@@ -8,7 +8,7 @@ import "github.com/kitsunium/sdk/pkg/v1/app/mail/spool"
 
 Package spool is the public facade for the durable mail outbox: the place a mail waits between the call that wants it sent and the relay that takes it.
 
-A mail transport (package [github.com/kitsunium/sdk/pkg/v1/app/mail](https://pkg.go.dev/github.com/kitsunium/sdk/pkg/v1/app/mail)) sends once, synchronously, and a relay that is down makes that the caller's problem. A [Spool](#Spool) is the outbox between them: [Spool](#Spool).Send validates a mail — refusing at the call site everything the transport would refuse later — stamps what a retry must not change (the sender from [Config](#Config).From when the mail names none, the Date, and a Message-ID made of the spool's identifier at the sender's domain), and returns once the mail is queued: durable, in a directory that outlives the process, when [Config](#Config).Dir is set. [Spool](#Spool).Run hands each mail to the transport, one at a time, and a failure waits a backoff that grows with the attempt — one second, doubling, to five minutes by default — before the next; after [Config](#Config).MaxAttempts the mail is dead-lettered with its last failure, readable through [Spool](#Spool).DeadLetters.
+A mail transport (package [github.com/kitsunium/sdk/pkg/v1/app/mail](https://pkg.go.dev/github.com/kitsunium/sdk/pkg/v1/app/mail)) sends once, synchronously, and a relay that is down makes that the caller's problem. A [Spool](#Spool) is the outbox between them: [Spool](#Spool).Send validates a mail — refusing at the call site everything the transport would refuse later — stamps what a retry must not change (the sender from [Config](#Config).From when the mail names none, the Date, and a Message-ID made of the spool's identifier at the sender's domain), and returns once the mail is queued: durable, in a directory that outlives the process, when [Config](#Config).Dir is set. [Spool](#Spool).Run hands each mail to the transport, one at a time, and a failure waits a backoff that grows with the attempt — one second, doubling, to five minutes by default — before the next; after [Config](#Config).MaxAttempts the mail is dead-lettered with its last failure, readable through [Spool](#Spool).DeadLetters. A permanent refusal — an SMTP 5xx reply — is dead-lettered at once ([MailRejected](#MailRejected)) unless [Config](#Config).RetryPermanent is set, and with [Config](#Config).MaxAge a mail whose attempt fails once it is that old is dead-lettered too ([MailExpired](#MailExpired)); a 4xx reply is retried.
 
 ```
 outbox, err := spool.New(spool.Config{
@@ -81,6 +81,28 @@ The outbox stands on the queue domain, and a durable one on the filesystem and t
 
 ## Constants
 
+<a name="CodeMailExpired"></a>
+```go
+const CodeMailExpired errs.Code = 217352
+```
+
+CodeMailExpired is the code Config.MaxAge adds to the wrap trail of the failure that dead-lettered an expired mail.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/app/mail/spool.CodeMailExpired`.
+
+Code `0.3.81.8`
+
+<a name="CodeMailRejected"></a>
+```go
+const CodeMailRejected errs.Code = 217351
+```
+
+CodeMailRejected is the code a permanent refusal adds to the wrap trail of a dead letter's failure: errs.HasCode(event.Err, CodeMailRejected) recognises it, where errors.Is(event.Err, MailRejected) sees only an origin.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/app/mail/spool.CodeMailRejected`.
+
+Code `0.3.81.7`
+
 <a name="DefaultMaxMessageBytes"></a>
 ```go
 const DefaultMaxMessageBytes int = 33554432
@@ -131,7 +153,7 @@ Initialised with `github.com/kitsunium/sdk/internal/service/app/mail/spool.Deliv
 const EventDeadLettered EventKind = 4
 ```
 
-EventDeadLettered: the last attempt failed; the mail is kept with it.
+EventDeadLettered: the last attempt failed, the server refused the mail for good, or it outlived MaxAge; the mail is kept with its failure.
 
 Initialised with `github.com/kitsunium/sdk/internal/service/app/mail/spool.EventDeadLettered`.
 
@@ -203,6 +225,28 @@ InvalidMailID refuses an identifier Spool.SendWithID was given that is empty, lo
 Initialised with `github.com/kitsunium/sdk/internal/core/app/mail/spool.InvalidMailID`.
 
 Code `0.3.81.6` · reason `INVALID_MAIL_ID` · public "The mail identifier is malformed"
+
+<a name="MailExpired"></a>
+```go
+var MailExpired *errs.Error
+```
+
+MailExpired marks a mail whose attempt failed after Config.MaxAge, dead-lettered instead of retried. It is the origin only of a failure that is not an SDK error; match it with errs.HasCode and CodeMailExpired.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/app/mail/spool.MailExpired`.
+
+Code `0.3.81.8` · reason `MAIL_EXPIRED` · public "The mail was not delivered within the spool's maximum age"
+
+<a name="MailRejected"></a>
+```go
+var MailRejected *errs.Error
+```
+
+MailRejected marks a mail the receiving server refused for good — an SMTP 5xx reply — dead-lettered without a retry. It is the origin only of a failure that is not an SDK error; match it with errs.HasCode and CodeMailRejected.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/app/mail/spool.MailRejected`.
+
+Code `0.3.81.7` · reason `MAIL_REJECTED` · public "The receiving mail server rejected the mail permanently"
 
 <a name="MessageUndecodable"></a>
 ```go
@@ -293,7 +337,7 @@ type Attempt struct {
 <a name="Config"></a>
 ## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/spool/gen_facade.go>)
 
-Config is the public alias for a spool's configuration: Transport and MaxAttempts required; Dir or Broker and Deferrer, Clock, From, Backoff, SendTimeout, MaxMessageBytes, PollInterval, Observe, Annotate and NewID optional.
+Config is the public alias for a spool's configuration: Transport and MaxAttempts required; Dir or Broker and Deferrer, Clock, From, Backoff, SendTimeout, MaxMessageBytes, PollInterval, MaxAge, RetryPermanent, Observe, Annotate and NewID optional.
 
 ```go
 type Config = svcspool.Config
@@ -389,6 +433,23 @@ type Config struct {
 	// noticed; a mail spooled by this process is delivered at once. Zero is
 	// the queue's own default.
 	PollInterval    time.Duration
+	// MaxAge is how long after QueuedAt a mail may still be retried: an
+	// attempt that fails once MaxAge has passed on Clock dead-letters the
+	// mail with that failure, marked MailExpired, whatever attempts it had
+	// left — RFC 5321 §4.5.4.1 gives up after four to five days. The age is
+	// read when an attempt fails, so a mail is attempted at least once
+	// however late it is delivered. Zero sets no age: MaxAttempts alone
+	// decides. Negative is refused (SpoolMisconfigured).
+	MaxAge          time.Duration
+	// RetryPermanent retries a permanent refusal like a temporary one. By
+	// default a failure carrying an SMTP 5xx reply — a *net/textproto.Error
+	// with a Code from 500 to 599 anywhere in its chain — dead-letters the
+	// mail at once, marked MailRejected, because RFC 5321 §4.2.1 forbids
+	// repeating a 5yz command unchanged; a 4xx reply, a 552 to RCPT — read
+	// as 452, too many recipients, by RFC 5321 §4.5.3.1.10 — and a failure
+	// without a reply are retried. Set it for a relay known to answer 5xx
+	// for a condition that passes.
+	RetryPermanent  bool
 }
 ```
 
@@ -449,7 +510,10 @@ Event is an alias of `github.com/kitsunium/sdk/internal/service/app/mail/spool.E
 ```go
 type Event struct {
 	// Err is the failed attempt's error, for EventRetrying and
-	// EventDeadLettered.
+	// EventDeadLettered. A dead letter's carries CodeMailRejected or
+	// CodeMailExpired when that is why it was given up — errs.HasCode
+	// reads either —, and the transport's own error, an SMTP reply
+	// included, stays reachable through errors.As.
 	Err      error
 	// Meta is what Config.Annotate returned when the mail was sent.
 	Meta     map[string]string

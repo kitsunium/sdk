@@ -33,6 +33,11 @@ sequences:
           when: c.MaxMessageBytes < 0
       - opt:
           do:
+            - return: misconfigured("MaxAge", "negative")
+              to: misconfigured
+          when: c.MaxAge < 0
+      - opt:
+          do:
             - return: brokerErr
           init:
             bind: brokerErr
@@ -125,6 +130,10 @@ sequences:
         kind: value
       - id: s.delivered.add
         kind: internal
+      - id: s.giveUp
+        kind: internal
+      - id: corequeue
+        kind: package
       - id: s.backoff.Delay
         kind: value
       - id: event.At.Add
@@ -172,6 +181,19 @@ sequences:
           when: sendErr == nil
       - set: event.Err
         value: sendErr
+      - opt:
+          do:
+            - set: event.Err, event.Kind
+              value: given, EventDeadLettered
+            - eval: s.report(&event)
+              to: s.report
+            - return: corequeue.DoNotRetry(given)
+              to: corequeue
+          init:
+            bind: given
+            eval: s.giveUp(sendErr, record.QueuedAt, event.At)
+            to: s.giveUp
+          when: given != nil
       - opt:
           do:
             - set: event.Kind
@@ -281,6 +303,57 @@ sequences:
         eval: extender.Extend(ctx, delivery.Lease.Receipt, delay)
         to: extender.Extend
       - return: extendErr == nil
+  - of: (*Spool).giveUp
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Spool).giveUp
+        kind: self
+      - id: mark
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          init:
+            bind: _, rejects
+            eval: s.broker.(corequeue.Rejecter)
+          when: "!rejects"
+      - opt:
+          do:
+            - return: mark(sendErr, corespool.MailRejected)
+              to: mark
+          when: s.permanent != nil && s.permanent(sendErr)
+      - opt:
+          do:
+            - return: mark(sendErr, corespool.MailExpired, kerrs.String("max_age", s.maxAge.String()))
+              to: mark
+          when: s.maxAge > 0 && !failedAt.Before(queuedAt.Add(s.maxAge))
+      - return: nil
+  - of: permanentReply
+    steps:
+      - bind: reply, replied
+        eval: errors.AsType[*textproto.Error](err)
+      - opt:
+          do:
+            - return: "false"
+          when: "!replied || reply.Code < permanentReplyMin || reply.Code > permanentReplyMax"
+      - return: reply.Code != rcptTooManyRecipients || !failedAt(err, "RCPT")
+  - of: mark
+    participants:
+      - id: caller
+        kind: actor
+      - id: mark
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(cause, kerrs.WrapParams{
+          		Code: sentinel.Code(), Reason: sentinel.Reason(), Public: sentinel.Public(),
+          		Private: sentinel.Private(), ExitCode: sentinel.ExitCode(),
+          	}, fields...)
+        to: kerrs
   - of: EventKind.String
     steps:
       - switch:
@@ -437,8 +510,13 @@ sequences:
           		transport: cfg.Transport, clock: cfg.Clock, observe: cfg.Observe, annotate: cfg.Annotate,
           		newID: cfg.NewID, delivered: newLedger(DeliveredMemory), from: cfg.From, backoff: cfg.Backoff,
           		announcing: map[string]*announcement{}, maxAttempts: cfg.MaxAttempts, sendTimeout: cfg.SendTimeout,
-          		poll: cfg.PollInterval, deferrer: cfg.Deferrer,
+          		poll: cfg.PollInterval, deferrer: cfg.Deferrer, maxAge: cfg.MaxAge, permanent: permanentReply,
           	}
+      - opt:
+          do:
+            - set: s.permanent
+              value: nil
+          when: cfg.RetryPermanent
       - opt:
           do:
             - set: s.aborter, _

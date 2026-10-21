@@ -263,7 +263,7 @@ func (s *session) sendOne(delivery coremail.DeliveryValue) error {
 	//: the return path first (RFC 5321 §3.3).
 	if mailErr := s.client.Mail(delivery.Envelope.From); mailErr != nil {
 		//: SendRefused; the address is the caller's own and travels as a field.
-		return wrapAs(coremail.SendRefused, mailErr, errs.String("command", "MAIL"))
+		return refused(mailErr, errs.String("command", "MAIL"))
 	}
 	//: one RCPT per recipient, Bcc included — this is where a blind recipient
 	//: exists, and it exists nowhere in the bytes that follow.
@@ -272,25 +272,25 @@ func (s *session) sendOne(delivery coremail.DeliveryValue) error {
 		//: Public, because a Bcc recipient is a secret of the message.
 		if rcptErr := s.client.Rcpt(recipient); rcptErr != nil {
 			//: refused.
-			return wrapAs(coremail.SendRefused, rcptErr, errs.String("command", "RCPT"), errs.Int("recipient", index))
+			return refused(rcptErr, errs.String("command", "RCPT"), errs.Int("recipient", index))
 		}
 	}
 	writer, dataErr := s.client.Data()
 	//: SendRefused.
 	if dataErr != nil {
 		//: the server declined the DATA phase.
-		return wrapAs(coremail.SendRefused, dataErr, errs.String("command", "DATA"))
+		return refused(dataErr, errs.String("command", "DATA"))
 	}
 	//: net/smtp's dataCloser dot-stuffs, so a body line of "." cannot end the
 	//: message early (RFC 5321 §4.5.2).
 	if _, writeErr := writer.Write(delivery.Raw); writeErr != nil {
 		//: SendRefused: the write failed mid-message.
-		return wrapAs(coremail.SendRefused, writeErr, errs.String("command", "DATA"))
+		return refused(writeErr, errs.String("command", "DATA"))
 	}
 	//: Close sends the terminating dot and reads the server's verdict.
 	if closeErr := writer.Close(); closeErr != nil {
 		//: SendRefused: this is where a size limit or a content filter speaks.
-		return wrapAs(coremail.SendRefused, closeErr, errs.String("command", "DATA-END"))
+		return refused(closeErr, errs.String("command", "DATA-END"))
 	}
 	//: accepted by this hop.
 	return nil

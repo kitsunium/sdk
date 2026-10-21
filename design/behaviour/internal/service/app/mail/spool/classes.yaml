@@ -39,6 +39,24 @@ constants:
         type: int
         value: "1024"
     name: DefaultSendTimeout
+  - doc: |-
+      The SMTP reply codes RFC 5321 §4.2.1 calls permanent negative completion:
+      5yz.
+    grouped: true
+    items:
+      - name: permanentReplyMin
+        type: int
+        value: "500"
+      - name: permanentReplyMax
+        type: int
+        value: "599"
+      - doc: |-
+          rcptTooManyRecipients is the 552 RFC 5321 §4.5.3.1.10 has a client
+          read as 452 when RCPT gets it.
+        name: rcptTooManyRecipients
+        type: int
+        value: "552"
+    name: permanentReplyMin
   - doc: What can happen to a spooled mail. The zero value is none of them.
     grouped: true
     items:
@@ -51,8 +69,10 @@ constants:
       - doc: "EventRetrying: an attempt failed and the next is due at Next."
         name: EventRetrying
       - doc: |-
-          EventDeadLettered: the last attempt failed; the mail is kept, with
-          that failure, and never delivered again.
+          EventDeadLettered: the mail is kept, with its failure, and never
+          delivered again — its last attempt failed, the receiving server
+          refused it for good (CodeMailRejected), or an attempt failed after
+          Config.MaxAge (CodeMailExpired).
         name: EventDeadLettered
       - doc: |-
           EventDuplicate: the queue handed back a mail under an identifier this
@@ -82,10 +102,15 @@ files:
       - misconfigured
     name: config.go
   - decls:
+      - permanentReplyMin
       - (*Spool).deliver
       - (*Spool).attempt
       - (*Spool).send
       - (*Spool).park
+      - (*Spool).giveUp
+      - permanentReply
+      - failedAt
+      - mark
     name: deliver.go
   - decls: []
     name: doc.go
@@ -139,6 +164,30 @@ functions:
     name: misconfigured
     params: setting, problem string
     results: error
+  - doc: |-
+      permanentReply reports whether err carries an SMTP reply of the 5yz class
+      anywhere in its chain: the SDK's SMTP transport keeps it reachable for a
+      refused MAIL, RCPT or DATA, and a connector may return one as it is.
+
+      A 552 to RCPT is the one 5yz it reads as temporary: RFC 5321 §4.5.3.1.10
+      has clients treat it as 452, too many recipients, because servers long
+      answered that condition with 552. The SDK's transport names the command
+      in the failure's "command" field.
+    name: permanentReply
+    params: err error
+    results: bool
+  - doc: failedAt reports whether err names command in its "command" field.
+    name: failedAt
+    params: err error, command string
+    results: bool
+  - doc: |-
+      mark adds sentinel to cause as core/data/queue.DoNotRetry adds its own: an
+      SDK cause keeps its Reason, Code and Public and gains the sentinel's code in
+      its trail, and any other cause takes the sentinel as its origin and stays
+      its source.
+    name: mark
+    params: cause error, sentinel *kerrs.Error, fields ...kerrs.FieldValue
+    results: error
   - name: AttemptFrom
     params: ctx context.Context
     results: attempt AttemptValue, ok bool
@@ -182,6 +231,7 @@ imports:
   corespool: github.com/kitsunium/sdk/internal/core/app/mail/spool
   coresql: github.com/kitsunium/sdk/internal/core/data/sql
   debug: runtime/debug
+  errors: errors
   fmt: fmt
   io: io
   json: encoding/json
@@ -192,6 +242,7 @@ imports:
   svcmail: github.com/kitsunium/sdk/internal/service/app/mail
   svcqueue: github.com/kitsunium/sdk/internal/service/data/queue
   sync: sync
+  textproto: net/textproto
   time: time
 package:
   docFile: doc.go
@@ -313,6 +364,27 @@ types:
           the queue's own default.
         name: PollInterval
         type: time.Duration
+      - doc: |-
+          MaxAge is how long after QueuedAt a mail may still be retried: an
+          attempt that fails once MaxAge has passed on Clock dead-letters the
+          mail with that failure, marked MailExpired, whatever attempts it had
+          left — RFC 5321 §4.5.4.1 gives up after four to five days. The age is
+          read when an attempt fails, so a mail is attempted at least once
+          however late it is delivered. Zero sets no age: MaxAttempts alone
+          decides. Negative is refused (SpoolMisconfigured).
+        name: MaxAge
+        type: time.Duration
+      - doc: |-
+          RetryPermanent retries a permanent refusal like a temporary one. By
+          default a failure carrying an SMTP 5xx reply — a *net/textproto.Error
+          with a Code from 500 to 599 anywhere in its chain — dead-letters the
+          mail at once, marked MailRejected, because RFC 5321 §4.2.1 forbids
+          repeating a 5yz command unchanged; a 4xx reply, a 552 to RCPT — read
+          as 452, too many recipients, by RFC 5321 §4.5.3.1.10 — and a failure
+          without a reply are retried. Set it for a relay known to answer 5xx
+          for a condition that passes.
+        name: RetryPermanent
+        type: bool
     kind: struct
     methods:
       - doc: validate refuses a spool that could never deliver.
@@ -336,7 +408,10 @@ types:
   - fields:
       - doc: |-
           Err is the failed attempt's error, for EventRetrying and
-          EventDeadLettered.
+          EventDeadLettered. A dead letter's carries CodeMailRejected or
+          CodeMailExpired when that is why it was given up — errs.HasCode
+          reads either —, and the transport's own error, an SMTP reply
+          included, stays reachable through errors.As.
         name: Err
         type: error
       - doc: Meta is what Config.Annotate returned when the mail was sent.
@@ -517,6 +592,11 @@ types:
         type: func(ctx context.Context) map[string]string
       - name: newID
         type: func() (string, error)
+      - doc: |-
+          permanent reports whether a failure is never to be retried:
+          permanentReply, or nil with Config.RetryPermanent, which retries all.
+        name: permanent
+        type: func(error) bool
       - doc: delivered remembers the mails this spool delivered.
         name: delivered
         type: "*ledger"
@@ -533,12 +613,16 @@ types:
           it reports anything.
         name: announcing
         type: map[string]*announcement
-      - doc: maxAttempts, sendTimeout and poll are the resolved limits.
+      - doc: |-
+          maxAttempts, sendTimeout, poll and maxAge are the resolved limits;
+          maxAge is zero for no age.
         name: maxAttempts
         type: int
       - name: sendTimeout
         type: time.Duration
       - name: poll
+        type: time.Duration
+      - name: maxAge
         type: time.Duration
       - doc: observing serialises the observer's calls.
         name: observing
@@ -564,7 +648,8 @@ types:
       - doc: |-
           deliver is the spool's queue handler. Returning nil acknowledges; returning
           an error nacks, which on the last attempt dead-letters the mail with that
-          error.
+          error. A failure giveUp condemns is returned marked DoNotRetry, which the
+          consumer turns into the queue's Reject: dead-lettered on this attempt.
 
           A failure with attempts left does neither: the lease is extended by the
           backoff and the handler returns nil. The extension replaced the receipt, so
@@ -601,6 +686,18 @@ types:
         params: ctx context.Context, delivery corequeue.DeliveryValue, delay time.Duration
         recv: s *Spool
         results: bool
+      - doc: |-
+          giveUp returns the failure a mail is dead-lettered with at once, or nil to
+          let the backoff and MaxAttempts decide — always nil over a broker that is
+          not a core/data/queue.Rejecter. A permanent SMTP reply is
+          MailRejected unless RetryPermanent left s.permanent nil; a failure once
+          MaxAge has passed since queuedAt is MailExpired. Either is added to
+          sendErr, which stays the origin when it is an SDK error and stays reachable
+          through errors.As when not.
+        name: giveUp
+        params: sendErr error, queuedAt, failedAt time.Time
+        recv: s *Spool
+        results: error
       - name: Send
         params: ctx context.Context, msg coremail.MessageValue
         recv: s *Spool

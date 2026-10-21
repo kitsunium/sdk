@@ -6,7 +6,9 @@ Outbound mail made durable (ADR 0111): `Send` validates a mail, stamps what a
 retry must not change, and queues it; `SendWithID` does the same under an
 identifier its caller minted (ADR 0141); `Run` hands each mail to a
 `core/app/mail.Transport`, retries a failure on a growing backoff, dead-letters a
-mail after its last attempt with that failure, and drops a redelivery of a
+mail after its last attempt with that failure — or at once for an SMTP 5xx
+reply, and on the first failure once it is `Config.MaxAge` old (ADR 0111,
+amended 2026-10-21) —, and drops a redelivery of a
 mail it delivered — the one resend left is a crash between the relay's
 acceptance and the acknowledgement, under the same Message-ID. The queue is `internal/service/data/queue` — `NewFile` with a
 `Dir`, `NewMemory` without — or `Config.Broker`, one its caller built: a
@@ -24,8 +26,8 @@ raises the core's.
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
 | `spool.go` | `Spool`, `New`, `Send` (`mint`), `SendWithID`, both through `queue` (`stamp`, `domainOf`), the per-identifier `announcement` count, `holdAnnouncement` (a Send inside a transaction: `EventQueued` held until the commit, the registration ended by `OnAbort` on a rollback), `Run` (the queue's `Consume`, one mail at a time), `DeadLetters`, `Close` (a `Config.Broker` stays its caller's) |
 | `identifier.go` | `MaxIDBytes` and `checkID` — the rule every identifier keeps, whoever minted it |
-| `config.go` | `Config` (`Broker` and `Deferrer` since ADR 0178), `DefaultSendTimeout`, `DefaultRetryBase` / `DefaultRetryMax`, `DefaultMaxMessageBytes`, `DeliveredMemory`; the refusals (`validateBroker`: `Dir` or `MaxMessageBytes` beside a `Broker`, a `Deferrer` without one or that is not an `Aborter`) |
-| `deliver.go` | the queue handler: the record read back, a duplicate dropped, the attempt bounded on the spool's clock with its `AttemptValue` in the context, a transport panic recovered, a failure parked (`LeaseExtender.Extend` by `Backoff.Delay(attempt)`) or — on the last attempt — nacked into the dead letter |
+| `config.go` | `Config` (`Broker` and `Deferrer` since ADR 0178; `MaxAge` and `RetryPermanent` since ADR 0111's 2026-10-21 amendment, a negative `MaxAge` refused), `DefaultSendTimeout`, `DefaultRetryBase` / `DefaultRetryMax`, `DefaultMaxMessageBytes`, `DeliveredMemory`; the refusals (`validateBroker`: `Dir` or `MaxMessageBytes` beside a `Broker`, a `Deferrer` without one or that is not an `Aborter`) |
+| `deliver.go` | the queue handler: the record read back, a duplicate dropped, the attempt bounded on the spool's clock with its `AttemptValue` in the context, a transport panic recovered, a failure parked (`LeaseExtender.Extend` by `Backoff.Delay(attempt)`) or — on the last attempt — nacked into the dead letter; `giveUp` first: a failure carrying a 5xx `*textproto.Error` (`permanentReply`) is marked `MailRejected` unless `RetryPermanent`, one at or past `MaxAge` `MailExpired` (`mark`, origin-wins like `DoNotRetry`), and returned `corequeue.DoNotRetry`, which `Consume` turns into the broker's `Reject` |
 | `ledger.go` | the delivered-ID ring (`DeliveredMemory` entries) |
 | `event.go` | `EventKind` (`queued`, `sent`, `retrying`, `dead-lettered`, `duplicate`), `EventValue`, `AttemptValue` + `AttemptFrom`, `DeadLetterValue` |
 
@@ -43,6 +45,26 @@ raises the core's.
   (reason, wire-safe cause, code), which a lapsed lease would not carry. Both
   brokers answer `LEASE_EXPIRED` for a replaced receipt; `TestRetriesOnTheBackoffThenDeadLetters`
   and `TestAMailOutlivesItsProcess` run the path on both.
+- **A 5xx is not repeated, and a mail can be too old** (ADR 0111, amended
+  2026-10-21, #478). RFC 5321 §4.2.1: a 5yz reply means the same command
+  fails the same way, so a failure carrying a `*net/textproto.Error` with a
+  Code from 500 to 599 is dead-lettered on the attempt that got it, through
+  the queue's own early path — the handler returns it marked
+  `core/data/queue.DoNotRetry`, and `Consume` rejects it through the
+  broker's `Rejecter` (all three brokers have it; over a `Config.Broker`
+  without it `giveUp` declines, because a nack would hand back a mail the
+  observer was told was dead-lettered: it is parked as before and
+  dead-letters after its last attempt). A 4xx and
+  a failure without a reply park on the backoff as before, and so does a 552
+  whose `command` field is `RCPT` (RFC 5321 §4.5.3.1.10: read as 452).
+  `Config.RetryPermanent` retries a 5xx like a 4xx. `Config.MaxAge` gives
+  a mail up on the first failure at or past `QueuedAt + MaxAge`, on the
+  spool's clock, read when the attempt fails so a late mail is still tried
+  once; zero is the behaviour before (ADR 0031). The marks (`MAIL_REJECTED`,
+  `MAIL_EXPIRED`) are added as `DoNotRetry` adds its own: the transport's
+  SDK verdict stays the origin the dead letter records, the mark joins the
+  trail for `errs.HasCode`, and a foreign failure takes the mark as origin
+  with itself as source, so `errors.As` still reaches the reply.
 - **The Message-ID is minted at Send, not by the composer.** The mail domain
   mints none (RFC 6409 §8.2 leaves it to the submission server) — and a
   server that adds one per submission gives every retry a new one, so a
@@ -123,6 +145,9 @@ raises the core's.
 
 - **Nack a failure that has attempts left.** It would wait the queue's fixed
   `RetryDelay`, not the backoff.
+- **Read a 5xx from the error's text**, or treat a failure without a
+  `*textproto.Error` as permanent: a relay that is down is what retries are
+  for. And never dead-letter a mail on `MaxAge` before it was attempted.
 - **Mint the Message-ID in the composer**, or per attempt.
 - **Read an empty identifier as "mint one"**, or exempt an identifier from the
   rule because its mail brings its own Message-ID: the rule is the

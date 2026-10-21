@@ -18,8 +18,10 @@ const (
 	EventSent
 	// EventRetrying: an attempt failed and the next is due at Next.
 	EventRetrying
-	// EventDeadLettered: the last attempt failed; the mail is kept, with
-	// that failure, and never delivered again.
+	// EventDeadLettered: the mail is kept, with its failure, and never
+	// delivered again — its last attempt failed, the receiving server
+	// refused it for good (CodeMailRejected), or an attempt failed after
+	// Config.MaxAge (CodeMailExpired).
 	EventDeadLettered
 	// EventDuplicate: the queue handed back a mail under an identifier this
 	// spool had already delivered — its lease lapsed while the relay was
@@ -68,7 +70,10 @@ func (k EventKind) String() string {
 // seen no Send for it.
 type EventValue struct {
 	// Err is the failed attempt's error, for EventRetrying and
-	// EventDeadLettered.
+	// EventDeadLettered. A dead letter's carries CodeMailRejected or
+	// CodeMailExpired when that is why it was given up — errs.HasCode
+	// reads either —, and the transport's own error, an SMTP reply
+	// included, stays reachable through errors.As.
 	Err error
 	// Meta is what Config.Annotate returned when the mail was sent.
 	Meta map[string]string

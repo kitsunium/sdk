@@ -54,6 +54,24 @@ packages:
             name: CodeInvalidMailID
             value: "0x00_03_51_06"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeMailRejected identifies a mail the receiving server refused for good —
+              an SMTP 5xx reply — and the spool dead-lettered without a retry. It joins
+              the wrap trail of the transport's own failure, which stays the origin a
+              dead letter records, so errs.HasCode finds it.
+            name: CodeMailRejected
+            value: "0x00_03_51_07"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeMailExpired identifies a mail whose attempt failed once Config.MaxAge
+              had passed since it was queued, and the spool dead-lettered instead of
+              retrying. It joins the wrap trail of that last failure, which stays the
+              origin a dead letter records, so errs.HasCode finds it.
+            name: CodeMailExpired
+            value: "0x00_03_51_08"
+        type: errs.Code
     doc: |-
       Package spool — range 0.3.81.* (ADR 0111 service/app/mail/spool block,
       declared here since ADR 0160).
@@ -120,6 +138,31 @@ packages:
             private: "service/app/mail/spool: SendWithID was given an identifier that is empty, longer than MaxIDBytes or not an RFC 5322 dot-atom; the fields name the problem and the length, never the identifier"
             public: The mail identifier is malformed
             reason: INVALID_MAIL_ID
+          - code: CodeMailRejected
+            doc: |-
+              MailRejected marks a delivery failure that carried an SMTP 5xx reply:
+              the receiving server refused the mail for good, and RFC 5321 §4.2.1
+              forbids repeating the command unchanged, so the spool dead-letters it at
+              once instead of retrying it. The spool adds it to the transport's own
+              failure — an SDK error keeps its Reason, Code and Public, and gains
+              CodeMailRejected in its trail — and it is the origin only of a failure
+              that is not an SDK error. The reply itself stays reachable through
+              errors.As as a *net/textproto.Error, never in a Public.
+            name: MailRejected
+            private: "service/app/mail/spool: the transport's failure carried an SMTP 5xx reply (RFC 5321 §4.2.1), so the mail was dead-lettered without a retry; Config.RetryPermanent retries it instead"
+            public: The receiving mail server rejected the mail permanently
+            reason: MAIL_REJECTED
+          - code: CodeMailExpired
+            doc: |-
+              MailExpired marks the failure of an attempt made once Config.MaxAge had
+              passed since the mail was queued: the spool gives up on the mail and
+              dead-letters it with that failure, whatever attempts it had left (RFC
+              5321 §4.5.4.1). Like MailRejected it joins the trail of an SDK error and
+              is the origin only of a failure that is not one.
+            name: MailExpired
+            private: "service/app/mail/spool: an attempt failed after Config.MaxAge had passed since the mail was queued, so the mail was dead-lettered with that failure instead of retried"
+            public: The mail was not delivered within the spool's maximum age
+            reason: MAIL_EXPIRED
   - constants:
       - blockDoc: |-
           The defaults a zero field clamps to (ADR 0031: each zero has one reading —
@@ -189,8 +232,10 @@ packages:
         value: "3"
       - blockDoc: What can happen to a spooled mail. The zero value is none of them.
         doc: |-
-          EventDeadLettered: the last attempt failed; the mail is kept, with
-          that failure, and never delivered again.
+          EventDeadLettered: the mail is kept, with its failure, and never
+          delivered again — its last attempt failed, the receiving server
+          refused it for good (CodeMailRejected), or an attempt failed after
+          Config.MaxAge (CodeMailExpired).
         name: EventDeadLettered
         type: EventKind
         value: "4"
@@ -293,6 +338,24 @@ packages:
       back then, its delivery count — the count that decides the dead letter, and
       that survives a crash — incremented. The last attempt's failure is the
       queue's nack, and the queue dead-letters the mail with that failure.
+
+      # A refusal that is permanent, and a mail that is too old
+
+      A failure that carries an SMTP 5xx reply — a *net/textproto.Error whose
+      Code is 500 to 599, which the SDK's SMTP transport keeps reachable for a
+      refused MAIL, RCPT or DATA — is permanent: RFC 5321 §4.2.1 forbids
+      repeating the command unchanged, so the mail is dead-lettered at once with
+      that failure, marked MailRejected, through the queue's Rejecter. A 4xx
+      reply, a 552 to RCPT (RFC 5321 §4.5.3.1.10 reads it as 452), and every
+      failure without a reply — a relay down, a refused greeting, a timeout —,
+      stays temporary. Config.RetryPermanent retries a 5xx
+      like a 4xx. With Config.MaxAge, an attempt that fails once the mail is
+      that old dead-letters it with that failure, marked MailExpired, whatever
+      attempts are left (RFC 5321 §4.5.4.1); the age is read when an attempt
+      fails, so a mail is always attempted at least once. Over a Broker without
+      the Rejecter sibling the spool cannot dead-letter early: the mail is
+      retried as before and dead-lettered after its last attempt — the shortcut
+      is lost, never the mail.
 
       # Exactly once, and the one duplicate left
 
@@ -454,6 +517,27 @@ packages:
                 the queue's own default.
               name: PollInterval
               type: time.Duration
+            - doc: |-
+                MaxAge is how long after QueuedAt a mail may still be retried: an
+                attempt that fails once MaxAge has passed on Clock dead-letters the
+                mail with that failure, marked MailExpired, whatever attempts it had
+                left — RFC 5321 §4.5.4.1 gives up after four to five days. The age is
+                read when an attempt fails, so a mail is attempted at least once
+                however late it is delivered. Zero sets no age: MaxAttempts alone
+                decides. Negative is refused (SpoolMisconfigured).
+              name: MaxAge
+              type: time.Duration
+            - doc: |-
+                RetryPermanent retries a permanent refusal like a temporary one. By
+                default a failure carrying an SMTP 5xx reply — a *net/textproto.Error
+                with a Code from 500 to 599 anywhere in its chain — dead-letters the
+                mail at once, marked MailRejected, because RFC 5321 §4.2.1 forbids
+                repeating a 5yz command unchanged; a 4xx reply, a 552 to RCPT — read
+                as 452, too many recipients, by RFC 5321 §4.5.3.1.10 — and a failure
+                without a reply are retried. Set it for a relay known to answer 5xx
+                for a condition that passes.
+              name: RetryPermanent
+              type: bool
       - doc: EventKind names what an [EventValue] reports.
         methods:
           - doc: |-
@@ -475,7 +559,10 @@ packages:
           fields:
             - doc: |-
                 Err is the failed attempt's error, for EventRetrying and
-                EventDeadLettered.
+                EventDeadLettered. A dead letter's carries CodeMailRejected or
+                CodeMailExpired when that is why it was given up — errs.HasCode
+                reads either —, and the transport's own error, an SMTP reply
+                included, stays reachable through errors.As.
               name: Err
               type: error
             - doc: Meta is what Config.Annotate returned when the mail was sent.
@@ -700,6 +787,10 @@ packages:
       waits a backoff that grows with the attempt — one second, doubling, to five
       minutes by default — before the next; after [Config].MaxAttempts the mail is
       dead-lettered with its last failure, readable through [Spool].DeadLetters.
+      A permanent refusal — an SMTP 5xx reply — is dead-lettered at once
+      ([MailRejected]) unless [Config].RetryPermanent is set, and with
+      [Config].MaxAge a mail whose attempt fails once it is that old is
+      dead-lettered too ([MailExpired]); a 4xx reply is retried.
 
       	outbox, err := spool.New(spool.Config{
       		Transport:   transport, // a mail.Transport: mail.NewSMTP, mail.NewCapture, …
@@ -844,7 +935,9 @@ packages:
             type: EventKind
             typed: true
             value: "3"
-          - doc: "EventDeadLettered: the last attempt failed; the mail is kept with it."
+          - doc: |-
+              EventDeadLettered: the last attempt failed, the server refused the mail
+              for good, or it outlived MaxAge; the mail is kept with its failure.
             name: EventDeadLettered
             reexport: svcspool.EventDeadLettered
             type: EventKind
@@ -867,8 +960,8 @@ packages:
           - doc: |-
               Config is the public alias for a spool's configuration: Transport and
               MaxAttempts required; Dir or Broker and Deferrer, Clock, From, Backoff,
-              SendTimeout, MaxMessageBytes, PollInterval, Observe, Annotate and NewID
-              optional.
+              SendTimeout, MaxMessageBytes, PollInterval, MaxAge, RetryPermanent,
+              Observe, Annotate and NewID optional.
             name: Config
             target: svcspool.Config
       - alias:
@@ -924,6 +1017,42 @@ packages:
             name: InvalidMailID
             reexport: corespool.InvalidMailID
             type: "*errs.Error"
+          - doc: |-
+              MailRejected marks a mail the receiving server refused for good — an
+              SMTP 5xx reply — dead-lettered without a retry. It is the origin only
+              of a failure that is not an SDK error; match it with errs.HasCode and
+              CodeMailRejected.
+            name: MailRejected
+            reexport: corespool.MailRejected
+            type: "*errs.Error"
+          - doc: |-
+              MailExpired marks a mail whose attempt failed after Config.MaxAge,
+              dead-lettered instead of retried. It is the origin only of a failure
+              that is not an SDK error; match it with errs.HasCode and
+              CodeMailExpired.
+            name: MailExpired
+            reexport: corespool.MailExpired
+            type: "*errs.Error"
+      - const:
+          - doc: |-
+              CodeMailRejected is the code a permanent refusal adds to the wrap trail
+              of a dead letter's failure: errs.HasCode(event.Err, CodeMailRejected)
+              recognises it, where errors.Is(event.Err, MailRejected) sees only an
+              origin.
+            name: CodeMailRejected
+            reexport: corespool.CodeMailRejected
+            type: errs.Code
+            typed: true
+            value: "0x00_03_51_07"
+          - doc: |-
+              CodeMailExpired is the code Config.MaxAge adds to the wrap trail of the
+              failure that dead-lettered an expired mail.
+            name: CodeMailExpired
+            reexport: corespool.CodeMailExpired
+            type: errs.Code
+            typed: true
+            value: "0x00_03_51_08"
+        doc: The codes a dead letter's failure carries when the spool gave up early.
       - func:
           doc: |-
             New builds a durable outbox over cfg.Transport: over cfg.Broker, a queue in

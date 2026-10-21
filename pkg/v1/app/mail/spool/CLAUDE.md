@@ -3,7 +3,7 @@
 ## Purpose
 
 The public facade for the durable mail outbox (ADR 0111, ADR 0141): type
-aliases over `internal/service/app/mail/spool`, its six sentinels aliased from
+aliases over `internal/service/app/mail/spool`, its eight sentinels and the codes of the two that mark an early dead letter aliased from
 `internal/core/app/mail/spool` (ADR 0160), and two functions — `New`, and
 `AttemptFrom` for a transport that wants the attempt its context carries.
 
@@ -23,12 +23,13 @@ maintainer's half.
 | Symbol | Kind | Notes |
 |---|---|---|
 | `Spool` | alias | the outbox: `Send`, `SendWithID`, `Run`, `DeadLetters`, `Close` — `SendWithID` reaches consumers through the alias, so the facade adds no function for it (ADR 0141) |
-| `Config` | alias | `Transport` and `MaxAttempts` required; `Dir` — or `Broker`, a caller's queue (`queue.NewSQL`), with `Deferrer`, its transaction manager, a `sql.Deferrer` that is also a `sql.Aborter` (ADR 0178) —, `Clock`, `From`, `Backoff`, `SendTimeout`, `MaxMessageBytes`, `PollInterval`, `Observe`, `Annotate`, `NewID` optional |
+| `Config` | alias | `Transport` and `MaxAttempts` required; `Dir` — or `Broker`, a caller's queue (`queue.NewSQL`), with `Deferrer`, its transaction manager, a `sql.Deferrer` that is also a `sql.Aborter` (ADR 0178) —, `Clock`, `From`, `Backoff`, `SendTimeout`, `MaxMessageBytes`, `PollInterval`, `MaxAge` (zero: no age), `RetryPermanent` (retry a 5xx), `Observe`, `Annotate`, `NewID` optional |
 | `Event`, `EventKind`, `Attempt`, `DeadLetter` | aliases | onto `EventValue`, `EventKind`, `AttemptValue`, `DeadLetterValue` |
 | `EventQueued` … `EventDuplicate` | constants | the five event kinds |
 | `DefaultSendTimeout`, `DefaultRetryBase`, `DefaultRetryMax`, `DefaultMaxMessageBytes`, `DeliveredMemory` | constants | the spool's clamps |
 | `MaxIDBytes` | constant | the bound on a spooled mail's identifier, whoever minted it (ADR 0141) |
 | `Misconfigured`, `Closed`, `MessageUndecodable`, `MessageUnencodable`, `TransportPanicked`, `InvalidMailID` | vars | the sentinels (`0.3.81.*`), aliased from the core; `InvalidMailID` is `SendWithID`'s refusal of an identifier no mail can keep |
+| `MailRejected`, `MailExpired`, `CodeMailRejected`, `CodeMailExpired` | vars, constants | why a mail was dead-lettered early: an SMTP 5xx reply, or `Config.MaxAge` passed (ADR 0111, amended 2026-10-21); a mark in the trail of the transport's SDK error, so a consumer matches the code with `errs.HasCode` |
 | `New`, `AttemptFrom` | funcs | the constructor and the context accessor |
 
 The sentinels drop the `Spool` prefix their core names carry (`SpoolClosed` is

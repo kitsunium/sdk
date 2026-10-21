@@ -12,6 +12,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//internal/core/app/mail/spool",
+        "//internal/kernel/errs",
         "//internal/service/app/mail/spool",
     ],
 )
@@ -31,7 +32,7 @@ go_test(
     ],
     deps = [
         ":spool",
-        "//internal/core/app/mail/spool",
+        "//internal/kernel/errs",
         "//internal/service/app/mail/spool",
         "//pkg/v1/app/id",
         "//pkg/v1/app/mail",

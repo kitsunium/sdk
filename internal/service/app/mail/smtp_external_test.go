@@ -3,7 +3,9 @@ package mail_test
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"net/smtp"
+	"net/textproto"
 	"strconv"
 	"strings"
 	"testing"
@@ -261,6 +263,42 @@ func TestSMTPReportsARefusedRecipient(t *testing.T) {
 	}
 	if public := errs.PublicOf(err); strings.Contains(public, "no such user") {
 		t.Fatalf("Public = %q — a server reply is third-party text and belongs in a field", public)
+	}
+}
+
+// TestSMTPKeepsTheReplyOfARefusal pins that a refused MAIL, RCPT or DATA keeps
+// the server's reply reachable through errors.As, its code telling a permanent
+// 5xx from a temporary 4xx — what the mail spool reads — while the verdict
+// stays SendRefused for errors.Is and errs.HasCode alike.
+func TestSMTPKeepsTheReplyOfARefusal(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name   string
+		option fakeOption
+		code   int
+	}{
+		{"permanent", optRefuseRcpt, 550},
+		{"temporary", optDeferRcpt, 450},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			_, port := newFakeSMTP(t, optDefault|c.option)
+			transport, buildErr := svcmail.NewSMTP(smtpConfig(t, port, svcmail.TLSStartTLS))
+			if buildErr != nil {
+				t.Fatalf("NewSMTP = %v, want nil", buildErr)
+			}
+			err := transport.Send(context.Background(), simpleMessage())
+			if !errors.Is(err, coremail.SendRefused) || !errs.HasCode(err, coremail.CodeSendRefused) {
+				t.Fatalf("Send = %v, want SendRefused", err)
+			}
+			reply, replied := errors.AsType[*textproto.Error](err)
+			if !replied || reply.Code != c.code {
+				t.Fatalf("the reply of %v = (%v, %v), want a *textproto.Error with code %d", err, reply, replied, c.code)
+			}
+			if code, _ := errs.CodeOf(err); code != coremail.CodeSendRefused || errs.ExitCodeOf(err) != errs.ExitCodeOf(coremail.SendRefused) {
+				t.Fatalf("the verdict of %v is %v exit %d, want SendRefused's", err, code, errs.ExitCodeOf(err))
+			}
+		})
 	}
 }
 

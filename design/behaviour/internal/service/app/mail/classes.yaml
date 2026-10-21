@@ -370,6 +370,7 @@ files:
     name: envelope.go
   - decls:
       - wrapAs
+      - refused
     name: errors.go
   - decls:
       - forbiddenHeaderOctets
@@ -612,6 +613,23 @@ functions:
     name: wrapAs
     params: sentinel *errs.Error, cause error, fields ...errs.FieldValue
     results: error
+  - doc: |-
+      refused returns SendRefused for a MAIL, RCPT or DATA that failed. When the
+      server answered with a reply, the reply is the error's source: errors.As
+      finds it as a *net/textproto.Error, whose Code tells a permanent 5xx from a
+      temporary 4xx — what the mail spool reads to dead-letter a mail at once
+      rather than repeat a command RFC 5321 §4.2.1 says not to repeat. SendRefused
+      stays the origin, its Public unchanged, and the reply's text stays a
+      log-only field. A failure without a reply — a write cut mid-message — is
+      SendRefused as wrapAs builds it.
+
+      Only the transaction's commands keep their reply reachable: a 5xx to the
+      greeting, EHLO, STARTTLS or AUTH speaks of the relay or of this program's
+      configuration, never of the mail, and a spool that dead-lettered every mail
+      for it would lose them all to one misconfiguration.
+    name: refused
+    params: cause error, fields ...errs.FieldValue
+    results: error
   - name: IsReservedHeader
     params: name string
     results: bool
@@ -822,6 +840,7 @@ imports:
   strconv: strconv
   strings: strings
   sync: sync
+  textproto: net/textproto
   time: time
   tls: crypto/tls
   url: net/url

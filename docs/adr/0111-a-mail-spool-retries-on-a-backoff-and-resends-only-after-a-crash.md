@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-26
 - **Deciders**: SDK maintainers
-- **Amended by**: [ADR 0141](0141-a-mail-spool-keeps-an-identifier-its-caller-minted.md) — D2: `SendWithID` queues under an identifier the caller minted, and every identifier, `Config.NewID`'s included, is a dot-atom of at most 255 bytes; D4: a repeated identifier meets the ledger; D5: the Sends of one identifier are counted; [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) §As built — the spool is published by a facade of its own, `pkg/v1/app/mail/spool` (`New`, `Config`, `Event`… without the `Spool` prefix), and its codes are declared in `internal/core/app/mail/spool`
+- **Amended by**: [ADR 0141](0141-a-mail-spool-keeps-an-identifier-its-caller-minted.md) — D2: `SendWithID` queues under an identifier the caller minted, and every identifier, `Config.NewID`'s included, is a dot-atom of at most 255 bytes; D4: a repeated identifier meets the ledger; D5: the Sends of one identifier are counted; [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) §As built — the spool is published by a facade of its own, `pkg/v1/app/mail/spool` (`New`, `Config`, `Event`… without the `Spool` prefix), and its codes are declared in `internal/core/app/mail/spool`; its own amendment of 2026-10-21 (below) — D3: a 5xx reply dead-letters the mail at once, `Config.RetryPermanent` retries it, and `Config.MaxAge` gives a mail up
 - **Related**: [ADR 0064](0064-sdk-mail-domain.md) (the mail domain it builds on), [ADR 0054](0054-sdk-queue-domain.md) (the queue it spools into), [ADR 0104](0104-an-idle-consumer-sleeps-until-there-may-be-work.md) (the wake its consumer sleeps on), [ADR 0103](0103-a-bucket-per-caller-one-backoff-curve-and-a-retry-on-the-clock-it-is-given.md) (the backoff curve), [ADR 0112](0112-a-loop-that-must-keep-running-is-supervised-beside-the-lifecycle.md) (what restarts its consumer)
 
 ## Context
@@ -197,3 +197,56 @@ in `pkg/v1/mail`.
 - `internal/service/mail/spool/`, `internal/service/mail/memory.go`
 - kitsunium/platform `docs/adr/0001-the-sdk-holds-the-mechanisms-kit-is-the-framework.md`
   (the map, wave 3)
+
+## Amendment (2026-10-21): a permanent refusal is not retried, and a mail can be too old
+
+kitsunium/sdk#478. D3 had one way to fail: every failure parked the mail
+until `MaxAttempts`. A relay that answered `550 5.1.1 no such user` was asked
+again `MaxAttempts` times, which RFC 5321 §4.2.1 forbids — a 5yz reply means
+the same command will fail the same way — and a mail had no age limit, where
+§4.5.4.1 gives up after four to five days. D3 now reads:
+
+- **A 5xx reply dead-letters the mail on the attempt that got it.** The
+  spool reads a `*net/textproto.Error` whose `Code` is 500 to 599 anywhere in
+  the failure's chain. The SMTP transport keeps it there for a refused MAIL,
+  RCPT or DATA (`SEND_REFUSED` stays the origin, the reply its source, its
+  text still a log-only field), and a connector may return one as it is. A
+  5xx to the greeting, EHLO, STARTTLS or AUTH is NOT kept reachable: it
+  speaks of the relay or of this program's configuration, and dead-lettering
+  every mail for one wrong password would lose them all to it.
+- **A 4xx reply, and every failure without a reply, stays temporary** —
+  parked on the backoff as before. So does a 552 to RCPT, which RFC 5321
+  §4.5.3.1.10 has a client read as 452 (too many recipients); the spool reads
+  the command from the transport's `command` field. A 552 to the end of DATA,
+  a size limit, stays permanent.
+- **`Config.RetryPermanent` is the escape hatch**: a relay known to answer
+  5xx for a condition that passes gets its 5xx retried like a 4xx.
+- **`Config.MaxAge`**: an attempt that fails once `MaxAge` has passed since
+  `QueuedAt`, on the spool's clock, dead-letters the mail with that failure,
+  whatever attempts are left. The age is read when an attempt fails, so a
+  mail is attempted at least once however late it is delivered. Zero sets no
+  age — the behaviour before this amendment (ADR 0031: the zero changes
+  nothing); negative is `SPOOL_MISCONFIGURED`.
+
+The early dead letter goes through the queue domain's own path: the handler
+returns its failure marked `DoNotRetry` (ADR 0151), and `Consume` rejects it
+through the broker's `Rejecter`, which all three brokers implement. Over a
+`Config.Broker` without the sibling the spool does not try: a nack there
+would hand the mail back after an `EventDeadLettered` the observer already
+believed, so the mail is parked and retried as before and dead-lettered
+after its last attempt — the shortcut is lost, never the mail. Two codes join the range, `MAIL_REJECTED` (`0.3.81.7`) and
+`MAIL_EXPIRED` (`0.3.81.8`). Each is added to the failure as `DoNotRetry`
+adds its own: an SDK failure keeps its Reason, Code and Public — the dead
+letter still records the transport's verdict, `SEND_REFUSED` or
+`DIAL_FAILED` — and gains the code in its trail, where `errs.HasCode` finds
+it on the `EventDeadLettered`'s `Err`; a failure that is not an SDK error
+takes the sentinel as its origin. `EventDeadLettered` now means "kept, never
+delivered again" for all three reasons. The `MessageUndecodable` path is
+unchanged.
+
+Verified by `internal/service/app/mail/spool/permanent_external_test.go` (a
+550 dead-lettered on attempt 1 with the reply reachable, a bare 554 from a
+connector recorded as `MAIL_REJECTED`, a 450 retried, `RetryPermanent`, a
+mail given up at `MaxAge` on the manual clock and none given up with a zero
+`MaxAge`, a broker without `Rejecter` whose 5xx is retried) and `internal/service/app/mail`'s
+`TestSMTPKeepsTheReplyOfARefusal` (the fake relay's 550 and 450 RCPT).

@@ -724,7 +724,10 @@ packages:
 
               It carries the SMTP reply as a log-only field, never as Public: a reply
               is third-party text of unbounded length that may name a recipient, and
-              Public is the half that travels to strangers.
+              Public is the half that travels to strangers. The SMTP transport also
+              keeps the server's reply reachable through errors.As as a
+              *net/textproto.Error, so a caller can tell a permanent 5xx from a
+              temporary 4xx — the mail spool dead-letters the first at once.
             exit: TEMPFAIL
             name: SendRefused
             private: "service/app/mail: MAIL FROM, RCPT TO or DATA was answered with a failure reply; the command and the server's reply travel as log-only fields"
@@ -1927,7 +1930,9 @@ packages:
             type: "*errs.Error"
           - doc: |-
               SendRefused is returned when MAIL, RCPT or DATA was answered with a
-              failure reply. The server's own text travels as a log-only field.
+              failure reply. The server's own text travels as a log-only field, and
+              the SMTP transport keeps the reply reachable through errors.As as a
+              *net/textproto.Error: its Code tells a permanent 5xx from a 4xx.
             name: SendRefused
             reexport: coremail.SendRefused
             type: "*errs.Error"
