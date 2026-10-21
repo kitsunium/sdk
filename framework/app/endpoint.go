@@ -61,13 +61,18 @@ func RateLimit(perSecond float64, burst int, opts ...RateLimitOption) OperationO
 // information, and nothing it could read is written. It is the SDK's
 // resilience timeout, on the app's clock.
 //
-// d is the default of the operation's setting <service>-<kind>-<operation>-timeout,
-// which config/<env>.* and <PRODUCT>_<NAME> override; one that is not
-// positive stops the start.
+// Given to a port's [Port].Guard, it is a deadline on each attempt of the port's
+// call, the innermost of its policies: an attempt that outruns it fails with
+// the SDK's TimeoutExceeded, which the port's breaker counts and its retry
+// replays.
+//
+// d is the default of the operation's setting <service>-<kind>-<operation>-timeout
+// — <service>-port-<name>-timeout for a port —, which config/<env>.* and
+// <PRODUCT>_<NAME> override; one that is not positive stops the start.
 //
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
-func Timeout(d time.Duration) OperationOption {
+func Timeout(d time.Duration) TimeoutOption {
 	//: the implementation is framework/internal/app's; this facade only forwards.
 	return iapp.Timeout(d)
 }

@@ -208,6 +208,13 @@ type PortSpec struct {
 	Bound string `json:"bound,omitempty"`
 	// Via is how it was chosen: one of the Via constants.
 	Via string `json:"via,omitempty"`
+	// Pipeline are the policies around the port's calls (Port.Guard), the
+	// outermost first — retry, hedge, breaker, throttle, timeout —, its
+	// retry budget before them, with the values the app runs with.
+	Pipeline []MechanicMessage `json:"pipeline,omitempty"`
+	// Idempotent says the port's operation may run more than once for one
+	// call (app.Idempotent): what a hedge needs.
+	Idempotent bool `json:"idempotent,omitempty"`
 }
 
 // CommandSpec describes a command: an operation that changes something.

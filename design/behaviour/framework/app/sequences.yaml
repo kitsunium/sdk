@@ -148,6 +148,28 @@ sequences:
   - of: Bind
     steps:
       - return: iapp.Bind[Req, Resp](port, op)
+  - forward: iapp.Retry
+    of: Retry
+  - forward: iapp.RetryMaxDelay
+    of: RetryMaxDelay
+  - forward: iapp.NoRetryAfter
+    of: NoRetryAfter
+  - forward: iapp.Budget
+    of: Budget
+  - forward: iapp.Breaker
+    of: Breaker
+  - forward: iapp.BreakerWindow
+    of: BreakerWindow
+  - forward: iapp.HalfOpenTrials
+    of: HalfOpenTrials
+  - forward: iapp.OpenBackoff
+    of: OpenBackoff
+  - forward: iapp.Idempotent
+    of: Idempotent
+  - forward: iapp.Hedge
+    of: Hedge
+  - forward: iapp.Throttle
+    of: Throttle
   - forward: iapp.Erase
     of: Erase
   - forward: iapp.Export

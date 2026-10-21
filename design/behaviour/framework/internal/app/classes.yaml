@@ -60,6 +60,24 @@ constants:
         type: string
         value: "\"container:process\""
     name: archUser
+  - doc: breakerUsageText is `breaker`'s usage; %[1]s is the product's name.
+    items:
+      - name: breakerUsageText
+        type: string
+        value: |-
+          `usage:
+            %[1]s breaker [list]
+                every port whose calls a breaker guards — its ID, <service>/port/<name>,
+                as the graph names it —, and whether an operator isolated it
+            %[1]s breaker isolate PORT
+                open PORT's breaker until it is reset: its calls fail at once, without
+                reaching what the port is bound to
+            %[1]s breaker reset PORT
+                take the isolation off: the breaker closes, its counts cleared
+          The isolation is kept in the data directory: every start applies it, and a
+          running product within five seconds.
+          `
+    name: breakerUsageText
   - doc: |-
       sdkModule is the module a build's kit and SDK are read from, besides the
       product's own. The framework and the SDK are one Go module (ADR 0162), so
@@ -827,6 +845,137 @@ constants:
       - name: resiliencePackage
         value: "\"github.com/kitsunium/sdk/pkg/v1/app/resilience\""
     name: resiliencePackage
+  - doc: The knobs of a port's breaker, each a suffix of its setting's name.
+    grouped: true
+    items:
+      - name: knobBreakerFailures
+        value: "\"breaker-failures\""
+      - name: knobBreakerOpen
+        value: "\"breaker-open\""
+      - name: knobBreakerOpenMax
+        value: "\"breaker-open-max\""
+      - name: knobBreakerTrials
+        value: "\"breaker-trials\""
+      - name: knobBreakerWindow
+        value: "\"breaker-window\""
+      - name: knobBreakerWindowCalls
+        value: "\"breaker-window-calls\""
+      - name: knobBreakerWindowRatio
+        value: "\"breaker-window-ratio\""
+    name: knobBreakerFailures
+  - doc: |-
+      The window a breaker counts on when the code gives none: no window — the
+      failures in a row decide —, and, once a configuration gives one a size,
+      Polly's MinimumThroughput and FailureRatio.
+    grouped: true
+    items:
+      - name: defaultBreakerWindowCalls
+        type: int
+        value: "100"
+      - name: defaultBreakerWindowRatio
+        type: float64
+        value: "0.1"
+    name: defaultBreakerWindowCalls
+  - doc: |-
+      breakerPoll is how often a running product reads the operator's marks:
+      an isolation or a reset made with `breaker` reaches it within this.
+    items:
+      - name: breakerPoll
+        type: time.Duration
+        value: 5 * time.Second
+    name: breakerPoll
+  - doc: |-
+      The knobs of a port's hedge and of its throttle, each a suffix of its
+      setting's name.
+    grouped: true
+    items:
+      - name: knobHedgeDelay
+        value: "\"hedge-delay\""
+      - name: knobHedgeMax
+        value: "\"hedge-max\""
+      - name: knobHedgeInFlight
+        value: "\"hedge-in-flight\""
+      - name: knobThrottleK
+        value: "\"throttle-k\""
+    name: knobHedgeDelay
+  - doc: minThrottleK is the smallest K the SDK's adaptive throttle takes.
+    items:
+      - name: minThrottleK
+        type: float64
+        value: "1"
+    name: minThrottleK
+  - doc: The places of the layers, the outermost first.
+    grouped: true
+    items:
+      - name: rankRetry
+        type: int
+        value: iota + 1
+      - name: rankHedge
+      - name: rankBreaker
+      - name: rankThrottle
+      - name: rankTimeout
+    name: rankRetry
+  - doc: |-
+      The retry budget a port's retry and hedge share when the port gives none:
+      gRPC's retryThrottling example, ten tokens and a tenth of one put back by
+      a success.
+    grouped: true
+    items:
+      - name: defaultBudgetTokens
+        type: int
+        value: "10"
+      - name: defaultBudgetRatio
+        type: float64
+        value: "0.1"
+    name: defaultBudgetTokens
+  - doc: |-
+      The knobs of a port's retry and of its budget, each a suffix of its
+      setting's name.
+    grouped: true
+    items:
+      - name: knobRetryAttempts
+        value: "\"retry-attempts\""
+      - name: knobRetryDelay
+        value: "\"retry-delay\""
+      - name: knobRetryMaxDelay
+        value: "\"retry-max-delay\""
+      - name: knobRetryJitter
+        value: "\"retry-jitter\""
+      - name: knobRetryAfter
+        value: "\"retry-after\""
+      - name: knobBudgetTokens
+        value: "\"budget-tokens\""
+      - name: knobBudgetRatio
+        value: "\"budget-ratio\""
+    name: knobRetryAttempts
+  - doc: |-
+      The jitters a retry's setting names: the SDK's full and decorrelated
+      jitters, and none.
+    grouped: true
+    items:
+      - name: jitterFull
+        value: "\"full\""
+      - name: jitterDecorrelated
+        value: "\"decorrelated\""
+      - name: jitterNone
+        value: "\"none\""
+    name: jitterFull
+  - doc: |-
+      defaultRetryMaxDelay is the longest a retry waits when the code names no
+      longer delay: a server's Retry-After beyond it is cut to it.
+    items:
+      - name: defaultRetryMaxDelay
+        type: time.Duration
+        value: 30 * time.Second
+    name: defaultRetryMaxDelay
+  - doc: |-
+      minBudgetRatio is the smallest token ratio the SDK's retry budget reads:
+      a thousandth, as gRPC reads it.
+    items:
+      - name: minBudgetRatio
+        type: float64
+        value: "0.001"
+    name: minBudgetRatio
   - doc: kit's own privacy service, as the graph names and describes it.
     grouped: true
     items:
@@ -1787,6 +1936,15 @@ files:
       - authMechanic
     name: auth.go
   - decls:
+      - breakerUsageText
+      - (*breakerGuard).command
+      - (*App).breakerCommand
+      - breakerArgs
+      - (*App).breakerData
+      - (*App).listBreakers
+      - (*App).markBreaker
+    name: breakercmd.go
+  - decls:
       - sdkModule
       - gitCache
       - cloneBuild
@@ -1811,6 +1969,7 @@ files:
       - Catalog
       - requestMechanics
       - operationMechanics
+      - portMechanics
       - backgroundMechanics
       - idGenerators
       - NewID
@@ -2881,6 +3040,8 @@ files:
       - usageFormat
       - (*App).Main
       - (*App).mainCommands
+      - (*App).breakerCLI
+      - (*App).usageBreaker
       - (*App).onStores
       - (*App).serveCommand
       - statusOf
@@ -3239,6 +3400,138 @@ files:
       - (*portRule).implementation
       - NewPortService
     name: port.go
+  - decls:
+      - knobBreakerFailures
+      - defaultBreakerWindowCalls
+      - breakerGuard
+      - breakerOption
+      - breakerOption.breakerConfigure
+      - Breaker
+      - BreakerWindow
+      - HalfOpenTrials
+      - OpenBackoff
+      - (*breakerGuard).rank
+      - (*breakerGuard).declare
+      - (*breakerGuard).mechanic
+      - (*breakerGuard).runner
+      - (*breakerGuard).of
+      - (*breakerGuard).configOf
+      - (*breakerGuard).id
+      - (*breakerGuard).state
+      - (*breakerGuard).started
+      - (*App).breakerChanged
+      - breakerReady
+      - checkRatio
+    name: port_breaker.go
+  - decls:
+      - breakerPoll
+      - breakerAt
+      - (*App).breakers
+      - breakerMark
+      - (*App).addBreakers
+      - (*breakerGuard).attach
+      - breakerMarks
+      - (*breakerMarks).apply
+      - (*breakerMarks).start
+    name: port_breaker_run.go
+  - decls:
+      - knobHedgeDelay
+      - minThrottleK
+      - Idempotent
+      - hedgeGuard
+      - Hedge
+      - (*hedgeGuard).rank
+      - (*hedgeGuard).declare
+      - (*hedgeGuard).mechanic
+      - (*hedgeGuard).runner
+      - (*hedgeGuard).started
+      - throttleGuard
+      - Throttle
+      - (*throttleGuard).declare
+      - (*throttleGuard).mechanic
+      - (*throttleGuard).runner
+      - checkThrottleK
+    name: port_hedge.go
+  - decls:
+      - rankRetry
+      - defaultBudgetTokens
+      - portGuards
+      - portCall
+      - portPolicyOption
+      - portPolicyOption.portPolicyConfigure
+      - (*PortService).Guard
+      - (*portGuards).add
+      - (*portGuards).settle
+      - (*portGuards).share
+      - (*portGuards).judge
+      - (*portGuards).declare
+      - (*portGuards).has
+      - (*portGuards).drawn
+      - (*portGuards).run
+      - (*PortService).guarded
+      - (*portCall).retried
+      - transient
+      - policyRefusal
+      - (*App).portPolicyProblems
+      - guardedPort
+      - (*App).guardedPorts
+      - (*PortService).portGuards
+      - perStart
+      - startValue
+      - (*perStart).get
+      - policyLayer
+      - (*policyLayer).rank
+      - (*policyLayer).declare
+      - (*policyLayer).mechanic
+      - (*policyLayer).runner
+      - (*policyLayer).started
+      - timeoutOption
+      - timeoutOption.guard
+      - timeoutOption.call
+      - timeoutOption.endpointConfigure
+      - timeoutOption.exposeConfigure
+      - timeoutOption.commandConfigure
+      - timeoutOption.queryConfigure
+      - timeoutOption.portPolicyConfigure
+      - knobIn
+    name: port_policy.go
+  - decls:
+      - _#4
+    name: port_policy_compliance.go
+  - decls:
+      - PortPolicyConfigurer
+      - TimeoutConfigurer
+      - RetryConfigurer
+      - BreakerConfigurer
+      - portLayer
+      - portBreaker
+    name: port_policy_interface.go
+  - decls:
+      - knobRetryAttempts
+      - jitterFull
+      - defaultRetryMaxDelay
+      - minBudgetRatio
+      - retryGuard
+      - retryOption
+      - retryOption.retryConfigure
+      - Retry
+      - RetryMaxDelay
+      - NoRetryAfter
+      - (*retryGuard).rank
+      - (*retryGuard).declare
+      - (*retryGuard).mechanic
+      - (*retryGuard).runner
+      - (*retryGuard).configOf
+      - failureDelay
+      - (*retryGuard).started
+      - budgetGuard
+      - Budget
+      - (*budgetGuard).declare
+      - (*budgetGuard).mechanic
+      - (*budgetGuard).of
+      - checkJitter
+      - checkBudgetRatio
+    name: port_retry.go
   - decls:
       - privacyService
       - actorRetention
@@ -4498,6 +4791,8 @@ files:
       - (*App).stopTelemetry
       - (*App).report
       - (*App).reportPhase
+      - (*App).reportRetry
+      - (*App).reportBreaker
     name: telemetry.go
   - decls:
       - TopicService
@@ -5073,6 +5368,12 @@ functions:
     name: authMechanic
     params: a *App, mode string
     results: model.Mechanic
+  - doc: |-
+      breakerArgs reads `breaker`'s arguments: list, or isolate or reset and a
+      port; ok is false for any other.
+    name: breakerArgs
+    params: args []string
+    results: verb, port string, ok bool
   - doc: cloneBuild is a copy of b that shares nothing with it; nil for nil.
     name: cloneBuild
     params: b *model.Build
@@ -5142,6 +5443,11 @@ functions:
     results: "[]model.Mechanic"
   - doc: operationMechanics are a command's and a query's own (ADR 0005).
     name: operationMechanics
+    results: "[]model.Mechanic"
+  - doc: |-
+      portMechanics are the policies around a port's calls (Port.Guard),
+      composed the outermost first as retry, hedge, breaker, throttle, timeout.
+    name: portMechanics
     results: "[]model.Mechanic"
   - doc: |-
       backgroundMechanics are what runs apart from a caller: a queue's retries,
@@ -5959,7 +6265,7 @@ functions:
     results: OperationOption
   - name: Timeout
     params: d time.Duration
-    results: OperationOption
+    results: TimeoutConfigurer
   - name: Bulkhead
     params: maxConcurrent int, opts ...BulkheadConfigurer
     results: OperationOption
@@ -6972,6 +7278,88 @@ functions:
   - name: NewPortService
     results: "*PortService[Req, Resp]"
     typeParams: Req, Resp any
+  - name: Breaker
+    params: failures int, open time.Duration, opts ...BreakerConfigurer
+    results: PortPolicyConfigurer
+  - name: BreakerWindow
+    params: size time.Duration, minCalls int, failureRatio float64
+    results: BreakerConfigurer
+  - name: HalfOpenTrials
+    params: n int
+    results: BreakerConfigurer
+  - name: OpenBackoff
+    params: maxOpen time.Duration
+    results: BreakerConfigurer
+  - doc: |-
+      breakerReady is a breaker's readiness: an error, which degrades the
+      product without taking it out of rotation, while it is not closed.
+    name: breakerReady
+    params: port string, st resilience.BreakerState
+    results: error
+  - doc: checkRatio refuses a share that is not above zero and at most one.
+    name: checkRatio
+    results: func(v any) phrase
+  - doc: |-
+      breakerMark is where, under the data directory, an operator's isolation
+      of the breaker of the port name of service is kept.
+    name: breakerMark
+    params: service, name string
+    results: string
+  - name: Idempotent
+    results: PortPolicyConfigurer
+  - name: Hedge
+    params: delay time.Duration, inFlight int
+    results: PortPolicyConfigurer
+  - name: Throttle
+    params: k float64
+    results: PortPolicyConfigurer
+  - doc: checkThrottleK refuses a K below 1, or not a number.
+    name: checkThrottleK
+    results: func(v any) phrase
+  - doc: |-
+      transient reports whether err is the dependency failing — what the start
+      answers as a 5xx, a 408 or a 429 —, which a retry replays, a breaker and
+      a throttle count. A refusal of the caller's own is not, nor a caller that
+      left, nor the refusals the policies make themselves: an open breaker, a
+      throttle, an exhausted retry or budget, a policy refused.
+    name: transient
+    params: err error
+    results: bool
+  - doc: policyRefusal reports whether err is a refusal a policy made itself.
+    name: policyRefusal
+    params: err error
+    results: bool
+  - doc: |-
+      knobIn is a port policy's setting as app a's start resolved it — its
+      default before, or outside an app —, or the code's value when the port
+      declared no setting. A port's runners are built from it rather than from
+      the setting's Get, which reads the app the service is mounted in: the
+      start judges a breaker before it mounts the services.
+    name: knobIn
+    params: a *App, st *SettingService[T], def T
+    results: T
+    typeParams: T SettingValue
+  - name: Retry
+    params: maxAttempts int, delay time.Duration, opts ...RetryConfigurer
+    results: PortPolicyConfigurer
+  - name: RetryMaxDelay
+    params: d time.Duration
+    results: RetryConfigurer
+  - name: NoRetryAfter
+    results: RetryConfigurer
+  - doc: failureDelay is the wait a failure asks for, as RetryConfig.Delay reads it.
+    name: failureDelay
+    params: _ int, err error
+    results: time.Duration, bool
+  - name: Budget
+    params: maxTokens int, tokenRatio float64
+    results: PortPolicyConfigurer
+  - doc: checkJitter refuses a jitter the retry does not know.
+    name: checkJitter
+    results: func(v any) phrase
+  - doc: checkBudgetRatio refuses a ratio below a thousandth, or not a number.
+    name: checkBudgetRatio
+    results: func(v any) phrase
   - doc: withActor returns ctx acting for who.
     name: withActor
     params: ctx context.Context, who string
@@ -9799,6 +10187,29 @@ types:
         name: appProblems
         recv: a *App
         results: "[]model.Diagnostic"
+      - doc: breakerCommand runs `breaker …`.
+        name: breakerCommand
+        params: args []string, stdout, stderr io.Writer
+        recv: a *App
+        results: int
+      - doc: |-
+          breakerData is the data directory the marks are kept in, made when it is
+          not there yet.
+        name: breakerData
+        recv: a *App
+        results: vfs.FullFS, error
+      - doc: |-
+          listBreakers prints each port a breaker guards, and whether an operator
+          isolated it.
+        name: listBreakers
+        params: fsys vfs.FullFS, stdout io.Writer
+        recv: a *App
+        results: int
+      - doc: markBreaker writes, or takes off, the mark that isolates port's breaker.
+        name: markBreaker
+        params: fsys vfs.FullFS, verb, port string, stdout, stderr io.Writer
+        recv: a *App
+        results: int
       - doc: |-
           moduleBuild is the Go module that holds package pkg, as the build says
           it: its release, or the commit it came from — git's answer, in dev, for a
@@ -10699,6 +11110,17 @@ types:
         recv: a *App
         results: map[string]func(ctx context.Context, args []string) int
       - doc: |-
+          breakerCLI is Main's `breaker` command, nil when no port of the app
+          declares a breaker: reached through one (portBreaker.command), so a
+          product that declares none links none of it.
+        name: breakerCLI
+        recv: a *App
+        results: func(ctx context.Context, args []string) int
+      - doc: usageBreaker says the `breaker` command, when the app has one.
+        name: usageBreaker
+        params: w io.Writer
+        recv: a *App
+      - doc: |-
           onStores is Main's command name on the stores, on the process's standard
           streams.
         name: onStores
@@ -10988,6 +11410,34 @@ types:
         name: heldBinds
         recv: a *App
         results: "[]bindDecl"
+      - doc: |-
+          breakerChanged is a breaker's change of phase: logged — a warning when it
+          opens —, and put on the telemetry port.
+        name: breakerChanged
+        params: port string, from, to resilience.BreakerPhase
+        recv: a *App
+      - doc: breakers are the breakers of the app's ports.
+        name: breakers
+        recv: a *App
+        results: "[]breakerAt"
+      - doc: |-
+          addBreakers readies the app's breakers once its components are being
+          added, through one of them, so that a product that declares none links
+          none of it (attach).
+        name: addBreakers
+        params: cli bool
+        recv: a *App
+        results: error
+      - doc: |-
+          portPolicyProblems are what stops a start in the app's guarded ports: a
+          policy the SDK refuses with the values the start resolved.
+        name: portPolicyProblems
+        recv: a *App
+        results: "[]model.Diagnostic"
+      - doc: guardedPorts are the ports of the app's services that guard their calls.
+        name: guardedPorts
+        recv: a *App
+        results: "[]guardedPort"
       - doc: |-
           beginPrivacy opens a privacy operation's span on a store's node: a read
           for a reads edge, a write otherwise. Who acts is read first: inside the
@@ -12260,6 +12710,19 @@ types:
       - doc: reportPhase puts a phase change on the telemetry port.
         name: reportPhase
         params: phase string
+        recv: a *App
+      - doc: |-
+          reportRetry puts a port's retry on the telemetry port: the port and its
+          caller as references, the failure's code, the wait before the next
+          attempt.
+        name: reportRetry
+        params: sp *span, err error, delay time.Duration
+        recv: a *App
+      - doc: |-
+          reportBreaker puts a port's breaker entering phase to on the telemetry
+          port: an error outcome while it is open.
+        name: reportBreaker
+        params: port string, to resilience.BreakerPhase
         recv: a *App
       - doc: |-
           writeTurn is what a local write of the store needs before it runs: in a
@@ -17813,6 +18276,9 @@ types:
       - doc: fallback is the port's app.Fallback, nil without one.
         name: fallback
         type: Operation[Req, Resp]
+      - doc: guards are the policies around its calls (Guard), nil without any.
+        name: guards
+        type: "*portGuards"
     kind: struct
     methods:
       - name: Call
@@ -17852,6 +18318,22 @@ types:
         params: a *App, out *model.Node
         recv: p *PortService[Req, Resp]
         results: "[]model.Edge"
+      - name: Guard
+        params: opts ...PortPolicyConfigurer
+        recv: p *PortService[Req, Resp]
+        results: "*PortService[Req, Resp]"
+      - doc: |-
+          guarded runs the call through the port's policies: each attempt — a
+          retry's, a hedge's duplicate — runs what the port is bound to, and the
+          first that succeeds answers.
+        name: guarded
+        params: ctx context.Context, a *App, sp *span, req Req
+        recv: p *PortService[Req, Resp]
+        results: Resp, error
+      - doc: portGuards are the port's policies, nil without any.
+        name: portGuards
+        recv: p *PortService[Req, Resp]
+        results: "*portGuards"
     name: PortService
     typeParams: Req, Resp any
   - kind: named
@@ -18001,6 +18483,576 @@ types:
         recv: r *portRule
         results: op node, ok, decided bool
     name: portRule
+  - doc: breakerGuard is a port's circuit breaker ([Breaker]).
+    fields:
+      - name: failures
+        type: int
+      - name: open
+        type: time.Duration
+      - name: openMax
+        type: time.Duration
+      - name: trials
+        type: int
+      - name: window
+        type: time.Duration
+      - name: windowCalls
+        type: int
+      - name: windowRatio
+        type: float64
+      - name: failuresFor
+        type: "*SettingService[int]"
+      - name: openFor
+        type: "*SettingService[time.Duration]"
+      - name: openMaxFor
+        type: "*SettingService[time.Duration]"
+      - name: trialsFor
+        type: "*SettingService[int]"
+      - name: windowFor
+        type: "*SettingService[time.Duration]"
+      - name: windowCallsFor
+        type: "*SettingService[int]"
+      - name: windowRatioFor
+        type: "*SettingService[float64]"
+      - doc: |-
+          node is the port's: its ID names the breaker in a log line, the
+          readiness and the telemetry, read when it is used — a module renames
+          it.
+        name: node
+        type: "*nodeBase"
+      - name: built
+        type: perStart[resilience.Runner]
+    kind: struct
+    methods:
+      - doc: command is Main's `breaker` command of app a.
+        name: command
+        params: a *App
+        recv: "*breakerGuard"
+        results: func(ctx context.Context, args []string) int
+      - doc: "rank is the breaker's place: inside the retry and the hedge."
+        name: rank
+        recv: "*breakerGuard"
+        results: int
+      - doc: declare declares the breaker's settings.
+        name: declare
+        params: svc *Service, n *nodeBase
+        recv: g *breakerGuard
+      - doc: mechanic draws the breaker.
+        name: mechanic
+        recv: g *breakerGuard
+        results: model.Mechanic
+      - doc: runner is the breaker of the call's start.
+        name: runner
+        params: c *portCall
+        recv: g *breakerGuard
+        results: resilience.Runner
+      - doc: |-
+          of is the breaker of app a's start, built from the settings it resolved,
+          on its clock.
+        name: of
+        params: a *App
+        recv: g *breakerGuard
+        results: resilience.Runner
+      - doc: configOf is the breaker's configuration in app a's start, on clk.
+        name: configOf
+        params: a *App, clk clock.Timed
+        recv: g *breakerGuard
+        results: resilience.BreakerConfig
+      - doc: id is the port's ID.
+        name: id
+        recv: g *breakerGuard
+        results: string
+      - doc: state is the breaker of app a's start; nil when the SDK refused it.
+        name: state
+        params: a *App
+        recv: g *breakerGuard
+        results: resilience.BreakerState
+      - doc: |-
+          started refuses a breaker the SDK refuses with the start's values: its
+          every call would fail with PolicyMisconfigured, which is no state a
+          breaker has.
+        name: started
+        params: a *App, port string
+        recv: g *breakerGuard
+        results: phrase
+      - doc: |-
+          attach readies the breakers bs of app a: the operator's marks applied;
+          then, unless a CLI command runs, a readiness check each, and the
+          component that applies the marks a running product finds.
+        name: attach
+        params: a *App, bs []breakerAt, cli bool
+        recv: "*breakerGuard"
+        results: error
+    name: breakerGuard
+  - doc: breakerOption configures a breaker.
+    kind: named
+    methods:
+      - doc: breakerConfigure sets the option on what it configures.
+        name: breakerConfigure
+        params: g *breakerGuard
+        recv: f breakerOption
+    name: breakerOption
+    underlying: func(g *breakerGuard)
+  - doc: |-
+      breakerAt is a port's breaker in an app: the port's ID, the mark that
+      isolates it, and the breaker.
+    fields:
+      - name: port
+        type: string
+      - name: mark
+        type: string
+      - name: b
+        type: portBreaker
+    kind: struct
+    name: breakerAt
+  - doc: |-
+      breakerMarks applies the operator's marks to the app's breakers: applied
+      says which it isolated, so that a mark taken off resets only those.
+    fields:
+      - name: a
+        type: "*App"
+      - name: breakers
+        type: "[]breakerAt"
+      - name: applied
+        type: map[string]bool
+    kind: struct
+    methods:
+      - doc: |-
+          apply isolates each breaker whose mark appeared, and resets each whose
+          mark it applied went away. A mark it cannot read changes nothing.
+        name: apply
+        recv: m *breakerMarks
+      - doc: |-
+          start reads the marks every breakerPoll on the app's clock, until the app
+          stops.
+
+          Goroutine lifecycle: one tracked goroutine, which ends when the app's base
+          context ends; the stop waits for it.
+        name: start
+        params: _ context.Context
+        recv: m *breakerMarks
+        results: error
+    name: breakerMarks
+  - doc: hedgeGuard is a port's hedge ([Hedge]).
+    fields:
+      - name: delay
+        type: time.Duration
+      - name: inFlight
+        type: int
+      - name: hedges
+        type: int
+      - name: delayFor
+        type: "*SettingService[time.Duration]"
+      - name: inFlightFor
+        type: "*SettingService[int]"
+      - name: hedgesFor
+        type: "*SettingService[int]"
+      - name: built
+        type: perStart[resilience.Runner]
+    kind: struct
+    methods:
+      - doc: "rank is the hedge's place: inside the retry."
+        name: rank
+        recv: "*hedgeGuard"
+        results: int
+      - doc: declare declares the hedge's settings.
+        name: declare
+        params: svc *Service, n *nodeBase
+        recv: g *hedgeGuard
+      - doc: mechanic draws the hedge.
+        name: mechanic
+        recv: g *hedgeGuard
+        results: model.Mechanic
+      - doc: runner is the hedge of the call's start, sharing its budget.
+        name: runner
+        params: c *portCall
+        recv: g *hedgeGuard
+        results: resilience.Runner
+      - doc: started has nothing to ready.
+        name: started
+        params: _ *App, _ string
+        recv: "*hedgeGuard"
+        results: phrase
+    name: hedgeGuard
+  - doc: throttleGuard is a port's adaptive throttle ([Throttle]).
+    fields:
+      - name: k
+        type: float64
+      - name: kFor
+        type: "*SettingService[float64]"
+      - doc: random draws each refusal; nil is the SDK's. A test sets it.
+        name: random
+        type: func() float64
+    kind: struct
+    methods:
+      - doc: declare declares <port>-throttle-k.
+        name: declare
+        params: svc *Service, n *nodeBase
+        recv: g *throttleGuard
+      - doc: mechanic draws the throttle.
+        name: mechanic
+        recv: g *throttleGuard
+        results: model.Mechanic
+      - doc: runner is the SDK's adaptive throttle.
+        name: runner
+        params: clk clock.Timed
+        recv: g *throttleGuard
+        results: resilience.Runner
+    name: throttleGuard
+  - doc: portGuards are the policies around a port's calls.
+    fields:
+      - doc: layers are the policies, the outermost first.
+        name: layers
+        type: "[]portLayer"
+      - doc: budgets are the Budget options given; the first is the port's.
+        name: budgets
+        type: "[]*budgetGuard"
+      - doc: |-
+          budget is the retry budget the retry and the hedge share; nil when
+          the port has neither.
+        name: budget
+        type: "*budgetGuard"
+      - doc: |-
+          idempotent is the port's declaration that its operation may run more
+          than once for one call ([Idempotent]).
+        name: idempotent
+        type: bool
+    kind: struct
+    methods:
+      - doc: add adds a layer.
+        name: add
+        params: l portLayer
+        recv: g *portGuards
+      - doc: |-
+          settle orders the layers, gives the retry and the hedge their budget, and
+          declares every setting in svc — none when the port is no service's.
+        name: settle
+        params: svc *Service, n *nodeBase
+        recv: g *portGuards
+      - doc: |-
+          share gives the retry and the hedge their budget: the first Budget given,
+          else the default one; none when the port neither retries nor hedges.
+        name: share
+        recv: g *portGuards
+      - doc: |-
+          judge refuses what the port's policies are given wrong: a budget no retry
+          nor hedge shares, a hedge on a port not said idempotent.
+        name: judge
+        params: svc *Service, n *nodeBase
+        recv: g *portGuards
+      - doc: declare declares the settings of the port's budget and policies.
+        name: declare
+        params: svc *Service, n *nodeBase
+        recv: g *portGuards
+      - doc: has reports whether a layer of rank r guards the port.
+        name: has
+        params: r int
+        recv: g *portGuards
+        results: bool
+      - doc: |-
+          drawn are the port's policies as the graph draws them, the outermost
+          first, its budget before them.
+        name: drawn
+        recv: g *portGuards
+        results: "[]model.Mechanic"
+      - doc: run runs attempt through the policies, in the app of c.
+        name: run
+        params: ctx context.Context, c *portCall, attempt func(context.Context) error
+        recv: g *portGuards
+        results: error
+    name: portGuards
+  - doc: portCall is one call through a port's policies.
+    fields:
+      - name: a
+        type: "*App"
+      - name: sp
+        type: "*span"
+      - doc: budget is the port's retry budget in the app's start, nil without one.
+        name: budget
+        type: resilience.RetryBudget
+    kind: struct
+    methods:
+      - doc: |-
+          retried is what a call says of a retry about to wait: on the port's span,
+          a retry event and the count of its retries; on the telemetry port, a
+          retry event.
+        name: retried
+        params: attempt int, err error, delay time.Duration
+        recv: c *portCall
+    name: portCall
+  - doc: portPolicyOption is a [PortPolicyConfigurer].
+    kind: named
+    methods:
+      - doc: portPolicyConfigure sets the option on what it configures.
+        name: portPolicyConfigure
+        params: g *portGuards
+        recv: f portPolicyOption
+    name: portPolicyOption
+    underlying: func(g *portGuards)
+  - doc: guardedPort is a port that guards its calls, whatever its types.
+    fields:
+      - name: id
+        type: string
+      - name: decl
+        type: pos
+      - name: svc
+        type: "*Service"
+      - name: name
+        type: string
+      - name: guards
+        type: "*portGuards"
+    kind: struct
+    name: guardedPort
+  - doc: |-
+      perStart is a value built once per start of the app that reads it, from
+      the settings that start resolved, on its clock: a restart builds it
+      again.
+    fields:
+      - name: built
+        type: atomic.Pointer[startValue[T]]
+    kind: struct
+    methods:
+      - doc: |-
+          get is the value of app a's start, built now when there is none — once:
+          a goroutine that loses the race takes the winner's.
+        name: get
+        params: a *App, build func(clk clock.Timed) T
+        recv: s *perStart[T]
+        results: T
+    name: perStart
+    typeParams: T any
+  - doc: |-
+      startValue is a perStart's value, and the settings of the start it was
+      built for.
+    fields:
+      - name: values
+        type: "*map[string]any"
+      - name: v
+        type: T
+    kind: struct
+    name: startValue
+    typeParams: T any
+  - doc: |-
+      policyLayer is a policy of part 1 put around a port's calls: the
+      timeout and the throttle, whose runner needs nothing but the clock.
+    fields:
+      - name: p
+        type: policy
+      - name: place
+        type: int
+    kind: struct
+    methods:
+      - doc: rank is the layer's place.
+        name: rank
+        recv: l *policyLayer
+        results: int
+      - doc: declare declares the policy's settings.
+        name: declare
+        params: svc *Service, n *nodeBase
+        recv: l *policyLayer
+      - doc: mechanic is the policy's step.
+        name: mechanic
+        recv: l *policyLayer
+        results: model.Mechanic
+      - doc: runner is the policy's runner in the call's app.
+        name: runner
+        params: c *portCall
+        recv: l *policyLayer
+        results: resilience.Runner
+      - doc: started has nothing to ready.
+        name: started
+        params: _ *App, _ string
+        recv: "*policyLayer"
+        results: phrase
+    name: policyLayer
+  - doc: |-
+      timeoutOption is [Timeout]: a deadline on an operation's handler, or on
+      each attempt of a port's call.
+    kind: named
+    methods:
+      - doc: "guard is a fresh timeout guard: each operation declares its own setting."
+        name: guard
+        recv: d timeoutOption
+        results: "*timeoutGuard"
+      - doc: call adds the timeout to an operation's policies.
+        name: call
+        params: o *callOptions
+        recv: d timeoutOption
+      - doc: endpointConfigure sets the option on what it configures.
+        name: endpointConfigure
+        params: o *endpointOptions
+        recv: d timeoutOption
+      - doc: exposeConfigure sets the option on what it configures.
+        name: exposeConfigure
+        params: o *endpointOptions
+        recv: d timeoutOption
+      - doc: commandConfigure sets the option on what it configures.
+        name: commandConfigure
+        params: o *commandOptions
+        recv: d timeoutOption
+      - doc: queryConfigure sets the option on what it configures.
+        name: queryConfigure
+        params: o *queryOptions
+        recv: d timeoutOption
+      - doc: portPolicyConfigure sets the option on what it configures.
+        name: portPolicyConfigure
+        params: g *portGuards
+        recv: d timeoutOption
+    name: timeoutOption
+    underlying: time.Duration
+  - kind: named
+    name: PortPolicyConfigurer
+    underlying: |-
+      interface {
+      	portPolicyConfigure(g *portGuards)
+      }
+  - kind: named
+    name: TimeoutConfigurer
+    underlying: |-
+      interface {
+      	OperationOption
+      	PortPolicyConfigurer
+      }
+  - kind: named
+    name: RetryConfigurer
+    underlying: |-
+      interface {
+      	retryConfigure(g *retryGuard)
+      }
+  - kind: named
+    name: BreakerConfigurer
+    underlying: |-
+      interface {
+      	breakerConfigure(g *breakerGuard)
+      }
+  - doc: |-
+      portLayer is one policy around a port's calls: where it sits in the
+      composition, the settings it declares, the step the graph draws, and the
+      SDK runner a call runs through. A layer is reached only through this
+      interface, so a product that guards no port links none of their engines.
+    kind: named
+    name: portLayer
+    underlying: |-
+      interface {
+      	// rank is the layer's place, the outermost first (rankRetry … rankTimeout).
+      	rank() int
+      	// declare declares the layer's settings in svc, for the port n.
+      	declare(svc *Service, n *nodeBase)
+      	// mechanic is the step as the graph draws it, with the values it runs
+      	// with in the app that runs it — its defaults before.
+      	mechanic() model.Mechanic
+      	// runner is the SDK runner the call c runs through.
+      	runner(c *portCall) resilience.Runner
+      	// started readies the layer in an app that starts, and answers what
+      	// stops the start.
+      	started(a *App, port string) phrase
+      }
+  - doc: |-
+      portBreaker is a breaker layer, as the start, the readiness, the
+      operator's marks and the CLI reach it.
+    kind: named
+    name: portBreaker
+    underlying: |-
+      interface {
+      	// state is the breaker of the app's start; nil when the SDK refused it.
+      	state(a *App) resilience.BreakerState
+      	// command is Main's `breaker` command of app a: reached through a
+      	// breaker, so that a product that declares none links none of it.
+      	command(a *App) func(ctx context.Context, args []string) int
+      	// attach readies the app's breakers bs at its start: reached through
+      	// one of them, for the same reason.
+      	attach(a *App, bs []breakerAt, cli bool) error
+      }
+  - doc: retryGuard is a port's retry ([Retry]).
+    fields:
+      - name: attempts
+        type: int
+      - name: delay
+        type: time.Duration
+      - name: maxDelay
+        type: time.Duration
+      - name: honour
+        type: bool
+      - name: attemptsFor
+        type: "*SettingService[int]"
+      - name: delayFor
+        type: "*SettingService[time.Duration]"
+      - name: maxDelayFor
+        type: "*SettingService[time.Duration]"
+      - name: jitterFor
+        type: "*SettingService[string]"
+      - name: afterFor
+        type: "*SettingService[bool]"
+      - name: config
+        type: perStart[resilience.RetryConfig]
+    kind: struct
+    methods:
+      - doc: "rank is the retry's place: the outermost."
+        name: rank
+        recv: "*retryGuard"
+        results: int
+      - doc: declare declares the retry's settings.
+        name: declare
+        params: svc *Service, n *nodeBase
+        recv: g *retryGuard
+      - doc: mechanic draws the retry.
+        name: mechanic
+        recv: g *retryGuard
+        results: model.Mechanic
+      - doc: |-
+          runner is the SDK's retry for one call: its configuration is the start's,
+          its OnRetry the call's.
+        name: runner
+        params: c *portCall
+        recv: g *retryGuard
+        results: resilience.Runner
+      - doc: configOf is the retry's configuration in app a's start, on clk.
+        name: configOf
+        params: a *App, clk clock.Timed
+        recv: g *retryGuard
+        results: resilience.RetryConfig
+      - doc: started has nothing to ready.
+        name: started
+        params: _ *App, _ string
+        recv: "*retryGuard"
+        results: phrase
+    name: retryGuard
+  - doc: retryOption configures a retry.
+    kind: named
+    methods:
+      - doc: retryConfigure sets the option on what it configures.
+        name: retryConfigure
+        params: g *retryGuard
+        recv: f retryOption
+    name: retryOption
+    underlying: func(g *retryGuard)
+  - doc: budgetGuard is a port's retry budget ([Budget]).
+    fields:
+      - name: tokens
+        type: int
+      - name: ratio
+        type: float64
+      - name: tokensFor
+        type: "*SettingService[int]"
+      - name: ratioFor
+        type: "*SettingService[float64]"
+      - name: built
+        type: perStart[resilience.RetryBudget]
+    kind: struct
+    methods:
+      - doc: declare declares the budget's settings.
+        name: declare
+        params: svc *Service, n *nodeBase
+        recv: b *budgetGuard
+      - doc: mechanic draws the budget.
+        name: mechanic
+        recv: b *budgetGuard
+        results: model.Mechanic
+      - doc: of is the budget of app a's start.
+        name: of
+        params: a *App
+        recv: b *budgetGuard
+        results: resilience.RetryBudget
+    name: budgetGuard
   - doc: |-
       actorKey carries who kit acts for: the retention, the command line, the
       Studio.
@@ -26148,6 +27200,34 @@ vars:
         type: BulkheadConfigurer
         value: (*waitOption)(nil)
     name: _#3
+  - doc: |-
+      : Asserts at compile time that a port's breaker is what its start, its
+      readiness, its marks and its command reach, and that Timeout's option
+      configures an endpoint, an exposure, a command, a query and a port alike.
+    grouped: true
+    items:
+      - name: _
+        type: portBreaker
+        value: (*breakerGuard)(nil)
+      - name: _
+        type: OperationOption
+        value: (*timeoutOption)(nil)
+      - name: _
+        type: EndpointConfigurer
+        value: (*timeoutOption)(nil)
+      - name: _
+        type: ExposeConfigurer
+        value: (*timeoutOption)(nil)
+      - name: _
+        type: CommandConfigurer
+        value: (*timeoutOption)(nil)
+      - name: _
+        type: QueryConfigurer
+        value: (*timeoutOption)(nil)
+      - name: _
+        type: PortPolicyConfigurer
+        value: (*timeoutOption)(nil)
+    name: _#4
   - doc: |-
       Privacy is the framework's own service: the data keys, the legal holds and the
       privacy journal of an app that keeps personal data or seals what it

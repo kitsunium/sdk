@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/app/health"
@@ -97,6 +98,10 @@ Usage:
 //	data         the data directory copied into a database: data copy --to NAME,
 //	             verified by fingerprints
 //
+// An app whose port declares a [Breaker] understands breaker too: list the
+// breakers, isolate PORT — open its breaker until it is reset — and reset
+// PORT, kept in the data directory for every start and a running product.
+//
 // A product's CLI command runs when the first argument names it. A command
 // declared with DefaultCommand runs when the first argument names no command
 // at all — with every argument —, and when there is none, in serve's place:
@@ -123,6 +128,7 @@ func (a *App) Main(ctx context.Context, args []string) int {
 		return a.runCLI(ctx, def, args, stdio())
 	}
 	usage(os.Stderr, a.name)
+	a.usageBreaker(os.Stderr)
 	a.usageCommands(os.Stderr)
 	return 2
 }
@@ -131,10 +137,11 @@ func (a *App) Main(ctx context.Context, args []string) int {
 func (a *App) mainCommands() map[string]func(ctx context.Context, args []string) int {
 	help := func(context.Context, []string) int {
 		usage(os.Stdout, a.name)
+		a.usageBreaker(os.Stdout)
 		a.usageCommands(os.Stdout)
 		return 0
 	}
-	return map[string]func(ctx context.Context, args []string) int{
+	cmds := map[string]func(ctx context.Context, args []string) int{
 		"serve":       func(ctx context.Context, _ []string) int { return a.serveCommand(ctx) },
 		"graph":       func(ctx context.Context, args []string) int { return a.graphCommand(ctx, args, os.Stdout, os.Stderr) },
 		"healthcheck": func(ctx context.Context, _ []string) int { return a.healthcheck(ctx, os.Stderr) },
@@ -147,6 +154,27 @@ func (a *App) mainCommands() map[string]func(ctx context.Context, args []string)
 		"migrate": a.onStores("migrate"), "privacy": a.onStores("privacy"), "revisions": a.onStores("revisions"),
 		"watch": a.onStores("watch"), "data": a.onStores("data"),
 		"help": help, "-h": help, "-help": help, "--help": help,
+	}
+	if run := a.breakerCLI(); run != nil {
+		cmds["breaker"] = run
+	}
+	return cmds
+}
+
+// breakerCLI is Main's `breaker` command, nil when no port of the app
+// declares a breaker: reached through one (portBreaker.command), so a
+// product that declares none links none of it.
+func (a *App) breakerCLI() func(ctx context.Context, args []string) int {
+	if bs := a.breakers(); len(bs) > 0 {
+		return bs[0].b.command(a)
+	}
+	return nil
+}
+
+// usageBreaker says the `breaker` command, when the app has one.
+func (a *App) usageBreaker(w io.Writer) {
+	if len(a.breakers()) > 0 {
+		fmt.Fprintf(w, "  %[1]s breaker [list]|isolate PORT|reset PORT\n%[2]s a port's breaker, opened by an operator until reset\n", a.name, strings.Repeat(" ", 37))
 	}
 }
 

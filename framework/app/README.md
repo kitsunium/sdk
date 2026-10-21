@@ -193,6 +193,9 @@ Package app — workflows: a state machine over the entities of one store.
 - [func AuthData\[D any\]\(ctx context.Context\) \(D, bool\)](<#AuthData>)
 - [func AuthOptional\(\) OperationOption](<#AuthOptional>)
 - [func Bind\[Req, Resp any\]\(port \*iapp.PortService\[Req, Resp\], op iapp.Operation\[Req, Resp\]\) interface{AppOption; MountOption}](<#Bind>)
+- [func Breaker\(failures int, open time.Duration, opts ...BreakerOption\) PortPolicyOption](<#Breaker>)
+- [func BreakerWindow\(size time.Duration, minCalls int, failureRatio float64\) BreakerOption](<#BreakerWindow>)
+- [func Budget\(maxTokens int, tokenRatio float64\) PortPolicyOption](<#Budget>)
 - [func Bulkhead\(maxConcurrent int, opts ...BulkheadOption\) OperationOption](<#Bulkhead>)
 - [func BulkheadQueue\(n int\) BulkheadOption](<#BulkheadQueue>)
 - [func Catalog\(\) \[\]model.Mechanic](<#Catalog>)
@@ -218,8 +221,11 @@ Package app — workflows: a state machine over the entities of one store.
 - [func Forbidden\(message string\) \*Error](<#Forbidden>)
 - [func From\(name string, addr string\) MailerOption](<#From>)
 - [func Generated\(bytes int\) SecretOption](<#Generated>)
+- [func HalfOpenTrials\(n int\) BreakerOption](<#HalfOpenTrials>)
+- [func Hedge\(delay time.Duration, inFlight int\) PortPolicyOption](<#Hedge>)
 - [func HeldUntil\[T any\]\(until func\(T\) \(time.Time, bool\), reason string\) StoreOption](<#HeldUntil>)
 - [func HoldSubject\(ctx context.Context, reason string, ids ...string\) error](<#HoldSubject>)
+- [func Idempotent\(\) PortPolicyOption](<#Idempotent>)
 - [func IdleStop\(d time.Duration\) AppOption](<#IdleStop>)
 - [func InMemory\(\) interface{StoreOption; AppOption}](<#InMemory>)
 - [func Index\[T any\]\(name string, keys func\(T\) \[\]string\) StoreOption](<#Index>)
@@ -245,6 +251,7 @@ Package app — workflows: a state machine over the entities of one store.
 - [func NewModule\(name string, doc string, parts ...ModulePart\) \*Module](<#NewModule>)
 - [func NewService\(name string, doc string\) \*Service](<#NewService>)
 - [func NewTicker\(ctx context.Context, d time.Duration\) clock.Ticker](<#NewTicker>)
+- [func NoRetryAfter\(\) RetryOption](<#NoRetryAfter>)
 - [func NoTransaction\(\) CommandOption](<#NoTransaction>)
 - [func NotCommon\(\) PasswordOption](<#NotCommon>)
 - [func NotFound\(message string\) \*Error](<#NotFound>)
@@ -252,6 +259,7 @@ Package app — workflows: a state machine over the entities of one store.
 - [func Now\(ctx context.Context\) time.Time](<#Now>)
 - [func OnBounce\(fn func\(ctx context.Context, b \*Bounce\)\) MailerOption](<#OnBounce>)
 - [func Only\(envs ...string\) MountOption](<#Only>)
+- [func OpenBackoff\(maxOpen time.Duration\) BreakerOption](<#OpenBackoff>)
 - [func Optional\(\) SecretOption](<#Optional>)
 - [func OwnStores\(\) SubscriptionOption](<#OwnStores>)
 - [func Parallelism\(n int\) DeliveryOption](<#Parallelism>)
@@ -268,6 +276,8 @@ Package app — workflows: a state machine over the entities of one store.
 - [func Required\(\) SettingOption](<#Required>)
 - [func Requires\(other \*Module\) ModulePart](<#Requires>)
 - [func RetentionByProduct\(limits string\) StoreOption](<#RetentionByProduct>)
+- [func Retry\(maxAttempts int, delay time.Duration, opts ...RetryOption\) PortPolicyOption](<#Retry>)
+- [func RetryMaxDelay\(d time.Duration\) RetryOption](<#RetryMaxDelay>)
 - [func Revisions\(n int\) StoreOption](<#Revisions>)
 - [func Root\(dir string\) StaticOption](<#Root>)
 - [func RotateEvery\(d time.Duration\) SecretOption](<#RotateEvery>)
@@ -284,7 +294,8 @@ Package app — workflows: a state machine over the entities of one store.
 - [func Stop\(ctx context.Context\) bool](<#Stop>)
 - [func Studio\(on bool\) AppOption](<#Studio>)
 - [func Telemetry\(path string, gids ...int\) AppOption](<#Telemetry>)
-- [func Timeout\(d time.Duration\) OperationOption](<#Timeout>)
+- [func Throttle\(k float64\) PortPolicyOption](<#Throttle>)
+- [func Timeout\(d time.Duration\) TimeoutOption](<#Timeout>)
 - [func Transact\(ctx context.Context, fn func\(context.Context\) error\) error](<#Transact>)
 - [func Unauthenticated\(message string\) \*Error](<#Unauthenticated>)
 - [func Unavailable\(message string\) \*Error](<#Unavailable>)
@@ -316,6 +327,7 @@ Package app — workflows: a state machine over the entities of one store.
   - [func \(\*Binary\) Role\(name string, app \*App, args ...string\) \*Binary](<#Binary.Role>)
   - [func \(\*Binary\) Talks\(from string, to string, contractName string\) \*Binary](<#Binary.Talks>)
 - [type Bounce](<#Bounce>)
+- [type BreakerOption](<#BreakerOption>)
 - [type BulkheadOption](<#BulkheadOption>)
 - [type CLI](<#CLI>)
 - [type CLIFunc](<#CLIFunc>)
@@ -394,7 +406,9 @@ Package app — workflows: a state machine over the entities of one store.
 - [type PersonalData](<#PersonalData>)
 - [type Port](<#Port>)
   - [func \(\*Port\) Call\(ctx context.Context, req Req\) \(Resp, error\)](<#Port.Call>)
+  - [func \(\*Port\) Guard\(opts ...PortPolicyConfigurer\) \*PortService\[Req, Resp\]](<#Port.Guard>)
 - [type PortOption](<#PortOption>)
+- [type PortPolicyOption](<#PortPolicyOption>)
 - [type Principal](<#Principal>)
   - [func \(Principal\) Attrs\(\) \[\]authz.Attr](<#Principal.Attrs>)
 - [type Query](<#Query>)
@@ -409,6 +423,7 @@ Package app — workflows: a state machine over the entities of one store.
   - [func \(Records\) EraseFields\(ctx context.Context, key string, reason string, paths ...string\) error](<#Records.EraseFields>)
   - [func \(Records\) Get\(ctx context.Context, key string\) \(json.RawMessage, error\)](<#Records.Get>)
   - [func \(Records\) Keys\(ctx context.Context\) iter.Seq2\[string, error\]](<#Records.Keys>)
+- [type RetryOption](<#RetryOption>)
 - [type Revision](<#Revision>)
 - [type Routine](<#Routine>)
 - [type Scope](<#Scope>)
@@ -476,6 +491,7 @@ Package app — workflows: a state machine over the entities of one store.
 - [type StoreOption](<#StoreOption>)
 - [type Subscription](<#Subscription>)
 - [type SubscriptionOption](<#SubscriptionOption>)
+- [type TimeoutOption](<#TimeoutOption>)
 - [type Tombstone](<#Tombstone>)
 - [type Topic](<#Topic>)
   - [func \(\*Topic\) Publish\(ctx context.Context, msg T\) error](<#Topic.Publish>)
@@ -1811,6 +1827,45 @@ It is an option of [Mount](#Mount) too, under the same name: there it binds a po
 a := app.NewApp("shop", posts.Service).With(app.Mount(moderation.Module, app.Bind(moderation.Enforcer, posts.EnforceAPI)))
 ```
 
+<a name="Breaker"></a>
+## func [Breaker](<https://github.com/kitsunium/sdk/blob/main/framework/app/port_policy.go>)
+
+```go
+func Breaker(failures int, open time.Duration, opts ...BreakerOption) PortPolicyOption
+```
+
+Breaker stops a port's calls from reaching a dependency that keeps failing: after failures failures of the dependency's in a row — or, given [BreakerWindow](#BreakerWindow), a share of a window's calls — it opens, and every call fails at once with the SDK's CircuitOpen (503) for open; then it lets [HalfOpenTrials](#HalfOpenTrials) trial calls through, one at a time, which close it or open it again, for longer each time under [OpenBackoff](#OpenBackoff). A refusal of the caller's own does not count, nor a caller that left, nor a throttle's refusal. It is the SDK's resilience circuit breaker, on the app's clock, one per port and per start.
+
+Its state is the product's: a readiness check, breaker:\<port>, degraded — never unready — while it is not closed; each change of phase logged and put on the telemetry port. An operator opens it until reset with the product's \`breaker isolate PORT\` and closes it with \`breaker reset PORT\`, kept in the data directory: a start applies it, and so does a running product, within five seconds.
+
+The values are the defaults of the port's settings \<service>-port-\<name>-breaker-failures, -breaker-open, -breaker-open-max, -breaker-trials, -breaker-window, -breaker-window-calls and -breaker-window-ratio, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override; a value the breaker cannot run with stops the start, and so does a breaker the SDK refuses.
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
+
+<a name="BreakerWindow"></a>
+## func [BreakerWindow](<https://github.com/kitsunium/sdk/blob/main/framework/app/port_policy.go>)
+
+```go
+func BreakerWindow(size time.Duration, minCalls int, failureRatio float64) BreakerOption
+```
+
+BreakerWindow makes a [Breaker](#Breaker) open on a rate rather than on failures in a row: once the last size of calls holds at least minCalls, a share of failures of failureRatio or more opens it. Its values are the defaults of the port's settings \<service>-port-\<name>-breaker-window, -breaker-window-calls and -breaker-window-ratio; a window of 0 is none, a ratio outside (0, 1] stops the start.
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
+
+<a name="Budget"></a>
+## func [Budget](<https://github.com/kitsunium/sdk/blob/main/framework/app/port_policy.go>)
+
+```go
+func Budget(maxTokens int, tokenRatio float64) PortPolicyOption
+```
+
+Budget sizes the retry budget a port's [Retry](#Retry) and [Hedge](#Hedge) share: a bucket of maxTokens tokens, a failure costing one and a success putting back tokenRatio; retries and duplicates are refused once half the tokens are spent, so a dependency that fails for every caller receives fewer extra calls, not every call times the attempts. A port that retries or hedges without it has 10 tokens and a ratio of 0.1, gRPC's example; a Budget on a port that does neither stops the start. It is the SDK's resilience retry budget, one per port and per start.
+
+The values are the defaults of the port's settings \<service>-port-\<name>-budget-tokens and -budget-ratio, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override; fewer than one token, or a ratio below a thousandth, stops the start.
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
+
 <a name="Bulkhead"></a>
 ## func [Bulkhead](<https://github.com/kitsunium/sdk/blob/main/framework/app/endpoint.go>)
 
@@ -2083,6 +2138,30 @@ Generated makes the secret the framework's to make: versions of bytes random byt
 
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
+<a name="HalfOpenTrials"></a>
+## func [HalfOpenTrials](<https://github.com/kitsunium/sdk/blob/main/framework/app/port_policy.go>)
+
+```go
+func HalfOpenTrials(n int) BreakerOption
+```
+
+HalfOpenTrials is how many trial calls in a row must succeed to close a [Breaker](#Breaker) once its open time is over — one by default. It is the default of the port's setting \<service>-port-\<name>-breaker-trials; fewer than one stops the start.
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
+
+<a name="Hedge"></a>
+## func [Hedge](<https://github.com/kitsunium/sdk/blob/main/framework/app/port_policy.go>)
+
+```go
+func Hedge(delay time.Duration, inFlight int) PortPolicyOption
+```
+
+Hedge races a port's slow call: an attempt that has not answered after delay is joined by a duplicate, and the first to succeed answers — the tail of a dependency's latency cut, at the price of more calls. At most inFlight duplicates run at once across every call, and the port's retry budget ([Budget](#Budget)) refuses them while the dependency fails for many: then the call goes on with the attempts it has. Only a port declared [Idempotent](#Idempotent) may hedge — the start refuses another. It is the SDK's resilience hedge, on the app's clock.
+
+The values are the defaults of the port's settings \<service>-port-\<name>-hedge-delay, -hedge-in-flight and -hedge-max — the duplicates one call may make, 1 —, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override; a delay that is not positive, or fewer than one, stops the start.
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
+
 <a name="HeldUntil"></a>
 ## func [HeldUntil](<https://github.com/kitsunium/sdk/blob/main/framework/app/retention.go>)
 
@@ -2100,6 +2179,17 @@ func HoldSubject(ctx context.Context, reason string, ids ...string) error
 ```
 
 HoldSubject places a legal hold on every record whose subject is one of ids, in every store of the app: an authority's request about a person. It holds the records they have now; a record written later is not held. reason is kept as Store.Hold keeps it.
+
+<a name="Idempotent"></a>
+## func [Idempotent](<https://github.com/kitsunium/sdk/blob/main/framework/app/port_policy.go>)
+
+```go
+func Idempotent() PortPolicyOption
+```
+
+Idempotent declares that the port's operation may run more than once for one call, concurrently, with no harm done: what a [Hedge](#Hedge) needs, which is refused on a port that does not say so. The graph draws it on the port.
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
 <a name="IdleStop"></a>
 ## func [IdleStop](<https://github.com/kitsunium/sdk/blob/main/framework/app/app_profiles.go>)
@@ -2355,6 +2445,17 @@ func NewTicker(ctx context.Context, d time.Duration) clock.Ticker
 
 NewTicker is a ticker of period d on the app's clock, for a loop written by hand ([Service](#Service).Go): a test's manual clock drives it like every timer the framework runs itself, where a time.Ticker would tick on the wall clock whatever the test does. It panics on a non-positive d, as time.NewTicker does.
 
+<a name="NoRetryAfter"></a>
+## func [NoRetryAfter](<https://github.com/kitsunium/sdk/blob/main/framework/app/port_policy.go>)
+
+```go
+func NoRetryAfter() RetryOption
+```
+
+NoRetryAfter makes a [Retry](#Retry) wait its backoff whatever a failure says: a Retry-After, a rate limiter's next token. It is the default of the port's setting \<service>-port-\<name>-retry-after, false, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override.
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
+
 <a name="NoTransaction"></a>
 ## func [NoTransaction](<https://github.com/kitsunium/sdk/blob/main/framework/app/command.go>)
 
@@ -2428,6 +2529,17 @@ a := app.NewApp("vigie", identity.Service).
 ```
 
 Elsewhere the mount is as if it had not been given, its [Prefix](#Prefix) and its [Bind](#Bind) with it; another mount of the module without Only still mounts it. Several Only on one mount add up. The start refuses an Only that names no environment, a name that cannot be one — lower-case letters, digits and dashes inside, 63 at most —, and a module a mounted module requires ([Requires](#Requires)) that its mount leaves out, rather than mounting it at its defaults behind the product's back.
+
+<a name="OpenBackoff"></a>
+## func [OpenBackoff](<https://github.com/kitsunium/sdk/blob/main/framework/app/port_policy.go>)
+
+```go
+func OpenBackoff(maxOpen time.Duration) BreakerOption
+```
+
+OpenBackoff lengthens the open time of a [Breaker](#Breaker) that opens again without having closed: it doubles at each opening, from the breaker's open time up to max. It is the default of the port's setting \<service>-port-\<name>-breaker-open-max, 0 — the same open time every time — without it; a negative one stops the start.
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
 <a name="Optional"></a>
 ## func [Optional](<https://github.com/kitsunium/sdk/blob/main/framework/app/secret.go>)
@@ -2610,6 +2722,32 @@ RetentionByProduct says the product keeps the store's retention itself: its own 
 
 The framework then runs no retention for the store, and warns of neither a missing retention nor a missing subject. Its classified fields keep every other promise: sealed at rest, never shown, exported with their person — when the store names one — and erased by app.Erase and Store.Erase. It goes with app.Purpose, app.HeldUntil, app.Anonymise and app.DeleteOnErasure; with app.EraseAfter, app.EraseAt, app.DeleteAfter or app.DeleteAt it is refused: a store's retention is the framework's or the product's, never both.
 
+<a name="Retry"></a>
+## func [Retry](<https://github.com/kitsunium/sdk/blob/main/framework/app/port_policy.go>)
+
+```go
+func Retry(maxAttempts int, delay time.Duration, opts ...RetryOption) PortPolicyOption
+```
+
+Retry runs a port's call again when it fails for a reason of the dependency's — what the start answers as a 5xx, a 408 or a 429 —, up to maxAttempts attempts in all, waiting between them a backoff that starts at delay and doubles, with full jitter, up to [RetryMaxDelay](#RetryMaxDelay) — 30 seconds unless the code says otherwise. A failure that says how long to wait — a Retry-After, a rate limiter's next token (the SDK's resilience.RetryAfter) — is waited that long instead, held at the longest delay, unless [NoRetryAfter](#NoRetryAfter). A refusal of the caller's own is not retried, nor an open breaker, a throttle or another retry's exhaustion. It is the SDK's resilience retry, on the app's clock, sharing the port's retry budget ([Budget](#Budget)) with its hedge.
+
+Each retry is an event on the port's span, which counts them, and a retry event on the telemetry port.
+
+The values are the defaults of the port's settings \<service>-port-\<name>-retry-attempts, -retry-delay, -retry-max-delay, -retry-jitter (full, decorrelated or none) and -retry-after (whether a failure's own delay is honoured), which config/\<env>.\* and \<PRODUCT>\_\<NAME> override; fewer than one attempt, or a delay that is not positive, stops the start.
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
+
+<a name="RetryMaxDelay"></a>
+## func [RetryMaxDelay](<https://github.com/kitsunium/sdk/blob/main/framework/app/port_policy.go>)
+
+```go
+func RetryMaxDelay(d time.Duration) RetryOption
+```
+
+RetryMaxDelay is the longest a [Retry](#Retry) waits between two attempts: the backoff's cap, and the cap on a delay a failure asks for. It is the default of the port's setting \<service>-port-\<name>-retry-max-delay; one that is not positive stops the start.
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
+
 <a name="Revisions"></a>
 ## func [Revisions](<https://github.com/kitsunium/sdk/blob/main/framework/app/revisions.go>)
 
@@ -2775,16 +2913,31 @@ func Telemetry(path string, gids ...int) AppOption
 
 Telemetry exports the app's telemetry on the private socket at path — absolute, and short enough for a Unix socket (pkg/v1/proc/ipc) — admitting the groups gids besides the product's own account. It wins over \<PRODUCT>\_TELEMETRY.
 
+<a name="Throttle"></a>
+## func [Throttle](<https://github.com/kitsunium/sdk/blob/main/framework/app/port_policy.go>)
+
+```go
+func Throttle(k float64) PortPolicyOption
+```
+
+Throttle refuses, on the caller's side and without sending them, a share of a port's calls while the dependency refuses more than 1/k of the recent ones — the client-side throttling of Google's SRE book: a call is refused with probability (requests − k × accepts) / (requests + 1), over the last two minutes, with the SDK's Throttled (503). A refusal is a 5xx, a 408 or a 429 of the dependency's; a refusal of the caller's own is an accept. It is the SDK's resilience adaptive throttle, on the app's clock; 2 is the book's k.
+
+k is the default of the port's setting \<service>-port-\<name>-throttle-k, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override; a k below 1 stops the start.
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
+
 <a name="Timeout"></a>
 ## func [Timeout](<https://github.com/kitsunium/sdk/blob/main/framework/app/endpoint.go>)
 
 ```go
-func Timeout(d time.Duration) OperationOption
+func Timeout(d time.Duration) TimeoutOption
 ```
 
 Timeout cancels the handler's context after d and answers 504. A caller that leaves first is no timeout: its request is recorded as 499, logged as information, and nothing it could read is written. It is the SDK's resilience timeout, on the app's clock.
 
-d is the default of the operation's setting \<service>-\<kind>-\<operation>-timeout, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override; one that is not positive stops the start.
+Given to a port's [Port](#Port).Guard, it is a deadline on each attempt of the port's call, the innermost of its policies: an attempt that outruns it fails with the SDK's TimeoutExceeded, which the port's breaker counts and its retry replays.
+
+d is the default of the operation's setting \<service>-\<kind>-\<operation>-timeout — \<service>-port-\<name>-timeout for a port —, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override; one that is not positive stops the start.
 
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
@@ -3011,6 +3164,8 @@ data         the data directory copied into a database: data copy --to NAME,
              verified by fingerprints
 ```
 
+An app whose port declares a [Breaker](#Breaker) understands breaker too: list the breakers, isolate PORT — open its breaker until it is reset — and reset PORT, kept in the data directory for every start and a running product.
+
 A product's CLI command runs when the first argument names it. A command declared with DefaultCommand runs when the first argument names no command at all — with every argument —, and when there is none, in serve's place: Main then never answers a usage error.
 
 It returns the process exit status rather than exiting, so that deferred work runs and a test can call it.
@@ -3202,6 +3357,23 @@ type Bounce struct {
 	GivenUp  string
 	// Attempts is how many deliveries it got.
 	Attempts int
+}
+```
+
+<a name="BreakerOption"></a>
+## type [BreakerOption](<https://github.com/kitsunium/sdk/blob/main/framework/app/port_policy_interface.go>)
+
+BreakerOption configures a [Breaker](#Breaker).
+
+```go
+type BreakerOption = iapp.BreakerConfigurer
+```
+
+BreakerOption is an alias of `github.com/kitsunium/sdk/framework/internal/app.BreakerConfigurer`, declared as:
+
+```go
+type BreakerOption interface {
+	breakerConfigure(g *breakerGuard)
 }
 ```
 
@@ -4377,7 +4549,23 @@ type Port[Req, Resp any] struct{}
 func (*Port) Call(ctx context.Context, req Req) (Resp, error)
 ```
 
-Call runs what the port is bound to: in a span on the port — the caller's calls edge — then in the bound operation's own span, through its whole pipeline, carrying the caller's user as \[EndpointService.Call] does.
+Call runs what the port is bound to: in a span on the port — the caller's calls edge — then, through the policies \[PortService.Guard] put around it, in the bound operation's own span — one per attempt —, through its whole pipeline, carrying the caller's user as \[EndpointService.Call] does.
+
+<a name="Port.Guard"></a>
+### func \(Port\) [Guard](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/port_policy.go>)
+
+```go
+func (*Port) Guard(opts ...PortPolicyConfigurer) *PortService[Req, Resp]
+```
+
+Guard puts policies around the calls the port makes — [Retry](#Retry), [Budget](#Budget), [Breaker](#Breaker), [Hedge](#Hedge) with [Idempotent](#Idempotent), [Throttle](#Throttle), [Timeout](#Timeout) — and returns the port. Whatever the order they are given in, they compose the outermost first as Retry, Hedge, Breaker, Throttle, Timeout, around the operation the port is bound to; the retry and the hedge share the port's retry budget.
+
+Each declares, in the port's service, the settings that tune it, named \<service>-port-\<name>-\<knob>: the code's value is the default, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override, and a value a policy cannot run with stops the start. A port is guarded once: a second Guard is refused.
+
+```
+var Quote = Service.Port[QuoteRequest, Price]("quote").
+	Guard(app.Timeout(2*time.Second), app.Retry(3, 100*time.Millisecond), app.Breaker(5, 30*time.Second))
+```
 
 <a name="PortOption"></a>
 ## type [PortOption](<https://github.com/kitsunium/sdk/blob/main/framework/app/port.go>)
@@ -4393,6 +4581,23 @@ PortOption is an alias of `github.com/kitsunium/sdk/framework/internal/app.PortC
 ```go
 type PortOption[Req, Resp any] interface {
 	portConfigure(p *PortService[Req, Resp])
+}
+```
+
+<a name="PortPolicyOption"></a>
+## type [PortPolicyOption](<https://github.com/kitsunium/sdk/blob/main/framework/app/port_policy_interface.go>)
+
+PortPolicyOption guards the calls a port makes: [Retry](#Retry), [Budget](#Budget), [Breaker](#Breaker), [Hedge](#Hedge), [Idempotent](#Idempotent), [Throttle](#Throttle) and [Timeout](#Timeout), given to [Port](#Port).Guard.
+
+```go
+type PortPolicyOption = iapp.PortPolicyConfigurer
+```
+
+PortPolicyOption is an alias of `github.com/kitsunium/sdk/framework/internal/app.PortPolicyConfigurer`, declared as:
+
+```go
+type PortPolicyOption interface {
+	portPolicyConfigure(g *portGuards)
 }
 ```
 
@@ -4567,6 +4772,23 @@ func (Records) Keys(ctx context.Context) iter.Seq2[string, error]
 ```
 
 Keys yields the key of every record the store holds, in key order, and nothing of a record: what a watch reads to catch up on the writes it may have missed. It is offered only to a module one of whose watches the store feeds — any other caller, code outside a module's node included, is refused with a [Forbidden](#Forbidden) error ([CodeRecordsKeys](#CodeRecordsKeys)) —, and each listing is one entry in the privacy journal, however many keys it yields. A record in the store's trash is not listed. A failure is yielded once, with an empty key, and ends the listing.
+
+<a name="RetryOption"></a>
+## type [RetryOption](<https://github.com/kitsunium/sdk/blob/main/framework/app/port_policy_interface.go>)
+
+RetryOption configures a [Retry](#Retry).
+
+```go
+type RetryOption = iapp.RetryConfigurer
+```
+
+RetryOption is an alias of `github.com/kitsunium/sdk/framework/internal/app.RetryConfigurer`, declared as:
+
+```go
+type RetryOption interface {
+	retryConfigure(g *retryGuard)
+}
+```
 
 <a name="Revision"></a>
 ## type [Revision](<https://github.com/kitsunium/sdk/blob/main/framework/app/revisions.go>)
@@ -5346,6 +5568,24 @@ SubscriptionOption is an alias of `github.com/kitsunium/sdk/framework/internal/a
 ```go
 type SubscriptionOption interface {
 	subscriptionConfigure(o *subscriptionOptions)
+}
+```
+
+<a name="TimeoutOption"></a>
+## type [TimeoutOption](<https://github.com/kitsunium/sdk/blob/main/framework/app/port_policy_interface.go>)
+
+TimeoutOption configures an endpoint, a command, a query and a port alike: [Timeout](#Timeout).
+
+```go
+type TimeoutOption = iapp.TimeoutConfigurer
+```
+
+TimeoutOption is an alias of `github.com/kitsunium/sdk/framework/internal/app.TimeoutConfigurer`, declared as:
+
+```go
+type TimeoutOption interface {
+	OperationOption
+	PortPolicyConfigurer
 }
 ```
 

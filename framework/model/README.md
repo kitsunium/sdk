@@ -4916,19 +4916,26 @@ PortInfo is an alias of `github.com/kitsunium/sdk/framework/model/internal/core.
 ```go
 type PortInfo struct {
 	// Request is the type the port is called with.
-	Request  *SchemaMessage `json:"request,omitempty"`
+	Request    *SchemaMessage    `json:"request,omitempty"`
 	// Response is the type it answers.
-	Response *SchemaMessage `json:"response,omitempty"`
+	Response   *SchemaMessage    `json:"response,omitempty"`
 	// Fallback is the node ID of the operation the port declares for when
 	// the app binds nothing else (app.Fallback).
-	Fallback string         `json:"fallback,omitempty"`
+	Fallback   string            `json:"fallback,omitempty"`
 	// Bound is the node ID of the operation the port calls, as the start
 	// chose it — on a static graph, as the analysis reads the same rule;
 	// empty when nothing is bound or a test replaced the port. The graph
 	// draws it as a declared edge from the port.
-	Bound    string         `json:"bound,omitempty"`
+	Bound      string            `json:"bound,omitempty"`
 	// Via is how it was chosen: one of the Via constants.
-	Via      string         `json:"via,omitempty"`
+	Via        string            `json:"via,omitempty"`
+	// Pipeline are the policies around the port's calls (Port.Guard), the
+	// outermost first — retry, hedge, breaker, throttle, timeout —, its
+	// retry budget before them, with the values the app runs with.
+	Pipeline   []MechanicMessage `json:"pipeline,omitempty"`
+	// Idempotent says the port's operation may run more than once for one
+	// call (app.Idempotent): what a hedge needs.
+	Idempotent bool              `json:"idempotent,omitempty"`
 }
 ```
 

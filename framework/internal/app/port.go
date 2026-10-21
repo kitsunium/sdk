@@ -28,6 +28,8 @@ type PortService[Req, Resp any] struct {
 	nodeBase
 	// fallback is the port's app.Fallback, nil without one.
 	fallback Operation[Req, Resp]
+	// guards are the policies around its calls (Guard), nil without any.
+	guards *portGuards
 }
 
 // PortConfigurer configures a port: [Fallback].
@@ -72,7 +74,8 @@ func (s *Service) Port[Req, Resp any](name string, opts ...PortConfigurer[Req, R
 }
 
 // Call runs what the port is bound to: in a span on the port — the caller's
-// calls edge — then in the bound operation's own span, through its whole
+// calls edge — then, through the policies [PortService.Guard] put around it,
+// in the bound operation's own span — one per attempt —, through its whole
 // pipeline, carrying the caller's user as [EndpointService.Call] does.
 func (p *PortService[Req, Resp]) Call(ctx context.Context, req Req) (Resp, error) {
 	a := p.app()
@@ -81,7 +84,15 @@ func (p *PortService[Req, Resp]) Call(ctx context.Context, req Req) (Resp, error
 		return zero, unmounted(&p.nodeBase)
 	}
 	ctx, sp := a.begin(ctx, &spanStart{node: p.id, from: currentNode(ctx), edge: model.EdgeCalls, op: model.OpCall, name: p.name})
-	resp, err := p.run(ctx, a, req)
+	var (
+		resp Resp
+		err  error
+	)
+	if p.guards == nil {
+		resp, err = p.run(ctx, a, req)
+	} else {
+		resp, err = p.guarded(ctx, a, sp, req)
+	}
 	sp.end(err)
 	return resp, err
 }
@@ -134,6 +145,9 @@ func (p *PortService[Req, Resp]) describe(a *App, out *model.Node) []model.Edge 
 	}
 	if fb := p.fallbackOp(); fb != nil && !nilOperation(fb) {
 		info.Fallback = fb.base().id
+	}
+	if p.guards != nil {
+		info.Pipeline, info.Idempotent = p.guards.drawn(), p.guards.idempotent
 	}
 	out.Port = info
 	if a == nil {

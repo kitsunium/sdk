@@ -1298,9 +1298,14 @@ packages:
           information, and nothing it could read is written. It is the SDK's
           resilience timeout, on the app's clock.
 
-          d is the default of the operation's setting <service>-<kind>-<operation>-timeout,
-          which config/<env>.* and <PRODUCT>_<NAME> override; one that is not
-          positive stops the start.
+          Given to a port's [PortService.Guard], it is a deadline on each attempt of the port's
+          call, the innermost of its policies: an attempt that outruns it fails with
+          the SDK's TimeoutExceeded, which the port's breaker counts and its retry
+          replays.
+
+          d is the default of the operation's setting <service>-<kind>-<operation>-timeout
+          — <service>-port-<name>-timeout for a port —, which config/<env>.* and
+          <PRODUCT>_<NAME> override; one that is not positive stops the start.
 
           IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
           only hands it to the declaration it configures.
@@ -1309,7 +1314,7 @@ packages:
             type: time.Duration
         name: Timeout
         out:
-          - type: OperationOption
+          - type: TimeoutConfigurer
       - doc: |-
           Bulkhead caps how many requests the handler serves at once; the overflow
           answers 503 — at once, or, given [BulkheadQueue] and [MaxWait], once the
@@ -1365,6 +1370,237 @@ packages:
         name: BulkheadQueue
         out:
           - type: BulkheadConfigurer
+      - doc: |-
+          Retry runs a port's call again when it fails for a reason of the
+          dependency's — what the start answers as a 5xx, a 408 or a 429 —, up to
+          maxAttempts attempts in all, waiting between them a backoff that starts at
+          delay and doubles, with full jitter, up to [RetryMaxDelay] — 30 seconds
+          unless the code says otherwise. A failure that says how long to wait — a
+          Retry-After, a rate limiter's next token (the SDK's resilience.RetryAfter)
+          — is waited that long instead, held at the longest delay, unless
+          [NoRetryAfter]. A refusal of the caller's own is not retried, nor an open
+          breaker, a throttle or another retry's exhaustion. It is the SDK's
+          resilience retry, on the app's clock, sharing the port's retry budget
+          ([Budget]) with its hedge.
+
+          Each retry is an event on the port's span, which counts them, and a
+          retry event on the telemetry port.
+
+          The values are the defaults of the port's settings
+          <service>-port-<name>-retry-attempts, -retry-delay, -retry-max-delay,
+          -retry-jitter (full, decorrelated or none) and -retry-after (whether a
+          failure's own delay is honoured), which config/<env>.* and
+          <PRODUCT>_<NAME> override; fewer than one attempt, or a delay that is not
+          positive, stops the start.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: maxAttempts
+            type: int
+          - name: delay
+            type: time.Duration
+          - name: opts
+            type: RetryConfigurer
+        name: Retry
+        out:
+          - type: PortPolicyConfigurer
+        variadic: true
+      - doc: |-
+          RetryMaxDelay is the longest a [Retry] waits between two attempts: the
+          backoff's cap, and the cap on a delay a failure asks for. It is the default
+          of the port's setting <service>-port-<name>-retry-max-delay; one that is
+          not positive stops the start.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: d
+            type: time.Duration
+        name: RetryMaxDelay
+        out:
+          - type: RetryConfigurer
+      - doc: |-
+          NoRetryAfter makes a [Retry] wait its backoff whatever a failure says: a
+          Retry-After, a rate limiter's next token. It is the default of the port's
+          setting <service>-port-<name>-retry-after, false, which config/<env>.* and
+          <PRODUCT>_<NAME> override.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        name: NoRetryAfter
+        out:
+          - type: RetryConfigurer
+      - doc: |-
+          Budget sizes the retry budget a port's [Retry] and [Hedge] share: a
+          bucket of maxTokens tokens, a failure costing one and a success putting
+          back tokenRatio; retries and duplicates are refused once half the tokens
+          are spent, so a dependency that fails for every caller receives fewer
+          extra calls, not every call times the attempts. A port that retries or
+          hedges without it has 10 tokens and a ratio of 0.1, gRPC's example; a
+          Budget on a port that does neither stops the start. It is the SDK's
+          resilience retry budget, one per port and per start.
+
+          The values are the defaults of the port's settings
+          <service>-port-<name>-budget-tokens and -budget-ratio, which
+          config/<env>.* and <PRODUCT>_<NAME> override; fewer than one token, or a
+          ratio below a thousandth, stops the start.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: maxTokens
+            type: int
+          - name: tokenRatio
+            type: float64
+        name: Budget
+        out:
+          - type: PortPolicyConfigurer
+      - doc: |-
+          Breaker stops a port's calls from reaching a dependency that keeps
+          failing: after failures failures of the dependency's in a row — or, given
+          [BreakerWindow], a share of a window's calls — it opens, and every call
+          fails at once with the SDK's CircuitOpen (503) for open; then it lets
+          [HalfOpenTrials] trial calls through, one at a time, which close it or open
+          it again, for longer each time under [OpenBackoff]. A refusal of the
+          caller's own does not count, nor a caller that left, nor a throttle's
+          refusal. It is the SDK's resilience circuit breaker, on the app's clock,
+          one per port and per start.
+
+          Its state is the product's: a readiness check, breaker:<port>, degraded —
+          never unready — while it is not closed; each change of phase logged and
+          put on the telemetry port. An operator opens it until reset with the
+          product's `breaker isolate PORT` and closes it with `breaker reset PORT`,
+          kept in the data directory: a start applies it, and so does a running
+          product, within five seconds.
+
+          The values are the defaults of the port's settings
+          <service>-port-<name>-breaker-failures, -breaker-open, -breaker-open-max,
+          -breaker-trials, -breaker-window, -breaker-window-calls and
+          -breaker-window-ratio, which config/<env>.* and <PRODUCT>_<NAME> override;
+          a value the breaker cannot run with stops the start, and so does a
+          breaker the SDK refuses.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: failures
+            type: int
+          - name: open
+            type: time.Duration
+          - name: opts
+            type: BreakerConfigurer
+        name: Breaker
+        out:
+          - type: PortPolicyConfigurer
+        variadic: true
+      - doc: |-
+          BreakerWindow makes a [Breaker] open on a rate rather than on failures in
+          a row: once the last size of calls holds at least minCalls, a share of
+          failures of failureRatio or more opens it. Its values are the defaults of
+          the port's settings <service>-port-<name>-breaker-window,
+          -breaker-window-calls and -breaker-window-ratio; a window of 0 is none, a
+          ratio outside (0, 1] stops the start.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: size
+            type: time.Duration
+          - name: minCalls
+            type: int
+          - name: failureRatio
+            type: float64
+        name: BreakerWindow
+        out:
+          - type: BreakerConfigurer
+      - doc: |-
+          HalfOpenTrials is how many trial calls in a row must succeed to close a
+          [Breaker] once its open time is over — one by default. It is the default
+          of the port's setting <service>-port-<name>-breaker-trials; fewer than one
+          stops the start.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: "n"
+            type: int
+        name: HalfOpenTrials
+        out:
+          - type: BreakerConfigurer
+      - doc: |-
+          OpenBackoff lengthens the open time of a [Breaker] that opens again
+          without having closed: it doubles at each opening, from the breaker's open
+          time up to max. It is the default of the port's setting
+          <service>-port-<name>-breaker-open-max, 0 — the same open time every
+          time — without it; a negative one stops the start.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: maxOpen
+            type: time.Duration
+        name: OpenBackoff
+        out:
+          - type: BreakerConfigurer
+      - doc: |-
+          Idempotent declares that the port's operation may run more than once for
+          one call, concurrently, with no harm done: what a [Hedge] needs, which is
+          refused on a port that does not say so. The graph draws it on the port.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        name: Idempotent
+        out:
+          - type: PortPolicyConfigurer
+      - doc: |-
+          Hedge races a port's slow call: an attempt that has not answered after
+          delay is joined by a duplicate, and the first to succeed answers — the
+          tail of a dependency's latency cut, at the price of more calls. At most
+          inFlight duplicates run at once across every call, and the port's retry
+          budget ([Budget]) refuses them while the dependency fails for many: then
+          the call goes on with the attempts it has. Only a port declared
+          [Idempotent] may hedge — the start refuses another. It is the SDK's
+          resilience hedge, on the app's clock.
+
+          The values are the defaults of the port's settings
+          <service>-port-<name>-hedge-delay, -hedge-in-flight and -hedge-max — the
+          duplicates one call may make, 1 —, which config/<env>.* and
+          <PRODUCT>_<NAME> override; a delay that is not positive, or fewer than
+          one, stops the start.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: delay
+            type: time.Duration
+          - name: inFlight
+            type: int
+        name: Hedge
+        out:
+          - type: PortPolicyConfigurer
+      - doc: |-
+          Throttle refuses, on the caller's side and without sending them, a share
+          of a port's calls while the dependency refuses more than 1/k of the
+          recent ones — the client-side throttling of Google's SRE book: a call is
+          refused with probability (requests − k × accepts) / (requests + 1), over
+          the last two minutes, with the SDK's Throttled (503). A refusal is a 5xx,
+          a 408 or a 429 of the dependency's; a refusal of the caller's own is an
+          accept. It is the SDK's resilience adaptive throttle, on the app's clock;
+          2 is the book's k.
+
+          k is the default of the port's setting <service>-port-<name>-throttle-k,
+          which config/<env>.* and <PRODUCT>_<NAME> override; a k below 1 stops the
+          start.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: k
+            type: float64
+        name: Throttle
+        out:
+          - type: PortPolicyConfigurer
       - doc: |-
           NewEndpointService is an endpoint no service declares yet:
           [Service.Endpoint] makes one and declares it, which is how a product gets
@@ -2757,6 +2993,10 @@ packages:
               	data         the data directory copied into a database: data copy --to NAME,
               	             verified by fingerprints
 
+              An app whose port declares a [Breaker] understands breaker too: list the
+              breakers, isolate PORT — open its breaker until it is reset — and reset
+              PORT, kept in the data directory for every start and a running product.
+
               A product's CLI command runs when the first argument names it. A command
               declared with DefaultCommand runs when the first argument names no command
               at all — with every argument —, and when there is none, in serve's place:
@@ -3296,6 +3536,29 @@ packages:
             - BulkheadConfigurer
         name: WaitConfigurer
       - doc: |-
+          PortPolicyConfigurer guards the calls a port makes: [Retry], [Budget],
+          [Breaker], [Hedge], [Idempotent], [Throttle] and [Timeout], given to
+          [PortService.Guard].
+        interface:
+          unexported: true
+        name: PortPolicyConfigurer
+      - doc: |-
+          TimeoutConfigurer configures an endpoint, a command, a query and a port
+          alike: [Timeout].
+        interface:
+          embeds:
+            - OperationOption
+            - PortPolicyConfigurer
+        name: TimeoutConfigurer
+      - doc: RetryConfigurer configures a [Retry].
+        interface:
+          unexported: true
+        name: RetryConfigurer
+      - doc: BreakerConfigurer configures a [Breaker].
+        interface:
+          unexported: true
+        name: BreakerConfigurer
+      - doc: |-
           Error is an error a product returns to its callers. Message travels on the
           wire; the cause attached with [Error.Wrap] is logged and never sent.
 
@@ -3694,7 +3957,8 @@ packages:
         methods:
           - doc: |-
               Call runs what the port is bound to: in a span on the port — the caller's
-              calls edge — then in the bound operation's own span, through its whole
+              calls edge — then, through the policies [PortService.Guard] put around it,
+              in the bound operation's own span — one per attempt —, through its whole
               pipeline, carrying the caller's user as [EndpointService.Call] does.
             in:
               - name: ctx
@@ -3706,6 +3970,30 @@ packages:
               - type: Resp
               - type: error
             recv: pointer
+          - doc: |-
+              Guard puts policies around the calls the port makes — [Retry], [Budget],
+              [Breaker], [Hedge] with [Idempotent], [Throttle], [Timeout] — and returns
+              the port. Whatever the order they are given in, they compose the outermost
+              first as Retry, Hedge, Breaker, Throttle, Timeout, around the operation
+              the port is bound to; the retry and the hedge share the port's retry
+              budget.
+
+              Each declares, in the port's service, the settings that tune it, named
+              <service>-port-<name>-<knob>: the code's value is the default, which
+              config/<env>.* and <PRODUCT>_<NAME> override, and a value a policy cannot
+              run with stops the start. A port is guarded once: a second Guard is
+              refused.
+
+              	var Quote = Service.Port[QuoteRequest, Price]("quote").
+              		Guard(app.Timeout(2*time.Second), app.Retry(3, 100*time.Millisecond), app.Breaker(5, 30*time.Second))
+            in:
+              - name: opts
+                type: PortPolicyConfigurer
+            name: Guard
+            out:
+              - type: "*PortService[Req, Resp]"
+            recv: pointer
+            variadic: true
         name: PortService
         struct:
           unexported: true
@@ -8855,6 +9143,23 @@ packages:
         name: WaitOption
         target: iapp.WaitConfigurer
       - doc: |-
+          PortPolicyOption guards the calls a port makes: [Retry], [Budget],
+          [Breaker], [Hedge], [Idempotent], [Throttle] and [Timeout], given to
+          [Port].Guard.
+        name: PortPolicyOption
+        target: iapp.PortPolicyConfigurer
+      - doc: |-
+          TimeoutOption configures an endpoint, a command, a query and a port
+          alike: [Timeout].
+        name: TimeoutOption
+        target: iapp.TimeoutConfigurer
+      - doc: RetryOption configures a [Retry].
+        name: RetryOption
+        target: iapp.RetryConfigurer
+      - doc: BreakerOption configures a [Breaker].
+        name: BreakerOption
+        target: iapp.BreakerConfigurer
+      - doc: |-
           Error is an error a product returns to its callers. Message travels on the
           wire; the cause attached with [Error].Wrap is logged and never sent.
 
@@ -10456,9 +10761,14 @@ packages:
           information, and nothing it could read is written. It is the SDK's
           resilience timeout, on the app's clock.
 
-          d is the default of the operation's setting <service>-<kind>-<operation>-timeout,
-          which config/<env>.* and <PRODUCT>_<NAME> override; one that is not
-          positive stops the start.
+          Given to a port's [Port].Guard, it is a deadline on each attempt of the port's
+          call, the innermost of its policies: an attempt that outruns it fails with
+          the SDK's TimeoutExceeded, which the port's breaker counts and its retry
+          replays.
+
+          d is the default of the operation's setting <service>-<kind>-<operation>-timeout
+          — <service>-port-<name>-timeout for a port —, which config/<env>.* and
+          <PRODUCT>_<NAME> override; one that is not positive stops the start.
 
           IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
           only hands it to the declaration it configures.
@@ -10467,7 +10777,7 @@ packages:
             type: time.Duration
         name: Timeout
         out:
-          - type: OperationOption
+          - type: TimeoutOption
       - doc: |-
           Bulkhead caps how many requests the handler serves at once; the overflow
           answers 503 — at once, or, given [BulkheadQueue] and [MaxWait], once the
@@ -10523,6 +10833,237 @@ packages:
         name: BulkheadQueue
         out:
           - type: BulkheadOption
+      - doc: |-
+          Retry runs a port's call again when it fails for a reason of the
+          dependency's — what the start answers as a 5xx, a 408 or a 429 —, up to
+          maxAttempts attempts in all, waiting between them a backoff that starts at
+          delay and doubles, with full jitter, up to [RetryMaxDelay] — 30 seconds
+          unless the code says otherwise. A failure that says how long to wait — a
+          Retry-After, a rate limiter's next token (the SDK's resilience.RetryAfter)
+          — is waited that long instead, held at the longest delay, unless
+          [NoRetryAfter]. A refusal of the caller's own is not retried, nor an open
+          breaker, a throttle or another retry's exhaustion. It is the SDK's
+          resilience retry, on the app's clock, sharing the port's retry budget
+          ([Budget]) with its hedge.
+
+          Each retry is an event on the port's span, which counts them, and a
+          retry event on the telemetry port.
+
+          The values are the defaults of the port's settings
+          <service>-port-<name>-retry-attempts, -retry-delay, -retry-max-delay,
+          -retry-jitter (full, decorrelated or none) and -retry-after (whether a
+          failure's own delay is honoured), which config/<env>.* and
+          <PRODUCT>_<NAME> override; fewer than one attempt, or a delay that is not
+          positive, stops the start.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: maxAttempts
+            type: int
+          - name: delay
+            type: time.Duration
+          - name: opts
+            type: RetryOption
+        name: Retry
+        out:
+          - type: PortPolicyOption
+        variadic: true
+      - doc: |-
+          RetryMaxDelay is the longest a [Retry] waits between two attempts: the
+          backoff's cap, and the cap on a delay a failure asks for. It is the default
+          of the port's setting <service>-port-<name>-retry-max-delay; one that is
+          not positive stops the start.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: d
+            type: time.Duration
+        name: RetryMaxDelay
+        out:
+          - type: RetryOption
+      - doc: |-
+          NoRetryAfter makes a [Retry] wait its backoff whatever a failure says: a
+          Retry-After, a rate limiter's next token. It is the default of the port's
+          setting <service>-port-<name>-retry-after, false, which config/<env>.* and
+          <PRODUCT>_<NAME> override.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        name: NoRetryAfter
+        out:
+          - type: RetryOption
+      - doc: |-
+          Budget sizes the retry budget a port's [Retry] and [Hedge] share: a
+          bucket of maxTokens tokens, a failure costing one and a success putting
+          back tokenRatio; retries and duplicates are refused once half the tokens
+          are spent, so a dependency that fails for every caller receives fewer
+          extra calls, not every call times the attempts. A port that retries or
+          hedges without it has 10 tokens and a ratio of 0.1, gRPC's example; a
+          Budget on a port that does neither stops the start. It is the SDK's
+          resilience retry budget, one per port and per start.
+
+          The values are the defaults of the port's settings
+          <service>-port-<name>-budget-tokens and -budget-ratio, which
+          config/<env>.* and <PRODUCT>_<NAME> override; fewer than one token, or a
+          ratio below a thousandth, stops the start.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: maxTokens
+            type: int
+          - name: tokenRatio
+            type: float64
+        name: Budget
+        out:
+          - type: PortPolicyOption
+      - doc: |-
+          Breaker stops a port's calls from reaching a dependency that keeps
+          failing: after failures failures of the dependency's in a row — or, given
+          [BreakerWindow], a share of a window's calls — it opens, and every call
+          fails at once with the SDK's CircuitOpen (503) for open; then it lets
+          [HalfOpenTrials] trial calls through, one at a time, which close it or open
+          it again, for longer each time under [OpenBackoff]. A refusal of the
+          caller's own does not count, nor a caller that left, nor a throttle's
+          refusal. It is the SDK's resilience circuit breaker, on the app's clock,
+          one per port and per start.
+
+          Its state is the product's: a readiness check, breaker:<port>, degraded —
+          never unready — while it is not closed; each change of phase logged and
+          put on the telemetry port. An operator opens it until reset with the
+          product's `breaker isolate PORT` and closes it with `breaker reset PORT`,
+          kept in the data directory: a start applies it, and so does a running
+          product, within five seconds.
+
+          The values are the defaults of the port's settings
+          <service>-port-<name>-breaker-failures, -breaker-open, -breaker-open-max,
+          -breaker-trials, -breaker-window, -breaker-window-calls and
+          -breaker-window-ratio, which config/<env>.* and <PRODUCT>_<NAME> override;
+          a value the breaker cannot run with stops the start, and so does a
+          breaker the SDK refuses.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: failures
+            type: int
+          - name: open
+            type: time.Duration
+          - name: opts
+            type: BreakerOption
+        name: Breaker
+        out:
+          - type: PortPolicyOption
+        variadic: true
+      - doc: |-
+          BreakerWindow makes a [Breaker] open on a rate rather than on failures in
+          a row: once the last size of calls holds at least minCalls, a share of
+          failures of failureRatio or more opens it. Its values are the defaults of
+          the port's settings <service>-port-<name>-breaker-window,
+          -breaker-window-calls and -breaker-window-ratio; a window of 0 is none, a
+          ratio outside (0, 1] stops the start.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: size
+            type: time.Duration
+          - name: minCalls
+            type: int
+          - name: failureRatio
+            type: float64
+        name: BreakerWindow
+        out:
+          - type: BreakerOption
+      - doc: |-
+          HalfOpenTrials is how many trial calls in a row must succeed to close a
+          [Breaker] once its open time is over — one by default. It is the default
+          of the port's setting <service>-port-<name>-breaker-trials; fewer than one
+          stops the start.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: "n"
+            type: int
+        name: HalfOpenTrials
+        out:
+          - type: BreakerOption
+      - doc: |-
+          OpenBackoff lengthens the open time of a [Breaker] that opens again
+          without having closed: it doubles at each opening, from the breaker's open
+          time up to max. It is the default of the port's setting
+          <service>-port-<name>-breaker-open-max, 0 — the same open time every
+          time — without it; a negative one stops the start.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: maxOpen
+            type: time.Duration
+        name: OpenBackoff
+        out:
+          - type: BreakerOption
+      - doc: |-
+          Idempotent declares that the port's operation may run more than once for
+          one call, concurrently, with no harm done: what a [Hedge] needs, which is
+          refused on a port that does not say so. The graph draws it on the port.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        name: Idempotent
+        out:
+          - type: PortPolicyOption
+      - doc: |-
+          Hedge races a port's slow call: an attempt that has not answered after
+          delay is joined by a duplicate, and the first to succeed answers — the
+          tail of a dependency's latency cut, at the price of more calls. At most
+          inFlight duplicates run at once across every call, and the port's retry
+          budget ([Budget]) refuses them while the dependency fails for many: then
+          the call goes on with the attempts it has. Only a port declared
+          [Idempotent] may hedge — the start refuses another. It is the SDK's
+          resilience hedge, on the app's clock.
+
+          The values are the defaults of the port's settings
+          <service>-port-<name>-hedge-delay, -hedge-in-flight and -hedge-max — the
+          duplicates one call may make, 1 —, which config/<env>.* and
+          <PRODUCT>_<NAME> override; a delay that is not positive, or fewer than
+          one, stops the start.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: delay
+            type: time.Duration
+          - name: inFlight
+            type: int
+        name: Hedge
+        out:
+          - type: PortPolicyOption
+      - doc: |-
+          Throttle refuses, on the caller's side and without sending them, a share
+          of a port's calls while the dependency refuses more than 1/k of the
+          recent ones — the client-side throttling of Google's SRE book: a call is
+          refused with probability (requests − k × accepts) / (requests + 1), over
+          the last two minutes, with the SDK's Throttled (503). A refusal is a 5xx,
+          a 408 or a 429 of the dependency's; a refusal of the caller's own is an
+          accept. It is the SDK's resilience adaptive throttle, on the app's clock;
+          2 is the book's k.
+
+          k is the default of the port's setting <service>-port-<name>-throttle-k,
+          which config/<env>.* and <PRODUCT>_<NAME> override; a k below 1 stops the
+          start.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: k
+            type: float64
+        name: Throttle
+        out:
+          - type: PortPolicyOption
       - doc: Invalid reports a request the caller must change before retrying (400).
         in:
           - name: message

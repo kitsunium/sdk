@@ -477,6 +477,51 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/app.Breaker",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "Breaker",
+      "spelled": "func(failures int, open time.Duration, opts ...BreakerOption) PortPolicyOption",
+      "canonical": "func(failures int, open time.Duration, opts ...github.com/kitsunium/sdk/framework/app.BreakerOption) github.com/kitsunium/sdk/framework/app.PortPolicyOption",
+      "doc": "Breaker stops a port's calls from reaching a dependency that keeps\nfailing: after failures failures of the dependency's in a row — or, given\n[BreakerWindow], a share of a window's calls — it opens, and every call\nfails at once with the SDK's CircuitOpen (503) for open; then it lets\n[HalfOpenTrials] trial calls through, one at a time, which close it or open\nit again, for longer each time under [OpenBackoff]. A refusal of the\ncaller's own does not count, nor a caller that left, nor a throttle's\nrefusal. It is the SDK's resilience circuit breaker, on the app's clock,\none per port and per start.\n\nIts state is the product's: a readiness check, breaker:<port>, degraded —\nnever unready — while it is not closed; each change of phase logged and\nput on the telemetry port. An operator opens it until reset with the\nproduct's `breaker isolate PORT` and closes it with `breaker reset PORT`,\nkept in the data directory: a start applies it, and so does a running\nproduct, within five seconds.\n\nThe values are the defaults of the port's settings\n<service>-port-<name>-breaker-failures, -breaker-open, -breaker-open-max,\n-breaker-trials, -breaker-window, -breaker-window-calls and\n-breaker-window-ratio, which config/<env>.* and <PRODUCT>_<NAME> override;\na value the breaker cannot run with stops the start, and so does a\nbreaker the SDK refuses.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/app/port_policy.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.BreakerOption",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "BreakerOption",
+      "spelled": "iapp.BreakerConfigurer",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/app.BreakerConfigurer",
+      "owner": "go:github.com/kitsunium/sdk/framework/internal/app.BreakerConfigurer",
+      "doc": "BreakerOption configures a [Breaker].\n",
+      "file": "framework/app/port_policy_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.BreakerWindow",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "BreakerWindow",
+      "spelled": "func(size time.Duration, minCalls int, failureRatio float64) BreakerOption",
+      "canonical": "func(size time.Duration, minCalls int, failureRatio float64) github.com/kitsunium/sdk/framework/app.BreakerOption",
+      "doc": "BreakerWindow makes a [Breaker] open on a rate rather than on failures in\na row: once the last size of calls holds at least minCalls, a share of\nfailures of failureRatio or more opens it. Its values are the defaults of\nthe port's settings <service>-port-<name>-breaker-window,\n-breaker-window-calls and -breaker-window-ratio; a window of 0 is none, a\nratio outside (0, 1] stops the start.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/app/port_policy.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.Budget",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "Budget",
+      "spelled": "func(maxTokens int, tokenRatio float64) PortPolicyOption",
+      "canonical": "func(maxTokens int, tokenRatio float64) github.com/kitsunium/sdk/framework/app.PortPolicyOption",
+      "doc": "Budget sizes the retry budget a port's [Retry] and [Hedge] share: a\nbucket of maxTokens tokens, a failure costing one and a success putting\nback tokenRatio; retries and duplicates are refused once half the tokens\nare spent, so a dependency that fails for every caller receives fewer\nextra calls, not every call times the attempts. A port that retries or\nhedges without it has 10 tokens and a ratio of 0.1, gRPC's example; a\nBudget on a port that does neither stops the start. It is the SDK's\nresilience retry budget, one per port and per start.\n\nThe values are the defaults of the port's settings\n<service>-port-<name>-budget-tokens and -budget-ratio, which\nconfig/<env>.* and <PRODUCT>_<NAME> override; fewer than one token, or a\nratio below a thousandth, stops the start.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/app/port_policy.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/app.Bulkhead",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/app",
@@ -2510,6 +2555,28 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/app.HalfOpenTrials",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "HalfOpenTrials",
+      "spelled": "func(n int) BreakerOption",
+      "canonical": "func(n int) github.com/kitsunium/sdk/framework/app.BreakerOption",
+      "doc": "HalfOpenTrials is how many trial calls in a row must succeed to close a\n[Breaker] once its open time is over — one by default. It is the default\nof the port's setting <service>-port-<name>-breaker-trials; fewer than one\nstops the start.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/app/port_policy.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.Hedge",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "Hedge",
+      "spelled": "func(delay time.Duration, inFlight int) PortPolicyOption",
+      "canonical": "func(delay time.Duration, inFlight int) github.com/kitsunium/sdk/framework/app.PortPolicyOption",
+      "doc": "Hedge races a port's slow call: an attempt that has not answered after\ndelay is joined by a duplicate, and the first to succeed answers — the\ntail of a dependency's latency cut, at the price of more calls. At most\ninFlight duplicates run at once across every call, and the port's retry\nbudget ([Budget]) refuses them while the dependency fails for many: then\nthe call goes on with the attempts it has. Only a port declared\n[Idempotent] may hedge — the start refuses another. It is the SDK's\nresilience hedge, on the app's clock.\n\nThe values are the defaults of the port's settings\n<service>-port-<name>-hedge-delay, -hedge-in-flight and -hedge-max — the\nduplicates one call may make, 1 —, which config/<env>.* and\n<PRODUCT>_<NAME> override; a delay that is not positive, or fewer than\none, stops the start.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/app/port_policy.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/app.HeldUntil[...]",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/app",
@@ -2529,6 +2596,17 @@
       "canonical": "func(ctx context.Context, reason string, ids ...string) error",
       "doc": "HoldSubject places a legal hold on every record whose subject is one of\nids, in every store of the app: an authority's request about a person.\nIt holds the records they have now; a record written later is not held.\nreason is kept as Store.Hold keeps it.\n",
       "file": "framework/app/hold.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.Idempotent",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "Idempotent",
+      "spelled": "func() PortPolicyOption",
+      "canonical": "func() github.com/kitsunium/sdk/framework/app.PortPolicyOption",
+      "doc": "Idempotent declares that the port's operation may run more than once for\none call, concurrently, with no harm done: what a [Hedge] needs, which is\nrefused on a port that does not say so. The graph draws it on the port.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/app/port_policy.go",
       "layer": "framework"
     },
     {
@@ -3024,6 +3102,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/app.NoRetryAfter",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "NoRetryAfter",
+      "spelled": "func() RetryOption",
+      "canonical": "func() github.com/kitsunium/sdk/framework/app.RetryOption",
+      "doc": "NoRetryAfter makes a [Retry] wait its backoff whatever a failure says: a\nRetry-After, a rate limiter's next token. It is the default of the port's\nsetting <service>-port-<name>-retry-after, false, which config/<env>.* and\n<PRODUCT>_<NAME> override.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/app/port_policy.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/app.NoTransaction",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/app",
@@ -3098,6 +3187,17 @@
       "canonical": "func(envs ...string) github.com/kitsunium/sdk/framework/app.MountOption",
       "doc": "Only makes a mount hold in the environments envs names alone — the name\n<PRODUCT>_ENV or [Env] gives, lower-cased, \"production\" when neither does:\n\n\ta := app.NewApp(\"vigie\", identity.Service).\n\t\tWith(app.Mount(debugbar.Module, app.Only(\"dev\", \"staging\")))\n\nElsewhere the mount is as if it had not been given, its [Prefix] and its\n[Bind] with it; another mount of the module without Only still mounts it.\nSeveral Only on one mount add up. The start refuses an Only that names no\nenvironment, a name that cannot be one — lower-case letters, digits and\ndashes inside, 63 at most —, and a module a mounted module requires\n([Requires]) that its mount leaves out, rather than mounting it at its\ndefaults behind the product's back.\n",
       "file": "framework/app/mount.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.OpenBackoff",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "OpenBackoff",
+      "spelled": "func(maxOpen time.Duration) BreakerOption",
+      "canonical": "func(maxOpen time.Duration) github.com/kitsunium/sdk/framework/app.BreakerOption",
+      "doc": "OpenBackoff lengthens the open time of a [Breaker] that opens again\nwithout having closed: it doubles at each opening, from the breaker's open\ntime up to max. It is the default of the port's setting\n<service>-port-<name>-breaker-open-max, 0 — the same open time every\ntime — without it; a negative one stops the start.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/app/port_policy.go",
       "layer": "framework"
     },
     {
@@ -3275,6 +3375,18 @@
       "owner": "go:github.com/kitsunium/sdk/framework/internal/app.PortConfigurer",
       "doc": "PortOption configures a port: [Fallback].\n",
       "file": "framework/app/port.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.PortPolicyOption",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "PortPolicyOption",
+      "spelled": "iapp.PortPolicyConfigurer",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/app.PortPolicyConfigurer",
+      "owner": "go:github.com/kitsunium/sdk/framework/internal/app.PortPolicyConfigurer",
+      "doc": "PortPolicyOption guards the calls a port makes: [Retry], [Budget],\n[Breaker], [Hedge], [Idempotent], [Throttle] and [Timeout], given to\n[Port].Guard.\n",
+      "file": "framework/app/port_policy_interface.go",
       "layer": "framework"
     },
     {
@@ -3479,6 +3591,40 @@
       "canonical": "func(limits string) github.com/kitsunium/sdk/framework/app.StoreOption",
       "doc": "RetentionByProduct says the product keeps the store's retention itself:\nits own code erases and deletes what it no longer needs — a record whose\nlife the product's own rules end, a lifecycle the framework cannot read from the\nentity. limits says, in the product's words, for how long and how, which\nthe register publishes as the store's time limits (GDPR art. 30(1)(f));\n\"\" says only that the product keeps them.\n\nThe framework then runs no retention for the store, and warns of neither a missing\nretention nor a missing subject. Its classified fields keep every other\npromise: sealed at rest, never shown, exported with their person — when\nthe store names one — and erased by app.Erase and Store.Erase. It goes\nwith app.Purpose, app.HeldUntil, app.Anonymise and app.DeleteOnErasure;\nwith app.EraseAfter, app.EraseAt, app.DeleteAfter or app.DeleteAt it is\nrefused: a store's retention is the framework's or the product's, never both.\n",
       "file": "framework/app/retention.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.Retry",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "Retry",
+      "spelled": "func(maxAttempts int, delay time.Duration, opts ...RetryOption) PortPolicyOption",
+      "canonical": "func(maxAttempts int, delay time.Duration, opts ...github.com/kitsunium/sdk/framework/app.RetryOption) github.com/kitsunium/sdk/framework/app.PortPolicyOption",
+      "doc": "Retry runs a port's call again when it fails for a reason of the\ndependency's — what the start answers as a 5xx, a 408 or a 429 —, up to\nmaxAttempts attempts in all, waiting between them a backoff that starts at\ndelay and doubles, with full jitter, up to [RetryMaxDelay] — 30 seconds\nunless the code says otherwise. A failure that says how long to wait — a\nRetry-After, a rate limiter's next token (the SDK's resilience.RetryAfter)\n— is waited that long instead, held at the longest delay, unless\n[NoRetryAfter]. A refusal of the caller's own is not retried, nor an open\nbreaker, a throttle or another retry's exhaustion. It is the SDK's\nresilience retry, on the app's clock, sharing the port's retry budget\n([Budget]) with its hedge.\n\nEach retry is an event on the port's span, which counts them, and a\nretry event on the telemetry port.\n\nThe values are the defaults of the port's settings\n<service>-port-<name>-retry-attempts, -retry-delay, -retry-max-delay,\n-retry-jitter (full, decorrelated or none) and -retry-after (whether a\nfailure's own delay is honoured), which config/<env>.* and\n<PRODUCT>_<NAME> override; fewer than one attempt, or a delay that is not\npositive, stops the start.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/app/port_policy.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.RetryMaxDelay",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "RetryMaxDelay",
+      "spelled": "func(d time.Duration) RetryOption",
+      "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/app.RetryOption",
+      "doc": "RetryMaxDelay is the longest a [Retry] waits between two attempts: the\nbackoff's cap, and the cap on a delay a failure asks for. It is the default\nof the port's setting <service>-port-<name>-retry-max-delay; one that is\nnot positive stops the start.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/app/port_policy.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.RetryOption",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "RetryOption",
+      "spelled": "iapp.RetryConfigurer",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/app.RetryConfigurer",
+      "owner": "go:github.com/kitsunium/sdk/framework/internal/app.RetryConfigurer",
+      "doc": "RetryOption configures a [Retry].\n",
+      "file": "framework/app/port_policy_interface.go",
       "layer": "framework"
     },
     {
@@ -3851,14 +3997,37 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/app.Throttle",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "Throttle",
+      "spelled": "func(k float64) PortPolicyOption",
+      "canonical": "func(k float64) github.com/kitsunium/sdk/framework/app.PortPolicyOption",
+      "doc": "Throttle refuses, on the caller's side and without sending them, a share\nof a port's calls while the dependency refuses more than 1/k of the\nrecent ones — the client-side throttling of Google's SRE book: a call is\nrefused with probability (requests − k × accepts) / (requests + 1), over\nthe last two minutes, with the SDK's Throttled (503). A refusal is a 5xx,\na 408 or a 429 of the dependency's; a refusal of the caller's own is an\naccept. It is the SDK's resilience adaptive throttle, on the app's clock;\n2 is the book's k.\n\nk is the default of the port's setting <service>-port-<name>-throttle-k,\nwhich config/<env>.* and <PRODUCT>_<NAME> override; a k below 1 stops the\nstart.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/app/port_policy.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/app.Timeout",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/app",
       "name": "Timeout",
-      "spelled": "func(d time.Duration) OperationOption",
-      "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/app.OperationOption",
-      "doc": "Timeout cancels the handler's context after d and answers 504. A caller\nthat leaves first is no timeout: its request is recorded as 499, logged as\ninformation, and nothing it could read is written. It is the SDK's\nresilience timeout, on the app's clock.\n\nd is the default of the operation's setting <service>-<kind>-<operation>-timeout,\nwhich config/<env>.* and <PRODUCT>_<NAME> override; one that is not\npositive stops the start.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "spelled": "func(d time.Duration) TimeoutOption",
+      "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/app.TimeoutOption",
+      "doc": "Timeout cancels the handler's context after d and answers 504. A caller\nthat leaves first is no timeout: its request is recorded as 499, logged as\ninformation, and nothing it could read is written. It is the SDK's\nresilience timeout, on the app's clock.\n\nGiven to a port's [Port].Guard, it is a deadline on each attempt of the port's\ncall, the innermost of its policies: an attempt that outruns it fails with\nthe SDK's TimeoutExceeded, which the port's breaker counts and its retry\nreplays.\n\nd is the default of the operation's setting <service>-<kind>-<operation>-timeout\n— <service>-port-<name>-timeout for a port —, which config/<env>.* and\n<PRODUCT>_<NAME> override; one that is not positive stops the start.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
       "file": "framework/app/endpoint.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.TimeoutOption",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "TimeoutOption",
+      "spelled": "iapp.TimeoutConfigurer",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/app.TimeoutConfigurer",
+      "owner": "go:github.com/kitsunium/sdk/framework/internal/app.TimeoutConfigurer",
+      "doc": "TimeoutOption configures an endpoint, a command, a query and a port\nalike: [Timeout].\n",
+      "file": "framework/app/port_policy_interface.go",
       "layer": "framework"
     },
     {
@@ -5528,7 +5697,7 @@
       "recv": "App",
       "spelled": "func(ctx context.Context, args []string) int",
       "canonical": "func(ctx context.Context, args []string) int",
-      "doc": "Main is the whole main function of a product:\n\n\tfunc main() { os.Exit(App.Main(context.Background(), os.Args[1:])) }\n\nIt understands ten commands, so every binary of the framework can describe itself, be\nprobed, say its configuration, manage its secrets, migrate its databases,\nanswer for the personal data it keeps, replay what its watches hear and\ncopy its data directory into a database without a shell or another tool in\nits image:\n\n\tserve        run the product (the default)\n\tgraph        print the product graph: -format json|mermaid\n\thealthcheck  exit 0 when the product running on <PRODUCT>_ADDR is ready\n\tconfig       every setting: its value, never a secret's, and its origin\n\tsecrets      list the secrets, set one from standard input, rotate one\n\tmigrate      the databases' migrations: status, up, down SET VERSION\n\tprivacy      the register of processing, a person's export and erasure,\n\t             the legal holds, the privacy journal, the retention\n\trevisions    a record's version restored\n\twatch        replay WATCH: one notice per record of each store that feeds it\n\tdata         the data directory copied into a database: data copy --to NAME,\n\t             verified by fingerprints\n\nA product's CLI command runs when the first argument names it. A command\ndeclared with DefaultCommand runs when the first argument names no command\nat all — with every argument —, and when there is none, in serve's place:\nMain then never answers a usage error.\n\nIt returns the process exit status rather than exiting, so that deferred\nwork runs and a test can call it.\n",
+      "doc": "Main is the whole main function of a product:\n\n\tfunc main() { os.Exit(App.Main(context.Background(), os.Args[1:])) }\n\nIt understands ten commands, so every binary of the framework can describe itself, be\nprobed, say its configuration, manage its secrets, migrate its databases,\nanswer for the personal data it keeps, replay what its watches hear and\ncopy its data directory into a database without a shell or another tool in\nits image:\n\n\tserve        run the product (the default)\n\tgraph        print the product graph: -format json|mermaid\n\thealthcheck  exit 0 when the product running on <PRODUCT>_ADDR is ready\n\tconfig       every setting: its value, never a secret's, and its origin\n\tsecrets      list the secrets, set one from standard input, rotate one\n\tmigrate      the databases' migrations: status, up, down SET VERSION\n\tprivacy      the register of processing, a person's export and erasure,\n\t             the legal holds, the privacy journal, the retention\n\trevisions    a record's version restored\n\twatch        replay WATCH: one notice per record of each store that feeds it\n\tdata         the data directory copied into a database: data copy --to NAME,\n\t             verified by fingerprints\n\nAn app whose port declares a [Breaker] understands breaker too: list the\nbreakers, isolate PORT — open its breaker until it is reset — and reset\nPORT, kept in the data directory for every start and a running product.\n\nA product's CLI command runs when the first argument names it. A command\ndeclared with DefaultCommand runs when the first argument names no command\nat all — with every argument —, and when there is none, in serve's place:\nMain then never answers a usage error.\n\nIt returns the process exit status rather than exiting, so that deferred\nwork runs and a test can call it.\n",
       "file": "framework/internal/app/main.go",
       "layer": "framework"
     },
@@ -5807,6 +5976,50 @@
       ],
       "doc": "BounceEvent is a mail its mailer gave up on: the receiving server refused it for\ngood, it outlived its mailer's max-age, or its last attempt failed —\nGivenUp says which. It stays in the outbox as a dead letter.\n\nReply is the receiving server's own answer: the hook may read it, log it or\nact on it, but the framework never puts it in a message it shows — the\nStudio's mailbox keeps its code alone.\n",
       "file": "framework/internal/app/mailer_bounce.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.Breaker",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "Breaker",
+      "spelled": "func(failures int, open time.Duration, opts ...BreakerConfigurer) PortPolicyConfigurer",
+      "canonical": "func(failures int, open time.Duration, opts ...github.com/kitsunium/sdk/framework/internal/app.BreakerConfigurer) github.com/kitsunium/sdk/framework/internal/app.PortPolicyConfigurer",
+      "doc": "Breaker stops a port's calls from reaching a dependency that keeps\nfailing: after failures failures of the dependency's in a row — or, given\n[BreakerWindow], a share of a window's calls — it opens, and every call\nfails at once with the SDK's CircuitOpen (503) for open; then it lets\n[HalfOpenTrials] trial calls through, one at a time, which close it or open\nit again, for longer each time under [OpenBackoff]. A refusal of the\ncaller's own does not count, nor a caller that left, nor a throttle's\nrefusal. It is the SDK's resilience circuit breaker, on the app's clock,\none per port and per start.\n\nIts state is the product's: a readiness check, breaker:<port>, degraded —\nnever unready — while it is not closed; each change of phase logged and\nput on the telemetry port. An operator opens it until reset with the\nproduct's `breaker isolate PORT` and closes it with `breaker reset PORT`,\nkept in the data directory: a start applies it, and so does a running\nproduct, within five seconds.\n\nThe values are the defaults of the port's settings\n<service>-port-<name>-breaker-failures, -breaker-open, -breaker-open-max,\n-breaker-trials, -breaker-window, -breaker-window-calls and\n-breaker-window-ratio, which config/<env>.* and <PRODUCT>_<NAME> override;\na value the breaker cannot run with stops the start, and so does a\nbreaker the SDK refuses.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/port_breaker.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.BreakerConfigurer",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "BreakerConfigurer",
+      "spelled": "interface{breakerConfigure(g *breakerGuard)}",
+      "canonical": "interface{breakerConfigure(g *github.com/kitsunium/sdk/framework/internal/app.breakerGuard)}",
+      "doc": "BreakerConfigurer configures a [Breaker].\n",
+      "file": "framework/internal/app/port_policy_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.BreakerWindow",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "BreakerWindow",
+      "spelled": "func(size time.Duration, minCalls int, failureRatio float64) BreakerConfigurer",
+      "canonical": "func(size time.Duration, minCalls int, failureRatio float64) github.com/kitsunium/sdk/framework/internal/app.BreakerConfigurer",
+      "doc": "BreakerWindow makes a [Breaker] open on a rate rather than on failures in\na row: once the last size of calls holds at least minCalls, a share of\nfailures of failureRatio or more opens it. Its values are the defaults of\nthe port's settings <service>-port-<name>-breaker-window,\n-breaker-window-calls and -breaker-window-ratio; a window of 0 is none, a\nratio outside (0, 1] stops the start.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/port_breaker.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.Budget",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "Budget",
+      "spelled": "func(maxTokens int, tokenRatio float64) PortPolicyConfigurer",
+      "canonical": "func(maxTokens int, tokenRatio float64) github.com/kitsunium/sdk/framework/internal/app.PortPolicyConfigurer",
+      "doc": "Budget sizes the retry budget a port's [Retry] and [Hedge] share: a\nbucket of maxTokens tokens, a failure costing one and a success putting\nback tokenRatio; retries and duplicates are refused once half the tokens\nare spent, so a dependency that fails for every caller receives fewer\nextra calls, not every call times the attempts. A port that retries or\nhedges without it has 10 tokens and a ratio of 0.1, gRPC's example; a\nBudget on a port that does neither stops the start. It is the SDK's\nresilience retry budget, one per port and per start.\n\nThe values are the defaults of the port's settings\n<service>-port-<name>-budget-tokens and -budget-ratio, which\nconfig/<env>.* and <PRODUCT>_<NAME> override; fewer than one token, or a\nratio below a thousandth, stops the start.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/port_retry.go",
       "layer": "framework"
     },
     {
@@ -8068,6 +8281,28 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.HalfOpenTrials",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "HalfOpenTrials",
+      "spelled": "func(n int) BreakerConfigurer",
+      "canonical": "func(n int) github.com/kitsunium/sdk/framework/internal/app.BreakerConfigurer",
+      "doc": "HalfOpenTrials is how many trial calls in a row must succeed to close a\n[Breaker] once its open time is over — one by default. It is the default\nof the port's setting <service>-port-<name>-breaker-trials; fewer than one\nstops the start.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/port_breaker.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.Hedge",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "Hedge",
+      "spelled": "func(delay time.Duration, inFlight int) PortPolicyConfigurer",
+      "canonical": "func(delay time.Duration, inFlight int) github.com/kitsunium/sdk/framework/internal/app.PortPolicyConfigurer",
+      "doc": "Hedge races a port's slow call: an attempt that has not answered after\ndelay is joined by a duplicate, and the first to succeed answers — the\ntail of a dependency's latency cut, at the price of more calls. At most\ninFlight duplicates run at once across every call, and the port's retry\nbudget ([Budget]) refuses them while the dependency fails for many: then\nthe call goes on with the attempts it has. Only a port declared\n[Idempotent] may hedge — the start refuses another. It is the SDK's\nresilience hedge, on the app's clock.\n\nThe values are the defaults of the port's settings\n<service>-port-<name>-hedge-delay, -hedge-in-flight and -hedge-max — the\nduplicates one call may make, 1 —, which config/<env>.* and\n<PRODUCT>_<NAME> override; a delay that is not positive, or fewer than\none, stops the start.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/port_hedge.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app.HeldUntil[...]",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/internal/app",
@@ -8087,6 +8322,17 @@
       "canonical": "func(ctx context.Context, reason string, ids ...string) error",
       "doc": "HoldSubject places a legal hold on every record whose subject is one of\nids, in every store of the app: an authority's request about a person.\nIt holds the records they have now; a record written later is not held.\nreason is kept as Store.Hold keeps it.\n",
       "file": "framework/internal/app/hold.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.Idempotent",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "Idempotent",
+      "spelled": "func() PortPolicyConfigurer",
+      "canonical": "func() github.com/kitsunium/sdk/framework/internal/app.PortPolicyConfigurer",
+      "doc": "Idempotent declares that the port's operation may run more than once for\none call, concurrently, with no harm done: what a [Hedge] needs, which is\nrefused on a port that does not say so. The graph draws it on the port.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/port_hedge.go",
       "layer": "framework"
     },
     {
@@ -8896,6 +9142,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.NoRetryAfter",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "NoRetryAfter",
+      "spelled": "func() RetryConfigurer",
+      "canonical": "func() github.com/kitsunium/sdk/framework/internal/app.RetryConfigurer",
+      "doc": "NoRetryAfter makes a [Retry] wait its backoff whatever a failure says: a\nRetry-After, a rate limiter's next token. It is the default of the port's\nsetting <service>-port-<name>-retry-after, false, which config/<env>.* and\n<PRODUCT>_<NAME> override.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/port_retry.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app.NoTransaction",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/internal/app",
@@ -8970,6 +9227,17 @@
       "canonical": "func(envs ...string) github.com/kitsunium/sdk/framework/internal/app.MountConfigurer",
       "doc": "Only makes a mount hold in the environments envs names alone — the name\n<PRODUCT>_ENV or [Env] gives, lower-cased, \"production\" when neither does:\n\n\ta := app.NewApp(\"vigie\", identity.Service).\n\t\tWith(app.Mount(debugbar.Module, app.Only(\"dev\", \"staging\")))\n\nElsewhere the mount is as if it had not been given, its [Prefix] and its\n[Bind] with it; another mount of the module without Only still mounts it.\nSeveral Only on one mount add up. The start refuses an Only that names no\nenvironment, a name that cannot be one — lower-case letters, digits and\ndashes inside, 63 at most —, and a module a mounted module requires\n([Requires]) that its mount leaves out, rather than mounting it at its\ndefaults behind the product's back.\n",
       "file": "framework/internal/app/mount.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.OpenBackoff",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "OpenBackoff",
+      "spelled": "func(maxOpen time.Duration) BreakerConfigurer",
+      "canonical": "func(maxOpen time.Duration) github.com/kitsunium/sdk/framework/internal/app.BreakerConfigurer",
+      "doc": "OpenBackoff lengthens the open time of a [Breaker] that opens again\nwithout having closed: it doubles at each opening, from the breaker's open\ntime up to max. It is the default of the port's setting\n<service>-port-<name>-breaker-open-max, 0 — the same open time every\ntime — without it; a negative one stops the start.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/port_breaker.go",
       "layer": "framework"
     },
     {
@@ -9165,6 +9433,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.PortPolicyConfigurer",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "PortPolicyConfigurer",
+      "spelled": "interface{portPolicyConfigure(g *portGuards)}",
+      "canonical": "interface{portPolicyConfigure(g *github.com/kitsunium/sdk/framework/internal/app.portGuards)}",
+      "doc": "PortPolicyConfigurer guards the calls a port makes: [Retry], [Budget],\n[Breaker], [Hedge], [Idempotent], [Throttle] and [Timeout], given to\n[PortService.Guard].\n",
+      "file": "framework/internal/app/port_policy_interface.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app.PortService",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/app",
@@ -9183,8 +9462,20 @@
       "recv": "PortService",
       "spelled": "func(ctx context.Context, req Req) (Resp, error)",
       "canonical": "func(ctx context.Context, req Req) (Resp, error)",
-      "doc": "Call runs what the port is bound to: in a span on the port — the caller's\ncalls edge — then in the bound operation's own span, through its whole\npipeline, carrying the caller's user as [EndpointService.Call] does.\n",
+      "doc": "Call runs what the port is bound to: in a span on the port — the caller's\ncalls edge — then, through the policies [PortService.Guard] put around it,\nin the bound operation's own span — one per attempt —, through its whole\npipeline, carrying the caller's user as [EndpointService.Call] does.\n",
       "file": "framework/internal/app/port.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.(*PortService[...]).Guard",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "Guard",
+      "recv": "PortService",
+      "spelled": "func(opts ...PortPolicyConfigurer) *PortService[Req, Resp]",
+      "canonical": "func(opts ...github.com/kitsunium/sdk/framework/internal/app.PortPolicyConfigurer) *github.com/kitsunium/sdk/framework/internal/app.PortService[Req, Resp]",
+      "doc": "Guard puts policies around the calls the port makes — [Retry], [Budget],\n[Breaker], [Hedge] with [Idempotent], [Throttle], [Timeout] — and returns\nthe port. Whatever the order they are given in, they compose the outermost\nfirst as Retry, Hedge, Breaker, Throttle, Timeout, around the operation\nthe port is bound to; the retry and the hedge share the port's retry\nbudget.\n\nEach declares, in the port's service, the settings that tune it, named\n<service>-port-<name>-<knob>: the code's value is the default, which\nconfig/<env>.* and <PRODUCT>_<NAME> override, and a value a policy cannot\nrun with stops the start. A port is guarded once: a second Guard is\nrefused.\n\n\tvar Quote = Service.Port[QuoteRequest, Price](\"quote\").\n\t\tGuard(app.Timeout(2*time.Second), app.Retry(3, 100*time.Millisecond), app.Breaker(5, 30*time.Second))\n",
+      "file": "framework/internal/app/port_policy.go",
       "layer": "framework"
     },
     {
@@ -9479,6 +9770,39 @@
       "canonical": "func(limits string) github.com/kitsunium/sdk/framework/internal/app.StoreConfigurer",
       "doc": "RetentionByProduct says the product keeps the store's retention itself:\nits own code erases and deletes what it no longer needs — a record whose\nlife the product's own rules end, a lifecycle the framework cannot read from the\nentity. limits says, in the product's words, for how long and how, which\nthe register publishes as the store's time limits (GDPR art. 30(1)(f));\n\"\" says only that the product keeps them.\n\nThe framework then runs no retention for the store, and warns of neither a missing\nretention nor a missing subject. Its classified fields keep every other\npromise: sealed at rest, never shown, exported with their person — when\nthe store names one — and erased by app.Erase and Store.Erase. It goes\nwith app.Purpose, app.HeldUntil, app.Anonymise and app.DeleteOnErasure;\nwith app.EraseAfter, app.EraseAt, app.DeleteAfter or app.DeleteAt it is\nrefused: a store's retention is the framework's or the product's, never both.\n",
       "file": "framework/internal/app/retention.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.Retry",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "Retry",
+      "spelled": "func(maxAttempts int, delay time.Duration, opts ...RetryConfigurer) PortPolicyConfigurer",
+      "canonical": "func(maxAttempts int, delay time.Duration, opts ...github.com/kitsunium/sdk/framework/internal/app.RetryConfigurer) github.com/kitsunium/sdk/framework/internal/app.PortPolicyConfigurer",
+      "doc": "Retry runs a port's call again when it fails for a reason of the\ndependency's — what the start answers as a 5xx, a 408 or a 429 —, up to\nmaxAttempts attempts in all, waiting between them a backoff that starts at\ndelay and doubles, with full jitter, up to [RetryMaxDelay] — 30 seconds\nunless the code says otherwise. A failure that says how long to wait — a\nRetry-After, a rate limiter's next token (the SDK's resilience.RetryAfter)\n— is waited that long instead, held at the longest delay, unless\n[NoRetryAfter]. A refusal of the caller's own is not retried, nor an open\nbreaker, a throttle or another retry's exhaustion. It is the SDK's\nresilience retry, on the app's clock, sharing the port's retry budget\n([Budget]) with its hedge.\n\nEach retry is an event on the port's span, which counts them, and a\nretry event on the telemetry port.\n\nThe values are the defaults of the port's settings\n<service>-port-<name>-retry-attempts, -retry-delay, -retry-max-delay,\n-retry-jitter (full, decorrelated or none) and -retry-after (whether a\nfailure's own delay is honoured), which config/<env>.* and\n<PRODUCT>_<NAME> override; fewer than one attempt, or a delay that is not\npositive, stops the start.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/port_retry.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.RetryConfigurer",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "RetryConfigurer",
+      "spelled": "interface{retryConfigure(g *retryGuard)}",
+      "canonical": "interface{retryConfigure(g *github.com/kitsunium/sdk/framework/internal/app.retryGuard)}",
+      "doc": "RetryConfigurer configures a [Retry].\n",
+      "file": "framework/internal/app/port_policy_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.RetryMaxDelay",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "RetryMaxDelay",
+      "spelled": "func(d time.Duration) RetryConfigurer",
+      "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/internal/app.RetryConfigurer",
+      "doc": "RetryMaxDelay is the longest a [Retry] waits between two attempts: the\nbackoff's cap, and the cap on a delay a failure asks for. It is the default\nof the port's setting <service>-port-<name>-retry-max-delay; one that is\nnot positive stops the start.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/port_retry.go",
       "layer": "framework"
     },
     {
@@ -10503,14 +10827,36 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.Throttle",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "Throttle",
+      "spelled": "func(k float64) PortPolicyConfigurer",
+      "canonical": "func(k float64) github.com/kitsunium/sdk/framework/internal/app.PortPolicyConfigurer",
+      "doc": "Throttle refuses, on the caller's side and without sending them, a share\nof a port's calls while the dependency refuses more than 1/k of the\nrecent ones — the client-side throttling of Google's SRE book: a call is\nrefused with probability (requests − k × accepts) / (requests + 1), over\nthe last two minutes, with the SDK's Throttled (503). A refusal is a 5xx,\na 408 or a 429 of the dependency's; a refusal of the caller's own is an\naccept. It is the SDK's resilience adaptive throttle, on the app's clock;\n2 is the book's k.\n\nk is the default of the port's setting <service>-port-<name>-throttle-k,\nwhich config/<env>.* and <PRODUCT>_<NAME> override; a k below 1 stops the\nstart.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/port_hedge.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app.Timeout",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/internal/app",
       "name": "Timeout",
-      "spelled": "func(d time.Duration) OperationOption",
-      "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/internal/app.OperationOption",
-      "doc": "Timeout cancels the handler's context after d and answers 504. A caller\nthat leaves first is no timeout: its request is recorded as 499, logged as\ninformation, and nothing it could read is written. It is the SDK's\nresilience timeout, on the app's clock.\n\nd is the default of the operation's setting <service>-<kind>-<operation>-timeout,\nwhich config/<env>.* and <PRODUCT>_<NAME> override; one that is not\npositive stops the start.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "spelled": "func(d time.Duration) TimeoutConfigurer",
+      "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/internal/app.TimeoutConfigurer",
+      "doc": "Timeout cancels the handler's context after d and answers 504. A caller\nthat leaves first is no timeout: its request is recorded as 499, logged as\ninformation, and nothing it could read is written. It is the SDK's\nresilience timeout, on the app's clock.\n\nGiven to a port's [PortService.Guard], it is a deadline on each attempt of the port's\ncall, the innermost of its policies: an attempt that outruns it fails with\nthe SDK's TimeoutExceeded, which the port's breaker counts and its retry\nreplays.\n\nd is the default of the operation's setting <service>-<kind>-<operation>-timeout\n— <service>-port-<name>-timeout for a port —, which config/<env>.* and\n<PRODUCT>_<NAME> override; one that is not positive stops the start.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
       "file": "framework/internal/app/endpoint.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.TimeoutConfigurer",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "TimeoutConfigurer",
+      "spelled": "interface{OperationOption; PortPolicyConfigurer}",
+      "canonical": "interface{github.com/kitsunium/sdk/framework/internal/app.OperationOption; github.com/kitsunium/sdk/framework/internal/app.PortPolicyConfigurer}",
+      "doc": "TimeoutConfigurer configures an endpoint, a command, a query and a port\nalike: [Timeout].\n",
+      "file": "framework/internal/app/port_policy_interface.go",
       "layer": "framework"
     },
     {
@@ -30271,8 +30617,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/model/internal/core",
       "name": "PortSpec",
-      "spelled": "struct{Request *SchemaMessage \"json:\\\"request,omitempty\\\"\"; Response *SchemaMessage \"json:\\\"response,omitempty\\\"\"; Fallback string \"json:\\\"fallback,omitempty\\\"\"; Bound string \"json:\\\"bound,omitempty\\\"\"; Via string \"json:\\\"via,omitempty\\\"\"}",
-      "canonical": "struct{Request *github.com/kitsunium/sdk/framework/model/internal/core.SchemaMessage \"json:\\\"request,omitempty\\\"\"; Response *github.com/kitsunium/sdk/framework/model/internal/core.SchemaMessage \"json:\\\"response,omitempty\\\"\"; Fallback string \"json:\\\"fallback,omitempty\\\"\"; Bound string \"json:\\\"bound,omitempty\\\"\"; Via string \"json:\\\"via,omitempty\\\"\"}",
+      "spelled": "struct{Request *SchemaMessage \"json:\\\"request,omitempty\\\"\"; Response *SchemaMessage \"json:\\\"response,omitempty\\\"\"; Fallback string \"json:\\\"fallback,omitempty\\\"\"; Bound string \"json:\\\"bound,omitempty\\\"\"; Via string \"json:\\\"via,omitempty\\\"\"; Pipeline []MechanicMessage \"json:\\\"pipeline,omitempty\\\"\"; Idempotent bool \"json:\\\"idempotent,omitempty\\\"\"}",
+      "canonical": "struct{Request *github.com/kitsunium/sdk/framework/model/internal/core.SchemaMessage \"json:\\\"request,omitempty\\\"\"; Response *github.com/kitsunium/sdk/framework/model/internal/core.SchemaMessage \"json:\\\"response,omitempty\\\"\"; Fallback string \"json:\\\"fallback,omitempty\\\"\"; Bound string \"json:\\\"bound,omitempty\\\"\"; Via string \"json:\\\"via,omitempty\\\"\"; Pipeline []github.com/kitsunium/sdk/framework/model/internal/core.MechanicMessage \"json:\\\"pipeline,omitempty\\\"\"; Idempotent bool \"json:\\\"idempotent,omitempty\\\"\"}",
       "fields": [
         {
           "name": "Request",
@@ -30303,6 +30649,18 @@
           "type": "string",
           "tag": "json:\"via,omitempty\"",
           "doc": "Via is how it was chosen: one of the Via constants.\n"
+        },
+        {
+          "name": "Pipeline",
+          "type": "[]MechanicMessage",
+          "tag": "json:\"pipeline,omitempty\"",
+          "doc": "Pipeline are the policies around the port's calls (Port.Guard), the\noutermost first — retry, hedge, breaker, throttle, timeout —, its\nretry budget before them, with the values the app runs with.\n"
+        },
+        {
+          "name": "Idempotent",
+          "type": "bool",
+          "tag": "json:\"idempotent,omitempty\"",
+          "doc": "Idempotent says the port's operation may run more than once for one\ncall (app.Idempotent): what a hedge needs.\n"
         }
       ],
       "doc": "PortSpec describes a port: an operation a service needs and another\nimplements.\n",
@@ -34648,6 +35006,18 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/telemetry.KindBreaker",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/telemetry",
+      "name": "KindBreaker",
+      "spelled": "Kind",
+      "canonical": "github.com/kitsunium/sdk/framework/telemetry.Kind",
+      "value": "4",
+      "doc": "KindBreaker is a port's breaker changing phase: Node is the port, Op\nthe phase it enters — closed, open, half-open.\n",
+      "file": "framework/telemetry/telemetry.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/telemetry.KindPhase",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/telemetry",
@@ -34656,6 +35026,18 @@
       "canonical": "github.com/kitsunium/sdk/framework/telemetry.Kind",
       "value": "2",
       "doc": "KindPhase is the process changing phase: starting, serving, draining,\nstopped, failed — Op carries it.\n",
+      "file": "framework/telemetry/telemetry.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/telemetry.KindRetry",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/telemetry",
+      "name": "KindRetry",
+      "spelled": "Kind",
+      "canonical": "github.com/kitsunium/sdk/framework/telemetry.Kind",
+      "value": "3",
+      "doc": "KindRetry is a port's call about to be tried again: Node is the port,\nCode the failure's, Duration the wait before the next attempt.\n",
       "file": "framework/telemetry/telemetry.go",
       "layer": "framework"
     },
@@ -34804,6 +35186,18 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/telemetry.OpClosed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/telemetry",
+      "name": "OpClosed",
+      "spelled": "Op",
+      "canonical": "github.com/kitsunium/sdk/framework/telemetry.Op",
+      "value": "23",
+      "doc": "The breaker's phases, for KindBreaker.\n",
+      "file": "framework/telemetry/telemetry.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/telemetry.OpConnect",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/telemetry",
@@ -34876,6 +35270,18 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/telemetry.OpHalfOpen",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/telemetry",
+      "name": "OpHalfOpen",
+      "spelled": "Op",
+      "canonical": "github.com/kitsunium/sdk/framework/telemetry.Op",
+      "value": "25",
+      "doc": "The operations, in the order of their names in [OpNames]; zero is none.\n",
+      "file": "framework/telemetry/telemetry.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/telemetry.OpHandle",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/telemetry",
@@ -34892,8 +35298,8 @@
       "kind": "var",
       "package": "github.com/kitsunium/sdk/framework/telemetry",
       "name": "OpNames",
-      "spelled": "[23]string",
-      "canonical": "[23]string",
+      "spelled": "[26]string",
+      "canonical": "[26]string",
       "doc": "OpNames are the operations' names, as framework/model spells them,\nindexed by Op. The handshake sends them, so a reader never hard-codes\nthe table.\n",
       "file": "framework/telemetry/telemetry.go",
       "layer": "framework"
@@ -34918,6 +35324,18 @@
       "spelled": "func(name string) Op",
       "canonical": "func(name string) github.com/kitsunium/sdk/framework/telemetry.Op",
       "doc": "OpOf is the Op named name, or OpNone.\n",
+      "file": "framework/telemetry/telemetry.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/telemetry.OpOpen",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/telemetry",
+      "name": "OpOpen",
+      "spelled": "Op",
+      "canonical": "github.com/kitsunium/sdk/framework/telemetry.Op",
+      "value": "24",
+      "doc": "The operations, in the order of their names in [OpNames]; zero is none.\n",
       "file": "framework/telemetry/telemetry.go",
       "layer": "framework"
     },

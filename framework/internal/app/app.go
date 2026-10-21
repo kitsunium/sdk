@@ -415,7 +415,7 @@ func (a *App) declarationProblems() []model.Diagnostic {
 	if a.cfg.studio.on && a.serves() && studioMount.Load() == nil {
 		out = append(out, diagnosticOf("warning", "", nil, say("config.studio-missing", "package", studioPackage)))
 	}
-	return slices.Concat(out, a.moduleProblems(), a.appProblems(), a.serverProblems(), a.subsystemProblems())
+	return slices.Concat(out, a.moduleProblems(), a.appProblems(), a.serverProblems(), a.subsystemProblems(), a.portPolicyProblems())
 }
 
 // serviceProblems are what the service declares wrong, and a second service
@@ -799,7 +799,10 @@ func (a *App) addComponents() error {
 	if cli {
 		singleton = func() error { return nil }
 	}
-	if err := firstError(singleton, func() error { return a.startGroups(g.secrets) }, a.addDatabases); err != nil {
+	// The ports' breakers with the operator's isolations, before anything
+	// that may call a port (port_breaker_run.go).
+	breakers := func() error { return a.addBreakers(cli) }
+	if err := firstError(singleton, func() error { return a.startGroups(g.secrets) }, a.addDatabases, breakers); err != nil {
 		return err
 	}
 	if cli {

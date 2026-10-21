@@ -81,12 +81,26 @@ const DefaultBuffer int = 4096
 
 The ring's bounds and default, in events.
 
+<a name="KindBreaker"></a>
+```go
+const KindBreaker Kind = 4
+```
+
+KindBreaker is a port's breaker changing phase: Node is the port, Op the phase it enters — closed, open, half-open.
+
 <a name="KindPhase"></a>
 ```go
 const KindPhase Kind = 2
 ```
 
 KindPhase is the process changing phase: starting, serving, draining, stopped, failed — Op carries it.
+
+<a name="KindRetry"></a>
+```go
+const KindRetry Kind = 3
+```
+
+KindRetry is a port's call about to be tried again: Node is the port, Code the failure's, Duration the wait before the next attempt.
 
 <a name="KindSpan"></a>
 ```go
@@ -137,6 +151,13 @@ const OpCall Op = 2
 
 The operations, in the order of their names in [OpNames](#OpNames); zero is none.
 
+<a name="OpClosed"></a>
+```go
+const OpClosed Op = 23
+```
+
+The breaker's phases, for KindBreaker.
+
 <a name="OpConnect"></a>
 ```go
 const OpConnect Op = 16
@@ -179,6 +200,13 @@ const OpFailed Op = 22
 
 The operations, in the order of their names in [OpNames](#OpNames); zero is none.
 
+<a name="OpHalfOpen"></a>
+```go
+const OpHalfOpen Op = 25
+```
+
+The operations, in the order of their names in [OpNames](#OpNames); zero is none.
+
 <a name="OpHandle"></a>
 ```go
 const OpHandle Op = 15
@@ -189,6 +217,13 @@ The operations, in the order of their names in [OpNames](#OpNames); zero is none
 <a name="OpNone"></a>
 ```go
 const OpNone Op = 0
+```
+
+The operations, in the order of their names in [OpNames](#OpNames); zero is none.
+
+<a name="OpOpen"></a>
+```go
+const OpOpen Op = 24
 ```
 
 The operations, in the order of their names in [OpNames](#OpNames); zero is none.
@@ -318,7 +353,7 @@ Nop is the emitter that reports nothing: what a product holds unless it was star
 
 <a name="OpNames"></a>
 ```go
-var OpNames [23]string
+var OpNames [26]string
 ```
 
 OpNames are the operations' names, as framework/model spells them, indexed by Op. The handshake sends them, so a reader never hard-codes the table.

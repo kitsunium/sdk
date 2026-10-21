@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -76,7 +77,7 @@ func expectBinding(t *testing.T, g *model.Graph, port string, want model.PortInf
 		t.Errorf("%s has no contract: %+v", port, got)
 	}
 	got.Request, got.Response = nil, nil
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("%s: %+v, want %+v", port, got, want)
 	}
 	// The binding draws the verb of what it calls: a query is asked, a

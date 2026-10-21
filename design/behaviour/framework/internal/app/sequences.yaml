@@ -708,7 +708,7 @@ sequences:
             - set: out
               value: append(out, diagnosticOf("warning", "", nil, say("config.studio-missing", "package", studioPackage)))
           when: a.cfg.studio.on && a.serves() && studioMount.Load() == nil
-      - return: slices.Concat(out, a.moduleProblems(), a.appProblems(), a.serverProblems(), a.subsystemProblems())
+      - return: slices.Concat(out, a.moduleProblems(), a.appProblems(), a.serverProblems(), a.subsystemProblems(), a.portPolicyProblems())
         to: slices
   - of: (*App).serviceProblems
     participants:
@@ -1467,6 +1467,8 @@ sequences:
         kind: self
       - id: a.componentNodes
         kind: internal
+      - id: a.addBreakers
+        kind: internal
       - id: firstError
         kind: internal
       - id: a.startGroups
@@ -1488,12 +1490,19 @@ sequences:
                   steps:
                     - return: nil
           when: cli
+      - bind: breakers
+        eval:
+          closure:
+            results: error
+            steps:
+              - return: a.addBreakers(cli)
+                to: a.addBreakers
       - opt:
           do:
             - return: err
           init:
             bind: err
-            eval: firstError(singleton, func() error { return a.startGroups(g.secrets) }, a.addDatabases)
+            eval: firstError(singleton, func() error { return a.startGroups(g.secrets) }, a.addDatabases, breakers)
             to: firstError
           when: err != nil
       - opt:
@@ -4339,6 +4348,218 @@ sequences:
                 when: h != nil
           when: a != nil
       - return: m
+  - of: (*breakerGuard).command
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*breakerGuard).command
+        kind: self
+      - id: a.breakerCommand
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: _ context.Context, args []string
+            results: int
+            steps:
+              - return: a.breakerCommand(args, os.Stdout, os.Stderr)
+                to: a.breakerCommand
+  - of: (*App).breakerCommand
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).breakerCommand
+        kind: self
+      - id: breakerArgs
+        kind: internal
+      - id: fmt
+        kind: stdlib
+      - id: a.breakerData
+        kind: internal
+      - id: a.listBreakers
+        kind: internal
+      - id: a.markBreaker
+        kind: internal
+    steps:
+      - bind: verb, port, ok
+        eval: breakerArgs(args)
+        to: breakerArgs
+      - opt:
+          do:
+            - eval: fmt.Fprintf(stderr, breakerUsageText, a.name)
+              to: fmt
+            - return: "2"
+          when: "!ok"
+      - bind: fsys, err
+        eval: a.breakerData()
+        to: a.breakerData
+      - opt:
+          do:
+            - eval: fmt.Fprintln(stderr, err)
+              to: fmt
+            - return: "1"
+          when: err != nil
+      - opt:
+          do:
+            - return: a.listBreakers(fsys, stdout)
+              to: a.listBreakers
+          when: verb == "list"
+      - return: a.markBreaker(fsys, verb, port, stdout, stderr)
+        to: a.markBreaker
+  - of: breakerArgs
+    steps:
+      - switch:
+          cases:
+            - case: len(args) == 0 || len(args) == 1 && args[0] == "list"
+              do:
+                - return: "\"list\", \"\", true"
+            - case: len(args) == 2 && (args[0] == "isolate" || args[0] == "reset") && args[1] != ""
+              do:
+                - return: args[0], args[1], true
+      - return: "\"\", \"\", false"
+  - of: (*App).breakerData
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).breakerData
+        kind: self
+      - id: a.resolve
+        kind: internal
+      - id: os
+        kind: stdlib
+      - id: vfs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: a.resolve()
+            to: a.resolve
+          when: err != nil
+      - opt:
+          do:
+            - return: |-
+                nil, failure(CodeAppConfig, "BREAKER_NO_DATA",
+                			"the product keeps its data in memory: an isolation has nowhere to be kept; set "+appPrefix(a.name)+"_DATA_DIR", nil)
+          when: a.dataDir == ""
+      - opt:
+          do:
+            - return: nil, failure(CodeAppConfig, "DATA_DIR_INVALID", "the data directory cannot be created", err, errs.String("dir", a.dataDir))
+          init:
+            bind: err
+            eval: os.MkdirAll(a.dataDir, 0o700)
+            to: os
+          when: err != nil
+      - return: vfs.NewOS(a.dataDir)
+        to: vfs
+  - of: (*App).listBreakers
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).listBreakers
+        kind: self
+      - id: fs
+        kind: stdlib
+      - id: fmt
+        kind: stdlib
+    steps:
+      - loop:
+          do:
+            - bind: state
+              eval: "\"not isolated\""
+            - opt:
+                do:
+                  - set: state
+                    value: "\"isolated\""
+                init:
+                  bind: _, err
+                  eval: fs.Stat(fsys, b.mark)
+                  to: fs
+                when: err == nil
+            - eval: fmt.Fprintf(stdout, "%s\t%s\n", b.port, state)
+              to: fmt
+          key: _
+          range: a.breakers()
+          value: b
+      - return: "0"
+  - of: (*App).markBreaker
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).markBreaker
+        kind: self
+      - id: fmt
+        kind: stdlib
+      - id: fsys.MkdirAll
+        kind: value
+      - id: fsys.WriteAtomic
+        kind: value
+      - id: fsys.Remove
+        kind: value
+    steps:
+      - var:
+          name: mark
+          type: string
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: mark
+                    value: b.mark
+                when: b.port == port
+          key: _
+          range: a.breakers()
+          value: b
+      - opt:
+          do:
+            - eval: "fmt.Fprintf(stderr, \"%q is no port a breaker guards: %s breaker lists them\\n\", port, a.name)"
+              to: fmt
+            - return: "1"
+          when: mark == ""
+      - var:
+          name: err
+          type: error
+      - alt:
+          - do:
+              - opt:
+                  do:
+                    - set: err
+                      to: fsys.WriteAtomic
+                      value: fsys.WriteAtomic(mark, []byte(port+"\n"), 0o600)
+                  init:
+                    bind: err
+                    eval: fsys.MkdirAll(path.Dir(mark), 0o700)
+                    op: =
+                    to: fsys.MkdirAll
+                  when: err == nil
+            when: verb == "isolate"
+          - do:
+              - set: err
+                value: nil
+            init:
+              bind: err
+              eval: fsys.Remove(mark)
+              op: =
+              to: fsys.Remove
+            when: errors.Is(err, fs.ErrNotExist)
+      - opt:
+          do:
+            - eval: "fmt.Fprintf(stderr, \"the breaker of %s: %v\\n\", port, err)"
+              to: fmt
+            - return: "1"
+          when: err != nil
+      - bind: done
+        eval: "\"isolated\""
+      - opt:
+          do:
+            - set: done
+              value: "\"reset\""
+          when: verb == "reset"
+      - eval: "fmt.Fprintf(stdout, \"%s: %s; a running product applies it within five seconds\\n\", port, done)"
+        to: fmt
+      - return: "0"
   - of: cloneBuild
     steps:
       - opt:
@@ -4632,7 +4853,7 @@ sequences:
       - id: slices
         kind: stdlib
     steps:
-      - return: slices.Concat(requestMechanics(), operationMechanics(), backgroundMechanics())
+      - return: slices.Concat(requestMechanics(), operationMechanics(), portMechanics(), backgroundMechanics())
         to: slices
   - of: requestMechanics
     steps:
@@ -4687,6 +4908,36 @@ sequences:
           			Kind: "queue", Label: "queued command", Package: "github.com/kitsunium/sdk/pkg/v1/data/queue",
           			Doc:     "Sends a command to the background: Dispatch returns once its own queue accepted it, and a consumer handles it as the user who dispatched it, retried, then dead-lettered. Exposed, it answers 202.",
           			Snippet: "Service.Command(\"reindex\", reindex, app.Queued(), app.MaxDeliveries(3))",
+          		},
+          	}
+  - of: portMechanics
+    steps:
+      - return: |-
+          []model.Mechanic{
+          		{
+          			Kind: "retry", Label: "retry", Package: resiliencePackage,
+          			Doc:     "Runs a port's call again when the dependency fails (5xx, 408, 429), with a backoff and full jitter, waiting what a Retry-After asks; the port's retry budget bounds the retries.",
+          			Snippet: "Service.Port[Req, Resp](\"quote\").Guard(app.Retry(3, 100*time.Millisecond))",
+          		},
+          		{
+          			Kind: "budget", Label: "retry budget", Package: resiliencePackage,
+          			Doc:     "Sizes the retry budget a port's retry and hedge share, so a dependency that fails for every caller receives fewer extra calls.",
+          			Snippet: "app.Budget(10, 0.1)",
+          		},
+          		{
+          			Kind: "hedge", Label: "hedge", Package: resiliencePackage,
+          			Doc:     "Races a slow call of an idempotent port with a duplicate after a delay; the first answer wins.",
+          			Snippet: "app.Idempotent(), app.Hedge(50*time.Millisecond, 8)",
+          		},
+          		{
+          			Kind: "breaker", Label: "circuit breaker", Package: resiliencePackage,
+          			Doc:     "Stops a port's calls from reaching a dependency that keeps failing; its state is a readiness check, and `breaker isolate PORT` opens it until reset.",
+          			Snippet: "app.Breaker(5, 30*time.Second)",
+          		},
+          		{
+          			Kind: "throttle", Label: "adaptive throttle", Package: resiliencePackage,
+          			Doc:     "Refuses a share of a port's calls on the caller's side while the dependency refuses more than 1/k of them (the SRE book's client-side throttling).",
+          			Snippet: "app.Throttle(2)",
           		},
           	}
   - of: backgroundMechanics
@@ -13700,16 +13951,8 @@ sequences:
       - return: policyOption(func() policyGuard { return newRateLimitGuard(perSecond, burst, opts) })
         to: policyOption
   - of: Timeout
-    participants:
-      - id: caller
-        kind: actor
-      - id: Timeout
-        kind: self
-      - id: policyOption
-        kind: internal
     steps:
-      - return: "policyOption(func() policyGuard { return &timeoutGuard{after: d} })"
-        to: policyOption
+      - return: timeoutOption(d)
   - of: Bulkhead
     participants:
       - id: caller
@@ -23001,6 +23244,8 @@ sequences:
         kind: internal
       - id: usage
         kind: internal
+      - id: a.usageBreaker
+        kind: internal
       - id: a.usageCommands
         kind: internal
     steps:
@@ -23042,6 +23287,8 @@ sequences:
           when: def != nil
       - eval: usage(os.Stderr, a.name)
         to: usage
+      - eval: a.usageBreaker(os.Stderr)
+        to: a.usageBreaker
       - eval: a.usageCommands(os.Stderr)
         to: a.usageCommands
       - return: "2"
@@ -23053,7 +23300,11 @@ sequences:
         kind: self
       - id: usage
         kind: internal
+      - id: a.usageBreaker
+        kind: internal
       - id: a.usageCommands
+        kind: internal
+      - id: a.breakerCLI
         kind: internal
     steps:
       - bind: help
@@ -23064,10 +23315,13 @@ sequences:
             steps:
               - eval: usage(os.Stdout, a.name)
                 to: usage
+              - eval: a.usageBreaker(os.Stdout)
+                to: a.usageBreaker
               - eval: a.usageCommands(os.Stdout)
                 to: a.usageCommands
               - return: "0"
-      - return: |-
+      - bind: cmds
+        eval: |-
           map[string]func(ctx context.Context, args []string) int{
           		"serve":       func(ctx context.Context, _ []string) int { return a.serveCommand(ctx) },
           		"graph":       func(ctx context.Context, args []string) int { return a.graphCommand(ctx, args, os.Stdout, os.Stderr) },
@@ -23082,6 +23336,51 @@ sequences:
           		"watch": a.onStores("watch"), "data": a.onStores("data"),
           		"help": help, "-h": help, "-help": help, "--help": help,
           	}
+      - opt:
+          do:
+            - set: cmds["breaker"]
+              value: run
+          init:
+            bind: run
+            eval: a.breakerCLI()
+            to: a.breakerCLI
+          when: run != nil
+      - return: cmds
+  - of: (*App).breakerCLI
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).breakerCLI
+        kind: self
+      - id: a.breakers
+        kind: internal
+      - id: bs[0].b.command
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: bs[0].b.command(a)
+              to: bs[0].b.command
+          init:
+            bind: bs
+            eval: a.breakers()
+            to: a.breakers
+          when: len(bs) > 0
+      - return: nil
+  - of: (*App).usageBreaker
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).usageBreaker
+        kind: self
+      - id: fmt
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - eval: fmt.Fprintf(w, "  %[1]s breaker [list]|isolate PORT|reset PORT\n%[2]s a port's breaker, opened by an operator until reset\n", a.name, strings.Repeat(" ", 37))
+              to: fmt
+          when: len(a.breakers()) > 0
   - of: (*App).onStores
     participants:
       - id: caller
@@ -28056,6 +28355,8 @@ sequences:
         kind: internal
       - id: p.run
         kind: internal
+      - id: p.guarded
+        kind: internal
       - id: sp.end
         kind: internal
     steps:
@@ -28072,9 +28373,23 @@ sequences:
       - bind: ctx, sp
         eval: "a.begin(ctx, &spanStart{node: p.id, from: currentNode(ctx), edge: model.EdgeCalls, op: model.OpCall, name: p.name})"
         to: a.begin
-      - bind: resp, err
-        eval: p.run(ctx, a, req)
-        to: p.run
+      - leaf: a const or type declaration in a body
+        stmt: |-
+          var (
+          		resp Resp
+          		err  error
+          	)
+      - alt:
+          - do:
+              - set: resp, err
+                to: p.run
+                value: p.run(ctx, a, req)
+            when: p.guards == nil
+          - do:
+              - set: resp, err
+                to: p.guarded
+                value: p.guarded(ctx, a, sp, req)
+            else: true
       - eval: sp.end(err)
         to: sp.end
       - return: resp, err
@@ -28170,6 +28485,11 @@ sequences:
             eval: p.fallbackOp()
             to: p.fallbackOp
           when: fb != nil && !nilOperation(fb)
+      - opt:
+          do:
+            - set: info.Pipeline, info.Idempotent
+              value: p.guards.drawn(), p.guards.idempotent
+          when: p.guards != nil
       - set: out.Port
         value: info
       - opt:
@@ -28601,6 +28921,1331 @@ sequences:
   - of: NewPortService
     steps:
       - return: "&PortService[Req, Resp]{}"
+  - of: breakerOption.breakerConfigure
+    steps:
+      - eval: f(g)
+  - of: Breaker
+    steps:
+      - return: |-
+          portPolicyOption(func(g *portGuards) {
+          		b := &breakerGuard{
+          			failures: failures, open: open, trials: 1,
+          			windowCalls: defaultBreakerWindowCalls, windowRatio: defaultBreakerWindowRatio,
+          		}
+          		for _, o := range opts {
+          			if o != nil {
+          				o.breakerConfigure(b)
+          			}
+          		}
+          		g.add(b)
+          	})
+  - of: BreakerWindow
+    steps:
+      - return: breakerOption(func(g *breakerGuard) { g.window, g.windowCalls, g.windowRatio = size, minCalls, failureRatio })
+  - of: HalfOpenTrials
+    steps:
+      - return: breakerOption(func(g *breakerGuard) { g.trials = n })
+  - of: OpenBackoff
+    steps:
+      - return: breakerOption(func(g *breakerGuard) { g.openMax = maxOpen })
+  - of: (*breakerGuard).rank
+    steps:
+      - return: rankBreaker
+  - of: (*breakerGuard).declare
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*breakerGuard).declare
+        kind: self
+      - id: declarePolicySetting
+        kind: internal
+    steps:
+      - set: g.node
+        value: "n"
+      - set: g.failuresFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobBreakerFailures, g.failures, checkAtLeastOne())
+      - set: g.openFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobBreakerOpen, g.open, checkPositive())
+      - set: g.openMaxFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobBreakerOpenMax, g.openMax, checkWait())
+      - set: g.trialsFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobBreakerTrials, g.trials, checkAtLeastOne())
+      - set: g.windowFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobBreakerWindow, g.window, checkWait())
+      - set: g.windowCallsFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobBreakerWindowCalls, g.windowCalls, checkAtLeastOne())
+      - set: g.windowRatioFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobBreakerWindowRatio, g.windowRatio, checkRatio())
+  - of: (*breakerGuard).mechanic
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*breakerGuard).mechanic
+        kind: self
+      - id: fmt
+        kind: stdlib
+      - id: knobValue
+        kind: internal
+      - id: openMax.String
+        kind: value
+    steps:
+      - bind: failures, open
+        eval: knobValue(g.failuresFor, g.failures), knobValue(g.openFor, g.open)
+      - bind: config
+        eval: |-
+          map[string]string{
+          		"failures": strconv.Itoa(failures), "open": open.String(),
+          		"trials": strconv.Itoa(knobValue(g.trialsFor, g.trials)),
+          	}
+      - bind: label
+        eval: fmt.Sprintf("%d failures, open %s", failures, open)
+        to: fmt
+      - opt:
+          do:
+            - set: config["openMax"]
+              to: openMax.String
+              value: openMax.String()
+          init:
+            bind: openMax
+            eval: knobValue(g.openMaxFor, g.openMax)
+            to: knobValue
+          when: openMax > 0
+      - opt:
+          do:
+            - bind: calls, ratio
+              eval: knobValue(g.windowCallsFor, g.windowCalls), formatRate(knobValue(g.windowRatioFor, g.windowRatio))
+            - set: config["window"], config["windowCalls"], config["windowRatio"]
+              value: window.String(), strconv.Itoa(calls), ratio
+            - set: label
+              to: fmt
+              value: fmt.Sprintf("%s of %d calls in %s, open %s", ratio, calls, window, open)
+          init:
+            bind: window
+            eval: knobValue(g.windowFor, g.window)
+            to: knobValue
+          when: window > 0
+      - return: "model.Mechanic{Kind: \"breaker\", Label: label, Package: resiliencePackage, Config: config}"
+  - of: (*breakerGuard).runner
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*breakerGuard).runner
+        kind: self
+      - id: g.of
+        kind: internal
+    steps:
+      - return: g.of(c.a)
+        to: g.of
+  - of: (*breakerGuard).of
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*breakerGuard).of
+        kind: self
+      - id: g.built.get
+        kind: internal
+    steps:
+      - return: g.built.get(a, func(clk clock.Timed) resilience.Runner { return resilience.NewCircuitBreaker(g.configOf(a, clk)) })
+        to: g.built.get
+  - of: (*breakerGuard).configOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*breakerGuard).configOf
+        kind: self
+      - id: knobIn
+        kind: internal
+    steps:
+      - bind: open
+        eval: knobIn(a, g.openFor, g.open)
+        to: knobIn
+      - bind: cfg
+        eval: |-
+          resilience.BreakerConfig{
+          		FailureThreshold: knobIn(a, g.failuresFor, g.failures), OpenDuration: open, Clock: clk,
+          		Retryable: transient, HalfOpenTrials: knobIn(a, g.trialsFor, g.trials),
+          		OnStateChange: func(from, to resilience.BreakerPhase) { a.breakerChanged(g.id(), from, to) },
+          	}
+      - opt:
+          do:
+            - set: cfg.OpenBackoff
+              value: "&resilience.Backoff{BaseDelay: open, MaxDelay: openMax}"
+          init:
+            bind: openMax
+            eval: knobIn(a, g.openMaxFor, g.openMax)
+            to: knobIn
+          when: openMax > 0
+      - opt:
+          do:
+            - set: cfg.Window
+              value: |-
+                &resilience.BreakerWindowValue{
+                			Size: window, MinCalls: knobIn(a, g.windowCallsFor, g.windowCalls), FailureRatio: knobIn(a, g.windowRatioFor, g.windowRatio),
+                		}
+          init:
+            bind: window
+            eval: knobIn(a, g.windowFor, g.window)
+            to: knobIn
+          when: window > 0
+      - return: cfg
+  - of: (*breakerGuard).id
+    steps:
+      - opt:
+          do:
+            - return: "\"\""
+          when: g.node == nil
+      - return: g.node.id
+  - of: (*breakerGuard).state
+    steps:
+      - bind: st, _
+        eval: g.of(a).(resilience.BreakerState)
+      - return: st
+  - of: (*breakerGuard).started
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*breakerGuard).started
+        kind: self
+      - id: g.of
+        kind: internal
+      - id: r.Run
+        kind: value
+      - id: f.StringValue
+        kind: value
+      - id: say
+        kind: internal
+    steps:
+      - bind: r
+        eval: g.of(a)
+        to: g.of
+      - opt:
+          do:
+            - return: phrase{}
+          init:
+            bind: _, ok
+            eval: r.(resilience.BreakerState)
+          when: ok
+      - bind: knob
+        eval: "\"\""
+      - bind: err
+        eval: r.Run(context.Background(), func(context.Context) error { return nil })
+        to: r.Run
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: knob
+                    to: f.StringValue
+                    value: f.StringValue()
+                when: f.Key() == "knob"
+          key: _
+          range: errs.FieldsOf(err)
+          value: f
+      - return: say("policy.breaker-refused", "port", port, "knob", knob)
+        to: say
+  - of: (*App).breakerChanged
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).breakerChanged
+        kind: self
+      - id: logger
+        kind: package
+      - id: a.reportBreaker
+        kind: internal
+    steps:
+      - bind: attrs
+        eval: "[]logger.Attr{logger.String(\"node\", port), logger.String(\"from\", from.String()), logger.String(\"to\", to.String())}"
+      - alt:
+          - do:
+              - eval: "logger.Warn(context.Background(), a.log, \"the breaker of \"+port+\" opened: its calls fail at once\", attrs...)"
+                to: logger
+            when: to == resilience.BreakerOpen
+          - do:
+              - eval: logger.Info(context.Background(), a.log, "the breaker of "+port+" is "+to.String(), attrs...)
+                to: logger
+            else: true
+      - eval: a.reportBreaker(port, to)
+        to: a.reportBreaker
+  - of: breakerReady
+    participants:
+      - id: caller
+        kind: actor
+      - id: breakerReady
+        kind: self
+      - id: st.State
+        kind: value
+      - id: Unavailable
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: st == nil
+      - switch:
+          cases:
+            - case: s.Isolated
+              do:
+                - return: "Unavailable(\"the breaker of \" + port + \" is isolated: breaker reset \" + port + \" closes it\")"
+                  to: Unavailable
+            - case: s.Phase != resilience.BreakerClosed
+              do:
+                - return: Unavailable("the breaker of " + port + " is " + s.Phase.String())
+                  to: Unavailable
+          init:
+            bind: s
+            eval: st.State()
+            to: st.State
+      - return: nil
+  - of: checkRatio
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkRatio
+        kind: self
+      - id: judged
+        kind: internal
+    steps:
+      - return: judged(func(f float64) bool { return !math.IsNaN(f) && f > 0 && f <= 1 }, func() phrase { return say("policy.ratio") })
+        to: judged
+  - of: (*App).breakers
+    steps:
+      - var:
+          name: out
+          type: "[]breakerAt"
+      - loop:
+          do:
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - set: out
+                          value: "append(out, breakerAt{port: gp.id, mark: breakerMark(gp.svc.name, gp.name), b: b})"
+                      init:
+                        bind: b, ok
+                        eval: l.(portBreaker)
+                      when: ok
+                key: _
+                range: gp.guards.layers
+                value: l
+          key: _
+          range: a.guardedPorts()
+          value: gp
+      - return: out
+  - of: breakerMark
+    participants:
+      - id: caller
+        kind: actor
+      - id: breakerMark
+        kind: self
+      - id: path
+        kind: stdlib
+    steps:
+      - return: path.Join(service, "ports", name+".isolated")
+        to: path
+  - of: (*App).addBreakers
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).addBreakers
+        kind: self
+      - id: a.breakers
+        kind: internal
+      - id: bs[0].b.attach
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: bs[0].b.attach(a, bs, cli)
+              to: bs[0].b.attach
+          init:
+            bind: bs
+            eval: a.breakers()
+            to: a.breakers
+          when: len(bs) > 0
+      - return: nil
+  - of: (*breakerGuard).attach
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*breakerGuard).attach
+        kind: self
+      - id: m.apply
+        kind: internal
+      - id: breakerReady
+        kind: internal
+      - id: a.health.AddReadiness
+        kind: value
+      - id: a.component
+        kind: internal
+    steps:
+      - bind: m
+        eval: "&breakerMarks{a: a, breakers: bs, applied: map[string]bool{}}"
+      - eval: m.apply()
+        to: m.apply
+      - opt:
+          do:
+            - return: nil
+          when: cli
+      - loop:
+          do:
+            - bind: check
+              eval:
+                closure:
+                  params: context.Context
+                  results: error
+                  steps:
+                    - return: breakerReady(b.port, b.b.state(a))
+                      to: breakerReady
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: "a.health.AddReadiness(health.ReadinessCheck{Name: \"breaker:\" + b.port, NonCritical: true, Check: check})"
+                  to: a.health.AddReadiness
+                when: err != nil
+          key: _
+          range: bs
+          value: b
+      - opt:
+          do:
+            - return: nil
+          when: a.data == nil
+      - return: a.component("breakers", "", m.start, func(context.Context) error { return nil })
+        to: a.component
+  - of: (*breakerMarks).apply
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*breakerMarks).apply
+        kind: self
+      - id: fs
+        kind: stdlib
+      - id: st.Isolate
+        kind: value
+      - id: logger
+        kind: package
+      - id: st.Reset
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: m.a.data == nil
+      - loop:
+          do:
+            - bind: _, err
+              eval: fs.Stat(m.a.data, b.mark)
+              to: fs
+            - opt:
+                do:
+                  - continue: true
+                when: err != nil && !errors.Is(err, fs.ErrNotExist)
+            - bind: marked, st
+              eval: err == nil, b.b.state(m.a)
+            - opt:
+                do:
+                  - continue: true
+                when: st == nil || marked == m.applied[b.port]
+            - set: m.applied[b.port]
+              value: marked
+            - opt:
+                do:
+                  - eval: st.Isolate()
+                    to: st.Isolate
+                  - eval: logger.Warn(context.Background(), m.a.log, "an operator isolated the breaker of "+b.port, logger.String("node", b.port))
+                    to: logger
+                  - continue: true
+                when: marked
+            - eval: st.Reset()
+              to: st.Reset
+            - eval: logger.Info(context.Background(), m.a.log, "an operator reset the breaker of "+b.port, logger.String("node", b.port))
+              to: logger
+          key: _
+          range: m.breakers
+          value: b
+  - of: (*breakerMarks).start
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*breakerMarks).start
+        kind: self
+      - id: m.a.goTracked
+        kind: internal
+      - id: failure
+        kind: internal
+    steps:
+      - bind: ok
+        eval: |-
+          m.a.goTracked(func() {
+          		t := m.a.clock.NewTicker(breakerPoll)
+          		defer t.Stop()
+          		for {
+          			select {
+          			case <-m.a.baseCtx.Done():
+          				return
+          			case _, open := <-t.C():
+          				if !open {
+          					return
+          				}
+          				m.apply()
+          			}
+          		}
+          	})
+        to: m.a.goTracked
+      - opt:
+          do:
+            - return: failure(CodeAppRunning, "APP_STOPPING", "the app is stopping", nil)
+              to: failure
+          when: "!ok"
+      - return: nil
+  - of: Idempotent
+    steps:
+      - return: portPolicyOption(func(g *portGuards) { g.idempotent = true })
+  - of: Hedge
+    steps:
+      - return: "portPolicyOption(func(g *portGuards) { g.add(&hedgeGuard{delay: delay, inFlight: inFlight, hedges: 1}) })"
+  - of: (*hedgeGuard).rank
+    steps:
+      - return: rankHedge
+  - of: (*hedgeGuard).declare
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*hedgeGuard).declare
+        kind: self
+      - id: declarePolicySetting
+        kind: internal
+    steps:
+      - set: g.delayFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobHedgeDelay, g.delay, checkPositive())
+      - set: g.inFlightFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobHedgeInFlight, g.inFlight, checkAtLeastOne())
+      - set: g.hedgesFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobHedgeMax, g.hedges, checkAtLeastOne())
+  - of: (*hedgeGuard).mechanic
+    steps:
+      - bind: delay, inFlight, hedges
+        eval: knobValue(g.delayFor, g.delay), knobValue(g.inFlightFor, g.inFlight), knobValue(g.hedgesFor, g.hedges)
+      - return: |-
+          model.Mechanic{
+          		Kind: "hedge", Label: fmt.Sprintf("after %s, %d in flight", delay, inFlight), Package: resiliencePackage,
+          		Config: map[string]string{"delay": delay.String(), "inFlight": strconv.Itoa(inFlight), "max": strconv.Itoa(hedges)},
+          	}
+  - of: (*hedgeGuard).runner
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*hedgeGuard).runner
+        kind: self
+      - id: g.built.get
+        kind: internal
+    steps:
+      - return: |-
+          g.built.get(c.a, func(clk clock.Timed) resilience.Runner {
+          		return resilience.NewHedge(resilience.HedgeConfig{
+          			Idempotent: true, Delay: knobIn(c.a, g.delayFor, g.delay), MaxHedges: knobIn(c.a, g.hedgesFor, g.hedges),
+          			MaxInFlight: knobIn(c.a, g.inFlightFor, g.inFlight), Clock: clk, Budget: c.budget,
+          		})
+          	})
+        to: g.built.get
+  - of: (*hedgeGuard).started
+    steps:
+      - return: phrase{}
+  - of: Throttle
+    steps:
+      - return: |-
+          portPolicyOption(func(g *portGuards) {
+          		g.add(&policyLayer{p: policy{guard: &throttleGuard{k: k}}, place: rankThrottle})
+          	})
+  - of: (*throttleGuard).declare
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*throttleGuard).declare
+        kind: self
+      - id: declarePolicySetting
+        kind: internal
+    steps:
+      - set: g.kFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobThrottleK, g.k, checkThrottleK())
+  - of: (*throttleGuard).mechanic
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*throttleGuard).mechanic
+        kind: self
+      - id: formatRate
+        kind: internal
+    steps:
+      - bind: k
+        eval: formatRate(knobValue(g.kFor, g.k))
+        to: formatRate
+      - return: "model.Mechanic{Kind: \"throttle\", Label: \"k \" + k, Package: resiliencePackage, Config: map[string]string{\"k\": k}}"
+  - of: (*throttleGuard).runner
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*throttleGuard).runner
+        kind: self
+      - id: resilience
+        kind: package
+    steps:
+      - return: |-
+          resilience.NewAdaptiveThrottle(resilience.AdaptiveThrottleConfig{
+          		K: knobValue(g.kFor, g.k), Rejected: transient, Clock: clk, Random: g.random,
+          	})
+        to: resilience
+  - of: checkThrottleK
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkThrottleK
+        kind: self
+      - id: judged
+        kind: internal
+    steps:
+      - return: |-
+          judged(func(f float64) bool { return !math.IsNaN(f) && !math.IsInf(f, 0) && f >= minThrottleK },
+          		func() phrase { return say("policy.throttle-k") })
+        to: judged
+  - of: portPolicyOption.portPolicyConfigure
+    steps:
+      - eval: f(g)
+  - of: (*PortService).Guard
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*PortService).Guard
+        kind: self
+      - id: p.svc.problemSaid
+        kind: internal
+      - id: o.portPolicyConfigure
+        kind: internal
+      - id: g.settle
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - eval: p.svc.problemSaid(p.decl, p.id, say("port.guard-twice", "port", p.id))
+                    to: p.svc.problemSaid
+                when: p.svc != nil
+            - return: p
+          when: p.guards != nil
+      - bind: g
+        eval: "&portGuards{}"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: o.portPolicyConfigure(g)
+                    to: o.portPolicyConfigure
+                when: o != nil
+          key: _
+          range: opts
+          value: o
+      - eval: g.settle(p.svc, &p.nodeBase)
+        to: g.settle
+      - set: p.guards
+        value: g
+      - return: p
+  - of: (*portGuards).add
+    steps:
+      - set: g.layers
+        value: append(g.layers, l)
+  - of: (*portGuards).settle
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*portGuards).settle
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: g.share
+        kind: internal
+      - id: g.judge
+        kind: internal
+      - id: g.declare
+        kind: internal
+    steps:
+      - eval: slices.SortStableFunc(g.layers, func(x, y portLayer) int { return cmp.Compare(x.rank(), y.rank()) })
+        to: slices
+      - eval: g.share()
+        to: g.share
+      - opt:
+          do:
+            - return: ""
+          when: svc == nil
+      - eval: g.judge(svc, n)
+        to: g.judge
+      - eval: g.declare(svc, n)
+        to: g.declare
+  - of: (*portGuards).share
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!g.has(rankRetry) && !g.has(rankHedge)"
+      - set: g.budget
+        value: "&budgetGuard{tokens: defaultBudgetTokens, ratio: defaultBudgetRatio}"
+      - opt:
+          do:
+            - set: g.budget
+              value: g.budgets[0]
+          when: len(g.budgets) > 0
+  - of: (*portGuards).judge
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*portGuards).judge
+        kind: self
+      - id: svc.problemSaid
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: svc.problemSaid(n.decl, n.id, say("policy.budget-alone", "port", n.id))
+              to: svc.problemSaid
+          when: len(g.budgets) > 0 && g.budget == nil
+      - opt:
+          do:
+            - eval: svc.problemSaid(n.decl, n.id, say("policy.hedge-idempotent", "port", n.id))
+              to: svc.problemSaid
+          when: g.has(rankHedge) && !g.idempotent
+  - of: (*portGuards).declare
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*portGuards).declare
+        kind: self
+      - id: g.budget.declare
+        kind: internal
+      - id: b.declare
+        kind: internal
+      - id: l.declare
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: g.budget.declare(svc, n)
+              to: g.budget.declare
+            - loop:
+                do:
+                  - eval: b.declare(svc, n)
+                    to: b.declare
+                key: _
+                range: g.budgets[min(1, len(g.budgets)):]
+                value: b
+          when: g.budget != nil
+      - loop:
+          do:
+            - eval: l.declare(svc, n)
+              to: l.declare
+          key: _
+          range: g.layers
+          value: l
+  - of: (*portGuards).has
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*portGuards).has
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.ContainsFunc(g.layers, func(l portLayer) bool { return l.rank() == r })
+        to: slices
+  - of: (*portGuards).drawn
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: g == nil
+      - var:
+          name: out
+          type: "[]model.Mechanic"
+      - opt:
+          do:
+            - set: out
+              value: append(out, g.budget.mechanic())
+          when: g.budget != nil
+      - loop:
+          do:
+            - set: out
+              value: append(out, l.mechanic())
+          key: _
+          range: g.layers
+          value: l
+      - return: out
+  - of: (*portGuards).run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*portGuards).run
+        kind: self
+      - id: g.budget.of
+        kind: internal
+      - id: r.Run
+        kind: value
+    steps:
+      - opt:
+          do:
+            - set: c.budget
+              to: g.budget.of
+              value: g.budget.of(c.a)
+          when: g.budget != nil
+      - bind: run
+        eval: attempt
+      - loop:
+          do:
+            - bind: r, inner
+              eval: l.runner(c), run
+            - set: run
+              value:
+                closure:
+                  params: ctx context.Context
+                  results: error
+                  steps:
+                    - return: r.Run(ctx, inner)
+                      to: r.Run
+          key: _
+          range: slices.Backward(g.layers)
+          value: l
+      - return: run(ctx)
+  - of: (*PortService).guarded
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*PortService).guarded
+        kind: self
+      - id: p.guards.run
+        kind: internal
+    steps:
+      - leaf: a const or type declaration in a body
+        stmt: |-
+          var (
+          		mu   sync.Mutex
+          		won  bool
+          		resp Resp
+          	)
+      - bind: err
+        eval: |-
+          p.guards.run(ctx, &portCall{a: a, sp: sp}, func(ctx context.Context) error {
+          		r, err := p.run(ctx, a, req)
+          		if err == nil {
+          			mu.Lock()
+          			if !won {
+          				won, resp = true, r
+          			}
+          			mu.Unlock()
+          		}
+          		return err
+          	})
+        to: p.guards.run
+      - opt:
+          do:
+            - var:
+                name: zero
+                type: Resp
+            - return: zero, err
+          when: err != nil
+      - lock:
+          mutex: mu
+      - return: resp, nil
+  - of: (*portCall).retried
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*portCall).retried
+        kind: self
+      - id: describe
+        kind: internal
+      - id: c.sp.attr
+        kind: internal
+      - id: c.sp.sdk.AddEvent
+        kind: value
+      - id: c.a.reportRetry
+        kind: internal
+    steps:
+      - bind: _, body
+        eval: describe(err)
+        to: describe
+      - eval: c.sp.attr("retries", strconv.Itoa(attempt))
+        to: c.sp.attr
+      - opt:
+          do:
+            - eval: c.sp.sdk.AddEvent("retry", trace.Int64("attempt", int64(attempt)), trace.String("delay", delay.String()), trace.String("code", body.Code))
+              to: c.sp.sdk.AddEvent
+          when: c.sp.sdk != nil
+      - eval: c.a.reportRetry(c.sp, err, delay)
+        to: c.a.reportRetry
+  - of: transient
+    participants:
+      - id: caller
+        kind: actor
+      - id: transient
+        kind: self
+      - id: describe
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: err == nil || errors.Is(err, context.Canceled) || policyRefusal(err)
+      - bind: status, _
+        eval: describe(err)
+        to: describe
+      - return: status >= http.StatusInternalServerError || status == http.StatusRequestTimeout || status == http.StatusTooManyRequests
+  - of: policyRefusal
+    steps:
+      - return: |-
+          errors.Is(err, resilience.CircuitOpen) || errors.Is(err, resilience.Throttled) ||
+          		errors.Is(err, resilience.RetryExhausted) || errors.Is(err, resilience.RetryBudgetExceeded) ||
+          		errors.Is(err, resilience.PolicyMisconfigured)
+  - of: (*App).portPolicyProblems
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).portPolicyProblems
+        kind: self
+      - id: l.started
+        kind: internal
+    steps:
+      - var:
+          name: out
+          type: "[]model.Diagnostic"
+      - loop:
+          do:
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - set: out
+                          value: append(out, diagnosticOf("error", gp.id, a.source(&gp.decl), p))
+                      init:
+                        bind: p
+                        eval: l.started(a, gp.id)
+                        to: l.started
+                      when: "!p.empty()"
+                key: _
+                range: gp.guards.layers
+                value: l
+          key: _
+          range: a.guardedPorts()
+          value: gp
+      - return: out
+  - of: (*App).guardedPorts
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).guardedPorts
+        kind: self
+      - id: svc.snapshot
+        kind: internal
+      - id: n.base
+        kind: internal
+    steps:
+      - var:
+          name: out
+          type: "[]guardedPort"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: svc == nil
+            - bind: nodes, _
+              eval: svc.snapshot()
+              to: svc.snapshot
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - bind: b
+                          eval: n.base()
+                          to: n.base
+                        - set: out
+                          value: "append(out, guardedPort{id: b.id, decl: b.decl, svc: svc, name: b.name, guards: g.portGuards()})"
+                      init:
+                        bind: g, ok
+                        eval: n.(interface{ portGuards() *portGuards })
+                      when: ok && g.portGuards() != nil
+                key: _
+                range: nodes
+                value: "n"
+          key: _
+          range: a.services
+          value: svc
+      - return: out
+  - of: (*PortService).portGuards
+    steps:
+      - return: p.guards
+  - of: (*perStart).get
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*perStart).get
+        kind: self
+      - id: startOf
+        kind: internal
+      - id: s.built.Load
+        kind: value
+    steps:
+      - bind: values, clk
+        eval: startOf(a)
+        to: startOf
+      - loop:
+          do:
+            - bind: b
+              eval: s.built.Load()
+              to: s.built.Load
+            - opt:
+                do:
+                  - return: b.v
+                when: b != nil && b.values == values
+            - bind: next
+              eval: "&startValue[T]{values: values, v: build(clk)}"
+            - opt:
+                do:
+                  - return: next.v
+                when: s.built.CompareAndSwap(b, next)
+          forever: true
+  - of: (*policyLayer).rank
+    steps:
+      - return: l.place
+  - of: (*policyLayer).declare
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*policyLayer).declare
+        kind: self
+      - id: l.p.guard.declare
+        kind: internal
+    steps:
+      - eval: l.p.guard.declare(svc, n)
+        to: l.p.guard.declare
+  - of: (*policyLayer).mechanic
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*policyLayer).mechanic
+        kind: self
+      - id: l.p.guard.mechanic
+        kind: internal
+    steps:
+      - return: l.p.guard.mechanic()
+        to: l.p.guard.mechanic
+  - of: (*policyLayer).runner
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*policyLayer).runner
+        kind: self
+      - id: l.p.runnerFor
+        kind: internal
+    steps:
+      - return: l.p.runnerFor(c.a)
+        to: l.p.runnerFor
+  - of: (*policyLayer).started
+    steps:
+      - return: phrase{}
+  - of: timeoutOption.guard
+    steps:
+      - return: "&timeoutGuard{after: time.Duration(d)}"
+  - of: timeoutOption.call
+    steps:
+      - set: o.policies
+        value: "append(o.policies, &policy{guard: d.guard()})"
+  - of: timeoutOption.endpointConfigure
+    participants:
+      - id: caller
+        kind: actor
+      - id: timeoutOption.endpointConfigure
+        kind: self
+      - id: d.call
+        kind: internal
+    steps:
+      - eval: d.call(&o.callOptions)
+        to: d.call
+  - of: timeoutOption.exposeConfigure
+    participants:
+      - id: caller
+        kind: actor
+      - id: timeoutOption.exposeConfigure
+        kind: self
+      - id: d.call
+        kind: internal
+    steps:
+      - eval: d.call(&o.callOptions)
+        to: d.call
+  - of: timeoutOption.commandConfigure
+    participants:
+      - id: caller
+        kind: actor
+      - id: timeoutOption.commandConfigure
+        kind: self
+      - id: d.call
+        kind: internal
+    steps:
+      - eval: d.call(&o.callOptions)
+        to: d.call
+  - of: timeoutOption.queryConfigure
+    participants:
+      - id: caller
+        kind: actor
+      - id: timeoutOption.queryConfigure
+        kind: self
+      - id: d.call
+        kind: internal
+    steps:
+      - eval: d.call(&o.callOptions)
+        to: d.call
+  - of: timeoutOption.portPolicyConfigure
+    participants:
+      - id: caller
+        kind: actor
+      - id: timeoutOption.portPolicyConfigure
+        kind: self
+      - id: g.add
+        kind: internal
+    steps:
+      - eval: "g.add(&policyLayer{p: policy{guard: d.guard()}, place: rankTimeout})"
+        to: g.add
+  - of: knobIn
+    participants:
+      - id: caller
+        kind: actor
+      - id: knobIn
+        kind: self
+      - id: resolvedSetting
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: st == nil
+              do:
+                - return: def
+            - case: a == nil
+              do:
+                - return: st.def
+      - return: resolvedSetting(a, st)
+        to: resolvedSetting
+  - of: retryOption.retryConfigure
+    steps:
+      - eval: f(g)
+  - of: Retry
+    steps:
+      - return: |-
+          portPolicyOption(func(g *portGuards) {
+          		r := &retryGuard{attempts: maxAttempts, delay: delay, maxDelay: max(defaultRetryMaxDelay, delay), honour: true}
+          		for _, o := range opts {
+          			if o != nil {
+          				o.retryConfigure(r)
+          			}
+          		}
+          		g.add(r)
+          	})
+  - of: RetryMaxDelay
+    steps:
+      - return: retryOption(func(g *retryGuard) { g.maxDelay = d })
+  - of: NoRetryAfter
+    steps:
+      - return: retryOption(func(g *retryGuard) { g.honour = false })
+  - of: (*retryGuard).rank
+    steps:
+      - return: rankRetry
+  - of: (*retryGuard).declare
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*retryGuard).declare
+        kind: self
+      - id: declarePolicySetting
+        kind: internal
+    steps:
+      - set: g.attemptsFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobRetryAttempts, g.attempts, checkAtLeastOne())
+      - set: g.delayFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobRetryDelay, g.delay, checkPositive())
+      - set: g.maxDelayFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobRetryMaxDelay, g.maxDelay, checkPositive())
+      - set: g.jitterFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobRetryJitter, jitterFull, checkJitter())
+      - set: g.afterFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobRetryAfter, g.honour, nil)
+  - of: (*retryGuard).mechanic
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*retryGuard).mechanic
+        kind: self
+      - id: knobValue
+        kind: internal
+    steps:
+      - bind: attempts, delay
+        eval: knobValue(g.attemptsFor, g.attempts), knobValue(g.delayFor, g.delay)
+      - bind: maxDelay, jitter
+        eval: knobValue(g.maxDelayFor, g.maxDelay), knobValue(g.jitterFor, jitterFull)
+      - bind: honour
+        eval: knobValue(g.afterFor, g.honour)
+        to: knobValue
+      - bind: m
+        eval: |-
+          model.Mechanic{
+          		Kind: "retry", Label: fmt.Sprintf("%d attempts from %s", attempts, delay), Package: resiliencePackage,
+          		Config: map[string]string{"attempts": strconv.Itoa(attempts), "delay": delay.String(), "maxDelay": maxDelay.String()},
+          	}
+      - set: m.Config["jitter"], m.Config["retryAfter"]
+        value: jitter, strconv.FormatBool(honour)
+      - return: m
+  - of: (*retryGuard).runner
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*retryGuard).runner
+        kind: self
+      - id: g.config.get
+        kind: internal
+      - id: resilience
+        kind: package
+    steps:
+      - bind: cfg
+        eval: g.config.get(c.a, func(clk clock.Timed) resilience.RetryConfig { return g.configOf(c.a, clk) })
+        to: g.config.get
+      - set: cfg.Budget, cfg.OnRetry
+        value: c.budget, c.retried
+      - return: resilience.NewRetry(cfg)
+        to: resilience
+  - of: (*retryGuard).configOf
+    steps:
+      - bind: cfg
+        eval: |-
+          resilience.RetryConfig{
+          		MaxAttempts: knobIn(a, g.attemptsFor, g.attempts), BaseDelay: knobIn(a, g.delayFor, g.delay),
+          		MaxDelay: knobIn(a, g.maxDelayFor, g.maxDelay), Retryable: transient, Clock: clk,
+          	}
+      - switch:
+          cases:
+            - case: jitterFull
+              do:
+                - set: cfg.JitterMode
+                  value: resilience.JitterFull
+            - case: jitterDecorrelated
+              do:
+                - set: cfg.JitterMode
+                  value: resilience.JitterDecorrelated
+          "on": knobIn(a, g.jitterFor, jitterFull)
+      - opt:
+          do:
+            - set: cfg.Delay
+              value: failureDelay
+          when: knobIn(a, g.afterFor, g.honour)
+      - return: cfg
+  - of: failureDelay
+    participants:
+      - id: caller
+        kind: actor
+      - id: failureDelay
+        kind: self
+      - id: resilience
+        kind: package
+    steps:
+      - return: resilience.RetryAfter(err)
+        to: resilience
+  - of: (*retryGuard).started
+    steps:
+      - return: phrase{}
+  - of: Budget
+    steps:
+      - return: |-
+          portPolicyOption(func(g *portGuards) {
+          		g.budgets = append(g.budgets, &budgetGuard{tokens: maxTokens, ratio: tokenRatio})
+          	})
+  - of: (*budgetGuard).declare
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*budgetGuard).declare
+        kind: self
+      - id: declarePolicySetting
+        kind: internal
+    steps:
+      - set: b.tokensFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobBudgetTokens, b.tokens, checkAtLeastOne())
+      - set: b.ratioFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobBudgetRatio, b.ratio, checkBudgetRatio())
+  - of: (*budgetGuard).mechanic
+    steps:
+      - bind: tokens, ratio
+        eval: knobValue(b.tokensFor, b.tokens), formatRate(knobValue(b.ratioFor, b.ratio))
+      - return: |-
+          model.Mechanic{
+          		Kind: "budget", Label: fmt.Sprintf("%d tokens, %s a success", tokens, ratio), Package: resiliencePackage,
+          		Config: map[string]string{"tokens": strconv.Itoa(tokens), "ratio": ratio},
+          	}
+  - of: (*budgetGuard).of
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*budgetGuard).of
+        kind: self
+      - id: b.built.get
+        kind: internal
+    steps:
+      - return: |-
+          b.built.get(a, func(clock.Timed) resilience.RetryBudget {
+          		return resilience.NewRetryBudget(resilience.RetryBudgetConfig{
+          			MaxTokens: knobIn(a, b.tokensFor, b.tokens), TokenRatio: knobIn(a, b.ratioFor, b.ratio),
+          		})
+          	})
+        to: b.built.get
+  - of: checkJitter
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkJitter
+        kind: self
+      - id: judged
+        kind: internal
+    steps:
+      - return: |-
+          judged(func(s string) bool { return s == jitterFull || s == jitterDecorrelated || s == jitterNone },
+          		func() phrase { return say("policy.jitter") })
+        to: judged
+  - of: checkBudgetRatio
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkBudgetRatio
+        kind: self
+      - id: judged
+        kind: internal
+    steps:
+      - return: |-
+          judged(func(f float64) bool { return !math.IsNaN(f) && !math.IsInf(f, 0) && f >= minBudgetRatio },
+          		func() phrase { return say("policy.budget-ratio") })
+        to: judged
   - of: (*privacyRun).formerJournal
     steps:
       - return: p.seq > 0 && p.lastRefs != journalRefLabels
@@ -53411,6 +55056,84 @@ sequences:
             eval: a.tel.Load()
             to: a.tel.Load
           when: ex != nil
+  - of: (*App).reportRetry
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).reportRetry
+        kind: self
+      - id: a.tel.Load
+        kind: value
+      - id: errs
+        kind: package
+      - id: sp.sdk.SpanContext
+        kind: value
+      - id: ex.Emit
+        kind: value
+    steps:
+      - bind: ex
+        eval: a.tel.Load()
+        to: a.tel.Load
+      - opt:
+          do:
+            - return: ""
+          when: ex == nil
+      - bind: ev
+        eval: |-
+          telemetry.Event{
+          		Kind: telemetry.KindRetry, Op: telemetry.OpCall, Outcome: telemetry.OutcomeError,
+          		Node: ex.Ref(sp.s.Node), From: ex.Ref(sp.s.From), Start: a.clock.Now().UnixNano(), Duration: int64(delay),
+          	}
+      - opt:
+          do:
+            - set: ev.Code
+              value: uint32(code)
+          init:
+            bind: code, ok
+            eval: errs.CodeOf(err)
+            to: errs
+          when: ok
+      - opt:
+          do:
+            - bind: sc
+              eval: sp.sdk.SpanContext()
+              to: sp.sdk.SpanContext
+            - set: ev.TraceID, ev.SpanID
+              value: sc.TraceID, sc.SpanID
+          when: sp.sdk != nil
+      - eval: ex.Emit(&ev)
+        to: ex.Emit
+  - of: (*App).reportBreaker
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).reportBreaker
+        kind: self
+      - id: a.tel.Load
+        kind: value
+      - id: ex.Emit
+        kind: value
+    steps:
+      - bind: ex
+        eval: a.tel.Load()
+        to: a.tel.Load
+      - opt:
+          do:
+            - return: ""
+          when: ex == nil
+      - bind: ev
+        eval: |-
+          telemetry.Event{
+          		Kind: telemetry.KindBreaker, Op: telemetry.OpOf(to.String()), Outcome: telemetry.OutcomeOK,
+          		Node: ex.Ref(port), Start: a.clock.Now().UnixNano(),
+          	}
+      - opt:
+          do:
+            - set: ev.Outcome
+              value: telemetry.OutcomeError
+          when: to == resilience.BreakerOpen
+      - eval: ex.Emit(&ev)
+        to: ex.Emit
   - of: (*Service).Topic
     participants:
       - id: caller

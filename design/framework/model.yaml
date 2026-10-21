@@ -5578,6 +5578,19 @@ packages:
               name: Via
               tag: json:"via,omitempty"
               type: string
+            - doc: |-
+                Pipeline are the policies around the port's calls (Port.Guard), the
+                outermost first — retry, hedge, breaker, throttle, timeout —, its
+                retry budget before them, with the values the app runs with.
+              name: Pipeline
+              tag: json:"pipeline,omitempty"
+              type: "[]MechanicMessage"
+            - doc: |-
+                Idempotent says the port's operation may run more than once for one
+                call (app.Idempotent): what a hedge needs.
+              name: Idempotent
+              tag: json:"idempotent,omitempty"
+              type: bool
       - doc: |-
           CommandSpec describes a command: an operation that changes something.
           It carries its input and result schemas, its handler, its queue and who may

@@ -47,7 +47,7 @@ Two packages, one API:
 | `node_kind.go`, `edge_kind.go`, `event_type.go` | the closed sets `NodeKind`, `EdgeKind`, `EventType`: strings, each marked `//ktn:wire-format` |
 | `id.go` | the ID grammar: `SegmentPattern`, `NamePattern`, `RoutePattern`, `ContractPattern`, `IDPattern` (one anchored expression, the one a JSON Schema publishes), `ID` + `ParseID` + `String`, `ValidSegment`/`ValidName`/`ValidContract`, `BinaryID`/`RoleID`/`LibraryID` |
 | `id_grammar.go` | the patterns' words matched by hand (`wordOf`, `validRoute`), never compiled: RE2 expands `{0,62}` into as many states, and the four compiled patterns cost 0.6 ms and 2 500 allocations at every start of every product, which declares its names before `main`; `TestTheMatchersAgreeWithThePatterns` holds them to the patterns |
-| `node_info.go` | kind-specific details (`SecretInfo`, `PortInfo`, `EndpointInfo`, `StoreInfo`, `CommandInfo`, `QueryInfo`, …), `Mechanic`, `Schema`, `Field` |
+| `node_info.go` | kind-specific details (`SecretInfo`, `PortInfo` — its `Pipeline` of policies and `Idempotent` since issue #483, which make it no longer comparable with `==` —, `EndpointInfo`, `StoreInfo`, `CommandInfo`, `QueryInfo`, …), `Mechanic`, `Schema`, `Field` |
 | `node_process.go` | what a product is made of beyond its services: the `Profile*` constants (`server`, `cli`, `daemon`), the `Network*` constants, `BinaryInfo`, `RoleInfo`, `CLIInfo`, `ListenerInfo`, `LibraryInfo`, `PresentationInfo` |
 | `code.go` | a node's code level, C4's fourth (`CodeInfo`, `CodeFunc`, `CodeStep`s under `CodeBlock`s) |
 | `devtools.go` | the mail statuses, why a dead mail was given up (`MailRejected`, `MailExpired`, `MailExhausted` — `MailSummary.GivenUp`, issue #489), `MailMessage`, `MockReplace` |
