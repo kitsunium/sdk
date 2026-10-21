@@ -492,6 +492,13 @@ packages:
           to contradict — and it is why the schema arrived as a second entry point
           rather than as a widened signature nobody could opt out of. A caller who
           wants the typo caught declares a schema and calls [LoadSchema].
+
+          A key is matched to a field the way encoding/json matches it, so "Port"
+          and "PORT" fill a field tagged "port": every layer is rewritten to the
+          spelling T declares before the merge, and later wins whatever case each
+          layer wrote. The keys of a map are data and keep their case, and two
+          fields whose names differ only by case are told apart by the exact
+          spelling, as the decoder tells them apart.
         in:
           - name: target
             type: "*T"
@@ -799,6 +806,10 @@ packages:
                 configuration file shared by two services, or an unprefixed EnvSource,
                 which hands over every variable in the process environment. Those are
                 facts about the SOURCE, and the opt-out is where the author says so.
+
+                A key that differs from one of T's only by case is not unknown: the
+                decoder fills that field from it, and the load rewrites it to T's
+                spelling before the check.
               name: AllowUnknownKeys
               type: bool
             - doc: |-
