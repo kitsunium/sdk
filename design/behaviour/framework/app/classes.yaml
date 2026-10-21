@@ -669,6 +669,9 @@ files:
       - MailerOption
       - From
       - MailAttempts
+      - Bounce
+      - OnBounce
+      - MailMaxAge
     name: mailer.go
   - decls:
       - Module
@@ -998,6 +1001,12 @@ functions:
     results: MailerOption
   - name: MailAttempts
     params: n int
+    results: MailerOption
+  - name: OnBounce
+    params: fn func(ctx context.Context, b *Bounce)
+    results: MailerOption
+  - name: MailMaxAge
+    params: d time.Duration
     results: MailerOption
   - name: NewModule
     params: name, doc string, parts ...ModulePart
@@ -1554,6 +1563,18 @@ types:
     kind: alias
     name: MailerOption
     underlying: iapp.MailerConfigurer
+  - alias: true
+    doc: |-
+      Bounce is a mail its mailer gave up on: the receiving server refused it for
+      good, it outlived its mailer's max-age, or its last attempt failed —
+      GivenUp says which. It stays in the outbox as a dead letter.
+
+      Reply is the receiving server's own answer: the hook may read it, log it or
+      act on it, but the framework never puts it in a message it shows — the
+      Studio's mailbox keeps its code alone.
+    kind: alias
+    name: Bounce
+    underlying: iapp.BounceEvent
   - alias: true
     doc: |-
       Module is a set of services a product mounts as one: [NewModule] declares

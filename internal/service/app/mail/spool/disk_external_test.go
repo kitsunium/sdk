@@ -140,3 +140,25 @@ func TestARecordThatIsNotAMailIsDeadLettered(t *testing.T) {
 		t.Fatalf("the dead letter %+v", letters[0])
 	}
 }
+
+// TestARecordThatIsNotAMailIsNeverRetried pins the record's DoNotRetry: no
+// attempt can decode it, so a spool with attempts to spare dead-letters it
+// at its first delivery instead of retrying it until MaxAttempts (#489).
+func TestARecordThatIsNotAMailIsNeverRetried(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	s := requireDiskSpool(t, spool.Config{Transport: svcmail.NewCapture(0), Dir: dir, MaxAttempts: 5})
+	intruder, err := svcqueue.NewFile(svcqueue.FileConfig{Dir: dir, Policy: corequeue.PolicyValue{VisibilityTimeout: time.Minute, MaxDeliveries: 5}})
+	if err != nil {
+		t.Fatalf("NewFile() = %v", err)
+	}
+	published, err := intruder.Publish(context.Background(), []byte("not a spooled mail"))
+	if err != nil {
+		t.Fatalf("Publish() = %v", err)
+	}
+	run(t, s)
+	letters := eventuallyDeadLetters(t, s, 1)
+	if letters[0].QueueID != published.ID || letters[0].Reason != "MESSAGE_UNDECODABLE" || letters[0].Attempts != 1 {
+		t.Fatalf("the dead letter %+v, want MESSAGE_UNDECODABLE after one delivery", letters[0])
+	}
+}

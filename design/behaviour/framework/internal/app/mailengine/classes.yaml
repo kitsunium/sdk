@@ -40,6 +40,8 @@ files:
       - backoffOf
       - deferrerOf
       - observeOf
+      - givenUpOf
+      - replyOf
       - events
       - eventOf
       - attemptFrom
@@ -145,6 +147,20 @@ functions:
     name: observeOf
     params: fn func(e *plug.MailEventValue)
     results: func(mailspool.Event)
+  - doc: |-
+      givenUpOf is why the spool gave up a mail that failed with err: the code
+      the spool adds to a dead letter's trail when it gives it up early — a
+      permanent refusal, a mail too old —, else its last attempt. errs.HasCode
+      reads the trail, where errors.Is would see only the origin.
+    name: givenUpOf
+    params: err error
+    results: plug.MailGiveUp
+  - doc: |-
+      replyOf is the SMTP reply err carries, which the SDK's SMTP transport
+      keeps reachable through errors.As; nil for none.
+    name: replyOf
+    params: err error
+    results: "*textproto.Error"
   - doc: eventOf is the spool's event kind k as kit's core reads it.
     name: eventOf
     params: k mailspool.EventKind
@@ -167,6 +183,7 @@ imports:
   sql: github.com/kitsunium/sdk/pkg/v1/data/sql
   storeengine: github.com/kitsunium/sdk/framework/internal/app/storeengine
   strconv: strconv
+  textproto: net/textproto
   time: time
 package:
   docFile: doc.go

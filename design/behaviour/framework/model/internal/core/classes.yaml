@@ -144,10 +144,23 @@ constants:
       - comment: the last attempt failed; another is scheduled
         name: MailRetrying
         value: "\"retrying\""
-      - comment: abandoned after its last attempt
+      - comment: "given up, and kept as a dead letter: GivenUp says why"
         name: MailDead
         value: "\"dead\""
     name: MailQueued
+  - doc: Why a dead mail was given up.
+    grouped: true
+    items:
+      - comment: "the receiving server refused it for good: an SMTP 5xx reply"
+        name: MailRejected
+        value: "\"rejected\""
+      - comment: an attempt failed once the mail was older than its mailer's max-age
+        name: MailExpired
+        value: "\"expired\""
+      - comment: its last attempt failed
+        name: MailExhausted
+        value: "\"exhausted\""
+    name: MailRejected
   - doc: |-
       MockReplace is the one mode a [MockMessage] has: a test's app.Replace, a typed
       function run in place of an operation's handler — or of what a port calls —
@@ -1235,6 +1248,7 @@ files:
     name: connector.go
   - decls:
       - MailQueued
+      - MailRejected
       - MockReplace
       - MailSummary
       - MailMessage
@@ -4789,6 +4803,16 @@ types:
       - doc: Error is the public message of the last failure.
         name: Error
         type: string
+      - doc: |-
+          GivenUp says why a dead mail was given up: [MailRejected],
+          [MailExpired] or [MailExhausted]; empty for any other status.
+        name: GivenUp
+        type: string
+      - doc: |-
+          Reply is the SMTP reply code of the last failure, 550 for instance,
+          when the receiving server answered one; its text is never kept.
+        name: Reply
+        type: int
       - doc: QueuedAt is when it entered the outbox; SentAt when it left.
         name: QueuedAt
         type: time.Time

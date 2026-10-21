@@ -3,6 +3,7 @@ package mailengine
 import (
 	"context"
 	"errors"
+	"net/textproto"
 	"slices"
 	"testing"
 	"time"
@@ -86,5 +87,34 @@ func TestTheTransports(t *testing.T) {
 	}
 	if _, err := newSMTP(&plug.MailRelayValue{Server: relay.Server}); !errors.Is(err, mail.InvalidConfig) {
 		t.Errorf("a relay ParseSMTP did not read builds a transport: %v", err)
+	}
+}
+
+// A dead letter's failure says why the spool gave it up through the code the
+// spool adds to its trail, wrapped again or not; any other failure is its
+// last attempt's. The SMTP reply is read through the chain, nil without one.
+func TestADeadLetterSaysWhyItWasGivenUp(t *testing.T) {
+	reply := &textproto.Error{Code: 550, Msg: "5.1.1 no such user"}
+	refused := errs.Wrap(reply, errs.WrapParams{Code: 0x00_03_3D_09, Reason: "SEND_REFUSED", Public: "The mail server refused the message"})
+	rejected := errs.Wrap(refused, errs.WrapParams{Code: mailspool.CodeMailRejected})
+	for _, c := range []struct {
+		err  error
+		want plug.MailGiveUp
+	}{
+		{rejected, plug.MailGivenUpRejected},
+		{errs.Wrap(rejected, errs.WrapParams{}), plug.MailGivenUpRejected},
+		{errs.Wrap(refused, errs.WrapParams{Code: mailspool.CodeMailExpired}), plug.MailGivenUpExpired},
+		{refused, plug.MailGivenUpExhausted},
+		{nil, plug.MailGivenUpExhausted},
+	} {
+		if got := givenUpOf(c.err); got != c.want {
+			t.Errorf("givenUpOf(%v) = %d, want %d", c.err, got, c.want)
+		}
+	}
+	if got := replyOf(rejected); got != reply {
+		t.Errorf("replyOf = %v, want the reply in the chain", got)
+	}
+	if got := replyOf(errors.New("no reply")); got != nil {
+		t.Errorf("replyOf of a failure without a reply = %v", got)
 	}
 }

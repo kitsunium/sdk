@@ -175,11 +175,27 @@ constants:
         name: MailRetrying
         type: string
         value: core.MailRetrying
-      - comment: abandoned after its last attempt
+      - comment: "given up, and kept as a dead letter: GivenUp says why"
         name: MailDead
         type: string
         value: core.MailDead
     name: MailQueued
+  - doc: Why a dead mail was given up.
+    grouped: true
+    items:
+      - comment: "the receiving server refused it for good: an SMTP 5xx reply"
+        name: MailRejected
+        type: string
+        value: core.MailRejected
+      - comment: an attempt failed once the mail was older than its mailer's max-age
+        name: MailExpired
+        type: string
+        value: core.MailExpired
+      - comment: its last attempt failed
+        name: MailExhausted
+        type: string
+        value: core.MailExhausted
+    name: MailRejected
   - grouped: true
     items:
       - doc: |-
@@ -1416,6 +1432,7 @@ files:
     name: connector.go
   - decls:
       - MailQueued
+      - MailRejected
       - MockReplace
       - MailSummary
       - MailMessage

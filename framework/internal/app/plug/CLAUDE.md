@@ -45,8 +45,10 @@ apart by kind (`WorkflowFailure`, through the driver's `Failed`). The
 mail's (`mail.go`, `mail_interface.go`) is written and implemented by
 `mailengine` since step 6: the core opens every mailer's outbox with a
 `MailSpoolConfig` — kit's attempt (`Transport`, told a `MailAttemptValue`),
-the app's `Clock`, what kit hears of each mail (`MailEventValue`), its
-retries, and where it keeps them: the queue subsystem's `Broker` on a
+the app's `Clock`, what kit hears of each mail (`MailEventValue`, a dead
+letter's `GivenUp` and the SMTP `Reply` read by `mailengine`), its
+retries, its age and whether a permanent refusal is retried (`MaxAge`,
+`RetryPermanent`), and where it keeps them: the queue subsystem's `Broker` on a
 `Database`, a directory, or memory —, holds a `MailSpool`, hands its mail to
 a `MailSink` the driver builds (SMTP through `ParseSMTP` and `NewSMTP`,
 or `Capture`, a `MailCaptureSource`), asks the SDK's verdict on a mail
@@ -85,7 +87,7 @@ their own until then (`OpenEventStream`, `StudioProfiler`), are
 |---|---|
 | `jobs.go` | the jobs subsystem's contract (ADR 0179 step 7): the hook `Jobs` (`JobDriverConfig`: `Every` and `Cron` — a job's schedule from its period or its cron expression —, `Open` the app's scheduler); `JobScheduleFunc`, `JobSchedulerConfig`, `JobEntryValue`, `JobResultValue` |
 | `jobs_interface.go` | the jobs subsystem's interface: `JobScheduler` (`Add`, `Run`), which `jobengine` implements over the SDK's scheduler and the core's `idleScheduler` for an app that declares no job |
-| `mail.go` | the mail subsystem's contract (ADR 0179 step 6): the hook `Mail` (`MailDriverConfig`: `Open` a mailer's outbox, `Validate` a mail, `Capture`, `ParseSMTP`, `NewSMTP` — the transports —, `Refused` — the refusal of a kind); the enums `MailRefusal` and `MailEvent` and their values; `MailSpoolConfig`, `MailValue`, `MailRelayValue`, `MailAttemptValue`, `MailEventValue` |
+| `mail.go` | the mail subsystem's contract (ADR 0179 step 6): the hook `Mail` (`MailDriverConfig`: `Open` a mailer's outbox, `Validate` a mail, `Capture`, `ParseSMTP`, `NewSMTP` — the transports —, `Refused` — the refusal of a kind); the enums `MailRefusal`, `MailEvent` and `MailGiveUp` (why a dead letter was given up: exhausted, rejected, expired — issue #489) and their values; `MailSpoolConfig` (its `MaxAge` and `RetryPermanent`, the mailer's settings), `MailValue`, `MailRelayValue`, `MailAttemptValue`, `MailEventValue` (its `Reply`, the SMTP reply as a `*textproto.Error`, and `GivenUp`) |
 | `mail_interface.go` | the mail subsystem's interfaces: `MailSpool` (`Send`, `SendWithID`, `DeadLetters`, `Run`, `Close`) and `MailSink` (`Send`) with its sibling `MailCaptureSource` (`Composed`: the capture transport's last message), which `mailengine` implements |
 | `plug.go` | the hooks (`NewHTTPServer`, `NewStaticFiles`, `SampleProcess`), what they take and return (`HTTPConfig`, `HTTPState`, `HTTPServer`), the pprof labels kit and the profiler share (`LabelNode`, `LabelLoop`) |
 | `queue.go` | the queue subsystem's contract (ADR 0179 step 4): the hook `Queues` (`QueueDriverConfig`: `Open` a queue, `TableMigration` its table on a database, `DoNotRetry` and `NotRetryable` — the mark of a delivery no retry helps); `QueueConfig` (`Name`, `Dir`, `Database`, `Table`, `Policy`, `Clock`, a mailer's `Seal`, `Unseal` and `MaxPayload`, a test's `Wrap`), `QueuePolicyValue`, `ConsumeConfig`, `MessageValue`, `DeliveryValue`, `LiveMessageValue`, `DeadLetterValue` |

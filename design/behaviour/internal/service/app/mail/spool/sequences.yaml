@@ -120,7 +120,7 @@ sequences:
         kind: self
       - id: json
         kind: stdlib
-      - id: kerrs
+      - id: corequeue
         kind: package
       - id: s.report
         kind: internal
@@ -132,8 +132,6 @@ sequences:
         kind: internal
       - id: s.giveUp
         kind: internal
-      - id: corequeue
-        kind: package
       - id: s.backoff.Delay
         kind: value
       - id: event.At.Add
@@ -144,8 +142,8 @@ sequences:
           type: spooledValue
       - opt:
           do:
-            - return: kerrs.Wrap(corespool.MessageUndecodable, kerrs.WrapParams{}, kerrs.String("message", delivery.Message.ID))
-              to: kerrs
+            - return: corequeue.DoNotRetry(kerrs.Wrap(corespool.MessageUndecodable, kerrs.WrapParams{}, kerrs.String("message", delivery.Message.ID)))
+              to: corequeue
           init:
             bind: decodeErr
             eval: json.Unmarshal(delivery.Message.Payload, &record)

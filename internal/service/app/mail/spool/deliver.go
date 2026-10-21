@@ -37,11 +37,14 @@ const (
 // and the mail comes back when the backoff ends, its delivery counted.
 func (s *Spool) deliver(ctx context.Context, delivery corequeue.DeliveryValue) error {
 	var record spooledValue
-	//: a record that is not a spooled mail fails like a delivery, and ends as
-	//: a dead letter an investigator can still read.
+	//: a record that is not a spooled mail fails, and ends as a dead letter an
+	//: investigator can still read: no attempt can decode it, so none is made
+	//: again.
 	if decodeErr := json.Unmarshal(delivery.Message.Payload, &record); decodeErr != nil {
-		//: MessageUndecodable, naming the queue message.
-		return kerrs.Wrap(corespool.MessageUndecodable, kerrs.WrapParams{}, kerrs.String("message", delivery.Message.ID))
+		//: MessageUndecodable, naming the queue message, marked DoNotRetry: the
+		//: consumer rejects it on this delivery where the queue can, and nacks
+		//: it — retried until MaxAttempts, as before — where it cannot.
+		return corequeue.DoNotRetry(kerrs.Wrap(corespool.MessageUndecodable, kerrs.WrapParams{}, kerrs.String("message", delivery.Message.ID)))
 	}
 	attempt := delivery.Deliveries
 	event := EventValue{ID: record.ID, Message: record.Message, Meta: record.Meta, QueuedAt: record.QueuedAt, Attempt: attempt}

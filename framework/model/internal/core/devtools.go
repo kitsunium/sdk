@@ -8,7 +8,14 @@ const (
 	MailQueued   = "queued"   // in the outbox, not yet handed to the transport
 	MailSent     = "sent"     // the transport accepted it (capture: kept for the mailbox)
 	MailRetrying = "retrying" // the last attempt failed; another is scheduled
-	MailDead     = "dead"     // abandoned after its last attempt
+	MailDead     = "dead"     // given up, and kept as a dead letter: GivenUp says why
+)
+
+// Why a dead mail was given up.
+const (
+	MailRejected  = "rejected"  // the receiving server refused it for good: an SMTP 5xx reply
+	MailExpired   = "expired"   // an attempt failed once the mail was older than its mailer's max-age
+	MailExhausted = "exhausted" // its last attempt failed
 )
 
 // MockReplace is the one mode a [MockMessage] has: a test's app.Replace, a typed

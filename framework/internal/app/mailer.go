@@ -114,6 +114,14 @@ type Mailer struct {
 	// composed holds what the capture transport composed for a mail, from
 	// the attempt that sent it to the spool's report that it was sent.
 	composed map[string][]byte
+	// runCtx is the outbox's own context while it runs, which a bounce hook
+	// is handed: the mailer's stop cancels it.
+	runCtx context.Context
+	// maxAgeFor and retryPermanentFor are the mailer's settings
+	// <mailer>-max-age and <mailer>-retry-permanent (mailer_bounce.go),
+	// declared with it; nil for a mailer no service declares.
+	maxAgeFor         *SettingService[time.Duration]
+	retryPermanentFor *SettingService[bool]
 }
 
 // MailerConfigurer configures a mailer.
@@ -122,8 +130,13 @@ type MailerConfigurer interface {
 }
 
 type mailerOptions struct {
-	from        mail.Address
+	from mail.Address
+	// bounce is told of each mail given up ([OnBounce]); nil for the
+	// framework's own, which logs it (logBounce).
+	bounce      func(ctx context.Context, b *BounceEvent)
 	maxAttempts int
+	// maxAge is the default of the mailer's <mailer>-max-age ([MailMaxAge]).
+	maxAge time.Duration
 }
 
 type mailerOption func(o *mailerOptions)
@@ -210,6 +223,7 @@ func (s *Service) Mailer(name string, opts ...MailerConfigurer) *Mailer {
 	if m.opts.maxAttempts < 1 {
 		s.problem(m.decl, m.id, "mailer.attempts", "name", name)
 	}
+	m.declareSettings(s)
 	return m
 }
 
@@ -463,8 +477,8 @@ func (r *mailRing) add(rec model.MailMessage) *model.MailMessage {
 // Goroutine lifecycle: one goroutine runs the outbox until stop cancels its
 // context; it closes done, which stop waits for.
 func (m *Mailer) start(ctx context.Context, a *App) error {
-	d := plug.Mail.Load()
-	if d == nil || d.Open == nil {
+	driver := plug.Mail.Load()
+	if driver == nil || driver.Open == nil {
 		return mailsMissing()
 	}
 	transport, capture, relay, err := m.openTransport(ctx, a)
@@ -483,6 +497,9 @@ func (m *Mailer) start(ctx context.Context, a *App) error {
 		MaxAttempts:  m.opts.maxAttempts,
 		SendTimeout:  mailSendTimeout,
 		PollInterval: pollInterval,
+		// The mailer's settings, as the start resolved them.
+		MaxAge:         m.maxAge(),
+		RetryPermanent: m.retriesPermanent(),
 	}
 	db, broker, err := m.openOutbox(ctx, a)
 	switch {
@@ -501,7 +518,7 @@ func (m *Mailer) start(ctx context.Context, a *App) error {
 			cfg.Dir = filepath.Join(a.dataDir, m.svc.name, underOutbox, m.name)
 		}
 	}
-	spool, err := d.Open(&cfg)
+	spool, err := driver.Open(&cfg)
 	if err != nil {
 		return failure(CodeMailQueue, "OUTBOX_OPEN", "a mailer's outbox cannot be opened", err, errs.String("mailer", m.id))
 	}
@@ -511,7 +528,7 @@ func (m *Mailer) start(ctx context.Context, a *App) error {
 	done := make(chan struct{})
 	m.mu.Lock()
 	m.transport, m.capture, m.spool, m.cancel, m.done, m.loop = transport, capture, spool, cancel, done, loop
-	m.relay, m.problem, m.composed, m.outboxDB = relay, "", map[string][]byte{}, db
+	m.relay, m.problem, m.composed, m.outboxDB, m.runCtx = relay, "", map[string][]byte{}, db, ctx
 	m.ring.reset(capture != nil)
 	m.ring.dead, m.ring.deadKnown = dead, deadErr == nil
 	m.mu.Unlock()
@@ -688,15 +705,13 @@ func (t outboxTransport) deliver(ctx context.Context, msg plug.MailValue, attemp
 	return err
 }
 
-// failed logs a failed attempt: a warning while attempts remain, an error on
-// the last one, after which the spool gives the mail up.
+// failed logs a failed attempt as a warning. Whether the spool retries it or
+// gives the mail up — its last attempt, a permanent refusal, a mail too old —
+// is the spool's to say once the attempt returns: the bounce hook hears of a
+// mail given up (observe), and by default logs it as an error (logBounce).
 func (m *Mailer) failed(ctx context.Context, a *App, attempt plug.MailAttemptValue, err error) {
-	fields := []logger.Attr{logger.String("node", m.id), logger.String("mail", attempt.ID), logger.Int("attempt", attempt.Attempt), logger.String("error", err.Error())}
-	if attempt.Attempt >= m.opts.maxAttempts {
-		logger.Error(ctx, a.log, "a mail was abandoned after its last attempt", fields...)
-		return
-	}
-	logger.Warn(ctx, a.log, "a mail delivery failed; it will be retried", fields...)
+	logger.Warn(ctx, a.log, "a mail delivery failed", logger.String("node", m.id), logger.String("mail", attempt.ID),
+		logger.Int("attempt", attempt.Attempt), logger.String("error", err.Error()))
 }
 
 // transmit hands one message to the transport. With the capture transport,
@@ -739,7 +754,7 @@ func (m *Mailer) observe(a *App, e *plug.MailEventValue) {
 	case plug.MailEventQueued:
 		m.ring.pending[e.ID] = true
 	case plug.MailEventSent:
-		rec.Attempts, rec.Status, rec.Error, rec.SentAt = e.Attempt, model.MailSent, "", new(e.At.UTC())
+		rec.Attempts, rec.Status, rec.Error, rec.SentAt, rec.Reply = e.Attempt, model.MailSent, "", new(e.At.UTC()), 0
 		if raw, ok := m.composed[e.ID]; ok {
 			rec.Raw = rawText(raw)
 			delete(m.composed, e.ID)
@@ -747,18 +762,24 @@ func (m *Mailer) observe(a *App, e *plug.MailEventValue) {
 		delete(m.ring.pending, e.ID)
 		m.ring.sent++
 	case plug.MailEventRetrying:
-		rec.Attempts, rec.Status, rec.Error = e.Attempt, model.MailRetrying, publicText(e.Err)
+		rec.Attempts, rec.Status, rec.Error, rec.Reply = e.Attempt, model.MailRetrying, publicText(e.Err), replyCode(e.Reply)
 		m.ring.pending[e.ID] = true
 	case plug.MailEventDeadLettered:
-		rec.Attempts, rec.Status, rec.Error = e.Attempt, model.MailDead, publicText(e.Err)
+		rec.Attempts, rec.Status, rec.Error, rec.Reply = e.Attempt, model.MailDead, publicText(e.Err), replyCode(e.Reply)
+		rec.GivenUp = givenUpName(e.GivenUp)
 		delete(m.ring.pending, e.ID)
 		m.ring.dead++
 	default:
 		// Every other event changes nothing the mailbox shows.
 	}
 	summary := summaryOf(rec)
+	runCtx := m.runCtx
 	m.mu.Unlock()
 	a.hub.publish(model.Event{Type: model.EventMail, Mail: summary})
+	if e.Kind == plug.MailEventDeadLettered {
+		// Outside the lock: the hook is the product's, and may take its time.
+		m.bounced(runCtx, a, e)
+	}
 }
 
 // messageOf is the mailbox's record of a mail the spool reports; full keeps
@@ -1010,4 +1031,6 @@ func (a *App) hasMailer() bool {
 // NewMailer is a mailer no service declares yet, with the default attempts:
 // [Service.Mailer] makes one and declares it, which is how a product gets
 // one.
-func NewMailer() *Mailer { return &Mailer{opts: mailerOptions{maxAttempts: defaultMailAttempts}} }
+func NewMailer() *Mailer {
+	return &Mailer{opts: mailerOptions{maxAttempts: defaultMailAttempts, maxAge: defaultMailMaxAge}}
+}

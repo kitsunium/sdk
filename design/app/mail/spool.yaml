@@ -28,8 +28,8 @@ packages:
       - const:
           - doc: |-
               CodeMessageUndecodable identifies a spooled record that does not decode —
-              written by another program, or edited — and is dead-lettered like any
-              failed delivery.
+              written by another program, or edited — and is dead-lettered at its
+              first delivery, since no attempt can decode it.
             name: CodeMessageUndecodable
             value: "0x00_03_51_03"
         type: errs.Code
@@ -101,8 +101,9 @@ packages:
           - code: CodeMessageUndecodable
             doc: |-
               MessageUndecodable reports a spooled record that does not decode. It is
-              the failure of that delivery, so the record is retried and then
-              dead-lettered with the rest of its bytes intact for an investigator.
+              the failure of that delivery, marked not retryable — no attempt can
+              decode it —, so the record is dead-lettered at once where the queue can
+              reject it, with the rest of its bytes intact for an investigator.
             name: MessageUndecodable
             private: "service/app/mail/spool: a record in the spool is not a spooled mail; the fields name the queue message"
             public: A spooled mail could not be read back

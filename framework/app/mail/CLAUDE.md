@@ -24,7 +24,10 @@ designed product (§5).
 kit's own mailer code — `Mailer`, `Send` and its transaction rules (ADR 0178
 C1, C7 item 7), the mailbox the Studio reads, the SMTP URL read again before
 every delivery, the sealing of an outbox on a database — names the SDK's mail
-types and nothing of its spool or transports, and stays in the core; it needs
+types and nothing of its spool or transports, and stays in the core — so do
+a mailer's bounce hook (`app.OnBounce`) and its settings `<mailer>-max-age`
+and `<mailer>-retry-permanent` (issue #489), which `mailengine` hands the
+spool and whose dead letters it classifies; it needs
 no `Enable` of the core's (unlike `framework/app/store`'s `EnableStores`).
 
 ## Contents

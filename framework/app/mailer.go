@@ -1,6 +1,9 @@
 package app
 
 import (
+	"context"
+	"time"
+
 	iapp "github.com/kitsunium/sdk/framework/internal/app"
 )
 
@@ -41,4 +44,41 @@ func From(name, addr string) MailerOption {
 func MailAttempts(n int) MailerOption {
 	//: the implementation is framework/internal/app's; this facade only forwards.
 	return iapp.MailAttempts(n)
+}
+
+// Bounce is a mail its mailer gave up on: the receiving server refused it for
+// good, it outlived its mailer's max-age, or its last attempt failed —
+// GivenUp says which. It stays in the outbox as a dead letter.
+//
+// Reply is the receiving server's own answer: the hook may read it, log it or
+// act on it, but the framework never puts it in a message it shows — the
+// Studio's mailbox keeps its code alone.
+type Bounce = iapp.BounceEvent
+
+// OnBounce replaces what the mailer does with a mail it gives up — by
+// default, it logs it as an error naming why — with fn: mark an address
+// undeliverable, tell an operator, retry it another way. fn runs on the
+// mailer's outbox loop, the mailbox already updated, with a context that
+// continues the trace of the Send and ends when the mailer stops; the next
+// mail waits for it, so it should not block. A panic in fn is logged and
+// changes nothing else. A nil fn keeps the framework's own.
+//
+// IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+// only hands it to the declaration it configures.
+func OnBounce(fn func(ctx context.Context, b *Bounce)) MailerOption {
+	//: the implementation is framework/internal/app's; this facade only forwards.
+	return iapp.OnBounce(fn)
+}
+
+// MailMaxAge is how long after it was queued a mail may still be retried: an
+// attempt that fails later gives it up, as expired, whatever attempts it had
+// left. It is the default of the mailer's setting <mailer>-max-age, which
+// config/<env>.* and <PRODUCT>_<MAILER>_MAX_AGE override; 0 sets no age. The
+// default is 5 days (RFC 5321 §4.5.4.1).
+//
+// IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+// only hands it to the declaration it configures.
+func MailMaxAge(d time.Duration) MailerOption {
+	//: the implementation is framework/internal/app's; this facade only forwards.
+	return iapp.MailMaxAge(d)
 }
