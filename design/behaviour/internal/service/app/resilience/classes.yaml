@@ -22,6 +22,17 @@ constants:
     name: defaultOpenDuration
   - grouped: true
     items:
+      - doc: "outcomeNeutral is a deterministic error or an abandoned call: no signal."
+        name: outcomeNeutral
+        type: outcome
+        value: iota
+      - doc: outcomeSuccess is a call that returned nil.
+        name: outcomeSuccess
+      - doc: outcomeFailure is a call whose error the classifier counts.
+        name: outcomeFailure
+    name: outcomeNeutral
+  - grouped: true
+    items:
       - doc: stateClosed passes calls through and counts failures.
         name: stateClosed
         type: breakerState
@@ -73,10 +84,15 @@ files:
       - defaultThreshold
       - defaultOpenDuration
       - circuitBreaker
+      - admission
+      - outcome
+      - outcomeNeutral
       - NewCircuitBreaker
       - (*circuitBreaker).Run
       - (*circuitBreaker).allow
+      - (*circuitBreaker).release
       - (*circuitBreaker).record
+      - (*circuitBreaker).fail
       - (*circuitBreaker).trip
     name: breaker.go
   - decls:
@@ -303,7 +319,13 @@ types:
     underlying: kbackoff.Value
   - doc: |-
       circuitBreaker trips Open after FailureThreshold consecutive failures, rejects
-      for OpenDuration, then half-opens for a trial.
+      for OpenDuration, then half-opens for ONE trial at a time.
+
+      generation counts the trips. A call captures it on admission and its outcome
+      is folded in only while it is still current: a call admitted before the
+      breaker last opened is a straggler, and its result describes a dependency the
+      breaker has already judged — its success must not close an Open breaker and
+      its failure must not restart a cooldown it did not cause.
     fields:
       - name: mu
         type: sync.Mutex
@@ -321,30 +343,65 @@ types:
         type: int
       - name: openedAt
         type: time.Time
+      - name: generation
+        type: uint64
+      - name: probing
+        type: bool
     kind: struct
     methods:
       - doc: |-
-          Run rejects fast when Open, else runs op and records the outcome. A
-          deterministic error (one the classifier rejects) is passed through without
-          touching the state machine.
+          Run rejects fast when Open — and when HalfOpen while its one trial is still
+          running —, else runs op and records the outcome. A deterministic error (one
+          the classifier rejects) is passed through without touching the state machine;
+          a trial that ends that way, or panics, frees the HalfOpen slot for the next
+          call.
         name: Run
         params: ctx context.Context, op coreres.Operation
         recv: b *circuitBreaker
         results: error
       - doc: |-
           allow reports whether a call may proceed, transitioning Open→HalfOpen once the
-          cooldown elapses. Holds mu.
+          cooldown elapses, and admits at most one HalfOpen trial at a time. Holds mu.
         name: allow
         recv: b *circuitBreaker
-        results: bool
-      - doc: record folds a call outcome into the state machine. Holds mu.
-        name: record
-        params: success bool
+        results: admission, bool
+      - doc: |-
+          release settles a trial its operation abandoned by panicking: record never
+          ran, so the trial counts as neutral and the HalfOpen slot is freed. A trial
+          record already settled is left alone — the slot may belong to the next one.
+        name: release
+        params: adm admission, settled *bool
         recv: b *circuitBreaker
-      - doc: trip moves the breaker to Open and stamps the cooldown start. Holds mu.
+      - doc: |-
+          record folds a call outcome into the state machine. An outcome from an
+          earlier generation is ignored, and a success closes the breaker only from
+          Closed or from its HalfOpen trial. Holds mu.
+        name: record
+        params: adm admission, res outcome
+        recv: b *circuitBreaker
+      - doc: fail folds one counted failure into the state machine. Holds mu (via record).
+        name: fail
+        recv: b *circuitBreaker
+      - doc: |-
+          trip moves the breaker to Open, stamps the cooldown start and starts a new
+          generation, so every call still in flight becomes a straggler. Holds mu.
         name: trip
         recv: b *circuitBreaker
     name: circuitBreaker
+  - doc: |-
+      admission is what allow hands Run: the generation the call was admitted in
+      and whether it is the HalfOpen trial, the one call that may close the breaker.
+    fields:
+      - name: generation
+        type: uint64
+      - name: trial
+        type: bool
+    kind: struct
+    name: admission
+  - doc: outcome is what a finished call tells the state machine.
+    kind: named
+    name: outcome
+    underlying: int
   - fields:
       - name: FailureThreshold
         type: int

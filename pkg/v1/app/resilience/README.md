@@ -212,7 +212,7 @@ NewBulkhead returns a bounded-concurrency Runner (reject mode).
 func NewCircuitBreaker(cfg BreakerConfig) Runner
 ```
 
-NewCircuitBreaker returns a circuit-breaker Runner. An error rejected by cfg.Retryable is returned verbatim and left out of the state machine.
+NewCircuitBreaker returns a circuit-breaker Runner. An error rejected by cfg.Retryable is returned verbatim and left out of the state machine. HalfOpen runs one trial at a time, and the outcome of a call admitted before the breaker last opened is ignored.
 
 <a name="NewFallback"></a>
 ## func [NewFallback](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/resilience/gen_facade.go>)

@@ -120,7 +120,17 @@ Two contracts were tightened during review, both before any release:
   The Decision section is unchanged: the classifier is an opt-in parameter on the
   two existing policies, not a new policy.)
 - Wait-mode (blocking) bulkhead/rate-limiter (v1 is reject-mode).
-- Half-open concurrency control (v1 admits HalfOpen trials without a probe cap).
+- ~~Half-open concurrency control (v1 admits HalfOpen trials without a probe cap).~~
+  **Closed on 2026-10-21 ([issue 467](https://github.com/kitsunium/sdk/issues/467))**, with no new knob: HalfOpen admits ONE trial at
+  a time and every other call returns `CircuitOpen` until it settles — the "one
+  HalfOpen trial" `BreakerConfig.OpenDuration` already promised. A trial whose
+  error the classifier rejects, or whose operation panics, frees the slot for
+  the next call. The same change gives each trip a generation that a call
+  captures on admission: the outcome of a call admitted before the breaker last
+  opened is ignored, so a straggler's success can no longer close an Open
+  breaker inside its cooldown, and its failure can no longer restart a cooldown
+  it did not cause. A cap above one stays out: it is the probe-count design this
+  item deferred, and nothing has asked for it.
 - **Adaptive concurrency (AIMD) and deadline propagation.** Both were examined
   when `fallback`/`hedging` landed (below) and left out on purpose: each changes
   what a policy may decide on the caller's behalf, and each needs measurement

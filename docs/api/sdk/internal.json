@@ -50757,7 +50757,7 @@
       "name": "NewCircuitBreaker",
       "spelled": "func(cfg BreakerConfig) coreres.Runner",
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/app/resilience.BreakerConfig) github.com/kitsunium/sdk/internal/core/app/resilience.Runner",
-      "doc": "NewCircuitBreaker returns a Runner guarding op with a Closed→Open→HalfOpen\nbreaker. Open calls return CircuitOpen until OpenDuration elapses; a\nnon-positive OpenDuration clamps to defaultOpenDuration, because a breaker\nwhose cooldown is zero admits the next call immediately and therefore\nprotects nothing (ADR 0031). An error rejected by cfg.Retryable is returned\nverbatim and left out of the state machine entirely, so deterministic\nfailures cannot trip the breaker.\n",
+      "doc": "NewCircuitBreaker returns a Runner guarding op with a Closed→Open→HalfOpen\nbreaker. Open calls return CircuitOpen until OpenDuration elapses; a\nnon-positive OpenDuration clamps to defaultOpenDuration, because a breaker\nwhose cooldown is zero admits the next call immediately and therefore\nprotects nothing (ADR 0031). An error rejected by cfg.Retryable is returned\nverbatim and left out of the state machine entirely, so deterministic\nfailures cannot trip the breaker. Once the cooldown elapses ONE HalfOpen\ntrial runs at a time and every other call returns CircuitOpen until it\nsettles. The outcome of a call admitted before the breaker last opened\nis ignored: its success cannot close the breaker and its failure cannot\nrestart the cooldown.\n",
       "file": "service/app/resilience/breaker.go",
       "layer": "service",
       "family": "app"
