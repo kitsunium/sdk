@@ -27837,18 +27837,18 @@ sequences:
         kind: self
       - id: policySettingName
         kind: internal
-      - id: svc.problem
+      - id: svc.warn
         kind: internal
       - id: NewSettingService
         kind: internal
     steps:
       - bind: name
-        eval: policySettingName(svc.name, n.name, knob)
+        eval: policySettingName(svc.name, string(n.kind), n.name, knob)
         to: policySettingName
       - opt:
           do:
-            - eval: svc.problem(n.decl, n.id, "node.setting-name", "node", n.name, "setting", name, "max", secret.MaxNameLen)
-              to: svc.problem
+            - eval: svc.warn(n.decl, n.id, "policy.setting-name", "node", n.id, "setting", name, "max", secret.MaxNameLen)
+              to: svc.warn
             - return: nil
           when: secret.ValidateName(name) != nil
       - lock:
@@ -27880,7 +27880,7 @@ sequences:
       - return: st
   - of: policySettingName
     steps:
-      - return: settingWords(service) + "-" + settingWords(operation) + "-" + knob
+      - return: settingWords(service) + "-" + kind + "-" + settingWords(operation) + "-" + knob
   - of: settingWords
     participants:
       - id: caller

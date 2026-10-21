@@ -24,11 +24,16 @@ import (
 // override any setting, runtime.config showing where the value came from
 // (ADR 0097), and a key no service declares stays refused.
 //
-// A policy's setting is named <service>-<operation>-<knob>, the service's and
-// the operation's names in lower case, a capital starting a word of its own
-// and any other character a setting's name cannot hold a dash
-// (policySettingName) — "shop-create-item-rate", SHOP_SHOP_CREATE_ITEM_RATE —
-// and qualified with its module's name for a module's service's:
+// A policy's setting is named after its operation's node ID,
+// <service>-<kind>-<operation>-<knob> — the kind endpoint, command or query,
+// so that a command and the endpoint that exposes it, both named after it,
+// never share one —, each name in lower case, a capital starting a word of
+// its own and any other character a setting's name cannot hold a dash
+// (policySettingName): "shop-endpoint-create-item-rate",
+// SHOP_SHOP_ENDPOINT_CREATE_ITEM_RATE; a module's service's is qualified with
+// its module's name. A name longer than a setting's may be is not declared:
+// the policy runs with the code's values, and the declaration warns, naming
+// the setting (policy.setting-name):
 //
 //	RateLimit           <op>-rate, <op>-burst, <op>-rate-wait
 //	RateLimitPerClient  <op>-client-rate, <op>-client-burst
@@ -158,9 +163,9 @@ func (f bulkheadOption) bulkheadConfigure(o *bulkheadGuard) { f(o) }
 // calls after it queue behind it —; given to [Bulkhead], for a slot to free,
 // in the queue [BulkheadQueue] sizes. A call still refused answers 429 or
 // 503 as before; a caller that leaves while it waits leaves the queue. Its
-// default is no wait. It is the default of the operation's setting
-// <service>-<operation>-rate-wait or -bulkhead-wait, which config/<env>.* and
-// <PRODUCT>_<NAME> override.
+// default is no wait, and a negative one stops the start. It is the default
+// of the operation's setting <service>-<kind>-<operation>-rate-wait or
+// -bulkhead-wait, which config/<env>.* and <PRODUCT>_<NAME> override.
 //
 // IFACE-OPAQUE: the option is sealed — its methods are unexported — so a
 // caller only hands it to the declaration it configures.
@@ -168,9 +173,10 @@ func MaxWait(d time.Duration) WaitConfigurer { return waitOption(d) }
 
 // BulkheadQueue lets up to n calls beyond those a [Bulkhead] runs wait for a
 // slot, each for its [MaxWait]: without a wait, or with n at 0, the overflow
-// is refused at once. A call that finds the queue full answers 503. It is
-// the default of the operation's setting <service>-<operation>-bulkhead-queue,
-// which config/<env>.* and <PRODUCT>_<NAME> override.
+// is refused at once, and a negative n stops the start. A call that finds the
+// queue full answers 503. It is the default of the operation's setting
+// <service>-<kind>-<operation>-bulkhead-queue, which config/<env>.* and
+// <PRODUCT>_<NAME> override.
 //
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
@@ -339,14 +345,15 @@ func knobValue[T SettingValue](st *SettingService[T], def T) T {
 func formatRate(rate float64) string { return strconv.FormatFloat(rate, 'f', -1, 64) }
 
 // declarePolicySetting declares in svc the setting
-// <service>-<operation>-<knob> of a policy of the operation n, with def as its
+// <service>-<kind>-<operation>-<knob> of a policy of the operation n, with def as its
 // default and check judging its resolved value; nil, with a declaration
-// error, when the name is not one a setting may take or the service declares
-// it already.
+// error, when the service declares it already, and nil, with a warning, when
+// the name is not one a setting may take — too long, most often: the policy
+// keeps the code's value.
 func declarePolicySetting[T SettingValue](svc *Service, n *nodeBase, knob string, def T, check func(v any) phrase) *SettingService[T] {
-	name := policySettingName(svc.name, n.name, knob)
+	name := policySettingName(svc.name, string(n.kind), n.name, knob)
 	if secret.ValidateName(name) != nil {
-		svc.problem(n.decl, n.id, "node.setting-name", "node", n.name, "setting", name, "max", secret.MaxNameLen)
+		svc.warn(n.decl, n.id, "policy.setting-name", "node", n.id, "setting", name, "max", secret.MaxNameLen)
 		return nil
 	}
 	svc.mu.Lock()
@@ -367,10 +374,11 @@ func declarePolicySetting[T SettingValue](svc *Service, n *nodeBase, knob string
 	return st
 }
 
-// policySettingName is <service>-<operation>-<knob>, each name spelled as a
-// setting's: "shop", "CreateItem", "rate" make "shop-create-item-rate".
-func policySettingName(service, operation, knob string) string {
-	return settingWords(service) + "-" + settingWords(operation) + "-" + knob
+// policySettingName is <service>-<kind>-<operation>-<knob>, each name spelled
+// as a setting's: "shop", "endpoint", "CreateItem", "rate" make
+// "shop-endpoint-create-item-rate".
+func policySettingName(service, kind, operation, knob string) string {
+	return settingWords(service) + "-" + kind + "-" + settingWords(operation) + "-" + knob
 }
 
 // settingWords spells a name as a setting's: lower case, a capital after a

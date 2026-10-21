@@ -23,15 +23,15 @@ type policyKnob struct {
 
 // policyKnobs are the settings of policyService's policies.
 var policyKnobs = []policyKnob{
-	{"orders-checkout-rate", "SHOP_ORDERS_CHECKOUT_RATE", "number", "5", "7.5"},
-	{"orders-checkout-burst", "SHOP_ORDERS_CHECKOUT_BURST", "int", "3", "4"},
-	{"orders-checkout-rate-wait", "SHOP_ORDERS_CHECKOUT_RATE_WAIT", "duration", "20ms", "40ms"},
-	{"orders-checkout-timeout", "SHOP_ORDERS_CHECKOUT_TIMEOUT", "duration", "2s", "3s"},
-	{"orders-checkout-bulkhead", "SHOP_ORDERS_CHECKOUT_BULKHEAD", "int", "4", "6"},
-	{"orders-checkout-bulkhead-queue", "SHOP_ORDERS_CHECKOUT_BULKHEAD_QUEUE", "int", "8", "9"},
-	{"orders-checkout-bulkhead-wait", "SHOP_ORDERS_CHECKOUT_BULKHEAD_WAIT", "duration", "30ms", "50ms"},
-	{"orders-lookup-client-rate", "SHOP_ORDERS_LOOKUP_CLIENT_RATE", "number", "10", "12"},
-	{"orders-lookup-client-burst", "SHOP_ORDERS_LOOKUP_CLIENT_BURST", "int", "2", "5"},
+	{"orders-endpoint-checkout-rate", "SHOP_ORDERS_ENDPOINT_CHECKOUT_RATE", "number", "5", "7.5"},
+	{"orders-endpoint-checkout-burst", "SHOP_ORDERS_ENDPOINT_CHECKOUT_BURST", "int", "3", "4"},
+	{"orders-endpoint-checkout-rate-wait", "SHOP_ORDERS_ENDPOINT_CHECKOUT_RATE_WAIT", "duration", "20ms", "40ms"},
+	{"orders-endpoint-checkout-timeout", "SHOP_ORDERS_ENDPOINT_CHECKOUT_TIMEOUT", "duration", "2s", "3s"},
+	{"orders-endpoint-checkout-bulkhead", "SHOP_ORDERS_ENDPOINT_CHECKOUT_BULKHEAD", "int", "4", "6"},
+	{"orders-endpoint-checkout-bulkhead-queue", "SHOP_ORDERS_ENDPOINT_CHECKOUT_BULKHEAD_QUEUE", "int", "8", "9"},
+	{"orders-endpoint-checkout-bulkhead-wait", "SHOP_ORDERS_ENDPOINT_CHECKOUT_BULKHEAD_WAIT", "duration", "30ms", "50ms"},
+	{"orders-query-lookup-client-rate", "SHOP_ORDERS_QUERY_LOOKUP_CLIENT_RATE", "number", "10", "12"},
+	{"orders-query-lookup-client-burst", "SHOP_ORDERS_QUERY_LOOKUP_CLIENT_BURST", "int", "2", "5"},
 }
 
 // policyService is a service whose endpoint takes every policy that has
@@ -113,7 +113,7 @@ func TestAPolicysSettingsAreOverriddenByTheConfiguration(t *testing.T) {
 		file.WriteString(`"` + k.key + `":` + value)
 	}
 	file.WriteString("}")
-	t.Setenv("SHOP_ORDERS_CHECKOUT_TIMEOUT", "4s")
+	t.Setenv("SHOP_ORDERS_ENDPOINT_CHECKOUT_TIMEOUT", "4s")
 	a, err := startPolicies(t, []*app.Service{policyService()},
 		app.ConfigFiles(fstest.MapFS{"config/dev.json": {Data: []byte(file.String())}}))
 	if err != nil {
@@ -123,7 +123,7 @@ func TestAPolicysSettingsAreOverriddenByTheConfiguration(t *testing.T) {
 		t.Run(k.key, func(t *testing.T) {
 			s := settingOf(t, a, k.variable)
 			want := model.Setting{From: model.SettingFile, Detail: "config/dev.json", Value: k.other}
-			if k.variable == "SHOP_ORDERS_CHECKOUT_TIMEOUT" {
+			if k.variable == "SHOP_ORDERS_ENDPOINT_CHECKOUT_TIMEOUT" {
 				want = model.Setting{From: model.SettingEnv, Value: "4s"}
 			}
 			if s.From != want.From || s.Detail != want.Detail || s.Value != want.Value {
@@ -140,13 +140,16 @@ func TestAPolicysSettingsAreOverriddenByTheConfiguration(t *testing.T) {
 }
 
 // A key no operation's policy declares is refused, as any key no service
-// declares: a setting of an operation that has no such policy, or of an
-// operation that does not exist.
+// declares: a setting of an operation that does not exist, of another kind,
+// or misspelled.
 func TestAKeyNoPolicyDeclaresIsRefused(t *testing.T) {
 	for _, k := range policyKnobs {
 		t.Run(k.key, func(t *testing.T) {
-			knob := k.key[strings.Index(k.key[len("orders-"):], "-")+len("orders-")+1:]
-			for _, stray := range []string{"orders-cancel-" + knob, "orders-checkout-" + knob + "s"} {
+			prefix, knob := "orders-endpoint-checkout-", strings.TrimPrefix(k.key, "orders-endpoint-checkout-")
+			if knob == k.key {
+				prefix, knob = "orders-query-lookup-", strings.TrimPrefix(k.key, "orders-query-lookup-")
+			}
+			for _, stray := range []string{"orders-endpoint-cancel-" + knob, prefix + knob + "s", "orders-command-checkout-" + knob} {
 				_, err := startPolicies(t, []*app.Service{policyService()},
 					app.ConfigFiles(fstest.MapFS{"config/config.json": {Data: []byte(`{"` + stray + `": 1}`)}}))
 				if err == nil || !strings.Contains(err.Error(), `config/config.json sets "`+stray+`", which no service declares`) {
@@ -161,15 +164,15 @@ func TestAKeyNoPolicyDeclaresIsRefused(t *testing.T) {
 // and from the code alike — where the SDK would refuse every call.
 func TestAPolicyValueItCannotRunWithStopsTheStart(t *testing.T) {
 	for _, tc := range []struct{ key, value string }{
-		{"orders-checkout-rate", "0"},
-		{"orders-checkout-burst", "0"},
-		{"orders-checkout-rate-wait", `"-1s"`},
-		{"orders-checkout-timeout", `"0s"`},
-		{"orders-checkout-bulkhead", "0"},
-		{"orders-checkout-bulkhead-queue", "-1"},
-		{"orders-checkout-bulkhead-wait", `"-1ms"`},
-		{"orders-lookup-client-rate", "-2"},
-		{"orders-lookup-client-burst", "0"},
+		{"orders-endpoint-checkout-rate", "0"},
+		{"orders-endpoint-checkout-burst", "0"},
+		{"orders-endpoint-checkout-rate-wait", `"-1s"`},
+		{"orders-endpoint-checkout-timeout", `"0s"`},
+		{"orders-endpoint-checkout-bulkhead", "0"},
+		{"orders-endpoint-checkout-bulkhead-queue", "-1"},
+		{"orders-endpoint-checkout-bulkhead-wait", `"-1ms"`},
+		{"orders-query-lookup-client-rate", "-2"},
+		{"orders-query-lookup-client-burst", "0"},
 	} {
 		t.Run(tc.key, func(t *testing.T) {
 			_, err := startPolicies(t, []*app.Service{policyService()},
@@ -181,7 +184,7 @@ func TestAPolicyValueItCannotRunWithStopsTheStart(t *testing.T) {
 	}
 	s := app.NewService("orders", "A rate of zero.")
 	s.Query("lookup", func(context.Context, app.EmptyValue) (int, error) { return 1, nil }, app.RateLimit(0, 1))
-	if _, err := startPolicies(t, []*app.Service{s}); err == nil || !strings.Contains(err.Error(), `setting "orders-lookup-rate"`) {
+	if _, err := startPolicies(t, []*app.Service{s}); err == nil || !strings.Contains(err.Error(), `setting "orders-query-lookup-rate"`) {
 		t.Errorf("a rate of zero in the code: %v", err)
 	}
 }
@@ -191,7 +194,7 @@ func TestAPolicyValueItCannotRunWithStopsTheStart(t *testing.T) {
 func TestAPolicyTwiceOnAnOperationIsRefused(t *testing.T) {
 	s := app.NewService("orders", "Two timeouts.")
 	s.Query("lookup", func(context.Context, app.EmptyValue) (int, error) { return 1, nil }, app.Timeout(time.Second), app.Timeout(time.Minute))
-	if _, err := startPolicies(t, []*app.Service{s}); err == nil || !strings.Contains(err.Error(), `its policy's setting "orders-lookup-timeout" is declared already`) {
+	if _, err := startPolicies(t, []*app.Service{s}); err == nil || !strings.Contains(err.Error(), `its policy's setting "orders-query-lookup-timeout" is declared already`) {
 		t.Errorf("two timeouts: %v", err)
 	}
 }
@@ -205,7 +208,7 @@ func TestARateLimitSaysWhenToRetry(t *testing.T) {
 	noop := func(context.Context, app.EmptyValue) (app.EmptyValue, error) { return app.EmptyValue{}, nil }
 	s.Endpoint("GET /orders/shared", noop, app.Name("shared"), app.RateLimit(0.4, 1))
 	s.Endpoint("GET /orders/mine", noop, app.Name("mine"), app.RateLimitPerClient(1, 1))
-	a, err := startPolicies(t, []*app.Service{s}, app.Clock(clk), app.Set("orders-shared-burst", 2))
+	a, err := startPolicies(t, []*app.Service{s}, app.Clock(clk), app.Set("orders-endpoint-shared-burst", 2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +305,7 @@ func TestATimeoutRunsOnTheAppsClock(t *testing.T) {
 	s := app.NewService("orders", "Slow.")
 	slow := newHeld()
 	s.Endpoint("GET /orders/slow", slow.handle, app.Name("slow"), app.Timeout(time.Hour))
-	a, err := startPolicies(t, []*app.Service{s}, app.Clock(clk), app.Set("orders-slow-timeout", "5s"))
+	a, err := startPolicies(t, []*app.Service{s}, app.Clock(clk), app.Set("orders-endpoint-slow-timeout", "5s"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -360,5 +363,44 @@ func TestACallerThatLeavesIsNoTimeout(t *testing.T) {
 	out := logs.String()
 	if !strings.Contains(out, "499") || strings.Contains(out, "request failed") || strings.Contains(out, "deadline") {
 		t.Errorf("the logs: %s", out)
+	}
+}
+
+// An operation whose policy's setting would be longer than a setting's name
+// may be still runs it, with the code's values: the declaration warns, and
+// the start goes on.
+func TestAPolicyWithATooLongNameKeepsTheCodesValues(t *testing.T) {
+	s := app.NewService("orders", "A long name.")
+	route := "GET /orders/" + strings.Repeat("x", 60)
+	s.Endpoint(route, func(context.Context, app.EmptyValue) (app.EmptyValue, error) { return app.EmptyValue{}, nil }, app.Timeout(time.Second))
+	a, err := startPolicies(t, []*app.Service{s})
+	if err != nil {
+		t.Fatalf("a long name stopped the start: %v", err)
+	}
+	warned := false
+	for _, d := range a.Graph().Diagnostics {
+		warned = warned || d.Severity == "warning" && strings.Contains(d.Message, "the policy runs with the code's values")
+	}
+	if !warned {
+		t.Errorf("no warning: %+v", a.Graph().Diagnostics)
+	}
+	expectAnswer(t, call(t, a, route, noBody), http.StatusNoContent, "")
+}
+
+// A command and the endpoint that exposes it are named alike, and each may
+// take a policy of the same kind: their settings are told apart by kind.
+func TestACommandAndItsExposureEachTakeAPolicy(t *testing.T) {
+	s := app.NewService("orders", "A command and its exposure.")
+	s.Command("place", func(context.Context, app.EmptyValue) (app.EmptyValue, error) { return app.EmptyValue{}, nil }, app.Timeout(time.Second)).
+		Expose("POST /orders/place", app.Anyone(), app.Timeout(2*time.Second))
+	a, err := startPolicies(t, []*app.Service{s})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := settingOf(t, a, "SHOP_ORDERS_COMMAND_PLACE_TIMEOUT"); got.Value != "1s" {
+		t.Errorf("the command's: %+v", got)
+	}
+	if got := settingOf(t, a, "SHOP_ORDERS_ENDPOINT_PLACE_TIMEOUT"); got.Value != "2s" {
+		t.Errorf("the exposure's: %+v", got)
 	}
 }

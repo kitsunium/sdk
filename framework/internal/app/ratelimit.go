@@ -28,7 +28,7 @@ const (
 // the least recently used goes first. It is the SDK's keyed rate limiter.
 //
 // The values are the defaults of the operation's settings
-// <service>-<operation>-client-rate and -client-burst, which config/<env>.*
+// <service>-<kind>-<operation>-client-rate and -client-burst, which config/<env>.*
 // and <PRODUCT>_<NAME> override; a rate that is not above zero or a burst
 // below one stops the start.
 //

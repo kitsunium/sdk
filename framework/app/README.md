@@ -1820,7 +1820,7 @@ func Bulkhead(maxConcurrent int, opts ...BulkheadOption) OperationOption
 
 Bulkhead caps how many requests the handler serves at once; the overflow answers 503 — at once, or, given [BulkheadQueue](#BulkheadQueue) and [MaxWait](#MaxWait), once the queue is full or the wait ran out. It is the SDK's resilience bulkhead.
 
-The values are the defaults of the operation's settings \<service>-\<operation>-bulkhead, -bulkhead-queue and -bulkhead-wait, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override; a bulkhead below one stops the start.
+The values are the defaults of the operation's settings \<service>-\<kind>-\<operation>-bulkhead, -bulkhead-queue and -bulkhead-wait, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override; a bulkhead below one stops the start.
 
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
@@ -1831,7 +1831,7 @@ IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller 
 func BulkheadQueue(n int) BulkheadOption
 ```
 
-BulkheadQueue lets up to n calls beyond those a [Bulkhead](#Bulkhead) runs wait for a slot, each for its [MaxWait](#MaxWait): without a wait, or with n at 0, the overflow is refused at once. A call that finds the queue full answers 503. It is the default of the operation's setting \<service>-\<operation>-bulkhead-queue, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override.
+BulkheadQueue lets up to n calls beyond those a [Bulkhead](#Bulkhead) runs wait for a slot, each for its [MaxWait](#MaxWait): without a wait, or with n at 0, the overflow is refused at once, and a negative n stops the start. A call that finds the queue full answers 503. It is the default of the operation's setting \<service>-\<kind>-\<operation>-bulkhead-queue, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override.
 
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
@@ -2242,7 +2242,7 @@ IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller 
 func MaxWait(d time.Duration) WaitOption
 ```
 
-MaxWait lets a call wait, at most d on the app's clock, instead of being refused at once: given to [RateLimit](#RateLimit), for a token due within d — the calls after it queue behind it —; given to [Bulkhead](#Bulkhead), for a slot to free, in the queue [BulkheadQueue](#BulkheadQueue) sizes. A call still refused answers 429 or 503 as before; a caller that leaves while it waits leaves the queue. Its default is no wait. It is the default of the operation's setting \<service>-\<operation>-rate-wait or -bulkhead-wait, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override.
+MaxWait lets a call wait, at most d on the app's clock, instead of being refused at once: given to [RateLimit](#RateLimit), for a token due within d — the calls after it queue behind it —; given to [Bulkhead](#Bulkhead), for a slot to free, in the queue [BulkheadQueue](#BulkheadQueue) sizes. A call still refused answers 429 or 503 as before; a caller that leaves while it waits leaves the queue. Its default is no wait, and a negative one stops the start. It is the default of the operation's setting \<service>-\<kind>-\<operation>-rate-wait or -bulkhead-wait, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override.
 
 IFACE-OPAQUE: the option is sealed — its methods are unexported — so a caller only hands it to the declaration it configures.
 
@@ -2514,7 +2514,7 @@ func RateLimit(perSecond float64, burst int, opts ...RateLimitOption) OperationO
 
 RateLimit puts a token bucket in front of the handler: perSecond tokens a second, up to burst at once. An empty bucket answers 429 at once — with Retry-After, the seconds the bucket needs to earn its next token —, or, given [MaxWait](#MaxWait), once the token due within it did not come. It is the SDK's resilience rate limiter.
 
-The values are the defaults of the operation's settings \<service>-\<operation>-rate, -burst and -rate-wait, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override; a rate that is not above zero or a burst below one stops the start.
+The values are the defaults of the operation's settings \<service>-\<kind>-\<operation>-rate, -burst and -rate-wait, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override; a rate that is not above zero or a burst below one stops the start.
 
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
@@ -2529,7 +2529,7 @@ RateLimitPerClient gives every client of an endpoint a token bucket of its own: 
 
 Buckets unused for ten minutes are forgotten, and at most 10 000 are kept: the least recently used goes first. It is the SDK's keyed rate limiter.
 
-The values are the defaults of the operation's settings \<service>-\<operation>-client-rate and -client-burst, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override; a rate that is not above zero or a burst below one stops the start.
+The values are the defaults of the operation's settings \<service>-\<kind>-\<operation>-client-rate and -client-burst, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override; a rate that is not above zero or a burst below one stops the start.
 
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
@@ -2784,7 +2784,7 @@ func Timeout(d time.Duration) OperationOption
 
 Timeout cancels the handler's context after d and answers 504. A caller that leaves first is no timeout: its request is recorded as 499, logged as information, and nothing it could read is written. It is the SDK's resilience timeout, on the app's clock.
 
-d is the default of the operation's setting \<service>-\<operation>-timeout, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override; one that is not positive stops the start.
+d is the default of the operation's setting \<service>-\<kind>-\<operation>-timeout, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override; one that is not positive stops the start.
 
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 

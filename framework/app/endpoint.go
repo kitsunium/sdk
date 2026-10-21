@@ -45,7 +45,7 @@ func MaxBody(bytes int64) EndpointOption {
 // SDK's resilience rate limiter.
 //
 // The values are the defaults of the operation's settings
-// <service>-<operation>-rate, -burst and -rate-wait, which config/<env>.* and
+// <service>-<kind>-<operation>-rate, -burst and -rate-wait, which config/<env>.* and
 // <PRODUCT>_<NAME> override; a rate that is not above zero or a burst below
 // one stops the start.
 //
@@ -61,7 +61,7 @@ func RateLimit(perSecond float64, burst int, opts ...RateLimitOption) OperationO
 // information, and nothing it could read is written. It is the SDK's
 // resilience timeout, on the app's clock.
 //
-// d is the default of the operation's setting <service>-<operation>-timeout,
+// d is the default of the operation's setting <service>-<kind>-<operation>-timeout,
 // which config/<env>.* and <PRODUCT>_<NAME> override; one that is not
 // positive stops the start.
 //
@@ -77,7 +77,7 @@ func Timeout(d time.Duration) OperationOption {
 // queue is full or the wait ran out. It is the SDK's resilience bulkhead.
 //
 // The values are the defaults of the operation's settings
-// <service>-<operation>-bulkhead, -bulkhead-queue and -bulkhead-wait, which
+// <service>-<kind>-<operation>-bulkhead, -bulkhead-queue and -bulkhead-wait, which
 // config/<env>.* and <PRODUCT>_<NAME> override; a bulkhead below one stops
 // the start.
 //

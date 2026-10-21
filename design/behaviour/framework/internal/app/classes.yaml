@@ -6890,19 +6890,21 @@ functions:
     results: string
   - doc: |-
       declarePolicySetting declares in svc the setting
-      <service>-<operation>-<knob> of a policy of the operation n, with def as its
+      <service>-<kind>-<operation>-<knob> of a policy of the operation n, with def as its
       default and check judging its resolved value; nil, with a declaration
-      error, when the name is not one a setting may take or the service declares
-      it already.
+      error, when the service declares it already, and nil, with a warning, when
+      the name is not one a setting may take — too long, most often: the policy
+      keeps the code's value.
     name: declarePolicySetting
     params: svc *Service, n *nodeBase, knob string, def T, check func(v any) phrase
     results: "*SettingService[T]"
     typeParams: T SettingValue
   - doc: |-
-      policySettingName is <service>-<operation>-<knob>, each name spelled as a
-      setting's: "shop", "CreateItem", "rate" make "shop-create-item-rate".
+      policySettingName is <service>-<kind>-<operation>-<knob>, each name spelled
+      as a setting's: "shop", "endpoint", "CreateItem", "rate" make
+      "shop-endpoint-create-item-rate".
     name: policySettingName
-    params: service, operation, knob string
+    params: service, kind, operation, knob string
     results: string
   - doc: |-
       settingWords spells a name as a setting's: lower case, a capital after a

@@ -155,6 +155,7 @@
   "policy.not-negative": "il doit valoir 0 ou plus",
   "policy.positive": "il doit être une durée positive",
   "policy.rate": "il doit être un nombre d’appels par seconde supérieur à zéro",
+  "policy.setting-name": "« {node} » : le réglage « {setting} » de sa politique n’est pas un nom de réglage — 1 à {max} lettres minuscules, chiffres et tirets — : la politique tourne avec les valeurs du code et aucune configuration ne l’atteint ; donnez à l’opération un nom plus court, avec app.Name pour un endpoint",
   "policy.setting-twice": "« {node} » : le réglage « {setting} » de sa politique est déjà déclaré : une opération prend une politique de chaque sorte, et deux opérations d’un service dont les noms s’écrivent pareil partagent leurs réglages — renommez-en une, avec app.Name pour un endpoint",
   "policy.wait": "il doit être une durée nulle ou positive : 0 n’attend pas",
   "port.fallback-nil": "le port {port} a un repli nil : app.Fallback prend une opération déclarée avant le port",

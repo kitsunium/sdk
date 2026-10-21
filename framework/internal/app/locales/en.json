@@ -155,6 +155,7 @@
   "policy.not-negative": "it must be 0 or more",
   "policy.positive": "it must be a positive duration",
   "policy.rate": "it must be a number of calls a second above zero",
+  "policy.setting-name": "\"{node}\": its policy's setting \"{setting}\" is not a setting's name — 1 to {max} lower-case letters, digits and dashes —: the policy runs with the code's values and no configuration reaches it; give the operation a shorter name, with app.Name for an endpoint",
   "policy.setting-twice": "\"{node}\": its policy's setting \"{setting}\" is declared already: an operation takes one policy of a kind, and two operations of a service whose names spell alike share their settings — rename one, with app.Name for an endpoint",
   "policy.wait": "it must be a duration of zero or more: 0 waits not at all",
   "port.fallback-nil": "port {port} has a nil fallback: app.Fallback takes an operation declared before the port",

@@ -1275,7 +1275,7 @@ packages:
           SDK's resilience rate limiter.
 
           The values are the defaults of the operation's settings
-          <service>-<operation>-rate, -burst and -rate-wait, which config/<env>.* and
+          <service>-<kind>-<operation>-rate, -burst and -rate-wait, which config/<env>.* and
           <PRODUCT>_<NAME> override; a rate that is not above zero or a burst below
           one stops the start.
 
@@ -1298,7 +1298,7 @@ packages:
           information, and nothing it could read is written. It is the SDK's
           resilience timeout, on the app's clock.
 
-          d is the default of the operation's setting <service>-<operation>-timeout,
+          d is the default of the operation's setting <service>-<kind>-<operation>-timeout,
           which config/<env>.* and <PRODUCT>_<NAME> override; one that is not
           positive stops the start.
 
@@ -1316,7 +1316,7 @@ packages:
           queue is full or the wait ran out. It is the SDK's resilience bulkhead.
 
           The values are the defaults of the operation's settings
-          <service>-<operation>-bulkhead, -bulkhead-queue and -bulkhead-wait, which
+          <service>-<kind>-<operation>-bulkhead, -bulkhead-queue and -bulkhead-wait, which
           config/<env>.* and <PRODUCT>_<NAME> override; a bulkhead below one stops
           the start.
 
@@ -1337,9 +1337,9 @@ packages:
           calls after it queue behind it —; given to [Bulkhead], for a slot to free,
           in the queue [BulkheadQueue] sizes. A call still refused answers 429 or
           503 as before; a caller that leaves while it waits leaves the queue. Its
-          default is no wait. It is the default of the operation's setting
-          <service>-<operation>-rate-wait or -bulkhead-wait, which config/<env>.* and
-          <PRODUCT>_<NAME> override.
+          default is no wait, and a negative one stops the start. It is the default
+          of the operation's setting <service>-<kind>-<operation>-rate-wait or
+          -bulkhead-wait, which config/<env>.* and <PRODUCT>_<NAME> override.
 
           IFACE-OPAQUE: the option is sealed — its methods are unexported — so a
           caller only hands it to the declaration it configures.
@@ -1352,9 +1352,10 @@ packages:
       - doc: |-
           BulkheadQueue lets up to n calls beyond those a [Bulkhead] runs wait for a
           slot, each for its [MaxWait]: without a wait, or with n at 0, the overflow
-          is refused at once. A call that finds the queue full answers 503. It is
-          the default of the operation's setting <service>-<operation>-bulkhead-queue,
-          which config/<env>.* and <PRODUCT>_<NAME> override.
+          is refused at once, and a negative n stops the start. A call that finds the
+          queue full answers 503. It is the default of the operation's setting
+          <service>-<kind>-<operation>-bulkhead-queue, which config/<env>.* and
+          <PRODUCT>_<NAME> override.
 
           IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
           only hands it to the declaration it configures.
@@ -1956,7 +1957,7 @@ packages:
           the least recently used goes first. It is the SDK's keyed rate limiter.
 
           The values are the defaults of the operation's settings
-          <service>-<operation>-client-rate and -client-burst, which config/<env>.*
+          <service>-<kind>-<operation>-client-rate and -client-burst, which config/<env>.*
           and <PRODUCT>_<NAME> override; a rate that is not above zero or a burst
           below one stops the start.
 
@@ -10432,7 +10433,7 @@ packages:
           SDK's resilience rate limiter.
 
           The values are the defaults of the operation's settings
-          <service>-<operation>-rate, -burst and -rate-wait, which config/<env>.* and
+          <service>-<kind>-<operation>-rate, -burst and -rate-wait, which config/<env>.* and
           <PRODUCT>_<NAME> override; a rate that is not above zero or a burst below
           one stops the start.
 
@@ -10455,7 +10456,7 @@ packages:
           information, and nothing it could read is written. It is the SDK's
           resilience timeout, on the app's clock.
 
-          d is the default of the operation's setting <service>-<operation>-timeout,
+          d is the default of the operation's setting <service>-<kind>-<operation>-timeout,
           which config/<env>.* and <PRODUCT>_<NAME> override; one that is not
           positive stops the start.
 
@@ -10473,7 +10474,7 @@ packages:
           queue is full or the wait ran out. It is the SDK's resilience bulkhead.
 
           The values are the defaults of the operation's settings
-          <service>-<operation>-bulkhead, -bulkhead-queue and -bulkhead-wait, which
+          <service>-<kind>-<operation>-bulkhead, -bulkhead-queue and -bulkhead-wait, which
           config/<env>.* and <PRODUCT>_<NAME> override; a bulkhead below one stops
           the start.
 
@@ -10494,9 +10495,9 @@ packages:
           calls after it queue behind it —; given to [Bulkhead], for a slot to free,
           in the queue [BulkheadQueue] sizes. A call still refused answers 429 or
           503 as before; a caller that leaves while it waits leaves the queue. Its
-          default is no wait. It is the default of the operation's setting
-          <service>-<operation>-rate-wait or -bulkhead-wait, which config/<env>.* and
-          <PRODUCT>_<NAME> override.
+          default is no wait, and a negative one stops the start. It is the default
+          of the operation's setting <service>-<kind>-<operation>-rate-wait or
+          -bulkhead-wait, which config/<env>.* and <PRODUCT>_<NAME> override.
 
           IFACE-OPAQUE: the option is sealed — its methods are unexported — so a
           caller only hands it to the declaration it configures.
@@ -10509,9 +10510,10 @@ packages:
       - doc: |-
           BulkheadQueue lets up to n calls beyond those a [Bulkhead] runs wait for a
           slot, each for its [MaxWait]: without a wait, or with n at 0, the overflow
-          is refused at once. A call that finds the queue full answers 503. It is
-          the default of the operation's setting <service>-<operation>-bulkhead-queue,
-          which config/<env>.* and <PRODUCT>_<NAME> override.
+          is refused at once, and a negative n stops the start. A call that finds the
+          queue full answers 503. It is the default of the operation's setting
+          <service>-<kind>-<operation>-bulkhead-queue, which config/<env>.* and
+          <PRODUCT>_<NAME> override.
 
           IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
           only hands it to the declaration it configures.
@@ -11030,7 +11032,7 @@ packages:
           the least recently used goes first. It is the SDK's keyed rate limiter.
 
           The values are the defaults of the operation's settings
-          <service>-<operation>-client-rate and -client-burst, which config/<env>.*
+          <service>-<kind>-<operation>-client-rate and -client-burst, which config/<env>.*
           and <PRODUCT>_<NAME> override; a rate that is not above zero or a burst
           below one stops the start.
 
