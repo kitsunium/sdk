@@ -1,12 +1,19 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 files:
+  - decls:
+      - Config
+    name: config.go
   - decls: []
     name: doc.go
   - decls:
       - failoverSink
       - New
+      - NewWithConfig
       - (*failoverSink).Write
+      - exhausted
+      - (*failoverSink).writeCooled
+      - (*failoverSink).attempt
       - (*failoverSink).Flush
       - (*failoverSink).Close
     name: failover_sink.go
@@ -14,23 +21,62 @@ functions:
   - name: New
     params: branches ...corelogger.Sink
     results: sink corelogger.Sink, err error
+  - name: NewWithConfig
+    params: cfg Config, branches ...corelogger.Sink
+    results: sink corelogger.Sink, err error
+  - doc: exhausted wraps every branch's failure in the documented sentinel.
+    name: exhausted
+    params: collected []error, attempts int, rec corelogger.RecordEvent
+    results: error
 imports:
+  atomic: sync/atomic
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
   context: context
   corefailover: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/failover
   corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
   errors: errors
   errs: github.com/kitsunium/sdk/internal/kernel/errs
+  time: time
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/failover
   name: failover
   purpose: Package failover implements a sequential-retry Sink that tries downstream sinks in order until one succeeds.
 types:
+  - fields:
+      - doc: |-
+          Cooldown is how long a branch whose Write failed is tried last rather
+          than in its place. Non-positive disables it — every Write walks the
+          declaration order, as New does. A branch that accepts a Write is back in
+          its place at once.
+        name: Cooldown
+        type: time.Duration
+      - doc: |-
+          Clock measures Cooldown; nil falls back to clock.System. It is read once
+          per Write, and only when Cooldown is set.
+        name: Clock
+        type: clock.Clock
+    kind: struct
+    name: Config
   - doc: failoverSink wraps an ordered list of downstream sinks tried sequentially.
     fields:
       - doc: chain is the ordered sink list — first hit returns; misses cascade.
         name: chain
         type: "[]corelogger.Sink"
+      - doc: |-
+          cooldown demotes a failed branch for this long; zero disables it, and
+          Write then never reads the clock or retryAt.
+        name: cooldown
+        type: time.Duration
+      - doc: clk measures cooldown; nil when cooldown is zero.
+        name: clk
+        type: clock.Clock
+      - doc: |-
+          retryAt holds, per branch, the clock instant (UnixNano) until which the
+          branch is tried last; zero means "in its place". Atomic, because Write
+          runs from every goroutine that logs and a lock would serialise them.
+        name: retryAt
+        type: "[]atomic.Int64"
     kind: struct
     methods:
       - doc: |-
@@ -40,6 +86,23 @@ types:
         params: ctx context.Context, rec corelogger.RecordEvent, p []byte
         recv: s *failoverSink
         results: n int, err error
+      - doc: |-
+          writeCooled is Write under a cooldown: a first pass in declaration order
+          over the branches not cooling down, then — only when all of them failed — a
+          second pass over the cooling ones, in the same order. A cooling branch is
+          demoted, never skipped, so a cooldown alone never loses a record. The clock
+          is read once per Write.
+        name: writeCooled
+        params: ctx context.Context, rec corelogger.RecordEvent, p []byte
+        recv: s *failoverSink
+        results: n int, err error
+      - doc: |-
+          attempt writes to branch i, restores it to its place on success and
+          demotes it for the cooldown on failure, collecting the failure.
+        name: attempt
+        params: ctx context.Context, i int, branch corelogger.Sink, rec corelogger.RecordEvent, p []byte, now int64, collected *[]error
+        recv: s *failoverSink
+        results: n int, ok bool
       - doc: |-
           Flush forwards to every distinct branch and aggregates per-branch errors via
           errors.Join. A sink reused across multiple chain slots (V33) is flushed once.

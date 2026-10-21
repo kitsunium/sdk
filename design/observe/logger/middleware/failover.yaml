@@ -53,6 +53,13 @@ packages:
 
       Use case: emit logs to a primary collector with a local file as a
       fallback so logs survive a network outage.
+
+      NewWithConfig adds a Cooldown: a branch whose Write failed is tried LAST
+      until Cooldown has passed on the configured Clock, so a dead primary stops
+      costing every record a failed attempt — a timeout, often — before the
+      fallback takes it. A cooling branch is demoted, never skipped: when every
+      other branch fails it is still tried, so a cooldown alone never loses a
+      record. A zero Cooldown is New's behaviour exactly.
     functions:
       - doc: New constructs a failover Sink trying each branch in order.
         in:
@@ -65,6 +72,43 @@ packages:
           - name: err
             type: error
         variadic: true
+      - doc: |-
+          NewWithConfig constructs a failover Sink trying each branch in order, a
+          branch that failed demoted to the end of the order until cfg.Cooldown has
+          passed on cfg.Clock. A zero Config is New exactly; an empty chain returns
+          Empty, as New does.
+        in:
+          - name: cfg
+            type: Config
+          - name: branches
+            type: corelogger.Sink
+        name: NewWithConfig
+        out:
+          - name: sink
+            type: corelogger.Sink
+          - name: err
+            type: error
+        variadic: true
     imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
       corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
     path: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/failover
+    types:
+      - doc: |-
+          Config tunes a failover Sink at construction time. The zero value is New's
+          behaviour: every branch tried in declaration order on every Write.
+        name: Config
+        struct:
+          fields:
+            - doc: |-
+                Cooldown is how long a branch whose Write failed is tried last rather
+                than in its place. Non-positive disables it — every Write walks the
+                declaration order, as New does. A branch that accepts a Write is back in
+                its place at once.
+              name: Cooldown
+              type: time.Duration
+            - doc: |-
+                Clock measures Cooldown; nil falls back to clock.System. It is read once
+                per Write, and only when Cooldown is set.
+              name: Clock
+              type: clock.Clock
