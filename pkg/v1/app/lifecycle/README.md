@@ -61,6 +61,14 @@ err = app.Add(sweeper.Component()) // Start begins it, Stop cancels and joins it
 
 Stop cancels the function's context and waits for it to return — the Lifecycle budgets that wait like any other Stop — and a function that ignores its context is abandoned at the budget, never killed. Start's context gives every run its values; its cancellation does not end the supervision, because a Lifecycle hands a component the context of its STARTUP. Every wait is on [SupervisorConfig](#SupervisorConfig).Clock, so a test drives each restart with a ManualClock instead of sleeping.
 
+A supervisor restarts forever by default. [SupervisorConfig](#SupervisorConfig).GiveUpAfter bounds it the way Erlang's restart intensity does: more than Restarts early ends within Within, and the supervision ends instead of restarting again. Its observer hears [SupervisionGaveUp](#SupervisionGaveUp), and [Supervisor](#Supervisor).Check — a health check's shape — reports [SupervisorGaveUp](#SupervisorGaveUp) to a liveness probe from then on:
+
+```
+sweeper, err := lifecycle.NewSupervisor("session-sweeper", sweep, lifecycle.SupervisorConfig{
+    GiveUpAfter: lifecycle.GiveUp{Restarts: 5, Within: time.Minute},
+})
+```
+
 ### Errors
 
 A failed [Lifecycle](#Lifecycle).Start returns an errors.Join carrying [StartFailed](#StartFailed) AND the component's own error, side by side rather than one wrapping the other — so errs.HasCode(err, CodeStartFailed) and the caller's own errors.Is both answer. [Lifecycle](#Lifecycle).Stop aggregates the same way, one entry per component that failed or overran.
@@ -76,6 +84,7 @@ A component that PANICS is recovered and reported as [ComponentPanicked](#Compon
 - [func Run\(ctx context.Context, lc Lifecycle, cfg RunConfig\) error](<#Run>)
 - [type Component](<#Component>)
 - [type Config](<#Config>)
+- [type GiveUp](<#GiveUp>)
 - [type Lifecycle](<#Lifecycle>)
   - [func \(Lifecycle\) Add\(component ComponentValue\) error](<#Lifecycle.Add>)
   - [func \(Lifecycle\) Start\(ctx context.Context\) error](<#Lifecycle.Start>)
@@ -94,6 +103,7 @@ A component that PANICS is recovered and reported as [ComponentPanicked](#Compon
 - [type SupervisionPhase](<#SupervisionPhase>)
   - [func \(SupervisionPhase\) String\(\) string](<#SupervisionPhase.String>)
 - [type Supervisor](<#Supervisor>)
+  - [func \(\*Supervisor\) Check\(ctx context.Context\) error](<#Supervisor.Check>)
   - [func \(\*Supervisor\) Component\(\) corelc.ComponentValue](<#Supervisor.Component>)
   - [func \(\*Supervisor\) Start\(ctx context.Context\) error](<#Supervisor.Start>)
   - [func \(\*Supervisor\) Stop\(ctx context.Context\) error](<#Supervisor.Stop>)
@@ -155,6 +165,15 @@ const PhaseStop Phase = 2
 PhaseStop reports a call to a component's Stop.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/app/lifecycle.PhaseStop`.
+
+<a name="SupervisionGaveUp"></a>
+```go
+const SupervisionGaveUp SupervisionPhase = 5
+```
+
+SupervisionGaveUp reports a supervision that gave up: its function ended early too often for SupervisorConfig.GiveUpAfter.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/app/lifecycle.SupervisionGaveUp`.
 
 <a name="SupervisionRestarting"></a>
 ```go
@@ -293,6 +312,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/app/lifecycle.StopTimeo
 
 Code `0.3.49.3` · reason `STOP_TIMEOUT` · public "A component did not stop within its budget and was abandoned"
 
+<a name="SupervisorGaveUp"></a>
+```go
+var SupervisorGaveUp *errs.Error
+```
+
+SupervisorGaveUp is what Supervisor.Check reports once a supervision gave up: its function ended early more often than GiveUpAfter allows.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/app/lifecycle.SupervisorGaveUp`.
+
+Code `0.3.49.9` · reason `SUPERVISOR_GAVE_UP` · public "The supervised function kept failing and the supervisor gave up"
+
 <a name="SupervisorMisconfigured"></a>
 ```go
 var SupervisorMisconfigured *errs.Error
@@ -427,6 +457,26 @@ type Config struct {
 	// caller's behalf (ADR 0030) — so a caller who wants a startup log must
 	// wire this. The errors are still returned from Start and Stop either way.
 	OnTransition func(corelc.TransitionValue)
+}
+```
+
+<a name="GiveUp"></a>
+## type [GiveUp](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/gen_facade.go>)
+
+GiveUp is the public alias for a supervisor's restart intensity: give up after more than Restarts early ends within Within.
+
+```go
+type GiveUp = svclc.GiveUpValue
+```
+
+GiveUp is an alias of `github.com/kitsunium/sdk/internal/service/app/lifecycle.GiveUpValue`, declared as:
+
+```go
+type GiveUp struct {
+	// Restarts is how many early ends Within tolerates, each restarted.
+	Restarts int
+	// Within is the span the early ends are counted over.
+	Within   time.Duration
 }
 ```
 
@@ -642,7 +692,8 @@ type SupervisionEvent struct {
 	// Err is what an ended run returned: nil when it returned nil before its
 	// context ended, RunPanicked for a panic, and nil too when it ended
 	// because the supervision was stopping and it returned its context's
-	// error — the way out, not a failure.
+	// error — the way out, not a failure. On SupervisionGaveUp it is
+	// SupervisorGaveUp, carrying the last run's error as a field.
 	Err      error
 	// At is when the event happened, on the supervisor's clock.
 	At       time.Time
@@ -652,8 +703,8 @@ type SupervisionEvent struct {
 	Duration time.Duration
 	// Delay is how long a restart waits before the next run.
 	Delay    time.Duration
-	// Run numbers the run the event is about, from 1; the Stopped event
-	// carries the last one.
+	// Run numbers the run the event is about, from 1; the Stopped and
+	// GaveUp events carry the last one.
 	Run      int
 	// Failures is how many runs in a row have ended early, counting this
 	// one — the attempt the backoff is computed for.
@@ -705,6 +756,21 @@ Supervisor is an alias of `github.com/kitsunium/sdk/internal/service/app/lifecyc
 type Supervisor struct{}
 ```
 
+<a name="Supervisor.Check"></a>
+### func \(Supervisor\) [Check](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/lifecycle/supervise.go>)
+
+```go
+func (*Supervisor) Check(ctx context.Context) error
+```
+
+Check reports whether the supervision gave up: SupervisorGaveUp once its function ended early more often than cfg.GiveUpAfter allows, and nil otherwise — while it runs, once it was stopped, and before it was ever started. A later Start clears it. Its shape is a health check's, so a liveness probe takes it as it is:
+
+```
+health.LivenessCheck{Name: "sweeper", Check: sweeper.Check}
+```
+
+A ctx already done reports its own error, as a Start does; otherwise the answer is a field read under a lock, never a wait.
+
 <a name="Supervisor.Component"></a>
 ### func \(Supervisor\) [Component](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/lifecycle/supervise.go>)
 
@@ -739,7 +805,7 @@ Stop ends the supervision: it cancels the running function's context and waits f
 <a name="SupervisorConfig"></a>
 ## type [SupervisorConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/gen_facade.go>)
 
-SupervisorConfig is the public alias for a supervisor's optional tuning: Clock, Observe, Backoff, HealthyAfter.
+SupervisorConfig is the public alias for a supervisor's optional tuning: Clock, Observe, Backoff, HealthyAfter, GiveUpAfter.
 
 ```go
 type SupervisorConfig = svclc.SupervisorConfig
@@ -766,6 +832,10 @@ type SupervisorConfig struct {
 	// HealthyAfter is how long a run must last for its end to reset the
 	// consecutive-failure count. Not positive means [DefaultHealthyRun].
 	HealthyAfter time.Duration
+	// GiveUpAfter bounds how often the function may end early before the
+	// supervisor stops restarting it. The zero value restarts it forever,
+	// as a supervisor always has.
+	GiveUpAfter  GiveUpValue
 }
 ```
 

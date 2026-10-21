@@ -94,8 +94,35 @@ func validateEntry(value coresched.EntryValue) error {
 		return kerrs.Wrap(coresched.InvalidEntry, kerrs.WrapParams{},
 			kerrs.String("missing", "Job"), kerrs.String("job", value.Name))
 	}
+	//: an overlap policy the engine cannot honour.
+	if field, refused := overlapRefusal(value); refused {
+		//: the field says which.
+		return kerrs.Wrap(coresched.InvalidEntry, kerrs.WrapParams{},
+			kerrs.String("field", field), kerrs.String("job", value.Name))
+	}
 	//: runnable.
 	return nil
+}
+
+// overlapRefusal names the field of an entry's overlap policy that cannot be
+// honoured — an Overlap this package does not define, or AllowOverlap beside
+// an Overlap that says something else — and reports whether there is one.
+func overlapRefusal(value coresched.EntryValue) (field string, refused bool) {
+	//: the first field that cannot be honoured.
+	switch {
+	//: a policy beyond the three.
+	case value.Overlap > coresched.OverlapReplace:
+		//: named.
+		return "Overlap", true
+	//: two answers to one question.
+	case value.AllowOverlap && value.Overlap == coresched.OverlapReplace:
+		//: named.
+		return "AllowOverlap", true
+	//: consistent.
+	default:
+		//: none.
+		return "", false
+	}
 }
 
 // begin claims the running flag and takes a snapshot of the entry set.

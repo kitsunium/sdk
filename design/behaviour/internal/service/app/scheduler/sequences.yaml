@@ -431,13 +431,42 @@ sequences:
       - return: got
   - of: newEntry
     steps:
+      - bind: overlap
+        eval: value.Overlap
+      - opt:
+          do:
+            - set: overlap
+              value: coresched.OverlapAllow
+          when: value.AllowOverlap
       - return: |-
           &entry{
-          		name:         value.Name,
-          		schedule:     value.Schedule,
-          		job:          value.Job,
-          		allowOverlap: value.AllowOverlap,
+          		name:     value.Name,
+          		schedule: value.Schedule,
+          		job:      value.Job,
+          		overlap:  overlap,
+          		deadline: value.StartingDeadline,
           	}
+  - of: (*entry).expired
+    steps:
+      - return: e.deadline > 0 && now.Sub(scheduled) > e.deadline
+  - of: (*entry).replaceWith
+    steps:
+      - lock:
+          mutex: e.mu
+      - bind: prev
+        eval: e.current
+      - set: e.current
+        value: next
+      - return: prev
+  - of: (*entry).release
+    steps:
+      - lock:
+          mutex: e.mu
+      - opt:
+          do:
+            - set: e.current
+              value: nil
+          when: e.current == mine
   - of: (*entry).arm
     steps:
       - bind: next, ok
@@ -853,6 +882,8 @@ sequences:
         kind: internal
       - id: s.emit
         kind: internal
+      - id: s.replace
+        kind: internal
       - id: e.busy.Store
         kind: value
       - id: wg.Add
@@ -871,13 +902,25 @@ sequences:
                 when: "!ok"
             - opt:
                 do:
+                  - eval: "s.emit(coresched.ResultValue{Name: e.name, Scheduled: scheduled, Missed: missed, Expired: true})"
+                    to: s.emit
+                  - continue: true
+                when: e.expired(scheduled, now)
+            - opt:
+                do:
+                  - eval: s.replace(ctx, wg, e, scheduled, missed)
+                    to: s.replace
+                  - continue: true
+                when: e.overlap == coresched.OverlapReplace
+            - opt:
+                do:
                   - eval: |-
                       s.emit(coresched.ResultValue{
                       				Name: e.name, Scheduled: scheduled, Missed: missed, Skipped: true,
                       			})
                     to: s.emit
                   - continue: true
-                when: "!e.allowOverlap && e.busy.Load()"
+                when: e.overlap == coresched.OverlapSkip && e.busy.Load()
             - eval: e.busy.Store(true)
               to: e.busy.Store
             - eval: wg.Add(1)
@@ -887,6 +930,108 @@ sequences:
           key: _
           range: entries
           value: e
+  - of: (*scheduler).replace
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*scheduler).replace
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: next.done.Add
+        kind: value
+      - id: e.replaceWith
+        kind: internal
+      - id: prev.replaced.Store
+        kind: value
+      - id: wg.Add
+        kind: value
+      - id: s.runReplacing
+        kind: internal
+    steps:
+      - bind: runCtx, cancel
+        eval: context.WithCancel(ctx)
+        to: context
+      - bind: next
+        eval: "&replaceable{cancel: cancel}"
+      - eval: next.done.Add(1)
+        to: next.done.Add
+      - bind: prev
+        eval: e.replaceWith(next)
+        to: e.replaceWith
+      - opt:
+          do:
+            - eval: prev.replaced.Store(true)
+              to: prev.replaced.Store
+            - eval: prev.cancel()
+          when: prev != nil
+      - eval: wg.Add(1)
+        to: wg.Add
+      - go: "s.runReplacing(runCtx, wg, replacement{entry: e, mine: next, prev: prev, scheduled: scheduled, missed: missed})"
+        to: s.runReplacing
+  - of: (*scheduler).runReplacing
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*scheduler).runReplacing
+        kind: self
+      - id: wg.Done
+        kind: value
+      - id: mine.done.Done
+        kind: value
+      - id: r.prev.done.Wait
+        kind: value
+      - id: e.release
+        kind: internal
+      - id: s.emit
+        kind: internal
+      - id: s.clk.Now
+        kind: value
+      - id: invoke
+        kind: internal
+      - id: mine.replaced.Load
+        kind: value
+    steps:
+      - defer: wg.Done()
+        to: wg.Done
+      - bind: e, mine
+        eval: r.entry, r.mine
+      - defer: mine.done.Done()
+        to: mine.done.Done
+      - defer: mine.cancel()
+      - opt:
+          do:
+            - eval: r.prev.done.Wait()
+              to: r.prev.done.Wait
+          when: r.prev != nil
+      - bind: result
+        eval: "coresched.ResultValue{Name: e.name, Scheduled: r.scheduled, Missed: r.missed}"
+      - opt:
+          do:
+            - set: result.Replaced
+              value: "true"
+            - eval: e.release(mine)
+              to: e.release
+            - eval: s.emit(result)
+              to: s.emit
+            - return: ""
+          when: mine.replaced.Load()
+      - set: result.Started
+        to: s.clk.Now
+        value: s.clk.Now()
+      - set: result.Err
+        to: invoke
+        value: invoke(ctx, e)
+      - set: result.Finished
+        to: s.clk.Now
+        value: s.clk.Now()
+      - set: result.Replaced
+        to: mine.replaced.Load
+        value: mine.replaced.Load()
+      - eval: e.release(mine)
+        to: e.release
+      - eval: s.emit(result)
+        to: s.emit
   - of: (*scheduler).run
     participants:
       - id: caller
@@ -1001,6 +1146,8 @@ sequences:
         kind: self
       - id: kerrs
         kind: package
+      - id: overlapRefusal
+        kind: internal
     steps:
       - opt:
           do:
@@ -1023,7 +1170,31 @@ sequences:
                 			kerrs.String("missing", "Job"), kerrs.String("job", value.Name))
               to: kerrs
           when: value.Job == nil
+      - opt:
+          do:
+            - return: |-
+                kerrs.Wrap(coresched.InvalidEntry, kerrs.WrapParams{},
+                			kerrs.String("field", field), kerrs.String("job", value.Name))
+              to: kerrs
+          init:
+            bind: field, refused
+            eval: overlapRefusal(value)
+            to: overlapRefusal
+          when: refused
       - return: nil
+  - of: overlapRefusal
+    steps:
+      - switch:
+          cases:
+            - case: value.Overlap > coresched.OverlapReplace
+              do:
+                - return: "\"Overlap\", true"
+            - case: value.AllowOverlap && value.Overlap == coresched.OverlapReplace
+              do:
+                - return: "\"AllowOverlap\", true"
+            - default: true
+              do:
+                - return: "\"\", false"
   - of: (*scheduler).begin
     participants:
       - id: caller

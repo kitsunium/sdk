@@ -11,7 +11,8 @@ import (
 // defaults to 5; a non-positive OpenDuration defaults to 30s; a nil Clock
 // defaults to clock.System; a nil Retryable counts every error as a failure;
 // a nil Window opens on consecutive failures; a nil OnStateChange hears
-// nothing; a nil OpenBackoff keeps every opening at OpenDuration.
+// nothing; a nil OpenBackoff keeps every opening at OpenDuration; a
+// non-positive HalfOpenTrials closes on one successful trial.
 type BreakerConfig struct {
 	// FailureThreshold is how many consecutive failures open a breaker
 	// without a Window. A non-positive value defaults to 5. It is not read
@@ -68,10 +69,22 @@ type BreakerConfig struct {
 	// Its BaseDelay and its MaxDelay are both required — a zero base is
 	// a cooldown of nothing, and a zero ceiling one that may grow to
 	// centuries — and are refused when not positive, with
-	// PolicyMisconfigured naming the field. Its Multiplier and Jitter
-	// read as BackoffValue reads them. Nil keeps every opening at
-	// OpenDuration.
+	// PolicyMisconfigured naming the field. Its Multiplier, Jitter and
+	// JitterMode read as BackoffValue reads them. Nil keeps every opening
+	// at OpenDuration.
 	OpenBackoff *BackoffValue
+	// HalfOpenTrials is how many trials in a row must succeed before a
+	// HalfOpen breaker closes. The trials still run one at a time, and
+	// any one that fails opens the breaker again. Zero, or less, is one:
+	// the first successful trial closes it, as before the field existed.
+	//
+	// One success is thin evidence that a dependency has recovered — the
+	// trial may have reached the one healthy replica, or a cache — and a
+	// breaker that closes on it and trips again at once doubles the load
+	// it meant to spare. A few trials in a row cost a few more cooldowns'
+	// worth of latency to the first callers after recovery, which is what
+	// resilience4j's permittedNumberOfCallsInHalfOpenState buys too.
+	HalfOpenTrials int
 }
 
 // BreakerWindowValue is a circuit breaker's sliding window: the calls of the

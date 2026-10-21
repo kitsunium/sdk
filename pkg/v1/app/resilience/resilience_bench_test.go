@@ -202,6 +202,47 @@ func BenchmarkRateLimiter_Admitted(b *testing.B) {
 	}
 }
 
+// BenchmarkRateLimiter_Admitted_WithMaxWait is the same admitted call on a
+// limiter that may wait (ADR 0184): a token is available, so no wait is armed,
+// and the cost must stay the rejecting limiter's.
+func BenchmarkRateLimiter_Admitted_WithMaxWait(b *testing.B) {
+	runner := resilience.NewRateLimiter(resilience.RateLimiterConfig{
+		Rate: 1e9, Burst: 1_000_000, MaxWait: time.Millisecond,
+	})
+	ctx := b.Context()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		errSink = runner.Run(ctx, okOp)
+	}
+}
+
+// BenchmarkBulkheadWait_Uncontended is the bulkhead that queues (ADR 0184) on
+// the path a healthy service takes: a slot is free, so the queue and the
+// clock are never touched.
+func BenchmarkBulkheadWait_Uncontended(b *testing.B) {
+	runner := resilience.NewBulkheadWait(resilience.BulkheadWaitConfig{Max: 16, Queue: 16, MaxWait: time.Millisecond})
+	ctx := b.Context()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		errSink = runner.Run(ctx, okOp)
+	}
+}
+
+// BenchmarkAdaptiveThrottle_Healthy is the adaptive throttle (ADR 0184) in
+// front of a dependency accepting every call: the refusal probability is zero,
+// so no draw is made — one lock and a slot advance per call.
+func BenchmarkAdaptiveThrottle_Healthy(b *testing.B) {
+	runner := resilience.NewAdaptiveThrottle(resilience.AdaptiveThrottleConfig{})
+	ctx := b.Context()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		errSink = runner.Run(ctx, okOp)
+	}
+}
+
 // BenchmarkBulkhead_Uncontended and _Contended bracket the concurrency limiter:
 // the first is what one goroutine pays for the guarantee, the second is what
 // eight pay for it, and the ratio is the number that decides whether a bulkhead

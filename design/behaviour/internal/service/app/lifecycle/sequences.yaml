@@ -550,6 +550,8 @@ sequences:
         kind: self
       - id: validateSupervisor
         kind: internal
+      - id: validateGiveUp
+        kind: internal
       - id: cfg.resolved
         kind: internal
     steps:
@@ -561,10 +563,22 @@ sequences:
             eval: validateSupervisor(name, run)
             to: validateSupervisor
           when: invalid != nil
+      - opt:
+          do:
+            - return: nil, invalid
+          init:
+            bind: invalid
+            eval: validateGiveUp(name, cfg.GiveUpAfter)
+            to: validateGiveUp
+          when: invalid != nil
       - bind: clk, backoff, healthy
         eval: cfg.resolved()
         to: cfg.resolved
-      - return: "&Supervisor{run: run, clock: clk, observe: cfg.Observe, name: name, backoff: backoff, healthy: healthy}, nil"
+      - return: |-
+          &Supervisor{
+          		run: run, clock: clk, observe: cfg.Observe, name: name,
+          		backoff: backoff, healthy: healthy, giveUp: cfg.GiveUpAfter,
+          	}, nil
   - of: (*Supervisor).Start
     participants:
       - id: caller
@@ -602,6 +616,8 @@ sequences:
         eval: make(chan struct{})
       - set: s.cancel, s.done
         value: cancel, done
+      - set: s.gaveUp
+        value: nil
       - go: s.supervise(runCtx, done)
         to: s.supervise
       - return: nil
@@ -641,6 +657,26 @@ sequences:
   - of: (*Supervisor).Component
     steps:
       - return: "corelc.ComponentValue{Name: s.name, Start: s.Start, Stop: s.Stop}"
+  - of: (*Supervisor).Check
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Supervisor).Check
+        kind: self
+      - id: ctx.Err
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ctxErr
+          init:
+            bind: ctxErr
+            eval: ctx.Err()
+            to: ctx.Err
+          when: ctxErr != nil
+      - lock:
+          mutex: s.mu
+      - return: s.gaveUp
   - of: (*Supervisor).running
     steps:
       - opt:
@@ -667,12 +703,19 @@ sequences:
         kind: internal
       - id: s.once
         kind: internal
+      - id: s.recordEnd
+        kind: internal
+      - id: s.giveUpOn
+        kind: internal
       - id: s.backoff.Delay
         kind: value
     steps:
       - defer: close(done)
       - bind: failures
         eval: "0"
+      - var:
+          name: ends
+          type: "[]time.Time"
       - loop:
           do:
             - bind: started
@@ -707,6 +750,17 @@ sequences:
                 when: ended.Sub(started) >= s.healthy
             - op: ++
               set: failures
+            - opt:
+                do:
+                  - eval: s.giveUpOn(ended, run, failures, runErr)
+                    to: s.giveUpOn
+                  - return: ""
+                init:
+                  bind: ends
+                  eval: s.recordEnd(ends, ended)
+                  op: =
+                  to: s.recordEnd
+                when: s.giveUp.enabled() && len(ends) > s.giveUp.Restarts
             - bind: delay
               eval: s.backoff.Delay(failures)
               to: s.backoff.Delay
@@ -720,6 +774,62 @@ sequences:
                 when: "!s.wait(ctx, delay)"
           init: run := 1
           post: run++
+  - of: (*Supervisor).recordEnd
+    steps:
+      - opt:
+          do:
+            - return: ends
+          when: "!s.giveUp.enabled()"
+      - bind: stale
+        eval: "0"
+      - loop:
+          cond: stale < len(ends) && ended.Sub(ends[stale]) >= s.giveUp.Within
+          do:
+            - op: ++
+              set: stale
+      - set: ends
+        value: ends[:copy(ends, ends[stale:])]
+      - return: append(ends, ended)
+  - of: (*Supervisor).giveUpOn
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Supervisor).giveUpOn
+        kind: self
+      - id: kerrs
+        kind: package
+      - id: s.mu.Lock
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+      - id: s.emit
+        kind: internal
+    steps:
+      - bind: fields
+        eval: |-
+          []kerrs.FieldValue{
+          		kerrs.String("supervisor", s.name),
+          		kerrs.Int("restarts", s.giveUp.Restarts),
+          		kerrs.String("within", s.giveUp.Within.String()),
+          	}
+      - opt:
+          do:
+            - set: fields
+              value: append(fields, kerrs.String("last", last.Error()))
+          when: last != nil
+      - bind: gaveUp
+        eval: kerrs.Wrap(corelc.SupervisorGaveUp, kerrs.WrapParams{}, fields...)
+        to: kerrs
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - set: s.gaveUp
+        value: gaveUp
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - eval: "s.emit(SupervisionEventValue{Phase: SupervisionGaveUp, At: at, Run: run, Failures: failures, Err: gaveUp})"
+        to: s.emit
+      - eval: "s.emit(SupervisionEventValue{Phase: SupervisionStopped, At: at, Run: run})"
+        to: s.emit
   - of: (*Supervisor).once
     steps:
       - defer: |-
@@ -776,6 +886,38 @@ sequences:
             - return: nil
           when: errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded)
       - return: runErr
+  - of: GiveUpValue.enabled
+    steps:
+      - return: g.Within > 0
+  - of: validateGiveUp
+    participants:
+      - id: caller
+        kind: actor
+      - id: validateGiveUp
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - bind: field
+        eval: "\"\""
+      - switch:
+          cases:
+            - case: giveUp.Restarts < 0
+              do:
+                - set: field
+                  value: "\"GiveUpAfter.Restarts\""
+            - case: giveUp.Within < 0, giveUp.Restarts > 0 && giveUp.Within == 0
+              do:
+                - set: field
+                  value: "\"GiveUpAfter.Within\""
+      - opt:
+          do:
+            - return: nil
+          when: field == ""
+      - return: |-
+          kerrs.Wrap(corelc.SupervisorMisconfigured, kerrs.WrapParams{},
+          		kerrs.String("argument", field), kerrs.String("supervisor", name))
+        to: kerrs
   - of: validateSupervisor
     participants:
       - id: caller
@@ -839,6 +981,9 @@ sequences:
             - case: SupervisionStopped
               do:
                 - return: "\"stopped\""
+            - case: SupervisionGaveUp
+              do:
+                - return: "\"gave up\""
             - default: true
               do:
                 - return: "\"unknown\""

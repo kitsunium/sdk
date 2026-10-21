@@ -38,7 +38,8 @@ const (
 //     already struggling;
 //   - a zero MaxDelay is no ceiling, and the growth then stops at the longest
 //     time.Duration rather than wrapping negative;
-//   - a Jitter outside [0, 1], or NaN, is clamped into it.
+//   - a Jitter outside [0, 1], or NaN, is clamped into it;
+//   - a JitterMode this package does not define is read as JitterAdditive.
 //
 // The growth is compared against its bound in the float domain BEFORE any
 // conversion. The copy this replaces converted first: past 2^63 nanoseconds Go
@@ -63,21 +64,46 @@ type Value struct {
 	// it is meant to spread: N clients that fail against one dependency at the
 	// same instant retry at the same instant, N times over. Jitter turns those
 	// bursts back into a distribution.
+	//
+	// It is read only under JitterAdditive.
 	Jitter float64
+	// JitterMode is how the randomisation is laid on the curve. The zero,
+	// JitterAdditive, is the Jitter above — what Value has always done;
+	// JitterFull and JitterDecorrelated are the Builders' Library's two
+	// other variants, which randomise the whole wait and ignore Jitter. A
+	// value outside the three is read as JitterAdditive.
+	JitterMode JitterMode
 }
 
 // Delay returns the wait after the attempt-th consecutive failure: [Grow] for
-// the curve, then [Widen] for the jitter. attempt counts from 1; a smaller
-// value is read as 1, so a loop that has not failed yet and asks anyway waits
-// BaseDelay rather than nothing.
+// the curve, then the randomisation JitterMode names — [Widen] by Jitter
+// for JitterAdditive, [Full] for JitterFull, and for JitterDecorrelated
+// [Decorrelate], reading the curve's wait for the attempt before as the
+// previous wait (a loop that keeps its own calls Decorrelate). attempt
+// counts from 1; a smaller value is read as 1, so a loop that has not
+// failed yet and asks anyway waits BaseDelay rather than nothing.
 //
 // It never returns a negative duration, and it costs at most as many
 // multiplications as it takes the delay to reach its ceiling, however large
 // attempt is.
 func (b Value) Delay(attempt int) time.Duration {
-	//: the growth first, as a pure function of the attempt; the randomisation
-	//: second, so the curve can be asserted without it.
-	return Widen(Grow(b.BaseDelay, b.MaxDelay, b.Multiplier, attempt), b.Jitter)
+	//: the randomisation the mode names, over the curve.
+	switch b.JitterMode {
+	//: the whole wait drawn below the curve.
+	case JitterFull:
+		//: Full Jitter: uniform in [0, grown].
+		return Full(Grow(b.BaseDelay, b.MaxDelay, b.Multiplier, attempt))
+	//: the wait drawn from the one before, which a memoryless Delay reads
+	//: off the curve.
+	case JitterDecorrelated:
+		//: the curve's wait for the attempt before stands for the previous one.
+		return Decorrelate(b.BaseDelay, b.MaxDelay, Grow(b.BaseDelay, b.MaxDelay, b.Multiplier, attempt-1))
+	//: JitterAdditive, the zero, and any value this package does not define.
+	default:
+		//: the growth first, as a pure function of the attempt; the
+		//: randomisation second, so the curve can be asserted without it.
+		return Widen(Grow(b.BaseDelay, b.MaxDelay, b.Multiplier, attempt), b.Jitter)
+	}
 }
 
 // Grow returns the deterministic half of the curve: base × multiplier^(attempt−1),

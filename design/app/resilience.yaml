@@ -19,15 +19,16 @@ packages:
         type: errs.Code
       - const:
           - doc: |-
-              CodeRateLimited identifies a call rejected (or whose wait was cancelled)
-              because the rate limiter had no token available.
+              CodeRateLimited identifies a call rejected because the rate limiter had
+              no token available, at once or within its MaxWait.
             name: CodeRateLimited
             value: "0x00_02_08_03"
         type: errs.Code
       - const:
           - doc: |-
               CodeBulkheadFull identifies a call rejected because the bulkhead's concurrency
-              slots were all occupied.
+              slots were all occupied — and, for a bulkhead that queues, its queue
+              was full or no slot freed within its MaxWait.
             name: CodeBulkheadFull
             value: "0x00_02_08_04"
         type: errs.Code
@@ -60,6 +61,14 @@ packages:
               (the last attempt's error is the wrap cause).
             name: CodeRetryBudgetExceeded
             value: "0x00_02_08_08"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeThrottled identifies a call the adaptive throttle refused on the
+              client side, without sending it: the dependency had been refusing more
+              than its share of the calls recently sent to it.
+            name: CodeThrottled
+            value: "0x00_02_08_09"
         type: errs.Code
     constants:
       - doc: |-
@@ -102,8 +111,8 @@ packages:
       - doc: |-
           Runner executes an Operation under a reliability policy and returns the
           operation's error, a policy sentinel (RetryExhausted, RetryBudgetExceeded,
-          CircuitOpen, RateLimited, BulkheadFull, TimeoutExceeded, FallbackFailed),
-          or ctx.Err().
+          CircuitOpen, RateLimited, BulkheadFull, TimeoutExceeded, FallbackFailed,
+          Throttled), or ctx.Err().
           Implementations MUST be safe for concurrent use. Runners compose: a Runner
           may itself invoke an inner Runner inside its Operation.
 
@@ -208,8 +217,8 @@ packages:
             reason: CIRCUIT_OPEN
           - code: CodeRateLimited
             doc: |-
-              RateLimited is returned when no token was available (or the wait was cancelled).
-              A rejection by the SDK's limiters carries, as the field
+              RateLimited is returned when no token was available, at once or within
+              the limiter's MaxWait. A rejection by the SDK's limiters carries, as the field
               retry_after_seconds, how long the bucket needs to earn the next token.
             exit: TEMPFAIL
             http: 429
@@ -218,7 +227,10 @@ packages:
             public: The call was rejected by the rate limiter
             reason: RATE_LIMITED
           - code: CodeBulkheadFull
-            doc: BulkheadFull is returned when every concurrency slot is occupied.
+            doc: |-
+              BulkheadFull is returned when every concurrency slot is occupied, and,
+              for a bulkhead that queues, when its queue is full or no slot freed
+              within its MaxWait.
             exit: TEMPFAIL
             http: 503
             name: BulkheadFull
@@ -255,6 +267,19 @@ packages:
             private: "service/app/resilience: primary and fallback both failed; the fields carry both messages"
             public: The operation and its fallback both failed
             reason: FALLBACK_FAILED
+          - code: CodeThrottled
+            doc: |-
+              Throttled is returned when the adaptive throttle refused the call on
+              the client side, without sending it, because the dependency had been
+              refusing more than its share of the recent calls (Google SRE's
+              client-side throttling). It is transient: the probability of a refusal
+              falls as the dependency accepts again.
+            exit: TEMPFAIL
+            http: 503
+            name: Throttled
+            private: "service/app/resilience: refused client-side by the adaptive throttle; the dependency rejected too many recent calls"
+            public: The call was throttled on the client side
+            reason: THROTTLED
     types:
       - doc: |-
           BreakerPhase is where a circuit breaker stands: BreakerClosed,
@@ -364,6 +389,18 @@ packages:
 
       Package resilience — bulkhead (bounded-concurrency) policy.
 
+      Package resilience — the bulkhead that queues: a bounded number of calls
+      wait a bounded time, on an injected clock, for a slot to free.
+
+      Package resilience — the adaptive throttle: Google SRE's client-side
+      throttling, a call refused locally with the probability the dependency's
+      recent refusals give it.
+
+      Package resilience — adaptive throttle configuration.
+
+      Package resilience — the adaptive throttle's window: requests and accepts
+      counted in time slots on the throttle's clock.
+
       Package resilience — fallback (secondary-operation) policy.
 
       Package resilience — fallback policy configuration.
@@ -415,9 +452,10 @@ packages:
           verbatim and left out of the state machine entirely, so deterministic
           failures cannot trip the breaker. Once the cooldown elapses ONE HalfOpen
           trial runs at a time and every other call returns CircuitOpen until it
-          settles. The outcome of a call admitted before the breaker last opened
-          is ignored: its success cannot close the breaker and its failure cannot
-          restart the cooldown.
+          settles; cfg.HalfOpenTrials successful trials in a row close the
+          breaker, and any failed one opens it again. The outcome of a call
+          admitted before the breaker last opened is ignored: its success cannot
+          close the breaker and its failure cannot restart the cooldown.
 
           A call that ends in context.Canceled once the caller's own context is
           closed is neutral — neither a success nor a failure — because the caller
@@ -452,6 +490,63 @@ packages:
           - name: maxConcurrent
             type: int
         name: NewBulkhead
+        out:
+          - type: coreres.Runner
+      - doc: |-
+          NewBulkheadWait returns a Runner that admits at most cfg.Max simultaneous
+          operations (clamped to >= 1) and lets up to cfg.Queue more calls wait, each
+          at most cfg.MaxWait on cfg.Clock, for a slot to free — Polly's
+          ConcurrencyLimiter(permitLimit, queueLimit), failsafe-go's bulkhead
+          WithMaxWaitTime. A call that finds the queue full, or whose wait runs out,
+          returns BulkheadFull; one whose context ends while it waits returns
+          ctx.Err() and frees its place in the queue.
+
+          A non-positive Queue or MaxWait is no waiting at all: the call is
+          rejected at once, as NewBulkhead rejects it, so the zero
+          BulkheadWaitConfig is NewBulkhead(1). Waiters take the freed slots in
+          the order they started waiting, as far as the Go runtime's channel
+          queues keep it.
+
+          A call that finds a slot free pays what NewBulkhead's does and
+          allocates nothing; a call that waits arms one timer on cfg.Clock.
+        in:
+          - name: cfg
+            type: BulkheadWaitConfig
+        name: NewBulkheadWait
+        out:
+          - type: coreres.Runner
+      - doc: |-
+          NewAdaptiveThrottle returns a Runner that refuses calls on the client
+          side, before sending them, when the dependency has been refusing more
+          than its share: the adaptive throttling of Google's SRE book ("Handling
+          Overload"). Over the last cfg.Window it counts requests — every call
+          Run was asked to make, the ones it refused included — and accepts —
+          the calls the dependency answered without refusing them — and refuses
+          each new call with probability
+
+          	max(0, (requests − K × accepts) / (requests + 1))
+
+          returning Throttled without running the operation. While the
+          dependency accepts at least one call in K, nothing is refused; past
+          that, the refusals grow with the excess. A dependency that refuses
+          everything still receives a trickle of calls — the traffic that tells
+          it, and us, when it has recovered — and the refusals fade as its
+          accepts come back into the window.
+
+          A call's error is a refusal when cfg.Rejected says so — every error
+          when it is nil —; a nil error is an accept, and so is a call that
+          ended in context.Canceled once the caller's own context was closed: a
+          caller who left says nothing about the dependency. The refusal is drawn
+          from cfg.Random, so a test decides it.
+
+          A K below 1 or not a number, a negative Window, more than 1000
+          Buckets, or a Window too short to split into its Buckets, is refused:
+          every call returns PolicyMisconfigured, naming the field. A call that
+          is not refused costs one lock and no allocation.
+        in:
+          - name: cfg
+            type: AdaptiveThrottleConfig
+        name: NewAdaptiveThrottle
         out:
           - type: coreres.Runner
       - doc: |-
@@ -580,6 +675,12 @@ packages:
           a finite positive number — zero, negative, NaN or infinite — is refused
           rather than defaulted: every call returns PolicyMisconfigured without running
           the operation (ADR 0031).
+
+          With a positive cfg.MaxWait, a call whose token is due within MaxWait
+          reserves it and waits for it on cfg.Clock instead of being rejected; a
+          call whose context ends while it waits returns ctx.Err() and hands its
+          token back. A cfg.Clock that cannot wait — a clock.Clock that is not a
+          clock.Timed — is refused when MaxWait is positive, naming Clock.
         in:
           - name: cfg
             type: RateLimiterConfig
@@ -594,7 +695,9 @@ packages:
           verbatim, so a deterministic failure neither spends the budget nor hides
           behind RetryExhausted. When cfg.Delay reads a wait from the failure — a
           Retry-After, a RateLimited rejection — that wait replaces the backoff,
-          held at cfg.MaxDelay.
+          held at cfg.MaxDelay. cfg.JitterMode chooses how the backoff is
+          randomised: added Jitter (the zero), full, or decorrelated from the
+          previous wait of the same call.
 
           With a cfg.Budget, every success and every retryable failure is recorded
           in it, and a retry it refuses ends the loop with RetryBudgetExceeded
@@ -711,11 +814,64 @@ packages:
     path: github.com/kitsunium/sdk/internal/service/app/resilience
     types:
       - doc: |-
+          AdaptiveThrottleConfig parameterises NewAdaptiveThrottle, in the terms
+          of Google's SRE book: the multiplier K, the window the requests and
+          accepts are counted over, and what counts as a refusal. Every field
+          has a default; a value out of range is refused with
+          PolicyMisconfigured, naming the field (ADR 0031).
+        name: AdaptiveThrottleConfig
+        struct:
+          fields:
+            - doc: |-
+                K is how many requests per accept the throttle lets through before
+                it starts refusing: a call is refused with probability
+                max(0, (requests − K × accepts) / (requests + 1)). Zero is 2, the
+                SRE book's value. A lower K refuses sooner and wastes less of the
+                dependency's capacity on calls it will refuse; a higher one refuses
+                later and keeps more traffic flowing. A K below 1 would refuse calls
+                to a dependency accepting every one of them, and is refused, as is
+                one that is not a finite number.
+              name: K
+              type: float64
+            - doc: |-
+                Window is how far back the requests and accepts are counted. Zero
+                is two minutes, the SRE book's history. A negative Window is
+                refused.
+              name: Window
+              type: time.Duration
+            - doc: |-
+                Buckets is how many slots the window is kept in: a slot leaves the
+                window whole, so it reaches back between Window − Window/Buckets
+                and Window. Zero is 10; more than 1000 is refused, as is a Window
+                too short to give each slot a nanosecond.
+              name: Buckets
+              type: int
+            - doc: |-
+                Rejected classifies a non-nil error of the operation: true is a
+                refusal by the dependency — overload, quota, unavailability —,
+                false an answer it gave, which counts as an accept however
+                unwelcome. Nil counts every error as a refusal. It is not
+                consulted for a context.Canceled returned once the caller's
+                context is closed: that call counts as an accept.
+              name: Rejected
+              type: func(error) bool
+            - doc: Clock is what the window is kept on. Nil means clock.System.
+              name: Clock
+              type: clock.Clock
+            - doc: |-
+                Random returns a number in [0, 1) each time a call might be
+                refused; the call is refused when it is below the probability.
+                Nil is math/rand/v2's Float64. A test hands it a sequence to
+                decide each refusal.
+              name: Random
+              type: func() float64
+      - doc: |-
           BreakerConfig parameterises NewCircuitBreaker. A non-positive FailureThreshold
           defaults to 5; a non-positive OpenDuration defaults to 30s; a nil Clock
           defaults to clock.System; a nil Retryable counts every error as a failure;
           a nil Window opens on consecutive failures; a nil OnStateChange hears
-          nothing; a nil OpenBackoff keeps every opening at OpenDuration.
+          nothing; a nil OpenBackoff keeps every opening at OpenDuration; a
+          non-positive HalfOpenTrials closes on one successful trial.
         name: BreakerConfig
         struct:
           fields:
@@ -786,11 +942,25 @@ packages:
                 Its BaseDelay and its MaxDelay are both required — a zero base is
                 a cooldown of nothing, and a zero ceiling one that may grow to
                 centuries — and are refused when not positive, with
-                PolicyMisconfigured naming the field. Its Multiplier and Jitter
-                read as BackoffValue reads them. Nil keeps every opening at
-                OpenDuration.
+                PolicyMisconfigured naming the field. Its Multiplier, Jitter and
+                JitterMode read as BackoffValue reads them. Nil keeps every opening
+                at OpenDuration.
               name: OpenBackoff
               type: "*BackoffValue"
+            - doc: |-
+                HalfOpenTrials is how many trials in a row must succeed before a
+                HalfOpen breaker closes. The trials still run one at a time, and
+                any one that fails opens the breaker again. Zero, or less, is one:
+                the first successful trial closes it, as before the field existed.
+
+                One success is thin evidence that a dependency has recovered — the
+                trial may have reached the one healthy replica, or a cache — and a
+                breaker that closes on it and trips again at once doubles the load
+                it meant to spare. A few trials in a row cost a few more cooldowns'
+                worth of latency to the first callers after recovery, which is what
+                resilience4j's permittedNumberOfCallsInHalfOpenState buys too.
+              name: HalfOpenTrials
+              type: int
       - doc: |-
           BreakerWindowValue is a circuit breaker's sliding window: the calls of the
           last Size, kept in Buckets slots of Size/Buckets each on the breaker's
@@ -847,6 +1017,40 @@ packages:
                 slow opens it.
               name: SlowRatio
               type: float64
+      - doc: |-
+          BulkheadWaitConfig parameterises NewBulkheadWait: how many calls run at
+          once, how many more may wait for a slot, for how long, and on which
+          clock. Its zero value is NewBulkhead(1) — one slot and no waiting —:
+          each field's zero is the reject-at-once bulkhead the SDK has always
+          had, never a queue nobody sized (ADR 0031).
+        name: BulkheadWaitConfig
+        struct:
+          fields:
+            - doc: |-
+                Max is how many operations run at once. A non-positive Max is 1,
+                as NewBulkhead's limit is.
+              name: Max
+              type: int
+            - doc: |-
+                Queue is how many calls may wait for a slot beyond the Max
+                running; a call that finds the queue full is rejected at once with
+                BulkheadFull. Zero, or less, is no queue. It bounds the memory
+                and the goroutines a saturated dependency can pin, which an
+                unbounded queue would not.
+              name: Queue
+              type: int
+            - doc: |-
+                MaxWait is how long a queued call waits for a slot before it is
+                rejected with BulkheadFull. Zero, or less, is no wait. Size it
+                below the caller's own deadline: a wait the caller cannot afford
+                only moves the timeout from this policy to the caller.
+              name: MaxWait
+              type: time.Duration
+            - doc: |-
+                Clock is what MaxWait is measured on. Nil means clock.System; a
+                ManualClock lets a test run the wait out without sleeping.
+              name: Clock
+              type: clock.Timed
       - doc: |-
           FallbackConfig parameterises NewFallback. A nil Fallback is refused (there is
           no defensible SDK-side substitute for the caller's own plan B); a nil
@@ -1054,7 +1258,8 @@ packages:
               type: time.Duration
       - doc: |-
           RateLimiterConfig parameterises NewRateLimiter. Burst is the bucket capacity
-          (clamped to >= 1); a nil Clock defaults to System.
+          (clamped to >= 1); a nil Clock defaults to System; a zero MaxWait
+          rejects at once a call that finds no token.
         name: RateLimiterConfig
         struct:
           fields:
@@ -1073,18 +1278,35 @@ packages:
               type: int
             - name: Clock
               type: clock.Clock
+            - doc: |-
+                MaxWait is how long a call may wait for its token instead of being
+                rejected: a call whose token is due within MaxWait reserves it at
+                once — later calls queue behind the reservation — and waits for
+                it on Clock. Zero, or less, rejects at once with RateLimited, as
+                the limiter always has. A call whose token is due later than
+                MaxWait is rejected at once, saying when it would have been due.
+
+                Waiting needs a clock that can wait: with a positive MaxWait, a
+                Clock that is not a clock.Timed is refused with
+                PolicyMisconfigured, naming Clock. A nil Clock waits on the wall
+                clock.
+              name: MaxWait
+              type: time.Duration
       - doc: |-
           RetryConfig parameterises NewRetry. A non-positive MaxAttempts clamps to 1; a
           Multiplier of 1 or below (or NaN) defaults to 2; a zero MaxDelay means no
           cap; a nil Retryable replays every error; a zero Jitter backs off
-          deterministically; a nil Clock waits on the wall clock; a nil Delay
+          deterministically, and a zero JitterMode is that additive Jitter; a nil
+          Clock waits on the wall clock; a nil Delay
           always waits the backoff curve; a nil Budget never refuses a retry; a nil
           OnRetry hears nothing.
 
-          BaseDelay, MaxDelay, Multiplier and Jitter are the four fields of
-          BackoffValue, under the same names and with the same meaning: NewRetry builds its curve
-          from them, so a loop that retries on its own terms and a Retry policy
-          configured alike wait alike.
+          BaseDelay, MaxDelay, Multiplier, Jitter and JitterMode are the five
+          fields of BackoffValue, under the same names and with the same meaning:
+          NewRetry builds its curve from them, so a loop that retries on its own
+          terms and a Retry policy configured alike wait alike — save that a
+          decorrelated retry draws each wait from the one it actually waited
+          before, which the memoryless BackoffValue.Delay cannot know.
         name: RetryConfig
         struct:
           fields:
@@ -1128,8 +1350,26 @@ packages:
                 Jitter), not MaxDelay. A zero MaxDelay is no cap at all, so there is no
                 ceiling to raise: the backoff grows geometrically and the jitter widens
                 whatever it reaches, bounded only by what a time.Duration can represent.
+
+                It is read only under the zero JitterMode.
               name: Jitter
               type: float64
+            - doc: |-
+                JitterMode is how the backoff is randomised. The zero,
+                JitterAdditive, adds Jitter as above. JitterFull waits a uniform
+                draw from [0, the capped curve]; JitterDecorrelated draws each wait
+                from [BaseDelay, 3 × the previous wait of this call], held at
+                MaxDelay. Both are the AWS Builders' Library's variants and ignore
+                Jitter; a wait the failure imposed through Delay is not randomised
+                and is not the previous wait a decorrelated draw starts from.
+
+                Full jitter spreads callers that failed together the most, at the
+                cost of sometimes retrying almost at once; decorrelated jitter
+                keeps the waits growing while drifting each caller off the others'
+                curve. With a zero MaxDelay a decorrelated wait is bounded only by
+                what a time.Duration can represent.
+              name: JitterMode
+              type: kbackoff.JitterMode
             - doc: |-
                 Clock is what the backoff waits on. Nil means clock.System.
 
@@ -1240,8 +1480,8 @@ packages:
       	})
 
       Rejections surface typed sentinels (RetryExhausted / RetryBudgetExceeded /
-      CircuitOpen / RateLimited / BulkheadFull / TimeoutExceeded / FallbackFailed)
-      matchable via
+      CircuitOpen / RateLimited / BulkheadFull / TimeoutExceeded / FallbackFailed /
+      Throttled) matchable via
       errs.HasReason / errs.HasCode.
 
       # Classifying deterministic failures
@@ -1439,7 +1679,44 @@ packages:
       [BreakerState]: State reports the phase and its counts, Isolate opens it by
       hand until Reset, and [BreakerConfig].OnStateChange hears each change of
       phase in order, outside the breaker's lock. [BreakerConfig].OpenBackoff
-      lengthens each opening while the trials keep failing.
+      lengthens each opening while the trials keep failing, and
+      [BreakerConfig].HalfOpenTrials asks for several successful trials in a row
+      before the breaker closes.
+
+      # Waiting a bounded time for a slot or a token
+
+      [NewBulkhead] and [NewRateLimiter] reject at once a call they cannot admit.
+      [NewBulkheadWait] lets a bounded queue of calls wait a bounded time for a
+      slot, and [RateLimiterConfig].MaxWait lets a call wait for a token due
+      soon enough — both on an injected clock, both rejecting as before when
+      their wait is zero:
+
+      	b := resilience.NewBulkheadWait(resilience.BulkheadWaitConfig{
+      	    Max: 16, Queue: 64, MaxWait: 50 * time.Millisecond,
+      	})
+      	l := resilience.NewRateLimiter(resilience.RateLimiterConfig{
+      	    Rate: 100, Burst: 10, MaxWait: 20 * time.Millisecond,
+      	})
+
+      # How the backoff is randomised
+
+      [RetryConfig].JitterMode, like [Backoff].JitterMode, chooses between the
+      AWS Builders' Library's three jitters: [JitterAdditive], the zero and the
+      Jitter fraction added to the curve; [JitterFull], a uniform draw below the
+      curve; and [JitterDecorrelated], each wait drawn from the one before.
+
+      # Throttling on the client side
+
+      [NewAdaptiveThrottle] is the adaptive throttling of Google's SRE book: it
+      counts, over a window, the calls it was asked to make and the calls the
+      dependency accepted, and refuses a new call locally — with [Throttled],
+      without sending it — with probability max(0, (requests − K × accepts) /
+      (requests + 1)). A dependency that refuses most of its traffic is no
+      longer sent most of it, and the refusals fade as it accepts again:
+
+      	t := resilience.NewAdaptiveThrottle(resilience.AdaptiveThrottleConfig{
+      	    Rejected: isOverload, // the caller's own: a 429, a 503, a RESOURCE_EXHAUSTED
+      	})
     facade:
       - alias:
           - doc: Operation is the public alias for the ctx-aware unit of guarded work.
@@ -1520,6 +1797,24 @@ packages:
               between attempts, for a loop that backs off on its own terms.
             name: Backoff
             target: kbackoff.Value
+      - alias:
+          - doc: |-
+              JitterMode is the public alias for how a Backoff, and a retry, randomise
+              their waits: additive (the zero), full, or decorrelated.
+            name: JitterMode
+            target: kbackoff.JitterMode
+      - alias:
+          - doc: |-
+              BulkheadWaitConfig is the public alias for the configuration of the
+              bulkhead that queues: Max, Queue, MaxWait, Clock.
+            name: BulkheadWaitConfig
+            target: svcres.BulkheadWaitConfig
+      - alias:
+          - doc: |-
+              AdaptiveThrottleConfig is the public alias for the adaptive throttle's
+              configuration: K, Window, Buckets, Rejected, Clock, Random.
+            name: AdaptiveThrottleConfig
+            target: svcres.AdaptiveThrottleConfig
       - const:
           - doc: |-
               BreakerClosed is a breaker admitting every call. The zero BreakerPhase
@@ -1541,6 +1836,28 @@ packages:
             type: BreakerPhase
             typed: true
             value: "3"
+          - doc: |-
+              JitterAdditive adds a random fraction of each wait, drawn from
+              [0, Jitter). It is the zero JitterMode.
+            name: JitterAdditive
+            reexport: kbackoff.JitterAdditive
+            type: JitterMode
+            typed: true
+            value: "0"
+          - doc: JitterFull draws each wait uniformly from [0, the capped curve].
+            name: JitterFull
+            reexport: kbackoff.JitterFull
+            type: JitterMode
+            typed: true
+            value: "1"
+          - doc: |-
+              JitterDecorrelated draws each wait from [BaseDelay, 3 × the previous
+              wait], held at MaxDelay.
+            name: JitterDecorrelated
+            reexport: kbackoff.JitterDecorrelated
+            type: JitterMode
+            typed: true
+            value: "2"
       - var:
           - doc: RetryExhausted is returned when the retry budget is spent.
             name: RetryExhausted
@@ -1567,8 +1884,9 @@ packages:
             reexport: coreres.RateLimited
             type: "*errs.Error"
           - doc: |-
-              BulkheadFull is returned when every concurrency slot is occupied. It
-              carries HTTP 503.
+              BulkheadFull is returned when every concurrency slot is occupied — and,
+              for NewBulkheadWait, when the queue is full or no slot freed within
+              MaxWait. It carries HTTP 503.
             name: BulkheadFull
             reexport: coreres.BulkheadFull
             type: "*errs.Error"
@@ -1588,6 +1906,12 @@ packages:
             reexport: coreres.FallbackFailed
             type: "*errs.Error"
           - doc: |-
+              Throttled is returned when NewAdaptiveThrottle refused the call on the
+              client side, without sending it. It carries HTTP 503.
+            name: Throttled
+            reexport: coreres.Throttled
+            type: "*errs.Error"
+          - doc: |-
               PolicyMisconfigured is returned by every call to a policy that was built
               with a configuration it cannot honour — a non-positive RateLimiterConfig
               .Rate, a non-positive NewTimeout duration, a nil FallbackConfig.Fallback,
@@ -1595,7 +1919,9 @@ packages:
               MaxInFlight, a KeyedRateLimiterConfig without a Key, a MaxKeys or an
               IdleTimeout, a retry budget built with an unusable MaxTokens or
               TokenRatio, a BreakerConfig.Window or OpenBackoff with a field out of
-              range. The operation is not run. Unlike the sentinels above it is
+              range, a RateLimiterConfig.Clock that cannot wait for a positive
+              MaxWait, an AdaptiveThrottleConfig field out of range. The operation
+              is not run. Unlike the sentinels above it is
               permanent, not transient: the fix is at the construction site, never a
               retry (ADR 0031).
             name: PolicyMisconfigured
@@ -1637,6 +1963,8 @@ packages:
             NewRateLimiter returns a token-bucket rate-limiter Runner. A non-positive
             cfg.Rate is refused: every call returns PolicyMisconfigured without running
             the operation, because any rate chosen for the caller would be a guess.
+            A positive cfg.MaxWait lets a call wait for a token due within it
+            instead of being rejected.
           forward: svcres.NewRateLimiter
           in:
             - name: cfg
@@ -1668,6 +1996,33 @@ packages:
             - name: maxConcurrent
               type: int
           name: NewBulkhead
+          out:
+            - type: Runner
+      - func:
+          doc: |-
+            NewBulkheadWait returns a bounded-concurrency Runner whose excess calls
+            wait in a bounded queue, each at most cfg.MaxWait on cfg.Clock, for a
+            slot; a full queue or a wait run out is BulkheadFull. Its zero
+            configuration is NewBulkhead(1).
+          forward: svcres.NewBulkheadWait
+          in:
+            - name: cfg
+              type: BulkheadWaitConfig
+          name: NewBulkheadWait
+          out:
+            - type: Runner
+      - func:
+          doc: |-
+            NewAdaptiveThrottle returns a Runner that refuses calls on the client
+            side with Throttled, with probability max(0, (requests − K × accepts) /
+            (requests + 1)) over a sliding window — the adaptive throttling of
+            Google's SRE book. A field out of range is refused with
+            PolicyMisconfigured.
+          forward: svcres.NewAdaptiveThrottle
+          in:
+            - name: cfg
+              type: AdaptiveThrottleConfig
+          name: NewAdaptiveThrottle
           out:
             - type: Runner
       - func:

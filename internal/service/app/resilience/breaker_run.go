@@ -219,6 +219,13 @@ func (b *circuitBreaker) settleTrial(adm admission, slow bool) {
 		b.trip()
 		return
 	}
+	b.passed++
+	//: more successful trials are asked for: stay HalfOpen, the slot freed
+	//: for the next trial.
+	if b.passed < b.trials {
+		//: not yet recovered.
+		return
+	}
 	//: recovery: closed, counts cleared, the open backoff starts over.
 	b.failures, b.opens = 0, 0
 	b.moveTo(coreres.BreakerClosed)
@@ -284,6 +291,8 @@ func (b *circuitBreaker) cooldownFor(opens int) time.Duration {
 func (b *circuitBreaker) moveTo(to breakerState) {
 	from := b.state
 	b.state = to
+	//: the successful trials in a row are counted within one HalfOpen phase.
+	b.passed = 0
 	//: every change of phase starts the window over.
 	if b.window != nil {
 		b.window.clear()

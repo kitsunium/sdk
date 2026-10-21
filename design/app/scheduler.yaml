@@ -80,6 +80,42 @@ packages:
             name: CodeInvalidInterval
             value: "0x00_03_2B_05"
         type: errs.Code
+    constants:
+      - blockDoc: |-
+          The three answers to a fire that comes due while the previous run of the
+          same entry has not returned — the concurrencyPolicy of a Kubernetes
+          CronJob, under the scheduler's names. The zero is the safe one.
+        doc: |-
+          OverlapSkip does not run the fire and reports it as
+          [ResultValue].Skipped. It is the zero OverlapPolicy: the SDK cannot know
+          whether two copies of a Job are safe side by side.
+        name: OverlapSkip
+        type: OverlapPolicy
+        value: "0"
+      - blockDoc: |-
+          The three answers to a fire that comes due while the previous run of the
+          same entry has not returned — the concurrencyPolicy of a Kubernetes
+          CronJob, under the scheduler's names. The zero is the safe one.
+        doc: |-
+          OverlapAllow runs the fire beside the previous run: the caller's in-code
+          assertion that concurrent copies are safe. [EntryValue].AllowOverlap
+          says the same.
+        name: OverlapAllow
+        type: OverlapPolicy
+        value: "1"
+      - blockDoc: |-
+          The three answers to a fire that comes due while the previous run of the
+          same entry has not returned — the concurrencyPolicy of a Kubernetes
+          CronJob, under the scheduler's names. The zero is the safe one.
+        doc: |-
+          OverlapReplace cancels the previous run's context and runs the fire once
+          that run has returned — never beside it. The cancelled run is reported
+          with [ResultValue].Replaced. A fire that comes due while its own
+          predecessor is still returning replaces the waiting one in turn, so at
+          most one run waits: the newest.
+        name: OverlapReplace
+        type: OverlapPolicy
+        value: "2"
     doc: |-
       Package scheduler — ranges 0.2.12.* (ADR 0041 core/app/scheduler block) and
       0.3.43.* (ADR 0041 service/app/scheduler block, declared here since ADR 0160).
@@ -109,6 +145,9 @@ packages:
       Package scheduler — hosts EntryValue, the registration a Scheduler owns.
 
       Package scheduler — hosts ResultValue, the record of one scheduling decision.
+
+      Package scheduler — hosts OverlapPolicy, what a fire does while the
+      previous run of its entry is still running.
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/app/scheduler
@@ -148,10 +187,14 @@ packages:
     sentinels:
       - var:
           - code: CodeInvalidEntry
-            doc: InvalidEntry is returned by Add for an entry that could never run.
+            doc: |-
+              InvalidEntry is returned by Add for an entry that could never run, or
+              whose overlap is asked two contradictory ways (AllowOverlap with an
+              Overlap other than OverlapSkip or OverlapAllow), or an Overlap this
+              package does not define.
             exit: CONFIG
             name: InvalidEntry
-            private: "core/app/scheduler: entry has an empty name, a nil Job or a nil Schedule; the field names which"
+            private: "core/app/scheduler: entry has an empty name, a nil Job or a nil Schedule, or an overlap policy it cannot honour; the field names which"
             public: The scheduler entry is not runnable and was refused
             reason: INVALID_ENTRY
           - code: CodeDuplicateJob
@@ -285,9 +328,32 @@ packages:
                 getting it wrong is a duplicated side effect rather than an error.
                 Setting it is the caller's in-code assertion that concurrent copies are
                 safe, the same instrument resilience.HedgeConfig.Idempotent uses for the
-                same class of claim (ADR 0031).
+                same class of claim (ADR 0031). It is OverlapAllow written as a bool,
+                kept because it was there first; set with any Overlap but
+                OverlapSkip or OverlapAllow, Add refuses the entry.
               name: AllowOverlap
               type: bool
+            - doc: |-
+                Overlap is what a fire does while the previous run of THIS entry has
+                not returned: OverlapSkip — the zero — skips it, OverlapAllow runs it
+                beside, OverlapReplace cancels the previous run and runs this one
+                once it has returned.
+              name: Overlap
+              type: OverlapPolicy
+            - doc: |-
+                StartingDeadline bounds how late a fire may start. When the scheduler
+                wakes after a due instant — a machine that slept, a timer that
+                overran — it runs the latest instant missed, however late; with a
+                positive StartingDeadline, an instant more than StartingDeadline in
+                the past is not run but reported with [ResultValue].Expired, as
+                Kubernetes' startingDeadlineSeconds does. Zero, or less, is no
+                deadline, as before the field existed.
+
+                It is how a job whose run is worth something only near its instant
+                — a report for 02:00, a rotation tied to the hour — says so: a run
+                long after the fact is a surprise, not a catch-up.
+              name: StartingDeadline
+              type: time.Duration
       - doc: |-
           ResultValue is what a [Scheduler] reports for every decision it takes about
           an entry — a run that happened, and a fire that was deliberately not run.
@@ -316,10 +382,10 @@ packages:
                 happens is the current one and the stale ones are what got dropped.
               name: Scheduled
               type: time.Time
-            - doc: Started is when the Job was invoked. Zero when Skipped.
+            - doc: Started is when the Job was invoked. Zero when it was not.
               name: Started
               type: time.Time
-            - doc: Finished is when the Job returned. Zero when Skipped.
+            - doc: Finished is when the Job returned. Zero when it was not invoked.
               name: Finished
               type: time.Time
             - doc: |-
@@ -335,8 +401,21 @@ packages:
               type: int
             - doc: |-
                 Skipped reports that the fire was not run because the previous run of
-                this entry had not returned and AllowOverlap is false.
+                this entry had not returned and its overlap policy is OverlapSkip.
               name: Skipped
+              type: bool
+            - doc: |-
+                Expired reports that the fire was not run because the scheduler came
+                to it more than the entry's StartingDeadline after its Scheduled
+                instant. Started and Finished are zero.
+              name: Expired
+              type: bool
+            - doc: |-
+                Replaced reports a run whose context was cancelled because a newer
+                fire of the same OverlapReplace entry replaced it; Err is what the
+                Job returned. A run replaced before it started has zero Started and
+                Finished: it waited for its predecessor and never ran.
+              name: Replaced
               type: bool
             - doc: |-
                 Err is the Job's own error, verbatim and unwrapped, so errors.Is against
@@ -344,6 +423,20 @@ packages:
                 Job panicked and the scheduler recovered.
               name: Err
               type: error
+      - doc: |-
+          OverlapPolicy is what a fire does while the previous run of its entry has
+          not returned: [OverlapSkip] (the zero), [OverlapAllow] or
+          [OverlapReplace].
+        methods:
+          - doc: |-
+              String renders the policy for a log line: "skip", "allow", "replace";
+              a value this package does not define renders "unknown".
+            name: String
+            out:
+              - type: string
+            recv: value
+        name: OverlapPolicy
+        underlying: uint8
   - doc: |-
       Package scheduler — hosts Config, the engine's construction parameters.
 
@@ -581,6 +674,14 @@ packages:
       effect the SDK cannot know is safe. A caller who knows concurrent copies are
       safe says so with [Entry].AllowOverlap — an in-code assertion, like
       resilience.HedgeConfig.Idempotent, whose zero value is the safe answer.
+      [Entry].Overlap names the third answer, Kubernetes' Replace: [OverlapReplace]
+      cancels the run still going and starts the new one once it has returned,
+      reporting the cancelled one with [Result].Replaced.
+
+      A late fire runs however late by default. [Entry].StartingDeadline bounds
+      it: an instant missed by more than that is not run but reported with
+      [Result].Expired — a 02:00 report is not produced at 09:00 because the
+      machine slept through the night.
 
       # What is guaranteed
 
@@ -621,10 +722,38 @@ packages:
           - doc: Config is the public alias for the engine's construction parameters.
             name: Config
             target: svcsched.Config
+      - alias:
+          - doc: |-
+              OverlapPolicy is the public alias for what a fire does while the
+              previous run of its entry is still going: skip, allow or replace.
+            name: OverlapPolicy
+            target: coresched.OverlapPolicy
+      - const:
+          - doc: OverlapSkip skips a fire whose previous run is still going. It is the zero.
+            name: OverlapSkip
+            reexport: coresched.OverlapSkip
+            type: OverlapPolicy
+            typed: true
+            value: "0"
+          - doc: OverlapAllow runs a fire beside its previous run.
+            name: OverlapAllow
+            reexport: coresched.OverlapAllow
+            type: OverlapPolicy
+            typed: true
+            value: "1"
+          - doc: |-
+              OverlapReplace cancels the previous run and runs the fire once that run
+              has returned.
+            name: OverlapReplace
+            reexport: coresched.OverlapReplace
+            type: OverlapPolicy
+            typed: true
+            value: "2"
       - var:
           - doc: |-
               InvalidEntry is returned by Add for an entry that could never run — an
-              empty Name, a nil Schedule, a nil Job. The "missing" field names which.
+              empty Name, a nil Schedule, a nil Job, named by the "missing" field —
+              or whose overlap policy it cannot honour, named by the "field" field.
             name: InvalidEntry
             reexport: coresched.InvalidEntry
             type: "*errs.Error"

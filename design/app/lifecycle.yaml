@@ -100,6 +100,14 @@ packages:
             name: CodeSupervisorRunning
             value: "0x00_03_31_08"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeSupervisorGaveUp identifies a supervision that ended on its own
+              because its function ended early more often than its GiveUpAfter bound
+              allows.
+            name: CodeSupervisorGaveUp
+            value: "0x00_03_31_09"
+        type: errs.Code
     constants:
       - doc: PhaseStart reports a call to a component's [Start].
         name: PhaseStart
@@ -339,6 +347,18 @@ packages:
             private: "service/app/lifecycle: Start was called while a supervision is running; Stop it first"
             public: The supervisor is already running
             reason: SUPERVISOR_RUNNING
+          - code: CodeSupervisorGaveUp
+            doc: |-
+              SupervisorGaveUp reports a supervision that gave up: its function ended
+              early more than GiveUpAfter.Restarts times within GiveUpAfter.Within, so
+              it was not restarted again — Erlang's restart intensity, after which a
+              supervisor stops and lets the level above it decide. Supervisor.Check
+              returns it from then on, so a liveness check sees it; the last run's
+              error travels as a field.
+            name: SupervisorGaveUp
+            private: "service/app/lifecycle: the supervised function ended early more often than GiveUpAfter allows; the fields name the supervisor, the bound and the last run's error"
+            public: The supervised function kept failing and the supervisor gave up
+            reason: SUPERVISOR_GAVE_UP
     types:
       - doc: |-
           Start brings one component up. It MUST honour ctx: the [Lifecycle] passes
@@ -496,21 +516,21 @@ packages:
         type: time.Duration
         value: "60000000000"
       - blockDoc: |-
-          The four phases of a supervision. The zero value is none of them, so an
+          The phases of a supervision. The zero value is none of them, so an
           event that was never filled in reads as "unknown".
         doc: "SupervisionRunStarted: a run of the function began."
         name: SupervisionRunStarted
         type: SupervisionPhase
         value: "1"
       - blockDoc: |-
-          The four phases of a supervision. The zero value is none of them, so an
+          The phases of a supervision. The zero value is none of them, so an
           event that was never filled in reads as "unknown".
         doc: "SupervisionRunEnded: a run returned, or panicked."
         name: SupervisionRunEnded
         type: SupervisionPhase
         value: "2"
       - blockDoc: |-
-          The four phases of a supervision. The zero value is none of them, so an
+          The phases of a supervision. The zero value is none of them, so an
           event that was never filled in reads as "unknown".
         doc: |-
           SupervisionRestarting: a run ended early and the next one is
@@ -519,7 +539,7 @@ packages:
         type: SupervisionPhase
         value: "3"
       - blockDoc: |-
-          The four phases of a supervision. The zero value is none of them, so an
+          The phases of a supervision. The zero value is none of them, so an
           event that was never filled in reads as "unknown".
         doc: |-
           SupervisionStopped: the supervision is over, and the goroutine
@@ -527,6 +547,16 @@ packages:
         name: SupervisionStopped
         type: SupervisionPhase
         value: "4"
+      - blockDoc: |-
+          The phases of a supervision. The zero value is none of them, so an
+          event that was never filled in reads as "unknown".
+        doc: |-
+          SupervisionGaveUp: a run ended early once too often for GiveUpAfter,
+          and the function is not restarted; Err is SupervisorGaveUp. The
+          Stopped event follows it.
+        name: SupervisionGaveUp
+        type: SupervisionPhase
+        value: "5"
     doc: |-
       Package lifecycle — hosts Config, the engine's construction parameters.
 
@@ -595,7 +625,11 @@ packages:
           NewSupervisor builds a supervisor named name over run, tuned by cfg. run
           must run until its context ends and then return; returning earlier — with
           an error, with nil, or by panicking — is a failure, and run is started again
-          after the backoff. NewSupervisor starts nothing: Start does.
+          after the backoff, unless cfg.GiveUpAfter says it has failed too often.
+          NewSupervisor starts nothing: Start does.
+
+          A cfg.GiveUpAfter with a negative field, or with Restarts but no
+          positive Within, is refused with SupervisorMisconfigured naming it.
 
           	janitor, err := lifecycle.NewSupervisor("janitor", sweep, lifecycle.SupervisorConfig{})
           	err = app.Add(janitor.Component()) // started and stopped with the application
@@ -744,6 +778,24 @@ packages:
             out:
               - type: corelc.ComponentValue
             recv: pointer
+          - doc: |-
+              Check reports whether the supervision gave up: SupervisorGaveUp once
+              its function ended early more often than cfg.GiveUpAfter allows, and
+              nil otherwise — while it runs, once it was stopped, and before it was
+              ever started. A later Start clears it. Its shape is a health check's,
+              so a liveness probe takes it as it is:
+
+              	health.LivenessCheck{Name: "sweeper", Check: sweeper.Check}
+
+              A ctx already done reports its own error, as a Start does; otherwise
+              the answer is a field read under a lock, never a wait.
+            in:
+              - name: ctx
+                type: context.Context
+            name: Check
+            out:
+              - type: error
+            recv: pointer
         name: Supervisor
         struct:
           unexported: true
@@ -780,6 +832,34 @@ packages:
                 consecutive-failure count. Not positive means [DefaultHealthyRun].
               name: HealthyAfter
               type: time.Duration
+            - doc: |-
+                GiveUpAfter bounds how often the function may end early before the
+                supervisor stops restarting it. The zero value restarts it forever,
+                as a supervisor always has.
+              name: GiveUpAfter
+              type: GiveUpValue
+      - doc: |-
+          GiveUpValue is a restart intensity, Erlang's: a supervisor gives up when
+          its function ends early more than Restarts times within any span of
+          Within on the supervisor's clock. The (Restarts+1)-th early end inside
+          Within is not restarted: the supervision ends, its observer hears
+          SupervisionGaveUp, and Supervisor.Check reports SupervisorGaveUp, so
+          the level above — a liveness probe, an orchestrator — decides what
+          happens next instead of a loop that cannot succeed restarting forever.
+
+          The zero value never gives up. Restarts zero with a positive Within
+          gives up at the first early end. A negative field, and a positive
+          Restarts without a positive Within, are refused by NewSupervisor with
+          SupervisorMisconfigured: a bound with no span is no bound.
+        name: GiveUpValue
+        struct:
+          fields:
+            - doc: Restarts is how many early ends Within tolerates, each restarted.
+              name: Restarts
+              type: int
+            - doc: Within is the span the early ends are counted over.
+              name: Within
+              type: time.Duration
       - doc: SupervisionPhase names what a [SupervisionEventValue] reports.
         methods:
           - doc: |-
@@ -802,7 +882,8 @@ packages:
                 Err is what an ended run returned: nil when it returned nil before its
                 context ended, RunPanicked for a panic, and nil too when it ended
                 because the supervision was stopping and it returned its context's
-                error — the way out, not a failure.
+                error — the way out, not a failure. On SupervisionGaveUp it is
+                SupervisorGaveUp, carrying the last run's error as a field.
               name: Err
               type: error
             - doc: At is when the event happened, on the supervisor's clock.
@@ -818,8 +899,8 @@ packages:
               name: Delay
               type: time.Duration
             - doc: |-
-                Run numbers the run the event is about, from 1; the Stopped event
-                carries the last one.
+                Run numbers the run the event is about, from 1; the Stopped and
+                GaveUp events carry the last one.
               name: Run
               type: int
             - doc: |-
@@ -939,6 +1020,16 @@ packages:
       STARTUP. Every wait is on [SupervisorConfig].Clock, so a test drives each
       restart with a ManualClock instead of sleeping.
 
+      A supervisor restarts forever by default. [SupervisorConfig].GiveUpAfter
+      bounds it the way Erlang's restart intensity does: more than Restarts early
+      ends within Within, and the supervision ends instead of restarting again.
+      Its observer hears [SupervisionGaveUp], and [Supervisor].Check — a health
+      check's shape — reports [SupervisorGaveUp] to a liveness probe from then on:
+
+      	sweeper, err := lifecycle.NewSupervisor("session-sweeper", sweep, lifecycle.SupervisorConfig{
+      	    GiveUpAfter: lifecycle.GiveUp{Restarts: 5, Within: time.Minute},
+      	})
+
       # Errors
 
       A failed [Lifecycle].Start returns an errors.Join carrying [StartFailed]
@@ -1023,6 +1114,14 @@ packages:
             type: SupervisionPhase
             typed: true
             value: "4"
+          - doc: |-
+              SupervisionGaveUp reports a supervision that gave up: its function
+              ended early too often for SupervisorConfig.GiveUpAfter.
+            name: SupervisionGaveUp
+            reexport: svclc.SupervisionGaveUp
+            type: SupervisionPhase
+            typed: true
+            value: "5"
       - alias:
           - doc: Start is the public alias for the ctx-aware bring-up half of a component.
             name: Start
@@ -1072,9 +1171,15 @@ packages:
       - alias:
           - doc: |-
               SupervisorConfig is the public alias for a supervisor's optional tuning:
-              Clock, Observe, Backoff, HealthyAfter.
+              Clock, Observe, Backoff, HealthyAfter, GiveUpAfter.
             name: SupervisorConfig
             target: svclc.SupervisorConfig
+      - alias:
+          - doc: |-
+              GiveUp is the public alias for a supervisor's restart intensity: give up
+              after more than Restarts early ends within Within.
+            name: GiveUp
+            target: svclc.GiveUpValue
       - alias:
           - doc: |-
               SupervisionEvent is the public alias for one thing a supervisor did, as
@@ -1156,6 +1261,12 @@ packages:
           - doc: SupervisorRunning refuses a second Start while a supervision runs.
             name: SupervisorRunning
             reexport: corelc.SupervisorRunning
+            type: "*errs.Error"
+          - doc: |-
+              SupervisorGaveUp is what Supervisor.Check reports once a supervision
+              gave up: its function ended early more often than GiveUpAfter allows.
+            name: SupervisorGaveUp
+            reexport: corelc.SupervisorGaveUp
             type: "*errs.Error"
       - func:
           doc: |-

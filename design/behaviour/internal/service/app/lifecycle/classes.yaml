@@ -58,7 +58,7 @@ constants:
         value: time.Minute
     name: DefaultHealthyRun
   - doc: |-
-      The four phases of a supervision. The zero value is none of them, so an
+      The phases of a supervision. The zero value is none of them, so an
       event that was never filled in reads as "unknown".
     grouped: true
     items:
@@ -76,6 +76,11 @@ constants:
           SupervisionStopped: the supervision is over, and the goroutine
           that ran it is returning.
         name: SupervisionStopped
+      - doc: |-
+          SupervisionGaveUp: a run ended early once too often for GiveUpAfter,
+          and the function is not restarted; Err is SupervisorGaveUp. The
+          Stopped event follows it.
+        name: SupervisionGaveUp
     name: SupervisionRunStarted
 files:
   - decls:
@@ -124,8 +129,11 @@ files:
       - (*Supervisor).Start
       - (*Supervisor).Stop
       - (*Supervisor).Component
+      - (*Supervisor).Check
       - (*Supervisor).running
       - (*Supervisor).supervise
+      - (*Supervisor).recordEnd
+      - (*Supervisor).giveUpOn
       - (*Supervisor).once
       - (*Supervisor).wait
       - (*Supervisor).emit
@@ -135,6 +143,9 @@ files:
       - DefaultRestartBase
       - DefaultHealthyRun
       - SupervisorConfig
+      - GiveUpValue
+      - GiveUpValue.enabled
+      - validateGiveUp
       - validateSupervisor
       - (*SupervisorConfig).resolved
     name: supervise_config.go
@@ -199,6 +210,12 @@ functions:
       returned — a panic included — is kept.
     name: wayOut
     params: runErr error
+    results: error
+  - doc: |-
+      validateGiveUp refuses a restart intensity that is no bound: a negative
+      field, or restarts counted over no span.
+    name: validateGiveUp
+    params: name string, giveUp GiveUpValue
     results: error
   - doc: validateSupervisor refuses a supervisor that could never run.
     name: validateSupervisor
@@ -513,7 +530,15 @@ types:
       - doc: healthy is how long a run lasts before its end is a first failure.
         name: healthy
         type: time.Duration
-      - doc: mu guards cancel and done.
+      - doc: giveUp is the restart intensity; its zero never gives up.
+        name: giveUp
+        type: GiveUpValue
+      - doc: |-
+          gaveUp is SupervisorGaveUp once the last supervision gave up, nil
+          otherwise. Guarded by mu.
+        name: gaveUp
+        type: error
+      - doc: mu guards cancel, done and gaveUp.
         name: mu
         type: sync.Mutex
     kind: struct
@@ -529,6 +554,10 @@ types:
       - name: Component
         recv: s *Supervisor
         results: corelc.ComponentValue
+      - name: Check
+        params: ctx context.Context
+        recv: s *Supervisor
+        results: error
       - doc: |-
           running reports whether a supervision started and has not ended. The
           caller holds mu.
@@ -540,6 +569,20 @@ types:
           run again, until ctx ends.
         name: supervise
         params: ctx context.Context, done chan struct{}
+        recv: s *Supervisor
+      - doc: |-
+          recordEnd adds the early end at ended to ends and drops the ends older than
+          GiveUpAfter.Within, keeping the slice's memory bounded by the bound itself.
+          Without a bound it keeps nothing.
+        name: recordEnd
+        params: ends []time.Time, ended time.Time
+        recv: s *Supervisor
+        results: "[]time.Time"
+      - doc: |-
+          giveUpOn ends a supervision that gave up: it records SupervisorGaveUp for
+          Check, then tells the observer, with the last run's error as a field.
+        name: giveUpOn
+        params: at time.Time, run, failures int, last error
         recv: s *Supervisor
       - doc: once runs the function once and turns a panic into RunPanicked.
         name: once
@@ -584,6 +627,12 @@ types:
           consecutive-failure count. Not positive means [DefaultHealthyRun].
         name: HealthyAfter
         type: time.Duration
+      - doc: |-
+          GiveUpAfter bounds how often the function may end early before the
+          supervisor stops restarting it. The zero value restarts it forever,
+          as a supervisor always has.
+        name: GiveUpAfter
+        type: GiveUpValue
     kind: struct
     methods:
       - doc: resolved applies the documented clamps.
@@ -591,6 +640,20 @@ types:
         recv: c *SupervisorConfig
         results: clk clock.Timed, backoff kbackoff.Value, healthy time.Duration
     name: SupervisorConfig
+  - fields:
+      - doc: Restarts is how many early ends Within tolerates, each restarted.
+        name: Restarts
+        type: int
+      - doc: Within is the span the early ends are counted over.
+        name: Within
+        type: time.Duration
+    kind: struct
+    methods:
+      - doc: "enabled reports whether the bound gives up at all: its zero value never does."
+        name: enabled
+        recv: g GiveUpValue
+        results: bool
+    name: GiveUpValue
   - kind: named
     methods:
       - name: String
@@ -603,7 +666,8 @@ types:
           Err is what an ended run returned: nil when it returned nil before its
           context ended, RunPanicked for a panic, and nil too when it ended
           because the supervision was stopping and it returned its context's
-          error — the way out, not a failure.
+          error — the way out, not a failure. On SupervisionGaveUp it is
+          SupervisorGaveUp, carrying the last run's error as a field.
         name: Err
         type: error
       - doc: At is when the event happened, on the supervisor's clock.
@@ -619,8 +683,8 @@ types:
         name: Delay
         type: time.Duration
       - doc: |-
-          Run numbers the run the event is about, from 1; the Stopped event
-          carries the last one.
+          Run numbers the run the event is about, from 1; the Stopped and
+          GaveUp events carry the last one.
         name: Run
         type: int
       - doc: |-

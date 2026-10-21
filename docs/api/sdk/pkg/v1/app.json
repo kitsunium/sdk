@@ -79,7 +79,7 @@
       "dir": "lifecycle",
       "layer": "public",
       "family": "app",
-      "doc": "Package lifecycle is the public facade for the SDK's ordered start/stop\ndomain: components come up in the order you declare them, and go down in the\nexact reverse.\n\n\tapp := lifecycle.New(lifecycle.Config{StopTimeout: 15 * time.Second})\n\n\t// the order of these three calls IS the dependency order\n\t_ = app.Add(lifecycle.Component{Name: \"db\", Start: db.Open, Stop: db.Close})\n\t_ = app.Add(lifecycle.Component{Name: \"cache\", Start: cache.Dial, Stop: cache.Close})\n\t_ = app.Add(lifecycle.Component{Name: \"http\", Start: srv.Start, Stop: srv.Shutdown})\n\n\t// start, wait for SIGTERM, stop http → cache → db\n\tif err := lifecycle.Run(ctx, app, lifecycle.RunConfig{Signals: []lifecycle.Signal{term}}); err != nil {\n\t\treturn err\n\t}\n\n# What it makes impossible\n\n**A partial start that leaks.** If the fourth component of six fails, the\nthree that are up are stopped, in reverse, before [Lifecycle].Start returns\n— through the same code path an ordinary [Lifecycle].Stop uses, not a second\ncopy of it. The component that failed is deliberately NOT stopped: its Start\nreturned an error, so it never handed back a running thing, and a Stop on a\nhalf-constructed component is how a double-close gets written. A Start that\nfails owns what it acquired, exactly as a Go constructor does.\n\nThe unwind also runs when the start failed BECAUSE the context was\ncancelled: each Stop is called with a context derived by\ncontext.WithoutCancel, so a cleanup is never driven by the cancellation that\nmade it necessary.\n\n**A shutdown budget one component can spend on everyone's behalf.**\n[Config].StopTimeout is the budget ONE component gets, not a budget for the\nwhole shutdown. A component that will not finish is abandoned at its own\ndeadline and the shutdown continues; every component before it in the\nreverse order still gets its full budget. The price is stated rather than\nhidden: a Stop of n components returns in at most n × StopTimeout.\n\n# What \"the budget expired\" means\n\nExactly three things, and deliberately nothing more:\n\n  - The context handed to that component's Stop is cancelled. That is an\n    ANNOUNCEMENT — the one piece of information the component cannot\n    otherwise have — and it is what a cooperative Stop selects on.\n  - The lifecycle stops WAITING and moves to the next component.\n  - A [StopTimeout] error naming the component is collected into the\n    aggregate that [Lifecycle].Stop returns.\n\nThe goroutine is not killed, because Go cannot kill one, and nothing the\ncomponent owns is closed on its behalf. Severing a resource under live work\nis how an unfinishable stream used to take a whole HTTP drain down with it;\na budget that expires must not cut short what was about to finish.\n\nA non-positive [Config].StopTimeout CLAMPS to [DefaultStopTimeout] (30s).\nIt is never read as \"stop immediately\": a zero there is what an unset field\nlooks like, and reporting a timeout for components that were about to\nsucceed is not a shutdown policy.\n\n# What it deliberately does not do\n\nThere is no dependency GRAPH. A linear sequence already is a topological\norder, and the caller — who wrote the constructors — is the only party that\nknows it. No edges, no cycle detection, no parallel start. The cost is\nstated: the SDK cannot tell you that you ordered them wrong, because it has\nnothing to check the order against.\n\nThere is no autowiring, no reflection over constructors and no container. A\nconvention that decides what gets injected where is a framework, and this\nSDK is a toolbox. Explicit constructors called in an order you can read are\nthe whole mechanism.\n\nSignals and sd_notify are OPT-IN fields of [RunConfig], never a default:\nthey are process-wide, observable side effects, and a library that installs\nthem because it was imported fights the caller's own main. Both delegate to\nthe SDK packages that already implement them.\n\n# A loop that must keep running: the Supervisor\n\nMany components own a loop that runs between their Start and their Stop — a\nconsumer, a sweeper, a watcher — and that loop is where a component dies\nunnoticed: it returns an error nobody reads, or panics and takes the process\nwith it. [NewSupervisor] runs such a function on a goroutine of its own\nuntil it is stopped, and restarts it after every early end — an error, a\nnil return before its context ended, a panic, which it recovers into\n[RunPanicked] — after a backoff: one second, doubling, to a minute by\ndefault ([SupervisorConfig].Backoff is the resilience curve, published by\npkg/v1/app/resilience). A run that lasted [DefaultHealthyRun] was working, so\nits end waits the first backoff again. Every run started and ended, every\nrestart scheduled, and the end of the supervision reach\n[SupervisorConfig].Observe; the supervisor writes nothing anywhere itself.\n\n\tsweeper, err := lifecycle.NewSupervisor(\"session-sweeper\", sweep, lifecycle.SupervisorConfig{})\n\terr = app.Add(sweeper.Component()) // Start begins it, Stop cancels and joins it\n\nStop cancels the function's context and waits for it to return — the\nLifecycle budgets that wait like any other Stop — and a function that\nignores its context is abandoned at the budget, never killed. Start's\ncontext gives every run its values; its cancellation does not end the\nsupervision, because a Lifecycle hands a component the context of its\nSTARTUP. Every wait is on [SupervisorConfig].Clock, so a test drives each\nrestart with a ManualClock instead of sleeping.\n\n# Errors\n\nA failed [Lifecycle].Start returns an errors.Join carrying [StartFailed]\nAND the component's own error, side by side rather than one wrapping the\nother — so errs.HasCode(err, CodeStartFailed) and the caller's own\nerrors.Is both answer. [Lifecycle].Stop aggregates the same way, one entry\nper component that failed or overran.\n\nA component that PANICS is recovered and reported as [ComponentPanicked]\nwith the panic value in a field. A panic escaping a Start would skip the\nunwind entirely and leak every component already up, which is the failure\nthis domain exists to prevent.\n"
+      "doc": "Package lifecycle is the public facade for the SDK's ordered start/stop\ndomain: components come up in the order you declare them, and go down in the\nexact reverse.\n\n\tapp := lifecycle.New(lifecycle.Config{StopTimeout: 15 * time.Second})\n\n\t// the order of these three calls IS the dependency order\n\t_ = app.Add(lifecycle.Component{Name: \"db\", Start: db.Open, Stop: db.Close})\n\t_ = app.Add(lifecycle.Component{Name: \"cache\", Start: cache.Dial, Stop: cache.Close})\n\t_ = app.Add(lifecycle.Component{Name: \"http\", Start: srv.Start, Stop: srv.Shutdown})\n\n\t// start, wait for SIGTERM, stop http → cache → db\n\tif err := lifecycle.Run(ctx, app, lifecycle.RunConfig{Signals: []lifecycle.Signal{term}}); err != nil {\n\t\treturn err\n\t}\n\n# What it makes impossible\n\n**A partial start that leaks.** If the fourth component of six fails, the\nthree that are up are stopped, in reverse, before [Lifecycle].Start returns\n— through the same code path an ordinary [Lifecycle].Stop uses, not a second\ncopy of it. The component that failed is deliberately NOT stopped: its Start\nreturned an error, so it never handed back a running thing, and a Stop on a\nhalf-constructed component is how a double-close gets written. A Start that\nfails owns what it acquired, exactly as a Go constructor does.\n\nThe unwind also runs when the start failed BECAUSE the context was\ncancelled: each Stop is called with a context derived by\ncontext.WithoutCancel, so a cleanup is never driven by the cancellation that\nmade it necessary.\n\n**A shutdown budget one component can spend on everyone's behalf.**\n[Config].StopTimeout is the budget ONE component gets, not a budget for the\nwhole shutdown. A component that will not finish is abandoned at its own\ndeadline and the shutdown continues; every component before it in the\nreverse order still gets its full budget. The price is stated rather than\nhidden: a Stop of n components returns in at most n × StopTimeout.\n\n# What \"the budget expired\" means\n\nExactly three things, and deliberately nothing more:\n\n  - The context handed to that component's Stop is cancelled. That is an\n    ANNOUNCEMENT — the one piece of information the component cannot\n    otherwise have — and it is what a cooperative Stop selects on.\n  - The lifecycle stops WAITING and moves to the next component.\n  - A [StopTimeout] error naming the component is collected into the\n    aggregate that [Lifecycle].Stop returns.\n\nThe goroutine is not killed, because Go cannot kill one, and nothing the\ncomponent owns is closed on its behalf. Severing a resource under live work\nis how an unfinishable stream used to take a whole HTTP drain down with it;\na budget that expires must not cut short what was about to finish.\n\nA non-positive [Config].StopTimeout CLAMPS to [DefaultStopTimeout] (30s).\nIt is never read as \"stop immediately\": a zero there is what an unset field\nlooks like, and reporting a timeout for components that were about to\nsucceed is not a shutdown policy.\n\n# What it deliberately does not do\n\nThere is no dependency GRAPH. A linear sequence already is a topological\norder, and the caller — who wrote the constructors — is the only party that\nknows it. No edges, no cycle detection, no parallel start. The cost is\nstated: the SDK cannot tell you that you ordered them wrong, because it has\nnothing to check the order against.\n\nThere is no autowiring, no reflection over constructors and no container. A\nconvention that decides what gets injected where is a framework, and this\nSDK is a toolbox. Explicit constructors called in an order you can read are\nthe whole mechanism.\n\nSignals and sd_notify are OPT-IN fields of [RunConfig], never a default:\nthey are process-wide, observable side effects, and a library that installs\nthem because it was imported fights the caller's own main. Both delegate to\nthe SDK packages that already implement them.\n\n# A loop that must keep running: the Supervisor\n\nMany components own a loop that runs between their Start and their Stop — a\nconsumer, a sweeper, a watcher — and that loop is where a component dies\nunnoticed: it returns an error nobody reads, or panics and takes the process\nwith it. [NewSupervisor] runs such a function on a goroutine of its own\nuntil it is stopped, and restarts it after every early end — an error, a\nnil return before its context ended, a panic, which it recovers into\n[RunPanicked] — after a backoff: one second, doubling, to a minute by\ndefault ([SupervisorConfig].Backoff is the resilience curve, published by\npkg/v1/app/resilience). A run that lasted [DefaultHealthyRun] was working, so\nits end waits the first backoff again. Every run started and ended, every\nrestart scheduled, and the end of the supervision reach\n[SupervisorConfig].Observe; the supervisor writes nothing anywhere itself.\n\n\tsweeper, err := lifecycle.NewSupervisor(\"session-sweeper\", sweep, lifecycle.SupervisorConfig{})\n\terr = app.Add(sweeper.Component()) // Start begins it, Stop cancels and joins it\n\nStop cancels the function's context and waits for it to return — the\nLifecycle budgets that wait like any other Stop — and a function that\nignores its context is abandoned at the budget, never killed. Start's\ncontext gives every run its values; its cancellation does not end the\nsupervision, because a Lifecycle hands a component the context of its\nSTARTUP. Every wait is on [SupervisorConfig].Clock, so a test drives each\nrestart with a ManualClock instead of sleeping.\n\nA supervisor restarts forever by default. [SupervisorConfig].GiveUpAfter\nbounds it the way Erlang's restart intensity does: more than Restarts early\nends within Within, and the supervision ends instead of restarting again.\nIts observer hears [SupervisionGaveUp], and [Supervisor].Check — a health\ncheck's shape — reports [SupervisorGaveUp] to a liveness probe from then on:\n\n\tsweeper, err := lifecycle.NewSupervisor(\"session-sweeper\", sweep, lifecycle.SupervisorConfig{\n\t    GiveUpAfter: lifecycle.GiveUp{Restarts: 5, Within: time.Minute},\n\t})\n\n# Errors\n\nA failed [Lifecycle].Start returns an errors.Join carrying [StartFailed]\nAND the component's own error, side by side rather than one wrapping the\nother — so errs.HasCode(err, CodeStartFailed) and the caller's own\nerrors.Is both answer. [Lifecycle].Stop aggregates the same way, one entry\nper component that failed or overran.\n\nA component that PANICS is recovered and reported as [ComponentPanicked]\nwith the panic value in a field. A panic escaping a Start would skip the\nunwind entirely and leak every component already up, which is the failure\nthis domain exists to prevent.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/pkg/v1/app/lock",
@@ -111,7 +111,7 @@
       "dir": "resilience",
       "layer": "public",
       "family": "app",
-      "doc": "Package resilience is the public facade for the SDK's reliability policies:\nretry, circuit-breaker, rate-limit, bulkhead, timeout, fallback, and hedging.\nEach constructor returns a [Runner] that guards an [Operation] (a ctx-aware\nfunc); policies compose by nesting.\n\n\tr := resilience.NewRetry(resilience.RetryConfig{MaxAttempts: 3})\n\tb := resilience.NewCircuitBreaker(resilience.BreakerConfig{FailureThreshold: 5, OpenDuration: time.Second})\n\terr := r.Run(ctx, func(ctx context.Context) error {\n\t    return b.Run(ctx, callDownstream) // Retry(Breaker(op))\n\t})\n\nRejections surface typed sentinels (RetryExhausted / RetryBudgetExceeded /\nCircuitOpen / RateLimited / BulkheadFull / TimeoutExceeded / FallbackFailed)\nmatchable via\nerrs.HasReason / errs.HasCode.\n\n# Classifying deterministic failures\n\nRetry and the circuit-breaker act on transient failures. A deterministic one —\na policy refusal, an HTTP 400, invalid input — gains nothing from a replay and\nsays nothing about a dependency's health, yet by default both policies treat\nevery non-nil error as transient: the retry spends its whole budget on it and\nhides it behind RetryExhausted, and the breaker counts it towards tripping.\nSet the Retryable predicate on either config to tell the two apart. It takes\nthe same shape in both, so a nested Retry(Breaker(op)) shares one classifier.\nThe sentinel is the caller's own — this package exports none to classify\nagainst, because only the caller knows which of their failures are\ndeterministic:\n\n\tvar ErrBadRequest = errors.New(\"bad request\") // declared by the caller\n\n\ttransient := func(err error) bool { return !errors.Is(err, ErrBadRequest) }\n\tr := resilience.NewRetry(resilience.RetryConfig{MaxAttempts: 3, Retryable: transient})\n\tb := resilience.NewCircuitBreaker(resilience.BreakerConfig{FailureThreshold: 5, Retryable: transient})\n\nA rejected error comes back verbatim: the retry stops at that attempt without\nbackoff and without the RetryExhausted relabel, and the breaker leaves its\nstate machine untouched. A nil predicate keeps the historical behaviour.\n[FallbackConfig] takes the same predicate, where it decides whether a primary\nfailure is worth serving a substitute answer for.\n\n# Falling back\n\n[NewFallback] runs a second Operation when the first one fails, and reports\nsuccess when it works — that masking is the policy. The port carries no\nresult value, so a \"fallback VALUE\" is a closure assigning the caller's own\ndefault:\n\n\tvar page []byte\n\tf := resilience.NewFallback(resilience.FallbackConfig{\n\t    Fallback: func(context.Context) error { page = cachedPage; return nil },\n\t})\n\terr := f.Run(ctx, func(ctx context.Context) error { return fetchLive(ctx, &page) })\n\nWhen BOTH halves fail, the result is FallbackFailed carrying both messages as\nfields — never one of the two errors alone. Reporting only the fallback's\nfailure would never say what it was covering for, and reporting only the\nprimary's would never say that plan B was tried and also broke; either way\nthe outcome stops being diagnosable. A nil Fallback is refused (ADR 0031).\n\nA cancelled context is the one exception, and it is reported as itself: when\nit is already dead after the primary the fallback does not run at all, and\nwhen it dies while the fallback runs, a failed fallback returns ctx.Err()\nrather than FallbackFailed — neither dependency was at fault. A fallback that\nsucceeds despite a late cancellation still returns nil: the work was done.\n\n# Hedging — for IDEMPOTENT operations only\n\n[NewHedge] guards tail latency by duplicating a slow call: when an attempt\nhas been outstanding for Delay, a second copy starts, and the first to\nsucceed wins.\n\n\th := resilience.NewHedge(resilience.HedgeConfig{\n\t    Idempotent:  true,               // asserted, not assumed — see below\n\t    Delay:       80 * time.Millisecond,\n\t    MaxHedges:   1,\n\t    MaxInFlight: 32,                 // duplicates in flight, all calls\n\t})\n\nThis is the only policy here that runs an Operation CONCURRENTLY with itself,\nwhich makes it the only one that can corrupt rather than merely delay: a\nnon-idempotent Operation hedged is a double charge, a double insert, a\nduplicate outbound message — and the policy reports one clean success. The\nSDK cannot detect idempotence, so [HedgeConfig].Idempotent makes the claim\nmandatory and in code: its zero value refuses the policy, so hedging is never\nreached by copying a config and dropping a field, and `grep -r 'Idempotent:'`\nenumerates every hedged call path in a codebase.\n\nThe second hazard is load. A dependency that has gone slow makes every\nin-flight call want a duplicate at the same instant, so hedging can deepen\nthe outage it was meant to hide. Delay and MaxInFlight are both refused when\nunset for that reason — a zero Delay duplicates every call, and an unbounded\nMaxInFlight lets the duplicates scale with the outage. Reaching MaxInFlight\ndegrades the policy to no-hedging (the call proceeds on its first attempt);\nit never turns into a rejection. Hedging also fires on latency ONLY: an\nattempt that fails before Delay elapses ends the call with that error, since\nreplaying a failure is [NewRetry]'s job, and composing NewRetry(NewHedge(op))\nis how you get both.\n\n# Limiting per caller\n\n[NewRateLimiter] is one bucket for every caller, which is right for a\ndependency and wrong for an endpoint: one client guessing passwords empties\nit and locks everybody out. [NewKeyedRateLimiter] keeps a bucket per key —\nthe authenticated user, the client's address — so one client is refused and\nthe others are not:\n\n\tlimiter := resilience.NewKeyedRateLimiter(resilience.KeyedRateLimiterConfig{\n\t    Rate: 1, Burst: 5,                  // per key\n\t    Key:  func(ctx context.Context) string { return clientOf(ctx) },\n\t    MaxKeys:     10_000,                // keys held at once, least recently used forgotten\n\t    IdleTimeout: 10 * time.Minute,      // a key left alone this long starts over full\n\t})\n\nThe set of keys is bounded because the keys come from outside: a stream of\ndistinct addresses would otherwise grow the process without limit. Both\nbounds are enforced on the calling goroutine — there is no sweeper. Key,\nMaxKeys and IdleTimeout have no defaults and are refused at zero, since each\nzero has a reading that disarms the limiter while every call keeps\nsucceeding. A key pushed out by capacity comes back with a full bucket, so\nsize MaxKeys above the number of clients active within IdleTimeout.\n\n# Backing off on your own terms\n\n[Backoff] is the curve [NewRetry] waits between attempts, published for the\nloops that retry on their own terms — a supervised goroutine restarting\nafter a failure, an outbox rescheduling a delivery:\n\n\twait := resilience.Backoff{BaseDelay: time.Second, MaxDelay: time.Minute}.Delay(failures)\n\nDelay(n) is BaseDelay × Multiplier^(n−1), held at MaxDelay; a Multiplier of 1\nor below doubles, and the growth stops at the ceiling — or at the longest\ntime.Duration — instead of wrapping negative, however large n is.\n\n# Driving the retry, the hedge and the timeout with a test clock\n\n[RetryConfig].Clock is the time source the retry backs off on,\n[HedgeConfig].Clock the one the hedge measures its delay on, and\n[TimeoutConfig].Clock the one [NewTimeoutWith] measures its deadline on.\nLeave them nil in production; in a test, hand them a ManualClock from\npkg/v1/clock and move it past each backoff, the hedge delay or the\ndeadline, instead of sleeping through it.\n\n# Waiting as long as the other side asked\n\nA collector shedding load, an HTTP server answering 429, a rate limiter\nrefusing a call: each knows when the next attempt may succeed, and a retry\nthat ignores it either hammers too early or waits too long.\n[RetryConfig].Delay lets the failure decide the wait, and [RetryAfter] reads\nthe delay the SDK's own producers attach to their errors:\n\n\tr := resilience.NewRetry(resilience.RetryConfig{\n\t    MaxAttempts: 5, BaseDelay: 100 * time.Millisecond, MaxDelay: 30 * time.Second,\n\t    Delay: func(_ int, err error) (time.Duration, bool) { return resilience.RetryAfter(err) },\n\t})\n\nA failure that names no delay waits the backoff curve, and the named one is\nheld at MaxDelay.\n\n# A retry budget per dependency\n\nA retry multiplies traffic exactly when the dependency can least take it:\nduring an outage every call becomes MaxAttempts calls, and stacked layers\nmultiply again. [NewRetryBudget] is the token bucket of gRPC's retry\nthrottling — a failure costs a token, a success returns TokenRatio of one,\nand extra attempts stop once half the tokens are gone. Share one per\ndependency between its retry and its hedge; the first attempt of a call is\nnever refused:\n\n\tbudget := resilience.NewRetryBudget(resilience.RetryBudgetConfig{MaxTokens: 10, TokenRatio: 0.1})\n\tr := resilience.NewRetry(resilience.RetryConfig{\n\t    MaxAttempts: 3, BaseDelay: 50 * time.Millisecond, Budget: budget,\n\t    OnRetry: func(attempt int, err error, wait time.Duration) { retries.Add(1) },\n\t})\n\nA retry the budget refuses ends the call with [RetryBudgetExceeded]; a\nduplicate it refuses is simply not issued. [RetryConfig].OnRetry hears every\nretry before its wait, synchronously, so retries are counted without this\npackage depending on a metrics library.\n\n# A caller who leaves is not a failing dependency\n\nA call that ends in context.Canceled once the caller's own context is\nclosed is neutral to the circuit breaker — a wave of disconnecting clients\ncannot open it on a healthy dependency — and the timeout reports the\ncaller's own context error rather than TimeoutExceeded when the caller's\ncontext finished first. A context.DeadlineExceeded from the dependency\nstays a failure.\n\n# A breaker that opens on a rate, and says where it stands\n\nA breaker counting CONSECUTIVE failures never opens on a dependency that\nfails every other call, nor on one that answers every call a minute late.\n[BreakerConfig].Window opens it on a rate instead — of failures, or of slow\ncalls — over a sliding window on the breaker's clock, once enough calls\nwere seen for a rate to mean something:\n\n\tb := resilience.NewCircuitBreaker(resilience.BreakerConfig{\n\t    Window: &resilience.BreakerWindowValue{\n\t        Size: 30 * time.Second, MinCalls: 20, FailureRatio: 0.5,\n\t        SlowAfter: 2 * time.Second, SlowRatio: 0.8,\n\t    },\n\t    OnStateChange: func(from, to resilience.BreakerPhase) { log.Info(\"breaker\", \"from\", from, \"to\", to) },\n\t})\n\tstate := b.(resilience.BreakerState)\n\tready := state.State().Phase != resilience.BreakerOpen // a readiness check\n\nA nil Window is the consecutive-failure breaker, unchanged. The Runner is a\n[BreakerState]: State reports the phase and its counts, Isolate opens it by\nhand until Reset, and [BreakerConfig].OnStateChange hears each change of\nphase in order, outside the breaker's lock. [BreakerConfig].OpenBackoff\nlengthens each opening while the trials keep failing.\n"
+      "doc": "Package resilience is the public facade for the SDK's reliability policies:\nretry, circuit-breaker, rate-limit, bulkhead, timeout, fallback, and hedging.\nEach constructor returns a [Runner] that guards an [Operation] (a ctx-aware\nfunc); policies compose by nesting.\n\n\tr := resilience.NewRetry(resilience.RetryConfig{MaxAttempts: 3})\n\tb := resilience.NewCircuitBreaker(resilience.BreakerConfig{FailureThreshold: 5, OpenDuration: time.Second})\n\terr := r.Run(ctx, func(ctx context.Context) error {\n\t    return b.Run(ctx, callDownstream) // Retry(Breaker(op))\n\t})\n\nRejections surface typed sentinels (RetryExhausted / RetryBudgetExceeded /\nCircuitOpen / RateLimited / BulkheadFull / TimeoutExceeded / FallbackFailed /\nThrottled) matchable via\nerrs.HasReason / errs.HasCode.\n\n# Classifying deterministic failures\n\nRetry and the circuit-breaker act on transient failures. A deterministic one —\na policy refusal, an HTTP 400, invalid input — gains nothing from a replay and\nsays nothing about a dependency's health, yet by default both policies treat\nevery non-nil error as transient: the retry spends its whole budget on it and\nhides it behind RetryExhausted, and the breaker counts it towards tripping.\nSet the Retryable predicate on either config to tell the two apart. It takes\nthe same shape in both, so a nested Retry(Breaker(op)) shares one classifier.\nThe sentinel is the caller's own — this package exports none to classify\nagainst, because only the caller knows which of their failures are\ndeterministic:\n\n\tvar ErrBadRequest = errors.New(\"bad request\") // declared by the caller\n\n\ttransient := func(err error) bool { return !errors.Is(err, ErrBadRequest) }\n\tr := resilience.NewRetry(resilience.RetryConfig{MaxAttempts: 3, Retryable: transient})\n\tb := resilience.NewCircuitBreaker(resilience.BreakerConfig{FailureThreshold: 5, Retryable: transient})\n\nA rejected error comes back verbatim: the retry stops at that attempt without\nbackoff and without the RetryExhausted relabel, and the breaker leaves its\nstate machine untouched. A nil predicate keeps the historical behaviour.\n[FallbackConfig] takes the same predicate, where it decides whether a primary\nfailure is worth serving a substitute answer for.\n\n# Falling back\n\n[NewFallback] runs a second Operation when the first one fails, and reports\nsuccess when it works — that masking is the policy. The port carries no\nresult value, so a \"fallback VALUE\" is a closure assigning the caller's own\ndefault:\n\n\tvar page []byte\n\tf := resilience.NewFallback(resilience.FallbackConfig{\n\t    Fallback: func(context.Context) error { page = cachedPage; return nil },\n\t})\n\terr := f.Run(ctx, func(ctx context.Context) error { return fetchLive(ctx, &page) })\n\nWhen BOTH halves fail, the result is FallbackFailed carrying both messages as\nfields — never one of the two errors alone. Reporting only the fallback's\nfailure would never say what it was covering for, and reporting only the\nprimary's would never say that plan B was tried and also broke; either way\nthe outcome stops being diagnosable. A nil Fallback is refused (ADR 0031).\n\nA cancelled context is the one exception, and it is reported as itself: when\nit is already dead after the primary the fallback does not run at all, and\nwhen it dies while the fallback runs, a failed fallback returns ctx.Err()\nrather than FallbackFailed — neither dependency was at fault. A fallback that\nsucceeds despite a late cancellation still returns nil: the work was done.\n\n# Hedging — for IDEMPOTENT operations only\n\n[NewHedge] guards tail latency by duplicating a slow call: when an attempt\nhas been outstanding for Delay, a second copy starts, and the first to\nsucceed wins.\n\n\th := resilience.NewHedge(resilience.HedgeConfig{\n\t    Idempotent:  true,               // asserted, not assumed — see below\n\t    Delay:       80 * time.Millisecond,\n\t    MaxHedges:   1,\n\t    MaxInFlight: 32,                 // duplicates in flight, all calls\n\t})\n\nThis is the only policy here that runs an Operation CONCURRENTLY with itself,\nwhich makes it the only one that can corrupt rather than merely delay: a\nnon-idempotent Operation hedged is a double charge, a double insert, a\nduplicate outbound message — and the policy reports one clean success. The\nSDK cannot detect idempotence, so [HedgeConfig].Idempotent makes the claim\nmandatory and in code: its zero value refuses the policy, so hedging is never\nreached by copying a config and dropping a field, and `grep -r 'Idempotent:'`\nenumerates every hedged call path in a codebase.\n\nThe second hazard is load. A dependency that has gone slow makes every\nin-flight call want a duplicate at the same instant, so hedging can deepen\nthe outage it was meant to hide. Delay and MaxInFlight are both refused when\nunset for that reason — a zero Delay duplicates every call, and an unbounded\nMaxInFlight lets the duplicates scale with the outage. Reaching MaxInFlight\ndegrades the policy to no-hedging (the call proceeds on its first attempt);\nit never turns into a rejection. Hedging also fires on latency ONLY: an\nattempt that fails before Delay elapses ends the call with that error, since\nreplaying a failure is [NewRetry]'s job, and composing NewRetry(NewHedge(op))\nis how you get both.\n\n# Limiting per caller\n\n[NewRateLimiter] is one bucket for every caller, which is right for a\ndependency and wrong for an endpoint: one client guessing passwords empties\nit and locks everybody out. [NewKeyedRateLimiter] keeps a bucket per key —\nthe authenticated user, the client's address — so one client is refused and\nthe others are not:\n\n\tlimiter := resilience.NewKeyedRateLimiter(resilience.KeyedRateLimiterConfig{\n\t    Rate: 1, Burst: 5,                  // per key\n\t    Key:  func(ctx context.Context) string { return clientOf(ctx) },\n\t    MaxKeys:     10_000,                // keys held at once, least recently used forgotten\n\t    IdleTimeout: 10 * time.Minute,      // a key left alone this long starts over full\n\t})\n\nThe set of keys is bounded because the keys come from outside: a stream of\ndistinct addresses would otherwise grow the process without limit. Both\nbounds are enforced on the calling goroutine — there is no sweeper. Key,\nMaxKeys and IdleTimeout have no defaults and are refused at zero, since each\nzero has a reading that disarms the limiter while every call keeps\nsucceeding. A key pushed out by capacity comes back with a full bucket, so\nsize MaxKeys above the number of clients active within IdleTimeout.\n\n# Backing off on your own terms\n\n[Backoff] is the curve [NewRetry] waits between attempts, published for the\nloops that retry on their own terms — a supervised goroutine restarting\nafter a failure, an outbox rescheduling a delivery:\n\n\twait := resilience.Backoff{BaseDelay: time.Second, MaxDelay: time.Minute}.Delay(failures)\n\nDelay(n) is BaseDelay × Multiplier^(n−1), held at MaxDelay; a Multiplier of 1\nor below doubles, and the growth stops at the ceiling — or at the longest\ntime.Duration — instead of wrapping negative, however large n is.\n\n# Driving the retry, the hedge and the timeout with a test clock\n\n[RetryConfig].Clock is the time source the retry backs off on,\n[HedgeConfig].Clock the one the hedge measures its delay on, and\n[TimeoutConfig].Clock the one [NewTimeoutWith] measures its deadline on.\nLeave them nil in production; in a test, hand them a ManualClock from\npkg/v1/clock and move it past each backoff, the hedge delay or the\ndeadline, instead of sleeping through it.\n\n# Waiting as long as the other side asked\n\nA collector shedding load, an HTTP server answering 429, a rate limiter\nrefusing a call: each knows when the next attempt may succeed, and a retry\nthat ignores it either hammers too early or waits too long.\n[RetryConfig].Delay lets the failure decide the wait, and [RetryAfter] reads\nthe delay the SDK's own producers attach to their errors:\n\n\tr := resilience.NewRetry(resilience.RetryConfig{\n\t    MaxAttempts: 5, BaseDelay: 100 * time.Millisecond, MaxDelay: 30 * time.Second,\n\t    Delay: func(_ int, err error) (time.Duration, bool) { return resilience.RetryAfter(err) },\n\t})\n\nA failure that names no delay waits the backoff curve, and the named one is\nheld at MaxDelay.\n\n# A retry budget per dependency\n\nA retry multiplies traffic exactly when the dependency can least take it:\nduring an outage every call becomes MaxAttempts calls, and stacked layers\nmultiply again. [NewRetryBudget] is the token bucket of gRPC's retry\nthrottling — a failure costs a token, a success returns TokenRatio of one,\nand extra attempts stop once half the tokens are gone. Share one per\ndependency between its retry and its hedge; the first attempt of a call is\nnever refused:\n\n\tbudget := resilience.NewRetryBudget(resilience.RetryBudgetConfig{MaxTokens: 10, TokenRatio: 0.1})\n\tr := resilience.NewRetry(resilience.RetryConfig{\n\t    MaxAttempts: 3, BaseDelay: 50 * time.Millisecond, Budget: budget,\n\t    OnRetry: func(attempt int, err error, wait time.Duration) { retries.Add(1) },\n\t})\n\nA retry the budget refuses ends the call with [RetryBudgetExceeded]; a\nduplicate it refuses is simply not issued. [RetryConfig].OnRetry hears every\nretry before its wait, synchronously, so retries are counted without this\npackage depending on a metrics library.\n\n# A caller who leaves is not a failing dependency\n\nA call that ends in context.Canceled once the caller's own context is\nclosed is neutral to the circuit breaker — a wave of disconnecting clients\ncannot open it on a healthy dependency — and the timeout reports the\ncaller's own context error rather than TimeoutExceeded when the caller's\ncontext finished first. A context.DeadlineExceeded from the dependency\nstays a failure.\n\n# A breaker that opens on a rate, and says where it stands\n\nA breaker counting CONSECUTIVE failures never opens on a dependency that\nfails every other call, nor on one that answers every call a minute late.\n[BreakerConfig].Window opens it on a rate instead — of failures, or of slow\ncalls — over a sliding window on the breaker's clock, once enough calls\nwere seen for a rate to mean something:\n\n\tb := resilience.NewCircuitBreaker(resilience.BreakerConfig{\n\t    Window: &resilience.BreakerWindowValue{\n\t        Size: 30 * time.Second, MinCalls: 20, FailureRatio: 0.5,\n\t        SlowAfter: 2 * time.Second, SlowRatio: 0.8,\n\t    },\n\t    OnStateChange: func(from, to resilience.BreakerPhase) { log.Info(\"breaker\", \"from\", from, \"to\", to) },\n\t})\n\tstate := b.(resilience.BreakerState)\n\tready := state.State().Phase != resilience.BreakerOpen // a readiness check\n\nA nil Window is the consecutive-failure breaker, unchanged. The Runner is a\n[BreakerState]: State reports the phase and its counts, Isolate opens it by\nhand until Reset, and [BreakerConfig].OnStateChange hears each change of\nphase in order, outside the breaker's lock. [BreakerConfig].OpenBackoff\nlengthens each opening while the trials keep failing, and\n[BreakerConfig].HalfOpenTrials asks for several successful trials in a row\nbefore the breaker closes.\n\n# Waiting a bounded time for a slot or a token\n\n[NewBulkhead] and [NewRateLimiter] reject at once a call they cannot admit.\n[NewBulkheadWait] lets a bounded queue of calls wait a bounded time for a\nslot, and [RateLimiterConfig].MaxWait lets a call wait for a token due\nsoon enough — both on an injected clock, both rejecting as before when\ntheir wait is zero:\n\n\tb := resilience.NewBulkheadWait(resilience.BulkheadWaitConfig{\n\t    Max: 16, Queue: 64, MaxWait: 50 * time.Millisecond,\n\t})\n\tl := resilience.NewRateLimiter(resilience.RateLimiterConfig{\n\t    Rate: 100, Burst: 10, MaxWait: 20 * time.Millisecond,\n\t})\n\n# How the backoff is randomised\n\n[RetryConfig].JitterMode, like [Backoff].JitterMode, chooses between the\nAWS Builders' Library's three jitters: [JitterAdditive], the zero and the\nJitter fraction added to the curve; [JitterFull], a uniform draw below the\ncurve; and [JitterDecorrelated], each wait drawn from the one before.\n\n# Throttling on the client side\n\n[NewAdaptiveThrottle] is the adaptive throttling of Google's SRE book: it\ncounts, over a window, the calls it was asked to make and the calls the\ndependency accepted, and refuses a new call locally — with [Throttled],\nwithout sending it — with probability max(0, (requests − K × accepts) /\n(requests + 1)). A dependency that refuses most of its traffic is no\nlonger sent most of it, and the refusals fade as it accepts again:\n\n\tt := resilience.NewAdaptiveThrottle(resilience.AdaptiveThrottleConfig{\n\t    Rejected: isOverload, // the caller's own: a 429, a 503, a RESOURCE_EXHAUSTED\n\t})\n"
     },
     {
       "path": "github.com/kitsunium/sdk/pkg/v1/app/scheduler",
@@ -119,7 +119,7 @@
       "dir": "scheduler",
       "layer": "public",
       "family": "app",
-      "doc": "Package scheduler is the public facade for the SDK's time-driven execution\ndomain: a five-field POSIX cron parser, a fixed-interval schedule, and an\nengine that fires jobs on either.\n\n\tsched := scheduler.New(scheduler.Config{\n\t    OnResult: func(r scheduler.Result) { log.Info(\"job\", \"name\", r.Name, \"err\", r.Err) },\n\t})\n\n\tnightly, err := scheduler.Parse(\"0 2 * * *\") // 02:00 UTC, every day\n\tif err != nil {\n\t    return err // an unusable expression is refused HERE, not at 02:00\n\t}\n\tif err := sched.Add(scheduler.Entry{Name: \"rollup\", Schedule: nightly, Job: rollup}); err != nil {\n\t    return err\n\t}\n\terr = sched.Run(ctx) // blocks until ctx is cancelled, then drains\n\n# What is refused, and when\n\nA [Scheduler] with no entries is legitimate — it runs empty and waits for\nits context, which is what a service with every job behind a feature flag\nlooks like. An unusable ENTRY is not: an empty name, a nil Job or a nil\nSchedule is refused by [Scheduler].Add, and an unusable cron expression is\nrefused by [Parse]. The two are different questions and the SDK answers them\ndifferently on purpose (ADR 0031).\n\n[Parse] refuses by name rather than by guessing. Six- and seven-field\nexpressions (the seconds and year dialects), @reboot, @every, the Quartz\noperators L, W, # and ?, a step written over a single value, an inverted\nrange, 7 for Sunday, and any expression that matches no date on the calendar\n— \"0 0 30 2 *\" — all come back as a typed error at construction. Fixed\nintervals are [Every], which is a different idea from a calendar expression\nand has a different name for that reason.\n\n# Time zones\n\n[Parse] evaluates in UTC. [ParseInLocation] takes any *time.Location, and\nrefuses a nil one — nil is what an unchecked time.LoadLocation leaves you\nwith, and reading it as UTC would silently run the job on a different clock.\nA named location needs the host's tz database or a blank import of\ntime/tzdata in your binary; the SDK does not import it for you.\n\nAround a DST transition the rules are fixed and documented rather than\nemergent:\n\n  - Spring forward — a wall-clock time that does not exist that day does not\n    fire. \"0 2 * * *\" in a zone that skips 02:00-03:00 skips that day. It is\n    not shifted to 01:00 or 03:00: those are instants the expression does\n    not name.\n  - Fall back — a wall-clock time that happens twice fires once, at the\n    first occurrence.\n\n# Missed deadlines, and overlap\n\nThe scheduler SKIPS and COUNTS. When the machine sleeps, or a run holds its\nslot past the next deadline, the job runs once for the most recent due\ninstant and [Result].Missed reports how many older ones were dropped. It\nnever replays them: a process that was down for a day would come back to a\nburst of stale work at the worst possible moment. Fires missed while the\nprocess was not running are invisible — this scheduler keeps no state across\nrestarts.\n\nWhen a run has not returned by the next deadline, the default is to SKIP\nthat fire and report it as [Result].Skipped. Queueing grows without bound\nbehind a persistently slow job; running copies in parallel duplicates a side\neffect the SDK cannot know is safe. A caller who knows concurrent copies are\nsafe says so with [Entry].AllowOverlap — an in-code assertion, like\nresilience.HedgeConfig.Idempotent, whose zero value is the safe answer.\n\n# What is guaranteed\n\nA job is never fired EARLY. Lateness has no upper bound: it is whatever the\nplatform's timer resolution, the machine's load and the OS's scheduling\nimpose, and on a machine that suspends it is unbounded. This is why cron's\nfinest field here is the minute and why a seconds field is refused — a\nsix-field expression would promise a resolution no GOOS in the SDK's support\nmatrix delivers uniformly (ADR 0018).\n\nA failing job never stops the scheduler and never affects another entry. A\nPANICKING job is recovered, reported as [JobPanicked] in [Result].Err, and\nthe scheduler keeps running — one job's bug must not take the process down.\nThe [Config].OnResult hook is the caller's own code and is deliberately NOT\nrecovered.\n"
+      "doc": "Package scheduler is the public facade for the SDK's time-driven execution\ndomain: a five-field POSIX cron parser, a fixed-interval schedule, and an\nengine that fires jobs on either.\n\n\tsched := scheduler.New(scheduler.Config{\n\t    OnResult: func(r scheduler.Result) { log.Info(\"job\", \"name\", r.Name, \"err\", r.Err) },\n\t})\n\n\tnightly, err := scheduler.Parse(\"0 2 * * *\") // 02:00 UTC, every day\n\tif err != nil {\n\t    return err // an unusable expression is refused HERE, not at 02:00\n\t}\n\tif err := sched.Add(scheduler.Entry{Name: \"rollup\", Schedule: nightly, Job: rollup}); err != nil {\n\t    return err\n\t}\n\terr = sched.Run(ctx) // blocks until ctx is cancelled, then drains\n\n# What is refused, and when\n\nA [Scheduler] with no entries is legitimate — it runs empty and waits for\nits context, which is what a service with every job behind a feature flag\nlooks like. An unusable ENTRY is not: an empty name, a nil Job or a nil\nSchedule is refused by [Scheduler].Add, and an unusable cron expression is\nrefused by [Parse]. The two are different questions and the SDK answers them\ndifferently on purpose (ADR 0031).\n\n[Parse] refuses by name rather than by guessing. Six- and seven-field\nexpressions (the seconds and year dialects), @reboot, @every, the Quartz\noperators L, W, # and ?, a step written over a single value, an inverted\nrange, 7 for Sunday, and any expression that matches no date on the calendar\n— \"0 0 30 2 *\" — all come back as a typed error at construction. Fixed\nintervals are [Every], which is a different idea from a calendar expression\nand has a different name for that reason.\n\n# Time zones\n\n[Parse] evaluates in UTC. [ParseInLocation] takes any *time.Location, and\nrefuses a nil one — nil is what an unchecked time.LoadLocation leaves you\nwith, and reading it as UTC would silently run the job on a different clock.\nA named location needs the host's tz database or a blank import of\ntime/tzdata in your binary; the SDK does not import it for you.\n\nAround a DST transition the rules are fixed and documented rather than\nemergent:\n\n  - Spring forward — a wall-clock time that does not exist that day does not\n    fire. \"0 2 * * *\" in a zone that skips 02:00-03:00 skips that day. It is\n    not shifted to 01:00 or 03:00: those are instants the expression does\n    not name.\n  - Fall back — a wall-clock time that happens twice fires once, at the\n    first occurrence.\n\n# Missed deadlines, and overlap\n\nThe scheduler SKIPS and COUNTS. When the machine sleeps, or a run holds its\nslot past the next deadline, the job runs once for the most recent due\ninstant and [Result].Missed reports how many older ones were dropped. It\nnever replays them: a process that was down for a day would come back to a\nburst of stale work at the worst possible moment. Fires missed while the\nprocess was not running are invisible — this scheduler keeps no state across\nrestarts.\n\nWhen a run has not returned by the next deadline, the default is to SKIP\nthat fire and report it as [Result].Skipped. Queueing grows without bound\nbehind a persistently slow job; running copies in parallel duplicates a side\neffect the SDK cannot know is safe. A caller who knows concurrent copies are\nsafe says so with [Entry].AllowOverlap — an in-code assertion, like\nresilience.HedgeConfig.Idempotent, whose zero value is the safe answer.\n[Entry].Overlap names the third answer, Kubernetes' Replace: [OverlapReplace]\ncancels the run still going and starts the new one once it has returned,\nreporting the cancelled one with [Result].Replaced.\n\nA late fire runs however late by default. [Entry].StartingDeadline bounds\nit: an instant missed by more than that is not run but reported with\n[Result].Expired — a 02:00 report is not produced at 09:00 because the\nmachine slept through the night.\n\n# What is guaranteed\n\nA job is never fired EARLY. Lateness has no upper bound: it is whatever the\nplatform's timer resolution, the machine's load and the OS's scheduling\nimpose, and on a machine that suspends it is unbounded. This is why cron's\nfinest field here is the minute and why a seconds field is refused — a\nsix-field expression would promise a resolution no GOOS in the SDK's support\nmatrix delivers uniformly (ADR 0018).\n\nA failing job never stops the scheduler and never affects another entry. A\nPANICKING job is recovered, reported as [JobPanicked] in [Result].Err, and\nthe scheduler keeps running — one job's bug must not take the process down.\nThe [Config].OnResult hook is the caller's own code and is deliberately NOT\nrecovered.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/pkg/v1/app/statemachine",
@@ -5714,6 +5714,19 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/lifecycle.GiveUp",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/lifecycle",
+      "name": "GiveUp",
+      "spelled": "svclc.GiveUpValue",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/lifecycle.GiveUpValue",
+      "owner": "go:github.com/kitsunium/sdk/internal/service/app/lifecycle.GiveUpValue",
+      "doc": "GiveUp is the public alias for a supervisor's restart intensity: give up\nafter more than Restarts early ends within Within.\n",
+      "file": "lifecycle/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/app/lifecycle.InvalidComponent",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/pkg/v1/app/lifecycle",
@@ -5995,6 +6008,20 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/lifecycle.SupervisionGaveUp",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/lifecycle",
+      "name": "SupervisionGaveUp",
+      "spelled": "SupervisionPhase",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/app/lifecycle.SupervisionPhase",
+      "value": "5",
+      "init": "go:github.com/kitsunium/sdk/internal/service/app/lifecycle.SupervisionGaveUp",
+      "doc": "SupervisionGaveUp reports a supervision that gave up: its function\nended early too often for SupervisorConfig.GiveUpAfter.\n",
+      "file": "lifecycle/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/app/lifecycle.SupervisionPhase",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/app/lifecycle",
@@ -6084,7 +6111,25 @@
       "spelled": "svclc.SupervisorConfig",
       "canonical": "github.com/kitsunium/sdk/internal/service/app/lifecycle.SupervisorConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/app/lifecycle.SupervisorConfig",
-      "doc": "SupervisorConfig is the public alias for a supervisor's optional tuning:\nClock, Observe, Backoff, HealthyAfter.\n",
+      "doc": "SupervisorConfig is the public alias for a supervisor's optional tuning:\nClock, Observe, Backoff, HealthyAfter, GiveUpAfter.\n",
+      "file": "lifecycle/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/lifecycle.SupervisorGaveUp",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/lifecycle",
+      "name": "SupervisorGaveUp",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/app/lifecycle.SupervisorGaveUp",
+      "code": {
+        "value": "0.3.49.9",
+        "reason": "SUPERVISOR_GAVE_UP",
+        "public": "The supervised function kept failing and the supervisor gave up"
+      },
+      "doc": "SupervisorGaveUp is what Supervisor.Check reports once a supervision\ngave up: its function ended early more often than GiveUpAfter allows.\n",
       "file": "lifecycle/gen_facade.go",
       "layer": "public",
       "family": "app"
@@ -7557,6 +7602,19 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/resilience.AdaptiveThrottleConfig",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/resilience",
+      "name": "AdaptiveThrottleConfig",
+      "spelled": "svcres.AdaptiveThrottleConfig",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/resilience.AdaptiveThrottleConfig",
+      "owner": "go:github.com/kitsunium/sdk/internal/service/app/resilience.AdaptiveThrottleConfig",
+      "doc": "AdaptiveThrottleConfig is the public alias for the adaptive throttle's\nconfiguration: K, Window, Buckets, Rejected, Clock, Random.\n",
+      "file": "resilience/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/app/resilience.Backoff",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/app/resilience",
@@ -7689,7 +7747,20 @@
         "reason": "BULKHEAD_FULL",
         "public": "The call was rejected because the bulkhead is full"
       },
-      "doc": "BulkheadFull is returned when every concurrency slot is occupied. It\ncarries HTTP 503.\n",
+      "doc": "BulkheadFull is returned when every concurrency slot is occupied — and,\nfor NewBulkheadWait, when the queue is full or no slot freed within\nMaxWait. It carries HTTP 503.\n",
+      "file": "resilience/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/resilience.BulkheadWaitConfig",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/resilience",
+      "name": "BulkheadWaitConfig",
+      "spelled": "svcres.BulkheadWaitConfig",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/resilience.BulkheadWaitConfig",
+      "owner": "go:github.com/kitsunium/sdk/internal/service/app/resilience.BulkheadWaitConfig",
+      "doc": "BulkheadWaitConfig is the public alias for the configuration of the\nbulkhead that queues: Max, Queue, MaxWait, Clock.\n",
       "file": "resilience/gen_facade.go",
       "layer": "public",
       "family": "app"
@@ -7757,6 +7828,61 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/resilience.JitterAdditive",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/resilience",
+      "name": "JitterAdditive",
+      "spelled": "JitterMode",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/app/resilience.JitterMode",
+      "value": "0",
+      "init": "go:github.com/kitsunium/sdk/internal/kernel/backoff.JitterAdditive",
+      "doc": "JitterAdditive adds a random fraction of each wait, drawn from\n[0, Jitter). It is the zero JitterMode.\n",
+      "file": "resilience/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/resilience.JitterDecorrelated",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/resilience",
+      "name": "JitterDecorrelated",
+      "spelled": "JitterMode",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/app/resilience.JitterMode",
+      "value": "2",
+      "init": "go:github.com/kitsunium/sdk/internal/kernel/backoff.JitterDecorrelated",
+      "doc": "JitterDecorrelated draws each wait from [BaseDelay, 3 × the previous\nwait], held at MaxDelay.\n",
+      "file": "resilience/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/resilience.JitterFull",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/resilience",
+      "name": "JitterFull",
+      "spelled": "JitterMode",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/app/resilience.JitterMode",
+      "value": "1",
+      "init": "go:github.com/kitsunium/sdk/internal/kernel/backoff.JitterFull",
+      "doc": "JitterFull draws each wait uniformly from [0, the capped curve].\n",
+      "file": "resilience/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/resilience.JitterMode",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/resilience",
+      "name": "JitterMode",
+      "spelled": "kbackoff.JitterMode",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/backoff.JitterMode",
+      "owner": "go:github.com/kitsunium/sdk/internal/kernel/backoff.JitterMode",
+      "doc": "JitterMode is the public alias for how a Backoff, and a retry, randomise\ntheir waits: additive (the zero), full, or decorrelated.\n",
+      "file": "resilience/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/app/resilience.KeyedRateLimiterConfig",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/app/resilience",
@@ -7770,6 +7896,18 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/resilience.NewAdaptiveThrottle",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/resilience",
+      "name": "NewAdaptiveThrottle",
+      "spelled": "func(cfg AdaptiveThrottleConfig) Runner",
+      "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/app/resilience.AdaptiveThrottleConfig) github.com/kitsunium/sdk/pkg/v1/app/resilience.Runner",
+      "doc": "NewAdaptiveThrottle returns a Runner that refuses calls on the client\nside with Throttled, with probability max(0, (requests − K × accepts) /\n(requests + 1)) over a sliding window — the adaptive throttling of\nGoogle's SRE book. A field out of range is refused with\nPolicyMisconfigured.\n",
+      "file": "resilience/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/app/resilience.NewBulkhead",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/pkg/v1/app/resilience",
@@ -7777,6 +7915,18 @@
       "spelled": "func(maxConcurrent int) Runner",
       "canonical": "func(maxConcurrent int) github.com/kitsunium/sdk/pkg/v1/app/resilience.Runner",
       "doc": "NewBulkhead returns a bounded-concurrency Runner (reject mode).\n",
+      "file": "resilience/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/resilience.NewBulkheadWait",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/resilience",
+      "name": "NewBulkheadWait",
+      "spelled": "func(cfg BulkheadWaitConfig) Runner",
+      "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/app/resilience.BulkheadWaitConfig) github.com/kitsunium/sdk/pkg/v1/app/resilience.Runner",
+      "doc": "NewBulkheadWait returns a bounded-concurrency Runner whose excess calls\nwait in a bounded queue, each at most cfg.MaxWait on cfg.Clock, for a\nslot; a full queue or a wait run out is BulkheadFull. Its zero\nconfiguration is NewBulkhead(1).\n",
       "file": "resilience/gen_facade.go",
       "layer": "public",
       "family": "app"
@@ -7836,7 +7986,7 @@
       "name": "NewRateLimiter",
       "spelled": "func(cfg RateLimiterConfig) Runner",
       "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/app/resilience.RateLimiterConfig) github.com/kitsunium/sdk/pkg/v1/app/resilience.Runner",
-      "doc": "NewRateLimiter returns a token-bucket rate-limiter Runner. A non-positive\ncfg.Rate is refused: every call returns PolicyMisconfigured without running\nthe operation, because any rate chosen for the caller would be a guess.\n",
+      "doc": "NewRateLimiter returns a token-bucket rate-limiter Runner. A non-positive\ncfg.Rate is refused: every call returns PolicyMisconfigured without running\nthe operation, because any rate chosen for the caller would be a guess.\nA positive cfg.MaxWait lets a call wait for a token due within it\ninstead of being rejected.\n",
       "file": "resilience/gen_facade.go",
       "layer": "public",
       "family": "app"
@@ -7915,7 +8065,7 @@
         "reason": "POLICY_MISCONFIGURED",
         "public": "The reliability policy was misconfigured and refused the call"
       },
-      "doc": "PolicyMisconfigured is returned by every call to a policy that was built\nwith a configuration it cannot honour — a non-positive RateLimiterConfig\n.Rate, a non-positive NewTimeout duration, a nil FallbackConfig.Fallback,\nan unasserted HedgeConfig.Idempotent, a non-positive HedgeConfig.Delay or\nMaxInFlight, a KeyedRateLimiterConfig without a Key, a MaxKeys or an\nIdleTimeout, a retry budget built with an unusable MaxTokens or\nTokenRatio, a BreakerConfig.Window or OpenBackoff with a field out of\nrange. The operation is not run. Unlike the sentinels above it is\npermanent, not transient: the fix is at the construction site, never a\nretry (ADR 0031).\n",
+      "doc": "PolicyMisconfigured is returned by every call to a policy that was built\nwith a configuration it cannot honour — a non-positive RateLimiterConfig\n.Rate, a non-positive NewTimeout duration, a nil FallbackConfig.Fallback,\nan unasserted HedgeConfig.Idempotent, a non-positive HedgeConfig.Delay or\nMaxInFlight, a KeyedRateLimiterConfig without a Key, a MaxKeys or an\nIdleTimeout, a retry budget built with an unusable MaxTokens or\nTokenRatio, a BreakerConfig.Window or OpenBackoff with a field out of\nrange, a RateLimiterConfig.Clock that cannot wait for a positive\nMaxWait, an AdaptiveThrottleConfig field out of range. The operation\nis not run. Unlike the sentinels above it is\npermanent, not transient: the fix is at the construction site, never a\nretry (ADR 0031).\n",
       "file": "resilience/gen_facade.go",
       "layer": "public",
       "family": "app"
@@ -8052,6 +8202,24 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/resilience.Throttled",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/resilience",
+      "name": "Throttled",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/app/resilience.Throttled",
+      "code": {
+        "value": "0.2.8.9",
+        "reason": "THROTTLED",
+        "public": "The call was throttled on the client side"
+      },
+      "doc": "Throttled is returned when NewAdaptiveThrottle refused the call on the\nclient side, without sending it. It carries HTTP 503.\n",
+      "file": "resilience/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/app/resilience.TimeoutConfig",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/app/resilience",
@@ -8151,7 +8319,7 @@
         "reason": "INVALID_ENTRY",
         "public": "The scheduler entry is not runnable and was refused"
       },
-      "doc": "InvalidEntry is returned by Add for an entry that could never run — an\nempty Name, a nil Schedule, a nil Job. The \"missing\" field names which.\n",
+      "doc": "InvalidEntry is returned by Add for an entry that could never run — an\nempty Name, a nil Schedule, a nil Job, named by the \"missing\" field —\nor whose overlap policy it cannot honour, named by the \"field\" field.\n",
       "file": "scheduler/gen_facade.go",
       "layer": "public",
       "family": "app"
@@ -8249,6 +8417,61 @@
       "spelled": "func(cfg Config) Scheduler",
       "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/app/scheduler.Config) github.com/kitsunium/sdk/pkg/v1/app/scheduler.Scheduler",
       "doc": "New returns a Scheduler. It cannot fail: a nil cfg.Clock falls back to the\nwall clock and a nil cfg.OnResult to no observation, both of which are\nworking configurations. What can fail fails at Add and at Parse.\n",
+      "file": "scheduler/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/scheduler.OverlapAllow",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/scheduler",
+      "name": "OverlapAllow",
+      "spelled": "OverlapPolicy",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/app/scheduler.OverlapPolicy",
+      "value": "1",
+      "init": "go:github.com/kitsunium/sdk/internal/core/app/scheduler.OverlapAllow",
+      "doc": "OverlapAllow runs a fire beside its previous run.\n",
+      "file": "scheduler/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/scheduler.OverlapPolicy",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/scheduler",
+      "name": "OverlapPolicy",
+      "spelled": "coresched.OverlapPolicy",
+      "canonical": "github.com/kitsunium/sdk/internal/core/app/scheduler.OverlapPolicy",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/app/scheduler.OverlapPolicy",
+      "doc": "OverlapPolicy is the public alias for what a fire does while the\nprevious run of its entry is still going: skip, allow or replace.\n",
+      "file": "scheduler/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/scheduler.OverlapReplace",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/scheduler",
+      "name": "OverlapReplace",
+      "spelled": "OverlapPolicy",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/app/scheduler.OverlapPolicy",
+      "value": "2",
+      "init": "go:github.com/kitsunium/sdk/internal/core/app/scheduler.OverlapReplace",
+      "doc": "OverlapReplace cancels the previous run and runs the fire once that run\nhas returned.\n",
+      "file": "scheduler/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/scheduler.OverlapSkip",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/scheduler",
+      "name": "OverlapSkip",
+      "spelled": "OverlapPolicy",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/app/scheduler.OverlapPolicy",
+      "value": "0",
+      "init": "go:github.com/kitsunium/sdk/internal/core/app/scheduler.OverlapSkip",
+      "doc": "OverlapSkip skips a fire whose previous run is still going. It is the zero.\n",
       "file": "scheduler/gen_facade.go",
       "layer": "public",
       "family": "app"

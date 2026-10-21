@@ -31,6 +31,43 @@ constants:
         type: float64
         value: "1"
     name: maxDuration
+  - doc: |-
+      decorrelatedFactor is how far above the previous wait a decorrelated draw
+      may reach: the Builders' Library's `random_between(base, sleep * 3)`.
+    items:
+      - name: decorrelatedFactor
+        type: float64
+        value: "3"
+    name: decorrelatedFactor
+  - doc: |-
+      The three ways a [Value] lays its randomisation on the curve. The zero is
+      the additive jitter the curve has always had, so a Value written before
+      the mode existed waits exactly as it did (ADR 0031).
+    grouped: true
+    items:
+      - doc: |-
+          JitterAdditive widens the grown wait by a random fraction of itself,
+          drawn from [0, Jitter) and ADDED: the average wait keeps growing with
+          the attempt. A zero Jitter is the deterministic curve. It is the zero
+          JitterMode.
+        name: JitterAdditive
+        type: JitterMode
+        value: iota
+      - doc: |-
+          JitterFull draws the wait uniformly from [0, grown], the grown wait being
+          the curve held at MaxDelay: the "Full Jitter" of the Builders' Library,
+          which spreads callers that failed together the most widely of the three
+          and keeps the average at half the curve. Jitter is not read.
+        name: JitterFull
+      - doc: |-
+          JitterDecorrelated draws each wait from the previous one, as [Decorrelate]
+          does: uniformly from [BaseDelay, 3 × previous], held at MaxDelay — the
+          "Decorrelated Jitter" of the Builders' Library. A loop that keeps the
+          previous wait calls Decorrelate; [Value.Delay], which has no memory,
+          reads the curve's own previous step as the previous wait. Jitter is not
+          read.
+        name: JitterDecorrelated
+    name: JitterAdditive
 files:
   - decls:
       - maxDuration
@@ -45,6 +82,14 @@ files:
     name: backoff.go
   - decls: []
     name: doc.go
+  - decls:
+      - decorrelatedFactor
+      - JitterMode
+      - JitterAdditive
+      - JitterMode.String
+      - Full
+      - Decorrelate
+    name: jitter.go
 functions:
   - name: Grow
     params: base, ceiling time.Duration, multiplier float64, attempt int
@@ -73,6 +118,12 @@ functions:
       suite that cannot assert the first without the second can assert neither.
     name: widen
     params: delay time.Duration, jitter float64
+    results: time.Duration
+  - name: Full
+    params: delay time.Duration
+    results: time.Duration
+  - name: Decorrelate
+    params: base, ceiling, previous time.Duration
     results: time.Duration
 imports:
   math: math
@@ -108,8 +159,18 @@ types:
           it is meant to spread: N clients that fail against one dependency at the
           same instant retry at the same instant, N times over. Jitter turns those
           bursts back into a distribution.
+
+          It is read only under JitterAdditive.
         name: Jitter
         type: float64
+      - doc: |-
+          JitterMode is how the randomisation is laid on the curve. The zero,
+          JitterAdditive, is the Jitter above — what Value has always done;
+          JitterFull and JitterDecorrelated are the Builders' Library's two
+          other variants, which randomise the whole wait and ignore Jitter. A
+          value outside the three is read as JitterAdditive.
+        name: JitterMode
+        type: JitterMode
     kind: struct
     methods:
       - name: Delay
@@ -117,3 +178,10 @@ types:
         recv: b Value
         results: time.Duration
     name: Value
+  - kind: named
+    methods:
+      - name: String
+        recv: m JitterMode
+        results: string
+    name: JitterMode
+    underlying: uint8

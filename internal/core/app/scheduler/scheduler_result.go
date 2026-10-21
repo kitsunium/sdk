@@ -24,9 +24,9 @@ type ResultValue struct {
 	// oldest: the scheduler skips rather than catches up, so the run that
 	// happens is the current one and the stale ones are what got dropped.
 	Scheduled time.Time
-	// Started is when the Job was invoked. Zero when Skipped.
+	// Started is when the Job was invoked. Zero when it was not.
 	Started time.Time
-	// Finished is when the Job returned. Zero when Skipped.
+	// Finished is when the Job returned. Zero when it was not invoked.
 	Finished time.Time
 	// Missed counts the due instants that were dropped because they had
 	// already passed when the scheduler woke — a machine that slept, a
@@ -38,8 +38,17 @@ type ResultValue struct {
 	// not visible to it and are not counted here.
 	Missed int
 	// Skipped reports that the fire was not run because the previous run of
-	// this entry had not returned and AllowOverlap is false.
+	// this entry had not returned and its overlap policy is OverlapSkip.
 	Skipped bool
+	// Expired reports that the fire was not run because the scheduler came
+	// to it more than the entry's StartingDeadline after its Scheduled
+	// instant. Started and Finished are zero.
+	Expired bool
+	// Replaced reports a run whose context was cancelled because a newer
+	// fire of the same OverlapReplace entry replaced it; Err is what the
+	// Job returned. A run replaced before it started has zero Started and
+	// Finished: it waited for its predecessor and never ran.
+	Replaced bool
 	// Err is the Job's own error, verbatim and unwrapped, so errors.Is against
 	// the caller's own sentinels keeps working. It is [JobPanicked] when the
 	// Job panicked and the scheduler recovered.

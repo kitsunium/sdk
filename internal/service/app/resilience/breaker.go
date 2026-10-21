@@ -50,6 +50,8 @@ type circuitBreaker struct {
 	onChange   func(from coreres.BreakerPhase, to coreres.BreakerPhase)
 	window     *slidingWindow
 	threshold  int
+	trials     int
+	passed     int
 	cooldown   time.Duration
 	backoff    *kbackoff.Value
 	state      breakerState
@@ -100,9 +102,10 @@ const (
 // verbatim and left out of the state machine entirely, so deterministic
 // failures cannot trip the breaker. Once the cooldown elapses ONE HalfOpen
 // trial runs at a time and every other call returns CircuitOpen until it
-// settles. The outcome of a call admitted before the breaker last opened
-// is ignored: its success cannot close the breaker and its failure cannot
-// restart the cooldown.
+// settles; cfg.HalfOpenTrials successful trials in a row close the
+// breaker, and any failed one opens it again. The outcome of a call
+// admitted before the breaker last opened is ignored: its success cannot
+// close the breaker and its failure cannot restart the cooldown.
 //
 // A call that ends in context.Canceled once the caller's own context is
 // closed is neutral — neither a success nor a failure — because the caller
@@ -139,6 +142,8 @@ func NewCircuitBreaker(cfg BreakerConfig) coreres.Runner {
 		threshold = defaultThreshold
 	}
 	//: a non-positive cooldown falls back to the default.
+	//: one successful trial closes the breaker unless more are asked for.
+	trials := max(cfg.HalfOpenTrials, 1)
 	openFor := cfg.OpenDuration
 	//: clamp it like every sibling knob — a zero cooldown is not a breaker.
 	if openFor <= 0 {
@@ -148,10 +153,10 @@ func NewCircuitBreaker(cfg BreakerConfig) coreres.Runner {
 	//: a fresh breaker starts Closed.
 	b := &circuitBreaker{
 		clk: clk, retryable: cfg.Retryable, onChange: cfg.OnStateChange,
-		threshold: threshold, cooldown: openFor, openFor: openFor, state: coreres.BreakerClosed,
+		threshold: threshold, trials: trials, cooldown: openFor, openFor: openFor, state: coreres.BreakerClosed,
 	}
 	//: the two optional parts refuse what they cannot honour.
-	if knob := b.configure(cfg); knob != "" {
+	if knob := b.configure(&cfg); knob != "" {
 		//: fail-closed, naming the field (ADR 0031).
 		return newMisconfigured(breakerPolicy, knob)
 	}
@@ -161,7 +166,7 @@ func NewCircuitBreaker(cfg BreakerConfig) coreres.Runner {
 
 // configure installs the open backoff, the window and the change queue cfg
 // asks for, and returns the field it refuses, if any.
-func (b *circuitBreaker) configure(cfg BreakerConfig) string {
+func (b *circuitBreaker) configure(cfg *BreakerConfig) string {
 	//: a growing cooldown needs a base and a ceiling.
 	if cfg.OpenBackoff != nil {
 		//: a zero base is a cooldown of nothing.

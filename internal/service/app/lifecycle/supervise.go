@@ -34,14 +34,23 @@ type Supervisor struct {
 	backoff kbackoff.Value
 	// healthy is how long a run lasts before its end is a first failure.
 	healthy time.Duration
-	// mu guards cancel and done.
+	// giveUp is the restart intensity; its zero never gives up.
+	giveUp GiveUpValue
+	// gaveUp is SupervisorGaveUp once the last supervision gave up, nil
+	// otherwise. Guarded by mu.
+	gaveUp error
+	// mu guards cancel, done and gaveUp.
 	mu sync.Mutex
 }
 
 // NewSupervisor builds a supervisor named name over run, tuned by cfg. run
 // must run until its context ends and then return; returning earlier — with
 // an error, with nil, or by panicking — is a failure, and run is started again
-// after the backoff. NewSupervisor starts nothing: Start does.
+// after the backoff, unless cfg.GiveUpAfter says it has failed too often.
+// NewSupervisor starts nothing: Start does.
+//
+// A cfg.GiveUpAfter with a negative field, or with Restarts but no
+// positive Within, is refused with SupervisorMisconfigured naming it.
 //
 //	janitor, err := lifecycle.NewSupervisor("janitor", sweep, lifecycle.SupervisorConfig{})
 //	err = app.Add(janitor.Component()) // started and stopped with the application
@@ -51,9 +60,17 @@ func NewSupervisor(name string, run func(ctx context.Context) error, cfg Supervi
 		//: SupervisorMisconfigured.
 		return nil, invalid
 	}
+	//: a restart intensity that is no bound, or nothing.
+	if invalid := validateGiveUp(name, cfg.GiveUpAfter); invalid != nil {
+		//: SupervisorMisconfigured, naming the field.
+		return nil, invalid
+	}
 	clk, backoff, healthy := cfg.resolved()
 	//: stopped until Start.
-	return &Supervisor{run: run, clock: clk, observe: cfg.Observe, name: name, backoff: backoff, healthy: healthy}, nil
+	return &Supervisor{
+		run: run, clock: clk, observe: cfg.Observe, name: name,
+		backoff: backoff, healthy: healthy, giveUp: cfg.GiveUpAfter,
+	}, nil
 }
 
 // Start begins the supervision on a goroutine of its own and returns at once.
@@ -82,6 +99,8 @@ func (s *Supervisor) Start(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	done := make(chan struct{})
 	s.cancel, s.done = cancel, done
+	//: a new supervision has not given up.
+	s.gaveUp = nil
 	//: Goroutine lifecycle: one per supervision, ended by Stop through
 	//: cancel, and joined by Stop through done.
 	go s.supervise(runCtx, done)
@@ -124,6 +143,28 @@ func (s *Supervisor) Component() corelc.ComponentValue {
 	return corelc.ComponentValue{Name: s.name, Start: s.Start, Stop: s.Stop}
 }
 
+// Check reports whether the supervision gave up: SupervisorGaveUp once
+// its function ended early more often than cfg.GiveUpAfter allows, and
+// nil otherwise — while it runs, once it was stopped, and before it was
+// ever started. A later Start clears it. Its shape is a health check's,
+// so a liveness probe takes it as it is:
+//
+//	health.LivenessCheck{Name: "sweeper", Check: sweeper.Check}
+//
+// A ctx already done reports its own error, as a Start does; otherwise
+// the answer is a field read under a lock, never a wait.
+func (s *Supervisor) Check(ctx context.Context) error {
+	//: a caller who stopped waiting gets its own verdict.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		//: the context's error.
+		return ctxErr
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	//: SupervisorGaveUp, or nil.
+	return s.gaveUp
+}
+
 // running reports whether a supervision started and has not ended. The
 // caller holds mu.
 func (s *Supervisor) running() bool {
@@ -149,6 +190,8 @@ func (s *Supervisor) running() bool {
 func (s *Supervisor) supervise(ctx context.Context, done chan struct{}) {
 	defer close(done)
 	failures := 0
+	//: the early ends within the last GiveUpAfter.Within, oldest first.
+	var ends []time.Time
 	//: one iteration per run.
 	for run := 1; ; run++ {
 		started := s.clock.Now()
@@ -170,6 +213,11 @@ func (s *Supervisor) supervise(ctx context.Context, done chan struct{}) {
 			failures = 0
 		}
 		failures++
+		//: one early end too many within the span: no further run.
+		if ends = s.recordEnd(ends, ended); s.giveUp.enabled() && len(ends) > s.giveUp.Restarts {
+			s.giveUpOn(ended, run, failures, runErr)
+			return
+		}
 		delay := s.backoff.Delay(failures)
 		s.emit(SupervisionEventValue{Phase: SupervisionRestarting, At: ended, Run: run, Failures: failures, Delay: delay})
 		//: stopped during the backoff: no further run.
@@ -178,6 +226,48 @@ func (s *Supervisor) supervise(ctx context.Context, done chan struct{}) {
 			return
 		}
 	}
+}
+
+// recordEnd adds the early end at ended to ends and drops the ends older than
+// GiveUpAfter.Within, keeping the slice's memory bounded by the bound itself.
+// Without a bound it keeps nothing.
+func (s *Supervisor) recordEnd(ends []time.Time, ended time.Time) []time.Time {
+	//: no bound: nothing to count.
+	if !s.giveUp.enabled() {
+		//: unchanged, and empty.
+		return ends
+	}
+	stale := 0
+	//: the ends a span of Within before this one no longer reaches.
+	for stale < len(ends) && ended.Sub(ends[stale]) >= s.giveUp.Within {
+		stale++
+	}
+	//: shifted down in place, so the backing array never grows past the
+	//: most ends one span has held.
+	ends = ends[:copy(ends, ends[stale:])]
+	//: this end, the newest.
+	return append(ends, ended)
+}
+
+// giveUpOn ends a supervision that gave up: it records SupervisorGaveUp for
+// Check, then tells the observer, with the last run's error as a field.
+func (s *Supervisor) giveUpOn(at time.Time, run, failures int, last error) {
+	fields := []kerrs.FieldValue{
+		kerrs.String("supervisor", s.name),
+		kerrs.Int("restarts", s.giveUp.Restarts),
+		kerrs.String("within", s.giveUp.Within.String()),
+	}
+	//: the run's own error, as text: never the origin, so it cannot
+	//: hijack the code.
+	if last != nil {
+		fields = append(fields, kerrs.String("last", last.Error()))
+	}
+	gaveUp := kerrs.Wrap(corelc.SupervisorGaveUp, kerrs.WrapParams{}, fields...)
+	s.mu.Lock()
+	s.gaveUp = gaveUp
+	s.mu.Unlock()
+	s.emit(SupervisionEventValue{Phase: SupervisionGaveUp, At: at, Run: run, Failures: failures, Err: gaveUp})
+	s.emit(SupervisionEventValue{Phase: SupervisionStopped, At: at, Run: run})
 }
 
 // once runs the function once and turns a panic into RunPanicked.

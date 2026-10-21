@@ -66,6 +66,14 @@
 // effect the SDK cannot know is safe. A caller who knows concurrent copies are
 // safe says so with [Entry].AllowOverlap — an in-code assertion, like
 // resilience.HedgeConfig.Idempotent, whose zero value is the safe answer.
+// [Entry].Overlap names the third answer, Kubernetes' Replace: [OverlapReplace]
+// cancels the run still going and starts the new one once it has returned,
+// reporting the cancelled one with [Result].Replaced.
+//
+// A late fire runs however late by default. [Entry].StartingDeadline bounds
+// it: an instant missed by more than that is not run but reported with
+// [Result].Expired — a 02:00 report is not produced at 09:00 because the
+// machine slept through the night.
 //
 // # What is guaranteed
 //

@@ -16,4 +16,9 @@
 // top of it. [Value.Delay] composes the two. A suite that cannot assert the
 // growth without the jitter can assert neither precisely, and a caller that
 // wants the deterministic curve asks for it by name.
+//
+// How the randomisation is laid on is [Value].JitterMode: added to the curve
+// (the zero, [JitterAdditive]), drawn across all of it ([JitterFull]), or
+// drawn from the previous wait ([JitterDecorrelated]) — the three variants of
+// the AWS Builders' Library's "Timeouts, retries and backoff with jitter".
 package backoff

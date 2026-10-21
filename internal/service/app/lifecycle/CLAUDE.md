@@ -25,9 +25,9 @@ raises the core's.
 | `start.go` | `Start`, `callStart`, `abort`, `joinStartFailure` — the bring-up sequence and the unwind trigger |
 | `stop.go` | `Stop`, `stopEach` (**the single unwind path**), `callStop`, `stopped`, `abandoned` |
 | `run.go` | `RunConfig`, `Run`, `waitForStop`, `announce` — opt-in signals + sd_notify |
-| `supervise.go` | `Supervisor`, `NewSupervisor`, `Start` / `Stop` / `Component`, the supervision loop (`supervise`, `once` — panic recovery — `wait`, `emit`, `wayOut`) |
-| `supervise_config.go` | `SupervisorConfig` (`Clock`, `Observe`, `Backoff`, `HealthyAfter`), `DefaultRestartBase` / `DefaultRestartMax` / `DefaultHealthyRun`, the refusal and the clamps |
-| `supervise_event.go` | `SupervisionPhase` (four), `SupervisionEventValue` |
+| `supervise.go` | `Supervisor`, `NewSupervisor`, `Start` / `Stop` / `Component` / `Check`, the supervision loop (`supervise`, `recordEnd` — the early ends within `Within` —, `giveUpOn`, `once` — panic recovery — `wait`, `emit`, `wayOut`) |
+| `supervise_config.go` | `SupervisorConfig` (`Clock`, `Observe`, `Backoff`, `HealthyAfter`, `GiveUpAfter`), `GiveUpValue{Restarts, Within}`, `DefaultRestartBase` / `DefaultRestartMax` / `DefaultHealthyRun`, the refusals (`validateSupervisor`, `validateGiveUp`) and the clamps |
+| `supervise_event.go` | `SupervisionPhase` (five, `SupervisionGaveUp` the last), `SupervisionEventValue` |
 
 ## How the partial-start cleanup is guaranteed
 
@@ -85,6 +85,15 @@ spend everyone else's budget, and it is stated rather than discovered.
   is `STOP_TIMEOUT` — the goroutine is abandoned, never killed, and a later
   `Stop` waits again. A `Start` while the supervision still runs is
   `SUPERVISOR_RUNNING`.
+- **It gives up past an Erlang intensity** (ADR 0184): with
+  `GiveUpAfter{Restarts, Within}`, the `(Restarts+1)`-th early end within any
+  span of `Within` is not restarted — `GaveUp` then `Stopped` reach the
+  observer and `Check` returns `SUPERVISOR_GAVE_UP` (`0.3.49.9`) with the last
+  run's error as a field, until the next `Start`. The zero restarts forever;
+  `Restarts` without a positive `Within`, and a negative field, are
+  `SUPERVISOR_MISCONFIGURED`. `recordEnd` shifts the kept ends down in place,
+  so their memory is bounded by what one span held. `Check` is a health
+  check's shape, so `health` takes it without `lifecycle` importing it.
 - **The wall-clock audit covers it**: every restart wait is on
   `SupervisorConfig.Clock`, and `supervise_external_test.go` drives each
   restart with `BlockUntil` + `Advance`, asserting "not one nanosecond early".

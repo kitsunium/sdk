@@ -4,20 +4,24 @@ import (
 	"time"
 
 	coreres "github.com/kitsunium/sdk/internal/core/app/resilience"
+	kbackoff "github.com/kitsunium/sdk/internal/kernel/backoff"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
 
 // RetryConfig parameterises NewRetry. A non-positive MaxAttempts clamps to 1; a
 // Multiplier of 1 or below (or NaN) defaults to 2; a zero MaxDelay means no
 // cap; a nil Retryable replays every error; a zero Jitter backs off
-// deterministically; a nil Clock waits on the wall clock; a nil Delay
+// deterministically, and a zero JitterMode is that additive Jitter; a nil
+// Clock waits on the wall clock; a nil Delay
 // always waits the backoff curve; a nil Budget never refuses a retry; a nil
 // OnRetry hears nothing.
 //
-// BaseDelay, MaxDelay, Multiplier and Jitter are the four fields of
-// BackoffValue, under the same names and with the same meaning: NewRetry builds its curve
-// from them, so a loop that retries on its own terms and a Retry policy
-// configured alike wait alike.
+// BaseDelay, MaxDelay, Multiplier, Jitter and JitterMode are the five
+// fields of BackoffValue, under the same names and with the same meaning:
+// NewRetry builds its curve from them, so a loop that retries on its own
+// terms and a Retry policy configured alike wait alike — save that a
+// decorrelated retry draws each wait from the one it actually waited
+// before, which the memoryless BackoffValue.Delay cannot know.
 type RetryConfig struct {
 	MaxAttempts int
 	BaseDelay   time.Duration
@@ -52,7 +56,23 @@ type RetryConfig struct {
 	// Jitter), not MaxDelay. A zero MaxDelay is no cap at all, so there is no
 	// ceiling to raise: the backoff grows geometrically and the jitter widens
 	// whatever it reaches, bounded only by what a time.Duration can represent.
+	//
+	// It is read only under the zero JitterMode.
 	Jitter float64
+	// JitterMode is how the backoff is randomised. The zero,
+	// JitterAdditive, adds Jitter as above. JitterFull waits a uniform
+	// draw from [0, the capped curve]; JitterDecorrelated draws each wait
+	// from [BaseDelay, 3 × the previous wait of this call], held at
+	// MaxDelay. Both are the AWS Builders' Library's variants and ignore
+	// Jitter; a wait the failure imposed through Delay is not randomised
+	// and is not the previous wait a decorrelated draw starts from.
+	//
+	// Full jitter spreads callers that failed together the most, at the
+	// cost of sometimes retrying almost at once; decorrelated jitter
+	// keeps the waits growing while drifting each caller off the others'
+	// curve. With a zero MaxDelay a decorrelated wait is bounded only by
+	// what a time.Duration can represent.
+	JitterMode kbackoff.JitterMode
 	// Clock is what the backoff waits on. Nil means clock.System.
 	//
 	// It exists so a test drives the whole retry loop with a ManualClock —

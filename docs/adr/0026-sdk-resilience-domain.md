@@ -119,7 +119,13 @@ Two contracts were tightened during review, both before any release:
   — a `func(error) bool` whose `nil` value preserves the behaviour decided above.
   The Decision section is unchanged: the classifier is an opt-in parameter on the
   two existing policies, not a new policy.)
-- Wait-mode (blocking) bulkhead/rate-limiter (v1 is reject-mode).
+- ~~Wait-mode (blocking) bulkhead/rate-limiter (v1 is reject-mode).~~
+  **Resolved on 2026-10-21 by [ADR 0184](0184-a-wait-is-bounded-a-restart-gives-up-and-a-client-throttles-itself.md)
+  ([issue 482](https://github.com/kitsunium/sdk/issues/482))**: `NewBulkheadWait`
+  (a bounded queue, a bounded wait) and `RateLimiterConfig.MaxWait` (a reserved
+  token), both on an injected clock, both rejecting as before at zero. The same
+  ADR adds full and decorrelated jitter, `HalfOpenTrials`, and the SRE book's
+  adaptive throttle (`NewAdaptiveThrottle`, `THROTTLED` `0.2.8.9`).
 - ~~Half-open concurrency control (v1 admits HalfOpen trials without a probe cap).~~
   **Closed on 2026-10-21 ([issue 467](https://github.com/kitsunium/sdk/issues/467))**, with no new knob: HalfOpen admits ONE trial at
   a time and every other call returns `CircuitOpen` until it settles — the "one

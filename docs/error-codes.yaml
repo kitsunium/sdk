@@ -329,6 +329,10 @@ codes:
     const: CodeRetryBudgetExceeded
     hex: "0x00_02_08_08"
     package: internal/core/app/resilience
+  - code: "0.2.8.9"
+    const: CodeThrottled
+    hex: "0x00_02_08_09"
+    package: internal/core/app/resilience
   - code: "0.2.9.1"
     const: CodeUnknownExporter
     hex: "0x00_02_09_01"
@@ -2004,6 +2008,10 @@ codes:
   - code: "0.3.49.8"
     const: CodeSupervisorRunning
     hex: "0x00_03_31_08"
+    package: internal/core/app/lifecycle
+  - code: "0.3.49.9"
+    const: CodeSupervisorGaveUp
+    hex: "0x00_03_31_09"
     package: internal/core/app/lifecycle
   - code: "0.3.50.1"
     const: CodeEntropyFailed

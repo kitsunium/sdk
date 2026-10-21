@@ -41,6 +41,7 @@ go_test(
     name = "scheduler_test",
     size = "small",
     srcs = [
+        "bounds_external_test.go",
         "config_external_test.go",
         "cron_dst_external_test.go",
         "cron_external_test.go",
