@@ -15,7 +15,7 @@ S3) so a backed-up drain never stalls the application.
 
 | File | Role |
 |---|---|
-| `async_sink.go`        | `asyncSink` + `New` + `Write` / `Flush` / `Close`; the `Block` wait (`blockForSpace` / `retryBlocked` / `signalSpace`); the production drainer runs on a `kernel/concur/worker.LoopDaemon`, whose idempotent `Stop` is the join (ADR 0014 §D6) |
+| `async_sink.go`        | `asyncSink` + `New` + `Write` / `Flush` / `Close`; the `Block` wait (`blockForSpace` / `retryBlocked` / `signalSpace` / `abandon`); the production drainer runs on a `kernel/concur/worker.LoopDaemon`, whose idempotent `Stop` is the join (ADR 0014 §D6) |
 | `async_sink_policy.go` | `DropPolicy` enum (`DropNewest` default, `DropOldest`, `Block`) + `DefaultMaxBlock` (1 s) |
 | `drainer.go`           | drainer body: `drain` (the loop body the daemon runs and the white-box tests spawn directly; closes `done` via `doneOnce`) / `drainLoop` (selects on the sink's `stop`) / `forward` / `drainRemaining`; `maxSaneCap` (64 KiB) bounds pool retention against attacker-influenced records |
 | `runtime.go`           | helpers — `yieldOnce`, `isClosed`, `asyncCtx`, `forwardDownstreamError`, `swallowRingError` |

@@ -2,6 +2,13 @@ package async
 
 import "time"
 
+// DefaultMaxBlock is how long a Write waits under the Block policy when
+// Config.MaxBlock is unset: one second. Zero does not mean "forever" (ADR 0031):
+// a logger that blocks without a bound turns a dead downstream into a stalled
+// service, and a caller that wants a longer wait says so, or bounds the wait by
+// its context.
+const DefaultMaxBlock time.Duration = time.Second
+
 // DropPolicy selects how a saturated ring buffer behaves on Write.
 type DropPolicy uint8
 
@@ -20,10 +27,3 @@ const DropOldest DropPolicy = 1
 // returns Stopped to every waiting Write. It is Vector's `when_full: block`
 // with the one difference ADR 0031 requires: the wait is never unbounded.
 const Block DropPolicy = 2
-
-// DefaultMaxBlock is how long a Write waits under the Block policy when
-// Config.MaxBlock is unset: one second. Zero does not mean "forever" (ADR 0031):
-// a logger that blocks without a bound turns a dead downstream into a stalled
-// service, and a caller that wants a longer wait says so, or bounds the wait by
-// its context.
-const DefaultMaxBlock time.Duration = time.Second

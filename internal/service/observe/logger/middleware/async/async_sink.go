@@ -257,37 +257,25 @@ func (s *asyncSink) Write(ctx context.Context, rec corelogger.RecordEvent, paylo
 func (s *asyncSink) blockForSpace(ctx context.Context, ent *recordEntry) (n int, err error) {
 	timer := s.clk.NewTimer(s.maxBlock)
 	defer timer.Stop()
-	//: a nil ctx waits on the bound alone, as Flush's nil ctx does.
-	var cancelled <-chan struct{}
-	if ctx != nil {
-		cancelled = ctx.Done()
-	}
+	cancelled := doneOf(ctx)
 	for {
 		select {
-		case <-s.space:
+		case _, open := <-s.space:
+			//: never closed; a closed one would only spin the wait.
+			if !open {
+				//: treated as the end of the sink.
+				return s.abandon(ent, coreasync.Stopped, false)
+			}
 			//: a slot was freed; try for it below.
 		case <-timer.C():
 			//: the bound passed with the ring still full: dropped and counted.
-			s.onDrop(1)
-			s.pool.Put(ent)
-			//: documented sentinel — the entry is lost, and the caller knows.
-			return 0, coreasync.BlockTimeout
+			return s.abandon(ent, coreasync.BlockTimeout, true)
 		case <-cancelled:
 			//: the caller left; the entry the ring could not take is dropped.
-			s.onDrop(1)
-			s.pool.Put(ent)
-			//: wrap ctx.Err() so the typed-errors-only SDK rule is preserved.
-			return 0, errs.Wrap(ctx.Err(), errs.WrapParams{
-				Code:    coreasync.CodeAsyncCtxCancelled,
-				Reason:  "ASYNC_CTX_CANCELLED",
-				Public:  "Async sink write aborted due to cancellation",
-				Private: "service/observe/logger/middleware/async.Write was cancelled while waiting for a free slot under the Block policy",
-			}, errs.Int("level", int(ent.rec.Level)))
+			return s.abandon(ent, blockCancelled(ctx, ent), true)
 		case <-s.stop:
 			//: Close began: the drainer will not make room for a new entry.
-			s.pool.Put(ent)
-			//: documented sentinel — Close has happened.
-			return 0, coreasync.Stopped
+			return s.abandon(ent, coreasync.Stopped, false)
 		}
 		//: retry under ringMu, re-checking Close as Write does.
 		if n, done, err := s.retryBlocked(ent); done {
@@ -295,6 +283,44 @@ func (s *asyncSink) blockForSpace(ctx context.Context, ent *recordEntry) (n int,
 			return n, err
 		}
 	}
+}
+
+// doneOf returns ctx's Done channel, or nil for a nil ctx — a channel nothing
+// ever sends on, so a nil ctx waits on the bound alone, as Flush's nil ctx
+// does.
+func doneOf(ctx context.Context) <-chan struct{} {
+	//: the legacy nil ctx is allowed.
+	if ctx == nil {
+		//: never ready.
+		return nil
+	}
+	//: the caller's cancellation.
+	return ctx.Done()
+}
+
+// abandon ends a Block wait without writing: the entry goes back to the pool,
+// OnDrop fires when the entry was dropped for want of a slot, and the verdict
+// is returned as Write's.
+func (s *asyncSink) abandon(ent *recordEntry, verdict error, dropped bool) (n int, err error) {
+	//: a drop the policy made is counted; a Close is not a drop.
+	if dropped {
+		s.onDrop(1)
+	}
+	s.pool.Put(ent)
+	//: nothing was written.
+	return 0, verdict
+}
+
+// blockCancelled wraps the context error a Block wait ended on, so the
+// typed-errors-only SDK rule is preserved.
+func blockCancelled(ctx context.Context, ent *recordEntry) error {
+	//: the documented sentinel's code, the context's error on the trail.
+	return errs.Wrap(ctx.Err(), errs.WrapParams{
+		Code:    coreasync.CodeAsyncCtxCancelled,
+		Reason:  "ASYNC_CTX_CANCELLED",
+		Public:  "Async sink write aborted due to cancellation",
+		Private: "service/observe/logger/middleware/async.Write was cancelled while waiting for a free slot under the Block policy",
+	}, errs.Int("level", int(ent.rec.Level)))
 }
 
 // retryBlocked makes one TryWrite for a waiting Block entry and reports

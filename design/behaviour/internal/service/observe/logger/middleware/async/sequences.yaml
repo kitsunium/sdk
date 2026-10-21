@@ -175,10 +175,10 @@ sequences:
         kind: value
       - id: timer.Stop
         kind: value
-      - id: ctx.Done
-        kind: value
-      - id: s.pool.Put
-        kind: value
+      - id: doneOf
+        kind: internal
+      - id: s.abandon
+        kind: internal
       - id: s.retryBlocked
         kind: internal
     steps:
@@ -187,43 +187,32 @@ sequences:
         to: s.clk.NewTimer
       - defer: timer.Stop()
         to: timer.Stop
-      - var:
-          name: cancelled
-          type: <-chan struct{}
-      - opt:
-          do:
-            - set: cancelled
-              to: ctx.Done
-              value: ctx.Done()
-          when: ctx != nil
+      - bind: cancelled
+        eval: doneOf(ctx)
+        to: doneOf
       - loop:
           do:
             - select:
                 cases:
-                  - comm: <-s.space
+                  - comm: _, open := <-s.space
+                    do:
+                      - opt:
+                          do:
+                            - return: s.abandon(ent, coreasync.Stopped, false)
+                              to: s.abandon
+                          when: "!open"
                   - comm: <-timer.C()
                     do:
-                      - eval: s.onDrop(1)
-                      - eval: s.pool.Put(ent)
-                        to: s.pool.Put
-                      - return: 0, coreasync.BlockTimeout
+                      - return: s.abandon(ent, coreasync.BlockTimeout, true)
+                        to: s.abandon
                   - comm: <-cancelled
                     do:
-                      - eval: s.onDrop(1)
-                      - eval: s.pool.Put(ent)
-                        to: s.pool.Put
-                      - return: |-
-                          0, errs.Wrap(ctx.Err(), errs.WrapParams{
-                          				Code:    coreasync.CodeAsyncCtxCancelled,
-                          				Reason:  "ASYNC_CTX_CANCELLED",
-                          				Public:  "Async sink write aborted due to cancellation",
-                          				Private: "service/observe/logger/middleware/async.Write was cancelled while waiting for a free slot under the Block policy",
-                          			}, errs.Int("level", int(ent.rec.Level)))
+                      - return: s.abandon(ent, blockCancelled(ctx, ent), true)
+                        to: s.abandon
                   - comm: <-s.stop
                     do:
-                      - eval: s.pool.Put(ent)
-                        to: s.pool.Put
-                      - return: 0, coreasync.Stopped
+                      - return: s.abandon(ent, coreasync.Stopped, false)
+                        to: s.abandon
             - opt:
                 do:
                   - return: n, err
@@ -233,6 +222,54 @@ sequences:
                   to: s.retryBlocked
                 when: done
           forever: true
+  - of: doneOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: doneOf
+        kind: self
+      - id: ctx.Done
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: ctx == nil
+      - return: ctx.Done()
+        to: ctx.Done
+  - of: (*asyncSink).abandon
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*asyncSink).abandon
+        kind: self
+      - id: s.pool.Put
+        kind: value
+    steps:
+      - opt:
+          do:
+            - eval: s.onDrop(1)
+          when: dropped
+      - eval: s.pool.Put(ent)
+        to: s.pool.Put
+      - return: 0, verdict
+  - of: blockCancelled
+    participants:
+      - id: caller
+        kind: actor
+      - id: blockCancelled
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(ctx.Err(), errs.WrapParams{
+          		Code:    coreasync.CodeAsyncCtxCancelled,
+          		Reason:  "ASYNC_CTX_CANCELLED",
+          		Public:  "Async sink write aborted due to cancellation",
+          		Private: "service/observe/logger/middleware/async.Write was cancelled while waiting for a free slot under the Block policy",
+          	}, errs.Int("level", int(ent.rec.Level)))
+        to: errs
   - of: (*asyncSink).retryBlocked
     participants:
       - id: caller

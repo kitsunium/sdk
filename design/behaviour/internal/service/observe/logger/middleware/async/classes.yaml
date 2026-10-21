@@ -10,6 +10,17 @@ constants:
         value: "1024"
     name: defaultBufferSize
   - doc: |-
+      DefaultMaxBlock is how long a Write waits under the Block policy when
+      Config.MaxBlock is unset: one second. Zero does not mean "forever" (ADR 0031):
+      a logger that blocks without a bound turns a dead downstream into a stalled
+      service, and a caller that wants a longer wait says so, or bounds the wait by
+      its context.
+    items:
+      - name: DefaultMaxBlock
+        type: time.Duration
+        value: time.Second
+    name: DefaultMaxBlock
+  - doc: |-
       DropNewest discards the new entry when the ring is full and surfaces
       BufferFull to the caller. The OnDrop callback fires for the dropped entry.
     items:
@@ -38,17 +49,6 @@ constants:
         value: "2"
     name: Block
   - doc: |-
-      DefaultMaxBlock is how long a Write waits under the Block policy when
-      Config.MaxBlock is unset: one second. Zero does not mean "forever" (ADR 0031):
-      a logger that blocks without a bound turns a dead downstream into a stalled
-      service, and a caller that wants a longer wait says so, or bounds the wait by
-      its context.
-    items:
-      - name: DefaultMaxBlock
-        type: time.Duration
-        value: time.Second
-    name: DefaultMaxBlock
-  - doc: |-
       maxSaneCap caps the per-entry backing array size the pool will retain
       after a forward() call. An attacker-influenced record (huge Message or
       attr value) otherwise leaves the entry with a massive cap(ent.data)
@@ -73,6 +73,9 @@ files:
       - noopOnDrop
       - (*asyncSink).Write
       - (*asyncSink).blockForSpace
+      - doneOf
+      - (*asyncSink).abandon
+      - blockCancelled
       - (*asyncSink).retryBlocked
       - (*asyncSink).signalSpace
       - (*asyncSink).handleFull
@@ -82,11 +85,11 @@ files:
       - (*asyncSink).joinDrainer
     name: async_sink.go
   - decls:
+      - DefaultMaxBlock
       - DropPolicy
       - DropNewest
       - DropOldest
       - Block
-      - DefaultMaxBlock
     name: async_sink_policy.go
   - decls:
       - Config
@@ -132,6 +135,19 @@ functions:
       does not supply one. Keeps the drainer's call path branch-free.
     name: noopOnDrop
     params: missed int
+  - doc: |-
+      doneOf returns ctx's Done channel, or nil for a nil ctx — a channel nothing
+      ever sends on, so a nil ctx waits on the bound alone, as Flush's nil ctx
+      does.
+    name: doneOf
+    params: ctx context.Context
+    results: <-chan struct{}
+  - doc: |-
+      blockCancelled wraps the context error a Block wait ended on, so the
+      typed-errors-only SDK rule is preserved.
+    name: blockCancelled
+    params: ctx context.Context, ent *recordEntry
+    results: error
   - doc: |-
       newRecordEntry returns a fresh *recordEntry with a nil bytes slice; the
       producer owns sizing the slice when it copies the payload in.
@@ -298,6 +314,14 @@ types:
           never touches the clock.
         name: blockForSpace
         params: ctx context.Context, ent *recordEntry
+        recv: s *asyncSink
+        results: n int, err error
+      - doc: |-
+          abandon ends a Block wait without writing: the entry goes back to the pool,
+          OnDrop fires when the entry was dropped for want of a slot, and the verdict
+          is returned as Write's.
+        name: abandon
+        params: ent *recordEntry, verdict error, dropped bool
         recv: s *asyncSink
         results: n int, err error
       - doc: |-
