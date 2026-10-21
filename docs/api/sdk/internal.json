@@ -50,6 +50,14 @@
       "doc": "Package events — ranges 0.2.22.* (ADR 0053 core/app/events block) and\n0.3.52.* (ADR 0053 service/app/events block, declared here since ADR 0160).\n\nPackage events — declares the sentinel *errs.Error outcomes of the domain:\nthe registration refusals, the control sentinel, and the bus's verdicts on\na dispatch. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE\nform.\n\nPackage events declares the SDK's IN-PROCESS event bus port: the [Listener]\nthat reacts to one event, the [SubscriptionValue] that registers it at a\npriority, and the [Bus] that dispatches a published event to all of them.\nA core sibling admitted by ADR 0053.\n\n# events is not a queue\n\nThis is the frontier the whole domain rests on, and it is stated first\nbecause getting it wrong produces a bus that guarantees neither half:\n\n  - events is IN-PROCESS, SYNCHRONOUS and SAME-GOROUTINE. Publish returns\n    when every listener has returned. There is no durability, no retry, no\n    dead-letter queue and no delivery beyond this process. If the process\n    dies mid-dispatch, the event never happened as far as anything outside\n    memory is concerned.\n  - A queue is INTER-PROCESS, ASYNCHRONOUS and DURABLE, with retries and a\n    dead-letter path.\n\nA caller who wants \"asynchronous but reliable\" is asking for a queue, and\nmust be sent to one rather than served half of it here. Handing them a\ngoroutine per listener would give them asynchrony without durability, which\nis the worst of both: work that can be lost and no record that it was.\n\n# What the bus is for\n\nOne fact, several independent consequences, all inside the caller's\ntransaction. \"The order was placed\" is one fact; writing the audit row,\ninvalidating the cache and stamping the metric are three consequences that\nhave nothing to say to each other. Without a bus the publisher imports all\nthree; with one it imports none.\n\n# The port\n\n[Listener] is a FUNCTION type rather than an interface — the shape\ninternal/core/CLAUDE.md already admits for resilience.Operation,\nscheduler.Job and lifecycle.Start. ADR 0039's rule is that a published port\nmust not grow a method, because pkg/v1 aliases publish the shape and Go\ninterfaces are structural; a func type satisfies that rule structurally,\nsince it cannot grow a method at all.\n\nThe engine, the priority ordering, the panic guard and the TYPED\nregistration front end live in internal/service/app/events; this package owns\nthe contract, the three domain values, and the typed sentinels a\nregistration refuses with.\n\nPackage events — hosts DispatchValue, the report of one Publish.\n\nPackage events — hosts SubscriptionValue and the Priority that orders it.\n"
     },
     {
+      "path": "github.com/kitsunium/sdk/internal/core/app/forward",
+      "name": "forward",
+      "dir": "core/app/forward",
+      "layer": "core",
+      "family": "app",
+      "doc": "Package forward — range 0.3.93.* (ADR 0185 service/app/forward block,\ndeclared in the core per ADR 0160).\n\nPackage forward — declares the sentinel *errs.Error outcomes of the\nstore-and-forward export queue. Each var's name equals its errs.Define\nReason in SCREAMING_SNAKE form.\n"
+    },
+    {
       "path": "github.com/kitsunium/sdk/internal/core/app/health",
       "name": "health",
       "dir": "core/app/health",
@@ -792,6 +800,14 @@
       "layer": "service",
       "family": "app",
       "doc": "Package events — hosts the engine: registration, removal, and the\ncopy-on-write membership the dispatch reads.\n\nPackage events — hosts the TYPED registration front end: the generic\nfunctions that hide the erasure the heterogeneous bus is built on.\n\nPackage events — hosts the dispatch: the ordered walk, the halt, the panic\nguard, and the aggregate.\n\nPackage events — one published version of the bus membership, and the two\nrewrites that produce the next one.\n"
+    },
+    {
+      "path": "github.com/kitsunium/sdk/internal/service/app/forward",
+      "name": "forward",
+      "dir": "service/app/forward",
+      "layer": "service",
+      "family": "app",
+      "doc": "Package forward is the store-and-forward engine (ADR 0185): a batch kept in\na durable queue by Enqueue, sent later by Run through the caller's Sender,\nretried by resilience's retry on the injected clock — the delay a collector\nimposes honoured in full, the backoff otherwise, the batch's age as the\nbudget —, dead-lettered when the sender refuses it for good, and counted at\nevery step. The queue is bounded in batches and bytes, and a full one drops\nits oldest batch, refuses the newest, or makes the producer wait a bounded\ntime. NewSpanExporter and NewMetricExporter put a signal's batch in, encoded\nonce as the OTLP/JSON request its OTLP/HTTP exporter posts.\n\nCode range 0.3.93.*, declared in internal/core/app/forward (ADR 0160).\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/service/app/health",
@@ -6697,6 +6713,105 @@
       },
       "doc": "UnknownListener is returned by Unsubscribe for a name that is not\nregistered. Reporting it beats returning nil: \"removed\" and \"there was\nnothing to remove\" are different answers, and a caller who gets the\nsecond while expecting the first has a bug that silence would hide\nuntil the listener they meant to remove fired again.\n",
       "file": "core/app/events/gen_codes.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/forward.BatchTooLarge",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/app/forward",
+      "name": "BatchTooLarge",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.93.3",
+        "reason": "BATCH_TOO_LARGE",
+        "public": "The export batch is larger than the queue may hold"
+      },
+      "doc": "BatchTooLarge refuses a batch larger than the forwarder's MaxBytes on\nits own. It is counted Dropped. The fields name its size and the bound,\nnever its bytes.\n",
+      "file": "core/app/forward/gen_codes.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/forward.CodeBatchTooLarge",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/app/forward",
+      "name": "CodeBatchTooLarge",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "220419",
+      "code": {
+        "value": "0.3.93.3"
+      },
+      "doc": "CodeBatchTooLarge identifies a batch larger on its own than the\nforwarder's MaxBytes, which no policy can make room for.\n",
+      "file": "core/app/forward/gen_codes.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/forward.CodeForwardFull",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/app/forward",
+      "name": "CodeForwardFull",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "220418",
+      "code": {
+        "value": "0.3.93.2"
+      },
+      "doc": "CodeForwardFull identifies a batch the forwarder did not keep because\nits queue held its bound of batches or bytes, under DropNewest, under\nBlock once BlockTimeout ran out, or under DropOldest when nothing older\ncould be taken out.\n",
+      "file": "core/app/forward/gen_codes.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/forward.CodeForwardMisconfigured",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/app/forward",
+      "name": "CodeForwardMisconfigured",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "220417",
+      "code": {
+        "value": "0.3.93.1"
+      },
+      "doc": "CodeForwardMisconfigured identifies a forwarder refused at construction —\nno broker, no sender, no classification, a negative bound or timeout,\nan unknown full policy — or an adapter built over no forwarder.\n",
+      "file": "core/app/forward/gen_codes.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/forward.ForwardFull",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/app/forward",
+      "name": "ForwardFull",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.93.2",
+        "reason": "FORWARD_FULL",
+        "public": "The export queue is full"
+      },
+      "doc": "ForwardFull refuses a batch the forwarder's queue had no room for. The\nbatch is counted Dropped; a caller in front — a trace BatchSink —\ncounts it failed as it did a collector that was down.\n",
+      "file": "core/app/forward/gen_codes.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/forward.ForwardMisconfigured",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/app/forward",
+      "name": "ForwardMisconfigured",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.93.1",
+        "reason": "FORWARD_MISCONFIGURED",
+        "public": "The export forwarder cannot run as configured"
+      },
+      "doc": "ForwardMisconfigured refuses a forwarder that could never forward.\n",
+      "file": "core/app/forward/gen_codes.go",
       "layer": "core",
       "family": "app"
     },
@@ -31742,6 +31857,30 @@
       "family": "observe"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.DocumentExporter",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/metrics",
+      "name": "DocumentExporter",
+      "spelled": "interface{ExportDocument(ctx context.Context, doc []byte) error}",
+      "canonical": "interface{ExportDocument(ctx context.Context, doc []byte) error}",
+      "doc": "DocumentExporter is the sibling of ContextExporter an exporter implements\nwhen it can ship a snapshot already encoded as its wire document:\nExportDocument sends doc under ctx, as ExportContext sends the snapshot it\nwould have encoded into it, with the same verdicts. The OTLP/HTTP\nexporter implements it, doc being an OTLP/JSON\nExportMetricsServiceRequest — what EncodeOTLPJSON writes —, so a\nsnapshot encoded and stored by a store-and-forward queue is posted later\nwithout being decoded (ADR 0185). An empty doc sends nothing.\n\nA caller holding a ContextExporter asks for it with a type assertion\n(ADR 0039). Implementations MUST be safe for concurrent use.\n",
+      "file": "core/observe/metrics/gen_ports.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.DocumentExporter.ExportDocument",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/metrics",
+      "name": "ExportDocument",
+      "recv": "DocumentExporter",
+      "spelled": "func(ctx context.Context, doc []byte) error",
+      "canonical": "func(ctx context.Context, doc []byte) error",
+      "file": "core/observe/metrics/gen_ports.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.DuplicateRegistration",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/internal/core/observe/metrics",
@@ -34178,6 +34317,30 @@
       "value": "\"github.com/kitsunium/sdk/pkg/v1/observe/trace\"",
       "doc": "DefaultScopeName names this SDK's TRACE package as the instrumenting library\nwhen a caller declares no scope of their own.\n\nIt is a separate constant from metrics' DefaultScopeName, and the difference is\nnot cosmetic: an InstrumentationScope names the library that produced THIS\nsignal, so stamping a span batch with `…/pkg/v1/observe/metrics` would tell a backend\nthat the metrics package emitted spans. Sharing the value would have been the\none place where sharing the model stopped being reuse and started being a\nwrong answer — which is exactly the line ADR 0051 §Decision 2 draws, and why\ninternal/core/observe/otel takes the default as a parameter rather than owning one.\n",
       "file": "core/observe/trace/scope.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/trace.DocumentExporter",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/trace",
+      "name": "DocumentExporter",
+      "spelled": "interface{ExportDocument(ctx context.Context, doc []byte) error}",
+      "canonical": "interface{ExportDocument(ctx context.Context, doc []byte) error}",
+      "doc": "DocumentExporter is the sibling of ContextSpanExporter an exporter\nimplements when it can ship a batch already encoded as its wire\ndocument: ExportDocument sends doc under ctx, as ExportContext sends\nthe spans it would have encoded into it, with the same verdicts.\nThe OTLP/HTTP exporter implements it, doc being an OTLP/JSON\nExportTraceServiceRequest — what EncodeOTLPJSON writes —, so a\nbatch encoded and stored by a store-and-forward queue is posted\nlater without being decoded (ADR 0185). An empty doc sends nothing.\n\nA caller holding a ContextSpanExporter asks for it with a type\nassertion (ADR 0039). Implementations MUST be safe for concurrent use.\n",
+      "file": "core/observe/trace/gen_ports.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/trace.DocumentExporter.ExportDocument",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/trace",
+      "name": "ExportDocument",
+      "recv": "DocumentExporter",
+      "spelled": "func(ctx context.Context, doc []byte) error",
+      "canonical": "func(ctx context.Context, doc []byte) error",
+      "file": "core/observe/trace/gen_ports.go",
       "layer": "core",
       "family": "observe"
     },
@@ -49333,6 +49496,413 @@
       "canonical": "func[E any](bus github.com/kitsunium/sdk/internal/core/app/events.Bus, handler github.com/kitsunium/sdk/internal/service/app/events.Handler[E]) error",
       "doc": "On registers a typed listener for the event type E.\n\nIt is a package-level FUNCTION and not a method on Bus because Go methods\ncannot take type parameters of their own. That is not a workaround, it is\nthe whole design constraint: a method-based Subscribe[E] would force the\ntype parameter onto the Bus itself, and a Bus[E] carries exactly one event\ntype — which is a channel, not a bus. See ADR 0053 §D3.\n\n\terr := events.On(bus, events.Handler[OrderPlaced]{\n\t\tName:     \"audit\",\n\t\tPriority: -10,\n\t\tHandle:   func(ctx context.Context, e OrderPlaced) error { return audit.Write(ctx, e) },\n\t})\n\nE MUST be a concrete type. An interface E is refused here rather than\nregistered and never called: Publish resolves an event's type with\nreflect.TypeOf, which never yields an interface type (ADR 0031).\n",
       "file": "service/app/events/on.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/forward.Block",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/forward",
+      "name": "Block",
+      "spelled": "FullPolicy",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/forward.FullPolicy",
+      "value": "2",
+      "doc": "Block waits for room up to Config.BlockTimeout, then refuses the new\nbatch with ForwardFull, counted Dropped.\n",
+      "file": "service/app/forward/config.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/forward.Config",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/forward",
+      "name": "Config",
+      "spelled": "struct{Broker corequeue.Broker; Send Sender; Retryable func(error) bool; Clock clock.Timed; MaxBatches int; MaxBytes int64; WhenFull FullPolicy; BlockTimeout time.Duration; SendTimeout time.Duration; MaxAge time.Duration; Backoff kbackoff.Value; Parallelism int; PollInterval time.Duration; DrainTimeout time.Duration; SettleTimeout time.Duration}",
+      "canonical": "struct{Broker github.com/kitsunium/sdk/internal/core/data/queue.Broker; Send github.com/kitsunium/sdk/internal/service/app/forward.Sender; Retryable func(error) bool; Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed; MaxBatches int; MaxBytes int64; WhenFull github.com/kitsunium/sdk/internal/service/app/forward.FullPolicy; BlockTimeout time.Duration; SendTimeout time.Duration; MaxAge time.Duration; Backoff github.com/kitsunium/sdk/internal/kernel/backoff.Value; Parallelism int; PollInterval time.Duration; DrainTimeout time.Duration; SettleTimeout time.Duration}",
+      "fields": [
+        {
+          "name": "Broker",
+          "type": "corequeue.Broker",
+          "doc": "Broker is the queue the forwarder holds its batches in: a directory\n(queue.NewFile) for a backlog that outlives the process, a table\n(queue.NewSQL), or memory. One queue per signal. Build it with a\nVisibilityTimeout above SendTimeout, a MaxDeliveries no outage reaches\n— MaxAge is the forwarder's budget — and a MaxMessageBytes that holds\na batch. The forwarder neither sets its policy nor closes it.\n"
+        },
+        {
+          "name": "Send",
+          "type": "Sender",
+          "doc": "Send ships one stored batch: an OTLP/HTTP exporter's ExportDocument,\nor any function of that shape.\n"
+        },
+        {
+          "name": "Retryable",
+          "type": "func(error) bool",
+          "doc": "Retryable classifies a failure of Send as one a later attempt may cure\n— trace.OTLPRetryable, metrics.OTLPRetryable. It is REQUIRED: nil reads\nas \"retry everything\" or as \"retry nothing\", two opposites. A failure\nit calls permanent is dead-lettered at once.\n"
+        },
+        {
+          "name": "Clock",
+          "type": "clock.Timed",
+          "doc": "Clock paces every retry, bounds every attempt and the wait of Block,\nand ages every batch. Nil means clock.System; a clock.ManualClock drives\na test without a sleep. It must be the broker's: a batch's age is read\nfrom the instant the broker stamped.\n"
+        },
+        {
+          "name": "MaxBatches",
+          "type": "int",
+          "doc": "MaxBatches bounds the batches the forwarder holds. Zero means\nDefaultMaxBatches; negative is refused.\n"
+        },
+        {
+          "name": "MaxBytes",
+          "type": "int64",
+          "doc": "MaxBytes bounds the bytes the forwarder holds. Zero means\nDefaultMaxBytes; negative is refused. A batch larger on its own is\nrefused with BatchTooLarge.\n"
+        },
+        {
+          "name": "WhenFull",
+          "type": "FullPolicy",
+          "doc": "WhenFull is what Enqueue does when either bound is reached. The zero\nis DropOldest.\n"
+        },
+        {
+          "name": "BlockTimeout",
+          "type": "time.Duration",
+          "doc": "BlockTimeout bounds the wait of Block. Zero means DefaultBlockTimeout;\nnegative is refused.\n"
+        },
+        {
+          "name": "SendTimeout",
+          "type": "time.Duration",
+          "doc": "SendTimeout bounds one attempt, on Clock. Zero means\nDefaultSendTimeout; negative is refused.\n"
+        },
+        {
+          "name": "MaxAge",
+          "type": "time.Duration",
+          "doc": "MaxAge is how long after the queue accepted it a batch may still be\nsent: one delivered older is dropped unsent, one whose retryable\nfailure finds it older is not retried; either is acknowledged and\ncounted Expired. A Retry-After is honoured in full, but never past it.\nZero means DefaultMaxAge; negative is refused.\n"
+        },
+        {
+          "name": "Backoff",
+          "type": "kbackoff.Value",
+          "doc": "Backoff is the wait before each retry when the failure imposes none:\nBackoff.Delay(attempt). The zero value is the\nDefaultRetryBase–DefaultRetryMax curve, and a curve without a positive\nBaseDelay starts from DefaultRetryBase under its own ceiling: a failed\nbatch is never retried at once.\n"
+        },
+        {
+          "name": "Parallelism",
+          "type": "int",
+          "doc": "Parallelism is how many consumers send at once. Non-positive is one,\nwhich keeps the queue's order while nothing fails and sends one request\nat a time to a collector that is down; above one there is no order.\n"
+        },
+        {
+          "name": "PollInterval",
+          "type": "time.Duration",
+          "doc": "PollInterval is how late a batch another PROCESS queued may be\nnoticed; one Enqueue queued in this process is sent at once. Zero is\nthe queue's own default.\n"
+        },
+        {
+          "name": "DrainTimeout",
+          "type": "time.Duration",
+          "doc": "DrainTimeout is how long the batch being sent when Run's context ends\nmay still run. Zero stops it at once; it is then handed back uncounted\nand sent by the next process.\n"
+        },
+        {
+          "name": "SettleTimeout",
+          "type": "time.Duration",
+          "doc": "SettleTimeout bounds each acknowledgement and hand-back once Run's\ncontext has ended. Zero is the queue's own default.\n"
+        }
+      ],
+      "doc": "Config configures [New]. Broker, Send and Retryable are required; every\nother field is optional.\n",
+      "file": "service/app/forward/config.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/forward.DefaultBlockTimeout",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/forward",
+      "name": "DefaultBlockTimeout",
+      "spelled": "time.Duration",
+      "canonical": "time.Duration",
+      "value": "5000000000",
+      "doc": "DefaultBlockTimeout is how long Enqueue waits for room under Block when\nConfig.BlockTimeout is zero.\n",
+      "file": "service/app/forward/config.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/forward.DefaultMaxAge",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/forward",
+      "name": "DefaultMaxAge",
+      "spelled": "time.Duration",
+      "canonical": "time.Duration",
+      "value": "86400000000000",
+      "doc": "DefaultMaxAge is how long after the queue accepted it a batch may still\nbe sent when Config.MaxAge is zero.\n",
+      "file": "service/app/forward/config.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/forward.DefaultMaxBatches",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/forward",
+      "name": "DefaultMaxBatches",
+      "spelled": "int",
+      "canonical": "int",
+      "value": "10000",
+      "doc": "DefaultMaxBatches bounds the batches a forwarder holds when\nConfig.MaxBatches is zero — the order of magnitude of the OpenTelemetry\nCollector's sending_queue.\n",
+      "file": "service/app/forward/config.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/forward.DefaultMaxBytes",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/forward",
+      "name": "DefaultMaxBytes",
+      "spelled": "int64",
+      "canonical": "int64",
+      "value": "268435456",
+      "doc": "DefaultMaxBytes bounds the bytes a forwarder holds when Config.MaxBytes\nis zero — Vector's smallest disk buffer.\n",
+      "file": "service/app/forward/config.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/forward.DefaultRetryBase",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/forward",
+      "name": "DefaultRetryBase",
+      "spelled": "time.Duration",
+      "canonical": "time.Duration",
+      "value": "5000000000",
+      "doc": "DefaultRetryBase and DefaultRetryMax bound the wait between attempts\nwhen Config.Backoff is zero: five seconds, growing to thirty — the\nCollector's retry_on_failure numbers.\n",
+      "file": "service/app/forward/config.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/forward.DefaultRetryMax",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/forward",
+      "name": "DefaultRetryMax",
+      "spelled": "time.Duration",
+      "canonical": "time.Duration",
+      "value": "30000000000",
+      "doc": "DefaultRetryMax is the ceiling of the default backoff.\n",
+      "file": "service/app/forward/config.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/forward.DefaultSendTimeout",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/forward",
+      "name": "DefaultSendTimeout",
+      "spelled": "time.Duration",
+      "canonical": "time.Duration",
+      "value": "10000000000",
+      "doc": "DefaultSendTimeout bounds one attempt when Config.SendTimeout is zero —\nthe OTLP specification's default OTEL_EXPORTER_OTLP_TIMEOUT.\n",
+      "file": "service/app/forward/config.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/forward.DropNewest",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/forward",
+      "name": "DropNewest",
+      "spelled": "FullPolicy",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/forward.FullPolicy",
+      "value": "1",
+      "doc": "DropNewest refuses the new batch with ForwardFull, counted Dropped.\n",
+      "file": "service/app/forward/config.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/forward.DropOldest",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/forward",
+      "name": "DropOldest",
+      "spelled": "FullPolicy",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/forward.FullPolicy",
+      "value": "0",
+      "doc": "DropOldest takes the oldest batches the consumer is not sending out of\nthe queue, each counted Dropped, until the new one fits; when none can\nbe taken it refuses the new one as DropNewest does.\n",
+      "file": "service/app/forward/config.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/forward.Forwarder",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/forward",
+      "name": "Forwarder",
+      "spelled": "struct{}",
+      "canonical": "struct{}",
+      "doc": "Forwarder holds batches in a durable queue and sends each one later,\nretried while its failure is retryable and its age allows, dead-lettered\nwhen the sender refuses it for good, and counted at every step. Enqueue\nkeeps a batch; Run sends; Stats reads the counters. It is safe for\nconcurrent use.\n",
+      "file": "service/app/forward/forwarder.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/forward.(*Forwarder).Enqueue",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/forward",
+      "name": "Enqueue",
+      "recv": "Forwarder",
+      "spelled": "func(ctx context.Context, batch []byte) error",
+      "canonical": "func(ctx context.Context, batch []byte) error",
+      "doc": "Enqueue keeps batch in the queue, durably once it returns nil, for Run to\nsend. An empty batch is kept nowhere. A batch larger than MaxBytes is\nrefused with BatchTooLarge; one the queue has no room for is handled by\nConfig.WhenFull — older batches dropped, or ForwardFull, or a bounded wait\n— and every batch lost to a bound is counted Dropped. ctx bounds the\npublication and the wait.\n",
+      "file": "service/app/forward/forwarder.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/forward.(*Forwarder).Run",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/forward",
+      "name": "Run",
+      "recv": "Forwarder",
+      "spelled": "func(ctx context.Context) error",
+      "canonical": "func(ctx context.Context) error",
+      "doc": "Run sends the queued batches until ctx ends, one consumer per\nConfig.Parallelism, and returns what the queue's consumer returns. The\nbatch being sent when ctx ends may finish within Config.DrainTimeout; one\ncut short is handed back uncounted and sent by the next process.\n",
+      "file": "service/app/forward/forwarder.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/forward.(*Forwarder).Stats",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/forward",
+      "name": "Stats",
+      "recv": "Forwarder",
+      "spelled": "func() StatsValue",
+      "canonical": "func() github.com/kitsunium/sdk/internal/service/app/forward.StatsValue",
+      "doc": "Stats returns the forwarder's counters, read at once.\n",
+      "file": "service/app/forward/forwarder.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/forward.FullPolicy",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/forward",
+      "name": "FullPolicy",
+      "spelled": "uint8",
+      "canonical": "uint8",
+      "doc": "FullPolicy says what Enqueue does with a batch the queue has no room for.\n",
+      "file": "service/app/forward/config.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/forward.FullPolicy.String",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/forward",
+      "name": "String",
+      "recv": "FullPolicy",
+      "spelled": "func() string",
+      "canonical": "func() string",
+      "doc": "String renders the policy for a log line; a value this package never mints\nrenders as \"unknown\".\n",
+      "file": "service/app/forward/config.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/forward.New",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/forward",
+      "name": "New",
+      "spelled": "func(ctx context.Context, cfg Config) (*Forwarder, error)",
+      "canonical": "func(ctx context.Context, cfg github.com/kitsunium/sdk/internal/service/app/forward.Config) (*github.com/kitsunium/sdk/internal/service/app/forward.Forwarder, error)",
+      "doc": "New builds a forwarder over cfg.Broker. It starts nothing: Run sends. When\nthe broker is a queue.MessageReader — every broker of the SDK is — New\ncounts the backlog a previous process left, so the bounds hold across a\nrestart; ctx bounds that count.\n",
+      "file": "service/app/forward/forwarder.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/forward.NewMetricExporter",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/forward",
+      "name": "NewMetricExporter",
+      "spelled": "func(name coremetrics.ExporterName, forwarder *Forwarder) (coremetrics.ContextExporter, error)",
+      "canonical": "func(name github.com/kitsunium/sdk/internal/core/observe/metrics.ExporterName, forwarder *github.com/kitsunium/sdk/internal/service/app/forward.Forwarder) (github.com/kitsunium/sdk/internal/core/observe/metrics.ContextExporter, error)",
+      "doc": "NewMetricExporter returns a metrics ContextExporter that encodes each\nsnapshot as an OTLP/JSON ExportMetricsServiceRequest and keeps it in\nforwarder, returning once it is durable. The forwarder's Send is the\nOTLP/HTTP exporter's ExportDocument. A nil forwarder is refused with\nForwardMisconfigured.\n",
+      "file": "service/app/forward/signal.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/forward.NewSpanExporter",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/forward",
+      "name": "NewSpanExporter",
+      "spelled": "func(name coretrace.ExporterName, forwarder *Forwarder) (coretrace.ContextSpanExporter, error)",
+      "canonical": "func(name github.com/kitsunium/sdk/internal/core/observe/trace.ExporterName, forwarder *github.com/kitsunium/sdk/internal/service/app/forward.Forwarder) (github.com/kitsunium/sdk/internal/core/observe/trace.ContextSpanExporter, error)",
+      "doc": "NewSpanExporter returns a trace ContextSpanExporter that encodes each\nbatch as an OTLP/JSON ExportTraceServiceRequest and keeps it in forwarder,\nreturning once it is durable — behind a trace BatchSink, an export costs\none publication instead of a round trip to the collector. The forwarder's\nSend is the OTLP/HTTP exporter's ExportDocument. A nil forwarder is\nrefused with ForwardMisconfigured.\n",
+      "file": "service/app/forward/signal.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/forward.Sender",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/forward",
+      "name": "Sender",
+      "spelled": "func(ctx context.Context, batch []byte) error",
+      "canonical": "func(ctx context.Context, batch []byte) error",
+      "doc": "Sender ships one batch, as the forwarder stored it, and returns the\nverdict the forwarder classifies with Config.Retryable. It is called on the\nforwarder's consumer, under a context bounded by Config.SendTimeout, and\nmay be called again with the same bytes — after a retryable failure, or\nafter a crash between its success and the acknowledgement.\n\nAn OTLP/HTTP exporter's ExportDocument has its shape (trace and metrics\nDocumentExporter).\n",
+      "file": "service/app/forward/config.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/forward.StatsValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/forward",
+      "name": "StatsValue",
+      "spelled": "struct{LastRetryAfterAt time.Time; PendingBytes int64; LastRetryAfter time.Duration; Pending int; Enqueued uint64; Sent uint64; Retries uint64; Dropped uint64; Expired uint64; DeadLettered uint64}",
+      "canonical": "struct{LastRetryAfterAt time.Time; PendingBytes int64; LastRetryAfter time.Duration; Pending int; Enqueued uint64; Sent uint64; Retries uint64; Dropped uint64; Expired uint64; DeadLettered uint64}",
+      "fields": [
+        {
+          "name": "LastRetryAfterAt",
+          "type": "time.Time",
+          "doc": "LastRetryAfterAt is when a collector last imposed a delay; zero when\nnone has.\n"
+        },
+        {
+          "name": "PendingBytes",
+          "type": "int64",
+          "doc": "PendingBytes is the bytes of the batches the forwarder holds.\n"
+        },
+        {
+          "name": "LastRetryAfter",
+          "type": "time.Duration",
+          "doc": "LastRetryAfter is the last delay a collector imposed — a Retry-After\n— as the failure carried it.\n"
+        },
+        {
+          "name": "Pending",
+          "type": "int",
+          "doc": "Pending is the batches the forwarder holds: queued, waiting or being\nsent.\n"
+        },
+        {
+          "name": "Enqueued",
+          "type": "uint64",
+          "doc": "Enqueued counts the batches Enqueue kept.\n"
+        },
+        {
+          "name": "Sent",
+          "type": "uint64",
+          "doc": "Sent counts the batches the sender accepted.\n"
+        },
+        {
+          "name": "Retries",
+          "type": "uint64",
+          "doc": "Retries counts the attempts made after a retryable failure.\n"
+        },
+        {
+          "name": "Dropped",
+          "type": "uint64",
+          "doc": "Dropped counts the batches lost to a bound: refused by a full queue or\nas too large, or taken out of it by DropOldest.\n"
+        },
+        {
+          "name": "Expired",
+          "type": "uint64",
+          "doc": "Expired counts the batches dropped because they outlived MaxAge.\n"
+        },
+        {
+          "name": "DeadLettered",
+          "type": "uint64",
+          "doc": "DeadLettered counts the batches the sender refused for good, kept in\nthe broker's dead-letter store.\n"
+        }
+      ],
+      "doc": "StatsValue is what a forwarder holds, has done and has lost, read at once\nby [Forwarder.Stats]. The counters count since New; Pending and\nPendingBytes start from the backlog New found in the queue.\n",
+      "file": "service/app/forward/stats.go",
       "layer": "service",
       "family": "app"
     },

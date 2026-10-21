@@ -44,6 +44,7 @@ Go SDK providing a normed, performant toolbox for downstream applications: the m
 | `lock` | app | Named exclusive leases over one process or one machine, with fencing tokens and the guarantee that is not made said out loud | 0052, 0081, 0082, 0083, 0084, 0086 |
 | `id` | app | UUIDv4/v7, ULID, snowflake, NanoID, KSUID and TypeID | 0024, 0038 |
 | `mail` | app | MIME composition and SMTP with header injection refused, and a durable spool | 0064, 0111, 0141 |
+| `forward` | app | Store and forward: an export kept in a durable queue while its collector is down, bounded in batches and bytes, retried on the collector's Retry-After or a backoff, dead-lettered when refused, counted; the trace and metrics adapters and their `DocumentExporter` | 0185 |
 | `selfupdate` | framework (ADR 0158) | A signed release verified before its digest, then an atomic replacement; no key, no install | 0077, 0150 |
 | `entitlement` | framework (ADR 0158) | A vendor-signed roster read into a grant, with an offline cache, an anti-rollback ratchet and a CI seat | 0078, 0079, 0091, 0092 |
 | `gate` | framework (ADR 0158) | Whether an invocation is subject to the check: a policy value and a decision that performs nothing | 0080 |
@@ -63,7 +64,7 @@ internal/
 │                  fs/{flock, pathchain, winacl}
 ├── core/          domain interfaces + domain values — each package by its path
 │                  crypto, crypto/key/jwk, net, proc, proc/ipc,
-│                  app/{cli, config, consensus, events, health, i18n, id,
+│                  app/{cli, config, consensus, events, forward, health, i18n, id,
 │                       lifecycle, lock, mail, mail/spool, resilience,
 │                       scheduler, statemachine, validation, view},
 │                  data/{cache, codec, codec/scratch,
@@ -201,7 +202,11 @@ internal/
                            mail — the guards (Validate, the injection gate,
                              Envelope — moved from the core, ADR 0160) +
                              MIME composition + SMTP + memory and capture
-                             doubles; spool/ — the durable outbox)
+                             doubles; spool/ — the durable outbox;
+                           forward — store and forward: a batch kept in a
+                             queue, bounded, retried, dead-lettered,
+                             counted, + the trace/metrics adapters —
+                             ADR 0185)
 pkg/
 └── v1/            stable public API (type aliases + ergonomic helpers)
     ├── clock/     (the time port: Clock/Waiter/Timed + System + ManualClock — ADR 0090)
@@ -300,7 +305,9 @@ pkg/
                       id/ — UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID —
                         ADR 0024, ADR 0038;
                       mail/ — compose + Transport, injection refused — ADR 0064;
-                      mail/spool/ — the durable outbox — ADR 0111, ADR 0141)
+                      mail/spool/ — the durable outbox — ADR 0111, ADR 0141;
+                      forward/ — store and forward for an export, the
+                        trace and metrics adapters — ADR 0185)
 third-party/       opt-in vendor integrations, one Go module per vendor
                    (ADR 0157) — see third-party/CLAUDE.md:
                    aws (writer/{cloudwatch,s3}), codec/hcl, codec/protobuf,
@@ -625,5 +632,6 @@ The full digest of every ADR — what it decided, what it amends, its status —
 - ADR 0182 — a runtime directory ends on the caller's directory, never on a shared tree, accepted on 2026-10-20 for kodflow/ktn-linter#785: `ipc.RuntimeDirOr(app, fallback)` ends `RuntimeDir`'s chain on a directory the caller keeps private instead of `<tmp>/<app>-<uid>`; `RuntimeDir` unchanged — `docs/adr/0182-a-runtime-directory-ends-on-the-callers-directory-never-on-a-shared-tree.md`
 - ADR 0183 — a message may wait for its instant, and recurrence stays the scheduler's, accepted on 2026-10-21 for kitsunium/sdk#481, decided autonomously and revisable while v0 (ADR 0040): resolves ADR 0054's deferred `PublishAt` — one message held until one instant, durably, recurrence left to ADR 0041's scheduler — and adds on every broker `DelayedPublisher`, `DelayedNacker` with the handler's `RetryAfter` (`RETRY_REQUESTED` `0.2.23.10`) and `OncePublisher` (a duplicate is a boolean) — `docs/adr/0183-a-message-may-wait-for-its-instant-and-recurrence-stays-the-schedulers.md`
 - ADR 0184 — a wait is bounded, a restart gives up, and a client throttles itself, accepted on 2026-10-21 for kitsunium/sdk#482, decided autonomously and revisable while v0 (ADR 0040): resolves ADR 0026's deferred wait mode with `NewBulkheadWait` and `RateLimiterConfig.MaxWait`, adds full and decorrelated jitter (`JitterMode`), `BreakerConfig.HalfOpenTrials`, the supervisor's `GiveUpAfter` with `Supervisor.Check` and `SUPERVISOR_GAVE_UP` (`0.3.49.9`), the scheduler's `StartingDeadline` and `OverlapReplace`, and the SRE book's adaptive throttle `NewAdaptiveThrottle` (`THROTTLED`, `0.2.8.9`); adaptive concurrency deferred — `docs/adr/0184-a-wait-is-bounded-a-restart-gives-up-and-a-client-throttles-itself.md`
+- ADR 0185 — an export waits on disk, and the forwarder says what it lost, accepted on 2026-10-21 for kitsunium/sdk#493, decided autonomously and revisable while v0 (ADR 0040): a generic store and forward in `app/forward` (codes `0.3.93.*`), beside the mail spool because the module graph forbids `observe` (it would require `app`) and `data`; one queue message per batch, the OTLP/JSON request the signal already encodes, posted unchanged through a new sibling port per signal, `trace.DocumentExporter` / `metrics.DocumentExporter`; one queue per signal, one consumer by default (order kept, and the load on a down collector one request); bounded in batches AND bytes (`DefaultMaxBatches` 10 000, `DefaultMaxBytes` 256 MiB, negative refused); when full `DropOldest` (the zero), `DropNewest` or `Block` up to `BlockTimeout`; each batch retried in the handler by `resilience.NewRetry` on the injected clock, `Retry-After` honoured in full up to the batch's `MaxAge` (24 h), otherwise 5 s growing to 30 s; a permanent refusal dead-lettered once (`DoNotRetry`), an expired batch dropped and counted; `Stats` counts pending, sent, retries, dropped, expired, dead-lettered and the last `Retry-After`; the stop is `Consume`'s drain; the framework's OTLP subsystem and the Studio deferred — `docs/adr/0185-an-export-waits-on-disk-and-the-forwarder-says-what-it-lost.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`

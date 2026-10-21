@@ -181,3 +181,18 @@ func (e *otlpHTTPExporter) ExportContext(ctx context.Context, spans coretrace.Sp
 	//: transport and classification, under the caller's bound.
 	return e.sender.PostContext(ctx, body)
 }
+
+// ExportDocument implements core/observe/trace.DocumentExporter: it POSTs doc
+// — an OTLP/JSON ExportTraceServiceRequest, what EncodeOTLPJSON writes — as
+// ExportContext POSTs the document it encodes, under ctx and with the same
+// verdicts. A store-and-forward queue encodes a batch once, keeps the bytes,
+// and hands them here later (ADR 0185). An empty doc posts nothing.
+func (e *otlpHTTPExporter) ExportDocument(ctx context.Context, doc []byte) error {
+	//: nothing to ship.
+	if len(doc) == 0 {
+		//: no socket touched.
+		return nil
+	}
+	//: transport and classification, under the caller's bound.
+	return e.sender.PostContext(ctx, doc)
+}

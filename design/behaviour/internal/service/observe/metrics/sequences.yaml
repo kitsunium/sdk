@@ -90,6 +90,21 @@ sequences:
           when: err != nil
       - return: e.sender.PostContext(ctx, body)
         to: e.sender.PostContext
+  - of: (*otlpHTTPExporter).ExportDocument
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpHTTPExporter).ExportDocument
+        kind: self
+      - id: e.sender.PostContext
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(doc) == 0
+      - return: e.sender.PostContext(ctx, doc)
+        to: e.sender.PostContext
   - of: EncodeOTLPJSON
     participants:
       - id: caller

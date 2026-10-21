@@ -55,6 +55,7 @@ contract stands on the standard library and the kernel alone.
 | `validation/` | the `Constraint[T]` FUNC port, the located `ViolationValue`, the `ReportValue` that is not an `error`, and the path grammar; no registry (ADR 0046) | `0.2.15.*`, `0.3.47.*` | `internal/service/app/validation` |
 | `view/` | the `Renderer` port frozen at two, the `Factory` registry, and `TrustedHTML` / `TrustHTML`, the one escaping bypass; no `text/template` representation (ADR 0058) | `0.2.27.*`, `0.3.57.*` | `internal/service/app/view` |
 | `mail/spool/` | the codes and sentinels of the durable mail outbox, and nothing else: the spool is one engine with no port (ADR 0111, ADR 0141, ADR 0160) | `0.3.81.*` | `internal/service/app/mail/spool` |
+| `forward/` | the codes and sentinels of store and forward, and nothing else: the forwarder is one engine whose `Sender` is a function of the service's (ADR 0185, ADR 0160) | `0.3.93.*` | `internal/service/app/forward` |
 
 A code keeps its value when its package moves, and when its declaration moves
 (ADR 0160): the `0.2.*` ranges above are the ones these packages declared

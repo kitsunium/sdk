@@ -265,6 +265,7 @@ files:
       - (*otlpHTTPExporter).Name
       - (*otlpHTTPExporter).Export
       - (*otlpHTTPExporter).ExportContext
+      - (*otlpHTTPExporter).ExportDocument
     name: exporter_otlphttp.go
   - decls:
       - otlpJSONExporterName
@@ -1210,6 +1211,16 @@ types:
           retryable failure the specification says it is.
         name: ExportContext
         params: ctx context.Context, snap coremetrics.SnapshotValue
+        recv: e *otlpHTTPExporter
+        results: error
+      - doc: |-
+          ExportDocument implements core/observe/metrics.DocumentExporter: it POSTs
+          doc — an OTLP/JSON ExportMetricsServiceRequest, what EncodeOTLPJSON writes
+          — as ExportContext POSTs the document it encodes, under ctx and with the
+          same verdicts. A store-and-forward queue encodes a snapshot once, keeps the
+          bytes, and hands them here later (ADR 0185). An empty doc posts nothing.
+        name: ExportDocument
+        params: ctx context.Context, doc []byte
         recv: e *otlpHTTPExporter
         results: error
     name: otlpHTTPExporter

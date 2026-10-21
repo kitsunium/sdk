@@ -63,6 +63,7 @@ go_test(
         "batch_sink_bench_test.go",
         "batch_sink_external_test.go",
         "exporter_otlphttp_context_external_test.go",
+        "exporter_otlphttp_document_external_test.go",
         "exporter_otlphttp_external_test.go",
         "exporter_otlpjson_external_test.go",
         "gen_api_test.go",

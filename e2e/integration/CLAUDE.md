@@ -18,7 +18,7 @@ graph of every consumer of a database writer.
 
 | Directory | Suite | Servers |
 |---|---|---|
-| `sql/` | the SQL mechanisms (`pkg/v1/data/sql`, `docstore`, `queue`) on the three engines — see `sql/CLAUDE.md` | SQLite (none), `postgres:17`, `mysql:8.4` |
+| `sql/` | the SQL mechanisms (`pkg/v1/data/sql`, `docstore`, `queue`, and `app/forward` over the SQL broker) on the three engines — see `sql/CLAUDE.md` | SQLite (none), `postgres:17`, `mysql:8.4` |
 | `writer/clickhouse/` | the `"clickhouse"` writer (`third-party/db/writer/clickhouse`) through `writer.Open`, rows read back | `clickhouse/clickhouse-server:24-alpine` |
 | `writer/mysql/` | the `"mysql"` writer over the bind-mounted Unix socket, rows read back | `mysql:8` |
 | `writer/redis/` | the `"redis"` writer over the bind-mounted Unix socket: XADD, MaxLen trimming, the `AddFailed` path | `redis:7-alpine` |

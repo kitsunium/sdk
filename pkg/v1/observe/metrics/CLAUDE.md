@@ -50,7 +50,7 @@ visible aggregated overflow series.
 | `OverflowAttrKey` | how a consumer RECOGNISES the folded series (its value is the bool `true`) |
 | `Exporter` / `ExporterName` | exporter aliases |
 | `NewMeter()` / `NewMeterWithConfig(cfg)` | in-memory `FullMeter` |
-| `Export` / `ExportContext` (bounded; `DefaultExportTimeout`, 30 s, when the context carries no deadline; `ContextExporter` the sibling port) / `RegisterExporter` / `NewTextExporter` / `NewPrometheusExporter` / `NewOTLPJSONExporter` / `AvailableExporters` | registry verbs |
+| `Export` / `ExportContext` (bounded; `DefaultExportTimeout`, 30 s, when the context carries no deadline; `ContextExporter` the sibling port, `DocumentExporter` the second — the OTLP/HTTP exporter posts a stored document, ADR 0185) / `RegisterExporter` / `NewTextExporter` / `NewPrometheusExporter` / `NewOTLPJSONExporter` / `AvailableExporters` | registry verbs |
 | `EncodeOTLPJSON` | the OTLP/JSON ENCODER — snapshot to the exact bytes of one `ExportMetricsServiceRequest`, no I/O (ADR 0048) |
 | `NewOTLPHTTPExporter` / `OTLPHTTPConfig` / `OTLPMetricsPath` / `DefaultOTLPTimeout` / `DefaultOTLPMaxResponseBytes` | the EMITTER and its knobs; never registered, and the endpoint is a full URL used as-is |
 | `OTLPRetryable` | classifies an export failure; its signature IS `resilience.RetryConfig.Retryable`'s |

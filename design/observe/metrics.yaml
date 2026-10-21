@@ -572,6 +572,28 @@ packages:
             out:
               - type: error
         name: ContextExporter
+      - doc: |-
+          DocumentExporter is the sibling of ContextExporter an exporter implements
+          when it can ship a snapshot already encoded as its wire document:
+          ExportDocument sends doc under ctx, as ExportContext sends the snapshot it
+          would have encoded into it, with the same verdicts. The OTLP/HTTP
+          exporter implements it, doc being an OTLP/JSON
+          ExportMetricsServiceRequest — what EncodeOTLPJSON writes —, so a
+          snapshot encoded and stored by a store-and-forward queue is posted later
+          without being decoded (ADR 0185). An empty doc sends nothing.
+
+          A caller holding a ContextExporter asks for it with a type assertion
+          (ADR 0039). Implementations MUST be safe for concurrent use.
+        methods:
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: doc
+                type: "[]byte"
+            name: ExportDocument
+            out:
+              - type: error
+        name: DocumentExporter
       - doc: Gauge is an instantaneous value that can go up or down.
         methods:
           - doc: Set replaces the gauge's current value.
@@ -2014,6 +2036,14 @@ packages:
               bounds and cancels — a sibling, so Exporter is not widened (ADR 0039).
             name: ContextExporter
             target: coremetrics.ContextExporter
+      - alias:
+          - doc: |-
+              DocumentExporter is the public alias for the sibling of ContextExporter
+              an exporter implements to ship a snapshot already encoded — the
+              OTLP/HTTP exporter's ExportDocument posts an OTLP/JSON document with
+              the verdicts of ExportContext (ADR 0185).
+            name: DocumentExporter
+            target: coremetrics.DocumentExporter
       - alias:
           - doc: ExporterName is the public alias for an exporter's registry key.
             name: ExporterName

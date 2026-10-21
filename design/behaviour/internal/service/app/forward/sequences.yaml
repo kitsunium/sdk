@@ -1,0 +1,765 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: FullPolicy.String
+    steps:
+      - switch:
+          cases:
+            - case: DropOldest
+              do:
+                - return: dropOldestName
+            - case: DropNewest
+              do:
+                - return: dropNewestName
+            - case: Block
+              do:
+                - return: blockName
+            - default: true
+              do:
+                - return: unknownName
+          "on": p
+  - of: (*Config).validate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Config).validate
+        kind: self
+      - id: misconfigured
+        kind: internal
+      - id: c.validateBounds
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: c.Broker == nil
+              do:
+                - return: misconfigured("Broker", "missing")
+                  to: misconfigured
+            - case: c.Send == nil
+              do:
+                - return: misconfigured("Send", "missing")
+                  to: misconfigured
+            - case: c.Retryable == nil
+              do:
+                - return: misconfigured("Retryable", "missing")
+                  to: misconfigured
+            - case: c.WhenFull > Block
+              do:
+                - return: misconfigured("WhenFull", "unknown")
+                  to: misconfigured
+            - default: true
+              do:
+                - return: c.validateBounds()
+                  to: c.validateBounds
+  - of: (*Config).validateBounds
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Config).validateBounds
+        kind: self
+      - id: misconfigured
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: c.MaxBatches < 0
+              do:
+                - return: misconfigured("MaxBatches", "negative")
+                  to: misconfigured
+            - case: c.MaxBytes < 0
+              do:
+                - return: misconfigured("MaxBytes", "negative")
+                  to: misconfigured
+            - case: c.BlockTimeout < 0
+              do:
+                - return: misconfigured("BlockTimeout", "negative")
+                  to: misconfigured
+            - case: c.SendTimeout < 0
+              do:
+                - return: misconfigured("SendTimeout", "negative")
+                  to: misconfigured
+            - case: c.MaxAge < 0
+              do:
+                - return: misconfigured("MaxAge", "negative")
+                  to: misconfigured
+            - default: true
+              do:
+                - return: nil
+  - of: (*Config).normalized
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Config).normalized
+        kind: self
+      - id: orDefault
+        kind: internal
+    steps:
+      - bind: "n"
+        eval: "*c"
+      - opt:
+          do:
+            - set: n.Clock
+              value: clock.System
+          when: n.Clock == nil
+      - set: n.MaxBatches
+        to: orDefault
+        value: orDefault(n.MaxBatches, DefaultMaxBatches)
+      - set: n.MaxBytes
+        to: orDefault
+        value: orDefault(n.MaxBytes, DefaultMaxBytes)
+      - set: n.BlockTimeout
+        to: orDefault
+        value: orDefault(n.BlockTimeout, DefaultBlockTimeout)
+      - set: n.SendTimeout
+        to: orDefault
+        value: orDefault(n.SendTimeout, DefaultSendTimeout)
+      - set: n.MaxAge
+        to: orDefault
+        value: orDefault(n.MaxAge, DefaultMaxAge)
+      - set: n.Parallelism
+        value: max(n.Parallelism, 1)
+      - opt:
+          do:
+            - set: n.Backoff.BaseDelay
+              value: DefaultRetryBase
+            - opt:
+                do:
+                  - set: n.Backoff.MaxDelay
+                    value: DefaultRetryMax
+                when: n.Backoff.MaxDelay <= 0
+          when: n.Backoff.BaseDelay <= 0
+      - return: "n"
+  - of: orDefault
+    steps:
+      - opt:
+          do:
+            - return: fallback
+          when: value == 0
+      - return: value
+  - of: misconfigured
+    participants:
+      - id: caller
+        kind: actor
+      - id: misconfigured
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(coreforward.ForwardMisconfigured, kerrs.WrapParams{},
+          		kerrs.String("field", field), kerrs.String("problem", problem))
+        to: kerrs
+  - of: (*Forwarder).deliver
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Forwarder).deliver
+        kind: self
+      - id: delivery.Message.EnqueuedAt.Add
+        kind: value
+      - id: f.settle
+        kind: internal
+      - id: f.retry(expiry).Run
+        kind: value
+      - id: corequeue
+        kind: package
+    steps:
+      - bind: payload
+        eval: delivery.Message.Payload
+      - bind: size
+        eval: int64(len(payload))
+      - bind: expiry
+        eval: delivery.Message.EnqueuedAt.Add(f.cfg.MaxAge)
+        to: delivery.Message.EnqueuedAt.Add
+      - opt:
+          do:
+            - eval: f.settle(size, &f.stats.Expired)
+              to: f.settle
+            - return: nil
+          when: "!f.cfg.Clock.Now().Before(expiry)"
+      - bind: err
+        eval: |-
+          f.retry(expiry).Run(ctx, func(attemptCtx context.Context) error {
+          		//: one attempt, bounded on the clock.
+          		return f.attempt(attemptCtx, payload)
+          	})
+        to: f.retry(expiry).Run
+      - switch:
+          cases:
+            - case: err == nil
+              do:
+                - eval: f.settle(size, &f.stats.Sent)
+                  to: f.settle
+                - return: nil
+            - case: ctx.Err() != nil
+              do:
+                - return: err
+            - case: "!f.cfg.Retryable(err)"
+              do:
+                - eval: f.settle(size, &f.stats.DeadLettered)
+                  to: f.settle
+                - return: corequeue.DoNotRetry(err)
+                  to: corequeue
+            - default: true
+              do:
+                - eval: f.settle(size, &f.stats.Expired)
+                  to: f.settle
+                - return: nil
+  - of: (*Forwarder).retry
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Forwarder).retry
+        kind: self
+      - id: svcres
+        kind: package
+    steps:
+      - return: |-
+          svcres.NewRetry(svcres.RetryConfig{
+          		MaxAttempts: math.MaxInt,
+          		Clock:       f.cfg.Clock,
+          		Retryable: func(err error) bool {
+          			//: retryable, and young enough to try again.
+          			return f.cfg.Retryable(err) && f.cfg.Clock.Now().Before(expiry)
+          		},
+          		Delay: func(attempt int, err error) (time.Duration, bool) {
+          			//: the imposed delay or the curve, never past the age.
+          			return f.delay(attempt, err, expiry), true
+          		},
+          		OnRetry: func(int, error, time.Duration) {
+          			f.mu.Lock()
+          			f.stats.Retries++
+          			f.mu.Unlock()
+          		},
+          	})
+        to: svcres
+  - of: (*Forwarder).delay
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Forwarder).delay
+        kind: self
+      - id: svcres
+        kind: package
+      - id: f.mu.Lock
+        kind: value
+      - id: f.cfg.Clock.Now
+        kind: value
+      - id: f.mu.Unlock
+        kind: value
+    steps:
+      - bind: left
+        eval: max(expiry.Sub(f.cfg.Clock.Now()), 0)
+      - opt:
+          do:
+            - eval: f.mu.Lock()
+              to: f.mu.Lock
+            - set: f.stats.LastRetryAfter
+              value: imposed
+            - set: f.stats.LastRetryAfterAt
+              to: f.cfg.Clock.Now
+              value: f.cfg.Clock.Now()
+            - eval: f.mu.Unlock()
+              to: f.mu.Unlock
+            - return: min(imposed, left)
+          init:
+            bind: imposed, ok
+            eval: svcres.RetryAfter(failed)
+            to: svcres
+          when: ok
+      - return: min(f.cfg.Backoff.Delay(attempt), left)
+  - of: (*Forwarder).attempt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Forwarder).attempt
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: f.cfg.Clock.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+    steps:
+      - bind: sendCtx, cancel
+        eval: context.WithCancel(ctx)
+        to: context
+      - defer: cancel()
+      - bind: timer
+        eval: f.cfg.Clock.NewTimer(f.cfg.SendTimeout)
+        to: f.cfg.Clock.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - bind: done
+        eval: make(chan struct{})
+      - defer: close(done)
+      - go: |-
+          func() {
+          		//: the bound, or the attempt over first.
+          		select {
+          		//: the bound passed.
+          		case <-timer.C():
+          			cancel()
+          		//: the attempt returned.
+          		case <-done:
+          		}
+          	}()
+      - return: f.cfg.Send(sendCtx, payload)
+  - of: New
+    participants:
+      - id: caller
+        kind: actor
+      - id: New
+        kind: self
+      - id: cfg.validate
+        kind: internal
+      - id: forwarder.countBacklog
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: cfg.validate()
+            to: cfg.validate
+          when: err != nil
+      - bind: forwarder
+        eval: "&Forwarder{cfg: cfg.normalized(), room: make(chan struct{}, 1)}"
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: nil, err
+                init:
+                  bind: err
+                  eval: forwarder.countBacklog(ctx, reader)
+                  to: forwarder.countBacklog
+                when: err != nil
+          init:
+            bind: reader, ok
+            eval: cfg.Broker.(corequeue.MessageReader)
+          when: ok
+      - return: forwarder, nil
+  - of: (*Forwarder).countBacklog
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Forwarder).countBacklog
+        kind: self
+      - id: reader.Messages
+        kind: value
+    steps:
+      - bind: after
+        eval: "\"\""
+      - loop:
+          do:
+            - bind: page, err
+              eval: reader.Messages(ctx, after, countPage)
+              to: reader.Messages
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - loop:
+                do:
+                  - op: ++
+                    set: f.stats.Pending
+                  - op: +=
+                    set: f.stats.PendingBytes
+                    value: int64(len(live.Message.Payload))
+                  - set: after
+                    value: live.Message.ID
+                key: _
+                range: page
+                value: live
+            - opt:
+                do:
+                  - return: nil
+                when: len(page) < countPage
+          forever: true
+  - of: (*Forwarder).Enqueue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Forwarder).Enqueue
+        kind: self
+      - id: f.settle
+        kind: internal
+      - id: kerrs
+        kind: package
+      - id: f.makeRoom
+        kind: internal
+      - id: f.reserve
+        kind: internal
+      - id: f.cfg.Broker.Publish
+        kind: value
+      - id: f.unreserve
+        kind: internal
+      - id: f.mu.Lock
+        kind: value
+      - id: f.mu.Unlock
+        kind: value
+    steps:
+      - bind: size
+        eval: int64(len(batch))
+      - opt:
+          do:
+            - return: nil
+          when: size == 0
+      - opt:
+          do:
+            - eval: f.settle(0, &f.stats.Dropped)
+              to: f.settle
+            - return: |-
+                kerrs.Wrap(coreforward.BatchTooLarge, kerrs.WrapParams{},
+                			kerrs.Int64("bytes", size), kerrs.Int64("max_bytes", f.cfg.MaxBytes))
+              to: kerrs
+          when: size > f.cfg.MaxBytes
+      - lock:
+          mutex: f.admit
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: f.makeRoom(ctx, size)
+            to: f.makeRoom
+          when: err != nil
+      - eval: f.reserve(size)
+        to: f.reserve
+      - opt:
+          do:
+            - eval: f.unreserve(size)
+              to: f.unreserve
+            - return: err
+          init:
+            bind: _, err
+            eval: f.cfg.Broker.Publish(ctx, batch)
+            to: f.cfg.Broker.Publish
+          when: err != nil
+      - eval: f.mu.Lock()
+        to: f.mu.Lock
+      - op: ++
+        set: f.stats.Enqueued
+      - eval: f.mu.Unlock()
+        to: f.mu.Unlock
+      - return: nil
+  - of: (*Forwarder).Stats
+    steps:
+      - lock:
+          mutex: f.mu
+      - return: f.stats
+  - of: (*Forwarder).Run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Forwarder).Run
+        kind: self
+      - id: svcqueue
+        kind: package
+    steps:
+      - return: |-
+          svcqueue.Consume(ctx, f.cfg.Broker, svcqueue.ConsumerConfig{
+          		Handler:       f.deliver,
+          		Clock:         f.cfg.Clock,
+          		PollInterval:  f.cfg.PollInterval,
+          		Parallelism:   f.cfg.Parallelism,
+          		BatchSize:     1,
+          		SettleTimeout: f.cfg.SettleTimeout,
+          		DrainTimeout:  f.cfg.DrainTimeout,
+          		AutoExtend:    true,
+          		// A batch sent again after a crash between the collector's
+          		// acceptance and the acknowledgement is a duplicate span or point,
+          		// which no forwarder can prevent — a delta metric point is then
+          		// counted twice, as the package documentation says (ADR 0185 D6).
+          		HandlerIsIdempotent: true,
+          	})
+        to: svcqueue
+  - of: (*Forwarder).makeRoom
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Forwarder).makeRoom
+        kind: self
+      - id: f.block
+        kind: internal
+      - id: f.full
+        kind: internal
+      - id: f.dropOldest
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: Block
+              do:
+                - return: f.block(ctx, size)
+                  to: f.block
+            - case: DropNewest
+              do:
+                - opt:
+                    do:
+                      - return: nil
+                    when: f.fits(size)
+                - return: f.full()
+                  to: f.full
+            - default: true
+              do:
+                - return: f.dropOldest(ctx, size)
+                  to: f.dropOldest
+          "on": f.cfg.WhenFull
+  - of: (*Forwarder).dropOldest
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Forwarder).dropOldest
+        kind: self
+      - id: f.cfg.Broker.Receive
+        kind: value
+      - id: f.full
+        kind: internal
+      - id: f.cfg.Broker.Ack
+        kind: value
+      - id: f.settle
+        kind: internal
+    steps:
+      - loop:
+          cond: "!f.fits(size)"
+          do:
+            - bind: deliveries, err
+              eval: f.cfg.Broker.Receive(ctx, 1)
+              to: f.cfg.Broker.Receive
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - opt:
+                do:
+                  - return: f.full()
+                    to: f.full
+                when: len(deliveries) == 0
+            - bind: oldest
+              eval: deliveries[0]
+            - opt:
+                do:
+                  - return: ackErr
+                init:
+                  bind: ackErr
+                  eval: f.cfg.Broker.Ack(ctx, oldest.Lease.Receipt)
+                  to: f.cfg.Broker.Ack
+                when: ackErr != nil
+            - eval: f.settle(int64(len(oldest.Message.Payload)), &f.stats.Dropped)
+              to: f.settle
+      - return: nil
+  - of: (*Forwarder).block
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Forwarder).block
+        kind: self
+      - id: f.cfg.Clock.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+      - id: f.full
+        kind: internal
+      - id: f.settle
+        kind: internal
+      - id: ctx.Err
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: f.fits(size)
+      - bind: timer
+        eval: f.cfg.Clock.NewTimer(f.cfg.BlockTimeout)
+        to: f.cfg.Clock.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - loop:
+          cond: "!f.fits(size)"
+          do:
+            - select:
+                cases:
+                  - comm: <-f.room
+                  - comm: <-timer.C()
+                    do:
+                      - return: f.full()
+                        to: f.full
+                  - comm: <-ctx.Done()
+                    do:
+                      - eval: f.settle(0, &f.stats.Dropped)
+                        to: f.settle
+                      - return: ctx.Err()
+                        to: ctx.Err
+      - return: nil
+  - of: (*Forwarder).fits
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Forwarder).fits
+        kind: self
+      - id: f.holds
+        kind: internal
+    steps:
+      - lock:
+          mutex: f.mu
+      - return: f.holds(size)
+        to: f.holds
+  - of: (*Forwarder).holds
+    steps:
+      - return: f.stats.Pending < f.cfg.MaxBatches && f.stats.PendingBytes+size <= f.cfg.MaxBytes
+  - of: (*Forwarder).full
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Forwarder).full
+        kind: self
+      - id: f.settle
+        kind: internal
+      - id: kerrs
+        kind: package
+    steps:
+      - eval: f.settle(0, &f.stats.Dropped)
+        to: f.settle
+      - return: |-
+          kerrs.Wrap(coreforward.ForwardFull, kerrs.WrapParams{},
+          		kerrs.String("policy", f.cfg.WhenFull.String()))
+        to: kerrs
+  - of: (*Forwarder).reserve
+    steps:
+      - lock:
+          mutex: f.mu
+      - op: ++
+        set: f.stats.Pending
+      - op: +=
+        set: f.stats.PendingBytes
+        value: size
+  - of: (*Forwarder).unreserve
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Forwarder).unreserve
+        kind: self
+      - id: f.leave
+        kind: internal
+    steps:
+      - lock:
+          mutex: f.mu
+      - eval: f.leave(size)
+        to: f.leave
+  - of: (*Forwarder).settle
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Forwarder).settle
+        kind: self
+      - id: f.leave
+        kind: internal
+    steps:
+      - lock:
+          mutex: f.mu
+      - op: ++
+        set: "*counter"
+      - opt:
+          do:
+            - eval: f.leave(size)
+              to: f.leave
+          when: size > 0
+  - of: (*Forwarder).leave
+    steps:
+      - set: f.stats.Pending
+        value: max(f.stats.Pending-1, 0)
+      - set: f.stats.PendingBytes
+        value: max(f.stats.PendingBytes-size, 0)
+      - select:
+          cases:
+            - comm: f.room <- struct{}{}
+            - default: true
+  - of: NewSpanExporter
+    steps:
+      - opt:
+          do:
+            - return: nil, misconfigured("forwarder", "missing")
+          when: forwarder == nil
+      - return: "&spanExporter{forwarder: forwarder, name: name}, nil"
+  - of: NewMetricExporter
+    steps:
+      - opt:
+          do:
+            - return: nil, misconfigured("forwarder", "missing")
+          when: forwarder == nil
+      - return: "&metricExporter{forwarder: forwarder, name: name}, nil"
+  - of: (*spanExporter).Name
+    steps:
+      - return: e.name
+  - of: (*spanExporter).Export
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*spanExporter).Export
+        kind: self
+      - id: e.ExportContext
+        kind: internal
+    steps:
+      - return: e.ExportContext(context.Background(), spans)
+        to: e.ExportContext
+  - of: (*spanExporter).ExportContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*spanExporter).ExportContext
+        kind: self
+      - id: svctrace
+        kind: package
+      - id: e.forwarder.Enqueue
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: spans.IsEmpty()
+      - bind: doc, err
+        eval: svctrace.EncodeOTLPJSON(spans)
+        to: svctrace
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - return: e.forwarder.Enqueue(ctx, doc)
+        to: e.forwarder.Enqueue
+  - of: (*metricExporter).Name
+    steps:
+      - return: e.name
+  - of: (*metricExporter).Export
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*metricExporter).Export
+        kind: self
+      - id: e.ExportContext
+        kind: internal
+    steps:
+      - return: e.ExportContext(context.Background(), snap)
+        to: e.ExportContext
+  - of: (*metricExporter).ExportContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*metricExporter).ExportContext
+        kind: self
+      - id: svcmetrics
+        kind: package
+      - id: e.forwarder.Enqueue
+        kind: internal
+    steps:
+      - bind: doc, err
+        eval: svcmetrics.EncodeOTLPJSON(snap)
+        to: svcmetrics
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - return: e.forwarder.Enqueue(ctx, doc)
+        to: e.forwarder.Enqueue

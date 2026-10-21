@@ -1,0 +1,540 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      The defaults a zero field clamps to (ADR 0031: each zero has one reading —
+      "not thought about" — and the value below is the one that needs no
+      explanation).
+    grouped: true
+    items:
+      - doc: |-
+          DefaultMaxBatches bounds the batches a forwarder holds when
+          Config.MaxBatches is zero — the order of magnitude of the OpenTelemetry
+          Collector's sending_queue.
+        name: DefaultMaxBatches
+        type: int
+        value: "10_000"
+      - doc: |-
+          DefaultMaxBytes bounds the bytes a forwarder holds when Config.MaxBytes
+          is zero — Vector's smallest disk buffer.
+        name: DefaultMaxBytes
+        type: int64
+        value: 256 << 20
+      - doc: |-
+          DefaultBlockTimeout is how long Enqueue waits for room under Block when
+          Config.BlockTimeout is zero.
+        name: DefaultBlockTimeout
+        type: time.Duration
+        value: 5 * time.Second
+      - doc: |-
+          DefaultSendTimeout bounds one attempt when Config.SendTimeout is zero —
+          the OTLP specification's default OTEL_EXPORTER_OTLP_TIMEOUT.
+        name: DefaultSendTimeout
+        type: time.Duration
+        value: 10 * time.Second
+      - doc: |-
+          DefaultMaxAge is how long after the queue accepted it a batch may still
+          be sent when Config.MaxAge is zero.
+        name: DefaultMaxAge
+        type: time.Duration
+        value: 24 * time.Hour
+      - doc: |-
+          DefaultRetryBase and DefaultRetryMax bound the wait between attempts
+          when Config.Backoff is zero: five seconds, growing to thirty — the
+          Collector's retry_on_failure numbers.
+        name: DefaultRetryBase
+        type: time.Duration
+        value: 5 * time.Second
+      - doc: DefaultRetryMax is the ceiling of the default backoff.
+        name: DefaultRetryMax
+        type: time.Duration
+        value: 30 * time.Second
+    name: DefaultMaxBatches
+  - doc: |-
+      countPage is how many live messages New reads per call when it counts the
+      backlog a previous process left.
+    items:
+      - name: countPage
+        type: int
+        value: "256"
+    name: countPage
+  - doc: The three full policies. The zero is DropOldest.
+    grouped: true
+    items:
+      - doc: |-
+          DropOldest takes the oldest batches the consumer is not sending out of
+          the queue, each counted Dropped, until the new one fits; when none can
+          be taken it refuses the new one as DropNewest does.
+        name: DropOldest
+        type: FullPolicy
+        value: iota
+      - doc: DropNewest refuses the new batch with ForwardFull, counted Dropped.
+        name: DropNewest
+      - doc: |-
+          Block waits for room up to Config.BlockTimeout, then refuses the new
+          batch with ForwardFull, counted Dropped.
+        name: Block
+    name: DropOldest
+  - doc: The names String renders.
+    grouped: true
+    items:
+      - name: dropOldestName
+        type: string
+        value: "\"drop-oldest\""
+      - name: dropNewestName
+        type: string
+        value: "\"drop-newest\""
+      - name: blockName
+        type: string
+        value: "\"block\""
+      - name: unknownName
+        type: string
+        value: "\"unknown\""
+    name: dropOldestName
+files:
+  - decls:
+      - DefaultMaxBatches
+      - countPage
+      - DropOldest
+      - dropOldestName
+      - Sender
+      - FullPolicy
+      - Config
+      - FullPolicy.String
+      - (*Config).validate
+      - (*Config).validateBounds
+      - (*Config).normalized
+      - orDefault
+      - misconfigured
+    name: config.go
+  - decls:
+      - (*Forwarder).deliver
+      - (*Forwarder).retry
+      - (*Forwarder).delay
+      - (*Forwarder).attempt
+    name: deliver.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - Forwarder
+      - New
+      - (*Forwarder).countBacklog
+      - (*Forwarder).Enqueue
+      - (*Forwarder).Stats
+      - (*Forwarder).Run
+      - (*Forwarder).makeRoom
+      - (*Forwarder).dropOldest
+      - (*Forwarder).block
+      - (*Forwarder).fits
+      - (*Forwarder).holds
+      - (*Forwarder).full
+      - (*Forwarder).reserve
+      - (*Forwarder).unreserve
+      - (*Forwarder).settle
+      - (*Forwarder).leave
+    name: forwarder.go
+  - decls:
+      - spanExporter
+      - metricExporter
+      - NewSpanExporter
+      - NewMetricExporter
+      - (*spanExporter).Name
+      - (*spanExporter).Export
+      - (*spanExporter).ExportContext
+      - (*metricExporter).Name
+      - (*metricExporter).Export
+      - (*metricExporter).ExportContext
+    name: signal.go
+  - decls:
+      - StatsValue
+    name: stats.go
+functions:
+  - doc: orDefault returns value, or fallback when value is zero.
+    name: orDefault
+    params: value, fallback T
+    results: T
+    typeParams: T int | int64 | time.Duration
+  - doc: misconfigured is ForwardMisconfigured naming the field and the problem.
+    name: misconfigured
+    params: field, problem string
+    results: error
+  - name: New
+    params: ctx context.Context, cfg Config
+    results: "*Forwarder, error"
+  - name: NewSpanExporter
+    params: name coretrace.ExporterName, forwarder *Forwarder
+    results: coretrace.ContextSpanExporter, error
+  - name: NewMetricExporter
+    params: name coremetrics.ExporterName, forwarder *Forwarder
+    results: coremetrics.ContextExporter, error
+imports:
+  clock: github.com/kitsunium/sdk/internal/kernel/clock
+  context: context
+  coreforward: github.com/kitsunium/sdk/internal/core/app/forward
+  coremetrics: github.com/kitsunium/sdk/internal/core/observe/metrics
+  corequeue: github.com/kitsunium/sdk/internal/core/data/queue
+  coreres: github.com/kitsunium/sdk/internal/core/app/resilience
+  coretrace: github.com/kitsunium/sdk/internal/core/observe/trace
+  kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
+  kerrs: github.com/kitsunium/sdk/internal/kernel/errs
+  math: math
+  svcmetrics: github.com/kitsunium/sdk/internal/service/observe/metrics
+  svcqueue: github.com/kitsunium/sdk/internal/service/data/queue
+  svcres: github.com/kitsunium/sdk/internal/service/app/resilience
+  svctrace: github.com/kitsunium/sdk/internal/service/observe/trace
+  sync: sync
+  time: time
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/app/forward
+  name: forward
+  purpose: "Package forward is the store-and-forward engine (ADR 0185): a batch kept in a durable queue by Enqueue, sent later by Run through the caller's Sender, retried by resilience's retry on the injected clock — the delay a collector imposes honoured in full, the backoff otherwise, the batch's age as the budget —, dead-lettered when the sender refuses it for good, and counted at every step."
+types:
+  - kind: named
+    name: Sender
+    underlying: func(ctx context.Context, batch []byte) error
+  - kind: named
+    methods:
+      - name: String
+        recv: p FullPolicy
+        results: string
+    name: FullPolicy
+    underlying: uint8
+  - fields:
+      - doc: |-
+          Broker is the queue the forwarder holds its batches in: a directory
+          (queue.NewFile) for a backlog that outlives the process, a table
+          (queue.NewSQL), or memory. One queue per signal. Build it with a
+          VisibilityTimeout above SendTimeout, a MaxDeliveries no outage reaches
+          — MaxAge is the forwarder's budget — and a MaxMessageBytes that holds
+          a batch. The forwarder neither sets its policy nor closes it.
+        name: Broker
+        type: corequeue.Broker
+      - doc: |-
+          Send ships one stored batch: an OTLP/HTTP exporter's ExportDocument,
+          or any function of that shape.
+        name: Send
+        type: Sender
+      - doc: |-
+          Retryable classifies a failure of Send as one a later attempt may cure
+          — trace.OTLPRetryable, metrics.OTLPRetryable. It is REQUIRED: nil reads
+          as "retry everything" or as "retry nothing", two opposites. A failure
+          it calls permanent is dead-lettered at once.
+        name: Retryable
+        type: func(error) bool
+      - doc: |-
+          Clock paces every retry, bounds every attempt and the wait of Block,
+          and ages every batch. Nil means clock.System; a clock.ManualClock drives
+          a test without a sleep. It must be the broker's: a batch's age is read
+          from the instant the broker stamped.
+        name: Clock
+        type: clock.Timed
+      - doc: |-
+          MaxBatches bounds the batches the forwarder holds. Zero means
+          DefaultMaxBatches; negative is refused.
+        name: MaxBatches
+        type: int
+      - doc: |-
+          MaxBytes bounds the bytes the forwarder holds. Zero means
+          DefaultMaxBytes; negative is refused. A batch larger on its own is
+          refused with BatchTooLarge.
+        name: MaxBytes
+        type: int64
+      - doc: |-
+          WhenFull is what Enqueue does when either bound is reached. The zero
+          is DropOldest.
+        name: WhenFull
+        type: FullPolicy
+      - doc: |-
+          BlockTimeout bounds the wait of Block. Zero means DefaultBlockTimeout;
+          negative is refused.
+        name: BlockTimeout
+        type: time.Duration
+      - doc: |-
+          SendTimeout bounds one attempt, on Clock. Zero means
+          DefaultSendTimeout; negative is refused.
+        name: SendTimeout
+        type: time.Duration
+      - doc: |-
+          MaxAge is how long after the queue accepted it a batch may still be
+          sent: one delivered older is dropped unsent, one whose retryable
+          failure finds it older is not retried; either is acknowledged and
+          counted Expired. A Retry-After is honoured in full, but never past it.
+          Zero means DefaultMaxAge; negative is refused.
+        name: MaxAge
+        type: time.Duration
+      - doc: |-
+          Backoff is the wait before each retry when the failure imposes none:
+          Backoff.Delay(attempt). The zero value is the
+          DefaultRetryBase–DefaultRetryMax curve, and a curve without a positive
+          BaseDelay starts from DefaultRetryBase under its own ceiling: a failed
+          batch is never retried at once.
+        name: Backoff
+        type: kbackoff.Value
+      - doc: |-
+          Parallelism is how many consumers send at once. Non-positive is one,
+          which keeps the queue's order while nothing fails and sends one request
+          at a time to a collector that is down; above one there is no order.
+        name: Parallelism
+        type: int
+      - doc: |-
+          PollInterval is how late a batch another PROCESS queued may be
+          noticed; one Enqueue queued in this process is sent at once. Zero is
+          the queue's own default.
+        name: PollInterval
+        type: time.Duration
+      - doc: |-
+          DrainTimeout is how long the batch being sent when Run's context ends
+          may still run. Zero stops it at once; it is then handed back uncounted
+          and sent by the next process.
+        name: DrainTimeout
+        type: time.Duration
+      - doc: |-
+          SettleTimeout bounds each acknowledgement and hand-back once Run's
+          context has ended. Zero is the queue's own default.
+        name: SettleTimeout
+        type: time.Duration
+    kind: struct
+    methods:
+      - doc: validate refuses a configuration no forwarder can run under.
+        name: validate
+        recv: c *Config
+        results: error
+      - doc: |-
+          validateBounds refuses a negative bound or timeout: a zero is a default,
+          a negative has no reading.
+        name: validateBounds
+        recv: c *Config
+        results: error
+      - doc: |-
+          normalized resolves every clamped field, so the engine reads numbers rather
+          than remembering defaults.
+        name: normalized
+        recv: c *Config
+        results: Config
+    name: Config
+  - fields:
+      - doc: |-
+          room holds one signal, sent when a batch leaves the queue, which the
+          one producer waiting under Block — Enqueue is serialised — wakes on. A
+          signal nobody waited for only makes the next wait look again.
+        name: room
+        type: chan struct{}
+      - doc: cfg is the normalized configuration.
+        name: cfg
+        type: Config
+      - doc: stats is what the forwarder holds and has done.
+        name: stats
+        type: StatsValue
+      - doc: |-
+          admit serialises Enqueue, so two producers never both make room for
+          one slot.
+        name: admit
+        type: sync.Mutex
+      - doc: mu guards stats.
+        name: mu
+        type: sync.Mutex
+    kind: struct
+    methods:
+      - doc: |-
+          deliver is the queue handler: one batch, retried while its failure is
+          retryable and its age allows, then acknowledged — sent or expired — or
+          dead-lettered. A stop hands it back as it is.
+        name: deliver
+        params: ctx context.Context, delivery corequeue.DeliveryValue
+        recv: f *Forwarder
+        results: error
+      - doc: |-
+          retry is the policy one batch is retried under: as many attempts as its
+          age allows, each failure classified by Config.Retryable, each wait the
+          delay the failure imposes or the backoff, on the forwarder's clock.
+        name: retry
+        params: expiry time.Time
+        recv: f *Forwarder
+        results: coreres.Runner
+      - doc: |-
+          delay is the wait before the attempt-th retry: what the failure imposes —
+          a collector's Retry-After —, recorded, else the backoff curve; either held
+          at what is left of the batch's age.
+        name: delay
+        params: attempt int, failed error, expiry time.Time
+        recv: f *Forwarder
+        results: time.Duration
+      - doc: |-
+          attempt sends payload once, its context cancelled when SendTimeout passes
+          on the forwarder's clock.
+
+          Goroutine lifecycle: one per attempt waits on the timeout timer. It ends
+          when the attempt returns (done closes) or when the timer fires and cancels
+          the attempt's context; attempt closes done on every way out.
+        name: attempt
+        params: ctx context.Context, payload []byte
+        recv: f *Forwarder
+        results: error
+      - doc: countBacklog adds every live message of reader to Pending and PendingBytes.
+        name: countBacklog
+        params: ctx context.Context, reader corequeue.MessageReader
+        recv: f *Forwarder
+        results: error
+      - name: Enqueue
+        params: ctx context.Context, batch []byte
+        recv: f *Forwarder
+        results: error
+      - name: Stats
+        recv: f *Forwarder
+        results: StatsValue
+      - name: Run
+        params: ctx context.Context
+        recv: f *Forwarder
+        results: error
+      - doc: makeRoom applies the full policy until size fits.
+        name: makeRoom
+        params: ctx context.Context, size int64
+        recv: f *Forwarder
+        results: error
+      - doc: |-
+          dropOldest takes the oldest receivable batches out of the queue until size
+          fits, each counted Dropped; when none can be taken the new batch is
+          refused instead.
+        name: dropOldest
+        params: ctx context.Context, size int64
+        recv: f *Forwarder
+        results: error
+      - doc: block waits for room up to BlockTimeout on the clock, then refuses.
+        name: block
+        params: ctx context.Context, size int64
+        recv: f *Forwarder
+        results: error
+      - doc: fits reports whether a batch of size fits under both bounds.
+        name: fits
+        params: size int64
+        recv: f *Forwarder
+        results: bool
+      - doc: holds is fits with mu held.
+        name: holds
+        params: size int64
+        recv: f *Forwarder
+        results: bool
+      - doc: full counts the new batch Dropped and refuses it with ForwardFull.
+        name: full
+        recv: f *Forwarder
+        results: error
+      - doc: |-
+          reserve counts a batch held before it is published, so a consumer that
+          acknowledges it at once never takes the count below zero.
+        name: reserve
+        params: size int64
+        recv: f *Forwarder
+      - doc: unreserve takes back a reservation whose publication failed.
+        name: unreserve
+        params: size int64
+        recv: f *Forwarder
+      - doc: |-
+          settle records a batch of size leaving the queue under counter — size 0
+          for one that never entered it — and wakes a producer waiting for room.
+        name: settle
+        params: size int64, counter *uint64
+        recv: f *Forwarder
+      - doc: |-
+          leave takes a held batch of size out of the counts, never below zero — a
+          batch another process queued is not counted — and wakes a waiting
+          producer.
+        name: leave
+        params: size int64
+        recv: f *Forwarder
+    name: Forwarder
+  - doc: |-
+      spanExporter is the producer half for the trace signal: each batch
+      encoded once, as the OTLP/HTTP exporter would post it, and kept.
+    fields:
+      - doc: forwarder keeps the encoded batches.
+        name: forwarder
+        type: "*Forwarder"
+      - doc: name is the exporter's name.
+        name: name
+        type: coretrace.ExporterName
+    kind: struct
+    methods:
+      - doc: Name implements core/observe/trace.SpanExporter.
+        name: Name
+        recv: e *spanExporter
+        results: coretrace.ExporterName
+      - doc: Export is ExportContext under a context that never ends.
+        name: Export
+        params: spans coretrace.SpansValue
+        recv: e *spanExporter
+        results: error
+      - doc: ExportContext encodes spans and keeps them; an empty batch keeps nothing.
+        name: ExportContext
+        params: ctx context.Context, spans coretrace.SpansValue
+        recv: e *spanExporter
+        results: error
+    name: spanExporter
+  - doc: metricExporter is the producer half for the metrics signal.
+    fields:
+      - doc: forwarder keeps the encoded snapshots.
+        name: forwarder
+        type: "*Forwarder"
+      - doc: name is the exporter's name.
+        name: name
+        type: coremetrics.ExporterName
+    kind: struct
+    methods:
+      - doc: Name implements core/observe/metrics.Exporter.
+        name: Name
+        recv: e *metricExporter
+        results: coremetrics.ExporterName
+      - doc: Export is ExportContext under a context that never ends.
+        name: Export
+        params: snap coremetrics.SnapshotValue
+        recv: e *metricExporter
+        results: error
+      - doc: ExportContext encodes snap and keeps it.
+        name: ExportContext
+        params: ctx context.Context, snap coremetrics.SnapshotValue
+        recv: e *metricExporter
+        results: error
+    name: metricExporter
+  - fields:
+      - doc: |-
+          LastRetryAfterAt is when a collector last imposed a delay; zero when
+          none has.
+        name: LastRetryAfterAt
+        type: time.Time
+      - doc: PendingBytes is the bytes of the batches the forwarder holds.
+        name: PendingBytes
+        type: int64
+      - doc: |-
+          LastRetryAfter is the last delay a collector imposed — a Retry-After
+          — as the failure carried it.
+        name: LastRetryAfter
+        type: time.Duration
+      - doc: |-
+          Pending is the batches the forwarder holds: queued, waiting or being
+          sent.
+        name: Pending
+        type: int
+      - doc: Enqueued counts the batches Enqueue kept.
+        name: Enqueued
+        type: uint64
+      - doc: Sent counts the batches the sender accepted.
+        name: Sent
+        type: uint64
+      - doc: Retries counts the attempts made after a retryable failure.
+        name: Retries
+        type: uint64
+      - doc: |-
+          Dropped counts the batches lost to a bound: refused by a full queue or
+          as too large, or taken out of it by DropOldest.
+        name: Dropped
+        type: uint64
+      - doc: Expired counts the batches dropped because they outlived MaxAge.
+        name: Expired
+        type: uint64
+      - doc: |-
+          DeadLettered counts the batches the sender refused for good, kept in
+          the broker's dead-letter store.
+        name: DeadLettered
+        type: uint64
+    kind: struct
+    name: StatsValue

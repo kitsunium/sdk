@@ -1,0 +1,44 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "forward",
+    srcs = [
+        "doc.go",
+        "gen_facade.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/app/forward",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/app/forward",
+        "//internal/core/observe/metrics",
+        "//internal/core/observe/trace",
+        "//internal/kernel/errs",
+        "//internal/service/app/forward",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":forward",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "forward_test",
+    srcs = [
+        "forward_external_test.go",
+        "gen_api_test.go",
+    ],
+    deps = [
+        ":forward",
+        "//internal/core/observe/metrics",
+        "//internal/core/observe/trace",
+        "//internal/kernel/errs",
+        "//internal/service/app/forward",
+        "//pkg/v1/data/queue",
+        "//pkg/v1/errs",
+        "//pkg/v1/observe/trace",
+    ],
+)

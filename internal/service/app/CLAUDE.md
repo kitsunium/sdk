@@ -31,7 +31,8 @@ ADR 0061), a `health` registry starts and drains as a `lifecycle` component,
 and `mail/spool` mints its Message-IDs with `id`'s ULID unless the caller
 supplies its own (ADR 0141). Outside the family they lean on the others
 rather than repeat them: `config` and `i18n` decode through `data/codec`,
-`mail/spool` is a `data/queue` consumer, `lifecycle` reaches `proc/signal`
+`mail/spool` and `forward` are `data/queue` consumers — `forward` also
+encodes through `observe/trace` and `observe/metrics` (ADR 0185) —, `lifecycle` reaches `proc/signal`
 and `proc/systemd/notify` and `health` the latter, `lock` walks its directory
 with `kernel/fs/pathchain`, `config` and `mail` carry `security/secret`
 values, and the members that wait do so on `kernel/clock`, the ones that
@@ -51,6 +52,7 @@ retry on the `kernel/backoff` curve.
 | `lock/` | the in-process locker, whose leases expire, and the file locker over `flock(2)` or `LockFileEx`, whose leases do not; the keepalive; the lock path refused when redirected or replaced (ADR 0052, ADR 0081–ADR 0084, ADR 0086) | `core/app/lock` | `0.3.51.*` and `0.2.21.*`, both declared in `core/app/lock` | `pkg/v1/app/lock` |
 | `mail/` | the guards every writer runs (the injection gate, the addr-spec subset, `Validate`, `Envelope` — ADR 0160), MIME composition and the SMTP transport over `net/smtp`, with memory and capture doubles that compose as production does (ADR 0064) | `core/app/mail` | `0.3.61.*` and `0.2.31.*`, both declared in `core/app/mail` | `pkg/v1/app/mail` |
 | `mail/spool/` | the durable outbox: validated and stamped at `Send`, delivered from a `data/queue` consumer, a failure parked on the backoff curve and the last one dead-lettered with its cause (ADR 0111, ADR 0141) | none — it composes `core/app/mail` and `core/data/queue` | `0.3.81.*`, declared in `core/app/mail/spool` | `pkg/v1/app/mail/spool` |
+| `forward/` | store and forward: a batch kept in a `data/queue` broker, bounded in batches and bytes with a full policy, sent by a `Consume` loop, each batch retried by `resilience.NewRetry` (the collector's `Retry-After` in full, the backoff otherwise, its age the budget), dead-lettered when refused, counted; the trace and metrics producer adapters (ADR 0185) | none — it composes `core/data/queue`, `core/app/resilience` and the signals' exporter ports | `0.3.93.*`, declared in `core/app/forward` | `pkg/v1/app/forward` |
 | `resilience/` | retry, circuit breaker, rate limit (one bucket, or one per caller), bulkhead, timeout, fallback and hedging, and `BackoffValue`, an alias of `kernel/backoff`'s curve (ADR 0026, ADR 0031, ADR 0103) | `core/app/resilience` | none of its own — core's `0.2.8.*` | `pkg/v1/app/resilience` |
 | `scheduler/` | the five-field cron parser, the fixed interval and the firing engine, waiting on `kernel/clock` (ADR 0041) | `core/app/scheduler` | `0.3.43.*` and `0.2.12.*`, both declared in `core/app/scheduler` | `pkg/v1/app/scheduler` |
 | `statemachine/` | declarations frozen per machine, per-entity transitions, and the agenda heap the loop sleeps on (ADR 0120) | `core/app/statemachine` | `0.3.88.*` and `0.2.56.*`, both declared in `core/app/statemachine` | `pkg/v1/app/statemachine` |
@@ -74,4 +76,6 @@ family only because their own tests read their sources at runtime.
   to `data/queue`, a signal to `proc/signal`.
 - Import one member from another without saying so in both `CLAUDE.md` files:
   today `config` reaches `validation`, `health` reaches `lifecycle`, and
-  `mail/spool` reaches `mail` and `id`, and no other member reaches a sibling.
+  `mail/spool` reaches `mail` and `id`, `forward` reaches `resilience` — its
+  retry, `NewRetry` honouring `RetryAfter` (ADR 0185) —, and no other member
+  reaches a sibling.

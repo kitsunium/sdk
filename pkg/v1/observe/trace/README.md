@@ -128,6 +128,8 @@ See ADR 0051.
   - [func \(Carrier\) Set\(key string, value string\)](<#Carrier.Set>)
 - [type ContextSpanExporter](<#ContextSpanExporter>)
   - [func \(ContextSpanExporter\) ExportContext\(ctx context.Context, spans SpansValue\) error](<#ContextSpanExporter.ExportContext>)
+- [type DocumentExporter](<#DocumentExporter>)
+  - [func \(DocumentExporter\) ExportDocument\(ctx context.Context, doc \[\]byte\) error](<#DocumentExporter.ExportDocument>)
 - [type Event](<#Event>)
   - [func \(Event\) Normalized\(\) EventValue](<#Event.Normalized>)
 - [type ExporterName](<#ExporterName>)
@@ -1342,6 +1344,30 @@ type ContextSpanExporter interface {
 
 ```go
 func (ContextSpanExporter) ExportContext(ctx context.Context, spans SpansValue) error
+```
+
+<a name="DocumentExporter"></a>
+## type [DocumentExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
+
+DocumentExporter is the sibling of ContextSpanExporter an exporter implements to ship a batch already encoded — the OTLP/HTTP exporter's ExportDocument posts an OTLP/JSON document as ExportContext posts spans, with the same verdicts (ADR 0185).
+
+```go
+type DocumentExporter = coretrace.DocumentExporter
+```
+
+DocumentExporter is an alias of `github.com/kitsunium/sdk/internal/core/observe/trace.DocumentExporter`, declared as:
+
+```go
+type DocumentExporter interface {
+	ExportDocument(ctx context.Context, doc []byte) error
+}
+```
+
+<a name="DocumentExporter.ExportDocument"></a>
+### func \(DocumentExporter\) [ExportDocument](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/gen_ports.go>)
+
+```go
+func (DocumentExporter) ExportDocument(ctx context.Context, doc []byte) error
 ```
 
 <a name="Event"></a>
