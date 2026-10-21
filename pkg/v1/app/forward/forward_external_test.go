@@ -43,7 +43,7 @@ func TestTheFacadeKeepsABatchAndRefusesWhatCannotFit(t *testing.T) {
 	if code, _ := errs.CodeOf(err); !errors.Is(err, forward.BatchTooLarge) || code.String() != "0.3.93.3" {
 		t.Errorf("an oversized batch = %v, want BatchTooLarge", err)
 	}
-	var stats forward.Stats = fw.Stats()
+	stats := fw.Stats()
 	if stats.Pending != 1 || stats.Dropped != 2 {
 		t.Errorf("Stats = %+v, want one pending and two dropped", stats)
 	}

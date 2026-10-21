@@ -180,8 +180,11 @@ The consumer is `data/queue`'s `Consume`, one message at a time,
 `AutoExtend` on — the lease is renewed while a batch is retried, so a long
 outage keeps the batch leased by one consumer instead of letting it lapse to
 another — and `HandlerIsIdempotent` asserted: a batch the collector accepted
-just before a crash is sent again by the next process, which OTLP tolerates
-(a duplicate span or point) and which no forwarder can prevent (ADR 0054 §1).
+just before a crash is sent again by the next process, which no forwarder can
+prevent (ADR 0054 §1). Its cost depends on the data: a duplicate span, a
+cumulative metric point repeated — harmless —, or a DELTA metric point counted
+twice, which a product exporting delta temporality through a forwarder accepts
+or avoids by exporting cumulative. The package documentation says so.
 
 Each delivery runs `resilience.NewRetry` on the forwarder's clock:
 

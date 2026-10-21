@@ -2,10 +2,12 @@
 // waits on disk while the collector it is meant for is down, and a count of
 // what it held, sent and lost (ADR 0185).
 //
-// A [Forwarder] holds each batch as one message of a durable queue (package
-// [github.com/kitsunium/sdk/pkg/v1/data/queue]: a directory, a table, or
-// memory) and sends it later through a [Sender] its caller supplies. [Forwarder].Enqueue
-// returns once the batch is durable; [Forwarder].Run sends, one batch at a time by
+// A [Forwarder] holds each batch as one message of a queue (package
+// [github.com/kitsunium/sdk/pkg/v1/data/queue]: a directory or a table, which
+// outlive the process, or memory, which does not) and sends it later through a
+// [Sender] its caller supplies. [Forwarder].Enqueue returns once the queue holds
+// the batch — durably, and across a restart, only on a directory or a table;
+// [Forwarder].Run sends, one batch at a time by
 // default, each retried on the forwarder's clock while [Config].Retryable calls its
 // failure retryable and the batch is younger than [Config].MaxAge — waiting the
 // delay a collector imposes (a Retry-After) in full, otherwise a backoff from
@@ -31,7 +33,13 @@
 //	spans, err := forward.NewSpanExporter("otlp-durable", fw) // behind a trace.BatchSink
 //
 // One queue per signal: metrics take their own forwarder, through
-// [NewMetricExporter] and the metrics exporter's DocumentExporter. A batch is
-// sent at least once: a process that dies between the collector's acceptance
-// and the acknowledgement sends it again, which OTLP tolerates.
+// [NewMetricExporter] and the metrics exporter's DocumentExporter.
+//
+// A batch the forwarder keeps until a send — one no full queue dropped and no
+// MaxAge expired, counted Dropped or Expired otherwise — is sent at least once:
+// a process that dies between the collector's acceptance and the
+// acknowledgement sends it again. A trace backend sees a duplicate span; a
+// cumulative metric point repeats a value; a DELTA metric point is counted
+// twice. A product exporting delta temporality through a forwarder accepts
+// that, or exports cumulative.
 package forward

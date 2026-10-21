@@ -145,7 +145,8 @@ func (f *Forwarder) Run(ctx context.Context) error {
 		AutoExtend:    true,
 		// A batch sent again after a crash between the collector's
 		// acceptance and the acknowledgement is a duplicate span or point,
-		// which OTLP tolerates and no forwarder can prevent (ADR 0185 D6).
+		// which no forwarder can prevent — a delta metric point is then
+		// counted twice, as the package documentation says (ADR 0185 D6).
 		HandlerIsIdempotent: true,
 	})
 }

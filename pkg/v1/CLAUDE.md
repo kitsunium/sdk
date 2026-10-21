@@ -133,7 +133,7 @@ at `internal/kernel/semver`. `transform` publishes the compressors beside
 
 The application facades — `config`, `cli`, `i18n`, `validation`, `view`,
 `events`, `scheduler`, `statemachine`, `resilience`, `lifecycle`, `health`,
-`lock`, `id` and `mail` (with the mail spool beneath it, `mail/spool`, a
+`lock`, `id`, `forward` and `mail` (with the mail spool beneath it, `mail/spool`, a
 facade of its own since ADR 0160) — are children of `app/`, a family directory with no Go code of its own (ADR 0155):
 `github.com/kitsunium/sdk/pkg/v1/app/<name>`. They moved from the root of
 `pkg/v1` with no alias left behind, under the same v0 licence. With them every
@@ -222,7 +222,7 @@ for m in pkg/v1/*/go.mod; do (cd "${m%/go.mod}" && GOWORK=off go test -race -cov
 
 - `observe/` — see `pkg/v1/observe/CLAUDE.md` (the observe family — `logger`, `metrics`, `trace`, `profiling` — and the rule that put them together; a directory with no Go code, so there is no `pkg/v1/observe` to import)
 - `data/` — see `pkg/v1/data/CLAUDE.md` (the data family — `codec`, `transform`, `sql`, `docstore`, `queue`, `cache`, `vfs`, `semver` — and the rule that put them together; a directory with no Go code, so there is no `pkg/v1/data` to import)
-- `app/` — see `pkg/v1/app/CLAUDE.md` (the app family — `config`, `cli`, `i18n`, `validation`, `view`, `events`, `scheduler`, `statemachine`, `resilience`, `lifecycle`, `health`, `lock`, `id`, `mail` — and the rule that put them together; a directory with no Go code, so there is no `pkg/v1/app` to import)
+- `app/` — see `pkg/v1/app/CLAUDE.md` (the app family — `config`, `cli`, `i18n`, `validation`, `view`, `events`, `scheduler`, `statemachine`, `resilience`, `lifecycle`, `health`, `lock`, `id`, `mail`, `forward` — and the rule that put them together; a directory with no Go code, so there is no `pkg/v1/app` to import)
 - `observe/logger/` — see `pkg/v1/observe/logger/CLAUDE.md`
 - `app/mail/` — see `pkg/v1/app/mail/CLAUDE.md`
 - `app/mail/spool/` — see `pkg/v1/app/mail/spool/CLAUDE.md`
