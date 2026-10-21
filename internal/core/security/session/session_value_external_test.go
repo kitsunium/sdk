@@ -184,6 +184,13 @@ func TestKeysAreSorted(t *testing.T) {
 	}
 }
 
+// cartTotal is the data value the rendering tests look for. It is spelled with
+// letters no hexadecimal or decimal rendering produces, so a pointer address a
+// %v or %d prints for an unexported field can never contain it: the digit
+// string "1499" it replaced matched the address 0x19f1499b40e0 on NetBSD
+// (kitsunium/sdk#484), a false leak whose rate depended on the heap layout.
+const cartTotal = "zq1499-quokka"
+
 // TestSessionRendersItsShapeNeverItsContents is the regression guard for the
 // claim that a %v on a session cannot leak the subject, the identifier, or the
 // caller's data.
@@ -194,10 +201,10 @@ func TestSessionRendersItsShapeNeverItsContents(t *testing.T) {
 		ID: id, Subject: "user-42-alice@example.test",
 		CreatedAt: origin, LastSeen: origin,
 		AbsoluteExpiry: origin.Add(time.Hour), IdleExpiry: origin.Add(time.Hour),
-		Data: map[string]string{"cart_total": "1499", "email": "alice@example.test"},
+		Data: map[string]string{"cart_total": cartTotal, "email": "alice@example.test"},
 	})
 	forbidden := []string{
-		id.Reveal(), "alice", "user-42", "cart_total", "1499", "example.test",
+		id.Reveal(), "alice", "user-42", "cart_total", cartTotal, "example.test",
 	}
 	for _, verb := range []string{"%v", "%s", "%#v", "%+v"} {
 		rendered := fmt.Sprintf(verb, built)
@@ -236,7 +243,7 @@ func TestSessionNeverRendersItsContentsThroughAnyVerb(t *testing.T) {
 		ID: id, Subject: "user-42-alice@example.test",
 		CreatedAt: origin, LastSeen: origin,
 		AbsoluteExpiry: origin.Add(time.Hour), IdleExpiry: origin.Add(time.Hour),
-		Data: map[string]string{"cart_total": "1499"},
+		Data: map[string]string{"cart_total": cartTotal},
 	})
 	type tc struct {
 		name   string
@@ -251,7 +258,7 @@ func TestSessionNeverRendersItsContentsThroughAnyVerb(t *testing.T) {
 		{"an unexported field, %d", func() string { return fmt.Sprintf("%d", sessionHider{session: built}) }},
 		{"inside an array of any, %+v", func() string { return fmt.Sprintf("%+v", struct{ x [1]any }{[1]any{built}}) }},
 	}
-	forbidden := []string{id.Reveal(), "0 1 2 3 4 5 6", "000102030405", "alice", "user-42", "cart_total", "1499"}
+	forbidden := []string{id.Reveal(), "0 1 2 3 4 5 6", "000102030405060708090a0b", "alice", "user-42", "cart_total", cartTotal}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		rendered := c.render()
