@@ -27,7 +27,7 @@ func RenderSQLForTest(dialect coresql.Dialect, table string) RenderedSQL {
 		s.ack: "ack", s.retry: "retry", s.bury: "bury", s.extend: "extend", s.release: "release",
 		s.deadList: "deadList", s.replay: "replay", s.deleteDead: "deleteDead", s.putDead: "putDead",
 		s.liveList: "liveList", s.putLive: "putLive",
-		s.onceDrop: "onceDrop", s.onceClaim: "onceClaim", s.oncePick: "oncePick",
+		s.once.drop: "onceDrop", s.once.claim: "onceClaim", s.once.pick: "oncePick",
 	}
 	//: SQLite's lock, the one statement only one dialect sends.
 	if s.lock != "" {

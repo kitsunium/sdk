@@ -772,6 +772,8 @@ files:
       - sqlHeldBy
       - (*sqlStatements).leaseRows
       - (*sqlStatements).buryRows
+      - sqlOnceStatements
+      - renderSQLOnceStatements
       - (*sqlStatements).onceSweepRows
       - onceClaimStatement
       - (*sqlStatements).list
@@ -787,6 +789,7 @@ files:
       - (*sqlBroker).PublishOnce
       - (*sqlBroker).claimOnce
       - (*sqlBroker).sweepOnce
+      - (*sqlBroker).pickPassedOnce
     name: sql_once.go
   - decls:
       - sqlPicked
@@ -1380,6 +1383,12 @@ functions:
     name: sqlHeldBy
     params: dialect coresql.Dialect, first int
     results: string
+  - doc: |-
+      renderSQLOnceStatements renders PublishOnce's fixed statements on dialect,
+      over q, the queue's quoted table.
+    name: renderSQLOnceStatements
+    params: dialect coresql.Dialect, q string
+    results: sqlOnceStatements
   - doc: |-
       onceClaimStatement renders the reservation of a key: a row of state 2 whose
       due is the end of its window, inserted unless the key's row exists — then
@@ -3364,7 +3373,15 @@ types:
         name: sweepOnce
         params: ctx context.Context, ex coresql.Executor, now int64
         recv: b *sqlBroker
-        results: err error
+        results: error
+      - doc: |-
+          pickPassedOnce reads the identifiers of up to sqlOnceSweepRows reservations
+          whose window has passed by now — locked, and skipping those another
+          transaction holds, where the engine can.
+        name: pickPassedOnce
+        params: ctx context.Context, ex coresql.Executor, now int64
+        recv: b *sqlBroker
+        results: ids []any, err error
       - doc: |-
           Receive leases up to max due messages, burying on the way every lapsed
           lease with no attempt left.
@@ -3629,27 +3646,9 @@ types:
           due, with its count.
         name: putLive
         type: string
-      - doc: |-
-          onceDrop removes one key's reservation once its window has passed;
-          onceClaim reserves a key, affecting no row when the key is still
-          reserved; oncePick reads the passed reservations of any key, locked and
-          skipping those another transaction holds where the engine can.
-        name: onceDrop
-        type: string
-      - doc: |-
-          onceDrop removes one key's reservation once its window has passed;
-          onceClaim reserves a key, affecting no row when the key is still
-          reserved; oncePick reads the passed reservations of any key, locked and
-          skipping those another transaction holds where the engine can.
-        name: onceClaim
-        type: string
-      - doc: |-
-          onceDrop removes one key's reservation once its window has passed;
-          onceClaim reserves a key, affecting no row when the key is still
-          reserved; oncePick reads the passed reservations of any key, locked and
-          skipping those another transaction holds where the engine can.
-        name: oncePick
-        type: string
+      - doc: once are PublishOnce's fixed statements.
+        name: once
+        type: sqlOnceStatements
       - doc: table is the table's quoted name.
         name: table
         type: string
@@ -3685,6 +3684,23 @@ types:
         recv: s *sqlStatements
         results: string
     name: sqlStatements
+  - doc: |-
+      sqlOnceStatements are PublishOnce's fixed statements (ADR 0183), over
+      reservation rows — dead = 2 — of the queue's own table.
+    fields:
+      - doc: drop removes one key's reservation once its window has passed.
+        name: drop
+        type: string
+      - doc: claim reserves a key, affecting no row when the key is still reserved.
+        name: claim
+        type: string
+      - doc: |-
+          pick reads the passed reservations of any key, locked and skipping
+          those another transaction holds where the engine can.
+        name: pick
+        type: string
+    kind: struct
+    name: sqlOnceStatements
   - doc: sqlPicked is one row the lease's read returned.
     fields:
       - doc: id is the message identifier.

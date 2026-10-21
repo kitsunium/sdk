@@ -78,11 +78,8 @@ type sqlStatements struct {
 	// putLive writes a live message as it is given: queued, visible at its
 	// due, with its count.
 	putLive string
-	// onceDrop removes one key's reservation once its window has passed;
-	// onceClaim reserves a key, affecting no row when the key is still
-	// reserved; oncePick reads the passed reservations of any key, locked and
-	// skipping those another transaction holds where the engine can.
-	onceDrop, onceClaim, oncePick string
+	// once are PublishOnce's fixed statements.
+	once sqlOnceStatements
 	// table is the table's quoted name.
 	table string
 	// dialect selects the placeholder grammar of the per-call ones.
@@ -124,9 +121,7 @@ func renderSQLStatements(dialect coresql.Dialect, table string) sqlStatements {
 			" ORDER BY id LIMIT " + p(2),
 		putLive: "INSERT INTO " + q + " (id, dead, due, enqueued_at, deliveries, payload) VALUES (" +
 			p(1) + ", 0, " + p(2) + ", " + p(3) + ", " + p(4) + ", " + p(5) + ")",
-		onceDrop:  "DELETE FROM " + q + " WHERE id = " + p(1) + " AND dead = 2 AND due <= " + p(2),
-		onceClaim: onceClaimStatement(dialect, q),
-		oncePick:  "SELECT id FROM " + q + " WHERE dead = 2 AND due <= " + p(1) + " ORDER BY due, id LIMIT " + p(2) + dialect.ForUpdateSkipLocked(),
+		once: renderSQLOnceStatements(dialect, q),
 	}
 	//: SQLite's lock is the database's, taken by a transaction's first
 	//: WRITE: a lease that read first could be refused busy at its update,
@@ -165,6 +160,30 @@ func (s *sqlStatements) buryRows(n int) string {
 	//: the instant and the cause, then the identifiers from the fifth.
 	return "UPDATE " + s.table + " SET dead = 1, due = " + p(1) + ", lease = NULL, reason = " + p(2) + ", cause = " + p(3) +
 		", code = " + p(4) + " WHERE dead = 0 AND id IN (" + s.list(5, n) + ")"
+}
+
+// sqlOnceStatements are PublishOnce's fixed statements (ADR 0183), over
+// reservation rows — dead = 2 — of the queue's own table.
+type sqlOnceStatements struct {
+	// drop removes one key's reservation once its window has passed.
+	drop string
+	// claim reserves a key, affecting no row when the key is still reserved.
+	claim string
+	// pick reads the passed reservations of any key, locked and skipping
+	// those another transaction holds where the engine can.
+	pick string
+}
+
+// renderSQLOnceStatements renders PublishOnce's fixed statements on dialect,
+// over q, the queue's quoted table.
+func renderSQLOnceStatements(dialect coresql.Dialect, q string) sqlOnceStatements {
+	p := dialect.Placeholder
+	//: rendered once, sent on every PublishOnce.
+	return sqlOnceStatements{
+		drop:  "DELETE FROM " + q + " WHERE id = " + p(1) + " AND dead = 2 AND due <= " + p(2),
+		claim: onceClaimStatement(dialect, q),
+		pick:  "SELECT id FROM " + q + " WHERE dead = 2 AND due <= " + p(1) + " ORDER BY due, id LIMIT " + p(2) + dialect.ForUpdateSkipLocked(),
+	}
 }
 
 // onceSweepRows renders the removal of n passed reservations, picked by

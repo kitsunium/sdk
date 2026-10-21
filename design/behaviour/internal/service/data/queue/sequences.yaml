@@ -2578,14 +2578,12 @@ sequences:
       - bind: last
         eval: b.onceSwept.Load()
         to: b.onceSwept.Load
+      - bind: recent
+        eval: last != 0 && now.UnixNano() >= last && now.UnixNano()-last < int64(onceSweepEvery)
       - opt:
           do:
             - return: nil
-          when: last != 0 && now.UnixNano() >= last && now.UnixNano()-last < int64(onceSweepEvery)
-      - opt:
-          do:
-            - return: nil
-          when: "!b.onceSwept.CompareAndSwap(last, now.UnixNano())"
+          when: recent || !b.onceSwept.CompareAndSwap(last, now.UnixNano())
       - bind: entries, listErr
         eval: b.entriesOf(dirOnce)
         to: b.entriesOf
@@ -2651,12 +2649,9 @@ sequences:
           do:
             - return: ignoreMissing("remove", dirOnce, b.root.Remove(name))
               to: ignoreMissing
-          when: strings.HasSuffix(base, suffixGone) && !b.asideStillRuns(name, now)
-      - opt:
-          do:
-            - return: ignoreMissing("remove", dirOnce, b.root.Remove(name))
-              to: ignoreMissing
-          when: strings.HasSuffix(base, suffixNew) && b.writtenAndPassed(name, now)
+          when: |-
+            (strings.HasSuffix(base, suffixGone) && !b.asideStillRuns(name, now)) ||
+            		(strings.HasSuffix(base, suffixNew) && b.writtenAndPassed(name, now))
       - return: nil
   - of: (*fileBroker).writtenAndPassed
     participants:
@@ -5852,9 +5847,7 @@ sequences:
           			" ORDER BY id LIMIT " + p(2),
           		putLive: "INSERT INTO " + q + " (id, dead, due, enqueued_at, deliveries, payload) VALUES (" +
           			p(1) + ", 0, " + p(2) + ", " + p(3) + ", " + p(4) + ", " + p(5) + ")",
-          		onceDrop:  "DELETE FROM " + q + " WHERE id = " + p(1) + " AND dead = 2 AND due <= " + p(2),
-          		onceClaim: onceClaimStatement(dialect, q),
-          		oncePick:  "SELECT id FROM " + q + " WHERE dead = 2 AND due <= " + p(1) + " ORDER BY due, id LIMIT " + p(2) + dialect.ForUpdateSkipLocked(),
+          		once: renderSQLOnceStatements(dialect, q),
           	}
       - opt:
           do:
@@ -5893,6 +5886,16 @@ sequences:
       - return: |-
           "UPDATE " + s.table + " SET dead = 1, due = " + p(1) + ", lease = NULL, reason = " + p(2) + ", cause = " + p(3) +
           		", code = " + p(4) + " WHERE dead = 0 AND id IN (" + s.list(5, n) + ")"
+  - of: renderSQLOnceStatements
+    steps:
+      - bind: p
+        eval: dialect.Placeholder
+      - return: |-
+          sqlOnceStatements{
+          		drop:  "DELETE FROM " + q + " WHERE id = " + p(1) + " AND dead = 2 AND due <= " + p(2),
+          		claim: onceClaimStatement(dialect, q),
+          		pick:  "SELECT id FROM " + q + " WHERE dead = 2 AND due <= " + p(1) + " ORDER BY due, id LIMIT " + p(2) + dialect.ForUpdateSkipLocked(),
+          	}
   - of: (*sqlStatements).onceSweepRows
     steps:
       - return: |-
@@ -6119,11 +6122,11 @@ sequences:
             - return: false, b.failed("drop a passed reservation", execErr)
           init:
             bind: _, execErr
-            eval: ex.ExecContext(ctx, b.stmts.onceDrop, digest, now)
+            eval: ex.ExecContext(ctx, b.stmts.once.drop, digest, now)
             to: ex.ExecContext
           when: execErr != nil
       - bind: result, execErr
-        eval: ex.ExecContext(ctx, b.stmts.onceClaim, digest, until, now)
+        eval: ex.ExecContext(ctx, b.stmts.once.claim, digest, until, now)
         to: ex.ExecContext
       - bind: n, err
         eval: rowsAffected(result, execErr)
@@ -6139,41 +6142,16 @@ sequences:
         kind: actor
       - id: (*sqlBroker).sweepOnce
         kind: self
-      - id: ex.QueryContext
-        kind: value
-      - id: b.failed
+      - id: b.pickPassedOnce
         kind: internal
       - id: ex.ExecContext
         kind: value
+      - id: b.failed
+        kind: internal
     steps:
-      - bind: rows, queryErr
-        eval: ex.QueryContext(ctx, b.stmts.oncePick, now, int64(sqlOnceSweepRows))
-        to: ex.QueryContext
-      - opt:
-          do:
-            - return: b.failed("read the passed reservations", queryErr)
-              to: b.failed
-          when: queryErr != nil
-      - var:
-          name: ids
-          type: "[]any"
-      - set: err
-        value: |-
-          func() (err error) {
-          		defer func() { err = b.finishRows(rows, "read the passed reservations", err) }()
-          		//: their identifiers, in the order read.
-          		for rows.Next() {
-          			var id []byte
-          			//: a row the driver cannot hand over fails the read.
-          			if scanErr := rows.Scan(&id); scanErr != nil {
-          				//: QueueBackendFailed.
-          				return b.failed("read the passed reservations", scanErr)
-          			}
-          			ids = append(ids, id)
-          		}
-          		//: every row read.
-          		return nil
-          	}()
+      - bind: ids, err
+        eval: b.pickPassedOnce(ctx, ex, now)
+        to: b.pickPassedOnce
       - opt:
           do:
             - return: err
@@ -6188,6 +6166,42 @@ sequences:
             to: ex.ExecContext
           when: execErr != nil
       - return: nil
+  - of: (*sqlBroker).pickPassedOnce
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sqlBroker).pickPassedOnce
+        kind: self
+      - id: ex.QueryContext
+        kind: value
+      - id: rows.Scan
+        kind: value
+    steps:
+      - bind: rows, err
+        eval: ex.QueryContext(ctx, b.stmts.once.pick, now, int64(sqlOnceSweepRows))
+        to: ex.QueryContext
+      - opt:
+          do:
+            - return: nil, b.failed("read the passed reservations", err)
+          when: err != nil
+      - defer: func() { err = b.finishRows(rows, "read the passed reservations", err) }()
+      - loop:
+          cond: rows.Next()
+          do:
+            - var:
+                name: id
+                type: "[]byte"
+            - opt:
+                do:
+                  - return: nil, b.failed("read the passed reservations", scanErr)
+                init:
+                  bind: scanErr
+                  eval: rows.Scan(&id)
+                  to: rows.Scan
+                when: scanErr != nil
+            - set: ids
+              value: append(ids, id)
+      - return: ids, nil
   - of: (*sqlBroker).Receive
     participants:
       - id: caller

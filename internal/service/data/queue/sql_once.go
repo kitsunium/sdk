@@ -106,11 +106,11 @@ func (b *sqlBroker) PublishOnce(
 // row — whether the key is this call's.
 func (b *sqlBroker) claimOnce(ctx context.Context, ex coresql.Executor, digest []byte, until, now int64) (bool, error) {
 	//: a passed reservation holds nothing; its row is the key's to reclaim.
-	if _, execErr := ex.ExecContext(ctx, b.stmts.onceDrop, digest, now); execErr != nil {
+	if _, execErr := ex.ExecContext(ctx, b.stmts.once.drop, digest, now); execErr != nil {
 		//: QueueBackendFailed.
 		return false, b.failed("drop a passed reservation", execErr)
 	}
-	result, execErr := ex.ExecContext(ctx, b.stmts.onceClaim, digest, until, now)
+	result, execErr := ex.ExecContext(ctx, b.stmts.once.claim, digest, until, now)
 	n, err := rowsAffected(result, execErr)
 	//: the claim did not complete.
 	if err != nil {
@@ -124,30 +124,8 @@ func (b *sqlBroker) claimOnce(ctx context.Context, ex coresql.Executor, digest [
 // sweepOnce removes up to sqlOnceSweepRows reservations whose window has
 // passed by now, of any key: read locked and skipping those another
 // transaction holds, then removed by identifier.
-func (b *sqlBroker) sweepOnce(ctx context.Context, ex coresql.Executor, now int64) (err error) {
-	rows, queryErr := ex.QueryContext(ctx, b.stmts.oncePick, now, int64(sqlOnceSweepRows))
-	//: the read did not start.
-	if queryErr != nil {
-		//: QueueBackendFailed.
-		return b.failed("read the passed reservations", queryErr)
-	}
-	var ids []any
-	//: one reservation per row; the rows are this call's to close.
-	err = func() (err error) {
-		defer func() { err = b.finishRows(rows, "read the passed reservations", err) }()
-		//: their identifiers, in the order read.
-		for rows.Next() {
-			var id []byte
-			//: a row the driver cannot hand over fails the read.
-			if scanErr := rows.Scan(&id); scanErr != nil {
-				//: QueueBackendFailed.
-				return b.failed("read the passed reservations", scanErr)
-			}
-			ids = append(ids, id)
-		}
-		//: every row read.
-		return nil
-	}()
+func (b *sqlBroker) sweepOnce(ctx context.Context, ex coresql.Executor, now int64) error {
+	ids, err := b.pickPassedOnce(ctx, ex, now)
 	//: the read failed, or there is nothing to remove.
 	if err != nil || len(ids) == 0 {
 		//: QueueBackendFailed, or nil.
@@ -160,4 +138,30 @@ func (b *sqlBroker) sweepOnce(ctx context.Context, ex coresql.Executor, now int6
 	}
 	//: swept.
 	return nil
+}
+
+// pickPassedOnce reads the identifiers of up to sqlOnceSweepRows reservations
+// whose window has passed by now — locked, and skipping those another
+// transaction holds, where the engine can.
+func (b *sqlBroker) pickPassedOnce(ctx context.Context, ex coresql.Executor, now int64) (ids []any, err error) {
+	rows, err := ex.QueryContext(ctx, b.stmts.once.pick, now, int64(sqlOnceSweepRows))
+	//: the read did not start.
+	if err != nil {
+		//: QueueBackendFailed.
+		return nil, b.failed("read the passed reservations", err)
+	}
+	//: rows are this call's, so this call closes them.
+	defer func() { err = b.finishRows(rows, "read the passed reservations", err) }()
+	//: their identifiers, in the order read.
+	for rows.Next() {
+		var id []byte
+		//: a row the driver cannot hand over fails the read.
+		if scanErr := rows.Scan(&id); scanErr != nil {
+			//: QueueBackendFailed.
+			return nil, b.failed("read the passed reservations", scanErr)
+		}
+		ids = append(ids, id)
+	}
+	//: the finisher reports a failure that ended the rows early.
+	return ids, nil
 }

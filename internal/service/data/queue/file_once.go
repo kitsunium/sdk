@@ -319,14 +319,11 @@ func (b *fileBroker) asideStillRuns(name string, now int64) bool {
 // onceSweepEvery for this broker, measured on its clock.
 func (b *fileBroker) sweepOnce(now time.Time) error {
 	last := b.onceSwept.Load()
-	//: swept recently enough; and a clock that went back sweeps at once.
-	if last != 0 && now.UnixNano() >= last && now.UnixNano()-last < int64(onceSweepEvery) {
+	recent := last != 0 && now.UnixNano() >= last && now.UnixNano()-last < int64(onceSweepEvery)
+	//: swept recently enough — a clock that went back sweeps at once — or
+	//: another of this broker's producers is the one sweeping.
+	if recent || !b.onceSwept.CompareAndSwap(last, now.UnixNano()) {
 		//: nothing to do.
-		return nil
-	}
-	//: one sweeper among this broker's concurrent producers.
-	if !b.onceSwept.CompareAndSwap(last, now.UnixNano()) {
-		//: another call is sweeping.
 		return nil
 	}
 	entries, listErr := b.entriesOf(dirOnce)
@@ -369,14 +366,11 @@ func (b *fileBroker) sweepEntry(base string, now int64) error {
 		return b.dropPassed(digest, now)
 	}
 	name := path.Join(dirOnce, base)
-	//: set aside and left there, and passed: nothing will put it back.
-	if strings.HasSuffix(base, suffixGone) && !b.asideStillRuns(name, now) {
-		//: removed; gone already is as good.
-		return ignoreMissing("remove", dirOnce, b.root.Remove(name))
-	}
-	//: written and never linked — a crash between the two — and passed. One
+	//: set aside and left there, and passed: nothing will put it back. Or
+	//: written and never linked — a crash between the two — and passed; one
 	//: whose end cannot be read yet may be another producer's, still writing.
-	if strings.HasSuffix(base, suffixNew) && b.writtenAndPassed(name, now) {
+	if (strings.HasSuffix(base, suffixGone) && !b.asideStillRuns(name, now)) ||
+		(strings.HasSuffix(base, suffixNew) && b.writtenAndPassed(name, now)) {
 		//: removed; gone already is as good.
 		return ignoreMissing("remove", dirOnce, b.root.Remove(name))
 	}

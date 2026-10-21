@@ -87,6 +87,10 @@ func TestAHandlerThatSaysWhenToRetryIsNackedWithItsDelay(t *testing.T) {
 			if err != nil || len(live) != 1 || live[0].Leased || !live[0].VisibleAt.Equal(epoch.Add(retryAsked)) || live[0].Deliveries != 1 {
 				t.Fatalf("after the handler's RetryAfter, Messages() = (%+v, %v), want one waiting until %v", live, err, epoch.Add(retryAsked))
 			}
+			//: the worker found nothing receivable and sleeps until the delay
+			//: ends: advancing before its timer is armed would arm it a whole
+			//: delay after the advance, and the retry would never come.
+			clk.BlockUntil(1)
 			clk.Advance(retryAsked)
 			if second := await(t, attempts, "the retry"); second != 2 {
 				t.Fatalf("the retry was delivery %d, want 2", second)
