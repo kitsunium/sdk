@@ -61,6 +61,9 @@ type Spool struct {
 	observe  func(EventValue)
 	annotate func(ctx context.Context) map[string]string
 	newID    func() (string, error)
+	// permanent reports whether a failure is never to be retried:
+	// permanentReply, or nil with Config.RetryPermanent, which retries all.
+	permanent func(error) bool
 	// delivered remembers the mails this spool delivered.
 	delivered *ledger
 	// from is the default sender.
@@ -72,10 +75,12 @@ type Spool struct {
 	// that window: a delivery of that identifier waits until none is before
 	// it reports anything.
 	announcing map[string]*announcement
-	// maxAttempts, sendTimeout and poll are the resolved limits.
+	// maxAttempts, sendTimeout, poll and maxAge are the resolved limits;
+	// maxAge is zero for no age.
 	maxAttempts int
 	sendTimeout time.Duration
 	poll        time.Duration
+	maxAge      time.Duration
 	// observing serialises the observer's calls.
 	observing sync.Mutex
 	// closing guards closed and the queue's lifetime: every publication
@@ -135,7 +140,11 @@ func resolve(cfg *Config) *Spool {
 		transport: cfg.Transport, clock: cfg.Clock, observe: cfg.Observe, annotate: cfg.Annotate,
 		newID: cfg.NewID, delivered: newLedger(DeliveredMemory), from: cfg.From, backoff: cfg.Backoff,
 		announcing: map[string]*announcement{}, maxAttempts: cfg.MaxAttempts, sendTimeout: cfg.SendTimeout,
-		poll: cfg.PollInterval, deferrer: cfg.Deferrer,
+		poll: cfg.PollInterval, deferrer: cfg.Deferrer, maxAge: cfg.MaxAge, permanent: permanentReply,
+	}
+	//: the escape hatch: a 5xx is retried like a 4xx.
+	if cfg.RetryPermanent {
+		s.permanent = nil
 	}
 	//: validate made sure a Deferrer is an Aborter too.
 	if cfg.Deferrer != nil {

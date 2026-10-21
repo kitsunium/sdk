@@ -2545,6 +2545,14 @@ codes:
     const: CodeInvalidMailID
     hex: "0x00_03_51_06"
     package: internal/core/app/mail/spool
+  - code: "0.3.81.7"
+    const: CodeMailRejected
+    hex: "0x00_03_51_07"
+    package: internal/core/app/mail/spool
+  - code: "0.3.81.8"
+    const: CodeMailExpired
+    hex: "0x00_03_51_08"
+    package: internal/core/app/mail/spool
   - code: "0.3.88.1"
     const: CodeTransitionRefused
     hex: "0x00_03_58_01"

@@ -16,7 +16,7 @@ service's, and `pkg/v1/app/mail/spool` aliases them there (ADR 0074).
 
 | File | Surface |
 |---|---|
-| `gen_codes.go` | `CodeSpoolMisconfigured` … `CodeInvalidMailID` — range `0.3.81.*`; `SpoolMisconfigured`, `SpoolClosed`, `MessageUndecodable`, `MessageUnencodable`, `TransportPanicked`, `InvalidMailID` (`errs.Define`) — written by kit gen from `design/app/mail/spool.yaml` (ADR 0164) |
+| `gen_codes.go` | `CodeSpoolMisconfigured` … `CodeMailExpired` — range `0.3.81.*`; `SpoolMisconfigured`, `SpoolClosed`, `MessageUndecodable`, `MessageUnencodable`, `TransportPanicked`, `InvalidMailID`, `MailRejected`, `MailExpired` (`errs.Define`) — written by kit gen from `design/app/mail/spool.yaml` (ADR 0164) |
 
 ## Error codes
 
@@ -32,6 +32,8 @@ keeps the value its allocation gave it whichever layer declares it.
 | `0.3.81.4` | `MESSAGE_UNENCODABLE` | HTTP 400 | `encoding/json` refused the record — a `Date` outside the years 0 to 9999 |
 | `0.3.81.5` | `TRANSPORT_PANICKED` | — | an attempt whose transport panicked, recovered as that attempt's failure |
 | `0.3.81.6` | `INVALID_MAIL_ID` | HTTP 400 | `SendWithID` got an identifier that is empty, too long or not a dot-atom |
+| `0.3.81.7` | `MAIL_REJECTED` | — | an SMTP 5xx reply: the mail dead-lettered without a retry (ADR 0111, amended 2026-10-21); a mark in the trail of an SDK failure, the origin of a foreign one |
+| `0.3.81.8` | `MAIL_EXPIRED` | — | an attempt failed once `Config.MaxAge` had passed: the mail dead-lettered with that failure; the same mark |
 
 The two HTTP statuses are integer literals behind named constants: a core
 package does not import `net/http` for two numbers.

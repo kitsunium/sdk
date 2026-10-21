@@ -3,7 +3,9 @@ package spool
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/textproto"
 	"runtime/debug"
 	"time"
 
@@ -12,9 +14,17 @@ import (
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
+// The SMTP reply codes RFC 5321 §4.2.1 calls permanent negative completion:
+// 5yz.
+const (
+	permanentReplyMin int = 500
+	permanentReplyMax int = 599
+)
+
 // deliver is the spool's queue handler. Returning nil acknowledges; returning
 // an error nacks, which on the last attempt dead-letters the mail with that
-// error.
+// error. A failure giveUp condemns is returned marked DoNotRetry, which the
+// consumer turns into the queue's Reject: dead-lettered on this attempt.
 //
 // A failure with attempts left does neither: the lease is extended by the
 // backoff and the handler returns nil. The extension replaced the receipt, so
@@ -49,6 +59,14 @@ func (s *Spool) deliver(ctx context.Context, delivery corequeue.DeliveryValue) e
 		return nil
 	}
 	event.Err = sendErr
+	//: a failure no retry may repeat, or a mail too old to retry: rejected
+	//: now, whatever attempts are left.
+	if given := s.giveUp(sendErr, record.QueuedAt, event.At); given != nil {
+		event.Err, event.Kind = given, EventDeadLettered
+		s.report(&event)
+		//: the consumer rejects it through the queue's Rejecter.
+		return corequeue.DoNotRetry(given)
+	}
 	//: the last attempt: the nack dead-letters the mail with this failure.
 	if attempt >= s.maxAttempts {
 		event.Kind = EventDeadLettered
@@ -131,4 +149,54 @@ func (s *Spool) park(ctx context.Context, delivery corequeue.DeliveryValue, dela
 	_, extendErr := extender.Extend(ctx, delivery.Lease.Receipt, delay)
 	//: a lease that lapsed meanwhile is already back in the queue.
 	return extendErr == nil
+}
+
+// giveUp returns the failure a mail is dead-lettered with at once, or nil to
+// let the backoff and MaxAttempts decide — always nil over a broker that is
+// not a core/data/queue.Rejecter. A permanent SMTP reply is
+// MailRejected unless RetryPermanent left s.permanent nil; a failure once
+// MaxAge has passed since queuedAt is MailExpired. Either is added to
+// sendErr, which stays the origin when it is an SDK error and stays reachable
+// through errors.As when not.
+func (s *Spool) giveUp(sendErr error, queuedAt, failedAt time.Time) error {
+	//: a caller's queue that cannot dead-letter early would put the mail back
+	//: after an EventDeadLettered: it is retried, and dead-lettered after its
+	//: last attempt, as before.
+	if _, rejects := s.broker.(corequeue.Rejecter); !rejects {
+		//: the shortcut is lost, never the mail.
+		return nil
+	}
+	//: a refusal the receiving server made for good.
+	if s.permanent != nil && s.permanent(sendErr) {
+		//: marked, the transport's failure kept.
+		return mark(sendErr, corespool.MailRejected)
+	}
+	//: a mail that outlived its age: its next attempt never comes.
+	if s.maxAge > 0 && !failedAt.Before(queuedAt.Add(s.maxAge)) {
+		//: marked, the last failure kept.
+		return mark(sendErr, corespool.MailExpired, kerrs.String("max_age", s.maxAge.String()))
+	}
+	//: retried, or dead-lettered after the last attempt.
+	return nil
+}
+
+// permanentReply reports whether err carries an SMTP reply of the 5yz class
+// anywhere in its chain: the SDK's SMTP transport keeps it reachable for a
+// refused MAIL, RCPT or DATA, and a connector may return one as it is.
+func permanentReply(err error) bool {
+	reply, replied := errors.AsType[*textproto.Error](err)
+	//: no reply, a 4yz, or anything else: temporary.
+	return replied && reply.Code >= permanentReplyMin && reply.Code <= permanentReplyMax
+}
+
+// mark adds sentinel to cause as core/data/queue.DoNotRetry adds its own: an
+// SDK cause keeps its Reason, Code and Public and gains the sentinel's code in
+// its trail, and any other cause takes the sentinel as its origin and stays
+// its source.
+func mark(cause error, sentinel *kerrs.Error, fields ...kerrs.FieldValue) error {
+	//: one call for both paths, by errs.Wrap's own rule.
+	return kerrs.Wrap(cause, kerrs.WrapParams{
+		Code: sentinel.Code(), Reason: sentinel.Reason(), Public: sentinel.Public(),
+		Private: sentinel.Private(), ExitCode: sentinel.ExitCode(),
+	}, fields...)
 }

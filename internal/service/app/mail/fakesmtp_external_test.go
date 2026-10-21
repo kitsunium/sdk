@@ -37,6 +37,8 @@ const (
 	optImplicitTLS
 	// optRefuseRcpt answers every RCPT TO with a 550.
 	optRefuseRcpt
+	// optDeferRcpt answers every RCPT TO with a 450, a temporary refusal.
+	optDeferRcpt
 )
 
 // optDefault is the ordinary submission relay: STARTTLS and AUTH offered.
@@ -230,6 +232,9 @@ func (f *fakeSession) startTLS() bool {
 func (f *fakeSession) rcpt() bool {
 	if f.server.options.has(optRefuseRcpt) {
 		return f.write("550 5.1.1 no such user")
+	}
+	if f.server.options.has(optDeferRcpt) {
+		return f.write("450 4.2.1 mailbox busy")
 	}
 	return f.write("250 2.1.5 ok")
 }

@@ -40,7 +40,7 @@ This package declares no code and raises the core's.
 | `smtpurl.go` | `ParseURL` — `smtp://…?tls=starttls\|implicit\|none` / `smtps://…` into a config `validate` accepts; a refusal is `INVALID_URL` with a clause and never the URL |
 | `smtp_compliance.go` | the compile-time port conformance assertions |
 | `memory.go` | the in-memory transport — a DOUBLE, because it composes — `NewMemory` (keeps every delivery) and `NewCapture(keep)` (keeps the last `keep`, `DefaultCaptureKeep` = 200 when not positive: the transport a development server and a test deliver through, ADR 0111) |
-| `errors.go` | `wrapAs` — a core sentinel raised over a cause carried as a log-only field |
+| `errors.go` | `wrapAs` — a core sentinel raised over a cause carried as a log-only field; `refused` — `SendRefused` for MAIL, RCPT or DATA, the server's `*textproto.Error` kept as its source so `errors.As` tells a 5xx from a 4xx (the spool's permanent refusal, ADR 0111 amended 2026-10-21) |
 | `BENCH.md` | composition cost, cost per MiB of attachment, and the one measured optimisation |
 
 ## The MIME structure is a function of the populated fields
@@ -157,6 +157,15 @@ configured here because it is not implemented.
 **`Send` and `SendBatch` share one composition path** (`smtpTransport.prepare`),
 so a message that would be refused is refused identically whichever call site it
 arrives through — and before a socket exists either way.
+
+**A refused MAIL, RCPT or DATA keeps its reply reachable** (`refused`,
+ADR 0111 amended 2026-10-21): `SEND_REFUSED` is the origin and the server's
+`*textproto.Error` its source, so `errors.As` reads the reply code — a 5xx is
+permanent and the mail spool dead-letters it at once, a 4xx is retried. The
+reply's text is still only a log-only field. A 5xx to the greeting, EHLO,
+STARTTLS or AUTH is NOT kept reachable: it is about the relay or this
+program's configuration, never the mail, and a spool that dead-lettered every
+mail on a wrong password would lose them all.
 
 **No connection pool.** An SMTP session is stateful, a pooled one must be
 revalidated with a NOOP before every reuse, and the caller who wants one session

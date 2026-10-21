@@ -361,7 +361,7 @@ Code `0.2.31.6` · reason `RESERVED_HEADER` · public "That header is set by the
 var SendRefused *errs.Error
 ```
 
-SendRefused is returned when MAIL, RCPT or DATA was answered with a failure reply. The server's own text travels as a log-only field.
+SendRefused is returned when MAIL, RCPT or DATA was answered with a failure reply. The server's own text travels as a log-only field, and the SMTP transport keeps the reply reachable through errors.As as a \*net/textproto.Error: its Code tells a permanent 5xx from a 4xx.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/app/mail.SendRefused`.
 

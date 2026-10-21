@@ -49,6 +49,7 @@ go_test(
         "gen_api_test.go",
         "harness_external_test.go",
         "identifier_external_test.go",
+        "permanent_external_test.go",
         "spool_external_test.go",
         "transaction_external_test.go",
     ],

@@ -847,7 +847,7 @@
       "dir": "service/app/mail/spool",
       "layer": "service",
       "family": "app",
-      "doc": "Package spool — the spool's construction parameters, the defaults their\nzero values clamp to, and the refusals.\n\nPackage spool — one delivery: the record read back, a duplicate dropped,\nthe attempt bounded, and its failure parked, or dead-lettered.\n\nPackage spool — what a spool tells its observer, what an attempt knows\nabout itself, and what a dead letter keeps.\n\nPackage spool — a mail's identifier: the one rule it keeps, whoever minted\nit, because it becomes the left half of the mail's Message-ID.\n\nPackage spool — the memory of what was delivered, which is what drops a\nredelivery instead of sending a mail twice.\n\nPackage spool is outbound mail made durable: Send validates a mail and\nqueues it, and the spool's consumer hands it to a mail transport, retrying a\nfailure with a backoff and dead-lettering the mail after its last attempt. A\nredelivery of a mail it delivered is dropped, and every attempt, the one\nresend a crash can cause included, carries the same Message-ID. ADR 0111.\n\n# Where it sits\n\nIt composes two domains and adds what neither has. The mail domain composes\nand refuses a mail and hands it to a transport, synchronously, once. The\nqueue domain keeps bytes durably and delivers them at least once. The spool\nis the mail-shaped use of the queue: its records are mails, a failed\ndelivery waits a backoff that grows with the attempt instead of the queue's\nfixed retry delay, the last failure is the dead letter's reason, and a\nredelivered mail that was in fact delivered is recognised and dropped.\n\n# What Send promises\n\nSend refuses, at the call site, everything the transport would refuse\nlater: a header carrying a line break, an address that is not one, a mail\nwith no recipient or no body. It stamps what a retry must not change — the\nsender when the mail names none, the Date, and a Message-ID made of the\nspool's identifier at the sender's domain — and returns once the mail is in\nthe spool: durable, with a Dir, before Send returns.\n\n# A mail in its caller's transaction\n\nConfig.Broker hands the spool a queue its caller built — a queue on SQL,\nwhich joins the transaction its context carries (ADR 0151) — and\nConfig.Deferrer the transaction manager of its database. A Send made inside\none of that manager's transactions writes the mail in it: the mail exists\nif and only if the transaction commits (ADR 0178). Its EventQueued is held\nuntil the commit and told after it, and a delivery of the mail — which the\ncommit makes visible to the consumer at once — waits for it, as it waits\nfor every Send's (ADR 0111 D5, ADR 0141 D4). When the work is undone — the\ntransaction, or the savepoint the Send ran in, rolls back — the observer\nhears nothing, and the identifier's registration ends with it, so a later\nmail under that identifier is delivered (ADR 0139's Aborter). Outside a\ntransaction, and without a Broker, a Send tells the observer before it\nreturns.\n\n# An identifier the caller minted\n\nSend mints the mail's identifier with Config.NewID. SendWithID queues the\nmail under one its caller minted instead, for a caller that must know the\nidentifier before the spool has the mail — a framework that holds a mail\nuntil a transaction commits returns the identifier at the call and queues\nthe mail after the commit. Every identifier, whoever minted it, is\nnon-empty, at most MaxIDBytes and an RFC 5322 dot-atom, because it becomes\nthe left half of the mail's Message-ID: a caller's that is not is\nInvalidMailID, a generator's SpoolMisconfigured. A repeated identifier is\nnot refused. The spool cannot see the identifiers in its queue without\nreading every record; it drops a mail under an identifier it delivered, as\nit drops every redelivery.\n\n# How a mail is delivered\n\nRun consumes the spool, one mail at a time, on the goroutine that calls it.\nEach attempt runs under SendTimeout, with its AttemptValue in the context.\nAn attempt that fails with attempts left PARKS the mail: its lease is\nextended by Backoff.Delay(attempt) and left to lapse, and the queue hands it\nback then, its delivery count — the count that decides the dead letter, and\nthat survives a crash — incremented. The last attempt's failure is the\nqueue's nack, and the queue dead-letters the mail with that failure.\n\n# Exactly once, and the one duplicate left\n\nA mail this spool delivered is remembered by its identifier (the last\nDeliveredMemory of them), so a redelivery — the lease lapsed while the relay\nwas still accepting the mail — is dropped rather than sent. The lease is\ntwice SendTimeout, so that needs a relay slower than the timeout. What\nremains is a process that dies between the relay's acceptance and the\nacknowledgement: the next process sends the mail again, with the SAME\nMessage-ID, which is how a receiver recognises it. No transport offers more:\nSMTP has no idempotent submission.\n"
+      "doc": "Package spool — the spool's construction parameters, the defaults their\nzero values clamp to, and the refusals.\n\nPackage spool — one delivery: the record read back, a duplicate dropped,\nthe attempt bounded, and its failure parked, or dead-lettered.\n\nPackage spool — what a spool tells its observer, what an attempt knows\nabout itself, and what a dead letter keeps.\n\nPackage spool — a mail's identifier: the one rule it keeps, whoever minted\nit, because it becomes the left half of the mail's Message-ID.\n\nPackage spool — the memory of what was delivered, which is what drops a\nredelivery instead of sending a mail twice.\n\nPackage spool is outbound mail made durable: Send validates a mail and\nqueues it, and the spool's consumer hands it to a mail transport, retrying a\nfailure with a backoff and dead-lettering the mail after its last attempt. A\nredelivery of a mail it delivered is dropped, and every attempt, the one\nresend a crash can cause included, carries the same Message-ID. ADR 0111.\n\n# Where it sits\n\nIt composes two domains and adds what neither has. The mail domain composes\nand refuses a mail and hands it to a transport, synchronously, once. The\nqueue domain keeps bytes durably and delivers them at least once. The spool\nis the mail-shaped use of the queue: its records are mails, a failed\ndelivery waits a backoff that grows with the attempt instead of the queue's\nfixed retry delay, the last failure is the dead letter's reason, and a\nredelivered mail that was in fact delivered is recognised and dropped.\n\n# What Send promises\n\nSend refuses, at the call site, everything the transport would refuse\nlater: a header carrying a line break, an address that is not one, a mail\nwith no recipient or no body. It stamps what a retry must not change — the\nsender when the mail names none, the Date, and a Message-ID made of the\nspool's identifier at the sender's domain — and returns once the mail is in\nthe spool: durable, with a Dir, before Send returns.\n\n# A mail in its caller's transaction\n\nConfig.Broker hands the spool a queue its caller built — a queue on SQL,\nwhich joins the transaction its context carries (ADR 0151) — and\nConfig.Deferrer the transaction manager of its database. A Send made inside\none of that manager's transactions writes the mail in it: the mail exists\nif and only if the transaction commits (ADR 0178). Its EventQueued is held\nuntil the commit and told after it, and a delivery of the mail — which the\ncommit makes visible to the consumer at once — waits for it, as it waits\nfor every Send's (ADR 0111 D5, ADR 0141 D4). When the work is undone — the\ntransaction, or the savepoint the Send ran in, rolls back — the observer\nhears nothing, and the identifier's registration ends with it, so a later\nmail under that identifier is delivered (ADR 0139's Aborter). Outside a\ntransaction, and without a Broker, a Send tells the observer before it\nreturns.\n\n# An identifier the caller minted\n\nSend mints the mail's identifier with Config.NewID. SendWithID queues the\nmail under one its caller minted instead, for a caller that must know the\nidentifier before the spool has the mail — a framework that holds a mail\nuntil a transaction commits returns the identifier at the call and queues\nthe mail after the commit. Every identifier, whoever minted it, is\nnon-empty, at most MaxIDBytes and an RFC 5322 dot-atom, because it becomes\nthe left half of the mail's Message-ID: a caller's that is not is\nInvalidMailID, a generator's SpoolMisconfigured. A repeated identifier is\nnot refused. The spool cannot see the identifiers in its queue without\nreading every record; it drops a mail under an identifier it delivered, as\nit drops every redelivery.\n\n# How a mail is delivered\n\nRun consumes the spool, one mail at a time, on the goroutine that calls it.\nEach attempt runs under SendTimeout, with its AttemptValue in the context.\nAn attempt that fails with attempts left PARKS the mail: its lease is\nextended by Backoff.Delay(attempt) and left to lapse, and the queue hands it\nback then, its delivery count — the count that decides the dead letter, and\nthat survives a crash — incremented. The last attempt's failure is the\nqueue's nack, and the queue dead-letters the mail with that failure.\n\n# A refusal that is permanent, and a mail that is too old\n\nA failure that carries an SMTP 5xx reply — a *net/textproto.Error whose\nCode is 500 to 599, which the SDK's SMTP transport keeps reachable for a\nrefused MAIL, RCPT or DATA — is permanent: RFC 5321 §4.2.1 forbids\nrepeating the command unchanged, so the mail is dead-lettered at once with\nthat failure, marked MailRejected, through the queue's Rejecter. A 4xx\nreply, and every failure without a reply — a relay down, a refused\ngreeting, a timeout —, stays temporary. Config.RetryPermanent retries a 5xx\nlike a 4xx. With Config.MaxAge, an attempt that fails once the mail is\nthat old dead-letters it with that failure, marked MailExpired, whatever\nattempts are left (RFC 5321 §4.5.4.1); the age is read when an attempt\nfails, so a mail is always attempted at least once. Over a Broker without\nthe Rejecter sibling the spool cannot dead-letter early: the mail is\nretried as before and dead-lettered after its last attempt — the shortcut\nis lost, never the mail.\n\n# Exactly once, and the one duplicate left\n\nA mail this spool delivered is remembered by its identifier (the last\nDeliveredMemory of them), so a redelivery — the lease lapsed while the relay\nwas still accepting the mail — is dropped rather than sent. The lease is\ntwice SendTimeout, so that needs a relay slower than the timeout. What\nremains is a process that dies between the relay's acceptance and the\nacknowledgement: the next process sends the mail again, with the SAME\nMessage-ID, which is how a receiver recognises it. No transport offers more:\nSMTP has no idempotent submission.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/service/app/resilience",
@@ -11122,7 +11122,7 @@
         "reason": "SEND_REFUSED",
         "public": "The mail server refused the message"
       },
-      "doc": "SendRefused is returned when MAIL, RCPT or DATA was answered with a\nfailure reply.\n\nIt carries the SMTP reply as a log-only field, never as Public: a reply\nis third-party text of unbounded length that may name a recipient, and\nPublic is the half that travels to strangers.\n",
+      "doc": "SendRefused is returned when MAIL, RCPT or DATA was answered with a\nfailure reply.\n\nIt carries the SMTP reply as a log-only field, never as Public: a reply\nis third-party text of unbounded length that may name a recipient, and\nPublic is the half that travels to strangers. The SMTP transport also\nkeeps the server's reply reachable through errors.As as a\n*net/textproto.Error, so a caller can tell a permanent 5xx from a\ntemporary 4xx — the mail spool dead-letters the first at once.\n",
       "file": "core/app/mail/gen_codes.go",
       "layer": "core",
       "family": "app"
@@ -11220,6 +11220,38 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/mail/spool.CodeMailExpired",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/app/mail/spool",
+      "name": "CodeMailExpired",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "217352",
+      "code": {
+        "value": "0.3.81.8"
+      },
+      "doc": "CodeMailExpired identifies a mail whose attempt failed once Config.MaxAge\nhad passed since it was queued, and the spool dead-lettered instead of\nretrying. It joins the wrap trail of that last failure, which stays the\norigin a dead letter records, so errs.HasCode finds it.\n",
+      "file": "core/app/mail/spool/gen_codes.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/mail/spool.CodeMailRejected",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/app/mail/spool",
+      "name": "CodeMailRejected",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "217351",
+      "code": {
+        "value": "0.3.81.7"
+      },
+      "doc": "CodeMailRejected identifies a mail the receiving server refused for good —\nan SMTP 5xx reply — and the spool dead-lettered without a retry. It joins\nthe wrap trail of the transport's own failure, which stays the origin a\ndead letter records, so errs.HasCode finds it.\n",
+      "file": "core/app/mail/spool/gen_codes.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/app/mail/spool.CodeMessageUndecodable",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/core/app/mail/spool",
@@ -11312,6 +11344,40 @@
         "public": "The mail identifier is malformed"
       },
       "doc": "InvalidMailID refuses an identifier SendWithID was given that no mail\ncan keep, because it becomes the left half of the mail's Message-ID.\nNothing was queued. The fields name the rule it broke and its length,\nnever the identifier, which may carry the very bytes it was refused for.\n",
+      "file": "core/app/mail/spool/gen_codes.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/mail/spool.MailExpired",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/app/mail/spool",
+      "name": "MailExpired",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.81.8",
+        "reason": "MAIL_EXPIRED",
+        "public": "The mail was not delivered within the spool's maximum age"
+      },
+      "doc": "MailExpired marks the failure of an attempt made once Config.MaxAge had\npassed since the mail was queued: the spool gives up on the mail and\ndead-letters it with that failure, whatever attempts it had left (RFC\n5321 §4.5.4.1). Like MailRejected it joins the trail of an SDK error and\nis the origin only of a failure that is not one.\n",
+      "file": "core/app/mail/spool/gen_codes.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/mail/spool.MailRejected",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/app/mail/spool",
+      "name": "MailRejected",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.81.7",
+        "reason": "MAIL_REJECTED",
+        "public": "The receiving mail server rejected the mail permanently"
+      },
+      "doc": "MailRejected marks a delivery failure that carried an SMTP 5xx reply:\nthe receiving server refused the mail for good, and RFC 5321 §4.2.1\nforbids repeating the command unchanged, so the spool dead-letters it at\nonce instead of retrying it. The spool adds it to the transport's own\nfailure — an SDK error keeps its Reason, Code and Public, and gains\nCodeMailRejected in its trail — and it is the origin only of a failure\nthat is not an SDK error. The reply itself stays reachable through\nerrors.As as a *net/textproto.Error, never in a Public.\n",
       "file": "core/app/mail/spool/gen_codes.go",
       "layer": "core",
       "family": "app"
@@ -50125,8 +50191,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/mail/spool",
       "name": "Config",
-      "spelled": "struct{Transport coremail.Transport; Clock clock.Timed; Observe func(EventValue); Annotate func(ctx context.Context) map[string]string; NewID func() (string, error); Dir string; Broker corequeue.Broker; Deferrer coresql.Deferrer; From coremail.AddressValue; Backoff kbackoff.Value; MaxAttempts int; SendTimeout time.Duration; MaxMessageBytes int; PollInterval time.Duration}",
-      "canonical": "struct{Transport github.com/kitsunium/sdk/internal/core/app/mail.Transport; Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed; Observe func(github.com/kitsunium/sdk/internal/service/app/mail/spool.EventValue); Annotate func(ctx context.Context) map[string]string; NewID func() (string, error); Dir string; Broker github.com/kitsunium/sdk/internal/core/data/queue.Broker; Deferrer github.com/kitsunium/sdk/internal/core/data/sql.Deferrer; From github.com/kitsunium/sdk/internal/core/app/mail.AddressValue; Backoff github.com/kitsunium/sdk/internal/kernel/backoff.Value; MaxAttempts int; SendTimeout time.Duration; MaxMessageBytes int; PollInterval time.Duration}",
+      "spelled": "struct{Transport coremail.Transport; Clock clock.Timed; Observe func(EventValue); Annotate func(ctx context.Context) map[string]string; NewID func() (string, error); Dir string; Broker corequeue.Broker; Deferrer coresql.Deferrer; From coremail.AddressValue; Backoff kbackoff.Value; MaxAttempts int; SendTimeout time.Duration; MaxMessageBytes int; PollInterval time.Duration; MaxAge time.Duration; RetryPermanent bool}",
+      "canonical": "struct{Transport github.com/kitsunium/sdk/internal/core/app/mail.Transport; Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed; Observe func(github.com/kitsunium/sdk/internal/service/app/mail/spool.EventValue); Annotate func(ctx context.Context) map[string]string; NewID func() (string, error); Dir string; Broker github.com/kitsunium/sdk/internal/core/data/queue.Broker; Deferrer github.com/kitsunium/sdk/internal/core/data/sql.Deferrer; From github.com/kitsunium/sdk/internal/core/app/mail.AddressValue; Backoff github.com/kitsunium/sdk/internal/kernel/backoff.Value; MaxAttempts int; SendTimeout time.Duration; MaxMessageBytes int; PollInterval time.Duration; MaxAge time.Duration; RetryPermanent bool}",
       "fields": [
         {
           "name": "Transport",
@@ -50197,6 +50263,16 @@
           "name": "PollInterval",
           "type": "time.Duration",
           "doc": "PollInterval is how late a mail another PROCESS spooled into Dir may be\nnoticed; a mail spooled by this process is delivered at once. Zero is\nthe queue's own default.\n"
+        },
+        {
+          "name": "MaxAge",
+          "type": "time.Duration",
+          "doc": "MaxAge is how long after QueuedAt a mail may still be retried: an\nattempt that fails once MaxAge has passed on Clock dead-letters the\nmail with that failure, marked MailExpired, whatever attempts it had\nleft — RFC 5321 §4.5.4.1 gives up after four to five days. The age is\nread when an attempt fails, so a mail is attempted at least once\nhowever late it is delivered. Zero sets no age: MaxAttempts alone\ndecides. Negative is refused (SpoolMisconfigured).\n"
+        },
+        {
+          "name": "RetryPermanent",
+          "type": "bool",
+          "doc": "RetryPermanent retries a permanent refusal like a temporary one. By\ndefault a failure carrying an SMTP 5xx reply — a *net/textproto.Error\nwith a Code from 500 to 599 anywhere in its chain — dead-letters the\nmail at once, marked MailRejected, because RFC 5321 §4.2.1 forbids\nrepeating a 5yz command unchanged; a 4xx reply and a failure without a\nreply are retried. Set it for a relay known to answer 5xx for a\ncondition that passes.\n"
         }
       ],
       "doc": "Config configures [New]. Transport and MaxAttempts are required; every\nother field is optional.\n",
@@ -50343,7 +50419,7 @@
       "spelled": "EventKind",
       "canonical": "github.com/kitsunium/sdk/internal/service/app/mail/spool.EventKind",
       "value": "4",
-      "doc": "EventDeadLettered: the last attempt failed; the mail is kept, with\nthat failure, and never delivered again.\n",
+      "doc": "EventDeadLettered: the mail is kept, with its failure, and never\ndelivered again — its last attempt failed, the receiving server\nrefused it for good (CodeMailRejected), or an attempt failed after\nConfig.MaxAge (CodeMailExpired).\n",
       "file": "service/app/mail/spool/event.go",
       "layer": "service",
       "family": "app"
@@ -50436,7 +50512,7 @@
         {
           "name": "Err",
           "type": "error",
-          "doc": "Err is the failed attempt's error, for EventRetrying and\nEventDeadLettered.\n"
+          "doc": "Err is the failed attempt's error, for EventRetrying and\nEventDeadLettered. A dead letter's carries CodeMailRejected or\nCodeMailExpired when that is why it was given up — errs.HasCode\nreads either —, and the transport's own error, an SMTP reply\nincluded, stays reachable through errors.As.\n"
         },
         {
           "name": "Meta",

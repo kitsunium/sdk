@@ -13,6 +13,10 @@
 // waits a backoff that grows with the attempt — one second, doubling, to five
 // minutes by default — before the next; after [Config].MaxAttempts the mail is
 // dead-lettered with its last failure, readable through [Spool].DeadLetters.
+// A permanent refusal — an SMTP 5xx reply — is dead-lettered at once
+// ([MailRejected]) unless [Config].RetryPermanent is set, and with
+// [Config].MaxAge a mail whose attempt fails once it is that old is
+// dead-lettered too ([MailExpired]); a 4xx reply is retried.
 //
 //	outbox, err := spool.New(spool.Config{
 //		Transport:   transport, // a mail.Transport: mail.NewSMTP, mail.NewCapture, …

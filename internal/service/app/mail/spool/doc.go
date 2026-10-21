@@ -78,6 +78,23 @@
 // that survives a crash — incremented. The last attempt's failure is the
 // queue's nack, and the queue dead-letters the mail with that failure.
 //
+// # A refusal that is permanent, and a mail that is too old
+//
+// A failure that carries an SMTP 5xx reply — a *net/textproto.Error whose
+// Code is 500 to 599, which the SDK's SMTP transport keeps reachable for a
+// refused MAIL, RCPT or DATA — is permanent: RFC 5321 §4.2.1 forbids
+// repeating the command unchanged, so the mail is dead-lettered at once with
+// that failure, marked MailRejected, through the queue's Rejecter. A 4xx
+// reply, and every failure without a reply — a relay down, a refused
+// greeting, a timeout —, stays temporary. Config.RetryPermanent retries a 5xx
+// like a 4xx. With Config.MaxAge, an attempt that fails once the mail is
+// that old dead-letters it with that failure, marked MailExpired, whatever
+// attempts are left (RFC 5321 §4.5.4.1); the age is read when an attempt
+// fails, so a mail is always attempted at least once. Over a Broker without
+// the Rejecter sibling the spool cannot dead-letter early: the mail is
+// retried as before and dead-lettered after its last attempt — the shortcut
+// is lost, never the mail.
+//
 // # Exactly once, and the one duplicate left
 //
 // A mail this spool delivered is remembered by its identifier (the last

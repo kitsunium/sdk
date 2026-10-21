@@ -1006,6 +1006,40 @@ sequences:
           when: cause == nil
       - return: errs.Wrap(sentinel, errs.WrapParams{}, append(fields, errs.String("cause", cause.Error()))...)
         to: errs
+  - of: refused
+    participants:
+      - id: caller
+        kind: actor
+      - id: refused
+        kind: self
+      - id: wrapAs
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: wrapAs(coremail.SendRefused, inner, fields...)
+              to: wrapAs
+          init:
+            bind: inner, sdk
+            eval: errors.AsType[*errs.Error](cause)
+          when: sdk
+      - bind: reply, replied
+        eval: errors.AsType[*textproto.Error](cause)
+      - opt:
+          do:
+            - return: wrapAs(coremail.SendRefused, cause, fields...)
+              to: wrapAs
+          when: "!replied"
+      - bind: sentinel
+        eval: coremail.SendRefused
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code: sentinel.Code(), Reason: sentinel.Reason(), Public: sentinel.Public(),
+          		Private: sentinel.Private(), ExitCode: sentinel.ExitCode(),
+          	}, append(fields, errs.Int("reply", reply.Code), errs.String("cause", cause.Error()))...)
+        to: errs
   - of: IsReservedHeader
     steps:
       - bind: _, reserved
@@ -1770,7 +1804,7 @@ sequences:
         kind: self
       - id: s.client.Mail
         kind: value
-      - id: wrapAs
+      - id: refused
         kind: internal
       - id: s.client.Rcpt
         kind: value
@@ -1783,8 +1817,8 @@ sequences:
     steps:
       - opt:
           do:
-            - return: wrapAs(coremail.SendRefused, mailErr, errs.String("command", "MAIL"))
-              to: wrapAs
+            - return: refused(mailErr, errs.String("command", "MAIL"))
+              to: refused
           init:
             bind: mailErr
             eval: s.client.Mail(delivery.Envelope.From)
@@ -1794,8 +1828,8 @@ sequences:
           do:
             - opt:
                 do:
-                  - return: wrapAs(coremail.SendRefused, rcptErr, errs.String("command", "RCPT"), errs.Int("recipient", index))
-                    to: wrapAs
+                  - return: refused(rcptErr, errs.String("command", "RCPT"), errs.Int("recipient", index))
+                    to: refused
                 init:
                   bind: rcptErr
                   eval: s.client.Rcpt(recipient)
@@ -1809,13 +1843,13 @@ sequences:
         to: s.client.Data
       - opt:
           do:
-            - return: wrapAs(coremail.SendRefused, dataErr, errs.String("command", "DATA"))
-              to: wrapAs
+            - return: refused(dataErr, errs.String("command", "DATA"))
+              to: refused
           when: dataErr != nil
       - opt:
           do:
-            - return: wrapAs(coremail.SendRefused, writeErr, errs.String("command", "DATA"))
-              to: wrapAs
+            - return: refused(writeErr, errs.String("command", "DATA"))
+              to: refused
           init:
             bind: _, writeErr
             eval: writer.Write(delivery.Raw)
@@ -1823,8 +1857,8 @@ sequences:
           when: writeErr != nil
       - opt:
           do:
-            - return: wrapAs(coremail.SendRefused, closeErr, errs.String("command", "DATA-END"))
-              to: wrapAs
+            - return: refused(closeErr, errs.String("command", "DATA-END"))
+              to: refused
           init:
             bind: closeErr
             eval: writer.Close()

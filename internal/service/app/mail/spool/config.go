@@ -126,6 +126,22 @@ type Config struct {
 	// noticed; a mail spooled by this process is delivered at once. Zero is
 	// the queue's own default.
 	PollInterval time.Duration
+	// MaxAge is how long after QueuedAt a mail may still be retried: an
+	// attempt that fails once MaxAge has passed on Clock dead-letters the
+	// mail with that failure, marked MailExpired, whatever attempts it had
+	// left — RFC 5321 §4.5.4.1 gives up after four to five days. The age is
+	// read when an attempt fails, so a mail is attempted at least once
+	// however late it is delivered. Zero sets no age: MaxAttempts alone
+	// decides. Negative is refused (SpoolMisconfigured).
+	MaxAge time.Duration
+	// RetryPermanent retries a permanent refusal like a temporary one. By
+	// default a failure carrying an SMTP 5xx reply — a *net/textproto.Error
+	// with a Code from 500 to 599 anywhere in its chain — dead-letters the
+	// mail at once, marked MailRejected, because RFC 5321 §4.2.1 forbids
+	// repeating a 5yz command unchanged; a 4xx reply and a failure without a
+	// reply are retried. Set it for a relay known to answer 5xx for a
+	// condition that passes.
+	RetryPermanent bool
 }
 
 // validate refuses a spool that could never deliver.
@@ -144,6 +160,11 @@ func (c *Config) validate() error {
 	if c.MaxMessageBytes < 0 {
 		//: SpoolMisconfigured, naming the setting.
 		return misconfigured("MaxMessageBytes", "negative")
+	}
+	//: a negative age is no age, and zero already says "none".
+	if c.MaxAge < 0 {
+		//: SpoolMisconfigured, naming the setting.
+		return misconfigured("MaxAge", "negative")
 	}
 	//: a caller's queue, and the transaction manager that announces after it.
 	if brokerErr := c.validateBroker(); brokerErr != nil {
