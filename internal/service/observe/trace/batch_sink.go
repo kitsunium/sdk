@@ -100,9 +100,10 @@ type BatchSink struct {
 	stopOnce sync.Once
 	// done is closed when the goroutine has exported the last batch and ended;
 	// lastErr is the first failure of that last flush, written before done
-	// closes and read only after.
-	done    chan struct{}
-	lastErr error
+	// closes and read only after. doneOnce states that done closes once.
+	done     chan struct{}
+	doneOnce sync.Once
+	lastErr  error
 }
 
 // NewBatchSink builds a BatchSink from cfg, applying every clamp once, and starts
@@ -273,28 +274,50 @@ func (b *BatchSink) Len() int {
 // delay, a ForceFlush or Shutdown, exports, and re-arms the delay after each
 // export, as the specification's scheduledDelay is the delay between two
 // consecutive exports.
+//
+// None of the channels it receives from is ever closed but stop; each receive
+// still reads the comma-ok form, and a closed one would end the loop rather
+// than spin it.
 func (b *BatchSink) run() {
-	defer close(b.done)
+	defer b.doneOnce.Do(func() { close(b.done) })
 	timer := b.clk.NewTimer(b.delay)
 	defer timer.Stop()
-	for {
-		select {
-		case <-b.ready:
-			//: export full batches only; a partial one waits for the delay.
-			b.exportFull()
-		case <-timer.C():
-			//: the delay has passed: everything queued goes.
-			b.exportAll()
-		case request := <-b.flushes:
-			//: everything queued goes, and the caller hears how it went.
-			request.reply <- b.exportAll()
-		case <-b.stop:
-			//: the last flush; closed is set, so nothing new arrives.
-			b.lastErr = b.exportAll()
-			//: done closes on return.
-			return
-		}
+	//: one wake-up per turn; the delay is re-armed after each.
+	for b.serve(timer) {
 		timer.Reset(b.delay)
+	}
+}
+
+// serve waits for one wake-up and exports for it, and reports whether the
+// goroutine goes on.
+func (b *BatchSink) serve(timer clock.Timer) bool {
+	select {
+	case _, open := <-b.ready:
+		//: export full batches only; a partial one waits for the delay.
+		if open {
+			b.exportFull()
+		}
+		//: a closed channel would only spin the loop: it ends it.
+		return open
+	case _, open := <-timer.C():
+		//: the delay has passed: everything queued goes.
+		if open {
+			b.exportAll()
+		}
+		//: a clock's timer channel is never closed.
+		return open
+	case request, open := <-b.flushes:
+		//: everything queued goes, and the caller hears how it went.
+		if open {
+			request.reply <- b.exportAll()
+		}
+		//: never closed.
+		return open
+	case <-b.stop:
+		//: the last flush; closed is set, so nothing new arrives.
+		b.lastErr = b.exportAll()
+		//: done closes as run returns.
+		return false
 	}
 }
 
@@ -370,6 +393,11 @@ func (b *BatchSink) exportBatch() error {
 
 // export hands one batch to the exporter, bounded by the export timeout on
 // the sink's clock when the exporter can honour a context.
+//
+// Goroutine lifecycle: one watcher per bounded export, started here; it ends
+// when the clock reaches the bound — cancelling the export's context — or when
+// the export returns first, and export joins it before returning, so none
+// outlives the call.
 func (b *BatchSink) export(spans coretrace.SpansValue) error {
 	//: no context to honour: the exporter bounds itself or nothing does.
 	if b.withContext == nil {

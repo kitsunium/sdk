@@ -170,49 +170,71 @@ sequences:
         kind: actor
       - id: (*BatchSink).run
         kind: self
+      - id: b.doneOnce.Do
+        kind: value
       - id: b.clk.NewTimer
         kind: value
       - id: timer.Stop
         kind: value
-      - id: b.exportFull
-        kind: internal
-      - id: b.exportAll
-        kind: internal
       - id: timer.Reset
         kind: value
     steps:
-      - defer: close(b.done)
+      - defer: b.doneOnce.Do(func() { close(b.done) })
+        to: b.doneOnce.Do
       - bind: timer
         eval: b.clk.NewTimer(b.delay)
         to: b.clk.NewTimer
       - defer: timer.Stop()
         to: timer.Stop
       - loop:
+          cond: b.serve(timer)
           do:
-            - select:
-                cases:
-                  - comm: <-b.ready
+            - eval: timer.Reset(b.delay)
+              to: timer.Reset
+  - of: (*BatchSink).serve
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*BatchSink).serve
+        kind: self
+      - id: b.exportFull
+        kind: internal
+      - id: b.exportAll
+        kind: internal
+    steps:
+      - select:
+          cases:
+            - comm: _, open := <-b.ready
+              do:
+                - opt:
                     do:
                       - eval: b.exportFull()
                         to: b.exportFull
-                  - comm: <-timer.C()
+                    when: open
+                - return: open
+            - comm: _, open := <-timer.C()
+              do:
+                - opt:
                     do:
                       - eval: b.exportAll()
                         to: b.exportAll
-                  - comm: request := <-b.flushes
+                    when: open
+                - return: open
+            - comm: request, open := <-b.flushes
+              do:
+                - opt:
                     do:
                       - send:
                           chan: request.reply
                           value: b.exportAll()
-                  - comm: <-b.stop
-                    do:
-                      - set: b.lastErr
-                        to: b.exportAll
-                        value: b.exportAll()
-                      - return: ""
-            - eval: timer.Reset(b.delay)
-              to: timer.Reset
-          forever: true
+                    when: open
+                - return: open
+            - comm: <-b.stop
+              do:
+                - set: b.lastErr
+                  to: b.exportAll
+                  value: b.exportAll()
+                - return: "false"
   - of: (*BatchSink).exportFull
     participants:
       - id: caller
@@ -395,32 +417,32 @@ sequences:
     steps:
       - opt:
           do:
-            - set: cfg.MaxQueueSize
+            - set: c.MaxQueueSize
               value: DefaultBatchMaxQueueSize
-          when: cfg.MaxQueueSize <= 0
+          when: c.MaxQueueSize <= 0
       - opt:
           do:
-            - set: cfg.ScheduledDelay
+            - set: c.ScheduledDelay
               value: DefaultBatchScheduledDelay
-          when: cfg.ScheduledDelay <= 0
+          when: c.ScheduledDelay <= 0
       - opt:
           do:
-            - set: cfg.ExportTimeout
+            - set: c.ExportTimeout
               value: DefaultBatchExportTimeout
-          when: cfg.ExportTimeout <= 0
+          when: c.ExportTimeout <= 0
       - opt:
           do:
-            - set: cfg.MaxExportBatchSize
+            - set: c.MaxExportBatchSize
               value: DefaultBatchMaxExportBatchSize
-          when: cfg.MaxExportBatchSize <= 0
-      - set: cfg.MaxExportBatchSize
-        value: min(cfg.MaxExportBatchSize, cfg.MaxQueueSize)
+          when: c.MaxExportBatchSize <= 0
+      - set: c.MaxExportBatchSize
+        value: min(c.MaxExportBatchSize, c.MaxQueueSize)
       - opt:
           do:
-            - set: cfg.Clock
+            - set: c.Clock
               value: clock.System
-          when: cfg.Clock == nil
-      - return: cfg
+          when: c.Clock == nil
+      - return: c
   - of: TracerConfig.resolved
     participants:
       - id: caller

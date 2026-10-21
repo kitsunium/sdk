@@ -382,6 +382,7 @@ files:
       - (*BatchSink).Failed
       - (*BatchSink).Len
       - (*BatchSink).run
+      - (*BatchSink).serve
       - (*BatchSink).exportFull
       - (*BatchSink).exportAll
       - (*BatchSink).exportBatch
@@ -903,9 +904,11 @@ types:
       - doc: |-
           done is closed when the goroutine has exported the last batch and ended;
           lastErr is the first failure of that last flush, written before done
-          closes and read only after.
+          closes and read only after. doneOnce states that done closes once.
         name: done
         type: chan struct{}
+      - name: doneOnce
+        type: sync.Once
       - name: lastErr
         type: error
     kind: struct
@@ -944,8 +947,19 @@ types:
           delay, a ForceFlush or Shutdown, exports, and re-arms the delay after each
           export, as the specification's scheduledDelay is the delay between two
           consecutive exports.
+
+          None of the channels it receives from is ever closed but stop; each receive
+          still reads the comma-ok form, and a closed one would end the loop rather
+          than spin it.
         name: run
         recv: b *BatchSink
+      - doc: |-
+          serve waits for one wake-up and exports for it, and reports whether the
+          goroutine goes on.
+        name: serve
+        params: timer clock.Timer
+        recv: b *BatchSink
+        results: bool
       - doc: exportFull exports while at least one full batch is queued.
         name: exportFull
         recv: b *BatchSink
@@ -965,6 +979,11 @@ types:
       - doc: |-
           export hands one batch to the exporter, bounded by the export timeout on
           the sink's clock when the exporter can honour a context.
+
+          Goroutine lifecycle: one watcher per bounded export, started here; it ends
+          when the clock reaches the bound — cancelling the export's context — or when
+          the export returns first, and export joins it before returning, so none
+          outlives the call.
         name: export
         params: spans coretrace.SpansValue
         recv: b *BatchSink
@@ -1019,11 +1038,11 @@ types:
     kind: struct
     methods:
       - doc: |-
-          resolved returns cfg with every clamp applied once: a non-positive size or
+          resolved returns c with every clamp applied once: a non-positive size or
           duration takes the specification's default, a batch larger than the queue
           is the queue, and an unset clock is the system's.
         name: resolved
-        recv: cfg BatchSinkConfig
+        recv: c BatchSinkConfig
         results: BatchSinkConfig
     name: BatchSinkConfig
   - fields:

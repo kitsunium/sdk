@@ -43,33 +43,33 @@ type BatchSinkConfig struct {
 	OnError func(err error)
 }
 
-// resolved returns cfg with every clamp applied once: a non-positive size or
+// resolved returns c with every clamp applied once: a non-positive size or
 // duration takes the specification's default, a batch larger than the queue
 // is the queue, and an unset clock is the system's.
-func (cfg BatchSinkConfig) resolved() BatchSinkConfig {
+func (c BatchSinkConfig) resolved() BatchSinkConfig {
 	//: the queue bound first — the batch clamp reads it.
-	if cfg.MaxQueueSize <= 0 {
+	if c.MaxQueueSize <= 0 {
 		//: maxQueueSize 2048.
-		cfg.MaxQueueSize = DefaultBatchMaxQueueSize
+		c.MaxQueueSize = DefaultBatchMaxQueueSize
 	}
 	//: scheduledDelayMillis 5000.
-	if cfg.ScheduledDelay <= 0 {
-		cfg.ScheduledDelay = DefaultBatchScheduledDelay
+	if c.ScheduledDelay <= 0 {
+		c.ScheduledDelay = DefaultBatchScheduledDelay
 	}
 	//: exportTimeoutMillis 30000.
-	if cfg.ExportTimeout <= 0 {
-		cfg.ExportTimeout = DefaultBatchExportTimeout
+	if c.ExportTimeout <= 0 {
+		c.ExportTimeout = DefaultBatchExportTimeout
 	}
 	//: maxExportBatchSize 512.
-	if cfg.MaxExportBatchSize <= 0 {
-		cfg.MaxExportBatchSize = DefaultBatchMaxExportBatchSize
+	if c.MaxExportBatchSize <= 0 {
+		c.MaxExportBatchSize = DefaultBatchMaxExportBatchSize
 	}
 	//: the specification: it MUST be less than or equal to maxQueueSize.
-	cfg.MaxExportBatchSize = min(cfg.MaxExportBatchSize, cfg.MaxQueueSize)
+	c.MaxExportBatchSize = min(c.MaxExportBatchSize, c.MaxQueueSize)
 	//: the real clock is a description, not a guess.
-	if cfg.Clock == nil {
-		cfg.Clock = clock.System
+	if c.Clock == nil {
+		c.Clock = clock.System
 	}
 	//: the resolved configuration.
-	return cfg
+	return c
 }
