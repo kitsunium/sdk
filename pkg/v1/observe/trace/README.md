@@ -59,7 +59,7 @@ The client one lives at the transport for the same reason the network domain's p
 
 ### What it deliberately does not do
 
-It does not batch. A [SpanSink](#SpanSink) receives one span at a time and a batching processor is a sink that buffers and forwards — which is where its cost is visible, rather than hidden inside a tracer.
+It does not batch inside the tracer. A [SpanSink](#SpanSink) receives one span at a time, and batching is a sink that buffers and forwards — [NewBatchSink](#NewBatchSink), the specification's batching processor, whose cost is visible there rather than hidden inside a tracer.
 
 It does not schedule an export. [github.com/kitsunium/sdk/pkg/v1/app/scheduler](https://pkg.go.dev/github.com/kitsunium/sdk/pkg/v1/app/scheduler) already owns "when", and Collect plus Export is one call.
 
@@ -78,6 +78,7 @@ See ADR 0051.
 - [func ContextWithSpanContext\(parent context.Context, spanContext SpanContext\) context.Context](<#ContextWithSpanContext>)
 - [func EncodeOTLPJSON\(spans Spans\) \(doc \[\]byte, err error\)](<#EncodeOTLPJSON>)
 - [func Export\(name ExporterName, spans Spans\) error](<#Export>)
+- [func ExportContext\(ctx context.Context, name ExporterName, spans Spans\) error](<#ExportContext>)
 - [func Extract\(carrier Carrier\) SpanContext](<#Extract>)
 - [func Float64\(key string, value float64\) Attr](<#Float64>)
 - [func FormatTraceParent\(context SpanContext\) \(header string, ok bool\)](<#FormatTraceParent>)
@@ -85,7 +86,8 @@ See ADR 0051.
 - [func Int64\(key string, value int64\) Attr](<#Int64>)
 - [func LookupExporter\(name ExporterName\) \(e SpanExporter, ok bool\)](<#LookupExporter>)
 - [func NeverSample\(params SamplingParams\) bool](<#NeverSample>)
-- [func NewOTLPHTTPExporter\(name ExporterName, cfg OTLPHTTPConfig\) \(exporter SpanExporter, err error\)](<#NewOTLPHTTPExporter>)
+- [func NewBatchSink\(cfg BatchSinkConfig\) \(sink \*BatchSink, err error\)](<#NewBatchSink>)
+- [func NewOTLPHTTPExporter\(name ExporterName, cfg OTLPHTTPConfig\) \(exporter ContextSpanExporter, err error\)](<#NewOTLPHTTPExporter>)
 - [func NewOTLPJSONExporter\(name ExporterName, dst io.Writer\) SpanExporter](<#NewOTLPJSONExporter>)
 - [func NewRecorder\(cfg RecorderConfig\) \*Recorder](<#NewRecorder>)
 - [func NewSpanID\(\) \(id SpanID, err error\)](<#NewSpanID>)
@@ -112,9 +114,20 @@ See ADR 0051.
   - [func \(Attr\) Kind\(\) AttrKind](<#Attr.Kind>)
   - [func \(Attr\) Str\(\) string](<#Attr.Str>)
 - [type AttrKind](<#AttrKind>)
+- [type BatchSink](<#BatchSink>)
+  - [func \(\*BatchSink\) Dropped\(\) uint64](<#BatchSink.Dropped>)
+  - [func \(\*BatchSink\) Failed\(\) uint64](<#BatchSink.Failed>)
+  - [func \(\*BatchSink\) ForceFlush\(ctx context.Context\) error](<#BatchSink.ForceFlush>)
+  - [func \(\*BatchSink\) Len\(\) int](<#BatchSink.Len>)
+  - [func \(\*BatchSink\) Resource\(\) coreotel.ResourceValue](<#BatchSink.Resource>)
+  - [func \(\*BatchSink\) Shutdown\(ctx context.Context\) error](<#BatchSink.Shutdown>)
+  - [func \(\*BatchSink\) Sink\(\) coretrace.SpanSink](<#BatchSink.Sink>)
+- [type BatchSinkConfig](<#BatchSinkConfig>)
 - [type Carrier](<#Carrier>)
   - [func \(Carrier\) Get\(key string\) string](<#Carrier.Get>)
   - [func \(Carrier\) Set\(key string, value string\)](<#Carrier.Set>)
+- [type ContextSpanExporter](<#ContextSpanExporter>)
+  - [func \(ContextSpanExporter\) ExportContext\(ctx context.Context, spans SpansValue\) error](<#ContextSpanExporter.ExportContext>)
 - [type Event](<#Event>)
   - [func \(Event\) Normalized\(\) EventValue](<#Event.Normalized>)
 - [type ExporterName](<#ExporterName>)
@@ -233,6 +246,51 @@ const AttrKindString AttrKind = 1
 AttrKindString marks a string-valued attribute.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/observe/otel.AttrKindString`.
+
+<a name="DefaultBatchExportTimeout"></a>
+```go
+const DefaultBatchExportTimeout time.Duration = 30000000000
+```
+
+DefaultBatchExportTimeout bounds one export of a BatchSink.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/observe/trace.DefaultBatchExportTimeout`.
+
+<a name="DefaultBatchMaxExportBatchSize"></a>
+```go
+const DefaultBatchMaxExportBatchSize int = 512
+```
+
+DefaultBatchMaxExportBatchSize bounds how many spans one export carries.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/observe/trace.DefaultBatchMaxExportBatchSize`.
+
+<a name="DefaultBatchMaxQueueSize"></a>
+```go
+const DefaultBatchMaxQueueSize int = 2048
+```
+
+DefaultBatchMaxQueueSize, DefaultBatchScheduledDelay, DefaultBatchExportTimeout and DefaultBatchMaxExportBatchSize are a BatchSink's defaults — the OpenTelemetry trace SDK specification's own: 2048 spans, 5s, 30s and 512 spans.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/observe/trace.DefaultBatchMaxQueueSize`.
+
+<a name="DefaultBatchScheduledDelay"></a>
+```go
+const DefaultBatchScheduledDelay time.Duration = 5000000000
+```
+
+DefaultBatchScheduledDelay is the longest a queued span waits before an export starts.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/observe/trace.DefaultBatchScheduledDelay`.
+
+<a name="DefaultExportTimeout"></a>
+```go
+const DefaultExportTimeout time.Duration = 30000000000
+```
+
+DefaultExportTimeout bounds an ExportContext whose context carries no deadline: 30s, the OpenTelemetry trace SDK specification's exportTimeout.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/observe/trace.DefaultExportTimeout`.
 
 <a name="DefaultMaxSpans"></a>
 ```go
@@ -506,6 +564,28 @@ Initialised with `github.com/kitsunium/sdk/internal/service/observe/trace.Versio
 
 ## Variables
 
+<a name="BatchExporterMissing"></a>
+```go
+var BatchExporterMissing *errs.Error
+```
+
+BatchExporterMissing reports a BatchSink configured with no usable exporter.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/observe/trace.BatchExporterMissing`.
+
+Code `0.3.50.9` · reason `BATCH_EXPORTER_MISSING` · public "The batch span sink needs an exporter"
+
+<a name="BatchFlushIncomplete"></a>
+```go
+var BatchFlushIncomplete *errs.Error
+```
+
+BatchFlushIncomplete reports a ForceFlush or Shutdown cut short by its context.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/observe/trace.BatchFlushIncomplete`.
+
+Code `0.3.50.10` · reason `BATCH_FLUSH_INCOMPLETE` · public "The batch span sink did not finish exporting before the deadline"
+
 <a name="DuplicateRegistration"></a>
 ```go
 var DuplicateRegistration *errs.Error
@@ -734,6 +814,15 @@ func Export(name ExporterName, spans Spans) error
 
 Export ships spans through the SpanExporter registered as name.
 
+<a name="ExportContext"></a>
+## func [ExportContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
+
+```go
+func ExportContext(ctx context.Context, name ExporterName, spans Spans) error
+```
+
+ExportContext ships spans through the SpanExporter registered as name, bounded by ctx — DefaultExportTimeout when ctx carries no deadline.
+
 <a name="Extract"></a>
 ## func [Extract](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
@@ -797,14 +886,23 @@ func NeverSample(params SamplingParams) bool
 
 NeverSample drops every root trace. It exists so "off" has a NAME a reviewer can grep for, rather than a rate of zero that is indistinguishable from a field nobody set.
 
+<a name="NewBatchSink"></a>
+## func [NewBatchSink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
+
+```go
+func NewBatchSink(cfg BatchSinkConfig) (sink *BatchSink, err error)
+```
+
+NewBatchSink builds the batching span destination and starts its exporting goroutine; Shutdown ends it. A missing exporter is refused with BatchExporterMissing.
+
 <a name="NewOTLPHTTPExporter"></a>
 ## func [NewOTLPHTTPExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
 ```go
-func NewOTLPHTTPExporter(name ExporterName, cfg OTLPHTTPConfig) (exporter SpanExporter, err error)
+func NewOTLPHTTPExporter(name ExporterName, cfg OTLPHTTPConfig) (exporter ContextSpanExporter, err error)
 ```
 
-NewOTLPHTTPExporter builds a SpanExporter that POSTs each batch to an OTLP collector. It is deliberately NOT in the registry: arming a network client from an import is worse than arming a writer, and no endpoint could be a correct default. It does not retry either — use OTLPRetryable with [github.com/kitsunium/sdk/pkg/v1/app/resilience](https://pkg.go.dev/github.com/kitsunium/sdk/pkg/v1/app/resilience).
+NewOTLPHTTPExporter builds a ContextSpanExporter that POSTs each batch to an OTLP collector, ExportContext bounded by its context. It is deliberately NOT in the registry: arming a network client from an import is worse than arming a writer, and no endpoint could be a correct default. It does not retry either — use OTLPRetryable with [github.com/kitsunium/sdk/pkg/v1/app/resilience](https://pkg.go.dev/github.com/kitsunium/sdk/pkg/v1/app/resilience).
 
 <a name="NewOTLPJSONExporter"></a>
 ## func [NewOTLPJSONExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
@@ -1066,6 +1164,129 @@ AttrKind is an alias of `github.com/kitsunium/sdk/internal/core/observe/otel.Att
 type AttrKind uint8
 ```
 
+<a name="BatchSink"></a>
+## type [BatchSink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
+
+BatchSink is the specification's batching span processor, as a SpanSink: a bounded queue exported in batches by one goroutine, its losses counted.
+
+```go
+type BatchSink = svctrace.BatchSink
+```
+
+BatchSink is an alias of `github.com/kitsunium/sdk/internal/service/observe/trace.BatchSink`, declared as:
+
+```go
+type BatchSink struct{}
+```
+
+<a name="BatchSink.Dropped"></a>
+### func \(BatchSink\) [Dropped](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/trace/batch_sink.go>)
+
+```go
+func (*BatchSink) Dropped() uint64
+```
+
+Dropped reports how many spans were refused since construction — the queue was full, or the sink was shut down. It is cumulative.
+
+<a name="BatchSink.Failed"></a>
+### func \(BatchSink\) [Failed](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/trace/batch_sink.go>)
+
+```go
+func (*BatchSink) Failed() uint64
+```
+
+Failed reports how many spans were handed to an export that returned an error, since construction. It is cumulative.
+
+<a name="BatchSink.ForceFlush"></a>
+### func \(BatchSink\) [ForceFlush](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/trace/batch_sink.go>)
+
+```go
+func (*BatchSink) ForceFlush(ctx context.Context) error
+```
+
+ForceFlush exports every span queued when it is called, in batches, and returns once the exporter has answered for each of them or ctx has ended, whichever is first. It returns the first export failure, or BatchFlushIncomplete wrapping the context's error. After Shutdown it has nothing to flush and returns nil.
+
+<a name="BatchSink.Len"></a>
+### func \(BatchSink\) [Len](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/trace/batch_sink.go>)
+
+```go
+func (*BatchSink) Len() int
+```
+
+Len reports how many spans are queued and not yet handed to the exporter.
+
+<a name="BatchSink.Resource"></a>
+### func \(BatchSink\) [Resource](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/trace/batch_sink.go>)
+
+```go
+func (*BatchSink) Resource() coreotel.ResourceValue
+```
+
+Resource returns the producing resource this sink stamps on every batch, already normalised, so a Tracer and its sink can be given ONE resource literal.
+
+<a name="BatchSink.Shutdown"></a>
+### func \(BatchSink\) [Shutdown](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/trace/batch_sink.go>)
+
+```go
+func (*BatchSink) Shutdown(ctx context.Context) error
+```
+
+Shutdown stops accepting spans, exports what is queued, and ends the exporting goroutine. It returns the first export failure of that last flush, or BatchFlushIncomplete when ctx ends first — the goroutine then finishes on its own, each export still bounded by ExportTimeout. A second call waits for the same end and returns nil.
+
+<a name="BatchSink.Sink"></a>
+### func \(BatchSink\) [Sink](<https://github.com/kitsunium/sdk/blob/main/internal/service/observe/trace/batch_sink.go>)
+
+```go
+func (*BatchSink) Sink() coretrace.SpanSink
+```
+
+Sink returns the core/observe/trace.SpanSink to hand to a TracerConfig. Every call returns the same bound method; recording takes one short lock and never waits on the exporter.
+
+<a name="BatchSinkConfig"></a>
+## type [BatchSinkConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
+
+BatchSinkConfig configures a BatchSink; zero fields take the specification's defaults.
+
+```go
+type BatchSinkConfig = svctrace.BatchSinkConfig
+```
+
+BatchSinkConfig is an alias of `github.com/kitsunium/sdk/internal/service/observe/trace.BatchSinkConfig`, declared as:
+
+```go
+type BatchSinkConfig struct {
+	// Exporter receives every batch. Required: NewBatchSink refuses a nil one
+	// with BatchExporterMissing. One that implements ContextSpanExporter is
+	// bounded by ExportTimeout.
+	Exporter           coretrace.SpanExporter
+	// Resource identifies the producer, stamped on every batch.
+	Resource           coreotel.ResourceValue
+	// Scope identifies the instrumentation, stamped on every batch.
+	Scope              coreotel.ScopeValue
+	// MaxQueueSize bounds how many finished spans wait for export.
+	// Non-positive CLAMPS to DefaultBatchMaxQueueSize (2048).
+	MaxQueueSize       int
+	// ScheduledDelay is the longest a queued span waits before an export
+	// starts. Non-positive CLAMPS to DefaultBatchScheduledDelay (5 s).
+	ScheduledDelay     time.Duration
+	// ExportTimeout bounds one export, on Clock. Non-positive CLAMPS to
+	// DefaultBatchExportTimeout (30 s).
+	ExportTimeout      time.Duration
+	// MaxExportBatchSize bounds how many spans one export carries, and is the
+	// fill level that starts an export before ScheduledDelay. Non-positive
+	// CLAMPS to DefaultBatchMaxExportBatchSize (512); above MaxQueueSize it
+	// clamps to MaxQueueSize, as the specification requires.
+	MaxExportBatchSize int
+	// Clock drives ScheduledDelay and ExportTimeout. Unset CLAMPS to
+	// clock.System; a test injects a ManualClock and waits on nothing.
+	Clock              clock.Timed
+	// OnError receives every export failure, from the exporting goroutine. Nil
+	// discards it; Failed counts the spans either way. It must not block: the
+	// next export waits for it.
+	OnError            func(err error)
+}
+```
+
 <a name="Carrier"></a>
 ## type [Carrier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
 
@@ -1096,6 +1317,31 @@ func (Carrier) Get(key string) string
 
 ```go
 func (Carrier) Set(key string, value string)
+```
+
+<a name="ContextSpanExporter"></a>
+## type [ContextSpanExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/gen_facade.go>)
+
+ContextSpanExporter is a SpanExporter whose export a context bounds and cancels — the sibling that carries the specification's "MUST NOT block indefinitely" without widening SpanExporter (ADR 0039).
+
+```go
+type ContextSpanExporter = coretrace.ContextSpanExporter
+```
+
+ContextSpanExporter is an alias of `github.com/kitsunium/sdk/internal/core/observe/trace.ContextSpanExporter`, declared as:
+
+```go
+type ContextSpanExporter interface {
+	ExportContext(ctx context.Context, spans SpansValue) error
+	SpanExporter
+}
+```
+
+<a name="ContextSpanExporter.ExportContext"></a>
+### func \(ContextSpanExporter\) [ExportContext](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/trace/gen_ports.go>)
+
+```go
+func (ContextSpanExporter) ExportContext(ctx context.Context, spans SpansValue) error
 ```
 
 <a name="Event"></a>
@@ -2099,8 +2345,9 @@ type TracerConfig struct {
 	// no destination has nowhere to put a span, and buffering into a slice
 	// nobody drains is the memory leak that shape invites.
 	//
-	// NewRecorder is the in-tree destination; a batching processor would be a
-	// Sink that buffers and forwards (ADR 0051 §Deferred).
+	// NewRecorder is the in-tree destination a caller collects from;
+	// NewBatchSink is the batching processor that buffers and forwards to an
+	// exporter on its own.
 	Sink     coretrace.SpanSink
 	// Clock stamps StartTime and EndTime. Unset CLAMPS to clock.System.
 	//

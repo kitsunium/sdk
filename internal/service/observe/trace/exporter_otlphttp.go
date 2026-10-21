@@ -1,6 +1,7 @@
 package trace
 
 import (
+	"context"
 	"time"
 
 	coretrace "github.com/kitsunium/sdk/internal/core/observe/trace"
@@ -77,8 +78,10 @@ type otlpHTTPExporter struct {
 	sender *otlp.Sender
 }
 
-// NewOTLPHTTPExporter builds a SpanExporter that POSTs each batch to an OTLP
-// collector as OTLP/JSON.
+// NewOTLPHTTPExporter builds a ContextSpanExporter that POSTs each batch to an
+// OTLP collector as OTLP/JSON. ExportContext bounds the POST by its context —
+// a done context aborts the request and returns the transient verdict — and
+// Export is ExportContext under a context bounded by the client's own deadline.
 //
 // # It is NOT registered, and that is a decision one step beyond ADR 0030
 //
@@ -96,9 +99,9 @@ type otlpHTTPExporter struct {
 // The specification asks a client to honour Retry-After and otherwise back off
 // exponentially. `internal/service/app/resilience` already ships that policy, and a
 // backoff hidden inside Export would be a second one a caller cannot see, tune or
-// cancel — Export has no context to cancel it with. What this exporter supplies
-// instead is the CLASSIFICATION a retry policy needs, in the exact shape
-// resilience.RetryConfig.Retryable wants:
+// cancel, and would spend the very deadline ExportContext is given. What this
+// exporter supplies instead is the CLASSIFICATION a retry policy needs, in the
+// exact shape resilience.RetryConfig.Retryable wants:
 //
 //	resilience.NewRetry(resilience.RetryConfig{
 //	    MaxAttempts: 3,
@@ -109,7 +112,7 @@ type otlpHTTPExporter struct {
 // A construction failure is returned rather than deferred into an always-failing
 // exporter: refusing at wiring time is strictly earlier than refusing at the
 // first export.
-func NewOTLPHTTPExporter(name coretrace.ExporterName, cfg OTLPHTTPConfig) (exporter coretrace.SpanExporter, err error) {
+func NewOTLPHTTPExporter(name coretrace.ExporterName, cfg OTLPHTTPConfig) (exporter coretrace.ContextSpanExporter, err error) {
 	//: the shared transport, refusing an unusable endpoint under this
 	//: signal's code before anything is constructed.
 	sender, senderErr := otlp.NewSender((*otlp.HTTPConfig)(&cfg), &otlpSignal)
@@ -152,6 +155,17 @@ func (e *otlpHTTPExporter) Name() coretrace.ExporterName {
 // costs a round trip to say nothing, and an export loop on a quiet service would
 // make one every interval forever.
 func (e *otlpHTTPExporter) Export(spans coretrace.SpansValue) error {
+	//: the same export under a context that never ends: the client's deadline
+	//: is the bound, as it always was.
+	return e.ExportContext(context.Background(), spans)
+}
+
+// ExportContext implements core/observe/trace.ContextSpanExporter: Export,
+// with the POST bounded by ctx. A context that is done before the collector
+// answers — already, or midway — ends the round trip with the transient
+// verdict a transport fault earns, so a retry policy reads a timeout as the
+// retryable failure the specification says it is.
+func (e *otlpHTTPExporter) ExportContext(ctx context.Context, spans coretrace.SpansValue) error {
 	//: nothing to ship.
 	if spans.IsEmpty() {
 		//: no socket touched.
@@ -164,6 +178,6 @@ func (e *otlpHTTPExporter) Export(spans coretrace.SpansValue) error {
 		//: surface the typed refusal.
 		return err
 	}
-	//: transport and classification.
-	return e.sender.Post(body)
+	//: transport and classification, under the caller's bound.
+	return e.sender.PostContext(ctx, body)
 }

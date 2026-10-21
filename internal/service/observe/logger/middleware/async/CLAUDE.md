@@ -15,12 +15,12 @@ S3) so a backed-up drain never stalls the application.
 
 | File | Role |
 |---|---|
-| `async_sink.go`        | `asyncSink` + `New` + `Write` / `Flush` / `Close`; the production drainer runs on a `kernel/concur/worker.LoopDaemon`, whose idempotent `Stop` is the join (ADR 0014 §D6) |
-| `async_sink_policy.go` | `DropPolicy` enum (`DropNewest` default, `DropOldest`) |
+| `async_sink.go`        | `asyncSink` + `New` + `Write` / `Flush` / `Close`; the `Block` wait (`blockForSpace` / `retryBlocked` / `signalSpace` / `abandon`); the production drainer runs on a `kernel/concur/worker.LoopDaemon`, whose idempotent `Stop` is the join (ADR 0014 §D6) |
+| `async_sink_policy.go` | `DropPolicy` enum (`DropNewest` default, `DropOldest`, `Block`) + `DefaultMaxBlock` (1 s) |
 | `drainer.go`           | drainer body: `drain` (the loop body the daemon runs and the white-box tests spawn directly; closes `done` via `doneOnce`) / `drainLoop` (selects on the sink's `stop`) / `forward` / `drainRemaining`; `maxSaneCap` (64 KiB) bounds pool retention against attacker-influenced records |
 | `runtime.go`           | helpers — `yieldOnce`, `isClosed`, `asyncCtx`, `forwardDownstreamError`, `swallowRingError` |
 | `entry.go`             | `recordEntry` recycled through `recycler.Pool` |
-| `config.go`            | `Config{BufferSize, Policy, OnDrop, OnError}` |
+| `config.go`            | `Config{BufferSize, Policy, MaxBlock, Clock, OnDrop, OnError}` |
 | `internal/core/observe/logger/middleware/async` | its sentinels — range 0.3.17.\* — declared in the core mirror since ADR 0160; this package declares none |
 
 ## Behaviour
@@ -30,6 +30,18 @@ S3) so a backed-up drain never stalls the application.
   return `BufferFull`.
 - **DropOldest**: evict the head, fire `OnDrop` for it, retry the write,
   return `nil`.
+- **Block** (#479): the Write waits for a free slot instead of losing the
+  entry — Vector's `when_full: block` — OUTSIDE `ringMu`, so the drainer can
+  free the slot and `Close` can reach the waiter. The wait is bounded by
+  `MaxBlock` on `Clock` (ADR 0090); a zero `MaxBlock` is `DefaultMaxBlock`,
+  one second, never "forever" (ADR 0031) — a logger blocking without a bound
+  turns a dead downstream into a stalled service. Past the bound the entry is
+  dropped, `OnDrop` fires and Write returns `BlockTimeout`; a cancelled context
+  returns `CtxCancelled` (and fires `OnDrop`), `Close` returns `Stopped` to
+  every waiter. The drainer signals a one-slot `space` channel after every
+  read; a waiter that lands and leaves room passes the signal on. The timer is
+  armed only on the saturated path, so a Write that finds room never touches
+  the clock; `space` is nil under the drop policies.
 - **Cancellation.** `Write` with a cancelled `ctx` returns `CtxCancelled`
   wrapping `ctx.Err()`; `Flush` does too while entries remain (a drained
   ring goes straight to the downstream `Flush`). A nil ctx is allowed and
@@ -60,7 +72,8 @@ Declared in `internal/core/observe/logger/middleware/async` since ADR 0160 §2: 
 |---|---|---|
 | 0.3.17.1  | `Stopped`      | `Write` after `Close` (drainer is gone) |
 | 0.3.17.2  | `BufferFull`   | ring saturated under `DropNewest` |
-| 0.3.17.3  | `CtxCancelled` | `Write` / `Flush` saw a cancelled `ctx` |
+| 0.3.17.3  | `CtxCancelled` | `Write` / `Flush` saw a cancelled `ctx`, or a `Block` wait was cancelled |
+| 0.3.17.4  | `BlockTimeout` | the ring stayed full for `MaxBlock` under `Block` |
 
 ## Do NOT
 

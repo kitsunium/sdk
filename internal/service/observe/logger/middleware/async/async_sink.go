@@ -3,9 +3,11 @@ package async
 import (
 	"context"
 	"sync"
+	"time"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	coreasync "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/async"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/collections/ring"
 	"github.com/kitsunium/sdk/internal/kernel/concur/recycler"
 	"github.com/kitsunium/sdk/internal/kernel/concur/worker"
@@ -27,6 +29,15 @@ type asyncSink struct {
 	pool *recycler.Pool[*recordEntry]
 	// policy selects the saturation behaviour at Write time.
 	policy DropPolicy
+	// maxBlock bounds a Block wait, on clk. Resolved at construction.
+	maxBlock time.Duration
+	// clk drives the Block wait; never nil once New has run.
+	clk clock.Timed
+	// space carries "a slot was freed" from the drainer to a Write waiting
+	// under Block. One buffered slot: a free slot wakes one waiter, which
+	// passes the token on when it leaves room behind. nil under the two drop
+	// policies, where nobody waits, so the drainer sends nothing.
+	space chan struct{}
 	// onDrop fires for every entry discarded by the policy; never nil.
 	onDrop func(missed int)
 	// onError fires for every downstream Write failure seen by the drainer;
@@ -121,11 +132,25 @@ func New(downstream corelogger.Sink, cfg Config) corelogger.Sink {
 		queue:       queue,
 		pool:        pool,
 		policy:      cfg.Policy,
+		maxBlock:    cfg.MaxBlock,
+		clk:         cfg.Clock,
 		onDrop:      callback,
 		onError:     errCallback,
 		flushSignal: make(chan struct{}, 1),
 		stop:        make(chan struct{}),
 		done:        make(chan struct{}),
+	}
+	//: the Block policy's bound and clock, resolved once; never unbounded.
+	if out.policy == Block {
+		//: non-positive is the documented bound, not "forever" (ADR 0031).
+		if out.maxBlock <= 0 {
+			out.maxBlock = DefaultMaxBlock
+		}
+		//: the real clock is a description, not a guess.
+		if out.clk == nil {
+			out.clk = clock.System
+		}
+		out.space = make(chan struct{}, 1)
 	}
 	//: the kernel worker.LoopDaemon owns the drainer goroutine + its
 	//: idempotent stop/join; the loop body is drain(), which selects on
@@ -194,10 +219,10 @@ func (s *asyncSink) Write(ctx context.Context, rec corelogger.RecordEvent, paylo
 	//: takes the same mutex so an in-flight Write cannot race drainRemaining
 	//: and the SPSC ring never sees concurrent producers.
 	s.ringMu.Lock()
-	defer s.ringMu.Unlock()
 	//: refuse work after Close — the drainer is gone. Checked under the
 	//: mutex so Close cannot transition between the check and TryWrite.
 	if isClosed(s.stop) {
+		s.ringMu.Unlock()
 		//: documented sentinel — caller knows Close has happened.
 		return 0, coreasync.Stopped
 	}
@@ -206,12 +231,137 @@ func (s *asyncSink) Write(ctx context.Context, rec corelogger.RecordEvent, paylo
 	ent.rec = rec
 	ent.data = append(ent.data[:0], payload...)
 	//: TryWrite runs inside ringMu — SPSC contract honoured.
-	if werr := s.queue.TryWrite(ent); werr != nil {
-		//: ring is full — apply the configured drop policy.
-		return s.handleFull(ent)
+	if werr := s.queue.TryWrite(ent); werr == nil {
+		s.ringMu.Unlock()
+		//: happy path — bytes accepted by the ring.
+		return len(payload), nil
 	}
-	//: happy path — bytes accepted by the ring.
-	return len(payload), nil
+	//: ring is full — Block waits OUTSIDE the lock, so the drainer can free
+	//: the slot it waits for and Close can reach every waiter.
+	if s.policy == Block {
+		s.ringMu.Unlock()
+		//: the bounded wait.
+		return s.blockForSpace(ctx, ent)
+	}
+	//: apply the configured drop policy, still under ringMu.
+	n, err = s.handleFull(ent)
+	s.ringMu.Unlock()
+	//: the policy's verdict.
+	return n, err
+}
+
+// blockForSpace is the Block policy: it waits for the drainer to free a slot,
+// at most maxBlock on clk, and stops early when ctx ends or Close begins. The
+// timer is armed only here, on the saturated path — a Write that finds room
+// never touches the clock.
+func (s *asyncSink) blockForSpace(ctx context.Context, ent *recordEntry) (n int, err error) {
+	timer := s.clk.NewTimer(s.maxBlock)
+	defer timer.Stop()
+	cancelled := doneOf(ctx)
+	for {
+		select {
+		case _, open := <-s.space:
+			//: never closed; a closed one would only spin the wait.
+			if !open {
+				//: treated as the end of the sink.
+				return s.abandon(ent, coreasync.Stopped, false)
+			}
+			//: a slot was freed; try for it below.
+		case <-timer.C():
+			//: the bound passed with the ring still full: dropped and counted.
+			return s.abandon(ent, coreasync.BlockTimeout, true)
+		case <-cancelled:
+			//: the caller left; the entry the ring could not take is dropped.
+			return s.abandon(ent, blockCancelled(ctx, ent), true)
+		case <-s.stop:
+			//: Close began: the drainer will not make room for a new entry.
+			return s.abandon(ent, coreasync.Stopped, false)
+		}
+		//: retry under ringMu, re-checking Close as Write does.
+		if n, done, err := s.retryBlocked(ent); done {
+			//: written, or refused by Close.
+			return n, err
+		}
+	}
+}
+
+// doneOf returns ctx's Done channel, or nil for a nil ctx — a channel nothing
+// ever sends on, so a nil ctx waits on the bound alone, as Flush's nil ctx
+// does.
+func doneOf(ctx context.Context) <-chan struct{} {
+	//: the legacy nil ctx is allowed.
+	if ctx == nil {
+		//: never ready.
+		return nil
+	}
+	//: the caller's cancellation.
+	return ctx.Done()
+}
+
+// abandon ends a Block wait without writing: the entry goes back to the pool,
+// OnDrop fires when the entry was dropped for want of a slot, and the verdict
+// is returned as Write's.
+func (s *asyncSink) abandon(ent *recordEntry, verdict error, dropped bool) (n int, err error) {
+	//: a drop the policy made is counted; a Close is not a drop.
+	if dropped {
+		s.onDrop(1)
+	}
+	s.pool.Put(ent)
+	//: nothing was written.
+	return 0, verdict
+}
+
+// blockCancelled wraps the context error a Block wait ended on, so the
+// typed-errors-only SDK rule is preserved.
+func blockCancelled(ctx context.Context, ent *recordEntry) error {
+	//: the documented sentinel's code, the context's error on the trail.
+	return errs.Wrap(ctx.Err(), errs.WrapParams{
+		Code:    coreasync.CodeAsyncCtxCancelled,
+		Reason:  "ASYNC_CTX_CANCELLED",
+		Public:  "Async sink write aborted due to cancellation",
+		Private: "service/observe/logger/middleware/async.Write was cancelled while waiting for a free slot under the Block policy",
+	}, errs.Int("level", int(ent.rec.Level)))
+}
+
+// retryBlocked makes one TryWrite for a waiting Block entry and reports
+// whether the wait is over. When the write lands and room is left, it passes
+// the wake-up on, so a second waiter is not left waiting for the next read.
+func (s *asyncSink) retryBlocked(ent *recordEntry) (n int, done bool, err error) {
+	s.ringMu.Lock()
+	defer s.ringMu.Unlock()
+	//: Close won the race for the lock: refuse as Write does.
+	if isClosed(s.stop) {
+		s.pool.Put(ent)
+		//: documented sentinel.
+		return 0, true, coreasync.Stopped
+	}
+	//: another producer took the slot: keep waiting.
+	if s.queue.TryWrite(ent) != nil {
+		//: not done.
+		return 0, false, nil
+	}
+	//: room is left behind: the next waiter need not wait for a read.
+	if s.queue.Len() < s.queue.Capacity() {
+		s.signalSpace()
+	}
+	//: accepted.
+	return len(ent.data), true, nil
+}
+
+// signalSpace tells one Block waiter that a slot may be free. Non-blocking,
+// and a no-op under the drop policies, where nobody waits.
+func (s *asyncSink) signalSpace() {
+	//: no waiter can exist.
+	if s.space == nil {
+		//: nothing to signal.
+		return
+	}
+	select {
+	case s.space <- struct{}{}:
+		//: one waiter will retry.
+	default:
+		//: a wake-up is already pending.
+	}
 }
 
 // handleFull applies the configured DropPolicy to a saturated ring.

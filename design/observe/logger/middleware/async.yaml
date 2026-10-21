@@ -26,6 +26,14 @@ packages:
             name: CodeAsyncCtxCancelled
             value: "0x00_03_11_03"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeAsyncBlockTimeout identifies a Write under the Block policy that waited
+              MaxBlock for a free slot without one appearing; the entry is dropped and the
+              OnDrop callback fires.
+            name: CodeAsyncBlockTimeout
+            value: "0x00_03_11_04"
+        type: errs.Code
     doc: |-
       Package async declares the codes and sentinels of the logger's asynchronous
       middleware, internal/service/observe/logger/middleware/async: range 0.3.17.*,
@@ -65,6 +73,15 @@ packages:
             private: service/observe/logger/middleware/async.Write or Flush saw a cancelled context
             public: Async sink aborted due to cancellation
             reason: ASYNC_CTX_CANCELLED
+          - code: CodeAsyncBlockTimeout
+            doc: |-
+              BlockTimeout is returned by Write under the Block policy when the ring
+              stayed saturated for MaxBlock; the entry is dropped and the OnDrop
+              callback fires.
+            name: BlockTimeout
+            private: service/observe/logger/middleware/async.Write waited MaxBlock under the Block policy and the ring stayed saturated
+            public: Async sink ring buffer stayed full
+            reason: ASYNC_BLOCK_TIMEOUT
   - constants:
       - doc: |-
           DropNewest discards the new entry when the ring is full and surfaces
@@ -78,6 +95,25 @@ packages:
         name: DropOldest
         type: DropPolicy
         value: "1"
+      - doc: |-
+          Block waits for a free slot when the ring is full — the producer is slowed to
+          the downstream's pace instead of losing the entry — for at most MaxBlock on
+          the configured Clock. Past the bound the entry is dropped, OnDrop fires and
+          Write returns BlockTimeout; a cancelled context returns CtxCancelled and Close
+          returns Stopped to every waiting Write. It is Vector's `when_full: block`
+          with the one difference ADR 0031 requires: the wait is never unbounded.
+        name: Block
+        type: DropPolicy
+        value: "2"
+      - doc: |-
+          DefaultMaxBlock is how long a Write waits under the Block policy when
+          Config.MaxBlock is unset: one second. Zero does not mean "forever" (ADR 0031):
+          a logger that blocks without a bound turns a dead downstream into a stalled
+          service, and a caller that wants a longer wait says so, or bounds the wait by
+          its context.
+        name: DefaultMaxBlock
+        type: time.Duration
+        value: "1000000000"
     doc: |-
       Package async wraps any corelogger.Sink with a non-blocking ring buffer
       and a single drainer goroutine, decoupling the producer hot path from
@@ -89,6 +125,9 @@ packages:
         - DropNewest: the new Write returns BufferFull; the OnDrop callback fires.
         - DropOldest: the oldest queued entry is silently discarded; the new
           entry takes its slot. OnDrop fires for the dropped entry.
+        - Block: the Write waits for a free slot, at most MaxBlock on the
+          configured Clock; past it the entry is dropped, OnDrop fires and Write
+          returns BlockTimeout.
 
       Use case: wrap CloudWatch / S3 / HTTP sinks so a slow remote drain never
       stalls the application's hot path.
@@ -125,6 +164,7 @@ packages:
         out:
           - type: corelogger.Sink
     imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
       corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
     path: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async
     types:
@@ -143,9 +183,20 @@ packages:
                 defaultBufferSize (1024 slots).
               name: BufferSize
               type: int
-            - doc: Policy selects DropNewest (default) or DropOldest behaviour on saturation.
+            - doc: Policy selects DropNewest (default), DropOldest or Block behaviour on saturation.
               name: Policy
               type: DropPolicy
+            - doc: |-
+                MaxBlock bounds how long a Write waits for a free slot under the Block
+                policy; non-positive falls back to DefaultMaxBlock (one second), never to
+                an unbounded wait (ADR 0031). Ignored by the two drop policies.
+              name: MaxBlock
+              type: time.Duration
+            - doc: |-
+                Clock drives the MaxBlock wait; nil falls back to clock.System. A test
+                injects a ManualClock and waits on nothing.
+              name: Clock
+              type: clock.Timed
             - doc: |-
                 OnDrop is invoked for every entry the policy discards because the ring
                 is saturated. Useful for wiring a metric counter; nil disables the

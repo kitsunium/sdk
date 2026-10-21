@@ -5,6 +5,8 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "trace",
     srcs = [
+        "batch_sink.go",
+        "batch_sink_config.go",
         "config.go",
         "doc.go",
         "exporter_otlphttp.go",
@@ -38,6 +40,7 @@ go_library(
         "//internal/core/observe/trace",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
+        "//internal/kernel/plugin",
         "//internal/service/observe/internal/otlp",
     ],
 )
@@ -56,6 +59,10 @@ go_test(
     srcs = [
         "alloc_external_test.go",
         "allocwindow_test.go",
+        "batch_sink_alloc_external_test.go",
+        "batch_sink_bench_test.go",
+        "batch_sink_external_test.go",
+        "exporter_otlphttp_context_external_test.go",
         "exporter_otlphttp_external_test.go",
         "exporter_otlpjson_external_test.go",
         "gen_api_test.go",

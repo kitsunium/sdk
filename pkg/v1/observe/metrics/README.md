@@ -162,11 +162,12 @@ Two things the encoder REFUSES rather than mis-encodes, both structural and ther
 - [func Bool\(key string, value bool\) Attr](<#Bool>)
 - [func EncodeOTLPJSON\(snap Snapshot\) \(doc \[\]byte, err error\)](<#EncodeOTLPJSON>)
 - [func Export\(name ExporterName, snap Snapshot\) error](<#Export>)
+- [func ExportContext\(ctx context.Context, name ExporterName, snap Snapshot\) error](<#ExportContext>)
 - [func Float64\(key string, value float64\) Attr](<#Float64>)
 - [func Int64\(key string, value int64\) Attr](<#Int64>)
 - [func NewMeter\(\) FullMeter](<#NewMeter>)
 - [func NewMeterWithConfig\(cfg MeterConfig\) FullMeter](<#NewMeterWithConfig>)
-- [func NewOTLPHTTPExporter\(name ExporterName, cfg OTLPHTTPConfig\) \(exporter Exporter, err error\)](<#NewOTLPHTTPExporter>)
+- [func NewOTLPHTTPExporter\(name ExporterName, cfg OTLPHTTPConfig\) \(exporter ContextExporter, err error\)](<#NewOTLPHTTPExporter>)
 - [func NewOTLPJSONExporter\(name ExporterName, dst io.Writer\) Exporter](<#NewOTLPJSONExporter>)
 - [func NewPrometheusExporter\(name ExporterName, dst io.Writer\) Exporter](<#NewPrometheusExporter>)
 - [func NewTextExporter\(name ExporterName, dst io.Writer\) Exporter](<#NewTextExporter>)
@@ -186,6 +187,8 @@ Two things the encoder REFUSES rather than mis-encodes, both structural and ther
   - [func \(Attr\) Kind\(\) AttrKind](<#Attr.Kind>)
   - [func \(Attr\) Str\(\) string](<#Attr.Str>)
 - [type AttrKind](<#AttrKind>)
+- [type ContextExporter](<#ContextExporter>)
+  - [func \(ContextExporter\) ExportContext\(ctx context.Context, snap SnapshotValue\) error](<#ContextExporter.ExportContext>)
 - [type Counter](<#Counter>)
   - [func \(Counter\) Add\(delta int64\)](<#Counter.Add>)
   - [func \(Counter\) Inc\(\)](<#Counter.Inc>)
@@ -279,6 +282,15 @@ const AttrKindString AttrKind = 1
 AttrKindString marks a string-valued attribute.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/observe/otel.AttrKindString`.
+
+<a name="DefaultExportTimeout"></a>
+```go
+const DefaultExportTimeout time.Duration = 30000000000
+```
+
+DefaultExportTimeout bounds an ExportContext whose context carries no deadline: 30s, the OpenTelemetry metrics SDK specification's exportTimeout.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/observe/metrics.DefaultExportTimeout`.
 
 <a name="DefaultMaxSeriesPerInstrument"></a>
 ```go
@@ -606,6 +618,15 @@ func Export(name ExporterName, snap Snapshot) error
 
 Export ships snap through the exporter registered as name.
 
+<a name="ExportContext"></a>
+## func [ExportContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
+
+```go
+func ExportContext(ctx context.Context, name ExporterName, snap Snapshot) error
+```
+
+ExportContext ships snap through the exporter registered as name, bounded by ctx — DefaultExportTimeout when ctx carries no deadline.
+
 <a name="Float64"></a>
 ## func [Float64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
 
@@ -646,10 +667,10 @@ NewMeterWithConfig returns a fresh in-memory Meter honouring cfg. Every unset fi
 ## func [NewOTLPHTTPExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
 
 ```go
-func NewOTLPHTTPExporter(name ExporterName, cfg OTLPHTTPConfig) (exporter Exporter, err error)
+func NewOTLPHTTPExporter(name ExporterName, cfg OTLPHTTPConfig) (exporter ContextExporter, err error)
 ```
 
-NewOTLPHTTPExporter returns an Exporter that encodes each snapshot as OTLP/JSON and POSTs it to cfg.Endpoint, which is a full URL used as-is.
+NewOTLPHTTPExporter returns a ContextExporter that encodes each snapshot as OTLP/JSON and POSTs it to cfg.Endpoint, which is a full URL used as-is; ExportContext bounds the POST by its context.
 
 It is never registered, and it never retries — compose resilience.NewRetry with OTLPRetryable instead. A refused endpoint fails here, at wiring, rather than at the first scrape.
 
@@ -857,6 +878,31 @@ AttrKind is an alias of `github.com/kitsunium/sdk/internal/core/observe/otel.Att
 
 ```go
 type AttrKind uint8
+```
+
+<a name="ContextExporter"></a>
+## type [ContextExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/metrics/gen_facade.go>)
+
+ContextExporter is the public alias for an Exporter whose export a context bounds and cancels — a sibling, so Exporter is not widened (ADR 0039).
+
+```go
+type ContextExporter = coremetrics.ContextExporter
+```
+
+ContextExporter is an alias of `github.com/kitsunium/sdk/internal/core/observe/metrics.ContextExporter`, declared as:
+
+```go
+type ContextExporter interface {
+	ExportContext(ctx context.Context, snap SnapshotValue) error
+	Exporter
+}
+```
+
+<a name="ContextExporter.ExportContext"></a>
+### func \(ContextExporter\) [ExportContext](<https://github.com/kitsunium/sdk/blob/main/internal/core/observe/metrics/gen_ports.go>)
+
+```go
+func (ContextExporter) ExportContext(ctx context.Context, snap SnapshotValue) error
 ```
 
 <a name="Counter"></a>

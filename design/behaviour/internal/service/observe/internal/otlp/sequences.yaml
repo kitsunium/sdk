@@ -330,6 +330,17 @@ sequences:
         kind: actor
       - id: (*Sender).Post
         kind: self
+      - id: s.PostContext
+        kind: internal
+    steps:
+      - return: s.PostContext(context.Background(), body)
+        to: s.PostContext
+  - of: (*Sender).PostContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Sender).PostContext
+        kind: self
       - id: http
         kind: stdlib
       - id: errs
@@ -346,7 +357,7 @@ sequences:
         kind: internal
     steps:
       - bind: request, buildErr
-        eval: http.NewRequest(http.MethodPost, s.endpoint, bytes.NewReader(body))
+        eval: http.NewRequestWithContext(ctx, http.MethodPost, s.endpoint, bytes.NewReader(body))
         to: http
       - opt:
           do:

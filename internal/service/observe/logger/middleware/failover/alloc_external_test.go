@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	"github.com/kitsunium/sdk/internal/service/observe/logger/middleware/failover"
@@ -166,5 +167,44 @@ func TestChainDepthAddsNoAllocationOnTheHealthyPath(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) { runCase(t, tc) })
+	}
+}
+
+// TestCooldownAddsNoAllocationOnTheHealthyPath pins that a Cooldown costs the
+// healthy path nothing either: one clock read and one atomic load per branch,
+// no allocation — against the same one-branch baseline, fewest of allocRounds
+// windows each.
+func TestCooldownAddsNoAllocationOnTheHealthyPath(t *testing.T) {
+	ctx := context.Background()
+	payload := []byte("a log line that no branch will refuse\n")
+	measure := func(t *testing.T, build func() (corelogger.Sink, error)) uint64 {
+		t.Helper()
+		fewest := uint64(0)
+		for round := range allocRounds {
+			sink, err := build()
+			if err != nil {
+				t.Fatalf("building the chain: %v", err)
+			}
+			got := mallocsOver(failoverRuns, func() {
+				n, werr := sink.Write(ctx, corelogger.RecordEvent{}, payload)
+				if werr != nil {
+					t.Fatalf("Write err = %v", werr)
+				}
+				allocSink = n
+			})
+			reportWindow(t, "cooled writes", got)
+			if round == 0 || got.own < fewest {
+				fewest = got.own
+			}
+		}
+		return fewest
+	}
+	warmRuntimeCaches(t, payload)
+	base := measure(t, func() (corelogger.Sink, error) { return failover.New(&controlledSink{}) })
+	cooled := measure(t, func() (corelogger.Sink, error) {
+		return failover.NewWithConfig(failover.Config{Cooldown: time.Minute}, &controlledSink{}, &controlledSink{})
+	})
+	if cooled > base {
+		t.Errorf("%d cooled writes performed %d allocations, want at most %d (the one-branch baseline)", failoverRuns, cooled, base)
 	}
 }

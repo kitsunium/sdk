@@ -45,12 +45,29 @@ sequences:
           		queue:       queue,
           		pool:        pool,
           		policy:      cfg.Policy,
+          		maxBlock:    cfg.MaxBlock,
+          		clk:         cfg.Clock,
           		onDrop:      callback,
           		onError:     errCallback,
           		flushSignal: make(chan struct{}, 1),
           		stop:        make(chan struct{}),
           		done:        make(chan struct{}),
           	}
+      - opt:
+          do:
+            - opt:
+                do:
+                  - set: out.maxBlock
+                    value: DefaultMaxBlock
+                when: out.maxBlock <= 0
+            - opt:
+                do:
+                  - set: out.clk
+                    value: clock.System
+                when: out.clk == nil
+            - set: out.space
+              value: make(chan struct{}, 1)
+          when: out.policy == Block
       - set: out.daemon
         to: worker
         value: |-
@@ -87,10 +104,16 @@ sequences:
         kind: actor
       - id: (*asyncSink).Write
         kind: self
+      - id: s.ringMu.Lock
+        kind: value
+      - id: s.ringMu.Unlock
+        kind: value
       - id: s.pool.Get
         kind: value
       - id: s.queue.TryWrite
         kind: value
+      - id: s.blockForSpace
+        kind: internal
       - id: s.handleFull
         kind: internal
     steps:
@@ -104,10 +127,12 @@ sequences:
                 			Private: "service/observe/logger/middleware/async.Write saw a cancelled context",
                 		}, errs.Int("level", int(rec.Level)))
           when: ctx != nil && ctx.Err() != nil
-      - lock:
-          mutex: s.ringMu
+      - eval: s.ringMu.Lock()
+        to: s.ringMu.Lock
       - opt:
           do:
+            - eval: s.ringMu.Unlock()
+              to: s.ringMu.Unlock
             - return: 0, coreasync.Stopped
           when: isClosed(s.stop)
       - bind: ent
@@ -119,14 +144,171 @@ sequences:
         value: append(ent.data[:0], payload...)
       - opt:
           do:
-            - return: s.handleFull(ent)
-              to: s.handleFull
+            - eval: s.ringMu.Unlock()
+              to: s.ringMu.Unlock
+            - return: len(payload), nil
           init:
             bind: werr
             eval: s.queue.TryWrite(ent)
             to: s.queue.TryWrite
-          when: werr != nil
-      - return: len(payload), nil
+          when: werr == nil
+      - opt:
+          do:
+            - eval: s.ringMu.Unlock()
+              to: s.ringMu.Unlock
+            - return: s.blockForSpace(ctx, ent)
+              to: s.blockForSpace
+          when: s.policy == Block
+      - set: n, err
+        to: s.handleFull
+        value: s.handleFull(ent)
+      - eval: s.ringMu.Unlock()
+        to: s.ringMu.Unlock
+      - return: n, err
+  - of: (*asyncSink).blockForSpace
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*asyncSink).blockForSpace
+        kind: self
+      - id: s.clk.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+      - id: doneOf
+        kind: internal
+      - id: s.abandon
+        kind: internal
+      - id: s.retryBlocked
+        kind: internal
+    steps:
+      - bind: timer
+        eval: s.clk.NewTimer(s.maxBlock)
+        to: s.clk.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - bind: cancelled
+        eval: doneOf(ctx)
+        to: doneOf
+      - loop:
+          do:
+            - select:
+                cases:
+                  - comm: _, open := <-s.space
+                    do:
+                      - opt:
+                          do:
+                            - return: s.abandon(ent, coreasync.Stopped, false)
+                              to: s.abandon
+                          when: "!open"
+                  - comm: <-timer.C()
+                    do:
+                      - return: s.abandon(ent, coreasync.BlockTimeout, true)
+                        to: s.abandon
+                  - comm: <-cancelled
+                    do:
+                      - return: s.abandon(ent, blockCancelled(ctx, ent), true)
+                        to: s.abandon
+                  - comm: <-s.stop
+                    do:
+                      - return: s.abandon(ent, coreasync.Stopped, false)
+                        to: s.abandon
+            - opt:
+                do:
+                  - return: n, err
+                init:
+                  bind: n, done, err
+                  eval: s.retryBlocked(ent)
+                  to: s.retryBlocked
+                when: done
+          forever: true
+  - of: doneOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: doneOf
+        kind: self
+      - id: ctx.Done
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: ctx == nil
+      - return: ctx.Done()
+        to: ctx.Done
+  - of: (*asyncSink).abandon
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*asyncSink).abandon
+        kind: self
+      - id: s.pool.Put
+        kind: value
+    steps:
+      - opt:
+          do:
+            - eval: s.onDrop(1)
+          when: dropped
+      - eval: s.pool.Put(ent)
+        to: s.pool.Put
+      - return: 0, verdict
+  - of: blockCancelled
+    participants:
+      - id: caller
+        kind: actor
+      - id: blockCancelled
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(ctx.Err(), errs.WrapParams{
+          		Code:    coreasync.CodeAsyncCtxCancelled,
+          		Reason:  "ASYNC_CTX_CANCELLED",
+          		Public:  "Async sink write aborted due to cancellation",
+          		Private: "service/observe/logger/middleware/async.Write was cancelled while waiting for a free slot under the Block policy",
+          	}, errs.Int("level", int(ent.rec.Level)))
+        to: errs
+  - of: (*asyncSink).retryBlocked
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*asyncSink).retryBlocked
+        kind: self
+      - id: s.pool.Put
+        kind: value
+      - id: s.signalSpace
+        kind: internal
+    steps:
+      - lock:
+          mutex: s.ringMu
+      - opt:
+          do:
+            - eval: s.pool.Put(ent)
+              to: s.pool.Put
+            - return: 0, true, coreasync.Stopped
+          when: isClosed(s.stop)
+      - opt:
+          do:
+            - return: 0, false, nil
+          when: s.queue.TryWrite(ent) != nil
+      - opt:
+          do:
+            - eval: s.signalSpace()
+              to: s.signalSpace
+          when: s.queue.Len() < s.queue.Capacity()
+      - return: len(ent.data), true, nil
+  - of: (*asyncSink).signalSpace
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: s.space == nil
+      - select:
+          cases:
+            - comm: s.space <- struct{}{}
+            - default: true
   - of: (*asyncSink).handleFull
     participants:
       - id: caller
@@ -302,6 +484,8 @@ sequences:
         kind: value
       - id: s.ringMu.Unlock
         kind: value
+      - id: s.signalSpace
+        kind: internal
       - id: s.forward
         kind: internal
       - id: s.drainRemaining
@@ -325,6 +509,8 @@ sequences:
               to: s.ringMu.Unlock
             - opt:
                 do:
+                  - eval: s.signalSpace()
+                    to: s.signalSpace
                   - eval: s.forward(ent)
                     to: s.forward
                   - continue: true

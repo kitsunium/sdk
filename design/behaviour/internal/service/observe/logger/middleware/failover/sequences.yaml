@@ -1,18 +1,62 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 sequences:
+  - of: NewWithConfig
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewWithConfig
+        kind: self
+      - id: New
+        kind: internal
+      - id: newDeadlines
+        kind: internal
+    steps:
+      - set: sink, err
+        to: New
+        value: New(branches...)
+      - opt:
+          do:
+            - return: sink, err
+          when: err != nil || cfg.Cooldown <= 0
+      - bind: out, isFailover
+        eval: sink.(*failoverSink)
+      - opt:
+          do:
+            - return: sink, nil
+          when: "!isFailover"
+      - set: out.cooldown
+        value: cfg.Cooldown
+      - set: out.clk
+        value: cfg.Clock
+      - opt:
+          do:
+            - set: out.clk
+              value: clock.System
+          when: out.clk == nil
+      - set: out.retryAt
+        to: newDeadlines
+        value: newDeadlines(len(out.chain))
+      - return: out, nil
   - of: (*failoverSink).Write
     participants:
       - id: caller
         kind: actor
       - id: (*failoverSink).Write
         kind: self
+      - id: s.writeCooled
+        kind: internal
       - id: branch.Write
         kind: value
     steps:
       - var:
           name: collected
           type: "[]error"
+      - opt:
+          do:
+            - return: s.writeCooled(ctx, rec, p)
+              to: s.writeCooled
+          when: s.cooldown > 0
       - loop:
           do:
             - bind: written, werr
@@ -27,13 +71,106 @@ sequences:
           key: _
           range: s.chain
           value: branch
+      - return: 0, exhausted(collected, len(s.chain), rec)
+  - of: exhausted
+    participants:
+      - id: caller
+        kind: actor
+      - id: exhausted
+        kind: self
+      - id: errs
+        kind: package
+    steps:
       - return: |-
-          0, errs.Wrap(errors.Join(collected...), errs.WrapParams{
+          errs.Wrap(errors.Join(collected...), errs.WrapParams{
           		Code:    corefailover.CodeFailoverExhausted,
           		Reason:  "FAILOVER_EXHAUSTED",
           		Public:  "All failover sinks returned an error",
           		Private: "service/observe/logger/middleware/failover.Write exhausted the chain",
-          	}, errs.Int("attempts", len(s.chain)), errs.Int("level", int(rec.Level)))
+          	}, errs.Int("attempts", attempts), errs.Int("level", int(rec.Level)))
+        to: errs
+  - of: (*failoverSink).writeCooled
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*failoverSink).writeCooled
+        kind: self
+      - id: s.clk.Now().UnixNano
+        kind: value
+      - id: s.attempt
+        kind: internal
+    steps:
+      - bind: now
+        eval: s.clk.Now().UnixNano()
+        to: s.clk.Now().UnixNano
+      - var:
+          name: collected
+          type: "[]error"
+      - var:
+          name: onStack
+          type: "[demotedOnStack]int"
+      - bind: demoted
+        eval: onStack[:0]
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: demoted
+                    value: append(demoted, i)
+                  - continue: true
+                when: s.retryAt[i].Load() > now
+            - bind: written, werr
+              eval: s.attempt(ctx, i, rec, p, now)
+              to: s.attempt
+            - opt:
+                do:
+                  - return: written, nil
+                when: werr == nil
+            - set: collected
+              value: append(collected, werr)
+          key: i
+          range: s.chain
+      - loop:
+          do:
+            - bind: written, werr
+              eval: s.attempt(ctx, i, rec, p, now)
+              to: s.attempt
+            - opt:
+                do:
+                  - return: written, nil
+                when: werr == nil
+            - set: collected
+              value: append(collected, werr)
+          key: _
+          range: demoted
+          value: i
+      - return: 0, exhausted(collected, len(collected), rec)
+  - of: (*failoverSink).attempt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*failoverSink).attempt
+        kind: self
+      - id: s.chain[i].Write
+        kind: value
+      - id: s.retryAt[i].Store
+        kind: value
+    steps:
+      - bind: written, werr
+        eval: s.chain[i].Write(ctx, rec, p)
+        to: s.chain[i].Write
+      - opt:
+          do:
+            - opt:
+                do:
+                  - eval: s.retryAt[i].Store(0)
+                    to: s.retryAt[i].Store
+                when: s.retryAt[i].Load() != 0
+            - return: written, nil
+          when: werr == nil
+      - eval: s.retryAt[i].Store(now + int64(s.cooldown))
+        to: s.retryAt[i].Store
+      - return: 0, werr
   - of: (*failoverSink).Flush
     participants:
       - id: caller
@@ -122,3 +259,6 @@ sequences:
               to: errors
           when: len(collected) > 0
       - return: nil
+  - of: newDeadlines
+    steps:
+      - return: make([]atomic.Int64, n)

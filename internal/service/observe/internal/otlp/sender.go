@@ -2,6 +2,7 @@ package otlp
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"maps"
 	"net/http"
@@ -68,7 +69,7 @@ const (
 // specification asks a client to honour Retry-After and otherwise back off
 // exponentially; internal/service/app/resilience already ships that policy, and a
 // backoff hidden inside a send would be a second one a caller cannot see, tune
-// or cancel — an exporter's Export has no context to cancel it with. What it
+// or cancel, and would spend the deadline PostContext is given. What it
 // supplies instead is the CLASSIFICATION a retry policy needs: a transient
 // verdict carries the signal's Unavailable code, which each signal's
 // OTLPRetryable reads.
@@ -238,8 +239,18 @@ func newTransport() *http.Transport {
 // drains a BOUNDED remainder and closes the body, so the keep-alive connection
 // returns to the pool whenever the body ends within that bound.
 func (s *Sender) Post(body []byte) error {
-	//: build the request; a body reader gives Content-Length for free.
-	request, buildErr := http.NewRequest(http.MethodPost, s.endpoint, bytes.NewReader(body))
+	//: the same exchange under a context that never ends: the client's own
+	//: deadline is the bound, as it always was.
+	return s.PostContext(context.Background(), body)
+}
+
+// PostContext is Post bounded by ctx: the request carries ctx, so a context
+// done before the collector answers aborts the round trip and returns the
+// transient verdict — a timeout is retryable, as a transport fault is. The
+// client's own deadline still applies; whichever ends first wins.
+func (s *Sender) PostContext(ctx context.Context, body []byte) error {
+	//: build the request under ctx; a body reader gives Content-Length for free.
+	request, buildErr := http.NewRequestWithContext(ctx, http.MethodPost, s.endpoint, bytes.NewReader(body))
 	//: the endpoint was validated at construction, so this is near-unreachable.
 	if buildErr != nil {
 		//: still typed rather than swallowed; the URL stays out of the message.

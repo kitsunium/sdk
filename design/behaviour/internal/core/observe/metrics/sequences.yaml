@@ -105,6 +105,84 @@ sequences:
           		Private: "core/observe/metrics.Export: the registered exporter returned an error",
           	})
         to: errs
+  - of: ExportContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: ExportContext
+        kind: self
+      - id: LookupExporter
+        kind: internal
+      - id: boundExport
+        kind: internal
+      - id: withContext.ExportContext
+        kind: internal
+      - id: exporter.Export
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - bind: exporter, ok
+        eval: LookupExporter(name)
+        to: LookupExporter
+      - opt:
+          do:
+            - return: UnknownExporter
+          when: "!ok"
+      - bind: bounded, cancel
+        eval: boundExport(ctx)
+        to: boundExport
+      - defer: cancel()
+      - var:
+          name: err
+          type: error
+      - alt:
+          - do:
+              - set: err
+                to: withContext.ExportContext
+                value: withContext.ExportContext(bounded, snap)
+            init:
+              bind: withContext, isContext
+              eval: exporter.(ContextExporter)
+            when: isContext
+          - do:
+              - set: err
+                to: exporter.Export
+                value: exporter.Export(snap)
+            else: true
+      - opt:
+          do:
+            - return: nil
+          when: err == nil
+      - return: |-
+          errs.Wrap(err, errs.WrapParams{
+          		Code:    CodeExportFailed,
+          		Reason:  "EXPORT_FAILED",
+          		Public:  "The metrics exporter failed to ship the snapshot",
+          		Private: "core/observe/metrics.ExportContext: the registered exporter returned an error",
+          	})
+        to: errs
+  - of: boundExport
+    participants:
+      - id: caller
+        kind: actor
+      - id: boundExport
+        kind: self
+      - id: ctx.Deadline
+        kind: value
+      - id: context
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: ctx, func() {}
+          init:
+            bind: _, hasDeadline
+            eval: ctx.Deadline()
+            to: ctx.Deadline
+          when: hasDeadline
+      - return: context.WithTimeout(ctx, DefaultExportTimeout)
+        to: context
   - of: NormalizeScope
     participants:
       - id: caller

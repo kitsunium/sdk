@@ -1287,7 +1287,7 @@
       "dir": "service/observe/logger/middleware/async",
       "layer": "service",
       "family": "observe",
-      "doc": "Package async wraps any corelogger.Sink with a non-blocking ring buffer\nand a single drainer goroutine, decoupling the producer hot path from\nthe (potentially slow) downstream sink. Producers call Write synchronously\nbut never block on I/O — entries land in the ring and the drainer sips\nthem out.\n\nWhen the ring saturates, the configured DropPolicy decides:\n  - DropNewest: the new Write returns BufferFull; the OnDrop callback fires.\n  - DropOldest: the oldest queued entry is silently discarded; the new\n    entry takes its slot. OnDrop fires for the dropped entry.\n\nUse case: wrap CloudWatch / S3 / HTTP sinks so a slow remote drain never\nstalls the application's hot path.\n\nPackage async — declares the DropPolicy enum used by the async Sink to\ndecide what happens when the ring buffer saturates. Held as a sibling of\nasync_sink.go so the sink file stays focused on the Sink contract.\n\nPackage async — holds the Config struct consumed by New. Pulled\ninto its own file so async_sink.go stays focused on the Sink contract.\n\nPackage async — declares the goroutine loop that consumes the\nring buffer and forwards entries to the downstream sink. Pulled into its\nown file so async_sink.go stays focused on the Sink contract.\n\nPackage async — holds the recycled payload struct that travels\nthrough the ring buffer between the producer (Write) and the consumer\n(drain goroutine).\n\nPackage async — gathers the small runtime helpers used by the\nasync drainer (yield primitive, channel-closed probe, error swallowers).\nPulled out of async_sink.go to keep that file focused on the Sink contract.\n"
+      "doc": "Package async wraps any corelogger.Sink with a non-blocking ring buffer\nand a single drainer goroutine, decoupling the producer hot path from\nthe (potentially slow) downstream sink. Producers call Write synchronously\nbut never block on I/O — entries land in the ring and the drainer sips\nthem out.\n\nWhen the ring saturates, the configured DropPolicy decides:\n  - DropNewest: the new Write returns BufferFull; the OnDrop callback fires.\n  - DropOldest: the oldest queued entry is silently discarded; the new\n    entry takes its slot. OnDrop fires for the dropped entry.\n  - Block: the Write waits for a free slot, at most MaxBlock on the\n    configured Clock; past it the entry is dropped, OnDrop fires and Write\n    returns BlockTimeout.\n\nUse case: wrap CloudWatch / S3 / HTTP sinks so a slow remote drain never\nstalls the application's hot path.\n\nPackage async — declares the DropPolicy enum used by the async Sink to\ndecide what happens when the ring buffer saturates. Held as a sibling of\nasync_sink.go so the sink file stays focused on the Sink contract.\n\nPackage async — holds the Config struct consumed by New. Pulled\ninto its own file so async_sink.go stays focused on the Sink contract.\n\nPackage async — declares the goroutine loop that consumes the\nring buffer and forwards entries to the downstream sink. Pulled into its\nown file so async_sink.go stays focused on the Sink contract.\n\nPackage async — holds the recycled payload struct that travels\nthrough the ring buffer between the producer (Write) and the consumer\n(drain goroutine).\n\nPackage async — gathers the small runtime helpers used by the\nasync drainer (yield primitive, channel-closed probe, error swallowers).\nPulled out of async_sink.go to keep that file focused on the Sink contract.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/service/observe/logger/middleware/encwrite",
@@ -1303,7 +1303,7 @@
       "dir": "service/observe/logger/middleware/failover",
       "layer": "service",
       "family": "observe",
-      "doc": "Package failover implements a sequential-retry Sink that tries downstream\nsinks in order until one succeeds. The first successful Write returns\nnil; if every sink fails, Write returns Exhausted wrapping an\nerrors.Join of the per-sink failures.\n\nUse case: emit logs to a primary collector with a local file as a\nfallback so logs survive a network outage.\n"
+      "doc": "Package failover implements a sequential-retry Sink that tries downstream\nsinks in order until one succeeds. The first successful Write returns\nnil; if every sink fails, Write returns Exhausted wrapping an\nerrors.Join of the per-sink failures.\n\nUse case: emit logs to a primary collector with a local file as a\nfallback so logs survive a network outage.\n\nNewWithConfig adds a Cooldown: a branch whose Write failed is tried LAST\nuntil Cooldown has passed on the configured Clock, so a dead primary stops\ncosting every record a failed attempt — a timeout, often — before the\nfallback takes it. A cooling branch is demoted, never skipped: when every\nother branch fails it is still tried, so a cooldown alone never loses a\nrecord. A zero Cooldown is New's behaviour exactly.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/service/observe/logger/middleware/multi",
@@ -28638,6 +28638,23 @@
       "family": "observe"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/logger/middleware/async.BlockTimeout",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/async",
+      "name": "BlockTimeout",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.17.4",
+        "reason": "ASYNC_BLOCK_TIMEOUT",
+        "public": "Async sink ring buffer stayed full"
+      },
+      "doc": "BlockTimeout is returned by Write under the Block policy when the ring\nstayed saturated for MaxBlock; the entry is dropped and the OnDrop\ncallback fires.\n",
+      "file": "core/observe/logger/middleware/async/gen_codes.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/observe/logger/middleware/async.BufferFull",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/async",
@@ -28650,6 +28667,22 @@
         "public": "Async sink ring buffer is full"
       },
       "doc": "BufferFull is returned by Write under the DropNewest policy when the\nring is saturated; the entry is dropped and the OnDrop callback fires.\n",
+      "file": "core/observe/logger/middleware/async/gen_codes.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/logger/middleware/async.CodeAsyncBlockTimeout",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/async",
+      "name": "CodeAsyncBlockTimeout",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "200964",
+      "code": {
+        "value": "0.3.17.4"
+      },
+      "doc": "CodeAsyncBlockTimeout identifies a Write under the Block policy that waited\nMaxBlock for a free slot without one appearing; the entry is dropped and the\nOnDrop callback fires.\n",
       "file": "core/observe/logger/middleware/async/gen_codes.go",
       "layer": "core",
       "family": "observe"
@@ -31133,6 +31166,30 @@
       "family": "observe"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.ContextExporter",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/metrics",
+      "name": "ContextExporter",
+      "spelled": "interface{ExportContext(ctx context.Context, snap SnapshotValue) error; Exporter}",
+      "canonical": "interface{ExportContext(ctx context.Context, snap github.com/kitsunium/sdk/internal/core/observe/metrics.SnapshotValue) error; github.com/kitsunium/sdk/internal/core/observe/metrics.Exporter}",
+      "doc": "ContextExporter is an Exporter whose export can be bounded and cancelled:\nExportContext ships snap under ctx, and returns once ctx is done at the\nlatest. The OpenTelemetry metrics SDK specification bounds every export by\nexportTimeout; Export has no context to bound it with, and Exporter is a\npublished port, so the bound arrives as this sibling rather than as a widened\nmethod (ADR 0039). A caller holding an Exporter asks for it with a type\nassertion, as ExportContext does.\n\nImplementations MUST be safe for concurrent use, and Export keeps its\nmeaning: it is ExportContext under a context the exporter bounds itself.\n",
+      "file": "core/observe/metrics/gen_ports.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.ContextExporter.ExportContext",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/metrics",
+      "name": "ExportContext",
+      "recv": "ContextExporter",
+      "spelled": "func(ctx context.Context, snap SnapshotValue) error",
+      "canonical": "func(ctx context.Context, snap github.com/kitsunium/sdk/internal/core/observe/metrics.SnapshotValue) error",
+      "file": "core/observe/metrics/gen_ports.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.Counter",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/observe/metrics",
@@ -31167,6 +31224,19 @@
       "canonical": "func()",
       "doc": "Inc increments the counter by one (Add(1) shorthand).\n",
       "file": "core/observe/metrics/gen_ports.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.DefaultExportTimeout",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/metrics",
+      "name": "DefaultExportTimeout",
+      "spelled": "time.Duration",
+      "canonical": "time.Duration",
+      "value": "30000000000",
+      "doc": "DefaultExportTimeout bounds one export when the caller's context carries no\ndeadline of its own: 30 s, the OpenTelemetry metrics SDK specification's\ndefault exportTimeout for a periodic exporting reader\n(OTEL_METRIC_EXPORT_TIMEOUT). A context with no deadline is how an\nindefinite block is written; a caller who wants another bound puts it on the\ncontext.\n",
+      "file": "core/observe/metrics/exporter.go",
       "layer": "core",
       "family": "observe"
     },
@@ -31250,6 +31320,18 @@
       "spelled": "func(name ExporterName, snap SnapshotValue) error",
       "canonical": "func(name github.com/kitsunium/sdk/internal/core/observe/metrics.ExporterName, snap github.com/kitsunium/sdk/internal/core/observe/metrics.SnapshotValue) error",
       "doc": "Export ships snap through the Exporter registered as name. A missing exporter\nreturns UnknownExporter; an exporter failure wraps as ExportFailed.\n",
+      "file": "core/observe/metrics/exporter.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/metrics.ExportContext",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/metrics",
+      "name": "ExportContext",
+      "spelled": "func(ctx context.Context, name ExporterName, snap SnapshotValue) error",
+      "canonical": "func(ctx context.Context, name github.com/kitsunium/sdk/internal/core/observe/metrics.ExporterName, snap github.com/kitsunium/sdk/internal/core/observe/metrics.SnapshotValue) error",
+      "doc": "ExportContext ships snap through the Exporter registered as name, bounded by\nctx. A missing exporter returns UnknownExporter; an exporter failure wraps as\nExportFailed.\n\nWhen ctx carries no deadline, DefaultExportTimeout is applied: the\nspecification bounds every export. An exporter that implements ContextExporter\nreceives the bounded context through ExportContext; one that implements only\nExporter is called through Export, which has no context to honour, and is\nbounded by nothing but itself — every exporter that touches a network in this\nSDK implements the sibling.\n",
       "file": "core/observe/metrics/exporter.go",
       "layer": "core",
       "family": "observe"
@@ -33250,6 +33332,40 @@
       "family": "observe"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/trace.BatchExporterMissing",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/trace",
+      "name": "BatchExporterMissing",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.50.9",
+        "reason": "BATCH_EXPORTER_MISSING",
+        "public": "The batch span sink needs an exporter"
+      },
+      "doc": "BatchExporterMissing is returned by NewBatchSink when no usable exporter is configured.\n",
+      "file": "core/observe/trace/gen_codes.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/trace.BatchFlushIncomplete",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/trace",
+      "name": "BatchFlushIncomplete",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.50.10",
+        "reason": "BATCH_FLUSH_INCOMPLETE",
+        "public": "The batch span sink did not finish exporting before the deadline"
+      },
+      "doc": "BatchFlushIncomplete reports a ForceFlush or Shutdown cut short by its context.\n",
+      "file": "core/observe/trace/gen_codes.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/observe/trace.Carrier",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/observe/trace",
@@ -33282,6 +33398,38 @@
       "spelled": "func(key string, value string)",
       "canonical": "func(key string, value string)",
       "file": "core/observe/trace/gen_ports.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/trace.CodeBatchExporterMissing",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/trace",
+      "name": "CodeBatchExporterMissing",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "209417",
+      "code": {
+        "value": "0.3.50.9"
+      },
+      "doc": "CodeBatchExporterMissing identifies a batch sink built with no exporter, or\nwith one that cannot serve a call: a batch with nowhere to go has no safe\ndefault (ADR 0031).\n",
+      "file": "core/observe/trace/gen_codes.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/trace.CodeBatchFlushIncomplete",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/trace",
+      "name": "CodeBatchFlushIncomplete",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "209418",
+      "code": {
+        "value": "0.3.50.10"
+      },
+      "doc": "CodeBatchFlushIncomplete identifies a ForceFlush or Shutdown whose context\nended before every queued span had been handed to the exporter.\n",
+      "file": "core/observe/trace/gen_codes.go",
       "layer": "core",
       "family": "observe"
     },
@@ -33526,6 +33674,30 @@
       "family": "observe"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/trace.ContextSpanExporter",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/trace",
+      "name": "ContextSpanExporter",
+      "spelled": "interface{ExportContext(ctx context.Context, spans SpansValue) error; SpanExporter}",
+      "canonical": "interface{ExportContext(ctx context.Context, spans github.com/kitsunium/sdk/internal/core/observe/trace.SpansValue) error; github.com/kitsunium/sdk/internal/core/observe/trace.SpanExporter}",
+      "doc": "ContextSpanExporter is a SpanExporter whose export can be bounded and\ncancelled: ExportContext ships spans under ctx, and returns once ctx is done\nat the latest. The OpenTelemetry SDK specification says an export MUST NOT\nblock indefinitely; Export has no context to bound it with, and SpanExporter\nis a published port, so the bound arrives as this sibling rather than as a\nwidened method (ADR 0039). A caller holding a SpanExporter asks for it with a\ntype assertion, as ExportContext and the batch sink do.\n\nImplementations MUST be safe for concurrent use, and Export keeps its\nmeaning: it is ExportContext under a context the exporter bounds itself.\n",
+      "file": "core/observe/trace/gen_ports.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/trace.ContextSpanExporter.ExportContext",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/trace",
+      "name": "ExportContext",
+      "recv": "ContextSpanExporter",
+      "spelled": "func(ctx context.Context, spans SpansValue) error",
+      "canonical": "func(ctx context.Context, spans github.com/kitsunium/sdk/internal/core/observe/trace.SpansValue) error",
+      "file": "core/observe/trace/gen_ports.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/observe/trace.ContextWithSpanContext",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/core/observe/trace",
@@ -33534,6 +33706,19 @@
       "canonical": "func(parent context.Context, context github.com/kitsunium/sdk/internal/core/observe/trace.SpanContextValue) context.Context",
       "doc": "ContextWithSpanContext returns a copy of parent carrying context.\n\nAn INVALID context is still stored rather than skipped. Storing it is what\nmakes \"this scope deliberately has no trace\" expressible: a handler that ran\nunder an unsampled or absent traceparent shadows any outer context instead of\nsilently re-parenting its children onto it.\n",
       "file": "core/observe/trace/context.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/trace.DefaultExportTimeout",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/trace",
+      "name": "DefaultExportTimeout",
+      "spelled": "time.Duration",
+      "canonical": "time.Duration",
+      "value": "30000000000",
+      "doc": "DefaultExportTimeout bounds one export when the caller's context carries no\ndeadline of its own: 30 s, the OpenTelemetry trace SDK specification's default\nfor a batch processor's exportTimeout (OTEL_BSP_EXPORT_TIMEOUT). The\nspecification says an export MUST NOT block indefinitely, and a context with\nno deadline is how an indefinite block is written; a caller who wants another\nbound puts it on the context.\n",
+      "file": "core/observe/trace/exporter.go",
       "layer": "core",
       "family": "observe"
     },
@@ -33686,6 +33871,18 @@
       "spelled": "func(name ExporterName, spans SpansValue) error",
       "canonical": "func(name github.com/kitsunium/sdk/internal/core/observe/trace.ExporterName, spans github.com/kitsunium/sdk/internal/core/observe/trace.SpansValue) error",
       "doc": "Export ships spans through the SpanExporter registered as name. A missing\nexporter returns UnknownExporter; an exporter failure wraps as ExportFailed.\n",
+      "file": "core/observe/trace/exporter.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/trace.ExportContext",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/trace",
+      "name": "ExportContext",
+      "spelled": "func(ctx context.Context, name ExporterName, spans SpansValue) error",
+      "canonical": "func(ctx context.Context, name github.com/kitsunium/sdk/internal/core/observe/trace.ExporterName, spans github.com/kitsunium/sdk/internal/core/observe/trace.SpansValue) error",
+      "doc": "ExportContext ships spans through the SpanExporter registered as name, bounded\nby ctx. A missing exporter returns UnknownExporter; an exporter failure wraps\nas ExportFailed.\n\nWhen ctx carries no deadline, DefaultExportTimeout is applied: the\nspecification forbids an export that blocks indefinitely. An exporter that\nimplements ContextSpanExporter receives the bounded context through\nExportContext; one that implements only SpanExporter is called through Export,\nwhich has no context to honour, and is bounded by nothing but itself — every\nexporter that touches a network in this SDK implements the sibling.\n",
       "file": "core/observe/trace/exporter.go",
       "layer": "core",
       "family": "observe"
@@ -59558,7 +59755,7 @@
       "name": "Sender",
       "spelled": "struct{}",
       "canonical": "struct{}",
-      "doc": "Sender POSTs encoded OTLP/JSON documents to one collector and maps each\nanswer onto one of three verdicts, under the calling signal's codes.\n\nIt holds no mutable state, so it needs no mutex: http.Client is safe for\nconcurrent use, and every request builds its own body reader from its own\ndocument.\n\nIt does NOT retry, and that is a decision rather than an omission. The\nspecification asks a client to honour Retry-After and otherwise back off\nexponentially; internal/service/app/resilience already ships that policy, and a\nbackoff hidden inside a send would be a second one a caller cannot see, tune\nor cancel — an exporter's Export has no context to cancel it with. What it\nsupplies instead is the CLASSIFICATION a retry policy needs: a transient\nverdict carries the signal's Unavailable code, which each signal's\nOTLPRetryable reads.\n",
+      "doc": "Sender POSTs encoded OTLP/JSON documents to one collector and maps each\nanswer onto one of three verdicts, under the calling signal's codes.\n\nIt holds no mutable state, so it needs no mutex: http.Client is safe for\nconcurrent use, and every request builds its own body reader from its own\ndocument.\n\nIt does NOT retry, and that is a decision rather than an omission. The\nspecification asks a client to honour Retry-After and otherwise back off\nexponentially; internal/service/app/resilience already ships that policy, and a\nbackoff hidden inside a send would be a second one a caller cannot see, tune\nor cancel, and would spend the deadline PostContext is given. What it\nsupplies instead is the CLASSIFICATION a retry policy needs: a transient\nverdict carries the signal's Unavailable code, which each signal's\nOTLPRetryable reads.\n",
       "file": "service/observe/internal/otlp/sender.go",
       "layer": "service",
       "family": "observe"
@@ -59572,6 +59769,19 @@
       "spelled": "func(body []byte) error",
       "canonical": "func(body []byte) error",
       "doc": "Post sends body — one document Marshal returned — and returns a typed\nverdict under the signal's codes.\n\nNothing here panics and nothing blocks past the client's deadline: a\ntransport fault returns the transient verdict, and every response path\ndrains a BOUNDED remainder and closes the body, so the keep-alive connection\nreturns to the pool whenever the body ends within that bound.\n",
+      "file": "service/observe/internal/otlp/sender.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/internal/otlp.(*Sender).PostContext",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/internal/otlp",
+      "name": "PostContext",
+      "recv": "Sender",
+      "spelled": "func(ctx context.Context, body []byte) error",
+      "canonical": "func(ctx context.Context, body []byte) error",
+      "doc": "PostContext is Post bounded by ctx: the request carries ctx, so a context\ndone before the collector answers aborts the round trip and returns the\ntransient verdict — a timeout is retryable, as a transport fault is. The\nclient's own deadline still applies; whichever ends first wins.\n",
       "file": "service/observe/internal/otlp/sender.go",
       "layer": "service",
       "family": "observe"
@@ -60160,12 +60370,25 @@
       "family": "observe"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async.Block",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async",
+      "name": "Block",
+      "spelled": "DropPolicy",
+      "canonical": "github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async.DropPolicy",
+      "value": "2",
+      "doc": "Block waits for a free slot when the ring is full — the producer is slowed to\nthe downstream's pace instead of losing the entry — for at most MaxBlock on\nthe configured Clock. Past the bound the entry is dropped, OnDrop fires and\nWrite returns BlockTimeout; a cancelled context returns CtxCancelled and Close\nreturns Stopped to every waiting Write. It is Vector's `when_full: block`\nwith the one difference ADR 0031 requires: the wait is never unbounded.\n",
+      "file": "service/observe/logger/middleware/async/async_sink_policy.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async.Config",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async",
       "name": "Config",
-      "spelled": "struct{BufferSize int; Policy DropPolicy; OnDrop func(missed int); OnError func(err error)}",
-      "canonical": "struct{BufferSize int; Policy github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async.DropPolicy; OnDrop func(missed int); OnError func(err error)}",
+      "spelled": "struct{BufferSize int; Policy DropPolicy; MaxBlock time.Duration; Clock clock.Timed; OnDrop func(missed int); OnError func(err error)}",
+      "canonical": "struct{BufferSize int; Policy github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async.DropPolicy; MaxBlock time.Duration; Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed; OnDrop func(missed int); OnError func(err error)}",
       "fields": [
         {
           "name": "BufferSize",
@@ -60175,7 +60398,17 @@
         {
           "name": "Policy",
           "type": "DropPolicy",
-          "doc": "Policy selects DropNewest (default) or DropOldest behaviour on saturation.\n"
+          "doc": "Policy selects DropNewest (default), DropOldest or Block behaviour on saturation.\n"
+        },
+        {
+          "name": "MaxBlock",
+          "type": "time.Duration",
+          "doc": "MaxBlock bounds how long a Write waits for a free slot under the Block\npolicy; non-positive falls back to DefaultMaxBlock (one second), never to\nan unbounded wait (ADR 0031). Ignored by the two drop policies.\n"
+        },
+        {
+          "name": "Clock",
+          "type": "clock.Timed",
+          "doc": "Clock drives the MaxBlock wait; nil falls back to clock.System. A test\ninjects a ManualClock and waits on nothing.\n"
         },
         {
           "name": "OnDrop",
@@ -60190,6 +60423,20 @@
       ],
       "doc": "Config tunes the async sink at construction time. Every field is optional\n— the zero-value Config produces a sink with the documented defaults\n(defaultBufferSize ring, DropNewest policy, no callbacks).\n",
       "file": "service/observe/logger/middleware/async/config.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async.DefaultMaxBlock",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async",
+      "name": "DefaultMaxBlock",
+      "spelled": "time.Duration",
+      "canonical": "time.Duration",
+      "value": "1000000000",
+      "init": "go:time.Second",
+      "doc": "DefaultMaxBlock is how long a Write waits under the Block policy when\nConfig.MaxBlock is unset: one second. Zero does not mean \"forever\" (ADR 0031):\na logger that blocks without a bound turns a dead downstream into a stalled\nservice, and a caller that wants a longer wait says so, or bounds the wait by\nits context.\n",
+      "file": "service/observe/logger/middleware/async/async_sink_policy.go",
       "layer": "service",
       "family": "observe"
     },
@@ -60336,6 +60583,30 @@
       "family": "observe"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/logger/middleware/failover.Config",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/logger/middleware/failover",
+      "name": "Config",
+      "spelled": "struct{Cooldown time.Duration; Clock clock.Clock}",
+      "canonical": "struct{Cooldown time.Duration; Clock github.com/kitsunium/sdk/internal/kernel/clock.Clock}",
+      "fields": [
+        {
+          "name": "Cooldown",
+          "type": "time.Duration",
+          "doc": "Cooldown is how long a branch whose Write failed is tried last rather\nthan in its place. Non-positive disables it — every Write walks the\ndeclaration order, as New does. A branch that accepts a Write is back in\nits place at once.\n"
+        },
+        {
+          "name": "Clock",
+          "type": "clock.Clock",
+          "doc": "Clock measures Cooldown; nil falls back to clock.System. It is read once\nper Write, and only when Cooldown is set.\n"
+        }
+      ],
+      "doc": "Config tunes a failover Sink at construction time. The zero value is New's\nbehaviour: every branch tried in declaration order on every Write.\n",
+      "file": "service/observe/logger/middleware/failover/config.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/observe/logger/middleware/failover.New",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/observe/logger/middleware/failover",
@@ -60343,6 +60614,18 @@
       "spelled": "func(branches ...corelogger.Sink) (sink corelogger.Sink, err error)",
       "canonical": "func(branches ...github.com/kitsunium/sdk/internal/core/observe/logger.Sink) (sink github.com/kitsunium/sdk/internal/core/observe/logger.Sink, err error)",
       "doc": "New constructs a failover Sink trying each branch in order.\n",
+      "file": "service/observe/logger/middleware/failover/failover_sink.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/logger/middleware/failover.NewWithConfig",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/logger/middleware/failover",
+      "name": "NewWithConfig",
+      "spelled": "func(cfg Config, branches ...corelogger.Sink) (sink corelogger.Sink, err error)",
+      "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/observe/logger/middleware/failover.Config, branches ...github.com/kitsunium/sdk/internal/core/observe/logger.Sink) (sink github.com/kitsunium/sdk/internal/core/observe/logger.Sink, err error)",
+      "doc": "NewWithConfig constructs a failover Sink trying each branch in order, a\nbranch that failed demoted to the end of the order until cfg.Cooldown has\npassed on cfg.Clock. A zero Config is New exactly; an empty chain returns\nEmpty, as New does.\n",
       "file": "service/observe/logger/middleware/failover/failover_sink.go",
       "layer": "service",
       "family": "observe"
@@ -61150,9 +61433,9 @@
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/observe/metrics",
       "name": "NewOTLPHTTPExporter",
-      "spelled": "func(name coremetrics.ExporterName, cfg OTLPHTTPConfig) (exporter coremetrics.Exporter, err error)",
-      "canonical": "func(name github.com/kitsunium/sdk/internal/core/observe/metrics.ExporterName, cfg github.com/kitsunium/sdk/internal/service/observe/metrics.OTLPHTTPConfig) (exporter github.com/kitsunium/sdk/internal/core/observe/metrics.Exporter, err error)",
-      "doc": "NewOTLPHTTPExporter returns an Exporter that encodes each snapshot as\nOTLP/JSON and POSTs it to cfg.Endpoint.\n\nIt is the EMITTER half of this package's OTLP support; EncodeOTLPJSON is the\nencoder half and this constructor adds nothing to it but transport. The split\nis why an encoding bug and a network bug are never the same investigation.\n\nIt is deliberately NOT registered. The registry is reached by importing a\npackage, and arming a network client from an import is strictly worse than\nthe stdout hazard ADR 0030 already refuses: there is no endpoint that could\nbe a correct default, and a wrong one turns every Export into a POST at\nwhatever answers on that address.\n\nIt does NOT retry, and that is a decision rather than an omission. The\nspecification asks a client to back off exponentially on a retryable status,\nthis SDK already ships that policy in internal/service/app/resilience, and a\nbackoff hidden inside Export would be a second one a caller cannot see, tune\nor cancel. What this exporter provides instead is the CLASSIFICATION a retry\npolicy needs:\n\n\trunner := resilience.NewRetry(resilience.RetryConfig{\n\t    MaxAttempts: 3,\n\t    BaseDelay:   time.Second,\n\t    Retryable:   metrics.OTLPRetryable,\n\t})\n\nA construction failure is returned rather than deferred into a Runner that\nalways fails: nothing here publishes a signature that forces the deferral,\nand refusing at wiring time is strictly earlier than refusing at the first\nscrape.\n",
+      "spelled": "func(name coremetrics.ExporterName, cfg OTLPHTTPConfig) (exporter coremetrics.ContextExporter, err error)",
+      "canonical": "func(name github.com/kitsunium/sdk/internal/core/observe/metrics.ExporterName, cfg github.com/kitsunium/sdk/internal/service/observe/metrics.OTLPHTTPConfig) (exporter github.com/kitsunium/sdk/internal/core/observe/metrics.ContextExporter, err error)",
+      "doc": "NewOTLPHTTPExporter returns a ContextExporter that encodes each snapshot as\nOTLP/JSON and POSTs it to cfg.Endpoint. ExportContext bounds the POST by its\ncontext — a done context aborts the request and returns the transient\nverdict — and Export is ExportContext under a context bounded by the client's\nown deadline.\n\nIt is the EMITTER half of this package's OTLP support; EncodeOTLPJSON is the\nencoder half and this constructor adds nothing to it but transport. The split\nis why an encoding bug and a network bug are never the same investigation.\n\nIt is deliberately NOT registered. The registry is reached by importing a\npackage, and arming a network client from an import is strictly worse than\nthe stdout hazard ADR 0030 already refuses: there is no endpoint that could\nbe a correct default, and a wrong one turns every Export into a POST at\nwhatever answers on that address.\n\nIt does NOT retry, and that is a decision rather than an omission. The\nspecification asks a client to back off exponentially on a retryable status,\nthis SDK already ships that policy in internal/service/app/resilience, and a\nbackoff hidden inside Export would be a second one a caller cannot see, tune\nor cancel. What this exporter provides instead is the CLASSIFICATION a retry\npolicy needs:\n\n\trunner := resilience.NewRetry(resilience.RetryConfig{\n\t    MaxAttempts: 3,\n\t    BaseDelay:   time.Second,\n\t    Retryable:   metrics.OTLPRetryable,\n\t})\n\nA construction failure is returned rather than deferred into a Runner that\nalways fails: nothing here publishes a signature that forces the deferral,\nand refusing at wiring time is strictly earlier than refusing at the first\nscrape.\n",
       "file": "service/observe/metrics/exporter_otlphttp.go",
       "layer": "service",
       "family": "observe"
@@ -61561,6 +61844,168 @@
       "family": "observe"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/trace.BatchSink",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/trace",
+      "name": "BatchSink",
+      "spelled": "struct{}",
+      "canonical": "struct{}",
+      "doc": "BatchSink is the batching span processor of the OpenTelemetry trace SDK\nspecification, as a SpanSink: a span that ends is queued, and one goroutine\nhands the queue to a SpanExporter in batches — when a batch is full, when the\nscheduled delay has passed since the last export, on ForceFlush and on\nShutdown — so no span end ever waits on the network.\n\n# Bounded, counted, never silent\n\nThe queue holds at most MaxQueueSize spans. A span that finds it full is\nDROPPED and counted, as one that ends after Shutdown is: Dropped is the number\nto alert on. A span whose export failed is counted by Failed and reported to\nOnError; it is not retried — a retry policy wraps the exporter, where it can be\nseen and tuned.\n\n# Every wait is bounded, on the injected clock\n\nAn export runs under ExportTimeout on the sink's clock: an exporter that\nimplements ContextSpanExporter receives a context that ends when the clock\nreaches it, and one that implements only SpanExporter is called through Export\nand is bounded by nothing but itself. ForceFlush and Shutdown wait for the\nexporter at most until their own context ends, and say so with\nBatchFlushIncomplete.\n\nRecording a span copies it into a slot allocated at construction: the path a\nspan end takes allocates nothing, which BENCH.md measures and an allocation\ngate holds.\n",
+      "file": "service/observe/trace/batch_sink.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/trace.(*BatchSink).Dropped",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/trace",
+      "name": "Dropped",
+      "recv": "BatchSink",
+      "spelled": "func() uint64",
+      "canonical": "func() uint64",
+      "doc": "Dropped reports how many spans were refused since construction — the queue\nwas full, or the sink was shut down. It is cumulative.\n",
+      "file": "service/observe/trace/batch_sink.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/trace.(*BatchSink).Failed",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/trace",
+      "name": "Failed",
+      "recv": "BatchSink",
+      "spelled": "func() uint64",
+      "canonical": "func() uint64",
+      "doc": "Failed reports how many spans were handed to an export that returned an\nerror, since construction. It is cumulative.\n",
+      "file": "service/observe/trace/batch_sink.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/trace.(*BatchSink).ForceFlush",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/trace",
+      "name": "ForceFlush",
+      "recv": "BatchSink",
+      "spelled": "func(ctx context.Context) error",
+      "canonical": "func(ctx context.Context) error",
+      "doc": "ForceFlush exports every span queued when it is called, in batches, and\nreturns once the exporter has answered for each of them or ctx has ended,\nwhichever is first. It returns the first export failure, or\nBatchFlushIncomplete wrapping the context's error. After Shutdown it has\nnothing to flush and returns nil.\n",
+      "file": "service/observe/trace/batch_sink.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/trace.(*BatchSink).Len",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/trace",
+      "name": "Len",
+      "recv": "BatchSink",
+      "spelled": "func() int",
+      "canonical": "func() int",
+      "doc": "Len reports how many spans are queued and not yet handed to the exporter.\n",
+      "file": "service/observe/trace/batch_sink.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/trace.(*BatchSink).Resource",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/trace",
+      "name": "Resource",
+      "recv": "BatchSink",
+      "spelled": "func() coreotel.ResourceValue",
+      "canonical": "func() github.com/kitsunium/sdk/internal/core/observe/otel.ResourceValue",
+      "doc": "Resource returns the producing resource this sink stamps on every batch,\nalready normalised, so a Tracer and its sink can be given ONE resource\nliteral.\n",
+      "file": "service/observe/trace/batch_sink.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/trace.(*BatchSink).Shutdown",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/trace",
+      "name": "Shutdown",
+      "recv": "BatchSink",
+      "spelled": "func(ctx context.Context) error",
+      "canonical": "func(ctx context.Context) error",
+      "doc": "Shutdown stops accepting spans, exports what is queued, and ends the\nexporting goroutine. It returns the first export failure of that last\nflush, or BatchFlushIncomplete when ctx ends first — the goroutine then\nfinishes on its own, each export still bounded by ExportTimeout. A second\ncall waits for the same end and returns nil.\n",
+      "file": "service/observe/trace/batch_sink.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/trace.(*BatchSink).Sink",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/trace",
+      "name": "Sink",
+      "recv": "BatchSink",
+      "spelled": "func() coretrace.SpanSink",
+      "canonical": "func() github.com/kitsunium/sdk/internal/core/observe/trace.SpanSink",
+      "doc": "Sink returns the core/observe/trace.SpanSink to hand to a TracerConfig. Every\ncall returns the same bound method; recording takes one short lock and never\nwaits on the exporter.\n",
+      "file": "service/observe/trace/batch_sink.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/trace.BatchSinkConfig",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/trace",
+      "name": "BatchSinkConfig",
+      "spelled": "struct{Exporter coretrace.SpanExporter; Resource coreotel.ResourceValue; Scope coreotel.ScopeValue; MaxQueueSize int; ScheduledDelay time.Duration; ExportTimeout time.Duration; MaxExportBatchSize int; Clock clock.Timed; OnError func(err error)}",
+      "canonical": "struct{Exporter github.com/kitsunium/sdk/internal/core/observe/trace.SpanExporter; Resource github.com/kitsunium/sdk/internal/core/observe/otel.ResourceValue; Scope github.com/kitsunium/sdk/internal/core/observe/otel.ScopeValue; MaxQueueSize int; ScheduledDelay time.Duration; ExportTimeout time.Duration; MaxExportBatchSize int; Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed; OnError func(err error)}",
+      "fields": [
+        {
+          "name": "Exporter",
+          "type": "coretrace.SpanExporter",
+          "doc": "Exporter receives every batch. Required: NewBatchSink refuses a nil one\nwith BatchExporterMissing. One that implements ContextSpanExporter is\nbounded by ExportTimeout.\n"
+        },
+        {
+          "name": "Resource",
+          "type": "coreotel.ResourceValue",
+          "doc": "Resource identifies the producer, stamped on every batch.\n"
+        },
+        {
+          "name": "Scope",
+          "type": "coreotel.ScopeValue",
+          "doc": "Scope identifies the instrumentation, stamped on every batch.\n"
+        },
+        {
+          "name": "MaxQueueSize",
+          "type": "int",
+          "doc": "MaxQueueSize bounds how many finished spans wait for export.\nNon-positive CLAMPS to DefaultBatchMaxQueueSize (2048).\n"
+        },
+        {
+          "name": "ScheduledDelay",
+          "type": "time.Duration",
+          "doc": "ScheduledDelay is the longest a queued span waits before an export\nstarts. Non-positive CLAMPS to DefaultBatchScheduledDelay (5 s).\n"
+        },
+        {
+          "name": "ExportTimeout",
+          "type": "time.Duration",
+          "doc": "ExportTimeout bounds one export, on Clock. Non-positive CLAMPS to\nDefaultBatchExportTimeout (30 s).\n"
+        },
+        {
+          "name": "MaxExportBatchSize",
+          "type": "int",
+          "doc": "MaxExportBatchSize bounds how many spans one export carries, and is the\nfill level that starts an export before ScheduledDelay. Non-positive\nCLAMPS to DefaultBatchMaxExportBatchSize (512); above MaxQueueSize it\nclamps to MaxQueueSize, as the specification requires.\n"
+        },
+        {
+          "name": "Clock",
+          "type": "clock.Timed",
+          "doc": "Clock drives ScheduledDelay and ExportTimeout. Unset CLAMPS to\nclock.System; a test injects a ManualClock and waits on nothing.\n"
+        },
+        {
+          "name": "OnError",
+          "type": "func(err error)",
+          "doc": "OnError receives every export failure, from the exporting goroutine. Nil\ndiscards it; Failed counts the spans either way. It must not block: the\nnext export waits for it.\n"
+        }
+      ],
+      "doc": "BatchSinkConfig configures a BatchSink. Exporter is required; every other\nfield has a resolved meaning when left unset — the specification's default\nfor the four sizes and durations, and never \"unbounded\" (ADR 0031).\n",
+      "file": "service/observe/trace/batch_sink_config.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/observe/trace.ClientMiddleware",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/observe/trace",
@@ -61569,6 +62014,59 @@
       "canonical": "func(tracer github.com/kitsunium/sdk/internal/core/observe/trace.Tracer) github.com/kitsunium/sdk/internal/core/net.Middleware[net/http.RoundTripper]",
       "doc": "ClientMiddleware returns a middleware that traces every outbound request and\nINJECTS the traceparent into it.\n\nIt is a corenet.Middleware[http.RoundTripper] — the SDK's own middleware type\nagain, this time instantiated at the outbound seam — so it composes with\ncorenet.Chain and wraps the guarded client's transport:\n\n\tc, err := client.New(cfg, identity, policy, hook)\n\tc.HTTP().Transport = corenet.Chain(c.HTTP().Transport, trace.ClientMiddleware(tracer))\n\nIt decorates the ROUND TRIPPER rather than the call site, and that placement is\nthe same argument the net domain makes for putting its Policy there: a caller\ncannot construct a request that skips the transport, so \"every egress carries a\ntraceparent\" stops being a convention the next contributor has to remember.\n\n# The request is CLONED\n\nhttp.RoundTripper's contract says an implementation \"should not modify the\nrequest\", and the reason is not pedantry: net/http retries an idempotent\nrequest on a fresh connection using the SAME *http.Request, so a header set in\nplace would be observed by a caller inspecting the request afterwards, and a\nspan-per-attempt would write a different traceparent onto a request the caller\nstill holds. Cloning costs one header map per call and makes the middleware\nre-entrant.\n",
       "file": "service/observe/trace/http_client.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/trace.DefaultBatchExportTimeout",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/trace",
+      "name": "DefaultBatchExportTimeout",
+      "spelled": "time.Duration",
+      "canonical": "time.Duration",
+      "value": "30000000000",
+      "init": "go:github.com/kitsunium/sdk/internal/core/observe/trace.DefaultExportTimeout",
+      "doc": "DefaultBatchExportTimeout bounds one export, on the sink's clock.\n",
+      "file": "service/observe/trace/batch_sink.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/trace.DefaultBatchMaxExportBatchSize",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/trace",
+      "name": "DefaultBatchMaxExportBatchSize",
+      "spelled": "int",
+      "canonical": "int",
+      "value": "512",
+      "doc": "DefaultBatchMaxExportBatchSize bounds how many spans one export carries.\n",
+      "file": "service/observe/trace/batch_sink.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/trace.DefaultBatchMaxQueueSize",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/trace",
+      "name": "DefaultBatchMaxQueueSize",
+      "spelled": "int",
+      "canonical": "int",
+      "value": "2048",
+      "doc": "DefaultBatchMaxQueueSize bounds how many finished spans wait for export.\n",
+      "file": "service/observe/trace/batch_sink.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/trace.DefaultBatchScheduledDelay",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/trace",
+      "name": "DefaultBatchScheduledDelay",
+      "spelled": "time.Duration",
+      "canonical": "time.Duration",
+      "value": "5000000000",
+      "doc": "DefaultBatchScheduledDelay is the longest a queued span waits before an export starts.\n",
+      "file": "service/observe/trace/batch_sink.go",
       "layer": "service",
       "family": "observe"
     },
@@ -61713,13 +62211,25 @@
       "family": "observe"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/trace.NewBatchSink",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/trace",
+      "name": "NewBatchSink",
+      "spelled": "func(cfg BatchSinkConfig) (sink *BatchSink, err error)",
+      "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/observe/trace.BatchSinkConfig) (sink *github.com/kitsunium/sdk/internal/service/observe/trace.BatchSink, err error)",
+      "doc": "NewBatchSink builds a BatchSink from cfg, applying every clamp once, and starts\nthe one goroutine that exports — Shutdown is what ends it.\n\nA missing exporter is REFUSED with BatchExporterMissing rather than defaulted:\nthere is no destination that could be right for a caller who named none, and a\nsink that discarded every span would be the silent loss ADR 0031 forbids.\n",
+      "file": "service/observe/trace/batch_sink.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/observe/trace.NewOTLPHTTPExporter",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/observe/trace",
       "name": "NewOTLPHTTPExporter",
-      "spelled": "func(name coretrace.ExporterName, cfg OTLPHTTPConfig) (exporter coretrace.SpanExporter, err error)",
-      "canonical": "func(name github.com/kitsunium/sdk/internal/core/observe/trace.ExporterName, cfg github.com/kitsunium/sdk/internal/service/observe/trace.OTLPHTTPConfig) (exporter github.com/kitsunium/sdk/internal/core/observe/trace.SpanExporter, err error)",
-      "doc": "NewOTLPHTTPExporter builds a SpanExporter that POSTs each batch to an OTLP\ncollector as OTLP/JSON.\n\n# It is NOT registered, and that is a decision one step beyond ADR 0030\n\nADR 0030 refuses to arm a WRITER on stdout from an import. Arming a NETWORK\nCLIENT from an import is strictly worse, and for a reason that is structural\nrather than a matter of degree: there is no endpoint that could be a correct\ndefault. `localhost:4318` is a guess, and a wrong guess turns every export into\na POST at whatever answers on that address — inside a cluster, that is a real\nhost belonging to somebody else. So this exporter is constructed explicitly, by\na caller who names the collector, or not at all. A test pins its absence from\nAvailableExporters.\n\n# It does not retry\n\nThe specification asks a client to honour Retry-After and otherwise back off\nexponentially. `internal/service/app/resilience` already ships that policy, and a\nbackoff hidden inside Export would be a second one a caller cannot see, tune or\ncancel — Export has no context to cancel it with. What this exporter supplies\ninstead is the CLASSIFICATION a retry policy needs, in the exact shape\nresilience.RetryConfig.Retryable wants:\n\n\tresilience.NewRetry(resilience.RetryConfig{\n\t    MaxAttempts: 3,\n\t    BaseDelay:   time.Second,\n\t    Retryable:   trace.OTLPRetryable,\n\t})\n\nA construction failure is returned rather than deferred into an always-failing\nexporter: refusing at wiring time is strictly earlier than refusing at the\nfirst export.\n",
+      "spelled": "func(name coretrace.ExporterName, cfg OTLPHTTPConfig) (exporter coretrace.ContextSpanExporter, err error)",
+      "canonical": "func(name github.com/kitsunium/sdk/internal/core/observe/trace.ExporterName, cfg github.com/kitsunium/sdk/internal/service/observe/trace.OTLPHTTPConfig) (exporter github.com/kitsunium/sdk/internal/core/observe/trace.ContextSpanExporter, err error)",
+      "doc": "NewOTLPHTTPExporter builds a ContextSpanExporter that POSTs each batch to an\nOTLP collector as OTLP/JSON. ExportContext bounds the POST by its context —\na done context aborts the request and returns the transient verdict — and\nExport is ExportContext under a context bounded by the client's own deadline.\n\n# It is NOT registered, and that is a decision one step beyond ADR 0030\n\nADR 0030 refuses to arm a WRITER on stdout from an import. Arming a NETWORK\nCLIENT from an import is strictly worse, and for a reason that is structural\nrather than a matter of degree: there is no endpoint that could be a correct\ndefault. `localhost:4318` is a guess, and a wrong guess turns every export into\na POST at whatever answers on that address — inside a cluster, that is a real\nhost belonging to somebody else. So this exporter is constructed explicitly, by\na caller who names the collector, or not at all. A test pins its absence from\nAvailableExporters.\n\n# It does not retry\n\nThe specification asks a client to honour Retry-After and otherwise back off\nexponentially. `internal/service/app/resilience` already ships that policy, and a\nbackoff hidden inside Export would be a second one a caller cannot see, tune or\ncancel, and would spend the very deadline ExportContext is given. What this\nexporter supplies instead is the CLASSIFICATION a retry policy needs, in the\nexact shape resilience.RetryConfig.Retryable wants:\n\n\tresilience.NewRetry(resilience.RetryConfig{\n\t    MaxAttempts: 3,\n\t    BaseDelay:   time.Second,\n\t    Retryable:   trace.OTLPRetryable,\n\t})\n\nA construction failure is returned rather than deferred into an always-failing\nexporter: refusing at wiring time is strictly earlier than refusing at the\nfirst export.\n",
       "file": "service/observe/trace/exporter_otlphttp.go",
       "layer": "service",
       "family": "observe"
@@ -62175,7 +62685,7 @@
         {
           "name": "Sink",
           "type": "coretrace.SpanSink",
-          "doc": "Sink receives every sampled span at End. Unset means the tracer records\nnothing — which is not an inert policy but the honest one: a Tracer with\nno destination has nowhere to put a span, and buffering into a slice\nnobody drains is the memory leak that shape invites.\n\nNewRecorder is the in-tree destination; a batching processor would be a\nSink that buffers and forwards (ADR 0051 §Deferred).\n"
+          "doc": "Sink receives every sampled span at End. Unset means the tracer records\nnothing — which is not an inert policy but the honest one: a Tracer with\nno destination has nowhere to put a span, and buffering into a slice\nnobody drains is the memory leak that shape invites.\n\nNewRecorder is the in-tree destination a caller collects from;\nNewBatchSink is the batching processor that buffers and forwards to an\nexporter on its own.\n"
         },
         {
           "name": "Clock",

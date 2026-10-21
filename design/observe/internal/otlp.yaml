@@ -485,7 +485,7 @@ packages:
           specification asks a client to honour Retry-After and otherwise back off
           exponentially; internal/service/app/resilience already ships that policy, and a
           backoff hidden inside a send would be a second one a caller cannot see, tune
-          or cancel — an exporter's Export has no context to cancel it with. What it
+          or cancel, and would spend the deadline PostContext is given. What it
           supplies instead is the CLASSIFICATION a retry policy needs: a transient
           verdict carries the signal's Unavailable code, which each signal's
           OTLPRetryable reads.
@@ -502,6 +502,20 @@ packages:
               - name: body
                 type: "[]byte"
             name: Post
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              PostContext is Post bounded by ctx: the request carries ctx, so a context
+              done before the collector answers aborts the round trip and returns the
+              transient verdict — a timeout is retryable, as a transport fault is. The
+              client's own deadline still applies; whichever ends first wins.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: body
+                type: "[]byte"
+            name: PostContext
             out:
               - type: error
             recv: pointer

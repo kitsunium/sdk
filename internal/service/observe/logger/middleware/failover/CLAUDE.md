@@ -15,7 +15,8 @@ logs survive a network outage.
 
 | File | Role |
 |---|---|
-| `failover_sink.go` | `failoverSink` + `New` + `Write` / `Flush` / `Close` |
+| `failover_sink.go` | `failoverSink` + `New` / `NewWithConfig` + `Write` / `Flush` / `Close`; the cooled walk (`writeCooled` / `attempt`) |
+| `config.go` | `Config{Cooldown, Clock}` — the zero value is `New` (#479) |
 | `internal/core/observe/logger/middleware/failover` | its sentinels — range 0.3.19.\* — declared in the core mirror since ADR 0160; this package declares none |
 
 ## Behaviour
@@ -25,6 +26,15 @@ logs survive a network outage.
 - `Write` walks the chain in order; first non-error wins (its byte count
   is returned). Every branch failure is collected into the `errors.Join`
   set surfaced by `Exhausted`.
+- **Cooldown** (`NewWithConfig`, #479). A branch whose `Write` failed is tried
+  LAST until `Cooldown` has passed on `Clock` (ADR 0090), so a dead primary
+  stops costing every record a failed attempt — often a timeout — before the
+  fallback takes it. It is demoted, never skipped: when every branch in its
+  place fails, the cooling ones are still tried, in declaration order, so a
+  cooldown alone never loses a record; a branch that accepts a write is back
+  in its place at once. Per-branch deadlines are `atomic.Int64` (a lock would
+  serialise every goroutine that logs), the clock is read once per write, and
+  a zero `Cooldown` is `New` exactly — `Write` reads neither.
 - `Flush` and `Close` forward to every distinct branch unconditionally — a
   sink repeated in the chain is flushed and closed once, and they never
   short-circuit on a failure — and aggregate per-branch errors via
@@ -56,6 +66,10 @@ only when a branch actually fails. See BENCH.md §0.
 
 ## Do NOT
 
+- Skip a cooling branch outright. A cooldown reorders the chain; refusing a
+  record because the only branch that might take it is cooling would turn a
+  latency optimisation into a loss.
+
 - Re-order branches at runtime — order encodes the failover priority.
 - Treat `Exhausted` as a single error; unwrap it for per-branch causes.
 - Pre-size the per-`Write` error slate again — a longer fallback chain must not
@@ -83,3 +97,6 @@ bazel test --config=race //internal/service/observe/logger/middleware/failover:f
 # (and CI's test-386 job runs it again, without -race):
 bazel test --config=alloc //internal/service/observe/logger/middleware/failover:failover_test
 ```
+
+`TestCooldownAddsNoAllocationOnTheHealthyPath`, in the same `!race` file and lane,
+holds a cooled two-branch chain to the one-branch baseline.

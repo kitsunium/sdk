@@ -1481,6 +1481,10 @@ codes:
     const: CodeAsyncCtxCancelled
     hex: "0x00_03_11_03"
     package: internal/core/observe/logger/middleware/async
+  - code: "0.3.17.4"
+    const: CodeAsyncBlockTimeout
+    hex: "0x00_03_11_04"
+    package: internal/core/observe/logger/middleware/async
   - code: "0.3.18.1"
     const: CodeRouteNoMatch
     hex: "0x00_03_12_01"
@@ -2028,6 +2032,14 @@ codes:
   - code: "0.3.50.8"
     const: CodeOTLPPartialSuccess
     hex: "0x00_03_32_08"
+    package: internal/core/observe/trace
+  - code: "0.3.50.9"
+    const: CodeBatchExporterMissing
+    hex: "0x00_03_32_09"
+    package: internal/core/observe/trace
+  - code: "0.3.50.10"
+    const: CodeBatchFlushIncomplete
+    hex: "0x00_03_32_0A"
     package: internal/core/observe/trace
   - code: "0.3.51.1"
     const: CodeLockFenceCorrupt

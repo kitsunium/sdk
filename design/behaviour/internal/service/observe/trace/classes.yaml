@@ -2,6 +2,32 @@
 apiVersion: design/behaviour/v1
 constants:
   - doc: |-
+      The four defaults of a BatchSink are the OpenTelemetry trace SDK
+      specification's own for the batching span processor
+      (https://opentelemetry.io/docs/specs/otel/trace/sdk/#batching-processor):
+      maxQueueSize 2048, scheduledDelayMillis 5000, exportTimeoutMillis 30000 and
+      maxExportBatchSize 512. A zero field in BatchSinkConfig takes them, so a zero
+      value is the specification's processor rather than an inert one (ADR 0031).
+    grouped: true
+    items:
+      - doc: DefaultBatchMaxQueueSize bounds how many finished spans wait for export.
+        name: DefaultBatchMaxQueueSize
+        type: int
+        value: "2048"
+      - doc: DefaultBatchScheduledDelay is the longest a queued span waits before an export starts.
+        name: DefaultBatchScheduledDelay
+        type: time.Duration
+        value: 5 * time.Second
+      - doc: DefaultBatchExportTimeout bounds one export, on the sink's clock.
+        name: DefaultBatchExportTimeout
+        type: time.Duration
+        value: coretrace.DefaultExportTimeout
+      - doc: DefaultBatchMaxExportBatchSize bounds how many spans one export carries.
+        name: DefaultBatchMaxExportBatchSize
+        type: int
+        value: "512"
+    name: DefaultBatchMaxQueueSize
+  - doc: |-
       OTLPTracesPath is the OTLP/HTTP path for the trace signal. It is a constant
       rather than something the exporter appends, so an endpoint stays a full URL a
       reviewer can read in one string: "http://collector:4318" + OTLPTracesPath.
@@ -343,6 +369,31 @@ constants:
     name: traceStateListSep
 files:
   - decls:
+      - DefaultBatchMaxQueueSize
+      - flushRequest
+      - BatchSink
+      - NewBatchSink
+      - (*BatchSink).Sink
+      - (*BatchSink).Resource
+      - (*BatchSink).record
+      - (*BatchSink).ForceFlush
+      - (*BatchSink).Shutdown
+      - (*BatchSink).Dropped
+      - (*BatchSink).Failed
+      - (*BatchSink).Len
+      - (*BatchSink).run
+      - (*BatchSink).serve
+      - (*BatchSink).exportFull
+      - (*BatchSink).exportAll
+      - (*BatchSink).exportBatch
+      - (*BatchSink).export
+      - incomplete
+    name: batch_sink.go
+  - decls:
+      - BatchSinkConfig
+      - BatchSinkConfig.resolved
+    name: batch_sink_config.go
+  - decls:
       - TracerConfig
       - TracerConfig.resolved
       - discardSpan
@@ -360,6 +411,7 @@ files:
       - OTLPRetryable
       - (*otlpHTTPExporter).Name
       - (*otlpHTTPExporter).Export
+      - (*otlpHTTPExporter).ExportContext
     name: exporter_otlphttp.go
   - decls:
       - otlpJSONExporterName
@@ -508,6 +560,13 @@ files:
       - ParseTraceState
     name: tracestate.go
 functions:
+  - name: NewBatchSink
+    params: cfg BatchSinkConfig
+    results: sink *BatchSink, err error
+  - doc: incomplete wraps the context error a ForceFlush or Shutdown ended on.
+    name: incomplete
+    params: cause error
+    results: error
   - doc: |-
       discardSpan is the SpanSink a Tracer with no configured destination uses. It
       is a named function rather than a nil check on the hot path, and rather than a
@@ -516,7 +575,7 @@ functions:
     params: _ coretrace.SpanValue
   - name: NewOTLPHTTPExporter
     params: name coretrace.ExporterName, cfg OTLPHTTPConfig
-    results: exporter coretrace.SpanExporter, err error
+    results: exporter coretrace.ContextSpanExporter, err error
   - name: OTLPRetryable
     params: err error
     results: bool
@@ -758,6 +817,7 @@ imports:
   math: math
   os: os
   otlp: github.com/kitsunium/sdk/internal/service/observe/internal/otlp
+  plugin: github.com/kitsunium/sdk/internal/kernel/plugin
   rand: crypto/rand
   slices: slices
   strconv: strconv
@@ -770,6 +830,223 @@ package:
   name: trace
   purpose: "Package trace — the Tracer's configuration: producing Resource, instrumentation Scope, sampling policy, span destination and clock."
 types:
+  - doc: |-
+      flushRequest is one ForceFlush handed to the exporting goroutine: reply
+      receives the outcome, and is buffered so the goroutine never waits on a
+      caller whose context has already ended.
+    fields:
+      - name: reply
+        type: chan error
+    kind: struct
+    name: flushRequest
+  - fields:
+      - doc: |-
+          exporter receives every batch; withContext is the same exporter when it
+          implements the sibling, nil when it does not. Both immutable.
+        name: exporter
+        type: coretrace.SpanExporter
+      - name: withContext
+        type: coretrace.ContextSpanExporter
+      - doc: resource and scope are stamped on every batch. Immutable.
+        name: resource
+        type: coreotel.ResourceValue
+      - name: scope
+        type: coreotel.ScopeValue
+      - doc: the resolved bounds. Immutable.
+        name: maxBatch
+        type: int
+      - name: delay
+        type: time.Duration
+      - name: timeout
+        type: time.Duration
+      - name: clk
+        type: clock.Timed
+      - name: onError
+        type: func(err error)
+      - doc: |-
+          mu guards the ring and the three counters. It is a sync.Mutex for the
+          reason Recorder.mu is one: the busy side — a span ending — is exclusive.
+        name: mu
+        type: sync.Mutex
+      - doc: |-
+          ring holds the queued spans, allocated once at construction: recording
+          copies a span into a slot and allocates nothing.
+        name: ring
+        type: "[]coretrace.SpanValue"
+      - doc: head is the oldest queued slot; count how many are queued.
+        name: head
+        type: int
+      - doc: head is the oldest queued slot; count how many are queued.
+        name: count
+        type: int
+      - doc: closed is set by Shutdown; a span that ends afterwards is dropped.
+        name: closed
+        type: bool
+      - doc: dropped and failed are cumulative, as Recorder.dropped is.
+        name: dropped
+        type: uint64
+      - doc: dropped and failed are cumulative, as Recorder.dropped is.
+        name: failed
+        type: uint64
+      - doc: |-
+          ready carries "a batch is full" to the goroutine; one buffered slot, so
+          a span end never waits and a burst wakes it once.
+        name: ready
+        type: chan struct{}
+      - doc: flushes carries ForceFlush requests to the goroutine.
+        name: flushes
+        type: chan flushRequest
+      - doc: stop is closed once, by the first Shutdown.
+        name: stop
+        type: chan struct{}
+      - name: stopOnce
+        type: sync.Once
+      - doc: |-
+          done is closed when the goroutine has exported the last batch and ended;
+          lastErr is the first failure of that last flush, written before done
+          closes and read only after. doneOnce states that done closes once.
+        name: done
+        type: chan struct{}
+      - name: doneOnce
+        type: sync.Once
+      - name: lastErr
+        type: error
+    kind: struct
+    methods:
+      - name: Sink
+        recv: b *BatchSink
+        results: coretrace.SpanSink
+      - name: Resource
+        recv: b *BatchSink
+        results: coreotel.ResourceValue
+      - doc: |-
+          record is the SpanSink itself: one short lock, a copy into a slot that
+          already exists, and a non-blocking wake-up when a batch is full.
+        name: record
+        params: span coretrace.SpanValue
+        recv: b *BatchSink
+      - name: ForceFlush
+        params: ctx context.Context
+        recv: b *BatchSink
+        results: error
+      - name: Shutdown
+        params: ctx context.Context
+        recv: b *BatchSink
+        results: error
+      - name: Dropped
+        recv: b *BatchSink
+        results: uint64
+      - name: Failed
+        recv: b *BatchSink
+        results: uint64
+      - name: Len
+        recv: b *BatchSink
+        results: int
+      - doc: |-
+          run is the exporting goroutine: it waits for a full batch, the scheduled
+          delay, a ForceFlush or Shutdown, exports, and re-arms the delay after each
+          export, as the specification's scheduledDelay is the delay between two
+          consecutive exports.
+
+          None of the channels it receives from is ever closed but stop; each receive
+          still reads the comma-ok form, and a closed one would end the loop rather
+          than spin it.
+        name: run
+        recv: b *BatchSink
+      - doc: |-
+          serve waits for one wake-up and exports for it, and reports whether the
+          goroutine goes on.
+        name: serve
+        params: timer clock.Timer
+        recv: b *BatchSink
+        results: bool
+      - doc: exportFull exports while at least one full batch is queued.
+        name: exportFull
+        recv: b *BatchSink
+      - doc: |-
+          exportAll exports the spans queued when it is called, in batches, and
+          returns the first failure. It is bounded by that count, not by an empty
+          queue: spans that keep ending while it exports wait for the next export, so
+          a ForceFlush under steady traffic still returns.
+        name: exportAll
+        recv: b *BatchSink
+        results: error
+      - doc: |-
+          exportBatch takes up to maxBatch spans off the queue and exports them. The
+          batch is a slice of its own: an exporter may hold it, and the ring slot it
+          came from is cleared so the queue holds no reference to an exported span.
+        name: exportBatch
+        recv: b *BatchSink
+        results: error
+      - doc: |-
+          export hands one batch to the exporter, bounded by the export timeout on
+          the sink's clock when the exporter can honour a context.
+
+          Goroutine lifecycle: one watcher per bounded export, started here; it ends
+          when the clock reaches the bound — cancelling the export's context — or when
+          the export returns first, and export joins it before returning, so none
+          outlives the call.
+        name: export
+        params: spans coretrace.SpansValue
+        recv: b *BatchSink
+        results: error
+    name: BatchSink
+  - fields:
+      - doc: |-
+          Exporter receives every batch. Required: NewBatchSink refuses a nil one
+          with BatchExporterMissing. One that implements ContextSpanExporter is
+          bounded by ExportTimeout.
+        name: Exporter
+        type: coretrace.SpanExporter
+      - doc: Resource identifies the producer, stamped on every batch.
+        name: Resource
+        type: coreotel.ResourceValue
+      - doc: Scope identifies the instrumentation, stamped on every batch.
+        name: Scope
+        type: coreotel.ScopeValue
+      - doc: |-
+          MaxQueueSize bounds how many finished spans wait for export.
+          Non-positive CLAMPS to DefaultBatchMaxQueueSize (2048).
+        name: MaxQueueSize
+        type: int
+      - doc: |-
+          ScheduledDelay is the longest a queued span waits before an export
+          starts. Non-positive CLAMPS to DefaultBatchScheduledDelay (5 s).
+        name: ScheduledDelay
+        type: time.Duration
+      - doc: |-
+          ExportTimeout bounds one export, on Clock. Non-positive CLAMPS to
+          DefaultBatchExportTimeout (30 s).
+        name: ExportTimeout
+        type: time.Duration
+      - doc: |-
+          MaxExportBatchSize bounds how many spans one export carries, and is the
+          fill level that starts an export before ScheduledDelay. Non-positive
+          CLAMPS to DefaultBatchMaxExportBatchSize (512); above MaxQueueSize it
+          clamps to MaxQueueSize, as the specification requires.
+        name: MaxExportBatchSize
+        type: int
+      - doc: |-
+          Clock drives ScheduledDelay and ExportTimeout. Unset CLAMPS to
+          clock.System; a test injects a ManualClock and waits on nothing.
+        name: Clock
+        type: clock.Timed
+      - doc: |-
+          OnError receives every export failure, from the exporting goroutine. Nil
+          discards it; Failed counts the spans either way. It must not block: the
+          next export waits for it.
+        name: OnError
+        type: func(err error)
+    kind: struct
+    methods:
+      - doc: |-
+          resolved returns c with every clamp applied once: a non-positive size or
+          duration takes the specification's default, a batch larger than the queue
+          is the queue, and an unset clock is the system's.
+        name: resolved
+        recv: c BatchSinkConfig
+        results: BatchSinkConfig
+    name: BatchSinkConfig
   - fields:
       - doc: |-
           Resource identifies the producer of the telemetry and is carried once
@@ -807,8 +1084,9 @@ types:
           no destination has nowhere to put a span, and buffering into a slice
           nobody drains is the memory leak that shape invites.
 
-          NewRecorder is the in-tree destination; a batching processor would be a
-          Sink that buffers and forwards (ADR 0051 §Deferred).
+          NewRecorder is the in-tree destination a caller collects from;
+          NewBatchSink is the batching processor that buffers and forwards to an
+          exporter on its own.
         name: Sink
         type: coretrace.SpanSink
       - doc: |-
@@ -863,6 +1141,16 @@ types:
           make one every interval forever.
         name: Export
         params: spans coretrace.SpansValue
+        recv: e *otlpHTTPExporter
+        results: error
+      - doc: |-
+          ExportContext implements core/observe/trace.ContextSpanExporter: Export,
+          with the POST bounded by ctx. A context that is done before the collector
+          answers — already, or midway — ends the round trip with the transient
+          verdict a transport fault earns, so a retry policy reads a timeout as the
+          retryable failure the specification says it is.
+        name: ExportContext
+        params: ctx context.Context, spans coretrace.SpansValue
         recv: e *otlpHTTPExporter
         results: error
     name: otlpHTTPExporter

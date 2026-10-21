@@ -54,6 +54,8 @@ func (s *asyncSink) drainLoop(stop <-chan struct{}) {
 		s.ringMu.Unlock()
 		//: empty queue → fall through to the stop-channel select.
 		if err == nil {
+			//: a slot was freed: a Write waiting under Block may take it.
+			s.signalSpace()
 			//: forward the entry to the downstream sink and recycle it.
 			s.forward(ent)
 			continue

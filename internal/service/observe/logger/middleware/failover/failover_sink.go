@@ -3,16 +3,33 @@ package failover
 import (
 	"context"
 	"errors"
+	"sync/atomic"
+	"time"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	corefailover "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/failover"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
+
+// demotedOnStack is how many demoted branches a cooled Write remembers without
+// allocating; a chain with more branches cooling at once spills to the heap,
+// on a path where every one of them has already failed.
+const demotedOnStack int = 8
 
 // failoverSink wraps an ordered list of downstream sinks tried sequentially.
 type failoverSink struct {
 	// chain is the ordered sink list — first hit returns; misses cascade.
 	chain []corelogger.Sink
+	// cooldown demotes a failed branch for this long; zero disables it, and
+	// Write then never reads the clock or retryAt.
+	cooldown time.Duration
+	// clk measures cooldown; nil when cooldown is zero.
+	clk clock.Clock
+	// retryAt holds, per branch, the clock instant (UnixNano) until which the
+	// branch is tried last; zero means "in its place". Atomic, because Write
+	// runs from every goroutine that logs and a lock would serialise them.
+	retryAt []atomic.Int64
 }
 
 // New constructs a failover Sink trying each branch in order.
@@ -37,6 +54,37 @@ func New(branches ...corelogger.Sink) (sink corelogger.Sink, err error) {
 	return &failoverSink{chain: cp}, nil
 }
 
+// NewWithConfig constructs a failover Sink trying each branch in order, a
+// branch that failed demoted to the end of the order until cfg.Cooldown has
+// passed on cfg.Clock. A zero Config is New exactly; an empty chain returns
+// Empty, as New does.
+func NewWithConfig(cfg Config, branches ...corelogger.Sink) (sink corelogger.Sink, err error) {
+	//: the chain is New's — the same copy, the same refusal of an empty one.
+	sink, err = New(branches...)
+	//: no cooldown, or no chain: the sink is New's verdict exactly.
+	if err != nil || cfg.Cooldown <= 0 {
+		//: New's sink, or Empty.
+		return sink, err
+	}
+	out, isFailover := sink.(*failoverSink)
+	//: New only ever returns its own type; the check keeps the assertion safe.
+	if !isFailover {
+		//: unreachable, but never a panic.
+		return sink, nil
+	}
+	//: a cooldown needs a clock and one deadline per branch; without one the
+	//: sink is New's, and Write touches neither.
+	out.cooldown = cfg.Cooldown
+	out.clk = cfg.Clock
+	//: the real clock is a description, not a guess.
+	if out.clk == nil {
+		out.clk = clock.System
+	}
+	out.retryAt = newDeadlines(len(out.chain))
+	//: the demoting sink.
+	return out, nil
+}
+
 // Write tries each branch in order, returning the first success. When every
 // branch fails, Write returns Exhausted wrapping the joined failure chain.
 func (s *failoverSink) Write(ctx context.Context, rec corelogger.RecordEvent, p []byte) (n int, err error) {
@@ -50,6 +98,11 @@ func (s *failoverSink) Write(ctx context.Context, rec corelogger.RecordEvent, p 
 	//: internal/service/observe/logger/BENCH.md §0. Flush/Close keep their pre-sized
 	//: slates because they run once per sink lifetime, not once per record.
 	var collected []error
+	//: with a cooldown, the walk demotes the branches that failed lately.
+	if s.cooldown > 0 {
+		//: the cooled walk returns its own verdict.
+		return s.writeCooled(ctx, rec, p)
+	}
 	//: walk the chain in order; first success short-circuits the loop.
 	for _, branch := range s.chain {
 		//: try the branch and capture either success or failure.
@@ -63,12 +116,79 @@ func (s *failoverSink) Write(ctx context.Context, rec corelogger.RecordEvent, p 
 		collected = append(collected, werr)
 	}
 	//: every branch failed — wrap the joined chain in the documented sentinel.
-	return 0, errs.Wrap(errors.Join(collected...), errs.WrapParams{
+	return 0, exhausted(collected, len(s.chain), rec)
+}
+
+// exhausted wraps every branch's failure in the documented sentinel.
+func exhausted(collected []error, attempts int, rec corelogger.RecordEvent) error {
+	//: the joined chain, so a caller can errors.Is every cause.
+	return errs.Wrap(errors.Join(collected...), errs.WrapParams{
 		Code:    corefailover.CodeFailoverExhausted,
 		Reason:  "FAILOVER_EXHAUSTED",
 		Public:  "All failover sinks returned an error",
 		Private: "service/observe/logger/middleware/failover.Write exhausted the chain",
-	}, errs.Int("attempts", len(s.chain)), errs.Int("level", int(rec.Level)))
+	}, errs.Int("attempts", attempts), errs.Int("level", int(rec.Level)))
+}
+
+// writeCooled is Write under a cooldown: a first pass in declaration order
+// over the branches not cooling down, then — only when all of them failed — a
+// second pass over the branches that were cooling when the Write began, in the
+// same order. A branch the first pass tried is not tried twice. A cooling
+// branch is demoted, never skipped, so a cooldown alone never loses a record.
+// The clock is read once per Write.
+func (s *failoverSink) writeCooled(ctx context.Context, rec corelogger.RecordEvent, p []byte) (n int, err error) {
+	now := s.clk.Now().UnixNano()
+	//: nil until a branch fails, for the reason Write's slate is.
+	var collected []error
+	//: the branches cooling when this Write began, remembered on the stack.
+	var onStack [demotedOnStack]int
+	demoted := onStack[:0]
+	//: first pass: the branches in their place.
+	for i := range s.chain {
+		//: demoted until its deadline: the second pass may still reach it.
+		if s.retryAt[i].Load() > now {
+			demoted = append(demoted, i)
+			continue
+		}
+		written, werr := s.attempt(ctx, i, rec, p, now)
+		//: the first success short-circuits, as Write's does.
+		if werr == nil {
+			//: accepted.
+			return written, nil
+		}
+		collected = append(collected, werr)
+	}
+	//: second pass: the demoted branches, in declaration order.
+	for _, i := range demoted {
+		written, werr := s.attempt(ctx, i, rec, p, now)
+		//: a demoted branch that recovered takes the record.
+		if werr == nil {
+			//: accepted.
+			return written, nil
+		}
+		collected = append(collected, werr)
+	}
+	//: every branch was tried, once, and failed.
+	return 0, exhausted(collected, len(collected), rec)
+}
+
+// attempt writes to branch i, restores it to its place on success and
+// demotes it for the cooldown on failure.
+func (s *failoverSink) attempt(ctx context.Context, i int, rec corelogger.RecordEvent, p []byte, now int64) (n int, err error) {
+	written, werr := s.chain[i].Write(ctx, rec, p)
+	//: accepted: a demoted branch is back in its place.
+	if werr == nil {
+		//: a load first, so the healthy path never writes a shared word.
+		if s.retryAt[i].Load() != 0 {
+			s.retryAt[i].Store(0)
+		}
+		//: the byte count.
+		return written, nil
+	}
+	//: failed: tried last until the cooldown has passed.
+	s.retryAt[i].Store(now + int64(s.cooldown))
+	//: the branch's own failure, for the caller's slate.
+	return 0, werr
 }
 
 // Flush forwards to every distinct branch and aggregates per-branch errors via
@@ -128,4 +248,11 @@ func (s *failoverSink) Close() error {
 	}
 	//: happy path — every branch closed cleanly.
 	return nil
+}
+
+// newDeadlines returns one cooldown deadline per branch, every one zero — "in
+// its place". A fixed-length table indexed by branch, never appended to.
+func newDeadlines(n int) []atomic.Int64 {
+	//: indexed access only.
+	return make([]atomic.Int64, n)
 }

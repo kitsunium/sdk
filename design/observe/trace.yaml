@@ -127,6 +127,21 @@ packages:
             name: CodeOTLPPartialSuccess
             value: "0x00_03_32_08"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeBatchExporterMissing identifies a batch sink built with no exporter, or
+              with one that cannot serve a call: a batch with nowhere to go has no safe
+              default (ADR 0031).
+            name: CodeBatchExporterMissing
+            value: "0x00_03_32_09"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeBatchFlushIncomplete identifies a ForceFlush or Shutdown whose context
+              ended before every queued span had been handed to the exporter.
+            name: CodeBatchFlushIncomplete
+            value: "0x00_03_32_0A"
+        type: errs.Code
     constants:
       - blockDoc: |-
           ExceptionEventName and the three attribute keys around it are the OpenTelemetry
@@ -179,6 +194,16 @@ packages:
         name: ExceptionStacktraceKey
         type: string
         value: "\"exception.stacktrace\""
+      - doc: |-
+          DefaultExportTimeout bounds one export when the caller's context carries no
+          deadline of its own: 30 s, the OpenTelemetry trace SDK specification's default
+          for a batch processor's exportTimeout (OTEL_BSP_EXPORT_TIMEOUT). The
+          specification says an export MUST NOT block indefinitely, and a context with
+          no deadline is how an indefinite block is written; a caller who wants another
+          bound puts it on the context.
+        name: DefaultExportTimeout
+        type: time.Duration
+        value: "30000000000"
       - blockDoc: |-
           TraceIDLen and SpanIDLen are the byte lengths W3C Trace Context and
           opentelemetry/proto/trace/v1 both fix: 16 bytes of trace-id, 8 of span-id.
@@ -531,6 +556,27 @@ packages:
         out:
           - type: error
       - doc: |-
+          ExportContext ships spans through the SpanExporter registered as name, bounded
+          by ctx. A missing exporter returns UnknownExporter; an exporter failure wraps
+          as ExportFailed.
+
+          When ctx carries no deadline, DefaultExportTimeout is applied: the
+          specification forbids an export that blocks indefinitely. An exporter that
+          implements ContextSpanExporter receives the bounded context through
+          ExportContext; one that implements only SpanExporter is called through Export,
+          which has no context to honour, and is bounded by nothing but itself — every
+          exporter that touches a network in this SDK implements the sibling.
+        in:
+          - name: ctx
+            type: context.Context
+          - name: name
+            type: ExporterName
+          - name: spans
+            type: SpansValue
+        name: ExportContext
+        out:
+          - type: error
+      - doc: |-
           ParseTraceID reads 32 lowercase hex digits into a TraceID, refusing an
           all-zero result.
 
@@ -630,6 +676,29 @@ packages:
             out:
               - type: error
         name: SpanExporter
+      - doc: |-
+          ContextSpanExporter is a SpanExporter whose export can be bounded and
+          cancelled: ExportContext ships spans under ctx, and returns once ctx is done
+          at the latest. The OpenTelemetry SDK specification says an export MUST NOT
+          block indefinitely; Export has no context to bound it with, and SpanExporter
+          is a published port, so the bound arrives as this sibling rather than as a
+          widened method (ADR 0039). A caller holding a SpanExporter asks for it with a
+          type assertion, as ExportContext and the batch sink do.
+
+          Implementations MUST be safe for concurrent use, and Export keeps its
+          meaning: it is ExportContext under a context the exporter bounds itself.
+        embeds:
+          - SpanExporter
+        methods:
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: spans
+                type: SpansValue
+            name: ExportContext
+            out:
+              - type: error
+        name: ContextSpanExporter
       - doc: |-
           Tracer starts spans. It is the only way a span comes into existence.
 
@@ -811,6 +880,18 @@ packages:
             private: "service/observe/trace: the OTLP specification forbids retrying a partial success, so the loss is reported rather than replayed"
             public: The trace collector accepted the request but rejected some spans
             reason: OTLP_PARTIAL_SUCCESS
+          - code: CodeBatchExporterMissing
+            doc: BatchExporterMissing is returned by NewBatchSink when no usable exporter is configured.
+            name: BatchExporterMissing
+            private: "service/observe/trace.NewBatchSink: BatchSinkConfig.Exporter is nil, a typed nil, or not comparable"
+            public: The batch span sink needs an exporter
+            reason: BATCH_EXPORTER_MISSING
+          - code: CodeBatchFlushIncomplete
+            doc: BatchFlushIncomplete reports a ForceFlush or Shutdown cut short by its context.
+            name: BatchFlushIncomplete
+            private: "service/observe/trace.BatchSink: the caller's context ended before the queue was exported"
+            public: The batch span sink did not finish exporting before the deadline
+            reason: BATCH_FLUSH_INCOMPLETE
     types:
       - doc: |-
           EventValue is one thing that happened at an instant during a span, rather than
@@ -1613,6 +1694,50 @@ packages:
         type: int
         value: "2048"
       - blockDoc: |-
+          The four defaults of a BatchSink are the OpenTelemetry trace SDK
+          specification's own for the batching span processor
+          (https://opentelemetry.io/docs/specs/otel/trace/sdk/#batching-processor):
+          maxQueueSize 2048, scheduledDelayMillis 5000, exportTimeoutMillis 30000 and
+          maxExportBatchSize 512. A zero field in BatchSinkConfig takes them, so a zero
+          value is the specification's processor rather than an inert one (ADR 0031).
+        doc: DefaultBatchMaxQueueSize bounds how many finished spans wait for export.
+        name: DefaultBatchMaxQueueSize
+        type: int
+        value: "2048"
+      - blockDoc: |-
+          The four defaults of a BatchSink are the OpenTelemetry trace SDK
+          specification's own for the batching span processor
+          (https://opentelemetry.io/docs/specs/otel/trace/sdk/#batching-processor):
+          maxQueueSize 2048, scheduledDelayMillis 5000, exportTimeoutMillis 30000 and
+          maxExportBatchSize 512. A zero field in BatchSinkConfig takes them, so a zero
+          value is the specification's processor rather than an inert one (ADR 0031).
+        doc: DefaultBatchScheduledDelay is the longest a queued span waits before an export starts.
+        name: DefaultBatchScheduledDelay
+        type: time.Duration
+        value: "5000000000"
+      - blockDoc: |-
+          The four defaults of a BatchSink are the OpenTelemetry trace SDK
+          specification's own for the batching span processor
+          (https://opentelemetry.io/docs/specs/otel/trace/sdk/#batching-processor):
+          maxQueueSize 2048, scheduledDelayMillis 5000, exportTimeoutMillis 30000 and
+          maxExportBatchSize 512. A zero field in BatchSinkConfig takes them, so a zero
+          value is the specification's processor rather than an inert one (ADR 0031).
+        doc: DefaultBatchExportTimeout bounds one export, on the sink's clock.
+        name: DefaultBatchExportTimeout
+        type: time.Duration
+        value: "30000000000"
+      - blockDoc: |-
+          The four defaults of a BatchSink are the OpenTelemetry trace SDK
+          specification's own for the batching span processor
+          (https://opentelemetry.io/docs/specs/otel/trace/sdk/#batching-processor):
+          maxQueueSize 2048, scheduledDelayMillis 5000, exportTimeoutMillis 30000 and
+          maxExportBatchSize 512. A zero field in BatchSinkConfig takes them, so a zero
+          value is the specification's processor rather than an inert one (ADR 0031).
+        doc: DefaultBatchMaxExportBatchSize bounds how many spans one export carries.
+        name: DefaultBatchMaxExportBatchSize
+        type: int
+        value: "512"
+      - blockDoc: |-
           The traceparent field offsets, derived from the grammar rather than counted
           by hand:
 
@@ -1734,8 +1859,10 @@ packages:
       mechanism (ADR 0160 §4).
     functions:
       - doc: |-
-          NewOTLPHTTPExporter builds a SpanExporter that POSTs each batch to an OTLP
-          collector as OTLP/JSON.
+          NewOTLPHTTPExporter builds a ContextSpanExporter that POSTs each batch to an
+          OTLP collector as OTLP/JSON. ExportContext bounds the POST by its context —
+          a done context aborts the request and returns the transient verdict — and
+          Export is ExportContext under a context bounded by the client's own deadline.
 
           # It is NOT registered, and that is a decision one step beyond ADR 0030
 
@@ -1753,9 +1880,9 @@ packages:
           The specification asks a client to honour Retry-After and otherwise back off
           exponentially. `internal/service/app/resilience` already ships that policy, and a
           backoff hidden inside Export would be a second one a caller cannot see, tune or
-          cancel — Export has no context to cancel it with. What this exporter supplies
-          instead is the CLASSIFICATION a retry policy needs, in the exact shape
-          resilience.RetryConfig.Retryable wants:
+          cancel, and would spend the very deadline ExportContext is given. What this
+          exporter supplies instead is the CLASSIFICATION a retry policy needs, in the
+          exact shape resilience.RetryConfig.Retryable wants:
 
           	resilience.NewRetry(resilience.RetryConfig{
           	    MaxAttempts: 3,
@@ -1774,7 +1901,7 @@ packages:
         name: NewOTLPHTTPExporter
         out:
           - name: exporter
-            type: coretrace.SpanExporter
+            type: coretrace.ContextSpanExporter
           - name: err
             type: error
       - doc: |-
@@ -2036,6 +2163,22 @@ packages:
           - name: err
             type: error
         name: RecordError
+      - doc: |-
+          NewBatchSink builds a BatchSink from cfg, applying every clamp once, and starts
+          the one goroutine that exports — Shutdown is what ends it.
+
+          A missing exporter is REFUSED with BatchExporterMissing rather than defaulted:
+          there is no destination that could be right for a caller who named none, and a
+          sink that discarded every span would be the silent loss ADR 0031 forbids.
+        in:
+          - name: cfg
+            type: BatchSinkConfig
+        name: NewBatchSink
+        out:
+          - name: sink
+            type: "*BatchSink"
+          - name: err
+            type: error
       - doc: NewRecorder builds a Recorder from cfg, applying every clamp once.
         in:
           - name: cfg
@@ -2287,8 +2430,9 @@ packages:
                 no destination has nowhere to put a span, and buffering into a slice
                 nobody drains is the memory leak that shape invites.
 
-                NewRecorder is the in-tree destination; a batching processor would be a
-                Sink that buffers and forwards (ADR 0051 §Deferred).
+                NewRecorder is the in-tree destination a caller collects from;
+                NewBatchSink is the batching processor that buffers and forwards to an
+                exporter on its own.
               name: Sink
               type: coretrace.SpanSink
             - doc: |-
@@ -2315,6 +2459,150 @@ packages:
           signal's constructor.
         name: OTLPHTTPConfig
         underlying: otlp.HTTPConfig
+      - doc: |-
+          BatchSink is the batching span processor of the OpenTelemetry trace SDK
+          specification, as a SpanSink: a span that ends is queued, and one goroutine
+          hands the queue to a SpanExporter in batches — when a batch is full, when the
+          scheduled delay has passed since the last export, on ForceFlush and on
+          Shutdown — so no span end ever waits on the network.
+
+          # Bounded, counted, never silent
+
+          The queue holds at most MaxQueueSize spans. A span that finds it full is
+          DROPPED and counted, as one that ends after Shutdown is: Dropped is the number
+          to alert on. A span whose export failed is counted by Failed and reported to
+          OnError; it is not retried — a retry policy wraps the exporter, where it can be
+          seen and tuned.
+
+          # Every wait is bounded, on the injected clock
+
+          An export runs under ExportTimeout on the sink's clock: an exporter that
+          implements ContextSpanExporter receives a context that ends when the clock
+          reaches it, and one that implements only SpanExporter is called through Export
+          and is bounded by nothing but itself. ForceFlush and Shutdown wait for the
+          exporter at most until their own context ends, and say so with
+          BatchFlushIncomplete.
+
+          Recording a span copies it into a slot allocated at construction: the path a
+          span end takes allocates nothing, which BENCH.md measures and an allocation
+          gate holds.
+        methods:
+          - doc: |-
+              Sink returns the core/observe/trace.SpanSink to hand to a TracerConfig. Every
+              call returns the same bound method; recording takes one short lock and never
+              waits on the exporter.
+            name: Sink
+            out:
+              - type: coretrace.SpanSink
+            recv: pointer
+          - doc: |-
+              Resource returns the producing resource this sink stamps on every batch,
+              already normalised, so a Tracer and its sink can be given ONE resource
+              literal.
+            name: Resource
+            out:
+              - type: coreotel.ResourceValue
+            recv: pointer
+          - doc: |-
+              ForceFlush exports every span queued when it is called, in batches, and
+              returns once the exporter has answered for each of them or ctx has ended,
+              whichever is first. It returns the first export failure, or
+              BatchFlushIncomplete wrapping the context's error. After Shutdown it has
+              nothing to flush and returns nil.
+            in:
+              - name: ctx
+                type: context.Context
+            name: ForceFlush
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              Shutdown stops accepting spans, exports what is queued, and ends the
+              exporting goroutine. It returns the first export failure of that last
+              flush, or BatchFlushIncomplete when ctx ends first — the goroutine then
+              finishes on its own, each export still bounded by ExportTimeout. A second
+              call waits for the same end and returns nil.
+            in:
+              - name: ctx
+                type: context.Context
+            name: Shutdown
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              Dropped reports how many spans were refused since construction — the queue
+              was full, or the sink was shut down. It is cumulative.
+            name: Dropped
+            out:
+              - type: uint64
+            recv: pointer
+          - doc: |-
+              Failed reports how many spans were handed to an export that returned an
+              error, since construction. It is cumulative.
+            name: Failed
+            out:
+              - type: uint64
+            recv: pointer
+          - doc: Len reports how many spans are queued and not yet handed to the exporter.
+            name: Len
+            out:
+              - type: int
+            recv: pointer
+        name: BatchSink
+        struct:
+          unexported: true
+      - doc: |-
+          BatchSinkConfig configures a BatchSink. Exporter is required; every other
+          field has a resolved meaning when left unset — the specification's default
+          for the four sizes and durations, and never "unbounded" (ADR 0031).
+        name: BatchSinkConfig
+        struct:
+          fields:
+            - doc: |-
+                Exporter receives every batch. Required: NewBatchSink refuses a nil one
+                with BatchExporterMissing. One that implements ContextSpanExporter is
+                bounded by ExportTimeout.
+              name: Exporter
+              type: coretrace.SpanExporter
+            - doc: Resource identifies the producer, stamped on every batch.
+              name: Resource
+              type: coreotel.ResourceValue
+            - doc: Scope identifies the instrumentation, stamped on every batch.
+              name: Scope
+              type: coreotel.ScopeValue
+            - doc: |-
+                MaxQueueSize bounds how many finished spans wait for export.
+                Non-positive CLAMPS to DefaultBatchMaxQueueSize (2048).
+              name: MaxQueueSize
+              type: int
+            - doc: |-
+                ScheduledDelay is the longest a queued span waits before an export
+                starts. Non-positive CLAMPS to DefaultBatchScheduledDelay (5 s).
+              name: ScheduledDelay
+              type: time.Duration
+            - doc: |-
+                ExportTimeout bounds one export, on Clock. Non-positive CLAMPS to
+                DefaultBatchExportTimeout (30 s).
+              name: ExportTimeout
+              type: time.Duration
+            - doc: |-
+                MaxExportBatchSize bounds how many spans one export carries, and is the
+                fill level that starts an export before ScheduledDelay. Non-positive
+                CLAMPS to DefaultBatchMaxExportBatchSize (512); above MaxQueueSize it
+                clamps to MaxQueueSize, as the specification requires.
+              name: MaxExportBatchSize
+              type: int
+            - doc: |-
+                Clock drives ScheduledDelay and ExportTimeout. Unset CLAMPS to
+                clock.System; a test injects a ManualClock and waits on nothing.
+              name: Clock
+              type: clock.Timed
+            - doc: |-
+                OnError receives every export failure, from the exporting goroutine. Nil
+                discards it; Failed counts the spans either way. It must not block: the
+                next export waits for it.
+              name: OnError
+              type: func(err error)
       - doc: |-
           Recorder accumulates finished spans in memory and hands them out in batches.
 
@@ -2561,9 +2849,10 @@ packages:
 
       # What it deliberately does not do
 
-      It does not batch. A [SpanSink] receives one span at a time and a batching
-      processor is a sink that buffers and forwards — which is where its cost is
-      visible, rather than hidden inside a tracer.
+      It does not batch inside the tracer. A [SpanSink] receives one span at a time,
+      and batching is a sink that buffers and forwards — [NewBatchSink], the
+      specification's batching processor, whose cost is visible there rather than
+      hidden inside a tracer.
 
       It does not schedule an export.
       [github.com/kitsunium/sdk/pkg/v1/app/scheduler] already owns "when", and Collect
@@ -2836,6 +3125,15 @@ packages:
             value: 1 << 20
       - const:
           - doc: |-
+              DefaultExportTimeout bounds an ExportContext whose context carries no
+              deadline: 30s, the OpenTelemetry trace SDK specification's exportTimeout.
+            name: DefaultExportTimeout
+            reexport: coretrace.DefaultExportTimeout
+            type: time.Duration
+            typed: true
+            value: "30000000000"
+      - const:
+          - doc: |-
               DefaultMaxSpans is a Recorder's default bound. There is no "unbounded"
               setting, because a buffer nobody drains is how a tracing integration takes a
               process down.
@@ -2844,6 +3142,35 @@ packages:
             type: int
             typed: true
             value: "2048"
+      - const:
+          - doc: |-
+              DefaultBatchMaxQueueSize, DefaultBatchScheduledDelay,
+              DefaultBatchExportTimeout and DefaultBatchMaxExportBatchSize are a
+              BatchSink's defaults — the OpenTelemetry trace SDK specification's own:
+              2048 spans, 5s, 30s and 512 spans.
+            name: DefaultBatchMaxQueueSize
+            reexport: svctrace.DefaultBatchMaxQueueSize
+            type: int
+            typed: true
+            value: "2048"
+          - doc: DefaultBatchScheduledDelay is the longest a queued span waits before an export starts.
+            name: DefaultBatchScheduledDelay
+            reexport: svctrace.DefaultBatchScheduledDelay
+            type: time.Duration
+            typed: true
+            value: "5000000000"
+          - doc: DefaultBatchExportTimeout bounds one export of a BatchSink.
+            name: DefaultBatchExportTimeout
+            reexport: svctrace.DefaultBatchExportTimeout
+            type: time.Duration
+            typed: true
+            value: "30000000000"
+          - doc: DefaultBatchMaxExportBatchSize bounds how many spans one export carries.
+            name: DefaultBatchMaxExportBatchSize
+            reexport: svctrace.DefaultBatchMaxExportBatchSize
+            type: int
+            typed: true
+            value: "512"
       - doc: Sentinels returned by this package. Match with errors.Is or errs.HasCode.
         var:
           - doc: InvalidTraceParent reports a traceparent header that cannot be read.
@@ -2914,6 +3241,14 @@ packages:
           - doc: OTLPPartialSuccess reports an accepted request with rejected spans.
             name: OTLPPartialSuccess
             reexport: coretrace.OTLPPartialSuccess
+            type: "*errs.Error"
+          - doc: BatchExporterMissing reports a BatchSink configured with no usable exporter.
+            name: BatchExporterMissing
+            reexport: coretrace.BatchExporterMissing
+            type: "*errs.Error"
+          - doc: BatchFlushIncomplete reports a ForceFlush or Shutdown cut short by its context.
+            name: BatchFlushIncomplete
+            reexport: coretrace.BatchFlushIncomplete
             type: "*errs.Error"
       - func:
           doc: String returns a string-valued attribute.
@@ -2994,6 +3329,13 @@ packages:
           - doc: SpanExporter ships a batch of finished spans to a backend.
             name: SpanExporter
             target: coretrace.SpanExporter
+      - alias:
+          - doc: |-
+              ContextSpanExporter is a SpanExporter whose export a context bounds and
+              cancels — the sibling that carries the specification's "MUST NOT block
+              indefinitely" without widening SpanExporter (ADR 0039).
+            name: ContextSpanExporter
+            target: coretrace.ContextSpanExporter
       - alias:
           - doc: ExporterName is the typed key a SpanExporter registers under.
             name: ExporterName
@@ -3114,6 +3456,14 @@ packages:
           - doc: RecorderConfig configures a Recorder.
             name: RecorderConfig
             target: svctrace.RecorderConfig
+          - doc: |-
+              BatchSink is the specification's batching span processor, as a SpanSink: a
+              bounded queue exported in batches by one goroutine, its losses counted.
+            name: BatchSink
+            target: svctrace.BatchSink
+          - doc: BatchSinkConfig configures a BatchSink; zero fields take the specification's defaults.
+            name: BatchSinkConfig
+            target: svctrace.BatchSinkConfig
           - doc: OTLPHTTPConfig configures the OTLP/HTTP exporter.
             name: OTLPHTTPConfig
             target: svctrace.OTLPHTTPConfig
@@ -3147,6 +3497,21 @@ packages:
           name: NewRecorder
           out:
             - type: "*Recorder"
+      - func:
+          doc: |-
+            NewBatchSink builds the batching span destination and starts its exporting
+            goroutine; Shutdown ends it. A missing exporter is refused with
+            BatchExporterMissing.
+          forward: svctrace.NewBatchSink
+          in:
+            - name: cfg
+              type: BatchSinkConfig
+          name: NewBatchSink
+          out:
+            - name: sink
+              type: "*BatchSink"
+            - name: err
+              type: error
       - func:
           doc: AlwaysSample keeps every root trace.
           forward: svctrace.AlwaysSample
@@ -3416,10 +3781,10 @@ packages:
             - type: SpanExporter
       - func:
           doc: |-
-            NewOTLPHTTPExporter builds a SpanExporter that POSTs each batch to an OTLP
-            collector. It is deliberately NOT in the registry: arming a network client from
-            an import is worse than arming a writer, and no endpoint could be a correct
-            default. It does not retry either — use OTLPRetryable with
+            NewOTLPHTTPExporter builds a ContextSpanExporter that POSTs each batch to an
+            OTLP collector, ExportContext bounded by its context. It is deliberately NOT in
+            the registry: arming a network client from an import is worse than arming a
+            writer, and no endpoint could be a correct default. It does not retry either — use OTLPRetryable with
             [github.com/kitsunium/sdk/pkg/v1/app/resilience].
           forward: svctrace.NewOTLPHTTPExporter
           in:
@@ -3430,7 +3795,7 @@ packages:
           name: NewOTLPHTTPExporter
           out:
             - name: exporter
-              type: SpanExporter
+              type: ContextSpanExporter
             - name: err
               type: error
       - func:
@@ -3484,6 +3849,21 @@ packages:
             - name: spans
               type: Spans
           name: Export
+          out:
+            - type: error
+      - func:
+          doc: |-
+            ExportContext ships spans through the SpanExporter registered as name, bounded
+            by ctx — DefaultExportTimeout when ctx carries no deadline.
+          forward: coretrace.ExportContext
+          in:
+            - name: ctx
+              type: context.Context
+            - name: name
+              type: ExporterName
+            - name: spans
+              type: Spans
+          name: ExportContext
           out:
             - type: error
     imports:

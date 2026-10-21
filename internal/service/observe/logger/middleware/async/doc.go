@@ -8,6 +8,9 @@
 //   - DropNewest: the new Write returns BufferFull; the OnDrop callback fires.
 //   - DropOldest: the oldest queued entry is silently discarded; the new
 //     entry takes its slot. OnDrop fires for the dropped entry.
+//   - Block: the Write waits for a free slot, at most MaxBlock on the
+//     configured Clock; past it the entry is dropped, OnDrop fires and Write
+//     returns BlockTimeout.
 //
 // Use case: wrap CloudWatch / S3 / HTTP sinks so a slow remote drain never
 // stalls the application's hot path.

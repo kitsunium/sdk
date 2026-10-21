@@ -73,9 +73,10 @@
 //
 // # What it deliberately does not do
 //
-// It does not batch. A [SpanSink] receives one span at a time and a batching
-// processor is a sink that buffers and forwards — which is where its cost is
-// visible, rather than hidden inside a tracer.
+// It does not batch inside the tracer. A [SpanSink] receives one span at a time,
+// and batching is a sink that buffers and forwards — [NewBatchSink], the
+// specification's batching processor, whose cost is visible there rather than
+// hidden inside a tracer.
 //
 // It does not schedule an export.
 // [github.com/kitsunium/sdk/pkg/v1/app/scheduler] already owns "when", and Collect

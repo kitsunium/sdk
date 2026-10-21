@@ -1,6 +1,450 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 sequences:
+  - of: NewBatchSink
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewBatchSink
+        kind: self
+      - id: cfg.resolved
+        kind: internal
+      - id: sink.run
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, coretrace.BatchExporterMissing
+          when: cfg.Exporter == nil || plugin.Unusable(cfg.Exporter) != ""
+      - bind: resolved
+        eval: cfg.resolved()
+        to: cfg.resolved
+      - bind: withContext, _
+        eval: resolved.Exporter.(coretrace.ContextSpanExporter)
+      - set: sink
+        value: |-
+          &BatchSink{
+          		exporter:    resolved.Exporter,
+          		withContext: withContext,
+          		resource:    coretrace.NormalizeResource(resolved.Resource),
+          		scope:       coretrace.NormalizeScope(resolved.Scope),
+          		maxBatch:    resolved.MaxExportBatchSize,
+          		delay:       resolved.ScheduledDelay,
+          		timeout:     resolved.ExportTimeout,
+          		clk:         resolved.Clock,
+          		onError:     resolved.OnError,
+          		ring:        make([]coretrace.SpanValue, resolved.MaxQueueSize),
+          		ready:       make(chan struct{}, 1),
+          		flushes:     make(chan flushRequest),
+          		stop:        make(chan struct{}),
+          		done:        make(chan struct{}),
+          	}
+      - go: sink.run()
+        to: sink.run
+      - return: sink, nil
+  - of: (*BatchSink).Sink
+    steps:
+      - return: b.record
+  - of: (*BatchSink).Resource
+    steps:
+      - return: b.resource
+  - of: (*BatchSink).record
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*BatchSink).record
+        kind: self
+      - id: b.mu.Lock
+        kind: value
+      - id: b.mu.Unlock
+        kind: value
+    steps:
+      - eval: b.mu.Lock()
+        to: b.mu.Lock
+      - opt:
+          do:
+            - op: ++
+              set: b.dropped
+            - eval: b.mu.Unlock()
+              to: b.mu.Unlock
+            - return: ""
+          when: b.closed || b.count == len(b.ring)
+      - set: b.ring[(b.head+b.count)%len(b.ring)]
+        value: span
+      - op: ++
+        set: b.count
+      - bind: full
+        eval: b.count >= b.maxBatch
+      - eval: b.mu.Unlock()
+        to: b.mu.Unlock
+      - opt:
+          do:
+            - select:
+                cases:
+                  - comm: b.ready <- struct{}{}
+                  - default: true
+          when: full
+  - of: (*BatchSink).ForceFlush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*BatchSink).ForceFlush
+        kind: self
+      - id: incomplete
+        kind: internal
+    steps:
+      - bind: request
+        eval: "flushRequest{reply: make(chan error, 1)}"
+      - select:
+          cases:
+            - comm: b.flushes <- request
+            - comm: <-b.done
+              do:
+                - return: nil
+            - comm: <-ctx.Done()
+              do:
+                - return: incomplete(ctx.Err())
+                  to: incomplete
+      - select:
+          cases:
+            - comm: err := <-request.reply
+              do:
+                - return: err
+            - comm: <-ctx.Done()
+              do:
+                - return: incomplete(ctx.Err())
+                  to: incomplete
+  - of: (*BatchSink).Shutdown
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*BatchSink).Shutdown
+        kind: self
+      - id: b.stopOnce.Do
+        kind: value
+      - id: incomplete
+        kind: internal
+    steps:
+      - bind: first
+        eval: "false"
+      - eval: |-
+          b.stopOnce.Do(func() {
+          		b.mu.Lock()
+          		b.closed = true
+          		b.mu.Unlock()
+          		close(b.stop)
+          		first = true
+          	})
+        to: b.stopOnce.Do
+      - select:
+          cases:
+            - comm: <-b.done
+              do:
+                - opt:
+                    do:
+                      - return: b.lastErr
+                    when: first
+                - return: nil
+            - comm: <-ctx.Done()
+              do:
+                - return: incomplete(ctx.Err())
+                  to: incomplete
+  - of: (*BatchSink).Dropped
+    steps:
+      - lock:
+          mutex: b.mu
+      - return: b.dropped
+  - of: (*BatchSink).Failed
+    steps:
+      - lock:
+          mutex: b.mu
+      - return: b.failed
+  - of: (*BatchSink).Len
+    steps:
+      - lock:
+          mutex: b.mu
+      - return: b.count
+  - of: (*BatchSink).run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*BatchSink).run
+        kind: self
+      - id: b.doneOnce.Do
+        kind: value
+      - id: b.clk.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+      - id: timer.Reset
+        kind: value
+    steps:
+      - defer: b.doneOnce.Do(func() { close(b.done) })
+        to: b.doneOnce.Do
+      - bind: timer
+        eval: b.clk.NewTimer(b.delay)
+        to: b.clk.NewTimer
+      - defer: timer.Stop()
+        to: timer.Stop
+      - loop:
+          cond: b.serve(timer)
+          do:
+            - eval: timer.Reset(b.delay)
+              to: timer.Reset
+  - of: (*BatchSink).serve
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*BatchSink).serve
+        kind: self
+      - id: b.exportFull
+        kind: internal
+      - id: b.exportAll
+        kind: internal
+    steps:
+      - select:
+          cases:
+            - comm: _, open := <-b.ready
+              do:
+                - opt:
+                    do:
+                      - eval: b.exportFull()
+                        to: b.exportFull
+                    when: open
+                - return: open
+            - comm: _, open := <-timer.C()
+              do:
+                - opt:
+                    do:
+                      - eval: b.exportAll()
+                        to: b.exportAll
+                    when: open
+                - return: open
+            - comm: request, open := <-b.flushes
+              do:
+                - opt:
+                    do:
+                      - send:
+                          chan: request.reply
+                          value: b.exportAll()
+                    when: open
+                - return: open
+            - comm: <-b.stop
+              do:
+                - set: b.lastErr
+                  to: b.exportAll
+                  value: b.exportAll()
+                - return: "false"
+  - of: (*BatchSink).exportFull
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*BatchSink).exportFull
+        kind: self
+      - id: b.exportBatch
+        kind: internal
+    steps:
+      - loop:
+          cond: b.Len() >= b.maxBatch
+          do:
+            - eval: b.exportBatch()
+              to: b.exportBatch
+  - of: (*BatchSink).exportAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*BatchSink).exportAll
+        kind: self
+      - id: b.exportBatch
+        kind: internal
+    steps:
+      - var:
+          name: first
+          type: error
+      - loop:
+          cond: remaining > 0
+          do:
+            - opt:
+                do:
+                  - set: first
+                    value: err
+                init:
+                  bind: err
+                  eval: b.exportBatch()
+                  to: b.exportBatch
+                when: err != nil && first == nil
+          init: remaining := b.Len()
+          post: remaining -= b.maxBatch
+      - return: first
+  - of: (*BatchSink).exportBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*BatchSink).exportBatch
+        kind: self
+      - id: b.mu.Lock
+        kind: value
+      - id: b.mu.Unlock
+        kind: value
+      - id: b.export
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - eval: b.mu.Lock()
+        to: b.mu.Lock
+      - bind: "n"
+        eval: min(b.count, b.maxBatch)
+      - bind: batch
+        eval: make([]coretrace.SpanValue, n)
+      - loop:
+          do:
+            - bind: slot
+              eval: (b.head + i) % len(b.ring)
+            - set: batch[i]
+              value: b.ring[slot]
+            - set: b.ring[slot]
+              value: coretrace.SpanValue{}
+          key: i
+          range: batch
+      - set: b.head
+        value: (b.head + n) % len(b.ring)
+      - op: "-="
+        set: b.count
+        value: "n"
+      - eval: b.mu.Unlock()
+        to: b.mu.Unlock
+      - opt:
+          do:
+            - return: nil
+          when: n == 0
+      - bind: err
+        eval: "b.export(coretrace.SpansValue{Resource: b.resource, Scope: b.scope, Spans: batch})"
+        to: b.export
+      - opt:
+          do:
+            - return: nil
+          when: err == nil
+      - eval: b.mu.Lock()
+        to: b.mu.Lock
+      - op: +=
+        set: b.failed
+        value: uint64(n)
+      - eval: b.mu.Unlock()
+        to: b.mu.Unlock
+      - bind: wrapped
+        eval: |-
+          errs.Wrap(err, errs.WrapParams{
+          		Code:    coretrace.CodeExportFailed,
+          		Reason:  "EXPORT_FAILED",
+          		Public:  "The trace exporter failed to ship the spans",
+          		Private: "service/observe/trace.BatchSink: the exporter returned an error",
+          	}, errs.Int("spans", n))
+        to: errs
+      - opt:
+          do:
+            - eval: b.onError(wrapped)
+          when: b.onError != nil
+      - return: wrapped
+  - of: (*BatchSink).export
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*BatchSink).export
+        kind: self
+      - id: b.exporter.Export
+        kind: value
+      - id: context
+        kind: stdlib
+      - id: b.clk.NewTimer
+        kind: value
+      - id: b.withContext.ExportContext
+        kind: value
+      - id: timer.Stop
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: b.exporter.Export(spans)
+              to: b.exporter.Export
+          when: b.withContext == nil
+      - bind: ctx, cancel
+        eval: context.WithCancelCause(context.Background())
+        to: context
+      - defer: cancel(nil)
+      - bind: timer
+        eval: b.clk.NewTimer(b.timeout)
+        to: b.clk.NewTimer
+      - bind: finished
+        eval: make(chan struct{})
+      - bind: watched
+        eval: make(chan struct{})
+      - go: |-
+          func() {
+          		defer close(watched)
+          		select {
+          		case <-timer.C():
+          			//: the bound is reached.
+          			cancel(context.DeadlineExceeded)
+          		case <-finished:
+          			//: the export returned first.
+          		}
+          	}()
+      - bind: err
+        eval: b.withContext.ExportContext(ctx, spans)
+        to: b.withContext.ExportContext
+      - eval: close(finished)
+      - eval: <-watched
+      - eval: timer.Stop()
+        to: timer.Stop
+      - return: err
+  - of: incomplete
+    participants:
+      - id: caller
+        kind: actor
+      - id: incomplete
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code:    coretrace.CodeBatchFlushIncomplete,
+          		Reason:  "BATCH_FLUSH_INCOMPLETE",
+          		Public:  "The batch span sink did not finish exporting before the deadline",
+          		Private: "service/observe/trace.BatchSink: the caller's context ended before the queue was exported",
+          	})
+        to: errs
+  - of: BatchSinkConfig.resolved
+    steps:
+      - opt:
+          do:
+            - set: c.MaxQueueSize
+              value: DefaultBatchMaxQueueSize
+          when: c.MaxQueueSize <= 0
+      - opt:
+          do:
+            - set: c.ScheduledDelay
+              value: DefaultBatchScheduledDelay
+          when: c.ScheduledDelay <= 0
+      - opt:
+          do:
+            - set: c.ExportTimeout
+              value: DefaultBatchExportTimeout
+          when: c.ExportTimeout <= 0
+      - opt:
+          do:
+            - set: c.MaxExportBatchSize
+              value: DefaultBatchMaxExportBatchSize
+          when: c.MaxExportBatchSize <= 0
+      - set: c.MaxExportBatchSize
+        value: min(c.MaxExportBatchSize, c.MaxQueueSize)
+      - opt:
+          do:
+            - set: c.Clock
+              value: clock.System
+          when: c.Clock == nil
+      - return: c
   - of: TracerConfig.resolved
     participants:
       - id: caller
@@ -74,9 +518,20 @@ sequences:
         kind: actor
       - id: (*otlpHTTPExporter).Export
         kind: self
+      - id: e.ExportContext
+        kind: internal
+    steps:
+      - return: e.ExportContext(context.Background(), spans)
+        to: e.ExportContext
+  - of: (*otlpHTTPExporter).ExportContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpHTTPExporter).ExportContext
+        kind: self
       - id: EncodeOTLPJSON
         kind: internal
-      - id: e.sender.Post
+      - id: e.sender.PostContext
         kind: value
     steps:
       - opt:
@@ -90,8 +545,8 @@ sequences:
           do:
             - return: err
           when: err != nil
-      - return: e.sender.Post(body)
-        to: e.sender.Post
+      - return: e.sender.PostContext(ctx, body)
+        to: e.sender.PostContext
   - of: EncodeOTLPJSON
     participants:
       - id: caller

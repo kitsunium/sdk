@@ -32,6 +32,18 @@ constants:
         value: "\"exception.stacktrace\""
     name: ExceptionEventName
   - doc: |-
+      DefaultExportTimeout bounds one export when the caller's context carries no
+      deadline of its own: 30 s, the OpenTelemetry trace SDK specification's default
+      for a batch processor's exportTimeout (OTEL_BSP_EXPORT_TIMEOUT). The
+      specification says an export MUST NOT block indefinitely, and a context with
+      no deadline is how an indefinite block is written; a caller who wants another
+      bound puts it on the context.
+    items:
+      - name: DefaultExportTimeout
+        type: time.Duration
+        value: 30 * time.Second
+    name: DefaultExportTimeout
+  - doc: |-
       TraceIDLen and SpanIDLen are the byte lengths W3C Trace Context and
       opentelemetry/proto/trace/v1 both fix: 16 bytes of trace-id, 8 of span-id.
       They are not tunable — a 16-byte trace-id is the format, not a default.
@@ -234,6 +246,7 @@ files:
       - EventValue.Normalized
     name: event_value.go
   - decls:
+      - DefaultExportTimeout
       - ExporterName
       - ExporterName.String
       - registry
@@ -241,6 +254,8 @@ files:
       - LookupExporter
       - AvailableExporters
       - Export
+      - ExportContext
+      - boundExport
     name: exporter.go
   - decls:
       - TraceIDLen
@@ -368,6 +383,16 @@ functions:
   - name: Export
     params: name ExporterName, spans SpansValue
     results: error
+  - name: ExportContext
+    params: ctx context.Context, name ExporterName, spans SpansValue
+    results: error
+  - doc: |-
+      boundExport returns ctx unchanged when it already carries a deadline, and
+      ctx bounded by DefaultExportTimeout when it does not, with the function that
+      releases it.
+    name: boundExport
+    params: ctx context.Context
+    results: context.Context, context.CancelFunc
   - name: ParseTraceID
     params: text string
     results: id TraceID, err error
