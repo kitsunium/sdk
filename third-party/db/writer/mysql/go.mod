@@ -4,9 +4,13 @@ go 1.27.3
 
 require (
 	github.com/go-sql-driver/mysql v1.10.0
-	github.com/kitsunium/sdk/internal v0.0.0-00010101000000-000000000000
+	github.com/kitsunium/sdk/internal v0.14.3
 )
 
-require filippo.io/edwards25519 v1.2.0 // indirect
-
-replace github.com/kitsunium/sdk/internal => ../../../../internal
+require (
+	filippo.io/edwards25519 v1.2.0 // indirect
+	github.com/kitsunium/sdk v0.20.0
+	github.com/kitsunium/sdk/internal/core v0.18.0
+	github.com/kitsunium/sdk/internal/kernel v0.18.0
+	github.com/kitsunium/sdk/internal/service v0.18.0
+)
