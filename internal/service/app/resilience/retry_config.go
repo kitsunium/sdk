@@ -3,6 +3,7 @@ package resilience
 import (
 	"time"
 
+	coreres "github.com/kitsunium/sdk/internal/core/app/resilience"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
 
@@ -10,7 +11,8 @@ import (
 // Multiplier of 1 or below (or NaN) defaults to 2; a zero MaxDelay means no
 // cap; a nil Retryable replays every error; a zero Jitter backs off
 // deterministically; a nil Clock waits on the wall clock; a nil Delay
-// always waits the backoff curve.
+// always waits the backoff curve; a nil Budget never refuses a retry; a nil
+// OnRetry hears nothing.
 //
 // BaseDelay, MaxDelay, Multiplier and Jitter are the four fields of
 // BackoffValue, under the same names and with the same meaning: NewRetry builds its curve
@@ -77,4 +79,26 @@ type RetryConfig struct {
 	//
 	//	Delay: func(_ int, err error) (time.Duration, bool) { return resilience.RetryAfter(err) }
 	Delay func(attempt int, err error) (time.Duration, bool)
+	// Budget, when set, bounds the retries of every policy sharing it: each
+	// success and each retryable failure is recorded in it, and before
+	// every retry it is asked whether one may run. A refusal ends the loop
+	// with RetryBudgetExceeded wrapping the last error, without waiting. A
+	// deterministic error and a cancelled context record nothing.
+	//
+	// Nil — the zero value — is the policy without a budget, as it was
+	// before the field existed. Share one budget per dependency, between
+	// its retry and its hedge: that is what stops a failing dependency from
+	// receiving every call times MaxAttempts. A Retry(Hedge(op)) whose two
+	// policies share a budget records a failed call at both levels, which
+	// drains and refills it twice as fast and leaves its threshold where it
+	// was.
+	Budget coreres.RetryBudget
+	// OnRetry, when set, is called before each retry's wait, on the
+	// calling goroutine, with the retry's number — 1 before the second
+	// attempt —, the error that caused it and the wait about to start. It
+	// is how a caller counts retries in their own metrics without this
+	// package depending on one. It is not called for the first attempt,
+	// nor for a retry the budget refused. It must not block: the retry
+	// waits for it.
+	OnRetry func(attempt int, err error, delay time.Duration)
 }

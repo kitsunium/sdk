@@ -72,6 +72,30 @@ leave a call unguarded.
 `Fallback` with a failing primary is 12.59 ns, still allocation-free: the
 switch itself is ~5 ns, and everything above it is plan B's own cost.
 
+## The retry budget costs one compare-and-swap, and allocates nothing (#475)
+
+Measured on 2026-10-21 (go1.27.3, same machine class, `-benchtime=1s`, single
+run), beside a fresh baseline:
+
+| policy | ns/op | B/op | allocs | over baseline |
+|---|---:|---:|---:|---:|
+| baseline (no policy) | 2.851 | 0 | 0 | — |
+| `Retry`, first attempt succeeds | 6.307 | 0 | **0** | +3.5 ns |
+| `Retry` with a `RetryBudget`, first attempt succeeds | 8.861 | 0 | **0** | +6.0 ns |
+| `RetryBudget` alone, 8 goroutines: failure + question + success | 42.91 | 0 | **0** | — |
+
+A budget adds 2.5 ns to the happy path — the success it records is one
+compare-and-swap on a full bucket that writes nothing — and the bucket stays
+lock-free under contention: three operations on one shared counter from every
+core cost 43 ns together, with no allocation.
+
+```
+BenchmarkBaseline_NoPolicy-8                       	417023234	         2.851 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRetry_FirstAttemptSucceeds-8              	187023308	         6.307 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRetry_WithBudget_FirstAttemptSucceeds-8   	135465492	         8.861 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRetryBudget_Contended-8                   	27014719	        42.91 ns/op	       0 B/op	       0 allocs/op
+```
+
 ## What is NOT measured here
 
 `Hedge` has no benchmark. It duplicates the operation after a delay, so any
@@ -82,6 +106,10 @@ an assertion the caller writes in code.
 
 Retry with actual retries is likewise absent: it waits `BaseDelay` between
 attempts, so the number would be the backoff schedule, which the caller chose.
+
+A `RateLimited` rejection now allocates — the delay it carries for
+`RetryAfter` rides a wrap of the sentinel (#476) — and is not benchmarked: the
+admitted path, measured above, is unchanged.
 
 ## Reproducibility envelope
 

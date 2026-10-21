@@ -16,7 +16,7 @@ err := r.Run(ctx, func(ctx context.Context) error {
 })
 ```
 
-Rejections surface typed sentinels (RetryExhausted / CircuitOpen / RateLimited / BulkheadFull / TimeoutExceeded / FallbackFailed) matchable via errs.HasReason / errs.HasCode.
+Rejections surface typed sentinels (RetryExhausted / RetryBudgetExceeded / CircuitOpen / RateLimited / BulkheadFull / TimeoutExceeded / FallbackFailed) matchable via errs.HasReason / errs.HasCode.
 
 ### Classifying deterministic failures
 
@@ -107,6 +107,20 @@ r := resilience.NewRetry(resilience.RetryConfig{
 
 A failure that names no delay waits the backoff curve, and the named one is held at MaxDelay.
 
+### A retry budget per dependency
+
+A retry multiplies traffic exactly when the dependency can least take it: during an outage every call becomes MaxAttempts calls, and stacked layers multiply again. [NewRetryBudget](#NewRetryBudget) is the token bucket of gRPC's retry throttling — a failure costs a token, a success returns TokenRatio of one, and extra attempts stop once half the tokens are gone. Share one per dependency between its retry and its hedge; the first attempt of a call is never refused:
+
+```
+budget := resilience.NewRetryBudget(resilience.RetryBudgetConfig{MaxTokens: 10, TokenRatio: 0.1})
+r := resilience.NewRetry(resilience.RetryConfig{
+    MaxAttempts: 3, BaseDelay: 50 * time.Millisecond, Budget: budget,
+    OnRetry: func(attempt int, err error, wait time.Duration) { retries.Add(1) },
+})
+```
+
+A retry the budget refuses ends the call with [RetryBudgetExceeded](#RetryBudgetExceeded); a duplicate it refuses is simply not issued. [RetryConfig](#RetryConfig).OnRetry hears every retry before its wait, synchronously, so retries are counted without this package depending on a metrics library.
+
 ### A caller who leaves is not a failing dependency
 
 A call that ends in context.Canceled once the caller's own context is closed is neutral to the circuit breaker — a wave of disconnecting clients cannot open it on a healthy dependency — and the timeout reports the caller's own context error rather than TimeoutExceeded when the caller's context finished first. A context.DeadlineExceeded from the dependency stays a failure.
@@ -121,6 +135,7 @@ A call that ends in context.Canceled once the caller's own context is closed is 
 - [func NewKeyedRateLimiter\(cfg KeyedRateLimiterConfig\) Runner](<#NewKeyedRateLimiter>)
 - [func NewRateLimiter\(cfg RateLimiterConfig\) Runner](<#NewRateLimiter>)
 - [func NewRetry\(cfg RetryConfig\) Runner](<#NewRetry>)
+- [func NewRetryBudget\(cfg RetryBudgetConfig\) RetryBudget](<#NewRetryBudget>)
 - [func NewTimeout\(d time.Duration\) Runner](<#NewTimeout>)
 - [func NewTimeoutWith\(cfg TimeoutConfig\) Runner](<#NewTimeoutWith>)
 - [func RetryAfter\(err error\) \(time.Duration, bool\)](<#RetryAfter>)
@@ -132,6 +147,11 @@ A call that ends in context.Canceled once the caller's own context is closed is 
 - [type KeyedRateLimiterConfig](<#KeyedRateLimiterConfig>)
 - [type Operation](<#Operation>)
 - [type RateLimiterConfig](<#RateLimiterConfig>)
+- [type RetryBudget](<#RetryBudget>)
+  - [func \(RetryBudget\) AllowRetry\(\) bool](<#RetryBudget.AllowRetry>)
+  - [func \(RetryBudget\) RecordFailure\(\)](<#RetryBudget.RecordFailure>)
+  - [func \(RetryBudget\) RecordSuccess\(\)](<#RetryBudget.RecordSuccess>)
+- [type RetryBudgetConfig](<#RetryBudgetConfig>)
 - [type RetryConfig](<#RetryConfig>)
 - [type Runner](<#Runner>)
   - [func \(Runner\) Run\(ctx context.Context, op Operation\) error](<#Runner.Run>)
@@ -177,7 +197,7 @@ Code `0.2.8.7` · reason `FALLBACK_FAILED` · public "The operation and its fall
 var PolicyMisconfigured *errs.Error
 ```
 
-PolicyMisconfigured is returned by every call to a policy that was built with a configuration it cannot honour — a non-positive RateLimiterConfig .Rate, a non-positive NewTimeout duration, a nil FallbackConfig.Fallback, an unasserted HedgeConfig.Idempotent, a non-positive HedgeConfig.Delay or MaxInFlight, a KeyedRateLimiterConfig without a Key, a MaxKeys or an IdleTimeout. The operation is not run. Unlike the sentinels above it is permanent, not transient: the fix is at the construction site, never a retry (ADR 0031).
+PolicyMisconfigured is returned by every call to a policy that was built with a configuration it cannot honour — a non-positive RateLimiterConfig .Rate, a non-positive NewTimeout duration, a nil FallbackConfig.Fallback, an unasserted HedgeConfig.Idempotent, a non-positive HedgeConfig.Delay or MaxInFlight, a KeyedRateLimiterConfig without a Key, a MaxKeys or an IdleTimeout, a retry budget built with an unusable MaxTokens or TokenRatio. The operation is not run. Unlike the sentinels above it is permanent, not transient: the fix is at the construction site, never a retry (ADR 0031).
 
 Initialised with `github.com/kitsunium/sdk/internal/core/app/resilience.PolicyMisconfigured`.
 
@@ -193,6 +213,17 @@ RateLimited is returned when no rate-limit token is available. It carries HTTP 4
 Initialised with `github.com/kitsunium/sdk/internal/core/app/resilience.RateLimited`.
 
 Code `0.2.8.3` · reason `RATE_LIMITED` · public "The call was rejected by the rate limiter"
+
+<a name="RetryBudgetExceeded"></a>
+```go
+var RetryBudgetExceeded *errs.Error
+```
+
+RetryBudgetExceeded is returned when the shared retry budget refused the next attempt; the last attempt's error is its cause.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/app/resilience.RetryBudgetExceeded`.
+
+Code `0.2.8.8` · reason `RETRY_BUDGET_EXCEEDED` · public "The operation failed and the retry budget refused another attempt"
 
 <a name="RetryExhausted"></a>
 ```go
@@ -280,6 +311,15 @@ func NewRetry(cfg RetryConfig) Runner
 ```
 
 NewRetry returns a retry-with-backoff Runner. An error rejected by cfg.Retryable ends the loop at once and is returned verbatim.
+
+<a name="NewRetryBudget"></a>
+## func [NewRetryBudget](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/resilience/gen_facade.go>)
+
+```go
+func NewRetryBudget(cfg RetryBudgetConfig) RetryBudget
+```
+
+NewRetryBudget returns the token-bucket RetryBudget of gRPC's retry throttling, to share between the retry and the hedge of one dependency: full at cfg.MaxTokens, a failure costs one token, a success returns cfg.TokenRatio, and extra attempts are allowed while more than half remain. A non-positive cfg.MaxTokens or an unusable cfg.TokenRatio is refused: the policies given it return PolicyMisconfigured.
 
 <a name="NewTimeout"></a>
 ## func [NewTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/resilience/gen_facade.go>)
@@ -524,6 +564,14 @@ type HedgeConfig struct {
 	// the breaker and the rate limiters already take one; the hedge, the other
 	// policy that measures a wait, did not.
 	Clock       clock.Timed
+	// Budget, when set, is asked before each duplicate: a refusal issues
+	// none, and the call proceeds on the attempts already running, as when
+	// MaxInFlight is reached. Each call's outcome is recorded in it — a
+	// success, or a failure on a live context — so a hedge and a retry
+	// sharing one budget stop amplifying a failing dependency together, as
+	// gRPC's retry throttling covers hedging. Nil is the hedge without a
+	// budget.
+	Budget      coreres.RetryBudget
 }
 ```
 
@@ -620,6 +668,86 @@ type RateLimiterConfig struct {
 }
 ```
 
+<a name="RetryBudget"></a>
+## type [RetryBudget](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/resilience/gen_facade.go>)
+
+RetryBudget is the public alias for the retry-budget port: what a retry and a hedge sharing it ask before an extra attempt, and record after one.
+
+```go
+type RetryBudget = coreres.RetryBudget
+```
+
+RetryBudget is an alias of `github.com/kitsunium/sdk/internal/core/app/resilience.RetryBudget`, declared as:
+
+```go
+type RetryBudget interface {
+	// AllowRetry reports whether one more attempt beyond a call's first may
+	// be issued now. It is a query: it spends nothing, and a policy that
+	// asks it and then issues no attempt owes it nothing.
+	AllowRetry() bool
+	// RecordFailure records an attempt that failed in a way worth retrying,
+	// which drains the budget. A deterministic failure, and a caller who left,
+	// are not recorded.
+	RecordFailure()
+	// RecordSuccess records an attempt that succeeded, which replenishes the budget.
+	RecordSuccess()
+}
+```
+
+<a name="RetryBudget.AllowRetry"></a>
+### func \(RetryBudget\) [AllowRetry](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/resilience/gen_ports.go>)
+
+```go
+func (RetryBudget) AllowRetry() bool
+```
+
+AllowRetry reports whether one more attempt beyond a call's first may be issued now. It is a query: it spends nothing, and a policy that asks it and then issues no attempt owes it nothing.
+
+<a name="RetryBudget.RecordFailure"></a>
+### func \(RetryBudget\) [RecordFailure](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/resilience/gen_ports.go>)
+
+```go
+func (RetryBudget) RecordFailure()
+```
+
+RecordFailure records an attempt that failed in a way worth retrying, which drains the budget. A deterministic failure, and a caller who left, are not recorded.
+
+<a name="RetryBudget.RecordSuccess"></a>
+### func \(RetryBudget\) [RecordSuccess](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/resilience/gen_ports.go>)
+
+```go
+func (RetryBudget) RecordSuccess()
+```
+
+RecordSuccess records an attempt that succeeded, which replenishes the budget.
+
+<a name="RetryBudgetConfig"></a>
+## type [RetryBudgetConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/resilience/gen_facade.go>)
+
+RetryBudgetConfig is the public alias for the token-bucket retry budget's configuration.
+
+```go
+type RetryBudgetConfig = svcres.RetryBudgetConfig
+```
+
+RetryBudgetConfig is an alias of `github.com/kitsunium/sdk/internal/service/app/resilience.RetryBudgetConfig`, declared as:
+
+```go
+type RetryBudgetConfig struct {
+	// MaxTokens is the bucket's size and its starting content. Retries are
+	// allowed while more than MaxTokens/2 remain, so it is also how many
+	// more failures than the successes pay for the budget absorbs before
+	// it starts refusing. A non-positive MaxTokens is refused; values above
+	// 2^40 are held there.
+	MaxTokens  int
+	// TokenRatio is what a recorded success puts back, in tokens, a
+	// failure costing one. It is read to a thousandth, as gRPC reads it: a
+	// value that is not finite, or that rounds below 0.001, is refused —
+	// its zero would be a budget that, once drained, never refills.
+	TokenRatio float64
+}
+```
+
 <a name="RetryConfig"></a>
 ## type [RetryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/resilience/gen_facade.go>)
 
@@ -693,6 +821,28 @@ type RetryConfig struct {
 	//
 	//	Delay: func(_ int, err error) (time.Duration, bool) { return resilience.RetryAfter(err) }
 	Delay       func(attempt int, err error) (time.Duration, bool)
+	// Budget, when set, bounds the retries of every policy sharing it: each
+	// success and each retryable failure is recorded in it, and before
+	// every retry it is asked whether one may run. A refusal ends the loop
+	// with RetryBudgetExceeded wrapping the last error, without waiting. A
+	// deterministic error and a cancelled context record nothing.
+	//
+	// Nil — the zero value — is the policy without a budget, as it was
+	// before the field existed. Share one budget per dependency, between
+	// its retry and its hedge: that is what stops a failing dependency from
+	// receiving every call times MaxAttempts. A Retry(Hedge(op)) whose two
+	// policies share a budget records a failed call at both levels, which
+	// drains and refills it twice as fast and leaves its threshold where it
+	// was.
+	Budget      coreres.RetryBudget
+	// OnRetry, when set, is called before each retry's wait, on the
+	// calling goroutine, with the retry's number — 1 before the second
+	// attempt —, the error that caused it and the wait about to start. It
+	// is how a caller counts retries in their own metrics without this
+	// package depending on one. It is not called for the first attempt,
+	// nor for a retry the budget refused. It must not block: the retry
+	// waits for it.
+	OnRetry     func(attempt int, err error, delay time.Duration)
 }
 ```
 

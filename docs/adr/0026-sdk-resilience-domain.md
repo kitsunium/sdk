@@ -200,6 +200,51 @@ things the implementation decides:
 AWS's `x-amz-retry-after` and gRPC's `grpc-retry-pushback-ms` are the same
 mechanism in other wires.
 
+## Amendment — 2026-10-21: a retry budget shared by retry and hedging ([issue 475](https://github.com/kitsunium/sdk/issues/475))
+
+`MaxAttempts` bounds one call and nothing bounded the sum: during an outage
+every call became `MaxAttempts` calls, and each layer that retries multiplies
+again. The amendment adds no policy — Decision 2 still names seven — but a
+port the retry and the hedge consult, and one sentinel:
+
+- **`RetryBudget`, a sibling port of `Runner`** in `core/app/resilience`
+  (ADR 0039): `AllowRetry() bool`, `RecordSuccess()`, `RecordFailure()`. A
+  budget runs no Operation, so widening `Runner` would have been the wrong
+  shape; a caller may supply their own.
+- **`NewRetryBudget(RetryBudgetConfig{MaxTokens, TokenRatio})`** is gRFC A6's
+  `retryThrottling` bucket: full at `MaxTokens`, a recorded failure costs one
+  token, a success returns `TokenRatio`, extra attempts are allowed while
+  strictly more than half remain, and the first attempt of a call is never
+  refused. Counts are thousandths of a token, as gRPC keeps them, in one
+  `atomic.Int64` — the happy path of a budgeted retry stays allocation-free
+  (measured in `pkg/v1/app/resilience/BENCH.md`). `MaxTokens ≤ 0` and a
+  `TokenRatio` that is not finite or rounds below 0.001 are refused (ADR 0031):
+  the zero ratio is a budget that never refills once drained.
+- **`RetryConfig.Budget` and `HedgeConfig.Budget`**, nil being the policies as
+  they were. The retry records every success and every retryable failure and
+  asks before each retry; a refusal ends the call with `RetryBudgetExceeded`
+  (`0.2.8.8`, `EX_TEMPFAIL`, the last error as its cause). The hedge asks
+  before each duplicate, a refusal degrading to no-hedging as reaching
+  `MaxInFlight` does, and records each decided call once. One budget per
+  dependency, shared by both — gRPC's throttling covers hedging too.
+- **`RetryConfig.OnRetry(attempt, err, delay)`**, a synchronous hook before
+  each wait, so retries are counted in the caller's own metrics without this
+  package importing one.
+
+The constants are the caller's: the AWS SDKs' retry quota (a 500-token
+bucket, a cost per retry that depends on the failure, a token back per
+success, the first request never charged)
+and the SRE book's per-client retry budget (retries at most 10% of requests)
+are the same mechanism with other numbers; `TokenRatio: 0.1` is that order.
+failsafe-go's `Budget` and Polly's absence of one were weighed; the gRPC
+bucket was taken because it is specified to the arithmetic and covers
+hedging.
+
+Sources: [gRFC A6 — client retries, §Throttling](https://github.com/grpc/proposal/blob/master/A6-client-retries.md#throttling-retry-attempts-and-hedged-rpcs),
+[AWS SDKs — retry behavior](https://docs.aws.amazon.com/sdkref/latest/guide/feature-retry-behavior.html),
+[Google SRE book — Handling Overload, §Deciding to Retry](https://sre.google/sre-book/handling-overload/),
+[Amazon Builders' Library — Timeouts, retries, and backoff with jitter](https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/).
+
 ## Extension — `fallback` and `hedging` (Decision 2 now names seven policies)
 
 Two compositions landed after the original five, in the same shape (concrete

@@ -3,6 +3,7 @@ package resilience_test
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -53,6 +54,45 @@ func BenchmarkRetry_FirstAttemptSucceeds(b *testing.B) {
 	for b.Loop() {
 		errSink = runner.Run(ctx, okOp)
 	}
+}
+
+// BenchmarkRetry_WithBudget_FirstAttemptSucceeds is the happy path with a
+// shared retry budget: one more interface call and one compare-and-swap on the
+// way out. It must stay allocation-free — the budget sits on every guarded
+// call of a dependency.
+func BenchmarkRetry_WithBudget_FirstAttemptSucceeds(b *testing.B) {
+	runner := resilience.NewRetry(resilience.RetryConfig{
+		MaxAttempts: 3, BaseDelay: time.Millisecond, MaxDelay: time.Second, Multiplier: 2,
+		Budget: resilience.NewRetryBudget(resilience.RetryBudgetConfig{MaxTokens: 10, TokenRatio: 0.1}),
+	})
+	ctx := b.Context()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		errSink = runner.Run(ctx, okOp)
+	}
+}
+
+// boolSink defeats dead-code elimination on the budget's answers; atomic,
+// since every parallel worker stores into it.
+var boolSink atomic.Bool
+
+// BenchmarkRetryBudget_Contended is the budget alone under every core at
+// once: a failure, a question and a success per iteration, each a lock-free
+// compare-and-swap or load on one shared counter. Zero allocations.
+func BenchmarkRetryBudget_Contended(b *testing.B) {
+	budget := resilience.NewRetryBudget(resilience.RetryBudgetConfig{MaxTokens: 100, TokenRatio: 1})
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		allowed := false
+		for pb.Next() {
+			budget.RecordFailure()
+			allowed = budget.AllowRetry()
+			budget.RecordSuccess()
+		}
+		boolSink.Store(allowed)
+	})
 }
 
 // BenchmarkCircuitBreaker_Closed is the same question for a breaker: closed is

@@ -9,8 +9,9 @@
 //	    return b.Run(ctx, callDownstream) // Retry(Breaker(op))
 //	})
 //
-// Rejections surface typed sentinels (RetryExhausted / CircuitOpen / RateLimited
-// / BulkheadFull / TimeoutExceeded / FallbackFailed) matchable via
+// Rejections surface typed sentinels (RetryExhausted / RetryBudgetExceeded /
+// CircuitOpen / RateLimited / BulkheadFull / TimeoutExceeded / FallbackFailed)
+// matchable via
 // errs.HasReason / errs.HasCode.
 //
 // # Classifying deterministic failures
@@ -155,6 +156,27 @@
 //
 // A failure that names no delay waits the backoff curve, and the named one is
 // held at MaxDelay.
+//
+// # A retry budget per dependency
+//
+// A retry multiplies traffic exactly when the dependency can least take it:
+// during an outage every call becomes MaxAttempts calls, and stacked layers
+// multiply again. [NewRetryBudget] is the token bucket of gRPC's retry
+// throttling — a failure costs a token, a success returns TokenRatio of one,
+// and extra attempts stop once half the tokens are gone. Share one per
+// dependency between its retry and its hedge; the first attempt of a call is
+// never refused:
+//
+//	budget := resilience.NewRetryBudget(resilience.RetryBudgetConfig{MaxTokens: 10, TokenRatio: 0.1})
+//	r := resilience.NewRetry(resilience.RetryConfig{
+//	    MaxAttempts: 3, BaseDelay: 50 * time.Millisecond, Budget: budget,
+//	    OnRetry: func(attempt int, err error, wait time.Duration) { retries.Add(1) },
+//	})
+//
+// A retry the budget refuses ends the call with [RetryBudgetExceeded]; a
+// duplicate it refuses is simply not issued. [RetryConfig].OnRetry hears every
+// retry before its wait, synchronously, so retries are counted without this
+// package depending on a metrics library.
 //
 // # A caller who leaves is not a failing dependency
 //

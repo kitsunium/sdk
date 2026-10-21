@@ -14,7 +14,8 @@ ADR 0026.
 
 | File | Policy | Notes |
 |---|---|---|
-| `retry.go` / `retry_config.go` | retry | capped exponential backoff (the `BackoffValue` curve), ctx-aware sleep on the injected `Clock`, `RetryExhausted`; `Delay(attempt, err)` lets the failure impose the wait (no jitter, held into `[0, MaxDelay]` by `capDelay`), nil = the curve (#476) |
+| `retry.go` / `retry_config.go` | retry | capped exponential backoff (the `BackoffValue` curve), ctx-aware sleep on the injected `Clock`, `RetryExhausted`; `Delay(attempt, err)` lets the failure impose the wait (no jitter, held into `[0, MaxDelay]` by `capDelay`), nil = the curve (#476); `Budget` records each success and retryable failure and is asked before each retry — a refusal is `RetryBudgetExceeded`; `OnRetry(attempt, err, delay)` is called synchronously before each wait (#475) |
+| `retry_budget.go` / `retry_budget_config.go` | retry budget | `NewRetryBudget` — gRFC A6's token bucket implementing `core/app/resilience.RetryBudget`: thousandths of a token in one `atomic.Int64`, full at `MaxTokens`, failure −1, success +`TokenRatio` (capped), `AllowRetry` while strictly more than half remain; CAS loops, no lock, 0 alloc. `refusedBudget` for a non-positive `MaxTokens` or a `TokenRatio` rounding below 0.001 / non-finite — allows nothing, and `NewRetry`/`NewHedge` turn it into `PolicyMisconfigured` naming the knob (ADR 0031, #475) |
 | `retry_after.go` | — | `RetryAfter(err)` — reads the `retry_after_seconds` field (`retryAfterField`) of the outermost `*errs.Error`, whole or fractional seconds, rounded to the nanosecond, saturated at the longest `Duration`; zero, negative and non-finite are no hint. Written by the OTLP sender, `net/client` on 429/503 and `rateLimited` — each spelling pinned by its producer's suite (#476) |
 | `backoff.go` | — | `BackoffValue` — an alias of `kernel/backoff.Value`, the layer that owns the curve (ADR 0074, ADR 0103); `retryRunner.backoff`/`jittered` delegate to its two halves, `kernel/backoff.Grow` (pure, bounded, never negative) and `Widen` (jitter) |
 | `keyed_ratelimit.go` / `keyed_ratelimit_config.go` | keyed rate-limit | one `tokenBucket` per `Key(ctx)`, at most `MaxKeys` (LRU), forgotten after `IdleTimeout` (sliding), no sweeper; `Rate`/`Key`/`MaxKeys`/`IdleTimeout` refused at zero (ADR 0031, ADR 0103) |
@@ -23,7 +24,7 @@ ADR 0026.
 | `bulkhead.go` | bulkhead | buffered-channel semaphore (reject mode), `BulkheadFull` |
 | `timeout.go` / `timeout_config.go` / `timeout_clock.go` | timeout | `context.WithTimeout`, `TimeoutExceeded` — only for its OWN deadline: a caller's context already finished returns its own error (#477); `NewTimeoutWith(TimeoutConfig{Duration, Clock})` measures the deadline on an injected clock through `clockDeadline`, a context with its own `Done` so a derived context reports `DeadlineExceeded` too (ADR 0090); non-positive duration refused (ADR 0031) |
 | `fallback.go` / `fallback_config.go` | fallback | secondary `Operation` on primary failure; `FallbackFailed` carries BOTH errors; nil `Fallback` refused (ADR 0031) |
-| `hedge.go` / `hedge_config.go` / `hedge_race.go` / `hedge_outcome.go` | hedging | duplicate copies raced after `Delay`, first success wins; a copy's panic re-raised on the caller's goroutine with its original value; `Idempotent`/`Delay`/`MaxInFlight` refused, `MaxHedges`→1 (ADR 0031) |
+| `hedge.go` / `hedge_config.go` / `hedge_race.go` / `hedge_outcome.go` | hedging | duplicate copies raced after `Delay`, first success wins; a copy's panic re-raised on the caller's goroutine with its original value; `Idempotent`/`Delay`/`MaxInFlight` refused, `MaxHedges`→1 (ADR 0031); `Budget` asked before each duplicate (`claimSlot`, before the in-flight slot) — a refusal degrades to no-hedging — and each decided call recorded once (`recordOutcome`: success, or failure on a live context) (#475) |
 | `wrap.go` | — | `wrapAs(sentinel, cause)` (sentinel origin-wins + cause as a field) over `wrapAsFields(sentinel, fields...)`, the one builder every outcome goes through, `FallbackFailed`'s two halves included |
 | `retryable.go` | — | `isRetryable(pred, err)` — nil-predicate default shared by retry + breaker |
 | `misconfigured.go` | — | `newMisconfigured(policy, knob)` — refuses every call with `PolicyMisconfigured` (ADR 0031) |
@@ -232,7 +233,44 @@ cancellation can be dropped the same way, because `Run` does not wait for its
 copies. `Test_hedge_RunReRaisesAPanicWithItsOriginalValue` and
 `Test_hedge_RunDropsALosersLatePanic` pin both halves.
 
+## Retry budget — amplification bounded across calls (#475)
+
+`MaxAttempts` bounds one call; nothing bounded the sum. During an outage every
+call became `MaxAttempts` calls, and stacked layers multiplied again (the
+Builders' Library's "retries amplify load"). `RetryBudget` is a port of its
+own in `core/app/resilience`, a sibling of `Runner` rather than a widening of
+it (ADR 0039): a budget runs no Operation, it is a counter several policies
+consult. `NewRetryBudget` is gRFC A6's `retryThrottling` bucket, kept in
+thousandths of a token as gRPC does, so each update is one CAS on one
+`atomic.Int64` — the happy path of a budgeted retry stays allocation-free
+(`BENCH.md`).
+
+What each policy does with it:
+
+- **Retry** records every success and every *retryable* failure (the last
+  attempt's included), then asks before the next attempt; a refusal returns
+  `RetryBudgetExceeded` wrapping the last error, without waiting. A
+  deterministic error and a cancelled context record nothing.
+- **Hedge** asks before each duplicate — before taking the `MaxInFlight`
+  slot, so a refusal holds nothing — and a refusal degrades to no-hedging,
+  never to a rejection. It records each decided call once: a success, or a
+  failure on a live context. It has no classifier, so every failure counts.
+- **Both share one budget per dependency**, as gRPC's throttling covers
+  hedging. A `Retry(Hedge(op))` with one budget records a failed call at both
+  levels: the bucket drains and refills twice as fast and its threshold does
+  not move.
+
+The first attempt of a call never asks: a budget throttles amplification,
+never traffic, and the successes of a recovering dependency are what refill it.
+`MaxTokens ≤ 0` and a `TokenRatio` rounding below 0.001 are refused rather
+than defaulted (ADR 0031): a zero ratio is a budget that, once drained, never
+refills.
+
 ## Do NOT
+
+- Let the budget refuse a call's FIRST attempt, or make `AllowRetry` spend a
+  token. The question is a query; only outcomes move the bucket, and a budget
+  that throttles first attempts is a rate limiter that never recovers.
 
 - Relabel an `*errs.Error` cause via plain `errs.Wrap(cause, …)` — origin-wins
   would let the cause hijack the policy code; use `wrapAs`.

@@ -94,6 +94,30 @@ constants:
         type: int
         value: "64"
     name: floatBits
+  - doc: |-
+      milliPerToken is the fixed-point scale of the budget's counts: gRPC reads
+      TokenRatio to three decimals, so a thousandth of a token is the unit and
+      every update is one integer compare-and-swap.
+    items:
+      - name: milliPerToken
+        type: int64
+        value: "1000"
+    name: milliPerToken
+  - doc: |-
+      maxBudgetTokens holds MaxTokens where its count in thousandths, doubled by
+      AllowRetry's comparison, cannot overflow an int64. It is an int64 because a
+      32-bit int cannot hold it — and cannot reach it either.
+    items:
+      - name: maxBudgetTokens
+        type: int64
+        value: 1 << 40
+    name: maxBudgetTokens
+  - doc: budgetPolicy names a refused budget in PolicyMisconfigured's fields.
+    items:
+      - name: budgetPolicy
+        type: string
+        value: "\"retrybudget\""
+    name: budgetPolicy
 files:
   - decls:
       - BackoffValue
@@ -143,6 +167,8 @@ files:
       - NewHedge
       - (*hedge).Run
       - (*hedge).claimHedge
+      - (*hedge).claimSlot
+      - (*hedge).recordOutcome
       - (*hedge).attempt
       - (*hedge).duplicate
       - (*hedge).acquire
@@ -199,7 +225,10 @@ files:
       - minAttempts
       - retryRunner
       - NewRetry
+      - newRetryRunner
       - (*retryRunner).Run
+      - (*retryRunner).recordSuccess
+      - (*retryRunner).mayRetry
       - (*retryRunner).wait
       - (*retryRunner).delay
       - capDelay
@@ -213,6 +242,24 @@ files:
       - RetryAfter
       - secondsToDuration
     name: retry_after.go
+  - decls:
+      - milliPerToken
+      - maxBudgetTokens
+      - budgetPolicy
+      - tokenBudget
+      - refusedBudget
+      - NewRetryBudget
+      - (*tokenBudget).AllowRetry
+      - (*tokenBudget).RecordSuccess
+      - (*tokenBudget).RecordFailure
+      - refusedBudget.AllowRetry
+      - refusedBudget.RecordSuccess
+      - refusedBudget.RecordFailure
+      - refusedBudgetKnob
+    name: retry_budget.go
+  - decls:
+      - RetryBudgetConfig
+    name: retry_budget_config.go
   - decls:
       - RetryConfig
     name: retry_config.go
@@ -298,6 +345,12 @@ functions:
   - name: NewRetry
     params: cfg RetryConfig
     results: coreres.Runner
+  - doc: |-
+      newRetryRunner normalises the backoff knobs and the clock, refuses a budget
+      NewRetryBudget could not build, and builds the runner.
+    name: newRetryRunner
+    params: cfg RetryConfig
+    results: coreres.Runner
   - doc: capDelay holds d into [0, ceiling], a non-positive ceiling being no cap.
     name: capDelay
     params: d, ceiling time.Duration
@@ -316,6 +369,15 @@ functions:
     name: secondsToDuration
     params: rendered string
     results: time.Duration, bool
+  - name: NewRetryBudget
+    params: cfg RetryBudgetConfig
+    results: coreres.RetryBudget
+  - doc: |-
+      refusedBudgetKnob reports whether budget is one NewRetryBudget refused, and
+      the field it refused, so a policy given it refuses every call by name.
+    name: refusedBudgetKnob
+    params: budget coreres.RetryBudget
+    results: string, bool
   - doc: |-
       isRetryable reports whether err is a transient failure the policy may act on
       (replay it, or count it against a dependency's health). A nil predicate keeps
@@ -356,6 +418,7 @@ functions:
     params: sentinel *kerrs.Error, fields ...kerrs.FieldValue
     results: error
 imports:
+  atomic: sync/atomic
   clock: github.com/kitsunium/sdk/internal/kernel/clock
   context: context
   coreres: github.com/kitsunium/sdk/internal/core/app/resilience
@@ -599,6 +662,8 @@ types:
         type: chan struct{}
       - name: clk
         type: clock.Timed
+      - name: budget
+        type: coreres.RetryBudget
     kind: struct
     methods:
       - doc: |-
@@ -629,6 +694,17 @@ types:
         params: launched int
         recv: h *hedge
         results: bool
+      - doc: claimSlot asks the shared retry budget, then claims an in-flight slot.
+        name: claimSlot
+        recv: h *hedge
+        results: bool
+      - doc: |-
+          recordOutcome folds a decided call into the shared budget, when there is
+          one: a success replenishes it, a failure on a live context drains it, and a
+          failure the caller's cancellation explains records nothing.
+        name: recordOutcome
+        params: ctx context.Context, verdict error
+        recv: h *hedge
       - doc: |-
           attempt runs one copy of op and hands its outcome to Run.
 
@@ -738,6 +814,16 @@ types:
           policy that measures a wait, did not.
         name: Clock
         type: clock.Timed
+      - doc: |-
+          Budget, when set, is asked before each duplicate: a refusal issues
+          none, and the call proceeds on the attempts already running, as when
+          MaxInFlight is reached. Each call's outcome is recorded in it — a
+          success, or a failure on a live context — so a hedge and a retry
+          sharing one budget stop amplifying a failing dependency together, as
+          gRPC's retry throttling covers hedging. Nil is the hedge without a
+          budget.
+        name: Budget
+        type: coreres.RetryBudget
     kind: struct
     name: HedgeConfig
   - doc: |-
@@ -1032,9 +1118,21 @@ types:
         params: ctx context.Context, op coreres.Operation
         recv: r *retryRunner
         results: error
+      - doc: recordSuccess tells the budget, when there is one, that an attempt succeeded.
+        name: recordSuccess
+        recv: r *retryRunner
+      - doc: |-
+          mayRetry records the retryable failure of attempt in the budget and reports
+          whether the budget allows the next one. With no budget, or after the last
+          attempt, it is always true: the loop's own bound decides.
+        name: mayRetry
+        params: attempt int
+        recv: r *retryRunner
+        results: bool
       - doc: |-
           wait sleeps the delay before the given attempt on the configured clock,
           returning ctx.Err on cancel. failed is the error of the attempt before it.
+          OnRetry hears the retry first, on this goroutine.
         name: wait
         params: ctx context.Context, attempt int, failed error
         recv: r *retryRunner
@@ -1069,6 +1167,67 @@ types:
         recv: r *retryRunner
         results: time.Duration
     name: retryRunner
+  - doc: |-
+      tokenBudget is gRPC's retry-throttling bucket: tokens in thousandths, full
+      at max, a failure costing one token, a success returning ratio of one.
+    fields:
+      - name: tokens
+        type: atomic.Int64
+      - name: max
+        type: int64
+      - name: ratio
+        type: int64
+    kind: struct
+    methods:
+      - doc: AllowRetry reports whether more than half the tokens remain.
+        name: AllowRetry
+        recv: b *tokenBudget
+        results: bool
+      - doc: RecordSuccess puts ratio back, never past the bucket's size.
+        name: RecordSuccess
+        recv: b *tokenBudget
+      - doc: RecordFailure takes one token out, never below zero.
+        name: RecordFailure
+        recv: b *tokenBudget
+    name: tokenBudget
+  - doc: |-
+      refusedBudget is what NewRetryBudget returns for a configuration it cannot
+      honour: it allows no extra attempt, and NewRetry and NewHedge recognise it
+      and refuse every call with PolicyMisconfigured naming knob (ADR 0031).
+    fields:
+      - name: knob
+        type: string
+    kind: struct
+    methods:
+      - doc: "AllowRetry refuses every extra attempt: the budget could not be built."
+        name: AllowRetry
+        recv: refusedBudget
+        results: bool
+      - doc: RecordSuccess records nothing.
+        name: RecordSuccess
+        recv: refusedBudget
+      - doc: RecordFailure records nothing.
+        name: RecordFailure
+        recv: refusedBudget
+    name: refusedBudget
+  - fields:
+      - doc: |-
+          MaxTokens is the bucket's size and its starting content. Retries are
+          allowed while more than MaxTokens/2 remain, so it is also how many
+          more failures than the successes pay for the budget absorbs before
+          it starts refusing. A non-positive MaxTokens is refused; values above
+          2^40 are held there.
+        name: MaxTokens
+        type: int
+      - doc: |-
+          TokenRatio is what a recorded success puts back, in tokens, a
+          failure costing one. It is read to a thousandth, as gRPC reads it: a
+          value that is not finite, or that rounds below 0.001, is refused —
+          its zero would be a budget that, once drained, never refills.
+        name: TokenRatio
+        type: float64
+    kind: struct
+    name: RetryBudgetConfig
   - fields:
       - name: MaxAttempts
         type: int
@@ -1142,6 +1301,32 @@ types:
           	Delay: func(_ int, err error) (time.Duration, bool) { return resilience.RetryAfter(err) }
         name: Delay
         type: func(attempt int, err error) (time.Duration, bool)
+      - doc: |-
+          Budget, when set, bounds the retries of every policy sharing it: each
+          success and each retryable failure is recorded in it, and before
+          every retry it is asked whether one may run. A refusal ends the loop
+          with RetryBudgetExceeded wrapping the last error, without waiting. A
+          deterministic error and a cancelled context record nothing.
+
+          Nil — the zero value — is the policy without a budget, as it was
+          before the field existed. Share one budget per dependency, between
+          its retry and its hedge: that is what stops a failing dependency from
+          receiving every call times MaxAttempts. A Retry(Hedge(op)) whose two
+          policies share a budget records a failed call at both levels, which
+          drains and refills it twice as fast and leaves its threshold where it
+          was.
+        name: Budget
+        type: coreres.RetryBudget
+      - doc: |-
+          OnRetry, when set, is called before each retry's wait, on the
+          calling goroutine, with the retry's number — 1 before the second
+          attempt —, the error that caused it and the wait about to start. It
+          is how a caller counts retries in their own metrics without this
+          package depending on one. It is not called for the first attempt,
+          nor for a retry the budget refused. It must not block: the retry
+          waits for it.
+        name: OnRetry
+        type: func(attempt int, err error, delay time.Duration)
     kind: struct
     name: RetryConfig
   - doc: |-

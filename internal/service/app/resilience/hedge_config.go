@@ -3,6 +3,7 @@ package resilience
 import (
 	"time"
 
+	coreres "github.com/kitsunium/sdk/internal/core/app/resilience"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
 
@@ -11,7 +12,7 @@ import (
 // the SDK could pick for them is either a guess at the caller's requirement or
 // a licence to duplicate load the caller never agreed to (ADR 0031). MaxHedges
 // is the one with an obvious floor and clamps to 1. A nil Clock measures the
-// delay on the wall clock.
+// delay on the wall clock, and a nil Budget never refuses a duplicate.
 type HedgeConfig struct {
 	// Idempotent asserts that the guarded Operation is safe to run more than
 	// once, concurrently, with at most one of the copies being observed. It
@@ -87,4 +88,12 @@ type HedgeConfig struct {
 	// the breaker and the rate limiters already take one; the hedge, the other
 	// policy that measures a wait, did not.
 	Clock clock.Timed
+	// Budget, when set, is asked before each duplicate: a refusal issues
+	// none, and the call proceeds on the attempts already running, as when
+	// MaxInFlight is reached. Each call's outcome is recorded in it — a
+	// success, or a failure on a live context — so a hedge and a retry
+	// sharing one budget stop amplifying a failing dependency together, as
+	// gRPC's retry throttling covers hedging. Nil is the hedge without a
+	// budget.
+	Budget coreres.RetryBudget
 }
