@@ -192,13 +192,14 @@ func Test_circuitBreaker_record(t *testing.T) {
 			state:      c.state,
 			failures:   c.failures,
 			threshold:  c.threshold,
+			cooldown:   time.Minute,
 			openFor:    time.Minute,
 			openedAt:   opened,
 			generation: current,
 			probing:    c.state == stateHalfOpen,
 		}
 
-		b.record(c.adm, c.res)
+		b.record(c.adm, c.res, clk.now, clk.now)
 
 		if b.state != c.wantState {
 			t.Errorf("state = %v, want %v", b.state, c.wantState)
@@ -296,7 +297,9 @@ func Test_circuitBreaker_Run(t *testing.T) {
 			clk:       clk,
 			retryable: c.retryable,
 			threshold: c.threshold,
+			cooldown:  time.Minute,
 			openFor:   time.Minute,
+			state:     stateClosed,
 		}
 
 		runs := 0
@@ -353,7 +356,7 @@ func Test_circuitBreaker_RunRecovers(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		clk := &steppedClock{now: time.Unix(1_700_000_000, 0)}
-		b := &circuitBreaker{clk: clk, threshold: 2, openFor: time.Minute}
+		b := &circuitBreaker{clk: clk, threshold: 2, cooldown: time.Minute, openFor: time.Minute, state: stateClosed}
 
 		//: trip it. The failures are the point; their errors are the
 		//: operation's own and are asserted by the state below.
