@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.48.0
-	github.com/kitsunium/sdk/internal v0.0.0-00010101000000-000000000000
+	github.com/kitsunium/sdk/internal v0.18.0
 )
 
 require (
@@ -14,6 +14,10 @@ require (
 	github.com/go-faster/city v1.0.1 // indirect
 	github.com/go-faster/errors v0.8.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/kitsunium/sdk v0.20.0
+	github.com/kitsunium/sdk/internal/core v0.18.0
+	github.com/kitsunium/sdk/internal/kernel v0.18.0
+	github.com/kitsunium/sdk/internal/service v0.18.0
 	github.com/klauspost/compress v1.19.2 // indirect
 	github.com/paulmach/orb v0.13.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.29 // indirect
@@ -23,5 +27,3 @@ require (
 	go.opentelemetry.io/otel/trace v1.45.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 )
-
-replace github.com/kitsunium/sdk/internal => ../../../../internal
