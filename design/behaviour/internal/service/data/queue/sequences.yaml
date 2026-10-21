@@ -71,6 +71,8 @@ sequences:
         kind: value
       - id: ignoreCancelled
         kind: internal
+      - id: c.cfg.Clock.Now
+        kind: value
       - id: c.settleBatch
         kind: internal
     steps:
@@ -98,10 +100,13 @@ sequences:
                 when: receiveErr != nil
             - opt:
                 do:
+                  - bind: from
+                    eval: c.cfg.Clock.Now()
+                    to: c.cfg.Clock.Now
                   - opt:
                       do:
                         - return: nil
-                      when: "!idle(ctx, c.cfg, signal, idleFor(c.cfg.PollInterval, c.waker))"
+                      when: "!idle(ctx, c.cfg, signal, from.Add(idleFor(c.cfg.PollInterval, c.waker)))"
                   - continue: true
                 when: len(batch) == 0
             - opt:
@@ -141,14 +146,14 @@ sequences:
         kind: actor
       - id: idle
         kind: self
-      - id: cfg.Clock.NewTimer
-        kind: value
+      - id: armUntil
+        kind: internal
       - id: timer.Stop
         kind: value
     steps:
       - bind: timer
-        eval: cfg.Clock.NewTimer(wait)
-        to: cfg.Clock.NewTimer
+        eval: armUntil(cfg.Clock, until)
+        to: armUntil
       - defer: timer.Stop()
         to: timer.Stop
       - select:
@@ -162,6 +167,43 @@ sequences:
             - comm: <-timer.C()
               do:
                 - return: "true"
+  - of: armUntil
+    participants:
+      - id: caller
+        kind: actor
+      - id: armUntil
+        kind: self
+      - id: clk.Now
+        kind: value
+      - id: clk.NewTimer
+        kind: value
+      - id: timer.Stop
+        kind: value
+    steps:
+      - bind: before
+        eval: clk.Now()
+        to: clk.Now
+      - bind: timer
+        eval: clk.NewTimer(max(until.Sub(before), 0))
+        to: clk.NewTimer
+      - loop:
+          do:
+            - bind: after
+              eval: clk.Now()
+              to: clk.Now
+            - opt:
+                do:
+                  - break: true
+                when: "!after.After(before)"
+            - eval: timer.Stop()
+              to: timer.Stop
+            - set: before
+              value: after
+            - set: timer
+              to: clk.NewTimer
+              value: clk.NewTimer(max(until.Sub(before), 0))
+          range: armTimerRounds
+      - return: timer
   - of: (*consumer).settleBatch
     participants:
       - id: caller

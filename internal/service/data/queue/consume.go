@@ -6,11 +6,16 @@ import (
 	"runtime/debug"
 	"time"
 
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/concur/group"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 
 	corequeue "github.com/kitsunium/sdk/internal/core/data/queue"
 )
+
+// armTimerRounds bounds how many times armUntil re-arms a timer the clock
+// moved past while it was being armed.
+const armTimerRounds int = 4
 
 // Consume runs cfg.Handler against broker until ctx is done.
 //
@@ -155,7 +160,11 @@ func (c *consumer) pump(ctx context.Context) error {
 		if len(batch) == 0 {
 			//: waits through the clock, never time.Sleep, and wakes on cancel,
 			//: on a publication, or when something the broker holds is due.
-			if !idle(ctx, c.cfg, signal, idleFor(c.cfg.PollInterval, c.waker)) {
+			//: the instant the wait is measured from is read BEFORE the broker
+			//: is asked, so a clock moving meanwhile can only make the wake
+			//: early — a cheap empty Receive — and never late.
+			from := c.cfg.Clock.Now()
+			if !idle(ctx, c.cfg, signal, from.Add(idleFor(c.cfg.PollInterval, c.waker))) {
 				//: cancelled while waiting.
 				return nil
 			}
@@ -194,15 +203,15 @@ func idleFor(poll time.Duration, waker corequeue.Waker) time.Duration {
 }
 
 // idle waits for the first of: the caller's cancellation, the broker's wake
-// signal, or wait elapsing on the consumer's clock. It reports whether the
+// signal, or the consumer's clock reaching until. It reports whether the
 // worker should carry on.
 //
 // A nil signal — a broker without the Waker capability — blocks forever in the
 // select and leaves the plain poll it always was.
-func idle(ctx context.Context, cfg ConsumerConfig, signal <-chan struct{}, wait time.Duration) bool {
+func idle(ctx context.Context, cfg ConsumerConfig, signal <-chan struct{}, until time.Time) bool {
 	//: a timer rather than After, so a wake that wins releases it at once
 	//: instead of leaving it armed until it fires.
-	timer := cfg.Clock.NewTimer(wait)
+	timer := armUntil(cfg.Clock, until)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
@@ -215,6 +224,36 @@ func idle(ctx context.Context, cfg ConsumerConfig, signal <-chan struct{}, wait 
 		//: the poll elapsed, or something became due: ask again.
 		return true
 	}
+}
+
+// armUntil returns a timer that fires when clk reaches until.
+//
+// A timer takes a duration, measured from the instant it registers, and that
+// instant is not the one the duration was computed from: a clock that moves
+// between the two — a test's ManualClock advancing while a worker arms its
+// idle wait — would fire the timer that much late, after the instant the
+// broker said a message is due, and a manual clock that is not advanced
+// again never fires it at all (a mail spool's retry missed on OpenBSD this
+// way). So the clock is read on both sides of the registration, and a timer
+// armed across a move is armed again from the later reading; a real clock,
+// which moves between any two readings, is re-armed a bounded number of times
+// for a lateness of nanoseconds.
+func armUntil(clk clock.Timed, until time.Time) clock.Timer {
+	before := clk.Now()
+	timer := clk.NewTimer(max(until.Sub(before), 0))
+	//: re-armed while the clock moved across the registration.
+	for range armTimerRounds {
+		after := clk.Now()
+		//: registered at the instant the duration was measured from.
+		if !after.After(before) {
+			break
+		}
+		timer.Stop()
+		before = after
+		timer = clk.NewTimer(max(until.Sub(before), 0))
+	}
+	//: due at until, or a few nanoseconds of a real clock after it.
+	return timer
 }
 
 // settleBatch runs the handler over each delivery and reports each outcome to

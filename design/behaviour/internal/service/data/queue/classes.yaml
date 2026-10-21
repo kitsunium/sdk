@@ -2,6 +2,14 @@
 apiVersion: design/behaviour/v1
 constants:
   - doc: |-
+      armTimerRounds bounds how many times armUntil re-arms a timer the clock
+      moved past while it was being armed.
+    items:
+      - name: armTimerRounds
+        type: int
+        value: "4"
+    name: armTimerRounds
+  - doc: |-
       DefaultPollInterval is how long an idle worker waits before asking again,
       when [ConsumerConfig.PollInterval] is left at zero.
 
@@ -459,12 +467,14 @@ constants:
     name: sqlOnceSweepRows
 files:
   - decls:
+      - armTimerRounds
       - Consume
       - consumer
       - newConsumer
       - (*consumer).pump
       - idleFor
       - idle
+      - armUntil
       - (*consumer).settleBatch
       - (*consumer).prepare
       - (*consumer).process
@@ -840,14 +850,30 @@ functions:
     results: time.Duration
   - doc: |-
       idle waits for the first of: the caller's cancellation, the broker's wake
-      signal, or wait elapsing on the consumer's clock. It reports whether the
+      signal, or the consumer's clock reaching until. It reports whether the
       worker should carry on.
 
       A nil signal — a broker without the Waker capability — blocks forever in the
       select and leaves the plain poll it always was.
     name: idle
-    params: ctx context.Context, cfg ConsumerConfig, signal <-chan struct{}, wait time.Duration
+    params: ctx context.Context, cfg ConsumerConfig, signal <-chan struct{}, until time.Time
     results: bool
+  - doc: |-
+      armUntil returns a timer that fires when clk reaches until.
+
+      A timer takes a duration, measured from the instant it registers, and that
+      instant is not the one the duration was computed from: a clock that moves
+      between the two — a test's ManualClock advancing while a worker arms its
+      idle wait — would fire the timer that much late, after the instant the
+      broker said a message is due, and a manual clock that is not advanced
+      again never fires it at all (a mail spool's retry missed on OpenBSD this
+      way). So the clock is read on both sides of the registration, and a timer
+      armed across a move is armed again from the later reading; a real clock,
+      which moves between any two readings, is re-armed a bounded number of times
+      for a lateness of nanoseconds.
+    name: armUntil
+    params: clk clock.Timed, until time.Time
+    results: clock.Timer
   - doc: |-
       guard invokes the handler with its panic recovered.
 

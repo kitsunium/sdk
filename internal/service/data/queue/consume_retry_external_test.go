@@ -109,6 +109,49 @@ func TestAHandlerThatSaysWhenToRetryIsNackedWithItsDelay(t *testing.T) {
 	}
 }
 
+// jumpyClock is a ManualClock that moves by jump the first time a timer is
+// armed on it, between the instant its caller measured a duration from and
+// the one the timer registers at: the interleaving a test advancing the
+// clock while a worker arms its idle wait produces at random.
+type jumpyClock struct {
+	*clock.ManualClock
+	jump   time.Duration
+	jumped sync.Once
+}
+
+// NewTimer moves the clock first, once, then arms the timer.
+func (c *jumpyClock) NewTimer(d time.Duration) clock.Timer {
+	c.jumped.Do(func() { c.Advance(c.jump) })
+	return c.ManualClock.NewTimer(d)
+}
+
+// TestAnIdleConsumerWakesAtTheDueInstantWhenTheClockMovesWhileItArms pins the
+// fix for a retry a mail spool missed on OpenBSD's CI: the worker measured its
+// idle wait — a second, until the message falls due — and the clock moved
+// 600 ms before the timer registered, so the timer was due 600 ms late, and
+// a test that then moved the clock to the due instant and no further waited
+// forever. The wait is now armed until an instant, and re-armed when the clock
+// moved across its registration.
+func TestAnIdleConsumerWakesAtTheDueInstantWhenTheClockMovesWhileItArms(t *testing.T) {
+	t.Parallel()
+	clk := &jumpyClock{ManualClock: clock.NewManualClock(epoch), jump: 600 * time.Millisecond}
+	broker := makeMemory(t, clk, defaultPolicy())
+	if _, err := delayedPublisher(t, broker).PublishAt(t.Context(), []byte("due"), epoch.Add(time.Second)); err != nil {
+		t.Fatalf("PublishAt() = %v", err)
+	}
+	attempts := make(chan int, 1)
+	consumeInBackground(t, broker, svcqueue.ConsumerConfig{
+		Handler: func(ctx context.Context, delivery corequeue.DeliveryValue) error {
+			report(ctx, attempts, delivery.Deliveries)
+			return nil
+		},
+		Clock: clk, PollInterval: time.Hour, HandlerIsIdempotent: true,
+	})
+	clk.BlockUntil(1)
+	clk.Advance(400 * time.Millisecond)
+	await(t, attempts, "the delivery at the instant it fell due")
+}
+
 // policyOnly is a broker with the four verbs of Broker and no sibling at all:
 // a connector whose redelivery delay is fixed.
 type policyOnly struct {
