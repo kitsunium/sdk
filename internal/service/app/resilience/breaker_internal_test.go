@@ -34,9 +34,9 @@ func Test_circuitBreaker_trip(t *testing.T) {
 		from breakerState
 	}
 	tests := []tc{
-		{"from closed", stateClosed},
-		{"from half-open", stateHalfOpen},
-		{"from open", stateOpen},
+		{"from closed", coreres.BreakerClosed},
+		{"from half-open", coreres.BreakerHalfOpen},
+		{"from open", coreres.BreakerOpen},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -45,7 +45,7 @@ func Test_circuitBreaker_trip(t *testing.T) {
 
 		b.trip()
 
-		if b.state != stateOpen {
+		if b.state != coreres.BreakerOpen {
 			t.Errorf("state = %v after trip, want open", b.state)
 		}
 		//: the cooldown is measured from this stamp; a zero one would make the
@@ -85,14 +85,14 @@ func Test_circuitBreaker_allow(t *testing.T) {
 		wantProbing bool
 	}
 	tests := []tc{
-		{"closed admits", stateClosed, false, 0, time.Minute, true, false, stateClosed, false},
-		{"half-open admits the probe", stateHalfOpen, false, 0, time.Minute, true, true, stateHalfOpen, true},
-		{"half-open rejects while its probe runs", stateHalfOpen, true, 0, time.Minute, false, false, stateHalfOpen, true},
-		{"open rejects within the cooldown", stateOpen, false, 30 * time.Second, time.Minute, false, false, stateOpen, false},
-		{"open rejects at the very start", stateOpen, false, 0, time.Minute, false, false, stateOpen, false},
-		{"open rejects one tick before the cooldown", stateOpen, false, time.Minute - time.Nanosecond, time.Minute, false, false, stateOpen, false},
-		{"open half-opens once the cooldown elapses", stateOpen, false, time.Minute, time.Minute, true, true, stateHalfOpen, true},
-		{"open half-opens well past the cooldown", stateOpen, false, time.Hour, time.Minute, true, true, stateHalfOpen, true},
+		{"closed admits", coreres.BreakerClosed, false, 0, time.Minute, true, false, coreres.BreakerClosed, false},
+		{"half-open admits the probe", coreres.BreakerHalfOpen, false, 0, time.Minute, true, true, coreres.BreakerHalfOpen, true},
+		{"half-open rejects while its probe runs", coreres.BreakerHalfOpen, true, 0, time.Minute, false, false, coreres.BreakerHalfOpen, true},
+		{"open rejects within the cooldown", coreres.BreakerOpen, false, 30 * time.Second, time.Minute, false, false, coreres.BreakerOpen, false},
+		{"open rejects at the very start", coreres.BreakerOpen, false, 0, time.Minute, false, false, coreres.BreakerOpen, false},
+		{"open rejects one tick before the cooldown", coreres.BreakerOpen, false, time.Minute - time.Nanosecond, time.Minute, false, false, coreres.BreakerOpen, false},
+		{"open half-opens once the cooldown elapses", coreres.BreakerOpen, false, time.Minute, time.Minute, true, true, coreres.BreakerHalfOpen, true},
+		{"open half-opens well past the cooldown", coreres.BreakerOpen, false, time.Hour, time.Minute, true, true, coreres.BreakerHalfOpen, true},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -165,22 +165,22 @@ func Test_circuitBreaker_record(t *testing.T) {
 	trial := admission{generation: current, trial: true}
 	stale := admission{generation: current - 1}
 	tests := []tc{
-		{"a success closes and clears", stateClosed, 3, 5, closed, outcomeSuccess, stateClosed, 0, false},
-		{"a success from the half-open trial closes", stateHalfOpen, 0, 5, trial, outcomeSuccess, stateClosed, 0, false},
-		{"a failure below the threshold counts", stateClosed, 1, 5, closed, outcomeFailure, stateClosed, 2, false},
-		{"the threshold trips", stateClosed, 4, 5, closed, outcomeFailure, stateOpen, 5, true},
-		{"a failure while open of the same generation changes nothing", stateOpen, 5, 5, closed, outcomeFailure, stateOpen, 5, false},
-		{"a success while open never closes", stateOpen, 5, 5, closed, outcomeSuccess, stateOpen, 5, false},
+		{"a success closes and clears", coreres.BreakerClosed, 3, 5, closed, outcomeSuccess, coreres.BreakerClosed, 0, false},
+		{"a success from the half-open trial closes", coreres.BreakerHalfOpen, 0, 5, trial, outcomeSuccess, coreres.BreakerClosed, 0, false},
+		{"a failure below the threshold counts", coreres.BreakerClosed, 1, 5, closed, outcomeFailure, coreres.BreakerClosed, 2, false},
+		{"the threshold trips", coreres.BreakerClosed, 4, 5, closed, outcomeFailure, coreres.BreakerOpen, 5, true},
+		{"a failure while open of the same generation changes nothing", coreres.BreakerOpen, 5, 5, closed, outcomeFailure, coreres.BreakerOpen, 5, false},
+		{"a success while open never closes", coreres.BreakerOpen, 5, 5, closed, outcomeSuccess, coreres.BreakerOpen, 5, false},
 		//: one failed probe is the whole answer.
-		{"a failed probe re-opens at once", stateHalfOpen, 0, 5, trial, outcomeFailure, stateOpen, 0, true},
-		{"a threshold of one trips immediately", stateClosed, 0, 1, closed, outcomeFailure, stateOpen, 1, true},
-		{"a neutral outcome changes nothing", stateClosed, 3, 5, closed, outcomeNeutral, stateClosed, 3, false},
-		{"a neutral trial leaves it half-open", stateHalfOpen, 0, 5, trial, outcomeNeutral, stateHalfOpen, 0, false},
+		{"a failed probe re-opens at once", coreres.BreakerHalfOpen, 0, 5, trial, outcomeFailure, coreres.BreakerOpen, 0, true},
+		{"a threshold of one trips immediately", coreres.BreakerClosed, 0, 1, closed, outcomeFailure, coreres.BreakerOpen, 1, true},
+		{"a neutral outcome changes nothing", coreres.BreakerClosed, 3, 5, closed, outcomeNeutral, coreres.BreakerClosed, 3, false},
+		{"a neutral trial leaves it half-open", coreres.BreakerHalfOpen, 0, 5, trial, outcomeNeutral, coreres.BreakerHalfOpen, 0, false},
 		//: stragglers, admitted before the last trip.
-		{"a straggler's success leaves it open", stateOpen, 1, 1, stale, outcomeSuccess, stateOpen, 1, false},
-		{"a straggler's failure does not restart the cooldown", stateOpen, 1, 1, stale, outcomeFailure, stateOpen, 1, false},
-		{"a straggler's success does not close the half-open breaker", stateHalfOpen, 0, 1, stale, outcomeSuccess, stateHalfOpen, 0, false},
-		{"a straggler's failure does not re-open the half-open breaker", stateHalfOpen, 0, 1, stale, outcomeFailure, stateHalfOpen, 0, false},
+		{"a straggler's success leaves it open", coreres.BreakerOpen, 1, 1, stale, outcomeSuccess, coreres.BreakerOpen, 1, false},
+		{"a straggler's failure does not restart the cooldown", coreres.BreakerOpen, 1, 1, stale, outcomeFailure, coreres.BreakerOpen, 1, false},
+		{"a straggler's success does not close the half-open breaker", coreres.BreakerHalfOpen, 0, 1, stale, outcomeSuccess, coreres.BreakerHalfOpen, 0, false},
+		{"a straggler's failure does not re-open the half-open breaker", coreres.BreakerHalfOpen, 0, 1, stale, outcomeFailure, coreres.BreakerHalfOpen, 0, false},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -192,13 +192,14 @@ func Test_circuitBreaker_record(t *testing.T) {
 			state:      c.state,
 			failures:   c.failures,
 			threshold:  c.threshold,
+			cooldown:   time.Minute,
 			openFor:    time.Minute,
 			openedAt:   opened,
 			generation: current,
-			probing:    c.state == stateHalfOpen,
+			probing:    c.state == coreres.BreakerHalfOpen,
 		}
 
-		b.record(c.adm, c.res)
+		b.record(c.adm, c.res, clk.now, false)
 
 		if b.state != c.wantState {
 			t.Errorf("state = %v, want %v", b.state, c.wantState)
@@ -213,7 +214,7 @@ func Test_circuitBreaker_record(t *testing.T) {
 		if c.adm.trial && b.probing {
 			t.Error("the trial's slot was not freed")
 		}
-		if !c.adm.trial && c.wantState == stateHalfOpen && !b.probing {
+		if !c.adm.trial && c.wantState == coreres.BreakerHalfOpen && !b.probing {
 			t.Error("a straggler freed a slot it never held")
 		}
 	}
@@ -254,14 +255,14 @@ func Test_circuitBreaker_Run(t *testing.T) {
 			name:      "successes keep it closed",
 			outcomes:  []error{nil, nil, nil},
 			threshold: 2,
-			wantState: stateClosed,
+			wantState: coreres.BreakerClosed,
 			wantRuns:  3,
 		},
 		{
 			name:      "consecutive failures trip it",
 			outcomes:  []error{transient, transient},
 			threshold: 2,
-			wantState: stateOpen,
+			wantState: coreres.BreakerOpen,
 			wantRuns:  2,
 		},
 		{
@@ -269,14 +270,14 @@ func Test_circuitBreaker_Run(t *testing.T) {
 			name:      "an open breaker rejects without running the operation",
 			outcomes:  []error{transient, transient, transient},
 			threshold: 2,
-			wantState: stateOpen,
+			wantState: coreres.BreakerOpen,
 			wantRuns:  2,
 		},
 		{
 			name:      "a success resets the count",
 			outcomes:  []error{transient, nil, transient},
 			threshold: 2,
-			wantState: stateClosed,
+			wantState: coreres.BreakerClosed,
 			wantRuns:  3,
 		},
 		{
@@ -285,7 +286,7 @@ func Test_circuitBreaker_Run(t *testing.T) {
 			outcomes:  []error{permanent, permanent, permanent, permanent},
 			retryable: func(err error) bool { return errors.Is(err, transient) },
 			threshold: 2,
-			wantState: stateClosed,
+			wantState: coreres.BreakerClosed,
 			wantRuns:  4,
 		},
 	}
@@ -296,7 +297,9 @@ func Test_circuitBreaker_Run(t *testing.T) {
 			clk:       clk,
 			retryable: c.retryable,
 			threshold: c.threshold,
+			cooldown:  time.Minute,
 			openFor:   time.Minute,
+			state:     coreres.BreakerClosed,
 		}
 
 		runs := 0
@@ -347,13 +350,13 @@ func Test_circuitBreaker_RunRecovers(t *testing.T) {
 		wantState     breakerState
 	}
 	tests := []tc{
-		{"a successful probe closes it", true, stateClosed},
-		{"a failed probe re-opens it", false, stateOpen},
+		{"a successful probe closes it", true, coreres.BreakerClosed},
+		{"a failed probe re-opens it", false, coreres.BreakerOpen},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		clk := &steppedClock{now: time.Unix(1_700_000_000, 0)}
-		b := &circuitBreaker{clk: clk, threshold: 2, openFor: time.Minute}
+		b := &circuitBreaker{clk: clk, threshold: 2, cooldown: time.Minute, openFor: time.Minute, state: coreres.BreakerClosed}
 
 		//: trip it. The failures are the point; their errors are the
 		//: operation's own and are asserted by the state below.

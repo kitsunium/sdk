@@ -246,6 +246,59 @@ Sources: [gRFC A6 — client retries, §Throttling](https://github.com/grpc/prop
 [Google SRE book — Handling Overload, §Deciding to Retry](https://sre.google/sre-book/handling-overload/),
 [Amazon Builders' Library — Timeouts, retries, and backoff with jitter](https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/).
 
+## Amendment — 2026-10-21: the breaker opens on a rate, and says where it stands ([issue 480](https://github.com/kitsunium/sdk/issues/480))
+
+The breaker opened only on `FailureThreshold` CONSECUTIVE failures, with a
+fixed cooldown and a state nobody could read. A dependency failing every
+other call never opened it, nor one answering every call a minute late; a
+readiness probe could not report it, and an operator could not force it. The
+amendment adds no policy and no code range — `PolicyMisconfigured` names the
+refused field, as it already did:
+
+- **`BreakerConfig.Window *BreakerWindowValue{Size, Buckets, MinCalls,
+  FailureRatio, SlowAfter, SlowRatio}`.** Nil is the consecutive breaker,
+  unchanged (ADR 0040 admits the field). Set, the breaker counts the calls
+  that ENDED in the last `Size`, kept in `Buckets` time slots on its injected
+  clock (ADR 0090), and opens when the window holds at least `MinCalls` and
+  the failure rate reaches `FailureRatio` or the rate of calls lasting
+  `SlowAfter` or more reaches `SlowRatio`. A zero field takes a published
+  default: Polly v8's `SamplingDuration` 30 s, its ten sampling windows,
+  `MinimumThroughput` 100 and `FailureRatio` 0.1; resilience4j's
+  `slowCallDurationThreshold` 60 s and `slowCallRateThreshold` 100 %. A
+  negative value, a ratio outside (0, 1] or NaN, more than 1000 buckets, or a
+  `Size` too short to split is refused (ADR 0031). Neutral calls (#477) stay
+  out of the window, the window empties on every change of phase, and a
+  HalfOpen trial lasting `SlowAfter` fails the trial. Time slots rather than a
+  count of calls: Polly v8 and gobreaker v2 chose the same, and it describes
+  the dependency now whatever the traffic.
+- **`BreakerState`, a sibling port of `Runner`** in `core/app/resilience`
+  (ADR 0039): `State() BreakerStateValue` — `Phase` (`BreakerClosed`,
+  `BreakerOpen`, `BreakerHalfOpen`, from 1 so the zero reads "unknown"),
+  `Isolated`, `Calls`, `Failures`, `SlowCalls`, `Trips`, `OpenUntil` —,
+  `Isolate()` — Open with no cooldown and no trial until `Reset` — and
+  `Reset()`. Both controls start a generation, so a call in flight across
+  them is a straggler (#467). The breaker's Runner implements it; a refused
+  breaker does not.
+- **`BreakerConfig.OnStateChange func(from, to BreakerPhase)`**, called
+  outside the breaker's lock, one call at a time, in the order of the
+  changes: each change is queued under the lock and the goroutine that
+  queued the first undelivered one hands the queue out after unlocking. A
+  listener may call the breaker back.
+- **`BreakerConfig.OpenBackoff *Backoff`** (the issue's P3): the n-th opening
+  since the breaker last closed lasts `OpenBackoff.Delay(n)`, so a dependency
+  failing its trials is probed less and less often, up to `MaxDelay`, which
+  is required with `BaseDelay`. Polly's `BreakDurationGenerator` and
+  failsafe-go's delay function are the same lever. `HalfOpenTrials` (more
+  than one trial) stays deferred with #482.
+
+Measured in `pkg/v1/app/resilience/BENCH.md`: the window's closed path is
+allocation-free and costs two clock reads more than the consecutive one;
+the consecutive path pays 2 ns more than before, allocation-free still.
+
+Sources: [Polly — circuit breaker strategy](https://www.pollydocs.org/strategies/circuit-breaker.html),
+[resilience4j — CircuitBreaker](https://resilience4j.readme.io/docs/circuitbreaker),
+[gobreaker v2](https://github.com/sony/gobreaker).
+
 ## Extension — `fallback` and `hedging` (Decision 2 now names seven policies)
 
 Two compositions landed after the original five, in the same shape (concrete

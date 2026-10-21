@@ -1,13 +1,8 @@
 package resilience
 
-// breakerState is the circuit-breaker state machine value.
-type breakerState int
+import coreres "github.com/kitsunium/sdk/internal/core/app/resilience"
 
-const (
-	// stateClosed passes calls through and counts failures.
-	stateClosed breakerState = iota
-	// stateOpen rejects calls fast until the cooldown elapses.
-	stateOpen
-	// stateHalfOpen admits a single trial call to probe recovery.
-	stateHalfOpen
-)
+// breakerState is the circuit-breaker state machine value: the phase the core
+// publishes — coreres.BreakerClosed, BreakerOpen, BreakerHalfOpen —, so State
+// reports what the machine holds without a translation.
+type breakerState = coreres.BreakerPhase

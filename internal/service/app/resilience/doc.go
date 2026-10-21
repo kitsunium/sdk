@@ -7,6 +7,12 @@
 //
 // Package resilience — circuit-breaker state machine values.
 //
+// Package resilience — the circuit breaker's sliding window: time slots on
+// the breaker's clock, the oldest dropped as time moves past it.
+//
+// Package resilience — what the circuit breaker reports, what an operator
+// forces on it, and the changes of phase it delivers outside its lock.
+//
 // Package resilience — bulkhead (bounded-concurrency) policy.
 //
 // Package resilience — fallback (secondary-operation) policy.

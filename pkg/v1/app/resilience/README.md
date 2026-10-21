@@ -125,8 +125,27 @@ A retry the budget refuses ends the call with [RetryBudgetExceeded](#RetryBudget
 
 A call that ends in context.Canceled once the caller's own context is closed is neutral to the circuit breaker — a wave of disconnecting clients cannot open it on a healthy dependency — and the timeout reports the caller's own context error rather than TimeoutExceeded when the caller's context finished first. A context.DeadlineExceeded from the dependency stays a failure.
 
+### A breaker that opens on a rate, and says where it stands
+
+A breaker counting CONSECUTIVE failures never opens on a dependency that fails every other call, nor on one that answers every call a minute late. [BreakerConfig](#BreakerConfig).Window opens it on a rate instead — of failures, or of slow calls — over a sliding window on the breaker's clock, once enough calls were seen for a rate to mean something:
+
+```
+b := resilience.NewCircuitBreaker(resilience.BreakerConfig{
+    Window: &resilience.BreakerWindowValue{
+        Size: 30 * time.Second, MinCalls: 20, FailureRatio: 0.5,
+        SlowAfter: 2 * time.Second, SlowRatio: 0.8,
+    },
+    OnStateChange: func(from, to resilience.BreakerPhase) { log.Info("breaker", "from", from, "to", to) },
+})
+state := b.(resilience.BreakerState)
+ready := state.State().Phase != resilience.BreakerOpen // a readiness check
+```
+
+A nil Window is the consecutive-failure breaker, unchanged. The Runner is a [BreakerState](#BreakerState): State reports the phase and its counts, Isolate opens it by hand until Reset, and [BreakerConfig](#BreakerConfig).OnStateChange hears each change of phase in order, outside the breaker's lock. [BreakerConfig](#BreakerConfig).OpenBackoff lengthens each opening while the trials keep failing.
+
 ## Index
 
+- [Constants](<#constants>)
 - [Variables](<#variables>)
 - [func NewBulkhead\(maxConcurrent int\) Runner](<#NewBulkhead>)
 - [func NewCircuitBreaker\(cfg BreakerConfig\) Runner](<#NewCircuitBreaker>)
@@ -142,6 +161,14 @@ A call that ends in context.Canceled once the caller's own context is closed is 
 - [type Backoff](<#Backoff>)
   - [func \(Backoff\) Delay\(attempt int\) time.Duration](<#Backoff.Delay>)
 - [type BreakerConfig](<#BreakerConfig>)
+- [type BreakerPhase](<#BreakerPhase>)
+  - [func \(BreakerPhase\) String\(\) string](<#BreakerPhase.String>)
+- [type BreakerState](<#BreakerState>)
+  - [func \(BreakerState\) Isolate\(\)](<#BreakerState.Isolate>)
+  - [func \(BreakerState\) Reset\(\)](<#BreakerState.Reset>)
+  - [func \(BreakerState\) State\(\) BreakerStateValue](<#BreakerState.State>)
+- [type BreakerStateValue](<#BreakerStateValue>)
+- [type BreakerWindowValue](<#BreakerWindowValue>)
 - [type FallbackConfig](<#FallbackConfig>)
 - [type HedgeConfig](<#HedgeConfig>)
 - [type KeyedRateLimiterConfig](<#KeyedRateLimiterConfig>)
@@ -156,6 +183,35 @@ A call that ends in context.Canceled once the caller's own context is closed is 
 - [type Runner](<#Runner>)
   - [func \(Runner\) Run\(ctx context.Context, op Operation\) error](<#Runner.Run>)
 - [type TimeoutConfig](<#TimeoutConfig>)
+
+## Constants
+
+<a name="BreakerClosed"></a>
+```go
+const BreakerClosed BreakerPhase = 1
+```
+
+BreakerClosed is a breaker admitting every call. The zero BreakerPhase is not it: a phase nobody set reads "unknown".
+
+Initialised with `github.com/kitsunium/sdk/internal/core/app/resilience.BreakerClosed`.
+
+<a name="BreakerHalfOpen"></a>
+```go
+const BreakerHalfOpen BreakerPhase = 3
+```
+
+BreakerHalfOpen is a breaker admitting one trial call at a time.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/app/resilience.BreakerHalfOpen`.
+
+<a name="BreakerOpen"></a>
+```go
+const BreakerOpen BreakerPhase = 2
+```
+
+BreakerOpen is a breaker rejecting every call fast with CircuitOpen.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/app/resilience.BreakerOpen`.
 
 ## Variables
 
@@ -197,7 +253,7 @@ Code `0.2.8.7` · reason `FALLBACK_FAILED` · public "The operation and its fall
 var PolicyMisconfigured *errs.Error
 ```
 
-PolicyMisconfigured is returned by every call to a policy that was built with a configuration it cannot honour — a non-positive RateLimiterConfig .Rate, a non-positive NewTimeout duration, a nil FallbackConfig.Fallback, an unasserted HedgeConfig.Idempotent, a non-positive HedgeConfig.Delay or MaxInFlight, a KeyedRateLimiterConfig without a Key, a MaxKeys or an IdleTimeout, a retry budget built with an unusable MaxTokens or TokenRatio. The operation is not run. Unlike the sentinels above it is permanent, not transient: the fix is at the construction site, never a retry (ADR 0031).
+PolicyMisconfigured is returned by every call to a policy that was built with a configuration it cannot honour — a non-positive RateLimiterConfig .Rate, a non-positive NewTimeout duration, a nil FallbackConfig.Fallback, an unasserted HedgeConfig.Idempotent, a non-positive HedgeConfig.Delay or MaxInFlight, a KeyedRateLimiterConfig without a Key, a MaxKeys or an IdleTimeout, a retry budget built with an unusable MaxTokens or TokenRatio, a BreakerConfig.Window or OpenBackoff with a field out of range. The operation is not run. Unlike the sentinels above it is permanent, not transient: the fix is at the construction site, never a retry (ADR 0031).
 
 Initialised with `github.com/kitsunium/sdk/internal/core/app/resilience.PolicyMisconfigured`.
 
@@ -264,6 +320,8 @@ func NewCircuitBreaker(cfg BreakerConfig) Runner
 ```
 
 NewCircuitBreaker returns a circuit-breaker Runner. An error rejected by cfg.Retryable is returned verbatim and left out of the state machine. HalfOpen runs one trial at a time, and the outcome of a call admitted before the breaker last opened is ignored. A context.Canceled returned once the caller's context is closed counts neither way: the caller left, not the dependency.
+
+A nil cfg.Window opens on FailureThreshold consecutive failures; a Window opens on a rate of failures or of slow calls over a sliding time window. The Runner returned is a BreakerState — State, Isolate, Reset — unless cfg was refused with PolicyMisconfigured.
 
 <a name="NewFallback"></a>
 ## func [NewFallback](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/resilience/gen_facade.go>)
@@ -406,6 +464,9 @@ BreakerConfig is an alias of `github.com/kitsunium/sdk/internal/service/app/resi
 
 ```go
 type BreakerConfig struct {
+	// FailureThreshold is how many consecutive failures open a breaker
+	// without a Window. A non-positive value defaults to 5. It is not read
+	// when Window is set.
 	FailureThreshold int
 	// OpenDuration is how long an Open breaker rejects calls before admitting
 	// one HalfOpen trial. A non-positive value clamps to 30s: a zero cooldown
@@ -426,6 +487,200 @@ type BreakerConfig struct {
 	// Shares its shape with RetryConfig.Retryable so one classifier serves a
 	// nested Retry(Breaker(op)) stack.
 	Retryable        func(error) bool
+	// Window, when set, opens the breaker on a RATE rather than a streak:
+	// of failures, or of slow calls, among the calls a sliding time window
+	// holds. Nil — the zero value — is the consecutive-failure breaker,
+	// exactly as it was before the field existed.
+	//
+	// A streak misses a dependency that fails every other call: S, F, S,
+	// F never reaches a threshold of five, and neither does a dependency
+	// that answers every call, eventually, a minute late. A rate over a
+	// window sees both. The window's fields have defaults of their own,
+	// taken from Polly and resilience4j — see BreakerWindowValue.
+	Window           *BreakerWindowValue
+	// OnStateChange, when set, is called on every change of phase, with the
+	// phase left and the phase entered: Closed to Open on a trip, Open to
+	// HalfOpen when a call is admitted as the trial, HalfOpen to Closed or
+	// Open on its outcome, and whatever Isolate and Reset change.
+	//
+	// It is called outside the breaker's lock, one call at a time and in
+	// the order the changes happened, on the goroutine of the call that
+	// made the change — or of one already delivering an earlier change,
+	// which then delivers this one too. It may call State, Isolate or
+	// Reset. It must not block: a call that changed the phase waits for
+	// it. Nil hears nothing.
+	OnStateChange    func(from coreres.BreakerPhase, to coreres.BreakerPhase)
+	// OpenBackoff, when set, makes each opening last longer than the one
+	// before while the dependency keeps failing its trials: the n-th
+	// opening since the breaker last closed lasts OpenBackoff.Delay(n),
+	// in place of OpenDuration. The count starts over when a trial closes
+	// the breaker, and on Reset.
+	//
+	// Its BaseDelay and its MaxDelay are both required — a zero base is
+	// a cooldown of nothing, and a zero ceiling one that may grow to
+	// centuries — and are refused when not positive, with
+	// PolicyMisconfigured naming the field. Its Multiplier and Jitter
+	// read as BackoffValue reads them. Nil keeps every opening at
+	// OpenDuration.
+	OpenBackoff      *BackoffValue
+}
+```
+
+<a name="BreakerPhase"></a>
+## type [BreakerPhase](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/resilience/gen_facade.go>)
+
+BreakerPhase is the public alias for where a circuit breaker stands.
+
+```go
+type BreakerPhase = coreres.BreakerPhase
+```
+
+BreakerPhase is an alias of `github.com/kitsunium/sdk/internal/core/app/resilience.BreakerPhase`, declared as:
+
+```go
+type BreakerPhase uint8
+```
+
+<a name="BreakerPhase.String"></a>
+### func \(BreakerPhase\) [String](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/resilience/breaker.go>)
+
+```go
+func (BreakerPhase) String() string
+```
+
+String renders the phase for a log line, a readiness body or a metric label: "closed", "open", "half-open". The spellings are stable — a dashboard parses them — and a value this package never mints renders "unknown".
+
+<a name="BreakerState"></a>
+## type [BreakerState](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/resilience/gen_facade.go>)
+
+BreakerState is the public alias for what a circuit breaker says about itself and what an operator may force on it — State, Isolate, Reset. The Runner NewCircuitBreaker returns implements it.
+
+```go
+type BreakerState = coreres.BreakerState
+```
+
+BreakerState is an alias of `github.com/kitsunium/sdk/internal/core/app/resilience.BreakerState`, declared as:
+
+```go
+type BreakerState interface {
+	// Isolate opens the breaker by hand: every call is rejected with
+	// CircuitOpen, with no cooldown and no trial, until Reset. The outcome
+	// of a call admitted before it is ignored.
+	Isolate()
+	// Reset closes the breaker and clears its counts, isolated or not. The
+	// outcome of a call admitted before it is ignored, and an increasing
+	// open duration starts over.
+	Reset()
+	// State reports the breaker's phase and the counts it decides on, as of
+	// the call. It changes nothing: an Open breaker whose cooldown has
+	// elapsed reads Open, with OpenUntil in the past, until the next call
+	// is admitted as its HalfOpen trial.
+	State() BreakerStateValue
+}
+```
+
+<a name="BreakerState.Isolate"></a>
+### func \(BreakerState\) [Isolate](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/resilience/gen_ports.go>)
+
+```go
+func (BreakerState) Isolate()
+```
+
+Isolate opens the breaker by hand: every call is rejected with CircuitOpen, with no cooldown and no trial, until Reset. The outcome of a call admitted before it is ignored.
+
+<a name="BreakerState.Reset"></a>
+### func \(BreakerState\) [Reset](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/resilience/gen_ports.go>)
+
+```go
+func (BreakerState) Reset()
+```
+
+Reset closes the breaker and clears its counts, isolated or not. The outcome of a call admitted before it is ignored, and an increasing open duration starts over.
+
+<a name="BreakerState.State"></a>
+### func \(BreakerState\) [State](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/resilience/gen_ports.go>)
+
+```go
+func (BreakerState) State() BreakerStateValue
+```
+
+State reports the breaker's phase and the counts it decides on, as of the call. It changes nothing: an Open breaker whose cooldown has elapsed reads Open, with OpenUntil in the past, until the next call is admitted as its HalfOpen trial.
+
+<a name="BreakerStateValue"></a>
+## type [BreakerStateValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/resilience/gen_facade.go>)
+
+BreakerStateValue is the public alias for a circuit breaker's reported state.
+
+```go
+type BreakerStateValue = coreres.BreakerStateValue
+```
+
+BreakerStateValue is an alias of `github.com/kitsunium/sdk/internal/core/app/resilience.BreakerStateValue`, declared as:
+
+```go
+type BreakerStateValue struct {
+	// Phase is where the breaker stands.
+	Phase     BreakerPhase
+	// Isolated reports a breaker opened by Isolate: its Phase is
+	// BreakerOpen, and it stays so until Reset, whatever the clock says.
+	Isolated  bool
+	// Calls is how many calls the breaker's sliding window holds — the
+	// successes and failures recorded within it while Closed. A breaker
+	// without a window keeps no such count, and reports zero.
+	Calls     int
+	// Failures is, with a sliding window, how many of Calls failed; without
+	// one, how many failures followed one another since the last success,
+	// the count FailureThreshold is compared to.
+	Failures  int
+	// SlowCalls is how many of Calls lasted at least the window's
+	// SlowAfter, failed or not. Zero without a window.
+	SlowCalls int
+	// Trips counts the times the breaker opened on its own since it was
+	// built — from Closed on its threshold, or from HalfOpen on a failed
+	// trial. Isolate is not a trip.
+	Trips     uint64
+	// OpenUntil is when an Open breaker admits its next HalfOpen trial. It
+	// is zero unless Phase is BreakerOpen, and zero for an isolated one,
+	// which admits nothing until Reset.
+	OpenUntil time.Time
+}
+```
+
+<a name="BreakerWindowValue"></a>
+## type [BreakerWindowValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/resilience/gen_facade.go>)
+
+BreakerWindowValue is the public alias for a circuit breaker's sliding window: the rate of failures, or of slow calls, that opens it.
+
+```go
+type BreakerWindowValue = svcres.BreakerWindowValue
+```
+
+BreakerWindowValue is an alias of `github.com/kitsunium/sdk/internal/service/app/resilience.BreakerWindowValue`, declared as:
+
+```go
+type BreakerWindowValue struct {
+	// Size is how far back the window reaches. Zero is 30 seconds.
+	Size         time.Duration
+	// Buckets is how many slots the window is kept in: a slot leaves the
+	// window whole, so the window reaches back between Size − Size/Buckets
+	// and Size. Zero is 10; more than 1000 is refused, the memory of a
+	// breaker being one slot each.
+	Buckets      int
+	// MinCalls is how many calls the window must hold before a ratio is
+	// read at all: below it, a single failure would be a rate of 100%.
+	// Zero is 100.
+	MinCalls     int
+	// FailureRatio is the share of failed calls, in (0, 1], at or above
+	// which the breaker opens. Zero is 0.1.
+	FailureRatio float64
+	// SlowAfter is the duration, measured on the breaker's clock from
+	// admission to return, at or above which a call is slow, whether it
+	// succeeded or failed. Zero is 60 seconds.
+	SlowAfter    time.Duration
+	// SlowRatio is the share of slow calls, in (0, 1], at or above which
+	// the breaker opens. Zero is 1: only a window where every call was
+	// slow opens it.
+	SlowRatio    float64
 }
 ```
 

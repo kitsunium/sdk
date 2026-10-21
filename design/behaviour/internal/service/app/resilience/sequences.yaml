@@ -2,6 +2,15 @@
 apiVersion: design/behaviour/v1
 sequences:
   - of: NewCircuitBreaker
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewCircuitBreaker
+        kind: self
+      - id: b.configure
+        kind: internal
+      - id: newMisconfigured
+        kind: internal
     steps:
       - bind: clk
         eval: cfg.Clock
@@ -24,7 +33,279 @@ sequences:
             - set: openFor
               value: defaultOpenDuration
           when: openFor <= 0
-      - return: "&circuitBreaker{clk: clk, retryable: cfg.Retryable, threshold: threshold, openFor: openFor}"
+      - bind: b
+        eval: |-
+          &circuitBreaker{
+          		clk: clk, retryable: cfg.Retryable, onChange: cfg.OnStateChange,
+          		threshold: threshold, cooldown: openFor, openFor: openFor, state: coreres.BreakerClosed,
+          	}
+      - opt:
+          do:
+            - return: newMisconfigured(breakerPolicy, knob)
+              to: newMisconfigured
+          init:
+            bind: knob
+            eval: b.configure(cfg)
+            to: b.configure
+          when: knob != ""
+      - return: b
+  - of: (*circuitBreaker).configure
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*circuitBreaker).configure
+        kind: self
+      - id: resolveWindow
+        kind: internal
+      - id: newWindow
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: "\"OpenBackoff.BaseDelay\""
+                when: cfg.OpenBackoff.BaseDelay <= 0
+            - opt:
+                do:
+                  - return: "\"OpenBackoff.MaxDelay\""
+                when: cfg.OpenBackoff.MaxDelay <= 0
+            - bind: curve
+              eval: "*cfg.OpenBackoff"
+            - set: b.backoff
+              value: "&curve"
+          when: cfg.OpenBackoff != nil
+      - opt:
+          do:
+            - bind: settings, knob
+              eval: resolveWindow(*cfg.Window)
+              to: resolveWindow
+            - opt:
+                do:
+                  - return: knob
+                when: knob != ""
+            - set: b.window
+              to: newWindow
+              value: newWindow(settings, b.clk.Now())
+          when: cfg.Window != nil
+      - opt:
+          do:
+            - set: b.queue.changes
+              value: make([]phaseChange, 0, changesCapacity)
+          when: b.onChange != nil
+      - return: "\"\""
+  - of: (*circuitBreaker).State
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*circuitBreaker).State
+        kind: self
+      - id: b.window.advance
+        kind: internal
+      - id: b.openedAt.Add
+        kind: value
+    steps:
+      - lock:
+          mutex: b.mu
+      - bind: v
+        eval: |-
+          coreres.BreakerStateValue{
+          		Phase: b.state, Isolated: b.isolated, Failures: b.failures, Trips: b.trips,
+          	}
+      - opt:
+          do:
+            - eval: b.window.advance(b.clk.Now())
+              to: b.window.advance
+            - set: v.Calls, v.Failures, v.SlowCalls
+              value: b.window.calls, b.window.failures, b.window.slow
+          when: b.window != nil
+      - opt:
+          do:
+            - set: v.OpenUntil
+              to: b.openedAt.Add
+              value: b.openedAt.Add(b.openFor)
+          when: b.state == coreres.BreakerOpen && !b.isolated
+      - return: v
+  - of: (*circuitBreaker).Isolate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*circuitBreaker).Isolate
+        kind: self
+      - id: b.deliverIf
+        kind: internal
+    steps:
+      - eval: b.deliverIf(b.isolate())
+        to: b.deliverIf
+  - of: (*circuitBreaker).isolate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*circuitBreaker).isolate
+        kind: self
+      - id: b.moveTo
+        kind: internal
+      - id: b.claimDelivery
+        kind: internal
+    steps:
+      - lock:
+          mutex: b.mu
+      - set: b.isolated
+        value: "true"
+      - op: ++
+        set: b.generation
+      - set: b.probing
+        value: "false"
+      - eval: b.moveTo(coreres.BreakerOpen)
+        to: b.moveTo
+      - return: b.claimDelivery()
+        to: b.claimDelivery
+  - of: (*circuitBreaker).Reset
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*circuitBreaker).Reset
+        kind: self
+      - id: b.mu.Lock
+        kind: value
+      - id: b.moveTo
+        kind: internal
+      - id: b.window.clear
+        kind: internal
+      - id: b.claimDelivery
+        kind: internal
+      - id: b.mu.Unlock
+        kind: value
+      - id: b.deliverIf
+        kind: internal
+    steps:
+      - eval: b.mu.Lock()
+        to: b.mu.Lock
+      - set: b.isolated
+        value: "false"
+      - op: ++
+        set: b.generation
+      - set: b.probing
+        value: "false"
+      - set: b.failures, b.opens
+        value: 0, 0
+      - set: b.openFor
+        value: b.cooldown
+      - eval: b.moveTo(coreres.BreakerClosed)
+        to: b.moveTo
+      - opt:
+          do:
+            - eval: b.window.clear()
+              to: b.window.clear
+          when: b.window != nil
+      - bind: deliver
+        eval: b.claimDelivery()
+        to: b.claimDelivery
+      - eval: b.mu.Unlock()
+        to: b.mu.Unlock
+      - eval: b.deliverIf(deliver)
+        to: b.deliverIf
+  - of: (*changeQueue).push
+    steps:
+      - set: q.changes
+        value: append(q.changes, change)
+  - of: (*changeQueue).claim
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: q.delivering || q.next == len(q.changes)
+      - set: q.delivering
+        value: "true"
+      - return: "true"
+  - of: (*changeQueue).pop
+    steps:
+      - opt:
+          do:
+            - set: q.changes
+              value: q.changes[:0]
+            - set: q.next
+              value: "0"
+            - set: q.delivering
+              value: "false"
+            - return: phaseChange{}, false
+          when: q.next == len(q.changes)
+      - bind: change
+        eval: q.changes[q.next]
+      - op: ++
+        set: q.next
+      - return: change, true
+  - of: (*circuitBreaker).claimDelivery
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*circuitBreaker).claimDelivery
+        kind: self
+      - id: b.queue.claim
+        kind: internal
+    steps:
+      - return: b.queue.claim()
+        to: b.queue.claim
+  - of: (*circuitBreaker).deliverIf
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*circuitBreaker).deliverIf
+        kind: self
+      - id: b.deliver
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: b.deliver()
+              to: b.deliver
+          when: claimed
+  - of: (*circuitBreaker).deliver
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*circuitBreaker).deliver
+        kind: self
+      - id: b.nextChange
+        kind: internal
+    steps:
+      - bind: drained
+        eval: "false"
+      - defer: |-
+          func() {
+          		//: a normal return already released the claim, under mu.
+          		if !drained {
+          			b.mu.Lock()
+          			b.queue.delivering = false
+          			b.mu.Unlock()
+          		}
+          	}()
+      - loop:
+          do:
+            - bind: change, ok
+              eval: b.nextChange()
+              to: b.nextChange
+            - opt:
+                do:
+                  - set: drained
+                    value: "true"
+                  - return: ""
+                when: "!ok"
+            - eval: b.onChange(change.from, change.to)
+          forever: true
+  - of: (*circuitBreaker).nextChange
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*circuitBreaker).nextChange
+        kind: self
+      - id: b.queue.pop
+        kind: internal
+    steps:
+      - lock:
+          mutex: b.mu
+      - return: b.queue.pop()
+        to: b.queue.pop
   - of: (*circuitBreaker).Run
     participants:
       - id: caller
@@ -33,11 +314,13 @@ sequences:
         kind: self
       - id: b.allow
         kind: internal
+      - id: b.deliverIf
+        kind: internal
       - id: wrapAs
         kind: internal
-      - id: b.release
+      - id: b.runTrial
         kind: internal
-      - id: b.record
+      - id: b.runTimed
         kind: internal
     steps:
       - bind: adm, ok
@@ -45,22 +328,97 @@ sequences:
         to: b.allow
       - opt:
           do:
+            - eval: b.deliverIf(adm.deliver)
+              to: b.deliverIf
             - return: wrapAs(coreres.CircuitOpen, nil)
               to: wrapAs
           when: "!ok"
-      - bind: settled
-        eval: "false"
       - opt:
           do:
-            - defer: b.release(adm, &settled)
-              to: b.release
+            - return: b.runTrial(ctx, op, adm)
+              to: b.runTrial
           when: adm.trial
+      - opt:
+          do:
+            - return: b.runTimed(ctx, op, adm)
+              to: b.runTimed
+          when: b.window != nil
       - bind: err
         eval: op(ctx)
-      - eval: b.record(adm, b.classify(ctx, err))
+      - eval: b.deliverIf(b.record(adm, b.classify(ctx, err), time.Time{}, false))
+        to: b.deliverIf
+      - return: err
+  - of: (*circuitBreaker).runTimed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*circuitBreaker).runTimed
+        kind: self
+      - id: b.clk.Now
+        kind: value
+      - id: b.deliverIf
+        kind: internal
+    steps:
+      - bind: start
+        eval: b.clk.Now()
+        to: b.clk.Now
+      - bind: err
+        eval: op(ctx)
+      - bind: end
+        eval: b.clk.Now()
+        to: b.clk.Now
+      - eval: b.deliverIf(b.record(adm, b.classify(ctx, err), end, end.Sub(start) >= b.window.slowAfter))
+        to: b.deliverIf
+      - return: err
+  - of: (*circuitBreaker).runTrial
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*circuitBreaker).runTrial
+        kind: self
+      - id: b.release
+        kind: internal
+      - id: b.deliverIf
+        kind: internal
+      - id: b.clk.Now
+        kind: value
+      - id: b.record
+        kind: internal
+    steps:
+      - bind: settled
+        eval: "false"
+      - defer: b.release(adm, &settled)
+        to: b.release
+      - eval: b.deliverIf(adm.deliver)
+        to: b.deliverIf
+      - var:
+          name: start
+          type: time.Time
+      - opt:
+          do:
+            - set: start
+              to: b.clk.Now
+              value: b.clk.Now()
+          when: b.window != nil
+      - bind: err
+        eval: op(ctx)
+      - bind: end, slow
+        eval: start, false
+      - opt:
+          do:
+            - set: end
+              to: b.clk.Now
+              value: b.clk.Now()
+            - set: slow
+              value: end.Sub(start) >= b.window.slowAfter
+          when: b.window != nil
+      - bind: deliver
+        eval: b.record(adm, b.classify(ctx, err), end, slow)
         to: b.record
       - set: settled
         value: "true"
+      - eval: b.deliverIf(deliver)
+        to: b.deliverIf
       - return: err
   - of: (*circuitBreaker).classify
     steps:
@@ -78,60 +436,71 @@ sequences:
           when: isRetryable(b.retryable, err)
       - return: outcomeNeutral
   - of: (*circuitBreaker).allow
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*circuitBreaker).allow
+        kind: self
+      - id: b.moveTo
+        kind: internal
     steps:
       - lock:
           mutex: b.mu
       - opt:
           do:
-            - opt:
-                do:
-                  - return: admission{}, false
-                when: b.clk.Since(b.openedAt) < b.openFor
-            - set: b.state
-              value: stateHalfOpen
-            - set: b.probing
-              value: "false"
-          when: b.state == stateOpen
+            - return: "admission{generation: b.generation}, true"
+          when: b.state == coreres.BreakerClosed
       - opt:
           do:
             - opt:
                 do:
                   - return: admission{}, false
-                when: b.probing
+                when: b.isolated || b.clk.Since(b.openedAt) < b.openFor
+            - eval: b.moveTo(coreres.BreakerHalfOpen)
+              to: b.moveTo
             - set: b.probing
-              value: "true"
-            - return: "admission{generation: b.generation, trial: true}, true"
-          when: b.state == stateHalfOpen
-      - return: "admission{generation: b.generation}, true"
+              value: "false"
+          when: b.state == coreres.BreakerOpen
+      - opt:
+          do:
+            - return: "admission{deliver: b.claimDelivery()}, false"
+          when: b.probing
+      - set: b.probing
+        value: "true"
+      - return: "admission{generation: b.generation, trial: true, deliver: b.claimDelivery()}, true"
   - of: (*circuitBreaker).release
     participants:
       - id: caller
         kind: actor
       - id: (*circuitBreaker).release
         kind: self
-      - id: b.record
+      - id: b.deliverIf
         kind: internal
     steps:
       - opt:
           do:
             - return: ""
           when: "*settled"
-      - eval: b.record(adm, outcomeNeutral)
-        to: b.record
+      - eval: b.deliverIf(b.record(adm, outcomeNeutral, time.Time{}, false))
+        to: b.deliverIf
   - of: (*circuitBreaker).record
     participants:
       - id: caller
         kind: actor
       - id: (*circuitBreaker).record
         kind: self
+      - id: b.succeed
+        kind: internal
       - id: b.fail
+        kind: internal
+      - id: b.claimDelivery
         kind: internal
     steps:
       - lock:
           mutex: b.mu
       - opt:
           do:
-            - return: ""
+            - return: "false"
           when: adm.generation != b.generation
       - opt:
           do:
@@ -142,19 +511,69 @@ sequences:
           cases:
             - case: outcomeSuccess
               do:
-                - opt:
-                    do:
-                      - set: b.state
-                        value: stateClosed
-                      - set: b.failures
-                        value: "0"
-                    when: b.state == stateClosed || (b.state == stateHalfOpen && adm.trial)
+                - eval: b.succeed(adm, end, slow)
+                  to: b.succeed
             - case: outcomeFailure
               do:
-                - eval: b.fail()
+                - eval: b.fail(end, slow)
                   to: b.fail
             - case: outcomeNeutral
           "on": res
+      - return: b.claimDelivery()
+        to: b.claimDelivery
+  - of: (*circuitBreaker).succeed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*circuitBreaker).succeed
+        kind: self
+      - id: b.settleTrial
+        kind: internal
+      - id: b.trip
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: coreres.BreakerHalfOpen
+              do:
+                - eval: b.settleTrial(adm, slow)
+                  to: b.settleTrial
+            - case: coreres.BreakerClosed
+              do:
+                - set: b.failures
+                  value: "0"
+                - opt:
+                    do:
+                      - eval: b.trip()
+                        to: b.trip
+                    when: b.window != nil && b.window.add(now, false, slow)
+            - case: coreres.BreakerOpen
+          "on": b.state
+  - of: (*circuitBreaker).settleTrial
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*circuitBreaker).settleTrial
+        kind: self
+      - id: b.trip
+        kind: internal
+      - id: b.moveTo
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!adm.trial"
+      - opt:
+          do:
+            - eval: b.trip()
+              to: b.trip
+            - return: ""
+          when: slow
+      - set: b.failures, b.opens
+        value: 0, 0
+      - eval: b.moveTo(coreres.BreakerClosed)
+        to: b.moveTo
   - of: (*circuitBreaker).fail
     participants:
       - id: caller
@@ -166,12 +585,21 @@ sequences:
     steps:
       - switch:
           cases:
-            - case: stateHalfOpen
+            - case: coreres.BreakerHalfOpen
               do:
                 - eval: b.trip()
                   to: b.trip
-            - case: stateClosed
+            - case: coreres.BreakerClosed
               do:
+                - opt:
+                    do:
+                      - opt:
+                          do:
+                            - eval: b.trip()
+                              to: b.trip
+                          when: b.window.add(now, true, slow)
+                      - return: ""
+                    when: b.window != nil
                 - op: ++
                   set: b.failures
                 - opt:
@@ -179,7 +607,7 @@ sequences:
                       - eval: b.trip()
                         to: b.trip
                     when: b.failures >= b.threshold
-            - case: stateOpen
+            - case: coreres.BreakerOpen
           "on": b.state
   - of: (*circuitBreaker).trip
     participants:
@@ -189,9 +617,11 @@ sequences:
         kind: self
       - id: b.clk.Now
         kind: value
+      - id: b.cooldownFor
+        kind: internal
+      - id: b.moveTo
+        kind: internal
     steps:
-      - set: b.state
-        value: stateOpen
       - set: b.openedAt
         to: b.clk.Now
         value: b.clk.Now()
@@ -199,6 +629,273 @@ sequences:
         set: b.generation
       - set: b.probing
         value: "false"
+      - op: ++
+        set: b.trips
+      - op: ++
+        set: b.opens
+      - set: b.openFor
+        to: b.cooldownFor
+        value: b.cooldownFor(b.opens)
+      - eval: b.moveTo(coreres.BreakerOpen)
+        to: b.moveTo
+  - of: (*circuitBreaker).cooldownFor
+    steps:
+      - opt:
+          do:
+            - return: b.cooldown
+          when: b.backoff == nil
+      - return: max(b.backoff.Delay(opens), time.Nanosecond)
+  - of: (*circuitBreaker).moveTo
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*circuitBreaker).moveTo
+        kind: self
+      - id: b.window.clear
+        kind: internal
+      - id: b.queue.push
+        kind: internal
+    steps:
+      - bind: from
+        eval: b.state
+      - set: b.state
+        value: to
+      - opt:
+          do:
+            - eval: b.window.clear()
+              to: b.window.clear
+          when: b.window != nil
+      - opt:
+          do:
+            - eval: "b.queue.push(phaseChange{from: from, to: to})"
+              to: b.queue.push
+          when: b.onChange != nil && from != to
+  - of: resolveWindow
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolveWindow
+        kind: self
+      - id: reachRefusal
+        kind: internal
+      - id: thresholdRefusal
+        kind: internal
+    steps:
+      - bind: settings
+        eval: |-
+          windowSettings{
+          		size:         orDuration(w.Size, defaultWindowSize),
+          		buckets:      orInt(w.Buckets, defaultWindowBuckets),
+          		minCalls:     orInt(w.MinCalls, defaultMinCalls),
+          		failureRatio: orRatio(w.FailureRatio, defaultFailureRatio),
+          		slowAfter:    orDuration(w.SlowAfter, defaultSlowAfter),
+          		slowRatio:    orRatio(w.SlowRatio, defaultSlowRatio),
+          	}
+      - opt:
+          do:
+            - return: settings, knob
+          init:
+            bind: knob, refused
+            eval: reachRefusal(settings)
+            to: reachRefusal
+          when: refused
+      - bind: knob, _
+        eval: thresholdRefusal(settings)
+        to: thresholdRefusal
+      - return: settings, knob
+  - of: reachRefusal
+    steps:
+      - switch:
+          cases:
+            - case: settings.buckets < 0 || settings.buckets > maxWindowBuckets
+              do:
+                - return: "\"Window.Buckets\", true"
+            - case: settings.size < 0 || settings.size/time.Duration(settings.buckets) <= 0
+              do:
+                - return: "\"Window.Size\", true"
+            - default: true
+              do:
+                - return: "\"\", false"
+  - of: thresholdRefusal
+    steps:
+      - switch:
+          cases:
+            - case: settings.minCalls < 0
+              do:
+                - return: "\"Window.MinCalls\", true"
+            - case: "!validRatio(settings.failureRatio)"
+              do:
+                - return: "\"Window.FailureRatio\", true"
+            - case: settings.slowAfter < 0
+              do:
+                - return: "\"Window.SlowAfter\", true"
+            - case: "!validRatio(settings.slowRatio)"
+              do:
+                - return: "\"Window.SlowRatio\", true"
+            - default: true
+              do:
+                - return: "\"\", false"
+  - of: orDuration
+    steps:
+      - opt:
+          do:
+            - return: def
+          when: d == 0
+      - return: d
+  - of: orInt
+    steps:
+      - opt:
+          do:
+            - return: def
+          when: n == 0
+      - return: "n"
+  - of: orRatio
+    steps:
+      - opt:
+          do:
+            - return: def
+          when: r == 0
+      - return: r
+  - of: validRatio
+    steps:
+      - return: r > 0 && r <= 1 && !math.IsNaN(r)
+  - of: newWindow
+    steps:
+      - bind: width
+        eval: s.size / time.Duration(s.buckets)
+      - return: |-
+          &slidingWindow{
+          		buckets:      make([]windowBucket, s.buckets),
+          		width:        width,
+          		origin:       origin,
+          		headEnd:      width,
+          		minCalls:     s.minCalls,
+          		failureRatio: s.failureRatio,
+          		slowAfter:    s.slowAfter,
+          		slowRatio:    s.slowRatio,
+          	}
+  - of: (*slidingWindow).advance
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*slidingWindow).advance
+        kind: self
+      - id: now.Sub
+        kind: value
+      - id: w.clear
+        kind: internal
+      - id: w.drop
+        kind: internal
+      - id: epochEnd
+        kind: internal
+    steps:
+      - bind: "n"
+        eval: int64(len(w.buckets))
+      - bind: elapsed
+        eval: now.Sub(w.origin)
+        to: now.Sub
+      - opt:
+          do:
+            - return: "&w.buckets[w.head%n]"
+          when: elapsed < w.headEnd
+      - bind: epoch
+        eval: int64(elapsed / w.width)
+      - set: w.moved
+        value: "true"
+      - alt:
+          - do:
+              - eval: w.clear()
+                to: w.clear
+            when: epoch-w.head >= n
+          - do:
+              - loop:
+                  cond: e <= epoch
+                  do:
+                    - eval: w.drop(&w.buckets[e%n])
+                      to: w.drop
+                  init: e := w.head + 1
+                  post: e++
+            else: true
+      - set: w.head
+        value: epoch
+      - set: w.headEnd
+        to: epochEnd
+        value: epochEnd(epoch, w.width)
+      - return: "&w.buckets[epoch%n]"
+  - of: epochEnd
+    steps:
+      - opt:
+          do:
+            - return: math.MaxInt64
+          when: epoch >= int64(math.MaxInt64/width)-1
+      - return: time.Duration(epoch+1) * width
+  - of: (*slidingWindow).drop
+    steps:
+      - op: "-="
+        set: w.calls
+        value: b.calls
+      - op: "-="
+        set: w.failures
+        value: b.failures
+      - op: "-="
+        set: w.slow
+        value: b.slow
+      - set: "*b"
+        value: windowBucket{}
+  - of: (*slidingWindow).clear
+    steps:
+      - eval: clear(w.buckets)
+      - set: w.calls, w.failures, w.slow
+        value: 0, 0, 0
+  - of: (*slidingWindow).add
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*slidingWindow).add
+        kind: self
+      - id: w.advance
+        kind: internal
+      - id: w.tripped
+        kind: internal
+    steps:
+      - bind: b
+        eval: w.advance(now)
+        to: w.advance
+      - op: ++
+        set: b.calls
+      - op: ++
+        set: w.calls
+      - opt:
+          do:
+            - op: ++
+              set: b.failures
+            - op: ++
+              set: w.failures
+          when: failed
+      - opt:
+          do:
+            - op: ++
+              set: b.slow
+            - op: ++
+              set: w.slow
+          when: slow
+      - opt:
+          do:
+            - return: "false"
+          when: "!failed && !slow && !w.moved && w.calls != w.minCalls"
+      - set: w.moved
+        value: "false"
+      - return: w.tripped()
+        to: w.tripped
+  - of: (*slidingWindow).tripped
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: w.calls < w.minCalls
+      - bind: total
+        eval: float64(w.calls)
+      - return: float64(w.failures)/total >= w.failureRatio || float64(w.slow)/total >= w.slowRatio
   - of: NewBulkhead
     steps:
       - opt:

@@ -855,7 +855,7 @@
       "dir": "service/app/resilience",
       "layer": "service",
       "family": "app",
-      "doc": "Package resilience — the exponential backoff every waiting policy computes,\nre-exported from the kernel package that owns it.\n\nPackage resilience — circuit-breaker policy.\n\nPackage resilience — circuit-breaker configuration.\n\nPackage resilience — circuit-breaker state machine values.\n\nPackage resilience — bulkhead (bounded-concurrency) policy.\n\nPackage resilience — fallback (secondary-operation) policy.\n\nPackage resilience — fallback policy configuration.\n\nPackage resilience — hedging (duplicate-request racing) policy.\n\nPackage resilience — hedging policy configuration.\n\nPackage resilience — what one hedged attempt reports back to the race.\n\nPackage resilience — the per-call bookkeeping of a hedged race.\n\nPackage resilience — the keyed rate limiter: one token bucket per caller,\nwith the set of callers bounded and idle ones forgotten.\n\nPackage resilience — keyed rate-limiter configuration.\n\nPackage resilience — the Runner returned when a policy cannot be honoured.\n\nPackage resilience — token-bucket rate-limit policy.\n\nPackage resilience — token-bucket rate-limiter configuration.\n\nPackage resilience — retry-with-exponential-backoff policy.\n\nPackage resilience — retry policy configuration.\n\nPackage resilience — shared retryable-error classification helper.\n\nPackage resilience provides the concrete reliability policies (retry,\ncircuit-breaker, rate-limit, bulkhead, timeout, fallback, hedging)\nimplementing core/app/resilience.Runner. Each constructor returns a Runner;\npolicies compose by nesting. ADR 0026. Cross-OS: 100% portable (context,\ntime, sync, atomic).\n\nHedging is the one policy that runs the Operation CONCURRENTLY with itself,\nso it is correct only on an idempotent Operation; HedgeConfig.Idempotent\nmakes the caller say so in code (ADR 0031's rule applied to a precondition\nthe SDK cannot check).\n\nPackage resilience — shared sentinel-wrapping helper.\n"
+      "doc": "Package resilience — the exponential backoff every waiting policy computes,\nre-exported from the kernel package that owns it.\n\nPackage resilience — circuit-breaker policy.\n\nPackage resilience — circuit-breaker configuration.\n\nPackage resilience — circuit-breaker state machine values.\n\nPackage resilience — the circuit breaker's sliding window: time slots on\nthe breaker's clock, the oldest dropped as time moves past it.\n\nPackage resilience — what the circuit breaker reports, what an operator\nforces on it, and the changes of phase it delivers outside its lock.\n\nPackage resilience — bulkhead (bounded-concurrency) policy.\n\nPackage resilience — fallback (secondary-operation) policy.\n\nPackage resilience — fallback policy configuration.\n\nPackage resilience — hedging (duplicate-request racing) policy.\n\nPackage resilience — hedging policy configuration.\n\nPackage resilience — what one hedged attempt reports back to the race.\n\nPackage resilience — the per-call bookkeeping of a hedged race.\n\nPackage resilience — the keyed rate limiter: one token bucket per caller,\nwith the set of callers bounded and idle ones forgotten.\n\nPackage resilience — keyed rate-limiter configuration.\n\nPackage resilience — the Runner returned when a policy cannot be honoured.\n\nPackage resilience — token-bucket rate-limit policy.\n\nPackage resilience — token-bucket rate-limiter configuration.\n\nPackage resilience — retry-with-exponential-backoff policy.\n\nPackage resilience — retry policy configuration.\n\nPackage resilience — shared retryable-error classification helper.\n\nPackage resilience provides the concrete reliability policies (retry,\ncircuit-breaker, rate-limit, bulkhead, timeout, fallback, hedging)\nimplementing core/app/resilience.Runner. Each constructor returns a Runner;\npolicies compose by nesting. ADR 0026. Cross-OS: 100% portable (context,\ntime, sync, atomic).\n\nHedging is the one policy that runs the Operation CONCURRENTLY with itself,\nso it is correct only on an idempotent Operation; HedgeConfig.Idempotent\nmakes the caller say so in code (ADR 0031's rule applied to a precondition\nthe SDK cannot check).\n\nPackage resilience — shared sentinel-wrapping helper.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/service/app/scheduler",
@@ -11464,6 +11464,170 @@
       },
       "doc": "TransportPanicked is the failure of an attempt whose transport\npanicked. The spool recovers it so the attempt fails like any other —\nretried after its backoff, dead-lettered after the last — and so the\nconsumer and every other mail are untouched. The value and the stack\ntravel as fields, never in the Public text a mailbox may show.\n",
       "file": "core/app/mail/spool/gen_codes.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/resilience.BreakerClosed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/app/resilience",
+      "name": "BreakerClosed",
+      "spelled": "BreakerPhase",
+      "canonical": "github.com/kitsunium/sdk/internal/core/app/resilience.BreakerPhase",
+      "value": "1",
+      "doc": "BreakerClosed is a breaker that admits every call and counts their\noutcomes. The run starts at iota+1: the zero is left unclaimed, so a\nBreakerPhase nobody set reads \"unknown\", never \"closed\" — a forgotten\nassignment must not read as a healthy dependency (ADR 0031).\n",
+      "file": "core/app/resilience/breaker.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/resilience.BreakerHalfOpen",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/app/resilience",
+      "name": "BreakerHalfOpen",
+      "spelled": "BreakerPhase",
+      "canonical": "github.com/kitsunium/sdk/internal/core/app/resilience.BreakerPhase",
+      "value": "3",
+      "doc": "BreakerHalfOpen is a breaker whose cooldown elapsed: it admits ONE trial\ncall at a time, whose success closes it and whose failure opens it again.\n",
+      "file": "core/app/resilience/breaker.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/resilience.BreakerOpen",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/app/resilience",
+      "name": "BreakerOpen",
+      "spelled": "BreakerPhase",
+      "canonical": "github.com/kitsunium/sdk/internal/core/app/resilience.BreakerPhase",
+      "value": "2",
+      "doc": "BreakerOpen is a breaker that rejects every call fast with CircuitOpen:\nuntil its cooldown elapses after a trip, or until Reset after Isolate.\n",
+      "file": "core/app/resilience/breaker.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/resilience.BreakerPhase",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/app/resilience",
+      "name": "BreakerPhase",
+      "spelled": "uint8",
+      "canonical": "uint8",
+      "doc": "BreakerPhase is where a circuit breaker stands: BreakerClosed,\nBreakerOpen or BreakerHalfOpen. The zero value is none of them.\n",
+      "file": "core/app/resilience/breaker.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/resilience.BreakerPhase.String",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/app/resilience",
+      "name": "String",
+      "recv": "BreakerPhase",
+      "spelled": "func() string",
+      "canonical": "func() string",
+      "doc": "String renders the phase for a log line, a readiness body or a metric\nlabel: \"closed\", \"open\", \"half-open\". The spellings are stable — a\ndashboard parses them — and a value this package never mints renders\n\"unknown\".\n",
+      "file": "core/app/resilience/breaker.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/resilience.BreakerState",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/app/resilience",
+      "name": "BreakerState",
+      "spelled": "interface{Isolate(); Reset(); State() BreakerStateValue}",
+      "canonical": "interface{Isolate(); Reset(); State() github.com/kitsunium/sdk/internal/core/app/resilience.BreakerStateValue}",
+      "doc": "BreakerState is what a circuit breaker says about itself and what an\noperator may do to it: read its state, isolate it, reset it. The\nbreaker NewCircuitBreaker returns implements it beside Runner; a caller\nreaches it with a type assertion on that Runner.\n\nA sibling of Runner rather than a widening of it (ADR 0039): a Runner\nruns Operations, and six of the seven policies have no state an\noperator could read or force.\n\nImplementations MUST be safe for concurrent use with Run.\n",
+      "file": "core/app/resilience/gen_ports.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/resilience.BreakerState.Isolate",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/app/resilience",
+      "name": "Isolate",
+      "recv": "BreakerState",
+      "spelled": "func()",
+      "canonical": "func()",
+      "doc": "Isolate opens the breaker by hand: every call is rejected with\nCircuitOpen, with no cooldown and no trial, until Reset. The outcome\nof a call admitted before it is ignored.\n",
+      "file": "core/app/resilience/gen_ports.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/resilience.BreakerState.Reset",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/app/resilience",
+      "name": "Reset",
+      "recv": "BreakerState",
+      "spelled": "func()",
+      "canonical": "func()",
+      "doc": "Reset closes the breaker and clears its counts, isolated or not. The\noutcome of a call admitted before it is ignored, and an increasing\nopen duration starts over.\n",
+      "file": "core/app/resilience/gen_ports.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/resilience.BreakerState.State",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/app/resilience",
+      "name": "State",
+      "recv": "BreakerState",
+      "spelled": "func() BreakerStateValue",
+      "canonical": "func() github.com/kitsunium/sdk/internal/core/app/resilience.BreakerStateValue",
+      "doc": "State reports the breaker's phase and the counts it decides on, as of\nthe call. It changes nothing: an Open breaker whose cooldown has\nelapsed reads Open, with OpenUntil in the past, until the next call\nis admitted as its HalfOpen trial.\n",
+      "file": "core/app/resilience/gen_ports.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/resilience.BreakerStateValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/app/resilience",
+      "name": "BreakerStateValue",
+      "spelled": "struct{Phase BreakerPhase; Isolated bool; Calls int; Failures int; SlowCalls int; Trips uint64; OpenUntil time.Time}",
+      "canonical": "struct{Phase github.com/kitsunium/sdk/internal/core/app/resilience.BreakerPhase; Isolated bool; Calls int; Failures int; SlowCalls int; Trips uint64; OpenUntil time.Time}",
+      "fields": [
+        {
+          "name": "Phase",
+          "type": "BreakerPhase",
+          "doc": "Phase is where the breaker stands.\n"
+        },
+        {
+          "name": "Isolated",
+          "type": "bool",
+          "doc": "Isolated reports a breaker opened by Isolate: its Phase is\nBreakerOpen, and it stays so until Reset, whatever the clock says.\n"
+        },
+        {
+          "name": "Calls",
+          "type": "int",
+          "doc": "Calls is how many calls the breaker's sliding window holds — the\nsuccesses and failures recorded within it while Closed. A breaker\nwithout a window keeps no such count, and reports zero.\n"
+        },
+        {
+          "name": "Failures",
+          "type": "int",
+          "doc": "Failures is, with a sliding window, how many of Calls failed; without\none, how many failures followed one another since the last success,\nthe count FailureThreshold is compared to.\n"
+        },
+        {
+          "name": "SlowCalls",
+          "type": "int",
+          "doc": "SlowCalls is how many of Calls lasted at least the window's\nSlowAfter, failed or not. Zero without a window.\n"
+        },
+        {
+          "name": "Trips",
+          "type": "uint64",
+          "doc": "Trips counts the times the breaker opened on its own since it was\nbuilt — from Closed on its threshold, or from HalfOpen on a failed\ntrial. Isolate is not a trip.\n"
+        },
+        {
+          "name": "OpenUntil",
+          "type": "time.Time",
+          "doc": "OpenUntil is when an Open breaker admits its next HalfOpen trial. It\nis zero unless Phase is BreakerOpen, and zero for an isolated one,\nwhich admits nothing until Reset.\n"
+        }
+      ],
+      "doc": "BreakerStateValue is a circuit breaker's state as BreakerState.State\nreports it: its phase and the counts that phase is decided on.\n",
+      "file": "core/app/resilience/breaker.go",
       "layer": "core",
       "family": "app"
     },
@@ -50986,12 +51150,13 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/resilience",
       "name": "BreakerConfig",
-      "spelled": "struct{FailureThreshold int; OpenDuration time.Duration; Clock clock.Clock; Retryable func(error) bool}",
-      "canonical": "struct{FailureThreshold int; OpenDuration time.Duration; Clock github.com/kitsunium/sdk/internal/kernel/clock.Clock; Retryable func(error) bool}",
+      "spelled": "struct{FailureThreshold int; OpenDuration time.Duration; Clock clock.Clock; Retryable func(error) bool; Window *BreakerWindowValue; OnStateChange func(from coreres.BreakerPhase, to coreres.BreakerPhase); OpenBackoff *BackoffValue}",
+      "canonical": "struct{FailureThreshold int; OpenDuration time.Duration; Clock github.com/kitsunium/sdk/internal/kernel/clock.Clock; Retryable func(error) bool; Window *github.com/kitsunium/sdk/internal/service/app/resilience.BreakerWindowValue; OnStateChange func(from github.com/kitsunium/sdk/internal/core/app/resilience.BreakerPhase, to github.com/kitsunium/sdk/internal/core/app/resilience.BreakerPhase); OpenBackoff *github.com/kitsunium/sdk/internal/service/app/resilience.BackoffValue}",
       "fields": [
         {
           "name": "FailureThreshold",
-          "type": "int"
+          "type": "int",
+          "doc": "FailureThreshold is how many consecutive failures open a breaker\nwithout a Window. A non-positive value defaults to 5. It is not read\nwhen Window is set.\n"
         },
         {
           "name": "OpenDuration",
@@ -51006,9 +51171,68 @@
           "name": "Retryable",
           "type": "func(error) bool",
           "doc": "Retryable classifies a non-nil operation error as a dependency failure\nworth counting against the breaker's health. false means the error is\ndeterministic — the caller's own fault, not the dependency's — so it is\nreturned verbatim and folded into neither the failure count nor the\nsuccess path: a stream of HTTP 400s can no longer trip the breaker, and\none of them cannot close a HalfOpen breaker either. A nil predicate\ncounts every error as a failure, which is the pre-classifier behaviour.\nIt is not consulted for a context.Canceled returned once the caller's\ncontext is closed: that call is neutral whatever the predicate says.\nShares its shape with RetryConfig.Retryable so one classifier serves a\nnested Retry(Breaker(op)) stack.\n"
+        },
+        {
+          "name": "Window",
+          "type": "*BreakerWindowValue",
+          "doc": "Window, when set, opens the breaker on a RATE rather than a streak:\nof failures, or of slow calls, among the calls a sliding time window\nholds. Nil — the zero value — is the consecutive-failure breaker,\nexactly as it was before the field existed.\n\nA streak misses a dependency that fails every other call: S, F, S,\nF never reaches a threshold of five, and neither does a dependency\nthat answers every call, eventually, a minute late. A rate over a\nwindow sees both. The window's fields have defaults of their own,\ntaken from Polly and resilience4j — see BreakerWindowValue.\n"
+        },
+        {
+          "name": "OnStateChange",
+          "type": "func(from coreres.BreakerPhase, to coreres.BreakerPhase)",
+          "doc": "OnStateChange, when set, is called on every change of phase, with the\nphase left and the phase entered: Closed to Open on a trip, Open to\nHalfOpen when a call is admitted as the trial, HalfOpen to Closed or\nOpen on its outcome, and whatever Isolate and Reset change.\n\nIt is called outside the breaker's lock, one call at a time and in\nthe order the changes happened, on the goroutine of the call that\nmade the change — or of one already delivering an earlier change,\nwhich then delivers this one too. It may call State, Isolate or\nReset. It must not block: a call that changed the phase waits for\nit. Nil hears nothing.\n"
+        },
+        {
+          "name": "OpenBackoff",
+          "type": "*BackoffValue",
+          "doc": "OpenBackoff, when set, makes each opening last longer than the one\nbefore while the dependency keeps failing its trials: the n-th\nopening since the breaker last closed lasts OpenBackoff.Delay(n),\nin place of OpenDuration. The count starts over when a trial closes\nthe breaker, and on Reset.\n\nIts BaseDelay and its MaxDelay are both required — a zero base is\na cooldown of nothing, and a zero ceiling one that may grow to\ncenturies — and are refused when not positive, with\nPolicyMisconfigured naming the field. Its Multiplier and Jitter\nread as BackoffValue reads them. Nil keeps every opening at\nOpenDuration.\n"
         }
       ],
-      "doc": "BreakerConfig parameterises NewCircuitBreaker. A non-positive FailureThreshold\ndefaults to 5; a non-positive OpenDuration defaults to 30s; a nil Clock\ndefaults to clock.System; a nil Retryable counts every error as a failure.\n",
+      "doc": "BreakerConfig parameterises NewCircuitBreaker. A non-positive FailureThreshold\ndefaults to 5; a non-positive OpenDuration defaults to 30s; a nil Clock\ndefaults to clock.System; a nil Retryable counts every error as a failure;\na nil Window opens on consecutive failures; a nil OnStateChange hears\nnothing; a nil OpenBackoff keeps every opening at OpenDuration.\n",
+      "file": "service/app/resilience/breaker_config.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/resilience.BreakerWindowValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/resilience",
+      "name": "BreakerWindowValue",
+      "spelled": "struct{Size time.Duration; Buckets int; MinCalls int; FailureRatio float64; SlowAfter time.Duration; SlowRatio float64}",
+      "canonical": "struct{Size time.Duration; Buckets int; MinCalls int; FailureRatio float64; SlowAfter time.Duration; SlowRatio float64}",
+      "fields": [
+        {
+          "name": "Size",
+          "type": "time.Duration",
+          "doc": "Size is how far back the window reaches. Zero is 30 seconds.\n"
+        },
+        {
+          "name": "Buckets",
+          "type": "int",
+          "doc": "Buckets is how many slots the window is kept in: a slot leaves the\nwindow whole, so the window reaches back between Size − Size/Buckets\nand Size. Zero is 10; more than 1000 is refused, the memory of a\nbreaker being one slot each.\n"
+        },
+        {
+          "name": "MinCalls",
+          "type": "int",
+          "doc": "MinCalls is how many calls the window must hold before a ratio is\nread at all: below it, a single failure would be a rate of 100%.\nZero is 100.\n"
+        },
+        {
+          "name": "FailureRatio",
+          "type": "float64",
+          "doc": "FailureRatio is the share of failed calls, in (0, 1], at or above\nwhich the breaker opens. Zero is 0.1.\n"
+        },
+        {
+          "name": "SlowAfter",
+          "type": "time.Duration",
+          "doc": "SlowAfter is the duration, measured on the breaker's clock from\nadmission to return, at or above which a call is slow, whether it\nsucceeded or failed. Zero is 60 seconds.\n"
+        },
+        {
+          "name": "SlowRatio",
+          "type": "float64",
+          "doc": "SlowRatio is the share of slow calls, in (0, 1], at or above which\nthe breaker opens. Zero is 1: only a window where every call was\nslow opens it.\n"
+        }
+      ],
+      "doc": "BreakerWindowValue is a circuit breaker's sliding window: the calls of the\nlast Size, kept in Buckets slots of Size/Buckets each on the breaker's\nclock, the oldest slot dropped as time moves past it. The breaker opens\nwhen the window holds at least MinCalls calls and either FailureRatio of\nthem failed or SlowRatio of them lasted SlowAfter or longer.\n\nA zero field takes its default, each one a published library's own:\nSize 30s, Buckets 10, MinCalls 100 and FailureRatio 0.1 are Polly v8's\nSamplingDuration, its ten sampling windows, MinimumThroughput and\nFailureRatio; SlowAfter 60s and SlowRatio 1 are resilience4j's\nslowCallDurationThreshold and slowCallRateThreshold. A negative value,\na ratio above 1 or not a number, more than 1000 Buckets, or a Size too\nshort to split into Buckets, is refused: every call returns\nPolicyMisconfigured, naming the field.\n\nA call is counted when it ends, in the slot of its end, if the breaker\nis still Closed and it was not admitted before the breaker last opened. A\ndeterministic error and a caller who left are not counted at all. The\nwindow is emptied each time the breaker changes phase.\n",
       "file": "service/app/resilience/breaker_config.go",
       "layer": "service",
       "family": "app"
@@ -51144,7 +51368,7 @@
       "name": "NewCircuitBreaker",
       "spelled": "func(cfg BreakerConfig) coreres.Runner",
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/app/resilience.BreakerConfig) github.com/kitsunium/sdk/internal/core/app/resilience.Runner",
-      "doc": "NewCircuitBreaker returns a Runner guarding op with a Closed→Open→HalfOpen\nbreaker. Open calls return CircuitOpen until OpenDuration elapses; a\nnon-positive OpenDuration clamps to defaultOpenDuration, because a breaker\nwhose cooldown is zero admits the next call immediately and therefore\nprotects nothing (ADR 0031). An error rejected by cfg.Retryable is returned\nverbatim and left out of the state machine entirely, so deterministic\nfailures cannot trip the breaker. Once the cooldown elapses ONE HalfOpen\ntrial runs at a time and every other call returns CircuitOpen until it\nsettles. The outcome of a call admitted before the breaker last opened\nis ignored: its success cannot close the breaker and its failure cannot\nrestart the cooldown.\n\nA call that ends in context.Canceled once the caller's own context is\nclosed is neutral — neither a success nor a failure — because the caller\nleft, not the dependency: a wave of client disconnects cannot open the\nbreaker on a healthy dependency, and a HalfOpen trial abandoned that way\nfrees the slot for the next call. context.DeadlineExceeded stays a\nfailure: a dependency too slow for the caller's deadline is a slow\ndependency.\n",
+      "doc": "NewCircuitBreaker returns a Runner guarding op with a Closed→Open→HalfOpen\nbreaker. Open calls return CircuitOpen until OpenDuration elapses; a\nnon-positive OpenDuration clamps to defaultOpenDuration, because a breaker\nwhose cooldown is zero admits the next call immediately and therefore\nprotects nothing (ADR 0031). An error rejected by cfg.Retryable is returned\nverbatim and left out of the state machine entirely, so deterministic\nfailures cannot trip the breaker. Once the cooldown elapses ONE HalfOpen\ntrial runs at a time and every other call returns CircuitOpen until it\nsettles. The outcome of a call admitted before the breaker last opened\nis ignored: its success cannot close the breaker and its failure cannot\nrestart the cooldown.\n\nA call that ends in context.Canceled once the caller's own context is\nclosed is neutral — neither a success nor a failure — because the caller\nleft, not the dependency: a wave of client disconnects cannot open the\nbreaker on a healthy dependency, and a HalfOpen trial abandoned that way\nfrees the slot for the next call. context.DeadlineExceeded stays a\nfailure: a dependency too slow for the caller's deadline is a slow\ndependency.\n\nWith a nil cfg.Window the breaker opens on FailureThreshold consecutive\nfailures. With one, it opens on the rate of failures, or of slow calls,\namong the calls of a sliding time window on cfg.Clock, once that window\nholds at least MinCalls of them; a HalfOpen trial that lasts SlowAfter\nor longer counts as failed. A Window or an OpenBackoff with a value it\ncannot honour is refused: every call returns PolicyMisconfigured,\nnaming the field, and the Runner returned is not a BreakerState.\n\nThe Runner returned otherwise implements BreakerState: State reports\nthe phase and its counts, Isolate opens the breaker until Reset, and\nReset closes it. cfg.OnStateChange hears every change of phase.\n",
       "file": "service/app/resilience/breaker.go",
       "layer": "service",
       "family": "app"

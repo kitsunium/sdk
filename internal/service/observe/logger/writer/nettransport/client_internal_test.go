@@ -655,6 +655,10 @@ func Test_postRecord_boundedDrain(t *testing.T) {
 				streamForever(w, r)
 			}))
 			t.Cleanup(srv.Close)
+			//: before Close (cleanups run last-in first-out): sever the socket the
+			//: handler writes to, or Close waits on a Write the kernel may never
+			//: wake — on Solaris it stayed parked after the send had returned.
+			t.Cleanup(srv.CloseClientConnections)
 			send, closer := newHTTPSeam(srv.URL, srv.Client())
 			t.Cleanup(func() { swallowErr(closer()) })
 			budget, cancel := context.WithTimeout(t.Context(), endlessBodyBudget)

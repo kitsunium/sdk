@@ -1,6 +1,32 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
+constants:
+  - grouped: true
+    items:
+      - doc: |-
+          BreakerClosed is a breaker that admits every call and counts their
+          outcomes. The run starts at iota+1: the zero is left unclaimed, so a
+          BreakerPhase nobody set reads "unknown", never "closed" — a forgotten
+          assignment must not read as a healthy dependency (ADR 0031).
+        name: BreakerClosed
+        type: BreakerPhase
+        value: iota + 1
+      - doc: |-
+          BreakerOpen is a breaker that rejects every call fast with CircuitOpen:
+          until its cooldown elapses after a trip, or until Reset after Isolate.
+        name: BreakerOpen
+      - doc: |-
+          BreakerHalfOpen is a breaker whose cooldown elapsed: it admits ONE trial
+          call at a time, whose success closes it and whose failure opens it again.
+        name: BreakerHalfOpen
+    name: BreakerClosed
 files:
+  - decls:
+      - BreakerPhase
+      - BreakerClosed
+      - BreakerPhase.String
+      - BreakerStateValue
+    name: breaker.go
   - decls: []
     name: doc.go
   - decls:
@@ -8,12 +34,60 @@ files:
     name: resilience.go
 imports:
   context: context
+  time: time
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/core/app/resilience
   name: resilience
   purpose: Package resilience — range 0.2.8.* (ADR 0026 core/app/resilience block).
 types:
+  - kind: named
+    methods:
+      - name: String
+        recv: p BreakerPhase
+        results: string
+    name: BreakerPhase
+    underlying: uint8
+  - fields:
+      - doc: Phase is where the breaker stands.
+        name: Phase
+        type: BreakerPhase
+      - doc: |-
+          Isolated reports a breaker opened by Isolate: its Phase is
+          BreakerOpen, and it stays so until Reset, whatever the clock says.
+        name: Isolated
+        type: bool
+      - doc: |-
+          Calls is how many calls the breaker's sliding window holds — the
+          successes and failures recorded within it while Closed. A breaker
+          without a window keeps no such count, and reports zero.
+        name: Calls
+        type: int
+      - doc: |-
+          Failures is, with a sliding window, how many of Calls failed; without
+          one, how many failures followed one another since the last success,
+          the count FailureThreshold is compared to.
+        name: Failures
+        type: int
+      - doc: |-
+          SlowCalls is how many of Calls lasted at least the window's
+          SlowAfter, failed or not. Zero without a window.
+        name: SlowCalls
+        type: int
+      - doc: |-
+          Trips counts the times the breaker opened on its own since it was
+          built — from Closed on its threshold, or from HalfOpen on a failed
+          trial. Isolate is not a trip.
+        name: Trips
+        type: uint64
+      - doc: |-
+          OpenUntil is when an Open breaker admits its next HalfOpen trial. It
+          is zero unless Phase is BreakerOpen, and zero for an isolated one,
+          which admits nothing until Reset.
+        name: OpenUntil
+        type: time.Time
+    kind: struct
+    name: BreakerStateValue
   - kind: named
     name: Operation
     underlying: func(ctx context.Context) error

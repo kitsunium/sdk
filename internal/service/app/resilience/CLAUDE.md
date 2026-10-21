@@ -19,7 +19,9 @@ ADR 0026.
 | `retry_after.go` | — | `RetryAfter(err)` — reads the `retry_after_seconds` field (`retryAfterField`) of the outermost `*errs.Error`, whole or fractional seconds, rounded to the nanosecond, saturated at the longest `Duration`; zero, negative and non-finite are no hint. Written by the OTLP sender, `net/client` on 429/503 and `rateLimited` — each spelling pinned by its producer's suite (#476) |
 | `backoff.go` | — | `BackoffValue` — an alias of `kernel/backoff.Value`, the layer that owns the curve (ADR 0074, ADR 0103); `retryRunner.backoff`/`jittered` delegate to its two halves, `kernel/backoff.Grow` (pure, bounded, never negative) and `Widen` (jitter) |
 | `keyed_ratelimit.go` / `keyed_ratelimit_config.go` | keyed rate-limit | one `tokenBucket` per `Key(ctx)`, at most `MaxKeys` (LRU), forgotten after `IdleTimeout` (sliding), no sweeper; `Rate`/`Key`/`MaxKeys`/`IdleTimeout` refused at zero (ADR 0031, ADR 0103) |
-| `breaker.go` / `breaker_config.go` / `breaker_state.go` | circuit-breaker | Closed→Open→HalfOpen (injectable clock), `CircuitOpen`; ONE HalfOpen trial at a time (a deterministic error, a caller's cancellation or a panic frees the slot); each trip starts a generation a call captures on admission, and a straggler's outcome (an older generation) is ignored — ADR 0026 §Deferred, closed by #467; `classify` makes a `context.Canceled` under a closed caller context neutral, before the classifier is asked (#477) |
+| `breaker.go` / `breaker_run.go` / `breaker_config.go` / `breaker_state.go` | circuit-breaker | Closed→Open→HalfOpen (injectable clock), `CircuitOpen`; ONE HalfOpen trial at a time (a deterministic error, a caller's cancellation or a panic frees the slot); each trip, `Isolate` and `Reset` start a generation a call captures on admission, and a straggler's outcome (an older generation) is ignored — ADR 0026 §Deferred, closed by #467; `classify` makes a `context.Canceled` under a closed caller context neutral, before the classifier is asked (#477). `Run` splits three paths — the trial (`runTrial`, the deferred release), the window's (`runTimed`, two clock reads) and the consecutive closed path, which reads no clock and defers nothing. `BreakerConfig.OpenBackoff` sizes the n-th opening since the last close with `kbackoff.Value.Delay(n)` (`cooldownFor`); `BaseDelay`/`MaxDelay` ≤ 0 refused (#480). `breaker_state.go` aliases the core's `BreakerPhase` so `State` reports what the machine holds |
+| `breaker_window.go` | circuit-breaker window | `BreakerWindowValue` resolved (`resolveWindow`: zero → the Polly/resilience4j default, out of range → the field's name for `PolicyMisconfigured`) into a `slidingWindow`: `Buckets` slots of `Size/Buckets` on the breaker's clock, allocated once, running totals kept as slots fill and empty, `headEnd` so a record in the current slot pays no division, a clock set back counted in the latest slot; the ratios read only when one could have risen — a failure, a slow call, a slot dropped, or the call reaching `MinCalls` (#480) |
+| `breaker_control.go` | circuit-breaker state | `BreakerState` (core sibling port, ADR 0039): `State` (advances the window to now, changes no phase), `Isolate` (Open with no cooldown until `Reset`), `Reset`; `OnStateChange` delivery — `moveTo` queues each change in the `changeQueue` under `mu`, the first goroutine to `claimDelivery` hands the queue out OUTSIDE `mu`, in order, re-entrant (a listener may call `Reset`), and a listener's panic gives the claim back (#480) |
 | `ratelimit.go` / `ratelimit_config.go` | rate-limit | token bucket (reject mode), `RateLimited` carrying `retry_after_seconds = (1 − tokens) / rate` through `rateLimited` (#476); non-positive `Rate` refused (ADR 0031); `usableRate`/`bucketSize`/`newTokenBucket`/`rateLimited` shared with the keyed limiter |
 | `bulkhead.go` | bulkhead | buffered-channel semaphore (reject mode), `BulkheadFull` |
 | `timeout.go` / `timeout_config.go` / `timeout_clock.go` | timeout | `context.WithTimeout`, `TimeoutExceeded` — only for its OWN deadline: a caller's context already finished returns its own error (#477); `NewTimeoutWith(TimeoutConfig{Duration, Clock})` measures the deadline on an injected clock through `clockDeadline`, a context with its own `Done` so a derived context reports `DeadlineExceeded` too (ADR 0090); non-positive duration refused (ADR 0031) |
@@ -49,7 +51,9 @@ ADR 0026.
 - **No constructor returns an inert policy** (ADR 0031). A non-positive knob is
   either clamped to a working floor — `MaxAttempts`→1, `Multiplier`→2,
   `FailureThreshold`→5, `OpenDuration`→30s, `Burst`→1, bulkhead limit→1 — or,
-  where any SDK-chosen value would be arbitrary, refused. A breaker with a zero
+  where any SDK-chosen value would be arbitrary, refused — a `BreakerConfig.Window`
+  field out of range and an `OpenBackoff` without a base or a ceiling included
+  (#480), each named in the refusal. A breaker with a zero
   cooldown admits the next call and so rejects nothing, which is the one failure
   mode that hands back a false sense of protection.
 - **Retryable classifier** (`RetryConfig.Retryable` / `BreakerConfig.Retryable`,
@@ -266,7 +270,58 @@ never traffic, and the successes of a recovering dependency are what refill it.
 than defaulted (ADR 0031): a zero ratio is a budget that, once drained, never
 refills.
 
+## Breaker — a rate over a window, and a state an operator reads (#480)
+
+The consecutive breaker misses two dependencies: one that fails every other
+call (S, F, S, F never makes a streak) and one that answers every call a
+minute late. `BreakerConfig.Window` opens on a RATE — of failures, or of calls
+lasting `SlowAfter` or more on the breaker's clock — once the window holds
+`MinCalls`; nil keeps the consecutive breaker, byte for byte in behaviour.
+Decisions the implementation makes:
+
+- **Time slots, not a count of calls.** resilience4j offers both; a time
+  window answers "how is the dependency NOW" whatever the traffic, and is what
+  Polly v8 and gobreaker v2 (`BucketPeriod`) chose. A slot leaves whole, so the
+  reach is between `Size − Size/Buckets` and `Size`.
+- **Defaults are the libraries' own, and a nil Window stays the old mode.** A
+  zero field takes Polly's (`SamplingDuration` 30 s, ten windows,
+  `MinimumThroughput` 100, `FailureRatio` 0.1) or resilience4j's
+  (`slowCallDurationThreshold` 60 s, `slowCallRateThreshold` 100 %). Out of
+  range is refused naming the field; `Buckets` above 1000 too — the slots are
+  allocated at construction.
+- **Neutral calls are not calls.** A deterministic error and a caller who left
+  are left out of the window, as they are out of the streak: counting them
+  would dilute the rate.
+- **A slow trial fails the trial.** With one HalfOpen trial, its slow-call
+  "rate" is 0 or 1; a dependency still answering `SlowAfter` late is not
+  recovered.
+- **The window empties on every change of phase**, as resilience4j resets its
+  metrics: the calls before a trip are what the trip already judged.
+- **`OnStateChange` is delivered outside the lock, in order.** Each change is
+  queued under `mu`; the goroutine that queued the first undelivered one drains
+  the queue after unlocking, one change at a time, including those queued
+  meanwhile — by other calls, or by the listener calling `Reset`. Calling it
+  under the lock would deadlock a listener that reads `State`; calling it from
+  each goroutine after unlocking would reorder two changes made back to back.
+- **`Isolate` is a phase plus a flag**, not a fourth phase: the issue's
+  vocabulary is Closed/Open/HalfOpen, and `State().Isolated` tells an operator
+  which Open it is. It is not a trip (`Trips` counts the breaker's own).
+- **A refused breaker is not a `BreakerState`.** `misconfiguredRunner` keeps
+  no state to report; a type assertion fails, which a framework treats as the
+  start-up error it is.
+
+The window's closed path costs two reads of the clock — the slow-call measure —
+and the window's own work is a few nanoseconds; `pkg/v1/app/resilience/BENCH.md`
+has the numbers; the consecutive path pays 2 ns more than before, still
+allocation-free.
+
 ## Do NOT
+
+- Call `OnStateChange` while holding `mu`, or from each goroutine after it
+  unlocks: the first deadlocks a listener that reads `State`, the second
+  delivers two back-to-back changes out of order.
+- Read a clock, or defer, on the consecutive breaker's closed path: it is
+  what keeps a nil Window within 2 ns of its cost before #480.
 
 - Let the budget refuse a call's FIRST attempt, or make `AllowRetry` spend a
   token. The question is a query; only outcomes move the bucket, and a budget

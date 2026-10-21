@@ -61,6 +61,27 @@ packages:
             name: CodeRetryBudgetExceeded
             value: "0x00_02_08_08"
         type: errs.Code
+    constants:
+      - doc: |-
+          BreakerClosed is a breaker that admits every call and counts their
+          outcomes. The run starts at iota+1: the zero is left unclaimed, so a
+          BreakerPhase nobody set reads "unknown", never "closed" — a forgotten
+          assignment must not read as a healthy dependency (ADR 0031).
+        name: BreakerClosed
+        type: BreakerPhase
+        value: "1"
+      - doc: |-
+          BreakerOpen is a breaker that rejects every call fast with CircuitOpen:
+          until its cooldown elapses after a trip, or until Reset after Isolate.
+        name: BreakerOpen
+        type: BreakerPhase
+        value: "2"
+      - doc: |-
+          BreakerHalfOpen is a breaker whose cooldown elapsed: it admits ONE trial
+          call at a time, whose success closes it and whose failure opens it again.
+        name: BreakerHalfOpen
+        type: BreakerPhase
+        value: "3"
     doc: |-
       Package resilience — range 0.2.8.* (ADR 0026 core/app/resilience block).
 
@@ -127,6 +148,37 @@ packages:
               are not recorded.
             name: RecordFailure
         name: RetryBudget
+      - doc: |-
+          BreakerState is what a circuit breaker says about itself and what an
+          operator may do to it: read its state, isolate it, reset it. The
+          breaker NewCircuitBreaker returns implements it beside Runner; a caller
+          reaches it with a type assertion on that Runner.
+
+          A sibling of Runner rather than a widening of it (ADR 0039): a Runner
+          runs Operations, and six of the seven policies have no state an
+          operator could read or force.
+
+          Implementations MUST be safe for concurrent use with Run.
+        methods:
+          - doc: |-
+              State reports the breaker's phase and the counts it decides on, as of
+              the call. It changes nothing: an Open breaker whose cooldown has
+              elapsed reads Open, with OpenUntil in the past, until the next call
+              is admitted as its HalfOpen trial.
+            name: State
+            out:
+              - type: BreakerStateValue
+          - doc: |-
+              Isolate opens the breaker by hand: every call is rejected with
+              CircuitOpen, with no cooldown and no trial, until Reset. The outcome
+              of a call admitted before it is ignored.
+            name: Isolate
+          - doc: |-
+              Reset closes the breaker and clears its counts, isolated or not. The
+              outcome of a call admitted before it is ignored, and an increasing
+              open duration starts over.
+            name: Reset
+        name: BreakerState
     sentinels:
       - var:
           - code: CodeRetryExhausted
@@ -205,6 +257,64 @@ packages:
             reason: FALLBACK_FAILED
     types:
       - doc: |-
+          BreakerPhase is where a circuit breaker stands: BreakerClosed,
+          BreakerOpen or BreakerHalfOpen. The zero value is none of them.
+        methods:
+          - doc: |-
+              String renders the phase for a log line, a readiness body or a metric
+              label: "closed", "open", "half-open". The spellings are stable — a
+              dashboard parses them — and a value this package never mints renders
+              "unknown".
+            name: String
+            out:
+              - type: string
+            recv: value
+        name: BreakerPhase
+        underlying: uint8
+      - doc: |-
+          BreakerStateValue is a circuit breaker's state as BreakerState.State
+          reports it: its phase and the counts that phase is decided on.
+        name: BreakerStateValue
+        struct:
+          fields:
+            - doc: Phase is where the breaker stands.
+              name: Phase
+              type: BreakerPhase
+            - doc: |-
+                Isolated reports a breaker opened by Isolate: its Phase is
+                BreakerOpen, and it stays so until Reset, whatever the clock says.
+              name: Isolated
+              type: bool
+            - doc: |-
+                Calls is how many calls the breaker's sliding window holds — the
+                successes and failures recorded within it while Closed. A breaker
+                without a window keeps no such count, and reports zero.
+              name: Calls
+              type: int
+            - doc: |-
+                Failures is, with a sliding window, how many of Calls failed; without
+                one, how many failures followed one another since the last success,
+                the count FailureThreshold is compared to.
+              name: Failures
+              type: int
+            - doc: |-
+                SlowCalls is how many of Calls lasted at least the window's
+                SlowAfter, failed or not. Zero without a window.
+              name: SlowCalls
+              type: int
+            - doc: |-
+                Trips counts the times the breaker opened on its own since it was
+                built — from Closed on its threshold, or from HalfOpen on a failed
+                trial. Isolate is not a trip.
+              name: Trips
+              type: uint64
+            - doc: |-
+                OpenUntil is when an Open breaker admits its next HalfOpen trial. It
+                is zero unless Phase is BreakerOpen, and zero for an isolated one,
+                which admits nothing until Reset.
+              name: OpenUntil
+              type: time.Time
+      - doc: |-
           Operation is the unit of work a Runner guards. It MUST honour ctx
           cancellation (return promptly when ctx.Done fires) so timeout/cancellation
           propagate; a non-cancellable op caps a Timeout's precision at op granularity.
@@ -245,6 +355,12 @@ packages:
       Package resilience — circuit-breaker configuration.
 
       Package resilience — circuit-breaker state machine values.
+
+      Package resilience — the circuit breaker's sliding window: time slots on
+      the breaker's clock, the oldest dropped as time moves past it.
+
+      Package resilience — what the circuit breaker reports, what an operator
+      forces on it, and the changes of phase it delivers outside its lock.
 
       Package resilience — bulkhead (bounded-concurrency) policy.
 
@@ -310,6 +426,18 @@ packages:
           frees the slot for the next call. context.DeadlineExceeded stays a
           failure: a dependency too slow for the caller's deadline is a slow
           dependency.
+
+          With a nil cfg.Window the breaker opens on FailureThreshold consecutive
+          failures. With one, it opens on the rate of failures, or of slow calls,
+          among the calls of a sliding time window on cfg.Clock, once that window
+          holds at least MinCalls of them; a HalfOpen trial that lasts SlowAfter
+          or longer counts as failed. A Window or an OpenBackoff with a value it
+          cannot honour is refused: every call returns PolicyMisconfigured,
+          naming the field, and the Runner returned is not a BreakerState.
+
+          The Runner returned otherwise implements BreakerState: State reports
+          the phase and its counts, Isolate opens the breaker until Reset, and
+          Reset closes it. cfg.OnStateChange hears every change of phase.
         in:
           - name: cfg
             type: BreakerConfig
@@ -585,11 +713,17 @@ packages:
       - doc: |-
           BreakerConfig parameterises NewCircuitBreaker. A non-positive FailureThreshold
           defaults to 5; a non-positive OpenDuration defaults to 30s; a nil Clock
-          defaults to clock.System; a nil Retryable counts every error as a failure.
+          defaults to clock.System; a nil Retryable counts every error as a failure;
+          a nil Window opens on consecutive failures; a nil OnStateChange hears
+          nothing; a nil OpenBackoff keeps every opening at OpenDuration.
         name: BreakerConfig
         struct:
           fields:
-            - name: FailureThreshold
+            - doc: |-
+                FailureThreshold is how many consecutive failures open a breaker
+                without a Window. A non-positive value defaults to 5. It is not read
+                when Window is set.
+              name: FailureThreshold
               type: int
             - doc: |-
                 OpenDuration is how long an Open breaker rejects calls before admitting
@@ -615,6 +749,104 @@ packages:
                 nested Retry(Breaker(op)) stack.
               name: Retryable
               type: func(error) bool
+            - doc: |-
+                Window, when set, opens the breaker on a RATE rather than a streak:
+                of failures, or of slow calls, among the calls a sliding time window
+                holds. Nil — the zero value — is the consecutive-failure breaker,
+                exactly as it was before the field existed.
+
+                A streak misses a dependency that fails every other call: S, F, S,
+                F never reaches a threshold of five, and neither does a dependency
+                that answers every call, eventually, a minute late. A rate over a
+                window sees both. The window's fields have defaults of their own,
+                taken from Polly and resilience4j — see BreakerWindowValue.
+              name: Window
+              type: "*BreakerWindowValue"
+            - doc: |-
+                OnStateChange, when set, is called on every change of phase, with the
+                phase left and the phase entered: Closed to Open on a trip, Open to
+                HalfOpen when a call is admitted as the trial, HalfOpen to Closed or
+                Open on its outcome, and whatever Isolate and Reset change.
+
+                It is called outside the breaker's lock, one call at a time and in
+                the order the changes happened, on the goroutine of the call that
+                made the change — or of one already delivering an earlier change,
+                which then delivers this one too. It may call State, Isolate or
+                Reset. It must not block: a call that changed the phase waits for
+                it. Nil hears nothing.
+              name: OnStateChange
+              type: func(from coreres.BreakerPhase, to coreres.BreakerPhase)
+            - doc: |-
+                OpenBackoff, when set, makes each opening last longer than the one
+                before while the dependency keeps failing its trials: the n-th
+                opening since the breaker last closed lasts OpenBackoff.Delay(n),
+                in place of OpenDuration. The count starts over when a trial closes
+                the breaker, and on Reset.
+
+                Its BaseDelay and its MaxDelay are both required — a zero base is
+                a cooldown of nothing, and a zero ceiling one that may grow to
+                centuries — and are refused when not positive, with
+                PolicyMisconfigured naming the field. Its Multiplier and Jitter
+                read as BackoffValue reads them. Nil keeps every opening at
+                OpenDuration.
+              name: OpenBackoff
+              type: "*BackoffValue"
+      - doc: |-
+          BreakerWindowValue is a circuit breaker's sliding window: the calls of the
+          last Size, kept in Buckets slots of Size/Buckets each on the breaker's
+          clock, the oldest slot dropped as time moves past it. The breaker opens
+          when the window holds at least MinCalls calls and either FailureRatio of
+          them failed or SlowRatio of them lasted SlowAfter or longer.
+
+          A zero field takes its default, each one a published library's own:
+          Size 30s, Buckets 10, MinCalls 100 and FailureRatio 0.1 are Polly v8's
+          SamplingDuration, its ten sampling windows, MinimumThroughput and
+          FailureRatio; SlowAfter 60s and SlowRatio 1 are resilience4j's
+          slowCallDurationThreshold and slowCallRateThreshold. A negative value,
+          a ratio above 1 or not a number, more than 1000 Buckets, or a Size too
+          short to split into Buckets, is refused: every call returns
+          PolicyMisconfigured, naming the field.
+
+          A call is counted when it ends, in the slot of its end, if the breaker
+          is still Closed and it was not admitted before the breaker last opened. A
+          deterministic error and a caller who left are not counted at all. The
+          window is emptied each time the breaker changes phase.
+        name: BreakerWindowValue
+        struct:
+          fields:
+            - doc: Size is how far back the window reaches. Zero is 30 seconds.
+              name: Size
+              type: time.Duration
+            - doc: |-
+                Buckets is how many slots the window is kept in: a slot leaves the
+                window whole, so the window reaches back between Size − Size/Buckets
+                and Size. Zero is 10; more than 1000 is refused, the memory of a
+                breaker being one slot each.
+              name: Buckets
+              type: int
+            - doc: |-
+                MinCalls is how many calls the window must hold before a ratio is
+                read at all: below it, a single failure would be a rate of 100%.
+                Zero is 100.
+              name: MinCalls
+              type: int
+            - doc: |-
+                FailureRatio is the share of failed calls, in (0, 1], at or above
+                which the breaker opens. Zero is 0.1.
+              name: FailureRatio
+              type: float64
+            - doc: |-
+                SlowAfter is the duration, measured on the breaker's clock from
+                admission to return, at or above which a call is slow, whether it
+                succeeded or failed. Zero is 60 seconds.
+              name: SlowAfter
+              type: time.Duration
+            - doc: |-
+                SlowRatio is the share of slow calls, in (0, 1], at or above which
+                the breaker opens. Zero is 1: only a window where every call was
+                slow opens it.
+              name: SlowRatio
+              type: float64
       - doc: |-
           FallbackConfig parameterises NewFallback. A nil Fallback is refused (there is
           no defensible SDK-side substitute for the caller's own plan B); a nil
@@ -1184,6 +1416,30 @@ packages:
       caller's own context error rather than TimeoutExceeded when the caller's
       context finished first. A context.DeadlineExceeded from the dependency
       stays a failure.
+
+      # A breaker that opens on a rate, and says where it stands
+
+      A breaker counting CONSECUTIVE failures never opens on a dependency that
+      fails every other call, nor on one that answers every call a minute late.
+      [BreakerConfig].Window opens it on a rate instead — of failures, or of slow
+      calls — over a sliding window on the breaker's clock, once enough calls
+      were seen for a rate to mean something:
+
+      	b := resilience.NewCircuitBreaker(resilience.BreakerConfig{
+      	    Window: &resilience.BreakerWindowValue{
+      	        Size: 30 * time.Second, MinCalls: 20, FailureRatio: 0.5,
+      	        SlowAfter: 2 * time.Second, SlowRatio: 0.8,
+      	    },
+      	    OnStateChange: func(from, to resilience.BreakerPhase) { log.Info("breaker", "from", from, "to", to) },
+      	})
+      	state := b.(resilience.BreakerState)
+      	ready := state.State().Phase != resilience.BreakerOpen // a readiness check
+
+      A nil Window is the consecutive-failure breaker, unchanged. The Runner is a
+      [BreakerState]: State reports the phase and its counts, Isolate opens it by
+      hand until Reset, and [BreakerConfig].OnStateChange hears each change of
+      phase in order, outside the breaker's lock. [BreakerConfig].OpenBackoff
+      lengthens each opening while the trials keep failing.
     facade:
       - alias:
           - doc: Operation is the public alias for the ctx-aware unit of guarded work.
@@ -1201,6 +1457,27 @@ packages:
           - doc: BreakerConfig is the public alias for the circuit-breaker configuration.
             name: BreakerConfig
             target: svcres.BreakerConfig
+      - alias:
+          - doc: |-
+              BreakerWindowValue is the public alias for a circuit breaker's sliding
+              window: the rate of failures, or of slow calls, that opens it.
+            name: BreakerWindowValue
+            target: svcres.BreakerWindowValue
+      - alias:
+          - doc: |-
+              BreakerState is the public alias for what a circuit breaker says about
+              itself and what an operator may force on it — State, Isolate, Reset.
+              The Runner NewCircuitBreaker returns implements it.
+            name: BreakerState
+            target: coreres.BreakerState
+      - alias:
+          - doc: BreakerStateValue is the public alias for a circuit breaker's reported state.
+            name: BreakerStateValue
+            target: coreres.BreakerStateValue
+      - alias:
+          - doc: BreakerPhase is the public alias for where a circuit breaker stands.
+            name: BreakerPhase
+            target: coreres.BreakerPhase
       - alias:
           - doc: RateLimiterConfig is the public alias for the rate-limiter configuration.
             name: RateLimiterConfig
@@ -1243,6 +1520,27 @@ packages:
               between attempts, for a loop that backs off on its own terms.
             name: Backoff
             target: kbackoff.Value
+      - const:
+          - doc: |-
+              BreakerClosed is a breaker admitting every call. The zero BreakerPhase
+              is not it: a phase nobody set reads "unknown".
+            name: BreakerClosed
+            reexport: coreres.BreakerClosed
+            type: BreakerPhase
+            typed: true
+            value: "1"
+          - doc: BreakerOpen is a breaker rejecting every call fast with CircuitOpen.
+            name: BreakerOpen
+            reexport: coreres.BreakerOpen
+            type: BreakerPhase
+            typed: true
+            value: "2"
+          - doc: BreakerHalfOpen is a breaker admitting one trial call at a time.
+            name: BreakerHalfOpen
+            reexport: coreres.BreakerHalfOpen
+            type: BreakerPhase
+            typed: true
+            value: "3"
       - var:
           - doc: RetryExhausted is returned when the retry budget is spent.
             name: RetryExhausted
@@ -1296,7 +1594,8 @@ packages:
               an unasserted HedgeConfig.Idempotent, a non-positive HedgeConfig.Delay or
               MaxInFlight, a KeyedRateLimiterConfig without a Key, a MaxKeys or an
               IdleTimeout, a retry budget built with an unusable MaxTokens or
-              TokenRatio. The operation is not run. Unlike the sentinels above it is
+              TokenRatio, a BreakerConfig.Window or OpenBackoff with a field out of
+              range. The operation is not run. Unlike the sentinels above it is
               permanent, not transient: the fix is at the construction site, never a
               retry (ADR 0031).
             name: PolicyMisconfigured
@@ -1321,6 +1620,11 @@ packages:
             before the breaker last opened is ignored. A context.Canceled returned
             once the caller's context is closed counts neither way: the caller
             left, not the dependency.
+
+            A nil cfg.Window opens on FailureThreshold consecutive failures; a
+            Window opens on a rate of failures or of slow calls over a sliding
+            time window. The Runner returned is a BreakerState — State, Isolate,
+            Reset — unless cfg was refused with PolicyMisconfigured.
           forward: svcres.NewCircuitBreaker
           in:
             - name: cfg

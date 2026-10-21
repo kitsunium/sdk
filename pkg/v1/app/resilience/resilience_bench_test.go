@@ -109,6 +109,62 @@ func BenchmarkCircuitBreaker_Closed(b *testing.B) {
 	}
 }
 
+// BenchmarkCircuitBreaker_Window_Closed is the closed path of a breaker that
+// opens on a rate: the same lock, plus two reads of the clock to time the
+// call and one slot of the window filled. It must stay allocation-free — a
+// window is filled on every guarded call of a dependency.
+func BenchmarkCircuitBreaker_Window_Closed(b *testing.B) {
+	runner := resilience.NewCircuitBreaker(resilience.BreakerConfig{
+		OpenDuration: time.Second,
+		Window:       &resilience.BreakerWindowValue{Size: 30 * time.Second, Buckets: 10, MinCalls: 100, FailureRatio: 0.5},
+	})
+	ctx := b.Context()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		errSink = runner.Run(ctx, okOp)
+	}
+}
+
+// BenchmarkCircuitBreaker_Window_Closed_Listened is the same closed path with
+// an OnStateChange set: a listener costs nothing while the phase holds.
+func BenchmarkCircuitBreaker_Window_Closed_Listened(b *testing.B) {
+	changes := 0
+	runner := resilience.NewCircuitBreaker(resilience.BreakerConfig{
+		OpenDuration:  time.Second,
+		Window:        &resilience.BreakerWindowValue{},
+		OnStateChange: func(resilience.BreakerPhase, resilience.BreakerPhase) { changes++ },
+	})
+	ctx := b.Context()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		errSink = runner.Run(ctx, okOp)
+	}
+	if changes != 0 {
+		b.Fatalf("a healthy breaker changed phase %d times", changes)
+	}
+}
+
+// BenchmarkCircuitBreaker_State is what a readiness probe or a metrics scrape
+// pays to read a breaker: one lock and a copy.
+func BenchmarkCircuitBreaker_State(b *testing.B) {
+	state, ok := resilience.NewCircuitBreaker(resilience.BreakerConfig{
+		Window: &resilience.BreakerWindowValue{},
+	}).(resilience.BreakerState)
+	if !ok {
+		b.Fatal("the breaker is not a BreakerState")
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		phaseSink = state.State().Phase
+	}
+}
+
+// phaseSink defeats dead-code elimination on State's answers.
+var phaseSink resilience.BreakerPhase
+
 // BenchmarkCircuitBreaker_Open is the point of a breaker: once it is open it
 // must refuse without touching the dependency, and refusing must be far cheaper
 // than the call it is standing in for. If this were not much cheaper than

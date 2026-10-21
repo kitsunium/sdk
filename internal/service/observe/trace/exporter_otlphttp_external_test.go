@@ -351,6 +351,10 @@ func TestOTLPHTTPReturnsFromACollectorThatNeverStopsSending(t *testing.T) {
 				streamForever(w, r)
 			}))
 			t.Cleanup(server.Close)
+			//: before Close (cleanups run last-in first-out): sever the socket the
+			//: handler writes to, or Close waits on a Write the kernel may never
+			//: wake — on Solaris it stayed parked after Export had returned.
+			t.Cleanup(server.CloseClientConnections)
 			exporter, err := svctrace.NewOTLPHTTPExporter("otlphttp", svctrace.OTLPHTTPConfig{
 				Endpoint: server.URL + svctrace.OTLPTracesPath,
 				Client:   server.Client(),
