@@ -12,6 +12,15 @@ constants:
         value: "65"
     name: exitDataErr
   - doc: |-
+      exitTempFail matches sysexits EX_TEMPFAIL (75). A failure a handler asks to
+      retry after a delay is temporary by its own account: the same message is
+      expected to succeed once the delay has passed.
+    items:
+      - name: exitTempFail
+        type: int
+        value: "75"
+    name: exitTempFail
+  - doc: |-
       DefaultMaxMessageBytes bounds a payload when [PolicyValue.MaxMessageBytes]
       is left at zero. One mebibyte is the value the industry converged on —
       NATS's default, Kafka's default `message.max.bytes`, four times SQS's
@@ -50,6 +59,27 @@ constants:
         type: time.Duration
         value: 100 * 365 * 24 * time.Hour
     name: MaxDeadlineOffset
+  - doc: |-
+      retryAfterField names the field RetryAfter carries its delay in, as integer
+      nanoseconds. RetryAfterOf is its one reader, so the spelling is this
+      package's alone.
+    items:
+      - name: retryAfterField
+        type: string
+        value: "\"retry_after_ns\""
+    name: retryAfterField
+  - doc: "delayBits is the width a delay is parsed back at: a time.Duration's."
+    items:
+      - name: delayBits
+        type: int
+        value: "64"
+    name: delayBits
+  - doc: delayBase is the radix errs renders an integer field in.
+    items:
+      - name: delayBase
+        type: int
+        value: "10"
+    name: delayBase
 files:
   - decls:
       - DeadLetterValue
@@ -58,6 +88,7 @@ files:
     name: doc.go
   - decls:
       - exitDataErr
+      - exitTempFail
     name: errors.go
   - decls:
       - LiveMessageValue
@@ -79,7 +110,12 @@ files:
       - NackValue
     name: queue.go
   - decls:
+      - retryAfterField
+      - delayBits
+      - delayBase
       - DoNotRetry
+      - RetryAfter
+      - RetryAfterOf
     name: retry.go
   - decls:
       - WakeValue
@@ -88,9 +124,17 @@ functions:
   - name: DoNotRetry
     params: cause error
     results: error
+  - name: RetryAfter
+    params: cause error, delay time.Duration
+    results: error
+  - name: RetryAfterOf
+    params: err error
+    results: delay time.Duration, marked bool
 imports:
   context: context
   errs: github.com/kitsunium/sdk/internal/kernel/errs
+  slices: slices
+  strconv: strconv
   time: time
 package:
   docFile: doc.go

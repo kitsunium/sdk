@@ -212,7 +212,7 @@ sequences:
             - eval: s.report(&event)
               to: s.report
             - return: nil
-          when: s.park(ctx, delivery, delay)
+          when: s.park(ctx, delivery, delay, sendErr)
       - set: event.Next
         to: event.At.Add
         value: event.At.Add(s.backoff.BaseDelay)
@@ -290,9 +290,21 @@ sequences:
         kind: actor
       - id: (*Spool).park
         kind: self
+      - id: nacker.NackAfter
+        kind: value
       - id: extender.Extend
         kind: value
     steps:
+      - opt:
+          do:
+            - bind: _, nackErr
+              eval: nacker.NackAfter(ctx, delivery.Lease.Receipt, failure, delay)
+              to: nacker.NackAfter
+            - return: nackErr == nil
+          init:
+            bind: nacker, delays
+            eval: s.broker.(corequeue.DelayedNacker)
+          when: delays
       - bind: extender, extendable
         eval: s.broker.(corequeue.LeaseExtender)
       - opt:

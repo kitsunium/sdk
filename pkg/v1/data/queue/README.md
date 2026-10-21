@@ -107,6 +107,34 @@ if err := json.Unmarshal(d.Message.Payload, &order); err != nil {
 
 Keep it for failures that belong to the message. A downstream that is down, a lock that is held, a deadline that passed are what retries are for. The mark is recognised with errs.HasCode(err, queue.CodeNotRetryable); a broker of your own without [Rejecter](#Rejecter) is nacked as before, and the message then reaches the dead-letter store after its last attempt with the same cause.
 
+### A retry when the handler says, a message for later, a publication once
+
+Three more siblings, every broker here implementing each (ADR 0183).
+
+A handler that knows when to try again — a downstream that answered with a Retry-After, a server that greylisted the sender — returns [RetryAfter](#RetryAfter) around its error, and [Consume](#Consume) hands the message back through [DelayedNacker](#DelayedNacker) with that delay instead of the policy's; the delivery is counted, as a nack's always is:
+
+```
+if resp.StatusCode == http.StatusTooManyRequests {
+	return queue.RetryAfter(errThrottled, 30*time.Second)
+}
+```
+
+Work that falls due once, later — a reminder, a trial that ends, an order cancelled if still unpaid — is published with [DelayedPublisher](#DelayedPublisher): no consumer receives it before its instant, and it is as durable as any message. It does not recur: work that repeats on a calendar is pkg/v1/app/scheduler's, whose job may publish here.
+
+```
+if deferred, ok := broker.(queue.DelayedPublisher); ok {
+	_, err := deferred.PublishAt(ctx, payload, trialEnds)
+}
+```
+
+A producer that may retry a publication whose answer it never got publishes under a key with [OncePublisher](#OncePublisher): within the window, a second publication under the same key publishes nothing and says so — a boolean, not an error, since it is the answer the retry was looking for. The queue still delivers at least once; this only stops the producer adding a copy.
+
+```
+if once, ok := broker.(queue.OncePublisher); ok {
+	_, published, err := once.PublishOnce(ctx, "order-"+id+"-paid", payload, 5*time.Minute)
+}
+```
+
 ### A retry delay that grows
 
 [Policy](#Policy).RetryDelay is the same wait after every failure. Set [Policy](#Policy).MaxRetryDelay and it grows instead — RetryDelay after the first failure, doubling, never more than the ceiling — so a downstream that is down is asked less and less often:
@@ -195,6 +223,7 @@ Idle consumers are woken once the publication's transaction commits, never for o
 - [func NewFile\(cfg FileConfig\) \(broker Broker, err error\)](<#NewFile>)
 - [func NewMemory\(cfg MemoryConfig\) \(broker Broker, err error\)](<#NewMemory>)
 - [func NewSQL\(cfg SQLConfig\) \(broker Broker, err error\)](<#NewSQL>)
+- [func RetryAfter\(cause error, delay time.Duration\) error](<#RetryAfter>)
 - [func SQLMigration\(dialect sql.Dialect, table string, version uint64\) \(sql.Migration, error\)](<#SQLMigration>)
 - [type Broker](<#Broker>)
   - [func \(Broker\) Ack\(ctx context.Context, receipt ReceiptValue\) error](<#Broker.Ack>)
@@ -210,6 +239,10 @@ Idle consumers are woken once the publication's transaction commits, never for o
   - [func \(DeadLetterReader\) DeadLetters\(ctx context.Context, max int\) \(\[\]DeadLetterValue, error\)](<#DeadLetterReader.DeadLetters>)
 - [type DeadLetterWriter](<#DeadLetterWriter>)
   - [func \(DeadLetterWriter\) PutDeadLetter\(ctx context.Context, dead DeadLetterValue\) \(string, error\)](<#DeadLetterWriter.PutDeadLetter>)
+- [type DelayedNacker](<#DelayedNacker>)
+  - [func \(DelayedNacker\) NackAfter\(ctx context.Context, receipt ReceiptValue, cause error, delay time.Duration\) \(NackValue, error\)](<#DelayedNacker.NackAfter>)
+- [type DelayedPublisher](<#DelayedPublisher>)
+  - [func \(DelayedPublisher\) PublishAt\(ctx context.Context, payload \[\]byte, at time.Time\) \(MessageValue, error\)](<#DelayedPublisher.PublishAt>)
 - [type Delivery](<#Delivery>)
 - [type FileConfig](<#FileConfig>)
 - [type Handler](<#Handler>)
@@ -224,6 +257,8 @@ Idle consumers are woken once the publication's transaction commits, never for o
 - [type MessageWriter](<#MessageWriter>)
   - [func \(MessageWriter\) PutMessage\(ctx context.Context, live LiveMessageValue\) \(string, error\)](<#MessageWriter.PutMessage>)
 - [type Nack](<#Nack>)
+- [type OncePublisher](<#OncePublisher>)
+  - [func \(OncePublisher\) PublishOnce\(ctx context.Context, key string, payload \[\]byte, window time.Duration\) \(message MessageValue, published bool, err error\)](<#OncePublisher.PublishOnce>)
 - [type Policy](<#Policy>)
   - [func \(Policy\) Normalized\(\) PolicyValue](<#Policy.Normalized>)
   - [func \(Policy\) Validate\(\) error](<#Policy.Validate>)
@@ -282,6 +317,17 @@ CodeNotRetryable is the code [DoNotRetry](#DoNotRetry) adds to a failure's wrap 
 Initialised with `github.com/kitsunium/sdk/internal/core/data/queue.CodeNotRetryable`.
 
 Code `0.2.23.6`
+
+<a name="CodeRetryRequested"></a>
+```go
+const CodeRetryRequested errs.Code = 136970
+```
+
+CodeRetryRequested is the code [RetryAfter](#RetryAfter) adds to a failure's wrap trail: errs.HasCode(err, CodeRetryRequested) recognises the mark.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/queue.CodeRetryRequested`.
+
+Code `0.2.23.10`
 
 <a name="CodeSQLQueueMisconfigured"></a>
 ```go
@@ -475,6 +521,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/data/queue.QueueMisconf
 
 Code `0.2.23.1` · reason `QUEUE_MISCONFIGURED` · public "The queue policy is not one this broker can honour"
 
+<a name="RetryRequested"></a>
+```go
+var RetryRequested *errs.Error
+```
+
+RetryRequested is what a dead letter records when [RetryAfter](#RetryAfter) marked an error with no public words of its own, or none at all, and the message ran out of attempts.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/queue.RetryRequested`.
+
+Code `0.2.23.10` · reason `RETRY_REQUESTED` · public "The message was handed back to be retried after a delay"
+
 <a name="SQLQueueMisconfigured"></a>
 ```go
 var SQLQueueMisconfigured *errs.Error
@@ -562,6 +619,15 @@ NewSQL returns a durable broker whose queue is one table of the caller's databas
 
 It refuses at construction — never at first use — a policy it cannot honour and a transactor, dialect or table it cannot use ([SQLQueueMisconfigured](#SQLQueueMisconfigured)). The transactor must be the SDK's, or another core/data/sql Joiner and Deferrer.
 
+<a name="RetryAfter"></a>
+## func [RetryAfter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
+
+```go
+func RetryAfter(cause error, delay time.Duration) error
+```
+
+RetryAfter marks cause as a failure to retry no sooner than delay from now: returned from a [Handler](#Handler), it makes [Consume](#Consume) hand the message back through the broker's [DelayedNacker](#DelayedNacker) with that delay instead of the policy's retry delay, its delivery counted. A negative delay is read as zero; [DoNotRetry](#DoNotRetry) wins over it.
+
 <a name="SQLMigration"></a>
 ## func [SQLMigration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
@@ -574,7 +640,7 @@ SQLMigration returns the migration that creates the one table an SQL queue named
 <a name="Broker"></a>
 ## type [Broker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
-Broker is the public alias for the queue contract. It is FROZEN at four methods; capabilities arrive as siblings ([DeadLetterReader](#DeadLetterReader), [LeaseExtender](#LeaseExtender), [Waker](#Waker), [Rejecter](#Rejecter), [Releaser](#Releaser), [DeadLetterManager](#DeadLetterManager), [DeadLetterWriter](#DeadLetterWriter), [MessageReader](#MessageReader), [MessageWriter](#MessageWriter)) reached by type assertion.
+Broker is the public alias for the queue contract. It is FROZEN at four methods; capabilities arrive as siblings ([DeadLetterReader](#DeadLetterReader), [LeaseExtender](#LeaseExtender), [Waker](#Waker), [Rejecter](#Rejecter), [Releaser](#Releaser), [DelayedNacker](#DelayedNacker), [DelayedPublisher](#DelayedPublisher), [OncePublisher](#OncePublisher), [DeadLetterManager](#DeadLetterManager), [DeadLetterWriter](#DeadLetterWriter), [MessageReader](#MessageReader), [MessageWriter](#MessageWriter)) reached by type assertion.
 
 ```go
 type Broker = corequeue.Broker
@@ -1030,6 +1096,94 @@ dead.Message.ID must be empty: the identifier is the broker's to mint, as [Broke
 
 It is never delivered and wakes no consumer. A broker that joins the transaction ctx carries (ADR 0151) writes it in that transaction, so it exists if and only if the transaction commits.
 
+<a name="DelayedNacker"></a>
+## type [DelayedNacker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
+
+DelayedNacker is the public alias for the capability of handing a leased message back after a delay its caller names. Every broker here implements it, and Consume uses it for a [RetryAfter](#RetryAfter) failure.
+
+```go
+type DelayedNacker = corequeue.DelayedNacker
+```
+
+DelayedNacker is an alias of `github.com/kitsunium/sdk/internal/core/data/queue.DelayedNacker`, declared as:
+
+```go
+type DelayedNacker interface {
+	// NackAfter reports that processing failed and hands the message back,
+	// receivable again delay after now on the broker's clock — whatever
+	// [PolicyValue.RetryDelay] and [PolicyValue.MaxRetryDelay] would have
+	// made it wait. Everything else is [Broker.Nack]'s: the delivery is
+	// counted, and a message delivered [PolicyValue.MaxDeliveries] times is
+	// moved to the dead-letter store with cause instead, the delay unused.
+	// See [NackValue].
+	//
+	// A zero delay makes the message receivable at once, and a negative one
+	// is read as zero: both have the one reading "now". A delay whose instant
+	// a durable broker cannot record (past 2262, Unix nanoseconds) is
+	// [QueueMisconfigured], refused before anything moves, and the lease the
+	// caller holds stays valid. A lapsed or unknown receipt is refused
+	// exactly as [Broker.Ack] refuses it.
+	NackAfter(ctx context.Context, receipt ReceiptValue, cause error, delay time.Duration) (NackValue, error)
+}
+```
+
+<a name="DelayedNacker.NackAfter"></a>
+### func \(DelayedNacker\) [NackAfter](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/gen_ports.go>)
+
+```go
+func (DelayedNacker) NackAfter(ctx context.Context, receipt ReceiptValue, cause error, delay time.Duration) (NackValue, error)
+```
+
+NackAfter reports that processing failed and hands the message back, receivable again delay after now on the broker's clock — whatever \[PolicyValue.RetryDelay] and \[PolicyValue.MaxRetryDelay] would have made it wait. Everything else is [Broker.Nack](#Broker.Nack)'s: the delivery is counted, and a message delivered \[PolicyValue.MaxDeliveries] times is moved to the dead-letter store with cause instead, the delay unused. See \[NackValue].
+
+A zero delay makes the message receivable at once, and a negative one is read as zero: both have the one reading "now". A delay whose instant a durable broker cannot record (past 2262, Unix nanoseconds) is [QueueMisconfigured](#QueueMisconfigured), refused before anything moves, and the lease the caller holds stays valid. A lapsed or unknown receipt is refused exactly as [Broker.Ack](#Broker.Ack) refuses it.
+
+<a name="DelayedPublisher"></a>
+## type [DelayedPublisher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
+
+DelayedPublisher is the public alias for the capability of publishing a message no consumer receives before an instant. Every broker here implements it.
+
+```go
+type DelayedPublisher = corequeue.DelayedPublisher
+```
+
+DelayedPublisher is an alias of `github.com/kitsunium/sdk/internal/core/data/queue.DelayedPublisher`, declared as:
+
+```go
+type DelayedPublisher interface {
+	// PublishAt appends payload to the queue as [Broker.Publish] does, and
+	// hands it to no consumer before at. Its EnqueuedAt is the broker's now,
+	// as every publication's is; at is when it becomes visible, which
+	// [MessageReader.Messages] reports as its VisibleAt.
+	//
+	// An at already past — the zero time.Time included — means now: the
+	// message is receivable at once, as a published one is. An at a durable
+	// broker cannot record (past 2262, Unix nanoseconds) is
+	// [QueueMisconfigured], and nothing is published.
+	//
+	// Everything else is Publish's: durable when it returns nil, part of the
+	// transaction ctx carries on a broker that joins one (ADR 0151), a
+	// payload above [PolicyValue.MaxMessageBytes] refused with
+	// [MessageTooLarge]. Idle consumers are woken, and from then on wait
+	// until at rather than polling for it. A queue delivers by visibility,
+	// so a deferred message comes behind every message visible before it.
+	PublishAt(ctx context.Context, payload []byte, at time.Time) (MessageValue, error)
+}
+```
+
+<a name="DelayedPublisher.PublishAt"></a>
+### func \(DelayedPublisher\) [PublishAt](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/gen_ports.go>)
+
+```go
+func (DelayedPublisher) PublishAt(ctx context.Context, payload []byte, at time.Time) (MessageValue, error)
+```
+
+PublishAt appends payload to the queue as [Broker.Publish](#Broker.Publish) does, and hands it to no consumer before at. Its EnqueuedAt is the broker's now, as every publication's is; at is when it becomes visible, which [MessageReader.Messages](#MessageReader.Messages) reports as its VisibleAt.
+
+An at already past — the zero time.Time included — means now: the message is receivable at once, as a published one is. An at a durable broker cannot record (past 2262, Unix nanoseconds) is [QueueMisconfigured](#QueueMisconfigured), and nothing is published.
+
+Everything else is Publish's: durable when it returns nil, part of the transaction ctx carries on a broker that joins one (ADR 0151), a payload above \[PolicyValue.MaxMessageBytes] refused with [MessageTooLarge](#MessageTooLarge). Idle consumers are woken, and from then on wait until at rather than polling for it. A queue delivers by visibility, so a deferred message comes behind every message visible before it.
+
 <a name="Delivery"></a>
 ## type [Delivery](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
@@ -1414,6 +1568,69 @@ type Nack struct {
 	DeadLettered bool
 }
 ```
+
+<a name="OncePublisher"></a>
+## type [OncePublisher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
+
+OncePublisher is the public alias for the capability of publishing at most once per key over a window. Every broker here implements it.
+
+```go
+type OncePublisher = corequeue.OncePublisher
+```
+
+OncePublisher is an alias of `github.com/kitsunium/sdk/internal/core/data/queue.OncePublisher`, declared as:
+
+```go
+type OncePublisher interface {
+	// PublishOnce publishes payload as [Broker.Publish] does and reserves key
+	// for window from now — unless key is still reserved, and then it
+	// publishes nothing. It reports which: true with the message it minted,
+	// or false with the zero [MessageValue] when an earlier publication's
+	// window still holds key.
+	//
+	// A duplicate is an answer and not an error, on purpose: it is the
+	// expected outcome of the retry this call exists for, and a caller
+	// asking "did it go out?" must not have to tell a sentinel from a
+	// failure. The message the earlier publication minted is not returned:
+	// the key is what the caller holds.
+	//
+	// The window runs on the broker's clock from the publication that
+	// reserved key, and ends there: a publication after it publishes again
+	// and reserves the key anew. A reservation past its window is removed
+	// lazily, by a later publication through this sibling. Keys are compared
+	// byte for byte; the durable brokers keep only their SHA-256.
+	//
+	// An empty key is refused, and so is a non-positive window — "never
+	// deduplicate" and "forever" are opposite readings of zero, and either
+	// would be a publication that reads as deduplicated and is not — or one
+	// whose end a durable broker cannot record (2262): [QueueMisconfigured],
+	// naming the argument, and nothing is published. A payload above
+	// [PolicyValue.MaxMessageBytes] is [MessageTooLarge].
+	//
+	// A broker that joins the transaction ctx carries (ADR 0151) reserves key
+	// in that transaction: the reservation and the message exist if and only
+	// if it commits. What a crash between the two costs is the broker's to
+	// say, and it is at most a duplicate, never a lost message.
+	PublishOnce(ctx context.Context, key string, payload []byte, window time.Duration) (message MessageValue, published bool, err error)
+}
+```
+
+<a name="OncePublisher.PublishOnce"></a>
+### func \(OncePublisher\) [PublishOnce](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/gen_ports.go>)
+
+```go
+func (OncePublisher) PublishOnce(ctx context.Context, key string, payload []byte, window time.Duration) (message MessageValue, published bool, err error)
+```
+
+PublishOnce publishes payload as [Broker.Publish](#Broker.Publish) does and reserves key for window from now — unless key is still reserved, and then it publishes nothing. It reports which: true with the message it minted, or false with the zero \[MessageValue] when an earlier publication's window still holds key.
+
+A duplicate is an answer and not an error, on purpose: it is the expected outcome of the retry this call exists for, and a caller asking "did it go out?" must not have to tell a sentinel from a failure. The message the earlier publication minted is not returned: the key is what the caller holds.
+
+The window runs on the broker's clock from the publication that reserved key, and ends there: a publication after it publishes again and reserves the key anew. A reservation past its window is removed lazily, by a later publication through this sibling. Keys are compared byte for byte; the durable brokers keep only their SHA-256.
+
+An empty key is refused, and so is a non-positive window — "never deduplicate" and "forever" are opposite readings of zero, and either would be a publication that reads as deduplicated and is not — or one whose end a durable broker cannot record (2262): [QueueMisconfigured](#QueueMisconfigured), naming the argument, and nothing is published. A payload above \[PolicyValue.MaxMessageBytes] is [MessageTooLarge](#MessageTooLarge).
+
+A broker that joins the transaction ctx carries (ADR 0151) reserves key in that transaction: the reservation and the message exist if and only if it commits. What a crash between the two costs is the broker's to say, and it is at most a duplicate, never a lost message.
 
 <a name="Policy"></a>
 ## type [Policy](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)

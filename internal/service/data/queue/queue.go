@@ -2,9 +2,11 @@ package queue
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"math"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -197,6 +199,79 @@ func checkLiveMessage(live corequeue.LiveMessageValue, maxBytes int) error {
 	}
 	//: MessageTooLarge, or nil: the bound Publish enforces.
 	return checkSize(len(live.Message.Payload), maxBytes)
+}
+
+// nackDeadline is the instant a message NackAfter hands back becomes
+// receivable: delay after now, a negative delay read as zero
+// (core/data/queue.DelayedNacker). An instant no durable broker records is
+// refused, by every broker alike, before anything moves.
+func nackDeadline(now time.Time, delay time.Duration) (time.Time, error) {
+	visibleAt := now.Add(max(delay, 0))
+	//: past 2262 a name or a column would carry it wrapped.
+	if !nameable(visibleAt) {
+		//: QueueMisconfigured, naming the argument and never a payload.
+		return time.Time{}, kerrs.Wrap(corequeue.QueueMisconfigured, kerrs.WrapParams{},
+			kerrs.String("field", "NackAfter.delay"), kerrs.Int64("value_ns", int64(delay)))
+	}
+	//: the instant, on the broker's clock.
+	return visibleAt, nil
+}
+
+// publishVisibleAt is the instant a message PublishAt writes becomes
+// receivable: at, or now when at has already passed
+// (core/data/queue.DelayedPublisher). An instant no durable broker records is
+// refused, by every broker alike, before anything is written.
+func publishVisibleAt(now, at time.Time) (time.Time, error) {
+	//: a past instant — the zero time.Time included — has one reading: now.
+	if !at.After(now) {
+		//: receivable at once, as a publication is.
+		return now, nil
+	}
+	//: past 2262 a name or a column would carry it wrapped.
+	if !nameable(at) {
+		//: QueueMisconfigured, naming the argument.
+		return time.Time{}, kerrs.Wrap(corequeue.QueueMisconfigured, kerrs.WrapParams{},
+			kerrs.String("field", "PublishAt.at"), kerrs.String("instant", at.UTC().Format(time.RFC3339Nano)))
+	}
+	//: held back until then.
+	return at, nil
+}
+
+// onceUntil is the instant a PublishOnce reservation made now ends
+// (core/data/queue.OncePublisher), after the refusals every broker makes
+// alike: an empty key, a window that is not positive — "never deduplicate"
+// and "forever" are the opposite readings of zero — and a window whose end no
+// durable broker records.
+func onceUntil(now time.Time, key string, window time.Duration) (time.Time, error) {
+	field := ""
+	until := now.Add(window)
+	switch {
+	//: an empty key would make every keyless publication one message.
+	case key == "":
+		field = "PublishOnce.key"
+	//: zero and below have two readings, and both are harmful.
+	case window <= 0 || !nameable(until):
+		field = "PublishOnce.window"
+	}
+	//: one argument no broker can honour.
+	if field != "" {
+		//: QueueMisconfigured, naming the argument — never the key, which may
+		//: be derived from the payload.
+		return time.Time{}, kerrs.Wrap(corequeue.QueueMisconfigured, kerrs.WrapParams{},
+			kerrs.String("field", field), kerrs.Int64("window_ns", int64(window)))
+	}
+	//: the reservation's end, on the broker's clock.
+	return until, nil
+}
+
+// onceDigest is what a durable broker keeps of a PublishOnce key: its SHA-256,
+// in lower-case hex. Fixed-width whatever the key, so it is a file name and a
+// column value with no escaping, and never the key itself, which a caller may
+// derive from what the message carries.
+func onceDigest(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	//: 64 hex digits.
+	return hex.EncodeToString(sum[:])
 }
 
 // keptAsWritten reports whether value survives oneLine unchanged: no line

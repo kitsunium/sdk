@@ -116,3 +116,53 @@ sequences:
           		ExitCode: exitDataErr,
           	})
         to: errs
+  - of: RetryAfter
+    participants:
+      - id: caller
+        kind: actor
+      - id: RetryAfter
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - bind: held
+        eval: min(max(delay, 0), MaxDeadlineOffset)
+      - return: |-
+          errs.Wrap(cause, errs.WrapParams{
+          		Code: CodeRetryRequested, Reason: "RETRY_REQUESTED",
+          		Public:   "The message was handed back to be retried after a delay",
+          		Private:  "core/data/queue: a handler asked for a retry after a delay of its own; the delay rides as the retry_after_ns field",
+          		ExitCode: exitTempFail,
+          	}, errs.Int64(retryAfterField, int64(held)))
+        to: errs
+  - of: RetryAfterOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: RetryAfterOf
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: 0, false
+          when: "!errs.HasCode(err, CodeRetryRequested)"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: field.Key() != retryAfterField
+            - bind: nanos, parseErr
+              eval: strconv.ParseInt(field.StringValue(), delayBase, delayBits)
+              to: strconv
+            - opt:
+                do:
+                  - return: 0, true
+                when: parseErr != nil
+            - return: min(max(time.Duration(nanos), 0), MaxDeadlineOffset), true
+          key: _
+          range: slices.Backward(errs.FieldsOf(err))
+          value: field
+      - return: 0, true

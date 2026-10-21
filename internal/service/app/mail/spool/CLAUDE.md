@@ -27,23 +27,31 @@ raises the core's.
 | `spool.go` | `Spool`, `New`, `Send` (`mint`), `SendWithID`, both through `queue` (`stamp`, `domainOf`), the per-identifier `announcement` count, `holdAnnouncement` (a Send inside a transaction: `EventQueued` held until the commit, the registration ended by `OnAbort` on a rollback), `Run` (the queue's `Consume`, one mail at a time), `DeadLetters`, `Close` (a `Config.Broker` stays its caller's) |
 | `identifier.go` | `MaxIDBytes` and `checkID` — the rule every identifier keeps, whoever minted it |
 | `config.go` | `Config` (`Broker` and `Deferrer` since ADR 0178; `MaxAge` and `RetryPermanent` since ADR 0111's 2026-10-21 amendment, a negative `MaxAge` refused), `DefaultSendTimeout`, `DefaultRetryBase` / `DefaultRetryMax`, `DefaultMaxMessageBytes`, `DeliveredMemory`; the refusals (`validateBroker`: `Dir` or `MaxMessageBytes` beside a `Broker`, a `Deferrer` without one or that is not an `Aborter`) |
-| `deliver.go` | the queue handler: the record read back, a duplicate dropped, the attempt bounded on the spool's clock with its `AttemptValue` in the context, a transport panic recovered, a failure parked (`LeaseExtender.Extend` by `Backoff.Delay(attempt)`) or — on the last attempt — nacked into the dead letter; `giveUp` first: a failure carrying a 5xx `*textproto.Error` (`permanentReply`) is marked `MailRejected` unless `RetryPermanent`, one at or past `MaxAge` `MailExpired` (`mark`, origin-wins like `DoNotRetry`), and returned `corequeue.DoNotRetry`, which `Consume` turns into the broker's `Reject` |
+| `deliver.go` | the queue handler: the record read back, a duplicate dropped, the attempt bounded on the spool's clock with its `AttemptValue` in the context, a transport panic recovered, a failure parked for `Backoff.Delay(attempt)` (`DelayedNacker.NackAfter` where the queue has it — ADR 0183 —, `LeaseExtender.Extend` otherwise) or — on the last attempt — nacked into the dead letter; `giveUp` first: a failure carrying a 5xx `*textproto.Error` (`permanentReply`) is marked `MailRejected` unless `RetryPermanent`, one at or past `MaxAge` `MailExpired` (`mark`, origin-wins like `DoNotRetry`), and returned `corequeue.DoNotRetry`, which `Consume` turns into the broker's `Reject` |
 | `ledger.go` | the delivered-ID ring (`DeliveredMemory` entries) |
 | `event.go` | `EventKind` (`queued`, `sent`, `retrying`, `dead-lettered`, `duplicate`), `EventValue`, `AttemptValue` + `AttemptFrom`, `DeadLetterValue` |
 
 ## Why-this-shape
 
-- **A retry parks the mail; it does not nack it.** The queue's `RetryDelay`
-  is one fixed delay per queue, and a mail wants a backoff that grows with the
-  attempt. So a failure with attempts left EXTENDS the lease by
-  `Backoff.Delay(attempt)` and the handler returns nil: `Extend` replaced the
+- **A retry parks the mail; it does not nack it on the queue's delay.** The
+  queue's `RetryDelay` is one fixed delay per queue, and a mail wants a backoff
+  that grows with the attempt. So a failure with attempts left is handed back
+  for `Backoff.Delay(attempt)` and the handler returns nil. Since ADR 0183 that
+  is `NackAfter` on a queue with the `DelayedNacker` sibling — all three SDK
+  brokers, and the framework's sealed outbox — so the mail waits as a queued
+  message, the attempt's failure handed over as the nack's cause; a queue
+  without it EXTENDS the lease by the delay instead, as before. The mail comes
+  back at the same instant with the same count either way; what differs is
+  what `MessageReader` lists meanwhile (queued, not leased) and, on a caller's
+  queue whose `MaxDeliveries` is below `MaxAttempts`, the cause a premature
+  dead letter records (the failure, not `LEASE_EXPIRED`). Parking voided the
   receipt, the consumer's acknowledgement of the old one is `LEASE_EXPIRED`,
   which `Consume` ignores as it ignores every lapsed acknowledgement, and the
-  queue hands the mail back when the new lease lapses — its delivery count, the
+  queue hands the mail back when the backoff ends — its delivery count, the
   one that decides the dead letter and survives a crash, incremented. The last
   attempt returns its error: the nack dead-letters the mail WITH that failure
   (reason, wire-safe cause, code), which a lapsed lease would not carry. Both
-  brokers answer `LEASE_EXPIRED` for a replaced receipt; `TestRetriesOnTheBackoffThenDeadLetters`
+  brokers answer `LEASE_EXPIRED` for a nacked or a replaced receipt; `TestRetriesOnTheBackoffThenDeadLetters`
   and `TestAMailOutlivesItsProcess` run the path on both.
 - **A 5xx is not repeated, and a mail can be too old** (ADR 0111, amended
   2026-10-21, #478). RFC 5321 §4.2.1: a 5yz reply means the same command

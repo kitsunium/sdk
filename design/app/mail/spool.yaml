@@ -333,10 +333,12 @@ packages:
 
       Run consumes the spool, one mail at a time, on the goroutine that calls it.
       Each attempt runs under SendTimeout, with its AttemptValue in the context.
-      An attempt that fails with attempts left PARKS the mail: its lease is
-      extended by Backoff.Delay(attempt) and left to lapse, and the queue hands it
-      back then, its delivery count — the count that decides the dead letter, and
-      that survives a crash — incremented. The last attempt's failure is the
+      An attempt that fails with attempts left PARKS the mail for
+      Backoff.Delay(attempt): a queue that can nack after a delay of the caller's
+      (data/queue's DelayedNacker, ADR 0183) is nacked after it, and any other has
+      the lease extended by it and left to lapse. Either way the queue hands the
+      mail back then, its delivery count — the count that decides the dead letter,
+      and that survives a crash — incremented. The last attempt's failure is the
       queue's nack, and the queue dead-letters the mail with that failure.
 
       # A refusal that is permanent, and a mail that is too old

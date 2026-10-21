@@ -147,6 +147,40 @@
 // of your own without [Rejecter] is nacked as before, and the message then
 // reaches the dead-letter store after its last attempt with the same cause.
 //
+// # A retry when the handler says, a message for later, a publication once
+//
+// Three more siblings, every broker here implementing each (ADR 0183).
+//
+// A handler that knows when to try again — a downstream that answered with a
+// Retry-After, a server that greylisted the sender — returns [RetryAfter]
+// around its error, and [Consume] hands the message back through
+// [DelayedNacker] with that delay instead of the policy's; the delivery is
+// counted, as a nack's always is:
+//
+//	if resp.StatusCode == http.StatusTooManyRequests {
+//		return queue.RetryAfter(errThrottled, 30*time.Second)
+//	}
+//
+// Work that falls due once, later — a reminder, a trial that ends, an order
+// cancelled if still unpaid — is published with [DelayedPublisher]: no consumer
+// receives it before its instant, and it is as durable as any message. It does
+// not recur: work that repeats on a calendar is pkg/v1/app/scheduler's, whose
+// job may publish here.
+//
+//	if deferred, ok := broker.(queue.DelayedPublisher); ok {
+//		_, err := deferred.PublishAt(ctx, payload, trialEnds)
+//	}
+//
+// A producer that may retry a publication whose answer it never got publishes
+// under a key with [OncePublisher]: within the window, a second publication
+// under the same key publishes nothing and says so — a boolean, not an error,
+// since it is the answer the retry was looking for. The queue still delivers
+// at least once; this only stops the producer adding a copy.
+//
+//	if once, ok := broker.(queue.OncePublisher); ok {
+//		_, published, err := once.PublishOnce(ctx, "order-"+id+"-paid", payload, 5*time.Minute)
+//	}
+//
 // # A retry delay that grows
 //
 // [Policy].RetryDelay is the same wait after every failure. Set

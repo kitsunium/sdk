@@ -6,11 +6,16 @@ import (
 	"runtime/debug"
 	"time"
 
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/concur/group"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 
 	corequeue "github.com/kitsunium/sdk/internal/core/data/queue"
 )
+
+// armTimerRounds bounds how many times armUntil re-arms a timer the clock
+// moved past while it was being armed.
+const armTimerRounds int = 4
 
 // Consume runs cfg.Handler against broker until ctx is done.
 //
@@ -40,6 +45,15 @@ import (
 // of those outcomes is sent past the stop, on ctx without its cancellation,
 // bounded by [ConsumerConfig.SettleTimeout] on the consumer's clock, so a
 // caller's stop budget must cover DrainTimeout plus SettleTimeout.
+//
+// # A handler says when to try again (ADR 0183)
+//
+// A failure the handler marked with [corequeue.RetryAfter] is handed back
+// through the broker's [corequeue.DelayedNacker] with the delay it names,
+// its delivery counted as a nack counts it; a broker without the sibling is
+// nacked, and the message waits the policy's retry delay instead.
+// [corequeue.DoNotRetry] wins over it, and a failure a stop cut short is
+// handed back uncounted, as any other is.
 //
 // # A handler ends before its lease does
 //
@@ -98,6 +112,7 @@ type consumer struct {
 	waker    corequeue.Waker
 	releaser corequeue.Releaser
 	rejecter corequeue.Rejecter
+	delayer  corequeue.DelayedNacker
 	extender corequeue.LeaseExtender
 	cfg      ConsumerConfig
 }
@@ -108,6 +123,7 @@ func newConsumer(broker corequeue.Broker, cfg ConsumerConfig) *consumer {
 	engine.waker, _ = broker.(corequeue.Waker)
 	engine.releaser, _ = broker.(corequeue.Releaser)
 	engine.rejecter, _ = broker.(corequeue.Rejecter)
+	engine.delayer, _ = broker.(corequeue.DelayedNacker)
 	//: renewing is the caller's choice, and a capability the broker may lack.
 	if cfg.AutoExtend {
 		engine.extender, _ = broker.(corequeue.LeaseExtender)
@@ -144,7 +160,11 @@ func (c *consumer) pump(ctx context.Context) error {
 		if len(batch) == 0 {
 			//: waits through the clock, never time.Sleep, and wakes on cancel,
 			//: on a publication, or when something the broker holds is due.
-			if !idle(ctx, c.cfg, signal, idleFor(c.cfg.PollInterval, c.waker)) {
+			//: the instant the wait is measured from is read BEFORE the broker
+			//: is asked, so a clock moving meanwhile can only make the wake
+			//: early — a cheap empty Receive — and never late.
+			from := c.cfg.Clock.Now()
+			if !idle(ctx, c.cfg, signal, from.Add(idleFor(c.cfg.PollInterval, c.waker))) {
 				//: cancelled while waiting.
 				return nil
 			}
@@ -183,15 +203,15 @@ func idleFor(poll time.Duration, waker corequeue.Waker) time.Duration {
 }
 
 // idle waits for the first of: the caller's cancellation, the broker's wake
-// signal, or wait elapsing on the consumer's clock. It reports whether the
+// signal, or the consumer's clock reaching until. It reports whether the
 // worker should carry on.
 //
 // A nil signal — a broker without the Waker capability — blocks forever in the
 // select and leaves the plain poll it always was.
-func idle(ctx context.Context, cfg ConsumerConfig, signal <-chan struct{}, wait time.Duration) bool {
+func idle(ctx context.Context, cfg ConsumerConfig, signal <-chan struct{}, until time.Time) bool {
 	//: a timer rather than After, so a wake that wins releases it at once
 	//: instead of leaving it armed until it fires.
-	timer := cfg.Clock.NewTimer(wait)
+	timer := armUntil(cfg.Clock, until)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
@@ -204,6 +224,36 @@ func idle(ctx context.Context, cfg ConsumerConfig, signal <-chan struct{}, wait 
 		//: the poll elapsed, or something became due: ask again.
 		return true
 	}
+}
+
+// armUntil returns a timer that fires when clk reaches until.
+//
+// A timer takes a duration, measured from the instant it registers, and that
+// instant is not the one the duration was computed from: a clock that moves
+// between the two — a test's ManualClock advancing while a worker arms its
+// idle wait — would fire the timer that much late, after the instant the
+// broker said a message is due, and a manual clock that is not advanced
+// again never fires it at all (a mail spool's retry missed on OpenBSD this
+// way). So the clock is read on both sides of the registration, and a timer
+// armed across a move is armed again from the later reading; a real clock,
+// which moves between any two readings, is re-armed a bounded number of times
+// for a lateness of nanoseconds.
+func armUntil(clk clock.Timed, until time.Time) clock.Timer {
+	before := clk.Now()
+	timer := clk.NewTimer(max(until.Sub(before), 0))
+	//: re-armed while the clock moved across the registration.
+	for range armTimerRounds {
+		after := clk.Now()
+		//: registered at the instant the duration was measured from.
+		if !after.After(before) {
+			break
+		}
+		timer.Stop()
+		before = after
+		timer = clk.NewTimer(max(until.Sub(before), 0))
+	}
+	//: due at until, or a few nanoseconds of a real clock after it.
+	return timer
 }
 
 // settleBatch runs the handler over each delivery and reports each outcome to
@@ -315,6 +365,13 @@ func (c *consumer) process(ctx context.Context, delivery corequeue.DeliveryValue
 // margin reached during it — is not the message's: it is handed back
 // uncounted, unless it is a panic, which is.
 //
+// A failure the handler marked with core/data/queue.RetryAfter is nacked
+// with the delay it names when the broker is a core/data/queue.DelayedNacker
+// (ADR 0183), its delivery counted, and nacked as any other failure — after
+// the policy's delay — when it is not. DoNotRetry and a stop are read first,
+// so a failure marked both ways is rejected, and one a stop cut short is
+// handed back.
+//
 // Every outcome is sent on ctx WITHOUT its cancellation, bounded by
 // SettleTimeout: the work is done, or was stopped, and a stop that lands
 // between the handler's return and the report — the consumer's context
@@ -343,6 +400,15 @@ func (c *consumer) settle(ctx context.Context, receipt corequeue.ReceiptValue, f
 	if stopped && !kerrs.HasCode(failure, corequeue.CodeHandlerPanicked) {
 		//: uncounted, receivable at once.
 		return c.handBack(ctx, receipt)
+	}
+	//: the handler said when to try again, and the broker can wait that long.
+	if delay, marked := corequeue.RetryAfterOf(failure); marked && c.delayer != nil {
+		//: same rule as the acknowledgement.
+		return ignoreLapsed(c.bounded(ctx, "nack", false, func(settleCtx context.Context) error {
+			_, nackErr := c.delayer.NackAfter(settleCtx, receipt, failure, delay)
+			//: retried after the handler's delay, or dead-lettered with its cause.
+			return nackErr
+		}))
 	}
 	//: the broker decides: retried, or abandoned with its cause.
 	return c.nack(ctx, receipt, failure)

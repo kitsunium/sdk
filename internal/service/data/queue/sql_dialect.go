@@ -38,6 +38,12 @@ const sqlCauseColumnLen int = 4 * publicMaxRunes
 // one's deadline, a dead letter's failure. So every live row whose due has
 // passed is either receivable or a lease whose holder may have died, and one
 // ordered read finds both.
+//
+// A third state, dead = 2, is no message: it is a PublishOnce reservation
+// (ADR 0183), its id the key's SHA-256 in hex — 64 bytes, no dash, so never a
+// message's identifier — and its due the end of its window. The primary key is
+// its unique constraint, so the table needs no migration for it, and every
+// statement above names dead = 0 or dead = 1 and never reads one.
 type sqlStatements struct {
 	// insert publishes a message.
 	insert string
@@ -72,6 +78,8 @@ type sqlStatements struct {
 	// putLive writes a live message as it is given: queued, visible at its
 	// due, with its count.
 	putLive string
+	// once are PublishOnce's fixed statements.
+	once sqlOnceStatements
 	// table is the table's quoted name.
 	table string
 	// dialect selects the placeholder grammar of the per-call ones.
@@ -113,6 +121,7 @@ func renderSQLStatements(dialect coresql.Dialect, table string) sqlStatements {
 			" ORDER BY id LIMIT " + p(2),
 		putLive: "INSERT INTO " + q + " (id, dead, due, enqueued_at, deliveries, payload) VALUES (" +
 			p(1) + ", 0, " + p(2) + ", " + p(3) + ", " + p(4) + ", " + p(5) + ")",
+		once: renderSQLOnceStatements(dialect, q),
 	}
 	//: SQLite's lock is the database's, taken by a transaction's first
 	//: WRITE: a lease that read first could be refused busy at its update,
@@ -151,6 +160,61 @@ func (s *sqlStatements) buryRows(n int) string {
 	//: the instant and the cause, then the identifiers from the fifth.
 	return "UPDATE " + s.table + " SET dead = 1, due = " + p(1) + ", lease = NULL, reason = " + p(2) + ", cause = " + p(3) +
 		", code = " + p(4) + " WHERE dead = 0 AND id IN (" + s.list(5, n) + ")"
+}
+
+// sqlOnceStatements are PublishOnce's fixed statements (ADR 0183), over
+// reservation rows — dead = 2 — of the queue's own table.
+type sqlOnceStatements struct {
+	// drop removes one key's reservation once its window has passed.
+	drop string
+	// claim reserves a key, affecting no row when the key is still reserved.
+	claim string
+	// pick reads the passed reservations of any key, locked and skipping
+	// those another transaction holds where the engine can.
+	pick string
+}
+
+// renderSQLOnceStatements renders PublishOnce's fixed statements on dialect,
+// over q, the queue's quoted table.
+func renderSQLOnceStatements(dialect coresql.Dialect, q string) sqlOnceStatements {
+	p := dialect.Placeholder
+	//: rendered once, sent on every PublishOnce.
+	return sqlOnceStatements{
+		drop:  "DELETE FROM " + q + " WHERE id = " + p(1) + " AND dead = 2 AND due <= " + p(2),
+		claim: onceClaimStatement(dialect, q),
+		pick:  "SELECT id FROM " + q + " WHERE dead = 2 AND due <= " + p(1) + " ORDER BY due, id LIMIT " + p(2) + dialect.ForUpdateSkipLocked(),
+	}
+}
+
+// onceSweepRows renders the removal of n passed reservations, picked by
+// oncePick: still reservations, and still passed at the instant bound first.
+func (s *sqlStatements) onceSweepRows(n int) string {
+	//: the instant, then the identifiers from the second.
+	return "DELETE FROM " + s.table + " WHERE dead = 2 AND due <= " + s.dialect.Placeholder(1) +
+		" AND id IN (" + s.list(2, n) + ")"
+}
+
+// onceClaimStatement renders the reservation of a key: a row of state 2 whose
+// due is the end of its window, inserted unless the key's row exists — then
+// it affects no row and fails nothing, so a duplicate is an answer and not an
+// error, which on PostgreSQL would also abort the caller's transaction.
+//
+// PostgreSQL and SQLite say so with ON CONFLICT DO NOTHING. MySQL has no ON
+// CONFLICT, and its ON DUPLICATE KEY UPDATE counts a row it left unchanged as
+// one or none depending on the connection's CLIENT_FOUND_ROWS; so it is
+// INSERT IGNORE, whose one other effect — a value truncated or defaulted to
+// fit with a warning — cannot occur here: every value is a 64-byte digest or
+// an integer.
+func onceClaimStatement(dialect coresql.Dialect, q string) string {
+	p := dialect.Placeholder
+	values := " INTO " + q + " (id, dead, due, enqueued_at, deliveries) VALUES (" + p(1) + ", 2, " + p(2) + ", " + p(3) + ", 0)"
+	//: MySQL and MariaDB.
+	if dialect == coresql.DialectMySQL {
+		//: no row affected when the key is taken.
+		return "INSERT IGNORE" + values
+	}
+	//: no row affected when the key is taken.
+	return "INSERT" + values + " ON CONFLICT (id) DO NOTHING"
 }
 
 // list renders n comma-separated placeholders, numbered from first.

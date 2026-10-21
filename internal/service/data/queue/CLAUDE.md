@@ -11,7 +11,7 @@ on goroutines it owns).
 
 All three implement every capability sibling: `DeadLetterReader`,
 `LeaseExtender`, `Waker`, since ADR 0151 `Rejecter` and
-`DeadLetterManager`, since ADR 0178 `DeadLetterWriter`, `MessageReader` and `MessageWriter`, and since kitsunium/sdk#474 `Releaser`; and all three wait the same growing retry delay when the
+`DeadLetterManager`, since ADR 0178 `DeadLetterWriter`, `MessageReader` and `MessageWriter`, since kitsunium/sdk#474 `Releaser`, and since ADR 0183 `DelayedNacker`, `DelayedPublisher` and `OncePublisher`; and all three wait the same growing retry delay when the
 policy's `MaxRetryDelay` asks for one (`retry.go`).
 
 Code range: `0.3.53.*` (ADR 0054) — `QUEUE_BACKEND_FAILED`,
@@ -25,24 +25,26 @@ package declares no code.
 | File | Holds |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
-| `queue.go` | the dead-letter `causeValue` reduction, `randomHex`, the shared guards (`checkBatch`, `checkSize`, `checkDeadLetter` and `checkLiveMessage` — the refusals of `PutDeadLetter` and `PutMessage`, identical on the three brokers, ADR 0178), `deadLetterNotFound` |
+| `queue.go` | the dead-letter `causeValue` reduction, `randomHex`, the shared guards (`checkBatch`, `checkSize`, `checkDeadLetter` and `checkLiveMessage` — the refusals of `PutDeadLetter` and `PutMessage`, identical on the three brokers, ADR 0178; `nackDeadline`, `publishVisibleAt` and `onceUntil` — the arguments of `NackAfter`, `PublishAt` and `PublishOnce`, read and refused identically on the three, and `onceDigest`, the SHA-256 the durable brokers keep of a key, ADR 0183), `deadLetterNotFound` |
 | `retry.go` | `retryDelay`: RetryDelay, or the `kernel/backoff` curve from it to `MaxRetryDelay` — one function the three brokers call (ADR 0151) |
-| `memory.go` | `NewMemory` and the in-heap broker: the heap-ordered lease expiry, the ready list ordered at insertion; `Reject`, `Release`, `ReplayDeadLetter`, `DeleteDeadLetter`, `PutDeadLetter`, `Messages`, `PutMessage` |
-| `memory_config.go` / `mem_record.go` / `lease_expiry.go` | `MemoryConfig` and the two values the memory broker keeps |
-| `file.go` | `NewFile`, `Publish`, `Ack`, receipt resolution, `entriesOf` |
+| `memory.go` | `NewMemory` and the in-heap broker: the heap-ordered lease expiry, the ready list ordered at insertion; `Reject`, `Release`, `NackAfter`, `PublishAt`, `PublishOnce` (a map of the keys reserved and a heap of their windows' ends, `dropPassedOnce`), `ReplayDeadLetter`, `DeleteDeadLetter`, `PutDeadLetter`, `Messages`, `PutMessage` |
+| `memory_config.go` / `mem_record.go` / `lease_expiry.go` / `once_end.go` | `MemoryConfig` and the three values the memory broker keeps |
+| `file.go` | `NewFile`, `Publish`, `PublishAt` (a queued name whose visibility is the instant), `write` (the durable publication both share, waking nobody), `Ack`, receipt resolution, `entriesOf` |
+| `file_once.go` | `PublishOnce` (ADR 0183): the message written first, then the key reserved — `once/<sha256>.key`, written under a name of its own with `O_EXCL` and `link(2)`ed to the key's —, a racer's message withdrawn before anybody is woken (`withdraw`), a passed reservation set aside and read again before it is removed (`dropPassed`), and the sweep, at most once a minute per broker (`sweepOnce`) |
 | `file_config.go` | `FileConfig`, the directory preparation, and the refusals it runs on the queue directory AND each state directory — the shape half (a link, a reparse point, a non-directory), shared by every platform |
 | `dirtrust_posix.go` / `dirtrust_windows.go` | the permission half of those refusals: the mode bits on Unix, the directory's DACL on Windows, read through the kernel's reader, `internal/kernel/fs/winacl` |
 | `file_name.go` | the NAME grammar — the durable broker's entire state machine — and `nameable`, the range of instants a name can carry. Every field is held to the exact width and spelling the renderers write (entropy and lease as wide as `randomHex` makes them, the count as `padCount` spells it), so a stray file of the right shape is skipped rather than delivered |
 | `file_receive.go` | `Receive`, the reclaim scan, the rename that IS the exclusion |
-| `file_dead.go` | `Nack`, `Reject`, `Release` (one rename back into `ready/`, visible now, the count one lower), `Extend`, `DeadLetters`, the burial, the dead-letter record's encoding |
+| `file_dead.go` | `Nack` and `NackAfter` (one `nackWith`, the delay the policy's or the caller's), `Reject`, `Release` (one rename back into `ready/`, visible now, the count one lower), `Extend`, `DeadLetters`, the burial, the dead-letter record's encoding |
 | `file_replay.go` | `ReplayDeadLetter`, `DeleteDeadLetter`, `PutDeadLetter` (a burial's record, published atomically and durably), `Messages` (`liveFiles`, `parseLive`: the two state directories' names, sorted by identifier) and `PutMessage` (a `ready/` file, as a retry leaves one), `deadRecordsOf` — every record of one message by its ID |
-| `sql.go` | `NewSQL`, the SQL broker, `Publish`, `Ack`, `Nack`, `Release`, `Extend`, `Wake`; `run` (a savepoint of the caller's transaction, a transaction of the broker's own, or one statement on the pool), `announce` (the wake through `Deferrer`), the receipt grammar, `failed` (QUEUE_BACKEND_FAILED + the driver's error through `service/data/sql`'s `Withheld`, its text out of every rendering), the process-wide `sqlWakes` table |
+| `sql.go` | `NewSQL`, the SQL broker, `Publish` and `PublishAt` (one INSERT, `due` the instant), `Ack`, `Nack` and `NackAfter` (one `nackWith`), `Release`, `Extend`, `Wake`; `run` (a savepoint of the caller's transaction, a transaction of the broker's own, or one statement on the pool), `announce` (the wake through `Deferrer`), the receipt grammar, `failed` (QUEUE_BACKEND_FAILED + the driver's error through `service/data/sql`'s `Withheld`, its text out of every rendering), the process-wide `sqlWakes` table |
+| `sql_once.go` | `PublishOnce` (ADR 0183): one transaction — the key's passed reservation dropped, the key claimed by an insertion that affects no row when it is taken, the message inserted when the claim took, and up to 100 passed reservations of other keys read `SKIP LOCKED` and removed (`claimOnce`, `sweepOnce`) |
 | `sql_receive.go` | `Receive`: the probe, then — only when something is due — the lease transaction: `pickDue`, `buryLapsed`, `leaseRows`, `minDue` |
 | `sql_dead.go` | `Reject`, `DeadLetters`, `ReplayDeadLetter`, `DeleteDeadLetter`, `PutDeadLetter` (one INSERT of a dead row, in the caller's transaction when its context carries one), `Messages` (one unlocked read of the live rows after an identifier) and `PutMessage` (one INSERT of a live row with its count) on the table |
 | `sql_config.go` | `SQLConfig`, `MaxSQLTableLen`, the table-name rule, the refusals (`SQL_QUEUE_MISCONFIGURED`) |
-| `sql_dialect.go` | **the only place the SQL broker renders SQL**: every statement per dialect, `leaseRows` / `buryRows` rendered per call, the DDL; every marker, quoted name and the lease's `FOR UPDATE SKIP LOCKED` is `core/data/sql.Dialect`'s (`Placeholder`, `QuoteIdent`, `ForUpdateSkipLocked`) |
+| `sql_dialect.go` | **the only place the SQL broker renders SQL**: every statement per dialect, `leaseRows` / `buryRows` / `onceSweepRows` rendered per call, `onceClaimStatement` (`ON CONFLICT (id) DO NOTHING`, MySQL's `INSERT IGNORE`), the DDL; every marker, quoted name and the lease's `FOR UPDATE SKIP LOCKED` is `core/data/sql.Dialect`'s (`Placeholder`, `QuoteIdent`, `ForUpdateSkipLocked`) |
 | `sql_migration.go` | `SQLMigration`: the one table as an idempotent `core/data/sql` migration the caller numbers |
-| `consume.go` | `Consume` (its workers in a `kernel/concur/group` joined group) and `consumer`, the siblings asked once; the pull loop, the batch (`settleBatch`, `prepare`: a message whose lease ran down is handed back or renewed before it starts), the outcomes (`settle`, `handBack` — `Release`, or `Nack` without the sibling — `nack`), the panic guard, and the idle wait on a `Waker` (`idleFor`, `idle`) |
+| `consume.go` | `Consume` (its workers in a `kernel/concur/group` joined group) and `consumer`, the siblings asked once; the pull loop, the batch (`settleBatch`, `prepare`: a message whose lease ran down is handed back or renewed before it starts), the outcomes (`settle` — `NackAfter` for a `RetryAfter` failure when the broker has the sibling, ADR 0183 —, `handBack` — `Release`, or `Nack` without the sibling — `nack`), the panic guard, and the idle wait on a `Waker` (`idleFor`, `idle`, `armUntil`: the wait armed until an instant measured before the broker is asked, re-armed when the clock moved across its registration — a ManualClock advanced while a worker armed its wait fired it that much late, and a spool retry was missed on OpenBSD's CI; `TestAnIdleConsumerWakesAtTheDueInstantWhenTheClockMovesWhileItArms`) |
 | `consume_lease.go` | the handler's watch (kitsunium/sdk#474): `leasePlan` (the lease as granted, its margin — a tenth, at most `SettleTimeout` — and AutoExtend's third), `watch`/`oversee`/`finish` (one goroutine per handled message that ends its context on the stop, after `DrainTimeout`, and a margin before the lease ends, and renews it under AutoExtend), `renew`, and `bounded`/`bound` — every outcome on its context without the cancellation, bounded by `SettleTimeout` from the stop on, a renewal always |
 | `wake.go` | `wakeSignal` (the broadcast every broker closes on Publish, Nack and a replay, and a durable broker's recorded due instant), `wakeValue`, `earliest`, and `wakeTable[K]` — the process-wide, weakly-held table that makes every durable broker over one queue share one signal: `fileWakes` by directory, `sqlWakes` by pool and table |
 | `consume_config.go` | `ConsumerConfig`, the idempotence assertion, the clamps |
@@ -512,6 +514,62 @@ recovered on the worker's goroutine with the originating stack, with the
 recovered value travelling as a FIELD so a `panic(someSentinel)` cannot hijack
 the code.
 
+## A retry after the handler's delay, a message for later, a publication once (ADR 0183)
+
+Three siblings, on all three brokers, each one statement, one rename or one
+write beside what the broker already did:
+
+- **`NackAfter` is `Nack` with another delay.** Each broker's `Nack` became
+  `nackWith(wait)`: the policy's `retryDelay` for `Nack`, the caller's delay for
+  `NackAfter`. The count, the burial on the last attempt and the wake are the
+  same. A negative delay is now, and an instant no name or column carries is
+  `QUEUE_MISCONFIGURED`, checked before the lease is touched (`nackDeadline`).
+  `Consume`'s `settle` reads `RetryAfterOf` after `DoNotRetry` and after a
+  stop, and nacks without the sibling.
+- **`PublishAt` is `Publish` with a later visibility.** Memory: the record's
+  `visibleAt`. File: the queued name's first field, which is what the
+  directory sorts on. SQL: the `due` the INSERT already binds (`Publish` is
+  `PublishAt` at the zero instant). A past instant is now, one past 2262 is
+  refused (`publishVisibleAt`). The idle consumer's wake already reports the
+  earliest due, so it sleeps until the instant.
+- **`PublishOnce` reserves a key for a window.** A duplicate returns `false`
+  and the zero message, never an error. The refusals are `onceUntil`'s: an
+  empty key, a window that is not positive, or one past 2262.
+  - Memory: `once` maps a key to its window's end, and `onceEnds`, a heap,
+    drops passed ones at the next `PublishOnce`.
+  - SQL: a row of the queue's own table, `dead = 2`, id the key's SHA-256 (64
+    hex bytes, never a message identifier), `due` the window's end. The
+    primary key is the unique constraint, so a table that predates this needs
+    no migration. Every older statement names `dead = 0` or `1`, so none ever
+    reads such a row: `TestSQLAReservationIsNoMessage`. One transaction, the
+    caller's as a savepoint, so the reservation and the message commit or roll
+    back together: `TestSQLAReservationExistsIfAndOnlyIfItsTransactionCommits`.
+  - File: `once/`, a fourth directory under the states' rule. An account that
+    could plant `once/<digest>.key` could silence that key:
+    `TestTheDurableBrokerRefusesAStateDirectoryItCannotTrust`. The message is
+    written first and the key reserved after, so a crash costs a duplicate and
+    never a lost message. The reservation is written under `<digest>.<hex>.new`
+    with `O_EXCL`, then `link(2)`ed to `<digest>.key`. A create-then-write was
+    read empty, as passed, by a racing producer, which published too: three of
+    eight producers published under `-race`
+    (`TestProducersRacingOnOneKeyPublishOnce`). A producer that loses the link
+    unlinks its message before waking anybody (`withdraw`). If a consumer
+    leased it in that instant, the call reports a publication. A passed
+    reservation is renamed to `<digest>.<hex>.gone`, read again, and put back
+    by `link(2)` if it turns out to be running. The sweep runs at most once a
+    minute per broker: it removes passed reservations, passed `.gone`
+    leftovers and passed `.new` leftovers. It never removes a `.new` whose end
+    it cannot read, since that may be another producer still writing. The
+    reservation is not flushed: a power cut may forget it, which is a
+    duplicate. `TestAFileReservationIsOneFilePerKeySweptOnceItsWindowPassed`,
+    `TestAHalfWrittenReservationReadsAsPassed`,
+    `TestTwoFileBrokersOverOneDirectoryShareTheirReservations`.
+
+`TestSQLStatementsPerCall` pins the costs. `PublishAt` and `NackAfter` are one
+statement each. `PublishOnce` is one transaction: `onceDrop`, `onceClaim`,
+`insert` when claimed, `oncePick`, and `onceSweepRows` only when something
+passed.
+
 ## Tests worth knowing about
 
 - **`TestAKilledConsumerLosesItsLeaseAndTheMessageComesBack`** is the domain's
@@ -540,8 +598,9 @@ the code.
   `integration` tag — see its CLAUDE.md.
 - **`TestSQLAPublicationExistsIfAndOnlyIfItsTransactionCommits`** is the SQL
   broker's reason to exist, and **`TestSQLStatementsPerCall`** what each call
-  costs: one read for an idle Receive, one statement per Ack, Nack, Extend,
-  Reject or Release.
+  costs: one read for an idle Receive, one statement per Ack, Nack, NackAfter,
+  Extend, Reject or Release, one INSERT per Publish or PublishAt, one
+  transaction per PublishOnce.
 - **`TestAStrayFileInTheQueueDirectoryIsNeverDelivered`** plants a
   `.vfs-<hex>.tmp` in `ready/` — the temporary a CONCURRENT atomic publication
   is genuinely writing there — and asserts the scan skips it. Delivering it
@@ -613,6 +672,7 @@ the handler holds, and its own `Extend` would then be refused.
 - ADR 0151 — the SQL broker, the growing retry delay, `Rejecter`, `DeadLetterManager`
 - ADR 0178 — `DeadLetterWriter`, `MessageReader` and `MessageWriter`, for kit's `data copy`
 - kitsunium/sdk#474 — `Releaser`, the drain, the bound on each outcome, the handler's lease bound and `AutoExtend`
+- ADR 0183 — `DelayedNacker` and `RetryAfter`, `DelayedPublisher`, `OncePublisher`; the frontier with the scheduler
 - `internal/core/data/queue/CLAUDE.md` — the port and the five decisions
 - `e2e/integration/sql/CLAUDE.md` — the SQL broker on the three real engines
 - `BENCH.md` — the cost of durability, and the two defects the numbers found

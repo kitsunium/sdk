@@ -175,7 +175,7 @@ func deadLetterReader(t *testing.T, broker corequeue.Broker) corequeue.DeadLette
 // renews a lease; a savepoint of the caller's for a publication inside it.
 func TestSQLStatementsPerCall(t *testing.T) {
 	t.Parallel()
-	eachDialect(t, func(t *testing.T, fx *sqlFixture, _ *clock.ManualClock) {
+	eachDialect(t, func(t *testing.T, fx *sqlFixture, clk *clock.ManualClock) {
 		begin, lock := "BEGIN", []string(nil)
 		switch fx.dialect() {
 		case coresql.DialectMySQL:
@@ -214,6 +214,30 @@ func TestSQLStatementsPerCall(t *testing.T) {
 				t.Fatalf("Release() = %v", err)
 			}
 		})
+		//: ADR 0183: a deferred publication and a delayed nack are the same one
+		//: statement as their plain forms, bound to another instant.
+		expect("a PublishAt", []string{"insert"}, func() {
+			if _, err := delayedPublisher(t, fx.broker).PublishAt(t.Context(), []byte("m"), epoch.Add(time.Hour)); err != nil {
+				t.Fatalf("PublishAt() = %v", err)
+			}
+		})
+		delivery = receiveOne(t, fx.broker)
+		expect("a NackAfter", []string{"retry"}, func() {
+			if _, err := delayedNacker(t, fx.broker).NackAfter(t.Context(), delivery.Lease.Receipt, nil, time.Minute); err != nil {
+				t.Fatalf("NackAfter() = %v", err)
+			}
+		})
+		//: a publication once is one transaction: the key's passed reservation
+		//: dropped, the key claimed, the message inserted when the claim took,
+		//: the other passed reservations read and — when there are — removed.
+		expect("a PublishOnce", []string{begin, "onceDrop", "onceClaim", "insert", "oncePick", "COMMIT"},
+			func() { publishOnce(t, fx.broker, "k", "m", time.Minute) })
+		expect("a duplicate PublishOnce", []string{begin, "onceDrop", "onceClaim", "oncePick", "COMMIT"},
+			func() { publishOnce(t, fx.broker, "k", "m", time.Minute) })
+		publishOnce(t, fx.broker, "other", "m", time.Second)
+		clk.Advance(time.Minute)
+		expect("a PublishOnce past two windows", []string{begin, "onceDrop", "onceClaim", "insert", "oncePick", "onceSweepRows", "COMMIT"},
+			func() { publishOnce(t, fx.broker, "k", "m", time.Minute) })
 		expect("a Publish inside the caller's transaction", []string{"BEGIN", "SAVEPOINT ktn_sp_1", "insert", "RELEASE SAVEPOINT ktn_sp_1", "COMMIT"},
 			func() {
 				if err := inTransaction(t, fx, func(ctx context.Context) error {

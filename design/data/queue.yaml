@@ -73,6 +73,15 @@ packages:
         type: errs.Code
       - const:
           - doc: |-
+              CodeRetryRequested identifies a handler's failure it wants retried no
+              sooner than a delay of its own choosing. RetryAfter adds it to the wrap
+              trail of the handler's own cause, as DoNotRetry adds CodeNotRetryable
+              (ADR 0183).
+            name: CodeRetryRequested
+            value: "0x00_02_17_0A"
+        type: errs.Code
+      - const:
+          - doc: |-
               CodeQueueBackendFailed identifies an operation a durable broker depends on
               that its storage refused: a filesystem call the operating system refused,
               or a statement the SQL broker's database did not complete.
@@ -263,7 +272,12 @@ packages:
       internal/service/data/queue. This package owns the contract, the domain values,
       the policy and its guard, and the typed sentinels a refusal carries.
 
-      Package queue — the failure a handler reports when no retry can fix it.
+      Package queue — the failure a handler reports when no retry can fix it, and
+      the one it reports when a retry must wait a delay of its own choosing.
+
+      Package queue — the three ADR 0039 siblings ADR 0183 added: a nack that
+      names its own delay, a message held back until an instant, and a
+      publication made at most once per key over a window.
 
       Package queue — the ADR 0039 sibling that lets a consumer sleep until there
       may be work, and the value it answers with (ADR 0104).
@@ -305,6 +319,54 @@ packages:
         name: DoNotRetry
         out:
           - type: error
+      - doc: |-
+          RetryAfter marks cause as a failure to retry no sooner than delay from now,
+          so the consumer engine hands the message back through the broker's
+          [DelayedNacker] with that delay instead of the policy's retry delay
+          (ADR 0183).
+
+          	if resp.StatusCode == http.StatusTooManyRequests {
+          		return queue.RetryAfter(errThrottled, retryAfter(resp)) // what the server asked for
+          	}
+
+          It is for a failure whose moment is known — a downstream that answered
+          with a Retry-After, a mail server that greylisted the sender, a resource
+          that frees up at a known instant. The delivery is counted as a nack counts
+          it, so a message that has used its [PolicyValue.MaxDeliveries] is
+          dead-lettered with cause, the delay unused. A negative delay is read as
+          zero — retry at once — and one above [MaxDeadlineOffset] is held there.
+
+          The mark is an errs.Wrap onto cause, as [DoNotRetry]'s is: an SDK cause
+          keeps its own Reason, Code and Public, [CodeRetryRequested] joins its wrap
+          trail and the delay rides as a field; any other cause, or none, records
+          [RetryRequested] itself. [RetryAfterOf] reads the delay back. A failure
+          marked both ways is not retried: [DoNotRetry] wins.
+
+          A broker without the sibling is nacked as before: the message comes back
+          after the policy's retry delay, so the delay asked for is lost, never the
+          message.
+        in:
+          - name: cause
+            type: error
+          - name: delay
+            type: time.Duration
+        name: RetryAfter
+        out:
+          - type: error
+      - doc: |-
+          RetryAfterOf returns the delay [RetryAfter] put on err, and whether it put
+          one: err carries [CodeRetryRequested] in its chain and the delay it was
+          marked with. When err was marked more than once, the outermost mark's
+          delay is the one returned.
+        in:
+          - name: err
+            type: error
+        name: RetryAfterOf
+        out:
+          - name: delay
+            type: time.Duration
+          - name: marked
+            type: bool
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
     path: github.com/kitsunium/sdk/internal/core/data/queue
@@ -474,6 +536,166 @@ packages:
             out:
               - type: error
         name: Releaser
+      - doc: |-
+          DelayedNacker hands a leased message back as [Broker.Nack] does, but after
+          a delay its caller names instead of the policy's retry delay (ADR 0183).
+
+          It is the broker's half of a handler saying "try again, but not before
+          then" — [RetryAfter] is the handler's — and
+          internal/service/data/queue.Consume joins the two. It is JetStream's
+          delayed negative acknowledgement and SQS's ChangeMessageVisibility on a
+          message that failed.
+
+          It is a sibling of [Broker] for the reason [DeadLetterReader] is: a
+          connector onto a system whose redelivery delay is fixed cannot implement
+          it, and the engine falls back to Nack for such a broker — the message then
+          comes back after the policy's retry delay, so the delay asked for is lost
+          and never the message. The three brokers in internal/service/data/queue
+          implement it.
+        methods:
+          - doc: |-
+              NackAfter reports that processing failed and hands the message back,
+              receivable again delay after now on the broker's clock — whatever
+              [PolicyValue.RetryDelay] and [PolicyValue.MaxRetryDelay] would have
+              made it wait. Everything else is [Broker.Nack]'s: the delivery is
+              counted, and a message delivered [PolicyValue.MaxDeliveries] times is
+              moved to the dead-letter store with cause instead, the delay unused.
+              See [NackValue].
+
+              A zero delay makes the message receivable at once, and a negative one
+              is read as zero: both have the one reading "now". A delay whose instant
+              a durable broker cannot record (past 2262, Unix nanoseconds) is
+              [QueueMisconfigured], refused before anything moves, and the lease the
+              caller holds stays valid. A lapsed or unknown receipt is refused
+              exactly as [Broker.Ack] refuses it.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: receipt
+                type: ReceiptValue
+              - name: cause
+                type: error
+              - name: delay
+                type: time.Duration
+            name: NackAfter
+            out:
+              - type: NackValue
+              - type: error
+        name: DelayedNacker
+      - doc: |-
+          DelayedPublisher publishes a message no consumer receives before an
+          instant its producer names: one deadline, kept as durably as the message
+          itself (ADR 0183).
+
+          It is what a producer needs for work that falls due once — a reminder at
+          nine, a trial that ends in fourteen days, an order cancelled if it is
+          still unpaid in an hour — and that must survive the process that decided
+          it. It is NOT a scheduler: the message is delivered at or after its
+          instant, once as any message is, and nothing recurs. Work that repeats on
+          a calendar is internal/core/app/scheduler's (ADR 0041), which owns the
+          recurrence and keeps no state a restart would need; the two meet where a
+          scheduled job publishes into a queue.
+
+          It is SQS's DelaySeconds without its fifteen-minute ceiling and River's
+          ScheduledAt. A sibling of [Broker] for the reason [DeadLetterReader] is: a
+          connector onto a system with no delayed delivery cannot implement it. The
+          three brokers in internal/service/data/queue implement it.
+        methods:
+          - doc: |-
+              PublishAt appends payload to the queue as [Broker.Publish] does, and
+              hands it to no consumer before at. Its EnqueuedAt is the broker's now,
+              as every publication's is; at is when it becomes visible, which
+              [MessageReader.Messages] reports as its VisibleAt.
+
+              An at already past — the zero time.Time included — means now: the
+              message is receivable at once, as a published one is. An at a durable
+              broker cannot record (past 2262, Unix nanoseconds) is
+              [QueueMisconfigured], and nothing is published.
+
+              Everything else is Publish's: durable when it returns nil, part of the
+              transaction ctx carries on a broker that joins one (ADR 0151), a
+              payload above [PolicyValue.MaxMessageBytes] refused with
+              [MessageTooLarge]. Idle consumers are woken, and from then on wait
+              until at rather than polling for it. A queue delivers by visibility,
+              so a deferred message comes behind every message visible before it.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: payload
+                type: "[]byte"
+              - name: at
+                type: time.Time
+            name: PublishAt
+            out:
+              - type: MessageValue
+              - type: error
+        name: DelayedPublisher
+      - doc: |-
+          OncePublisher publishes a message at most once per key over a window: a
+          second publication under a key the window still holds publishes nothing
+          (ADR 0183).
+
+          It is the producer's half of the duplicates at-least-once delivery leaves.
+          A producer that retries a publication whose answer it never got — a
+          timeout, a crash between the call and its log line — would otherwise
+          enqueue the same work twice; under a key derived from the work, the retry
+          inside the window is recognised and dropped. It is JetStream's
+          Nats-Msg-Id, two minutes by default, SQS FIFO's deduplication ID, five
+          minutes, and River's unique jobs. It narrows duplicates at the producer
+          and does not remove them: the queue still delivers at least once, and a
+          handler still asserts it is idempotent.
+
+          A sibling of [Broker] for the reason [DeadLetterReader] is. The three
+          brokers in internal/service/data/queue implement it.
+        methods:
+          - doc: |-
+              PublishOnce publishes payload as [Broker.Publish] does and reserves key
+              for window from now — unless key is still reserved, and then it
+              publishes nothing. It reports which: true with the message it minted,
+              or false with the zero [MessageValue] when an earlier publication's
+              window still holds key.
+
+              A duplicate is an answer and not an error, on purpose: it is the
+              expected outcome of the retry this call exists for, and a caller
+              asking "did it go out?" must not have to tell a sentinel from a
+              failure. The message the earlier publication minted is not returned:
+              the key is what the caller holds.
+
+              The window runs on the broker's clock from the publication that
+              reserved key, and ends there: a publication after it publishes again
+              and reserves the key anew. A reservation past its window is removed
+              lazily, by a later publication through this sibling. Keys are compared
+              byte for byte; the durable brokers keep only their SHA-256.
+
+              An empty key is refused, and so is a non-positive window — "never
+              deduplicate" and "forever" are opposite readings of zero, and either
+              would be a publication that reads as deduplicated and is not — or one
+              whose end a durable broker cannot record (2262): [QueueMisconfigured],
+              naming the argument, and nothing is published. A payload above
+              [PolicyValue.MaxMessageBytes] is [MessageTooLarge].
+
+              A broker that joins the transaction ctx carries (ADR 0151) reserves key
+              in that transaction: the reservation and the message exist if and only
+              if it commits. What a crash between the two costs is the broker's to
+              say, and it is at most a duplicate, never a lost message.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+              - name: payload
+                type: "[]byte"
+              - name: window
+                type: time.Duration
+            name: PublishOnce
+            out:
+              - name: message
+                type: MessageValue
+              - name: published
+                type: bool
+              - name: err
+                type: error
+        name: OncePublisher
       - doc: |-
           DeadLetterManager puts a dead letter back into its queue, or deletes it.
 
@@ -676,6 +898,7 @@ packages:
           implementation at compile time with no deprecation window (ADR 0039). A new
           capability arrives as a sibling interface reached by type assertion —
           [DeadLetterReader], [LeaseExtender], [Waker], [Rejecter], [Releaser],
+          [DelayedNacker], [DelayedPublisher], [OncePublisher],
           [DeadLetterManager], [DeadLetterWriter], [MessageReader] and
           [MessageWriter] are the ones that ship.
 
@@ -827,8 +1050,11 @@ packages:
             doc: |-
               QueueMisconfigured refuses a PolicyValue a broker cannot honour — a
               zero with opposite readings, or a duration past MaxDeadlineOffset — and
-              an Extend duration that is non-positive or reaches past what a durable
-              broker can record. The "field" field names which value.
+              an argument a call cannot honour: an Extend duration that is
+              non-positive, a PublishOnce key that is empty or window that is not
+              positive, and a NackAfter delay, a PublishAt instant, an Extend or a
+              window that reaches past what a durable broker can record. The "field"
+              field names which value.
 
               It is a refusal and not a clamp for the fields whose zero has two
               opposite readings — see PolicyValue's documentation, which also names
@@ -960,6 +1186,19 @@ packages:
             private: "core/data/queue: a live message to write carries a value no broker keeps as given; the field names which, never the payload"
             public: The message cannot be written as it was given
             reason: INVALID_MESSAGE
+          - code: CodeRetryRequested
+            doc: |-
+              RetryRequested is the failure a handler reports when the message must be
+              retried no sooner than a delay of the handler's choosing: added by
+              RetryAfter to the handler's own cause — the usual form — or, around a
+              cause that is not an SDK error or around none, the origin a dead letter
+              records. The consumer engine recognises its code with errs.HasCode and
+              hands the message back through a broker's DelayedNacker (ADR 0183).
+            exit: TEMPFAIL
+            name: RetryRequested
+            private: "core/data/queue: a handler asked for a retry after a delay of its own; the delay rides as the retry_after_ns field"
+            public: The message was handed back to be retried after a delay
+            reason: RETRY_REQUESTED
           - code: CodeQueueBackendFailed
             doc: |-
               QueueBackendFailed reports a refusal from a durable broker's storage:
@@ -1393,7 +1632,9 @@ packages:
           retried, or dead-lettered once it has exhausted
           [PolicyValue.MaxDeliveries]. Returning [DoNotRetry](err) says no retry can
           fix it, and the message is dead-lettered at once, with err, through a
-          broker's [Rejecter]. ctx is the consumer's and IS honoured: unlike
+          broker's [Rejecter]; returning [RetryAfter](err, delay) says when to try
+          again, and the message is nacked with that delay through a broker's
+          [DelayedNacker]. ctx is the consumer's and IS honoured: unlike
           events.Listener, a handler that outlives its context is holding a lease it
           is about to lose, so abandoning the work is the correct response and the
           message will simply be redelivered. internal/service/data/queue.Consume
@@ -1655,6 +1896,10 @@ packages:
       Package queue — the SQL broker's read path: leasing what is due, and
       burying the leases whose consumers died with no attempt left.
 
+      Package queue — a message held back until an instant, a publication made at
+      most once per key over a window, and a nack that names its own delay, the
+      same way in all three brokers (ADR 0183).
+
       Package queue — waking an idle consumer: the broadcast every broker closes on
       a publication, and the table that lets two durable brokers over one queue —
       one directory, or one database and table — in one process wake each other's
@@ -1689,6 +1934,15 @@ packages:
           of those outcomes is sent past the stop, on ctx without its cancellation,
           bounded by [ConsumerConfig.SettleTimeout] on the consumer's clock, so a
           caller's stop budget must cover DrainTimeout plus SettleTimeout.
+
+          # A handler says when to try again (ADR 0183)
+
+          A failure the handler marked with [corequeue.RetryAfter] is handed back
+          through the broker's [corequeue.DelayedNacker] with the delay it names,
+          its delivery counted as a nack counts it; a broker without the sibling is
+          nacked, and the message waits the policy's retry delay instead.
+          [corequeue.DoNotRetry] wins over it, and a failure a stop cut short is
+          handed back uncounted, as any other is.
 
           # A handler ends before its lease does
 
@@ -2236,6 +2490,40 @@ packages:
       of your own without [Rejecter] is nacked as before, and the message then
       reaches the dead-letter store after its last attempt with the same cause.
 
+      # A retry when the handler says, a message for later, a publication once
+
+      Three more siblings, every broker here implementing each (ADR 0183).
+
+      A handler that knows when to try again — a downstream that answered with a
+      Retry-After, a server that greylisted the sender — returns [RetryAfter]
+      around its error, and [Consume] hands the message back through
+      [DelayedNacker] with that delay instead of the policy's; the delivery is
+      counted, as a nack's always is:
+
+      	if resp.StatusCode == http.StatusTooManyRequests {
+      		return queue.RetryAfter(errThrottled, 30*time.Second)
+      	}
+
+      Work that falls due once, later — a reminder, a trial that ends, an order
+      cancelled if still unpaid — is published with [DelayedPublisher]: no consumer
+      receives it before its instant, and it is as durable as any message. It does
+      not recur: work that repeats on a calendar is pkg/v1/app/scheduler's, whose
+      job may publish here.
+
+      	if deferred, ok := broker.(queue.DelayedPublisher); ok {
+      		_, err := deferred.PublishAt(ctx, payload, trialEnds)
+      	}
+
+      A producer that may retry a publication whose answer it never got publishes
+      under a key with [OncePublisher]: within the window, a second publication
+      under the same key publishes nothing and says so — a boolean, not an error,
+      since it is the answer the retry was looking for. The queue still delivers
+      at least once; this only stops the producer adding a copy.
+
+      	if once, ok := broker.(queue.OncePublisher); ok {
+      		_, published, err := once.PublishOnce(ctx, "order-"+id+"-paid", payload, 5*time.Minute)
+      	}
+
       # A retry delay that grows
 
       [Policy].RetryDelay is the same wait after every failure. Set
@@ -2456,11 +2744,21 @@ packages:
             type: errs.Code
             typed: true
             value: "0x00_02_17_09"
+      - const:
+          - doc: |-
+              CodeRetryRequested is the code [RetryAfter] adds to a failure's wrap
+              trail: errs.HasCode(err, CodeRetryRequested) recognises the mark.
+            name: CodeRetryRequested
+            reexport: corequeue.CodeRetryRequested
+            type: errs.Code
+            typed: true
+            value: "0x00_02_17_0A"
       - alias:
           - doc: |-
               Broker is the public alias for the queue contract. It is FROZEN at four
               methods; capabilities arrive as siblings ([DeadLetterReader],
-              [LeaseExtender], [Waker], [Rejecter], [Releaser], [DeadLetterManager],
+              [LeaseExtender], [Waker], [Rejecter], [Releaser], [DelayedNacker],
+              [DelayedPublisher], [OncePublisher], [DeadLetterManager],
               [DeadLetterWriter], [MessageReader], [MessageWriter]) reached by type
               assertion.
             name: Broker
@@ -2545,6 +2843,26 @@ packages:
               lease kept the handler from starting, or finishing.
             name: Releaser
             target: corequeue.Releaser
+      - alias:
+          - doc: |-
+              DelayedNacker is the public alias for the capability of handing a leased
+              message back after a delay its caller names. Every broker here
+              implements it, and Consume uses it for a [RetryAfter] failure.
+            name: DelayedNacker
+            target: corequeue.DelayedNacker
+      - alias:
+          - doc: |-
+              DelayedPublisher is the public alias for the capability of publishing a
+              message no consumer receives before an instant. Every broker here
+              implements it.
+            name: DelayedPublisher
+            target: corequeue.DelayedPublisher
+      - alias:
+          - doc: |-
+              OncePublisher is the public alias for the capability of publishing at
+              most once per key over a window. Every broker here implements it.
+            name: OncePublisher
+            target: corequeue.OncePublisher
       - alias:
           - doc: |-
               DeadLetterManager is the public alias for the capability of replaying a
@@ -2646,6 +2964,13 @@ packages:
               was given; the "field" field names which value.
             name: InvalidMessage
             reexport: corequeue.InvalidMessage
+            type: "*errs.Error"
+          - doc: |-
+              RetryRequested is what a dead letter records when [RetryAfter] marked an
+              error with no public words of its own, or none at all, and the message
+              ran out of attempts.
+            name: RetryRequested
+            reexport: corequeue.RetryRequested
             type: "*errs.Error"
           - doc: |-
               SQLQueueMisconfigured refuses an SQLConfig no SQL broker could run: no
@@ -2765,6 +3090,22 @@ packages:
             - name: cause
               type: error
           name: DoNotRetry
+          out:
+            - type: error
+      - func:
+          doc: |-
+            RetryAfter marks cause as a failure to retry no sooner than delay from
+            now: returned from a [Handler], it makes [Consume] hand the message back
+            through the broker's [DelayedNacker] with that delay instead of the
+            policy's retry delay, its delivery counted. A negative delay is read as
+            zero; [DoNotRetry] wins over it.
+          forward: corequeue.RetryAfter
+          in:
+            - name: cause
+              type: error
+            - name: delay
+              type: time.Duration
+          name: RetryAfter
           out:
             - type: error
       - func:

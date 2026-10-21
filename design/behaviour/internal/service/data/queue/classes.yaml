@@ -2,6 +2,14 @@
 apiVersion: design/behaviour/v1
 constants:
   - doc: |-
+      armTimerRounds bounds how many times armUntil re-arms a timer the clock
+      moved past while it was being armed.
+    items:
+      - name: armTimerRounds
+        type: int
+        value: "4"
+    name: armTimerRounds
+  - doc: |-
       DefaultPollInterval is how long an idle worker waits before asking again,
       when [ConsumerConfig.PollInterval] is left at zero.
 
@@ -139,6 +147,17 @@ constants:
         value: "\"dead\""
     name: dirReady
   - doc: |-
+      dirOnce holds the PublishOnce reservations, one file per key still
+      reserved (core/data/queue.OncePublisher). It is no state of a message —
+      nothing in it is ever delivered — but it is held to the states' rule: an
+      account that could plant a file there could hold any key reserved, and drop
+      every publication under it.
+    items:
+      - name: dirOnce
+        type: string
+        value: "\"once\""
+    name: dirOnce
+  - doc: |-
       The two suffixes distinguish a message from anything else that may appear
       in one of those directories — notably the `.vfs-*.tmp` temporary an atomic
       publication creates beside its target, which a scan MUST skip rather than
@@ -249,6 +268,47 @@ constants:
       - name: posDeadEntropy
       - name: posDeadDeliveries
     name: posDeadEnqueued
+  - doc: "suffixOnce ends a reservation's name: the key's digest, then this."
+    items:
+      - name: suffixOnce
+        type: string
+        value: "\".key\""
+    name: suffixOnce
+  - doc: |-
+      suffixGone ends the name a passed reservation is renamed to before it is
+      removed: the key's digest, a random half, then this.
+    items:
+      - name: suffixGone
+        type: string
+        value: "\".gone\""
+    name: suffixGone
+  - doc: |-
+      suffixNew ends the name a reservation is written under before it is linked
+      to its own: the key's digest, a random half, then this.
+    items:
+      - name: suffixNew
+        type: string
+        value: "\".new\""
+    name: suffixNew
+  - doc: |-
+      onceTakeovers bounds how many times one PublishOnce takes a passed
+      reservation over before it reads the key as held: each round lost is
+      another publication that reserved the key meanwhile.
+    items:
+      - name: onceTakeovers
+        type: int
+        value: "2"
+    name: onceTakeovers
+  - doc: |-
+      onceSweepEvery is how often one broker sweeps the reservations whose window
+      has passed. Each sweep reads the whole directory, so it is not paid on
+      every PublishOnce; between two, a passed reservation costs a file and
+      nothing else, since every read of one checks its end.
+    items:
+      - name: onceSweepEvery
+        type: time.Duration
+        value: time.Minute
+    name: onceSweepEvery
   - doc: |-
       instanceNonceBytes is the entropy in a broker's receipt prefix. It is what
       lets an unknown receipt be told apart from an expired one without keeping a
@@ -396,14 +456,25 @@ constants:
         type: string
         value: "\"queue \""
     name: sqlMigrationPrefix
+  - doc: |-
+      sqlOnceSweepRows bounds how many passed reservations one PublishOnce
+      removes besides its own key's: enough to outpace the reservations one call
+      adds, and one bounded statement whatever the backlog.
+    items:
+      - name: sqlOnceSweepRows
+        type: int
+        value: "100"
+    name: sqlOnceSweepRows
 files:
   - decls:
+      - armTimerRounds
       - Consume
       - consumer
       - newConsumer
       - (*consumer).pump
       - idleFor
       - idle
+      - armUntil
       - (*consumer).settleBatch
       - (*consumer).prepare
       - (*consumer).process
@@ -455,6 +526,8 @@ files:
       - (*fileBroker).Wake
       - (*fileBroker).Close
       - (*fileBroker).Publish
+      - (*fileBroker).write
+      - (*fileBroker).PublishAt
       - (*fileBroker).Ack
       - (*fileBroker).resolve
       - (*fileBroker).classifyMissing
@@ -479,6 +552,8 @@ files:
       - deadHeaderSep
       - publicMaxRunes
       - (*fileBroker).Nack
+      - (*fileBroker).NackAfter
+      - (*fileBroker).nackWith
       - (*fileBroker).Reject
       - (*fileBroker).Release
       - (*fileBroker).nackDead
@@ -495,6 +570,7 @@ files:
     name: file_dead.go
   - decls:
       - dirReady
+      - dirOnce
       - suffixMessage
       - nanoWidth
       - deliveryWidth
@@ -530,6 +606,23 @@ files:
       - padCount
     name: file_name.go
   - decls:
+      - suffixOnce
+      - suffixGone
+      - suffixNew
+      - onceTakeovers
+      - onceSweepEvery
+      - (*fileBroker).PublishOnce
+      - (*fileBroker).withdraw
+      - (*fileBroker).reserve
+      - (*fileBroker).createReservation
+      - (*fileBroker).reservedUntil
+      - (*fileBroker).dropPassed
+      - (*fileBroker).asideStillRuns
+      - (*fileBroker).sweepOnce
+      - (*fileBroker).sweepEntry
+      - (*fileBroker).writtenAndPassed
+    name: file_once.go
+  - decls:
       - (*fileBroker).Receive
       - (*fileBroker).leaseVisible
       - (*fileBroker).takeLease
@@ -562,12 +655,18 @@ files:
       - memoryBroker
       - NewMemory
       - (*memoryBroker).Publish
+      - (*memoryBroker).enqueue
+      - (*memoryBroker).PublishAt
+      - (*memoryBroker).PublishOnce
+      - (*memoryBroker).dropPassedOnce
       - (*memoryBroker).Receive
       - (*memoryBroker).takeEligible
       - (*memoryBroker).lease
       - (*memoryBroker).mintReceipt
       - (*memoryBroker).Ack
       - (*memoryBroker).Nack
+      - (*memoryBroker).NackAfter
+      - (*memoryBroker).nackWith
       - (*memoryBroker).Reject
       - (*memoryBroker).Release
       - (*memoryBroker).ReplayDeadLetter
@@ -594,6 +693,9 @@ files:
       - clockOrSystem
     name: memory_config.go
   - decls:
+      - onceEnd
+    name: once_end.go
+  - decls:
       - reasonLeaseExpired
       - reasonUnreported
       - maxDeadDeliveries
@@ -605,6 +707,10 @@ files:
       - deadLetterNotFound
       - checkDeadLetter
       - checkLiveMessage
+      - nackDeadline
+      - publishVisibleAt
+      - onceUntil
+      - onceDigest
       - keptAsWritten
     name: queue.go
   - decls:
@@ -622,8 +728,11 @@ files:
       - sqlWakeFor
       - sqlOwnTxOptions
       - (*sqlBroker).Publish
+      - (*sqlBroker).PublishAt
       - (*sqlBroker).Ack
       - (*sqlBroker).Nack
+      - (*sqlBroker).NackAfter
+      - (*sqlBroker).nackWith
       - (*sqlBroker).Release
       - (*sqlBroker).Extend
       - (*sqlBroker).Wake
@@ -673,6 +782,10 @@ files:
       - sqlHeldBy
       - (*sqlStatements).leaseRows
       - (*sqlStatements).buryRows
+      - sqlOnceStatements
+      - renderSQLOnceStatements
+      - (*sqlStatements).onceSweepRows
+      - onceClaimStatement
       - (*sqlStatements).list
       - createQueueTableStatements
       - dropQueueTableStatements
@@ -681,6 +794,13 @@ files:
       - sqlMigrationPrefix
       - SQLMigration
     name: sql_migration.go
+  - decls:
+      - sqlOnceSweepRows
+      - (*sqlBroker).PublishOnce
+      - (*sqlBroker).claimOnce
+      - (*sqlBroker).sweepOnce
+      - (*sqlBroker).pickPassedOnce
+    name: sql_once.go
   - decls:
       - sqlPicked
       - sqlLeaseRound
@@ -730,14 +850,30 @@ functions:
     results: time.Duration
   - doc: |-
       idle waits for the first of: the caller's cancellation, the broker's wake
-      signal, or wait elapsing on the consumer's clock. It reports whether the
+      signal, or the consumer's clock reaching until. It reports whether the
       worker should carry on.
 
       A nil signal — a broker without the Waker capability — blocks forever in the
       select and leaves the plain poll it always was.
     name: idle
-    params: ctx context.Context, cfg ConsumerConfig, signal <-chan struct{}, wait time.Duration
+    params: ctx context.Context, cfg ConsumerConfig, signal <-chan struct{}, until time.Time
     results: bool
+  - doc: |-
+      armUntil returns a timer that fires when clk reaches until.
+
+      A timer takes a duration, measured from the instant it registers, and that
+      instant is not the one the duration was computed from: a clock that moves
+      between the two — a test's ManualClock advancing while a worker arms its
+      idle wait — would fire the timer that much late, after the instant the
+      broker said a message is due, and a manual clock that is not advanced
+      again never fires it at all (a mail spool's retry missed on OpenBSD this
+      way). So the clock is read on both sides of the registration, and a timer
+      armed across a move is armed again from the later reading; a real clock,
+      which moves between any two readings, is re-armed a bounded number of times
+      for a lateness of nanoseconds.
+    name: armUntil
+    params: clk clock.Timed, until time.Time
+    results: clock.Timer
   - doc: |-
       guard invokes the handler with its panic recovered.
 
@@ -1136,6 +1272,39 @@ functions:
     params: live corequeue.LiveMessageValue, maxBytes int
     results: error
   - doc: |-
+      nackDeadline is the instant a message NackAfter hands back becomes
+      receivable: delay after now, a negative delay read as zero
+      (core/data/queue.DelayedNacker). An instant no durable broker records is
+      refused, by every broker alike, before anything moves.
+    name: nackDeadline
+    params: now time.Time, delay time.Duration
+    results: time.Time, error
+  - doc: |-
+      publishVisibleAt is the instant a message PublishAt writes becomes
+      receivable: at, or now when at has already passed
+      (core/data/queue.DelayedPublisher). An instant no durable broker records is
+      refused, by every broker alike, before anything is written.
+    name: publishVisibleAt
+    params: now, at time.Time
+    results: time.Time, error
+  - doc: |-
+      onceUntil is the instant a PublishOnce reservation made now ends
+      (core/data/queue.OncePublisher), after the refusals every broker makes
+      alike: an empty key, a window that is not positive — "never deduplicate"
+      and "forever" are the opposite readings of zero — and a window whose end no
+      durable broker records.
+    name: onceUntil
+    params: now time.Time, key string, window time.Duration
+    results: time.Time, error
+  - doc: |-
+      onceDigest is what a durable broker keeps of a PublishOnce key: its SHA-256,
+      in lower-case hex. Fixed-width whatever the key, so it is a file name and a
+      column value with no escaping, and never the key itself, which a caller may
+      derive from what the message carries.
+    name: onceDigest
+    params: key string
+    results: string
+  - doc: |-
       keptAsWritten reports whether value survives oneLine unchanged: no line
       break, and at most publicMaxRunes runes.
     name: keptAsWritten
@@ -1241,6 +1410,27 @@ functions:
     params: dialect coresql.Dialect, first int
     results: string
   - doc: |-
+      renderSQLOnceStatements renders PublishOnce's fixed statements on dialect,
+      over q, the queue's quoted table.
+    name: renderSQLOnceStatements
+    params: dialect coresql.Dialect, q string
+    results: sqlOnceStatements
+  - doc: |-
+      onceClaimStatement renders the reservation of a key: a row of state 2 whose
+      due is the end of its window, inserted unless the key's row exists — then
+      it affects no row and fails nothing, so a duplicate is an answer and not an
+      error, which on PostgreSQL would also abort the caller's transaction.
+
+      PostgreSQL and SQLite say so with ON CONFLICT DO NOTHING. MySQL has no ON
+      CONFLICT, and its ON DUPLICATE KEY UPDATE counts a row it left unchanged as
+      one or none depending on the connection's CLIENT_FOUND_ROWS; so it is
+      INSERT IGNORE, whose one other effect — a value truncated or defaulted to
+      fit with a warning — cannot occur here: every value is a 64-byte digest or
+      an integer.
+    name: onceClaimStatement
+    params: dialect coresql.Dialect, q string
+    results: string
+  - doc: |-
       createQueueTableStatements renders the DDL that creates a queue's table: one
       statement that does nothing when the table exists, so a migration run twice
       — MySQL commits DDL implicitly, so a run can stop after it — changes
@@ -1308,6 +1498,7 @@ functions:
     params: dir string
     results: string
 imports:
+  atomic: sync/atomic
   bytes: bytes
   clock: github.com/kitsunium/sdk/internal/kernel/clock
   cmp: cmp
@@ -1333,6 +1524,7 @@ imports:
   reflect: reflect
   regexp: regexp
   runtime: runtime
+  sha256: crypto/sha256
   slices: slices
   stdsql: database/sql
   strconv: strconv
@@ -1365,6 +1557,8 @@ types:
         type: corequeue.Releaser
       - name: rejecter
         type: corequeue.Rejecter
+      - name: delayer
+        type: corequeue.DelayedNacker
       - name: extender
         type: corequeue.LeaseExtender
       - name: cfg
@@ -1430,6 +1624,13 @@ types:
           A failure once the consumer is stopping — its drain over, or the lease's
           margin reached during it — is not the message's: it is handed back
           uncounted, unless it is a panic, which is.
+
+          A failure the handler marked with core/data/queue.RetryAfter is nacked
+          with the delay it names when the broker is a core/data/queue.DelayedNacker
+          (ADR 0183), its delivery counted, and nacked as any other failure — after
+          the policy's delay — when it is not. DoNotRetry and a stop are read first,
+          so a failure marked both ways is rejected, and one a stop cut short is
+          handed back.
 
           Every outcome is sent on ctx WITHOUT its cancellation, bounded by
           SettleTimeout: the work is done, or was stopped, and a stop that lands
@@ -1836,6 +2037,11 @@ types:
         type: "*wakeSignal"
       - name: policy
         type: corequeue.PolicyValue
+      - doc: |-
+          onceSwept is when this broker last swept the passed PublishOnce
+          reservations, in Unix nanoseconds on its clock; zero before the first.
+        name: onceSwept
+        type: atomic.Int64
     kind: struct
     methods:
       - doc: |-
@@ -1875,6 +2081,24 @@ types:
         params: |2
 
           	ctx context.Context, payload []byte,
+        recv: b *fileBroker
+        results: message corequeue.MessageValue, err error
+      - doc: |-
+          write publishes payload durably as a queued message enqueued at now and
+          visible at visibleAt, and returns its name. It wakes nobody: the caller
+          does, once the message is one it keeps.
+        name: write
+        params: payload []byte, now, visibleAt time.Time
+        recv: b *fileBroker
+        results: nameValue, error
+      - doc: |-
+          PublishAt publishes payload as Publish does, under a queued name whose
+          visibility instant is at (core/data/queue.DelayedPublisher): the directory
+          sorts by that instant, so a Receive meets it at its turn and not before.
+        name: PublishAt
+        params: |2
+
+          	ctx context.Context, payload []byte, at time.Time,
         recv: b *fileBroker
         results: message corequeue.MessageValue, err error
       - doc: Ack unlinks the leased message. It is the only call that removes one.
@@ -1922,6 +2146,25 @@ types:
         params: |2
 
           	ctx context.Context, receipt corequeue.ReceiptValue, cause error,
+        recv: b *fileBroker
+        results: verdict corequeue.NackValue, err error
+      - doc: |-
+          NackAfter hands the message back as Nack does, under a queued name visible
+          delay after now instead of after the policy's retry delay
+          (core/data/queue.DelayedNacker).
+        name: NackAfter
+        params: |2
+
+          	ctx context.Context, receipt corequeue.ReceiptValue, cause error, delay time.Duration,
+        recv: b *fileBroker
+        results: verdict corequeue.NackValue, err error
+      - doc: |-
+          nackWith is Nack and NackAfter: the message renamed back into the queue,
+          visible after wait, or buried with cause when it has no attempt left.
+        name: nackWith
+        params: |2
+
+          	ctx context.Context, receipt corequeue.ReceiptValue, cause error, wait func(deliveries int) time.Duration,
         recv: b *fileBroker
         results: verdict corequeue.NackValue, err error
       - doc: |-
@@ -1999,6 +2242,127 @@ types:
           	base string,
         recv: b *fileBroker
         results: record corequeue.DeadLetterValue, ok bool, err error
+      - doc: |-
+          PublishOnce publishes payload unless key is still reserved, and reserves it
+          for window (core/data/queue.OncePublisher).
+
+          # A reservation is a file, created exclusively
+
+          The key's reservation is once/<sha256 of the key>.key, holding the end of
+          its window as nanoWidth digits. It is written under a name of its own,
+          created with O_EXCL, and linked to the key's: link(2) refuses an existing
+          name as O_EXCL does, so two producers reserving one key — in one process or
+          in two — race on that one link and the kernel gives it to one of them, and
+          the reservation is never seen without its end. A passed reservation is
+          renamed aside before it is removed, so a producer taking it over never
+          removes the one another producer has just made.
+
+          # The message first, then the reservation
+
+          A crash must cost at most a duplicate, never a lost message (the port's
+          contract). So the message is written durably FIRST, then the key reserved.
+          A crash between the two leaves a message and no reservation: a retry
+          publishes it again, which at-least-once already permits. The other order
+          would leave a reservation with no message, and every retry inside the
+          window would be told the message went out.
+
+          The common duplicate — a retry long after the first publication — is read
+          off the reservation before anything is written, and costs no write. Only a
+          race inside the same instant writes a message and then withdraws it, by
+          unlinking its queued name before anybody is woken; a consumer that leased
+          it in that instant makes it a publication after all, and the call says so.
+
+          The reservation is not flushed: a power cut may forget it, which is a
+          duplicate, and a reservation whose end cannot be read back is read as passed.
+        name: PublishOnce
+        params: |2
+
+          	ctx context.Context, key string, payload []byte, window time.Duration,
+        recv: b *fileBroker
+        results: message corequeue.MessageValue, published bool, err error
+      - doc: |-
+          withdraw unlinks the queued message PublishOnce wrote but could not reserve
+          a key for, and reports the call's outcome: a duplicate when the key was
+          taken, the reservation's failure when it failed — and a publication after
+          all when a consumer leased the message before it could be withdrawn.
+        name: withdraw
+        params: |2
+
+          	message corequeue.MessageValue, name nameValue, reserveErr error,
+        recv: b *fileBroker
+        results: corequeue.MessageValue, bool, error
+      - doc: |-
+          reserve creates the key's reservation, ending at until, and reports whether
+          this call made it. An existing reservation whose window has passed by now
+          is taken over; one still running means another publication holds the key.
+        name: reserve
+        params: digest string, until, now int64
+        recv: b *fileBroker
+        results: bool, error
+      - doc: |-
+          createReservation creates once/<digest>.key holding the end of its window,
+          and reports false, and no failure, when the name exists.
+
+          The end is written first, into a name of its own created with O_EXCL, and
+          that file is then linked to the reservation's name — link(2) refuses an
+          existing name as O_EXCL does, and the name appears with its content. A
+          reservation created and written in two steps would be read empty between
+          them, as passed, by a producer racing this one, which would then take it
+          over and publish too.
+        name: createReservation
+        params: digest string, until int64
+        recv: b *fileBroker
+        results: bool, error
+      - doc: |-
+          reservedUntil reads the end of the key's reservation, in Unix nanoseconds:
+          0 when there is none, and when the file holds no end it can read — a
+          reservation a crash cut short, which is read as passed.
+        name: reservedUntil
+        params: digest string
+        recv: b *fileBroker
+        results: int64, error
+      - doc: |-
+          dropPassed removes the key's reservation when its window has passed by now.
+
+          It renames the reservation aside first and reads what it renamed, so a
+          reservation another producer made since this one read the passed one is put
+          back rather than removed: removing it would let a third publication through
+          a window that is still running.
+        name: dropPassed
+        params: digest string, now int64
+        recv: b *fileBroker
+        results: error
+      - doc: |-
+          asideStillRuns reports whether the reservation renamed aside to name ends
+          after now.
+        name: asideStillRuns
+        params: name string, now int64
+        recv: b *fileBroker
+        results: bool
+      - doc: |-
+          sweepOnce removes every reservation whose window has passed by now, and
+          every one set aside and left behind by a crash — at most once per
+          onceSweepEvery for this broker, measured on its clock.
+        name: sweepOnce
+        params: now time.Time
+        recv: b *fileBroker
+        results: error
+      - doc: |-
+          sweepEntry removes one entry of the reservations' directory when it no
+          longer holds a key: a reservation whose window has passed, or a passed one
+          a crash left set aside. Anything else — a running reservation, one another
+          producer is putting back, a stranger — is left alone.
+        name: sweepEntry
+        params: base string, now int64
+        recv: b *fileBroker
+        results: error
+      - doc: |-
+          writtenAndPassed reports whether name holds the end of a window, and that
+          end is not after now.
+        name: writtenAndPassed
+        params: name string, now int64
+        recv: b *fileBroker
+        results: bool
       - doc: |-
           Receive reclaims lapsed leases, then leases up to max visible messages.
 
@@ -2395,6 +2759,14 @@ types:
         name: expiry
         type: "*heap.Heap[leaseExpiry]"
       - doc: |-
+          once holds each PublishOnce key still reserved, by the end of its
+          window; onceEnds orders those ends so a passed one is dropped at the
+          next PublishOnce without a scan (core/data/queue.OncePublisher).
+        name: once
+        type: map[string]time.Time
+      - name: onceEnds
+        type: "*heap.Heap[onceEnd]"
+      - doc: |-
           wake is what an idle consumer of this broker waits on: closed by a
           Publish and by a Nack that hands a message back.
         name: wake
@@ -2429,6 +2801,41 @@ types:
           	ctx context.Context, payload []byte,
         recv: b *memoryBroker
         results: message corequeue.MessageValue, err error
+      - doc: |-
+          enqueue queues payload, enqueued at now and visible at visibleAt, wakes
+          every idle consumer, and returns the message it minted. The caller holds the
+          write lock and has checked the payload's size.
+        name: enqueue
+        params: payload []byte, now, visibleAt time.Time
+        recv: b *memoryBroker
+        results: corequeue.MessageValue
+      - doc: |-
+          PublishAt queues payload, received by no consumer before at
+          (core/data/queue.DelayedPublisher): a record whose visibility is at, in the
+          ready list's visibility order.
+        name: PublishAt
+        params: |2
+
+          	ctx context.Context, payload []byte, at time.Time,
+        recv: b *memoryBroker
+        results: message corequeue.MessageValue, err error
+      - doc: |-
+          PublishOnce queues payload unless key is still reserved, and reserves it
+          for window (core/data/queue.OncePublisher). The reservations are a map from
+          key to the end of its window, and a heap of those ends drops the passed ones
+          at the next PublishOnce — the lazy purge the durable brokers make too.
+        name: PublishOnce
+        params: |2
+
+          	ctx context.Context, key string, payload []byte, window time.Duration,
+        recv: b *memoryBroker
+        results: message corequeue.MessageValue, published bool, err error
+      - doc: |-
+          dropPassedOnce removes every reservation whose window has ended by now. The
+          caller holds the write lock.
+        name: dropPassedOnce
+        params: now time.Time
+        recv: b *memoryBroker
       - doc: Receive leases up to max messages.
         name: Receive
         params: |2
@@ -2462,6 +2869,24 @@ types:
         params: |2
 
           	ctx context.Context, receipt corequeue.ReceiptValue, cause error,
+        recv: b *memoryBroker
+        results: verdict corequeue.NackValue, err error
+      - doc: |-
+          NackAfter hands the message back as Nack does, receivable delay after now
+          instead of after the policy's retry delay (core/data/queue.DelayedNacker).
+        name: NackAfter
+        params: |2
+
+          	ctx context.Context, receipt corequeue.ReceiptValue, cause error, delay time.Duration,
+        recv: b *memoryBroker
+        results: verdict corequeue.NackValue, err error
+      - doc: |-
+          nackWith is Nack and NackAfter: the message handed back after wait, or
+          dead-lettered with cause when it has no attempt left.
+        name: nackWith
+        params: |2
+
+          	ctx context.Context, receipt corequeue.ReceiptValue, cause error, wait func(deliveries int) time.Duration,
         recv: b *memoryBroker
         results: verdict corequeue.NackValue, err error
       - doc: |-
@@ -2614,6 +3039,21 @@ types:
     kind: struct
     name: MemoryConfig
   - doc: |-
+      onceEnd is one entry in the in-memory broker's heap of PublishOnce windows:
+      when a reservation ends and which key it holds.
+
+      It carries the end as well as the key so a POPPED entry can be checked
+      against the key's current reservation — a key reserved again after its
+      window ended leaves the old entry in the heap, and comparing the two ends is
+      how the stale one is recognised, as leaseExpiry's is.
+    fields:
+      - name: at
+        type: time.Time
+      - name: key
+        type: string
+    kind: struct
+    name: onceEnd
+  - doc: |-
       causeValue is what a dead letter keeps of the failure that produced it:
       the SCREAMING_SNAKE reason, the wire-safe Public half, and the dotted-quad
       code.
@@ -2709,6 +3149,17 @@ types:
           	ctx context.Context, payload []byte,
         recv: b *sqlBroker
         results: message corequeue.MessageValue, err error
+      - doc: |-
+          PublishAt inserts payload into the queue as Publish does, its row due at at
+          rather than now (core/data/queue.DelayedPublisher): the lease's read takes
+          rows by due, so no consumer receives it before then. Its enqueue instant is
+          now, and its identifier is minted from it.
+        name: PublishAt
+        params: |2
+
+          	ctx context.Context, payload []byte, at time.Time,
+        recv: b *sqlBroker
+        results: message corequeue.MessageValue, err error
       - doc: Ack deletes the leased message. It is the only call that removes one.
         name: Ack
         params: ctx context.Context, receipt corequeue.ReceiptValue
@@ -2719,6 +3170,25 @@ types:
         params: |2
 
           	ctx context.Context, receipt corequeue.ReceiptValue, cause error,
+        recv: b *sqlBroker
+        results: verdict corequeue.NackValue, err error
+      - doc: |-
+          NackAfter hands the message back as Nack does, its row due delay after now
+          instead of after the policy's retry delay (core/data/queue.DelayedNacker):
+          the same one statement, bound to another instant.
+        name: NackAfter
+        params: |2
+
+          	ctx context.Context, receipt corequeue.ReceiptValue, cause error, delay time.Duration,
+        recv: b *sqlBroker
+        results: verdict corequeue.NackValue, err error
+      - doc: |-
+          nackWith is Nack and NackAfter: the row due again after wait, or buried with
+          cause when it has no attempt left.
+        name: nackWith
+        params: |2
+
+          	ctx context.Context, receipt corequeue.ReceiptValue, cause error, wait func(deliveries int) time.Duration,
         recv: b *sqlBroker
         results: verdict corequeue.NackValue, err error
       - doc: |-
@@ -2889,6 +3359,55 @@ types:
         params: result stdsql.Result, execErr error, step, id string
         recv: b *sqlBroker
         results: error
+      - doc: |-
+          PublishOnce inserts payload into the queue unless key is still reserved, and
+          reserves it for window (core/data/queue.OncePublisher), all in one
+          transaction: the caller's, as a savepoint of it, or one of the broker's own.
+
+          A reservation is a row of the queue's own table — dead = 2, the key's
+          SHA-256 as its id, the end of its window as its due — so the table's primary
+          key is the unique constraint, and a database that ran SQLMigration before
+          this sibling existed needs nothing more. The call removes the key's passed
+          reservation, claims the key with an insertion that affects no row when it
+          is taken, inserts the message only when the claim did, and removes up to
+          sqlOnceSweepRows passed reservations of other keys — those another
+          transaction holds are skipped, never waited for, where the engine can.
+
+          The reservation and the message commit together or not at all, so on this
+          broker a crash costs nothing: no duplicate, no loss. Two producers claiming
+          one key at once are ordered by the engine — the second waits on the first's
+          row until it commits, then affects nothing, or claims the key if the first
+          rolled back.
+        name: PublishOnce
+        params: |2
+
+          	ctx context.Context, key string, payload []byte, window time.Duration,
+        recv: b *sqlBroker
+        results: message corequeue.MessageValue, published bool, err error
+      - doc: |-
+          claimOnce removes the key's reservation when its window has passed by now,
+          then reserves the key until until, and reports whether the claim affected a
+          row — whether the key is this call's.
+        name: claimOnce
+        params: ctx context.Context, ex coresql.Executor, digest []byte, until, now int64
+        recv: b *sqlBroker
+        results: bool, error
+      - doc: |-
+          sweepOnce removes up to sqlOnceSweepRows reservations whose window has
+          passed by now, of any key: read locked and skipping those another
+          transaction holds, then removed by identifier.
+        name: sweepOnce
+        params: ctx context.Context, ex coresql.Executor, now int64
+        recv: b *sqlBroker
+        results: error
+      - doc: |-
+          pickPassedOnce reads the identifiers of up to sqlOnceSweepRows reservations
+          whose window has passed by now — locked, and skipping those another
+          transaction holds, where the engine can.
+        name: pickPassedOnce
+        params: ctx context.Context, ex coresql.Executor, now int64
+        recv: b *sqlBroker
+        results: ids []any, err error
       - doc: |-
           Receive leases up to max due messages, burying on the way every lapsed
           lease with no attempt left.
@@ -3072,6 +3591,12 @@ types:
       one's deadline, a dead letter's failure. So every live row whose due has
       passed is either receivable or a lease whose holder may have died, and one
       ordered read finds both.
+
+      A third state, dead = 2, is no message: it is a PublishOnce reservation
+      (ADR 0183), its id the key's SHA-256 in hex — 64 bytes, no dash, so never a
+      message's identifier — and its due the end of its window. The primary key is
+      its unique constraint, so the table needs no migration for it, and every
+      statement above names dead = 0 or dead = 1 and never reads one.
     fields:
       - doc: insert publishes a message.
         name: insert
@@ -3147,6 +3672,9 @@ types:
           due, with its count.
         name: putLive
         type: string
+      - doc: once are PublishOnce's fixed statements.
+        name: once
+        type: sqlOnceStatements
       - doc: table is the table's quoted name.
         name: table
         type: string
@@ -3169,12 +3697,36 @@ types:
         params: n int
         recv: s *sqlStatements
         results: string
+      - doc: |-
+          onceSweepRows renders the removal of n passed reservations, picked by
+          oncePick: still reservations, and still passed at the instant bound first.
+        name: onceSweepRows
+        params: n int
+        recv: s *sqlStatements
+        results: string
       - doc: list renders n comma-separated placeholders, numbered from first.
         name: list
         params: first, n int
         recv: s *sqlStatements
         results: string
     name: sqlStatements
+  - doc: |-
+      sqlOnceStatements are PublishOnce's fixed statements (ADR 0183), over
+      reservation rows — dead = 2 — of the queue's own table.
+    fields:
+      - doc: drop removes one key's reservation once its window has passed.
+        name: drop
+        type: string
+      - doc: claim reserves a key, affecting no row when the key is still reserved.
+        name: claim
+        type: string
+      - doc: |-
+          pick reads the passed reservations of any key, locked and skipping
+          those another transaction holds where the engine can.
+        name: pick
+        type: string
+    kind: struct
+    name: sqlOnceStatements
   - doc: sqlPicked is one row the lease's read returned.
     fields:
       - doc: id is the message identifier.
@@ -3301,11 +3853,11 @@ types:
     typeParams: K comparable
 vars:
   - doc: |-
-      stateDirs is the three state directories, hoisted so preparing a queue
-      directory does not allocate a slice literal every time.
+      stateDirs is the three state directories and the reservations', hoisted so
+      preparing a queue directory does not allocate a slice literal every time.
     items:
       - name: stateDirs
-        value: "[]string{dirReady, dirInflight, dirDead}"
+        value: "[]string{dirReady, dirInflight, dirDead, dirOnce}"
     name: stateDirs
   - doc: sqlWakes is the process's table of SQL queues.
     items:

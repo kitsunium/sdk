@@ -170,6 +170,12 @@ func TestTheDurableBrokerRefusesAStateDirectoryItCannotTrust(t *testing.T) {
 				t.Fatalf("WriteFile() = %v, want nil", err)
 			}
 		}, false},
+		// the reservations hold no message, but an account that could plant one
+		// could hold any key reserved and drop every publication under it.
+		{"a world-writable once/", "once", "world-writable", func(t *testing.T, statePath string) {
+			t.Helper()
+			mkdirMode(t, statePath, 0o777)
+		}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -223,7 +229,7 @@ func TestTheDurableBrokerCreatesItsStatesOwnerOnlyAndReopensThem(t *testing.T) {
 			t.Fatalf("NewFile() on construction %d = %v, want nil", attempt+1, err)
 		}
 	}
-	for _, state := range []string{"ready", "inflight", "dead"} {
+	for _, state := range []string{"ready", "inflight", "dead", "once"} {
 		info, err := os.Lstat(filepath.Join(root, state))
 		if err != nil {
 			t.Fatalf("Lstat(%s) = %v, want nil", state, err)
@@ -251,7 +257,7 @@ func TestTheDurableBrokerAcceptsStatesSharedThroughAGroup(t *testing.T) {
 	}
 	root := filepath.Join(t.TempDir(), "queue")
 	mkdirMode(t, root, 0o770)
-	for _, state := range []string{"ready", "inflight", "dead"} {
+	for _, state := range []string{"ready", "inflight", "dead", "once"} {
 		mkdirMode(t, filepath.Join(root, state), 0o770)
 	}
 	_, err := svcqueue.NewFile(svcqueue.FileConfig{Dir: root, Policy: defaultPolicy()})

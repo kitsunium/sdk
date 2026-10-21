@@ -29,11 +29,12 @@ const (
 // error. A failure giveUp condemns is returned marked DoNotRetry, which the
 // consumer turns into the queue's Reject: dead-lettered on this attempt.
 //
-// A failure with attempts left does neither: the lease is extended by the
-// backoff and the handler returns nil. The extension replaced the receipt, so
-// the consumer's acknowledgement of the old one is refused LeaseExpired —
-// which the consumer ignores, as it ignores every lapsed acknowledgement — and
-// the mail comes back when the new lease lapses, its delivery counted.
+// A failure with attempts left does neither: the mail is parked for the
+// backoff — nacked after it where the queue can (ADR 0183), its lease extended
+// by it where the queue cannot — and the handler returns nil. Parking voided
+// the receipt, so the consumer's acknowledgement of it is refused LeaseExpired
+// — which the consumer ignores, as it ignores every lapsed acknowledgement —
+// and the mail comes back when the backoff ends, its delivery counted.
 func (s *Spool) deliver(ctx context.Context, delivery corequeue.DeliveryValue) error {
 	var record spooledValue
 	//: a record that is not a spooled mail fails like a delivery, and ends as
@@ -80,7 +81,7 @@ func (s *Spool) deliver(ctx context.Context, delivery corequeue.DeliveryValue) e
 	delay := s.backoff.Delay(attempt)
 	event.Kind, event.Next = EventRetrying, event.At.Add(delay)
 	//: parked for the backoff: the lease lapses when the next attempt is due.
-	if s.park(ctx, delivery, delay) {
+	if s.park(ctx, delivery, delay, sendErr) {
 		s.report(&event)
 		//: nothing to acknowledge; see the doc comment.
 		return nil
@@ -139,10 +140,23 @@ func (s *Spool) send(ctx context.Context, record *spooledValue) (err error) {
 	return s.transport.Send(ctx, record.Message)
 }
 
-// park extends the delivery's lease by delay and reports whether it could: a
-// queue without the LeaseExtender capability cannot, and neither can a lease
-// that already lapsed.
-func (s *Spool) park(ctx context.Context, delivery corequeue.DeliveryValue, delay time.Duration) bool {
+// park hands the delivery back to come again delay from now, and reports
+// whether it could. A queue with the DelayedNacker capability nacks it after
+// delay with the attempt's failure (ADR 0183): the mail waits as a queued
+// message, its attempt counted, and the queue's own record says when it
+// returns. One without it has its lease extended by delay, which brings the
+// mail back at the same instant with the same count, leased meanwhile. A queue
+// with neither cannot park, and neither can a lease that already lapsed.
+//
+// Either way the receipt the consumer holds is void afterwards, so its
+// acknowledgement is refused LeaseExpired and ignored, as before.
+func (s *Spool) park(ctx context.Context, delivery corequeue.DeliveryValue, delay time.Duration, failure error) bool {
+	//: the queue says when the mail comes back.
+	if nacker, delays := s.broker.(corequeue.DelayedNacker); delays {
+		_, nackErr := nacker.NackAfter(ctx, delivery.Lease.Receipt, failure, delay)
+		//: a lease that lapsed meanwhile is already back in the queue.
+		return nackErr == nil
+	}
 	extender, extendable := s.broker.(corequeue.LeaseExtender)
 	//: both queues the spool builds can.
 	if !extendable {

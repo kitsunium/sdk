@@ -157,6 +157,17 @@ func sqlOwnTxOptions(dialect coresql.Dialect) coresql.TxOptionsValue {
 func (b *sqlBroker) Publish(
 	ctx context.Context, payload []byte,
 ) (message corequeue.MessageValue, err error) {
+	//: an instant already past is now: visible at once.
+	return b.PublishAt(ctx, payload, time.Time{})
+}
+
+// PublishAt inserts payload into the queue as Publish does, its row due at at
+// rather than now (core/data/queue.DelayedPublisher): the lease's read takes
+// rows by due, so no consumer receives it before then. Its enqueue instant is
+// now, and its identifier is minted from it.
+func (b *sqlBroker) PublishAt(
+	ctx context.Context, payload []byte, at time.Time,
+) (message corequeue.MessageValue, err error) {
 	//: a cancelled producer gets its own error rather than a message nobody
 	//: asked for any more.
 	if ctx.Err() != nil {
@@ -182,11 +193,17 @@ func (b *sqlBroker) Publish(
 		//: QueueMisconfigured, naming the clock.
 		return corequeue.MessageValue{}, clockRefused(now)
 	}
+	visibleAt, invalid := publishVisibleAt(now, at)
+	//: an instant the table cannot hold back.
+	if invalid != nil {
+		//: QueueMisconfigured, and nothing is sent.
+		return corequeue.MessageValue{}, invalid
+	}
 	id := messageID(now.UnixNano(), entropy)
 	insertErr := b.run(ctx, false, func(txCtx context.Context, ex coresql.Executor) error {
-		//: one row: live, queued, visible now, never delivered. A nil or empty
-		//: payload may be stored as NULL, which reads back as empty.
-		if _, execErr := ex.ExecContext(txCtx, b.stmts.insert, []byte(id), now.UnixNano(), now.UnixNano(), payload); execErr != nil {
+		//: one row: live, queued, due at its visibility, never delivered. A nil
+		//: or empty payload may be stored as NULL, which reads back as empty.
+		if _, execErr := ex.ExecContext(txCtx, b.stmts.insert, []byte(id), visibleAt.UnixNano(), now.UnixNano(), payload); execErr != nil {
 			//: QueueBackendFailed, the driver's text withheld.
 			return b.failed("publish", execErr)
 		}
@@ -225,6 +242,37 @@ func (b *sqlBroker) Ack(ctx context.Context, receipt corequeue.ReceiptValue) err
 func (b *sqlBroker) Nack(
 	ctx context.Context, receipt corequeue.ReceiptValue, cause error,
 ) (verdict corequeue.NackValue, err error) {
+	//: the policy's delay, grown with the deliveries when it asks for that.
+	return b.nackWith(ctx, receipt, cause, func(deliveries int) time.Duration {
+		//: the curve every broker waits on.
+		return retryDelay(b.policy, deliveries)
+	})
+}
+
+// NackAfter hands the message back as Nack does, its row due delay after now
+// instead of after the policy's retry delay (core/data/queue.DelayedNacker):
+// the same one statement, bound to another instant.
+func (b *sqlBroker) NackAfter(
+	ctx context.Context, receipt corequeue.ReceiptValue, cause error, delay time.Duration,
+) (verdict corequeue.NackValue, err error) {
+	//: an instant the table cannot hold is refused before a statement is
+	//: sent, and the lease the caller holds stays valid.
+	if _, invalid := nackDeadline(b.clk.Now(), delay); invalid != nil {
+		//: QueueMisconfigured, naming the argument.
+		return corequeue.NackValue{}, invalid
+	}
+	//: the caller's delay, whatever the delivery.
+	return b.nackWith(ctx, receipt, cause, func(int) time.Duration {
+		//: a negative delay is now.
+		return max(delay, 0)
+	})
+}
+
+// nackWith is Nack and NackAfter: the row due again after wait, or buried with
+// cause when it has no attempt left.
+func (b *sqlBroker) nackWith(
+	ctx context.Context, receipt corequeue.ReceiptValue, cause error, wait func(deliveries int) time.Duration,
+) (verdict corequeue.NackValue, err error) {
 	held, err := b.receiptOf(ctx, receipt)
 	//: an unknown receipt and a lapsed one are different bugs.
 	if err != nil {
@@ -232,7 +280,7 @@ func (b *sqlBroker) Nack(
 		return corequeue.NackValue{}, err
 	}
 	now := b.clk.Now()
-	visibleAt := now.Add(retryDelay(b.policy, held.deliveries))
+	visibleAt := now.Add(wait(held.deliveries))
 	//: an instant the table cannot hold is refused before anything moves,
 	//: and the lease the caller holds stays valid.
 	if !nameable(now) || !nameable(visibleAt) {
