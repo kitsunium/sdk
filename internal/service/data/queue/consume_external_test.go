@@ -94,7 +94,13 @@ func TestAFailingHandlerIsRetriedAndThenDeadLettered(t *testing.T) {
 			return cause
 		},
 		HandlerIsIdempotent: true, PollInterval: fastPoll,
-	}, func() bool { return attempts.Load() == int64(testDeliveries) })
+	}, func() bool {
+		//: the last attempt's failure must be folded in before the engine is
+		//: stopped: counting attempts alone stopped it between the handler's
+		//: return and its Nack, and the stop dead-lettered the message as
+		//: UNREPORTED — a race a slow kernel (NetBSD) lost.
+		return attempts.Load() == int64(testDeliveries) && len(deadLetters(t, broker, 10)) > 0
+	})
 
 	dead := deadLetters(t, broker, 10)
 	if len(dead) != 1 {

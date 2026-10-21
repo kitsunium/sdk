@@ -289,7 +289,11 @@ func TestABrokerThatCannotRejectRetriesADoNotRetryFailure(t *testing.T) {
 			return corequeue.DoNotRetry(nil)
 		},
 		HandlerIsIdempotent: true, PollInterval: fastPoll,
-	}, func() bool { return attempts.Load() == int64(testDeliveries) })
+	}, func() bool {
+		//: wait for the last Nack, not only the last attempt: stopping in
+		//: between dead-letters the message as UNREPORTED (seen on NetBSD).
+		return attempts.Load() == int64(testDeliveries) && len(deadLetters(t, inner, 10)) > 0
+	})
 
 	dead := deadLetters(t, inner, 10)
 	if len(dead) != 1 || dead[0].Reason != "NOT_RETRYABLE" || dead[0].Deliveries != testDeliveries {
