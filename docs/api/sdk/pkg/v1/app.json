@@ -111,7 +111,7 @@
       "dir": "resilience",
       "layer": "public",
       "family": "app",
-      "doc": "Package resilience is the public facade for the SDK's reliability policies:\nretry, circuit-breaker, rate-limit, bulkhead, timeout, fallback, and hedging.\nEach constructor returns a [Runner] that guards an [Operation] (a ctx-aware\nfunc); policies compose by nesting.\n\n\tr := resilience.NewRetry(resilience.RetryConfig{MaxAttempts: 3})\n\tb := resilience.NewCircuitBreaker(resilience.BreakerConfig{FailureThreshold: 5, OpenDuration: time.Second})\n\terr := r.Run(ctx, func(ctx context.Context) error {\n\t    return b.Run(ctx, callDownstream) // Retry(Breaker(op))\n\t})\n\nRejections surface typed sentinels (RetryExhausted / CircuitOpen / RateLimited\n/ BulkheadFull / TimeoutExceeded / FallbackFailed) matchable via\nerrs.HasReason / errs.HasCode.\n\n# Classifying deterministic failures\n\nRetry and the circuit-breaker act on transient failures. A deterministic one —\na policy refusal, an HTTP 400, invalid input — gains nothing from a replay and\nsays nothing about a dependency's health, yet by default both policies treat\nevery non-nil error as transient: the retry spends its whole budget on it and\nhides it behind RetryExhausted, and the breaker counts it towards tripping.\nSet the Retryable predicate on either config to tell the two apart. It takes\nthe same shape in both, so a nested Retry(Breaker(op)) shares one classifier.\nThe sentinel is the caller's own — this package exports none to classify\nagainst, because only the caller knows which of their failures are\ndeterministic:\n\n\tvar ErrBadRequest = errors.New(\"bad request\") // declared by the caller\n\n\ttransient := func(err error) bool { return !errors.Is(err, ErrBadRequest) }\n\tr := resilience.NewRetry(resilience.RetryConfig{MaxAttempts: 3, Retryable: transient})\n\tb := resilience.NewCircuitBreaker(resilience.BreakerConfig{FailureThreshold: 5, Retryable: transient})\n\nA rejected error comes back verbatim: the retry stops at that attempt without\nbackoff and without the RetryExhausted relabel, and the breaker leaves its\nstate machine untouched. A nil predicate keeps the historical behaviour.\n[FallbackConfig] takes the same predicate, where it decides whether a primary\nfailure is worth serving a substitute answer for.\n\n# Falling back\n\n[NewFallback] runs a second Operation when the first one fails, and reports\nsuccess when it works — that masking is the policy. The port carries no\nresult value, so a \"fallback VALUE\" is a closure assigning the caller's own\ndefault:\n\n\tvar page []byte\n\tf := resilience.NewFallback(resilience.FallbackConfig{\n\t    Fallback: func(context.Context) error { page = cachedPage; return nil },\n\t})\n\terr := f.Run(ctx, func(ctx context.Context) error { return fetchLive(ctx, &page) })\n\nWhen BOTH halves fail, the result is FallbackFailed carrying both messages as\nfields — never one of the two errors alone. Reporting only the fallback's\nfailure would never say what it was covering for, and reporting only the\nprimary's would never say that plan B was tried and also broke; either way\nthe outcome stops being diagnosable. A nil Fallback is refused (ADR 0031).\n\nA cancelled context is the one exception, and it is reported as itself: when\nit is already dead after the primary the fallback does not run at all, and\nwhen it dies while the fallback runs, a failed fallback returns ctx.Err()\nrather than FallbackFailed — neither dependency was at fault. A fallback that\nsucceeds despite a late cancellation still returns nil: the work was done.\n\n# Hedging — for IDEMPOTENT operations only\n\n[NewHedge] guards tail latency by duplicating a slow call: when an attempt\nhas been outstanding for Delay, a second copy starts, and the first to\nsucceed wins.\n\n\th := resilience.NewHedge(resilience.HedgeConfig{\n\t    Idempotent:  true,               // asserted, not assumed — see below\n\t    Delay:       80 * time.Millisecond,\n\t    MaxHedges:   1,\n\t    MaxInFlight: 32,                 // duplicates in flight, all calls\n\t})\n\nThis is the only policy here that runs an Operation CONCURRENTLY with itself,\nwhich makes it the only one that can corrupt rather than merely delay: a\nnon-idempotent Operation hedged is a double charge, a double insert, a\nduplicate outbound message — and the policy reports one clean success. The\nSDK cannot detect idempotence, so [HedgeConfig].Idempotent makes the claim\nmandatory and in code: its zero value refuses the policy, so hedging is never\nreached by copying a config and dropping a field, and `grep -r 'Idempotent:'`\nenumerates every hedged call path in a codebase.\n\nThe second hazard is load. A dependency that has gone slow makes every\nin-flight call want a duplicate at the same instant, so hedging can deepen\nthe outage it was meant to hide. Delay and MaxInFlight are both refused when\nunset for that reason — a zero Delay duplicates every call, and an unbounded\nMaxInFlight lets the duplicates scale with the outage. Reaching MaxInFlight\ndegrades the policy to no-hedging (the call proceeds on its first attempt);\nit never turns into a rejection. Hedging also fires on latency ONLY: an\nattempt that fails before Delay elapses ends the call with that error, since\nreplaying a failure is [NewRetry]'s job, and composing NewRetry(NewHedge(op))\nis how you get both.\n\n# Limiting per caller\n\n[NewRateLimiter] is one bucket for every caller, which is right for a\ndependency and wrong for an endpoint: one client guessing passwords empties\nit and locks everybody out. [NewKeyedRateLimiter] keeps a bucket per key —\nthe authenticated user, the client's address — so one client is refused and\nthe others are not:\n\n\tlimiter := resilience.NewKeyedRateLimiter(resilience.KeyedRateLimiterConfig{\n\t    Rate: 1, Burst: 5,                  // per key\n\t    Key:  func(ctx context.Context) string { return clientOf(ctx) },\n\t    MaxKeys:     10_000,                // keys held at once, least recently used forgotten\n\t    IdleTimeout: 10 * time.Minute,      // a key left alone this long starts over full\n\t})\n\nThe set of keys is bounded because the keys come from outside: a stream of\ndistinct addresses would otherwise grow the process without limit. Both\nbounds are enforced on the calling goroutine — there is no sweeper. Key,\nMaxKeys and IdleTimeout have no defaults and are refused at zero, since each\nzero has a reading that disarms the limiter while every call keeps\nsucceeding. A key pushed out by capacity comes back with a full bucket, so\nsize MaxKeys above the number of clients active within IdleTimeout.\n\n# Backing off on your own terms\n\n[Backoff] is the curve [NewRetry] waits between attempts, published for the\nloops that retry on their own terms — a supervised goroutine restarting\nafter a failure, an outbox rescheduling a delivery:\n\n\twait := resilience.Backoff{BaseDelay: time.Second, MaxDelay: time.Minute}.Delay(failures)\n\nDelay(n) is BaseDelay × Multiplier^(n−1), held at MaxDelay; a Multiplier of 1\nor below doubles, and the growth stops at the ceiling — or at the longest\ntime.Duration — instead of wrapping negative, however large n is.\n\n# Driving the retry and the hedge with a test clock\n\n[RetryConfig].Clock is the time source the retry backs off on, and\n[HedgeConfig].Clock the one the hedge measures its delay on. Leave them nil\nin production; in a test, hand them a ManualClock from pkg/v1/clock and move\nit past each backoff, or past the hedge delay, instead of sleeping through\nit.\n"
+      "doc": "Package resilience is the public facade for the SDK's reliability policies:\nretry, circuit-breaker, rate-limit, bulkhead, timeout, fallback, and hedging.\nEach constructor returns a [Runner] that guards an [Operation] (a ctx-aware\nfunc); policies compose by nesting.\n\n\tr := resilience.NewRetry(resilience.RetryConfig{MaxAttempts: 3})\n\tb := resilience.NewCircuitBreaker(resilience.BreakerConfig{FailureThreshold: 5, OpenDuration: time.Second})\n\terr := r.Run(ctx, func(ctx context.Context) error {\n\t    return b.Run(ctx, callDownstream) // Retry(Breaker(op))\n\t})\n\nRejections surface typed sentinels (RetryExhausted / RetryBudgetExceeded /\nCircuitOpen / RateLimited / BulkheadFull / TimeoutExceeded / FallbackFailed)\nmatchable via\nerrs.HasReason / errs.HasCode.\n\n# Classifying deterministic failures\n\nRetry and the circuit-breaker act on transient failures. A deterministic one —\na policy refusal, an HTTP 400, invalid input — gains nothing from a replay and\nsays nothing about a dependency's health, yet by default both policies treat\nevery non-nil error as transient: the retry spends its whole budget on it and\nhides it behind RetryExhausted, and the breaker counts it towards tripping.\nSet the Retryable predicate on either config to tell the two apart. It takes\nthe same shape in both, so a nested Retry(Breaker(op)) shares one classifier.\nThe sentinel is the caller's own — this package exports none to classify\nagainst, because only the caller knows which of their failures are\ndeterministic:\n\n\tvar ErrBadRequest = errors.New(\"bad request\") // declared by the caller\n\n\ttransient := func(err error) bool { return !errors.Is(err, ErrBadRequest) }\n\tr := resilience.NewRetry(resilience.RetryConfig{MaxAttempts: 3, Retryable: transient})\n\tb := resilience.NewCircuitBreaker(resilience.BreakerConfig{FailureThreshold: 5, Retryable: transient})\n\nA rejected error comes back verbatim: the retry stops at that attempt without\nbackoff and without the RetryExhausted relabel, and the breaker leaves its\nstate machine untouched. A nil predicate keeps the historical behaviour.\n[FallbackConfig] takes the same predicate, where it decides whether a primary\nfailure is worth serving a substitute answer for.\n\n# Falling back\n\n[NewFallback] runs a second Operation when the first one fails, and reports\nsuccess when it works — that masking is the policy. The port carries no\nresult value, so a \"fallback VALUE\" is a closure assigning the caller's own\ndefault:\n\n\tvar page []byte\n\tf := resilience.NewFallback(resilience.FallbackConfig{\n\t    Fallback: func(context.Context) error { page = cachedPage; return nil },\n\t})\n\terr := f.Run(ctx, func(ctx context.Context) error { return fetchLive(ctx, &page) })\n\nWhen BOTH halves fail, the result is FallbackFailed carrying both messages as\nfields — never one of the two errors alone. Reporting only the fallback's\nfailure would never say what it was covering for, and reporting only the\nprimary's would never say that plan B was tried and also broke; either way\nthe outcome stops being diagnosable. A nil Fallback is refused (ADR 0031).\n\nA cancelled context is the one exception, and it is reported as itself: when\nit is already dead after the primary the fallback does not run at all, and\nwhen it dies while the fallback runs, a failed fallback returns ctx.Err()\nrather than FallbackFailed — neither dependency was at fault. A fallback that\nsucceeds despite a late cancellation still returns nil: the work was done.\n\n# Hedging — for IDEMPOTENT operations only\n\n[NewHedge] guards tail latency by duplicating a slow call: when an attempt\nhas been outstanding for Delay, a second copy starts, and the first to\nsucceed wins.\n\n\th := resilience.NewHedge(resilience.HedgeConfig{\n\t    Idempotent:  true,               // asserted, not assumed — see below\n\t    Delay:       80 * time.Millisecond,\n\t    MaxHedges:   1,\n\t    MaxInFlight: 32,                 // duplicates in flight, all calls\n\t})\n\nThis is the only policy here that runs an Operation CONCURRENTLY with itself,\nwhich makes it the only one that can corrupt rather than merely delay: a\nnon-idempotent Operation hedged is a double charge, a double insert, a\nduplicate outbound message — and the policy reports one clean success. The\nSDK cannot detect idempotence, so [HedgeConfig].Idempotent makes the claim\nmandatory and in code: its zero value refuses the policy, so hedging is never\nreached by copying a config and dropping a field, and `grep -r 'Idempotent:'`\nenumerates every hedged call path in a codebase.\n\nThe second hazard is load. A dependency that has gone slow makes every\nin-flight call want a duplicate at the same instant, so hedging can deepen\nthe outage it was meant to hide. Delay and MaxInFlight are both refused when\nunset for that reason — a zero Delay duplicates every call, and an unbounded\nMaxInFlight lets the duplicates scale with the outage. Reaching MaxInFlight\ndegrades the policy to no-hedging (the call proceeds on its first attempt);\nit never turns into a rejection. Hedging also fires on latency ONLY: an\nattempt that fails before Delay elapses ends the call with that error, since\nreplaying a failure is [NewRetry]'s job, and composing NewRetry(NewHedge(op))\nis how you get both.\n\n# Limiting per caller\n\n[NewRateLimiter] is one bucket for every caller, which is right for a\ndependency and wrong for an endpoint: one client guessing passwords empties\nit and locks everybody out. [NewKeyedRateLimiter] keeps a bucket per key —\nthe authenticated user, the client's address — so one client is refused and\nthe others are not:\n\n\tlimiter := resilience.NewKeyedRateLimiter(resilience.KeyedRateLimiterConfig{\n\t    Rate: 1, Burst: 5,                  // per key\n\t    Key:  func(ctx context.Context) string { return clientOf(ctx) },\n\t    MaxKeys:     10_000,                // keys held at once, least recently used forgotten\n\t    IdleTimeout: 10 * time.Minute,      // a key left alone this long starts over full\n\t})\n\nThe set of keys is bounded because the keys come from outside: a stream of\ndistinct addresses would otherwise grow the process without limit. Both\nbounds are enforced on the calling goroutine — there is no sweeper. Key,\nMaxKeys and IdleTimeout have no defaults and are refused at zero, since each\nzero has a reading that disarms the limiter while every call keeps\nsucceeding. A key pushed out by capacity comes back with a full bucket, so\nsize MaxKeys above the number of clients active within IdleTimeout.\n\n# Backing off on your own terms\n\n[Backoff] is the curve [NewRetry] waits between attempts, published for the\nloops that retry on their own terms — a supervised goroutine restarting\nafter a failure, an outbox rescheduling a delivery:\n\n\twait := resilience.Backoff{BaseDelay: time.Second, MaxDelay: time.Minute}.Delay(failures)\n\nDelay(n) is BaseDelay × Multiplier^(n−1), held at MaxDelay; a Multiplier of 1\nor below doubles, and the growth stops at the ceiling — or at the longest\ntime.Duration — instead of wrapping negative, however large n is.\n\n# Driving the retry, the hedge and the timeout with a test clock\n\n[RetryConfig].Clock is the time source the retry backs off on,\n[HedgeConfig].Clock the one the hedge measures its delay on, and\n[TimeoutConfig].Clock the one [NewTimeoutWith] measures its deadline on.\nLeave them nil in production; in a test, hand them a ManualClock from\npkg/v1/clock and move it past each backoff, the hedge delay or the\ndeadline, instead of sleeping through it.\n\n# Waiting as long as the other side asked\n\nA collector shedding load, an HTTP server answering 429, a rate limiter\nrefusing a call: each knows when the next attempt may succeed, and a retry\nthat ignores it either hammers too early or waits too long.\n[RetryConfig].Delay lets the failure decide the wait, and [RetryAfter] reads\nthe delay the SDK's own producers attach to their errors:\n\n\tr := resilience.NewRetry(resilience.RetryConfig{\n\t    MaxAttempts: 5, BaseDelay: 100 * time.Millisecond, MaxDelay: 30 * time.Second,\n\t    Delay: func(_ int, err error) (time.Duration, bool) { return resilience.RetryAfter(err) },\n\t})\n\nA failure that names no delay waits the backoff curve, and the named one is\nheld at MaxDelay.\n\n# A retry budget per dependency\n\nA retry multiplies traffic exactly when the dependency can least take it:\nduring an outage every call becomes MaxAttempts calls, and stacked layers\nmultiply again. [NewRetryBudget] is the token bucket of gRPC's retry\nthrottling — a failure costs a token, a success returns TokenRatio of one,\nand extra attempts stop once half the tokens are gone. Share one per\ndependency between its retry and its hedge; the first attempt of a call is\nnever refused:\n\n\tbudget := resilience.NewRetryBudget(resilience.RetryBudgetConfig{MaxTokens: 10, TokenRatio: 0.1})\n\tr := resilience.NewRetry(resilience.RetryConfig{\n\t    MaxAttempts: 3, BaseDelay: 50 * time.Millisecond, Budget: budget,\n\t    OnRetry: func(attempt int, err error, wait time.Duration) { retries.Add(1) },\n\t})\n\nA retry the budget refuses ends the call with [RetryBudgetExceeded]; a\nduplicate it refuses is simply not issued. [RetryConfig].OnRetry hears every\nretry before its wait, synchronously, so retries are counted without this\npackage depending on a metrics library.\n\n# A caller who leaves is not a failing dependency\n\nA call that ends in context.Canceled once the caller's own context is\nclosed is neutral to the circuit breaker — a wave of disconnecting clients\ncannot open it on a healthy dependency — and the timeout reports the\ncaller's own context error rather than TimeoutExceeded when the caller's\ncontext finished first. A context.DeadlineExceeded from the dependency\nstays a failure.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/pkg/v1/app/scheduler",
@@ -7694,7 +7694,7 @@
       "name": "NewCircuitBreaker",
       "spelled": "func(cfg BreakerConfig) Runner",
       "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/app/resilience.BreakerConfig) github.com/kitsunium/sdk/pkg/v1/app/resilience.Runner",
-      "doc": "NewCircuitBreaker returns a circuit-breaker Runner. An error rejected by\ncfg.Retryable is returned verbatim and left out of the state machine.\nHalfOpen runs one trial at a time, and the outcome of a call admitted\nbefore the breaker last opened is ignored.\n",
+      "doc": "NewCircuitBreaker returns a circuit-breaker Runner. An error rejected by\ncfg.Retryable is returned verbatim and left out of the state machine.\nHalfOpen runs one trial at a time, and the outcome of a call admitted\nbefore the breaker last opened is ignored. A context.Canceled returned\nonce the caller's context is closed counts neither way: the caller\nleft, not the dependency.\n",
       "file": "resilience/gen_facade.go",
       "layer": "public",
       "family": "app"
@@ -7760,13 +7760,37 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/resilience.NewRetryBudget",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/resilience",
+      "name": "NewRetryBudget",
+      "spelled": "func(cfg RetryBudgetConfig) RetryBudget",
+      "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/app/resilience.RetryBudgetConfig) github.com/kitsunium/sdk/pkg/v1/app/resilience.RetryBudget",
+      "doc": "NewRetryBudget returns the token-bucket RetryBudget of gRPC's retry\nthrottling, to share between the retry and the hedge of one dependency:\nfull at cfg.MaxTokens, a failure costs one token, a success returns\ncfg.TokenRatio, and extra attempts are allowed while more than half\nremain. A non-positive cfg.MaxTokens or an unusable cfg.TokenRatio is\nrefused: the policies given it return PolicyMisconfigured.\n",
+      "file": "resilience/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/app/resilience.NewTimeout",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/pkg/v1/app/resilience",
       "name": "NewTimeout",
       "spelled": "func(d time.Duration) Runner",
       "canonical": "func(d time.Duration) github.com/kitsunium/sdk/pkg/v1/app/resilience.Runner",
-      "doc": "NewTimeout returns a deadline-enforcing Runner. A non-positive d is refused:\nevery call returns PolicyMisconfigured without running the operation, since\nany deadline chosen for the caller would be a guess (ADR 0031).\n",
+      "doc": "NewTimeout returns a deadline-enforcing Runner. A non-positive d is refused:\nevery call returns PolicyMisconfigured without running the operation, since\nany deadline chosen for the caller would be a guess (ADR 0031). Only its own\ndeadline is reported as TimeoutExceeded: when the caller's context is\nalready finished, the call returns that context's error instead.\n",
+      "file": "resilience/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/resilience.NewTimeoutWith",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/resilience",
+      "name": "NewTimeoutWith",
+      "spelled": "func(cfg TimeoutConfig) Runner",
+      "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/app/resilience.TimeoutConfig) github.com/kitsunium/sdk/pkg/v1/app/resilience.Runner",
+      "doc": "NewTimeoutWith is NewTimeout with the deadline measured on cfg.Clock, so a\ntest expires it by advancing a ManualClock instead of sleeping. A nil\ncfg.Clock is NewTimeout(cfg.Duration) exactly; a non-positive\ncfg.Duration is refused.\n",
       "file": "resilience/gen_facade.go",
       "layer": "public",
       "family": "app"
@@ -7797,7 +7821,7 @@
         "reason": "POLICY_MISCONFIGURED",
         "public": "The reliability policy was misconfigured and refused the call"
       },
-      "doc": "PolicyMisconfigured is returned by every call to a policy that was built\nwith a configuration it cannot honour — a non-positive RateLimiterConfig\n.Rate, a non-positive NewTimeout duration, a nil FallbackConfig.Fallback,\nan unasserted HedgeConfig.Idempotent, a non-positive HedgeConfig.Delay or\nMaxInFlight, a KeyedRateLimiterConfig without a Key, a MaxKeys or an\nIdleTimeout. The operation is not run. Unlike the sentinels above it is\npermanent, not transient: the fix is at the construction site, never a\nretry (ADR 0031).\n",
+      "doc": "PolicyMisconfigured is returned by every call to a policy that was built\nwith a configuration it cannot honour — a non-positive RateLimiterConfig\n.Rate, a non-positive NewTimeout duration, a nil FallbackConfig.Fallback,\nan unasserted HedgeConfig.Idempotent, a non-positive HedgeConfig.Delay or\nMaxInFlight, a KeyedRateLimiterConfig without a Key, a MaxKeys or an\nIdleTimeout, a retry budget built with an unusable MaxTokens or\nTokenRatio. The operation is not run. Unlike the sentinels above it is\npermanent, not transient: the fix is at the construction site, never a\nretry (ADR 0031).\n",
       "file": "resilience/gen_facade.go",
       "layer": "public",
       "family": "app"
@@ -7815,7 +7839,7 @@
         "reason": "RATE_LIMITED",
         "public": "The call was rejected by the rate limiter"
       },
-      "doc": "RateLimited is returned when no rate-limit token is available. It\ncarries HTTP 429: the client should slow down.\n",
+      "doc": "RateLimited is returned when no rate-limit token is available. It\ncarries HTTP 429: the client should slow down. A rejection by\nNewRateLimiter or NewKeyedRateLimiter also says by how much:\nRetryAfter reads the time the bucket needs to earn its next token.\n",
       "file": "resilience/gen_facade.go",
       "layer": "public",
       "family": "app"
@@ -7829,6 +7853,62 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/app/resilience.RateLimiterConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/app/resilience.RateLimiterConfig",
       "doc": "RateLimiterConfig is the public alias for the rate-limiter configuration.\n",
+      "file": "resilience/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/resilience.RetryAfter",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/resilience",
+      "name": "RetryAfter",
+      "spelled": "func(err error) (time.Duration, bool)",
+      "canonical": "func(err error) (time.Duration, bool)",
+      "doc": "RetryAfter reports the delay err says to wait before the next attempt — the\nretry_after_seconds field an OTLP exporter, the guarded HTTP client on a 429\nor 503, and RateLimited set — and whether it says one. Its shape is\nRetryConfig.Delay's.\n",
+      "file": "resilience/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/resilience.RetryBudget",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/resilience",
+      "name": "RetryBudget",
+      "spelled": "coreres.RetryBudget",
+      "canonical": "github.com/kitsunium/sdk/internal/core/app/resilience.RetryBudget",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/app/resilience.RetryBudget",
+      "doc": "RetryBudget is the public alias for the retry-budget port: what a retry\nand a hedge sharing it ask before an extra attempt, and record after\none.\n",
+      "file": "resilience/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/resilience.RetryBudgetConfig",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/resilience",
+      "name": "RetryBudgetConfig",
+      "spelled": "svcres.RetryBudgetConfig",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/resilience.RetryBudgetConfig",
+      "owner": "go:github.com/kitsunium/sdk/internal/service/app/resilience.RetryBudgetConfig",
+      "doc": "RetryBudgetConfig is the public alias for the token-bucket retry budget's configuration.\n",
+      "file": "resilience/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/resilience.RetryBudgetExceeded",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/resilience",
+      "name": "RetryBudgetExceeded",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/app/resilience.RetryBudgetExceeded",
+      "code": {
+        "value": "0.2.8.8",
+        "reason": "RETRY_BUDGET_EXCEEDED",
+        "public": "The operation failed and the retry budget refused another attempt"
+      },
+      "doc": "RetryBudgetExceeded is returned when the shared retry budget refused the\nnext attempt; the last attempt's error is its cause.\n",
       "file": "resilience/gen_facade.go",
       "layer": "public",
       "family": "app"
@@ -7873,6 +7953,19 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/app/resilience.Runner",
       "owner": "go:github.com/kitsunium/sdk/internal/core/app/resilience.Runner",
       "doc": "Runner is the public alias for the composable policy-executor contract.\n",
+      "file": "resilience/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/resilience.TimeoutConfig",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/resilience",
+      "name": "TimeoutConfig",
+      "spelled": "svcres.TimeoutConfig",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/resilience.TimeoutConfig",
+      "owner": "go:github.com/kitsunium/sdk/internal/service/app/resilience.TimeoutConfig",
+      "doc": "TimeoutConfig is the public alias for the timeout policy configuration\nNewTimeoutWith takes: the deadline and the clock it is measured on.\n",
       "file": "resilience/gen_facade.go",
       "layer": "public",
       "family": "app"

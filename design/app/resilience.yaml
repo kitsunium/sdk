@@ -53,6 +53,14 @@ packages:
             name: CodeFallbackFailed
             value: "0x00_02_08_07"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeRetryBudgetExceeded identifies a retry policy that stopped before its
+              attempt budget because the shared retry budget refused the next attempt
+              (the last attempt's error is the wrap cause).
+            name: CodeRetryBudgetExceeded
+            value: "0x00_02_08_08"
+        type: errs.Code
     doc: |-
       Package resilience — range 0.2.8.* (ADR 0026 core/app/resilience block).
 
@@ -72,8 +80,9 @@ packages:
     ports:
       - doc: |-
           Runner executes an Operation under a reliability policy and returns the
-          operation's error, a policy sentinel (RetryExhausted, CircuitOpen,
-          RateLimited, BulkheadFull, TimeoutExceeded, FallbackFailed), or ctx.Err().
+          operation's error, a policy sentinel (RetryExhausted, RetryBudgetExceeded,
+          CircuitOpen, RateLimited, BulkheadFull, TimeoutExceeded, FallbackFailed),
+          or ctx.Err().
           Implementations MUST be safe for concurrent use. Runners compose: a Runner
           may itself invoke an inner Runner inside its Operation.
 
@@ -89,6 +98,35 @@ packages:
             out:
               - type: error
         name: Runner
+      - doc: |-
+          RetryBudget bounds the extra attempts — retries and hedged duplicates —
+          that the policies sharing it may issue, so that during an outage every
+          call stops being multiplied by its attempt count. A call's FIRST attempt
+          never asks it: a budget throttles amplification, never traffic.
+
+          A sibling of Runner rather than a widening of it (ADR 0039): a budget is
+          not a policy that runs an Operation, it is a counter several policies
+          consult. NewRetryBudget is the SDK's implementation, the token bucket of
+          gRPC's retry throttling; a caller may supply their own.
+
+          Implementations MUST be safe for concurrent use, and SHOULD not allocate:
+          AllowRetry and the two Record methods run on the retry's hot path.
+        methods:
+          - doc: |-
+              AllowRetry reports whether one more attempt beyond a call's first may
+              be issued now. It is a query: it spends nothing, and a policy that
+              asks it and then issues no attempt owes it nothing.
+            name: AllowRetry
+            out:
+              - type: bool
+          - doc: RecordSuccess records an attempt that succeeded, which replenishes the budget.
+            name: RecordSuccess
+          - doc: |-
+              RecordFailure records an attempt that failed in a way worth retrying,
+              which drains the budget. A deterministic failure, and a caller who left,
+              are not recorded.
+            name: RecordFailure
+        name: RetryBudget
     sentinels:
       - var:
           - code: CodeRetryExhausted
@@ -98,6 +136,16 @@ packages:
             private: "service/app/resilience: retry budget exhausted; the wrap cause is the last attempt's error"
             public: The operation failed after exhausting all retries
             reason: RETRY_EXHAUSTED
+          - code: CodeRetryBudgetExceeded
+            doc: |-
+              RetryBudgetExceeded wraps the last attempt's error when the shared retry
+              budget refused the next attempt: the dependency is failing for enough
+              callers that retrying would only multiply its load.
+            exit: TEMPFAIL
+            name: RetryBudgetExceeded
+            private: "service/app/resilience: retry budget below half its tokens; the wrap cause is the last attempt's error"
+            public: The operation failed and the retry budget refused another attempt
+            reason: RETRY_BUDGET_EXCEEDED
           - code: CodeCircuitOpen
             doc: CircuitOpen is returned when the breaker is Open and the call is rejected fast.
             exit: TEMPFAIL
@@ -107,7 +155,10 @@ packages:
             public: The circuit breaker is open; the call was rejected
             reason: CIRCUIT_OPEN
           - code: CodeRateLimited
-            doc: RateLimited is returned when no token was available (or the wait was cancelled).
+            doc: |-
+              RateLimited is returned when no token was available (or the wait was cancelled).
+              A rejection by the SDK's limiters carries, as the field
+              retry_after_seconds, how long the bucket needs to earn the next token.
             exit: TEMPFAIL
             http: 429
             name: RateLimited
@@ -251,6 +302,14 @@ packages:
           settles. The outcome of a call admitted before the breaker last opened
           is ignored: its success cannot close the breaker and its failure cannot
           restart the cooldown.
+
+          A call that ends in context.Canceled once the caller's own context is
+          closed is neutral — neither a success nor a failure — because the caller
+          left, not the dependency: a wave of client disconnects cannot open the
+          breaker on a healthy dependency, and a HalfOpen trial abandoned that way
+          frees the slot for the next call. context.DeadlineExceeded stays a
+          failure: a dependency too slow for the caller's deadline is a slow
+          dependency.
         in:
           - name: cfg
             type: BreakerConfig
@@ -356,6 +415,12 @@ packages:
           A false cfg.Idempotent, a non-positive cfg.Delay, or a non-positive
           cfg.MaxInFlight is refused: every call returns PolicyMisconfigured without
           running the operation (ADR 0031). A cfg.MaxHedges below one clamps to one.
+
+          With a cfg.Budget, a duplicate the budget refuses is not issued — the
+          call proceeds on the attempts already running, as when MaxInFlight is
+          reached — and each call's outcome is recorded in it: a success, or a
+          failure on a live context. A cfg.Budget NewRetryBudget refused makes
+          every call return PolicyMisconfigured.
         in:
           - name: cfg
             type: HedgeConfig
@@ -399,7 +464,15 @@ packages:
           early on ctx cancellation. The final attempt's error wraps as RetryExhausted.
           An error rejected by cfg.Retryable ends the loop at once and is returned
           verbatim, so a deterministic failure neither spends the budget nor hides
-          behind RetryExhausted.
+          behind RetryExhausted. When cfg.Delay reads a wait from the failure — a
+          Retry-After, a RateLimited rejection — that wait replaces the backoff,
+          held at cfg.MaxDelay.
+
+          With a cfg.Budget, every success and every retryable failure is recorded
+          in it, and a retry it refuses ends the loop with RetryBudgetExceeded
+          wrapping the last error. cfg.OnRetry hears each retry before its wait. A
+          cfg.Budget NewRetryBudget refused makes every call return
+          PolicyMisconfigured.
         in:
           - name: cfg
             type: RetryConfig
@@ -416,12 +489,93 @@ packages:
           already-expired context, so the previous behaviour failed even an
           instantaneous operation with TimeoutExceeded — a policy that could never
           admit anything, reporting it with the error it uses when it is working.
+
+          Only this policy's own deadline is reported as TimeoutExceeded. When the
+          caller's context is already finished — cancelled, or past a deadline of
+          its own — the call returns that context's error instead: the caller
+          left or ran out of time, and the policy did not time anything out.
+
+          The deadline runs on the wall clock; NewTimeoutWith takes a clock.
         in:
           - name: d
             type: time.Duration
         name: NewTimeout
         out:
           - type: coreres.Runner
+      - doc: |-
+          NewTimeoutWith is NewTimeout with the deadline measured on cfg.Clock, so
+          a test expires it by advancing a clock.ManualClock past cfg.Duration
+          instead of sleeping through it (ADR 0090). A nil cfg.Clock, or
+          clock.System, is NewTimeout(cfg.Duration) exactly.
+
+          Under any other clock the Operation's context reports
+          context.DeadlineExceeded once the clock passes the deadline, and its
+          Deadline method reports the caller's deadline, not this one: a deadline
+          on a clock that is not the wall clock is not a time a socket can be
+          given. A non-positive cfg.Duration is refused like NewTimeout's.
+        in:
+          - name: cfg
+            type: TimeoutConfig
+        name: NewTimeoutWith
+        out:
+          - type: coreres.Runner
+      - doc: |-
+          RetryAfter reports the delay err says to wait before the next attempt,
+          and whether it says one. It reads the retry_after_seconds field of the
+          outermost *errs.Error in err's chain — a number of seconds, whole or
+          fractional — and reports false when there is none, or when it is not a
+          finite positive number.
+
+          Three producers in the SDK set it: the OTLP/HTTP exporters on a
+          retryable answer whose Retry-After header holds delta-seconds, the
+          guarded HTTP client (net/client) on a 429 or a 503 whose Retry-After
+          does the same, and RateLimited from NewRateLimiter and
+          NewKeyedRateLimiter, with the time the bucket needs to earn its next
+          token. An HTTP-date Retry-After is not read: converting it compares the
+          peer's clock to ours. Any other error sets the same field with
+          errs.Int or errs.Float to take part.
+
+          Its shape is RetryConfig.Delay's, so honouring the delay is one line:
+
+          	Delay: func(_ int, err error) (time.Duration, bool) { return RetryAfter(err) }
+
+          A delay too long for a time.Duration reports the longest one.
+        in:
+          - name: err
+            type: error
+        name: RetryAfter
+        out:
+          - type: time.Duration
+          - type: bool
+      - doc: |-
+          NewRetryBudget returns the token-bucket RetryBudget of gRPC's retry
+          throttling (gRFC A6), to share between the NewRetry and NewHedge policies
+          that call one dependency. It starts full, at cfg.MaxTokens tokens; each
+          recorded failure costs one token, each recorded success returns
+          cfg.TokenRatio of one, never past cfg.MaxTokens; and AllowRetry is true
+          only while more than half of cfg.MaxTokens remain. The first attempt of a
+          call is never refused, so a dependency that recovers is seen to recover:
+          its successes refill the bucket.
+
+          The bucket drains while recorded failures exceed TokenRatio times the
+          recorded successes — with 0.1, more than one failure per ten successes —
+          and retries stop once it has lost half its tokens; it refills, and
+          retries resume, when failures fall back below that ratio. 0.1 is the
+          order of the per-client retry budget Google's SRE book recommends (10%)
+          and of the AWS SDKs' retry quota.
+
+          A non-positive cfg.MaxTokens, and a cfg.TokenRatio that is not a finite
+          number of at least one thousandth, are refused (ADR 0031): the budget
+          returned allows no retry, and NewRetry or NewHedge given it refuses
+          every call with PolicyMisconfigured, naming the field. The counts are
+          kept in thousandths of a token, as gRPC does, without a lock and without
+          allocating.
+        in:
+          - name: cfg
+            type: RetryBudgetConfig
+        name: NewRetryBudget
+        out:
+          - type: coreres.RetryBudget
     imports:
       clock: github.com/kitsunium/sdk/internal/kernel/clock
       coreres: github.com/kitsunium/sdk/internal/core/app/resilience
@@ -455,6 +609,8 @@ packages:
                 success path: a stream of HTTP 400s can no longer trip the breaker, and
                 one of them cannot close a HalfOpen breaker either. A nil predicate
                 counts every error as a failure, which is the pre-classifier behaviour.
+                It is not consulted for a context.Canceled returned once the caller's
+                context is closed: that call is neutral whatever the predicate says.
                 Shares its shape with RetryConfig.Retryable so one classifier serves a
                 nested Retry(Breaker(op)) stack.
               name: Retryable
@@ -508,7 +664,7 @@ packages:
           the SDK could pick for them is either a guess at the caller's requirement or
           a licence to duplicate load the caller never agreed to (ADR 0031). MaxHedges
           is the one with an obvious floor and clamps to 1. A nil Clock measures the
-          delay on the wall clock.
+          delay on the wall clock, and a nil Budget never refuses a duplicate.
         name: HedgeConfig
         struct:
           fields:
@@ -596,6 +752,16 @@ packages:
                 policy that measures a wait, did not.
               name: Clock
               type: clock.Timed
+            - doc: |-
+                Budget, when set, is asked before each duplicate: a refusal issues
+                none, and the call proceeds on the attempts already running, as when
+                MaxInFlight is reached. Each call's outcome is recorded in it — a
+                success, or a failure on a live context — so a hedge and a retry
+                sharing one budget stop amplifying a failing dependency together, as
+                gRPC's retry throttling covers hedging. Nil is the hedge without a
+                budget.
+              name: Budget
+              type: coreres.RetryBudget
       - doc: |-
           KeyedRateLimiterConfig parameterises NewKeyedRateLimiter: a token bucket per
           key, at most MaxKeys of them, each forgotten after IdleTimeout without a
@@ -679,7 +845,9 @@ packages:
           RetryConfig parameterises NewRetry. A non-positive MaxAttempts clamps to 1; a
           Multiplier of 1 or below (or NaN) defaults to 2; a zero MaxDelay means no
           cap; a nil Retryable replays every error; a zero Jitter backs off
-          deterministically; a nil Clock waits on the wall clock.
+          deterministically; a nil Clock waits on the wall clock; a nil Delay
+          always waits the backoff curve; a nil Budget never refuses a retry; a nil
+          OnRetry hears nothing.
 
           BaseDelay, MaxDelay, Multiplier and Jitter are the four fields of
           BackoffValue, under the same names and with the same meaning: NewRetry builds its curve
@@ -740,6 +908,93 @@ packages:
                 the one policy here that actually WAITS, did not.
               name: Clock
               type: clock.Timed
+            - doc: |-
+                Delay decides the wait before a retry when the failure itself says how
+                long to wait. It is called once per retry, with the retry's number —
+                1 before the second attempt — and the error of the attempt that just
+                failed; a true second result makes its duration the wait, in place of
+                the backoff curve and without Jitter. A false one, and a nil Delay,
+                wait the curve, which is the behaviour before the field existed.
+
+                The wait it returns is held at MaxDelay when one is set, and a
+                negative one is no wait. A server's hint longer than the caller is
+                prepared to wait is therefore cut to MaxDelay, never followed past
+                it; a caller who would rather give up classifies that error as not
+                retryable instead.
+
+                RetryAfter has its shape, so honouring a Retry-After, an OTLP
+                collector's throttling or a RateLimited rejection is one line:
+
+                	Delay: func(_ int, err error) (time.Duration, bool) { return resilience.RetryAfter(err) }
+              name: Delay
+              type: func(attempt int, err error) (time.Duration, bool)
+            - doc: |-
+                Budget, when set, bounds the retries of every policy sharing it: each
+                success and each retryable failure is recorded in it, and before
+                every retry it is asked whether one may run. A refusal ends the loop
+                with RetryBudgetExceeded wrapping the last error, without waiting. A
+                deterministic error and a cancelled context record nothing.
+
+                Nil — the zero value — is the policy without a budget, as it was
+                before the field existed. Share one budget per dependency, between
+                its retry and its hedge: that is what stops a failing dependency from
+                receiving every call times MaxAttempts. A Retry(Hedge(op)) whose two
+                policies share a budget records a failed call at both levels, which
+                drains and refills it twice as fast and leaves its threshold where it
+                was.
+              name: Budget
+              type: coreres.RetryBudget
+            - doc: |-
+                OnRetry, when set, is called before each retry's wait, on the
+                calling goroutine, with the retry's number — 1 before the second
+                attempt —, the error that caused it and the wait about to start. It
+                is how a caller counts retries in their own metrics without this
+                package depending on one. It is not called for the first attempt,
+                nor for a retry the budget refused. It must not block: the retry
+                waits for it.
+              name: OnRetry
+              type: func(attempt int, err error, delay time.Duration)
+      - doc: |-
+          RetryBudgetConfig parameterises NewRetryBudget, in the terms of gRPC's
+          retryThrottling: the bucket's size and what a success puts back. Neither
+          has a default; both are refused when unusable (ADR 0031).
+        name: RetryBudgetConfig
+        struct:
+          fields:
+            - doc: |-
+                MaxTokens is the bucket's size and its starting content. Retries are
+                allowed while more than MaxTokens/2 remain, so the budget absorbs
+                about MaxTokens/2 more failures than its successes repay before it
+                starts refusing. A non-positive MaxTokens is refused; values above
+                2^40 are held there.
+              name: MaxTokens
+              type: int
+            - doc: |-
+                TokenRatio is what a recorded success puts back, in tokens, a
+                failure costing one. It is read to a thousandth, as gRPC reads it: a
+                value that is not finite, or that rounds below 0.001, is refused —
+                its zero would be a budget that, once drained, never refills.
+              name: TokenRatio
+              type: float64
+      - doc: |-
+          TimeoutConfig parameterises NewTimeoutWith: the deadline and the clock it
+          is measured on. Duration has no default and is refused when not positive
+          (ADR 0031); a nil Clock is the wall clock.
+        name: TimeoutConfig
+        struct:
+          fields:
+            - doc: |-
+                Duration is how long the Operation may run. A non-positive Duration
+                makes NewTimeoutWith return a policy that refuses every call with
+                PolicyMisconfigured, exactly as NewTimeout refuses a non-positive d.
+              name: Duration
+              type: time.Duration
+            - doc: |-
+                Clock is what Duration is measured on. Nil means clock.System, under
+                which the policy is NewTimeout's: a context.WithTimeout whose
+                deadline the Operation can read.
+              name: Clock
+              type: clock.Timed
   - doc: |-
       Package resilience is the public facade for the SDK's reliability policies:
       retry, circuit-breaker, rate-limit, bulkhead, timeout, fallback, and hedging.
@@ -752,8 +1007,9 @@ packages:
       	    return b.Run(ctx, callDownstream) // Retry(Breaker(op))
       	})
 
-      Rejections surface typed sentinels (RetryExhausted / CircuitOpen / RateLimited
-      / BulkheadFull / TimeoutExceeded / FallbackFailed) matchable via
+      Rejections surface typed sentinels (RetryExhausted / RetryBudgetExceeded /
+      CircuitOpen / RateLimited / BulkheadFull / TimeoutExceeded / FallbackFailed)
+      matchable via
       errs.HasReason / errs.HasCode.
 
       # Classifying deterministic failures
@@ -874,13 +1130,60 @@ packages:
       or below doubles, and the growth stops at the ceiling — or at the longest
       time.Duration — instead of wrapping negative, however large n is.
 
-      # Driving the retry and the hedge with a test clock
+      # Driving the retry, the hedge and the timeout with a test clock
 
-      [RetryConfig].Clock is the time source the retry backs off on, and
-      [HedgeConfig].Clock the one the hedge measures its delay on. Leave them nil
-      in production; in a test, hand them a ManualClock from pkg/v1/clock and move
-      it past each backoff, or past the hedge delay, instead of sleeping through
-      it.
+      [RetryConfig].Clock is the time source the retry backs off on,
+      [HedgeConfig].Clock the one the hedge measures its delay on, and
+      [TimeoutConfig].Clock the one [NewTimeoutWith] measures its deadline on.
+      Leave them nil in production; in a test, hand them a ManualClock from
+      pkg/v1/clock and move it past each backoff, the hedge delay or the
+      deadline, instead of sleeping through it.
+
+      # Waiting as long as the other side asked
+
+      A collector shedding load, an HTTP server answering 429, a rate limiter
+      refusing a call: each knows when the next attempt may succeed, and a retry
+      that ignores it either hammers too early or waits too long.
+      [RetryConfig].Delay lets the failure decide the wait, and [RetryAfter] reads
+      the delay the SDK's own producers attach to their errors:
+
+      	r := resilience.NewRetry(resilience.RetryConfig{
+      	    MaxAttempts: 5, BaseDelay: 100 * time.Millisecond, MaxDelay: 30 * time.Second,
+      	    Delay: func(_ int, err error) (time.Duration, bool) { return resilience.RetryAfter(err) },
+      	})
+
+      A failure that names no delay waits the backoff curve, and the named one is
+      held at MaxDelay.
+
+      # A retry budget per dependency
+
+      A retry multiplies traffic exactly when the dependency can least take it:
+      during an outage every call becomes MaxAttempts calls, and stacked layers
+      multiply again. [NewRetryBudget] is the token bucket of gRPC's retry
+      throttling — a failure costs a token, a success returns TokenRatio of one,
+      and extra attempts stop once half the tokens are gone. Share one per
+      dependency between its retry and its hedge; the first attempt of a call is
+      never refused:
+
+      	budget := resilience.NewRetryBudget(resilience.RetryBudgetConfig{MaxTokens: 10, TokenRatio: 0.1})
+      	r := resilience.NewRetry(resilience.RetryConfig{
+      	    MaxAttempts: 3, BaseDelay: 50 * time.Millisecond, Budget: budget,
+      	    OnRetry: func(attempt int, err error, wait time.Duration) { retries.Add(1) },
+      	})
+
+      A retry the budget refuses ends the call with [RetryBudgetExceeded]; a
+      duplicate it refuses is simply not issued. [RetryConfig].OnRetry hears every
+      retry before its wait, synchronously, so retries are counted without this
+      package depending on a metrics library.
+
+      # A caller who leaves is not a failing dependency
+
+      A call that ends in context.Canceled once the caller's own context is
+      closed is neutral to the circuit breaker — a wave of disconnecting clients
+      cannot open it on a healthy dependency — and the timeout reports the
+      caller's own context error rather than TimeoutExceeded when the caller's
+      context finished first. A context.DeadlineExceeded from the dependency
+      stays a failure.
     facade:
       - alias:
           - doc: Operation is the public alias for the ctx-aware unit of guarded work.
@@ -919,6 +1222,23 @@ packages:
             target: svcres.KeyedRateLimiterConfig
       - alias:
           - doc: |-
+              RetryBudget is the public alias for the retry-budget port: what a retry
+              and a hedge sharing it ask before an extra attempt, and record after
+              one.
+            name: RetryBudget
+            target: coreres.RetryBudget
+      - alias:
+          - doc: RetryBudgetConfig is the public alias for the token-bucket retry budget's configuration.
+            name: RetryBudgetConfig
+            target: svcres.RetryBudgetConfig
+      - alias:
+          - doc: |-
+              TimeoutConfig is the public alias for the timeout policy configuration
+              NewTimeoutWith takes: the deadline and the clock it is measured on.
+            name: TimeoutConfig
+            target: svcres.TimeoutConfig
+      - alias:
+          - doc: |-
               Backoff is the public alias for the exponential backoff curve NewRetry waits
               between attempts, for a loop that backs off on its own terms.
             name: Backoff
@@ -929,6 +1249,12 @@ packages:
             reexport: coreres.RetryExhausted
             type: "*errs.Error"
           - doc: |-
+              RetryBudgetExceeded is returned when the shared retry budget refused the
+              next attempt; the last attempt's error is its cause.
+            name: RetryBudgetExceeded
+            reexport: coreres.RetryBudgetExceeded
+            type: "*errs.Error"
+          - doc: |-
               CircuitOpen is returned when the breaker rejects a call fast. It carries
               HTTP 503 (errs.HTTPStatusOf): the dependency cannot take the call now.
             name: CircuitOpen
@@ -936,7 +1262,9 @@ packages:
             type: "*errs.Error"
           - doc: |-
               RateLimited is returned when no rate-limit token is available. It
-              carries HTTP 429: the client should slow down.
+              carries HTTP 429: the client should slow down. A rejection by
+              NewRateLimiter or NewKeyedRateLimiter also says by how much:
+              RetryAfter reads the time the bucket needs to earn its next token.
             name: RateLimited
             reexport: coreres.RateLimited
             type: "*errs.Error"
@@ -967,7 +1295,8 @@ packages:
               .Rate, a non-positive NewTimeout duration, a nil FallbackConfig.Fallback,
               an unasserted HedgeConfig.Idempotent, a non-positive HedgeConfig.Delay or
               MaxInFlight, a KeyedRateLimiterConfig without a Key, a MaxKeys or an
-              IdleTimeout. The operation is not run. Unlike the sentinels above it is
+              IdleTimeout, a retry budget built with an unusable MaxTokens or
+              TokenRatio. The operation is not run. Unlike the sentinels above it is
               permanent, not transient: the fix is at the construction site, never a
               retry (ADR 0031).
             name: PolicyMisconfigured
@@ -989,7 +1318,9 @@ packages:
             NewCircuitBreaker returns a circuit-breaker Runner. An error rejected by
             cfg.Retryable is returned verbatim and left out of the state machine.
             HalfOpen runs one trial at a time, and the outcome of a call admitted
-            before the breaker last opened is ignored.
+            before the breaker last opened is ignored. A context.Canceled returned
+            once the caller's context is closed counts neither way: the caller
+            left, not the dependency.
           forward: svcres.NewCircuitBreaker
           in:
             - name: cfg
@@ -1039,7 +1370,9 @@ packages:
           doc: |-
             NewTimeout returns a deadline-enforcing Runner. A non-positive d is refused:
             every call returns PolicyMisconfigured without running the operation, since
-            any deadline chosen for the caller would be a guess (ADR 0031).
+            any deadline chosen for the caller would be a guess (ADR 0031). Only its own
+            deadline is reported as TimeoutExceeded: when the caller's context is
+            already finished, the call returns that context's error instead.
           forward: svcres.NewTimeout
           in:
             - name: d
@@ -1047,6 +1380,48 @@ packages:
           name: NewTimeout
           out:
             - type: Runner
+      - func:
+          doc: |-
+            NewTimeoutWith is NewTimeout with the deadline measured on cfg.Clock, so a
+            test expires it by advancing a ManualClock instead of sleeping. A nil
+            cfg.Clock is NewTimeout(cfg.Duration) exactly; a non-positive
+            cfg.Duration is refused.
+          forward: svcres.NewTimeoutWith
+          in:
+            - name: cfg
+              type: TimeoutConfig
+          name: NewTimeoutWith
+          out:
+            - type: Runner
+      - func:
+          doc: |-
+            RetryAfter reports the delay err says to wait before the next attempt — the
+            retry_after_seconds field an OTLP exporter, the guarded HTTP client on a 429
+            or 503, and RateLimited set — and whether it says one. Its shape is
+            RetryConfig.Delay's.
+          forward: svcres.RetryAfter
+          in:
+            - name: err
+              type: error
+          name: RetryAfter
+          out:
+            - type: time.Duration
+            - type: bool
+      - func:
+          doc: |-
+            NewRetryBudget returns the token-bucket RetryBudget of gRPC's retry
+            throttling, to share between the retry and the hedge of one dependency:
+            full at cfg.MaxTokens, a failure costs one token, a success returns
+            cfg.TokenRatio, and extra attempts are allowed while more than half
+            remain. A non-positive cfg.MaxTokens or an unusable cfg.TokenRatio is
+            refused: the policies given it return PolicyMisconfigured.
+          forward: svcres.NewRetryBudget
+          in:
+            - name: cfg
+              type: RetryBudgetConfig
+          name: NewRetryBudget
+          out:
+            - type: RetryBudget
       - func:
           doc: |-
             NewFallback returns a Runner that runs cfg.Fallback when the guarded

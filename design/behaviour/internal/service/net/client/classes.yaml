@@ -71,6 +71,22 @@ constants:
         type: string
         value: "\"%5c\""
     name: escapeSlash
+  - doc: statusFieldKey names the non-2xx status a CallFailed carries.
+    items:
+      - name: statusFieldKey
+        type: string
+        value: "\"status\""
+    name: statusFieldKey
+  - doc: |-
+      retryAfterFieldKey names the seconds a 429 or a 503 asked the caller to wait.
+      It is the key resilience.RetryAfter reads, so RetryConfig.Delay honours the
+      server's hint with no adapter; the OTLP sender writes the same one. The
+      spelling is pinned against RetryAfter by this package's suite.
+    items:
+      - name: retryAfterFieldKey
+        type: string
+        value: "\"retry_after_seconds\""
+    name: retryAfterFieldKey
 files:
   - decls:
       - cappedBody
@@ -150,6 +166,12 @@ files:
       - Policies
       - compileAnchored
     name: policies.go
+  - decls:
+      - statusFieldKey
+      - retryAfterFieldKey
+      - statusError
+      - retryAfterSeconds
+    name: status.go
 functions:
   - doc: readOutcome maps a terminal read result onto what the observer should record.
     name: readOutcome
@@ -385,6 +407,21 @@ functions:
     name: compileAnchored
     params: patterns []string
     results: compiled []*regexp.Regexp, err error
+  - doc: |-
+      statusError is the CallFailed a non-2xx response is returned with: its
+      status, and — on a 429 or a 503 whose Retry-After holds delta-seconds — the
+      delay the server asked for.
+    name: statusError
+    params: raw *http.Response
+    results: error
+  - doc: |-
+      retryAfterSeconds reads Retry-After's delta-seconds form. The HTTP-date form
+      is not read: converting it would compare the server's clock to ours, which
+      is how a retry storm hides for months. A value that is not a positive whole
+      number is no hint.
+    name: retryAfterSeconds
+    params: header http.Header
+    results: int, bool
 imports:
   bytes: bytes
   clock: github.com/kitsunium/sdk/internal/kernel/clock
@@ -397,6 +434,7 @@ imports:
   math: math
   net: net
   regexp: regexp
+  strconv: strconv
   strings: strings
   sync: sync
   time: time

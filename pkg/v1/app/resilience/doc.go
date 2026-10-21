@@ -9,8 +9,9 @@
 //	    return b.Run(ctx, callDownstream) // Retry(Breaker(op))
 //	})
 //
-// Rejections surface typed sentinels (RetryExhausted / CircuitOpen / RateLimited
-// / BulkheadFull / TimeoutExceeded / FallbackFailed) matchable via
+// Rejections surface typed sentinels (RetryExhausted / RetryBudgetExceeded /
+// CircuitOpen / RateLimited / BulkheadFull / TimeoutExceeded / FallbackFailed)
+// matchable via
 // errs.HasReason / errs.HasCode.
 //
 // # Classifying deterministic failures
@@ -131,11 +132,58 @@
 // or below doubles, and the growth stops at the ceiling — or at the longest
 // time.Duration — instead of wrapping negative, however large n is.
 //
-// # Driving the retry and the hedge with a test clock
+// # Driving the retry, the hedge and the timeout with a test clock
 //
-// [RetryConfig].Clock is the time source the retry backs off on, and
-// [HedgeConfig].Clock the one the hedge measures its delay on. Leave them nil
-// in production; in a test, hand them a ManualClock from pkg/v1/clock and move
-// it past each backoff, or past the hedge delay, instead of sleeping through
-// it.
+// [RetryConfig].Clock is the time source the retry backs off on,
+// [HedgeConfig].Clock the one the hedge measures its delay on, and
+// [TimeoutConfig].Clock the one [NewTimeoutWith] measures its deadline on.
+// Leave them nil in production; in a test, hand them a ManualClock from
+// pkg/v1/clock and move it past each backoff, the hedge delay or the
+// deadline, instead of sleeping through it.
+//
+// # Waiting as long as the other side asked
+//
+// A collector shedding load, an HTTP server answering 429, a rate limiter
+// refusing a call: each knows when the next attempt may succeed, and a retry
+// that ignores it either hammers too early or waits too long.
+// [RetryConfig].Delay lets the failure decide the wait, and [RetryAfter] reads
+// the delay the SDK's own producers attach to their errors:
+//
+//	r := resilience.NewRetry(resilience.RetryConfig{
+//	    MaxAttempts: 5, BaseDelay: 100 * time.Millisecond, MaxDelay: 30 * time.Second,
+//	    Delay: func(_ int, err error) (time.Duration, bool) { return resilience.RetryAfter(err) },
+//	})
+//
+// A failure that names no delay waits the backoff curve, and the named one is
+// held at MaxDelay.
+//
+// # A retry budget per dependency
+//
+// A retry multiplies traffic exactly when the dependency can least take it:
+// during an outage every call becomes MaxAttempts calls, and stacked layers
+// multiply again. [NewRetryBudget] is the token bucket of gRPC's retry
+// throttling — a failure costs a token, a success returns TokenRatio of one,
+// and extra attempts stop once half the tokens are gone. Share one per
+// dependency between its retry and its hedge; the first attempt of a call is
+// never refused:
+//
+//	budget := resilience.NewRetryBudget(resilience.RetryBudgetConfig{MaxTokens: 10, TokenRatio: 0.1})
+//	r := resilience.NewRetry(resilience.RetryConfig{
+//	    MaxAttempts: 3, BaseDelay: 50 * time.Millisecond, Budget: budget,
+//	    OnRetry: func(attempt int, err error, wait time.Duration) { retries.Add(1) },
+//	})
+//
+// A retry the budget refuses ends the call with [RetryBudgetExceeded]; a
+// duplicate it refuses is simply not issued. [RetryConfig].OnRetry hears every
+// retry before its wait, synchronously, so retries are counted without this
+// package depending on a metrics library.
+//
+// # A caller who leaves is not a failing dependency
+//
+// A call that ends in context.Canceled once the caller's own context is
+// closed is neutral to the circuit breaker — a wave of disconnecting clients
+// cannot open it on a healthy dependency — and the timeout reports the
+// caller's own context error rather than TimeoutExceeded when the caller's
+// context finished first. A context.DeadlineExceeded from the dependency
+// stays a failure.
 package resilience

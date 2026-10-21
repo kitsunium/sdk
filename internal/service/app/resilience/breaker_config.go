@@ -25,6 +25,8 @@ type BreakerConfig struct {
 	// success path: a stream of HTTP 400s can no longer trip the breaker, and
 	// one of them cannot close a HalfOpen breaker either. A nil predicate
 	// counts every error as a failure, which is the pre-classifier behaviour.
+	// It is not consulted for a context.Canceled returned once the caller's
+	// context is closed: that call is neutral whatever the predicate says.
 	// Shares its shape with RetryConfig.Retryable so one classifier serves a
 	// nested Retry(Breaker(op)) stack.
 	Retryable func(error) bool

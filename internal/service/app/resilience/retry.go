@@ -22,13 +22,28 @@ type retryRunner struct {
 // early on ctx cancellation. The final attempt's error wraps as RetryExhausted.
 // An error rejected by cfg.Retryable ends the loop at once and is returned
 // verbatim, so a deterministic failure neither spends the budget nor hides
-// behind RetryExhausted.
+// behind RetryExhausted. When cfg.Delay reads a wait from the failure — a
+// Retry-After, a RateLimited rejection — that wait replaces the backoff,
+// held at cfg.MaxDelay.
+//
+// With a cfg.Budget, every success and every retryable failure is recorded
+// in it, and a retry it refuses ends the loop with RetryBudgetExceeded
+// wrapping the last error. cfg.OnRetry hears each retry before its wait. A
+// cfg.Budget NewRetryBudget refused makes every call return
+// PolicyMisconfigured.
 func NewRetry(cfg RetryConfig) coreres.Runner {
 	//: clamp the attempt budget to at least one.
 	if cfg.MaxAttempts < minAttempts {
 		//: a non-positive budget still runs once.
 		cfg.MaxAttempts = minAttempts
 	}
+	//: the rest of the normalisation, out of line so NewRetry stays inlinable.
+	return newRetryRunner(cfg)
+}
+
+// newRetryRunner normalises the backoff knobs and the clock, refuses a budget
+// NewRetryBudget could not build, and builds the runner.
+func newRetryRunner(cfg RetryConfig) coreres.Runner {
 	//: a sub-1 multiplier would shrink the delay, and a NaN one would poison
 	//: every product — both default to doubling, through the same
 	//: normalisation the kernel curve applies.
@@ -41,7 +56,13 @@ func NewRetry(cfg RetryConfig) coreres.Runner {
 	cfg.Jitter = kbackoff.NormalJitter(cfg.Jitter)
 	//: resolved once, so every wait reads the same clock.
 	cfg.Clock = timedOrSystem(cfg.Clock)
-	//: stateless config holder — safe to share.
+	//: a budget that could not be built refuses the policy, by name, rather
+	//: than silently allowing no retry (ADR 0031).
+	if knob, refused := refusedBudgetKnob(cfg.Budget); refused {
+		//: fail closed, and say why.
+		return newMisconfigured(budgetPolicy, knob)
+	}
+	//: stateless config holder — safe to share; the budget is the caller's.
 	return &retryRunner{cfg: cfg}
 }
 
@@ -55,7 +76,7 @@ func (r *retryRunner) Run(ctx context.Context, op coreres.Operation) error {
 		//: a non-first attempt waits the backoff (or aborts on ctx).
 		if attempt > 0 {
 			//: a cancelled wait propagates ctx.Err immediately.
-			if waitErr := r.wait(ctx, attempt); waitErr != nil {
+			if waitErr := r.wait(ctx, attempt, lastErr); waitErr != nil {
 				//: ctx cancelled mid-backoff.
 				return waitErr
 			}
@@ -64,12 +85,15 @@ func (r *retryRunner) Run(ctx context.Context, op coreres.Operation) error {
 		lastErr = op(ctx)
 		//: a success ends the retry loop.
 		if lastErr == nil {
+			//: a success replenishes the shared budget.
+			r.recordSuccess()
 			//: done.
 			return nil
 		}
 		//: a cancelled context stops further retries.
 		if ctx.Err() != nil {
-			//: surface the cancellation, not RetryExhausted.
+			//: surface the cancellation, not RetryExhausted; a caller who left
+			//: says nothing about the dependency, so the budget is untouched.
 			return ctx.Err()
 		}
 		//: a deterministic error is not worth replaying — hand it back untouched.
@@ -77,17 +101,60 @@ func (r *retryRunner) Run(ctx context.Context, op coreres.Operation) error {
 			//: verbatim: no backoff, no budget spent, no RetryExhausted relabel.
 			return lastErr
 		}
+		//: a retryable failure drains the shared budget, then asks it for the
+		//: next attempt — the order gRPC's throttling uses.
+		if !r.mayRetry(attempt) {
+			//: the dependency fails for enough callers that a retry would only
+			//: add load: stop now, without waiting.
+			return wrapAs(coreres.RetryBudgetExceeded, lastErr)
+		}
 	}
-	//: budget exhausted — relabel the last error as RetryExhausted.
+	//: attempts exhausted — relabel the last error as RetryExhausted.
 	return wrapAs(coreres.RetryExhausted, lastErr)
 }
 
-// wait sleeps the backoff for the given attempt on the configured clock,
-// returning ctx.Err on cancel.
-func (r *retryRunner) wait(ctx context.Context, attempt int) error {
+// recordSuccess tells the budget, when there is one, that an attempt succeeded.
+func (r *retryRunner) recordSuccess() {
+	//: nil is the policy without a budget.
+	if r.cfg.Budget != nil {
+		//: replenish.
+		r.cfg.Budget.RecordSuccess()
+	}
+}
+
+// mayRetry records the retryable failure of attempt in the budget and reports
+// whether the budget allows the next one. With no budget, or after the last
+// attempt, it is always true: the loop's own bound decides.
+func (r *retryRunner) mayRetry(attempt int) bool {
+	//: nil is the policy without a budget.
+	if r.cfg.Budget == nil {
+		//: the attempt count alone bounds the loop.
+		return true
+	}
+	//: every retryable failure costs, the last attempt's included.
+	r.cfg.Budget.RecordFailure()
+	//: no further attempt to ask about.
+	if attempt+1 >= r.cfg.MaxAttempts {
+		//: RetryExhausted, as without a budget.
+		return true
+	}
+	//: the budget decides whether the next attempt runs.
+	return r.cfg.Budget.AllowRetry()
+}
+
+// wait sleeps the delay before the given attempt on the configured clock,
+// returning ctx.Err on cancel. failed is the error of the attempt before it.
+// OnRetry hears the retry first, on this goroutine.
+func (r *retryRunner) wait(ctx context.Context, attempt int, failed error) error {
+	delay := r.delay(attempt, failed)
+	//: the caller's hook, synchronous: it sees the wait before it starts.
+	if r.cfg.OnRetry != nil {
+		//: the retry's number, its cause and its wait.
+		r.cfg.OnRetry(attempt, failed, delay)
+	}
 	//: a deadline-aware sleep on the injected clock, so a test drives the
 	//: whole backoff with a ManualClock instead of sleeping through it.
-	timer := timedOrSystem(r.cfg.Clock).NewTimer(r.jittered(r.backoff(attempt)))
+	timer := timedOrSystem(r.cfg.Clock).NewTimer(delay)
 	//: always release the timer.
 	defer timer.Stop()
 	//: race the backoff timer against context cancellation.
@@ -99,6 +166,38 @@ func (r *retryRunner) wait(ctx context.Context, attempt int) error {
 		//: the backoff elapsed normally.
 		return nil
 	}
+}
+
+// delay is the wait before attempt: the one cfg.Delay reads from the failure
+// when it reads one, held at MaxDelay and never negative, else the jittered
+// backoff curve.
+func (r *retryRunner) delay(attempt int, failed error) time.Duration {
+	//: the failure decides first, when the caller asked it to.
+	if r.cfg.Delay != nil {
+		//: a delay the failure named replaces the curve, jitter included.
+		if imposed, ok := r.cfg.Delay(attempt, failed); ok {
+			//: held into [0, MaxDelay]; a zero MaxDelay is no cap.
+			return capDelay(imposed, r.cfg.MaxDelay)
+		}
+	}
+	//: the curve, as before the field existed.
+	return r.jittered(r.backoff(attempt))
+}
+
+// capDelay holds d into [0, ceiling], a non-positive ceiling being no cap.
+func capDelay(d, ceiling time.Duration) time.Duration {
+	//: a negative wait is no wait.
+	if d < 0 {
+		//: retry at once.
+		return 0
+	}
+	//: the caller's ceiling bounds what the other side may impose.
+	if ceiling > 0 && d > ceiling {
+		//: cut to the ceiling.
+		return ceiling
+	}
+	//: within bounds.
+	return d
 }
 
 // backoff computes the capped exponential delay for attempt (1-based growth).

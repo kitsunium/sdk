@@ -5,8 +5,8 @@
 Public facade for the SDK reliability policies (ADR 0026). Aliases the
 `Operation`/`Runner` port + `*Config` types and `Backoff`, re-exports the eight
 constructors (`NewRetry`/`NewCircuitBreaker`/`NewRateLimiter`/
-`NewKeyedRateLimiter`/`NewBulkhead`/`NewTimeout`/`NewFallback`/`NewHedge`) and
-the outcome sentinels. Stdlib-only → dep-light;
+`NewKeyedRateLimiter`/`NewBulkhead`/`NewTimeout`/`NewFallback`/`NewHedge`),
+`NewTimeoutWith`, `RetryAfter`, `NewRetryBudget`, and the outcome sentinels. Stdlib-only → dep-light;
 cross-OS portable.
 
 ## Surface
@@ -20,10 +20,14 @@ cross-OS portable.
 | `HedgeConfig.Idempotent` | **mandatory** `bool` — the caller's in-code assertion that duplicating the operation is safe; false refuses the policy |
 | `RetryConfig.Clock` | `clock.Timed` the backoff waits on — nil is the wall clock; a `ManualClock` from `pkg/v1/clock` drives a retry without sleeping (ADR 0103) |
 | `HedgeConfig.Clock` | `clock.Timed` the hedge delay is measured on — nil is the wall clock; a `ManualClock` issues the duplicate when it is advanced past `Delay` |
+| `RetryBudget` / `RetryBudgetConfig` / `NewRetryBudget` | the sibling port (alias onto `core/app/resilience`) and gRPC A6's token bucket: full at `MaxTokens`, a failure −1, a success +`TokenRatio`, extra attempts while more than half remain; `MaxTokens ≤ 0` or a `TokenRatio` below 0.001 refused → `PolicyMisconfigured` from the policies given it (#475) |
+| `RetryConfig.Budget` / `HedgeConfig.Budget` / `RetryConfig.OnRetry` | one budget per dependency, shared by its retry (refusal → `RetryBudgetExceeded`) and its hedge (refusal → no duplicate); nil = no budget. `OnRetry(attempt, err, delay)` — synchronous, before each wait, for the caller's own metrics (#475) |
+| `RetryConfig.Delay` / `RetryAfter` | `func(attempt, err) (time.Duration, bool)` — the failure imposes the wait (held at `MaxDelay`, no jitter); nil = the curve. `RetryAfter(err)` has that shape and reads `retry_after_seconds`, set by the OTLP exporters, `net/client` on 429/503 and `RateLimited` (#476) |
+| `TimeoutConfig` / `NewTimeoutWith` | the deadline (`Duration`, refused when not positive) and the `clock.Timed` it is measured on; nil or `clock.System` is `NewTimeout` exactly, a `ManualClock` expires it when advanced (ADR 0090, #477) |
 | `KeyedRateLimiterConfig` | alias onto `service/app/resilience` — `Rate`/`Burst` per key, `Key func(ctx) string`, `MaxKeys`, `IdleTimeout`, `Clock`; `Rate`/`Key`/`MaxKeys`/`IdleTimeout` refused at zero (ADR 0103) |
 | `Backoff` | alias onto `kernel/backoff.Value`, the layer that owns the curve (ADR 0074) — `BaseDelay`/`MaxDelay`/`Multiplier`/`Jitter` + `Delay(attempt)`, the curve `NewRetry` waits, never negative (ADR 0103) |
 | `NewRetry` / `NewCircuitBreaker` / `NewRateLimiter` / `NewKeyedRateLimiter` / `NewBulkhead` / `NewTimeout` / `NewFallback` / `NewHedge` | constructors |
-| `RetryExhausted` / `CircuitOpen` / `RateLimited` / `BulkheadFull` / `TimeoutExceeded` / `FallbackFailed` | sentinels (`errs.HasReason`/`HasCode`), all `EX_TEMPFAIL`; the four REJECTIONS carry the HTTP status a framework answers with through `errs.HTTPStatusOf` — `RateLimited` 429, `CircuitOpen` and `BulkheadFull` 503, `TimeoutExceeded` 504 — and `RetryExhausted` / `FallbackFailed` carry none (500), since what failed there is the operation; `FallbackFailed` carries the `primary` + `fallback` messages as fields |
+| `RetryExhausted` / `RetryBudgetExceeded` / `CircuitOpen` / `RateLimited` / `BulkheadFull` / `TimeoutExceeded` / `FallbackFailed` | sentinels (`errs.HasReason`/`HasCode`), all `EX_TEMPFAIL`; the four REJECTIONS carry the HTTP status a framework answers with through `errs.HTTPStatusOf` — `RateLimited` 429, `CircuitOpen` and `BulkheadFull` 503, `TimeoutExceeded` 504 — and `RetryExhausted` / `FallbackFailed` carry none (500), since what failed there is the operation; `FallbackFailed` carries the `primary` + `fallback` messages as fields |
 | `PolicyMisconfigured` | sentinel for a policy that cannot honour its config — **permanent**, `EX_CONFIG`, never retry (ADR 0031) |
 
 ## Conventions
@@ -33,6 +37,10 @@ cross-OS portable.
 - **No inert policies** (ADR 0031): a non-positive knob is clamped to a working
   floor where one is obvious (`BreakerConfig.OpenDuration`→30s) and refused
   where it is not. A policy never silently declines to do its job.
+- **A caller who leaves is not a failing dependency** (#477): a
+  `context.Canceled` under a closed caller context is neutral to the breaker,
+  and the timeout returns the caller's own context error, not
+  `TimeoutExceeded`, when that context finished first.
 - **One classifier for three policies**: `Retryable` has the same shape in
   `RetryConfig`, `BreakerConfig` and `FallbackConfig`, so a nested stack shares
   a single predicate.

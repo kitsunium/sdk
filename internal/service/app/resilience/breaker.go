@@ -2,6 +2,7 @@ package resilience
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -52,7 +53,8 @@ type admission struct {
 type outcome int
 
 const (
-	// outcomeNeutral is a deterministic error or an abandoned call: no signal.
+	// outcomeNeutral is a deterministic error, an abandoned call, or a call the
+	// caller cancelled: no signal.
 	outcomeNeutral outcome = iota
 	// outcomeSuccess is a call that returned nil.
 	outcomeSuccess
@@ -71,6 +73,14 @@ const (
 // settles. The outcome of a call admitted before the breaker last opened
 // is ignored: its success cannot close the breaker and its failure cannot
 // restart the cooldown.
+//
+// A call that ends in context.Canceled once the caller's own context is
+// closed is neutral — neither a success nor a failure — because the caller
+// left, not the dependency: a wave of client disconnects cannot open the
+// breaker on a healthy dependency, and a HalfOpen trial abandoned that way
+// frees the slot for the next call. context.DeadlineExceeded stays a
+// failure: a dependency too slow for the caller's deadline is a slow
+// dependency.
 func NewCircuitBreaker(cfg BreakerConfig) coreres.Runner {
 	//: default the clock to the system source.
 	clk := cfg.Clock
@@ -120,23 +130,36 @@ func (b *circuitBreaker) Run(ctx context.Context, op coreres.Operation) error {
 	}
 	//: run the guarded operation.
 	err := op(ctx)
-	//: classify the outcome; a deterministic error is no health signal.
-	res := outcomeSuccess
-	//: an error the classifier counts is a failure, any other is neutral.
-	if err != nil {
-		//: the default: a deterministic error says nothing.
-		res = outcomeNeutral
-		//: a transient error counts against the dependency.
-		if isRetryable(b.retryable, err) {
-			//: a dependency failure.
-			res = outcomeFailure
-		}
-	}
 	//: fold the health signal into the state machine.
-	b.record(adm, res)
+	b.record(adm, b.classify(ctx, err))
 	settled = true
 	//: propagate the operation's own outcome.
 	return err
+}
+
+// classify turns a finished call into a health signal. A deterministic error
+// and a caller who left are no signal; a transient error is a failure.
+func (b *circuitBreaker) classify(ctx context.Context, err error) outcome {
+	//: a nil error is the one success.
+	if err == nil {
+		//: the dependency answered.
+		return outcomeSuccess
+	}
+	//: the caller cancelled and the operation said so: the caller left, not the
+	//: dependency, so a wave of disconnects cannot open a healthy breaker. A
+	//: DeadlineExceeded is not this case — a dependency too slow for the
+	//: caller's deadline is a slow dependency, and stays a failure.
+	if ctx.Err() != nil && errors.Is(err, context.Canceled) {
+		//: neither a success nor a failure; a trial frees its slot.
+		return outcomeNeutral
+	}
+	//: a transient error counts against the dependency.
+	if isRetryable(b.retryable, err) {
+		//: a dependency failure.
+		return outcomeFailure
+	}
+	//: a deterministic error says nothing.
+	return outcomeNeutral
 }
 
 // allow reports whether a call may proceed, transitioning Open→HalfOpen once the

@@ -11582,6 +11582,22 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/resilience.CodeRetryBudgetExceeded",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/app/resilience",
+      "name": "CodeRetryBudgetExceeded",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133128",
+      "code": {
+        "value": "0.2.8.8"
+      },
+      "doc": "CodeRetryBudgetExceeded identifies a retry policy that stopped before its\nattempt budget because the shared retry budget refused the next attempt\n(the last attempt's error is the wrap cause).\n",
+      "file": "core/app/resilience/gen_codes.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/app/resilience.CodeRetryExhausted",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/core/app/resilience",
@@ -11671,7 +11687,75 @@
         "reason": "RATE_LIMITED",
         "public": "The call was rejected by the rate limiter"
       },
-      "doc": "RateLimited is returned when no token was available (or the wait was cancelled).\n",
+      "doc": "RateLimited is returned when no token was available (or the wait was cancelled).\nA rejection by the SDK's limiters carries, as the field\nretry_after_seconds, how long the bucket needs to earn the next token.\n",
+      "file": "core/app/resilience/gen_codes.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/resilience.RetryBudget",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/app/resilience",
+      "name": "RetryBudget",
+      "spelled": "interface{AllowRetry() bool; RecordFailure(); RecordSuccess()}",
+      "canonical": "interface{AllowRetry() bool; RecordFailure(); RecordSuccess()}",
+      "doc": "RetryBudget bounds the extra attempts — retries and hedged duplicates —\nthat the policies sharing it may issue, so that during an outage every\ncall stops being multiplied by its attempt count. A call's FIRST attempt\nnever asks it: a budget throttles amplification, never traffic.\n\nA sibling of Runner rather than a widening of it (ADR 0039): a budget is\nnot a policy that runs an Operation, it is a counter several policies\nconsult. NewRetryBudget is the SDK's implementation, the token bucket of\ngRPC's retry throttling; a caller may supply their own.\n\nImplementations MUST be safe for concurrent use, and SHOULD not allocate:\nAllowRetry and the two Record methods run on the retry's hot path.\n",
+      "file": "core/app/resilience/gen_ports.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/resilience.RetryBudget.AllowRetry",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/app/resilience",
+      "name": "AllowRetry",
+      "recv": "RetryBudget",
+      "spelled": "func() bool",
+      "canonical": "func() bool",
+      "doc": "AllowRetry reports whether one more attempt beyond a call's first may\nbe issued now. It is a query: it spends nothing, and a policy that\nasks it and then issues no attempt owes it nothing.\n",
+      "file": "core/app/resilience/gen_ports.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/resilience.RetryBudget.RecordFailure",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/app/resilience",
+      "name": "RecordFailure",
+      "recv": "RetryBudget",
+      "spelled": "func()",
+      "canonical": "func()",
+      "doc": "RecordFailure records an attempt that failed in a way worth retrying,\nwhich drains the budget. A deterministic failure, and a caller who left,\nare not recorded.\n",
+      "file": "core/app/resilience/gen_ports.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/resilience.RetryBudget.RecordSuccess",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/app/resilience",
+      "name": "RecordSuccess",
+      "recv": "RetryBudget",
+      "spelled": "func()",
+      "canonical": "func()",
+      "doc": "RecordSuccess records an attempt that succeeded, which replenishes the budget.\n",
+      "file": "core/app/resilience/gen_ports.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/resilience.RetryBudgetExceeded",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/app/resilience",
+      "name": "RetryBudgetExceeded",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.8.8",
+        "reason": "RETRY_BUDGET_EXCEEDED",
+        "public": "The operation failed and the retry budget refused another attempt"
+      },
+      "doc": "RetryBudgetExceeded wraps the last attempt's error when the shared retry\nbudget refused the next attempt: the dependency is failing for enough\ncallers that retrying would only multiply its load.\n",
       "file": "core/app/resilience/gen_codes.go",
       "layer": "core",
       "family": "app"
@@ -11700,7 +11784,7 @@
       "name": "Runner",
       "spelled": "interface{Run(ctx context.Context, op Operation) error}",
       "canonical": "interface{Run(ctx context.Context, op github.com/kitsunium/sdk/internal/core/app/resilience.Operation) error}",
-      "doc": "Runner executes an Operation under a reliability policy and returns the\noperation's error, a policy sentinel (RetryExhausted, CircuitOpen,\nRateLimited, BulkheadFull, TimeoutExceeded, FallbackFailed), or ctx.Err().\nImplementations MUST be safe for concurrent use. Runners compose: a Runner\nmay itself invoke an inner Runner inside its Operation.\n\nIFACE-PLUGIN: concrete policies (retry/breaker/...) implement this interface;\ntheir concrete types stay unexported behind their constructors.\n",
+      "doc": "Runner executes an Operation under a reliability policy and returns the\noperation's error, a policy sentinel (RetryExhausted, RetryBudgetExceeded,\nCircuitOpen, RateLimited, BulkheadFull, TimeoutExceeded, FallbackFailed),\nor ctx.Err().\nImplementations MUST be safe for concurrent use. Runners compose: a Runner\nmay itself invoke an inner Runner inside its Operation.\n\nIFACE-PLUGIN: concrete policies (retry/breaker/...) implement this interface;\ntheir concrete types stay unexported behind their constructors.\n",
       "file": "core/app/resilience/gen_ports.go",
       "layer": "core",
       "family": "app"
@@ -50724,7 +50808,7 @@
         {
           "name": "Retryable",
           "type": "func(error) bool",
-          "doc": "Retryable classifies a non-nil operation error as a dependency failure\nworth counting against the breaker's health. false means the error is\ndeterministic — the caller's own fault, not the dependency's — so it is\nreturned verbatim and folded into neither the failure count nor the\nsuccess path: a stream of HTTP 400s can no longer trip the breaker, and\none of them cannot close a HalfOpen breaker either. A nil predicate\ncounts every error as a failure, which is the pre-classifier behaviour.\nShares its shape with RetryConfig.Retryable so one classifier serves a\nnested Retry(Breaker(op)) stack.\n"
+          "doc": "Retryable classifies a non-nil operation error as a dependency failure\nworth counting against the breaker's health. false means the error is\ndeterministic — the caller's own fault, not the dependency's — so it is\nreturned verbatim and folded into neither the failure count nor the\nsuccess path: a stream of HTTP 400s can no longer trip the breaker, and\none of them cannot close a HalfOpen breaker either. A nil predicate\ncounts every error as a failure, which is the pre-classifier behaviour.\nIt is not consulted for a context.Canceled returned once the caller's\ncontext is closed: that call is neutral whatever the predicate says.\nShares its shape with RetryConfig.Retryable so one classifier serves a\nnested Retry(Breaker(op)) stack.\n"
         }
       ],
       "doc": "BreakerConfig parameterises NewCircuitBreaker. A non-positive FailureThreshold\ndefaults to 5; a non-positive OpenDuration defaults to 30s; a nil Clock\ndefaults to clock.System; a nil Retryable counts every error as a failure.\n",
@@ -50761,8 +50845,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/resilience",
       "name": "HedgeConfig",
-      "spelled": "struct{Idempotent bool; Delay time.Duration; MaxHedges int; MaxInFlight int; Clock clock.Timed}",
-      "canonical": "struct{Idempotent bool; Delay time.Duration; MaxHedges int; MaxInFlight int; Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed}",
+      "spelled": "struct{Idempotent bool; Delay time.Duration; MaxHedges int; MaxInFlight int; Clock clock.Timed; Budget coreres.RetryBudget}",
+      "canonical": "struct{Idempotent bool; Delay time.Duration; MaxHedges int; MaxInFlight int; Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed; Budget github.com/kitsunium/sdk/internal/core/app/resilience.RetryBudget}",
       "fields": [
         {
           "name": "Idempotent",
@@ -50788,9 +50872,14 @@
           "name": "Clock",
           "type": "clock.Timed",
           "doc": "Clock is what Delay is measured on. Nil means clock.System.\n\nIt exists so a test drives the race with a ManualClock — advancing past\nDelay to issue the duplicate instead of sleeping through it, and\nasserting that no duplicate is issued a nanosecond earlier. The retry,\nthe breaker and the rate limiters already take one; the hedge, the other\npolicy that measures a wait, did not.\n"
+        },
+        {
+          "name": "Budget",
+          "type": "coreres.RetryBudget",
+          "doc": "Budget, when set, is asked before each duplicate: a refusal issues\nnone, and the call proceeds on the attempts already running, as when\nMaxInFlight is reached. Each call's outcome is recorded in it — a\nsuccess, or a failure on a live context — so a hedge and a retry\nsharing one budget stop amplifying a failing dependency together, as\ngRPC's retry throttling covers hedging. Nil is the hedge without a\nbudget.\n"
         }
       ],
-      "doc": "HedgeConfig parameterises NewHedge. Three of its four knobs have no default:\nIdempotent, Delay and MaxInFlight are refused when unset, because every value\nthe SDK could pick for them is either a guess at the caller's requirement or\na licence to duplicate load the caller never agreed to (ADR 0031). MaxHedges\nis the one with an obvious floor and clamps to 1. A nil Clock measures the\ndelay on the wall clock.\n",
+      "doc": "HedgeConfig parameterises NewHedge. Three of its four knobs have no default:\nIdempotent, Delay and MaxInFlight are refused when unset, because every value\nthe SDK could pick for them is either a guess at the caller's requirement or\na licence to duplicate load the caller never agreed to (ADR 0031). MaxHedges\nis the one with an obvious floor and clamps to 1. A nil Clock measures the\ndelay on the wall clock, and a nil Budget never refuses a duplicate.\n",
       "file": "service/app/resilience/hedge_config.go",
       "layer": "service",
       "family": "app"
@@ -50858,7 +50947,7 @@
       "name": "NewCircuitBreaker",
       "spelled": "func(cfg BreakerConfig) coreres.Runner",
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/app/resilience.BreakerConfig) github.com/kitsunium/sdk/internal/core/app/resilience.Runner",
-      "doc": "NewCircuitBreaker returns a Runner guarding op with a Closed→Open→HalfOpen\nbreaker. Open calls return CircuitOpen until OpenDuration elapses; a\nnon-positive OpenDuration clamps to defaultOpenDuration, because a breaker\nwhose cooldown is zero admits the next call immediately and therefore\nprotects nothing (ADR 0031). An error rejected by cfg.Retryable is returned\nverbatim and left out of the state machine entirely, so deterministic\nfailures cannot trip the breaker. Once the cooldown elapses ONE HalfOpen\ntrial runs at a time and every other call returns CircuitOpen until it\nsettles. The outcome of a call admitted before the breaker last opened\nis ignored: its success cannot close the breaker and its failure cannot\nrestart the cooldown.\n",
+      "doc": "NewCircuitBreaker returns a Runner guarding op with a Closed→Open→HalfOpen\nbreaker. Open calls return CircuitOpen until OpenDuration elapses; a\nnon-positive OpenDuration clamps to defaultOpenDuration, because a breaker\nwhose cooldown is zero admits the next call immediately and therefore\nprotects nothing (ADR 0031). An error rejected by cfg.Retryable is returned\nverbatim and left out of the state machine entirely, so deterministic\nfailures cannot trip the breaker. Once the cooldown elapses ONE HalfOpen\ntrial runs at a time and every other call returns CircuitOpen until it\nsettles. The outcome of a call admitted before the breaker last opened\nis ignored: its success cannot close the breaker and its failure cannot\nrestart the cooldown.\n\nA call that ends in context.Canceled once the caller's own context is\nclosed is neutral — neither a success nor a failure — because the caller\nleft, not the dependency: a wave of client disconnects cannot open the\nbreaker on a healthy dependency, and a HalfOpen trial abandoned that way\nfrees the slot for the next call. context.DeadlineExceeded stays a\nfailure: a dependency too slow for the caller's deadline is a slow\ndependency.\n",
       "file": "service/app/resilience/breaker.go",
       "layer": "service",
       "family": "app"
@@ -50882,7 +50971,7 @@
       "name": "NewHedge",
       "spelled": "func(cfg HedgeConfig) coreres.Runner",
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/app/resilience.HedgeConfig) github.com/kitsunium/sdk/internal/core/app/resilience.Runner",
-      "doc": "NewHedge returns a Runner that guards tail latency by DUPLICATING a slow\nOperation: when the first attempt has been outstanding for cfg.Delay, a\nsecond copy starts, and so on every cfg.Delay up to cfg.MaxHedges extra\ncopies. The first attempt to succeed wins and Run returns nil; the losers'\ncontext is cancelled on the way out and their results are discarded.\n\n# The Operation MUST be idempotent\n\nEvery other policy here runs the Operation at most once at a time; this one\nruns copies CONCURRENTLY, so a non-idempotent Operation is not made slow by\nhedging, it is made WRONG — two charges, two inserts, two outbound messages,\nwith the policy reporting one clean success. The SDK cannot detect\nidempotence, so cfg.Idempotent is a mandatory in-code assertion rather than a\nwarning in prose: its zero value refuses the policy (ADR 0031).\n\n# Hedging acts on latency, never on failure\n\nAn attempt that FAILS before cfg.Delay elapses ends the call with that error,\nverbatim; no duplicate is issued. Reacting to a failure by launching another\nattempt is retrying, and this package already has NewRetry — compose\nNewRetry(NewHedge(op)) to get both. Keeping them separate is also what keeps\nthe duplication bounded by latency rather than by failure: a dependency that\nis failing fast gets no extra traffic from this policy, only a slow one does.\n\n# Load\n\ncfg.MaxInFlight caps the duplicates in flight across all calls, so a\ndependency that has gone slow cannot make every caller hedge at once. When\nthe cap is reached the duplicate is simply not issued and the call proceeds\non its first attempt alone — degrading to no-hedging, never to a rejection.\n\n# A panic reaches the caller, with its original value\n\nThis is the one policy that runs the Operation on goroutines of its own, and\na panic that reaches the top of any goroutine ends the process — where under\nevery other policy the same panic reaches the caller's goroutine and is\ncontained by net/http or by the caller's own recover. So a copy's panic is\nrecovered on that copy's goroutine and re-raised from Run, on the caller's\ngoroutine, with the Operation's ORIGINAL value: the caller's recover compares\nequal to exactly what was panicked with, and http.ErrAbortHandler still\naborts a handler silently instead of being logged as a crash.\n\nWhat does NOT survive is the stack. The re-raised panic's stack is the\nre-raise site inside Run, not the Operation's frame: a value re-raised on\nanother goroutine cannot carry the panicking goroutine's stack without being\nwrapped, and wrapping it would break both http.ErrAbortHandler and value\nequality. A copy that panics after Run has returned — a loser, once a winner\nwas found or the caller went away — is recovered and dropped; it never\nreaches the caller and never ends the process.\n\nThe delay is measured on cfg.Clock — the wall clock when nil — so a test\nissues a duplicate by advancing a clock.ManualClock past cfg.Delay.\n\nRun costs one goroutine per attempt (including the first, so the delay stays\nobservable) and one ticker per call: this is the one policy in the package\nthat is not allocation-trivial, which is the price of racing. Neither cost\ngrows with cfg.MaxHedges, which bounds how many duplicates a call may issue\nand nothing else.\n\nA false cfg.Idempotent, a non-positive cfg.Delay, or a non-positive\ncfg.MaxInFlight is refused: every call returns PolicyMisconfigured without\nrunning the operation (ADR 0031). A cfg.MaxHedges below one clamps to one.\n",
+      "doc": "NewHedge returns a Runner that guards tail latency by DUPLICATING a slow\nOperation: when the first attempt has been outstanding for cfg.Delay, a\nsecond copy starts, and so on every cfg.Delay up to cfg.MaxHedges extra\ncopies. The first attempt to succeed wins and Run returns nil; the losers'\ncontext is cancelled on the way out and their results are discarded.\n\n# The Operation MUST be idempotent\n\nEvery other policy here runs the Operation at most once at a time; this one\nruns copies CONCURRENTLY, so a non-idempotent Operation is not made slow by\nhedging, it is made WRONG — two charges, two inserts, two outbound messages,\nwith the policy reporting one clean success. The SDK cannot detect\nidempotence, so cfg.Idempotent is a mandatory in-code assertion rather than a\nwarning in prose: its zero value refuses the policy (ADR 0031).\n\n# Hedging acts on latency, never on failure\n\nAn attempt that FAILS before cfg.Delay elapses ends the call with that error,\nverbatim; no duplicate is issued. Reacting to a failure by launching another\nattempt is retrying, and this package already has NewRetry — compose\nNewRetry(NewHedge(op)) to get both. Keeping them separate is also what keeps\nthe duplication bounded by latency rather than by failure: a dependency that\nis failing fast gets no extra traffic from this policy, only a slow one does.\n\n# Load\n\ncfg.MaxInFlight caps the duplicates in flight across all calls, so a\ndependency that has gone slow cannot make every caller hedge at once. When\nthe cap is reached the duplicate is simply not issued and the call proceeds\non its first attempt alone — degrading to no-hedging, never to a rejection.\n\n# A panic reaches the caller, with its original value\n\nThis is the one policy that runs the Operation on goroutines of its own, and\na panic that reaches the top of any goroutine ends the process — where under\nevery other policy the same panic reaches the caller's goroutine and is\ncontained by net/http or by the caller's own recover. So a copy's panic is\nrecovered on that copy's goroutine and re-raised from Run, on the caller's\ngoroutine, with the Operation's ORIGINAL value: the caller's recover compares\nequal to exactly what was panicked with, and http.ErrAbortHandler still\naborts a handler silently instead of being logged as a crash.\n\nWhat does NOT survive is the stack. The re-raised panic's stack is the\nre-raise site inside Run, not the Operation's frame: a value re-raised on\nanother goroutine cannot carry the panicking goroutine's stack without being\nwrapped, and wrapping it would break both http.ErrAbortHandler and value\nequality. A copy that panics after Run has returned — a loser, once a winner\nwas found or the caller went away — is recovered and dropped; it never\nreaches the caller and never ends the process.\n\nThe delay is measured on cfg.Clock — the wall clock when nil — so a test\nissues a duplicate by advancing a clock.ManualClock past cfg.Delay.\n\nRun costs one goroutine per attempt (including the first, so the delay stays\nobservable) and one ticker per call: this is the one policy in the package\nthat is not allocation-trivial, which is the price of racing. Neither cost\ngrows with cfg.MaxHedges, which bounds how many duplicates a call may issue\nand nothing else.\n\nA false cfg.Idempotent, a non-positive cfg.Delay, or a non-positive\ncfg.MaxInFlight is refused: every call returns PolicyMisconfigured without\nrunning the operation (ADR 0031). A cfg.MaxHedges below one clamps to one.\n\nWith a cfg.Budget, a duplicate the budget refuses is not issued — the\ncall proceeds on the attempts already running, as when MaxInFlight is\nreached — and each call's outcome is recorded in it: a success, or a\nfailure on a live context. A cfg.Budget NewRetryBudget refused makes\nevery call return PolicyMisconfigured.\n",
       "file": "service/app/resilience/hedge.go",
       "layer": "service",
       "family": "app"
@@ -50918,8 +51007,20 @@
       "name": "NewRetry",
       "spelled": "func(cfg RetryConfig) coreres.Runner",
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/app/resilience.RetryConfig) github.com/kitsunium/sdk/internal/core/app/resilience.Runner",
-      "doc": "NewRetry returns a Runner that retries op up to cfg.MaxAttempts times,\nsleeping an exponentially-growing (capped) delay between attempts and aborting\nearly on ctx cancellation. The final attempt's error wraps as RetryExhausted.\nAn error rejected by cfg.Retryable ends the loop at once and is returned\nverbatim, so a deterministic failure neither spends the budget nor hides\nbehind RetryExhausted.\n",
+      "doc": "NewRetry returns a Runner that retries op up to cfg.MaxAttempts times,\nsleeping an exponentially-growing (capped) delay between attempts and aborting\nearly on ctx cancellation. The final attempt's error wraps as RetryExhausted.\nAn error rejected by cfg.Retryable ends the loop at once and is returned\nverbatim, so a deterministic failure neither spends the budget nor hides\nbehind RetryExhausted. When cfg.Delay reads a wait from the failure — a\nRetry-After, a RateLimited rejection — that wait replaces the backoff,\nheld at cfg.MaxDelay.\n\nWith a cfg.Budget, every success and every retryable failure is recorded\nin it, and a retry it refuses ends the loop with RetryBudgetExceeded\nwrapping the last error. cfg.OnRetry hears each retry before its wait. A\ncfg.Budget NewRetryBudget refused makes every call return\nPolicyMisconfigured.\n",
       "file": "service/app/resilience/retry.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/resilience.NewRetryBudget",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/resilience",
+      "name": "NewRetryBudget",
+      "spelled": "func(cfg RetryBudgetConfig) coreres.RetryBudget",
+      "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/app/resilience.RetryBudgetConfig) github.com/kitsunium/sdk/internal/core/app/resilience.RetryBudget",
+      "doc": "NewRetryBudget returns the token-bucket RetryBudget of gRPC's retry\nthrottling (gRFC A6), to share between the NewRetry and NewHedge policies\nthat call one dependency. It starts full, at cfg.MaxTokens tokens; each\nrecorded failure costs one token, each recorded success returns\ncfg.TokenRatio of one, never past cfg.MaxTokens; and AllowRetry is true\nonly while more than half of cfg.MaxTokens remain. The first attempt of a\ncall is never refused, so a dependency that recovers is seen to recover:\nits successes refill the bucket.\n\nThe bucket drains while recorded failures exceed TokenRatio times the\nrecorded successes — with 0.1, more than one failure per ten successes —\nand retries stop once it has lost half its tokens; it refills, and\nretries resume, when failures fall back below that ratio. 0.1 is the\norder of the per-client retry budget Google's SRE book recommends (10%)\nand of the AWS SDKs' retry quota.\n\nA non-positive cfg.MaxTokens, and a cfg.TokenRatio that is not a finite\nnumber of at least one thousandth, are refused (ADR 0031): the budget\nreturned allows no retry, and NewRetry or NewHedge given it refuses\nevery call with PolicyMisconfigured, naming the field. The counts are\nkept in thousandths of a token, as gRPC does, without a lock and without\nallocating.\n",
+      "file": "service/app/resilience/retry_budget.go",
       "layer": "service",
       "family": "app"
     },
@@ -50930,7 +51031,19 @@
       "name": "NewTimeout",
       "spelled": "func(d time.Duration) coreres.Runner",
       "canonical": "func(d time.Duration) github.com/kitsunium/sdk/internal/core/app/resilience.Runner",
-      "doc": "NewTimeout returns a Runner that fails an Operation with TimeoutExceeded if it\ndoes not finish within d. The Operation MUST honour ctx for the deadline to\nfire promptly (a ctx-ignoring op caps precision at op granularity).\n\nA non-positive d is refused: every call returns PolicyMisconfigured without\nrunning the operation (ADR 0031). context.WithTimeout(ctx, 0) yields an\nalready-expired context, so the previous behaviour failed even an\ninstantaneous operation with TimeoutExceeded — a policy that could never\nadmit anything, reporting it with the error it uses when it is working.\n",
+      "doc": "NewTimeout returns a Runner that fails an Operation with TimeoutExceeded if it\ndoes not finish within d. The Operation MUST honour ctx for the deadline to\nfire promptly (a ctx-ignoring op caps precision at op granularity).\n\nA non-positive d is refused: every call returns PolicyMisconfigured without\nrunning the operation (ADR 0031). context.WithTimeout(ctx, 0) yields an\nalready-expired context, so the previous behaviour failed even an\ninstantaneous operation with TimeoutExceeded — a policy that could never\nadmit anything, reporting it with the error it uses when it is working.\n\nOnly this policy's own deadline is reported as TimeoutExceeded. When the\ncaller's context is already finished — cancelled, or past a deadline of\nits own — the call returns that context's error instead: the caller\nleft or ran out of time, and the policy did not time anything out.\n\nThe deadline runs on the wall clock; NewTimeoutWith takes a clock.\n",
+      "file": "service/app/resilience/timeout.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/resilience.NewTimeoutWith",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/resilience",
+      "name": "NewTimeoutWith",
+      "spelled": "func(cfg TimeoutConfig) coreres.Runner",
+      "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/app/resilience.TimeoutConfig) github.com/kitsunium/sdk/internal/core/app/resilience.Runner",
+      "doc": "NewTimeoutWith is NewTimeout with the deadline measured on cfg.Clock, so\na test expires it by advancing a clock.ManualClock past cfg.Duration\ninstead of sleeping through it (ADR 0090). A nil cfg.Clock, or\nclock.System, is NewTimeout(cfg.Duration) exactly.\n\nUnder any other clock the Operation's context reports\ncontext.DeadlineExceeded once the clock passes the deadline, and its\nDeadline method reports the caller's deadline, not this one: a deadline\non a clock that is not the wall clock is not a time a socket can be\ngiven. A non-positive cfg.Duration is refused like NewTimeout's.\n",
       "file": "service/app/resilience/timeout.go",
       "layer": "service",
       "family": "app"
@@ -50963,12 +51076,48 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/resilience.RetryAfter",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/resilience",
+      "name": "RetryAfter",
+      "spelled": "func(err error) (time.Duration, bool)",
+      "canonical": "func(err error) (time.Duration, bool)",
+      "doc": "RetryAfter reports the delay err says to wait before the next attempt,\nand whether it says one. It reads the retry_after_seconds field of the\noutermost *errs.Error in err's chain — a number of seconds, whole or\nfractional — and reports false when there is none, or when it is not a\nfinite positive number.\n\nThree producers in the SDK set it: the OTLP/HTTP exporters on a\nretryable answer whose Retry-After header holds delta-seconds, the\nguarded HTTP client (net/client) on a 429 or a 503 whose Retry-After\ndoes the same, and RateLimited from NewRateLimiter and\nNewKeyedRateLimiter, with the time the bucket needs to earn its next\ntoken. An HTTP-date Retry-After is not read: converting it compares the\npeer's clock to ours. Any other error sets the same field with\nerrs.Int or errs.Float to take part.\n\nIts shape is RetryConfig.Delay's, so honouring the delay is one line:\n\n\tDelay: func(_ int, err error) (time.Duration, bool) { return RetryAfter(err) }\n\nA delay too long for a time.Duration reports the longest one.\n",
+      "file": "service/app/resilience/retry_after.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/resilience.RetryBudgetConfig",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/resilience",
+      "name": "RetryBudgetConfig",
+      "spelled": "struct{MaxTokens int; TokenRatio float64}",
+      "canonical": "struct{MaxTokens int; TokenRatio float64}",
+      "fields": [
+        {
+          "name": "MaxTokens",
+          "type": "int",
+          "doc": "MaxTokens is the bucket's size and its starting content. Retries are\nallowed while more than MaxTokens/2 remain, so the budget absorbs\nabout MaxTokens/2 more failures than its successes repay before it\nstarts refusing. A non-positive MaxTokens is refused; values above\n2^40 are held there.\n"
+        },
+        {
+          "name": "TokenRatio",
+          "type": "float64",
+          "doc": "TokenRatio is what a recorded success puts back, in tokens, a\nfailure costing one. It is read to a thousandth, as gRPC reads it: a\nvalue that is not finite, or that rounds below 0.001, is refused —\nits zero would be a budget that, once drained, never refills.\n"
+        }
+      ],
+      "doc": "RetryBudgetConfig parameterises NewRetryBudget, in the terms of gRPC's\nretryThrottling: the bucket's size and what a success puts back. Neither\nhas a default; both are refused when unusable (ADR 0031).\n",
+      "file": "service/app/resilience/retry_budget_config.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/resilience.RetryConfig",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/resilience",
       "name": "RetryConfig",
-      "spelled": "struct{MaxAttempts int; BaseDelay time.Duration; MaxDelay time.Duration; Multiplier float64; Retryable func(error) bool; Jitter float64; Clock clock.Timed}",
-      "canonical": "struct{MaxAttempts int; BaseDelay time.Duration; MaxDelay time.Duration; Multiplier float64; Retryable func(error) bool; Jitter float64; Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed}",
+      "spelled": "struct{MaxAttempts int; BaseDelay time.Duration; MaxDelay time.Duration; Multiplier float64; Retryable func(error) bool; Jitter float64; Clock clock.Timed; Delay func(attempt int, err error) (time.Duration, bool); Budget coreres.RetryBudget; OnRetry func(attempt int, err error, delay time.Duration)}",
+      "canonical": "struct{MaxAttempts int; BaseDelay time.Duration; MaxDelay time.Duration; Multiplier float64; Retryable func(error) bool; Jitter float64; Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed; Delay func(attempt int, err error) (time.Duration, bool); Budget github.com/kitsunium/sdk/internal/core/app/resilience.RetryBudget; OnRetry func(attempt int, err error, delay time.Duration)}",
       "fields": [
         {
           "name": "MaxAttempts",
@@ -51000,10 +51149,49 @@
           "name": "Clock",
           "type": "clock.Timed",
           "doc": "Clock is what the backoff waits on. Nil means clock.System.\n\nIt exists so a test drives the whole retry loop with a ManualClock —\nadvancing past each backoff instead of sleeping through it, and asserting\nthe exact wait rather than a wall-clock tolerance. The breaker and the\nrate limiter have taken a clock since they shipped; the retry, which is\nthe one policy here that actually WAITS, did not.\n"
+        },
+        {
+          "name": "Delay",
+          "type": "func(attempt int, err error) (time.Duration, bool)",
+          "doc": "Delay decides the wait before a retry when the failure itself says how\nlong to wait. It is called once per retry, with the retry's number —\n1 before the second attempt — and the error of the attempt that just\nfailed; a true second result makes its duration the wait, in place of\nthe backoff curve and without Jitter. A false one, and a nil Delay,\nwait the curve, which is the behaviour before the field existed.\n\nThe wait it returns is held at MaxDelay when one is set, and a\nnegative one is no wait. A server's hint longer than the caller is\nprepared to wait is therefore cut to MaxDelay, never followed past\nit; a caller who would rather give up classifies that error as not\nretryable instead.\n\nRetryAfter has its shape, so honouring a Retry-After, an OTLP\ncollector's throttling or a RateLimited rejection is one line:\n\n\tDelay: func(_ int, err error) (time.Duration, bool) { return resilience.RetryAfter(err) }\n"
+        },
+        {
+          "name": "Budget",
+          "type": "coreres.RetryBudget",
+          "doc": "Budget, when set, bounds the retries of every policy sharing it: each\nsuccess and each retryable failure is recorded in it, and before\nevery retry it is asked whether one may run. A refusal ends the loop\nwith RetryBudgetExceeded wrapping the last error, without waiting. A\ndeterministic error and a cancelled context record nothing.\n\nNil — the zero value — is the policy without a budget, as it was\nbefore the field existed. Share one budget per dependency, between\nits retry and its hedge: that is what stops a failing dependency from\nreceiving every call times MaxAttempts. A Retry(Hedge(op)) whose two\npolicies share a budget records a failed call at both levels, which\ndrains and refills it twice as fast and leaves its threshold where it\nwas.\n"
+        },
+        {
+          "name": "OnRetry",
+          "type": "func(attempt int, err error, delay time.Duration)",
+          "doc": "OnRetry, when set, is called before each retry's wait, on the\ncalling goroutine, with the retry's number — 1 before the second\nattempt —, the error that caused it and the wait about to start. It\nis how a caller counts retries in their own metrics without this\npackage depending on one. It is not called for the first attempt,\nnor for a retry the budget refused. It must not block: the retry\nwaits for it.\n"
         }
       ],
-      "doc": "RetryConfig parameterises NewRetry. A non-positive MaxAttempts clamps to 1; a\nMultiplier of 1 or below (or NaN) defaults to 2; a zero MaxDelay means no\ncap; a nil Retryable replays every error; a zero Jitter backs off\ndeterministically; a nil Clock waits on the wall clock.\n\nBaseDelay, MaxDelay, Multiplier and Jitter are the four fields of\nBackoffValue, under the same names and with the same meaning: NewRetry builds its curve\nfrom them, so a loop that retries on its own terms and a Retry policy\nconfigured alike wait alike.\n",
+      "doc": "RetryConfig parameterises NewRetry. A non-positive MaxAttempts clamps to 1; a\nMultiplier of 1 or below (or NaN) defaults to 2; a zero MaxDelay means no\ncap; a nil Retryable replays every error; a zero Jitter backs off\ndeterministically; a nil Clock waits on the wall clock; a nil Delay\nalways waits the backoff curve; a nil Budget never refuses a retry; a nil\nOnRetry hears nothing.\n\nBaseDelay, MaxDelay, Multiplier and Jitter are the four fields of\nBackoffValue, under the same names and with the same meaning: NewRetry builds its curve\nfrom them, so a loop that retries on its own terms and a Retry policy\nconfigured alike wait alike.\n",
       "file": "service/app/resilience/retry_config.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/resilience.TimeoutConfig",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/resilience",
+      "name": "TimeoutConfig",
+      "spelled": "struct{Duration time.Duration; Clock clock.Timed}",
+      "canonical": "struct{Duration time.Duration; Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed}",
+      "fields": [
+        {
+          "name": "Duration",
+          "type": "time.Duration",
+          "doc": "Duration is how long the Operation may run. A non-positive Duration\nmakes NewTimeoutWith return a policy that refuses every call with\nPolicyMisconfigured, exactly as NewTimeout refuses a non-positive d.\n"
+        },
+        {
+          "name": "Clock",
+          "type": "clock.Timed",
+          "doc": "Clock is what Duration is measured on. Nil means clock.System, under\nwhich the policy is NewTimeout's: a context.WithTimeout whose\ndeadline the Operation can read.\n"
+        }
+      ],
+      "doc": "TimeoutConfig parameterises NewTimeoutWith: the deadline and the clock it\nis measured on. Duration has no default and is refused when not positive\n(ADR 0031); a nil Clock is the wall clock.\n",
+      "file": "service/app/resilience/timeout_config.go",
       "layer": "service",
       "family": "app"
     },

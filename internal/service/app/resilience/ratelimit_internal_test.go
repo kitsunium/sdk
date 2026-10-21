@@ -54,8 +54,18 @@ func Test_tokenBucket_take(t *testing.T) {
 		}
 		clk.advance(c.elapsed)
 
-		if got := b.take(); got != c.want {
+		got, wait := b.take()
+		if got != c.want {
 			t.Fatalf("take() = %v, want %v (tokens now %v)", got, c.want, b.tokens)
+		}
+		//: a rejection says how long the bucket needs to earn its next token,
+		//: an admission says nothing.
+		wantWait := 0.0
+		if !c.want {
+			wantWait = (1 - c.wantLeft) / c.rate
+		}
+		if math.Abs(wait-wantWait) > 1e-9 {
+			t.Errorf("take() wait = %vs, want %vs", wait, wantWait)
 		}
 		//: floating-point credit, so compare within a small epsilon.
 		if math.Abs(b.tokens-c.wantLeft) > 1e-9 {

@@ -260,8 +260,7 @@ func (c *Client) Do(req *http.Request) (resp corenet.ResponseValue, err error) {
 	//: receives an error.
 	if raw.StatusCode < http.StatusOK || raw.StatusCode >= http.StatusMultipleChoices {
 		//: the body is what makes the failure diagnosable.
-		return out, errs.Wrap(corenet.CallFailed, errs.WrapParams{},
-			errs.Int("status", raw.StatusCode))
+		return out, statusError(raw)
 	}
 	//: a 2xx with no body — 204, typically — is a normal outcome.
 	return out, nil

@@ -25,6 +25,7 @@ type hedge struct {
 	maxHedges int
 	slots     chan struct{}
 	clk       clock.Timed
+	budget    coreres.RetryBudget
 }
 
 // NewHedge returns a Runner that guards tail latency by DUPLICATING a slow
@@ -89,6 +90,12 @@ type hedge struct {
 // A false cfg.Idempotent, a non-positive cfg.Delay, or a non-positive
 // cfg.MaxInFlight is refused: every call returns PolicyMisconfigured without
 // running the operation (ADR 0031). A cfg.MaxHedges below one clamps to one.
+//
+// With a cfg.Budget, a duplicate the budget refuses is not issued — the
+// call proceeds on the attempts already running, as when MaxInFlight is
+// reached — and each call's outcome is recorded in it: a success, or a
+// failure on a live context. A cfg.Budget NewRetryBudget refused makes
+// every call return PolicyMisconfigured.
 func NewHedge(cfg HedgeConfig) coreres.Runner {
 	//: the precondition the SDK cannot check itself, and whose breach is a
 	//: silent double effect rather than an error — so it is asserted in code.
@@ -113,11 +120,17 @@ func NewHedge(cfg HedgeConfig) coreres.Runner {
 	//: unlike the three above, "issue at least one duplicate" is an obvious
 	//: floor — a zero budget would make the policy inert, so it clamps.
 	maxHedges := max(cfg.MaxHedges, minHedges)
+	//: a budget that could not be built refuses the policy, by name (ADR 0031).
+	if knob, refused := refusedBudgetKnob(cfg.Budget); refused {
+		//: fail closed, and say why.
+		return newMisconfigured(budgetPolicy, knob)
+	}
 	//: the buffered channel's capacity is the in-flight duplicate bound; the
 	//: clock is resolved once, so every call measures its delay on the same one.
 	return &hedge{
 		delay: cfg.Delay, maxHedges: maxHedges,
 		slots: make(chan struct{}, cfg.MaxInFlight), clk: timedOrSystem(cfg.Clock),
+		budget: cfg.Budget,
 	}
 }
 
@@ -176,6 +189,8 @@ func (h *hedge) Run(ctx context.Context, op coreres.Operation) error {
 			}
 			//: an undecided race keeps waiting on the copies still outstanding.
 			if decided, verdict := race.record(outcome.err); decided {
+				//: the call's outcome feeds the shared budget, once.
+				h.recordOutcome(ctx, verdict)
 				//: the race is over.
 				return verdict
 			}
@@ -205,9 +220,45 @@ func (h *hedge) claimHedge(launched int) bool {
 		//: this call has issued every duplicate it is allowed.
 		return false
 	}
+	//: the shared budget, then the Runner-wide cap.
+	return h.claimSlot()
+}
+
+// claimSlot asks the shared retry budget, then claims an in-flight slot.
+func (h *hedge) claimSlot() bool {
+	//: a shared retry budget below half refuses extra attempts — a duplicate
+	//: is one, as gRPC's throttling counts it. Asked before the slot is taken,
+	//: so a refusal holds nothing.
+	if h.budget != nil && !h.budget.AllowRetry() {
+		//: no duplicate this tick; the call proceeds on what runs.
+		return false
+	}
 	//: the Runner-wide cap is what stops a slow dependency from being hedged by
 	//: every caller at once.
 	return h.acquire()
+}
+
+// recordOutcome folds a decided call into the shared budget, when there is
+// one: a success replenishes it, a failure on a live context drains it, and a
+// failure the caller's cancellation explains records nothing.
+func (h *hedge) recordOutcome(ctx context.Context, verdict error) {
+	//: nil is the hedge without a budget.
+	if h.budget == nil {
+		//: nothing to record.
+		return
+	}
+	//: the first success won the race.
+	if verdict == nil {
+		//: replenish.
+		h.budget.RecordSuccess()
+		//: recorded.
+		return
+	}
+	//: a caller who left says nothing about the dependency.
+	if ctx.Err() == nil {
+		//: every attempt failed on a live context.
+		h.budget.RecordFailure()
+	}
 }
 
 // attempt runs one copy of op and hands its outcome to Run.

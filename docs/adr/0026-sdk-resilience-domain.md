@@ -139,6 +139,113 @@ Two contracts were tightened during review, both before any release:
   choosing its constants without data is how a load-shedding mechanism becomes a
   second outage.
 
+## Amendment — 2026-10-21: a caller who leaves is not a failing dependency ([issue 477](https://github.com/kitsunium/sdk/issues/477))
+
+Two behaviour changes, admitted in v0 by ADR 0040, and one new constructor:
+
+- **The breaker treats a caller's cancellation as neutral.** A call that ends
+  in `context.Canceled` once the caller's own context is closed is neither a
+  success nor a failure, whatever `BreakerConfig.Retryable` would have said:
+  it is folded in as `outcomeNeutral`, through the generation the HalfOpen
+  trial cap introduced ([issue 467](https://github.com/kitsunium/sdk/issues/467)),
+  so it frees a HalfOpen trial and moves no count. Before, with a nil
+  classifier, a wave of client disconnects opened the breaker on a healthy
+  dependency. `context.DeadlineExceeded` stays a failure — a dependency too
+  slow for its caller's deadline is a slow dependency — and so does a
+  `Canceled` returned while the caller is still there. Polly excludes
+  `OperationCanceledException` by default for the same reason; gobreaker v2
+  leaves it to `IsSuccessful`.
+- **The timeout reports only its own deadline.** `Run` relabels a deadline as
+  `TimeoutExceeded` (HTTP 504) only while the caller's context is live; when
+  the caller's context finished first — cancelled, or past an earlier
+  deadline of its own — it returns that context's error. A client that went
+  away is no longer reported as a dependency timing out.
+- **`NewTimeoutWith(TimeoutConfig{Duration, Clock})`** measures the deadline
+  on an injected clock (ADR 0090), as the retry, the hedge and the breaker
+  already did. Under a nil clock or `clock.System` it is `NewTimeout`
+  exactly; under any other, the Operation receives a context of the
+  package's own whose `Err` reports `DeadlineExceeded` — and so does any
+  context derived from it, which a `context.WithCancelCause` would not give —
+  and whose `Deadline` reports the caller's, since a time on a ManualClock is
+  not one a socket can be given. `NewTimeout` is unchanged.
+
+## Amendment — 2026-10-21: a retry waits as long as the failure asks ([issue 476](https://github.com/kitsunium/sdk/issues/476))
+
+`RetryConfig.Delay func(attempt int, err error) (time.Duration, bool)` lets
+the failure decide the wait before a retry. Its zero value is the curve, so
+every existing caller's timing is unchanged (ADR 0040 admits the field). Three
+things the implementation decides:
+
+- **An imposed delay replaces the curve, jitter included, and is held into
+  `[0, MaxDelay]`.** A server's hint is the floor it asked for, so widening it
+  is the caller's choice inside `Delay`, not the policy's; and a hint longer
+  than the caller is prepared to wait is cut to `MaxDelay` rather than
+  followed — the caller who would rather give up classifies the error as not
+  retryable. Polly's `DelayGenerator` and failsafe-go's `DelayFunc` make the
+  same split between the computed and the imposed delay.
+- **One field, read by one helper.** `RetryAfter(err)` reads
+  `retry_after_seconds` — whole or fractional seconds — from the outermost
+  `*errs.Error`. The OTLP sender already wrote it on a retryable answer;
+  `net/client` now writes it on a 429 or a 503 whose `Retry-After` holds
+  delta-seconds; `RateLimited` from both limiters carries
+  `(1 − tokens) / rate`, the time its bucket needs to earn the next token,
+  which the bucket always knew. An HTTP-date `Retry-After` is read by none of
+  them: converting it compares the peer's clock to ours. Each producer
+  spells the key in its own package and its suite pins it against
+  `RetryAfter`.
+- **A `RateLimited` rejection now allocates** (the field rides a wrap of the
+  sentinel); before, it was the bare sentinel. The admitted path is
+  unchanged. Callers matching it by identity (`err == RateLimited`) must use
+  `errors.Is` / `errs.HasCode`, which the package doc has always prescribed.
+
+AWS's `x-amz-retry-after` and gRPC's `grpc-retry-pushback-ms` are the same
+mechanism in other wires.
+
+## Amendment — 2026-10-21: a retry budget shared by retry and hedging ([issue 475](https://github.com/kitsunium/sdk/issues/475))
+
+`MaxAttempts` bounds one call and nothing bounded the sum: during an outage
+every call became `MaxAttempts` calls, and each layer that retries multiplies
+again. The amendment adds no policy — Decision 2 still names seven — but a
+port the retry and the hedge consult, and one sentinel:
+
+- **`RetryBudget`, a sibling port of `Runner`** in `core/app/resilience`
+  (ADR 0039): `AllowRetry() bool`, `RecordSuccess()`, `RecordFailure()`. A
+  budget runs no Operation, so widening `Runner` would have been the wrong
+  shape; a caller may supply their own.
+- **`NewRetryBudget(RetryBudgetConfig{MaxTokens, TokenRatio})`** is gRFC A6's
+  `retryThrottling` bucket: full at `MaxTokens`, a recorded failure costs one
+  token, a success returns `TokenRatio`, extra attempts are allowed while
+  strictly more than half remain, and the first attempt of a call is never
+  refused. Counts are thousandths of a token, as gRPC keeps them, in one
+  `atomic.Int64` — the happy path of a budgeted retry stays allocation-free
+  (measured in `pkg/v1/app/resilience/BENCH.md`). `MaxTokens ≤ 0` and a
+  `TokenRatio` that is not finite or rounds below 0.001 are refused (ADR 0031):
+  the zero ratio is a budget that never refills once drained.
+- **`RetryConfig.Budget` and `HedgeConfig.Budget`**, nil being the policies as
+  they were. The retry records every success and every retryable failure and
+  asks before each retry; a refusal ends the call with `RetryBudgetExceeded`
+  (`0.2.8.8`, `EX_TEMPFAIL`, the last error as its cause). The hedge asks
+  before each duplicate, a refusal degrading to no-hedging as reaching
+  `MaxInFlight` does, and records each decided call once. One budget per
+  dependency, shared by both — gRPC's throttling covers hedging too.
+- **`RetryConfig.OnRetry(attempt, err, delay)`**, a synchronous hook before
+  each wait, so retries are counted in the caller's own metrics without this
+  package importing one.
+
+The constants are the caller's: the AWS SDKs' retry quota (a 500-token
+bucket, a cost per retry that depends on the failure, a token back per
+success, the first request never charged)
+and the SRE book's per-client retry budget (retries at most 10% of requests)
+are the same mechanism with other numbers; `TokenRatio: 0.1` is that order.
+failsafe-go's `Budget` and Polly's absence of one were weighed; the gRPC
+bucket was taken because it is specified to the arithmetic and covers
+hedging.
+
+Sources: [gRFC A6 — client retries, §Throttling](https://github.com/grpc/proposal/blob/master/A6-client-retries.md#throttling-retry-attempts-and-hedged-rpcs),
+[AWS SDKs — retry behavior](https://docs.aws.amazon.com/sdkref/latest/guide/feature-retry-behavior.html),
+[Google SRE book — Handling Overload, §Deciding to Retry](https://sre.google/sre-book/handling-overload/),
+[Amazon Builders' Library — Timeouts, retries, and backoff with jitter](https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/).
+
 ## Extension — `fallback` and `hedging` (Decision 2 now names seven policies)
 
 Two compositions landed after the original five, in the same shape (concrete

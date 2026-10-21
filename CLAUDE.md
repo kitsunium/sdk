@@ -37,7 +37,7 @@ Go SDK providing a normed, performant toolbox for downstream applications: the m
 | `events` | app | An in-process synchronous event bus keyed on Go types — not a queue | 0053 |
 | `scheduler` | app | Five-field POSIX cron and fixed intervals, with DST, missed deadlines and overlap decided | 0041 |
 | `statemachine` | app | Entities moved by events, timers, deadlines and guards over the caller's store, on an agenda rather than a sweep | 0120 |
-| `resilience` | app | Retry, circuit breaker, keyed rate limit, bulkhead, timeout, fallback, hedging, and the published backoff curve | 0026, 0031, 0103 |
+| `resilience` | app | Retry, circuit breaker, keyed rate limit, bulkhead, timeout, fallback, hedging, and the published backoff curve; a retry budget shared by retry and hedge, and the delay a failure imposes (`RetryAfter`) | 0026, 0031, 0103 |
 | `lifecycle` | app | Ordered start and reverse stop with a per-component budget, and the supervisor that restarts a loop | 0050, 0112 |
 | `health` | app | Startup, readiness and liveness as three types, every wait bounded, and the loopback readiness probe | 0060, 0072, 0131 |
 | `consensus` | app | A write is committed when a majority holds it on disk: a Raft with PreVote and CheckQuorum always on, snapshots, single-server membership through learners, a segmented log that classifies every hole before it repairs one, an mTLS transport pinned by SPKI | 0152, 0174 |

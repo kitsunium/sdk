@@ -57,23 +57,26 @@ sequences:
           when: adm.trial
       - bind: err
         eval: op(ctx)
-      - bind: res
-        eval: outcomeSuccess
-      - opt:
-          do:
-            - set: res
-              value: outcomeNeutral
-            - opt:
-                do:
-                  - set: res
-                    value: outcomeFailure
-                when: isRetryable(b.retryable, err)
-          when: err != nil
-      - eval: b.record(adm, res)
+      - eval: b.record(adm, b.classify(ctx, err))
         to: b.record
       - set: settled
         value: "true"
       - return: err
+  - of: (*circuitBreaker).classify
+    steps:
+      - opt:
+          do:
+            - return: outcomeSuccess
+          when: err == nil
+      - opt:
+          do:
+            - return: outcomeNeutral
+          when: ctx.Err() != nil && errors.Is(err, context.Canceled)
+      - opt:
+          do:
+            - return: outcomeFailure
+          when: isRetryable(b.retryable, err)
+      - return: outcomeNeutral
   - of: (*circuitBreaker).allow
     steps:
       - lock:
@@ -291,6 +294,8 @@ sequences:
         kind: self
       - id: newMisconfigured
         kind: internal
+      - id: refusedBudgetKnob
+        kind: internal
     steps:
       - opt:
           do:
@@ -309,10 +314,20 @@ sequences:
           when: cfg.MaxInFlight < minInFlight
       - bind: maxHedges
         eval: max(cfg.MaxHedges, minHedges)
+      - opt:
+          do:
+            - return: newMisconfigured(budgetPolicy, knob)
+              to: newMisconfigured
+          init:
+            bind: knob, refused
+            eval: refusedBudgetKnob(cfg.Budget)
+            to: refusedBudgetKnob
+          when: refused
       - return: |-
           &hedge{
           		delay: cfg.Delay, maxHedges: maxHedges,
           		slots: make(chan struct{}, cfg.MaxInFlight), clk: timedOrSystem(cfg.Clock),
+          		budget: cfg.Budget,
           	}
   - of: (*hedge).Run
     participants:
@@ -333,6 +348,8 @@ sequences:
       - id: ctx.Err
         kind: value
       - id: race.record
+        kind: internal
+      - id: h.recordOutcome
         kind: internal
       - id: h.duplicate
         kind: internal
@@ -371,6 +388,8 @@ sequences:
                           when: outcome.panicked
                       - opt:
                           do:
+                            - eval: h.recordOutcome(ctx, verdict)
+                              to: h.recordOutcome
                             - return: verdict
                           init:
                             bind: decided, verdict
@@ -394,15 +413,56 @@ sequences:
         kind: actor
       - id: (*hedge).claimHedge
         kind: self
-      - id: h.acquire
+      - id: h.claimSlot
         kind: internal
     steps:
       - opt:
           do:
             - return: "false"
           when: launched > h.maxHedges
+      - return: h.claimSlot()
+        to: h.claimSlot
+  - of: (*hedge).claimSlot
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*hedge).claimSlot
+        kind: self
+      - id: h.acquire
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: h.budget != nil && !h.budget.AllowRetry()
       - return: h.acquire()
         to: h.acquire
+  - of: (*hedge).recordOutcome
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*hedge).recordOutcome
+        kind: self
+      - id: h.budget.RecordSuccess
+        kind: value
+      - id: h.budget.RecordFailure
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: h.budget == nil
+      - opt:
+          do:
+            - eval: h.budget.RecordSuccess()
+              to: h.budget.RecordSuccess
+            - return: ""
+          when: verdict == nil
+      - opt:
+          do:
+            - eval: h.budget.RecordFailure()
+              to: h.budget.RecordFailure
+          when: ctx.Err() == nil
   - of: (*hedge).attempt
     participants:
       - id: caller
@@ -534,14 +594,20 @@ sequences:
         kind: actor
       - id: (*keyedLimiter).Run
         kind: self
-      - id: wrapAs
+      - id: l.bucketOf(l.key(ctx)).take
+        kind: internal
+      - id: rateLimited
         kind: internal
     steps:
       - opt:
           do:
-            - return: wrapAs(coreres.RateLimited, nil)
-              to: wrapAs
-          when: "!l.bucketOf(l.key(ctx)).take()"
+            - return: rateLimited(wait)
+              to: rateLimited
+          init:
+            bind: admitted, wait
+            eval: l.bucketOf(l.key(ctx)).take()
+            to: l.bucketOf(l.key(ctx)).take
+          when: "!admitted"
       - return: op(ctx)
   - of: (*keyedLimiter).bucketOf
     participants:
@@ -739,15 +805,32 @@ sequences:
         kind: actor
       - id: (*tokenBucket).Run
         kind: self
-      - id: wrapAs
+      - id: t.take
+        kind: internal
+      - id: rateLimited
         kind: internal
     steps:
       - opt:
           do:
-            - return: wrapAs(coreres.RateLimited, nil)
-              to: wrapAs
-          when: "!t.take()"
+            - return: rateLimited(wait)
+              to: rateLimited
+          init:
+            bind: admitted, wait
+            eval: t.take()
+            to: t.take
+          when: "!admitted"
       - return: op(ctx)
+  - of: rateLimited
+    participants:
+      - id: caller
+        kind: actor
+      - id: rateLimited
+        kind: self
+      - id: wrapAsFields
+        kind: internal
+    steps:
+      - return: wrapAsFields(coreres.RateLimited, kerrs.Float(retryAfterField, waitSeconds))
+        to: wrapAsFields
   - of: (*tokenBucket).take
     participants:
       - id: caller
@@ -777,18 +860,16 @@ sequences:
             - op: "-="
               set: t.tokens
               value: oneToken
-            - return: "true"
+            - return: true, 0
           when: t.tokens >= oneToken
-      - return: "false"
+      - return: false, (oneToken - t.tokens) / t.rate
   - of: NewRetry
     participants:
       - id: caller
         kind: actor
       - id: NewRetry
         kind: self
-      - id: kbackoff
-        kind: package
-      - id: timedOrSystem
+      - id: newRetryRunner
         kind: internal
     steps:
       - opt:
@@ -796,6 +877,23 @@ sequences:
             - set: cfg.MaxAttempts
               value: minAttempts
           when: cfg.MaxAttempts < minAttempts
+      - return: newRetryRunner(cfg)
+        to: newRetryRunner
+  - of: newRetryRunner
+    participants:
+      - id: caller
+        kind: actor
+      - id: newRetryRunner
+        kind: self
+      - id: kbackoff
+        kind: package
+      - id: timedOrSystem
+        kind: internal
+      - id: refusedBudgetKnob
+        kind: internal
+      - id: newMisconfigured
+        kind: internal
+    steps:
       - set: cfg.Multiplier
         to: kbackoff
         value: kbackoff.NormalMultiplier(cfg.Multiplier)
@@ -805,6 +903,15 @@ sequences:
       - set: cfg.Clock
         to: timedOrSystem
         value: timedOrSystem(cfg.Clock)
+      - opt:
+          do:
+            - return: newMisconfigured(budgetPolicy, knob)
+              to: newMisconfigured
+          init:
+            bind: knob, refused
+            eval: refusedBudgetKnob(cfg.Budget)
+            to: refusedBudgetKnob
+          when: refused
       - return: "&retryRunner{cfg: cfg}"
   - of: (*retryRunner).Run
     participants:
@@ -813,6 +920,8 @@ sequences:
       - id: (*retryRunner).Run
         kind: self
       - id: r.wait
+        kind: internal
+      - id: r.recordSuccess
         kind: internal
       - id: ctx.Err
         kind: value
@@ -831,7 +940,7 @@ sequences:
                         - return: waitErr
                       init:
                         bind: waitErr
-                        eval: r.wait(ctx, attempt)
+                        eval: r.wait(ctx, attempt, lastErr)
                         to: r.wait
                       when: waitErr != nil
                 when: attempt > 0
@@ -839,6 +948,8 @@ sequences:
               value: op(ctx)
             - opt:
                 do:
+                  - eval: r.recordSuccess()
+                    to: r.recordSuccess
                   - return: nil
                 when: lastErr == nil
             - opt:
@@ -850,16 +961,60 @@ sequences:
                 do:
                   - return: lastErr
                 when: "!isRetryable(r.cfg.Retryable, lastErr)"
+            - opt:
+                do:
+                  - return: wrapAs(coreres.RetryBudgetExceeded, lastErr)
+                    to: wrapAs
+                when: "!r.mayRetry(attempt)"
           key: attempt
           range: r.cfg.MaxAttempts
       - return: wrapAs(coreres.RetryExhausted, lastErr)
         to: wrapAs
+  - of: (*retryRunner).recordSuccess
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*retryRunner).recordSuccess
+        kind: self
+      - id: r.cfg.Budget.RecordSuccess
+        kind: value
+    steps:
+      - opt:
+          do:
+            - eval: r.cfg.Budget.RecordSuccess()
+              to: r.cfg.Budget.RecordSuccess
+          when: r.cfg.Budget != nil
+  - of: (*retryRunner).mayRetry
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*retryRunner).mayRetry
+        kind: self
+      - id: r.cfg.Budget.RecordFailure
+        kind: value
+      - id: r.cfg.Budget.AllowRetry
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: r.cfg.Budget == nil
+      - eval: r.cfg.Budget.RecordFailure()
+        to: r.cfg.Budget.RecordFailure
+      - opt:
+          do:
+            - return: "true"
+          when: attempt+1 >= r.cfg.MaxAttempts
+      - return: r.cfg.Budget.AllowRetry()
+        to: r.cfg.Budget.AllowRetry
   - of: (*retryRunner).wait
     participants:
       - id: caller
         kind: actor
       - id: (*retryRunner).wait
         kind: self
+      - id: r.delay
+        kind: internal
       - id: timedOrSystem(r.cfg.Clock).NewTimer
         kind: value
       - id: timer.Stop
@@ -867,8 +1022,15 @@ sequences:
       - id: ctx.Err
         kind: value
     steps:
+      - bind: delay
+        eval: r.delay(attempt, failed)
+        to: r.delay
+      - opt:
+          do:
+            - eval: r.cfg.OnRetry(attempt, failed, delay)
+          when: r.cfg.OnRetry != nil
       - bind: timer
-        eval: timedOrSystem(r.cfg.Clock).NewTimer(r.jittered(r.backoff(attempt)))
+        eval: timedOrSystem(r.cfg.Clock).NewTimer(delay)
         to: timedOrSystem(r.cfg.Clock).NewTimer
       - defer: timer.Stop()
         to: timer.Stop
@@ -881,6 +1043,41 @@ sequences:
             - comm: <-timer.C()
               do:
                 - return: nil
+  - of: (*retryRunner).delay
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*retryRunner).delay
+        kind: self
+      - id: capDelay
+        kind: internal
+      - id: r.jittered
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: capDelay(imposed, r.cfg.MaxDelay)
+                    to: capDelay
+                init:
+                  bind: imposed, ok
+                  eval: r.cfg.Delay(attempt, failed)
+                when: ok
+          when: r.cfg.Delay != nil
+      - return: r.jittered(r.backoff(attempt))
+        to: r.jittered
+  - of: capDelay
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: d < 0
+      - opt:
+          do:
+            - return: ceiling
+          when: ceiling > 0 && d > ceiling
+      - return: d
   - of: (*retryRunner).backoff
     participants:
       - id: caller
@@ -910,6 +1107,142 @@ sequences:
             - return: clock.System
           when: clk == nil
       - return: clk
+  - of: RetryAfter
+    participants:
+      - id: caller
+        kind: actor
+      - id: RetryAfter
+        kind: self
+      - id: secondsToDuration
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: field.Key() != retryAfterField
+            - return: secondsToDuration(field.StringValue())
+              to: secondsToDuration
+          key: _
+          range: slices.Backward(kerrs.FieldsOf(err))
+          value: field
+      - return: 0, false
+  - of: secondsToDuration
+    participants:
+      - id: caller
+        kind: actor
+      - id: secondsToDuration
+        kind: self
+      - id: strconv
+        kind: stdlib
+      - id: time
+        kind: stdlib
+    steps:
+      - bind: seconds, err
+        eval: strconv.ParseFloat(rendered, floatBits)
+        to: strconv
+      - opt:
+          do:
+            - return: 0, false
+          when: err != nil || math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds <= 0
+      - bind: nanos
+        eval: seconds * float64(time.Second)
+      - opt:
+          do:
+            - return: time.Duration(math.MaxInt64), true
+              to: time
+          when: nanos >= math.MaxInt64
+      - return: time.Duration(max(math.Round(nanos), 1)), true
+        to: time
+  - of: NewRetryBudget
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewRetryBudget
+        kind: self
+      - id: math
+        kind: stdlib
+      - id: b.tokens.Store
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "refusedBudget{knob: \"MaxTokens\"}"
+          when: cfg.MaxTokens <= 0
+      - opt:
+          do:
+            - return: "refusedBudget{knob: \"TokenRatio\"}"
+          when: math.IsNaN(cfg.TokenRatio) || math.IsInf(cfg.TokenRatio, 0)
+      - bind: ratio
+        eval: math.Round(cfg.TokenRatio * float64(milliPerToken))
+        to: math
+      - opt:
+          do:
+            - return: "refusedBudget{knob: \"TokenRatio\"}"
+          when: ratio < 1
+      - bind: maxMilli
+        eval: min(int64(cfg.MaxTokens), maxBudgetTokens) * milliPerToken
+      - bind: b
+        eval: "&tokenBudget{max: maxMilli, ratio: int64(min(ratio, float64(maxMilli)))}"
+      - eval: b.tokens.Store(maxMilli)
+        to: b.tokens.Store
+      - return: b
+  - of: (*tokenBudget).AllowRetry
+    steps:
+      - return: b.tokens.Load()*2 > b.max
+  - of: (*tokenBudget).RecordSuccess
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tokenBudget).RecordSuccess
+        kind: self
+      - id: b.tokens.Load
+        kind: value
+    steps:
+      - loop:
+          do:
+            - bind: current
+              eval: b.tokens.Load()
+              to: b.tokens.Load
+            - bind: next
+              eval: min(current+b.ratio, b.max)
+            - opt:
+                do:
+                  - return: ""
+                when: next == current || b.tokens.CompareAndSwap(current, next)
+          forever: true
+  - of: (*tokenBudget).RecordFailure
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tokenBudget).RecordFailure
+        kind: self
+      - id: b.tokens.Load
+        kind: value
+    steps:
+      - loop:
+          do:
+            - bind: current
+              eval: b.tokens.Load()
+              to: b.tokens.Load
+            - bind: next
+              eval: max(current-milliPerToken, 0)
+            - opt:
+                do:
+                  - return: ""
+                when: next == current || b.tokens.CompareAndSwap(current, next)
+          forever: true
+  - of: refusedBudget.AllowRetry
+    steps:
+      - return: "false"
+  - of: refusedBudget.RecordSuccess
+  - of: refusedBudget.RecordFailure
+  - of: refusedBudgetKnob
+    steps:
+      - bind: refused, ok
+        eval: budget.(refusedBudget)
+      - return: refused.knob, ok
   - of: isRetryable
     steps:
       - opt:
@@ -923,6 +1256,17 @@ sequences:
         kind: actor
       - id: NewTimeout
         kind: self
+      - id: NewTimeoutWith
+        kind: internal
+    steps:
+      - return: "NewTimeoutWith(TimeoutConfig{Duration: d})"
+        to: NewTimeoutWith
+  - of: NewTimeoutWith
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewTimeoutWith
+        kind: self
       - id: newMisconfigured
         kind: internal
     steps:
@@ -930,31 +1274,198 @@ sequences:
           do:
             - return: newMisconfigured("timeout", "duration")
               to: newMisconfigured
-          when: d <= 0
-      - return: "timeoutRunner{timeout: d}"
+          when: cfg.Duration <= 0
+      - bind: clk
+        eval: cfg.Clock
+      - opt:
+          do:
+            - set: clk
+              value: nil
+          when: clk == clock.System
+      - return: "timeoutRunner{timeout: cfg.Duration, clk: clk}"
   - of: timeoutRunner.Run
     participants:
       - id: caller
         kind: actor
       - id: timeoutRunner.Run
         kind: self
-      - id: context
-        kind: stdlib
+      - id: t.derive
+        kind: internal
+      - id: ctx.Err
+        kind: value
       - id: wrapAs
         kind: internal
     steps:
       - bind: dctx, cancel
-        eval: context.WithTimeout(ctx, t.timeout)
-        to: context
+        eval: t.derive(ctx)
+        to: t.derive
       - defer: cancel()
       - bind: err
         eval: op(dctx)
       - opt:
           do:
+            - opt:
+                do:
+                  - return: parentErr
+                init:
+                  bind: parentErr
+                  eval: ctx.Err()
+                  to: ctx.Err
+                when: parentErr != nil
             - return: wrapAs(coreres.TimeoutExceeded, err)
               to: wrapAs
           when: dctx.Err() == context.DeadlineExceeded || errors.Is(err, context.DeadlineExceeded)
       - return: err
+  - of: timeoutRunner.derive
+    participants:
+      - id: caller
+        kind: actor
+      - id: timeoutRunner.derive
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: newClockDeadline
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: context.WithTimeout(ctx, t.timeout)
+              to: context
+          when: t.clk == nil
+      - return: newClockDeadline(ctx, t.clk, t.timeout)
+        to: newClockDeadline
+  - of: newClockDeadline
+    participants:
+      - id: caller
+        kind: actor
+      - id: newClockDeadline
+        kind: self
+      - id: parent.Err
+        kind: value
+      - id: c.finish
+        kind: internal
+      - id: clk.NewTimer
+        kind: value
+      - id: c.watch
+        kind: internal
+    steps:
+      - bind: c
+        eval: "&clockDeadline{parent: parent, done: make(chan struct{})}"
+      - opt:
+          do:
+            - eval: c.finish(parentErr)
+              to: c.finish
+            - return: c, func() {}
+          init:
+            bind: parentErr
+            eval: parent.Err()
+            to: parent.Err
+          when: parentErr != nil
+      - bind: timer
+        eval: clk.NewTimer(d)
+        to: clk.NewTimer
+      - bind: release
+        eval: make(chan struct{})
+      - go: c.watch(timer, release)
+        to: c.watch
+      - var:
+          name: once
+          type: sync.Once
+      - return: c, func() { once.Do(func() { close(release) }) }
+  - of: (*clockDeadline).watch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*clockDeadline).watch
+        kind: self
+      - id: timer.Stop
+        kind: value
+      - id: c.finish
+        kind: internal
+    steps:
+      - defer: timer.Stop()
+        to: timer.Stop
+      - select:
+          cases:
+            - comm: <-timer.C()
+              do:
+                - eval: c.finish(context.DeadlineExceeded)
+                  to: c.finish
+            - comm: <-c.parent.Done()
+              do:
+                - eval: c.finish(c.parent.Err())
+                  to: c.finish
+            - comm: <-release
+              do:
+                - eval: c.finish(context.Canceled)
+                  to: c.finish
+  - of: (*clockDeadline).finish
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*clockDeadline).finish
+        kind: self
+      - id: c.closeDone.Do
+        kind: value
+    steps:
+      - lock:
+          mutex: c.mu
+      - opt:
+          do:
+            - return: ""
+          when: c.err != nil
+      - set: c.err
+        value: err
+      - eval: c.closeDone.Do(func() { close(c.done) })
+        to: c.closeDone.Do
+  - of: (*clockDeadline).Deadline
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*clockDeadline).Deadline
+        kind: self
+      - id: c.parent.Deadline
+        kind: value
+    steps:
+      - return: c.parent.Deadline()
+        to: c.parent.Deadline
+  - of: (*clockDeadline).Done
+    steps:
+      - return: c.done
+  - of: (*clockDeadline).Err
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*clockDeadline).Err
+        kind: self
+      - id: c.parent.Err
+        kind: value
+      - id: c.finish
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: c.finish(parentErr)
+              to: c.finish
+          init:
+            bind: parentErr
+            eval: c.parent.Err()
+            to: c.parent.Err
+          when: parentErr != nil
+      - lock:
+          mutex: c.mu
+      - return: c.err
+  - of: (*clockDeadline).Value
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*clockDeadline).Value
+        kind: self
+      - id: c.parent.Value
+        kind: value
+    steps:
+      - return: c.parent.Value(key)
+        to: c.parent.Value
   - of: wrapAs
     participants:
       - id: caller

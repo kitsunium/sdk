@@ -22,7 +22,9 @@ constants:
     name: defaultOpenDuration
   - grouped: true
     items:
-      - doc: "outcomeNeutral is a deterministic error or an abandoned call: no signal."
+      - doc: |-
+          outcomeNeutral is a deterministic error, an abandoned call, or a call the
+          caller cancelled: no signal.
         name: outcomeNeutral
         type: outcome
         value: iota
@@ -76,6 +78,46 @@ constants:
         type: int
         value: "1"
     name: minAttempts
+  - doc: |-
+      retryAfterField is the errs field a failure carries to say how many seconds
+      to wait before the next attempt. The OTLP sender and the guarded HTTP client
+      write the same key, each spelled in its own package; their suites pin that
+      RetryAfter reads what they write.
+    items:
+      - name: retryAfterField
+        type: string
+        value: "\"retry_after_seconds\""
+    name: retryAfterField
+  - doc: floatBits is the width strconv parses a field's rendering at.
+    items:
+      - name: floatBits
+        type: int
+        value: "64"
+    name: floatBits
+  - doc: |-
+      milliPerToken is the fixed-point scale of the budget's counts: gRPC reads
+      TokenRatio to three decimals, so a thousandth of a token is the unit and
+      every update is one integer compare-and-swap.
+    items:
+      - name: milliPerToken
+        type: int64
+        value: "1000"
+    name: milliPerToken
+  - doc: |-
+      maxBudgetTokens holds MaxTokens where its count in thousandths, doubled by
+      AllowRetry's comparison, cannot overflow an int64. It is an int64 because a
+      32-bit int cannot hold it — and cannot reach it either.
+    items:
+      - name: maxBudgetTokens
+        type: int64
+        value: 1 << 40
+    name: maxBudgetTokens
+  - doc: budgetPolicy names a refused budget in PolicyMisconfigured's fields.
+    items:
+      - name: budgetPolicy
+        type: string
+        value: "\"retrybudget\""
+    name: budgetPolicy
 files:
   - decls:
       - BackoffValue
@@ -89,6 +131,7 @@ files:
       - outcomeNeutral
       - NewCircuitBreaker
       - (*circuitBreaker).Run
+      - (*circuitBreaker).classify
       - (*circuitBreaker).allow
       - (*circuitBreaker).release
       - (*circuitBreaker).record
@@ -124,6 +167,8 @@ files:
       - NewHedge
       - (*hedge).Run
       - (*hedge).claimHedge
+      - (*hedge).claimSlot
+      - (*hedge).recordOutcome
       - (*hedge).attempt
       - (*hedge).duplicate
       - (*hedge).acquire
@@ -170,6 +215,7 @@ files:
       - bucketSize
       - newTokenBucket
       - (*tokenBucket).Run
+      - rateLimited
       - (*tokenBucket).take
     name: ratelimit.go
   - decls:
@@ -179,12 +225,41 @@ files:
       - minAttempts
       - retryRunner
       - NewRetry
+      - newRetryRunner
       - (*retryRunner).Run
+      - (*retryRunner).recordSuccess
+      - (*retryRunner).mayRetry
       - (*retryRunner).wait
+      - (*retryRunner).delay
+      - capDelay
       - (*retryRunner).backoff
       - (*retryRunner).jittered
       - timedOrSystem
     name: retry.go
+  - decls:
+      - retryAfterField
+      - floatBits
+      - RetryAfter
+      - secondsToDuration
+    name: retry_after.go
+  - decls:
+      - milliPerToken
+      - maxBudgetTokens
+      - budgetPolicy
+      - tokenBudget
+      - refusedBudget
+      - NewRetryBudget
+      - (*tokenBudget).AllowRetry
+      - (*tokenBudget).RecordSuccess
+      - (*tokenBudget).RecordFailure
+      - refusedBudget.AllowRetry
+      - refusedBudget.RecordSuccess
+      - refusedBudget.RecordFailure
+      - refusedBudgetKnob
+    name: retry_budget.go
+  - decls:
+      - RetryBudgetConfig
+    name: retry_budget_config.go
   - decls:
       - RetryConfig
     name: retry_config.go
@@ -194,8 +269,23 @@ files:
   - decls:
       - timeoutRunner
       - NewTimeout
+      - NewTimeoutWith
       - timeoutRunner.Run
+      - timeoutRunner.derive
     name: timeout.go
+  - decls:
+      - clockDeadline
+      - newClockDeadline
+      - (*clockDeadline).watch
+      - (*clockDeadline).finish
+      - (*clockDeadline).Deadline
+      - (*clockDeadline).Done
+      - (*clockDeadline).Err
+      - (*clockDeadline).Value
+    name: timeout_clock.go
+  - decls:
+      - TimeoutConfig
+    name: timeout_config.go
   - decls:
       - wrapAs
       - wrapAsFields
@@ -246,13 +336,48 @@ functions:
     name: newTokenBucket
     params: clk clock.Clock, rate, burst float64
     results: "*tokenBucket"
+  - doc: |-
+      rateLimited is the RateLimited rejection carrying, as retryAfterField, the
+      seconds the bucket needs to earn its next token — the delay RetryAfter reads.
+    name: rateLimited
+    params: waitSeconds float64
+    results: error
   - name: NewRetry
     params: cfg RetryConfig
     results: coreres.Runner
+  - doc: |-
+      newRetryRunner normalises the backoff knobs and the clock, refuses a budget
+      NewRetryBudget could not build, and builds the runner.
+    name: newRetryRunner
+    params: cfg RetryConfig
+    results: coreres.Runner
+  - doc: capDelay holds d into [0, ceiling], a non-positive ceiling being no cap.
+    name: capDelay
+    params: d, ceiling time.Duration
+    results: time.Duration
   - doc: timedOrSystem resolves a nil clock to the wall clock.
     name: timedOrSystem
     params: clk clock.Timed
     results: clock.Timed
+  - name: RetryAfter
+    params: err error
+    results: time.Duration, bool
+  - doc: |-
+      secondsToDuration parses a field's rendering as a number of seconds and
+      converts it to a Duration, reporting false for anything that is not a
+      finite positive number.
+    name: secondsToDuration
+    params: rendered string
+    results: time.Duration, bool
+  - name: NewRetryBudget
+    params: cfg RetryBudgetConfig
+    results: coreres.RetryBudget
+  - doc: |-
+      refusedBudgetKnob reports whether budget is one NewRetryBudget refused, and
+      the field it refused, so a policy given it refuses every call by name.
+    name: refusedBudgetKnob
+    params: budget coreres.RetryBudget
+    results: string, bool
   - doc: |-
       isRetryable reports whether err is a transient failure the policy may act on
       (replay it, or count it against a dependency's health). A nil predicate keeps
@@ -265,6 +390,16 @@ functions:
   - name: NewTimeout
     params: d time.Duration
     results: coreres.Runner
+  - name: NewTimeoutWith
+    params: cfg TimeoutConfig
+    results: coreres.Runner
+  - doc: |-
+      newClockDeadline returns a context that expires after d on clk, or when
+      parent is done, and the function that releases it. The watcher goroutine
+      ends at whichever comes first, or at release.
+    name: newClockDeadline
+    params: parent context.Context, clk clock.Timed, d time.Duration
+    results: context.Context, context.CancelFunc
   - doc: |-
       wrapAs returns the given resilience sentinel as the error origin (its
       code/reason/public win), attaching the cause's message as a structured field
@@ -283,6 +418,7 @@ functions:
     params: sentinel *kerrs.Error, fields ...kerrs.FieldValue
     results: error
 imports:
+  atomic: sync/atomic
   clock: github.com/kitsunium/sdk/internal/kernel/clock
   context: context
   coreres: github.com/kitsunium/sdk/internal/core/app/resilience
@@ -290,6 +426,8 @@ imports:
   kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
   kerrs: github.com/kitsunium/sdk/internal/kernel/errs
   math: math
+  slices: slices
+  strconv: strconv
   sync: sync
   time: time
 package:
@@ -360,6 +498,13 @@ types:
         recv: b *circuitBreaker
         results: error
       - doc: |-
+          classify turns a finished call into a health signal. A deterministic error
+          and a caller who left are no signal; a transient error is a failure.
+        name: classify
+        params: ctx context.Context, err error
+        recv: b *circuitBreaker
+        results: outcome
+      - doc: |-
           allow reports whether a call may proceed, transitioning Open→HalfOpen once the
           cooldown elapses, and admits at most one HalfOpen trial at a time. Holds mu.
         name: allow
@@ -423,6 +568,8 @@ types:
           success path: a stream of HTTP 400s can no longer trip the breaker, and
           one of them cannot close a HalfOpen breaker either. A nil predicate
           counts every error as a failure, which is the pre-classifier behaviour.
+          It is not consulted for a context.Canceled returned once the caller's
+          context is closed: that call is neutral whatever the predicate says.
           Shares its shape with RetryConfig.Retryable so one classifier serves a
           nested Retry(Breaker(op)) stack.
         name: Retryable
@@ -516,6 +663,8 @@ types:
         type: chan struct{}
       - name: clk
         type: clock.Timed
+      - name: budget
+        type: coreres.RetryBudget
     kind: struct
     methods:
       - doc: |-
@@ -546,6 +695,17 @@ types:
         params: launched int
         recv: h *hedge
         results: bool
+      - doc: claimSlot asks the shared retry budget, then claims an in-flight slot.
+        name: claimSlot
+        recv: h *hedge
+        results: bool
+      - doc: |-
+          recordOutcome folds a decided call into the shared budget, when there is
+          one: a success replenishes it, a failure on a live context drains it, and a
+          failure the caller's cancellation explains records nothing.
+        name: recordOutcome
+        params: ctx context.Context, verdict error
+        recv: h *hedge
       - doc: |-
           attempt runs one copy of op and hands its outcome to Run.
 
@@ -655,6 +815,16 @@ types:
           policy that measures a wait, did not.
         name: Clock
         type: clock.Timed
+      - doc: |-
+          Budget, when set, is asked before each duplicate: a refusal issues
+          none, and the call proceeds on the attempts already running, as when
+          MaxInFlight is reached. Each call's outcome is recorded in it — a
+          success, or a failure on a live context — so a hedge and a retry
+          sharing one budget stop amplifying a failing dependency together, as
+          gRPC's retry throttling covers hedging. Nil is the hedge without a
+          budget.
+        name: Budget
+        type: coreres.RetryBudget
     kind: struct
     name: HedgeConfig
   - doc: |-
@@ -910,10 +1080,13 @@ types:
         params: ctx context.Context, op coreres.Operation
         recv: t *tokenBucket
         results: error
-      - doc: take refills by elapsed time then consumes one token if available. Holds mu.
+      - doc: |-
+          take refills by elapsed time then consumes one token if available. Holds mu.
+          A refusal also reports how many seconds the bucket needs, at its rate, to
+          hold a whole token again: (1 − tokens) / rate.
         name: take
         recv: t *tokenBucket
-        results: bool
+        results: admitted bool, waitSeconds float64
     name: tokenBucket
   - fields:
       - doc: |-
@@ -946,13 +1119,33 @@ types:
         params: ctx context.Context, op coreres.Operation
         recv: r *retryRunner
         results: error
+      - doc: recordSuccess tells the budget, when there is one, that an attempt succeeded.
+        name: recordSuccess
+        recv: r *retryRunner
       - doc: |-
-          wait sleeps the backoff for the given attempt on the configured clock,
-          returning ctx.Err on cancel.
+          mayRetry records the retryable failure of attempt in the budget and reports
+          whether the budget allows the next one. With no budget, or after the last
+          attempt, it is always true: the loop's own bound decides.
+        name: mayRetry
+        params: attempt int
+        recv: r *retryRunner
+        results: bool
+      - doc: |-
+          wait sleeps the delay before the given attempt on the configured clock,
+          returning ctx.Err on cancel. failed is the error of the attempt before it.
+          OnRetry hears the retry first, on this goroutine.
         name: wait
-        params: ctx context.Context, attempt int
+        params: ctx context.Context, attempt int, failed error
         recv: r *retryRunner
         results: error
+      - doc: |-
+          delay is the wait before attempt: the one cfg.Delay reads from the failure
+          when it reads one, held at MaxDelay and never negative, else the jittered
+          backoff curve.
+        name: delay
+        params: attempt int, failed error
+        recv: r *retryRunner
+        results: time.Duration
       - doc: |-
           backoff computes the capped exponential delay for attempt (1-based growth).
           It is the deterministic half of the kernel curve (kernel/backoff.Grow — the
@@ -975,6 +1168,67 @@ types:
         recv: r *retryRunner
         results: time.Duration
     name: retryRunner
+  - doc: |-
+      tokenBudget is gRPC's retry-throttling bucket: tokens in thousandths, full
+      at max, a failure costing one token, a success returning ratio of one.
+    fields:
+      - name: tokens
+        type: atomic.Int64
+      - name: max
+        type: int64
+      - name: ratio
+        type: int64
+    kind: struct
+    methods:
+      - doc: AllowRetry reports whether more than half the tokens remain.
+        name: AllowRetry
+        recv: b *tokenBudget
+        results: bool
+      - doc: RecordSuccess puts ratio back, never past the bucket's size.
+        name: RecordSuccess
+        recv: b *tokenBudget
+      - doc: RecordFailure takes one token out, never below zero.
+        name: RecordFailure
+        recv: b *tokenBudget
+    name: tokenBudget
+  - doc: |-
+      refusedBudget is what NewRetryBudget returns for a configuration it cannot
+      honour: it allows no extra attempt, and NewRetry and NewHedge recognise it
+      and refuse every call with PolicyMisconfigured naming knob (ADR 0031).
+    fields:
+      - name: knob
+        type: string
+    kind: struct
+    methods:
+      - doc: "AllowRetry refuses every extra attempt: the budget could not be built."
+        name: AllowRetry
+        recv: refusedBudget
+        results: bool
+      - doc: RecordSuccess records nothing.
+        name: RecordSuccess
+        recv: refusedBudget
+      - doc: RecordFailure records nothing.
+        name: RecordFailure
+        recv: refusedBudget
+    name: refusedBudget
+  - fields:
+      - doc: |-
+          MaxTokens is the bucket's size and its starting content. Retries are
+          allowed while more than MaxTokens/2 remain, so the budget absorbs
+          about MaxTokens/2 more failures than its successes repay before it
+          starts refusing. A non-positive MaxTokens is refused; values above
+          2^40 are held there.
+        name: MaxTokens
+        type: int
+      - doc: |-
+          TokenRatio is what a recorded success puts back, in tokens, a
+          failure costing one. It is read to a thousandth, as gRPC reads it: a
+          value that is not finite, or that rounds below 0.001, is refused —
+          its zero would be a budget that, once drained, never refills.
+        name: TokenRatio
+        type: float64
+    kind: struct
+    name: RetryBudgetConfig
   - fields:
       - name: MaxAttempts
         type: int
@@ -1028,12 +1282,63 @@ types:
           the one policy here that actually WAITS, did not.
         name: Clock
         type: clock.Timed
+      - doc: |-
+          Delay decides the wait before a retry when the failure itself says how
+          long to wait. It is called once per retry, with the retry's number —
+          1 before the second attempt — and the error of the attempt that just
+          failed; a true second result makes its duration the wait, in place of
+          the backoff curve and without Jitter. A false one, and a nil Delay,
+          wait the curve, which is the behaviour before the field existed.
+
+          The wait it returns is held at MaxDelay when one is set, and a
+          negative one is no wait. A server's hint longer than the caller is
+          prepared to wait is therefore cut to MaxDelay, never followed past
+          it; a caller who would rather give up classifies that error as not
+          retryable instead.
+
+          RetryAfter has its shape, so honouring a Retry-After, an OTLP
+          collector's throttling or a RateLimited rejection is one line:
+
+          	Delay: func(_ int, err error) (time.Duration, bool) { return resilience.RetryAfter(err) }
+        name: Delay
+        type: func(attempt int, err error) (time.Duration, bool)
+      - doc: |-
+          Budget, when set, bounds the retries of every policy sharing it: each
+          success and each retryable failure is recorded in it, and before
+          every retry it is asked whether one may run. A refusal ends the loop
+          with RetryBudgetExceeded wrapping the last error, without waiting. A
+          deterministic error and a cancelled context record nothing.
+
+          Nil — the zero value — is the policy without a budget, as it was
+          before the field existed. Share one budget per dependency, between
+          its retry and its hedge: that is what stops a failing dependency from
+          receiving every call times MaxAttempts. A Retry(Hedge(op)) whose two
+          policies share a budget records a failed call at both levels, which
+          drains and refills it twice as fast and leaves its threshold where it
+          was.
+        name: Budget
+        type: coreres.RetryBudget
+      - doc: |-
+          OnRetry, when set, is called before each retry's wait, on the
+          calling goroutine, with the retry's number — 1 before the second
+          attempt —, the error that caused it and the wait about to start. It
+          is how a caller counts retries in their own metrics without this
+          package depending on one. It is not called for the first attempt,
+          nor for a retry the budget refused. It must not block: the retry
+          waits for it.
+        name: OnRetry
+        type: func(attempt int, err error, delay time.Duration)
     kind: struct
     name: RetryConfig
-  - doc: timeoutRunner caps an Operation's wall-clock with a context deadline.
+  - doc: |-
+      timeoutRunner caps an Operation's run time with a deadline. A nil clk is the
+      wall clock, through context.WithTimeout; any other clock goes through
+      clockDeadline.
     fields:
       - name: timeout
         type: time.Duration
+      - name: clk
+        type: clock.Timed
     kind: struct
     methods:
       - doc: Run executes op under a derived deadline.
@@ -1041,4 +1346,86 @@ types:
         params: ctx context.Context, op coreres.Operation
         recv: t timeoutRunner
         results: error
+      - doc: derive returns the Operation's deadline-bound context on the runner's clock.
+        name: derive
+        params: ctx context.Context
+        recv: t timeoutRunner
+        results: context.Context, context.CancelFunc
     name: timeoutRunner
+  - doc: |-
+      clockDeadline is a context that expires when an injected clock passes its
+      deadline, rather than when the wall clock does. It is what NewTimeoutWith
+      hands the Operation under any clock but the system one.
+
+      It is a context of its own, not a context.WithCancelCause, on purpose: a
+      cancelCtx reports context.Canceled from Err however it was cancelled, and so
+      does every context derived from it, so an Operation checking
+      errors.Is(ctx.Err(), context.DeadlineExceeded) would never see the deadline.
+      With its own Done channel, a context derived from this one is propagated
+      through Err and reports DeadlineExceeded too.
+
+      Deadline reports the caller's deadline, never this one: a time on a
+      ManualClock is not a time a socket can be given.
+    fields:
+      - name: parent
+        type: context.Context
+      - name: done
+        type: chan struct{}
+      - name: closeDone
+        type: sync.Once
+      - name: mu
+        type: sync.Mutex
+      - name: err
+        type: error
+    kind: struct
+    methods:
+      - doc: |-
+          watch finishes the context at the first of the deadline, the parent's end
+          and the release, then stops the timer so a ManualClock holds no waiter.
+        name: watch
+        params: timer clock.Timer, release <-chan struct{}
+        recv: c *clockDeadline
+      - doc: |-
+          finish records err as the context's error and closes Done, once: the first
+          cause to arrive wins and Err never changes afterwards.
+        name: finish
+        params: err error
+        recv: c *clockDeadline
+      - doc: |-
+          Deadline reports the caller's deadline: this context's own runs on a clock
+          that is not the wall clock.
+        name: Deadline
+        recv: c *clockDeadline
+        results: time.Time, bool
+      - doc: Done is closed once the context is finished.
+        name: Done
+        recv: c *clockDeadline
+        results: <-chan struct{}
+      - doc: |-
+          Err reports why the context finished, or nil while it has not. A parent
+          that has finished is folded in on the spot rather than when the watcher
+          notices it, so Err never reports a live context under a dead caller.
+        name: Err
+        recv: c *clockDeadline
+        results: error
+      - doc: "Value is the parent's: this context carries no value of its own."
+        name: Value
+        params: key any
+        recv: c *clockDeadline
+        results: any
+    name: clockDeadline
+  - fields:
+      - doc: |-
+          Duration is how long the Operation may run. A non-positive Duration
+          makes NewTimeoutWith return a policy that refuses every call with
+          PolicyMisconfigured, exactly as NewTimeout refuses a non-positive d.
+        name: Duration
+        type: time.Duration
+      - doc: |-
+          Clock is what Duration is measured on. Nil means clock.System, under
+          which the policy is NewTimeout's: a context.WithTimeout whose
+          deadline the Operation can read.
+        name: Clock
+        type: clock.Timed
+    kind: struct
+    name: TimeoutConfig
