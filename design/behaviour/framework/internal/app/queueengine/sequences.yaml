@@ -454,6 +454,75 @@ sequences:
           errs.Wrap(queue.QueueMisconfigured, errs.WrapParams{},
           		errs.String("mailer", o.node), errs.String("capability", capability))
         to: errs
+  - of: (*sealedOutbox).NackAfter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sealedOutbox).NackAfter
+        kind: self
+      - id: nacker.NackAfter
+        kind: value
+    steps:
+      - bind: nacker, ok
+        eval: o.Broker.(queue.DelayedNacker)
+      - opt:
+          do:
+            - return: queue.Nack{}, o.lacks("DelayedNacker")
+          when: "!ok"
+      - return: nacker.NackAfter(ctx, receipt, cause, delay)
+        to: nacker.NackAfter
+  - of: (*sealedOutbox).PublishAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sealedOutbox).PublishAt
+        kind: self
+      - id: o.sealMail
+        kind: internal
+      - id: deferred.PublishAt
+        kind: value
+    steps:
+      - bind: deferred, ok
+        eval: o.Broker.(queue.DelayedPublisher)
+      - opt:
+          do:
+            - return: queue.Message{}, o.lacks("DelayedPublisher")
+          when: "!ok"
+      - bind: box, err
+        eval: o.sealMail(ctx, payload)
+        to: o.sealMail
+      - opt:
+          do:
+            - return: queue.Message{}, err
+          when: err != nil
+      - return: deferred.PublishAt(ctx, box, at)
+        to: deferred.PublishAt
+  - of: (*sealedOutbox).PublishOnce
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*sealedOutbox).PublishOnce
+        kind: self
+      - id: o.sealMail
+        kind: internal
+      - id: once.PublishOnce
+        kind: value
+    steps:
+      - bind: once, ok
+        eval: o.Broker.(queue.OncePublisher)
+      - opt:
+          do:
+            - return: queue.Message{}, false, o.lacks("OncePublisher")
+          when: "!ok"
+      - bind: box, err
+        eval: o.sealMail(ctx, payload)
+        to: o.sealMail
+      - opt:
+          do:
+            - return: queue.Message{}, false, err
+          when: err != nil
+      - return: once.PublishOnce(ctx, key, box, window)
+        to: once.PublishOnce
   - of: (*sealedOutbox).ReplayDeadLetter
     participants:
       - id: caller

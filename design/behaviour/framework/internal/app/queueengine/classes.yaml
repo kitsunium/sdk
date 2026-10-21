@@ -41,6 +41,9 @@ files:
       - (*sealedOutbox).PutDeadLetter
       - (*sealedOutbox).sealMail
       - (*sealedOutbox).lacks
+      - (*sealedOutbox).NackAfter
+      - (*sealedOutbox).PublishAt
+      - (*sealedOutbox).PublishOnce
       - (*sealedOutbox).ReplayDeadLetter
       - (*sealedOutbox).DeleteDeadLetter
     name: outbox.go
@@ -343,6 +346,27 @@ types:
         params: capability string
         recv: o *sealedOutbox
         results: error
+      - doc: |-
+          NackAfter is the SQL broker's (queue.DelayedNacker): the spool parks a
+          mail for its backoff with it, the box staying as it lies.
+        name: NackAfter
+        params: ctx context.Context, receipt queue.Receipt, cause error, delay time.Duration
+        recv: o *sealedOutbox
+        results: queue.Nack, error
+      - doc: |-
+          PublishAt seals payload as Publish does and publishes the box, received by
+          no consumer before at (queue.DelayedPublisher).
+        name: PublishAt
+        params: ctx context.Context, payload []byte, at time.Time
+        recv: o *sealedOutbox
+        results: queue.Message, error
+      - doc: |-
+          PublishOnce seals payload as Publish does and publishes the box at most
+          once per key over window (queue.OncePublisher).
+        name: PublishOnce
+        params: ctx context.Context, key string, payload []byte, window time.Duration
+        recv: o *sealedOutbox
+        results: queue.Message, bool, error
       - doc: "ReplayDeadLetter is the SQL broker's: the box goes back as it lies."
         name: ReplayDeadLetter
         params: ctx context.Context, id string
@@ -384,6 +408,15 @@ vars:
         value: (*sealedOutbox)(nil)
       - name: _
         type: queue.Releaser
+        value: (*sealedOutbox)(nil)
+      - name: _
+        type: queue.DelayedNacker
+        value: (*sealedOutbox)(nil)
+      - name: _
+        type: queue.DelayedPublisher
+        value: (*sealedOutbox)(nil)
+      - name: _
+        type: queue.OncePublisher
         value: (*sealedOutbox)(nil)
       - name: _
         type: queue.DeadLetterManager
