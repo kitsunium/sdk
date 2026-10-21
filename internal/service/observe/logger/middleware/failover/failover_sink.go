@@ -12,6 +12,11 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
+// demotedOnStack is how many demoted branches a cooled Write remembers without
+// allocating; a chain with more branches cooling at once spills to the heap,
+// on a path where every one of them has already failed.
+const demotedOnStack int = 8
+
 // failoverSink wraps an ordered list of downstream sinks tried sequentially.
 type failoverSink struct {
 	// chain is the ordered sink list — first hit returns; misses cascade.
@@ -75,7 +80,7 @@ func NewWithConfig(cfg Config, branches ...corelogger.Sink) (sink corelogger.Sin
 	if out.clk == nil {
 		out.clk = clock.System
 	}
-	out.retryAt = make([]atomic.Int64, len(out.chain))
+	out.retryAt = newDeadlines(len(out.chain))
 	//: the demoting sink.
 	return out, nil
 }
@@ -127,50 +132,50 @@ func exhausted(collected []error, attempts int, rec corelogger.RecordEvent) erro
 
 // writeCooled is Write under a cooldown: a first pass in declaration order
 // over the branches not cooling down, then — only when all of them failed — a
-// second pass over the cooling ones, in the same order. A cooling branch is
-// demoted, never skipped, so a cooldown alone never loses a record. The clock
-// is read once per Write.
+// second pass over the branches that were cooling when the Write began, in the
+// same order. A branch the first pass tried is not tried twice. A cooling
+// branch is demoted, never skipped, so a cooldown alone never loses a record.
+// The clock is read once per Write.
 func (s *failoverSink) writeCooled(ctx context.Context, rec corelogger.RecordEvent, p []byte) (n int, err error) {
 	now := s.clk.Now().UnixNano()
 	//: nil until a branch fails, for the reason Write's slate is.
 	var collected []error
-	cooling := false
+	//: the branches cooling when this Write began, remembered on the stack.
+	var onStack [demotedOnStack]int
+	demoted := onStack[:0]
 	//: first pass: the branches in their place.
-	for i, branch := range s.chain {
+	for i := range s.chain {
 		//: demoted until its deadline: the second pass may still reach it.
 		if s.retryAt[i].Load() > now {
-			cooling = true
+			demoted = append(demoted, i)
 			continue
 		}
+		written, werr := s.attempt(ctx, i, rec, p, now)
 		//: the first success short-circuits, as Write's does.
-		if written, ok := s.attempt(ctx, i, branch, rec, p, now, &collected); ok {
+		if werr == nil {
 			//: accepted.
 			return written, nil
 		}
+		collected = append(collected, werr)
 	}
-	//: second pass, only when there is a demoted branch left to try.
-	if cooling {
-		//: the demoted branches, in declaration order.
-		for i, branch := range s.chain {
-			//: the first pass already tried the others.
-			if s.retryAt[i].Load() <= now {
-				continue
-			}
-			//: a demoted branch that recovered takes the record.
-			if written, ok := s.attempt(ctx, i, branch, rec, p, now, &collected); ok {
-				//: accepted.
-				return written, nil
-			}
+	//: second pass: the demoted branches, in declaration order.
+	for _, i := range demoted {
+		written, werr := s.attempt(ctx, i, rec, p, now)
+		//: a demoted branch that recovered takes the record.
+		if werr == nil {
+			//: accepted.
+			return written, nil
 		}
+		collected = append(collected, werr)
 	}
-	//: every branch was tried and failed.
+	//: every branch was tried, once, and failed.
 	return 0, exhausted(collected, len(collected), rec)
 }
 
 // attempt writes to branch i, restores it to its place on success and
-// demotes it for the cooldown on failure, collecting the failure.
-func (s *failoverSink) attempt(ctx context.Context, i int, branch corelogger.Sink, rec corelogger.RecordEvent, p []byte, now int64, collected *[]error) (n int, ok bool) {
-	written, werr := branch.Write(ctx, rec, p)
+// demotes it for the cooldown on failure.
+func (s *failoverSink) attempt(ctx context.Context, i int, rec corelogger.RecordEvent, p []byte, now int64) (n int, err error) {
+	written, werr := s.chain[i].Write(ctx, rec, p)
 	//: accepted: a demoted branch is back in its place.
 	if werr == nil {
 		//: a load first, so the healthy path never writes a shared word.
@@ -178,13 +183,12 @@ func (s *failoverSink) attempt(ctx context.Context, i int, branch corelogger.Sin
 			s.retryAt[i].Store(0)
 		}
 		//: the byte count.
-		return written, true
+		return written, nil
 	}
 	//: failed: tried last until the cooldown has passed.
 	s.retryAt[i].Store(now + int64(s.cooldown))
-	*collected = append(*collected, werr)
-	//: the walk continues.
-	return 0, false
+	//: the branch's own failure, for the caller's slate.
+	return 0, werr
 }
 
 // Flush forwards to every distinct branch and aggregates per-branch errors via
@@ -244,4 +248,11 @@ func (s *failoverSink) Close() error {
 	}
 	//: happy path — every branch closed cleanly.
 	return nil
+}
+
+// newDeadlines returns one cooldown deadline per branch, every one zero — "in
+// its place". A fixed-length table indexed by branch, never appended to.
+func newDeadlines(n int) []atomic.Int64 {
+	//: indexed access only.
+	return make([]atomic.Int64, n)
 }

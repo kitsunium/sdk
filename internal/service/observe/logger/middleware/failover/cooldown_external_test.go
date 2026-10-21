@@ -137,6 +137,29 @@ func TestCooldownDemotesButNeverSkips(t *testing.T) {
 	}
 }
 
+// TestCooldownTriesEachBranchOnce pins that the second pass reaches only the
+// branches that were cooling when the Write began: a branch that has just
+// failed in the first pass is not tried a second time for the same record.
+func TestCooldownTriesEachBranchOnce(t *testing.T) {
+	t.Parallel()
+	first, second, third := &switchBranch{}, &switchBranch{}, &switchBranch{}
+	clk := clock.NewManualClock(time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC))
+	sink, err := failover.NewWithConfig(failover.Config{Cooldown: cooldownTestPeriod, Clock: clk}, first, second, third)
+	if err != nil {
+		t.Fatalf("NewWithConfig: %v", err)
+	}
+	first.down.Store(true)
+	write(t, sink)
+	second.down.Store(true)
+	third.down.Store(true)
+	if _, werr := sink.Write(t.Context(), corelogger.RecordEvent{}, []byte("x")); !errors.Is(werr, corefailover.Exhausted) {
+		t.Fatalf("Write = %v, want Exhausted", werr)
+	}
+	if got := [3]int64{first.calls.Load(), second.calls.Load(), third.calls.Load()}; got != [3]int64{2, 2, 1} {
+		t.Fatalf("calls = %v, want [2 2 1] — every branch once per record", got)
+	}
+}
+
 // TestCooldownExhaustedNamesEveryAttempt pins the verdict when every branch,
 // demoted or not, failed: Exhausted, every cause reachable.
 func TestCooldownExhaustedNamesEveryAttempt(t *testing.T) {

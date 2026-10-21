@@ -1,5 +1,15 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      demotedOnStack is how many demoted branches a cooled Write remembers without
+      allocating; a chain with more branches cooling at once spills to the heap,
+      on a path where every one of them has already failed.
+    items:
+      - name: demotedOnStack
+        type: int
+        value: "8"
+    name: demotedOnStack
 files:
   - decls:
       - Config
@@ -7,6 +17,7 @@ files:
   - decls: []
     name: doc.go
   - decls:
+      - demotedOnStack
       - failoverSink
       - New
       - NewWithConfig
@@ -16,6 +27,7 @@ files:
       - (*failoverSink).attempt
       - (*failoverSink).Flush
       - (*failoverSink).Close
+      - newDeadlines
     name: failover_sink.go
 functions:
   - name: New
@@ -28,6 +40,12 @@ functions:
     name: exhausted
     params: collected []error, attempts int, rec corelogger.RecordEvent
     results: error
+  - doc: |-
+      newDeadlines returns one cooldown deadline per branch, every one zero — "in
+      its place". A fixed-length table indexed by branch, never appended to.
+    name: newDeadlines
+    params: n int
+    results: "[]atomic.Int64"
 imports:
   atomic: sync/atomic
   clock: github.com/kitsunium/sdk/internal/kernel/clock
@@ -89,20 +107,21 @@ types:
       - doc: |-
           writeCooled is Write under a cooldown: a first pass in declaration order
           over the branches not cooling down, then — only when all of them failed — a
-          second pass over the cooling ones, in the same order. A cooling branch is
-          demoted, never skipped, so a cooldown alone never loses a record. The clock
-          is read once per Write.
+          second pass over the branches that were cooling when the Write began, in the
+          same order. A branch the first pass tried is not tried twice. A cooling
+          branch is demoted, never skipped, so a cooldown alone never loses a record.
+          The clock is read once per Write.
         name: writeCooled
         params: ctx context.Context, rec corelogger.RecordEvent, p []byte
         recv: s *failoverSink
         results: n int, err error
       - doc: |-
           attempt writes to branch i, restores it to its place on success and
-          demotes it for the cooldown on failure, collecting the failure.
+          demotes it for the cooldown on failure.
         name: attempt
-        params: ctx context.Context, i int, branch corelogger.Sink, rec corelogger.RecordEvent, p []byte, now int64, collected *[]error
+        params: ctx context.Context, i int, rec corelogger.RecordEvent, p []byte, now int64
         recv: s *failoverSink
-        results: n int, ok bool
+        results: n int, err error
       - doc: |-
           Flush forwards to every distinct branch and aggregates per-branch errors via
           errors.Join. A sink reused across multiple chain slots (V33) is flushed once.
