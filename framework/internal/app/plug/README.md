@@ -79,6 +79,9 @@ The package imports the standard library and the framework's model only, so that
 - [type JobSchedulerConfig](<#JobSchedulerConfig>)
 - [type Keyser](<#Keyser>)
   - [func \(Keyser\) Keys\(ctx context.Context, after string\) iter.Seq2\[string, error\]](<#Keyser.Keys>)
+- [type LaterPublisher](<#LaterPublisher>)
+  - [func \(LaterPublisher\) PublishAt\(ctx context.Context, payload \[\]byte, at time.Time\) error](<#LaterPublisher.PublishAt>)
+  - [func \(LaterPublisher\) PublishOnce\(ctx context.Context, key string, payload \[\]byte, window time.Duration\) \(published bool, err error\)](<#LaterPublisher.PublishOnce>)
 - [type LiveMessageValue](<#LiveMessageValue>)
 - [type MailAttemptValue](<#MailAttemptValue>)
 - [type MailCaptureSource](<#MailCaptureSource>)
@@ -822,7 +825,7 @@ Refused reports whether err, or an error it wraps, is a refusal of kind.
 <a name="Broker"></a>
 ## type [Broker](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/queue_interface.go>)
 
-Broker is one queue as the framework's core uses it: a publication, the consumer that delivers it, and its dead letters. It grows by the sibling below.
+Broker is one queue as the framework's core uses it: a publication, the consumer that delivers it, and its dead letters. It grows by the siblings below.
 
 ```go
 type Broker interface {
@@ -965,20 +968,34 @@ Sleep waits until d passed.
 <a name="ConsumeConfig"></a>
 ## type [ConsumeConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/queue.go>)
 
-ConsumeConfig is how a queue's consumer runs: its handler, how long it waits idle, how many messages it handles at once and takes at a time.
+ConsumeConfig is how a queue's consumer runs: its handler, how long it waits idle, how many messages it handles at once and takes at a time, how it stops, whether it renews a running handler's lease, and when a handler asked to be retried.
 
 ```go
 type ConsumeConfig struct {
 	// Handler handles one delivery: nil acknowledges it, an error has it
 	// retried or, through DoNotRetry, dead-lettered at once. Every handler
 	// the framework runs tolerates a redelivery.
-	Handler      func(ctx context.Context, d DeliveryValue) error
+	Handler       func(ctx context.Context, d DeliveryValue) error
 	// PollInterval bounds an idle wait.
-	PollInterval time.Duration
+	PollInterval  time.Duration
 	// Parallelism is how many deliveries are handled at once.
-	Parallelism  int
+	Parallelism   int
 	// BatchSize is how many messages the consumer takes at a time.
-	BatchSize    int
+	BatchSize     int
+	// DrainTimeout is how long the handler running when ctx ends may still
+	// run before its context is cancelled; zero cancels it at once.
+	DrainTimeout  time.Duration
+	// SettleTimeout bounds each outcome sent once ctx ended, and each lease
+	// renewal; zero is the queue's own bound.
+	SettleTimeout time.Duration
+	// AutoExtend renews the lease of the message a handler runs for as long
+	// as it runs.
+	AutoExtend    bool
+	// RetryIn reads, from the error a delivery's handler returned, the delay
+	// it asked to be retried after: its queue hands the message back with
+	// that delay, the delivery counted. Nil, or false, keeps the queue's own
+	// retry delay.
+	RetryIn       func(err error) (delay time.Duration, asked bool)
 }
 ```
 
@@ -1602,6 +1619,41 @@ func (Keyser) Keys(ctx context.Context, after string) iter.Seq2[string, error]
 ```
 
 Keys yields the keys above after, in order, then its failure if any.
+
+<a name="LaterPublisher"></a>
+## type [LaterPublisher](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/queue_interface.go>)
+
+LaterPublisher is a Broker that publishes a message for later, and once per key. A sibling of [Broker](#Broker).
+
+```go
+type LaterPublisher interface {
+	// PublishAt puts payload in the queue, received by no consumer before
+	// at: in the transaction ctx carries for its database, when it lives on
+	// one.
+	PublishAt(ctx context.Context, payload []byte, at time.Time) error
+	// PublishOnce puts payload in the queue unless a publication under key
+	// was made within window, and reports whether it did.
+	PublishOnce(ctx context.Context, key string, payload []byte, window time.Duration) (published bool, err error)
+}
+```
+
+<a name="LaterPublisher.PublishAt"></a>
+### func \(LaterPublisher\) [PublishAt](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/queue_interface.go>)
+
+```go
+func (LaterPublisher) PublishAt(ctx context.Context, payload []byte, at time.Time) error
+```
+
+PublishAt puts payload in the queue, received by no consumer before at: in the transaction ctx carries for its database, when it lives on one.
+
+<a name="LaterPublisher.PublishOnce"></a>
+### func \(LaterPublisher\) [PublishOnce](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/queue_interface.go>)
+
+```go
+func (LaterPublisher) PublishOnce(ctx context.Context, key string, payload []byte, window time.Duration) (published bool, err error)
+```
+
+PublishOnce puts payload in the queue unless a publication under key was made within window, and reports whether it did.
 
 <a name="LiveMessageValue"></a>
 ## type [LiveMessageValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/queue.go>)

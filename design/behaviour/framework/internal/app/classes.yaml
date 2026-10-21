@@ -224,6 +224,67 @@ constants:
         type: string
         value: frameworkName + "_queue"
     name: queueTableService
+  - doc: The knobs of a consumer, each a suffix of its setting's name.
+    grouped: true
+    items:
+      - name: knobDrain
+        value: "\"drain\""
+      - name: knobSettle
+        value: "\"settle\""
+      - name: knobLease
+        value: "\"lease\""
+      - name: knobAutoExtend
+        value: "\"auto-extend\""
+    name: knobDrain
+  - doc: |-
+      The code's values of a consumer's knobs, unless its declaration says
+      otherwise: a handler running at a stop gets five seconds to finish, each
+      outcome after the stop five more — the SDK's DefaultSettleTimeout —, a
+      delivery is leased thirty seconds and renewed while its handler runs.
+    grouped: true
+    items:
+      - name: defaultDrain
+        type: time.Duration
+        value: 5 * time.Second
+      - name: defaultSettle
+        type: time.Duration
+        value: 5 * time.Second
+      - name: defaultLease
+        type: time.Duration
+        value: 30 * time.Second
+    name: defaultDrain
+  - doc: |-
+      defaultStopBudget is the most one component's stop may take when no
+      consumer's drain asks for more: the SDK lifecycle's per-component budget.
+    items:
+      - name: defaultStopBudget
+        type: time.Duration
+        value: 10 * time.Second
+    name: defaultStopBudget
+  - doc: |-
+      runStopDeadline is how long the stop [App.Run] makes after a signal may
+      take when no consumer's drain asks for more (stopDeadline).
+    items:
+      - name: runStopDeadline
+        type: time.Duration
+        value: 30 * time.Second
+    name: runStopDeadline
+  - doc: |-
+      stopMargin is what a component's stop budget keeps beyond a consumer's
+      drain and settle: the time its supervisor takes to see its consumer end.
+    items:
+      - name: stopMargin
+        type: time.Duration
+        value: time.Second
+    name: stopMargin
+  - doc: |-
+      retryInField names the field RetryIn carries its delay in, as integer
+      nanoseconds; retryInOf is its one reader.
+    items:
+      - name: retryInField
+        type: string
+        value: "\"retry_in_ns\""
+    name: retryInField
   - doc: maxPhaseHistory caps the phase changes kept; the oldest go first.
     items:
       - name: maxPhaseHistory
@@ -1076,6 +1137,11 @@ constants:
       - name: clearFormer
       - name: clearVersions
     name: clearRecord
+  - doc: knobOnceWindow is the knob of a topic's deduplication window.
+    items:
+      - name: knobOnceWindow
+        value: "\"once-window\""
+    name: knobOnceWindow
   - doc: |-
       queuePackage is the package a program imports for its topics,
       subscriptions, watches, queued commands and outboxes on a database.
@@ -2122,6 +2188,7 @@ files:
       - (*Command).Key
       - (*Command).Expose
       - (*Command).Dispatch
+      - (*Command).DispatchAt
       - (*Command).steps
       - (*Command).transacted
       - (*Command).keyFor
@@ -2210,6 +2277,38 @@ files:
       - (*consumer).observe
       - defaultDeliveries
     name: consumer.go
+  - decls:
+      - knobDrain
+      - defaultDrain
+      - defaultStopBudget
+      - runStopDeadline
+      - stopMargin
+      - consumerKnobs
+      - defaultConsumerKnobs
+      - (*consumerKnobs).declare
+      - consumerRun
+      - (*consumerKnobs).values
+      - consumerRun.policy
+      - consumerRun.consume
+      - consumerRun.stopTakes
+      - consumerRun.config
+      - drainer
+      - (*App).componentStopBudget
+      - (*App).stopDeadline
+      - (*App).drainers
+      - (*App).beginDrains
+      - beginStop
+      - stoppedBy
+      - (*loopState).ended
+    name: consumer_policy.go
+  - decls:
+      - _#2
+    name: consumer_policy_compliance.go
+  - decls:
+      - retryInField
+      - RetryIn
+      - retryInOf
+    name: consumer_retry.go
   - decls:
       - maxPhaseHistory
       - labelNode
@@ -2859,7 +2958,7 @@ files:
       - NewListener
     name: listener.go
   - decls:
-      - _#2
+      - _#3
     name: listener_compliance.go
   - decls:
       - accepter
@@ -3353,7 +3452,7 @@ files:
       - judged
     name: policy.go
   - decls:
-      - _#3
+      - _#4
     name: policy_compliance.go
   - decls:
       - policyGuard
@@ -3499,7 +3598,7 @@ files:
       - knobIn
     name: port_policy.go
   - decls:
-      - _#4
+      - _#5
     name: port_policy_compliance.go
   - decls:
       - PortPolicyConfigurer
@@ -3704,6 +3803,15 @@ files:
       - NewQuery
     name: query.go
   - decls:
+      - knobOnceWindow
+      - publication
+      - publication.into
+      - publication.mark
+      - laterOnce
+      - noTopicKey
+      - notQueued
+    name: queue_later.go
+  - decls:
       - queuePackage
       - (*App).openQueueWith
       - deliveryHandler
@@ -3732,6 +3840,8 @@ files:
       - (*Command).queueUnder
       - (*Command).consume
       - (*Command).stop
+      - (*Command).stopTakes
+      - (*Command).beginDrain
       - (*Command).describeQueue
       - queuePlace
       - queueWhere
@@ -4800,13 +4910,18 @@ files:
   - decls:
       - TopicService
       - (*Service).Topic
+      - (*TopicService).Once
       - envelope
       - (*TopicService).Publish
+      - (*TopicService).PublishAt
+      - (*TopicService).publishAs
+      - (*TopicService).publication
       - (*TopicService).send
       - (*TopicService).payload
       - (*TopicService).publish
       - (*TopicService).subscribers
       - (*TopicService).publishTo
+      - (*TopicService).publishInto
       - (*TopicService).describe
       - SubscriptionWorker
       - (*SubscriptionWorker).queueUnder
@@ -4822,10 +4937,16 @@ files:
       - deliveryOption.commandConfigure
       - MaxDeliveries
       - Parallelism
+      - Drain
+      - Settle
+      - Lease
+      - AutoExtend
       - (*Service).Subscribe
       - (*SubscriptionWorker).start
       - (*SubscriptionWorker).deliver
       - (*SubscriptionWorker).stop
+      - (*SubscriptionWorker).stopTakes
+      - (*SubscriptionWorker).beginDrain
       - (*SubscriptionWorker).describe
       - NewTopicService
     name: topic.go
@@ -5023,6 +5144,8 @@ files:
       - (*Watch).consume
       - (*Watch).deliver
       - (*Watch).stop
+      - (*Watch).stopTakes
+      - (*Watch).beginDrain
       - noticeOf
       - (*Watch).notice
       - (*Watch).post
@@ -5883,7 +6006,8 @@ functions:
     results: string
   - doc: |-
       consumerPolicy is the policy of every consumer's queue: a message is leased
-      for thirty seconds, retried half a second after its first failure, the
+      for thirty seconds — its consumer's lease setting says otherwise
+      (consumerRun.policy) —, retried half a second after its first failure, the
       wait doubling after each — the queue's own growing delay (ADR 0151 §D7),
       never more than kit's backoff ceiling, a minute —, and dead-lettered after
       maxDeliveries attempts, or at its first failure when no retry can help
@@ -5909,9 +6033,38 @@ functions:
     results: bool
   - doc: |-
       defaultDeliveries are a consumer's delivery options until one is given:
-      defaultMaxDeliveries attempts, one message at a time.
+      defaultMaxDeliveries attempts, one message at a time, and the default stop
+      and lease (consumer_policy.go).
     name: defaultDeliveries
     results: deliveryOptions
+  - doc: defaultConsumerKnobs are a consumer's knobs until an option says otherwise.
+    name: defaultConsumerKnobs
+    results: consumerKnobs
+  - doc: |-
+      beginStop cancels the run sup supervises without waiting for it to end —
+      the component's stop waits —; nothing for a consumer that never started.
+      A Stop whose context is already done cancels the run and answers
+      StopTimeout at once, which is what is asked of it here: any other answer
+      is returned.
+    name: beginStop
+    params: sup *lifecycle.Supervisor
+    results: error
+  - doc: |-
+      stoppedBy reports whether err, a delivery's handler's, is its context
+      ending because its consumer stops — the drain over, the app stopping —:
+      the message is handed back uncounted, and it is no failure.
+    name: stoppedBy
+    params: ctx context.Context, a *App, err error
+    results: bool
+  - name: RetryIn
+    params: d time.Duration, cause error
+    results: error
+  - doc: |-
+      retryInOf is the delay RetryIn put on err, and whether it put one: the
+      outermost mark's when err was marked more than once.
+    name: retryInOf
+    params: err error
+    results: time.Duration, bool
   - doc: mustSignal names a signal the SDK knows on every platform.
     name: mustSignal
     params: name string
@@ -7468,6 +7621,24 @@ functions:
     results: "*Query[Q, R]"
     typeParams: Q, R any
   - doc: |-
+      laterOnce refuses a publication for later on a topic that publishes once:
+      the SDK has no publication once for later (ADR 0183).
+    name: laterOnce
+    params: t *nodeBase
+    results: error
+  - doc: |-
+      noTopicKey refuses a message whose key is empty on a topic that publishes
+      once.
+    name: noTopicKey
+    params: t *nodeBase
+    results: error
+  - doc: |-
+      notQueued refuses a dispatch for later of a command that is not queued:
+      only a queue holds a dispatch until its instant.
+    name: notQueued
+    params: c *nodeBase
+    results: error
+  - doc: |-
       queuesMissing is the refusal of what needs the queue subsystem in a
       program that does not import it.
     name: queuesMissing
@@ -8892,6 +9063,18 @@ functions:
   - name: Parallelism
     params: n int
     results: DeliveryOption
+  - name: Drain
+    params: d time.Duration
+    results: DeliveryOption
+  - name: Settle
+    params: d time.Duration
+    results: DeliveryOption
+  - name: Lease
+    params: d time.Duration
+    results: DeliveryOption
+  - name: AutoExtend
+    params: on bool
+    results: DeliveryOption
   - name: NewTopicService
     results: "*TopicService[T]"
     typeParams: T any
@@ -10310,13 +10493,13 @@ types:
         results: int
       - doc: |-
           openConsumerQueue opens the queue of the consumer b — a subscription's, a
-          watch's, a queued command's —, kept under under: on the database that
+          watch's, a queued command's —, kept under under, under policy: on the database that
           keeps the consumer when it is open (ADR 0178 C1), one table of the SDK's
           SQL broker, and the database it returns is where a publication made in a
           transaction on it joins that transaction; else a file or a memory queue
           (openQueue), and no database. A test's wrapper stands in front of either.
         name: openConsumerQueue
-        params: b *nodeBase, under string, maxDeliveries int
+        params: b *nodeBase, under string, policy plug.QueuePolicyValue
         recv: a *App
         results: plug.Broker, *databaseRun, error
       - doc: |-
@@ -10339,11 +10522,38 @@ types:
       - doc: |-
           openQueue opens the queue of the consumer b that no open database keeps:
           a file queue at dir under the data directory, memory without one, under
-          consumerPolicy, behind a test's wrapper.
+          policy, behind a test's wrapper.
         name: openQueue
-        params: b *nodeBase, dir string, maxDeliveries int
+        params: b *nodeBase, dir string, policy plug.QueuePolicyValue
         recv: a *App
         results: plug.Broker, error
+      - doc: |-
+          componentStopBudget is the budget the app's lifecycle gives each
+          component's stop: defaultStopBudget, or the longest stop a consumer of the
+          app takes — its drain plus its settle — and the margin, when that is
+          longer. A CLI run starts no consumer.
+        name: componentStopBudget
+        recv: a *App
+        results: time.Duration
+      - doc: |-
+          stopDeadline is how long a whole stop of the app may take, base when no
+          consumer asks for a longer component budget: base, plus what the
+          consumers' budget adds to the default one.
+        name: stopDeadline
+        params: base time.Duration
+        recv: a *App
+        results: time.Duration
+      - doc: drainers are the app's consumers.
+        name: drainers
+        recv: a *App
+        results: "[]drainer"
+      - doc: |-
+          beginDrains tells every consumer of the app that it is stopping, at once:
+          each one stops leasing and lets its running handler finish within its
+          drain, while the components before it stop. Its component's stop then
+          waits for it.
+        name: beginDrains
+        recv: a *App
       - doc: rememberPhase records a phase change. The caller holds a.mu.
         name: rememberPhase
         params: p, reason string
@@ -12894,6 +13104,13 @@ types:
         params: a *App, started, finished time.Time, err error
         recv: l *loopState
       - doc: |-
+          ended ends a delivery's span sp, begun at started, and reports the run to
+          the loop: a handler the stop's drain cut short is no failure — its span
+          says it was handed back, and the loop counts no error (stoppedBy).
+        name: ended
+        params: ctx context.Context, a *App, sp *span, started time.Time, err error
+        recv: l *loopState
+      - doc: |-
           begin marks a run of the loop as started, for wake — interval, topic,
           deadline, manual, start, or "" when the caller does not say — and streams
           the loop's new state.
@@ -13793,6 +14010,10 @@ types:
         params: ctx context.Context, in C
         recv: c *Command[C, R]
         results: R, error
+      - name: DispatchAt
+        params: ctx context.Context, in C, at time.Time
+        recv: c *Command[C, R]
+        results: error
       - doc: |-
           steps are a command's own, inside its policies: its key, then its
           transaction — opened once the key is held —, and in it its authorization
@@ -13867,11 +14088,12 @@ types:
         results: "[]model.Mechanic"
       - doc: |-
           accept checks a dispatch of the queued command as its caller — the
-          input's validate tags, its authorization, its key — and queues it. A
-          dispatch whose key waits or runs is not queued again: it is answered as
-          accepted, and its span says it was deduplicated.
+          input's validate tags, its authorization, its key — and queues it, for
+          at when it is not zero (DispatchAt). A dispatch whose key waits or runs is
+          not queued again: it is answered as accepted, and its span says it was
+          deduplicated — a dispatch for later holds its key until it is handled.
         name: accept
-        params: ctx context.Context, a *App, from string, in C
+        params: ctx context.Context, a *App, from string, in C, at time.Time
         recv: c *Command[C, R]
         results: err error
       - doc: |-
@@ -13883,14 +14105,14 @@ types:
         recv: c *Command[C, R]
         results: key string, fresh bool, err error
       - doc: |-
-          put queues env, with the dispatch's trace and user — inside a
-          transaction, encoded now and queued at the commit: in the transaction,
-          just before it commits, when the command's queue lives on the
-          transaction's database — a queue that refuses it then fails the
-          transaction —, once it committed otherwise. A rollback drops it, and gives
-          its key back.
+          put queues env, with the dispatch's trace and user, received by no
+          consumer before at when it is not zero — inside a transaction, encoded now
+          and queued at the commit: in the transaction, just before it commits, when
+          the command's queue lives on the transaction's database — a queue that
+          refuses it then fails the transaction —, once it committed otherwise. A
+          rollback drops it, and gives its key back.
         name: put
-        params: ctx context.Context, q *commandQueue, key string, env queuedEnvelope[C]
+        params: ctx context.Context, q *commandQueue, key string, env queuedEnvelope[C], at time.Time
         recv: c *Command[C, R]
         results: error
       - doc: |-
@@ -13900,7 +14122,9 @@ types:
           or dead-lettered — after its last attempt, or at once when no retry can
           help (doNotRetry) —, gives its key back. A dispatch that does not
           decode will not decode on its next attempt either: it is dead-lettered on
-          its first (ADR 0151 §D8).
+          its first (ADR 0151 §D8). A handling that said when to try again
+          ([RetryIn]) is handed back with that delay, its key kept; one the app's
+          stop cut short is no failure, and is handled again at the next start.
         name: handler
         params: a *App, q *commandQueue, loop *loopState
         recv: c *Command[C, R]
@@ -13950,7 +14174,7 @@ types:
           dispatches behind a slow one — their leases lapsing — and Parallelism
           would not say how many run.
         name: consume
-        params: ctx context.Context, q *commandQueue, handler deliveryHandler
+        params: ctx context.Context, q *commandQueue, run consumerRun, handler deliveryHandler
         recv: c *Command[C, R]
         results: error
       - doc: |-
@@ -13961,6 +14185,16 @@ types:
         recv: c *Command[C, R]
         results: error
       - doc: |-
+          stopTakes is the most a queued command's stop takes: its drain and its
+          settle; nothing for a command that is not queued.
+        name: stopTakes
+        recv: c *Command[C, R]
+        results: time.Duration
+      - doc: beginDrain tells a queued command's consumer the app is stopping.
+        name: beginDrain
+        recv: c *Command[C, R]
+        results: error
+      - doc: |-
           describeQueue fills what a queued command's node says of its queue: its
           attempts, its parallelism, where it waits and, running, its dead letters.
         name: describeQueue
@@ -13968,7 +14202,8 @@ types:
         recv: c *Command[C, R]
       - doc: |-
           queueMechanic is a queued command's queue, among the steps of its
-          pipeline: where it waits, and how many attempts it gets.
+          pipeline: where it waits, how many attempts it gets, and its stop and
+          lease.
         name: queueMechanic
         params: a *App
         recv: c *Command[C, R]
@@ -14245,7 +14480,10 @@ types:
           deliver runs one delivery in the trace its message carries, in a span on
           the consumer's node from the node the message came from, over a delivers
           edge, and reports it to the consumer's loop. A panic in handle is the
-          handler's failure.
+          handler's failure; a handler the app's stop cut short is none — its
+          message is handed back uncounted (stoppedBy) —; one that said when to
+          try again ([RetryIn]) is handed back by its queue with that delay
+          (consumerRun.consume).
         name: deliver
         params: ctx context.Context, d *plug.DeliveryValue, from origin, handle func(context.Context, *span) error
         recv: c *consumer
@@ -14281,6 +14519,90 @@ types:
         type: string
     kind: struct
     name: origin
+  - doc: |-
+      consumerKnobs are a consumer's stop and lease: the code's values, and the
+      settings that override them once its declaration declared them.
+    fields:
+      - name: drain
+        type: time.Duration
+      - name: settle
+        type: time.Duration
+      - name: lease
+        type: time.Duration
+      - name: autoExtend
+        type: bool
+      - name: drainFor
+        type: "*SettingService[time.Duration]"
+      - name: settleFor
+        type: "*SettingService[time.Duration]"
+      - name: leaseFor
+        type: "*SettingService[time.Duration]"
+      - name: autoExtendFor
+        type: "*SettingService[bool]"
+    kind: struct
+    methods:
+      - doc: declare declares the consumer n's settings in svc.
+        name: declare
+        params: svc *Service, n *nodeBase
+        recv: k *consumerKnobs
+      - doc: values are the knobs' values in the app that runs them.
+        name: values
+        recv: k *consumerKnobs
+        results: consumerRun
+    name: consumerKnobs
+  - doc: |-
+      consumerRun is what a consumer runs with in the app that runs it — its
+      defaults before.
+    fields:
+      - name: drain
+        type: time.Duration
+      - name: settle
+        type: time.Duration
+      - name: lease
+        type: time.Duration
+      - name: autoExtend
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          policy is the queue policy of a consumer's queue: consumerPolicy, its
+          lease the consumer's.
+        name: policy
+        params: maxDeliveries int
+        recv: r consumerRun
+        results: plug.QueuePolicyValue
+      - doc: |-
+          consume is cfg with the consumer's stop and lease renewal, and the delay
+          a handler asks to be retried after ([RetryIn]).
+        name: consume
+        params: cfg plug.ConsumeConfig
+        recv: r consumerRun
+        results: plug.ConsumeConfig
+      - doc: |-
+          stopTakes is the most the consumer's stop takes: its drain, then one
+          outcome's settle.
+        name: stopTakes
+        recv: r consumerRun
+        results: time.Duration
+      - doc: config is the consumer's knobs as a mechanic's configuration shows them.
+        name: config
+        params: into map[string]string
+        recv: r consumerRun
+    name: consumerRun
+  - doc: |-
+      drainer is a consumer the app tells of its stop before its component
+      stops: a subscription, a watch, a queued command.
+    kind: named
+    name: drainer
+    underlying: |-
+      interface {
+      	// stopTakes is the most its stop takes, 0 for none: a command that is
+      	// not queued.
+      	stopTakes() time.Duration
+      	// beginDrain tells its consumer the app is stopping, without waiting,
+      	// and answers why it could not.
+      	beginDrain() error
+      }
   - doc: |-
       runtimeState is what the daemon knows about itself beyond its nodes — its
       history, its HTTP server, its scheduler — and what the Studio may change in
@@ -19405,6 +19727,31 @@ types:
         type: callOptions
     kind: struct
     name: queryOptions
+  - doc: |-
+      publication is how a message goes into a queue: now, at an instant, or
+      once per key over a window.
+    fields:
+      - name: at
+        type: time.Time
+      - name: key
+        type: string
+      - name: window
+        type: time.Duration
+    kind: struct
+    methods:
+      - doc: |-
+          into puts payload in b as the publication says, and reports whether it
+          did: false for a message a publication under its key put there within its
+          window.
+        name: into
+        params: ctx context.Context, b plug.Broker, payload []byte
+        recv: p publication
+        results: bool, error
+      - doc: mark says on the span of a publication what made it other than now.
+        name: mark
+        params: sp *span
+        recv: p publication
+    name: publication
   - alias: true
     doc: |-
       deliveryHandler handles one delivery of a consumer's queue: nil
@@ -24401,6 +24748,15 @@ types:
         type: map[int]func()
       - name: nextID
         type: int
+      - doc: |-
+          once is the key a message is published once under (Once), nil for a
+          topic that publishes every message; onceFor is its window's setting.
+        name: once
+        type: func(T) string
+      - name: onceWindow
+        type: time.Duration
+      - name: onceFor
+        type: "*SettingService[time.Duration]"
     kind: struct
     methods:
       - doc: |-
@@ -24440,17 +24796,40 @@ types:
         params: ctx context.Context, a *App, payload []byte
         recv: t *TopicService[T]
         results: msg T, trace string, decodeErr, openErr error
+      - name: Once
+        params: key func(T) string, window time.Duration
+        recv: t *TopicService[T]
+        results: "*TopicService[T]"
       - name: Publish
         params: ctx context.Context, msg T
         recv: t *TopicService[T]
         results: error
+      - name: PublishAt
+        params: ctx context.Context, msg T, at time.Time
+        recv: t *TopicService[T]
+        results: error
       - doc: |-
-          send puts payload in every subscription's queue, then wakes the loops a
-          publish wakes. Inside a transaction each subscription's publication is
-          held on its own, tagged with the database its queue lives on (ADR 0178
-          C1), and the wake after them stays in the process.
+          publishAs publishes msg, at the instant at — now when it is zero —, in a
+          span named name.
+        name: publishAs
+        params: ctx context.Context, msg T, at time.Time, name string
+        recv: t *TopicService[T]
+        results: error
+      - doc: |-
+          publication is how msg goes into the subscriptions' queues: at at, or
+          once under its key on a topic that publishes once.
+        name: publication
+        params: msg T, at time.Time
+        recv: t *TopicService[T]
+        results: publication, error
+      - doc: |-
+          send puts payload in every subscription's queue as pub says, then wakes
+          the loops a publish wakes — a publication for later wakes none. Inside a
+          transaction each subscription's publication is held on its own, tagged
+          with the database its queue lives on (ADR 0178 C1), and the wake after
+          them stays in the process.
         name: send
-        params: ctx context.Context, a *App, sp *span, payload []byte
+        params: ctx context.Context, a *App, sp *span, payload []byte, pub publication
         recv: t *TopicService[T]
         results: error
       - doc: |-
@@ -24460,9 +24839,11 @@ types:
         params: ctx context.Context, a *App, msg T
         recv: t *TopicService[T]
         results: "[]byte, error"
-      - doc: publish puts payload in every subscription's queue.
+      - doc: |-
+          publish puts payload in every subscription's queue as pub says; the span
+          says when a queue had it already, under its key.
         name: publish
-        params: ctx context.Context, a *App, payload []byte
+        params: ctx context.Context, a *App, sp *span, payload []byte, pub publication
         recv: t *TopicService[T]
         results: error
       - doc: |-
@@ -24472,11 +24853,18 @@ types:
         params: a *App
         recv: t *TopicService[T]
         results: "[]*SubscriptionWorker[T]"
-      - doc: publishTo puts payload in sub's queue.
+      - doc: publishTo puts payload in sub's queue as pub says.
         name: publishTo
-        params: ctx context.Context, sub *SubscriptionWorker[T], payload []byte
+        params: ctx context.Context, sub *SubscriptionWorker[T], payload []byte, pub publication
         recv: t *TopicService[T]
         results: error
+      - doc: |-
+          publishInto puts payload in sub's queue as pub says, and reports whether
+          it did: false for a message its key put there within its window.
+        name: publishInto
+        params: ctx context.Context, sub *SubscriptionWorker[T], payload []byte, pub publication
+        recv: t *TopicService[T]
+        results: bool, error
       - doc: |-
           describe fills the graph node out with what the Topic declares, and returns
           its edges.
@@ -24510,6 +24898,11 @@ types:
         type: int
       - name: parallelism
         type: int
+      - doc: |-
+          knobs are its consumer's stop and lease, declared as settings of its
+          service (consumer_policy.go).
+        name: knobs
+        type: consumerKnobs
       - name: broker
         type: plug.Broker
       - doc: |-
@@ -24555,6 +24948,16 @@ types:
         recv: sb *SubscriptionWorker[T]
         results: error
       - doc: |-
+          stopTakes is the most the subscription's stop takes: its drain and its
+          settle.
+        name: stopTakes
+        recv: sb *SubscriptionWorker[T]
+        results: time.Duration
+      - doc: beginDrain tells the subscription's consumer the app is stopping.
+        name: beginDrain
+        recv: sb *SubscriptionWorker[T]
+        results: error
+      - doc: |-
           describe fills the graph node out with what the Subscription declares, and
           returns its edges.
         name: describe
@@ -24595,6 +24998,9 @@ types:
         type: int
       - name: parallelism
         type: int
+      - doc: knobs are the consumer's stop and lease (consumer_policy.go).
+        name: knobs
+        type: consumerKnobs
     kind: struct
     name: deliveryOptions
   - kind: named
@@ -25252,6 +25658,11 @@ types:
           writes of its own handler (OwnStores).
         name: ownStores
         type: bool
+      - doc: |-
+          knobs are its consumer's stop and lease, declared as settings of its
+          service (consumer_policy.go).
+        name: knobs
+        type: consumerKnobs
       - doc: run is the watch in its app's current run, or its last one.
         name: run
         type: atomic.Pointer[watchRun]
@@ -25341,7 +25752,7 @@ types:
           watch's handler reads and may call out, and a batch would hold notices
           behind a slow one, their leases lapsing.
         name: consume
-        params: ctx context.Context, r *watchRun, handler deliveryHandler
+        params: ctx context.Context, r *watchRun, cfg plug.ConsumeConfig
         recv: w *Watch
         results: error
       - doc: |-
@@ -25362,6 +25773,14 @@ types:
           the watch's running mark off: the next start has nothing to catch up on.
         name: stop
         params: ctx context.Context, a *App
+        recv: w *Watch
+        results: error
+      - doc: "stopTakes is the most the watch's stop takes: its drain and its settle."
+        name: stopTakes
+        recv: w *Watch
+        results: time.Duration
+      - doc: beginDrain tells the watch's consumer the app is stopping.
+        name: beginDrain
         recv: w *Watch
         results: error
       - doc: |-
@@ -26890,6 +27309,21 @@ vars:
         value: "[]string{\"ready\", \"inflight\", \"dead\"}"
     name: consumerHow
   - doc: |-
+      : Asserts at compile time that every consumer — a subscription, a watch, a
+      queued command — is told of the app's stop before its component stops.
+    grouped: true
+    items:
+      - name: _
+        type: drainer
+        value: (*SubscriptionWorker[any])(nil)
+      - name: _
+        type: drainer
+        value: (*Watch)(nil)
+      - name: _
+        type: drainer
+        value: (*Command[any, any])(nil)
+    name: _#2
+  - doc: |-
       stopSignals are the signals that end App.Run: an interrupt from a
       terminal, a termination from a supervisor.
     items:
@@ -27111,7 +27545,7 @@ vars:
       - name: _
         type: starter
         value: (*Listener)(nil)
-    name: _#2
+    name: _#3
   - doc: logLevels ranks the model's levels, for the minimum-level filter.
     items:
       - name: logLevels
@@ -27232,7 +27666,7 @@ vars:
       - name: _
         type: BulkheadConfigurer
         value: (*waitOption)(nil)
-    name: _#3
+    name: _#4
   - doc: |-
       : Asserts at compile time that a port's breaker is what its start, its
       readiness, its marks and its command reach, and that Timeout's option
@@ -27260,7 +27694,7 @@ vars:
       - name: _
         type: PortPolicyConfigurer
         value: (*timeoutOption)(nil)
-    name: _#4
+    name: _#5
   - doc: |-
       Privacy is the framework's own service: the data keys, the legal holds and the
       privacy journal of an app that keeps personal data or seals what it

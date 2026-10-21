@@ -292,6 +292,7 @@ Package app — the ports the workflow engine reaches a store through.
 - [func Auth\(\) OperationOption](<#Auth>)
 - [func AuthData\[D any\]\(ctx context.Context\) \(D, bool\)](<#AuthData>)
 - [func AuthOptional\(\) OperationOption](<#AuthOptional>)
+- [func AutoExtend\(on bool\) DeliveryOption](<#AutoExtend>)
 - [func Bind\[Req, Resp any\]\(port \*PortService\[Req, Resp\], op Operation\[Req, Resp\]\) interface{AppConfigurer; MountConfigurer}](<#Bind>)
 - [func Breaker\(failures int, open time.Duration, opts ...BreakerConfigurer\) PortPolicyConfigurer](<#Breaker>)
 - [func BreakerWindow\(size time.Duration, minCalls int, failureRatio float64\) BreakerConfigurer](<#BreakerWindow>)
@@ -311,6 +312,7 @@ Package app — the ports the workflow engine reaches a store through.
 - [func DeleteAt\[T any\]\(at func\(T\) \(time.Time, bool\)\) StoreConfigurer](<#DeleteAt>)
 - [func DeleteOnErasure\(\) StoreConfigurer](<#DeleteOnErasure>)
 - [func DesignDigest\(digest string\) AppConfigurer](<#DesignDigest>)
+- [func Drain\(d time.Duration\) DeliveryOption](<#Drain>)
 - [func EnableServer\(\)](<#EnableServer>)
 - [func EnableStores\(\)](<#EnableStores>)
 - [func EnableStudio\(\)](<#EnableStudio>)
@@ -336,6 +338,7 @@ Package app — the ports the workflow engine reaches a store through.
 - [func Irreversible\(ctx context.Context, ex MigrationExecutor\) error](<#Irreversible>)
 - [func KeepVersions\(n int\) SecretConfigurer](<#KeepVersions>)
 - [func Keeps\(things ...Keeper\) DatabaseConfigurer](<#Keeps>)
+- [func Lease\(d time.Duration\) DeliveryOption](<#Lease>)
 - [func Listen\(addr string\) AppConfigurer](<#Listen>)
 - [func Log\(ctx context.Context\) logger.Logger](<#Log>)
 - [func Logs\(w io.Writer\) AppConfigurer](<#Logs>)
@@ -395,6 +398,7 @@ Package app — the ports the workflow engine reaches a store through.
 - [func Requires\(other \*Module\) ModuleConfigurer](<#Requires>)
 - [func RetentionByProduct\(limits string\) StoreConfigurer](<#RetentionByProduct>)
 - [func Retry\(maxAttempts int, delay time.Duration, opts ...RetryConfigurer\) PortPolicyConfigurer](<#Retry>)
+- [func RetryIn\(d time.Duration, cause error\) error](<#RetryIn>)
 - [func RetryMaxDelay\(d time.Duration\) RetryConfigurer](<#RetryMaxDelay>)
 - [func Revisions\(n int\) StoreConfigurer](<#Revisions>)
 - [func Root\(dir string\) StaticConfigurer](<#Root>)
@@ -403,6 +407,7 @@ Package app — the ports the workflow engine reaches a store through.
 - [func SecretStore\(store secret.Store\) AppConfigurer](<#SecretStore>)
 - [func Set\(name string, value any\) AppConfigurer](<#Set>)
 - [func SetCookie\(ctx context.Context, c \*http.Cookie\)](<#SetCookie>)
+- [func Settle\(d time.Duration\) DeliveryOption](<#Settle>)
 - [func Singleton\(scope string\) AppConfigurer](<#Singleton>)
 - [func SingletonPer\(scopes ...ScopeValue\) AppConfigurer](<#SingletonPer>)
 - [func SocketPath\(path string\) ListenerConfigurer](<#SocketPath>)
@@ -456,6 +461,7 @@ Package app — the ports the workflow engine reaches a store through.
   - [func \(\*Command\) Allow\(policy authz.Policy, action string, resource string\) \*Command\[C, R\]](<#Command.Allow>)
   - [func \(\*Command\) Authorize\(fn func\(context.Context, C\) error\) \*Command\[C, R\]](<#Command.Authorize>)
   - [func \(\*Command\) Dispatch\(ctx context.Context, in C\) \(R, error\)](<#Command.Dispatch>)
+  - [func \(\*Command\) DispatchAt\(ctx context.Context, in C, at time.Time\) error](<#Command.DispatchAt>)
   - [func \(\*Command\) Expose\(route string, opts ...ExposeConfigurer\) \*Command\[C, R\]](<#Command.Expose>)
   - [func \(\*Command\) Key\(fn func\(C\) string\) \*Command\[C, R\]](<#Command.Key>)
 - [type CommandConfigurer](<#CommandConfigurer>)
@@ -612,7 +618,9 @@ Package app — the ports the workflow engine reaches a store through.
 - [type TimeoutConfigurer](<#TimeoutConfigurer>)
 - [type TombstoneEvent](<#TombstoneEvent>)
 - [type TopicService](<#TopicService>)
+  - [func \(\*TopicService\) Once\(key func\(T\) string, window time.Duration\) \*TopicService\[T\]](<#TopicService.Once>)
   - [func \(\*TopicService\) Publish\(ctx context.Context, msg T\) error](<#TopicService.Publish>)
+  - [func \(\*TopicService\) PublishAt\(ctx context.Context, msg T, at time.Time\) error](<#TopicService.PublishAt>)
 - [type UID](<#UID>)
 - [type ViolationMessage](<#ViolationMessage>)
 - [type WaitConfigurer](<#WaitConfigurer>)
@@ -1092,6 +1100,15 @@ const CodeRetentionPanic errs.Code = 262713
 The framework's own failures carry SDK error codes in 0.4.2.\* — layer 4 is the framework's, PP 2 this package (ADR 0147 §3) — so a product keeps the whole application range 0x40–0x7F for its own codes. Match them with errs.HasCode. Their Public text is the only part that may reach a caller; none of them is a 4xx, so a caller only ever reads "internal error".
 
 Code `0.4.2.57`
+
+<a name="CodeRetryIn"></a>
+```go
+const CodeRetryIn errs.Code = 262744
+```
+
+CodeRetryIn marks a failure a handler returned through [RetryIn](#RetryIn): the queue of the subscription, the watch or the queued command that ran it hands the message back with the delay it asked for, the delivery counted. It joins the trail of an SDK cause, whose own code a dead letter records; any other cause is recorded under it.
+
+Code `0.4.2.88`
 
 <a name="CodeRevisionDecode"></a>
 ```go
@@ -1702,6 +1719,19 @@ AuthOptional runs the app's auth handler when the request carries credentials, a
 
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
+<a name="AutoExtend"></a>
+## func [AutoExtend](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/topic.go>)
+
+```go
+func AutoExtend(on bool) DeliveryOption
+```
+
+AutoExtend says whether the lease of the message a handler is running is renewed, a third of the lease after it was granted or last renewed, for as long as the handler runs — a subscription's, a watch's, or a queued command's. It is on by default: a slow handler keeps its message instead of seeing it delivered to another while it runs. Off, the handler is stopped a margin before its [Lease](#Lease) ends. A renewal the queue refuses cancels the handler's context. A mailer's outbox never renews: the mail spool parks a mail by its own lease.
+
+on is the default of the consumer's setting \<service>-\<kind>-\<name>-auto-extend, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override.
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
+
 <a name="Bind"></a>
 ## func [Bind](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/port.go>)
 
@@ -1925,6 +1955,19 @@ func DesignDigest(digest string) AppConfigurer
 ```
 
 DesignDigest records the digest of the design the product's code was generated from — what the generated wiring passes —, so the telemetry handshake can say it and a tool attached to the product can tell a process built from another design.
+
+<a name="Drain"></a>
+## func [Drain](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/topic.go>)
+
+```go
+func Drain(d time.Duration) DeliveryOption
+```
+
+Drain is how long the message a handler is running when the app stops may still run before its context is cancelled — a subscription's, a watch's, or a queued command's. A handler that finishes within it is acknowledged; one it cuts short is handed back uncounted, delivered again at the next start, and is no failure. The default is 5 seconds; zero cancels the handler at once, and a negative one stops the start. The app's stop gives each component the longest drain plus its settle ([Settle](#Settle)), and tells every consumer at once, so that their drains overlap.
+
+d is the default of the consumer's setting \<service>-\<kind>-\<name>-drain, the kind subscription or command, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override.
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
 <a name="EnableServer"></a>
 ## func [EnableServer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/app.go>)
@@ -2176,6 +2219,19 @@ func Keeps(things ...Keeper) DatabaseConfigurer
 ```
 
 Keeps says what the database keeps: a service's stores, a store, a module's stores. The most precise wins: a store kept by name, then its service, then its module, then the default database — the one declared without Keeps —, then the data directory, then memory. [InMemory](#InMemory) wins over all of them, on the app as on a store. The framework's data keys never live on SQLite: Keeps(app.Privacy) there keeps its holds and its journal ([Privacy](#Privacy)).
+
+<a name="Lease"></a>
+## func [Lease](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/topic.go>)
+
+```go
+func Lease(d time.Duration) DeliveryOption
+```
+
+Lease is how long a delivered message is held by its consumer before the queue hands it to another — a subscription's, a watch's, or a queued command's. The default is 30 seconds; one that is not positive stops the start. With [AutoExtend](#AutoExtend), a handler that runs longer keeps it.
+
+d is the default of the consumer's setting \<service>-\<kind>-\<name>-lease, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override.
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
 <a name="Listen"></a>
 ## func [Listen](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/config.go>)
@@ -2797,6 +2853,23 @@ The values are the defaults of the port's settings \<service>-port-\<name>-retry
 
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
+<a name="RetryIn"></a>
+## func [RetryIn](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/consumer_retry.go>)
+
+```go
+func RetryIn(d time.Duration, cause error) error
+```
+
+RetryIn marks cause as a failure to retry in d, no sooner: returned from the handler of a subscription, a watch or a queued command, it hands the message back to its queue with that delay, in place of the queue's own — half a second after a first failure, doubling, never more than a minute —: a downstream that answered with a Retry-After, a resource that frees at a known instant. The delivery counts as an attempt: a message that used its [MaxDeliveries](#MaxDeliveries) is dead-lettered with cause, the delay unused. A negative d is read as zero.
+
+```
+if resp.StatusCode == http.StatusTooManyRequests {
+	return app.RetryIn(30*time.Second, errThrottled)
+}
+```
+
+cause keeps its own code, reason and words — what a dead letter records — and [CodeRetryIn](#CodeRetryIn) joins its trail; a cause that is no error of the SDK's, or none, is recorded as CodeRetryIn itself. Outside a consumer's handler it is an error like any other.
+
 <a name="RetryMaxDelay"></a>
 ## func [RetryMaxDelay](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/port_retry.go>)
 
@@ -2887,6 +2960,19 @@ func SetCookie(ctx context.Context, c *http.Cookie)
 SetCookie adds a Set-Cookie header to the HTTP response of the endpoint ctx serves. The framework fills what a cookie left zero with safe defaults — Path "/", HttpOnly, SameSite Lax, and Secure outside dev — so a session cookie is hardened unless the code says otherwise. In an in-process [EndpointService.Call](#EndpointService.Call) there is no response: the cookie is dropped.
 
 HttpOnly is always set, and Secure always outside dev (and in dev for SameSite=None, which browsers require): a boolean has no "unset" a default could fill, and the framework chooses the hardened reading. A cookie set more than once in one response keeps its last value, and cookies set before an error are sent with the error — clearing a stale session on a 401 works.
+
+<a name="Settle"></a>
+## func [Settle](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/topic.go>)
+
+```go
+func Settle(d time.Duration) DeliveryOption
+```
+
+Settle bounds each outcome a consumer sends once the app began to stop — an acknowledgement, a nack, a message handed back — and each renewal of a lease ([AutoExtend](#AutoExtend)): a queue that stopped answering cannot hold the stop. The default is 5 seconds; one that is not positive stops the start.
+
+d is the default of the consumer's setting \<service>-\<kind>-\<name>-settle, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override.
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
 <a name="Singleton"></a>
 ## func [Singleton](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/app_profiles.go>)
@@ -3513,6 +3599,15 @@ func (*Command) Dispatch(ctx context.Context, in C) (R, error)
 ```
 
 Dispatch runs the command for the node ctx runs inside — in a span on the command, its caller's dispatches edge —, through its whole pipeline, and returns its result; a queued command returns once its queue accepted it. The caller's user goes with it.
+
+<a name="Command.DispatchAt"></a>
+### func \(Command\) [DispatchAt](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/command.go>)
+
+```go
+func (*Command) DispatchAt(ctx context.Context, in C, at time.Time) error
+```
+
+DispatchAt queues a dispatch of the queued command that its consumer handles no sooner than at — a reminder, a trial that ends, an order cancelled if still unpaid —, checked now as [Command.Dispatch](#Command.Dispatch) checks it, as its caller: its validate tags, its authorization, its key. It returns once the command's queue accepted it; inside a transaction it is held to the commit as a dispatch is. A dispatch whose key ([Command.Key](#Command.Key)) waits — for later too — or runs is not queued again. An instant already past is now. A command that is not queued refuses it: only a queue holds a dispatch until its instant. It is the SDK's queue.PublishAt.
 
 <a name="Command.Expose"></a>
 ### func \(Command\) [Expose](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/command.go>)
@@ -5221,6 +5316,17 @@ TopicService is an asynchronous channel of messages of type T. Every subscriptio
 type TopicService[T any] struct{}
 ```
 
+<a name="TopicService.Once"></a>
+### func \(TopicService\) [Once](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/topic.go>)
+
+```go
+func (*TopicService) Once(key func(T) string, window time.Duration) *TopicService[T]
+```
+
+Once makes the topic publish a message at most once per key over window: a second [TopicService.Publish](#TopicService.Publish) whose message has the key of one published within the window publishes nothing, in no subscription's queue, and answers nil — a producer that retries a publication it never heard back from adds no copy. The window is counted by each subscription's queue, from its first publication under the key; it is the SDK's queue.PublishOnce. A message whose key is empty is refused. Delivery stays at least once: a handler still tolerates a redelivery.
+
+window is the default of the topic's setting \<service>-topic-\<name>-once-window, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override; one that is not positive stops the start. A queued command keeps its own key ([Command.Key](#Command.Key)): a dispatch whose key waits or runs is not queued again, however long ago it was dispatched.
+
 <a name="TopicService.Publish"></a>
 ### func \(TopicService\) [Publish](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/topic.go>)
 
@@ -5228,7 +5334,16 @@ type TopicService[T any] struct{}
 func (*TopicService) Publish(ctx context.Context, msg T) error
 ```
 
-Publish sends msg to every subscription. It returns once every subscription's queue has accepted the message; delivery happens later. Inside a transaction ([Transact](#Transact), a command's) the message is encoded now and queued at the commit: in the transaction, just before it commits, for a subscription whose queue lives on the transaction's database — a queue that refuses it then fails the transaction —, once it committed for the others. A rollback drops it.
+Publish sends msg to every subscription. It returns once every subscription's queue has accepted the message; delivery happens later. Inside a transaction ([Transact](#Transact), a command's) the message is encoded now and queued at the commit: in the transaction, just before it commits, for a subscription whose queue lives on the transaction's database — a queue that refuses it then fails the transaction —, once it committed for the others. A rollback drops it. A topic that publishes once ([TopicService.Once](#TopicService.Once)) publishes a message whose key it published within its window in no queue.
+
+<a name="TopicService.PublishAt"></a>
+### func \(TopicService\) [PublishAt](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/topic.go>)
+
+```go
+func (*TopicService) PublishAt(ctx context.Context, msg T, at time.Time) error
+```
+
+PublishAt sends msg to every subscription as [TopicService.Publish](#TopicService.Publish) does, but no subscription receives it before at: a reminder, a trial that ends, an order cancelled if still unpaid. It is as durable as any message, held to the commit inside a transaction as a publication is; an instant already past is now. It does not recur — a job does. A topic that publishes once refuses it: the SDK has no publication once for later yet. It is the SDK's queue.PublishAt.
 
 <a name="UID"></a>
 ## type [UID](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/auth.go>)

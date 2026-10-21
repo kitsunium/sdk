@@ -459,6 +459,13 @@ constants:
         type: errs.Code
         value: iapp.CodeRenameFailed
       - doc: |-
+          CodeRetryIn marks a failure a handler returned through [RetryIn]: its
+          queue hands the message back with the delay it asked for, the delivery
+          counted.
+        name: CodeRetryIn
+        type: errs.Code
+        value: iapp.CodeRetryIn
+      - doc: |-
           The signals the framework ends one of its own steps with and catches itself — a
           caller never receives one —, typed when the SDK made rule 2 a gate.
         name: CodeSealErased
@@ -627,6 +634,7 @@ files:
       - Unauthenticated
       - Forbidden
       - Unavailable
+      - RetryIn
     name: errors.go
   - decls:
       - ExposeOption
@@ -842,6 +850,10 @@ files:
       - DeliveryOption
       - MaxDeliveries
       - Parallelism
+      - Drain
+      - Settle
+      - Lease
+      - AutoExtend
       - OwnStores
     name: topic.go
   - decls:
@@ -987,6 +999,9 @@ functions:
   - name: Unavailable
     params: message string
     results: "*Error"
+  - name: RetryIn
+    params: d time.Duration, cause error
+    results: error
   - name: Anyone
     results: ExposeOption
   - name: AnyUser
@@ -1232,6 +1247,18 @@ functions:
     results: DeliveryOption
   - name: Parallelism
     params: n int
+    results: DeliveryOption
+  - name: Drain
+    params: d time.Duration
+    results: DeliveryOption
+  - name: Settle
+    params: d time.Duration
+    results: DeliveryOption
+  - name: Lease
+    params: d time.Duration
+    results: DeliveryOption
+  - name: AutoExtend
+    params: on bool
     results: DeliveryOption
   - name: OwnStores
     results: SubscriptionOption

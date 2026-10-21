@@ -14,6 +14,47 @@ sequences:
         eval: b.q.Publish(ctx, payload)
         to: b.q.Publish
       - return: err
+  - of: (*broker).PublishAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*broker).PublishAt
+        kind: self
+      - id: lacks
+        kind: internal
+      - id: deferred.PublishAt
+        kind: value
+    steps:
+      - bind: deferred, ok
+        eval: b.q.(queue.DelayedPublisher)
+      - opt:
+          do:
+            - return: lacks("DelayedPublisher")
+              to: lacks
+          when: "!ok"
+      - bind: _, err
+        eval: deferred.PublishAt(ctx, payload, at)
+        to: deferred.PublishAt
+      - return: err
+  - of: (*broker).PublishOnce
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*broker).PublishOnce
+        kind: self
+      - id: once.PublishOnce
+        kind: value
+    steps:
+      - bind: once, ok
+        eval: b.q.(queue.OncePublisher)
+      - opt:
+          do:
+            - return: false, lacks("OncePublisher")
+          when: "!ok"
+      - bind: _, published, err
+        eval: once.PublishOnce(ctx, key, payload, window)
+        to: once.PublishOnce
+      - return: published, err
   - of: (*broker).Consume
     participants:
       - id: caller
@@ -23,17 +64,27 @@ sequences:
       - id: queue
         kind: package
     steps:
-      - bind: handle
-        eval: cfg.Handler
+      - bind: handle, retryIn
+        eval: cfg.Handler, cfg.RetryIn
       - return: |-
           queue.Consume(ctx, b.q, queue.ConsumerConfig{
           		Handler: func(ctx context.Context, d queue.Delivery) error {
-          			return handle(ctx, plug.DeliveryValue{Message: pluggedMessage(d.Message), Deliveries: d.Deliveries})
+          			err := handle(ctx, plug.DeliveryValue{Message: pluggedMessage(d.Message), Deliveries: d.Deliveries})
+          			if retryIn == nil || err == nil {
+          				return err
+          			}
+          			if delay, asked := retryIn(err); asked {
+          				return queue.RetryAfter(err, delay)
+          			}
+          			return err
           		},
           		Clock:               b.clock,
           		PollInterval:        cfg.PollInterval,
           		Parallelism:         cfg.Parallelism,
           		BatchSize:           cfg.BatchSize,
+          		DrainTimeout:        cfg.DrainTimeout,
+          		SettleTimeout:       cfg.SettleTimeout,
+          		AutoExtend:          cfg.AutoExtend,
           		HandlerIsIdempotent: true,
           	})
         to: queue

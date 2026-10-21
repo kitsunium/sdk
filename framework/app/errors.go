@@ -1,6 +1,8 @@
 package app
 
 import (
+	"time"
+
 	iapp "github.com/kitsunium/sdk/framework/internal/app"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
@@ -302,6 +304,11 @@ const (
 	// former name, and the next start resumes the move.
 	CodeRenameFailed errs.Code = iapp.CodeRenameFailed
 
+	// CodeRetryIn marks a failure a handler returned through [RetryIn]: its
+	// queue hands the message back with the delay it asked for, the delivery
+	// counted.
+	CodeRetryIn errs.Code = iapp.CodeRetryIn
+
 	// The signals the framework ends one of its own steps with and catches itself — a
 	// caller never receives one —, typed when the SDK made rule 2 a gate.
 	CodeSealErased errs.Code = iapp.CodeSealErased
@@ -368,4 +375,26 @@ func Forbidden(message string) *Error {
 func Unavailable(message string) *Error {
 	//: the implementation is framework/internal/app's; this facade only forwards.
 	return iapp.Unavailable(message)
+}
+
+// RetryIn marks cause as a failure to retry in d, no sooner: returned from
+// the handler of a subscription, a watch or a queued command, it hands the
+// message back to its queue with that delay, in place of the queue's own —
+// half a second after a first failure, doubling, never more than a minute —:
+// a downstream that answered with a Retry-After, a resource that frees at a
+// known instant. The delivery counts as an attempt: a message that used its
+// [MaxDeliveries] is dead-lettered with cause, the delay unused. A negative
+// d is read as zero.
+//
+//	if resp.StatusCode == http.StatusTooManyRequests {
+//		return app.RetryIn(30*time.Second, errThrottled)
+//	}
+//
+// cause keeps its own code, reason and words — what a dead letter records —
+// and [CodeRetryIn] joins its trail; a cause that is no error of the SDK's,
+// or none, is recorded as CodeRetryIn itself. Outside a consumer's handler
+// it is an error like any other.
+func RetryIn(d time.Duration, cause error) error {
+	//: the implementation is framework/internal/app's; this facade only forwards.
+	return iapp.RetryIn(d, cause)
 }

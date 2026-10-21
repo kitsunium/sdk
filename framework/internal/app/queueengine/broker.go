@@ -3,6 +3,7 @@ package queueengine
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/kitsunium/sdk/framework/internal/app/plug"
 	"github.com/kitsunium/sdk/pkg/v1/clock"
@@ -28,18 +29,54 @@ func (b *broker) Publish(ctx context.Context, payload []byte) error {
 	return err
 }
 
+// PublishAt puts payload in the queue, received by no consumer before at,
+// in the transaction ctx carries for its database when it lives on one.
+func (b *broker) PublishAt(ctx context.Context, payload []byte, at time.Time) error {
+	deferred, ok := b.q.(queue.DelayedPublisher)
+	if !ok {
+		return lacks("DelayedPublisher")
+	}
+	_, err := deferred.PublishAt(ctx, payload, at)
+	return err
+}
+
+// PublishOnce puts payload in the queue unless a publication under key was
+// made within window, and reports whether it did.
+func (b *broker) PublishOnce(ctx context.Context, key string, payload []byte, window time.Duration) (bool, error) {
+	once, ok := b.q.(queue.OncePublisher)
+	if !ok {
+		return false, lacks("OncePublisher")
+	}
+	_, published, err := once.PublishOnce(ctx, key, payload, window)
+	return published, err
+}
+
 // Consume runs the SDK's consumer over the queue until ctx ends or its
-// storage fails: every handler kit runs tolerates a redelivery.
+// storage fails: every handler kit runs tolerates a redelivery. A stop lets
+// the running handler finish within cfg's drain, each outcome bounded by its
+// settle, and the lease of a running handler is renewed when cfg says so. A
+// failure whose handler asked for a delay of its own (cfg.RetryIn) is the
+// SDK's queue.RetryAfter: its message comes back after that delay.
 func (b *broker) Consume(ctx context.Context, cfg plug.ConsumeConfig) error {
-	handle := cfg.Handler
+	handle, retryIn := cfg.Handler, cfg.RetryIn
 	return queue.Consume(ctx, b.q, queue.ConsumerConfig{
 		Handler: func(ctx context.Context, d queue.Delivery) error {
-			return handle(ctx, plug.DeliveryValue{Message: pluggedMessage(d.Message), Deliveries: d.Deliveries})
+			err := handle(ctx, plug.DeliveryValue{Message: pluggedMessage(d.Message), Deliveries: d.Deliveries})
+			if retryIn == nil || err == nil {
+				return err
+			}
+			if delay, asked := retryIn(err); asked {
+				return queue.RetryAfter(err, delay)
+			}
+			return err
 		},
 		Clock:               b.clock,
 		PollInterval:        cfg.PollInterval,
 		Parallelism:         cfg.Parallelism,
 		BatchSize:           cfg.BatchSize,
+		DrainTimeout:        cfg.DrainTimeout,
+		SettleTimeout:       cfg.SettleTimeout,
+		AutoExtend:          cfg.AutoExtend,
 		HandlerIsIdempotent: true,
 	})
 }

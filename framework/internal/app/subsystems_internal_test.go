@@ -333,7 +333,7 @@ func TestAQueueWithItsSubsystemIsNotRefused(t *testing.T) {
 func TestAQueueOpenedWithoutItsSubsystemNamesTheImport(t *testing.T) {
 	withoutQueues(t)
 	a := NewApp("bare", NewService("bare", "Runs.")).With(InMemory(), Logs(io.Discard))
-	_, err := a.openQueue(&nodeBase{id: "bare/subscription/read"}, "", 1)
+	_, err := a.openQueue(&nodeBase{id: "bare/subscription/read"}, "", consumerPolicy(1))
 	if !errs.HasCode(err, CodeSubsystemMissing) || !strings.Contains(errs.PrivateOf(err), queuePackage) {
 		t.Errorf("a queue opened without framework/app/queue: %v", err)
 	}

@@ -91,7 +91,9 @@ type QueuePolicyValue struct {
 }
 
 // ConsumeConfig is how a queue's consumer runs: its handler, how long it
-// waits idle, how many messages it handles at once and takes at a time.
+// waits idle, how many messages it handles at once and takes at a time, how
+// it stops, whether it renews a running handler's lease, and when a handler
+// asked to be retried.
 type ConsumeConfig struct {
 	// Handler handles one delivery: nil acknowledges it, an error has it
 	// retried or, through DoNotRetry, dead-lettered at once. Every handler
@@ -103,6 +105,20 @@ type ConsumeConfig struct {
 	Parallelism int
 	// BatchSize is how many messages the consumer takes at a time.
 	BatchSize int
+	// DrainTimeout is how long the handler running when ctx ends may still
+	// run before its context is cancelled; zero cancels it at once.
+	DrainTimeout time.Duration
+	// SettleTimeout bounds each outcome sent once ctx ended, and each lease
+	// renewal; zero is the queue's own bound.
+	SettleTimeout time.Duration
+	// AutoExtend renews the lease of the message a handler runs for as long
+	// as it runs.
+	AutoExtend bool
+	// RetryIn reads, from the error a delivery's handler returned, the delay
+	// it asked to be retried after: its queue hands the message back with
+	// that delay, the delivery counted. Nil, or false, keeps the queue's own
+	// retry delay.
+	RetryIn func(err error) (delay time.Duration, asked bool)
 }
 
 // MessageValue is one message of a queue: its identifier, its payload as

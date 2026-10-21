@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"time"
 
 	"github.com/kitsunium/sdk/framework/internal/app/plug"
 	"github.com/kitsunium/sdk/framework/model"
@@ -34,7 +35,8 @@ type watchNotice struct {
 // queue until stop cancels it and waits for it; a consumer whose queue
 // fails comes back after kit's backoff.
 func (w *Watch) start(ctx context.Context, a *App) error {
-	broker, db, err := a.openConsumerQueue(&w.nodeBase, w.queueUnder(), w.maxDeliver)
+	cr := w.knobs.values()
+	broker, db, err := a.openConsumerQueue(&w.nodeBase, w.queueUnder(), cr.policy(w.maxDeliver))
 	if err != nil {
 		return failure(CodeWatchQueue, "WATCH_QUEUE", "a watch's queue cannot be opened", err, errs.String("watch", w.id))
 	}
@@ -50,8 +52,13 @@ func (w *Watch) start(ctx context.Context, a *App) error {
 	w.catchUp(ctx, a, r, feeders)
 	loop := a.loop(w.id+" consumer", w.id, model.LoopConsumer, consumerHow)
 	c := consumer{a: a, loop: loop, node: w.id, name: w.name, wake: model.WakeChange}
-	handler := w.deliver(&c, r)
-	r.sup, err = c.supervise(func(ctx context.Context) error { return w.consume(ctx, r, handler) })
+	cfg := cr.consume(plug.ConsumeConfig{
+		Handler:      w.deliver(&c, r),
+		PollInterval: pollInterval,
+		Parallelism:  w.parallelism,
+		BatchSize:    1,
+	})
+	r.sup, err = c.supervise(func(ctx context.Context) error { return w.consume(ctx, r, cfg) })
 	if err != nil {
 		for _, unfeed := range r.unfeed {
 			unfeed()
@@ -68,13 +75,8 @@ func (w *Watch) queueUnder() string { return underQueues }
 // notice at a time per worker, as a queued command's consumer does — a
 // watch's handler reads and may call out, and a batch would hold notices
 // behind a slow one, their leases lapsing.
-func (w *Watch) consume(ctx context.Context, r *watchRun, handler deliveryHandler) error {
-	return r.broker.Consume(ctx, plug.ConsumeConfig{
-		Handler:      handler,
-		PollInterval: pollInterval,
-		Parallelism:  w.parallelism,
-		BatchSize:    1,
-	})
+func (w *Watch) consume(ctx context.Context, r *watchRun, cfg plug.ConsumeConfig) error {
+	return r.broker.Consume(ctx, cfg)
 }
 
 // deliver is the queue's handler: in the write's trace, a span on the watch
@@ -121,6 +123,18 @@ func (w *Watch) stop(ctx context.Context, a *App) error {
 	}
 	w.unmark(a)
 	return nil
+}
+
+// stopTakes is the most the watch's stop takes: its drain and its settle.
+func (w *Watch) stopTakes() time.Duration { return w.knobs.values().stopTakes() }
+
+// beginDrain tells the watch's consumer the app is stopping.
+func (w *Watch) beginDrain() error {
+	r := w.run.Load()
+	if r == nil {
+		return nil
+	}
+	return beginStop(r.sup)
 }
 
 // noticeOf is what a watch's queue carries of a write a store says it made:

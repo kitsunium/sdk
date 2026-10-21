@@ -116,7 +116,7 @@ func TestAnUndecodableMessageIsDeadLetteredAtOnceByQueuedCommand(t *testing.T) {
 func TestAConsumersRetryDelayGrows(t *testing.T) {
 	clk := clock.NewManualClock(time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC))
 	a := &App{clock: clk}
-	pb, err := a.openQueue(&nodeBase{}, "", 10)
+	pb, err := a.openQueue(&nodeBase{}, "", consumerPolicy(10))
 	must(t, err)
 	b := sdkQueue(t, pb)
 	ctx := t.Context()

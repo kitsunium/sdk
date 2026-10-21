@@ -889,7 +889,7 @@ sequences:
           when: err != nil
       - set: a.lc
         to: lifecycle
-        value: "lifecycle.New(lifecycle.Config{Clock: a.clock, StopTimeout: 10 * time.Second, OnTransition: a.onTransition})"
+        value: "lifecycle.New(lifecycle.Config{Clock: a.clock, StopTimeout: a.componentStopBudget(), OnTransition: a.onTransition})"
       - opt:
           do:
             - return: a.failStart(err)
@@ -2223,6 +2223,8 @@ sequences:
         kind: internal
       - id: a.health.Drain
         kind: value
+      - id: a.beginDrains
+        kind: internal
       - id: a.lc.Stop
         kind: value
       - id: a.wg.Wait
@@ -2262,6 +2264,8 @@ sequences:
       - eval: a.endStreams()
       - eval: a.health.Drain()
         to: a.health.Drain
+      - eval: a.beginDrains()
+        to: a.beginDrains
       - bind: err
         eval: a.lc.Stop(ctx)
         to: a.lc.Stop
@@ -2348,7 +2352,7 @@ sequences:
       - eval: logger.Info(context.WithoutCancel(ctx), a.log, "draining", logger.String("reason", reason))
         to: logger
       - bind: stopCtx, stopCancel
-        eval: context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+        eval: context.WithTimeout(context.WithoutCancel(ctx), a.stopDeadline(runStopDeadline))
         to: context
       - defer: stopCancel()
       - return: a.stop(stopCtx, reason)
@@ -6810,6 +6814,8 @@ sequences:
         kind: internal
       - id: declarePolicies
         kind: internal
+      - id: c.opts.deliveries.knobs.declare
+        kind: internal
       - id: s.problem
         kind: internal
       - id: c.pipe.ready
@@ -6843,6 +6849,11 @@ sequences:
         to: s.add
       - eval: declarePolicies(s, &c.nodeBase, c.opts.policies)
         to: declarePolicies
+      - opt:
+          do:
+            - eval: c.opts.deliveries.knobs.declare(s, &c.nodeBase)
+              to: c.opts.deliveries.knobs.declare
+          when: c.opts.queued
       - opt:
           do:
             - eval: s.problem(c.decl, c.id, "command.nil", "command", c.id)
@@ -6988,7 +6999,7 @@ sequences:
             - return: |-
                 inProcess(ctx, &call, in, func(ctx context.Context) (R, error) {
                 			var zero R
-                			return zero, c.accept(ctx, a, from, in)
+                			return zero, c.accept(ctx, a, from, in, time.Time{})
                 		})
               to: inProcess
           when: c.opts.queued
@@ -7004,6 +7015,52 @@ sequences:
           		return c.pipe.invoke(withCommand(ctx, c.id), a, c, in, c.steps(a, key))
           	})
         to: inProcess
+  - of: (*Command).DispatchAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Command).DispatchAt
+        kind: self
+      - id: c.app
+        kind: internal
+      - id: unmounted
+        kind: internal
+      - id: notQueued
+        kind: internal
+      - id: currentNode
+        kind: internal
+      - id: inProcess
+        kind: internal
+    steps:
+      - bind: a
+        eval: c.app()
+        to: c.app
+      - opt:
+          do:
+            - return: unmounted(&c.nodeBase)
+              to: unmounted
+          when: a == nil
+      - opt:
+          do:
+            - return: notQueued(&c.nodeBase)
+              to: notQueued
+          when: "!c.opts.queued"
+      - bind: call
+        eval: "callSpec{app: a, node: c, edge: model.EdgeDispatches, op: model.OpDispatch, name: c.name, auth: c.authMode(), payloads: true}"
+      - bind: from
+        eval: currentNode(ctx)
+        to: currentNode
+      - bind: _, err
+        eval: |-
+          inProcess(ctx, &call, in, func(ctx context.Context) (R, error) {
+          		var zero R
+          		if !at.IsZero() {
+          			markSpan(ctx, c.id, "at", at.UTC().Format(time.RFC3339Nano))
+          		}
+          		return zero, c.accept(ctx, a, from, in, at)
+          	})
+        to: inProcess
+      - return: err
   - of: (*Command).steps
     participants:
       - id: caller
@@ -7924,7 +7981,7 @@ sequences:
       - return: suffix
   - of: consumerPolicy
     steps:
-      - return: "plug.QueuePolicyValue{VisibilityTimeout: 30 * time.Second, RetryDelay: 500 * time.Millisecond, MaxRetryDelay: loopBackoffMax, MaxDeliveries: maxDeliveries}"
+      - return: "plug.QueuePolicyValue{VisibilityTimeout: defaultLease, RetryDelay: 500 * time.Millisecond, MaxRetryDelay: loopBackoffMax, MaxDeliveries: maxDeliveries}"
   - of: (*App).openConsumerQueue
     participants:
       - id: caller
@@ -7944,12 +8001,12 @@ sequences:
       - opt:
           do:
             - bind: broker, err
-              eval: a.openQueue(b, filepath.Join(b.svc.name, under, b.name), maxDeliveries)
+              eval: a.openQueue(b, filepath.Join(b.svc.name, under, b.name), policy)
               to: a.openQueue
             - return: broker, nil, err
           when: r == nil
       - bind: broker, err
-        eval: "a.openSQLQueue(b, under, r, plug.QueueConfig{Policy: consumerPolicy(maxDeliveries)})"
+        eval: "a.openSQLQueue(b, under, r, plug.QueueConfig{Policy: policy})"
         to: a.openSQLQueue
       - opt:
           do:
@@ -8069,7 +8126,7 @@ sequences:
         kind: internal
     steps:
       - bind: cfg
-        eval: "plug.QueueConfig{Name: b.id, Policy: consumerPolicy(maxDeliveries), Wrap: a.wrapQueue}"
+        eval: "plug.QueueConfig{Name: b.id, Policy: policy, Wrap: a.wrapQueue}"
       - opt:
           do:
             - set: cfg.Dir
@@ -8126,8 +8183,7 @@ sequences:
           			err = failure(CodeHandlerPanic, "HANDLER_PANICKED", "the subscription's handler panicked", nil,
           				errs.String("subscription", c.node), errs.String("panic", fmt.Sprint(p)))
           		}
-          		sp.end(err)
-          		c.loop.ran(a, started, a.clock.Now(), err)
+          		c.loop.ended(ctx, a, sp, started, err)
           	}()
       - return: handle(ctx, sp)
   - of: (*consumer).supervise
@@ -8224,7 +8280,269 @@ sequences:
           "on": e.Phase
   - of: defaultDeliveries
     steps:
-      - return: "deliveryOptions{maxDeliveries: defaultMaxDeliveries, parallelism: 1}"
+      - return: "deliveryOptions{maxDeliveries: defaultMaxDeliveries, parallelism: 1, knobs: defaultConsumerKnobs()}"
+  - of: defaultConsumerKnobs
+    steps:
+      - return: "consumerKnobs{drain: defaultDrain, settle: defaultSettle, lease: defaultLease, autoExtend: true}"
+  - of: (*consumerKnobs).declare
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*consumerKnobs).declare
+        kind: self
+      - id: declarePolicySetting
+        kind: internal
+    steps:
+      - set: k.drainFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobDrain, k.drain, checkWait())
+      - set: k.settleFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobSettle, k.settle, checkPositive())
+      - set: k.leaseFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobLease, k.lease, checkPositive())
+      - set: k.autoExtendFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobAutoExtend, k.autoExtend, nil)
+  - of: (*consumerKnobs).values
+    steps:
+      - return: |-
+          consumerRun{
+          		drain: knobValue(k.drainFor, k.drain), settle: knobValue(k.settleFor, k.settle),
+          		lease: knobValue(k.leaseFor, k.lease), autoExtend: knobValue(k.autoExtendFor, k.autoExtend),
+          	}
+  - of: consumerRun.policy
+    participants:
+      - id: caller
+        kind: actor
+      - id: consumerRun.policy
+        kind: self
+      - id: consumerPolicy
+        kind: internal
+    steps:
+      - bind: p
+        eval: consumerPolicy(maxDeliveries)
+        to: consumerPolicy
+      - set: p.VisibilityTimeout
+        value: r.lease
+      - return: p
+  - of: consumerRun.consume
+    steps:
+      - set: cfg.DrainTimeout, cfg.SettleTimeout, cfg.AutoExtend
+        value: r.drain, r.settle, r.autoExtend
+      - set: cfg.RetryIn
+        value: retryInOf
+      - return: cfg
+  - of: consumerRun.stopTakes
+    steps:
+      - return: r.drain + r.settle
+  - of: consumerRun.config
+    participants:
+      - id: caller
+        kind: actor
+      - id: consumerRun.config
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - set: into["drain"], into["settle"], into["lease"]
+        value: r.drain.String(), r.settle.String(), r.lease.String()
+      - set: into["autoExtend"]
+        to: strconv
+        value: strconv.FormatBool(r.autoExtend)
+  - of: (*App).componentStopBudget
+    steps:
+      - bind: budget
+        eval: defaultStopBudget
+      - opt:
+          do:
+            - return: budget
+          when: a.runProfile() == model.ProfileCLI
+      - loop:
+          do:
+            - set: budget
+              value: max(budget, d.stopTakes()+stopMargin)
+          key: _
+          range: a.drainers()
+          value: d
+      - return: budget
+  - of: (*App).stopDeadline
+    steps:
+      - return: base + max(a.componentStopBudget()-defaultStopBudget, 0)
+  - of: (*App).drainers
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).drainers
+        kind: self
+      - id: a.componentNodes
+        kind: internal
+    steps:
+      - bind: g
+        eval: a.componentNodes()
+        to: a.componentNodes
+      - var:
+          name: out
+          type: "[]drainer"
+      - loop:
+          do:
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - set: out
+                          value: append(out, d)
+                      init:
+                        bind: d, ok
+                        eval: n.(drainer)
+                      when: ok
+                key: _
+                range: group
+                value: "n"
+          key: _
+          range: "[][]node{g.subs, g.commands}"
+          value: group
+      - return: out
+  - of: (*App).beginDrains
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).beginDrains
+        kind: self
+      - id: d.beginDrain
+        kind: internal
+      - id: logger
+        kind: package
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: |-
+                      logger.Warn(context.Background(), a.log, "a consumer was not told of the stop at once: its component's stop tells it",
+                      				logger.String("error", errs.PublicOf(err)))
+                    to: logger
+                init:
+                  bind: err
+                  eval: d.beginDrain()
+                  to: d.beginDrain
+                when: err != nil
+          key: _
+          range: a.drainers()
+          value: d
+  - of: beginStop
+    participants:
+      - id: caller
+        kind: actor
+      - id: beginStop
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: sup.Stop
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: sup == nil
+      - bind: ctx, cancel
+        eval: context.WithDeadline(context.Background(), time.Time{})
+        to: context
+      - defer: cancel()
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: sup.Stop(ctx)
+            to: sup.Stop
+          when: err != nil && !errors.Is(err, lifecycle.StopTimeout)
+      - return: nil
+  - of: stoppedBy
+    steps:
+      - bind: cancelled
+        eval: errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+      - opt:
+          do:
+            - return: "false"
+          when: ctx.Err() == nil || !cancelled
+      - lock:
+          mutex: a.mu
+      - return: a.stopping
+  - of: (*loopState).ended
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loopState).ended
+        kind: self
+      - id: sp.attr
+        kind: internal
+      - id: sp.end
+        kind: internal
+      - id: l.ran
+        kind: internal
+    steps:
+      - bind: failed
+        eval: err
+      - opt:
+          do:
+            - set: failed
+              value: nil
+            - eval: sp.attr("handed-back", "stop")
+              to: sp.attr
+          when: stoppedBy(ctx, a, err)
+      - eval: sp.end(failed)
+        to: sp.end
+      - eval: l.ran(a, started, a.clock.Now(), failed)
+        to: l.ran
+  - of: RetryIn
+    participants:
+      - id: caller
+        kind: actor
+      - id: RetryIn
+        kind: self
+      - id: failure
+        kind: internal
+    steps:
+      - return: |-
+          failure(CodeRetryIn, "RETRY_IN", "the message is handed back to be retried later", cause,
+          		errs.Int64(retryInField, int64(max(d, 0))))
+        to: failure
+  - of: retryInOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: retryInOf
+        kind: self
+      - id: strconv
+        kind: stdlib
+      - id: time
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: 0, false
+          when: "!errs.HasCode(err, CodeRetryIn)"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: f.Key() != retryInField
+            - bind: nanos, perr
+              eval: strconv.ParseInt(f.StringValue(), 10, 64)
+              to: strconv
+            - opt:
+                do:
+                  - return: 0, true
+                when: perr != nil
+            - return: time.Duration(max(nanos, 0)), true
+              to: time
+          key: _
+          range: slices.Backward(errs.FieldsOf(err))
+          value: f
+      - return: 0, true
   - of: (*runtimeState).newRun
     steps:
       - set: rt.http, rt.sched
@@ -33848,6 +34166,87 @@ sequences:
   - of: NewQuery
     steps:
       - return: "&Query[Q, R]{}"
+  - of: publication.into
+    participants:
+      - id: caller
+        kind: actor
+      - id: publication.into
+        kind: self
+      - id: later.PublishOnce
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: true, b.Publish(ctx, payload)
+          when: p.at.IsZero() && p.key == ""
+      - bind: later, ok
+        eval: b.(plug.LaterPublisher)
+      - opt:
+          do:
+            - return: false, Unavailable("the queue cannot publish for later or once")
+          when: "!ok"
+      - opt:
+          do:
+            - return: later.PublishOnce(ctx, p.key, payload, p.window)
+              to: later.PublishOnce
+          when: p.key != ""
+      - return: true, later.PublishAt(ctx, payload, p.at)
+  - of: publication.mark
+    participants:
+      - id: caller
+        kind: actor
+      - id: publication.mark
+        kind: self
+      - id: sp.attr
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: sp.attr("at", p.at.UTC().Format(time.RFC3339Nano))
+              to: sp.attr
+          when: "!p.at.IsZero()"
+      - opt:
+          do:
+            - eval: sp.attr("instance", clip(p.key))
+              to: sp.attr
+          when: p.key != ""
+  - of: laterOnce
+    participants:
+      - id: caller
+        kind: actor
+      - id: laterOnce
+        kind: self
+      - id: failure
+        kind: internal
+    steps:
+      - return: |-
+          failure(CodeTopicPublish, "TOPIC_LATER_ONCE", "a topic that publishes once cannot publish for later", nil,
+          		errs.String("topic", t.id))
+        to: failure
+  - of: noTopicKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: noTopicKey
+        kind: self
+      - id: failure
+        kind: internal
+    steps:
+      - return: failure(CodeTopicPublish, "TOPIC_KEY_EMPTY", "the message's key is empty", nil, errs.String("topic", t.id))
+        to: failure
+  - of: notQueued
+    participants:
+      - id: caller
+        kind: actor
+      - id: notQueued
+        kind: self
+      - id: failure
+        kind: internal
+    steps:
+      - return: |-
+          failure(CodeCommandQueue, "COMMAND_NOT_QUEUED", "only a queued command is dispatched for later", nil,
+          		errs.String("command", c.id))
+        to: failure
   - of: (*App).openQueueWith
     participants:
       - id: caller
@@ -34022,7 +34421,7 @@ sequences:
             - return: err
           init:
             bind: err
-            eval: "c.put(ctx, q, key, queuedEnvelope[C]{From: from, Key: key, Input: in})"
+            eval: "c.put(ctx, q, key, queuedEnvelope[C]{From: from, Key: key, Input: in}, at)"
             to: c.put
           when: err != nil
       - return: nil
@@ -34078,8 +34477,8 @@ sequences:
         kind: internal
       - id: failure
         kind: internal
-      - id: q.broker.Publish
-        kind: value
+      - id: pub.into
+        kind: internal
       - id: q.release
         kind: internal
       - id: markSpan
@@ -34109,6 +34508,8 @@ sequences:
               do:
                 - return: failure(CodeCommandEncode, "COMMAND_ENCODE", "the command cannot be queued", err, errs.String("command", c.id))
                   to: failure
+      - bind: pub
+        eval: "publication{at: at}"
       - bind: queue
         eval:
           closure:
@@ -34120,9 +34521,9 @@ sequences:
                     - return: failure(CodeCommandQueue, "COMMAND_QUEUE", "the command's queue refused it", err, errs.String("command", c.id))
                       to: failure
                   init:
-                    bind: err
-                    eval: q.broker.Publish(ctx, payload)
-                    to: q.broker.Publish
+                    bind: _, err
+                    eval: pub.into(ctx, q.broker, payload)
+                    to: pub.into
                   when: err != nil
               - return: nil
       - bind: release
@@ -34194,8 +34595,7 @@ sequences:
                   			if p := recover(); p != nil {
                   				err = panicked(ctx, a, c.id, "handler panicked", p)
                   			}
-                  			sp.end(err)
-                  			loop.ran(a, started, a.clock.Now(), err)
+                  			loop.ended(ctx, a, sp, started, err)
                   			if err == nil || d.Deliveries >= c.opts.deliveries.maxDeliveries || notRetryable(err) {
                   				q.release(env.Key)
                   			}
@@ -34321,6 +34721,8 @@ sequences:
         kind: actor
       - id: (*Command).start
         kind: self
+      - id: c.opts.deliveries.knobs.values
+        kind: internal
       - id: a.openConsumerQueue
         kind: internal
       - id: failure
@@ -34331,7 +34733,7 @@ sequences:
         kind: value
       - id: c.handler
         kind: internal
-      - id: run.supervise
+      - id: cons.supervise
         kind: internal
       - id: q.mu.Lock
         kind: value
@@ -34342,8 +34744,11 @@ sequences:
           do:
             - return: nil
           when: "!c.opts.queued"
+      - bind: run
+        eval: c.opts.deliveries.knobs.values()
+        to: c.opts.deliveries.knobs.values
       - bind: broker, db, err
-        eval: a.openConsumerQueue(&c.nodeBase, c.queueUnder(), c.opts.deliveries.maxDeliveries)
+        eval: a.openConsumerQueue(&c.nodeBase, c.queueUnder(), run.policy(c.opts.deliveries.maxDeliveries))
         to: a.openConsumerQueue
       - opt:
           do:
@@ -34357,14 +34762,14 @@ sequences:
         to: a.loop
       - eval: c.queue.Store(q)
         to: c.queue.Store
-      - bind: run
+      - bind: cons
         eval: "consumer{a: a, loop: loop, node: c.id, name: c.name, wake: model.WakeTopic}"
       - bind: handler
         eval: c.handler(a, q, loop)
         to: c.handler
       - bind: sup, err
-        eval: run.supervise(func(ctx context.Context) error { return c.consume(ctx, q, handler) })
-        to: run.supervise
+        eval: cons.supervise(func(ctx context.Context) error { return c.consume(ctx, q, run, handler) })
+        to: cons.supervise
       - opt:
           do:
             - return: failure(CodeLoopStart, "LOOP_START", "a queued command's consumer cannot start", err, errs.String("command", c.id))
@@ -34394,12 +34799,12 @@ sequences:
         kind: value
     steps:
       - return: |-
-          q.broker.Consume(ctx, plug.ConsumeConfig{
+          q.broker.Consume(ctx, run.consume(plug.ConsumeConfig{
           		Handler:      handler,
           		PollInterval: pollInterval,
           		Parallelism:  c.opts.deliveries.parallelism,
           		BatchSize:    1,
-          	})
+          	}))
         to: q.broker.Consume
   - of: (*Command).stop
     participants:
@@ -34435,6 +34840,51 @@ sequences:
           when: sup == nil
       - return: sup.Stop(ctx)
         to: sup.Stop
+  - of: (*Command).stopTakes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Command).stopTakes
+        kind: self
+      - id: c.opts.deliveries.knobs.values().stopTakes
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: "!c.opts.queued"
+      - return: c.opts.deliveries.knobs.values().stopTakes()
+        to: c.opts.deliveries.knobs.values().stopTakes
+  - of: (*Command).beginDrain
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Command).beginDrain
+        kind: self
+      - id: c.queue.Load
+        kind: value
+      - id: q.mu.Lock
+        kind: value
+      - id: q.mu.Unlock
+        kind: value
+      - id: beginStop
+        kind: internal
+    steps:
+      - bind: q
+        eval: c.queue.Load()
+        to: c.queue.Load
+      - opt:
+          do:
+            - return: nil
+          when: q == nil
+      - eval: q.mu.Lock()
+        to: q.mu.Lock
+      - bind: sup
+        eval: q.sup
+      - eval: q.mu.Unlock()
+        to: q.mu.Unlock
+      - return: beginStop(sup)
+        to: beginStop
   - of: (*Command).describeQueue
     participants:
       - id: caller
@@ -34503,16 +34953,22 @@ sequences:
         kind: self
       - id: queueWhere
         kind: internal
+      - id: d.knobs.values().config
+        kind: internal
     steps:
       - bind: d
         eval: c.opts.deliveries
       - bind: where
         eval: queueWhere(a, &c.nodeBase)
         to: queueWhere
+      - bind: config
+        eval: "map[string]string{\"queue\": where, \"maxDeliveries\": strconv.Itoa(d.maxDeliveries), \"parallelism\": strconv.Itoa(d.parallelism)}"
+      - eval: d.knobs.values().config(config)
+        to: d.knobs.values().config
       - return: |-
           model.Mechanic{
           		Kind: "queue", Label: fmt.Sprintf("%s · %d attempts", queuePlace[where], d.maxDeliveries), Package: "github.com/kitsunium/sdk/pkg/v1/data/queue",
-          		Config: map[string]string{"queue": where, "maxDeliveries": strconv.Itoa(d.maxDeliveries), "parallelism": strconv.Itoa(d.parallelism)},
+          		Config: config,
           	}
   - of: RateLimitPerClient
     participants:
@@ -55183,17 +55639,80 @@ sequences:
       - eval: s.add(t, true)
         to: s.add
       - return: t
+  - of: (*TopicService).Once
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TopicService).Once
+        kind: self
+      - id: t.svc.problem
+        kind: internal
+      - id: declarePolicySetting
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: t.svc == nil
+            - case: key == nil
+              do:
+                - eval: t.svc.problem(t.decl, t.id, "topic.once-nil", "topic", t.id)
+                  to: t.svc.problem
+            - case: t.once != nil
+              do:
+                - eval: t.svc.problem(t.decl, t.id, "topic.once-twice", "topic", t.id)
+                  to: t.svc.problem
+            - default: true
+              do:
+                - set: t.once, t.onceWindow
+                  value: key, window
+                - set: t.onceFor
+                  to: declarePolicySetting
+                  value: declarePolicySetting(t.svc, &t.nodeBase, knobOnceWindow, window, checkPositive())
+      - return: t
   - of: (*TopicService).Publish
     participants:
       - id: caller
         kind: actor
       - id: (*TopicService).Publish
         kind: self
+      - id: t.publishAs
+        kind: internal
+    steps:
+      - return: t.publishAs(ctx, msg, time.Time{}, "Publish")
+        to: t.publishAs
+  - of: (*TopicService).PublishAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TopicService).PublishAt
+        kind: self
+      - id: t.Publish
+        kind: internal
+      - id: t.publishAs
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: t.Publish(ctx, msg)
+              to: t.Publish
+          when: at.IsZero()
+      - return: t.publishAs(ctx, msg, at, "PublishAt")
+        to: t.publishAs
+  - of: (*TopicService).publishAs
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TopicService).publishAs
+        kind: self
       - id: t.app
         kind: internal
       - id: notRunning
         kind: internal
       - id: a.begin
+        kind: internal
+      - id: t.publication
+        kind: internal
+      - id: pub.mark
         kind: internal
       - id: t.payload
         kind: internal
@@ -55211,26 +55730,56 @@ sequences:
               to: notRunning
           when: a == nil
       - bind: ctx, sp
-        eval: "a.begin(ctx, &spanStart{node: t.id, from: currentNode(ctx), edge: model.EdgePublishes, op: model.OpPublish, name: \"Publish\"})"
+        eval: "a.begin(ctx, &spanStart{node: t.id, from: currentNode(ctx), edge: model.EdgePublishes, op: model.OpPublish, name: name})"
         to: a.begin
-      - bind: payload, err
-        eval: t.payload(ctx, a, msg)
-        to: t.payload
+      - bind: pub, err
+        eval: t.publication(msg, at)
+        to: t.publication
+      - var:
+          name: payload
+          type: "[]byte"
+      - opt:
+          do:
+            - eval: pub.mark(sp)
+              to: pub.mark
+            - set: payload, err
+              to: t.payload
+              value: t.payload(ctx, a, msg)
+          when: err == nil
       - opt:
           do:
             - set: err
               to: t.send
-              value: t.send(ctx, a, sp, payload)
+              value: t.send(ctx, a, sp, payload, pub)
           when: err == nil
       - eval: sp.end(err)
         to: sp.end
       - return: err
+  - of: (*TopicService).publication
+    steps:
+      - opt:
+          do:
+            - return: "publication{at: at}, nil"
+          when: t.once == nil
+      - opt:
+          do:
+            - return: publication{}, laterOnce(&t.nodeBase)
+          when: "!at.IsZero()"
+      - bind: key
+        eval: t.once(msg)
+      - opt:
+          do:
+            - return: publication{}, noTopicKey(&t.nodeBase)
+          when: key == ""
+      - return: "publication{key: key, window: knobValue(t.onceFor, t.onceWindow)}, nil"
   - of: (*TopicService).send
     participants:
       - id: caller
         kind: actor
       - id: (*TopicService).send
         kind: self
+      - id: pub.at.IsZero
+        kind: value
       - id: t.publish
         kind: internal
       - id: t.wake
@@ -55242,13 +55791,19 @@ sequences:
       - id: errors
         kind: stdlib
     steps:
+      - bind: wakes
+        eval: pub.at.IsZero()
+        to: pub.at.IsZero
       - opt:
           do:
             - bind: err
-              eval: t.publish(ctx, a, payload)
+              eval: t.publish(ctx, a, sp, payload, pub)
               to: t.publish
-            - eval: t.wake()
-              to: t.wake
+            - opt:
+                do:
+                  - eval: t.wake()
+                    to: t.wake
+                when: wakes
             - return: err
           when: unitOf(ctx) == nil
       - var:
@@ -55262,7 +55817,7 @@ sequences:
                   params: rctx context.Context
                   results: error
                   steps:
-                    - return: t.publishTo(context.WithoutCancel(rctx), sub, payload)
+                    - return: t.publishTo(context.WithoutCancel(rctx), sub, payload, pub)
                       to: t.publishTo
             - bind: joined
               eval:
@@ -55270,7 +55825,7 @@ sequences:
                   params: tctx context.Context
                   results: error
                   steps:
-                    - return: t.publishTo(tctx, sub, payload)
+                    - return: t.publishTo(tctx, sub, payload, pub)
                       to: t.publishTo
             - opt:
                 do:
@@ -55282,7 +55837,7 @@ sequences:
                     value: append(failed, err)
                 init:
                   bind: err
-                  eval: t.publishTo(ctx, sub, payload)
+                  eval: t.publishTo(ctx, sub, payload, pub)
                   to: t.publishTo
                 when: err != nil
           key: _
@@ -55301,7 +55856,7 @@ sequences:
           do:
             - eval: t.wake()
               to: t.wake
-          when: "!hold(ctx, heldEffect{node: t.id, release: wake, inside: true})"
+          when: "wakes && !hold(ctx, heldEffect{node: t.id, release: wake, inside: true})"
       - eval: sp.attr("held", "commit")
         to: sp.attr
       - return: errors.Join(failed...)
@@ -55338,7 +55893,9 @@ sequences:
         kind: actor
       - id: (*TopicService).publish
         kind: self
-      - id: t.publishTo
+      - id: t.publishInto
+        kind: internal
+      - id: sp.attr
         kind: internal
       - id: errors
         kind: stdlib
@@ -55348,15 +55905,19 @@ sequences:
           type: "[]error"
       - loop:
           do:
+            - bind: published, err
+              eval: t.publishInto(ctx, sub, payload, pub)
+              to: t.publishInto
             - opt:
                 do:
                   - set: failed
                     value: append(failed, err)
-                init:
-                  bind: err
-                  eval: t.publishTo(ctx, sub, payload)
-                  to: t.publishTo
                 when: err != nil
+            - opt:
+                do:
+                  - eval: sp.attr("deduplicated", "true")
+                    to: sp.attr
+                when: err == nil && !published
           key: _
           range: t.subscribers(a)
           value: sub
@@ -55390,23 +55951,32 @@ sequences:
         kind: actor
       - id: (*TopicService).publishTo
         kind: self
-      - id: sub.broker.Publish
-        kind: value
-      - id: failure
+      - id: t.publishInto
         kind: internal
     steps:
+      - bind: _, err
+        eval: t.publishInto(ctx, sub, payload, pub)
+        to: t.publishInto
+      - return: err
+  - of: (*TopicService).publishInto
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TopicService).publishInto
+        kind: self
+      - id: pub.into
+        kind: internal
+    steps:
+      - bind: published, err
+        eval: pub.into(ctx, sub.broker, payload)
+        to: pub.into
       - opt:
           do:
             - return: |-
-                failure(CodeTopicPublish, "TOPIC_PUBLISH", "a subscription's queue refused the message", err,
+                false, failure(CodeTopicPublish, "TOPIC_PUBLISH", "a subscription's queue refused the message", err,
                 			errs.String("topic", t.id), errs.String("subscription", sub.id))
-              to: failure
-          init:
-            bind: err
-            eval: sub.broker.Publish(ctx, payload)
-            to: sub.broker.Publish
           when: err != nil
-      - return: nil
+      - return: published, nil
   - of: (*TopicService).describe
     participants:
       - id: caller
@@ -55465,6 +56035,18 @@ sequences:
   - of: Parallelism
     steps:
       - return: deliveryOption(func(o *deliveryOptions) { o.parallelism = n })
+  - of: Drain
+    steps:
+      - return: deliveryOption(func(o *deliveryOptions) { o.knobs.drain = d })
+  - of: Settle
+    steps:
+      - return: deliveryOption(func(o *deliveryOptions) { o.knobs.settle = d })
+  - of: Lease
+    steps:
+      - return: deliveryOption(func(o *deliveryOptions) { o.knobs.lease = d })
+  - of: AutoExtend
+    steps:
+      - return: deliveryOption(func(o *deliveryOptions) { o.knobs.autoExtend = on })
   - of: (*Service).Subscribe
     participants:
       - id: caller
@@ -55476,6 +56058,8 @@ sequences:
       - id: bodyOf
         kind: internal
       - id: s.add
+        kind: internal
+      - id: sub.knobs.declare
         kind: internal
       - id: s.problem
         kind: internal
@@ -55494,7 +56078,7 @@ sequences:
           range: opts
           value: opt
       - bind: sub
-        eval: "&SubscriptionWorker[T]{topic: topic, handler: handler, maxDeliver: o.maxDeliveries, parallelism: o.parallelism}"
+        eval: "&SubscriptionWorker[T]{topic: topic, handler: handler, maxDeliver: o.maxDeliveries, parallelism: o.parallelism, knobs: o.knobs}"
       - set: sub.kind, sub.name, sub.decl
         value: model.KindSubscription, name, callerPos()
       - set: sub.body
@@ -55502,6 +56086,8 @@ sequences:
         value: bodyOf(handler)
       - eval: s.add(sub, true)
         to: s.add
+      - eval: sub.knobs.declare(s, &sub.nodeBase)
+        to: sub.knobs.declare
       - switch:
           cases:
             - case: topic == nil
@@ -55537,6 +56123,8 @@ sequences:
         kind: self
       - id: failure
         kind: internal
+      - id: sb.knobs.values
+        kind: internal
       - id: a.openConsumerQueue
         kind: internal
       - id: a.loop
@@ -55554,9 +56142,12 @@ sequences:
       - var:
           name: err
           type: error
+      - bind: run
+        eval: sb.knobs.values()
+        to: sb.knobs.values
       - set: sb.broker, sb.queueDB, err
         to: a.openConsumerQueue
-        value: a.openConsumerQueue(&sb.nodeBase, sb.queueUnder(), sb.maxDeliver)
+        value: a.openConsumerQueue(&sb.nodeBase, sb.queueUnder(), run.policy(sb.maxDeliver))
       - opt:
           do:
             - return: failure(CodeQueueOpen, "QUEUE_OPEN", "a subscription's queue cannot be opened", err, errs.String("subscription", sb.id))
@@ -55573,12 +56164,12 @@ sequences:
         to: c.supervise
         value: |-
           c.supervise(func(ctx context.Context) error {
-          		return broker.Consume(ctx, plug.ConsumeConfig{
+          		return broker.Consume(ctx, run.consume(plug.ConsumeConfig{
           			Handler:      handler,
           			PollInterval: pollInterval,
           			Parallelism:  sb.parallelism,
           			BatchSize:    consumerBatch,
-          		})
+          		}))
           	})
       - opt:
           do:
@@ -55642,6 +56233,28 @@ sequences:
           when: sb.sup == nil
       - return: sb.sup.Stop(ctx)
         to: sb.sup.Stop
+  - of: (*SubscriptionWorker).stopTakes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SubscriptionWorker).stopTakes
+        kind: self
+      - id: sb.knobs.values().stopTakes
+        kind: internal
+    steps:
+      - return: sb.knobs.values().stopTakes()
+        to: sb.knobs.values().stopTakes
+  - of: (*SubscriptionWorker).beginDrain
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*SubscriptionWorker).beginDrain
+        kind: self
+      - id: beginStop
+        kind: internal
+    steps:
+      - return: beginStop(sb.sup)
+        to: beginStop
   - of: (*SubscriptionWorker).describe
     participants:
       - id: caller
@@ -58756,6 +59369,8 @@ sequences:
         kind: internal
       - id: s.add
         kind: internal
+      - id: w.knobs.declare
+        kind: internal
       - id: s.problem
         kind: internal
     steps:
@@ -58769,7 +59384,7 @@ sequences:
           range: opts
           value: opt
       - bind: w
-        eval: "&Watch{mark: mark, handler: handler, maxDeliver: o.maxDeliveries, parallelism: o.parallelism, ownStores: o.ownStores}"
+        eval: "&Watch{mark: mark, handler: handler, maxDeliver: o.maxDeliveries, parallelism: o.parallelism, ownStores: o.ownStores, knobs: o.knobs}"
       - set: w.kind, w.name, w.decl
         value: model.KindSubscription, name, callerPos()
       - set: w.body
@@ -58777,6 +59392,8 @@ sequences:
         value: bodyOf(handler)
       - eval: s.add(w, true)
         to: s.add
+      - eval: w.knobs.declare(s, &w.nodeBase)
+        to: w.knobs.declare
       - switch:
           cases:
             - case: "!slices.Contains(marks, mark)"
@@ -59188,6 +59805,8 @@ sequences:
         kind: actor
       - id: (*Watch).start
         kind: self
+      - id: w.knobs.values
+        kind: internal
       - id: a.openConsumerQueue
         kind: internal
       - id: failure
@@ -59202,13 +59821,16 @@ sequences:
         kind: internal
       - id: a.loop
         kind: internal
-      - id: w.deliver
+      - id: cr.consume
         kind: internal
       - id: c.supervise
         kind: internal
     steps:
+      - bind: cr
+        eval: w.knobs.values()
+        to: w.knobs.values
       - bind: broker, db, err
-        eval: a.openConsumerQueue(&w.nodeBase, w.queueUnder(), w.maxDeliver)
+        eval: a.openConsumerQueue(&w.nodeBase, w.queueUnder(), cr.policy(w.maxDeliver))
         to: a.openConsumerQueue
       - opt:
           do:
@@ -59244,12 +59866,18 @@ sequences:
         to: a.loop
       - bind: c
         eval: "consumer{a: a, loop: loop, node: w.id, name: w.name, wake: model.WakeChange}"
-      - bind: handler
-        eval: w.deliver(&c, r)
-        to: w.deliver
+      - bind: cfg
+        eval: |-
+          cr.consume(plug.ConsumeConfig{
+          		Handler:      w.deliver(&c, r),
+          		PollInterval: pollInterval,
+          		Parallelism:  w.parallelism,
+          		BatchSize:    1,
+          	})
+        to: cr.consume
       - set: r.sup, err
         to: c.supervise
-        value: c.supervise(func(ctx context.Context) error { return w.consume(ctx, r, handler) })
+        value: c.supervise(func(ctx context.Context) error { return w.consume(ctx, r, cfg) })
       - opt:
           do:
             - loop:
@@ -59274,13 +59902,7 @@ sequences:
       - id: r.broker.Consume
         kind: value
     steps:
-      - return: |-
-          r.broker.Consume(ctx, plug.ConsumeConfig{
-          		Handler:      handler,
-          		PollInterval: pollInterval,
-          		Parallelism:  w.parallelism,
-          		BatchSize:    1,
-          	})
+      - return: r.broker.Consume(ctx, cfg)
         to: r.broker.Consume
   - of: (*Watch).deliver
     participants:
@@ -59359,6 +59981,37 @@ sequences:
       - eval: w.unmark(a)
         to: w.unmark
       - return: nil
+  - of: (*Watch).stopTakes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Watch).stopTakes
+        kind: self
+      - id: w.knobs.values().stopTakes
+        kind: internal
+    steps:
+      - return: w.knobs.values().stopTakes()
+        to: w.knobs.values().stopTakes
+  - of: (*Watch).beginDrain
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Watch).beginDrain
+        kind: self
+      - id: w.run.Load
+        kind: value
+      - id: beginStop
+        kind: internal
+    steps:
+      - bind: r
+        eval: w.run.Load()
+        to: w.run.Load
+      - opt:
+          do:
+            - return: nil
+          when: r == nil
+      - return: beginStop(r.sup)
+        to: beginStop
   - of: noticeOf
     participants:
       - id: caller
@@ -59576,7 +60229,7 @@ sequences:
         kind: internal
     steps:
       - bind: broker, db, err
-        eval: a.openConsumerQueue(&w.nodeBase, w.queueUnder(), w.maxDeliver)
+        eval: a.openConsumerQueue(&w.nodeBase, w.queueUnder(), w.knobs.values().policy(w.maxDeliver))
         to: a.openConsumerQueue
       - opt:
           do:
