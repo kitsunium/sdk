@@ -3,7 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
 	"reflect"
 	"regexp"
@@ -73,7 +73,7 @@ type endpointOptions struct {
 type callOptions struct {
 	// auth is model.AuthRequired, model.AuthOptional or "".
 	auth     string
-	policies []policy
+	policies []*policy
 }
 
 // OperationOption configures an endpoint, a command or a query alike: the
@@ -101,12 +101,6 @@ func (f callOption) commandConfigure(o *commandOptions) { f(&o.callOptions) }
 // queryConfigure sets the option on what it configures.
 func (f callOption) queryConfigure(o *queryOptions) { f(&o.callOptions) }
 
-// policy is a mechanic an endpoint runs in front of its handler.
-type policy struct {
-	mech   model.Mechanic
-	runner resilience.Runner
-}
-
 type endpointOption func(o *endpointOptions)
 
 // endpointConfigure sets the option on what it configures.
@@ -128,61 +122,50 @@ func MaxBody(bytes int64) EndpointConfigurer {
 }
 
 // RateLimit puts a token bucket in front of the handler: perSecond tokens a
-// second, up to burst at once. An empty bucket answers 429 at once. It is the
+// second, up to burst at once. An empty bucket answers 429 at once — with
+// Retry-After, the seconds the bucket needs to earn its next token —, or,
+// given [MaxWait], once the token due within it did not come. It is the
 // SDK's resilience rate limiter.
+//
+// The values are the defaults of the operation's settings
+// <service>-<operation>-rate, -burst and -rate-wait, which config/<env>.* and
+// <PRODUCT>_<NAME> override; a rate that is not above zero or a burst below
+// one stops the start.
 //
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
-func RateLimit(perSecond float64, burst int) OperationOption {
-	return callOption(func(o *callOptions) {
-		o.policies = append(o.policies, policy{
-			mech: model.Mechanic{
-				Kind:    "ratelimit",
-				Label:   fmt.Sprintf("%s/s burst %d", strconv.FormatFloat(perSecond, 'f', -1, 64), burst),
-				Package: "github.com/kitsunium/sdk/pkg/v1/app/resilience",
-				Config:  map[string]string{"rate": strconv.FormatFloat(perSecond, 'f', -1, 64), "burst": strconv.Itoa(burst)},
-			},
-			runner: resilience.NewRateLimiter(resilience.RateLimiterConfig{Rate: perSecond, Burst: burst}),
-		})
-	})
+func RateLimit(perSecond float64, burst int, opts ...RateLimitConfigurer) OperationOption {
+	return policyOption(func() policyGuard { return newRateLimitGuard(perSecond, burst, opts) })
 }
 
-// Timeout cancels the handler's context after d and answers 504. It is the
-// SDK's resilience timeout.
+// Timeout cancels the handler's context after d and answers 504. A caller
+// that leaves first is no timeout: its request is recorded as 499, logged as
+// information, and nothing it could read is written. It is the SDK's
+// resilience timeout, on the app's clock.
+//
+// d is the default of the operation's setting <service>-<operation>-timeout,
+// which config/<env>.* and <PRODUCT>_<NAME> override; one that is not
+// positive stops the start.
 //
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
 func Timeout(d time.Duration) OperationOption {
-	return callOption(func(o *callOptions) {
-		o.policies = append(o.policies, policy{
-			mech: model.Mechanic{
-				Kind:    "timeout",
-				Label:   d.String(),
-				Package: "github.com/kitsunium/sdk/pkg/v1/app/resilience",
-				Config:  map[string]string{"after": d.String()},
-			},
-			runner: resilience.NewTimeout(d),
-		})
-	})
+	return policyOption(func() policyGuard { return &timeoutGuard{after: d} })
 }
 
 // Bulkhead caps how many requests the handler serves at once; the overflow
-// answers 503. It is the SDK's resilience bulkhead.
+// answers 503 — at once, or, given [BulkheadQueue] and [MaxWait], once the
+// queue is full or the wait ran out. It is the SDK's resilience bulkhead.
+//
+// The values are the defaults of the operation's settings
+// <service>-<operation>-bulkhead, -bulkhead-queue and -bulkhead-wait, which
+// config/<env>.* and <PRODUCT>_<NAME> override; a bulkhead below one stops
+// the start.
 //
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
-func Bulkhead(maxConcurrent int) OperationOption {
-	return callOption(func(o *callOptions) {
-		o.policies = append(o.policies, policy{
-			mech: model.Mechanic{
-				Kind:    "bulkhead",
-				Label:   fmt.Sprintf("%d at once", maxConcurrent),
-				Package: "github.com/kitsunium/sdk/pkg/v1/app/resilience",
-				Config:  map[string]string{"max": strconv.Itoa(maxConcurrent)},
-			},
-			runner: resilience.NewBulkhead(maxConcurrent),
-		})
-	})
+func Bulkhead(maxConcurrent int, opts ...BulkheadConfigurer) OperationOption {
+	return policyOption(func() policyGuard { return newBulkheadGuard(maxConcurrent, opts) })
 }
 
 var (
@@ -248,6 +231,7 @@ func (s *Service) Endpoint[Req, Resp any](route string, handler func(context.Con
 	method, path, wildcards, problem := parseRoute(route)
 	e.method, e.path = method, path
 	s.add(e, e.opts.name != "" || short != "")
+	declarePolicies(s, &e.nodeBase, e.opts.policies)
 	if !problem.empty() {
 		s.problemSaid(decl, e.id, problem)
 		return e
@@ -304,6 +288,7 @@ func (s *Service) Implement[Req, Resp any](port *PortService[Req, Resp], handler
 	}
 	e.name = firstNonEmpty(e.opts.name, short, portName)
 	s.add(e, e.opts.name != "" || short != "")
+	declarePolicies(s, &e.nodeBase, e.opts.policies)
 	if port == nil {
 		s.problem(decl, e.id, "implement.nil", "service", s.name)
 	}
@@ -422,6 +407,7 @@ func (e *EndpointService[Req, Resp]) serve(a *App) http.Handler {
 		ctx, sp := e.requestSpan(a, w, r, name)
 		ctx, rs := withResponseState(ctx, a, r)
 		ctx, out := e.handle(ctx, a, w, r, sp)
+		out.err = callerLeft(ctx, out.err)
 		// Cookies go out before the status line, errors included.
 		rs.write(ctx, w, a)
 		sp.attr("http.status", strconv.Itoa(e.answer(ctx, a, w, out)))
@@ -491,9 +477,14 @@ func (a *App) reply[T any](ctx context.Context, w http.ResponseWriter, resp T, e
 	h.Set("X-Content-Type-Options", "nosniff")
 	if err != nil {
 		status, body := describe(err)
-		if status >= http.StatusInternalServerError {
+		switch {
+		case status >= http.StatusInternalServerError:
 			logger.Error(ctx, a.log, "request failed", logger.Int("status", status), logger.String("error", err.Error()))
+		case status == statusCallerLeft:
+			// The logger drops a record whose context is done, and this one is.
+			logger.Info(context.WithoutCancel(ctx), a.log, "the caller left before the answer", logger.Int("status", status))
 		}
+		retryAfter(h, status, err)
 		return writeJSON(w, status, wireError{Error: body})
 	}
 	if noBody {
@@ -501,6 +492,39 @@ func (a *App) reply[T any](ctx context.Context, w http.ResponseWriter, resp T, e
 		return http.StatusNoContent
 	}
 	return writeJSON(w, http.StatusOK, resp)
+}
+
+// callerLeft is err, but for the cancellation of a request whose caller
+// left — ctx, the request's, is cancelled —: that is statusCallerLeft. A
+// cancellation the operation made itself, its caller still there, stays
+// what it was.
+func callerLeft(ctx context.Context, err error) error {
+	if err == nil || ctx.Err() == nil || !errors.Is(err, context.Canceled) {
+		return err
+	}
+	return NewError(statusCallerLeft, WireCanceled, "the caller left before the answer").Wrap(err)
+}
+
+// retryAfter sets Retry-After on a 429 or a 503 whose error says how long
+// to wait — the SDK's rate limiters do (resilience.RetryAfter) —: whole
+// seconds (RFC 9110 §10.2.3), rounded up, so that a client that waits as
+// told finds the token earned.
+func retryAfter(h http.Header, status int, err error) {
+	if status != http.StatusTooManyRequests && status != http.StatusServiceUnavailable {
+		return
+	}
+	if d, ok := resilience.RetryAfter(err); ok {
+		h.Set("Retry-After", strconv.FormatInt(ceilSeconds(d), 10))
+	}
+}
+
+// ceilSeconds is d in whole seconds, rounded up.
+func ceilSeconds(d time.Duration) int64 {
+	s := int64(d / time.Second)
+	if d%time.Second > 0 {
+		s++
+	}
+	return s
 }
 
 // replyError writes err as an error answer, and returns the status it sent.
@@ -588,10 +612,7 @@ func (e *EndpointService[Req, Resp]) drawn(a *App) []model.Mechanic {
 	if e.pipe.check != nil {
 		out = append(out, validateMechanic())
 	}
-	for _, p := range e.opts.policies {
-		out = append(out, p.mech)
-	}
-	return out
+	return append(out, mechanicsOf(e.opts.policies)...)
 }
 
 // humanBytes spells n bytes in the largest unit that divides it.

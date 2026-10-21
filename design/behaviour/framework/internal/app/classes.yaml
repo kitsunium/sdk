@@ -384,6 +384,20 @@ constants:
         value: "64"
     name: clipLimit
   - doc: |-
+      statusCallerLeft is the status a request is recorded with when its
+      caller left before the answer — nginx's 499, Client Closed Request: the
+      request's context was cancelled while the operation ran, and the
+      cancellation, or a policy's ([Timeout]) giving way to it, is what the
+      operation returned. It is no failure of the product — no 503, no 504, no
+      error logged, the span not in error —: it is logged as information, and
+      the status line the server writes reaches nobody, the connection gone, as
+      writeJSON already lets a write to a client that went away fail.
+    items:
+      - name: statusCallerLeft
+        type: int
+        value: "499"
+    name: statusCallerLeft
+  - doc: |-
       The wire codes a caller branches on: an [Error]'s Code, snake_case, kept
       byte-for-byte from the platform's former runtime (ADR 0147 §6). They are named Wire*,
       not Code*, because Code* names a dotted-quad errs.Code in the SDK and the
@@ -786,6 +800,33 @@ constants:
       - name: policyLabel
         value: "\"password\""
     name: policyLabel
+  - doc: The knobs of the policies, each a suffix of its setting's name.
+    grouped: true
+    items:
+      - name: knobRate
+        value: "\"rate\""
+      - name: knobBurst
+        value: "\"burst\""
+      - name: knobRateWait
+        value: "\"rate-wait\""
+      - name: knobClientRate
+        value: "\"client-rate\""
+      - name: knobClientBurst
+        value: "\"client-burst\""
+      - name: knobTimeout
+        value: "\"timeout\""
+      - name: knobBulkhead
+        value: "\"bulkhead\""
+      - name: knobBulkheadQueue
+        value: "\"bulkhead-queue\""
+      - name: knobBulkheadWait
+        value: "\"bulkhead-wait\""
+    name: knobRate
+  - doc: resiliencePackage is the SDK package every policy runs.
+    items:
+      - name: resiliencePackage
+        value: "\"github.com/kitsunium/sdk/pkg/v1/app/resilience\""
+    name: resiliencePackage
   - doc: kit's own privacy service, as the graph names and describes it.
     grouped: true
     items:
@@ -2319,7 +2360,6 @@ files:
       - callOption.exposeConfigure
       - callOption.commandConfigure
       - callOption.queryConfigure
-      - policy
       - endpointOption
       - endpointOption.endpointConfigure
       - endpointOption.exposeConfigure
@@ -2350,6 +2390,9 @@ files:
       - (*EndpointService).handle
       - (*EndpointService).answer
       - (*App).reply
+      - callerLeft
+      - retryAfter
+      - ceilSeconds
       - (*App).replyError
       - accepted
       - writeJSON
@@ -2361,6 +2404,7 @@ files:
     name: endpoint.go
   - decls:
       - clipLimit
+      - statusCallerLeft
       - WireInvalid
       - sdkCodes
       - Error
@@ -3097,6 +3141,65 @@ files:
       - (*App).passwordWarnings
       - unlimited
     name: passwords_warn.go
+  - decls:
+      - knobRate
+      - resiliencePackage
+      - policy
+      - builtRunner
+      - (*policy).run
+      - (*policy).runnerFor
+      - startOf
+      - declarePolicies
+      - mechanicsOf
+      - policyOption
+      - waitOption
+      - waitOption.rateLimitConfigure
+      - waitOption.bulkheadConfigure
+      - bulkheadOption
+      - bulkheadOption.bulkheadConfigure
+      - MaxWait
+      - BulkheadQueue
+      - rateLimitGuard
+      - newRateLimitGuard
+      - (*rateLimitGuard).declare
+      - (*rateLimitGuard).mechanic
+      - (*rateLimitGuard).runner
+      - clientLimitGuard
+      - (*clientLimitGuard).declare
+      - (*clientLimitGuard).mechanic
+      - (*clientLimitGuard).runner
+      - timeoutGuard
+      - (*timeoutGuard).declare
+      - (*timeoutGuard).mechanic
+      - (*timeoutGuard).runner
+      - bulkheadGuard
+      - newBulkheadGuard
+      - (*bulkheadGuard).declare
+      - (*bulkheadGuard).mechanic
+      - (*bulkheadGuard).runner
+      - knobValue
+      - formatRate
+      - declarePolicySetting
+      - policySettingName
+      - settingWords
+      - wordRune
+      - isLowerOrDigit
+      - checkRate
+      - checkAtLeastOne
+      - checkNotNegative
+      - checkPositive
+      - checkWait
+      - judged
+    name: policy.go
+  - decls:
+      - _#3
+    name: policy_compliance.go
+  - decls:
+      - policyGuard
+      - RateLimitConfigurer
+      - BulkheadConfigurer
+      - WaitConfigurer
+    name: policy_interface.go
   - decls:
       - PortService
       - PortConfigurer
@@ -5852,13 +5955,13 @@ functions:
     params: bytes int64
     results: EndpointConfigurer
   - name: RateLimit
-    params: perSecond float64, burst int
+    params: perSecond float64, burst int, opts ...RateLimitConfigurer
     results: OperationOption
   - name: Timeout
     params: d time.Duration
     results: OperationOption
   - name: Bulkhead
-    params: maxConcurrent int
+    params: maxConcurrent int, opts ...BulkheadConfigurer
     results: OperationOption
   - doc: parseRoute splits "METHOD /path/{param}" and returns the wildcards' names.
     name: parseRoute
@@ -5884,6 +5987,25 @@ functions:
     name: elementOf
     params: t reflect.Type
     results: reflect.Type
+  - doc: |-
+      callerLeft is err, but for the cancellation of a request whose caller
+      left — ctx, the request's, is cancelled —: that is statusCallerLeft. A
+      cancellation the operation made itself, its caller still there, stays
+      what it was.
+    name: callerLeft
+    params: ctx context.Context, err error
+    results: error
+  - doc: |-
+      retryAfter sets Retry-After on a 429 or a 503 whose error says how long
+      to wait — the SDK's rate limiters do (resilience.RetryAfter) —: whole
+      seconds (RFC 9110 §10.2.3), rounded up, so that a client that waits as
+      told finds the token earned.
+    name: retryAfter
+    params: h http.Header, status int, err error
+  - doc: ceilSeconds is d in whole seconds, rounded up.
+    name: ceilSeconds
+    params: d time.Duration
+    results: int64
   - doc: "accepted answers a queued command's dispatch: 202, and nothing more."
     name: accepted
     params: w http.ResponseWriter
@@ -6720,6 +6842,109 @@ functions:
     name: unlimited
     params: n *model.Node
     results: bool
+  - doc: |-
+      startOf is what a policy's runner is built from in app a: the settings
+      its start resolved, and its clock — none and the system's outside an app.
+    name: startOf
+    params: a *App
+    results: "*map[string]any, clock.Timed"
+  - doc: declarePolicies declares the settings of an operation's policies in svc.
+    name: declarePolicies
+    params: svc *Service, n *nodeBase, policies []*policy
+  - doc: mechanicsOf are the policies' steps, as the graph draws them.
+    name: mechanicsOf
+    params: policies []*policy
+    results: "[]model.Mechanic"
+  - doc: |-
+      policyOption is the OperationOption that adds guard's policy.
+
+      IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+      only hands it to the declaration it configures.
+    name: policyOption
+    params: guard func() policyGuard
+    results: OperationOption
+  - name: MaxWait
+    params: d time.Duration
+    results: WaitConfigurer
+  - name: BulkheadQueue
+    params: n int
+    results: BulkheadConfigurer
+  - doc: newRateLimitGuard is [RateLimit]'s policy.
+    name: newRateLimitGuard
+    params: perSecond float64, burst int, opts []RateLimitConfigurer
+    results: "*rateLimitGuard"
+  - doc: newBulkheadGuard is [Bulkhead]'s policy.
+    name: newBulkheadGuard
+    params: maxConcurrent int, opts []BulkheadConfigurer
+    results: "*bulkheadGuard"
+  - doc: |-
+      knobValue is a policy's setting in the app that runs it — its default
+      before —, or the code's value when the operation declared no setting.
+    name: knobValue
+    params: st *SettingService[T], def T
+    results: T
+    typeParams: T SettingValue
+  - doc: formatRate spells a rate as the graph shows it.
+    name: formatRate
+    params: rate float64
+    results: string
+  - doc: |-
+      declarePolicySetting declares in svc the setting
+      <service>-<operation>-<knob> of a policy of the operation n, with def as its
+      default and check judging its resolved value; nil, with a declaration
+      error, when the name is not one a setting may take or the service declares
+      it already.
+    name: declarePolicySetting
+    params: svc *Service, n *nodeBase, knob string, def T, check func(v any) phrase
+    results: "*SettingService[T]"
+    typeParams: T SettingValue
+  - doc: |-
+      policySettingName is <service>-<operation>-<knob>, each name spelled as a
+      setting's: "shop", "CreateItem", "rate" make "shop-create-item-rate".
+    name: policySettingName
+    params: service, operation, knob string
+    results: string
+  - doc: |-
+      settingWords spells a name as a setting's: lower case, a capital after a
+      lower-case letter or a digit starting a word of its own, and every run of
+      characters a setting's name cannot hold one dash, none at either end —
+      "CreateItem" is "create-item", "GET /items/{id}" is "get-items-id".
+    name: settingWords
+    params: name string
+    results: string
+  - doc: |-
+      wordRune is r as a setting's name holds it: in lower case, whether it is
+      kept at all, and whether it starts a word — a capital after a lower-case
+      letter or a digit.
+    name: wordRune
+    params: r rune, prevLower bool
+    results: lower rune, keep, starts bool
+  - doc: isLowerOrDigit reports whether r is an ASCII lower-case letter or digit.
+    name: isLowerOrDigit
+    params: r rune
+    results: bool
+  - doc: checkRate refuses a rate that is not a finite number above zero.
+    name: checkRate
+    results: func(v any) phrase
+  - doc: checkAtLeastOne refuses a count below one.
+    name: checkAtLeastOne
+    results: func(v any) phrase
+  - doc: checkNotNegative refuses a negative count.
+    name: checkNotNegative
+    results: func(v any) phrase
+  - doc: checkPositive refuses a duration that is not positive.
+    name: checkPositive
+    results: func(v any) phrase
+  - doc: checkWait refuses a negative wait.
+    name: checkWait
+    results: func(v any) phrase
+  - doc: |-
+      judged is a setting's check: refused says why a value of type T is not
+      one ok accepts.
+    name: judged
+    params: ok func(v T) bool, refused func() phrase
+    results: func(v any) phrase
+    typeParams: T SettingValue
   - name: Fallback
     params: op Operation[Req, Resp]
     results: PortConfigurer[Req, Resp]
@@ -14550,7 +14775,7 @@ types:
         name: auth
         type: string
       - name: policies
-        type: "[]policy"
+        type: "[]*policy"
     kind: struct
     name: callOptions
   - kind: named
@@ -14582,14 +14807,6 @@ types:
         recv: f callOption
     name: callOption
     underlying: func(o *callOptions)
-  - doc: policy is a mechanic an endpoint runs in front of its handler.
-    fields:
-      - name: mech
-        type: model.Mechanic
-      - name: runner
-        type: resilience.Runner
-    kind: struct
-    name: policy
   - kind: named
     methods:
       - doc: endpointConfigure sets the option on what it configures.
@@ -17150,7 +17367,7 @@ types:
       - name: check
         type: validation.Constraint[Req]
       - name: policies
-        type: "[]policy"
+        type: "[]*policy"
       - doc: "noBody is set when the response is Empty: there is nothing to answer."
         name: noBody
         type: bool
@@ -17387,6 +17604,206 @@ types:
         type: string
     kind: struct
     name: dummyHashes
+  - doc: |-
+      policy is a mechanic an operation runs in front of its handler: what it
+      guards with, and the runner it built for the start it last ran in.
+    fields:
+      - name: guard
+        type: policyGuard
+      - name: built
+        type: atomic.Pointer[builtRunner]
+    kind: struct
+    methods:
+      - doc: run runs op behind the policy, in app a.
+        name: run
+        params: ctx context.Context, a *App, op func(context.Context) error
+        recv: p *policy
+        results: error
+      - doc: |-
+          runnerFor is the policy's runner in app a: the one built for the settings
+          its start resolved, built now when there is none — once: a goroutine that
+          loses the race takes the winner's.
+        name: runnerFor
+        params: a *App
+        recv: p *policy
+        results: resilience.Runner
+    name: policy
+  - doc: |-
+      builtRunner is a policy's runner, and the settings of the start it was
+      built for.
+    fields:
+      - name: values
+        type: "*map[string]any"
+      - name: runner
+        type: resilience.Runner
+    kind: struct
+    name: builtRunner
+  - doc: waitOption is [MaxWait].
+    kind: named
+    methods:
+      - doc: rateLimitConfigure sets the option on what it configures.
+        name: rateLimitConfigure
+        params: o *rateLimitGuard
+        recv: w waitOption
+      - doc: bulkheadConfigure sets the option on what it configures.
+        name: bulkheadConfigure
+        params: o *bulkheadGuard
+        recv: w waitOption
+    name: waitOption
+    underlying: time.Duration
+  - doc: bulkheadOption configures a bulkhead.
+    kind: named
+    methods:
+      - doc: bulkheadConfigure sets the option on what it configures.
+        name: bulkheadConfigure
+        params: o *bulkheadGuard
+        recv: f bulkheadOption
+    name: bulkheadOption
+    underlying: func(o *bulkheadGuard)
+  - doc: rateLimitGuard is a token bucket shared by every caller ([RateLimit]).
+    fields:
+      - name: rate
+        type: float64
+      - name: burst
+        type: int
+      - name: wait
+        type: time.Duration
+      - name: rateFor
+        type: "*SettingService[float64]"
+      - name: burstFor
+        type: "*SettingService[int]"
+      - name: waitFor
+        type: "*SettingService[time.Duration]"
+    kind: struct
+    methods:
+      - doc: declare declares <op>-rate, <op>-burst and <op>-rate-wait.
+        name: declare
+        params: svc *Service, n *nodeBase
+        recv: g *rateLimitGuard
+      - doc: mechanic draws the bucket.
+        name: mechanic
+        recv: g *rateLimitGuard
+        results: model.Mechanic
+      - doc: runner is the SDK's rate limiter.
+        name: runner
+        params: clk clock.Timed
+        recv: g *rateLimitGuard
+        results: resilience.Runner
+    name: rateLimitGuard
+  - doc: clientLimitGuard is a token bucket per client ([RateLimitPerClient]).
+    fields:
+      - name: rate
+        type: float64
+      - name: burst
+        type: int
+      - name: rateFor
+        type: "*SettingService[float64]"
+      - name: burstFor
+        type: "*SettingService[int]"
+    kind: struct
+    methods:
+      - doc: declare declares <op>-client-rate and <op>-client-burst.
+        name: declare
+        params: svc *Service, n *nodeBase
+        recv: g *clientLimitGuard
+      - doc: mechanic draws the buckets.
+        name: mechanic
+        recv: g *clientLimitGuard
+        results: model.Mechanic
+      - doc: runner is the SDK's keyed rate limiter.
+        name: runner
+        params: clk clock.Timed
+        recv: g *clientLimitGuard
+        results: resilience.Runner
+    name: clientLimitGuard
+  - doc: timeoutGuard is a deadline on the handler ([Timeout]).
+    fields:
+      - name: after
+        type: time.Duration
+      - name: afterFor
+        type: "*SettingService[time.Duration]"
+    kind: struct
+    methods:
+      - doc: declare declares <op>-timeout.
+        name: declare
+        params: svc *Service, n *nodeBase
+        recv: g *timeoutGuard
+      - doc: mechanic draws the deadline.
+        name: mechanic
+        recv: g *timeoutGuard
+        results: model.Mechanic
+      - doc: runner is the SDK's timeout.
+        name: runner
+        params: clk clock.Timed
+        recv: g *timeoutGuard
+        results: resilience.Runner
+    name: timeoutGuard
+  - doc: bulkheadGuard caps the calls run at once ([Bulkhead]).
+    fields:
+      - name: limit
+        type: int
+      - name: queue
+        type: int
+      - name: wait
+        type: time.Duration
+      - name: limitFor
+        type: "*SettingService[int]"
+      - name: queueFor
+        type: "*SettingService[int]"
+      - name: waitFor
+        type: "*SettingService[time.Duration]"
+    kind: struct
+    methods:
+      - doc: declare declares <op>-bulkhead, <op>-bulkhead-queue and <op>-bulkhead-wait.
+        name: declare
+        params: svc *Service, n *nodeBase
+        recv: g *bulkheadGuard
+      - doc: mechanic draws the bulkhead.
+        name: mechanic
+        recv: g *bulkheadGuard
+        results: model.Mechanic
+      - doc: |-
+          runner is the SDK's bulkhead: the one that queues, which is the one that
+          refuses at once when nothing may wait.
+        name: runner
+        params: clk clock.Timed
+        recv: g *bulkheadGuard
+        results: resilience.Runner
+    name: bulkheadGuard
+  - doc: |-
+      policyGuard is one kind of policy: the settings it declares, the step the
+      graph draws, and the SDK runner its settings' values make.
+    kind: named
+    name: policyGuard
+    underlying: |-
+      interface {
+      	// declare declares the policy's settings in svc, for the operation n.
+      	declare(svc *Service, n *nodeBase)
+      	// mechanic is the step as the graph draws it, with the values it runs
+      	// with in the app that runs it — its defaults before.
+      	mechanic() model.Mechanic
+      	// runner is the SDK runner of those values, on clk.
+      	runner(clk clock.Timed) resilience.Runner
+      }
+  - kind: named
+    name: RateLimitConfigurer
+    underlying: |-
+      interface {
+      	rateLimitConfigure(o *rateLimitGuard)
+      }
+  - kind: named
+    name: BulkheadConfigurer
+    underlying: |-
+      interface {
+      	bulkheadConfigure(o *bulkheadGuard)
+      }
+  - kind: named
+    name: WaitConfigurer
+    underlying: |-
+      interface {
+      	RateLimitConfigurer
+      	BulkheadConfigurer
+      }
   - fields:
       - name: ""
         role: embedded
@@ -25717,6 +26134,18 @@ vars:
         name: dummy
         value: "&dummyHashes{}"
     name: verifyPassword
+  - doc: |-
+      : Asserts at compile time that MaxWait's option configures a rate limit
+      and a bulkhead alike.
+    grouped: true
+    items:
+      - name: _
+        type: RateLimitConfigurer
+        value: (*waitOption)(nil)
+      - name: _
+        type: BulkheadConfigurer
+        value: (*waitOption)(nil)
+    name: _#3
   - doc: |-
       Privacy is the framework's own service: the data keys, the legal holds and the
       privacy journal of an app that keeps personal data or seals what it

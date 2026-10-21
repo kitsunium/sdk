@@ -138,6 +138,10 @@ sequences:
     of: NotReused
   - forward: iapp.NotCommon
     of: NotCommon
+  - forward: iapp.MaxWait
+    of: MaxWait
+  - forward: iapp.BulkheadQueue
+    of: BulkheadQueue
   - of: Fallback
     steps:
       - return: iapp.Fallback[Req, Resp](op)

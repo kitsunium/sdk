@@ -696,6 +696,15 @@ files:
       - NotCommon
     name: passwords.go
   - decls:
+      - MaxWait
+      - BulkheadQueue
+    name: policy.go
+  - decls:
+      - RateLimitOption
+      - BulkheadOption
+      - WaitOption
+    name: policy_interface.go
+  - decls:
       - Port
       - PortOption
       - Fallback
@@ -933,13 +942,13 @@ functions:
     params: bytes int64
     results: EndpointOption
   - name: RateLimit
-    params: perSecond float64, burst int
+    params: perSecond float64, burst int, opts ...RateLimitOption
     results: OperationOption
   - name: Timeout
     params: d time.Duration
     results: OperationOption
   - name: Bulkhead
-    params: maxConcurrent int
+    params: maxConcurrent int, opts ...BulkheadOption
     results: OperationOption
   - name: Invalid
     params: message string
@@ -1031,6 +1040,12 @@ functions:
     results: PasswordOption
   - name: NotCommon
     results: PasswordOption
+  - name: MaxWait
+    params: d time.Duration
+    results: WaitOption
+  - name: BulkheadQueue
+    params: n int
+    results: BulkheadOption
   - name: Fallback
     params: op iapp.Operation[Req, Resp]
     results: iapp.PortConfigurer[Req, Resp]
@@ -1624,6 +1639,21 @@ types:
     kind: alias
     name: PasswordOption
     underlying: iapp.PasswordConfigurer
+  - alias: true
+    doc: RateLimitOption configures a [RateLimit].
+    kind: alias
+    name: RateLimitOption
+    underlying: iapp.RateLimitConfigurer
+  - alias: true
+    doc: BulkheadOption configures a [Bulkhead].
+    kind: alias
+    name: BulkheadOption
+    underlying: iapp.BulkheadConfigurer
+  - alias: true
+    doc: WaitOption configures a [RateLimit] and a [Bulkhead] alike.
+    kind: alias
+    name: WaitOption
+    underlying: iapp.WaitConfigurer
   - alias: true
     doc: |-
       Port is an operation a service needs and does not implement: a typed
