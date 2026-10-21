@@ -29,6 +29,20 @@ packages:
         name: KindPhase
         type: Kind
         value: "2"
+      - blockDoc: The kinds.
+        doc: |-
+          KindRetry is a port's call about to be tried again: Node is the port,
+          Code the failure's, Duration the wait before the next attempt.
+        name: KindRetry
+        type: Kind
+        value: "3"
+      - blockDoc: The kinds.
+        doc: |-
+          KindBreaker is a port's breaker changing phase: Node is the port, Op
+          the phase it enters — closed, open, half-open.
+        name: KindBreaker
+        type: Kind
+        value: "4"
       - blockDoc: The operations, in the order of their names in [OpNames]; zero is none.
         name: OpNone
         type: Op
@@ -122,6 +136,19 @@ packages:
         name: OpFailed
         type: Op
         value: "22"
+      - blockDoc: The operations, in the order of their names in [OpNames]; zero is none.
+        doc: The breaker's phases, for KindBreaker.
+        name: OpClosed
+        type: Op
+        value: "23"
+      - blockDoc: The operations, in the order of their names in [OpNames]; zero is none.
+        name: OpOpen
+        type: Op
+        value: "24"
+      - blockDoc: The operations, in the order of their names in [OpNames]; zero is none.
+        name: OpHalfOpen
+        type: Op
+        value: "25"
       - blockDoc: The outcomes.
         name: OutcomeOK
         type: Outcome
@@ -424,7 +451,7 @@ packages:
           indexed by Op. The handshake sends them, so a reader never hard-codes
           the table.
         name: OpNames
-        type: "[23]string"
+        type: "[26]string"
       - doc: |-
           Nop is the emitter that reports nothing: what a product holds unless it
           was started with an exporter.

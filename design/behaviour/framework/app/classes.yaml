@@ -711,6 +711,25 @@ files:
       - Bind
     name: port.go
   - decls:
+      - Retry
+      - RetryMaxDelay
+      - NoRetryAfter
+      - Budget
+      - Breaker
+      - BreakerWindow
+      - HalfOpenTrials
+      - OpenBackoff
+      - Idempotent
+      - Hedge
+      - Throttle
+    name: port_policy.go
+  - decls:
+      - PortPolicyOption
+      - TimeoutOption
+      - RetryOption
+      - BreakerOption
+    name: port_policy_interface.go
+  - decls:
       - Privacy
     name: privacy.go
   - decls:
@@ -946,7 +965,7 @@ functions:
     results: OperationOption
   - name: Timeout
     params: d time.Duration
-    results: OperationOption
+    results: TimeoutOption
   - name: Bulkhead
     params: maxConcurrent int, opts ...BulkheadOption
     results: OperationOption
@@ -1058,6 +1077,37 @@ functions:
       	MountOption
       }
     typeParams: Req, Resp any
+  - name: Retry
+    params: maxAttempts int, delay time.Duration, opts ...RetryOption
+    results: PortPolicyOption
+  - name: RetryMaxDelay
+    params: d time.Duration
+    results: RetryOption
+  - name: NoRetryAfter
+    results: RetryOption
+  - name: Budget
+    params: maxTokens int, tokenRatio float64
+    results: PortPolicyOption
+  - name: Breaker
+    params: failures int, open time.Duration, opts ...BreakerOption
+    results: PortPolicyOption
+  - name: BreakerWindow
+    params: size time.Duration, minCalls int, failureRatio float64
+    results: BreakerOption
+  - name: HalfOpenTrials
+    params: n int
+    results: BreakerOption
+  - name: OpenBackoff
+    params: maxOpen time.Duration
+    results: BreakerOption
+  - name: Idempotent
+    results: PortPolicyOption
+  - name: Hedge
+    params: delay time.Duration, inFlight int
+    results: PortPolicyOption
+  - name: Throttle
+    params: k float64
+    results: PortPolicyOption
   - name: Erase
     params: ctx context.Context, reason string, ids ...string
     results: Erasure, error
@@ -1679,6 +1729,31 @@ types:
     name: PortOption
     typeParams: Req, Resp any
     underlying: iapp.PortConfigurer[Req, Resp]
+  - alias: true
+    doc: |-
+      PortPolicyOption guards the calls a port makes: [Retry], [Budget],
+      [Breaker], [Hedge], [Idempotent], [Throttle] and [Timeout], given to
+      [Port].Guard.
+    kind: alias
+    name: PortPolicyOption
+    underlying: iapp.PortPolicyConfigurer
+  - alias: true
+    doc: |-
+      TimeoutOption configures an endpoint, a command, a query and a port
+      alike: [Timeout].
+    kind: alias
+    name: TimeoutOption
+    underlying: iapp.TimeoutConfigurer
+  - alias: true
+    doc: RetryOption configures a [Retry].
+    kind: alias
+    name: RetryOption
+    underlying: iapp.RetryConfigurer
+  - alias: true
+    doc: BreakerOption configures a [Breaker].
+    kind: alias
+    name: BreakerOption
+    underlying: iapp.BreakerConfigurer
   - alias: true
     doc: Erasure is what app.Erase did, store by store.
     kind: alias

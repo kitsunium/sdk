@@ -415,7 +415,7 @@ func (a *App) declarationProblems() []model.Diagnostic {
 	if a.cfg.studio.on && a.serves() && studioMount.Load() == nil {
 		out = append(out, diagnosticOf("warning", "", nil, say("config.studio-missing", "package", studioPackage)))
 	}
-	return slices.Concat(out, a.moduleProblems(), a.appProblems(), a.serverProblems(), a.subsystemProblems())
+	return slices.Concat(out, a.moduleProblems(), a.appProblems(), a.serverProblems(), a.subsystemProblems(), a.portPolicyProblems())
 }
 
 // serviceProblems are what the service declares wrong, and a second service
@@ -600,8 +600,9 @@ func (a *App) bootData() (count int, value string, err error) {
 	if a.dataDir == "" {
 		return 0, "memory", nil
 	}
-	if a.cliRun && len(a.componentNodes().stores) == 0 {
-		// A CLI command whose app keeps no store touches no directory.
+	if a.cliRun && len(a.componentNodes().stores) == 0 && len(a.breakers()) == 0 {
+		// A CLI command whose app keeps no store, and whose ports declare
+		// no breaker an operator may have isolated, touches no directory.
 		return 0, "none", nil
 	}
 	if err := os.MkdirAll(a.dataDir, 0o700); err != nil {
@@ -799,7 +800,10 @@ func (a *App) addComponents() error {
 	if cli {
 		singleton = func() error { return nil }
 	}
-	if err := firstError(singleton, func() error { return a.startGroups(g.secrets) }, a.addDatabases); err != nil {
+	// The ports' breakers with the operator's isolations, before anything
+	// that may call a port (port_breaker_run.go).
+	breakers := func() error { return a.addBreakers(cli) }
+	if err := firstError(singleton, func() error { return a.startGroups(g.secrets) }, a.addDatabases, breakers); err != nil {
 		return err
 	}
 	if cli {

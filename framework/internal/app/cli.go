@@ -20,10 +20,13 @@ const exitSoftware int = 70
 // cliStopTimeout bounds the stop after a command.
 const cliStopTimeout time.Duration = 10 * time.Second
 
-// reservedCommands are Main's own: a product's CLI command may not take one.
+// reservedCommands are Main's own: a product's CLI command may not take one
+// — breaker included, which is Main's only in an app whose port declares a
+// breaker, so that adding one never hides it behind the product's command.
 var reservedCommands = map[string]bool{
 	"serve": true, "graph": true, "healthcheck": true, "config": true, "secrets": true,
 	"migrate": true, "privacy": true, "revisions": true, "watch": true, "data": true, "help": true,
+	"breaker": true,
 }
 
 // StdioValue is where a CLI command reads and writes: the process's own streams

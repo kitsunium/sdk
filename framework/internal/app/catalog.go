@@ -14,7 +14,7 @@ import (
 // part of every graph, so the Studio — and an AI agent reading the graph —
 // knows what can be added to a product and the exact code that adds it.
 func Catalog() []model.Mechanic {
-	return slices.Concat(requestMechanics(), operationMechanics(), backgroundMechanics())
+	return slices.Concat(requestMechanics(), operationMechanics(), portMechanics(), backgroundMechanics())
 }
 
 // requestMechanics are what a request goes through before its handler — a
@@ -71,6 +71,38 @@ func operationMechanics() []model.Mechanic {
 			Kind: "queue", Label: "queued command", Package: "github.com/kitsunium/sdk/pkg/v1/data/queue",
 			Doc:     "Sends a command to the background: Dispatch returns once its own queue accepted it, and a consumer handles it as the user who dispatched it, retried, then dead-lettered. Exposed, it answers 202.",
 			Snippet: "Service.Command(\"reindex\", reindex, app.Queued(), app.MaxDeliveries(3))",
+		},
+	}
+}
+
+// portMechanics are the policies around a port's calls (Port.Guard),
+// composed the outermost first as retry, hedge, breaker, throttle, timeout.
+func portMechanics() []model.Mechanic {
+	return []model.Mechanic{
+		{
+			Kind: "retry", Label: "retry", Package: resiliencePackage,
+			Doc:     "Runs a port's call again when the dependency fails (5xx, 408, 429), with a backoff and full jitter, waiting what a Retry-After asks; the port's retry budget bounds the retries.",
+			Snippet: "Service.Port[Req, Resp](\"quote\").Guard(app.Retry(3, 100*time.Millisecond))",
+		},
+		{
+			Kind: "budget", Label: "retry budget", Package: resiliencePackage,
+			Doc:     "Sizes the retry budget a port's retry and hedge share, so a dependency that fails for every caller receives fewer extra calls.",
+			Snippet: "app.Budget(10, 0.1)",
+		},
+		{
+			Kind: "hedge", Label: "hedge", Package: resiliencePackage,
+			Doc:     "Races a slow call of an idempotent port with a duplicate after a delay; the first answer wins.",
+			Snippet: "app.Idempotent(), app.Hedge(50*time.Millisecond, 8)",
+		},
+		{
+			Kind: "breaker", Label: "circuit breaker", Package: resiliencePackage,
+			Doc:     "Stops a port's calls from reaching a dependency that keeps failing; its state is a readiness check, and `breaker isolate PORT` opens it until reset.",
+			Snippet: "app.Breaker(5, 30*time.Second)",
+		},
+		{
+			Kind: "throttle", Label: "adaptive throttle", Package: resiliencePackage,
+			Doc:     "Refuses a share of a port's calls on the caller's side while the dependency refuses more than 1/k of them (the SRE book's client-side throttling).",
+			Snippet: "app.Throttle(2)",
 		},
 	}
 }

@@ -6,9 +6,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/framework/telemetry"
+	"github.com/kitsunium/sdk/pkg/v1/app/resilience"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/proc/ipc"
 )
@@ -149,4 +151,43 @@ func (a *App) reportPhase(phase string) {
 			Start: a.clock.Now().UnixNano(),
 		})
 	}
+}
+
+// reportRetry puts a port's retry on the telemetry port: the port and its
+// caller as references, the failure's code, the wait before the next
+// attempt.
+func (a *App) reportRetry(sp *span, err error, delay time.Duration) {
+	ex := a.tel.Load()
+	if ex == nil {
+		return
+	}
+	ev := telemetry.Event{
+		Kind: telemetry.KindRetry, Op: telemetry.OpCall, Outcome: telemetry.OutcomeError,
+		Node: ex.Ref(sp.s.Node), From: ex.Ref(sp.s.From), Start: a.clock.Now().UnixNano(), Duration: int64(delay),
+	}
+	if code, ok := errs.CodeOf(err); ok {
+		ev.Code = uint32(code)
+	}
+	if sp.sdk != nil {
+		sc := sp.sdk.SpanContext()
+		ev.TraceID, ev.SpanID = sc.TraceID, sc.SpanID
+	}
+	ex.Emit(&ev)
+}
+
+// reportBreaker puts a port's breaker entering phase to on the telemetry
+// port: an error outcome while it is open.
+func (a *App) reportBreaker(port string, to resilience.BreakerPhase) {
+	ex := a.tel.Load()
+	if ex == nil {
+		return
+	}
+	ev := telemetry.Event{
+		Kind: telemetry.KindBreaker, Op: telemetry.OpOf(to.String()), Outcome: telemetry.OutcomeOK,
+		Node: ex.Ref(port), Start: a.clock.Now().UnixNano(),
+	}
+	if to == resilience.BreakerOpen {
+		ev.Outcome = telemetry.OutcomeError
+	}
+	ex.Emit(&ev)
 }

@@ -13,10 +13,16 @@ import (
 // The kinds.
 const (
 	// KindSpan is one unit of work that ended on a node.
-	KindSpan Kind = 1
+	KindSpan Kind = iota + 1
 	// KindPhase is the process changing phase: starting, serving, draining,
 	// stopped, failed — Op carries it.
-	KindPhase Kind = 2
+	KindPhase
+	// KindRetry is a port's call about to be tried again: Node is the port,
+	// Code the failure's, Duration the wait before the next attempt.
+	KindRetry
+	// KindBreaker is a port's breaker changing phase: Node is the port, Op
+	// the phase it enters — closed, open, half-open.
+	KindBreaker
 )
 
 // The operations, in the order of their names in [OpNames]; zero is none.
@@ -45,6 +51,10 @@ const (
 	OpDraining
 	OpStopped
 	OpFailed
+	// The breaker's phases, for KindBreaker.
+	OpClosed
+	OpOpen
+	OpHalfOpen
 	opCount
 )
 
@@ -92,6 +102,7 @@ var (
 		"", "request", "call", "read", "write", "publish", "deliver", "transition", "run", "auth", "send",
 		"deliver-mail", "secret", "dispatch", "ask", "handle", "connect", "cli",
 		"starting", "serving", "draining", "stopped", "failed",
+		"closed", "open", "half-open",
 	}
 
 	// Nop is the emitter that reports nothing: what a product holds unless it
