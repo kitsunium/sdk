@@ -134,6 +134,14 @@ constants:
         value: "2"
     name: keyFailureKinds
 files:
+  - decls:
+      - foldKey
+      - buildFolds
+      - keyVocabulary
+      - keyVocabulary.resolve
+      - keyVocabulary.canonicalLayer
+      - keyVocabulary.needsRewrite
+    name: canonical.go
   - decls: []
     name: doc.go
   - decls:
@@ -165,8 +173,9 @@ files:
       - mergedLayers
       - layerValue
       - mergeLayers
-      - secretKeysByType
-      - secretKeysOf
+      - typeKeys
+      - typeKeysByType
+      - typeKeysOf
       - restoreRawSecrets
       - lastSupplier
       - checkDecoded
@@ -277,6 +286,23 @@ files:
       - _
     name: wrap.go
 functions:
+  - doc: |-
+      foldKey is the case-folded form encoding/json compares a document's key to a
+      field's name by: each rune lowered then raised, which folds the special
+      cases (the Kelvin sign, the long s) the way the decoder does. Two keys with
+      the same fold address the same field when no field carries either spelling
+      exactly.
+    name: foldKey
+    params: key string
+    results: string
+  - doc: |-
+      buildFolds indexes a vocabulary by the fold of each key, so a key a layer
+      spelt in another case finds the one the type declares. A fold two declared
+      keys share — fields tagged "port" and "Port" side by side — maps to "": the
+      decoder tells those apart by the exact spelling, and so must the merge.
+    name: buildFolds
+    params: known map[string]keyKind
+    results: map[string]string
   - name: EnvSource
     params: prefix string
     results: coreconfig.Source
@@ -355,18 +381,20 @@ functions:
     typeParams: T any
   - doc: |-
       mergeLayers folds the schema's defaults and then every source into one map,
-      and returns every layer it folded, in order.
+      and returns every layer it folded, in order. Each source's layer is first
+      rewritten to the spelling the target type declares (canonicalLayer), so a
+      key two layers spell in different cases is one key, and the later layer
+      wins it (#468).
     name: mergeLayers
-    params: schema *SchemaValue[T], sources []coreconfig.Source
+    params: schema *SchemaValue[T], vocabulary keyVocabulary, sources []coreconfig.Source
     results: merged map[string]any, layers []layerValue, err error
     typeParams: T any
   - doc: |-
-      secretKeysOf returns the keys of T whose field holds a secret, and how:
-      compiled once into a schema, or walked once per type for a load that has
-      none.
-    name: secretKeysOf
+      typeKeysOf returns T's keys: compiled once into a schema, or walked once per
+      type for a load that has none.
+    name: typeKeysOf
     params: schema *SchemaValue[T]
-    results: map[string]secretHold
+    results: typeKeys
     typeParams: T any
   - doc: |-
       restoreRawSecrets replaces, for every DIRECT secret key an ENVIRONMENT layer
@@ -782,12 +810,64 @@ imports:
   svcvalidation: github.com/kitsunium/sdk/internal/service/app/validation
   sync: sync
   time: time
+  unicode: unicode
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/service/app/config
   name: config
   purpose: Package config — environment-variable Source.
 types:
+  - doc: |-
+      keyVocabulary is what a merge canonicalises a layer against: the target
+      type's keys, and the index of their folds.
+    fields:
+      - doc: known is every addressable key, marked leaf or table.
+        name: known
+        type: map[string]keyKind
+      - doc: folds maps the fold of a key to its declared spelling, "" when ambiguous.
+        name: folds
+        type: map[string]string
+    kind: struct
+    methods:
+      - doc: |-
+          resolve returns the declared spelling of the key name a layer supplied under
+          base, its kind, and whether name is a known key at all. A name the type
+          declares exactly is its own spelling; a name that only folds to one is
+          rewritten to it; a name that contains the separator, folds to nothing or to
+          an ambiguous pair, or folds to a key at another level is left as it is.
+        name: resolve
+        params: base, name string
+        recv: v keyVocabulary
+        results: canonical string, kind keyKind, found bool
+      - doc: |-
+          canonicalLayer returns layer with every key that addresses a field of the
+          target type in another case rewritten to the spelling the type declares, at
+          every level the type names (ADR 0028: later wins, whatever the case).
+
+          encoding/json matches a document's key to a field case-insensitively, so
+          "Port" and "port" fill the same field; the merge, comparing keys exactly,
+          kept both, and the decode's sorted order — not the layer order — then
+          decided which one won (#468). Rewriting every layer to one spelling before
+          the merge puts the two under one key, where the later layer overrides.
+
+          A layer with nothing to rewrite is returned as it is, unallocated. Otherwise
+          a copy is returned: the source's own map is never edited. Two keys of ONE
+          layer that land on the same spelling fold in a fixed order — the variants in
+          byte order, then the exact spelling — so the exact spelling wins, as it does
+          in the decoder. The members of a leaf (a map, a type that decodes itself) are
+          never rewritten: their keys are data, and "Env" and "env" are two of them.
+        name: canonicalLayer
+        params: layer map[string]any, base string
+        recv: v keyVocabulary
+        results: map[string]any
+      - doc: |-
+          needsRewrite reports whether some key of level, or of a table below it the
+          type names, is spelt differently from the declared key it addresses.
+        name: needsRewrite
+        params: level map[string]any, base string
+        recv: v keyVocabulary
+        results: bool
+    name: keyVocabulary
   - doc: envSource reads PREFIX_KEY environment variables into a flat lower-cased map.
     fields:
       - name: prefix
@@ -893,6 +973,18 @@ types:
     kind: struct
     name: layerValue
   - doc: |-
+      typeKeys is what a load needs to know about T's keys: the vocabulary a
+      layer is canonicalised against, and the keys whose field holds a secret.
+    fields:
+      - doc: vocabulary is T's keys and the index of their folds.
+        name: vocabulary
+        type: keyVocabulary
+      - doc: secrets is every key whose field holds a secret, and how.
+        name: secrets
+        type: map[string]secretHold
+    kind: struct
+    name: typeKeys
+  - doc: |-
       pollWatcher detects file changes by polling its mtime+size on an interval —
       cross-OS (os.Stat works on every GOOS; no inotify/kqueue dependency).
     fields:
@@ -968,6 +1060,11 @@ types:
           or table. The unknown-key pass walks the merged map against it.
         name: known
         type: map[string]keyKind
+      - doc: |-
+          vocabulary is known with the index of its folds, which every source's
+          layer is canonicalised against before the merge (#468).
+        name: vocabulary
+        type: keyVocabulary
       - doc: |-
           secrets is every key whose field holds a core/security/secret.Value, and how,
           resolved once here so a load pays no walk for it (ADR 0097).
@@ -1160,6 +1257,10 @@ types:
           configuration file shared by two services, or an unprefixed EnvSource,
           which hands over every variable in the process environment. Those are
           facts about the SOURCE, and the opt-out is where the author says so.
+
+          A key that differs from one of T's only by case is not unknown: the
+          decoder fills that field from it, and the load rewrites it to T's
+          spelling before the check.
         name: AllowUnknownKeys
         type: bool
       - doc: |-
@@ -1184,15 +1285,15 @@ types:
     typeParams: T any
 vars:
   - doc: |-
-      secretKeysByType memoises the secret keys of every target type a schemaless
-      load has decoded into, so the reflection walk happens once per TYPE rather
-      than once per load — a Watcher replays a load on every change, and without
-      the memo the walk doubled a schemaless load (measured in BENCH.md). It holds
-      one entry per configuration type a program declares, which is a handful.
+      typeKeysByType memoises the keys of every target type a schemaless load has
+      decoded into, so the reflection walk happens once per TYPE rather than once
+      per load — a Watcher replays a load on every change, and without the memo
+      the walk doubled a schemaless load (measured in BENCH.md). It holds one
+      entry per configuration type a program declares, which is a handful.
     items:
-      - name: secretKeysByType
+      - name: typeKeysByType
         type: sync.Map
-    name: secretKeysByType
+    name: typeKeysByType
   - doc: |-
       jsonUnmarshalerType and textUnmarshalerType are the two interfaces that make
       a struct a LEAF for this walk. A type that decodes itself — time.Time,

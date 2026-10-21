@@ -30,6 +30,7 @@ go_test(
         "construct_external_test.go",
         "facade_bench_test.go",
         "gen_api_test.go",
+        "rule4_external_test.go",
     ],
     deps = [
         ":errs",

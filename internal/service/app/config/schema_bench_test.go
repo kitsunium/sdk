@@ -179,7 +179,7 @@ func BenchmarkCheckKeys(b *testing.B) {
 	if err != nil {
 		b.Fatalf("NewSchemaValue: %v", err)
 	}
-	merged, _, mergeErr := mergeLayers(schema, []coreconfig.Source{benchLayer()})
+	merged, _, mergeErr := mergeLayers(schema, schema.vocabulary, []coreconfig.Source{benchLayer()})
 	if mergeErr != nil {
 		b.Fatalf("mergeLayers: %v", mergeErr)
 	}

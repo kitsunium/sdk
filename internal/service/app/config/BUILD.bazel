@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "config",
     srcs = [
+        "canonical.go",
         "doc.go",
         "env_source.go",
         "file_source.go",
@@ -57,6 +58,7 @@ go_test(
         "file_source_internal_test.go",
         "fs_source_external_test.go",
         "gen_api_test.go",
+        "key_case_external_test.go",
         "load_external_test.go",
         "load_internal_test.go",
         "merge_internal_test.go",

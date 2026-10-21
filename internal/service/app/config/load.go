@@ -22,6 +22,13 @@ import (
 // to contradict — and it is why the schema arrived as a second entry point
 // rather than as a widened signature nobody could opt out of. A caller who
 // wants the typo caught declares a schema and calls [LoadSchema].
+//
+// A key is matched to a field the way encoding/json matches it, so "Port"
+// and "PORT" fill a field tagged "port": every layer is rewritten to the
+// spelling T declares before the merge, and later wins whatever case each
+// layer wrote. The keys of a map are data and keep their case, and two
+// fields whose names differ only by case are told apart by the exact
+// spelling, as the decoder tells them apart.
 func Load[T any](target *T, sources ...coreconfig.Source) error {
 	//: no schema: no default layer, no key pass, and only the target's own
 	//: Validate runs.
@@ -100,8 +107,11 @@ func LoadSchema[T any](target *T, schema *SchemaValue[T], sources ...coreconfig.
 // — only whether the steps it owns happen at all. It returns the layers it
 // merged, in merge order, so a traced load can say which one supplied a key.
 func loadInto[T any](target *T, schema *SchemaValue[T], sources []coreconfig.Source) (loaded mergedLayers, err error) {
+	//: the type's keys: the merge canonicalises against them, and the secret
+	//: ones are restored from the environment's raw text.
+	keys := typeKeysOf(schema)
 	//: the default layer under every source, later winning.
-	merged, layers, mergeErr := mergeLayers(schema, sources)
+	merged, layers, mergeErr := mergeLayers(schema, keys.vocabulary, sources)
 	//: a source that could not be read aborts before anything is decoded.
 	if mergeErr != nil {
 		//: surface CONFIG_SOURCE_FAILED.
@@ -109,7 +119,7 @@ func loadInto[T any](target *T, schema *SchemaValue[T], sources []coreconfig.Sou
 	}
 	//: a secret field is filled from the environment's RAW text, never from
 	//: its JSON coercion, which would have re-spelled a numeric secret.
-	restoreRawSecrets(merged, layers, secretKeysOf(schema))
+	restoreRawSecrets(merged, layers, keys.secrets)
 	//: the KEY questions are answered while the keys are still keys.
 	if schema != nil {
 		//: every missing requirement and every stranger, in one error.
@@ -153,8 +163,11 @@ type layerValue struct {
 }
 
 // mergeLayers folds the schema's defaults and then every source into one map,
-// and returns every layer it folded, in order.
-func mergeLayers[T any](schema *SchemaValue[T], sources []coreconfig.Source) (merged map[string]any, layers []layerValue, err error) {
+// and returns every layer it folded, in order. Each source's layer is first
+// rewritten to the spelling the target type declares (canonicalLayer), so a
+// key two layers spell in different cases is one key, and the later layer
+// wins it (#468).
+func mergeLayers[T any](schema *SchemaValue[T], vocabulary keyVocabulary, sources []coreconfig.Source) (merged map[string]any, layers []layerValue, err error) {
 	//: merge all source layers into one map.
 	merged = make(map[string]any, 0)
 	layers = make([]layerValue, 0, len(sources)+1)
@@ -184,6 +197,8 @@ func mergeLayers[T any](schema *SchemaValue[T], sources []coreconfig.Source) (me
 			//: relabel anything else onto the documented sentinel.
 			return nil, nil, wrapAs(coreconfig.ConfigSourceFailed, loadErr)
 		}
+		//: one spelling per field, whatever case the source wrote.
+		layer = vocabulary.canonicalLayer(layer, "")
 		//: fold the layer in, and keep it for attribution.
 		deepMerge(merged, layer)
 		layers = append(layers, layerValue{source: src, position: position, values: layer})
@@ -192,36 +207,45 @@ func mergeLayers[T any](schema *SchemaValue[T], sources []coreconfig.Source) (me
 	return merged, layers, nil
 }
 
-// secretKeysByType memoises the secret keys of every target type a schemaless
-// load has decoded into, so the reflection walk happens once per TYPE rather
-// than once per load — a Watcher replays a load on every change, and without
-// the memo the walk doubled a schemaless load (measured in BENCH.md). It holds
-// one entry per configuration type a program declares, which is a handful.
-var secretKeysByType sync.Map
+// typeKeys is what a load needs to know about T's keys: the vocabulary a
+// layer is canonicalised against, and the keys whose field holds a secret.
+type typeKeys struct {
+	// vocabulary is T's keys and the index of their folds.
+	vocabulary keyVocabulary
+	// secrets is every key whose field holds a secret, and how.
+	secrets map[string]secretHold
+}
 
-// secretKeysOf returns the keys of T whose field holds a secret, and how:
-// compiled once into a schema, or walked once per type for a load that has
-// none.
-func secretKeysOf[T any](schema *SchemaValue[T]) map[string]secretHold {
+// typeKeysByType memoises the keys of every target type a schemaless load has
+// decoded into, so the reflection walk happens once per TYPE rather than once
+// per load — a Watcher replays a load on every change, and without the memo
+// the walk doubled a schemaless load (measured in BENCH.md). It holds one
+// entry per configuration type a program declares, which is a handful.
+var typeKeysByType sync.Map
+
+// typeKeysOf returns T's keys: compiled once into a schema, or walked once per
+// type for a load that has none.
+func typeKeysOf[T any](schema *SchemaValue[T]) typeKeys {
 	//: a schema resolved them at construction.
 	if schema != nil {
 		//: no walk per load.
-		return schema.secrets
+		return typeKeys{vocabulary: schema.vocabulary, secrets: schema.secrets}
 	}
 	typ := reflect.TypeFor[T]()
 	//: a type already walked by an earlier load.
-	if cached, found := secretKeysByType.Load(typ); found {
+	if cached, found := typeKeysByType.Load(typ); found {
 		//: the memo only ever stores this shape, so the assertion holds.
-		if secrets, ok := cached.(map[string]secretHold); ok {
+		if keys, ok := cached.(typeKeys); ok {
 			//: no walk.
-			return secrets
+			return keys
 		}
 	}
-	_, secrets := collectVocabulary(typ)
+	known, secrets := collectVocabulary(typ)
+	keys := typeKeys{vocabulary: keyVocabulary{known: known, folds: buildFolds(known)}, secrets: secrets}
 	//: two first loads racing store the same answer; either copy is right.
-	secretKeysByType.Store(typ, secrets)
+	typeKeysByType.Store(typ, keys)
 	//: walked once for this type.
-	return secrets
+	return keys
 }
 
 // restoreRawSecrets replaces, for every DIRECT secret key an ENVIRONMENT layer

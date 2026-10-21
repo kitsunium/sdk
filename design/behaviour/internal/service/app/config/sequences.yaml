@@ -1,6 +1,181 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 sequences:
+  - of: foldKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: foldKey
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - return: |-
+          strings.Map(func(r rune) rune {
+          		//: lower then upper: the decoder's own folding.
+          		return unicode.ToUpper(unicode.ToLower(r))
+          	}, key)
+        to: strings
+  - of: buildFolds
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildFolds
+        kind: self
+      - id: foldKey
+        kind: internal
+    steps:
+      - bind: folds
+        eval: make(map[string]string, len(known))
+      - loop:
+          do:
+            - bind: folded
+              eval: foldKey(key)
+              to: foldKey
+            - opt:
+                do:
+                  - set: folds[folded]
+                    value: "\"\""
+                  - continue: true
+                init:
+                  bind: _, taken
+                  eval: folds[folded]
+                when: taken
+            - set: folds[folded]
+              value: key
+          key: key
+          range: known
+      - return: folds
+  - of: keyVocabulary.resolve
+    participants:
+      - id: caller
+        kind: actor
+      - id: keyVocabulary.resolve
+        kind: self
+      - id: joinKey
+        kind: internal
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: path
+        eval: joinKey(base, name)
+        to: joinKey
+      - opt:
+          do:
+            - return: name, exact, true
+          init:
+            bind: exact, ok
+            eval: v.known[path]
+          when: ok
+      - opt:
+          do:
+            - return: name, keyLeaf, false
+          when: strings.Contains(name, keySeparator)
+      - bind: declared
+        eval: v.folds[foldKey(path)]
+      - opt:
+          do:
+            - return: name, keyLeaf, false
+          when: declared == ""
+      - bind: prefix
+        eval: "\"\""
+      - opt:
+          do:
+            - set: prefix
+              value: base + keySeparator
+          when: base != ""
+      - bind: segment, sameLevel
+        eval: strings.CutPrefix(declared, prefix)
+        to: strings
+      - opt:
+          do:
+            - return: name, keyLeaf, false
+          when: "!sameLevel || strings.Contains(segment, keySeparator)"
+      - return: segment, v.known[declared], true
+  - of: keyVocabulary.canonicalLayer
+    participants:
+      - id: caller
+        kind: actor
+      - id: keyVocabulary.canonicalLayer
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: v.resolve
+        kind: internal
+      - id: deepMerge
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: layer
+          when: "!v.needsRewrite(layer, base)"
+      - bind: names
+        eval: slices.Sorted(maps.Keys(layer))
+        to: slices
+      - bind: out
+        eval: make(map[string]any, len(layer))
+      - loop:
+          do:
+            - loop:
+                do:
+                  - bind: canonical, kind, _
+                    eval: v.resolve(base, name)
+                    to: v.resolve
+                  - opt:
+                      do:
+                        - continue: true
+                      when: (canonical != name) != rewritten
+                  - bind: value
+                    eval: layer[name]
+                  - opt:
+                      do:
+                        - set: value
+                          value: v.canonicalLayer(sub, joinKey(base, canonical))
+                      init:
+                        bind: sub, isTable
+                        eval: value.(map[string]any)
+                      when: isTable && kind == keyTable
+                  - eval: "deepMerge(out, map[string]any{canonical: value})"
+                    to: deepMerge
+                key: _
+                range: names
+                value: name
+          key: _
+          range: "[...]bool{true, false}"
+          value: rewritten
+      - return: out
+  - of: keyVocabulary.needsRewrite
+    participants:
+      - id: caller
+        kind: actor
+      - id: keyVocabulary.needsRewrite
+        kind: self
+      - id: v.resolve
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: canonical, kind, found
+              eval: v.resolve(base, name)
+              to: v.resolve
+            - opt:
+                do:
+                  - return: "true"
+                when: canonical != name
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: "true"
+                      when: v.needsRewrite(sub, joinKey(base, name))
+                init:
+                  bind: sub, isTable
+                  eval: value.(map[string]any)
+                when: isTable && found && kind == keyTable
+          key: name
+          range: level
+          value: value
+      - return: "false"
   - of: EnvSource
     steps:
       - return: "envSource{prefix: prefix}"
@@ -314,6 +489,8 @@ sequences:
         kind: actor
       - id: loadInto
         kind: self
+      - id: typeKeysOf
+        kind: internal
       - id: mergeLayers
         kind: internal
       - id: restoreRawSecrets
@@ -325,14 +502,17 @@ sequences:
       - id: checkDecoded
         kind: internal
     steps:
+      - bind: keys
+        eval: typeKeysOf(schema)
+        to: typeKeysOf
       - bind: merged, layers, mergeErr
-        eval: mergeLayers(schema, sources)
+        eval: mergeLayers(schema, keys.vocabulary, sources)
         to: mergeLayers
       - opt:
           do:
             - return: mergedLayers{}, mergeErr
           when: mergeErr != nil
-      - eval: restoreRawSecrets(merged, layers, secretKeysOf(schema))
+      - eval: restoreRawSecrets(merged, layers, keys.secrets)
         to: restoreRawSecrets
       - opt:
           do:
@@ -372,6 +552,8 @@ sequences:
         kind: internal
       - id: src.Load
         kind: value
+      - id: vocabulary.canonicalLayer
+        kind: internal
     steps:
       - set: merged
         value: make(map[string]any, 0)
@@ -397,6 +579,9 @@ sequences:
                       when: errs.HasCode(loadErr, coreconfig.CodeConfigSourceFailed)
                   - return: nil, nil, wrapAs(coreconfig.ConfigSourceFailed, loadErr)
                 when: loadErr != nil
+            - set: layer
+              to: vocabulary.canonicalLayer
+              value: vocabulary.canonicalLayer(layer, "")
             - eval: deepMerge(merged, layer)
               to: deepMerge
             - set: layers
@@ -405,22 +590,22 @@ sequences:
           range: sources
           value: src
       - return: merged, layers, nil
-  - of: secretKeysOf
+  - of: typeKeysOf
     participants:
       - id: caller
         kind: actor
-      - id: secretKeysOf
+      - id: typeKeysOf
         kind: self
-      - id: secretKeysByType.Load
+      - id: typeKeysByType.Load
         kind: value
       - id: collectVocabulary
         kind: internal
-      - id: secretKeysByType.Store
+      - id: typeKeysByType.Store
         kind: value
     steps:
       - opt:
           do:
-            - return: schema.secrets
+            - return: "typeKeys{vocabulary: schema.vocabulary, secrets: schema.secrets}"
           when: schema != nil
       - bind: typ
         eval: reflect.TypeFor[T]()
@@ -428,22 +613,24 @@ sequences:
           do:
             - opt:
                 do:
-                  - return: secrets
+                  - return: keys
                 init:
-                  bind: secrets, ok
-                  eval: cached.(map[string]secretHold)
+                  bind: keys, ok
+                  eval: cached.(typeKeys)
                 when: ok
           init:
             bind: cached, found
-            eval: secretKeysByType.Load(typ)
-            to: secretKeysByType.Load
+            eval: typeKeysByType.Load(typ)
+            to: typeKeysByType.Load
           when: found
-      - bind: _, secrets
+      - bind: known, secrets
         eval: collectVocabulary(typ)
         to: collectVocabulary
-      - eval: secretKeysByType.Store(typ, secrets)
-        to: secretKeysByType.Store
-      - return: secrets
+      - bind: keys
+        eval: "typeKeys{vocabulary: keyVocabulary{known: known, folds: buildFolds(known)}, secrets: secrets}"
+      - eval: typeKeysByType.Store(typ, keys)
+        to: typeKeysByType.Store
+      - return: keys
   - of: restoreRawSecrets
     participants:
       - id: caller
@@ -964,6 +1151,7 @@ sequences:
           		declared:   compiled.declared,
           		required:   compiled.required,
           		known:      compiled.known,
+          		vocabulary: keyVocabulary{known: compiled.known, folds: buildFolds(compiled.known)},
           		secrets:    compiled.secrets,
           		strict:     !spec.AllowUnknownKeys,
           		constraint: constraint,

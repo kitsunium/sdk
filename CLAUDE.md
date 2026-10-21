@@ -49,7 +49,7 @@ Go SDK providing a normed, performant toolbox for downstream applications: the m
 | `gate` | framework (ADR 0158) | Whether an invocation is subject to the check: a policy value and a decision that performs nothing | 0080 |
 | `git` | framework (ADR 0158) | What a branch changed and what a working tree is at, through hardened git invocations; it degrades, never empties | 0076, 0087, 0100 |
 
-**Repository**: `github.com/kitsunium/sdk` · **Modules**: the root (the framework), `…/internal`, one `…/pkg/v1/<family>` per family, and the vendor modules (ADR 0171) · **Go**: 1.27.2 (pinned in `MODULE.bazel`)
+**Repository**: `github.com/kitsunium/sdk` · **Modules**: the root (the framework), `…/internal`, one `…/pkg/v1/<family>` per family, and the vendor modules (ADR 0171) · **Go**: 1.27.3 (pinned in `MODULE.bazel`)
 
 ## Architecture at a glance
 
@@ -408,7 +408,7 @@ sdk/
 ├── docs/                  ADRs, and docs/api — the exported API, written from the code by `make api` — see docs/CLAUDE.md
 ├── .github/               CI workflows — bazel-ci.yml is the SDK lane
 ├── go.work, go.mod        workspace (read by Bazel via from_file) + the root module, `github.com/kitsunium/sdk`: the framework (ADR 0171); internal/ and each pkg/v1/<family> carry their own go.mod
-├── MODULE.bazel           Bzlmod entry point (rules_go 0.60.0 + gazelle 0.50.0 + go_sdk 1.27.2 + go_deps)
+├── MODULE.bazel           Bzlmod entry point (rules_go 0.60.0 + gazelle 0.50.0 + go_sdk 1.27.3 + go_deps)
 ├── BUILD.bazel            root gazelle target + audit_sources filegroup
 ├── .bazelrc               race-on by default; named configs: race / pure / ci / alloc
 ├── .bazelversion          pins Bazel to 9.0.2

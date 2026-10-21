@@ -31,24 +31,48 @@ sequences:
         kind: actor
       - id: (*circuitBreaker).Run
         kind: self
+      - id: b.allow
+        kind: internal
       - id: wrapAs
+        kind: internal
+      - id: b.release
         kind: internal
       - id: b.record
         kind: internal
     steps:
+      - bind: adm, ok
+        eval: b.allow()
+        to: b.allow
       - opt:
           do:
             - return: wrapAs(coreres.CircuitOpen, nil)
               to: wrapAs
-          when: "!b.allow()"
-      - bind: err
-        eval: op(ctx)
+          when: "!ok"
+      - bind: settled
+        eval: "false"
       - opt:
           do:
-            - return: err
-          when: err != nil && !isRetryable(b.retryable, err)
-      - eval: b.record(err == nil)
+            - defer: b.release(adm, &settled)
+              to: b.release
+          when: adm.trial
+      - bind: err
+        eval: op(ctx)
+      - bind: res
+        eval: outcomeSuccess
+      - opt:
+          do:
+            - set: res
+              value: outcomeNeutral
+            - opt:
+                do:
+                  - set: res
+                    value: outcomeFailure
+                when: isRetryable(b.retryable, err)
+          when: err != nil
+      - eval: b.record(adm, res)
         to: b.record
+      - set: settled
+        value: "true"
       - return: err
   - of: (*circuitBreaker).allow
     steps:
@@ -58,44 +82,102 @@ sequences:
           do:
             - opt:
                 do:
-                  - return: "false"
+                  - return: admission{}, false
                 when: b.clk.Since(b.openedAt) < b.openFor
             - set: b.state
               value: stateHalfOpen
+            - set: b.probing
+              value: "false"
           when: b.state == stateOpen
-      - return: "true"
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: admission{}, false
+                when: b.probing
+            - set: b.probing
+              value: "true"
+            - return: "admission{generation: b.generation, trial: true}, true"
+          when: b.state == stateHalfOpen
+      - return: "admission{generation: b.generation}, true"
+  - of: (*circuitBreaker).release
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*circuitBreaker).release
+        kind: self
+      - id: b.record
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "*settled"
+      - eval: b.record(adm, outcomeNeutral)
+        to: b.record
   - of: (*circuitBreaker).record
     participants:
       - id: caller
         kind: actor
       - id: (*circuitBreaker).record
         kind: self
-      - id: b.trip
+      - id: b.fail
         kind: internal
     steps:
       - lock:
           mutex: b.mu
       - opt:
           do:
-            - set: b.state
-              value: stateClosed
-            - set: b.failures
-              value: "0"
             - return: ""
-          when: success
+          when: adm.generation != b.generation
       - opt:
           do:
-            - eval: b.trip()
-              to: b.trip
-            - return: ""
-          when: b.state == stateHalfOpen
-      - op: ++
-        set: b.failures
-      - opt:
-          do:
-            - eval: b.trip()
-              to: b.trip
-          when: b.failures >= b.threshold
+            - set: b.probing
+              value: "false"
+          when: adm.trial
+      - switch:
+          cases:
+            - case: outcomeSuccess
+              do:
+                - opt:
+                    do:
+                      - set: b.state
+                        value: stateClosed
+                      - set: b.failures
+                        value: "0"
+                    when: b.state == stateClosed || (b.state == stateHalfOpen && adm.trial)
+            - case: outcomeFailure
+              do:
+                - eval: b.fail()
+                  to: b.fail
+            - case: outcomeNeutral
+          "on": res
+  - of: (*circuitBreaker).fail
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*circuitBreaker).fail
+        kind: self
+      - id: b.trip
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: stateHalfOpen
+              do:
+                - eval: b.trip()
+                  to: b.trip
+            - case: stateClosed
+              do:
+                - op: ++
+                  set: b.failures
+                - opt:
+                    do:
+                      - eval: b.trip()
+                        to: b.trip
+                    when: b.failures >= b.threshold
+            - case: stateOpen
+          "on": b.state
   - of: (*circuitBreaker).trip
     participants:
       - id: caller
@@ -110,6 +192,10 @@ sequences:
       - set: b.openedAt
         to: b.clk.Now
         value: b.clk.Now()
+      - op: ++
+        set: b.generation
+      - set: b.probing
+        value: "false"
   - of: NewBulkhead
     steps:
       - opt:

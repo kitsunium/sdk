@@ -12,6 +12,38 @@ const maxPublicRunes int = 120
 // reasonPattern documents the SCREAMING_SNAKE_CASE shape expected for Reason.
 const reasonPattern string = "^[A-Z][A-Z0-9_]*$"
 
+// maxEchoRunes bounds how much of a caller's argument a structural failure
+// quotes in its Private. The argument is the caller's own data, of any length:
+// it never reaches Public (rule 4), and Private keeps enough to find the call
+// site without carrying a runaway string into every log line.
+const maxEchoRunes int = 64
+
+// echoEllipsis marks an echo clipped at maxEchoRunes.
+const echoEllipsis string = "…"
+
+// The Public of each structural failure: a fixed literal, at most
+// maxPublicRunes runes and free of newlines, that never carries the caller's
+// argument (rule 4). The detail — the offending value, the measured size — is
+// the Private's.
+const (
+	// publicCodeZero is the Public of a zero code.
+	publicCodeZero string = "The error code must be non-zero"
+	// publicCodeOverflow is the Public of a code above the int32 range.
+	publicCodeOverflow string = "The error code must fit the positive int32 range"
+	// publicCodeMetaLayer is the Public of a Layer=0 code outside the meta-codes.
+	publicCodeMetaLayer string = "Layer 0 of an error code is reserved for the errs meta-codes"
+	// publicReason is the Public of a malformed Reason.
+	publicReason string = "The reason must match " + reasonPattern
+	// publicEmpty is the Public of an empty Public.
+	publicEmpty string = "The public message must not be empty"
+	// publicTooLong is the Public of a Public above maxPublicRunes.
+	publicTooLong string = "The public message exceeds the 120-rune limit"
+	// publicNewline is the Public of a Public holding a line terminator.
+	publicNewline string = "The public message must not contain a newline"
+	// publicPrivateEmpty is the Public of an empty Private.
+	publicPrivateEmpty string = "The private message must not be empty"
+)
+
 // maxInt32Positive caps the dotted-quad Code at the largest non-negative
 // int32 value so the deprecated Code() int accessor never wraps to a
 // negative integer.
@@ -76,7 +108,7 @@ func validateCode(code Code) *Error {
 	//: reject zero — it is the sentinel "no code" value, never valid.
 	if code == 0 {
 		//: emit the canonical zero-code rejection with the offending value.
-		return newValidationError(CodeInvalidCode, "INVALID_CODE",
+		return newValidationError(CodeInvalidCode, "INVALID_CODE", publicCodeZero,
 			fmt.Sprintf("code must be non-zero, got %d", int(uint32(code))))
 	}
 	//: reject anything that would overflow the signed int range when the
@@ -84,7 +116,7 @@ func validateCode(code Code) *Error {
 	//: for the foreseeable future, so the cap is comfortably far away.
 	if uint32(code) > maxInt32Positive {
 		//: emit the int32-overflow rejection with the offending hex value.
-		return newValidationError(CodeInvalidCode, "INVALID_CODE",
+		return newValidationError(CodeInvalidCode, "INVALID_CODE", publicCodeOverflow,
 			fmt.Sprintf("code must fit int32 positive range, got %#08x", uint32(code)))
 	}
 	//: Layer==0 is reserved for the errs-internal meta-codes.
@@ -96,7 +128,7 @@ func validateCode(code Code) *Error {
 			//: handed to fmt as the Stringer, not rendered here: Code.String
 			//: inlines, and inlined into this cold branch its stack buffer
 			//: grows the frame of every Define, measured +3 % to +7 %.
-			return newValidationError(CodeInvalidCode, "INVALID_CODE",
+			return newValidationError(CodeInvalidCode, "INVALID_CODE", publicCodeMetaLayer,
 				fmt.Sprintf("Layer=0 reserved for meta-codes; got %s", code))
 		}
 	}
@@ -108,10 +140,11 @@ func validateCode(code Code) *Error {
 func validateReason(reason string) *Error {
 	//: reject anything that is not a non-empty SCREAMING_SNAKE identifier.
 	if !isScreamingSnake(reason) {
-		//: emit the canonical bad-reason failure with the offending value
-		//: and the documented regex so the call site can self-diagnose.
-		return newValidationError(CodeInvalidReason, "INVALID_REASON",
-			fmt.Sprintf("reason %q must match %s", reason, reasonPattern))
+		//: emit the canonical bad-reason failure: the documented regex on the
+		//: wire, the offending value — the caller's own, clipped — in Private
+		//: only, so the call site can still self-diagnose from the log.
+		return newValidationError(CodeInvalidReason, "INVALID_REASON", publicReason,
+			fmt.Sprintf("reason %q must match %s", clipEcho(reason), reasonPattern))
 	}
 	//: reason matches the pattern.
 	return nil
@@ -122,14 +155,14 @@ func validatePublic(public string) *Error {
 	//: reject empty Public — every error MUST carry a wire-safe message.
 	if public == "" {
 		//: emit the empty-public failure.
-		return newValidationError(CodeInvalidPublic, "INVALID_PUBLIC",
+		return newValidationError(CodeInvalidPublic, "INVALID_PUBLIC", publicEmpty,
 			"public must not be empty")
 	}
 	//: enforce the rune cap so a runaway message cannot bloat HTTP bodies
 	//: or log lines downstream.
 	if utf8.RuneCountInString(public) > maxPublicRunes {
 		//: emit the over-cap failure with both the cap and the actual size.
-		return newValidationError(CodeInvalidPublic, "INVALID_PUBLIC",
+		return newValidationError(CodeInvalidPublic, "INVALID_PUBLIC", publicTooLong,
 			fmt.Sprintf("public exceeds %d runes (got %d)",
 				maxPublicRunes, utf8.RuneCountInString(public)))
 	}
@@ -137,7 +170,7 @@ func validatePublic(public string) *Error {
 	//: writers and HTTP status text.
 	if containsNewline(public) {
 		//: emit the newline-in-public failure.
-		return newValidationError(CodeInvalidPublic, "INVALID_PUBLIC",
+		return newValidationError(CodeInvalidPublic, "INVALID_PUBLIC", publicNewline,
 			"public must not contain a newline")
 	}
 	//: all three Public rules passed.
@@ -150,11 +183,29 @@ func validatePrivate(private string) *Error {
 	//: reject empty Private — operators MUST receive a log-only context line.
 	if private == "" {
 		//: emit the empty-private failure with the corrected meta-code.
-		return newValidationError(CodeInvalidPrivate, "INVALID_PRIVATE",
+		return newValidationError(CodeInvalidPrivate, "INVALID_PRIVATE", publicPrivateEmpty,
 			"private must not be empty")
 	}
 	//: Private is non-empty.
 	return nil
+}
+
+// clipEcho bounds a caller's argument to maxEchoRunes runes for a Private,
+// marking a cut with echoEllipsis. A cut never splits a rune.
+func clipEcho(value string) string {
+	//: walk the runes; the byte offset of the first rune past the bound is the cut.
+	seen := 0
+	//: every rune, until the bound.
+	for offset := range value {
+		//: the bound is reached with runes left: cut here.
+		if seen == maxEchoRunes {
+			//: the head, and the mark that something followed.
+			return value[:offset] + echoEllipsis
+		}
+		seen++
+	}
+	//: short enough to quote whole.
+	return value
 }
 
 // containsNewline reports whether s contains any newline rune.
