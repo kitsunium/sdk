@@ -1,6 +1,6 @@
 module github.com/kitsunium/sdk/pkg/v1/errs
 
-go 1.27.2
+go 1.27.3
 
 replace github.com/kitsunium/sdk/internal => ../../../internal
 
