@@ -336,3 +336,62 @@ func TestWithoutAutoExtendAHandlerStopsBeforeItsLease(t *testing.T) {
 	clk.Advance(defaultLease - time.Second)
 	until(t, "the handler stopped within its lease", b.handlerDone)
 }
+
+// keyedRun is a queued command's input: its key.
+type keyedRun struct {
+	Key string `json:"key"`
+}
+
+// A queued dispatch the stop's drain cuts short on its last delivery keeps
+// its key: its message is handed back uncounted and waits for the next
+// start, so a dispatch with the same key is deduplicated, not queued a
+// second time beside it.
+func TestADispatchTheStopCutsShortOnItsLastDeliveryKeepsItsKey(t *testing.T) {
+	clk := manualAt()
+	started := make(chan struct{}, 1)
+	var handlerCtx atomic.Pointer[context.Context]
+	svc := NewService("cutkey", "A queued command whose handler waits for its stop.")
+	cmd := svc.Command("run", func(ctx context.Context, _ keyedRun) (EmptyValue, error) {
+		handlerCtx.Store(&ctx)
+		started <- struct{}{}
+		<-ctx.Done()
+		return EmptyValue{}, ctx.Err()
+	}, Queued(), MaxDeliveries(1), Settle(time.Hour), Lease(2*time.Hour)).Key(func(in keyedRun) string { return in.Key })
+	cut := func() bool {
+		ctx := handlerCtx.Load()
+		return ctx != nil && (*ctx).Err() != nil
+	}
+	a := startConsumers(t, svc, clk)
+	q := cmd.queue.Load()
+	must(t, cmd.accept(t.Context(), a, "", keyedRun{Key: "k"}, time.Time{}))
+	<-started
+	began := clk.Now()
+	stopped := stopInBackground(a)
+	stopping(t, a)
+	for !cut() {
+		if clk.Since(began) > 50*time.Minute {
+			t.Fatal("the drain never ended")
+		}
+		clk.Advance(time.Second)
+		for range 64 {
+			if cut() {
+				break
+			}
+			runtime.Gosched()
+		}
+	}
+	must(t, <-stopped)
+	if live := liveOf(t, q.broker); len(live) != 1 || live[0].Deliveries != 0 {
+		t.Fatalf("the dispatch cut short: %+v; want it waiting, its delivery uncounted", live)
+	}
+	q.mu.Lock()
+	held := q.pending["k"]
+	q.mu.Unlock()
+	if !held {
+		t.Error("the stop gave back the key of a dispatch still in its queue")
+	}
+	must(t, cmd.accept(t.Context(), a, "", keyedRun{Key: "k"}, time.Time{}))
+	if live := liveOf(t, q.broker); len(live) != 1 {
+		t.Errorf("a dispatch with the same key was queued beside the one cut short: %d messages", len(live))
+	}
+}

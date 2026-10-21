@@ -180,7 +180,8 @@ func (c *Command[C, R]) put(ctx context.Context, q *commandQueue, key string, en
 // decode will not decode on its next attempt either: it is dead-lettered on
 // its first (ADR 0151 §D8). A handling that said when to try again
 // ([RetryIn]) is handed back with that delay, its key kept; one the app's
-// stop cut short is no failure, and is handled again at the next start.
+// stop cut short is no failure, keeps its key even on its last delivery,
+// and is handled again at the next start (settled).
 func (c *Command[C, R]) handler(a *App, q *commandQueue, loop *loopState) deliveryHandler {
 	return func(ctx context.Context, d plug.DeliveryValue) (err error) {
 		env, decodeErr, openErr := c.decode(ctx, a, d.Message.Payload)
@@ -195,7 +196,7 @@ func (c *Command[C, R]) handler(a *App, q *commandQueue, loop *loopState) delive
 				err = panicked(ctx, a, c.id, "handler panicked", p)
 			}
 			loop.ended(ctx, a, sp, started, err)
-			if err == nil || d.Deliveries >= c.opts.deliveries.maxDeliveries || notRetryable(err) {
+			if c.settled(ctx, a, d.Deliveries, err) {
 				q.release(env.Key)
 			}
 		}()
@@ -208,6 +209,23 @@ func (c *Command[C, R]) handler(a *App, q *commandQueue, loop *loopState) delive
 		}
 		return c.handle(ctx, a, sp, env)
 	}
+}
+
+// settled reports whether a handling that ended with err, on its
+// deliveries-th delivery, leaves its dispatch out of the queue — handled,
+// refused for good, or out of attempts —, so that its key can be given
+// back. A handling the app's stop cut short leaves it in, whatever its
+// delivery: its queue hands it back uncounted (stoppedBy), and it is
+// handled again at the next start — its key given back then would let a
+// dispatch with the same key be queued beside it.
+func (c *Command[C, R]) settled(ctx context.Context, a *App, deliveries int, err error) bool {
+	switch {
+	case err == nil:
+		return true
+	case stoppedBy(ctx, a, err):
+		return false
+	}
+	return deliveries >= c.opts.deliveries.maxDeliveries || notRetryable(err)
 }
 
 // handleSpan begins the span of a handling: on the command, from the node

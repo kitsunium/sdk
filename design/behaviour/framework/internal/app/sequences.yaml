@@ -34596,7 +34596,7 @@ sequences:
                   				err = panicked(ctx, a, c.id, "handler panicked", p)
                   			}
                   			loop.ended(ctx, a, sp, started, err)
-                  			if err == nil || d.Deliveries >= c.opts.deliveries.maxDeliveries || notRetryable(err) {
+                  			if c.settled(ctx, a, d.Deliveries, err) {
                   				q.release(env.Key)
                   			}
                   		}()
@@ -34613,6 +34613,17 @@ sequences:
                           to: doNotRetry
               - return: c.handle(ctx, a, sp, env)
                 to: c.handle
+  - of: (*Command).settled
+    steps:
+      - switch:
+          cases:
+            - case: err == nil
+              do:
+                - return: "true"
+            - case: stoppedBy(ctx, a, err)
+              do:
+                - return: "false"
+      - return: deliveries >= c.opts.deliveries.maxDeliveries || notRetryable(err)
   - of: (*Command).handleSpan
     participants:
       - id: caller
