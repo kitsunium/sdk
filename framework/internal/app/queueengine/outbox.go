@@ -178,6 +178,44 @@ func (o *sealedOutbox) lacks(capability string) error {
 		errs.String("mailer", o.node), errs.String("capability", capability))
 }
 
+// NackAfter is the SQL broker's (queue.DelayedNacker): the spool parks a
+// mail for its backoff with it, the box staying as it lies.
+func (o *sealedOutbox) NackAfter(ctx context.Context, receipt queue.Receipt, cause error, delay time.Duration) (queue.Nack, error) {
+	nacker, ok := o.Broker.(queue.DelayedNacker)
+	if !ok {
+		return queue.Nack{}, o.lacks("DelayedNacker")
+	}
+	return nacker.NackAfter(ctx, receipt, cause, delay)
+}
+
+// PublishAt seals payload as Publish does and publishes the box, received by
+// no consumer before at (queue.DelayedPublisher).
+func (o *sealedOutbox) PublishAt(ctx context.Context, payload []byte, at time.Time) (queue.Message, error) {
+	deferred, ok := o.Broker.(queue.DelayedPublisher)
+	if !ok {
+		return queue.Message{}, o.lacks("DelayedPublisher")
+	}
+	box, err := o.sealMail(ctx, payload)
+	if err != nil {
+		return queue.Message{}, err
+	}
+	return deferred.PublishAt(ctx, box, at)
+}
+
+// PublishOnce seals payload as Publish does and publishes the box at most
+// once per key over window (queue.OncePublisher).
+func (o *sealedOutbox) PublishOnce(ctx context.Context, key string, payload []byte, window time.Duration) (queue.Message, bool, error) {
+	once, ok := o.Broker.(queue.OncePublisher)
+	if !ok {
+		return queue.Message{}, false, o.lacks("OncePublisher")
+	}
+	box, err := o.sealMail(ctx, payload)
+	if err != nil {
+		return queue.Message{}, false, err
+	}
+	return once.PublishOnce(ctx, key, box, window)
+}
+
 // ReplayDeadLetter is the SQL broker's: the box goes back as it lies.
 func (o *sealedOutbox) ReplayDeadLetter(ctx context.Context, id string) error {
 	return o.manager.ReplayDeadLetter(ctx, id)
