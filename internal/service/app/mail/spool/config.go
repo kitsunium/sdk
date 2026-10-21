@@ -138,9 +138,10 @@ type Config struct {
 	// default a failure carrying an SMTP 5xx reply — a *net/textproto.Error
 	// with a Code from 500 to 599 anywhere in its chain — dead-letters the
 	// mail at once, marked MailRejected, because RFC 5321 §4.2.1 forbids
-	// repeating a 5yz command unchanged; a 4xx reply and a failure without a
-	// reply are retried. Set it for a relay known to answer 5xx for a
-	// condition that passes.
+	// repeating a 5yz command unchanged; a 4xx reply, a 552 to RCPT — read
+	// as 452, too many recipients, by RFC 5321 §4.5.3.1.10 — and a failure
+	// without a reply are retried. Set it for a relay known to answer 5xx
+	// for a condition that passes.
 	RetryPermanent bool
 }
 

@@ -22,12 +22,44 @@ import (
 // refusedWith is the failure the SDK's SMTP transport returns for a refused
 // RCPT: SendRefused as the origin, the server's reply as its source.
 func refusedWith(code int, msg string) func(int) error {
+	return refusedAt("RCPT", code, msg)
+}
+
+// refusedAt is the same failure for the SMTP command it names.
+func refusedAt(command string, code int, msg string) func(int) error {
 	return func(int) error {
 		sentinel := coremail.SendRefused
 		return errs.Wrap(&textproto.Error{Code: code, Msg: msg}, errs.WrapParams{
 			Code: sentinel.Code(), Reason: sentinel.Reason(), Public: sentinel.Public(),
 			Private: sentinel.Private(), ExitCode: sentinel.ExitCode(),
-		}, errs.String("command", "RCPT"))
+		}, errs.String("command", command))
+	}
+}
+
+// TestA552ToRCPTIsTemporary pins RFC 5321 §4.5.3.1.10: a 552 to RCPT is read
+// as 452, too many recipients, and retried with its reply still reachable,
+// while a 552 to the end of DATA — the size limit — is permanent.
+func TestA552ToRCPTIsTemporary(t *testing.T) {
+	t.Parallel()
+	transport := &scripted{fail: refusedWith(552, "5.5.3 too many recipients")}
+	s, _, rec := newSpool(t, spool.Config{Transport: transport, From: sender})
+	if _, err := s.Send(context.Background(), message("Hello")); err != nil {
+		t.Fatalf("Send() = %v", err)
+	}
+	rec.expect(t, spool.EventQueued)
+	retrying := rec.expect(t, spool.EventRetrying)
+	if reply, ok := errors.AsType[*textproto.Error](retrying.Err); !ok || reply.Code != 552 {
+		t.Fatalf("the reply of %v = (%v, %v), want 552", retrying.Err, reply, ok)
+	}
+
+	sized := &scripted{fail: refusedAt("DATA-END", 552, "5.3.4 message too big")}
+	s2, _, rec2 := newSpool(t, spool.Config{Transport: sized, From: sender})
+	if _, err := s2.Send(context.Background(), message("Hello")); err != nil {
+		t.Fatalf("Send() = %v", err)
+	}
+	rec2.expect(t, spool.EventQueued)
+	if dead := rec2.expect(t, spool.EventDeadLettered); dead.Attempt != 1 || !errs.HasCode(dead.Err, corespool.CodeMailRejected) {
+		t.Fatalf("the dead letter event %+v", dead)
 	}
 }
 

@@ -1,0 +1,15 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: failedAt
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: field.Key() == "command" && field.StringValue() == command
+          key: _
+          range: kerrs.FieldsOf(err)
+          value: field
+      - return: "false"

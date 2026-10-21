@@ -55,7 +55,8 @@ raises the core's.
   without it `giveUp` declines, because a nack would hand back a mail the
   observer was told was dead-lettered: it is parked as before and
   dead-letters after its last attempt). A 4xx and
-  a failure without a reply park on the backoff as before.
+  a failure without a reply park on the backoff as before, and so does a 552
+  whose `command` field is `RCPT` (RFC 5321 §4.5.3.1.10: read as 452).
   `Config.RetryPermanent` retries a 5xx like a 4xx. `Config.MaxAge` gives
   a mail up on the first failure at or past `QueuedAt + MaxAge`, on the
   spool's clock, read when the attempt fails so a late mail is still tried

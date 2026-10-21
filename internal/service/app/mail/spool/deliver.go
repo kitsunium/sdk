@@ -19,6 +19,9 @@ import (
 const (
 	permanentReplyMin int = 500
 	permanentReplyMax int = 599
+	// rcptTooManyRecipients is the 552 RFC 5321 §4.5.3.1.10 has a client
+	// read as 452 when RCPT gets it.
+	rcptTooManyRecipients int = 552
 )
 
 // deliver is the spool's queue handler. Returning nil acknowledges; returning
@@ -183,10 +186,34 @@ func (s *Spool) giveUp(sendErr error, queuedAt, failedAt time.Time) error {
 // permanentReply reports whether err carries an SMTP reply of the 5yz class
 // anywhere in its chain: the SDK's SMTP transport keeps it reachable for a
 // refused MAIL, RCPT or DATA, and a connector may return one as it is.
+//
+// A 552 to RCPT is the one 5yz it reads as temporary: RFC 5321 §4.5.3.1.10
+// has clients treat it as 452, too many recipients, because servers long
+// answered that condition with 552. The SDK's transport names the command
+// in the failure's "command" field.
 func permanentReply(err error) bool {
 	reply, replied := errors.AsType[*textproto.Error](err)
 	//: no reply, a 4yz, or anything else: temporary.
-	return replied && reply.Code >= permanentReplyMin && reply.Code <= permanentReplyMax
+	if !replied || reply.Code < permanentReplyMin || reply.Code > permanentReplyMax {
+		//: retried.
+		return false
+	}
+	//: a 5yz, but a 552 to RCPT is a 452 in disguise.
+	return reply.Code != rcptTooManyRecipients || !failedAt(err, "RCPT")
+}
+
+// failedAt reports whether err names command in its "command" field.
+func failedAt(err error, command string) bool {
+	//: the fields the SDK's transport attached.
+	for _, field := range kerrs.FieldsOf(err) {
+		//: the one that names the SMTP command.
+		if field.Key() == "command" && field.StringValue() == command {
+			//: that command failed.
+			return true
+		}
+	}
+	//: another command, or a transport that names none.
+	return false
 }
 
 // mark adds sentinel to cause as core/data/queue.DoNotRetry adds its own: an

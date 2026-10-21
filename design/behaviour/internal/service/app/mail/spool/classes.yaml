@@ -50,6 +50,12 @@ constants:
       - name: permanentReplyMax
         type: int
         value: "599"
+      - doc: |-
+          rcptTooManyRecipients is the 552 RFC 5321 §4.5.3.1.10 has a client
+          read as 452 when RCPT gets it.
+        name: rcptTooManyRecipients
+        type: int
+        value: "552"
     name: permanentReplyMin
   - doc: What can happen to a spooled mail. The zero value is none of them.
     grouped: true
@@ -103,6 +109,7 @@ files:
       - (*Spool).park
       - (*Spool).giveUp
       - permanentReply
+      - failedAt
       - mark
     name: deliver.go
   - decls: []
@@ -161,8 +168,17 @@ functions:
       permanentReply reports whether err carries an SMTP reply of the 5yz class
       anywhere in its chain: the SDK's SMTP transport keeps it reachable for a
       refused MAIL, RCPT or DATA, and a connector may return one as it is.
+
+      A 552 to RCPT is the one 5yz it reads as temporary: RFC 5321 §4.5.3.1.10
+      has clients treat it as 452, too many recipients, because servers long
+      answered that condition with 552. The SDK's transport names the command
+      in the failure's "command" field.
     name: permanentReply
     params: err error
+    results: bool
+  - doc: failedAt reports whether err names command in its "command" field.
+    name: failedAt
+    params: err error, command string
     results: bool
   - doc: |-
       mark adds sentinel to cause as core/data/queue.DoNotRetry adds its own: an
@@ -363,9 +379,10 @@ types:
           default a failure carrying an SMTP 5xx reply — a *net/textproto.Error
           with a Code from 500 to 599 anywhere in its chain — dead-letters the
           mail at once, marked MailRejected, because RFC 5321 §4.2.1 forbids
-          repeating a 5yz command unchanged; a 4xx reply and a failure without a
-          reply are retried. Set it for a relay known to answer 5xx for a
-          condition that passes.
+          repeating a 5yz command unchanged; a 4xx reply, a 552 to RCPT — read
+          as 452, too many recipients, by RFC 5321 §4.5.3.1.10 — and a failure
+          without a reply are retried. Set it for a relay known to answer 5xx
+          for a condition that passes.
         name: RetryPermanent
         type: bool
     kind: struct

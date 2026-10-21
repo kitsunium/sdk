@@ -334,7 +334,11 @@ sequences:
     steps:
       - bind: reply, replied
         eval: errors.AsType[*textproto.Error](err)
-      - return: replied && reply.Code >= permanentReplyMin && reply.Code <= permanentReplyMax
+      - opt:
+          do:
+            - return: "false"
+          when: "!replied || reply.Code < permanentReplyMin || reply.Code > permanentReplyMax"
+      - return: reply.Code != rcptTooManyRecipients || !failedAt(err, "RCPT")
   - of: mark
     participants:
       - id: caller

@@ -215,7 +215,10 @@ the same command will fail the same way — and a mail had no age limit, where
   speaks of the relay or of this program's configuration, and dead-lettering
   every mail for one wrong password would lose them all to it.
 - **A 4xx reply, and every failure without a reply, stays temporary** —
-  parked on the backoff as before.
+  parked on the backoff as before. So does a 552 to RCPT, which RFC 5321
+  §4.5.3.1.10 has a client read as 452 (too many recipients); the spool reads
+  the command from the transport's `command` field. A 552 to the end of DATA,
+  a size limit, stays permanent.
 - **`Config.RetryPermanent` is the escape hatch**: a relay known to answer
   5xx for a condition that passes gets its 5xx retried like a 4xx.
 - **`Config.MaxAge`**: an attempt that fails once `MaxAge` has passed since

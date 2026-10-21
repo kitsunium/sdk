@@ -85,8 +85,9 @@
 // refused MAIL, RCPT or DATA — is permanent: RFC 5321 §4.2.1 forbids
 // repeating the command unchanged, so the mail is dead-lettered at once with
 // that failure, marked MailRejected, through the queue's Rejecter. A 4xx
-// reply, and every failure without a reply — a relay down, a refused
-// greeting, a timeout —, stays temporary. Config.RetryPermanent retries a 5xx
+// reply, a 552 to RCPT (RFC 5321 §4.5.3.1.10 reads it as 452), and every
+// failure without a reply — a relay down, a refused greeting, a timeout —,
+// stays temporary. Config.RetryPermanent retries a 5xx
 // like a 4xx. With Config.MaxAge, an attempt that fails once the mail is
 // that old dead-letters it with that failure, marked MailExpired, whatever
 // attempts are left (RFC 5321 §4.5.4.1); the age is read when an attempt
