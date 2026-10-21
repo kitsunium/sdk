@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-10
 - **Deciders**: SDK maintainers
-- **Amended by**: [ADR 0104](0104-an-idle-consumer-sleeps-until-there-may-be-work.md) — `Consume` sleeps on the `Waker` sibling; [ADR 0151](0151-a-message-published-in-a-transaction-exists-if-and-only-if-it-commits.md) — a third broker, `NewSQL`, whose publication joins the caller's transaction (the frontier's Transaction row read as the WORK's, which still runs in its own), `PolicyValue.MaxRetryDelay`, and the `Rejecter` and `DeadLetterManager` siblings; amended in place on 2026-10-21 for kitsunium/sdk#474 — a `Releaser` sibling, and `Consume`'s stop, drain and lease bound (see the Amendment section)
+- **Amended by**: [ADR 0104](0104-an-idle-consumer-sleeps-until-there-may-be-work.md) — `Consume` sleeps on the `Waker` sibling; [ADR 0151](0151-a-message-published-in-a-transaction-exists-if-and-only-if-it-commits.md) — a third broker, `NewSQL`, whose publication joins the caller's transaction (the frontier's Transaction row read as the WORK's, which still runs in its own), `PolicyValue.MaxRetryDelay`, and the `Rejecter` and `DeadLetterManager` siblings; amended in place on 2026-10-21 for kitsunium/sdk#474 — a `Releaser` sibling, and `Consume`'s stop, drain and lease bound (see the Amendment section); [ADR 0183](0183-a-message-may-wait-for-its-instant-and-recurrence-stays-the-schedulers.md) — resolves the Deferred `PublishAt`: a queue holds a message until one instant, durably (`DelayedPublisher`), recurrence stays the scheduler's, beside `DelayedNacker` and `OncePublisher`
 - **Related**: [ADR 0053](0053-sdk-events-domain.md) (the frontier table, written before this domain existed), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a zero value is a safe default or an explicit refusal), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a published port grows by siblings), [ADR 0052](0052-sdk-lock-domain.md) (leases that expire, and the `flock(2)` measurement), [ADR 0056](0056-sdk-vfs-domain.md) (`vfs`, whose `WriteAtomic` is this domain's durable publish), [ADR 0018](0018-sdk-cross-platform-portability.md) (refuse rather than approximate), [ADR 0001](0001-sdk-go-multimodule-layout.md) / [ADR 0005](0005-sdk-error-codes-dotted-quad.md)
 
 ## Context
@@ -559,10 +559,7 @@ and the documentation the change is obliged to keep in step (rule 11).
 - **Delayed/scheduled publication** (`PublishAt`). The visibility instant is
   already in the durable representation, so the mechanism exists; the decision
   about whether a queue should also be a scheduler does not, and ADR 0041 is
-  where scheduling decisions live. *Resolved on 2026-10-21 by
-  [ADR 0183](0183-a-message-may-wait-for-its-instant-and-recurrence-stays-the-schedulers.md):
-  a queue holds a message until one instant, durably (`DelayedPublisher`), and
-  recurrence stays the scheduler's.*
+  where scheduling decisions live.
 - **Priority queues.** The name grammar sorts on one instant; a priority would
   be a second sort key and a starvation policy, and starvation policies are not
   something to add silently.

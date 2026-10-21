@@ -55,6 +55,16 @@ func await[T any](t *testing.T, ch <-chan T, what string) T {
 	}
 }
 
+// report hands a handler's delivery count to the test, or gives up when the
+// consumer stops: a delivery the test no longer reads must not hold the
+// handler, and with it the cleanup that waits for every worker.
+func report(ctx context.Context, attempts chan<- int, deliveries int) {
+	select {
+	case attempts <- deliveries:
+	case <-ctx.Done():
+	}
+}
+
 // TestAHandlerThatSaysWhenToRetryIsNackedWithItsDelay is RetryAfter through
 // Consume on every broker (ADR 0183): the message is handed back through the
 // broker's DelayedNacker, receivable at the delay the handler named — not at
@@ -70,8 +80,8 @@ func TestAHandlerThatSaysWhenToRetryIsNackedWithItsDelay(t *testing.T) {
 			handedBack := broker.(corequeue.Waker).Wake().Signal
 			attempts := make(chan int, 2)
 			consumeInBackground(t, broker, svcqueue.ConsumerConfig{
-				Handler: func(_ context.Context, delivery corequeue.DeliveryValue) error {
-					attempts <- delivery.Deliveries
+				Handler: func(ctx context.Context, delivery corequeue.DeliveryValue) error {
+					report(ctx, attempts, delivery.Deliveries)
 					if delivery.Deliveries == 1 {
 						return corequeue.RetryAfter(errThrottled, retryAsked)
 					}
@@ -116,8 +126,8 @@ func TestARetryAfterOnABrokerWithoutTheSiblingIsAPlainNack(t *testing.T) {
 	handedBack := inner.(corequeue.Waker).Wake().Signal
 	attempts := make(chan int, 2)
 	consumeInBackground(t, policyOnly{Broker: inner}, svcqueue.ConsumerConfig{
-		Handler: func(_ context.Context, delivery corequeue.DeliveryValue) error {
-			attempts <- delivery.Deliveries
+		Handler: func(ctx context.Context, delivery corequeue.DeliveryValue) error {
+			report(ctx, attempts, delivery.Deliveries)
 			return corequeue.RetryAfter(errThrottled, retryAsked)
 		},
 		Clock: clk, PollInterval: time.Hour, HandlerIsIdempotent: true,
@@ -141,8 +151,8 @@ func TestDoNotRetryWinsOverRetryAfter(t *testing.T) {
 	attempts := make(chan int, 2)
 	observed := outcomeSpy{Broker: broker, outcomes: make(chan string, 2)}
 	consumeInBackground(t, observed, svcqueue.ConsumerConfig{
-		Handler: func(_ context.Context, delivery corequeue.DeliveryValue) error {
-			attempts <- delivery.Deliveries
+		Handler: func(ctx context.Context, delivery corequeue.DeliveryValue) error {
+			report(ctx, attempts, delivery.Deliveries)
 			return corequeue.DoNotRetry(corequeue.RetryAfter(errThrottled, retryAsked))
 		},
 		Clock: clk, PollInterval: time.Hour, HandlerIsIdempotent: true,
