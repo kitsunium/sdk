@@ -73,6 +73,24 @@ func TestAThrottleRefusesOnTheCallersSide(t *testing.T) {
 	}
 }
 
+// An attempt's answer that came after its context ended — the late one a
+// timeout turned into a failure — is not the call's when a live one came;
+// it is when it is the only one.
+func TestALateAnswerIsNotTheCalls(t *testing.T) {
+	var w portAnswers[int]
+	w.keep(1, false)
+	w.keep(2, true)
+	w.keep(3, false)
+	if got := w.answer(); got != 2 {
+		t.Errorf("the call answered %d, want the live 2", got)
+	}
+	var only portAnswers[int]
+	only.keep(4, false)
+	if got := only.answer(); got != 4 {
+		t.Errorf("the call answered %d, want the only 4", got)
+	}
+}
+
 // Whatever the order a port's policies are given in, they compose the
 // outermost first as retry, hedge, breaker, throttle, timeout.
 func TestAPortsPoliciesComposeInOneOrder(t *testing.T) {

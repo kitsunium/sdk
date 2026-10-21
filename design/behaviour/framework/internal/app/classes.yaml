@@ -3469,6 +3469,9 @@ files:
       - (*portGuards).drawn
       - (*portGuards).run
       - (*PortService).guarded
+      - portAnswers
+      - (*portAnswers).keep
+      - (*portAnswers).answer
       - (*portCall).retried
       - transient
       - policyRefusal
@@ -10200,9 +10203,9 @@ types:
         results: vfs.FullFS, error
       - doc: |-
           listBreakers prints each port a breaker guards, and whether an operator
-          isolated it.
+          isolated it; a mark it cannot read is said, and fails the command.
         name: listBreakers
-        params: fsys vfs.FullFS, stdout io.Writer
+        params: fsys vfs.FullFS, stdout, stderr io.Writer
         recv: a *App
         results: int
       - doc: markBreaker writes, or takes off, the mark that isolates port's breaker.
@@ -18324,8 +18327,12 @@ types:
         results: "*PortService[Req, Resp]"
       - doc: |-
           guarded runs the call through the port's policies: each attempt — a
-          retry's, a hedge's duplicate — runs what the port is bound to, and the
-          first that succeeds answers.
+          retry's, a hedge's duplicate — runs what the port is bound to, and a
+          success answers. An attempt's answer is kept as the call's only while the
+          attempt's context lives — the last such one wins —: an answer that came
+          after its timeout is the failure the timeout makes of it, and a later
+          attempt's answer replaces it. One that came late is the call's only when
+          no other came, the chain having said success all the same.
         name: guarded
         params: ctx context.Context, a *App, sp *span, req Req
         recv: p *PortService[Req, Resp]
@@ -18788,6 +18795,28 @@ types:
         recv: f portPolicyOption
     name: portPolicyOption
     underlying: func(g *portGuards)
+  - doc: portAnswers are the answers of a call's attempts, which may run at once.
+    fields:
+      - name: mu
+        type: sync.Mutex
+      - name: fresh
+        type: Resp
+      - name: late
+        type: Resp
+      - name: held
+        type: bool
+    kind: struct
+    methods:
+      - doc: "keep keeps r, an attempt's answer: as fresh while its context lived."
+        name: keep
+        params: r Resp, live bool
+        recv: w *portAnswers[Resp]
+      - doc: "answer is the call's answer: the last fresh one, else the late one."
+        name: answer
+        recv: w *portAnswers[Resp]
+        results: Resp
+    name: portAnswers
+    typeParams: Resp any
   - doc: guardedPort is a port that guards its calls, whatever its types.
     fields:
       - name: id
@@ -26824,13 +26853,17 @@ vars:
         name: credentialNames
         value: "[]string{\"password\", \"passwd\", \"passphrase\", \"token\", \"key\", \"hash\", \"digest\", \"secret\", \"salt\", \"credential\"}"
     name: personalNames
-  - doc: "reservedCommands are Main's own: a product's CLI command may not take one."
+  - doc: |-
+      reservedCommands are Main's own: a product's CLI command may not take one
+      — breaker included, which is Main's only in an app whose port declares a
+      breaker, so that adding one never hides it behind the product's command.
     items:
       - name: reservedCommands
         value: |-
           map[string]bool{
           	"serve": true, "graph": true, "healthcheck": true, "config": true, "secrets": true,
           	"migrate": true, "privacy": true, "revisions": true, "watch": true, "data": true, "help": true,
+          	"breaker": true,
           }
     name: reservedCommands
   - grouped: true

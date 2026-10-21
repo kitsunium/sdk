@@ -1101,7 +1101,7 @@ sequences:
       - opt:
           do:
             - return: 0, "none", nil
-          when: a.cliRun && len(a.componentNodes().stores) == 0
+          when: a.cliRun && len(a.componentNodes().stores) == 0 && len(a.breakers()) == 0
       - opt:
           do:
             - return: 0, a.dataDir, failure(CodeAppConfig, "DATA_DIR_INVALID", "the data directory cannot be created", err, errs.String("dir", a.dataDir))
@@ -4401,7 +4401,7 @@ sequences:
           when: err != nil
       - opt:
           do:
-            - return: a.listBreakers(fsys, stdout)
+            - return: a.listBreakers(fsys, stdout, stderr)
               to: a.listBreakers
           when: verb == "list"
       - return: a.markBreaker(fsys, verb, port, stdout, stderr)
@@ -4465,25 +4465,33 @@ sequences:
       - id: fmt
         kind: stdlib
     steps:
+      - bind: status
+        eval: "0"
       - loop:
           do:
-            - bind: state
-              eval: "\"not isolated\""
-            - opt:
-                do:
-                  - set: state
-                    value: "\"isolated\""
-                init:
-                  bind: _, err
-                  eval: fs.Stat(fsys, b.mark)
-                  to: fs
-                when: err == nil
-            - eval: fmt.Fprintf(stdout, "%s\t%s\n", b.port, state)
-              to: fmt
+            - bind: _, err
+              eval: fs.Stat(fsys, b.mark)
+              to: fs
+            - switch:
+                cases:
+                  - case: err == nil
+                    do:
+                      - eval: fmt.Fprintf(stdout, "%s\tisolated\n", b.port)
+                        to: fmt
+                  - case: errors.Is(err, fs.ErrNotExist)
+                    do:
+                      - eval: fmt.Fprintf(stdout, "%s\tnot isolated\n", b.port)
+                        to: fmt
+                  - default: true
+                    do:
+                      - eval: "fmt.Fprintf(stderr, \"the breaker of %s: its mark cannot be read: %v\\n\", b.port, err)"
+                        to: fmt
+                      - set: status
+                        value: "1"
           key: _
           range: a.breakers()
           value: b
-      - return: "0"
+      - return: status
   - of: (*App).markBreaker
     participants:
       - id: caller
@@ -29378,15 +29386,21 @@ sequences:
         kind: actor
       - id: (*breakerMarks).start
         kind: self
+      - id: m.a.clock.NewTicker
+        kind: value
       - id: m.a.goTracked
         kind: internal
+      - id: t.Stop
+        kind: value
       - id: failure
         kind: internal
     steps:
+      - bind: t
+        eval: m.a.clock.NewTicker(breakerPoll)
+        to: m.a.clock.NewTicker
       - bind: ok
         eval: |-
           m.a.goTracked(func() {
-          		t := m.a.clock.NewTicker(breakerPoll)
           		defer t.Stop()
           		for {
           			select {
@@ -29403,6 +29417,8 @@ sequences:
         to: m.a.goTracked
       - opt:
           do:
+            - eval: t.Stop()
+              to: t.Stop
             - return: failure(CodeAppRunning, "APP_STOPPING", "the app is stopping", nil)
               to: failure
           when: "!ok"
@@ -29734,24 +29750,18 @@ sequences:
         kind: self
       - id: p.guards.run
         kind: internal
+      - id: answers.answer
+        kind: internal
     steps:
-      - leaf: a const or type declaration in a body
-        stmt: |-
-          var (
-          		mu   sync.Mutex
-          		won  bool
-          		resp Resp
-          	)
+      - var:
+          name: answers
+          type: portAnswers[Resp]
       - bind: err
         eval: |-
           p.guards.run(ctx, &portCall{a: a, sp: sp}, func(ctx context.Context) error {
           		r, err := p.run(ctx, a, req)
           		if err == nil {
-          			mu.Lock()
-          			if !won {
-          				won, resp = true, r
-          			}
-          			mu.Unlock()
+          			answers.keep(r, ctx.Err() == nil)
           		}
           		return err
           	})
@@ -29763,9 +29773,29 @@ sequences:
                 type: Resp
             - return: zero, err
           when: err != nil
+      - return: answers.answer(), nil
+        to: answers.answer
+  - of: (*portAnswers).keep
+    steps:
       - lock:
-          mutex: mu
-      - return: resp, nil
+          mutex: w.mu
+      - opt:
+          do:
+            - set: w.fresh, w.held
+              value: r, true
+            - return: ""
+          when: live
+      - set: w.late
+        value: r
+  - of: (*portAnswers).answer
+    steps:
+      - lock:
+          mutex: w.mu
+      - opt:
+          do:
+            - return: w.fresh
+          when: w.held
+      - return: w.late
   - of: (*portCall).retried
     participants:
       - id: caller

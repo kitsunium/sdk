@@ -53,7 +53,7 @@ func (a *App) breakerCommand(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if verb == "list" {
-		return a.listBreakers(fsys, stdout)
+		return a.listBreakers(fsys, stdout, stderr)
 	}
 	return a.markBreaker(fsys, verb, port, stdout, stderr)
 }
@@ -87,16 +87,22 @@ func (a *App) breakerData() (vfs.FullFS, error) {
 }
 
 // listBreakers prints each port a breaker guards, and whether an operator
-// isolated it.
-func (a *App) listBreakers(fsys vfs.FullFS, stdout io.Writer) int {
+// isolated it; a mark it cannot read is said, and fails the command.
+func (a *App) listBreakers(fsys vfs.FullFS, stdout, stderr io.Writer) int {
+	status := 0
 	for _, b := range a.breakers() {
-		state := "not isolated"
-		if _, err := fs.Stat(fsys, b.mark); err == nil {
-			state = "isolated"
+		_, err := fs.Stat(fsys, b.mark)
+		switch {
+		case err == nil:
+			fmt.Fprintf(stdout, "%s\tisolated\n", b.port)
+		case errors.Is(err, fs.ErrNotExist):
+			fmt.Fprintf(stdout, "%s\tnot isolated\n", b.port)
+		default:
+			fmt.Fprintf(stderr, "the breaker of %s: its mark cannot be read: %v\n", b.port, err)
+			status = 1
 		}
-		fmt.Fprintf(stdout, "%s\t%s\n", b.port, state)
 	}
-	return 0
+	return status
 }
 
 // markBreaker writes, or takes off, the mark that isolates port's breaker.

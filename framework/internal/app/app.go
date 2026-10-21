@@ -600,8 +600,9 @@ func (a *App) bootData() (count int, value string, err error) {
 	if a.dataDir == "" {
 		return 0, "memory", nil
 	}
-	if a.cliRun && len(a.componentNodes().stores) == 0 {
-		// A CLI command whose app keeps no store touches no directory.
+	if a.cliRun && len(a.componentNodes().stores) == 0 && len(a.breakers()) == 0 {
+		// A CLI command whose app keeps no store, and whose ports declare
+		// no breaker an operator may have isolated, touches no directory.
 		return 0, "none", nil
 	}
 	if err := os.MkdirAll(a.dataDir, 0o700); err != nil {

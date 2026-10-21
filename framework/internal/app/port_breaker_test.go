@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/internal/app"
+	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/clock"
 )
 
@@ -169,6 +170,40 @@ func TestAnIsolatedBreakerRefusesUntilItIsReset(t *testing.T) {
 	answersWith(t, a, http.StatusServiceUnavailable)
 	if dep.count() == 0 {
 		t.Errorf("the reset breaker reached nothing")
+	}
+}
+
+// A product's CLI command runs with the operator's isolations applied, its
+// data directory opened for them although it keeps no store; and no product
+// command may take Main's breaker, which an app has once a port declares one.
+func TestACLICommandMeetsAnIsolatedBreaker(t *testing.T) {
+	needsFileStore(t)
+	dir := t.TempDir()
+	mark := filepath.Join(dir, "orders", "ports", "quote.isolated")
+	if err := os.MkdirAll(filepath.Dir(mark), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mark, []byte("orders/port/quote\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dep := newDependency()
+	s := app.NewService("orders", "Prices, asked from the command line.")
+	fallback := s.Query("dependency", dep.handle)
+	quote := s.Port[guardAsk, guardPrice]("quote", app.Fallback[guardAsk, guardPrice](fallback)).Guard(app.Breaker(2, time.Second))
+	s.CLI("price", "Print a price.", func(ctx context.Context, _ []string, _ app.StdioValue) int {
+		if _, err := quote.Call(ctx, guardAsk{}); err != nil {
+			return 7
+		}
+		return 0
+	})
+	if status := breakerApp(t, dir, s).With(app.Profile(model.ProfileCLI)).Main(t.Context(), []string{"price"}); status != 7 || dep.count() != 0 {
+		t.Errorf("an isolated port called from the command line: status %d, %d calls", status, dep.count())
+	}
+
+	taken := app.NewService("orders", "A command named breaker.")
+	taken.CLI("breaker", "Mine.", func(context.Context, []string, app.StdioValue) int { return 0 })
+	if _, err := startPolicies(t, []*app.Service{taken}); err == nil || !strings.Contains(err.Error(), `takes the name "breaker"`) {
+		t.Errorf("a product command named breaker: %v", err)
 	}
 }
 

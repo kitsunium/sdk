@@ -226,22 +226,18 @@ func (g *portGuards) run(ctx context.Context, c *portCall, attempt func(context.
 }
 
 // guarded runs the call through the port's policies: each attempt — a
-// retry's, a hedge's duplicate — runs what the port is bound to, and the
-// first that succeeds answers.
+// retry's, a hedge's duplicate — runs what the port is bound to, and a
+// success answers. An attempt's answer is kept as the call's only while the
+// attempt's context lives — the last such one wins —: an answer that came
+// after its timeout is the failure the timeout makes of it, and a later
+// attempt's answer replaces it. One that came late is the call's only when
+// no other came, the chain having said success all the same.
 func (p *PortService[Req, Resp]) guarded(ctx context.Context, a *App, sp *span, req Req) (Resp, error) {
-	var (
-		mu   sync.Mutex
-		won  bool
-		resp Resp
-	)
+	var answers portAnswers[Resp]
 	err := p.guards.run(ctx, &portCall{a: a, sp: sp}, func(ctx context.Context) error {
 		r, err := p.run(ctx, a, req)
 		if err == nil {
-			mu.Lock()
-			if !won {
-				won, resp = true, r
-			}
-			mu.Unlock()
+			answers.keep(r, ctx.Err() == nil)
 		}
 		return err
 	})
@@ -249,9 +245,36 @@ func (p *PortService[Req, Resp]) guarded(ctx context.Context, a *App, sp *span, 
 		var zero Resp
 		return zero, err
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	return resp, nil
+	return answers.answer(), nil
+}
+
+// portAnswers are the answers of a call's attempts, which may run at once.
+type portAnswers[Resp any] struct {
+	mu    sync.Mutex
+	fresh Resp
+	late  Resp
+	held  bool
+}
+
+// keep keeps r, an attempt's answer: as fresh while its context lived.
+func (w *portAnswers[Resp]) keep(r Resp, live bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if live {
+		w.fresh, w.held = r, true
+		return
+	}
+	w.late = r
+}
+
+// answer is the call's answer: the last fresh one, else the late one.
+func (w *portAnswers[Resp]) answer() Resp {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.held {
+		return w.fresh
+	}
+	return w.late
 }
 
 // retried is what a call says of a retry about to wait: on the port's span,

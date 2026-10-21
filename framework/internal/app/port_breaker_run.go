@@ -113,8 +113,8 @@ func (m *breakerMarks) apply() {
 // Goroutine lifecycle: one tracked goroutine, which ends when the app's base
 // context ends; the stop waits for it.
 func (m *breakerMarks) start(_ context.Context) error {
+	t := m.a.clock.NewTicker(breakerPoll)
 	ok := m.a.goTracked(func() {
-		t := m.a.clock.NewTicker(breakerPoll)
 		defer t.Stop()
 		for {
 			select {
@@ -129,6 +129,7 @@ func (m *breakerMarks) start(_ context.Context) error {
 		}
 	})
 	if !ok {
+		t.Stop()
 		return failure(CodeAppRunning, "APP_STOPPING", "the app is stopping", nil)
 	}
 	return nil
