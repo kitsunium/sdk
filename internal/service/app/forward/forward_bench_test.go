@@ -2,6 +2,7 @@ package forward_test
 
 import (
 	"context"
+	"runtime"
 	"testing"
 
 	corequeue "github.com/kitsunium/sdk/internal/core/data/queue"
@@ -32,6 +33,9 @@ func BenchmarkEnqueue(b *testing.B) {
 			return broker
 		}},
 		{"file", func(b *testing.B) corequeue.Broker {
+			if diskRefused() {
+				b.Skipf("the durable broker refuses %s by design (ADR 0018, ADR 0056, ADR 0144)", runtime.GOOS)
+			}
 			broker, err := svcqueue.NewFile(svcqueue.FileConfig{Dir: b.TempDir(), Policy: testPolicy})
 			if err != nil {
 				b.Fatal(err)

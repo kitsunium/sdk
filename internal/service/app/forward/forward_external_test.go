@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 
 	coreforward "github.com/kitsunium/sdk/internal/core/app/forward"
 	corequeue "github.com/kitsunium/sdk/internal/core/data/queue"
+	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	svcforward "github.com/kitsunium/sdk/internal/service/app/forward"
 	svcqueue "github.com/kitsunium/sdk/internal/service/data/queue"
 )
@@ -407,10 +409,31 @@ func TestTheBatchesSurviveARestart(t *testing.T) {
 func fileBroker(t *testing.T, clk *timerClock, dir string) corequeue.Broker {
 	t.Helper()
 	broker, err := svcqueue.NewFile(svcqueue.FileConfig{Clock: clk, Dir: dir, Policy: testPolicy})
+	if diskRefused() {
+		// The durable broker publishes through internal/service/data/vfs,
+		// which refuses this platform by design (ADR 0018, ADR 0056, ADR
+		// 0144): the refusal is asserted, then the case skips — the broker
+		// it needs does not exist here (ADR 0095).
+		if !kerrs.HasCode(err, coreproc.CodeUnsupportedPlatform) || broker != nil {
+			t.Fatalf("NewFile on %s = (%v, %v), want (nil, UNSUPPORTED_PLATFORM)", runtime.GOOS, broker, err)
+		}
+		t.Skipf("the durable broker refuses %s by design; that refusal is asserted above", runtime.GOOS)
+	}
 	if err != nil {
 		t.Fatalf("NewFile: %v", err)
 	}
 	return broker
+}
+
+// diskRefused reports whether internal/service/data/vfs refuses this GOOS by
+// design — spelled out, as the queue suite does, so a refusal on Linux, macOS
+// or a BSD fails instead of skipping.
+func diskRefused() bool {
+	switch runtime.GOOS {
+	case "linux", "android", "darwin", "ios", "freebsd", "openbsd", "netbsd", "dragonfly":
+		return false
+	}
+	return true
 }
 
 // closeBroker closes a broker that can be closed — a process ending.

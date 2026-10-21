@@ -57,6 +57,7 @@ go_test(
         "//internal/core/data/queue",
         "//internal/core/observe/metrics",
         "//internal/core/observe/trace",
+        "//internal/core/proc",
         "//internal/kernel/backoff",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
