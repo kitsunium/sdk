@@ -1006,6 +1006,10 @@ func restoreRefused(why string) error {
 // fixed order so the reason given is always the first that applies: the
 // target, then the bounds, then the members.
 func checkRestore(flog *fileLog, stamp *coreconsensus.StampValue, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RestoreOptions) error {
+	if errs.HasCode(flog.refuse, coreconsensus.CodeStopMarkerPresent) {
+		// A STORAGE_FAILED stop of this boot: reboot first (#563).
+		return flog.refuse
+	}
 	if err := checkRestoreTarget(flog, newCluster, opt); err != nil {
 		return err
 	}
@@ -1045,9 +1049,6 @@ func defaultRestoreCodec() (coretransform.BoundedDecompressor, error) {
 func checkRestoreTarget(flog *fileLog, newCluster coreconsensus.ClusterID, opt *RestoreOptions) error {
 	exp := &opt.Expected
 	switch {
-	case errs.HasCode(flog.refuse, coreconsensus.CodeStopMarkerPresent):
-		// A STORAGE_FAILED stop of this boot: reboot first (#563).
-		return flog.refuse
 	case flog.refuse != nil:
 		return restoreRefused("quarantined log")
 	case !opt.Operator.Valid():

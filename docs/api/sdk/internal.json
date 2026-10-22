@@ -46168,16 +46168,21 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
       "name": "DataDirOptions",
-      "spelled": "struct{SegmentBytes int64}",
-      "canonical": "struct{SegmentBytes int64}",
+      "spelled": "struct{SegmentBytes int64; RuntimeDir string}",
+      "canonical": "struct{SegmentBytes int64; RuntimeDir string}",
       "fields": [
         {
           "name": "SegmentBytes",
           "type": "int64",
           "doc": "SegmentBytes is the fixed size of a log segment; 0 is 64 MiB.\n"
+        },
+        {
+          "name": "RuntimeDir",
+          "type": "string",
+          "doc": "RuntimeDir is the boot-scoped directory of the second STORAGE_FAILED\nmarker (R9-05); empty is /run/kitsunium-consensus on Linux, and\nkitsunium-consensus in the temporary directory elsewhere. It must\noutlive the process within the boot and be gone at the next one: a\nhost tmpfs, or systemd's RuntimeDirectory= with\nRuntimeDirectoryPreserve=yes. The process must be able to create it\nand write in it: NewDataDirWith refuses CONSENSUS_MISCONFIGURED\notherwise, naming the path.\n"
         }
       ],
-      "doc": "DataDirOptions tunes NewDataDirWith.\n",
+      "doc": "DataDirOptions tunes NewDataDirWith: the size of a log segment and the\nboot-scoped directory of the second STORAGE_FAILED marker.\n",
       "file": "service/app/consensus/datadir.go",
       "layer": "service",
       "family": "app"

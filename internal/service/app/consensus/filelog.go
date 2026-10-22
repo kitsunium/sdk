@@ -306,20 +306,9 @@ func openFileLog(dd *dataDir, segBytes int64) (*fileLog, error) {
 		segBytes = DefaultSegmentBytes
 	}
 	l := &fileLog{dir: dd.dir, segBytes: segBytes, dd: dd, first: 1, pendingLast: -1, runDir: dd.opts.RuntimeDir}
-	if l.runDir == "" {
-		l.runDir = runtimeMarkerDir()
-	}
-	if err := l.probeRuntimeDir(); err != nil {
+	if err := l.prepareOpen(); err != nil {
 		return nil, err
 	}
-	if err := mkdirDurable(l.logDir()); err != nil {
-		return nil, err
-	}
-	st, err := readStamp(dd.dir)
-	if err != nil {
-		return nil, err
-	}
-	l.stamp = st
 	if q, err := os.ReadFile(filepath.Join(dd.dir, markerQuarantine)); err == nil {
 		l.refuse = origin(coreconsensus.LogQuarantined, errs.String("marker", strings.TrimSpace(string(q))))
 		return l, nil
@@ -341,6 +330,27 @@ func openFileLog(dd *dataDir, segBytes int64) (*fileLog, error) {
 		return nil, err
 	}
 	return l, nil
+}
+
+// prepareOpen is what an open does before it reads the markers: the
+// boot-scoped directory resolved and probed (#562), the log directory made
+// and the stamp read.
+func (l *fileLog) prepareOpen() error {
+	if l.runDir == "" {
+		l.runDir = runtimeMarkerDir()
+	}
+	if err := l.probeRuntimeDir(); err != nil {
+		return err
+	}
+	if err := mkdirDurable(l.logDir()); err != nil {
+		return err
+	}
+	st, err := readStamp(l.dir)
+	if err != nil {
+		return err
+	}
+	l.stamp = st
+	return nil
 }
 
 // scanned is one segment as recovery read it, before anything is changed.
@@ -584,10 +594,7 @@ func (l *fileLog) applyCheckpoint(first bool, seg uint64, cp *checkpoint) error 
 func (l *fileLog) applyRecord(seg uint64, r *record) error {
 	switch r.kind {
 	case recEntry:
-		if r.index != l.first+uint64(len(l.slots)) {
-			return l.quarantine(seg, r.off, "index out of sequence")
-		}
-		l.slots = append(l.slots, slot{seg: seg, off: r.off, term: r.term})
+		return l.applyEntry(seg, r)
 	case recTruncate:
 		l.applyTruncate(r.index)
 	case recHardState:
@@ -600,6 +607,16 @@ func (l *fileLog) applyRecord(seg uint64, r *record) error {
 	default:
 		return unknownLayout(seg, r, "record_kind", int(r.kind))
 	}
+	return nil
+}
+
+// applyEntry appends an entry record's slot, quarantining one out of
+// sequence.
+func (l *fileLog) applyEntry(seg uint64, r *record) error {
+	if r.index != l.first+uint64(len(l.slots)) {
+		return l.quarantine(seg, r.off, "index out of sequence")
+	}
+	l.slots = append(l.slots, slot{seg: seg, off: r.off, term: r.term})
 	return nil
 }
 

@@ -1695,6 +1695,15 @@ DataDirOptions is an alias of `github.com/kitsunium/sdk/internal/service/app/con
 type DataDirOptions struct {
 	// SegmentBytes is the fixed size of a log segment; 0 is 64 MiB.
 	SegmentBytes int64
+	// RuntimeDir is the boot-scoped directory of the second STORAGE_FAILED
+	// marker (R9-05); empty is /run/kitsunium-consensus on Linux, and
+	// kitsunium-consensus in the temporary directory elsewhere. It must
+	// outlive the process within the boot and be gone at the next one: a
+	// host tmpfs, or systemd's RuntimeDirectory= with
+	// RuntimeDirectoryPreserve=yes. The process must be able to create it
+	// and write in it: NewDataDirWith refuses CONSENSUS_MISCONFIGURED
+	// otherwise, naming the path.
+	RuntimeDir   string
 }
 ```
 

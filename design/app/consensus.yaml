@@ -2682,7 +2682,9 @@ packages:
               type: coretrace.Tracer
             - name: Logger
               type: corelogger.Logger
-      - doc: DataDirOptions tunes NewDataDirWith.
+      - doc: |-
+          DataDirOptions tunes NewDataDirWith: the size of a log segment and the
+          boot-scoped directory of the second STORAGE_FAILED marker.
         name: DataDirOptions
         struct:
           fields:
