@@ -1456,8 +1456,32 @@ func (t *TCPTransport) joinAnswered(b []byte, rerr error, spki [32]byte) (pos co
 	if !joinAnswerListsPeer(m, spki) {
 		return coreconsensus.PositionValue{}, false, peerRejected("the answer does not list its own sender")
 	}
-	t.SetMembership(1, m.Members)
+	t.SetMembership(joinGroup, m.Members)
 	return coreconsensus.PositionValue{Term: binary.LittleEndian.Uint64(b[4:]), Index: binary.LittleEndian.Uint64(b[12:])}, false, nil
+}
+
+// joinGroup is the admission group the JOIN answer is installed in, apart
+// from the engine's (Config.Group clamps 0 to 1, so it is never 0). In the
+// engine's group, the first configuration a joiner replayed — an older
+// snapshot, the first batch of a log fed from index 1 — replaced the
+// answer, and a leader admitted after that configuration was cut and
+// refused for as long as it led (#552). The answer stays until the
+// joiner's own committed configuration lists it: every member admitted
+// before its AddLearner is in its log by then.
+const joinGroup coreconsensus.GroupID = 0
+
+// releaseJoinAnswer drops the JOIN answer's admission group once the node
+// is admitted: from then on the engine's configuration alone admits.
+func (t *TCPTransport) releaseJoinAnswer() {
+	t.mu.Lock()
+	_, held := t.members[joinGroup]
+	t.mu.Unlock()
+	if held {
+		t.SetMembership(joinGroup, nil)
+		t.mu.Lock()
+		delete(t.members, joinGroup)
+		t.mu.Unlock()
+	}
 }
 
 // joinAnswerListsPeer reports whether a JOIN answer's membership lists the

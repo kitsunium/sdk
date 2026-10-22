@@ -601,6 +601,13 @@ func (n *Node) snapshotToSend() (coreconsensus.SnapshotMetaValue, bool) {
 	if !metas[0].Log.Same(l) || metas[0].Position.Index < l.KeptIndex || termless(&metas[0]) {
 		return coreconsensus.SnapshotMetaValue{}, false
 	}
+	if _, listed := metas[0].Membership.Member(n.stamp.ID); !listed {
+		// A snapshot whose configuration predates this leader — one it
+		// installed before it was admitted — would make a joiner publish
+		// a membership without its leader and refuse it (#552): a fresh
+		// cut is sent instead.
+		return coreconsensus.SnapshotMetaValue{}, false
+	}
 	return metas[0], true
 }
 

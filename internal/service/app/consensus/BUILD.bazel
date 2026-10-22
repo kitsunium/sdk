@@ -122,6 +122,7 @@ go_test(
         "stopmark_unix_internal_test.go",
         "storagefailed_open_internal_test.go",
         "tcp_internal_test.go",
+        "tcp_joiner_internal_test.go",
         "tcp_link_internal_test.go",
         "unacked_linux_test.go",
         "waitapplied_internal_test.go",
