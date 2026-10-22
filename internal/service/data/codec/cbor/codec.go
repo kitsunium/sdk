@@ -3,7 +3,6 @@ package cbor
 import (
 	"bytes"
 	"io"
-	"slices"
 
 	"github.com/kitsunium/sdk/internal/core/data/codec"
 	"github.com/kitsunium/sdk/internal/core/data/codec/scratch"
@@ -14,12 +13,6 @@ import (
 var (
 	//: register the singleton and expose it as a typed package var.
 	Codec codec.Codec = codec.Register(&cborCodec{})
-
-	//: MIME table hoisted.
-	mimeTypes = []string{"application/cbor"}
-
-	//: extension table hoisted for the same reason.
-	extensions = []string{".cbor"}
 )
 
 // cborCodec is the concrete Codec implementation for CBOR.
@@ -39,14 +32,14 @@ func (*cborCodec) Name() string {
 
 // MIMETypes lists every MIME alias.
 func (*cborCodec) MIMETypes() []string {
-	//: hand back a copy of the package-level slice.
-	return slices.Clone(mimeTypes)
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{"application/cbor"}
 }
 
 // Extensions lists every file extension.
 func (*cborCodec) Extensions() []string {
-	//: hand back a copy of the package-level slice.
-	return slices.Clone(extensions)
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{".cbor"}
 }
 
 // Marshal serialises v as CBOR bytes. The encoding is built in a pooled

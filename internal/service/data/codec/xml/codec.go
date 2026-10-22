@@ -16,12 +16,6 @@ import (
 var (
 	//: register the singleton and expose it as a typed package var.
 	Codec codec.Codec = codec.Register(&xmlCodec{})
-
-	//: the canonical IETF-registered type is application/xml.
-	mimeTypes = []string{"application/xml", "text/xml"}
-
-	//: canonical extension.
-	extensions = []string{".xml"}
 )
 
 // xmlCodec is the concrete Codec implementation for XML.
@@ -41,14 +35,16 @@ func (*xmlCodec) Name() string {
 
 // MIMETypes lists every MIME alias.
 func (*xmlCodec) MIMETypes() []string {
-	//: return a copy so callers cannot mutate the shared slice.
-	return slices.Clone(mimeTypes)
+	//: the canonical IETF-registered type is application/xml.
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{"application/xml", "text/xml"}
 }
 
 // Extensions lists every file extension.
 func (*xmlCodec) Extensions() []string {
-	//: return a copy so callers cannot mutate the shared slice.
-	return slices.Clone(extensions)
+	//: canonical extension.
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{".xml"}
 }
 
 // Marshal serialises v as XML bytes. Routes through a pooled

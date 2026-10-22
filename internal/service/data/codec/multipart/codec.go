@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"io"
 	stdmp "mime/multipart"
-	"slices"
 
 	"github.com/kitsunium/sdk/internal/core/data/codec"
 	"github.com/kitsunium/sdk/internal/core/data/codec/scratch"
@@ -54,10 +53,6 @@ var (
 	//: registered instance carries the package defaults; a caller needing
 	//: other bounds builds an unregistered one with NewWithLimits.
 	Codec codec.Codec = codec.Register(&multipartCodec{limits: defaultLimits()})
-
-	//: MIME table hoisted. Registration normalises the key, so a header
-	//: carrying the boundary parameter still resolves through FromMIME.
-	mimeTypes = []string{mimeFormData}
 )
 
 // multipartCodec is the concrete Codec implementation for multipart/form-data.
@@ -110,8 +105,10 @@ func (*multipartCodec) Name() string {
 
 // MIMETypes lists every MIME alias.
 func (*multipartCodec) MIMETypes() []string {
-	//: hand back a copy so callers cannot mutate the package-level slice.
-	return slices.Clone(mimeTypes)
+	//: registration normalises the key, so a header
+	//: carrying the boundary parameter still resolves through FromMIME.
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{mimeFormData}
 }
 
 // Extensions reports no file extension.

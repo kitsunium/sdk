@@ -41,10 +41,9 @@ func Test_bsonCodec_Name(t *testing.T) {
 	}
 }
 
-// Test_bsonCodec_MIMETypes pins that the caller gets a copy. The list is a
-// package-level table, so handing it out directly would let one consumer's
-// append reach every other consumer — and content negotiation would start
-// answering for a format nobody registered.
+// Test_bsonCodec_MIMETypes pins that the caller gets its own list: one
+// consumer's write must never reach a later call — content negotiation would
+// start answering for a format nobody registered.
 func Test_bsonCodec_MIMETypes(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -58,14 +57,14 @@ func Test_bsonCodec_MIMETypes(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		want := slices.Clone(mimeTypes)
+		want := []string{"application/bson"}
 		got := (&bsonCodec{}).MIMETypes()
 
 		c.mutate(got)
 
-		//: the package table must be exactly as it was.
-		if !slices.Equal(mimeTypes, want) {
-			t.Errorf("the caller's mutation reached the package table: %v, want %v", mimeTypes, want)
+		//: a later call must hand back the original list.
+		if again := (&bsonCodec{}).MIMETypes(); !slices.Equal(again, want) {
+			t.Errorf("the caller's mutation reached a later call: %v, want %v", again, want)
 		}
 		//: and a later caller must still get the original list.
 		if !slices.Equal((&bsonCodec{}).MIMETypes(), want) {
@@ -94,13 +93,13 @@ func Test_bsonCodec_Extensions(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		want := slices.Clone(extensions)
+		want := []string{".bson"}
 		got := (&bsonCodec{}).Extensions()
 
 		c.mutate(got)
 
-		if !slices.Equal(extensions, want) {
-			t.Errorf("the caller's mutation reached the package table: %v, want %v", extensions, want)
+		if again := (&bsonCodec{}).Extensions(); !slices.Equal(again, want) {
+			t.Errorf("the caller's mutation reached a later call: %v, want %v", again, want)
 		}
 	}
 	for _, c := range tests {

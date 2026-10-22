@@ -3,7 +3,6 @@ package pem
 import (
 	"encoding/base64"
 	stdpem "encoding/pem"
-	"slices"
 
 	"github.com/kitsunium/sdk/internal/core/data/codec"
 	corepem "github.com/kitsunium/sdk/internal/core/data/codec/pem"
@@ -29,12 +28,6 @@ const (
 var (
 	//: register the singleton and expose it as a typed package var.
 	Codec codec.Codec = codec.Register(&pemCodec{})
-
-	//: no official IANA type exists; the de facto value is application/x-pem-file.
-	mimeTypes = []string{"application/x-pem-file"}
-
-	//: .pem is the canonical extension; .crt and .key are historical aliases.
-	extensions = []string{".pem", ".crt", ".key"}
 
 	//: pemJSONBegin is the BEGIN marker for a "JSON"-typed PEM block.
 	//: Cached so the promotion fast-path never re-builds it.
@@ -65,14 +58,16 @@ func (*pemCodec) Name() string {
 
 // MIMETypes lists every MIME alias.
 func (*pemCodec) MIMETypes() []string {
-	//: hand back the package-level slice.
-	return slices.Clone(mimeTypes)
+	//: no official IANA type exists; the de facto value is application/x-pem-file.
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{"application/x-pem-file"}
 }
 
 // Extensions lists every file extension.
 func (*pemCodec) Extensions() []string {
-	//: hand back the package-level slice.
-	return slices.Clone(extensions)
+	//: .pem is the canonical extension; .crt and .key are historical aliases.
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{".pem", ".crt", ".key"}
 }
 
 // Marshal encodes a *pem.Block into PEM bytes.

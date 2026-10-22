@@ -2,7 +2,6 @@ package hcl
 
 import (
 	"reflect"
-	"slices"
 
 	"github.com/hashicorp/hcl/v2/gohcl"
 	"github.com/hashicorp/hcl/v2/hclsimple"
@@ -19,16 +18,8 @@ const maxHCLBytes int = 10 << 20
 // decodeFilename is the synthetic name hclsimple.Decode reports in diagnostics.
 const decodeFilename string = "input.hcl"
 
-var (
-	// Codec is the registered HCL singleton.
-	Codec codec.Codec = codec.Register(&hclCodec{})
-
-	// mimeTypes is hoisted so MIMETypes does not allocate the literal per call.
-	mimeTypes = []string{"application/hcl"}
-
-	// extensions is hoisted for the same reason.
-	extensions = []string{".hcl"}
-)
+// Codec is the registered HCL singleton.
+var Codec codec.Codec = codec.Register(&hclCodec{})
 
 // hclCodec is the concrete Codec implementation for HCL. Stateless.
 type hclCodec struct{}
@@ -47,14 +38,14 @@ func (*hclCodec) Name() string {
 
 // MIMETypes returns a defensive copy of the MIME alias list.
 func (*hclCodec) MIMETypes() []string {
-	//: callers must not mutate the package-level table.
-	return slices.Clone(mimeTypes)
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{"application/hcl"}
 }
 
 // Extensions returns a defensive copy of the file-extension list.
 func (*hclCodec) Extensions() []string {
-	//: callers must not mutate the package-level table.
-	return slices.Clone(extensions)
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{".hcl"}
 }
 
 // structLike reports whether rt is a struct or a pointer to a struct — the

@@ -33,10 +33,17 @@ go_test(
         "appender_external_test.go",
         "format_external_test.go",
         "gen_api_test.go",
+        "registration_order_external_test.go",
         "registry_external_test.go",
         "registry_guard_external_test.go",
         "registry_internal_test.go",
     ],
+    # keep: TestNoCodecRegistersBeforeTheVariablesItsKeysRead parses every
+    # codec's sources under internal/service/data/codec/ and third-party/codec/
+    # at runtime. Bazel's sandbox strips the source-tree relationship, so they
+    # reach the test as runfiles — the mechanism //internal/kernel/errs uses for
+    # its AST audits.
+    data = ["//:audit_sources"],
     embed = [":codec"],
     deps = [
         "//internal/kernel/errs",

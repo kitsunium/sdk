@@ -75,6 +75,28 @@ var variantSpecs = [...]variantSpec{
 	},
 }
 
+// newVariant returns the codec for v, for a registered singleton's
+// initialiser.
+//
+// Reading variantSpecs here is load-bearing. Register reads Name, MIMETypes
+// and Extensions through the codec.Codec interface, and the Go specification
+// (Package initialization) records no dependency through an interface method
+// call: with a bare &baseencCodec{variant: v} the singletons in codec.go —
+// a file presented before this one — would be initialised BEFORE
+// variantSpecs, and only the compiler's static initialisation of constant
+// composite literals made that work. A build that turns those literals into
+// code (garble -literals) left every Name and alias empty at Register time.
+// Referencing the table from a function the initialiser calls makes each
+// singleton depend on it, so variantSpecs is initialised first whatever the
+// file order or the build.
+func newVariant(v variant) *baseencCodec {
+	//: index the row: the dependency on variantSpecs, and an out-of-range
+	//: variant fails here, at import, instead of in the first spec() call.
+	_ = variantSpecs[v]
+	//: the codec itself stays the one-field value the rest of the package builds.
+	return &baseencCodec{variant: v}
+}
+
 // spec returns the variantSpec for c.variant. Bounds are guaranteed by
 // the var initialisers — Register only stores in-range variants.
 func (c *baseencCodec) spec() *variantSpec {

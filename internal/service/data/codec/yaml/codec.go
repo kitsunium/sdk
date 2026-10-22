@@ -15,12 +15,6 @@ import (
 var (
 	// Codec is the registered YAML singleton.
 	Codec codec.Codec = codec.Register(&yamlCodec{})
-
-	// mimeTypes is hoisted so MIMETypes does not allocate the literal per call.
-	mimeTypes = []string{"application/yaml", "text/yaml", "application/x-yaml"}
-
-	// extensions is hoisted for the same reason.
-	extensions = []string{".yaml", ".yml"}
 )
 
 // yamlCodec is the concrete Codec implementation for YAML.
@@ -40,14 +34,14 @@ func (*yamlCodec) Name() string {
 
 // MIMETypes lists every MIME alias.
 func (*yamlCodec) MIMETypes() []string {
-	//: a copy of the package-level slice.
-	return slices.Clone(mimeTypes)
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{"application/yaml", "text/yaml", "application/x-yaml"}
 }
 
 // Extensions lists every file extension.
 func (*yamlCodec) Extensions() []string {
-	//: a copy of the package-level slice.
-	return slices.Clone(extensions)
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{".yaml", ".yml"}
 }
 
 // Marshal writes v as one YAML document.

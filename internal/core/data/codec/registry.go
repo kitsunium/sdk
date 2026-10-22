@@ -33,7 +33,19 @@ var (
 // Register inserts c into the registry and returns it so callers can bind
 // the singleton to a typed package-level variable like
 // `var Codec codec.Codec = codec.Register(&jsonCodec{})`. Panics on nil
-// argument or duplicate Name / MIME / extension.
+// argument, on an empty Name / MIME / extension (KEY_EMPTY), or on a
+// duplicate Name / MIME / extension.
+//
+// Register reads c.Name, c.MIMETypes and c.Extensions through the Codec
+// interface, so the initialiser of the calling package variable does NOT
+// depend, in the sense of the Go specification's package initialization
+// rules, on any package variable those methods read: a dependency is only
+// recorded for a method referenced through a non-interface type. A codec
+// whose methods read package variables must therefore make that dependency
+// visible in the initialiser itself — or, as the SDK's codecs do, return
+// fresh literals from the methods — otherwise those variables may still be
+// unset when Register runs (the gc compiler hides this by initialising
+// constant composite literals statically; garble -literals does not).
 //
 // IFACE-PLUGIN: the registry hands plug-in codec instances back to callers
 // so each domain can keep its concrete codec type unexported; the only
@@ -54,6 +66,11 @@ func Register(c Codec) Codec {
 	}
 	//: the canonical Format is the primary key.
 	name := Format(c.Name())
+	//: read each alias table once: what is checked is what gets indexed.
+	mimes, exts := c.MIMETypes(), c.Extensions()
+	//: an empty key is refused before anything is published, so a refused
+	//: codec leaves no half-registration behind (its Name claimed, no alias).
+	refuseEmptyKeys(c, name, mimes, exts)
 	//: publish the codec; any prior registration of the Name is a hard conflict.
 	if err := publishCodec(name, c); err != nil {
 		//: the typed conflict's dotted-quad header, then the name that collided.
@@ -65,9 +82,9 @@ func Register(c Codec) Codec {
 	//: applies — so a registered MIME is always reachable (issue #36): a
 	//: parameter-only alias (e.g. "application/x;p=1") normalises to its bare
 	//: media type and would collide with the bare form rather than hide behind it.
-	indexAliases(&mimeIndex, c.MIMETypes(), name, "MIME", normalizeMIME)
+	indexAliases(&mimeIndex, mimes, name, "MIME", normalizeMIME)
 	//: extensions share the same shape but only need case-folding.
-	indexAliases(&extIndex, c.Extensions(), name, "extension", strings.ToLower)
+	indexAliases(&extIndex, exts, name, "extension", strings.ToLower)
 	//: returning the codec lets callers bind it to a typed singleton var.
 	return c
 }
@@ -91,10 +108,43 @@ func publishCodec(name Format, c Codec) error {
 		errs.String("registrar", "codec.Register"), errs.String("name", string(name)))
 }
 
+// refuseEmptyKeys panics with KEY_EMPTY when c's Name, or one of its MIME
+// types or extensions once normalised the way the matching Lookup* normalises
+// it, is empty. An empty key is no key at all — LookupMIME and LookupExt miss
+// on "" — and it is exactly what a package variable holds when Register reads
+// it before its initialiser ran: two codecs in that state both hold "", and
+// the second used to die on a DUPLICATE_REGISTRATION naming the FIRST, a
+// collision that blamed the wrong codec and hid the cause (supervizio/agent#305).
+func refuseEmptyKeys(c Codec, name Format, mimes, exts []string) {
+	//: the Name first: without one, nothing else can be attributed.
+	if name == "" {
+		//: same shape as CODEC_NIL: the code, the reason, the offender's type.
+		panic(fmt.Sprintf("codec.Register [%s KEY_EMPTY]: %T declares an empty Name", CodeKeyEmpty, c))
+	}
+	//: every MIME type, reduced as LookupMIME reduces it.
+	refuseEmptyAliases(mimes, name, "MIME type", normalizeMIME)
+	//: every extension, reduced as LookupExt reduces it.
+	refuseEmptyAliases(exts, name, "extension", strings.ToLower)
+}
+
+// refuseEmptyAliases panics with KEY_EMPTY on the first alias of kind that
+// normalize reduces to "", naming the codec, the slot and the raw value.
+func refuseEmptyAliases(aliases []string, name Format, kind string, normalize func(string) string) {
+	//: walk the table in declaration order so the reported slot is the first bad one.
+	for i, alias := range aliases {
+		//: the key the matching Lookup* would compute for this alias.
+		if normalize(alias) == "" {
+			//: the code, the reason, then which codec and which slot.
+			panic(fmt.Sprintf("codec.Register [%s KEY_EMPTY]: codec %q declares an empty %s at index %d (%q)", CodeKeyEmpty, name, kind, i, alias))
+		}
+	}
+}
+
 // indexAliases stores every alias (MIME or extension) in dst, panicking
 // when a distinct codec already claims the same key. normalize reduces each
 // raw alias to its index key — strings.ToLower for extensions, normalizeMIME
 // for MIME types so registration and LookupMIME agree on the key (issue #36).
+// Empty keys never reach it: refuseEmptyKeys ran first.
 func indexAliases(dst *plugin.Registry[string, Format], aliases []string, name Format, kind string, normalize func(string) string) {
 	//: iterate over every alias and publish it atomically.
 	for _, alias := range aliases {

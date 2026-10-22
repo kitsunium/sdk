@@ -57,15 +57,6 @@ const (
 var (
 	//: register the singleton and expose it as a typed package var.
 	Codec codec.Codec = codec.Register(&formCodec{})
-
-	//: the one IANA-registered media type for this encoding.
-	mimeTypes = []string{"application/x-www-form-urlencoded"}
-
-	//: NEITHER extension is standardised — urlencoded is a wire encoding
-	//: for HTTP bodies and query strings, not a file format. They are
-	//: registered only so codec.LookupExt has a deterministic answer for
-	//: callers who persist a captured body to disk.
-	extensions = []string{".form", ".urlencoded"}
 )
 
 // formCodec is the concrete Codec implementation for urlencoded forms.
@@ -85,14 +76,19 @@ func (*formCodec) Name() string {
 
 // MIMETypes lists every MIME alias.
 func (*formCodec) MIMETypes() []string {
-	//: hand back a copy so callers cannot mutate the package table.
-	return slices.Clone(mimeTypes)
+	//: the one IANA-registered media type for this encoding.
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{"application/x-www-form-urlencoded"}
 }
 
 // Extensions lists every file extension.
 func (*formCodec) Extensions() []string {
-	//: hand back a copy so callers cannot mutate the package table.
-	return slices.Clone(extensions)
+	//: NEITHER extension is standardised — urlencoded is a wire encoding
+	//: for HTTP bodies and query strings, not a file format. They are
+	//: registered only so codec.LookupExt has a deterministic answer for
+	//: callers who persist a captured body to disk.
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{".form", ".urlencoded"}
 }
 
 // Marshal encodes v as an application/x-www-form-urlencoded body. Keys are
