@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	coretransform "github.com/kitsunium/sdk/internal/core/data/transform"
@@ -101,7 +102,7 @@ func (n *Node) maybeSnapshot() {
 	n.am.Unlock()
 	ss := &n.snapState
 	ss.mu.Lock()
-	if idx < ss.last+n.cfg.SnapshotEvery {
+	if idx < ss.last+n.cfg.SnapshotEvery || n.clk.Now().Before(ss.retryAt) {
 		ss.mu.Unlock()
 		return
 	}
@@ -120,18 +121,33 @@ func (n *Node) maybeSnapshot() {
 	}
 }
 
+// The bounds of the wait after a cut that failed without stopping the node.
+const (
+	cutRetryMin = time.Second
+	cutRetryMax = time.Minute
+)
+
 // cutFailed is what a snapshot cut that published nothing does to the node.
 // A STORAGE_FAILED stops it: a failed write or sync of a snapshot is a
 // failed write or sync of this node's disk, and D4 never retries one, for
 // the page cache may now lie about the log on the same disk as well. Any
-// other failure — the machine's Snapshot, its encoding — is logged, and the
-// next cut tries again.
+// other failure — the machine's Snapshot, its encoding, a full disk under
+// the spool, a state over MaxSnapshotBytes — is logged, and no automatic
+// cut starts again before a wait that doubles at each failure, from one
+// second to a minute: every applied batch used to start a full cut again,
+// on a disk the last one had just filled (#520).
 func (n *Node) cutFailed(err error) {
 	if errs.HasCode(err, coreconsensus.CodeStorageFailed) {
 		n.stop(err, true)
 		return
 	}
-	n.obs.warn("consensus: snapshot cut failed", lstr("error", err.Error()))
+	ss := &n.snapState
+	ss.mu.Lock()
+	ss.backoff = min(max(2*ss.backoff, cutRetryMin), cutRetryMax)
+	ss.retryAt = n.clk.Now().Add(ss.backoff)
+	wait := ss.backoff
+	ss.mu.Unlock()
+	n.obs.warn("consensus: snapshot cut failed", lstr("error", err.Error()), lstr("retry_in", wait.String()))
 }
 
 // metaAt builds, on the event loop, the metadata of a snapshot at idx: the
@@ -262,6 +278,7 @@ func (n *Node) publishSnapshot(snap coreconsensus.Snapshot, meta coreconsensus.S
 	n.obs.info("consensus: snapshot cut", lattr("index", meta.Position.Index), lattr("bytes", uint64(meta.EncodedSize)))
 	state.mu.Lock()
 	state.last = max(state.last, meta.Position.Index)
+	state.backoff, state.retryAt = 0, time.Time{}
 	state.mu.Unlock()
 	n.afterCut()
 	return nil

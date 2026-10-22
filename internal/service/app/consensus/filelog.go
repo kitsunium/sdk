@@ -241,6 +241,9 @@ type fileLog struct {
 	// lock released: twice for a batch of several records. Only a test sets
 	// it.
 	duringSync func()
+	// fill replaces zeroFrom when a test sets it, to fail as a full disk
+	// does; nil otherwise.
+	fill func(f *os.File, off, size int64) error
 	// wmu serialises the writers. A sync holds it, not mu, across its
 	// write and fdatasync, so readers do not wait for the disk (review of
 	// PR #301, L6).
@@ -770,10 +773,10 @@ func (l *fileLog) createSegment(n uint64, cp *checkpoint) error {
 	// The checkpoint is written at ACTIVATION, with the current hard state,
 	// never the state of the moment the segment was prepared (R3-24, R4-01).
 	if _, err := f.WriteAt(cpRec, 0); err != nil {
-		return abandonTmp(f, storageFailed("checkpoint", err))
+		return abandonTmp(f, tmp, storageFailed("checkpoint", err))
 	}
 	if err := f.Sync(); err != nil {
-		return abandonTmp(f, storageFailed("sync segment", err))
+		return abandonTmp(f, tmp, storageFailed("sync segment", err))
 	}
 	// Closed before the rename and opened again after: Windows refuses to
 	// rename a file a handle holds open.
@@ -809,17 +812,32 @@ func (l *fileLog) segmentFile(n uint64, size int64, tmp string) (*os.File, error
 	if err != nil {
 		return nil, storageFailed("create segment", err)
 	}
-	if err := zeroFrom(f, 0, size); err != nil {
-		return nil, abandonTmp(f, storageFailed("zero-fill", err))
+	if err := l.zeroFill()(f, 0, size); err != nil {
+		return nil, abandonTmp(f, tmp, storageFailed("zero-fill", err))
 	}
 	return f, nil
 }
 
-// abandonTmp closes f, a segment .tmp a failure leaves unpublished, and
-// returns cause, the failure that stops the log. The .tmp is never renamed
-// and recovery deletes it, so what its Close says changes nothing.
-func abandonTmp(f io.Closer, cause error) error {
+// zeroFill is the function that zero-fills a segment: zeroFrom, unless a
+// test set fill to fail as a full disk does. It is read on the writer's
+// path, before any goroutine it hands it to starts.
+func (l *fileLog) zeroFill() func(f *os.File, off, size int64) error {
+	if l.fill != nil {
+		return l.fill
+	}
+	return zeroFrom
+}
+
+// abandonTmp closes f, the segment .tmp at path a failure leaves
+// unpublished, removes it, and returns cause, the failure that stops the
+// log. The .tmp is never renamed, so what its Close says changes nothing. It
+// is removed now, not at the next start: a zero-fill that failed on a full
+// disk wrote until the disk had no byte left, and the disk is shared with
+// what the product stores beside the log (#520). A removal that fails
+// leaves it to recovery, which deletes every .tmp.
+func abandonTmp(f io.Closer, path string, cause error) error {
 	abandon(f.Close())
+	abandon(os.Remove(path))
 	return cause
 }
 
@@ -843,6 +861,7 @@ func (l *fileLog) prepare(n uint64, size int64) {
 	done := make(chan struct{})
 	p := &prepared{n: n, size: size, done: done}
 	l.prep = p
+	fill := l.zeroFill()
 	go func() {
 		defer close(done)
 		tmp := filepath.Join(l.logDir(), segName(n)+".tmp")
@@ -851,12 +870,12 @@ func (l *fileLog) prepare(n uint64, size int64) {
 			p.err = err
 			return
 		}
-		if err := zeroFrom(f, 0, size); err != nil {
+		if err := fill(f, 0, size); err != nil {
 			// A half-zeroed .tmp is never published: takePrepared then
 			// builds the segment on the writer's path, where a failure
-			// stops the node, and recovery deletes the .tmp.
-			abandon(f.Close())
-			p.err = err
+			// stops the node. It goes now: on a full disk it holds every
+			// byte the fill could write (#520).
+			p.err = abandonTmp(f, tmp, err)
 			return
 		}
 		p.f = f
@@ -875,8 +894,8 @@ func (l *fileLog) takePrepared(n uint64, size int64) *os.File {
 	if p.err != nil || p.n != n || p.size != size {
 		if p.f != nil {
 			// The wrong segment, or the wrong size: an unpublished .tmp
-			// nothing will read, which recovery deletes.
-			abandon(p.f.Close())
+			// nothing will read, removed now rather than at recovery.
+			abandon(abandonTmp(p.f, filepath.Join(l.logDir(), segName(p.n)+".tmp"), nil))
 		}
 		return nil
 	}

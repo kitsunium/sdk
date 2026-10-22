@@ -156,6 +156,11 @@ type snapState struct {
 	// the cut made once that one is written (D7).
 	pending bool
 	spools  map[string]coreconsensus.SnapshotSink
+	// backoff is the wait after the last cut that failed without stopping
+	// the node, doubled at each failure and cleared by a cut that
+	// publishes; no automatic cut starts before retryAt (#520).
+	backoff time.Duration
+	retryAt time.Time
 }
 
 type applyResult struct {
