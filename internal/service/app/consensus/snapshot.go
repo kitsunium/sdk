@@ -627,7 +627,8 @@ func (n *Node) snapshotToSend() (coreconsensus.SnapshotMetaValue, bool) {
 // send. It runs on the loop and launches the transfer on a background
 // goroutine counted in n.wg, which ends when Stream returns, and a watcher
 // goroutine that cancels the stream when the node stops and ends with it;
-// the outcome goes back to raft on the loop.
+// a change of leadership or term cancels it too (#547). The outcome goes
+// back to raft on the loop.
 func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 	if _, busy := n.sending[to]; busy {
 		return
@@ -646,10 +647,11 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 	}
 	n.sending[to] = meta.Position.Index
 	offer := coreconsensus.InstallOfferValue{Term: n.r.Status().Term, SnapshotID: meta.ID, Meta: meta}
+	ctx, cancel := context.WithCancel(context.Background())
+	n.sendStop[to] = cancel
 	n.wg.Add(1)
 	go func() {
 		defer n.wg.Done()
-		ctx, cancel := context.WithCancel(context.Background())
 		go func() {
 			select {
 			case <-n.stopc:
@@ -674,6 +676,7 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 		n.streamEnded(meta, to, err)
 		n.exec(func() {
 			delete(n.sending, to)
+			delete(n.sendStop, to)
 			n.r.SnapshotDone(to, err == nil)
 			n.handleReady()
 		})
