@@ -115,7 +115,9 @@ type Node struct {
 	transfers []chan errs.Code
 	subEpoch  uint64
 	subCount  uint32
-	sending   map[coreconsensus.NodeID]bool
+	// sending is the index of the snapshot in flight to each peer: it pins
+	// compaction (R6-01, #550).
+	sending map[coreconsensus.NodeID]uint64
 	// unreachableAt is when the transport last failed to reach a peer.
 	unreachableAt map[coreconsensus.NodeID]time.Time
 	lastTerm      uint64
@@ -370,7 +372,7 @@ func newNode(cfg *Config, stamp *coreconsensus.StampValue) *Node {
 		propc: make(chan *proposal, inboxDepth), execc: make(chan func(), loopBacklog), storec: make(chan storeDone, loopBacklog),
 		stopc: make(chan struct{}), sq: newFifo[storeReq](), fetchq: newFifo[raft.FetchSpec](), fetchc: make(chan fetchDone, fetchBacklog), aq: newFifo[applyItem](),
 		waiters: map[uint64]*proposal{}, results: map[uint64]applyResult{},
-		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]bool{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
+		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]uint64{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
 		watchers: map[chan coreconsensus.StatusValue]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
 	}
 	n.acond = sync.NewCond(&n.am)

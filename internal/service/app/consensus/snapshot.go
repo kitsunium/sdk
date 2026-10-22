@@ -353,7 +353,12 @@ func snapshotLimit(own int64, conf *coreconsensus.MembershipValue) int64 {
 }
 
 // afterCut keeps the two newest snapshots and compacts the log back to the
-// older one, less SnapshotTrailing, with saturating arithmetic (D7).
+// older one, less SnapshotTrailing, with saturating arithmetic (D7). A
+// snapshot in flight to a peer pins compaction back to it, less
+// SnapshotTrailing (R6-01): a leader that cut twice during one transfer
+// compacted past the snapshot it was sending, the entry after it was gone
+// once the peer installed it, and under a sustained write rate the peer
+// installed snapshot after snapshot and never caught up (#550).
 func (n *Node) afterCut() {
 	metas := n.retain()
 	if len(metas) == 0 {
@@ -369,6 +374,12 @@ func (n *Node) afterCut() {
 	}
 	through -= n.cfg.SnapshotTrailing
 	n.exec(func() {
+		for _, sent := range n.sending {
+			if sent <= n.cfg.SnapshotTrailing {
+				return
+			}
+			through = min(through, sent-n.cfg.SnapshotTrailing)
+		}
 		n.r.Compact(through)
 		n.handleReady()
 	})
@@ -618,7 +629,7 @@ func (n *Node) snapshotToSend() (coreconsensus.SnapshotMetaValue, bool) {
 // goroutine that cancels the stream when the node stops and ends with it;
 // the outcome goes back to raft on the loop.
 func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
-	if n.sending[to] {
+	if _, busy := n.sending[to]; busy {
 		return
 	}
 	meta, ok := n.snapshotToSend()
@@ -633,7 +644,7 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 		n.r.SnapshotDone(to, false)
 		return
 	}
-	n.sending[to] = true
+	n.sending[to] = meta.Position.Index
 	offer := coreconsensus.InstallOfferValue{Term: n.r.Status().Term, SnapshotID: meta.ID, Meta: meta}
 	n.wg.Add(1)
 	go func() {
