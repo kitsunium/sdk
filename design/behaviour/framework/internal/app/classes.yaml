@@ -4796,6 +4796,7 @@ files:
       - envStores
       - (*App).secretsNow
       - (*App).needsSecrets
+      - (*App).servicesNeedSecrets
       - (*App).openSecrets
       - (*App).openFileStore
       - (*App).openFileSecrets
@@ -12106,8 +12107,9 @@ types:
         results: "[]model.Setting"
       - doc: |-
           otlpReady is the export's readiness, which is not critical: degraded
-          while a signal's queue is above 80% of either bound, or since it last
-          answered a batch was lost.
+          once its loop ended while the app runs — a queue's storage failed, and
+          nothing is sent until the next start —, while a signal's queue is above
+          80% of either bound, or since it last answered a batch was lost.
         name: otlpReady
         params: _ context.Context
         recv: a *App
@@ -13100,9 +13102,15 @@ types:
         results: "*secretStores"
       - doc: |-
           needsSecrets reports whether the app has a secret to find: a declared
-          secret, a mailer's SMTP URL, a database's URL, or kit's index key when it
-          keeps personal data (privacy_keys.go).
+          secret, a mailer's SMTP URL, a database's URL, the OTLP export's headers,
+          or kit's index key when it keeps personal data (privacy_keys.go).
         name: needsSecrets
+        recv: a *App
+        results: bool
+      - doc: |-
+          servicesNeedSecrets reports whether a mounted service declares a secret or a
+          mailer, whose SMTP URL is one.
+        name: servicesNeedSecrets
         recv: a *App
         results: bool
       - doc: |-
@@ -19066,7 +19074,7 @@ types:
         type: trace.SpanSink
       - doc: |-
           cancel ends the loop; done is closed once it returned, err — written
-          before done closes — what it returned.
+          under mu before done closes — what it returned.
         name: cancel
         type: context.CancelFunc
       - name: done
@@ -19075,7 +19083,9 @@ types:
         type: sync.Once
       - name: err
         type: error
-      - doc: mu guards lost, the batches lost when readiness last answered.
+      - doc: |-
+          mu guards err and lost, the batches lost when readiness last
+          answered.
         name: mu
         type: sync.Mutex
       - name: lost

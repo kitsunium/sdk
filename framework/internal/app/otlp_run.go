@@ -25,9 +25,11 @@ import (
 // is not critical; and its stop, inside the lifecycle's budget, which the
 // export's drain and settle widen (componentStopBudget).
 //
-// The readiness check says degraded — never unready — while a signal's
-// queue is above 80% of either bound, or since it last answered a batch was
-// lost: dropped, expired or dead-lettered. Telemetry is not what the
+// The readiness check says degraded — never unready — once the export's
+// loop ended while the app runs (a queue's storage failed: nothing is sent
+// until the next start), while a signal's queue is above 80% of either
+// bound, or since it last answered a batch was lost: dropped, expired or
+// dead-lettered. Telemetry is not what the
 // product serves: taking an instance out of rotation because its collector
 // is down would turn an observability outage into an outage of the
 // product, every instance at once. The operator reads the state on the
@@ -39,12 +41,13 @@ type otlpRunning struct {
 	ex   plug.OTLPExporter
 	sink trace.SpanSink
 	// cancel ends the loop; done is closed once it returned, err — written
-	// before done closes — what it returned.
+	// under mu before done closes — what it returned.
 	cancel context.CancelFunc
 	done   chan struct{}
 	ended  sync.Once
 	err    error
-	// mu guards lost, the batches lost when readiness last answered.
+	// mu guards err and lost, the batches lost when readiness last
+	// answered.
 	mu   sync.Mutex
 	lost map[string]uint64
 }
@@ -130,7 +133,10 @@ func (a *App) startOTLP(ctx context.Context) error {
 	}
 	go func() {
 		defer r.ended.Do(func() { close(r.done) })
-		r.err = ex.Run(runCtx)
+		err := ex.Run(runCtx)
+		r.mu.Lock()
+		r.err = err
+		r.mu.Unlock()
 	}()
 	a.otlpRun.Store(r)
 	return nil
@@ -155,8 +161,11 @@ func (a *App) stopOTLP(ctx context.Context) error {
 			logger.Warn(ctx, a.log, "the OTLP export lost the batches it held in memory", logger.String("signal", st.Signal), logger.Int("batches", st.Pending))
 		}
 	}
-	if r.err != nil && !errors.Is(r.err, context.Canceled) {
-		logger.Warn(ctx, a.log, "the OTLP export stopped with an error", logger.String("error", errs.PublicOf(r.err)))
+	r.mu.Lock()
+	err := r.err
+	r.mu.Unlock()
+	if err != nil && !errors.Is(err, context.Canceled) {
+		logger.Warn(ctx, a.log, "the OTLP export stopped with an error", logger.String("error", errs.PublicOf(err)))
 	}
 	return nil
 }
@@ -237,8 +246,9 @@ func otlpRetryable(err error) bool {
 }
 
 // otlpReady is the export's readiness, which is not critical: degraded
-// while a signal's queue is above 80% of either bound, or since it last
-// answered a batch was lost.
+// once its loop ended while the app runs — a queue's storage failed, and
+// nothing is sent until the next start —, while a signal's queue is above
+// 80% of either bound, or since it last answered a batch was lost.
 func (a *App) otlpReady(_ context.Context) error {
 	r := a.otlpRun.Load()
 	if r == nil {
@@ -246,6 +256,15 @@ func (a *App) otlpReady(_ context.Context) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	select {
+	case <-r.done:
+		reason := "its loop ended"
+		if r.err != nil {
+			reason += ": " + errs.PublicOf(r.err)
+		}
+		return Unavailable("the OTLP export stopped sending until the next start: " + reason)
+	default:
+	}
 	var problems []string
 	for _, st := range r.ex.Stats() {
 		lost := st.Dropped + st.Expired + st.DeadLettered

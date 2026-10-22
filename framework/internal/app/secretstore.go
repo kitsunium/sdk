@@ -170,12 +170,18 @@ func (a *App) secretsNow() *secretStores {
 }
 
 // needsSecrets reports whether the app has a secret to find: a declared
-// secret, a mailer's SMTP URL, a database's URL, or kit's index key when it
-// keeps personal data (privacy_keys.go).
+// secret, a mailer's SMTP URL, a database's URL, the OTLP export's headers,
+// or kit's index key when it keeps personal data (privacy_keys.go).
 func (a *App) needsSecrets() bool {
-	if (len(a.opts.databases) > 0 && !a.opts.memory) || a.keepsPersonalData() {
+	if (len(a.opts.databases) > 0 && !a.opts.memory) || a.keepsPersonalData() || a.opts.otlp != nil {
 		return true
 	}
+	return a.servicesNeedSecrets()
+}
+
+// servicesNeedSecrets reports whether a mounted service declares a secret or a
+// mailer, whose SMTP URL is one.
+func (a *App) servicesNeedSecrets() bool {
 	for _, svc := range a.services {
 		if svc == nil {
 			continue

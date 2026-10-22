@@ -779,10 +779,17 @@ func TestAProductThatImportsTheOTLPExportLinksIt(t *testing.T) {
 	goTool := goToList(t)
 	syms, image := textSymbols(t, goTool, "./testdata/otlpprobe")
 	linked := linkedSymbols(syms, owners())
-	for _, c := range []struct {
+	type tc struct {
 		owner  string
 		linked bool
-	}{
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if n := linked[c.owner]; (n > 0) != c.linked {
+			t.Errorf("a product that imports framework/app/otlp links %d text symbols of %s, want linked %v", n, c.owner, c.linked)
+		}
+	}
+	for _, c := range []tc{
 		{"framework/app/otlp", true},
 		{"pkg/v1/app/forward", true},
 		{"pkg/v1/data/queue", true},
@@ -796,9 +803,7 @@ func TestAProductThatImportsTheOTLPExportLinksIt(t *testing.T) {
 		{"framework/app/jobs", false},
 		{"pkg/v1/app/scheduler", false},
 	} {
-		if n := linked[c.owner]; (n > 0) != c.linked {
-			t.Errorf("a product that imports framework/app/otlp links %d text symbols of %s, want linked %v", n, c.owner, c.linked)
-		}
+		t.Run(c.owner, func(t *testing.T) { runCase(t, c) })
 	}
 	if code := beyondInits(syms, owners()["pkg/v1/app/forward"]); len(code) == 0 {
 		t.Error("a product that imports framework/app/otlp links nothing of the SDK's forward beyond its inits")

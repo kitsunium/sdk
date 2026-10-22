@@ -27939,7 +27939,10 @@ sequences:
       - go: |-
           func() {
           		defer r.ended.Do(func() { close(r.done) })
-          		r.err = ex.Run(runCtx)
+          		err := ex.Run(runCtx)
+          		r.mu.Lock()
+          		r.err = err
+          		r.mu.Unlock()
           	}()
       - eval: a.otlpRun.Store(r)
         to: a.otlpRun.Store
@@ -27956,6 +27959,10 @@ sequences:
         kind: internal
       - id: logger
         kind: package
+      - id: r.mu.Lock
+        kind: value
+      - id: r.mu.Unlock
+        kind: value
     steps:
       - bind: r
         eval: a.otlpRun.Swap(nil)
@@ -27982,11 +27989,17 @@ sequences:
           key: _
           range: r.ex.Stats()
           value: st
+      - eval: r.mu.Lock()
+        to: r.mu.Lock
+      - bind: err
+        eval: r.err
+      - eval: r.mu.Unlock()
+        to: r.mu.Unlock
       - opt:
           do:
-            - eval: logger.Warn(ctx, a.log, "the OTLP export stopped with an error", logger.String("error", errs.PublicOf(r.err)))
+            - eval: logger.Warn(ctx, a.log, "the OTLP export stopped with an error", logger.String("error", errs.PublicOf(err)))
               to: logger
-          when: r.err != nil && !errors.Is(r.err, context.Canceled)
+          when: err != nil && !errors.Is(err, context.Canceled)
       - return: nil
   - of: (*App).otlpConfig
     participants:
@@ -28143,6 +28156,21 @@ sequences:
           when: r == nil
       - lock:
           mutex: r.mu
+      - select:
+          cases:
+            - comm: <-r.done
+              do:
+                - bind: reason
+                  eval: "\"its loop ended\""
+                - opt:
+                    do:
+                      - op: +=
+                        set: reason
+                        value: "\": \" + errs.PublicOf(r.err)"
+                    when: r.err != nil
+                - return: "Unavailable(\"the OTLP export stopped sending until the next start: \" + reason)"
+                  to: Unavailable
+            - default: true
       - var:
           name: problems
           type: "[]string"
@@ -50387,13 +50415,24 @@ sequences:
         kind: actor
       - id: (*App).needsSecrets
         kind: self
-      - id: svc.snapshot
+      - id: a.servicesNeedSecrets
         kind: internal
     steps:
       - opt:
           do:
             - return: "true"
-          when: (len(a.opts.databases) > 0 && !a.opts.memory) || a.keepsPersonalData()
+          when: (len(a.opts.databases) > 0 && !a.opts.memory) || a.keepsPersonalData() || a.opts.otlp != nil
+      - return: a.servicesNeedSecrets()
+        to: a.servicesNeedSecrets
+  - of: (*App).servicesNeedSecrets
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).servicesNeedSecrets
+        kind: self
+      - id: svc.snapshot
+        kind: internal
+    steps:
       - loop:
           do:
             - opt:

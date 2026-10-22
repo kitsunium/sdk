@@ -32,7 +32,7 @@ everywhere but in the binary's former names the test's allow-list admits.
 
 ## Rules
 
-- It imports `framework/app`, its six subsystems but the Studio, and the standard library only — never `framework/internal/app`: a product imports the facade.
+- It imports `framework/app`, its seven subsystems but the Studio, and the standard library only — never `framework/internal/app`: a product imports the facade.
 - Every file the build reads carries no occurrence of the three letters the guard refuses, but inside the vendor's name: the guard reads them.
 - Its README is written by hand and says what its package comment says: an edit of one is an edit of the other.
 

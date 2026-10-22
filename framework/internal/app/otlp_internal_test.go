@@ -140,3 +140,43 @@ func TestTheProductsSenderFailuresAreClassified(t *testing.T) {
 		}
 	}
 }
+
+// failingExport is an export whose loop ends at once with a storage
+// failure, as one whose queue's directory went away.
+type failingExport struct{}
+
+// SpanSink is no sink.
+func (failingExport) SpanSink() plug.OTLPSinkValue { return plug.OTLPSinkValue{} }
+
+// Record records nothing.
+func (failingExport) Record(string, string, time.Duration, bool) {}
+
+// Run fails at once.
+func (failingExport) Run(context.Context) error { return errors.New("the queue's directory is gone") }
+
+// Stats are none.
+func (failingExport) Stats() []plug.OTLPStatsValue { return nil }
+
+// An export whose loop ended while the app runs — its queue's storage
+// failed — degrades the readiness, and keeps it degraded: nothing is sent
+// until the next start.
+func TestAnOTLPExportWhoseLoopEndedDegradesTheReadiness(t *testing.T) {
+	saved := plug.OTLP.Load()
+	plug.OTLP.Store(&plug.OTLPDriverConfig{Open: func(context.Context, *plug.OTLPConfig) (plug.OTLPExporter, error) {
+		return failingExport{}, nil
+	}})
+	t.Cleanup(func() { plug.OTLP.Store(saved) })
+	a := otlpProduct()
+	must(t, a.Start(context.Background()))
+	defer func() { must(t, a.Stop(context.Background())) }()
+	r := a.otlpRun.Load()
+	if r == nil {
+		t.Fatal("the export does not run")
+	}
+	<-r.done
+	for range 2 {
+		if err := a.otlpReady(context.Background()); err == nil || !strings.Contains(err.Error(), "stopped sending until the next start") {
+			t.Errorf("the readiness of an export whose loop ended: %v", err)
+		}
+	}
+}
