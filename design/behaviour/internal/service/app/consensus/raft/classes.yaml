@@ -178,6 +178,10 @@ constants:
           mutReadRespAnyPeer takes a read's answer from any peer of the term,
           not only from the leader this node asked (#510).
         name: mutReadRespAnyPeer
+      - doc: |-
+          mutMembershipEveryCommit hands the driver the admission set at every
+          commit, changed or not (#531).
+        name: mutMembershipEveryCommit
     name: mutAckBeforeSync
   - doc: The facts a PeerStatValue carries.
     grouped: true
@@ -444,6 +448,7 @@ files:
       - (*Raft).commitTimingContract
       - (*Raft).commitClusterVersion
       - (*Raft).commitTo
+      - (*Raft).publishAdmitted
       - (*Raft).PeerStats
       - (*Raft).FailureTolerance
       - (*Raft).QuorumActive
@@ -1112,6 +1117,11 @@ types:
         type: core.MembershipValue
       - name: confs
         type: "[]confAt"
+      - doc: |-
+          admittedPub is the admission set last handed to the driver: it is
+          handed again only when it changes (#531).
+        name: admittedPub
+        type: "[]core.MemberValue"
       - name: prs
         type: map[core.NodeID]*progress
       - name: votes
@@ -1883,9 +1893,17 @@ types:
         results: bool
       - doc: |-
           commitTo advances the commit to i, never back, applying the engine's own
-          effects of the entries it covers and republishing the admission set.
+          effects of the entries it covers and republishing the admission set when
+          the commit changed it.
         name: commitTo
         params: i uint64
+        recv: r *Raft
+      - doc: |-
+          publishAdmitted hands the driver the admission set when it differs from
+          the one last handed. Republished at every commit, it cost every node a
+          SetMembership, a resolution of every member's address and an Info line
+          per committed entry, though nothing had changed (#531).
+        name: publishAdmitted
         recv: r *Raft
       - name: PeerStats
         recv: r *Raft

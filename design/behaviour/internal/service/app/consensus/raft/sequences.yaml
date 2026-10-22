@@ -2357,9 +2357,11 @@ sequences:
           when: node.mutated(mutNoRestartRefusal)
       - eval: node.resetElection(st.Now)
         to: node.resetElection
-      - set: node.rd.Membership
+      - set: node.admittedPub
         to: node.admitted
         value: node.admitted()
+      - set: node.rd.Membership
+        value: node.admittedPub
       - return: node
   - of: (*Raft).Tick
     participants:
@@ -2953,14 +2955,13 @@ sequences:
         kind: actor
       - id: (*Raft).confChanged
         kind: self
-      - id: r.admitted
+      - id: r.publishAdmitted
         kind: internal
       - id: r.trackMembers
         kind: internal
     steps:
-      - set: r.rd.Membership
-        to: r.admitted
-        value: r.admitted()
+      - eval: r.publishAdmitted()
+        to: r.publishAdmitted
       - switch:
           cases:
             - case: core.RoleLeader
@@ -3329,7 +3330,7 @@ sequences:
         kind: self
       - id: r.applyCommitEffects
         kind: internal
-      - id: r.admitted
+      - id: r.publishAdmitted
         kind: internal
     steps:
       - opt:
@@ -3340,10 +3341,29 @@ sequences:
               value: i
             - eval: r.applyCommitEffects(old+1, i)
               to: r.applyCommitEffects
-            - set: r.rd.Membership
-              to: r.admitted
-              value: r.admitted()
+            - eval: r.publishAdmitted()
+              to: r.publishAdmitted
           when: i > r.log.committed
+  - of: (*Raft).publishAdmitted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).publishAdmitted
+        kind: self
+      - id: r.admitted
+        kind: internal
+    steps:
+      - bind: a
+        eval: r.admitted()
+        to: r.admitted
+      - opt:
+          do:
+            - return: ""
+          when: slices.Equal(a, r.admittedPub) && !r.mutated(mutMembershipEveryCommit)
+      - set: r.admittedPub
+        value: a
+      - set: r.rd.Membership
+        value: a
   - of: (*Raft).PeerStats
     steps:
       - opt:

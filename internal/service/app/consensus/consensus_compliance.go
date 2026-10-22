@@ -41,6 +41,8 @@ var (
 		markStopEach(errs.Code, string) (dirErr, runErr error)
 	} = (*fileLog)(nil)
 	_ interface{ release() } = (*fileSink)(nil)
+	// A published snapshot's handle reads as a spool's file does.
+	_ spoolFile = (*fileHandle)(nil)
 	_ interface {
 		Cluster() coreconsensus.ClusterID
 	} = (*TCPTransport)(nil)

@@ -34,6 +34,7 @@ func (n *Node) judgeOffer(from coreconsensus.NodeID, o *coreconsensus.InstallOff
 	if n.screenOffer(from, o, acc) || n.answerFromHeld(o, acc) {
 		return
 	}
+	n.dropOtherSpools(o.SnapshotID)
 	sink, off, err := n.cfg.Snapshots.Create(o.SnapshotID, o.Meta)
 	if err != nil {
 		acc.Refused = coreconsensus.CodeStorageFailed
@@ -87,7 +88,10 @@ func (n *Node) screenOffer(from coreconsensus.NodeID, o *coreconsensus.InstallOf
 // answerFromHeld answers an offer for a snapshot id this node already
 // stores, and reports whether it did: held, unless the node has no table,
 // in which case its copy failed its checksums and the offer proceeds and
-// replaces it. The copy is not removed first: the commit of the replacement
+// replaces it, or the copy lies past what the node applied: published and
+// never restored, it is not the node's state, and answered held the leader
+// probed past it, the append was refused and the offer came again for as
+// long as it stayed the leader's newest (#528). The copy is not removed first: the commit of the replacement
 // overwrites it, and until then it is what the node's members are read
 // from. Removed, a replacement that then failed — a transfer cut short, a
 // Restore refused — left the node no snapshot, and at its next start a log
@@ -99,8 +103,11 @@ func (n *Node) answerFromHeld(o *coreconsensus.InstallOfferValue, acc *coreconse
 		acc.Refused = coreconsensus.CodeStorageFailed
 		return true
 	}
+	n.am.Lock()
+	applied := n.applied
+	n.am.Unlock()
 	for _, m := range metas {
-		if m.ID == o.SnapshotID && !n.r.NoTable() {
+		if m.ID == o.SnapshotID && !n.r.NoTable() && m.Position.Index <= applied {
 			acc.Held = true
 			return true
 		}
@@ -119,11 +126,37 @@ func (n *Node) keepSpool(id string, sink coreconsensus.SnapshotSink) {
 		n.snapState.spools = map[string]coreconsensus.SnapshotSink{}
 	}
 	if old := n.snapState.spools[id]; old != nil {
-		if r, ok := old.(interface{ release() }); ok {
-			r.release()
-		}
+		releaseSink(old)
 	}
 	n.snapState.spools[id] = sink
+}
+
+// releaseSink closes a sink's handle and keeps its spool for a resume,
+// when the store's sink can; a sink that cannot keeps nothing open.
+func releaseSink(sink coreconsensus.SnapshotSink) {
+	if r, ok := sink.(interface{ release() }); ok {
+		r.release()
+	}
+}
+
+// dropOtherSpools aborts the sinks earlier offers of another id opened and
+// whose body never came: an offer of id supersedes them, and kept, each
+// held its spool on the data disk for good (#527).
+func (n *Node) dropOtherSpools(id string) {
+	n.snapState.mu.Lock()
+	var stale []coreconsensus.SnapshotSink
+	for other, sink := range n.snapState.spools {
+		if other != id {
+			stale = append(stale, sink)
+			delete(n.snapState.spools, other)
+		}
+	}
+	n.snapState.mu.Unlock()
+	for _, sink := range stale {
+		// A spool that cannot be removed now is swept by the next Create
+		// or the next open; nothing here could act on the failure.
+		abandon(sink.Abort())
+	}
 }
 
 // install receives the stream of an accepted offer into its spool, commits
@@ -145,7 +178,10 @@ func (n *Node) install(req coreconsensus.InstallParams) error {
 	want := meta.EncodedSize - req.Offset
 	k, err := io.Copy(sink, io.LimitReader(req.Body, want+1))
 	if err != nil || k != want {
-		// The spool stays: the next offer resumes from its last chunk.
+		// The spool stays: the next offer resumes from its last chunk. Its
+		// handle goes, or every broken transfer leaked a descriptor and
+		// kept the spool counted as written to (#527).
+		releaseSink(sink)
 		return snapshotCorrupt("stream ended early")
 	}
 	if err := n.stillFresh(&req, sink); err != nil {

@@ -1,6 +1,7 @@
 package consensus
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -798,7 +799,11 @@ func TestASpoolResumesBeforeARegionOfZeros(t *testing.T) {
 	binary.LittleEndian.PutUint32(h[0:], uint32(len(payload)))
 	binary.LittleEndian.PutUint32(h[8:], crc32.Checksum(payload, castagnoli))
 	prefix := append(append(h[:], payload...), make([]byte, 4*chunkHeaderLen)...)
-	if got, want := alignedOffset(prefix), int64(chunkHeaderLen+len(payload)); got != want {
+	got, err := alignedOffsetAt(bytes.NewReader(prefix), int64(len(prefix)), maxEncodedChunk(defaultChunkSize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := int64(chunkHeaderLen + len(payload)); got != want {
 		t.Fatalf("resume offset %d over a chunk then zeros, want %d", got, want)
 	}
 }

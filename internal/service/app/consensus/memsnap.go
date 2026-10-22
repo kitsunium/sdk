@@ -41,8 +41,19 @@ type memSink struct {
 func (s *MemorySnapshots) Create(id string, meta coreconsensus.SnapshotMetaValue) (coreconsensus.SnapshotSink, int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// The spools of every other id are dropped, as the shipped store sweeps
+	// them (#527); a sink still writing to one commits as before.
+	for other := range s.spools {
+		if other != id {
+			delete(s.spools, other)
+		}
+	}
 	if sp, ok := s.spools[id]; ok {
-		off := alignedOffset(sp.buf.Bytes())
+		b := sp.buf.Bytes()
+		off, err := alignedOffsetAt(bytes.NewReader(b), int64(len(b)), maxEncodedChunk(meta.ChunkSize))
+		if err != nil {
+			return nil, 0, err
+		}
 		sp.buf.Truncate(int(off))
 		return sp, off, nil
 	}
