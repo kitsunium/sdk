@@ -47,8 +47,15 @@ func TestAFollowerTheLeaderNoLongerHearsIsNotReady(t *testing.T) {
 	if h, ok := waitHealth(f, true, true, 10*time.Second); !ok {
 		t.Fatalf("the healed follower never became ready again: %+v", h.Status)
 	}
-	if v, _ := f.sm.get("k99"); v != "v" {
-		t.Fatal("the healed follower did not catch up")
+	// Ready again from a lag within maxReadyLag (#545): the catch-up is
+	// waited for, not read at the instant ready returns.
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		if v, _ := f.sm.get("k99"); v == "v" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the healed follower did not catch up: %+v", f.node.Status())
+		}
 	}
 }
 
