@@ -236,6 +236,12 @@ func ClearQuarantine(d DataDir, exit QuarantineExit, op coreconsensus.Operator) 
 	case WipeAndRejoin:
 		return d.wipeAndRejoin(op)
 	case TruncateAndStaySilent:
+		if err := d.d.log.storageFailedThisBoot(); err != nil {
+			// The truncation would be written after pages the disk may
+			// not hold: reboot first (#563). WipeAndRejoin keeps nothing
+			// and stays open.
+			return err
+		}
 		if err := d.audit(op, "clear-quarantine truncate-and-stay-silent"); err != nil {
 			return err
 		}
@@ -357,6 +363,10 @@ func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsen
 		return err
 	}
 	flog := d.d.log
+	if errs.HasCode(flog.refuse, coreconsensus.CodeStopMarkerPresent) {
+		// A STORAGE_FAILED stop of this boot: reboot first (#563).
+		return flog.refuse
+	}
 	if flog.refuse != nil {
 		return recoverRefused("quarantined log")
 	}
@@ -996,6 +1006,10 @@ func restoreRefused(why string) error {
 // fixed order so the reason given is always the first that applies: the
 // target, then the bounds, then the members.
 func checkRestore(flog *fileLog, stamp *coreconsensus.StampValue, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RestoreOptions) error {
+	if errs.HasCode(flog.refuse, coreconsensus.CodeStopMarkerPresent) {
+		// A STORAGE_FAILED stop of this boot: reboot first (#563).
+		return flog.refuse
+	}
 	if err := checkRestoreTarget(flog, newCluster, opt); err != nil {
 		return err
 	}

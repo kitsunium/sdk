@@ -1,7 +1,6 @@
 package consensus
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -40,10 +39,20 @@ const (
 	stampFixed int = 1 + 16 + 8 + 16 + 8 + 8 + 8 + 16 + 1 + 32 + 1
 )
 
-// DataDirOptions tunes NewDataDirWith.
+// DataDirOptions tunes NewDataDirWith: the size of a log segment and the
+// boot-scoped directory of the second STORAGE_FAILED marker.
 type DataDirOptions struct {
 	// SegmentBytes is the fixed size of a log segment; 0 is 64 MiB.
 	SegmentBytes int64
+	// RuntimeDir is the boot-scoped directory of the second STORAGE_FAILED
+	// marker (R9-05); empty is /run/kitsunium-consensus on Linux, and
+	// kitsunium-consensus in the temporary directory elsewhere. It must
+	// outlive the process within the boot and be gone at the next one: a
+	// host tmpfs, or systemd's RuntimeDirectory= with
+	// RuntimeDirectoryPreserve=yes. The process must be able to create it
+	// and write in it: NewDataDirWith refuses CONSENSUS_MISCONFIGURED
+	// otherwise, naming the path.
+	RuntimeDir string
 }
 
 type dataDir struct {
@@ -72,6 +81,9 @@ func NewDataDir(dir string) (DataDir, error) { return NewDataDirWith(dir, DataDi
 
 // NewDataDirWith is NewDataDir with options.
 func NewDataDirWith(dir string, opts DataDirOptions) (DataDir, error) {
+	if err := refuseUnmarked(dir); err != nil {
+		return DataDir{}, err
+	}
 	// The directory lock is the first thing taken (D11), and there is none to
 	// take where the kernel has no flock(2) — illumos and Solaris (ADR 0144):
 	// the refusal is the platform's, at construction and before anything is
@@ -329,30 +341,7 @@ func (l *fileLog) checkMarkers() error {
 	if l.refuse != nil {
 		return l.refuse
 	}
-	ents, err := os.ReadDir(l.dir)
-	if err != nil {
-		return storageFailed("markers", err)
-	}
-	boot := []byte("boot=" + bootID() + "\n")
-	for _, p := range l.markerPaths(ents) {
-		b, err := os.ReadFile(p)
-		if errors.Is(err, os.ErrNotExist) {
-			// No marker there: the boot-scoped one is absent on every start
-			// that followed no storage failure.
-			continue
-		}
-		if err != nil {
-			// A marker that is there but cannot be read is a stop whose
-			// reason is unknown, never an absent one: the start is refused.
-			return storageFailed("read stop marker", err)
-		}
-		if strings.HasSuffix(p, "STORAGE_FAILED") && !bytes.HasPrefix(b, boot) {
-			// Another boot: the page cache that may have lied is gone.
-			continue
-		}
-		return stopMarkerPresent(p, b)
-	}
-	return nil
+	return l.markerApplies(false)
 }
 
 // stopMarkerPresent is the STOP_MARKER_PRESENT of the marker at path, its

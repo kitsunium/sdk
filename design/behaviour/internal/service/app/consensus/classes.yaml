@@ -703,6 +703,7 @@ files:
       - (*fileLog).logDir
       - quarantined
       - openFileLog
+      - (*fileLog).prepareOpen
       - scanned
       - (*fileLog).recover
       - (*fileLog).segmentNumbers
@@ -714,6 +715,7 @@ files:
       - (*fileLog).replay
       - (*fileLog).applyCheckpoint
       - (*fileLog).applyRecord
+      - (*fileLog).applyEntry
       - checkLayouts
       - knownLayout
       - (*fileLog).applyHardState
@@ -1229,6 +1231,14 @@ files:
       - (*Node).refuseShort
       - (*Node).raiseNoSpace
     name: space.go
+  - decls:
+      - unmarked
+      - noteUnmarked
+      - refuseUnmarked
+      - (*fileLog).probeRuntimeDir
+      - (*fileLog).storageFailedThisBoot
+      - (*fileLog).markerApplies
+    name: stopguard.go
   - decls:
       - datasync
       - bootID
@@ -2411,6 +2421,16 @@ functions:
     name: nearLimit
     params: size, limit int64
     results: bool
+  - doc: noteUnmarked records dir in unmarked.
+    name: noteUnmarked
+    params: dir string
+  - doc: |-
+      refuseUnmarked refuses a data directory a node of this process stopped on
+      with no marker: the process must exit, and the directory waits for a
+      reboot.
+    name: refuseUnmarked
+    params: dir string
+    results: error
   - doc: |-
       datasync makes a segment's written bytes durable with fdatasync(2): the
       segment is zero-filled at its full size, so there is no size to publish
@@ -2819,6 +2839,17 @@ types:
       - doc: SegmentBytes is the fixed size of a log segment; 0 is 64 MiB.
         name: SegmentBytes
         type: int64
+      - doc: |-
+          RuntimeDir is the boot-scoped directory of the second STORAGE_FAILED
+          marker (R9-05); empty is /run/kitsunium-consensus on Linux, and
+          kitsunium-consensus in the temporary directory elsewhere. It must
+          outlive the process within the boot and be gone at the next one: a
+          host tmpfs, or systemd's RuntimeDirectory= with
+          RuntimeDirectoryPreserve=yes. The process must be able to create it
+          and write in it: NewDataDirWith refuses CONSENSUS_MISCONFIGURED
+          otherwise, naming the path.
+        name: RuntimeDir
+        type: string
     kind: struct
     name: DataDirOptions
   - fields:
@@ -3260,9 +3291,8 @@ types:
         type: "*dataDir"
       - doc: |-
           runDir is the boot-scoped directory of the second STORAGE_FAILED
-          marker (R9-05). It is read once at open from runtimeMarkerDir and is
-          a field, not a constant, so a test can point it at a directory an
-          unprivileged process may create: /run is root's.
+          marker (R9-05): DataDirOptions.RuntimeDir, else runtimeMarkerDir. A
+          test may point it elsewhere after the open.
         name: runDir
         type: string
       - doc: |-
@@ -3347,6 +3377,13 @@ types:
         recv: l *fileLog
         results: string
       - doc: |-
+          prepareOpen is what an open does before it reads the markers: the
+          boot-scoped directory resolved and probed (#562), the log directory made
+          and the stamp read.
+        name: prepareOpen
+        recv: l *fileLog
+        results: error
+      - doc: |-
           recover runs the written recovery procedure (D4, R8-02, R9-01, R9-03):
           scan every segment, classify every hole, and only then change anything.
         name: recover
@@ -3415,6 +3452,13 @@ types:
           the open VERSION_UNSUPPORTED — skipped, it lost what a newer build wrote
           there (D18, #511). A seal changes nothing.
         name: applyRecord
+        params: seg uint64, r *record
+        recv: l *fileLog
+        results: error
+      - doc: |-
+          applyEntry appends an entry record's slot, quarantining one out of
+          sequence.
+        name: applyEntry
         params: seg uint64, r *record
         recv: l *fileLog
         results: error
@@ -3757,6 +3801,33 @@ types:
         results: term, index uint64, unreadable, err error
       - doc: endSilence removes the silence condition durably.
         name: endSilence
+        recv: l *fileLog
+        results: error
+      - doc: |-
+          probeRuntimeDir creates the boot-scoped directory and writes, then
+          removes, a file there. A directory the process cannot write in left every
+          STORAGE_FAILED stop with one marker of two, and with none when the data
+          directory's failed too: the start is refused while nothing has been
+          written (R9-05, #562).
+        name: probeRuntimeDir
+        recv: l *fileLog
+        results: error
+      - doc: |-
+          storageFailedThisBoot is the STOP_MARKER_PRESENT of a STORAGE_FAILED
+          marker of the current boot, in either place, nil when none applies. In
+          that boot the page cache may still show bytes whose fdatasync failed:
+          nothing writes to the log, the snapshots or the stamp until a reboot, or
+          a recovery, a Recover or an Init writes durable data after pages the disk
+          does not hold, and the reboot that clears the marker quarantines the log
+          (ADR 0152 "fail closed before any mutation", #563).
+        name: storageFailedThisBoot
+        recv: l *fileLog
+        results: error
+      - doc: |-
+          markerApplies is checkMarkers' reading of the markers, limited to the
+          STORAGE_FAILED ones when storageOnly is set.
+        name: markerApplies
+        params: storageOnly bool
         recv: l *fileLog
         results: error
     name: fileLog
@@ -6754,6 +6825,16 @@ vars:
       - name: castagnoli
         value: crc32.MakeTable(crc32.Castagnoli)
     name: castagnoli
+  - doc: |-
+      unmarked holds, by absolute path, every data directory a node of this
+      process stopped on with STORAGE_FAILED and no marker written in either
+      place. A consumer that does not exit on that stop would otherwise open it
+      again in the same boot and trust the page cache the failed fdatasync left
+      (R9-05, #562).
+    items:
+      - name: unmarked
+        type: sync.Map
+    name: unmarked
   - doc: |-
       listenTCP opens the transport's listener; a test replaces it to make
       Accept fail the way an exhausted descriptor table does (#518).

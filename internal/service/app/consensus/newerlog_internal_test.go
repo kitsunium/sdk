@@ -83,7 +83,7 @@ func TestALogANewerBuildWroteStopsTheOpen(t *testing.T) {
 			t.Fatalf("close before reopening: %v", err)
 		}
 		before := segmentBytes(t, dir)
-		nd, err := NewDataDirWith(dir, DataDirOptions{SegmentBytes: 1 << 16})
+		nd, err := NewDataDirWith(dir, DataDirOptions{SegmentBytes: 1 << 16, RuntimeDir: testRuntimeDir()})
 		if err == nil {
 			defer nd.Close()
 			_, last := nd.Log().Bounds()

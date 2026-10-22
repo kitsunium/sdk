@@ -1220,6 +1220,8 @@ sequences:
         kind: actor
       - id: NewDataDirWith
         kind: self
+      - id: refuseUnmarked
+        kind: internal
       - id: mkdirDurable
         kind: internal
       - id: os
@@ -1231,6 +1233,14 @@ sequences:
       - id: alsoFailed
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: DataDir{}, err
+          init:
+            bind: err
+            eval: refuseUnmarked(dir)
+            to: refuseUnmarked
+          when: err != nil
       - opt:
           do:
             - return: DataDir{}, coreproc.UnsupportedPlatform
@@ -1666,51 +1676,15 @@ sequences:
         kind: actor
       - id: (*fileLog).checkMarkers
         kind: self
-      - id: os
-        kind: stdlib
-      - id: storageFailed
-        kind: internal
-      - id: stopMarkerPresent
+      - id: l.markerApplies
         kind: internal
     steps:
       - opt:
           do:
             - return: l.refuse
           when: l.refuse != nil
-      - bind: ents, err
-        eval: os.ReadDir(l.dir)
-        to: os
-      - opt:
-          do:
-            - return: storageFailed("markers", err)
-              to: storageFailed
-          when: err != nil
-      - bind: boot
-        eval: "[]byte(\"boot=\" + bootID() + \"\\n\")"
-      - loop:
-          do:
-            - bind: b, err
-              eval: os.ReadFile(p)
-              to: os
-            - opt:
-                do:
-                  - continue: true
-                when: errors.Is(err, os.ErrNotExist)
-            - opt:
-                do:
-                  - return: storageFailed("read stop marker", err)
-                    to: storageFailed
-                when: err != nil
-            - opt:
-                do:
-                  - continue: true
-                when: strings.HasSuffix(p, "STORAGE_FAILED") && !bytes.HasPrefix(b, boot)
-            - return: stopMarkerPresent(p, b)
-              to: stopMarkerPresent
-          key: _
-          range: l.markerPaths(ents)
-          value: p
-      - return: nil
+      - return: l.markerApplies(false)
+        to: l.markerApplies
   - of: stopMarkerPresent
     participants:
       - id: caller
@@ -2284,13 +2258,13 @@ sequences:
         kind: actor
       - id: openFileLog
         kind: self
-      - id: mkdirDurable
-        kind: internal
-      - id: readStamp
+      - id: l.prepareOpen
         kind: internal
       - id: os
         kind: stdlib
       - id: origin
+        kind: internal
+      - id: l.storageFailedThisBoot
         kind: internal
       - id: l.recover
         kind: internal
@@ -2301,24 +2275,15 @@ sequences:
               value: DefaultSegmentBytes
           when: segBytes <= 0
       - bind: l
-        eval: "&fileLog{dir: dd.dir, segBytes: segBytes, dd: dd, first: 1, pendingLast: -1, runDir: runtimeMarkerDir()}"
+        eval: "&fileLog{dir: dd.dir, segBytes: segBytes, dd: dd, first: 1, pendingLast: -1, runDir: dd.opts.RuntimeDir}"
       - opt:
           do:
             - return: nil, err
           init:
             bind: err
-            eval: mkdirDurable(l.logDir())
-            to: mkdirDurable
+            eval: l.prepareOpen()
+            to: l.prepareOpen
           when: err != nil
-      - bind: st, err
-        eval: readStamp(dd.dir)
-        to: readStamp
-      - opt:
-          do:
-            - return: nil, err
-          when: err != nil
-      - set: l.stamp
-        value: st
       - opt:
           do:
             - set: l.refuse
@@ -2330,6 +2295,16 @@ sequences:
             eval: os.ReadFile(filepath.Join(dd.dir, markerQuarantine))
             to: os
           when: err == nil
+      - opt:
+          do:
+            - set: l.refuse
+              value: err
+            - return: l, nil
+          init:
+            bind: err
+            eval: l.storageFailedThisBoot()
+            to: l.storageFailedThisBoot
+          when: err != nil
       - opt:
           do:
             - opt:
@@ -2345,6 +2320,53 @@ sequences:
             to: l.recover
           when: err != nil
       - return: l, nil
+  - of: (*fileLog).prepareOpen
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLog).prepareOpen
+        kind: self
+      - id: runtimeMarkerDir
+        kind: internal
+      - id: l.probeRuntimeDir
+        kind: internal
+      - id: mkdirDurable
+        kind: internal
+      - id: readStamp
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: l.runDir
+              to: runtimeMarkerDir
+              value: runtimeMarkerDir()
+          when: l.runDir == ""
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: l.probeRuntimeDir()
+            to: l.probeRuntimeDir
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: mkdirDurable(l.logDir())
+            to: mkdirDurable
+          when: err != nil
+      - bind: st, err
+        eval: readStamp(l.dir)
+        to: readStamp
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - set: l.stamp
+        value: st
+      - return: nil
   - of: (*fileLog).recover
     participants:
       - id: caller
@@ -2799,7 +2821,7 @@ sequences:
         kind: actor
       - id: (*fileLog).applyRecord
         kind: self
-      - id: l.quarantine
+      - id: l.applyEntry
         kind: internal
       - id: l.applyTruncate
         kind: internal
@@ -2814,13 +2836,8 @@ sequences:
           cases:
             - case: recEntry
               do:
-                - opt:
-                    do:
-                      - return: l.quarantine(seg, r.off, "index out of sequence")
-                        to: l.quarantine
-                    when: r.index != l.first+uint64(len(l.slots))
-                - set: l.slots
-                  value: "append(l.slots, slot{seg: seg, off: r.off, term: r.term})"
+                - return: l.applyEntry(seg, r)
+                  to: l.applyEntry
             - case: recTruncate
               do:
                 - eval: l.applyTruncate(r.index)
@@ -2843,6 +2860,23 @@ sequences:
                 - return: unknownLayout(seg, r, "record_kind", int(r.kind))
                   to: unknownLayout
           "on": r.kind
+      - return: nil
+  - of: (*fileLog).applyEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLog).applyEntry
+        kind: self
+      - id: l.quarantine
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: l.quarantine(seg, r.off, "index out of sequence")
+              to: l.quarantine
+          when: r.index != l.first+uint64(len(l.slots))
+      - set: l.slots
+        value: "append(l.slots, slot{seg: seg, off: r.off, term: r.term})"
       - return: nil
   - of: checkLayouts
     participants:
@@ -4426,6 +4460,10 @@ sequences:
           mutex: l.wmu
       - lock:
           mutex: l.mu
+      - opt:
+          do:
+            - return: l.refuse
+          when: errs.HasCode(l.refuse, coreconsensus.CodeStopMarkerPresent)
       - opt:
           do:
             - return: storageFailed("stamp", err)
@@ -9411,6 +9449,8 @@ sequences:
         kind: package
       - id: m.markStopEach
         kind: internal
+      - id: noteUnmarked
+        kind: internal
       - id: n.reportUnwrittenMarkers
         kind: internal
       - id: n.obs.setGauge
@@ -9446,6 +9486,14 @@ sequences:
                 do:
                   - set: reason.Unmarked
                     value: "true"
+                  - opt:
+                      do:
+                        - eval: noteUnmarked(d.dir)
+                          to: noteUnmarked
+                      init:
+                        bind: d, ok
+                        eval: n.cfg.Log.(*fileLog)
+                      when: ok
                 when: dirErr != nil && (runErr != nil || code != coreconsensus.CodeStorageFailed) && storage
             - eval: n.reportUnwrittenMarkers(dirErr, runErr)
               to: n.reportUnwrittenMarkers
@@ -11095,6 +11143,8 @@ sequences:
         kind: internal
       - id: d.wipeAndRejoin
         kind: internal
+      - id: d.d.log.storageFailedThisBoot
+        kind: internal
       - id: d.audit
         kind: internal
       - id: d.truncateAndStaySilent
@@ -11121,6 +11171,14 @@ sequences:
                   to: d.wipeAndRejoin
             - case: TruncateAndStaySilent
               do:
+                - opt:
+                    do:
+                      - return: err
+                    init:
+                      bind: err
+                      eval: d.d.log.storageFailedThisBoot()
+                      to: d.d.log.storageFailedThisBoot
+                    when: err != nil
                 - opt:
                     do:
                       - return: err
@@ -11336,6 +11394,10 @@ sequences:
           when: err != nil
       - bind: flog
         eval: d.d.log
+      - opt:
+          do:
+            - return: flog.refuse
+          when: errs.HasCode(flog.refuse, coreconsensus.CodeStopMarkerPresent)
       - opt:
           do:
             - return: recoverRefused("quarantined log")
@@ -12455,6 +12517,10 @@ sequences:
       - id: checkRestoreMembers
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: flog.refuse
+          when: errs.HasCode(flog.refuse, coreconsensus.CodeStopMarkerPresent)
       - opt:
           do:
             - return: err
@@ -16180,6 +16246,163 @@ sequences:
       - defer: cancel()
       - eval: "abandon(n.admin(ctx, coreconsensus.EntryNoSpaceRaise, wire.AdminValue{Operator: string(spaceOperator)}))"
         to: abandon
+  - of: noteUnmarked
+    participants:
+      - id: caller
+        kind: actor
+      - id: noteUnmarked
+        kind: self
+      - id: filepath
+        kind: stdlib
+      - id: unmarked.Store
+        kind: value
+    steps:
+      - opt:
+          do:
+            - set: dir
+              value: abs
+          init:
+            bind: abs, err
+            eval: filepath.Abs(dir)
+            to: filepath
+          when: err == nil
+      - eval: unmarked.Store(dir, struct{}{})
+        to: unmarked.Store
+  - of: refuseUnmarked
+    participants:
+      - id: caller
+        kind: actor
+      - id: refuseUnmarked
+        kind: self
+      - id: filepath
+        kind: stdlib
+      - id: unmarked.Load
+        kind: value
+      - id: origin
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: dir
+              value: abs
+          init:
+            bind: abs, err
+            eval: filepath.Abs(dir)
+            to: filepath
+          when: err == nil
+      - opt:
+          do:
+            - return: |-
+                origin(coreconsensus.StopMarkerPresent, errs.String("dir", dir),
+                			errs.String("detail", "a STORAGE_FAILED stop of this process wrote no marker: exit, and start again after a reboot"))
+              to: origin
+          init:
+            bind: _, ok
+            eval: unmarked.Load(dir)
+            to: unmarked.Load
+          when: ok
+      - return: nil
+  - of: (*fileLog).probeRuntimeDir
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLog).probeRuntimeDir
+        kind: self
+      - id: l.runtimeMarker
+        kind: internal
+      - id: os
+        kind: stdlib
+      - id: writeFileSync
+        kind: internal
+      - id: misconfigured
+        kind: internal
+    steps:
+      - bind: probe
+        eval: l.runtimeMarker("PROBE")
+        to: l.runtimeMarker
+      - bind: err
+        eval: os.MkdirAll(l.runDir, 0o700)
+        to: os
+      - opt:
+          do:
+            - set: err
+              to: writeFileSync
+              value: writeFileSync(probe, nil)
+          when: err == nil
+      - opt:
+          do:
+            - set: err
+              to: os
+              value: os.Remove(probe)
+          when: err == nil
+      - opt:
+          do:
+            - return: "misconfigured(\"RuntimeDir\", fmt.Sprintf(\"the boot-scoped marker directory %s is not writable: %v\", l.runDir, err))"
+              to: misconfigured
+          when: err != nil
+      - return: nil
+  - of: (*fileLog).storageFailedThisBoot
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLog).storageFailedThisBoot
+        kind: self
+      - id: l.markerApplies
+        kind: internal
+    steps:
+      - return: l.markerApplies(true)
+        to: l.markerApplies
+  - of: (*fileLog).markerApplies
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLog).markerApplies
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: storageFailed
+        kind: internal
+      - id: stopMarkerPresent
+        kind: internal
+    steps:
+      - bind: ents, err
+        eval: os.ReadDir(l.dir)
+        to: os
+      - opt:
+          do:
+            - return: storageFailed("markers", err)
+              to: storageFailed
+          when: err != nil
+      - bind: boot
+        eval: "[]byte(\"boot=\" + bootID() + \"\\n\")"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: storageOnly && !strings.HasSuffix(p, "STORAGE_FAILED")
+            - bind: b, err
+              eval: os.ReadFile(p)
+              to: os
+            - opt:
+                do:
+                  - continue: true
+                when: errors.Is(err, os.ErrNotExist)
+            - opt:
+                do:
+                  - return: storageFailed("read stop marker", err)
+                    to: storageFailed
+                when: err != nil
+            - opt:
+                do:
+                  - continue: true
+                when: strings.HasSuffix(p, "STORAGE_FAILED") && !bytes.HasPrefix(b, boot)
+            - return: stopMarkerPresent(p, b)
+              to: stopMarkerPresent
+          key: _
+          range: l.markerPaths(ents)
+          value: p
+      - return: nil
   - of: datasync
     participants:
       - id: caller

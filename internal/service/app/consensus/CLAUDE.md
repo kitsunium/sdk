@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-22T23:30:00Z -->
+<!-- updated: 2026-10-22T23:59:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -376,3 +376,13 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   beside, or is rolled back under, the release that writes it; the writer
   ships with the cluster version that admits it (#546 phase 2, batch S3 of
   #564; `TestASnapshotMetaOfVersion2IsRestored`).
+- Write anything, open included, before the STORAGE_FAILED markers of the
+  current boot are read: recovery, Recover, Init and
+  TruncateAndStaySilent wrote past pages the disk did not hold (#563,
+  `TestAnOpenInTheBootOfAStorageFailureWritesNothing`,
+  `TestRecoverInTheBootOfAStorageFailureIsRefused`).
+- Open a data directory whose boot-scoped marker directory the process
+  cannot write: the open refuses CONSENSUS_MISCONFIGURED, and a stop that
+  wrote no marker refuses any later open in the process (#562,
+  `TestAnUnwritableRuntimeDirIsRefusedAtOpen`,
+  `TestAStorageStopRefusesTheSameBootRestart`).

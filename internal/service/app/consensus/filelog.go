@@ -261,9 +261,8 @@ type fileLog struct {
 	refuse       error
 	dd           *dataDir
 	// runDir is the boot-scoped directory of the second STORAGE_FAILED
-	// marker (R9-05). It is read once at open from runtimeMarkerDir and is
-	// a field, not a constant, so a test can point it at a directory an
-	// unprivileged process may create: /run is root's.
+	// marker (R9-05): DataDirOptions.RuntimeDir, else runtimeMarkerDir. A
+	// test may point it elsewhere after the open.
 	runDir string
 	// afterSeal runs once a rotation's seal is durable and before the next
 	// segment is published. Only the dm-crypt lane sets it, to cut power in
@@ -306,17 +305,21 @@ func openFileLog(dd *dataDir, segBytes int64) (*fileLog, error) {
 	if segBytes <= 0 {
 		segBytes = DefaultSegmentBytes
 	}
-	l := &fileLog{dir: dd.dir, segBytes: segBytes, dd: dd, first: 1, pendingLast: -1, runDir: runtimeMarkerDir()}
-	if err := mkdirDurable(l.logDir()); err != nil {
+	l := &fileLog{dir: dd.dir, segBytes: segBytes, dd: dd, first: 1, pendingLast: -1, runDir: dd.opts.RuntimeDir}
+	if err := l.prepareOpen(); err != nil {
 		return nil, err
 	}
-	st, err := readStamp(dd.dir)
-	if err != nil {
-		return nil, err
-	}
-	l.stamp = st
 	if q, err := os.ReadFile(filepath.Join(dd.dir, markerQuarantine)); err == nil {
 		l.refuse = origin(coreconsensus.LogQuarantined, errs.String("marker", strings.TrimSpace(string(q))))
+		return l, nil
+	}
+	if err := l.storageFailedThisBoot(); err != nil {
+		// Checked before recovery, which syncs, zeroes a torn tail and
+		// publishes the next segment: in the boot of a STORAGE_FAILED stop
+		// it wrote past pages the disk did not hold, and the reboot then
+		// found a hole in a sealed segment (#563). The log refuses every
+		// call; Inspect reads what it can without it.
+		l.refuse = err
 		return l, nil
 	}
 	if err := l.recover(); err != nil {
@@ -327,6 +330,27 @@ func openFileLog(dd *dataDir, segBytes int64) (*fileLog, error) {
 		return nil, err
 	}
 	return l, nil
+}
+
+// prepareOpen is what an open does before it reads the markers: the
+// boot-scoped directory resolved and probed (#562), the log directory made
+// and the stamp read.
+func (l *fileLog) prepareOpen() error {
+	if l.runDir == "" {
+		l.runDir = runtimeMarkerDir()
+	}
+	if err := l.probeRuntimeDir(); err != nil {
+		return err
+	}
+	if err := mkdirDurable(l.logDir()); err != nil {
+		return err
+	}
+	st, err := readStamp(l.dir)
+	if err != nil {
+		return err
+	}
+	l.stamp = st
+	return nil
 }
 
 // scanned is one segment as recovery read it, before anything is changed.
@@ -570,10 +594,7 @@ func (l *fileLog) applyCheckpoint(first bool, seg uint64, cp *checkpoint) error 
 func (l *fileLog) applyRecord(seg uint64, r *record) error {
 	switch r.kind {
 	case recEntry:
-		if r.index != l.first+uint64(len(l.slots)) {
-			return l.quarantine(seg, r.off, "index out of sequence")
-		}
-		l.slots = append(l.slots, slot{seg: seg, off: r.off, term: r.term})
+		return l.applyEntry(seg, r)
 	case recTruncate:
 		l.applyTruncate(r.index)
 	case recHardState:
@@ -586,6 +607,16 @@ func (l *fileLog) applyRecord(seg uint64, r *record) error {
 	default:
 		return unknownLayout(seg, r, "record_kind", int(r.kind))
 	}
+	return nil
+}
+
+// applyEntry appends an entry record's slot, quarantining one out of
+// sequence.
+func (l *fileLog) applyEntry(seg uint64, r *record) error {
+	if r.index != l.first+uint64(len(l.slots)) {
+		return l.quarantine(seg, r.off, "index out of sequence")
+	}
+	l.slots = append(l.slots, slot{seg: seg, off: r.off, term: r.term})
 	return nil
 }
 
@@ -1534,6 +1565,11 @@ func (l *fileLog) WriteStamp(s coreconsensus.StampValue) error {
 	defer l.wmu.Unlock()
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if errs.HasCode(l.refuse, coreconsensus.CodeStopMarkerPresent) {
+		// A STORAGE_FAILED stop of this boot: Init, Redraw and Bootstrap
+		// write nothing until a reboot (#563).
+		return l.refuse
+	}
 	if err := writeStamp(l.dir, s); err != nil {
 		return storageFailed("stamp", err)
 	}
