@@ -212,7 +212,10 @@ func refuseIncoherent(c *Config) error {
 	if err := refuseTiming(c); err != nil {
 		return err
 	}
-	return refuseBounds(c)
+	if err := refuseBounds(c); err != nil {
+		return err
+	}
+	return refuseCeilings(c)
 }
 
 // refuseNilPorts refuses a node missing one of the four ports it cannot
@@ -248,9 +251,8 @@ func refuseTiming(c *Config) error {
 	return nil
 }
 
-// refuseBounds refuses byte bounds that contradict each other, a batch the
-// transport cannot carry, and the two ceilings that have no safe default
-// (D14).
+// refuseBounds refuses byte bounds that contradict each other and a batch
+// the transport cannot carry (D14).
 func refuseBounds(c *Config) error {
 	switch {
 	case c.MaxInflightBytes < c.MaxBatchBytes:
@@ -266,6 +268,14 @@ func refuseBounds(c *Config) error {
 		// A batch the transport cannot carry stalls every follower it is
 		// sent to (review M2).
 		return misconfigured("MaxBatchBytes", "above the transport's MaxFrameBytes")
+	}
+	return nil
+}
+
+// refuseCeilings refuses the two ceilings that have no safe default, and
+// the bounds that contradict them (D14).
+func refuseCeilings(c *Config) error {
+	switch {
 	case c.MaxSnapshotBytes <= 0:
 		return misconfigured("MaxSnapshotBytes", "zero")
 	case c.MaxSnapshotBytes < c.SnapshotEveryBytes:

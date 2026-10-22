@@ -175,37 +175,21 @@ workflows:
           range: n.nodes
           value: x
       - return: targets
-  - of: (*Node).finalWrites
+  - of: (*Node).stageAll
     steps:
-      - opt:
-          do:
-            - return: ""
-          when: n.hard.Load()
+      - set: written
+        value: synced
       - loop:
           do:
             - opt:
                 do:
-                  - return: ""
-                when: "!n.write(&q, synced)"
-          key: _
-          range: n.sq.take(reqs)
-          value: q
-  - of: (*Node).writeAll
-    steps:
-      - loop:
-          do:
-            - opt:
-                do:
-                  - return: "false"
-                when: n.hard.Load()
-            - opt:
-                do:
-                  - return: "false"
-                when: "!n.write(&q, synced)"
-          key: _
+                  - return: written, durable, false
+                when: n.hard.Load() || !n.write(&reqs[i], &written)
+            - set: durable
+              value: durable || needsSync(&reqs[i].rd)
+          key: i
           range: reqs
-          value: q
-      - return: "true"
+      - return: written, durable, true
   - of: signedByEvery
     steps:
       - loop:

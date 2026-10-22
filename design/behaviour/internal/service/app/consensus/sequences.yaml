@@ -1048,6 +1048,8 @@ sequences:
         kind: internal
       - id: refuseBounds
         kind: internal
+      - id: refuseCeilings
+        kind: internal
     steps:
       - opt:
           do:
@@ -1065,8 +1067,16 @@ sequences:
             eval: refuseTiming(c)
             to: refuseTiming
           when: err != nil
-      - return: refuseBounds(c)
-        to: refuseBounds
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: refuseBounds(c)
+            to: refuseBounds
+          when: err != nil
+      - return: refuseCeilings(c)
+        to: refuseCeilings
   - of: refuseNilPorts
     participants:
       - id: caller
@@ -1144,10 +1154,26 @@ sequences:
               do:
                 - return: misconfigured("MaxEntryBytes", "above MaxBatchBytes")
                   to: misconfigured
+            - case: int64(c.MaxEntryBytes) > c.MaxPendingBytes
+              do:
+                - return: misconfigured("MaxPendingBytes", "below MaxEntryBytes")
+                  to: misconfigured
             - case: framesBelow(c.Transport, c.MaxBatchBytes+batchFrameOverhead)
               do:
                 - return: misconfigured("MaxBatchBytes", "above the transport's MaxFrameBytes")
                   to: misconfigured
+      - return: nil
+  - of: refuseCeilings
+    participants:
+      - id: caller
+        kind: actor
+      - id: refuseCeilings
+        kind: self
+      - id: misconfigured
+        kind: internal
+    steps:
+      - switch:
+          cases:
             - case: c.MaxSnapshotBytes <= 0
               do:
                 - return: misconfigured("MaxSnapshotBytes", "zero")
@@ -8564,6 +8590,8 @@ sequences:
         kind: internal
       - id: n.watchPins
         kind: internal
+      - id: n.watchPreferred
+        kind: internal
       - id: n.tickInterval
         kind: internal
       - id: n.tickEvery.Store
@@ -8594,6 +8622,8 @@ sequences:
         to: n.watchProgress
       - eval: n.watchPins(turn)
         to: n.watchPins
+      - eval: n.watchPreferred(turn)
+        to: n.watchPreferred
       - opt:
           do:
             - eval: n.tickEvery.Store(int64(d))
@@ -9333,8 +9363,6 @@ sequences:
         kind: value
       - id: n.startGrace
         kind: internal
-      - id: n.preferLeader
-        kind: internal
     steps:
       - bind: st
         eval: n.r.Status()
@@ -9364,11 +9392,8 @@ sequences:
           key: ctx
           range: n.reads
           value: w
-      - opt:
-          do:
-            - eval: n.preferLeader(st)
-              to: n.preferLeader
-          when: st.Role == coreconsensus.RoleLeader && len(n.cfg.PreferredLeaders) > 0
+      - set: n.preferAt
+        value: time.Time{}
   - of: (*Node).startGrace
     participants:
       - id: caller
@@ -9409,6 +9434,34 @@ sequences:
           value: p
       - eval: n.am.Unlock()
         to: n.am.Unlock
+  - of: (*Node).watchPreferred
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).watchPreferred
+        kind: self
+      - id: n.r.Status
+        kind: value
+      - id: now.Add
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: len(n.cfg.PreferredLeaders) == 0 || now.Before(n.preferAt)
+      - bind: st
+        eval: n.r.Status()
+        to: n.r.Status
+      - opt:
+          do:
+            - return: ""
+          when: st.Role != coreconsensus.RoleLeader || st.Transfer != 0
+      - opt:
+          do:
+            - set: n.preferAt
+              to: now.Add
+              value: now.Add(st.Timing.ElectionTimeoutMax)
+          when: n.preferLeader(now, &st)
   - of: (*Node).preferLeader
     participants:
       - id: caller
@@ -9419,12 +9472,10 @@ sequences:
         kind: value
       - id: n.r.Progress
         kind: value
-      - id: n.r.TransferLeadership
-        kind: value
     steps:
       - opt:
           do:
-            - return: ""
+            - return: "false"
           when: slices.Contains(n.cfg.PreferredLeaders, n.stamp.ID)
       - loop:
           do:
@@ -9432,9 +9483,7 @@ sequences:
                 do:
                   - opt:
                       do:
-                        - eval: n.r.TransferLeadership(n.clk.Now(), id)
-                          to: n.r.TransferLeadership
-                        - return: ""
+                        - return: n.r.TransferLeadership(now, id) == 0
                       init:
                         bind: match, _, ok
                         eval: n.r.Progress(id)
@@ -9448,6 +9497,7 @@ sequences:
           key: _
           range: n.cfg.PreferredLeaders
           value: id
+      - return: "false"
   - of: (*Node).publish
     participants:
       - id: caller
@@ -9625,8 +9675,8 @@ sequences:
           name: reqs
           type: "[]storeReq"
       - var:
-          name: synced
-          type: uint64
+          name: st
+          type: storeState
       - loop:
           do:
             - select:
@@ -9639,7 +9689,7 @@ sequences:
                           when: "!ok"
                   - comm: <-n.stopc
                     do:
-                      - eval: n.finalWrites(reqs, &synced)
+                      - eval: n.finalWrites(reqs, &st)
                         to: n.finalWrites
                       - return: ""
             - set: reqs
@@ -9648,8 +9698,77 @@ sequences:
             - opt:
                 do:
                   - return: ""
-                when: "!n.writeAll(reqs, &synced)"
+                when: "!n.writeAll(reqs, &st)"
           forever: true
+  - of: (*Node).finalWrites
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).finalWrites
+        kind: self
+      - id: n.cfg.Log.Sync
+        kind: value
+      - id: n.stop
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: n.hard.Load() || !n.writeAll(n.sq.take(reqs), st) || !st.lazy
+      - opt:
+          do:
+            - eval: n.stop(storageFailed("sync", err), true)
+              to: n.stop
+          init:
+            bind: err
+            eval: n.cfg.Log.Sync()
+            to: n.cfg.Log.Sync
+          when: err != nil
+  - of: (*Node).writeAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).writeAll
+        kind: self
+      - id: n.stageAll
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: len(reqs) == 0
+      - bind: written, durable, ok
+        eval: n.stageAll(reqs, st.synced)
+        to: n.stageAll
+      - opt:
+          do:
+            - return: "false"
+          when: "!ok"
+      - alt:
+          - do:
+              - opt:
+                  do:
+                    - return: "false"
+                  when: "!n.syncFor(reqs)"
+              - set: st.synced, st.lazy
+                value: written, false
+            when: durable
+          - do:
+              - set: st.lazy
+                value: "true"
+            else: true
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!n.completeWrite(&reqs[i].rd)"
+          key: i
+          range: reqs
+      - return: "true"
+  - of: needsSync
+    steps:
+      - return: rd.HardState != nil || rd.TruncateFrom != 0 || rd.Compact != 0 || len(rd.Entries) != 0 || len(rd.AfterSync) != 0
   - of: (*Node).write
     participants:
       - id: caller
@@ -9660,20 +9779,16 @@ sequences:
         kind: internal
       - id: n.stop
         kind: internal
-      - id: n.completeWrite
-        kind: internal
     steps:
       - bind: rd
         eval: "&q.rd"
       - opt:
           do:
             - return: "false"
-          when: "!n.truncateFor(rd, synced)"
-      - bind: last
-        eval: "*synced"
+          when: "!n.truncateFor(rd, written)"
       - opt:
           do:
-            - set: last
+            - set: "*written"
               value: rd.Entries[k-1].Position.Index
           init:
             bind: k
@@ -9682,7 +9797,7 @@ sequences:
       - opt:
           do:
             - return: "false"
-          when: "!n.appendFor(rd, last)"
+          when: "!n.appendFor(rd, *written)"
       - opt:
           do:
             - opt:
@@ -9696,14 +9811,7 @@ sequences:
                   to: compactLog
                 when: err != nil
           when: rd.Compact != 0
-      - opt:
-          do:
-            - return: "false"
-          when: "!n.syncFor(rd)"
-      - set: "*synced"
-        value: max(*synced, last)
-      - return: n.completeWrite(rd)
-        to: n.completeWrite
+      - return: "true"
   - of: (*Node).truncateFor
     participants:
       - id: caller
@@ -9729,8 +9837,8 @@ sequences:
             eval: n.cfg.Log.TruncateSuffix(rd.TruncateFrom)
             to: n.cfg.Log.TruncateSuffix
           when: err != nil
-      - set: "*synced"
-        value: min(*synced, rd.TruncateFrom-1)
+      - set: "*written"
+        value: min(*written, rd.TruncateFrom-1)
       - return: "true"
   - of: (*Node).appendFor
     participants:
@@ -9824,22 +9932,29 @@ sequences:
         to: n.cfg.Log.Sync
       - eval: n.obs.record(mFsyncLatency, n.clk.Since(syncStart).Seconds())
         to: n.obs.record
-      - opt:
+      - bind: entries, size
+        eval: 0, 0
+      - loop:
           do:
-            - bind: size
-              eval: "0"
             - loop:
                 do:
                   - op: +=
                     set: size
-                    value: len(rd.Entries[i].Data)
-                key: i
-                range: rd.Entries
-            - eval: n.obs.record(mBatchEntries, float64(len(rd.Entries)))
+                    value: len(reqs[i].rd.Entries[j].Data)
+                key: j
+                range: reqs[i].rd.Entries
+            - op: +=
+              set: entries
+              value: len(reqs[i].rd.Entries)
+          key: i
+          range: reqs
+      - opt:
+          do:
+            - eval: n.obs.record(mBatchEntries, float64(entries))
               to: n.obs.record
             - eval: n.obs.record(mBatchBytes, float64(size))
               to: n.obs.record
-          when: len(rd.Entries) > 0
+          when: entries > 0
       - opt:
           do:
             - eval: n.stop(storageFailed("sync", err), true)

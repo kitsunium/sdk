@@ -1501,10 +1501,7 @@ type storeState struct {
 // record included, before it exits (D5b); on a hard stop it writes nothing
 // more.
 func (n *Node) finalWrites(reqs []storeReq, st *storeState) {
-	if n.hard.Load() {
-		return
-	}
-	if !n.writeAll(n.sq.take(reqs), st) || !st.lazy {
+	if n.hard.Load() || !n.writeAll(n.sq.take(reqs), st) || !st.lazy {
 		return
 	}
 	if err := n.cfg.Log.Sync(); err != nil {
@@ -1525,15 +1522,9 @@ func (n *Node) writeAll(reqs []storeReq, st *storeState) bool {
 	if len(reqs) == 0 {
 		return true
 	}
-	written, durable := st.synced, false
-	for i := range reqs {
-		if n.hard.Load() {
-			return false
-		}
-		if !n.write(&reqs[i], &written) {
-			return false
-		}
-		durable = durable || needsSync(&reqs[i].rd)
+	written, durable, ok := n.stageAll(reqs, st.synced)
+	if !ok {
+		return false
 	}
 	if durable {
 		if !n.syncFor(reqs) {
@@ -1549,6 +1540,21 @@ func (n *Node) writeAll(reqs []storeReq, st *storeState) bool {
 		}
 	}
 	return true
+}
+
+// stageAll stages every request of a group in order, from synced, the last
+// index already durable. It returns the last index the group holds,
+// whether one of its requests must be synced, and false when the actor
+// must end.
+func (n *Node) stageAll(reqs []storeReq, synced uint64) (written uint64, durable, ok bool) {
+	written = synced
+	for i := range reqs {
+		if n.hard.Load() || !n.write(&reqs[i], &written) {
+			return written, durable, false
+		}
+		durable = durable || needsSync(&reqs[i].rd)
+	}
+	return written, durable, true
 }
 
 // needsSync reports whether a Ready must be durable before its completion:

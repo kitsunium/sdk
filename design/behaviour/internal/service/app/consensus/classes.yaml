@@ -675,6 +675,7 @@ files:
       - refuseNilPorts
       - refuseTiming
       - refuseBounds
+      - refuseCeilings
       - refuseDurability
       - (*Config).MemoryBudget
       - defaultCodec
@@ -1047,14 +1048,18 @@ files:
       - joinReleaser
       - (*Node).leadershipChanged
       - (*Node).startGrace
+      - (*Node).watchPreferred
       - (*Node).preferLeader
       - (*Node).publish
       - fetchDone
       - (*Node).reader
       - (*Node).fetch
       - (*Node).storageActor
+      - storeState
       - (*Node).finalWrites
       - (*Node).writeAll
+      - (*Node).stageAll
+      - needsSync
       - (*Node).write
       - (*Node).truncateFor
       - (*Node).appendFor
@@ -1565,10 +1570,15 @@ functions:
     params: c *Config
     results: error
   - doc: |-
-      refuseBounds refuses byte bounds that contradict each other, a batch the
-      transport cannot carry, and the two ceilings that have no safe default
-      (D14).
+      refuseBounds refuses byte bounds that contradict each other and a batch
+      the transport cannot carry (D14).
     name: refuseBounds
+    params: c *Config
+    results: error
+  - doc: |-
+      refuseCeilings refuses the two ceilings that have no safe default, and
+      the bounds that contradict them (D14).
+    name: refuseCeilings
     params: c *Config
     results: error
   - doc: |-
@@ -2128,6 +2138,13 @@ functions:
     name: baseTerm
     params: logTerm, metaTerm uint64, matched bool, first uint64
     results: uint64, error
+  - doc: |-
+      needsSync reports whether a Ready must be durable before its completion:
+      all but one that only carries a commit, which is written lazily (raft's
+      ReadyValue.Commit).
+    name: needsSync
+    params: rd *raft.ReadyValue
+    results: bool
   - doc: |-
       newObs binds a node's instruments to its configured Meter, Tracer and
       Logger; every series carries the group, so two groups never share one.
@@ -4772,6 +4789,11 @@ types:
         type: applyProgress
       - name: watch
         type: progressWatch
+      - doc: |-
+          preferAt is the earliest tick at which this leader tries
+          PreferredLeaders again after a transfer it started (#559).
+        name: preferAt
+        type: time.Time
       - name: watchMu
         type: sync.Mutex
       - name: watchers
@@ -5421,11 +5443,23 @@ types:
         params: commit uint64
         recv: n *Node
       - doc: |-
-          preferLeader transfers to a preferred node after an election when this
-          one is not preferred (D8).
-        name: preferLeader
-        params: st raft.StatusValue
+          watchPreferred hands the leadership to a preferred node once one holds
+          the commit, while this leader is not preferred (D8). It runs on the loop,
+          at every tick: on the Ready where a node becomes leader every match is
+          still 0, so a check made only then never transferred (#559). A transfer
+          it started, done or not, is not tried again before the maximum election
+          timeout, so a lagging preferred node causes no churn.
+        name: watchPreferred
+        params: now time.Time
         recv: n *Node
+      - doc: |-
+          preferLeader starts a transfer to the first preferred voter that holds
+          the commit, and reports whether it did; a preferred node never hands
+          over.
+        name: preferLeader
+        params: now time.Time, st *raft.StatusValue
+        recv: n *Node
+        results: bool
       - doc: |-
           publish stores the status a turn produced and wakes every watcher with
           it, replacing a value the watcher has not read yet so a slow reader sees
@@ -5447,40 +5481,58 @@ types:
         recv: n *Node
         results: bool
       - doc: |-
-          storageActor is the one writer of the log (D5b). Each request is appended
-          and synced before its completion goes back to the loop, and only then do
-          the replies that depend on it leave.
+          storageActor is the one writer of the log (D5b). Every request taken
+          together is appended and synced once, a group commit (D6, G2), before
+          their completions go back to the loop, in order, and only then do the
+          replies that depend on them leave.
         name: storageActor
         recv: n *Node
       - doc: |-
           finalWrites is the storage actor's exit on stop. The actor owns the
-          final sync: on Close it writes and syncs what it holds before it exits
-          (D5b); on a hard stop it writes nothing more.
+          final sync: on Close it writes and syncs what it holds, a commit-only
+          record included, before it exits (D5b); on a hard stop it writes nothing
+          more.
         name: finalWrites
-        params: reqs []storeReq, synced *uint64
+        params: reqs []storeReq, st *storeState
         recv: n *Node
       - doc: |-
-          writeAll writes a batch of requests in order, and returns false when the
-          actor must end: a hard stop arrived, or a write stopped the node.
+          writeAll writes a batch of requests as one group: each one's truncation,
+          entries with their hard state, and compaction, in order, then ONE sync,
+          then each completion in order (#558). Each Ready used to end with its own
+          sync, so a follower with a slower disk paid one fdatasync (two on the
+          file log) per queued Ready, and the next commit or election waited for
+          it to drain its backlog one sync at a time. A group of commit-only
+          Readys is not synced: the persisted commit is an optimisation, and its
+          record rides the next sync. It returns false when the actor must end: a
+          hard stop arrived, or a write stopped the node.
         name: writeAll
-        params: reqs []storeReq, synced *uint64
+        params: reqs []storeReq, st *storeState
         recv: n *Node
         results: bool
       - doc: |-
-          write persists one Ready, truncation, entries with their hard state,
-          then compaction, syncs it, and only then hands the loop its completion
-          with the replies that waited on it. Any storage failure stops the node
-          and is never retried (D4); it returns false then, or when the node
-          stopped before the completion was taken.
+          stageAll stages every request of a group in order, from synced, the last
+          index already durable. It returns the last index the group holds,
+          whether one of its requests must be synced, and false when the actor
+          must end.
+        name: stageAll
+        params: reqs []storeReq, synced uint64
+        recv: n *Node
+        results: written uint64, durable, ok bool
+      - doc: |-
+          write stages one Ready in the log, truncation, entries with their hard
+          state, then compaction, without syncing it; written follows the last
+          index the group holds. Any storage failure stops the node and is never
+          retried (D4); it returns false then.
         name: write
-        params: q *storeReq, synced *uint64
+        params: q *storeReq, written *uint64
         recv: n *Node
         results: bool
       - doc: |-
           truncateFor removes the log suffix a Ready overwrites, and lowers the
-          synced index with it, since what was synced there no longer exists.
+          group's last index with it, since what was written there no longer
+          exists.
         name: truncateFor
-        params: rd *raft.ReadyValue, synced *uint64
+        params: rd *raft.ReadyValue, written *uint64
         recv: n *Node
         results: bool
       - doc: |-
@@ -5493,16 +5545,16 @@ types:
       - doc: |-
           hardStateFor is the hard state a Ready changes, or nil when it changes
           none: the term and vote raft set, and a commit capped at the last index
-          this batch makes durable (R7-13).
+          this group makes durable (R7-13).
         name: hardStateFor
         params: rd *raft.ReadyValue, last uint64
         recv: n *Node
         results: "*coreconsensus.HardState, bool"
       - doc: |-
-          syncFor syncs the log and records the latency and the batch's size. A
-          failed sync stops the node and is never retried (D4).
+          syncFor syncs the log once for a group and records the latency and the
+          group's size. A failed sync stops the node and is never retried (D4).
         name: syncFor
-        params: rd *raft.ReadyValue
+        params: reqs []storeReq
         recv: n *Node
         results: bool
       - doc: |-
@@ -6237,6 +6289,17 @@ types:
         type: bool
     kind: struct
     name: fetchDone
+  - doc: |-
+      storeState is the storage actor's view of the log: the last index a sync
+      made durable, and whether a commit-only record waits in the log for the
+      next sync.
+    fields:
+      - name: synced
+        type: uint64
+      - name: lazy
+        type: bool
+    kind: struct
+    name: storeState
   - doc: |-
       leaderContact is what a node that does not lead knows of whether its
       leader hears it: a heartbeat only says the leader reaches this node, and

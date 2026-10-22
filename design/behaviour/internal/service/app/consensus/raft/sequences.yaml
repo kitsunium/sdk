@@ -585,7 +585,7 @@ sequences:
           do:
             - eval: pr.becomeProbe()
               to: pr.becomeProbe
-          when: pr.state == stateReplicate && len(pr.inflight) > 0 && pr.match == pr.hbMatch
+          when: pr.state == stateReplicate && len(pr.inflight) > 0 && pr.match == pr.hbMatch && m.Index < pr.inflight[0]
       - set: pr.hbMatch
         value: pr.match
       - opt:
@@ -4320,7 +4320,11 @@ sequences:
             bind: c
             eval: min(m.Commit, r.log.lastIndex())
           when: c > r.log.committed
-      - eval: "r.send(core.MessageValue{Kind: core.MsgHeartbeatResp, To: m.From, Context: m.Context, Contract: r.reportedContract()})"
+      - eval: |-
+          r.send(core.MessageValue{
+          		Kind: core.MsgHeartbeatResp, To: m.From, Context: m.Context, Contract: r.reportedContract(),
+          		Index: r.heldOfTerm(),
+          	})
         to: r.send
       - opt:
           do:
@@ -4331,6 +4335,29 @@ sequences:
                 		})
               to: r.send
           when: r.cfg.NoTable
+  - of: (*Raft).heldOfTerm
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).heldOfTerm
+        kind: self
+      - id: r.log.lastIndex
+        kind: internal
+      - id: r.log.term
+        kind: internal
+    steps:
+      - bind: last
+        eval: r.log.lastIndex()
+        to: r.log.lastIndex
+      - opt:
+          do:
+            - return: last
+          init:
+            bind: t, ok
+            eval: r.log.term(last)
+            to: r.log.term
+          when: ok && t == r.term
+      - return: "0"
   - of: (*Raft).reportedContract
     steps:
       - opt:
