@@ -1092,9 +1092,12 @@ func (a *App) onResult(r plug.JobResultValue) {
 		sched.fired(&r, next)
 	}
 	switch {
-	case errors.Is(r.Err, errOverlapped):
+	case errors.Is(r.Err, errOverlapped), r.Replaced && r.Started.IsZero():
 		l.skipped(a)
-	case !r.Skipped:
+	case r.Replaced && errors.Is(r.Err, context.Canceled):
+		// A newer fire replaced the run, which honoured its context.
+		l.ran(a, r.Started, r.Finished, nil)
+	case !r.Skipped && !r.Expired:
 		l.ran(a, r.Started, r.Finished, r.Err)
 	}
 }
@@ -1103,6 +1106,9 @@ func (a *App) onResult(r plug.JobResultValue) {
 // next, when its schedule says. The caller holds a.mu.
 func (l *loopState) counted(r *plug.JobResultValue) *time.Time {
 	l.Missed += int64(r.Missed)
+	if r.Expired {
+		l.Missed++ // a fire past its starting deadline is one more instant dropped
+	}
 	if r.Skipped {
 		l.Skipped++
 	}

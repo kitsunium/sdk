@@ -242,19 +242,28 @@ func (c *consumer) deliver(ctx context.Context, d *plug.DeliveryValue, from orig
 // to a minute —, and the consumer's loop shows the failure and counts the
 // restart, where an unsupervised consumer stayed down while its app served.
 // The consumer's goroutine carries its loop's label (dev).
-func (c *consumer) supervise(consume func(context.Context) error) (*lifecycle.Supervisor, error) {
+//
+// Past giveUp — more early ends than its Restarts within its Within — the
+// supervisor gives the consumer up: its liveness check, "supervised:<node>",
+// answers the supervisor's Check from then on (supervision.go).
+func (c *consumer) supervise(consume func(context.Context) error, giveUp lifecycle.GiveUp) (*lifecycle.Supervisor, error) {
 	a, loop := c.a, c.loop
+	var lastErr error
 	sup, err := lifecycle.NewSupervisor(loop.Name, func(ctx context.Context) error {
 		return consume(a.asLoop(ctx, loop.Name))
 	}, lifecycle.SupervisorConfig{
 		Clock:        a.clock,
 		Backoff:      loopBackoff,
 		HealthyAfter: healthyRun,
+		GiveUpAfter:  giveUp,
 		Observe: func(e lifecycle.SupervisionEvent) {
-			c.observe(&e)
+			lastErr = c.observe(&e, giveUp, lastErr)
 		},
 	})
 	if err != nil {
+		return nil, err
+	}
+	if err := a.supervise(c.node, supervisorCheck(sup)); err != nil {
 		return nil, err
 	}
 	if err := sup.Start(context.WithoutCancel(a.baseCtx)); err != nil {
@@ -266,8 +275,9 @@ func (c *consumer) supervise(consume func(context.Context) error) (*lifecycle.Su
 // observe draws what the supervisor did on the consumer's loop. It runs on
 // the supervisor's goroutine, one event at a time. A run is not one of the
 // loop's runs — each delivery is (deliver) —, so only its failure, its
-// restart and the end of the supervision show.
-func (c *consumer) observe(e *lifecycle.SupervisionEvent) {
+// restart, its giving up and the end of the supervision show. It returns
+// the last run's error, which a run's end replaces and a restart reports.
+func (c *consumer) observe(e *lifecycle.SupervisionEvent, giveUp lifecycle.GiveUp, lastErr error) error {
 	a, loop := c.a, c.loop
 	switch e.Phase {
 	case lifecycle.SupervisionRunStarted:
@@ -275,19 +285,31 @@ func (c *consumer) observe(e *lifecycle.SupervisionEvent) {
 			loop.restarted(a)
 		}
 	case lifecycle.SupervisionRunEnded:
-		if e.Err != nil && !e.Stopping {
-			a.problem(c.node, say("consumer.failed", "node", c.node, "detail", errs.PublicOf(e.Err)))
-			loop.failed(a, e.Err)
-		}
+		lastErr = e.Err
+		c.ended(e)
 	case lifecycle.SupervisionRestarting:
 		logger.Warn(context.Background(), a.log, "a consumer stopped; restarting it", logger.String("node", c.node), logger.String("after", e.Delay.String()))
 		loop.idle(a, e.At.Add(e.Delay))
 		loop.setState(a, model.LoopRestarting)
+		a.reportRestart(c.node, lastErr, e.Delay)
+	case lifecycle.SupervisionGaveUp:
+		a.gaveUp(loop, c.node, giveUp, e.Err)
 	case lifecycle.SupervisionStopped:
 		loop.setState(a, model.LoopStopped)
 	default:
 		// Every other phase changes nothing the Studio shows.
 	}
+	return lastErr
+}
+
+// ended draws a run of the consumer that ended: a failure while the app
+// still serves is a problem, and its loop shows it.
+func (c *consumer) ended(e *lifecycle.SupervisionEvent) {
+	if e.Err == nil || e.Stopping {
+		return
+	}
+	c.a.problem(c.node, say("consumer.failed", "node", c.node, "detail", errs.PublicOf(e.Err)))
+	c.loop.failed(c.a, e.Err)
 }
 
 // defaultDeliveries are a consumer's delivery options until one is given:

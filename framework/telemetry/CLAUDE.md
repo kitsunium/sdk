@@ -5,7 +5,7 @@
 ADR 0149: a port of numbers (`Emitter.Emit(*Event)`, zero allocations), `Nop`
 by default, and the `Exporter` that hands events to a tool attached on a
 private socket (`pkg/v1/proc/ipc`, ADR 0148). The framework's `App` reports every
-span, phase change, port retry and breaker change on it when `<PRODUCT>_TELEMETRY` names a socket at the start
+span, phase change, port retry, breaker change, supervised restart and giving up on it when `<PRODUCT>_TELEMETRY` names a socket at the start
 (`framework/app/telemetry.go`).
 
 ## Contents
@@ -13,7 +13,7 @@ span, phase change, port retry and breaker change on it when `<PRODUCT>_TELEMETR
 | File | Role |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
-| `telemetry.go` | `Kind` (`KindSpan`, `KindPhase`, and since issue #483 `KindRetry` — a port's call about to be tried again, its wait in `Duration` — and `KindBreaker` — a port's breaker entering the phase `Op` names, `OpClosed`, `OpOpen`, `OpHalfOpen`, appended after the phases), `Op` + `OpNames` + `OpOf`, `Outcome`, `NodeRef`, `Event`, `Nop`, `RecordSize`, `encode` / `Decode` (64 bytes, little-endian, fixed offsets); the exporter's constants and types — `Protocol` (`app-telemetry/v1` since ADR 0180 step 4, `kit-telemetry/v1` before, which the tool's collector accepts beside it for two minors), the buffer bounds, `HelloValue`, `ExporterConfig`, `Exporter`, the ring (`slot`, `ring`) and the padded `counter` — live here too, next to `Event`, as ktn-linter's co-location rule asks |
+| `telemetry.go` | `Kind` (`KindSpan`, `KindPhase`, and since issue #483 `KindRetry` — a port's call about to be tried again, its wait in `Duration` — and `KindBreaker` — a port's breaker entering the phase `Op` names, `OpClosed`, `OpOpen`, `OpHalfOpen`, appended after the phases —; since its part 4 `KindRestart` — a supervised loop restarting, `Op` `OpRun`, the failure's `Code`, the wait in `Duration`, one record a restart — and `KindGaveUp` — one given up, `Op` `OpStopped`, the product no longer live), `Op` + `OpNames` + `OpOf`, `Outcome`, `NodeRef`, `Event`, `Nop`, `RecordSize`, `encode` / `Decode` (64 bytes, little-endian, fixed offsets); the exporter's constants and types — `Protocol` (`app-telemetry/v1` since ADR 0180 step 4, `kit-telemetry/v1` before, which the tool's collector accepts beside it for two minors), the buffer bounds, `HelloValue`, `ExporterConfig`, `Exporter`, the ring (`slot`, `ring`) and the padded `counter` — live here too, next to `Event`, as ktn-linter's co-location rule asks |
 | `exporter.go` | the exporter's behaviour: `NewExporter(*ExporterConfig)`, `Ref`, `Instance`, `Emit` — the bounded ring, one CAS per event, drop and count when full —, `Start`, `Stop`, `Dropped`, `Sent`, the handshake line; a client whose close fails is logged, never returned |
 | `telemetry_interface.go` | `Emitter` (the port a product emits to), and the exporter's narrow views of its listener (`accepter`) and of a client (`writer`) |
 | `exporter_compliance.go` | `var _ Emitter = (*Exporter)(nil)` |

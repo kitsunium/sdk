@@ -211,10 +211,14 @@ func (a *App) asLoop(ctx context.Context, loop string) context.Context {
 }
 
 // scheduled wraps a scheduler job so its loop shows the run, and so that a
-// fire never overlaps a run the Studio started.
-func (a *App) scheduled(l *loopState, wake string, job func(context.Context) error) func(context.Context) error {
+// fire never overlaps another run of the job — unless its overlap policy
+// allows it ([OverlapAllow]): the scheduler then runs it beside, and its
+// loop counts both.
+func (a *App) scheduled(l *loopState, wake string, overlap OverlapPolicy, job func(context.Context) error) func(context.Context) error {
 	return func(ctx context.Context) error {
-		if !l.tryBegin(a, wake) {
+		if overlap == OverlapAllow {
+			l.begin(a, wake)
+		} else if !l.tryBegin(a, wake) {
 			return errOverlapped
 		}
 		return job(ctx)

@@ -1,5 +1,32 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      : Asserts at compile time that the numbers plug.JobEntryValue.Overlap
+      gives the overlap policies — 0 skip, 1 allow, 2 replace — are the SDK
+      scheduler's: each difference, taken both ways, overflows the unsigned type
+      and does not compile unless the two are equal.
+    grouped: true
+    items:
+      - name: _
+        type: uint8
+        value: uint8(scheduler.OverlapSkip) - 0
+      - name: _
+        type: uint8
+        value: 0 - uint8(scheduler.OverlapSkip)
+      - name: _
+        type: uint8
+        value: uint8(scheduler.OverlapAllow) - 1
+      - name: _
+        type: uint8
+        value: 1 - uint8(scheduler.OverlapAllow)
+      - name: _
+        type: uint8
+        value: uint8(scheduler.OverlapReplace) - 2
+      - name: _
+        type: uint8
+        value: 2 - uint8(scheduler.OverlapReplace)
+    name: _
 files:
   - decls:
       - sdkClock
@@ -21,6 +48,7 @@ files:
     name: jobengine.go
   - decls:
       - _
+      - _#2
     name: jobengine_compliance.go
 functions:
   - doc: |-
@@ -92,7 +120,9 @@ types:
         type: scheduler.Scheduler
     kind: struct
     methods:
-      - doc: Add registers entry with the SDK's scheduler.
+      - doc: |-
+          Add registers entry with the SDK's scheduler: its overlap policy and its
+          starting deadline the SDK's (ADR 0184).
         name: Add
         params: entry plug.JobEntryValue
         recv: r runner
@@ -115,4 +145,4 @@ vars:
       - name: _
         type: clock.Timed
         value: sdkClock{}
-    name: _
+    name: _#2

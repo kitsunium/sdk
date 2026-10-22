@@ -548,6 +548,43 @@ constants:
         type: int
         value: os.O_RDONLY | syscall.O_NONBLOCK
     name: sourceOpen
+  - doc: The knobs of a job, each a suffix of its setting's name.
+    grouped: true
+    items:
+      - name: knobOverlap
+        value: "\"overlap\""
+      - name: knobStartingDeadline
+        value: "\"starting-deadline\""
+    name: knobOverlap
+  - doc: |-
+      unknownOverlap is the number of a word that names no policy: the
+      scheduler refuses it, the job's entry with it.
+    items:
+      - name: unknownOverlap
+        type: uint8
+        value: "255"
+    name: unknownOverlap
+  - doc: The overlap policies.
+    grouped: true
+    items:
+      - doc: |-
+          OverlapSkip skips the fire, counted, the previous run going on: the
+          default, since the framework cannot know that two runs of a job may
+          run at once.
+        name: OverlapSkip
+        type: OverlapPolicy
+        value: "\"skip\""
+      - doc: OverlapAllow runs the fire beside the previous run.
+        name: OverlapAllow
+        type: OverlapPolicy
+        value: "\"allow\""
+      - doc: |-
+          OverlapReplace cancels the previous run's context and runs the fire
+          once that run returned: the newest fire wins, two runs never overlap.
+        name: OverlapReplace
+        type: OverlapPolicy
+        value: "\"replace\""
+    name: OverlapSkip
   - doc: jobsPackage is the package a program imports for its jobs.
     items:
       - name: jobsPackage
@@ -1689,6 +1726,36 @@ constants:
       - name: subsystemPublic
         value: "\"a declaration needs a subsystem this program does not import\""
     name: subsystemPublic
+  - doc: The knobs of a supervision, each a suffix of its setting's name.
+    grouped: true
+    items:
+      - name: knobGiveUpRestarts
+        value: "\"give-up-restarts\""
+      - name: knobGiveUpWithin
+        value: "\"give-up-within\""
+    name: knobGiveUpRestarts
+  - doc: |-
+      The code's restart intensity: ten early ends within ten minutes. Erlang's
+      default — one restart in five seconds — counts restarts that are
+      immediate; the framework's back off from one second to a minute, so the
+      span covers the curve: a function that fails at every start is given up
+      about five minutes after its first failure (1+2+4+8+16+32+60+60+60+60 s
+      of backoff before its eleventh), while one that fails now and then — once
+      a minute or less often — is restarted forever.
+    grouped: true
+    items:
+      - name: defaultGiveUpRestarts
+        type: int
+        value: "10"
+      - name: defaultGiveUpWithin
+        type: time.Duration
+        value: 10 * time.Minute
+    name: defaultGiveUpRestarts
+  - doc: supervisedCheck is the prefix of a supervised component's liveness check.
+    items:
+      - name: supervisedCheck
+        value: "\"supervised:\""
+    name: supervisedCheck
   - doc: localName is the data directory and memory, as a refusal names them.
     items:
       - name: localName
@@ -2275,6 +2342,7 @@ files:
       - (*consumer).deliver
       - (*consumer).supervise
       - (*consumer).observe
+      - (*consumer).ended
       - defaultDeliveries
     name: consumer.go
   - decls:
@@ -2892,6 +2960,27 @@ files:
       - (*Job).wake
       - (*Job).describe
     name: job.go
+  - decls:
+      - knobOverlap
+      - unknownOverlap
+      - OverlapPolicy
+      - OverlapSkip
+      - jobOption
+      - jobOption.jobConfigure
+      - Overlap
+      - StartingDeadline
+      - jobKnobs
+      - defaultJobKnobs
+      - (*jobKnobs).declare
+      - (*jobKnobs).overlapIn
+      - (*jobKnobs).deadlineIn
+      - OverlapPolicy.number
+      - checkOverlap
+      - checkStartingDeadline
+    name: job_policy.go
+  - decls:
+      - JobConfigurer
+    name: job_policy_interface.go
   - decls:
       - jobsPackage
       - jobsMissing
@@ -4897,6 +4986,43 @@ files:
       - (*App).missingPackages
     name: subsystem.go
   - decls:
+      - knobGiveUpRestarts
+      - defaultGiveUpRestarts
+      - supervisedCheck
+      - giveUpKnobs
+      - defaultGiveUp
+      - (*giveUpKnobs).declare
+      - (*giveUpKnobs).value
+      - giveUpText
+      - checkGiveUpWithin
+      - routineOptions
+      - (*routineOptions).info
+      - giveUpOption
+      - giveUpOption.set
+      - giveUpOption.subscriptionConfigure
+      - giveUpOption.commandConfigure
+      - giveUpOption.loopConfigure
+      - giveUpOption.routineConfigure
+      - GiveUpAfter
+      - (*App).supervise
+      - supervisorCheck
+      - (*App).gaveUp
+      - loopGaveUp
+      - restartText
+      - endsWithin
+      - (*Loop).failed
+      - (*Loop).giveUp
+      - (*Loop).gaveUpOf
+      - (*loopState).givenUp
+    name: supervision.go
+  - decls:
+      - _#6
+    name: supervision_compliance.go
+  - decls:
+      - SupervisionConfigurer
+      - RoutineConfigurer
+    name: supervision_interface.go
+  - decls:
       - Telemetry
       - DesignDigest
       - (*App).telemetrySocket
@@ -4907,6 +5033,8 @@ files:
       - (*App).reportPhase
       - (*App).reportRetry
       - (*App).reportBreaker
+      - (*App).reportRestart
+      - (*App).reportGaveUp
     name: telemetry.go
   - decls:
       - TopicService
@@ -6711,6 +6839,23 @@ functions:
     name: readSeen
     params: root openFiler, name string, seen fs.FileInfo
     results: content []byte, err error
+  - name: Overlap
+    params: p OverlapPolicy
+    results: JobConfigurer
+  - name: StartingDeadline
+    params: d time.Duration
+    results: JobConfigurer
+  - doc: |-
+      defaultJobKnobs are a job's knobs until an option says otherwise: a fire
+      that overlaps is skipped, a late one runs however late.
+    name: defaultJobKnobs
+    results: jobKnobs
+  - doc: checkOverlap refuses a policy the scheduler does not know.
+    name: checkOverlap
+    results: func(v any) phrase
+  - doc: checkStartingDeadline refuses a negative deadline.
+    name: checkStartingDeadline
+    results: func(v any) phrase
   - doc: |-
       jobsMissing is the refusal of a job in a program that does not import the
       jobs subsystem.
@@ -9050,6 +9195,44 @@ functions:
     name: sealsAtRest
     params: a *App, n node
     results: bool
+  - doc: defaultGiveUp is a supervision's intensity until an option says otherwise.
+    name: defaultGiveUp
+    results: giveUpKnobs
+  - doc: giveUpText is the intensity as the graph and the logs say it.
+    name: giveUpText
+    params: g lifecycle.GiveUp
+    results: string
+  - doc: checkGiveUpWithin refuses a negative span.
+    name: checkGiveUpWithin
+    results: func(v any) phrase
+  - name: GiveUpAfter
+    params: restarts int, within time.Duration
+    results: SupervisionConfigurer
+  - doc: |-
+      supervisorCheck is the liveness check of a component the SDK's
+      supervisor runs: its Check.
+    name: supervisorCheck
+    params: sup *lifecycle.Supervisor
+    results: func() error
+  - doc: |-
+      loopGaveUp is the error a declared loop's liveness check answers once it
+      gave up.
+    name: loopGaveUp
+    params: node string, g lifecycle.GiveUp, last error
+    results: error
+  - doc: restartText is how a supervised loop's restart reads in the graph.
+    name: restartText
+    params: what string, g lifecycle.GiveUp
+    results: string
+  - doc: |-
+      endsWithin adds the failure at to ends and drops those a span of within
+      before it no longer reaches, in place, so that ends never holds more than
+      one span's failures; without a span it keeps nothing. It is the rule of
+      the SDK's supervisor (GiveUpAfter), for a declared loop, whose failures
+      the framework counts itself: it runs the loop, and never sees it return.
+    name: endsWithin
+    params: ends []time.Time, at time.Time, within time.Duration
+    results: "[]time.Time"
   - name: Telemetry
     params: path string, gids ...int
     results: AppConfigurer
@@ -10626,9 +10809,11 @@ types:
         results: context.Context
       - doc: |-
           scheduled wraps a scheduler job so its loop shows the run, and so that a
-          fire never overlaps a run the Studio started.
+          fire never overlaps another run of the job — unless its overlap policy
+          allows it ([OverlapAllow]): the scheduler then runs it beside, and its
+          loop counts both.
         name: scheduled
-        params: l *loopState, wake string, job func(context.Context) error
+        params: l *loopState, wake string, overlap OverlapPolicy, job func(context.Context) error
         recv: a *App
         results: func(context.Context) error
       - doc: newSchedRunner registers the scheduler's own loop.
@@ -12890,6 +13075,21 @@ types:
         name: missingPackages
         recv: a *App
         results: "[]string"
+      - doc: |-
+          supervise registers the liveness check of the component node, which check
+          answers: nil while it runs, its gave-up error once it gave up. A run that
+          answers no probe — a CLI command's — registers none.
+        name: supervise
+        params: node string, check func() error
+        recv: a *App
+        results: error
+      - doc: |-
+          gaveUp records that the component node, whose loop is l, gave up: its
+          loop stops and says why, the problem and the error log name it, and the
+          telemetry port hears it. err is the gave-up error its check answers.
+        name: gaveUp
+        params: l *loopState, node string, g lifecycle.GiveUp, err error
+        recv: a *App
       - doc: telemetrySocket is where <PRODUCT>_TELEMETRY=on puts the socket.
         name: telemetrySocket
         recv: a *App
@@ -12937,6 +13137,18 @@ types:
           port: an error outcome while it is open.
         name: reportBreaker
         params: port string, to resilience.BreakerPhase
+        recv: a *App
+      - doc: |-
+          reportRestart puts a supervised loop's restart on the telemetry port: its
+          node as a reference, the failure's code, the wait before it runs again.
+        name: reportRestart
+        params: node string, err error, delay time.Duration
+        recv: a *App
+      - doc: |-
+          reportGaveUp puts a supervised loop the framework gave up on the
+          telemetry port: its node as a reference, the give-up's code.
+        name: reportGaveUp
+        params: node string, err error
         recv: a *App
       - doc: |-
           writeTurn is what a local write of the store needs before it runs: in a
@@ -13177,6 +13389,13 @@ types:
           handed out was read (TestALoopsNextRunIsItsOwnCopy).
         name: idle
         params: a *App, at time.Time
+        recv: l *loopState
+      - doc: |-
+          givenUp records that the loop's failures stopped it: its state is
+          stopped and its last error says so, in the framework's words; its
+          failures were counted as they came.
+        name: givenUp
+        params: a *App, err error
         recv: l *loopState
     name: loopState
   - doc: mountedModule is a module an app mounts, as its options resolve.
@@ -14510,16 +14729,28 @@ types:
           to a minute —, and the consumer's loop shows the failure and counts the
           restart, where an unsupervised consumer stayed down while its app served.
           The consumer's goroutine carries its loop's label (dev).
+
+          Past giveUp — more early ends than its Restarts within its Within — the
+          supervisor gives the consumer up: its liveness check, "supervised:<node>",
+          answers the supervisor's Check from then on (supervision.go).
         name: supervise
-        params: consume func(context.Context) error
+        params: consume func(context.Context) error, giveUp lifecycle.GiveUp
         recv: c *consumer
         results: "*lifecycle.Supervisor, error"
       - doc: |-
           observe draws what the supervisor did on the consumer's loop. It runs on
           the supervisor's goroutine, one event at a time. A run is not one of the
           loop's runs — each delivery is (deliver) —, so only its failure, its
-          restart and the end of the supervision show.
+          restart, its giving up and the end of the supervision show. It returns
+          the last run's error, which a run's end replaces and a restart reports.
         name: observe
+        params: e *lifecycle.SupervisionEvent, giveUp lifecycle.GiveUp, lastErr error
+        recv: c *consumer
+        results: error
+      - doc: |-
+          ended draws a run of the consumer that ended: a failure while the app
+          still serves is a problem, and its loop shows it.
+        name: ended
         params: e *lifecycle.SupervisionEvent
         recv: c *consumer
     name: consumer
@@ -14553,6 +14784,9 @@ types:
         type: "*SettingService[time.Duration]"
       - name: autoExtendFor
         type: "*SettingService[bool]"
+      - doc: giveUp is when its supervisor stops restarting it (supervision.go).
+        name: giveUp
+        type: giveUpKnobs
     kind: struct
     methods:
       - doc: declare declares the consumer n's settings in svc.
@@ -14576,6 +14810,8 @@ types:
         type: time.Duration
       - name: autoExtend
         type: bool
+      - name: giveUp
+        type: lifecycle.GiveUp
     kind: struct
     methods:
       - doc: |-
@@ -16322,6 +16558,9 @@ types:
         type: string
       - name: jobKind
         type: string
+      - doc: knobs are its overlap and starting deadline (job_policy.go).
+        name: knobs
+        type: jobKnobs
     kind: struct
     methods:
       - doc: |-
@@ -16339,7 +16578,11 @@ types:
         name: check
         recv: j *Job
         results: "[]phrase"
-      - doc: "run is the scheduler's view of the job: one root span per run."
+      - doc: |-
+          run is the scheduler's view of the job: one root span per run. A run
+          that returns its context's cancellation — a newer fire replaced it
+          ([OverlapReplace]), the app stops — honoured its context: its span is no
+          failure.
         name: run
         params: a *App
         recv: j *Job
@@ -16358,6 +16601,60 @@ types:
         recv: j *Job
         results: "[]model.Edge"
     name: Job
+  - kind: named
+    methods:
+      - doc: |-
+          number is the policy as plug.JobEntryValue numbers it, the SDK
+          scheduler's: 0 skip, 1 allow, 2 replace, and unknownOverlap for a word
+          that names none — which a setting's check refuses first, when the job
+          declared it.
+        name: number
+        recv: p OverlapPolicy
+        results: uint8
+    name: OverlapPolicy
+    underlying: string
+  - doc: jobOption is a JobConfigurer.
+    kind: named
+    methods:
+      - doc: jobConfigure sets the option on what it configures.
+        name: jobConfigure
+        params: k *jobKnobs
+        recv: f jobOption
+    name: jobOption
+    underlying: func(k *jobKnobs)
+  - doc: |-
+      jobKnobs are a job's overlap and starting deadline: the code's values, and
+      the settings that override them once its declaration declared them.
+    fields:
+      - name: overlap
+        type: string
+      - name: deadline
+        type: time.Duration
+      - name: overlapFor
+        type: "*SettingService[string]"
+      - name: deadlineFor
+        type: "*SettingService[time.Duration]"
+    kind: struct
+    methods:
+      - doc: declare declares the job n's settings in svc.
+        name: declare
+        params: svc *Service, n *nodeBase
+        recv: k *jobKnobs
+      - doc: overlapIn is the job's overlap policy in the app that runs it.
+        name: overlapIn
+        recv: k *jobKnobs
+        results: OverlapPolicy
+      - doc: deadlineIn is the job's starting deadline in the app that runs it.
+        name: deadlineIn
+        recv: k *jobKnobs
+        results: time.Duration
+    name: jobKnobs
+  - kind: named
+    name: JobConfigurer
+    underlying: |-
+      interface {
+      	jobConfigure(k *jobKnobs)
+      }
   - doc: |-
       idleScheduler is the scheduler of an app that declares no job: it holds
       no entry and waits for its end.
@@ -16824,6 +17121,29 @@ types:
         params: r *loopRun, floor time.Time, held *WakeEvent
         recv: l *Loop
         results: wake *WakeEvent, now bool
+      - doc: |-
+          failed counts a declared loop's run r that ended at ended with err, its
+          next run held until floor: one more failure within g's span — the
+          telemetry port hears the restart —, or the one past g, which gives the
+          loop up and stops it. A run that did not fail changes nothing. It reports
+          whether the loop stops.
+        name: failed
+        params: r *loopRun, g lifecycle.GiveUp, ended, floor time.Time, err error
+        recv: l *Loop
+        results: bool
+      - doc: |-
+          giveUp stops the declared loop's run r, whose runs failed past g, the
+          last with last: its liveness check answers the gave-up error from now on.
+        name: giveUp
+        params: r *loopRun, g lifecycle.GiveUp, last error
+        recv: l *Loop
+      - doc: |-
+          gaveUpOf is the declared loop's run r's liveness: its gave-up error, nil
+          while it runs.
+        name: gaveUpOf
+        params: r *loopRun
+        recv: l *Loop
+        results: error
     name: Loop
   - fields:
       - doc: |-
@@ -16882,6 +17202,9 @@ types:
         type: bool
       - name: nilTopic
         type: bool
+      - doc: giveUp is when the loop's failures stop it (supervision.go).
+        name: giveUp
+        type: giveUpKnobs
     kind: struct
     name: loopOptions
   - doc: topicWaker is a topic a loop wakes on, whatever its message type.
@@ -16923,6 +17246,16 @@ types:
         type: chan struct{}
       - name: unhook
         type: "[]func()"
+      - doc: |-
+          gaveUp is the error its liveness check answers once its failures
+          stopped it, nil before; guarded by Loop.mu.
+        name: gaveUp
+        type: error
+      - doc: |-
+          ends are its failed runs within its GiveUpAfter's span, oldest first;
+          the cycle's goroutine's alone.
+        name: ends
+        type: "[]time.Time"
     kind: struct
     name: loopRun
   - doc: |-
@@ -16953,6 +17286,8 @@ types:
         type: nodeBase
       - name: run
         type: func(context.Context) error
+      - name: opts
+        type: routineOptions
       - name: mu
         type: sync.Mutex
       - doc: "sup runs the function while the app runs: the SDK's supervisor."
@@ -16978,7 +17313,7 @@ types:
           returns the last run's error, which a run's end replaces and a restart
           reports.
         name: observe
-        params: a *App, state *loopState, e *lifecycle.SupervisionEvent, lastErr error
+        params: a *App, state *loopState, e *lifecycle.SupervisionEvent, giveUp lifecycle.GiveUp, lastErr error
         recv: r *Routine
         results: error
       - doc: stop ends the routine and waits for it until ctx ends.
@@ -21910,18 +22245,18 @@ types:
         results: "*EndpointService[Req, Resp]"
         typeParams: Req, Resp any
       - name: Every
-        params: name string, period time.Duration, fn func(context.Context) error
+        params: name string, period time.Duration, fn func(context.Context) error, opts ...JobConfigurer
         recv: s *Service
         results: "*Job"
       - name: Cron
-        params: name, expr string, fn func(context.Context) error
+        params: name, expr string, fn func(context.Context) error, opts ...JobConfigurer
         recv: s *Service
         results: "*Job"
       - doc: |-
           job declares a job of the given kind and schedule; Every and Cron call it,
           which the position it records counts on.
         name: job
-        params: name string, fn func(context.Context) error, kind, schedule string
+        params: name string, fn func(context.Context) error, kind, schedule string, opts []JobConfigurer
         recv: s *Service
         results: "*Job"
       - name: Listen
@@ -21933,7 +22268,7 @@ types:
         recv: s *Service
         results: "*Loop"
       - name: Go
-        params: name string, run func(context.Context) error
+        params: name string, run func(context.Context) error, opts ...RoutineConfigurer
         recv: s *Service
         results: "*Routine"
       - name: Mailer
@@ -24749,6 +25084,90 @@ types:
         type: subsystem
     kind: struct
     name: unlinkedDecl
+  - doc: |-
+      giveUpKnobs are a supervision's restart intensity: the code's values, and
+      the settings that override them once its declaration declared them.
+    fields:
+      - name: restarts
+        type: int
+      - name: within
+        type: time.Duration
+      - name: restartsFor
+        type: "*SettingService[int]"
+      - name: withinFor
+        type: "*SettingService[time.Duration]"
+    kind: struct
+    methods:
+      - doc: declare declares the supervision of n's settings in svc.
+        name: declare
+        params: svc *Service, n *nodeBase
+        recv: k *giveUpKnobs
+      - doc: |-
+          value is the intensity in the app that runs it — its default before —, as
+          the SDK's supervisor takes it: the zero, which never gives up, for a span
+          of zero.
+        name: value
+        recv: k *giveUpKnobs
+        results: lifecycle.GiveUp
+    name: giveUpKnobs
+  - doc: routineOptions are a hand-written loop's options.
+    fields:
+      - name: giveUp
+        type: giveUpKnobs
+    kind: struct
+    methods:
+      - doc: |-
+          info is a hand-written loop's node as the graph draws it: supervised,
+          restarted after a failure until it gives up.
+        name: info
+        recv: o *routineOptions
+        results: "*model.LoopInfo"
+    name: routineOptions
+  - doc: giveUpOption is [GiveUpAfter].
+    fields:
+      - name: restarts
+        type: int
+      - name: within
+        type: time.Duration
+    kind: struct
+    methods:
+      - doc: set puts the intensity in k.
+        name: set
+        params: k *giveUpKnobs
+        recv: g giveUpOption
+      - doc: subscriptionConfigure sets the option on what it configures.
+        name: subscriptionConfigure
+        params: o *subscriptionOptions
+        recv: g giveUpOption
+      - doc: |-
+          commandConfigure sets the option on a queued command: a command that is
+          not queued refuses it, as it refuses every delivery option.
+        name: commandConfigure
+        params: o *commandOptions
+        recv: g giveUpOption
+      - doc: loopConfigure sets the option on what it configures.
+        name: loopConfigure
+        params: o *loopOptions
+        recv: g giveUpOption
+      - doc: routineConfigure sets the option on what it configures.
+        name: routineConfigure
+        params: o *routineOptions
+        recv: g giveUpOption
+    name: giveUpOption
+  - kind: named
+    name: SupervisionConfigurer
+    underlying: |-
+      interface {
+      	DeliveryOption
+      	LoopConfigurer
+      	RoutineConfigurer
+      }
+  - kind: named
+    name: RoutineConfigurer
+    underlying: |-
+      interface {
+      	routineConfigure(o *routineOptions)
+      }
   - fields:
       - name: ""
         role: embedded
@@ -28164,6 +28583,31 @@ vars:
           	kinds: []model.NodeKind{model.KindJob}, linked: jobsLinked,
           }}
     name: subsystems
+  - doc: |-
+      : Asserts at compile time that GiveUpAfter's option configures every
+      supervised component — a subscription's, a watch's and a queued command's
+      consumer, a declared and a hand-written loop.
+    grouped: true
+    items:
+      - name: _
+        type: SupervisionConfigurer
+        value: (*giveUpOption)(nil)
+      - name: _
+        type: DeliveryOption
+        value: (*giveUpOption)(nil)
+      - name: _
+        type: SubscriptionConfigurer
+        value: (*giveUpOption)(nil)
+      - name: _
+        type: CommandConfigurer
+        value: (*giveUpOption)(nil)
+      - name: _
+        type: LoopConfigurer
+        value: (*giveUpOption)(nil)
+      - name: _
+        type: RoutineConfigurer
+        value: (*giveUpOption)(nil)
+    name: _#6
   - doc: |-
       errTransactionPanicked ends a level whose function panicked: its writes
       are undone as an error's are, and the panic continues.

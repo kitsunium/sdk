@@ -3173,6 +3173,10 @@ codes:
     const: CodeRetryIn
     hex: "0x00_04_02_58"
     package: framework/internal/app
+  - code: "0.4.2.89"
+    const: CodeGaveUp
+    hex: "0x00_04_02_59"
+    package: framework/internal/app
   - code: "0.4.3.1"
     const: CodeMisconfigured
     hex: "0x00_04_03_01"

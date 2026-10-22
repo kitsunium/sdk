@@ -101,6 +101,10 @@ sequences:
   - of: Index
     steps:
       - return: iapp.Index[T](name, keys)
+  - forward: iapp.Overlap
+    of: Overlap
+  - forward: iapp.StartingDeadline
+    of: StartingDeadline
   - forward: iapp.SocketPath
     of: SocketPath
   - forward: iapp.SocketPer
@@ -116,6 +120,8 @@ sequences:
   - of: WakeOn
     steps:
       - return: iapp.WakeOn[T](topic)
+  - forward: iapp.GiveUpAfter
+    of: GiveUpAfter
   - forward: iapp.From
     of: From
   - forward: iapp.MailAttempts

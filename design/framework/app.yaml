@@ -406,6 +406,15 @@ packages:
               letter records; any other cause is recorded under it.
             name: CodeRetryIn
             value: "0x00_04_02_58"
+          - comment: "0.4.2.89 — a supervised component failed too often and the framework gave it up"
+            doc: |-
+              CodeGaveUp marks a declared loop the framework stopped running: its
+              runs failed more often than its [GiveUpAfter] allows, and the product
+              is no longer live until the process restarts. A consumer and a
+              hand-written loop give up through the SDK's supervisor, whose own
+              code — lifecycle's SupervisorGaveUp — their liveness check answers.
+            name: CodeGaveUp
+            value: "0x00_04_02_59"
         type: errs.Code
     constants:
       - blockDoc: The environments.
@@ -546,6 +555,26 @@ packages:
         name: Moderated
         type: Mark
         value: "\"moderated\""
+      - blockDoc: The overlap policies.
+        doc: |-
+          OverlapSkip skips the fire, counted, the previous run going on: the
+          default, since the framework cannot know that two runs of a job may
+          run at once.
+        name: OverlapSkip
+        type: OverlapPolicy
+        value: "\"skip\""
+      - blockDoc: The overlap policies.
+        doc: OverlapAllow runs the fire beside the previous run.
+        name: OverlapAllow
+        type: OverlapPolicy
+        value: "\"allow\""
+      - blockDoc: The overlap policies.
+        doc: |-
+          OverlapReplace cancels the previous run's context and runs the fire
+          once that run returned: the newest fire wins, two runs never overlap.
+        name: OverlapReplace
+        type: OverlapPolicy
+        value: "\"replace\""
     doc: |-
       Package app — who may call an operation: the principal, the rules and their
       checks.
@@ -1870,6 +1899,77 @@ packages:
         typeParams:
           - constraint: any
             name: T
+      - doc: |-
+          GiveUpAfter bounds how often the framework restarts what fails — a
+          subscription's, a watch's or a queued command's consumer whose queue
+          failed, a hand-written loop ([Service.Go]) that returned, a declared
+          loop ([Service.Loop]) whose run failed or panicked —: once it failed
+          more than restarts times within within, it is not restarted again, and
+          the product is no longer live — its liveness check
+          "supervised:<node>" fails, the problem names it — so that whatever
+          watches its liveness — an orchestrator's probe — restarts the process; a
+          product nothing probes keeps running without it, and says so in its log,
+          its problems and its telemetry. It is Erlang's restart
+          intensity, the SDK's lifecycle supervisor's GiveUpAfter.
+
+          The default is 10 within 10 minutes: with the restarts' backoff — one
+          second, doubling up to a minute — a component that fails at every start
+          is given up about five minutes after its first failure, and one that
+          fails once a minute or less often is restarted forever. A within of zero
+          never gives up; a negative value stops the start.
+
+          restarts and within are the defaults of the settings
+          <service>-<kind>-<name>-give-up-restarts and -give-up-within, the kind
+          subscription, command or loop, which config/<env>.* and <PRODUCT>_<NAME>
+          override.
+
+          IFACE-OPAQUE: the option is sealed — its methods are unexported — so a
+          caller only hands it to the declaration it configures.
+        in:
+          - name: restarts
+            type: int
+          - name: within
+            type: time.Duration
+        name: GiveUpAfter
+        out:
+          - type: SupervisionConfigurer
+      - doc: |-
+          Overlap says what a fire of the job does while its previous run is still
+          going: [OverlapSkip], the default, skips it and counts it; [OverlapAllow]
+          runs it beside; [OverlapReplace] cancels the previous run's context and
+          runs it once that run returned. Any other word stops the start.
+
+          p is the default of the job's setting <service>-job-<name>-overlap, which
+          config/<env>.* and <PRODUCT>_<NAME> override.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: p
+            type: OverlapPolicy
+        name: Overlap
+        out:
+          - type: JobConfigurer
+      - doc: |-
+          StartingDeadline bounds how late a fire of the job may still start: a
+          scheduler that comes to a fire more than d after its instant — a machine
+          that slept, a run that held the slot — does not run it, and counts it
+          missed, as Kubernetes' startingDeadlineSeconds does. The default, zero, is
+          no bound: the latest fire missed runs however late, never more than one.
+          A negative d stops the start.
+
+          d is the default of the job's setting
+          <service>-job-<name>-starting-deadline, which config/<env>.* and
+          <PRODUCT>_<NAME> override.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: d
+            type: time.Duration
+        name: StartingDeadline
+        out:
+          - type: JobConfigurer
       - doc: |-
           NewLoop is a loop no service declares yet, whose runs are run:
           [Service.Loop] makes one and declares it, which is how a product gets one.
@@ -3887,6 +3987,32 @@ packages:
         interface:
           unexported: true
         name: LoopConfigurer
+      - doc: RoutineConfigurer configures a hand-written loop ([Service.Go]).
+        interface:
+          unexported: true
+        name: RoutineConfigurer
+      - doc: |-
+          SupervisionConfigurer configures what the framework restarts after a
+          failure: a subscription's, a watch's or a queued command's consumer, a
+          declared loop, a hand-written loop ([GiveUpAfter]).
+        interface:
+          embeds:
+            - DeliveryOption
+            - LoopConfigurer
+            - RoutineConfigurer
+        name: SupervisionConfigurer
+      - doc: |-
+          JobConfigurer configures a job ([Service.Every], [Service.Cron]):
+          [Overlap], [StartingDeadline].
+        interface:
+          unexported: true
+        name: JobConfigurer
+      - doc: |-
+          OverlapPolicy is what a job's fire does while the job's previous run is
+          still going: [OverlapSkip], [OverlapAllow] or [OverlapReplace]. It is
+          the word of the job's setting <service>-job-<name>-overlap.
+        name: OverlapPolicy
+        underlying: string
       - doc: |-
           Routine is a loop written by hand: a function that runs until its context
           ends. The framework starts it with the app, cancels its context on shutdown and waits
@@ -4696,7 +4822,9 @@ packages:
             variadic: true
           - doc: |-
               Every declares a job that runs every period, first one period after the
-              app starts.
+              app starts. A fire due while its previous run still goes is skipped, and a
+              late fire runs however late, unless [Overlap] and [StartingDeadline] say
+              otherwise.
             in:
               - name: name
                 type: string
@@ -4704,23 +4832,31 @@ packages:
                 type: time.Duration
               - name: fn
                 type: func(context.Context) error
+              - name: opts
+                type: JobConfigurer
             name: Every
             out:
               - type: "*Job"
             recv: pointer
+            variadic: true
           - doc: |-
               Cron declares a job that runs on a five-field POSIX cron expression, in the
-              process's local time zone.
+              process's local time zone. A fire due while its previous run still goes is
+              skipped, and a late fire runs however late, unless [Overlap] and
+              [StartingDeadline] say otherwise.
             in:
               - name: name
               - name: expr
                 type: string
               - name: fn
                 type: func(context.Context) error
+              - name: opts
+                type: JobConfigurer
             name: Cron
             out:
               - type: "*Job"
             recv: pointer
+            variadic: true
           - doc: |-
               Listen declares a listener named name speaking contract — "<name>/v<major>",
               "render/v1" — whose connections handler serves, one goroutine each.
@@ -4746,7 +4882,9 @@ packages:
               one waits a backoff — one second, doubling up to a minute — unless it is
               a [Loop.Nudge]. A deadline already past wakes the loop at once, but never
               sooner than a second after the previous run: a WakeAt that keeps answering
-              the past costs a run a second, not a spinning core.
+              the past costs a run a second, not a spinning core. A loop whose runs
+              failed more than ten times within ten minutes stops, and the product is no
+              longer live ([GiveUpAfter]).
             in:
               - name: name
                 type: string
@@ -4761,7 +4899,9 @@ packages:
             variadic: true
           - doc: |-
               Go declares a hand-written loop. run must return when ctx ends; returning
-              earlier, with or without an error, restarts it after a backoff.
+              earlier, with or without an error, restarts it after a backoff — more than
+              ten times within ten minutes, and it is not restarted again: the product
+              is no longer live ([GiveUpAfter]).
 
               Everything run does is drawn from the loop's node: a store it reads, a
               topic it publishes on. The framework has no span around it — a run lasts as long as
@@ -4771,10 +4911,13 @@ packages:
                 type: string
               - name: run
                 type: func(context.Context) error
+              - name: opts
+                type: RoutineConfigurer
             name: Go
             out:
               - type: "*Routine"
             recv: pointer
+            variadic: true
           - doc: Mailer declares outbound mail.
             in:
               - name: name
@@ -6376,6 +6519,17 @@ packages:
             - doc: Run runs the job once; its error is the result's.
               name: Run
               type: func(ctx context.Context) error
+            - doc: |-
+                Overlap is what a fire does while the job's previous run goes, as the
+                SDK scheduler's OverlapPolicy numbers it: 0 skips it — the zero —, 1
+                runs it beside, 2 replaces the run; the scheduler refuses any other.
+              name: Overlap
+              type: uint8
+            - doc: |-
+                StartingDeadline bounds how late a fire may still start; zero is no
+                bound.
+              name: StartingDeadline
+              type: time.Duration
       - doc: |-
           JobResultValue is one decision of the scheduler: a run of a job, or a fire
           it skipped.
@@ -6400,6 +6554,16 @@ packages:
               type: int
             - doc: "Skipped says the fire did not run: a run of the same job was going."
               name: Skipped
+              type: bool
+            - doc: |-
+                Expired says the fire did not run: the scheduler came to it more
+                than the job's starting deadline after its instant.
+              name: Expired
+              type: bool
+            - doc: |-
+                Replaced says a newer fire of a job that replaces its runs cancelled
+                this one — before it started when Started is zero.
+              name: Replaced
               type: bool
             - doc: Err is the run's error.
               name: Err
@@ -9469,6 +9633,26 @@ packages:
       - doc: LoopOption configures a declared loop.
         name: LoopOption
         target: iapp.LoopConfigurer
+      - doc: RoutineOption configures a hand-written loop ([Service].Go).
+        name: RoutineOption
+        target: iapp.RoutineConfigurer
+      - doc: |-
+          SupervisionOption configures what the framework restarts after a
+          failure: a subscription's, a watch's or a queued command's consumer, a
+          declared loop, a hand-written loop ([GiveUpAfter]).
+        name: SupervisionOption
+        target: iapp.SupervisionConfigurer
+      - doc: |-
+          JobOption configures a job ([Service].Every, [Service].Cron):
+          [Overlap], [StartingDeadline].
+        name: JobOption
+        target: iapp.JobConfigurer
+      - doc: |-
+          OverlapPolicy is what a job's fire does while the job's previous run is
+          still going: [OverlapSkip], [OverlapAllow] or [OverlapReplace]. It is
+          the word of the job's setting <service>-job-<name>-overlap.
+        name: OverlapPolicy
+        target: iapp.OverlapPolicy
       - doc: |-
           Routine is a loop written by hand: a function that runs until its context
           ends. The framework starts it with the app, cancels its context on shutdown and waits
@@ -10275,6 +10459,23 @@ packages:
         type: Mark
         value: "\"moderated\""
       - doc: |-
+          OverlapSkip skips the fire, counted, the previous run going on: the
+          default, since the framework cannot know that two runs of a job may
+          run at once.
+        name: OverlapSkip
+        type: OverlapPolicy
+        value: "\"skip\""
+      - doc: OverlapAllow runs the fire beside the previous run.
+        name: OverlapAllow
+        type: OverlapPolicy
+        value: "\"allow\""
+      - doc: |-
+          OverlapReplace cancels the previous run's context and runs the fire
+          once that run returned: the newest fire wins, two runs never overlap.
+        name: OverlapReplace
+        type: OverlapPolicy
+        value: "\"replace\""
+      - doc: |-
           CodeScopeUnknown reports a scope whose value could not be read at the
           start: no current user, no executable path, no configuration directory.
         name: CodeScopeUnknown
@@ -10336,6 +10537,13 @@ packages:
         name: CodeRetryIn
         type: errs.Code
         value: "0x00_04_02_58"
+      - doc: |-
+          CodeGaveUp marks a declared loop the framework stopped running: its runs
+          failed more often than its [GiveUpAfter] allows, and the product is no
+          longer live until the process restarts.
+        name: CodeGaveUp
+        type: errs.Code
+        value: "0x00_04_02_59"
     doc: |-
       Package app — who may call an operation: the principal, the rules and their
       checks.
@@ -11531,6 +11739,77 @@ packages:
         typeParams:
           - constraint: any
             name: T
+      - doc: |-
+          GiveUpAfter bounds how often the framework restarts what fails — a
+          subscription's, a watch's or a queued command's consumer whose queue
+          failed, a hand-written loop ([Service].Go) that returned, a declared
+          loop ([Service].Loop) whose run failed or panicked —: once it failed
+          more than restarts times within within, it is not restarted again, and
+          the product is no longer live — its liveness check
+          "supervised:<node>" fails, the problem names it — so that whatever
+          watches its liveness — an orchestrator's probe — restarts the process; a
+          product nothing probes keeps running without it, and says so in its log,
+          its problems and its telemetry. It is Erlang's restart
+          intensity, the SDK's lifecycle supervisor's GiveUpAfter.
+
+          The default is 10 within 10 minutes: with the restarts' backoff — one
+          second, doubling up to a minute — a component that fails at every start
+          is given up about five minutes after its first failure, and one that
+          fails once a minute or less often is restarted forever. A within of zero
+          never gives up; a negative value stops the start.
+
+          restarts and within are the defaults of the settings
+          <service>-<kind>-<name>-give-up-restarts and -give-up-within, the kind
+          subscription, command or loop, which config/<env>.* and <PRODUCT>_<NAME>
+          override.
+
+          IFACE-OPAQUE: the option is sealed — its methods are unexported — so a
+          caller only hands it to the declaration it configures.
+        in:
+          - name: restarts
+            type: int
+          - name: within
+            type: time.Duration
+        name: GiveUpAfter
+        out:
+          - type: SupervisionOption
+      - doc: |-
+          Overlap says what a fire of the job does while its previous run is still
+          going: [OverlapSkip], the default, skips it and counts it; [OverlapAllow]
+          runs it beside; [OverlapReplace] cancels the previous run's context and
+          runs it once that run returned. Any other word stops the start.
+
+          p is the default of the job's setting <service>-job-<name>-overlap, which
+          config/<env>.* and <PRODUCT>_<NAME> override.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: p
+            type: OverlapPolicy
+        name: Overlap
+        out:
+          - type: JobOption
+      - doc: |-
+          StartingDeadline bounds how late a fire of the job may still start: a
+          scheduler that comes to a fire more than d after its instant — a machine
+          that slept, a run that held the slot — does not run it, and counts it
+          missed, as Kubernetes' startingDeadlineSeconds does. The default, zero, is
+          no bound: the latest fire missed runs however late, never more than one.
+          A negative d stops the start.
+
+          d is the default of the job's setting
+          <service>-job-<name>-starting-deadline, which config/<env>.* and
+          <PRODUCT>_<NAME> override.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: d
+            type: time.Duration
+        name: StartingDeadline
+        out:
+          - type: JobOption
       - doc: |-
           From sets the sender of every message that names none.
 

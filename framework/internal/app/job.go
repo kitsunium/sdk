@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/kitsunium/sdk/framework/internal/app/plug"
@@ -24,37 +25,49 @@ type Job struct {
 	expr     string
 	schedule string
 	jobKind  string
+	// knobs are its overlap and starting deadline (job_policy.go).
+	knobs jobKnobs
 }
 
 // Every declares a job that runs every period, first one period after the
-// app starts.
+// app starts. A fire due while its previous run still goes is skipped, and a
+// late fire runs however late, unless [Overlap] and [StartingDeadline] say
+// otherwise.
 //
 //go:noinline
-func (s *Service) Every(name string, period time.Duration, fn func(context.Context) error) *Job {
-	j := s.job(name, fn, "interval", "every "+period.String())
+func (s *Service) Every(name string, period time.Duration, fn func(context.Context) error, opts ...JobConfigurer) *Job {
+	j := s.job(name, fn, "interval", "every "+period.String(), opts)
 	j.period = period
 	return j
 }
 
 // Cron declares a job that runs on a five-field POSIX cron expression, in the
-// process's local time zone.
+// process's local time zone. A fire due while its previous run still goes is
+// skipped, and a late fire runs however late, unless [Overlap] and
+// [StartingDeadline] say otherwise.
 //
 //go:noinline
-func (s *Service) Cron(name, expr string, fn func(context.Context) error) *Job {
-	j := s.job(name, fn, "cron", expr)
+func (s *Service) Cron(name, expr string, fn func(context.Context) error, opts ...JobConfigurer) *Job {
+	j := s.job(name, fn, "cron", expr, opts)
 	j.expr = expr
 	return j
 }
 
 // job declares a job of the given kind and schedule; Every and Cron call it,
 // which the position it records counts on.
-func (s *Service) job(name string, fn func(context.Context) error, kind, schedule string) *Job {
-	j := &Job{fn: fn, schedule: schedule, jobKind: kind}
+func (s *Service) job(name string, fn func(context.Context) error, kind, schedule string, opts []JobConfigurer) *Job {
+	j := &Job{fn: fn, schedule: schedule, jobKind: kind, knobs: defaultJobKnobs()}
+	for _, o := range opts {
+		if o != nil {
+			o.jobConfigure(&j.knobs)
+		}
+	}
 	j.kind, j.name = model.KindJob, name
 	j.decl = callerFrame(3) // callerFrame ← job ← Every/Cron ← the declaration
 
 	j.body = bodyOf(fn)
 	s.add(j, true)
+	j.knobs.declare(s, &j.nodeBase)
 	if fn == nil {
 		s.problem(j.decl, j.id, "job.nil", "name", name)
 	}
@@ -88,11 +101,19 @@ func (j *Job) check() []phrase {
 	return nil
 }
 
-// run is the scheduler's view of the job: one root span per run.
+// run is the scheduler's view of the job: one root span per run. A run
+// that returns its context's cancellation — a newer fire replaced it
+// ([OverlapReplace]), the app stops — honoured its context: its span is no
+// failure.
 func (j *Job) run(a *App) func(context.Context) error {
 	return func(ctx context.Context) error {
 		ctx, sp := a.begin(ctx, &spanStart{node: j.id, op: model.OpRun, name: j.name})
 		err := j.fn(ctx)
+		if ctx.Err() != nil && errors.Is(err, context.Canceled) {
+			sp.attr("cancelled", "true")
+			sp.end(nil)
+			return err
+		}
 		sp.end(err)
 		return err
 	}

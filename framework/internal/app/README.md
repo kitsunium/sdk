@@ -326,6 +326,7 @@ Package app — the ports the workflow engine reaches a store through.
 - [func Forbidden\(message string\) \*Error](<#Forbidden>)
 - [func From\(name string, addr string\) MailerConfigurer](<#From>)
 - [func Generated\(bytes int\) SecretConfigurer](<#Generated>)
+- [func GiveUpAfter\(restarts int, within time.Duration\) SupervisionConfigurer](<#GiveUpAfter>)
 - [func HalfOpenTrials\(n int\) BreakerConfigurer](<#HalfOpenTrials>)
 - [func Hedge\(delay time.Duration, inFlight int\) PortPolicyConfigurer](<#Hedge>)
 - [func HeldUntil\[T any\]\(until func\(T\) \(time.Time, bool\), reason string\) StoreConfigurer](<#HeldUntil>)
@@ -381,6 +382,7 @@ Package app — the ports the workflow engine reaches a store through.
 - [func Only\(envs ...string\) MountConfigurer](<#Only>)
 - [func OpenBackoff\(maxOpen time.Duration\) BreakerConfigurer](<#OpenBackoff>)
 - [func Optional\(\) SecretConfigurer](<#Optional>)
+- [func Overlap\(p OverlapPolicy\) JobConfigurer](<#Overlap>)
 - [func OwnStores\(\) SubscriptionConfigurer](<#OwnStores>)
 - [func Parallelism\(n int\) DeliveryOption](<#Parallelism>)
 - [func PerEnv\(name string, fallback string\) ScopeValue](<#PerEnv>)
@@ -413,6 +415,7 @@ Package app — the ports the workflow engine reaches a store through.
 - [func SocketPath\(path string\) ListenerConfigurer](<#SocketPath>)
 - [func SocketPathFor\(product string, service string, name string, scopes ...ScopeValue\) \(string, error\)](<#SocketPathFor>)
 - [func SocketPer\(scopes ...ScopeValue\) ListenerConfigurer](<#SocketPer>)
+- [func StartingDeadline\(d time.Duration\) JobConfigurer](<#StartingDeadline>)
 - [func Statements\(stmts ...string\) MigrationStep](<#Statements>)
 - [func Stop\(ctx context.Context\) bool](<#Stop>)
 - [func Studio\(on bool\) AppConfigurer](<#Studio>)
@@ -493,6 +496,7 @@ Package app — the ports the workflow engine reaches a store through.
 - [type Former](<#Former>)
 - [type Frontend](<#Frontend>)
 - [type Job](<#Job>)
+- [type JobConfigurer](<#JobConfigurer>)
 - [type Keeper](<#Keeper>)
 - [type ListenHandler](<#ListenHandler>)
 - [type Listener](<#Listener>)
@@ -524,6 +528,7 @@ Package app — the ports the workflow engine reaches a store through.
 - [type MountConfigurer](<#MountConfigurer>)
 - [type Operation](<#Operation>)
 - [type OperationOption](<#OperationOption>)
+- [type OverlapPolicy](<#OverlapPolicy>)
 - [type PasswordConfigurer](<#PasswordConfigurer>)
 - [type PasswordPolicyService](<#PasswordPolicyService>)
   - [func \(\*PasswordPolicyService\) Change\(ctx context.Context, key string, current \[\]byte, next \[\]byte\) error](<#PasswordPolicyService.Change>)
@@ -550,6 +555,7 @@ Package app — the ports the workflow engine reaches a store through.
 - [type RetryConfigurer](<#RetryConfigurer>)
 - [type RevisionEvent](<#RevisionEvent>)
 - [type Routine](<#Routine>)
+- [type RoutineConfigurer](<#RoutineConfigurer>)
 - [type ScopeValue](<#ScopeValue>)
 - [type Secret](<#Secret>)
   - [func \(\*Secret\) Open\(ctx context.Context, box \[\]byte, aad \[\]byte\) \(\[\]byte, error\)](<#Secret.Open>)
@@ -564,10 +570,10 @@ Package app — the ports the workflow engine reaches a store through.
   - [func \(\*Service\) AuthHandler\[P, D any\]\(name string, handler func\(context.Context, P\) \(UID, D, error\)\) \*AuthenticatorHandler\[P, D\]](<#Service.AuthHandler>)
   - [func \(\*Service\) CLI\(name string, doc string, fn CLIFunc, opts ...CommandLineConfigurer\) \*CLI](<#Service.CLI>)
   - [func \(\*Service\) Command\[C, R any\]\(name string, handler func\(context.Context, C\) \(R, error\), opts ...CommandConfigurer\) \*Command\[C, R\]](<#Service.Command>)
-  - [func \(\*Service\) Cron\(name string, expr string, fn func\(context.Context\) error\) \*Job](<#Service.Cron>)
+  - [func \(\*Service\) Cron\(name string, expr string, fn func\(context.Context\) error, opts ...JobConfigurer\) \*Job](<#Service.Cron>)
   - [func \(\*Service\) Endpoint\[Req, Resp any\]\(route string, handler func\(context.Context, Req\) \(Resp, error\), opts ...EndpointConfigurer\) \*EndpointService\[Req, Resp\]](<#Service.Endpoint>)
-  - [func \(\*Service\) Every\(name string, period time.Duration, fn func\(context.Context\) error\) \*Job](<#Service.Every>)
-  - [func \(\*Service\) Go\(name string, run func\(context.Context\) error\) \*Routine](<#Service.Go>)
+  - [func \(\*Service\) Every\(name string, period time.Duration, fn func\(context.Context\) error, opts ...JobConfigurer\) \*Job](<#Service.Every>)
+  - [func \(\*Service\) Go\(name string, run func\(context.Context\) error, opts ...RoutineConfigurer\) \*Routine](<#Service.Go>)
   - [func \(\*Service\) Implement\[Req, Resp any\]\(port \*PortService\[Req, Resp\], handler func\(context.Context, Req\) \(Resp, error\), opts ...EndpointConfigurer\) \*EndpointService\[Req, Resp\]](<#Service.Implement>)
   - [func \(\*Service\) Listen\(name string, contract string, handler ListenHandler, opts ...ListenerConfigurer\) \*Listener](<#Service.Listen>)
   - [func \(\*Service\) Loop\(name string, run func\(context.Context, WakeEvent\) error, opts ...LoopConfigurer\) \*Loop](<#Service.Loop>)
@@ -615,6 +621,7 @@ Package app — the ports the workflow engine reaches a store through.
   - [func \(\*StoreService\) Update\(ctx context.Context, key string, fn func\(\*T\) error\) \(T, error\)](<#StoreService.Update>)
 - [type SubscriptionConfigurer](<#SubscriptionConfigurer>)
 - [type SubscriptionWorker](<#SubscriptionWorker>)
+- [type SupervisionConfigurer](<#SupervisionConfigurer>)
 - [type TimeoutConfigurer](<#TimeoutConfigurer>)
 - [type TombstoneEvent](<#TombstoneEvent>)
 - [type TopicService](<#TopicService>)
@@ -785,6 +792,15 @@ const CodeDatabaseVersion errs.Code = 262732
 The framework's own failures carry SDK error codes in 0.4.2.\* — layer 4 is the framework's, PP 2 this package (ADR 0147 §3) — so a product keeps the whole application range 0x40–0x7F for its own codes. Match them with errs.HasCode. Their Public text is the only part that may reach a caller; none of them is a 4xx, so a caller only ever reads "internal error".
 
 Code `0.4.2.76`
+
+<a name="CodeGaveUp"></a>
+```go
+const CodeGaveUp errs.Code = 262745
+```
+
+CodeGaveUp marks a declared loop the framework stopped running: its runs failed more often than its [GiveUpAfter](#GiveUpAfter) allows, and the product is no longer live until the process restarts. A consumer and a hand-written loop give up through the SDK's supervisor, whose own code — lifecycle's SupervisorGaveUp — their liveness check answers.
+
+Code `0.4.2.89`
 
 <a name="CodeHandlerPanic"></a>
 ```go
@@ -1483,6 +1499,27 @@ const Moderated Mark = "moderated"
 
 Moderated marks content others see and a moderator may act on.
 
+<a name="OverlapAllow"></a>
+```go
+const OverlapAllow OverlapPolicy = "allow"
+```
+
+OverlapAllow runs the fire beside the previous run.
+
+<a name="OverlapReplace"></a>
+```go
+const OverlapReplace OverlapPolicy = "replace"
+```
+
+OverlapReplace cancels the previous run's context and runs the fire once that run returned: the newest fire wins, two runs never overlap.
+
+<a name="OverlapSkip"></a>
+```go
+const OverlapSkip OverlapPolicy = "skip"
+```
+
+OverlapSkip skips the fire, counted, the previous run going on: the default, since the framework cannot know that two runs of a job may run at once.
+
 <a name="Personal"></a>
 ```go
 const Personal Mark = "personal"
@@ -2102,6 +2139,21 @@ Generated makes the secret the framework's to make: versions of bytes random byt
 
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
+<a name="GiveUpAfter"></a>
+## func [GiveUpAfter](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/supervision.go>)
+
+```go
+func GiveUpAfter(restarts int, within time.Duration) SupervisionConfigurer
+```
+
+GiveUpAfter bounds how often the framework restarts what fails — a subscription's, a watch's or a queued command's consumer whose queue failed, a hand-written loop ([Service.Go](#Service.Go)) that returned, a declared loop ([Service.Loop](#Service.Loop)) whose run failed or panicked —: once it failed more than restarts times within within, it is not restarted again, and the product is no longer live — its liveness check "supervised:\<node>" fails, the problem names it — so that whatever watches its liveness — an orchestrator's probe — restarts the process; a product nothing probes keeps running without it, and says so in its log, its problems and its telemetry. It is Erlang's restart intensity, the SDK's lifecycle supervisor's GiveUpAfter.
+
+The default is 10 within 10 minutes: with the restarts' backoff — one second, doubling up to a minute — a component that fails at every start is given up about five minutes after its first failure, and one that fails once a minute or less often is restarted forever. A within of zero never gives up; a negative value stops the start.
+
+restarts and within are the defaults of the settings \<service>-\<kind>-\<name>-give-up-restarts and -give-up-within, the kind subscription, command or loop, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override.
+
+IFACE-OPAQUE: the option is sealed — its methods are unexported — so a caller only hands it to the declaration it configures.
+
 <a name="HalfOpenTrials"></a>
 ## func [HalfOpenTrials](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/port_breaker.go>)
 
@@ -2657,6 +2709,19 @@ Optional makes a provided secret one the product can do without — the key of a
 
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
+<a name="Overlap"></a>
+## func [Overlap](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/job_policy.go>)
+
+```go
+func Overlap(p OverlapPolicy) JobConfigurer
+```
+
+Overlap says what a fire of the job does while its previous run is still going: [OverlapSkip](#OverlapSkip), the default, skips it and counts it; [OverlapAllow](#OverlapAllow) runs it beside; [OverlapReplace](#OverlapReplace) cancels the previous run's context and runs it once that run returned. Any other word stops the start.
+
+p is the default of the job's setting \<service>-job-\<name>-overlap, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override.
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
+
 <a name="OwnStores"></a>
 ## func [OwnStores](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/topic.go>)
 
@@ -3022,6 +3087,19 @@ func SocketPer(scopes ...ScopeValue) ListenerConfigurer
 SocketPer names the listener's socket after the value of scopes in this process — \<runtime dir of the app>/\<service>-\<name>-\<key>.sock, the key being [ScopeKey](#ScopeKey)'s —: one daemon per user, per executable, per configuration directory. A client finds it with SocketPathIn or DialIn, which compute the same key from the same declaration.
 
 IFACE-OPAQUE: ListenerOption is sealed — its one method is unexported — so only this package makes one, and a caller only passes it to Listen.
+
+<a name="StartingDeadline"></a>
+## func [StartingDeadline](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/job_policy.go>)
+
+```go
+func StartingDeadline(d time.Duration) JobConfigurer
+```
+
+StartingDeadline bounds how late a fire of the job may still start: a scheduler that comes to a fire more than d after its instant — a machine that slept, a run that held the slot — does not run it, and counts it missed, as Kubernetes' startingDeadlineSeconds does. The default, zero, is no bound: the latest fire missed runs however late, never more than one. A negative d stops the start.
+
+d is the default of the job's setting \<service>-job-\<name>-starting-deadline, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override.
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
 <a name="Statements"></a>
 ## func [Statements](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/migration.go>)
@@ -4003,6 +4081,17 @@ Job is scheduled work: a piece of the daemon's internal loop. It runs on the SDK
 type Job struct{}
 ```
 
+<a name="JobConfigurer"></a>
+## type [JobConfigurer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/job_policy_interface.go>)
+
+JobConfigurer configures a job ([Service.Every](#Service.Every), [Service.Cron](#Service.Cron)): [Overlap](#Overlap), [StartingDeadline](#StartingDeadline).
+
+```go
+type JobConfigurer interface {
+	jobConfigure(k *jobKnobs)
+}
+```
+
 <a name="Keeper"></a>
 ## type [Keeper](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/database_interface.go>)
 
@@ -4339,6 +4428,15 @@ type OperationOption interface {
 }
 ```
 
+<a name="OverlapPolicy"></a>
+## type [OverlapPolicy](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/job_policy.go>)
+
+OverlapPolicy is what a job's fire does while the job's previous run is still going: [OverlapSkip](#OverlapSkip), [OverlapAllow](#OverlapAllow) or [OverlapReplace](#OverlapReplace). It is the word of the job's setting \<service>-job-\<name>-overlap.
+
+```go
+type OverlapPolicy string
+```
+
 <a name="PasswordConfigurer"></a>
 ## type [PasswordConfigurer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/passwords.go>)
 
@@ -4615,6 +4713,17 @@ Routine is a loop written by hand: a function that runs until its context ends. 
 type Routine struct{}
 ```
 
+<a name="RoutineConfigurer"></a>
+## type [RoutineConfigurer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/supervision_interface.go>)
+
+RoutineConfigurer configures a hand-written loop ([Service.Go](#Service.Go)).
+
+```go
+type RoutineConfigurer interface {
+	routineConfigure(o *routineOptions)
+}
+```
+
 <a name="ScopeValue"></a>
 ## type [ScopeValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/scope.go>)
 
@@ -4773,10 +4882,10 @@ var PlaceOrder = Service.Command("place-order", placeOrder).
 ### func \(Service\) [Cron](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/job.go>)
 
 ```go
-func (*Service) Cron(name string, expr string, fn func(context.Context) error) *Job
+func (*Service) Cron(name string, expr string, fn func(context.Context) error, opts ...JobConfigurer) *Job
 ```
 
-Cron declares a job that runs on a five-field POSIX cron expression, in the process's local time zone.
+Cron declares a job that runs on a five-field POSIX cron expression, in the process's local time zone. A fire due while its previous run still goes is skipped, and a late fire runs however late, unless [Overlap](#Overlap) and [StartingDeadline](#StartingDeadline) say otherwise.
 
 <a name="Service.Endpoint"></a>
 ### func \(Service\) [Endpoint](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/endpoint.go>)
@@ -4795,19 +4904,19 @@ The endpoint's name, and so its node ID, is the handler's function name.
 ### func \(Service\) [Every](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/job.go>)
 
 ```go
-func (*Service) Every(name string, period time.Duration, fn func(context.Context) error) *Job
+func (*Service) Every(name string, period time.Duration, fn func(context.Context) error, opts ...JobConfigurer) *Job
 ```
 
-Every declares a job that runs every period, first one period after the app starts.
+Every declares a job that runs every period, first one period after the app starts. A fire due while its previous run still goes is skipped, and a late fire runs however late, unless [Overlap](#Overlap) and [StartingDeadline](#StartingDeadline) say otherwise.
 
 <a name="Service.Go"></a>
 ### func \(Service\) [Go](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/loop.go>)
 
 ```go
-func (*Service) Go(name string, run func(context.Context) error) *Routine
+func (*Service) Go(name string, run func(context.Context) error, opts ...RoutineConfigurer) *Routine
 ```
 
-Go declares a hand-written loop. run must return when ctx ends; returning earlier, with or without an error, restarts it after a backoff.
+Go declares a hand-written loop. run must return when ctx ends; returning earlier, with or without an error, restarts it after a backoff — more than ten times within ten minutes, and it is not restarted again: the product is no longer live ([GiveUpAfter](#GiveUpAfter)).
 
 Everything run does is drawn from the loop's node: a store it reads, a topic it publishes on. The framework has no span around it — a run lasts as long as the app — so each of those calls starts a trace of its own.
 
@@ -4842,7 +4951,7 @@ func (*Service) Loop(name string, run func(context.Context, WakeEvent) error, op
 
 Loop declares a loop run by kit: run is called once at start, then on every wake.
 
-Runs never overlap: wakes that come while the function runs are gathered into one run after it. A run that fails or panics is counted, and the next one waits a backoff — one second, doubling up to a minute — unless it is a [Loop.Nudge](#Loop.Nudge). A deadline already past wakes the loop at once, but never sooner than a second after the previous run: a WakeAt that keeps answering the past costs a run a second, not a spinning core.
+Runs never overlap: wakes that come while the function runs are gathered into one run after it. A run that fails or panics is counted, and the next one waits a backoff — one second, doubling up to a minute — unless it is a [Loop.Nudge](#Loop.Nudge). A deadline already past wakes the loop at once, but never sooner than a second after the previous run: a WakeAt that keeps answering the past costs a run a second, not a spinning core. A loop whose runs failed more than ten times within ten minutes stops, and the product is no longer live ([GiveUpAfter](#GiveUpAfter)).
 
 <a name="Service.Mailer"></a>
 ### func \(Service\) [Mailer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/mailer.go>)
@@ -5280,6 +5389,19 @@ SubscriptionWorker consumes a topic: its handler runs once per message, at least
 
 ```go
 type SubscriptionWorker[T any] struct{}
+```
+
+<a name="SupervisionConfigurer"></a>
+## type [SupervisionConfigurer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/supervision_interface.go>)
+
+SupervisionConfigurer configures what the framework restarts after a failure: a subscription's, a watch's or a queued command's consumer, a declared loop, a hand-written loop ([GiveUpAfter](#GiveUpAfter)).
+
+```go
+type SupervisionConfigurer interface {
+	DeliveryOption
+	LoopConfigurer
+	RoutineConfigurer
+}
 ```
 
 <a name="TimeoutConfigurer"></a>

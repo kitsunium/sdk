@@ -60,6 +60,13 @@ type JobEntryValue struct {
 	Schedule JobScheduleFunc
 	// Run runs the job once; its error is the result's.
 	Run func(ctx context.Context) error
+	// Overlap is what a fire does while the job's previous run goes, as the
+	// SDK scheduler's OverlapPolicy numbers it: 0 skips it — the zero —, 1
+	// runs it beside, 2 replaces the run; the scheduler refuses any other.
+	Overlap uint8
+	// StartingDeadline bounds how late a fire may still start; zero is no
+	// bound.
+	StartingDeadline time.Duration
 }
 
 // JobResultValue is one decision of the scheduler: a run of a job, or a fire
@@ -76,6 +83,12 @@ type JobResultValue struct {
 	Missed int
 	// Skipped says the fire did not run: a run of the same job was going.
 	Skipped bool
+	// Expired says the fire did not run: the scheduler came to it more
+	// than the job's starting deadline after its instant.
+	Expired bool
+	// Replaced says a newer fire of a job that replaces its runs cancelled
+	// this one — before it started when Started is zero.
+	Replaced bool
 	// Err is the run's error.
 	Err error
 }

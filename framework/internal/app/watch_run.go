@@ -58,7 +58,7 @@ func (w *Watch) start(ctx context.Context, a *App) error {
 		Parallelism:  w.parallelism,
 		BatchSize:    1,
 	})
-	r.sup, err = c.supervise(func(ctx context.Context) error { return w.consume(ctx, r, cfg) })
+	r.sup, err = c.supervise(func(ctx context.Context) error { return w.consume(ctx, r, cfg) }, cr.giveUp)
 	if err != nil {
 		for _, unfeed := range r.unfeed {
 			unfeed()

@@ -191,3 +191,37 @@ func (a *App) reportBreaker(port string, to resilience.BreakerPhase) {
 	}
 	ex.Emit(&ev)
 }
+
+// reportRestart puts a supervised loop's restart on the telemetry port: its
+// node as a reference, the failure's code, the wait before it runs again.
+func (a *App) reportRestart(node string, err error, delay time.Duration) {
+	ex := a.tel.Load()
+	if ex == nil {
+		return
+	}
+	ev := telemetry.Event{
+		Kind: telemetry.KindRestart, Op: telemetry.OpRun, Outcome: telemetry.OutcomeError,
+		Node: ex.Ref(node), Start: a.clock.Now().UnixNano(), Duration: int64(delay),
+	}
+	if code, ok := errs.CodeOf(err); ok {
+		ev.Code = uint32(code)
+	}
+	ex.Emit(&ev)
+}
+
+// reportGaveUp puts a supervised loop the framework gave up on the
+// telemetry port: its node as a reference, the give-up's code.
+func (a *App) reportGaveUp(node string, err error) {
+	ex := a.tel.Load()
+	if ex == nil {
+		return
+	}
+	ev := telemetry.Event{
+		Kind: telemetry.KindGaveUp, Op: telemetry.OpStopped, Outcome: telemetry.OutcomeError,
+		Node: ex.Ref(node), Start: a.clock.Now().UnixNano(),
+	}
+	if code, ok := errs.CodeOf(err); ok {
+		ev.Code = uint32(code)
+	}
+	ex.Emit(&ev)
+}

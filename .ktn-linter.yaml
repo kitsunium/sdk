@@ -1033,13 +1033,17 @@ rules:
   # read by name — `if r.Expired` — in the caller's own code and in every log
   # line built from it. A bitfield would make each consumer decode bits of an
   # SDK-private layout, and Replaced is not exclusive with a run that happened,
-  # so the three are not one enum either.
+  # so the three are not one enum either. framework/internal/app/plug's
+  # JobResultValue is that value as the framework's core reads it through the
+  # jobs subsystem (issue #483 part 4), the same three facts by the same names.
   KTN-STRUCT-FLAGS:
     exclude:
       - "**/internal/service/app/health/entry.go"
       - "internal/service/app/health/entry.go"
       - "**/internal/core/app/scheduler/scheduler_result.go"
       - "internal/core/app/scheduler/scheduler_result.go"
+      - "**/framework/internal/app/plug/jobs.go"
+      - "framework/internal/app/plug/jobs.go"
       - "**/internal/service/app/health/probe_external_test.go"
       - "internal/service/app/health/probe_external_test.go"
 

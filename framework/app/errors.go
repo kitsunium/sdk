@@ -309,6 +309,11 @@ const (
 	// counted.
 	CodeRetryIn errs.Code = iapp.CodeRetryIn
 
+	// CodeGaveUp marks a declared loop the framework stopped running: its runs
+	// failed more often than its [GiveUpAfter] allows, and the product is no
+	// longer live until the process restarts.
+	CodeGaveUp errs.Code = iapp.CodeGaveUp
+
 	// The signals the framework ends one of its own steps with and catches itself — a
 	// caller never receives one —, typed when the SDK made rule 2 a gate.
 	CodeSealErased errs.Code = iapp.CodeSealErased
