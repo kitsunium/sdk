@@ -353,9 +353,13 @@ func (r *Raft) handleHeartbeatResp(pr *progress, m core.MessageValue) {
 	if pr.state == stateProbe {
 		pr.facts &^= peerProbeSent
 	}
-	if pr.state == stateReplicate && len(pr.inflight) > 0 && pr.match == pr.hbMatch {
+	if pr.state == stateReplicate && len(pr.inflight) > 0 && pr.match == pr.hbMatch && m.Index < pr.inflight[0] {
 		// An append in the window was lost: the transport may drop,
-		// and a window that never refills must not stall (R1-11).
+		// and a window that never refills must not stall (R1-11). A
+		// follower that reports holding the oldest append in flight only
+		// acknowledges it late, after its fdatasync: probing it resent,
+		// then refilled, a window it held (#560). 0 is a follower that
+		// reports nothing.
 		pr.becomeProbe()
 	}
 	pr.hbMatch = pr.match
