@@ -544,8 +544,10 @@ func (r *Raft) checkTimingContract(admin *wire.AdminValue) errs.Code {
 		return codePrecondition
 	}
 	c := admin.Contract
+	// The drift is checked as a range that NaN is outside of: a NaN drift
+	// compared false both ways and was admitted (#523).
 	if c.HeartbeatInterval <= 0 || c.ElectionTimeoutMin <= 0 || c.HeartbeatInterval*5 > c.ElectionTimeoutMin ||
-		c.ElectionTimeoutMax <= c.ElectionTimeoutMin || c.MaxClockDrift < 0 || c.MaxClockDrift >= 1 {
+		c.ElectionTimeoutMax <= c.ElectionTimeoutMin || !(c.MaxClockDrift >= 0 && c.MaxClockDrift < 1) {
 		return codeMisconfigured
 	}
 	// From the moment a new contract is proposed, the lease is dropped
@@ -601,7 +603,7 @@ func (r *Raft) nextConf(admin wire.AdminValue) (core.MembershipValue, errs.Code)
 	case wire.ChangeUpdateAddress:
 		code = r.updateAddress(&cur, &admin, idx)
 	case wire.ChangeDenyPin:
-		code = denyPin(&cur, idx)
+		code = r.denyPin(&cur, admin.Target, idx)
 	default:
 		code = codeMembershipInvalid
 	}
@@ -692,10 +694,19 @@ func (r *Raft) updateAddress(cur *core.MembershipValue, admin *wire.AdminValue, 
 	return 0
 }
 
-// denyPin withdraws the pin of the member at idx: its connections are
-// refused from then on, while it stays a member.
-func denyPin(cur *core.MembershipValue, idx int) errs.Code {
+// denyPin withdraws the pin of the member at idx, target: its connections
+// are refused once the change commits, while it stays a member. Never this
+// leader's own, and only while the voters that answer now, the target left
+// out, are a majority: the target is cut from the moment the change commits,
+// and the change itself must commit without it. Denying the pin of the one
+// live voter of three left the entry needing an acknowledgement the
+// transport no longer let through, and the cluster had no quorum until the
+// dead voter came back (#530, R2-27).
+func (r *Raft) denyPin(cur *core.MembershipValue, target core.NodeID, idx int) errs.Code {
 	if idx < 0 {
+		return codeMembershipInvalid
+	}
+	if !r.mutated(mutDenyPinUnchecked) && (target == r.id || !r.activeMajorityWithout(*cur, target)) {
 		return codeMembershipInvalid
 	}
 	clear(cur.Members[idx].SPKI[:])
@@ -705,11 +716,20 @@ func denyPin(cur *core.MembershipValue, idx int) errs.Code {
 // activeMajority is etcd's strict reconfiguration check: the voters of m
 // that answer the leader NOW form a majority of m (R2-27).
 func (r *Raft) activeMajority(m core.MembershipValue) bool {
+	return r.activeMajorityWithout(m, 0)
+}
+
+// activeMajorityWithout is activeMajority with silent counted as a voter
+// that does not answer, whatever it did last.
+func (r *Raft) activeMajorityWithout(m core.MembershipValue, silent core.NodeID) bool {
 	vs := m.Voters()
 	n := 0
 	for _, id := range vs {
 		if id == r.id {
 			n++
+			continue
+		}
+		if id == silent {
 			continue
 		}
 		if pr := r.prs[id]; pr != nil && pr.facts&peerHeard != 0 && r.now.Sub(pr.lastHeard) < r.voteWindow {
@@ -904,16 +924,24 @@ func (r *Raft) flushReads() {
 }
 
 // contractWindow is the minimum election timeout of the contract a voter
-// applied; an unknown generation counts as the shortest contract known.
+// applied, the window it refuses votes in; an unknown generation grants no
+// lease. It used to count as the shortest contract known: a leader started
+// from a snapshot cut after a contract change knows only the newer one,
+// and sized the acknowledgements of a follower still on the older, shorter
+// contract at the newer window, longer than that follower refused votes
+// for (#522).
 func (r *Raft) contractWindow(gen uint64) time.Duration {
 	if c, ok := r.contracts[gen]; ok {
 		return c.ElectionTimeoutMin
 	}
-	w := r.timing.ElectionTimeoutMin
-	for _, c := range r.contracts {
-		w = min(w, c.ElectionTimeoutMin)
+	if r.mutated(mutUnknownGenShortestKnown) {
+		w := r.timing.ElectionTimeoutMin
+		for _, c := range r.contracts {
+			w = min(w, c.ElectionTimeoutMin)
+		}
+		return w
 	}
-	return w
+	return 0
 }
 
 // confirmRounds settles the latest round a quorum of the current
@@ -959,10 +987,10 @@ func (r *Raft) roundAcks(rd *round) (int, time.Duration) {
 	minWindow := time.Duration(0)
 	for _, id := range r.voters() {
 		if g := rd.acks[id]; g != 0 {
-			n++
-			if w := r.contractWindow(g - 1); minWindow == 0 || w < minWindow {
+			if w := r.contractWindow(g - 1); n == 0 || w < minWindow {
 				minWindow = w
 			}
+			n++
 		}
 	}
 	return n, minWindow
@@ -1145,6 +1173,13 @@ func (r *Raft) ignoresInstall(idx uint64) bool {
 // committed past it, which only a node with no table can (#416).
 func (r *Raft) installEngine(meta *core.SnapshotMetaValue) {
 	if adoptsTiming(meta.Timing, r.timing) {
+		if r.ownTiming != 0 && !r.mutated(mutOwnTimingKept) {
+			// This node's own InitialTiming named a generation the cluster
+			// never confirmed to it: an acknowledgement of that generation
+			// is sized by nothing, rather than by this node's guess (#522).
+			delete(r.contracts, r.ownTiming)
+			r.ownTiming = 0
+		}
 		r.timing = meta.Timing
 		r.contracts[r.timing.Generation] = r.timing
 	}

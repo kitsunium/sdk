@@ -286,14 +286,21 @@ type Raft struct {
 	pendingReads []readReq
 	waitingReads []readReq
 
-	timing      core.TimingContractSpec
-	voteWindow  time.Duration
-	clusterVer  uint32
-	clusterGen  uint64
-	noSpace     core.AlarmID
-	engBase     EngineValue
-	engines     []engineAt
+	timing     core.TimingContractSpec
+	voteWindow time.Duration
+	clusterVer uint32
+	clusterGen uint64
+	noSpace    core.AlarmID
+	engBase    EngineValue
+	engines    []engineAt
+	// refusedLead is the leader this node refused for the rest of
+	// refusedTerm after MaxChainRefusals refusals of its chain (#508).
 	refusedLead core.NodeID
+	refusedTerm uint64
+	// ownTiming is the generation contracts holds this node's own
+	// InitialTiming under, no entry or snapshot having confirmed it yet; 0
+	// once one did (#522).
+	ownTiming   uint64
 	refusedAt   uint64
 	refusedFrom core.NodeID
 	refusals    int
@@ -323,6 +330,8 @@ func NewRaft(cfg *Config, st *StartState) *Raft {
 	node.base.Index = sm.Position.Index
 	if adoptsTiming(sm.Timing, node.timing) {
 		node.timing = sm.Timing
+	} else {
+		node.ownTiming = node.timing.Generation
 	}
 	node.clusterVer, node.clusterGen, node.noSpace = sm.ClusterVersion, sm.ClusterGeneration, sm.NoSpace
 	node.voteWindow = node.timing.ElectionTimeoutMin
@@ -368,10 +377,21 @@ func (r *Raft) Tick(now time.Time) {
 	}
 	if !now.Before(r.electionDeadline) {
 		r.resetElection(now)
-		if r.promotable() {
+		if r.promotable() && r.outsideVoteWindow(now) {
 			r.campaign(true, 0, 0)
 		}
 	}
+}
+
+// outsideVoteWindow reports whether this node may campaign at now: never
+// inside the window it refuses votes in after a leader's contact or its own
+// start. A candidacy is a vote for itself, and the window is what a lease
+// granted on this node's acknowledgement relies on: a node restarted on an
+// older, shorter contract than the one present in its log campaigned on
+// that contract's timeout, inside the lease it had acknowledged (#521).
+// TimeoutNow does not come here: the leader that sends it dropped its lease.
+func (r *Raft) outsideVoteWindow(now time.Time) bool {
+	return r.lastLeaderContact.IsZero() || now.Sub(r.lastLeaderContact) >= r.voteWindow || r.mutated(mutCampaignInVoteWindow)
 }
 
 // StorageDone reports that the write seq is durable through (index, term).
@@ -530,9 +550,15 @@ func (r *Raft) Progress(id core.NodeID) (match uint64, lastHeard time.Time, ok b
 	return pr.match, pr.lastHeard, true
 }
 
-// LeaseValid reports whether the leader's lease holds at now (D9).
+// LeaseValid reports whether the leader's lease holds at now (D9). A
+// contract in force with no drift budget in (0, 1) holds no lease at all:
+// the lease would be the whole election window, and the long-turn guard,
+// whose budget is that drift, would never drop it (#523).
 func (r *Raft) LeaseValid(now time.Time) bool {
 	if !r.cfg.Lease || r.role != core.RoleLeader || r.facts&raftLeaseDropped != 0 || r.leaseStart.IsZero() || r.log.committed < r.termStart {
+		return false
+	}
+	if d := r.timing.MaxClockDrift; !(d > 0 && d < 1) && !r.mutated(mutLeaseWithoutDrift) {
 		return false
 	}
 	return now.Sub(r.leaseStart) < r.leaseLen
@@ -670,12 +696,20 @@ func (r *Raft) randomTimeout() time.Duration {
 func (r *Raft) resetElection(now time.Time) { r.electionDeadline = now.Add(r.randomTimeout()) }
 
 // admitted is the transport's admission set: the union of the latest
-// appended configuration and the latest committed one (D4).
+// appended configuration and the latest committed one (D4). A member both
+// name keeps the committed pin while the appended one withdrew it: a
+// DenyPin cuts its target when it commits, never while its acknowledgement
+// may still be the one the entry needs (#530).
 func (r *Raft) admitted() []core.MemberValue {
 	out := slices.Clone(r.conf().Members)
+	var unpinned [32]byte
 	for _, m := range r.confAt(r.log.committed).Members {
-		if !slices.ContainsFunc(out, func(x core.MemberValue) bool { return x.ID == m.ID }) {
+		k := slices.IndexFunc(out, func(x core.MemberValue) bool { return x.ID == m.ID })
+		switch {
+		case k < 0:
 			out = append(out, m)
+		case out[k].SPKI == unpinned && !r.mutated(mutDenyPinAtAppend):
+			out[k].SPKI = m.SPKI
 		}
 	}
 	return out
@@ -725,11 +759,11 @@ func (r *Raft) noteAppended(e *core.EntryValue) {
 		m.Index = e.Position.Index
 		r.confs = append(r.confs, confAt{index: e.Position.Index, m: m})
 		r.confChanged()
-		if c, ok := foundingContract(&a); ok {
+		if c, ok := r.foundingContractOf(&a); ok {
 			// The founding contract is generation 1's: a lease counts
 			// acknowledgements of it, and it widens the vote window from
 			// its append, as every contract does (R3-07, #421).
-			r.contracts[1] = c
+			r.contracts[1], r.ownTiming = c, 0
 			if c.ElectionTimeoutMin > r.voteWindow {
 				r.voteWindow = c.ElectionTimeoutMin
 			}
@@ -918,13 +952,36 @@ func actsAtCommit(kind core.EntryKind) bool {
 // foundingContract is the generation 1 contract a founding membership
 // entry carries; ok is false for any other membership, and for a founding
 // entry with no contract.
+//
+// Bootstrap writes the contract NewNode validates, every field set. One
+// written before it did may lack its maximum or carry a drift outside
+// [0, 1): it is completed here, the same way on every node since it is a
+// function of the entry alone, with a maximum of twice the minimum and no
+// drift, which holds no lease. Run as written, a maximum of 0 refused every
+// promotion and drew every election timeout at exactly the minimum (#523).
 func foundingContract(admin *wire.AdminValue) (core.TimingContractSpec, bool) {
 	c := admin.Contract
 	if admin.Change != wire.ChangeFounding || c.HeartbeatInterval <= 0 || c.ElectionTimeoutMin <= 0 {
 		return core.TimingContractSpec{}, false
 	}
 	c.Generation = 1
+	if c.ElectionTimeoutMax <= c.ElectionTimeoutMin {
+		c.ElectionTimeoutMax = 2 * c.ElectionTimeoutMin
+	}
+	if !(c.MaxClockDrift >= 0 && c.MaxClockDrift < 1) {
+		c.MaxClockDrift = 0
+	}
 	return c, true
+}
+
+// foundingContractOf is foundingContract as this node reads it: as written,
+// with no completion, under the test mutation that reintroduces #523.
+func (r *Raft) foundingContractOf(admin *wire.AdminValue) (core.TimingContractSpec, bool) {
+	c, ok := foundingContract(admin)
+	if ok && r.mutated(mutFoundingAsWritten) {
+		c.ElectionTimeoutMax, c.MaxClockDrift = admin.Contract.ElectionTimeoutMax, admin.Contract.MaxClockDrift
+	}
+	return c, ok
 }
 
 // commitFounding makes the founding contract the one in force when its
@@ -933,12 +990,12 @@ func foundingContract(admin *wire.AdminValue) (core.TimingContractSpec, bool) {
 // two nodes started with different values would agree that generation 1
 // is in force while timing it differently (#421).
 func (r *Raft) commitFounding(admin *wire.AdminValue) {
-	c, ok := foundingContract(admin)
+	c, ok := r.foundingContractOf(admin)
 	if !ok || r.timing.Generation > 1 {
 		return
 	}
 	r.timing = c
-	r.contracts[1] = c
+	r.contracts[1], r.ownTiming = c, 0
 	if c.ElectionTimeoutMin > r.voteWindow {
 		r.voteWindow = c.ElectionTimeoutMin
 	}

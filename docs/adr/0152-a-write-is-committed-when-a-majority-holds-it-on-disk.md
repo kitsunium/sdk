@@ -603,8 +603,13 @@ vote or resurrecting an entry a later record truncated (`storage.js:35-37`,
   because a steady stream of alarms or contracts would starve the cut, and
   `SaveSnapshot` would refuse for a reason the operator cannot act on.
 - **No silent loop (R6-05, R7-19).** After N identical chain refusals at the
-  same index, a follower stops answering that leader's heartbeats for the
-  rest of the term. N defaults to 3, provisional, and zero is refused. Each
+  same index, a follower stops answering that leader's heartbeats and
+  appends for the rest of the term, and no longer takes them as contact
+  ([issue #508](https://github.com/kitsunium/sdk/issues/508)): answered,
+  each rejection counted as contact for the leader's CheckQuorum and
+  triggered an immediate resend, and the refusing followers, their timers
+  re-armed by every append, never campaigned. N defaults to 3, provisional,
+  and zero is refused. Each
   refusal is counted, and the follower reports itself unready in `Health`,
   naming the leader and the index, while it lasts.
   - **One refusing follower does not depose the leader (R7-19).** R6 said
@@ -1281,7 +1286,11 @@ accept that probability persists a counter range instead. **Before the low
 32 bits run out, the node reserves a fresh persisted range or draws a new
 epoch (R9-17).** A test exhausts the counter while the leader still retains
 an old answer, and the next submission must not match it. A leader that still holds an answer for an
-id from before the restart can never match it to a new submission. The follower tracks each submission through four states:
+id from before the restart can never match it to a new submission. A read's
+context is drawn from the same ids: a counter restarting at 1 matched a
+new incarnation's `Barrier` to the answer a leader still held for the
+previous one, at a commit index below a write acknowledged since ([issue
+#510](https://github.com/kitsunium/sdk/issues/510)). The follower tracks each submission through four states:
 
 1. **unsent** — not written to the connection;
 2. **possibly accepted** — written, no answer yet;
@@ -1333,7 +1342,10 @@ consumer's ref table carries a per-ref revision that defeats ABA (D19).
 raft-sql-poc.** Its cause is `ctx.Err()`, but the code is not
 `ctx.Err()` alone. The POC's `COMMIT_TIMEOUT` (`raft.js:850-858`) is this
 case under another name. A context that ends before the append returns
-`ctx.Err()`, as everywhere in the SDK.
+`ctx.Err()`, as everywhere in the SDK. "Before the append" is decided by a
+compare-and-swap on the proposal's stage: the caller abandons an unsent
+proposal or the event loop claims it, never both, and an abandoned proposal
+is dropped unappended ([issue #519](https://github.com/kitsunium/sdk/issues/519)).
 
 **Refused before anything is appended, from IWFS.** When the leader's pending
 proposals exceed `MaxPendingBytes`, `Propose` answers `OVERLOADED` and
@@ -1779,7 +1791,15 @@ committed before the call, and returns the applied index:
       the one the node last reported. A shorter window could let a node vote
       while a leader under the longer contract still holds its lease. A
       mutation that takes the window from the committed contract alone must
-      fail.
+      fail. **The generation a follower reports is the one its durable
+      committed entries put in force, the one a restart rebuilds, and a node
+      never campaigns inside its own refusal window** ([issue
+      #521](https://github.com/kitsunium/sdk/issues/521)): it reported the
+      generation applied in memory, and after a crash fell back to the older,
+      shorter contract and voted or campaigned inside the lease it had
+      granted. An acknowledgement of a generation the leader does not know
+      grants no lease, rather than the shortest contract it knows ([issue
+      #522](https://github.com/kitsunium/sdk/issues/522)).
     - Validation: `0 < MaxClockDrift < 1` and finite, and the cross-field rules
       of D14 are checked after defaults are applied.
 
@@ -1797,7 +1817,11 @@ committed before the call, and returns the applied index:
   The lease is used only when the leader has applied its commit index and
   that index is past the no-op of its term (`raft.js:1427-1432`).
   `MaxClockDrift` has no default: `ReadLease` with a zero drift is refused at
-  construction (ADR 0031, refuse half). Each condition has its mutation test
+  construction (ADR 0031, refuse half). `Bootstrap` completes and refuses the
+  founding contract as `NewNode` completes and refuses `InitialTiming`, so the
+  contract that rules every node is the one `NewNode` validated, and no lease
+  is held under a contract whose drift is not in (0, 1) ([issue
+  #523](https://github.com/kitsunium/sdk/issues/523)). Each condition has its mutation test
   (D15).
 
   What a lease does NOT guarantee is stated as loudly as ADR 0052 D5 states it
@@ -2733,7 +2757,11 @@ node, under the directory lock.
     and the configuration whose old voters must be fenced is the one of the
     last entry kept. The audit record is the report: `kept`, the persisted
     `commit` and how many entries past it were `adopted`, and the stamp's
-    `KeptIndex` is the last entry kept. **The owner's objective is zero loss
+    `KeptIndex` is the last entry kept. A token of the predecessor at or
+    below it is applied only when its term is the one kept at its index:
+    `WaitApplied` compares it, and answers `LINEAGE_MISMATCH` for a write
+    the adopted suffix replaced or whose term the node can no longer read
+    ([issue #509](https://github.com/kitsunium/sdk/issues/509)). **The owner's objective is zero loss
     of an acknowledged write, and the trade-off is stated:** an entry past the
     commit may also be one the old cluster never committed — its client was
     told `ENTRY_SUPERSEDED`, or never answered — and it is applied in the new
@@ -3003,7 +3031,11 @@ node, under the directory lock.
      It is an authenticated, replicated membership entry that withdraws the
      member's SPKI pin (R8-07). When it applies, every node closes that
      member's connections and refuses its handshakes and any `JOIN` under
-     that key. The slot's Vault auth and role are revoked, so the key cannot
+     that key. It is refused for the leader itself, and while the voters
+     that answer, the target left out, are not a majority, and the member
+     stays admitted until the entry commits: with one voter of three down,
+     denying the other live voter cut the acknowledgement the entry needed
+     ([issue #530](https://github.com/kitsunium/sdk/issues/530)). The slot's Vault auth and role are revoked, so the key cannot
      be renewed. **The old voter still counts in the quorum until it is
      removed**: it can no longer acknowledge, so `failure_tolerance` is 0.
   2. Add the replacement as a learner under a NEW `NodeID` and a new key,
