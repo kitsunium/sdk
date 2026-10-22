@@ -83,7 +83,6 @@ imports:
   codec: github.com/kitsunium/sdk/internal/core/data/codec
   coreflatbuffers: github.com/kitsunium/sdk/internal/core/data/codec/flatbuffers
   errs: github.com/kitsunium/sdk/internal/kernel/errs
-  slices: slices
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/service/data/codec/flatbuffers
@@ -155,12 +154,4 @@ vars:
         name: Codec
         type: codec.Codec
         value: codec.Register(&flatbuffersCodec{})
-      - doc: |-
-          : MIME table hoisted; the second alias documents the passthrough
-          : nature for consumers that resolve via Content-Type.
-        name: mimeTypes
-        value: "[]string{\"application/x-flatbuffers\", \"application/octet-stream+flatbuffers\"}"
-      - doc: ": extension table hoisted. \".bin\" is ambiguous on disk — see CLAUDE.md."
-        name: extensions
-        value: "[]string{\".fbs\", \".bin\"}"
     name: Codec

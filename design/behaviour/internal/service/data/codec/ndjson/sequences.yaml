@@ -8,27 +8,11 @@ sequences:
     steps:
       - return: "\"ndjson\""
   - of: (*ndjsonCodec).MIMETypes
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*ndjsonCodec).MIMETypes
-        kind: self
-      - id: slices
-        kind: stdlib
     steps:
-      - return: slices.Clone(mimeTypes)
-        to: slices
+      - return: "[]string{\"application/x-ndjson\", \"application/jsonl\"}"
   - of: (*ndjsonCodec).Extensions
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*ndjsonCodec).Extensions
-        kind: self
-      - id: slices
-        kind: stdlib
     steps:
-      - return: slices.Clone(extensions)
-        to: slices
+      - return: "[]string{\".ndjson\", \".jsonl\"}"
   - of: (*ndjsonCodec).Marshal
     participants:
       - id: caller

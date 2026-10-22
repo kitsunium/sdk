@@ -802,27 +802,11 @@ sequences:
     steps:
       - return: "\"yaml\""
   - of: (*yamlCodec).MIMETypes
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*yamlCodec).MIMETypes
-        kind: self
-      - id: slices
-        kind: stdlib
     steps:
-      - return: slices.Clone(mimeTypes)
-        to: slices
+      - return: "[]string{\"application/yaml\", \"text/yaml\", \"application/x-yaml\"}"
   - of: (*yamlCodec).Extensions
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*yamlCodec).Extensions
-        kind: self
-      - id: slices
-        kind: stdlib
     steps:
-      - return: slices.Clone(extensions)
-        to: slices
+      - return: "[]string{\".yaml\", \".yml\"}"
   - of: (*yamlCodec).Marshal
     participants:
       - id: caller

@@ -1209,7 +1209,6 @@ imports:
   recycler: github.com/kitsunium/sdk/internal/kernel/concur/recycler
   reflect: reflect
   scratch: github.com/kitsunium/sdk/internal/core/data/codec/scratch
-  slices: slices
   strconv: strconv
   sync: sync
 package:
@@ -1393,12 +1392,6 @@ vars:
         name: Codec
         type: codec.Codec
         value: codec.Register(&tlvCodec{})
-      - doc: ": MIME table hoisted so MIMETypes() can hand back a slices.Clone."
-        name: mimeTypes
-        value: "[]string{\"application/x-tlv\", \"application/vnd.tlv\"}"
-      - doc: ": extension table hoisted for the same reason."
-        name: extensions
-        value: "[]string{\".tlv\"}"
     name: Codec
   - doc: |-
       encodeScratch recycles the record buffers of the streaming Encoder — the

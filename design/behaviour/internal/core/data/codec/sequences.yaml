@@ -59,6 +59,8 @@ sequences:
         kind: self
       - id: plugin
         kind: package
+      - id: refuseEmptyKeys
+        kind: internal
       - id: publishCodec
         kind: internal
       - id: indexAliases
@@ -74,6 +76,10 @@ sequences:
           when: why != ""
       - bind: name
         eval: Format(c.Name())
+      - bind: mimes, exts
+        eval: c.MIMETypes(), c.Extensions()
+      - eval: refuseEmptyKeys(c, name, mimes, exts)
+        to: refuseEmptyKeys
       - opt:
           do:
             - panic: conflictText(err)
@@ -82,9 +88,9 @@ sequences:
             eval: publishCodec(name, c)
             to: publishCodec
           when: err != nil
-      - eval: indexAliases(&mimeIndex, c.MIMETypes(), name, "MIME", normalizeMIME)
+      - eval: indexAliases(&mimeIndex, mimes, name, "MIME", normalizeMIME)
         to: indexAliases
-      - eval: indexAliases(&extIndex, c.Extensions(), name, "extension", strings.ToLower)
+      - eval: indexAliases(&extIndex, exts, name, "extension", strings.ToLower)
         to: indexAliases
       - return: c
   - of: publishCodec
@@ -110,6 +116,23 @@ sequences:
           errs.Wrap(DuplicateRegistration, errs.WrapParams{},
           		errs.String("registrar", "codec.Register"), errs.String("name", string(name)))
         to: errs
+  - of: refuseEmptyKeys
+    participants:
+      - id: caller
+        kind: actor
+      - id: refuseEmptyKeys
+        kind: self
+      - id: refuseEmptyAliases
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - panic: "fmt.Sprintf(\"codec.Register [%s KEY_EMPTY]: %T declares an empty Name\", CodeKeyEmpty, c)"
+          when: name == ""
+      - eval: refuseEmptyAliases(mimes, name, "MIME type", normalizeMIME)
+        to: refuseEmptyAliases
+      - eval: refuseEmptyAliases(exts, name, "extension", strings.ToLower)
+        to: refuseEmptyAliases
   - of: indexAliases
     participants:
       - id: caller

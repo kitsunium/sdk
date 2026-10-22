@@ -8,27 +8,11 @@ sequences:
     steps:
       - return: "\"toml\""
   - of: (*tomlCodec).MIMETypes
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*tomlCodec).MIMETypes
-        kind: self
-      - id: slices
-        kind: stdlib
     steps:
-      - return: slices.Clone(mimeTypes)
-        to: slices
+      - return: "[]string{\"application/toml\"}"
   - of: (*tomlCodec).Extensions
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*tomlCodec).Extensions
-        kind: self
-      - id: slices
-        kind: stdlib
     steps:
-      - return: slices.Clone(extensions)
-        to: slices
+      - return: "[]string{\".toml\"}"
   - of: (*tomlCodec).Marshal
     participants:
       - id: caller

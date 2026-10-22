@@ -8,27 +8,11 @@ sequences:
     steps:
       - return: "\"pem\""
   - of: (*pemCodec).MIMETypes
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*pemCodec).MIMETypes
-        kind: self
-      - id: slices
-        kind: stdlib
     steps:
-      - return: slices.Clone(mimeTypes)
-        to: slices
+      - return: "[]string{\"application/x-pem-file\"}"
   - of: (*pemCodec).Extensions
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*pemCodec).Extensions
-        kind: self
-      - id: slices
-        kind: stdlib
     steps:
-      - return: slices.Clone(extensions)
-        to: slices
+      - return: "[]string{\".pem\", \".crt\", \".key\"}"
   - of: (*pemCodec).Marshal
     participants:
       - id: caller

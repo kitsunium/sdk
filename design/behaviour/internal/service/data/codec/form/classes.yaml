@@ -240,14 +240,4 @@ vars:
         name: Codec
         type: codec.Codec
         value: codec.Register(&formCodec{})
-      - doc: ": the one IANA-registered media type for this encoding."
-        name: mimeTypes
-        value: "[]string{\"application/x-www-form-urlencoded\"}"
-      - doc: |-
-          : NEITHER extension is standardised — urlencoded is a wire encoding
-          : for HTTP bodies and query strings, not a file format. They are
-          : registered only so codec.LookupExt has a deterministic answer for
-          : callers who persist a captured body to disk.
-        name: extensions
-        value: "[]string{\".form\", \".urlencoded\"}"
     name: Codec

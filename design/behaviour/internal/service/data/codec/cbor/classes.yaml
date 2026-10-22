@@ -3063,12 +3063,6 @@ vars:
         name: Codec
         type: codec.Codec
         value: codec.Register(&cborCodec{})
-      - doc: ": MIME table hoisted."
-        name: mimeTypes
-        value: "[]string{\"application/cbor\"}"
-      - doc: ": extension table hoisted for the same reason."
-        name: extensions
-        value: "[]string{\".cbor\"}"
     name: Codec
   - doc: |-
       decodeStates recycles the state of a decode pass: the plans' functions

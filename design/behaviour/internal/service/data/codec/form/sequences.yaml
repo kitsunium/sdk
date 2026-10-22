@@ -8,27 +8,11 @@ sequences:
     steps:
       - return: "\"form\""
   - of: (*formCodec).MIMETypes
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*formCodec).MIMETypes
-        kind: self
-      - id: slices
-        kind: stdlib
     steps:
-      - return: slices.Clone(mimeTypes)
-        to: slices
+      - return: "[]string{\"application/x-www-form-urlencoded\"}"
   - of: (*formCodec).Extensions
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*formCodec).Extensions
-        kind: self
-      - id: slices
-        kind: stdlib
     steps:
-      - return: slices.Clone(extensions)
-        to: slices
+      - return: "[]string{\".form\", \".urlencoded\"}"
   - of: (*formCodec).Marshal
     participants:
       - id: caller

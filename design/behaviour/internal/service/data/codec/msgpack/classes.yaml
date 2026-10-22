@@ -2436,12 +2436,6 @@ vars:
         name: Codec
         type: codec.Codec
         value: codec.Register(&msgpackCodec{})
-      - doc: ": MIME table hoisted."
-        name: mimeTypes
-        value: "[]string{\"application/msgpack\", \"application/x-msgpack\"}"
-      - doc: ": extension table hoisted for the same reason."
-        name: extensions
-        value: "[]string{\".msgpack\", \".mpk\"}"
     name: Codec
   - doc: Compile-time conformance.
     grouped: true

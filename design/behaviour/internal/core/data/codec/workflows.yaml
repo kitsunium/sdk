@@ -1,0 +1,14 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: refuseEmptyAliases
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - panic: "fmt.Sprintf(\"codec.Register [%s KEY_EMPTY]: codec %q declares an empty %s at index %d (%q)\", CodeKeyEmpty, name, kind, i, alias)"
+                when: normalize(alias) == ""
+          key: i
+          range: aliases
+          value: alias

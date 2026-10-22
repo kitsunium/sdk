@@ -218,10 +218,4 @@ vars:
         name: Codec
         type: codec.Codec
         value: codec.Register(&ndjsonCodec{})
-      - doc: ": MIME table hoisted."
-        name: mimeTypes
-        value: "[]string{\"application/x-ndjson\", \"application/jsonl\"}"
-      - doc: ": extension table hoisted for the same reason."
-        name: extensions
-        value: "[]string{\".ndjson\", \".jsonl\"}"
     name: Codec

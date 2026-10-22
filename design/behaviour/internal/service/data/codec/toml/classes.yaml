@@ -3065,12 +3065,6 @@ vars:
         name: Codec
         type: codec.Codec
         value: codec.Register(&tomlCodec{})
-      - doc: ": MIME table hoisted."
-        name: mimeTypes
-        value: "[]string{\"application/toml\"}"
-      - doc: ": extension table hoisted for the same reason."
-        name: extensions
-        value: "[]string{\".toml\"}"
     name: Codec
   - doc: The names a refusal gives the kinds of TOML value.
     items:

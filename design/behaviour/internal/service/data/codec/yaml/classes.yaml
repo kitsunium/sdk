@@ -3434,12 +3434,6 @@ vars:
         name: Codec
         type: codec.Codec
         value: codec.Register(&yamlCodec{})
-      - doc: mimeTypes is hoisted so MIMETypes does not allocate the literal per call.
-        name: mimeTypes
-        value: "[]string{\"application/yaml\", \"text/yaml\", \"application/x-yaml\"}"
-      - doc: extensions is hoisted for the same reason.
-        name: extensions
-        value: "[]string{\".yaml\", \".yml\"}"
     name: Codec
   - doc: |-
       The hook interfaces as reflected types, the types the codec treats as

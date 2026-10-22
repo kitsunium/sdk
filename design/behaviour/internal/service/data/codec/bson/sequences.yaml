@@ -8,27 +8,11 @@ sequences:
     steps:
       - return: "\"bson\""
   - of: (*bsonCodec).MIMETypes
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*bsonCodec).MIMETypes
-        kind: self
-      - id: slices
-        kind: stdlib
     steps:
-      - return: slices.Clone(mimeTypes)
-        to: slices
+      - return: "[]string{\"application/bson\"}"
   - of: (*bsonCodec).Extensions
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*bsonCodec).Extensions
-        kind: self
-      - id: slices
-        kind: stdlib
     steps:
-      - return: slices.Clone(extensions)
-        to: slices
+      - return: "[]string{\".bson\"}"
   - of: (*bsonCodec).Marshal
     participants:
       - id: caller

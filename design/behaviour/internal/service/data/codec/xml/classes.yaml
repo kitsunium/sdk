@@ -144,10 +144,4 @@ vars:
         name: Codec
         type: codec.Codec
         value: codec.Register(&xmlCodec{})
-      - doc: ": the canonical IETF-registered type is application/xml."
-        name: mimeTypes
-        value: "[]string{\"application/xml\", \"text/xml\"}"
-      - doc: ": canonical extension."
-        name: extensions
-        value: "[]string{\".xml\"}"
     name: Codec

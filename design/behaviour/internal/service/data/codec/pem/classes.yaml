@@ -73,7 +73,6 @@ imports:
   corepem: github.com/kitsunium/sdk/internal/core/data/codec/pem
   errs: github.com/kitsunium/sdk/internal/kernel/errs
   scratch: github.com/kitsunium/sdk/internal/core/data/codec/scratch
-  slices: slices
   stdpem: encoding/pem
 package:
   docFile: doc.go
@@ -133,12 +132,6 @@ vars:
         name: Codec
         type: codec.Codec
         value: codec.Register(&pemCodec{})
-      - doc: ": no official IANA type exists; the de facto value is application/x-pem-file."
-        name: mimeTypes
-        value: "[]string{\"application/x-pem-file\"}"
-      - doc: ": .pem is the canonical extension; .crt and .key are historical aliases."
-        name: extensions
-        value: "[]string{\".pem\", \".crt\", \".key\"}"
       - doc: |-
           : pemJSONBegin is the BEGIN marker for a "JSON"-typed PEM block.
           : Cached so the promotion fast-path never re-builds it.
