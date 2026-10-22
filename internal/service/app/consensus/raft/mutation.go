@@ -102,6 +102,9 @@ const (
 	// mutReadRespAnyPeer takes a read's answer from any peer of the term,
 	// not only from the leader this node asked (#510).
 	mutReadRespAnyPeer
+	// mutMembershipEveryCommit hands the driver the admission set at every
+	// commit, changed or not (#531).
+	mutMembershipEveryCommit
 )
 
 // mutated reports whether a test switched mutation m on; it is false in every

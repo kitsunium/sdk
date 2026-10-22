@@ -473,7 +473,7 @@ func (n *Node) load() (raft.StartState, error) {
 	if err != nil {
 		return raft.StartState{}, err
 	}
-	base, err := n.restoreLatest(metas, durIdx)
+	base, failed, err := n.restoreLatest(metas, durIdx)
 	if err != nil {
 		return raft.StartState{}, err
 	}
@@ -488,6 +488,12 @@ func (n *Node) load() (raft.StartState, error) {
 	}
 	snapIdx := base.Position.Index
 	if first, last, err = n.finishInstall(&base, first, last); err != nil {
+		return raft.StartState{}, err
+	}
+	// Only now that the older base is known to continue the log: unpublished
+	// before, a newer snapshot the log had been compacted to was gone when
+	// the fallback then failed with a gap, and every start failed after.
+	if err := n.unpublishNewer(failed); err != nil {
 		return raft.StartState{}, err
 	}
 	ents, err := n.readTail(first, last, snapIdx)
@@ -529,19 +535,50 @@ func (n *Node) durableIndex() (uint64, error) {
 // base. Each one discarded is logged with its reason: a node that starts
 // with no table otherwise says nothing of why (#512). One of a version or
 // format this build does not know refuses the start instead: unknown means
-// stop, never skip (D18, #513).
-func (n *Node) restoreLatest(metas []coreconsensus.SnapshotMetaValue, durIdx uint64) (coreconsensus.SnapshotMetaValue, error) {
+// stop, never skip (D18, #513). failed is the newer snapshots that did not
+// restore for a reason of their own, which load unpublishes once the base
+// is known to continue the log.
+func (n *Node) restoreLatest(metas []coreconsensus.SnapshotMetaValue, durIdx uint64) (base coreconsensus.SnapshotMetaValue, failed []coreconsensus.SnapshotMetaValue, err error) {
 	for _, m := range metas {
-		err := n.restoreFrom(m, durIdx)
-		if err == nil {
-			return m, nil
+		rerr := n.restoreFrom(m, durIdx)
+		if rerr == nil {
+			return m, failed, nil
 		}
-		if errs.HasCode(err, coreconsensus.CodeVersionUnsupported) {
-			return coreconsensus.SnapshotMetaValue{}, err
+		if errs.HasCode(rerr, coreconsensus.CodeVersionUnsupported) {
+			return coreconsensus.SnapshotMetaValue{}, nil, rerr
 		}
-		n.obs.warn("consensus: a snapshot was not restored", lstr("id", m.ID), lstr("error", err.Error()))
+		n.obs.warn("consensus: a snapshot was not restored", lstr("id", m.ID), lstr("error", rerr.Error()))
+		if ownFailure(rerr) {
+			failed = append(failed, m)
+		}
 	}
-	return coreconsensus.SnapshotMetaValue{}, nil
+	return coreconsensus.SnapshotMetaValue{}, nil, nil
+}
+
+// ownFailure reports whether a snapshot failed to restore for a reason of
+// its own — its checksums, or the machine refusing its state — rather than
+// this node's disk or a limit its configuration sets now: those may pass at
+// the next start, and the snapshot must still be there then.
+func ownFailure(err error) bool {
+	return !errs.HasCode(err, coreconsensus.CodeStorageFailed) && !errs.HasCode(err, coreconsensus.CodeSnapshotTooLarge)
+}
+
+// unpublishNewer removes the snapshots newer than the one restored that
+// failed to restore for a reason of their own. Left published, a node that
+// started with a table from its own older cut answered the leader's offer of
+// such an id as held, was probed past it, refused the append, and was
+// offered it again, for as long as it stayed the leader's newest (#528).
+// When none restores they all stay: a node with no table reads its members
+// from them (#526). A removal that fails is the disk's, and the start fails
+// with it (D4).
+func (n *Node) unpublishNewer(failed []coreconsensus.SnapshotMetaValue) error {
+	for _, m := range failed {
+		if err := n.cfg.Snapshots.Remove(m.ID); err != nil {
+			return storageFailed("unpublish a snapshot that did not restore", err)
+		}
+		n.obs.warn("consensus: a snapshot that did not restore was unpublished", lstr("id", m.ID))
+	}
+	return nil
 }
 
 // baseOrNoTable keeps a restored base, or starts the node with no table

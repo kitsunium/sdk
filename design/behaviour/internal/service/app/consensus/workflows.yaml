@@ -247,33 +247,6 @@ workflows:
           range: ps
           value: p
       - return: ps[:k]
-  - of: alignedOffset
-    steps:
-      - var:
-          name: "off"
-          type: int64
-      - loop:
-          cond: int64(len(prefix))-off >= chunkHeaderLen
-          do:
-            - bind: "n"
-              eval: int64(binary.LittleEndian.Uint32(prefix[off:]))
-            - opt:
-                do:
-                  - break: true
-                when: n == 0
-            - bind: end
-              eval: off + chunkHeaderLen + n
-            - opt:
-                do:
-                  - break: true
-                when: end > int64(len(prefix))
-            - opt:
-                do:
-                  - break: true
-                when: crc32.Checksum(prefix[off+chunkHeaderLen:end], castagnoli) != binary.LittleEndian.Uint32(prefix[off+8:])
-            - set: "off"
-              value: end
-      - return: "off"
   - of: snapshotLimit
     steps:
       - bind: limit

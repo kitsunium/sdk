@@ -79,3 +79,7 @@ under coverage before touching `shard_count`.
   `mutFoundingAsWritten`).
 - Take a read's answer from any peer but the leader this node asked (#510,
   `mutReadRespAnyPeer`).
+- Hand the driver the admission set at a commit that did not change it:
+  every node paid a SetMembership, an address resolution and an Info line
+  per committed entry (#531, `mutMembershipEveryCommit`,
+  `checkMembershipPublishedOnChange`).

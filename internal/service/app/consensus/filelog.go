@@ -114,20 +114,33 @@ func sealRecord(b []byte) {
 	binary.LittleEndian.PutUint32(b[4:], crc32.Checksum(b[recHeader:recHeader+int(n)], castagnoli))
 }
 
-// parseRecord decodes the record at b[0:]; ok is false for a hole: a short
-// read, a zero header, a length out of range or a crc that fails.
-func parseRecord(b []byte) (rec record, ok bool) {
+// sealedBody is the body of the record at b[0:] when its length is in range
+// and its crc holds, whatever version it carries; nil otherwise.
+func sealedBody(b []byte) []byte {
 	if len(b) < recHeader+recFixed {
-		return rec, false
+		return nil
 	}
 	n := int(binary.LittleEndian.Uint32(b))
 	if n < recFixed || recHeader+n > len(b) {
-		return rec, false
+		return nil
 	}
 	body := b[recHeader : recHeader+n]
-	if crc32.Checksum(body, castagnoli) != binary.LittleEndian.Uint32(b[4:]) || body[0] != recVersion {
+	if crc32.Checksum(body, castagnoli) != binary.LittleEndian.Uint32(b[4:]) {
+		return nil
+	}
+	return body
+}
+
+// parseRecord decodes the record at b[0:]; ok is false for a hole: a short
+// read, a zero header, a length out of range or a crc that fails — and for
+// a sealed record of a version this build does not write, which recovery
+// tells apart with unknownVersionAt before it calls anything a hole (#511).
+func parseRecord(b []byte) (rec record, ok bool) {
+	body := sealedBody(b)
+	if body == nil || body[0] != recVersion {
 		return rec, false
 	}
+	n := len(body)
 	rec = record{
 		kind: body[1], end: body[2] != 0,
 		batch: binary.LittleEndian.Uint64(body[4:]), term: binary.LittleEndian.Uint64(body[12:]),
@@ -136,6 +149,24 @@ func parseRecord(b []byte) (rec record, ok bool) {
 		chain: binary.LittleEndian.Uint32(body[40:]), data: body[recFixed:], length: align8(recHeader + n),
 	}
 	return rec, true
+}
+
+// unknownVersionAt looks, at every record boundary from off to the end of
+// b, for a record whose crc holds but whose version this build does not
+// write. Such a record is no damage: a newer build wrote it, synced, and
+// may have acknowledged it — an entry, a vote. Taken for a hole, recovery
+// zeroed it as a torn tail after a rollback, and the node forgot what it
+// had acknowledged and the vote it had cast (#511). D18: unknown means
+// stop, never skip. It returns VERSION_UNSUPPORTED naming the first one, or
+// nil.
+func unknownVersionAt(b []byte, seg uint64, off int64) error {
+	for o := int(off) &^ (recAlign - 1); o+recHeader+recFixed <= len(b); o += recAlign {
+		if body := sealedBody(b[o:]); body != nil && body[0] != recVersion {
+			return origin(coreconsensus.VersionUnsupported, errs.String("segment", segName(seg)),
+				errs.Int64("offset", int64(o)), errs.Int("record_version", int(body[0])))
+		}
+	}
+	return nil
 }
 
 // checkpoint is the record that opens every segment: the hard state, the
@@ -325,6 +356,9 @@ func (l *fileLog) recover() error {
 	if err := l.checkBatchSequence(segs); err != nil {
 		return err
 	}
+	if err := checkLayouts(segs); err != nil {
+		return err
+	}
 	last := segs[len(segs)-1]
 	if err := l.trimTornTail(last); err != nil {
 		return err
@@ -418,6 +452,11 @@ func (l *fileLog) scanSegment(n uint64) (*scanned, error) {
 	for off < limit {
 		r, ok := parseRecord(b[off:limit])
 		if !ok {
+			// A record a newer build wrote, here or past the hole, stops
+			// the open before anything is classified or changed (#511).
+			if err := unknownVersionAt(b[:limit], n, off); err != nil {
+				return nil, err
+			}
 			s.hole = off
 			break
 		}
@@ -524,8 +563,10 @@ func (l *fileLog) applyCheckpoint(first bool, seg uint64, cp *checkpoint) error 
 }
 
 // applyRecord applies one record of segment seg to the log being rebuilt.
-// Only an entry out of sequence is refused; a record kind recovery does not
-// rebuild from changes nothing.
+// An entry out of sequence is quarantined; a record kind this build does
+// not know, or a hard state of another length, is a newer layout and stops
+// the open VERSION_UNSUPPORTED — skipped, it lost what a newer build wrote
+// there (D18, #511). A seal changes nothing.
 func (l *fileLog) applyRecord(seg uint64, r *record) error {
 	switch r.kind {
 	case recEntry:
@@ -536,15 +577,64 @@ func (l *fileLog) applyRecord(seg uint64, r *record) error {
 	case recTruncate:
 		l.applyTruncate(r.index)
 	case recHardState:
-		if len(r.data) == hardStateLen {
-			l.hs = decodeHS(r.data)
-		}
+		return l.applyHardState(seg, r)
 	case recCommit:
 		l.hs.Commit = max(l.hs.Commit, r.index)
 	case recCompact:
 		l.applyCompactRecord(r.index, r.term)
+	case recSeal:
+	default:
+		return unknownLayout(seg, r, "record_kind", int(r.kind))
 	}
 	return nil
+}
+
+// checkLayouts refuses, before any tail is classified or trimmed, a record
+// of a kind this build does not know or a hard state of another length:
+// left to replay, one in an unfinished last batch was trimmed with the tear
+// and zeroed, and the open succeeded (D18, #511).
+func checkLayouts(segs []*scanned) error {
+	for _, s := range segs {
+		for i := range s.recs {
+			if err := knownLayout(s.n, &s.recs[i]); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// knownLayout is nil for a record of a kind this build reads, with the
+// payload length that kind has where it has one.
+func knownLayout(seg uint64, r *record) error {
+	switch r.kind {
+	case recEntry, recTruncate, recCheckpt, recSeal, recCompact, recCommit:
+		return nil
+	case recHardState:
+		if len(r.data) != hardStateLen {
+			return unknownLayout(seg, r, "hard_state_bytes", len(r.data))
+		}
+		return nil
+	default:
+		return unknownLayout(seg, r, "record_kind", int(r.kind))
+	}
+}
+
+// applyHardState applies a hard-state record; one of another length is a
+// newer layout (#511).
+func (l *fileLog) applyHardState(seg uint64, r *record) error {
+	if len(r.data) != hardStateLen {
+		return unknownLayout(seg, r, "hard_state_bytes", len(r.data))
+	}
+	l.hs = decodeHS(r.data)
+	return nil
+}
+
+// unknownLayout is the VERSION_UNSUPPORTED of record r of segment seg, a
+// layout this build does not read: field names what it is, v its value.
+func unknownLayout(seg uint64, r *record, field string, v int) error {
+	return origin(coreconsensus.VersionUnsupported, errs.String("segment", segName(seg)),
+		errs.Int64("offset", r.off), errs.Int(field, v))
 }
 
 // applyCompactRecord applies a compact record where it stands, as

@@ -2,6 +2,7 @@ package consensus
 
 import (
 	"context"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -59,10 +60,21 @@ const (
 	mReloadFailures   = "consensus_tls_reload_failures_total"
 )
 
-// latencyBuckets are the histogram bounds, in seconds, of every latency
-// D13 records: half a millisecond to five seconds, dense below 100 ms where
-// a healthy commit lands, so a regression is visible before it is an outage.
-var latencyBuckets = []float64{0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5}
+// departedCertExpiry is what consensus_tls_peer_cert_expiry_seconds reads
+// for a peer that left: a series cannot be deleted, and its last value,
+// left to stand, crossed the alert's threshold (#532). It never expires.
+const departedCertExpiry float64 = math.MaxFloat64
+
+var (
+	// peerGauges are the leader's per-peer series, reset once a peer is no
+	// longer published (#532).
+	peerGauges = []string{mPeerMatchLag, mPeerInflight, mPeerUnreachable, mPeerLastContact}
+	// latencyBuckets are the histogram bounds, in seconds, of every latency
+	// D13 records: half a millisecond to five seconds, dense below 100 ms
+	// where a healthy commit lands, so a regression is visible before it is
+	// an outage.
+	latencyBuckets = []float64{0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5}
+)
 
 // obs holds a node's instruments. Every method is safe on a nil Meter,
 // Tracer or Logger: observability is optional and never changes a decision.
@@ -79,6 +91,10 @@ type obs struct {
 
 	lastPeers time.Time
 	lastRes   time.Time
+	// peersPub and certsPub are the peers whose series the last pass
+	// published: a series is never deleted, so a peer that left is reset
+	// rather than left at its last value (#532).
+	peersPub, certsPub map[coreconsensus.NodeID]bool
 	// seenTails and seenReloads are the running totals already added to
 	// their counters.
 	seenTails, seenReloads int64
@@ -302,22 +318,48 @@ func (n *Node) observePeers() {
 	o.setGauge(mFailureTolerance, float64(n.r.FailureTolerance(now)))
 	last := n.r.Status().Last
 	window := n.r.Status().Timing.ElectionTimeoutMin
+	seen := map[coreconsensus.NodeID]bool{}
 	for _, p := range n.r.PeerStats() {
-		peer := coreotel.String("peer", p.ID.String())
-		o.setGauge(mPeerMatchLag, float64(last-min(last, p.Match)), peer)
-		o.setGauge(mPeerInflight, float64(p.Inflight), peer)
-		u := 0.0
-		if !p.Flags.Has(raft.StatHeard) || now.Sub(p.LastHeard) >= window {
-			u = 1
+		seen[p.ID] = true
+		n.observePeer(&p, now, last, window)
+	}
+	o.resetDeparted(seen)
+}
+
+// observePeer publishes one peer's gauges.
+func (n *Node) observePeer(p *raft.PeerStatValue, now time.Time, last uint64, window time.Duration) {
+	peer := coreotel.String("peer", p.ID.String())
+	n.obs.setGauge(mPeerMatchLag, float64(last-min(last, p.Match)), peer)
+	n.obs.setGauge(mPeerInflight, float64(p.Inflight), peer)
+	u := 0.0
+	if !p.Flags.Has(raft.StatHeard) || now.Sub(p.LastHeard) >= window {
+		u = 1
+	}
+	if at, ok := n.unreachableAt[p.ID]; ok && at.After(p.LastHeard) {
+		u = 1
+	}
+	n.obs.setGauge(mPeerUnreachable, u, peer)
+	if p.Flags.Has(raft.StatHeard) {
+		n.obs.setGauge(mPeerLastContact, now.Sub(p.LastHeard).Seconds(), peer)
+	}
+}
+
+// resetDeparted resets once the gauges of every peer the last pass
+// published and this one, whose peers are seen, did not: a peer that left
+// the membership, or a node no longer leading, publishes nothing more of
+// it, its last value stood for good, and "peer unreachable" alerted for a
+// member that no longer existed (#532). Its series reads as a quiet peer.
+func (o *obs) resetDeparted(seen map[coreconsensus.NodeID]bool) {
+	for id := range o.peersPub {
+		if seen[id] {
+			continue
 		}
-		if at, ok := n.unreachableAt[p.ID]; ok && at.After(p.LastHeard) {
-			u = 1
-		}
-		o.setGauge(mPeerUnreachable, u, peer)
-		if p.Flags.Has(raft.StatHeard) {
-			o.setGauge(mPeerLastContact, now.Sub(p.LastHeard).Seconds(), peer)
+		peer := coreotel.String("peer", id.String())
+		for _, name := range peerGauges {
+			o.setGauge(name, 0, peer)
 		}
 	}
+	o.peersPub = seen
 }
 
 // observeResources publishes the log, filesystem and certificate gauges and
@@ -352,9 +394,17 @@ func (n *Node) observeResources() {
 		if e := ct.CertExpiry(); !e.IsZero() {
 			o.setGauge(mCertExpiry, e.Sub(now).Seconds())
 		}
+		seen := map[coreconsensus.NodeID]bool{}
 		for id, e := range ct.PeerCertExpiry() {
+			seen[id] = true
 			o.setGauge(mPeerCertExpiry, e.Sub(now).Seconds(), coreotel.String("peer", id.String()))
 		}
+		for id := range o.certsPub {
+			if !seen[id] {
+				o.setGauge(mPeerCertExpiry, departedCertExpiry, coreotel.String("peer", id.String()))
+			}
+		}
+		o.certsPub = seen
 		o.addTo(mReloadFailures, &o.seenReloads, int64(ct.ReloadFailures()))
 	}
 }

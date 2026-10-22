@@ -22,12 +22,16 @@ type fileSnapshots struct {
 	dir  string
 	mu   sync.Mutex
 	pins map[string]int
+	// writing counts the sinks open on each id's spool: a spool a sink
+	// still writes to is never swept from under it.
+	writing map[string]int
 }
 
 // newFileSnapshots opens the snapshot directory dir, creating it private
 // to the owner, and removes every .snap that has no .meta: a crash between
 // a snapshot's rename and its .meta leaves one, and it is neither a snapshot
-// nor resumable. A directory that cannot be created, listed or cleaned is a
+// nor resumable. Of the receive spools only the newest stays, the one a
+// resume may still continue (#527). A directory that cannot be created, listed or cleaned is a
 // STORAGE_FAILED, so a store never opens over a state it could not read.
 func newFileSnapshots(dir string) (*fileSnapshots, error) {
 	if err := mkdirDurable(dir); err != nil {
@@ -50,6 +54,10 @@ func newFileSnapshots(dir string) (*fileSnapshots, error) {
 			}
 		}
 	}
+	s := &fileSnapshots{dir: dir, pins: map[string]int{}, writing: map[string]int{}}
+	if err := s.sweepSpools(newestSpool(ents)); err != nil {
+		return nil, err
+	}
 	// A process killed after a publication's rename and before its
 	// directory sync leaves a snapshot the listing reads and the disk may
 	// not hold: the directory is made durable before anything is restored
@@ -57,7 +65,60 @@ func newFileSnapshots(dir string) (*fileSnapshots, error) {
 	if err := syncDir(dir); err != nil {
 		return nil, storageFailed("sync snapshots at open", err)
 	}
-	return &fileSnapshots{dir: dir, pins: map[string]int{}}, nil
+	return s, nil
+}
+
+// newestSpool is the id of the newest receive spool among ents, "" when
+// there is none. Snapshot ids are fixed-width (index, term), so the newest
+// sorts last.
+func newestSpool(ents []os.DirEntry) string {
+	newest := ""
+	for _, e := range ents {
+		if id, ok := strings.CutSuffix(e.Name(), ".spool"); ok && id > newest {
+			newest = id
+		}
+	}
+	return newest
+}
+
+// sweepSpools removes every receive spool but keep's and those a sink still
+// writes to. A transfer cut mid-stream keeps its spool so that the same
+// offer resumes; once another id is accepted, or the directory reopened, no
+// offer of the old id is awaited any more, and its spool — up to one whole
+// snapshot — stayed on the data disk for good, one more at every such cut
+// (#527).
+func (s *fileSnapshots) sweepSpools(keep string) error {
+	ents, err := os.ReadDir(s.dir)
+	if err != nil {
+		return storageFailed("list snapshots", err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	orphans := s.orphanSpools(ents, keep)
+	for _, name := range orphans {
+		if err := os.Remove(filepath.Join(s.dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return storageFailed("remove orphan spool", err)
+		}
+	}
+	if len(orphans) == 0 {
+		return nil
+	}
+	if err := syncDir(s.dir); err != nil {
+		return storageFailed("remove orphan spool", err)
+	}
+	return nil
+}
+
+// orphanSpools is the names of the spools among ents that are neither
+// keep's nor written to by a sink. The caller holds s.mu.
+func (s *fileSnapshots) orphanSpools(ents []os.DirEntry, keep string) []string {
+	var out []string
+	for _, e := range ents {
+		if id, ok := strings.CutSuffix(e.Name(), ".spool"); ok && id != keep && s.writing[id] == 0 {
+			out = append(out, e.Name())
+		}
+	}
+	return out
 }
 
 // validID reports whether id may name a snapshot's files: non-empty,
@@ -72,33 +133,74 @@ type fileSink struct {
 	id   string
 	f    *os.File
 	meta coreconsensus.SnapshotMetaValue
+	done sync.Once
 }
 
 // Create implements SnapshotStore: an existing spool of that id resumes from
-// its last whole, checksummed chunk (R8-21).
+// its last whole, checksummed chunk (R8-21), found reading the spool one
+// chunk at a time. Every other spool no sink writes to is removed:
+// accepting this id abandons them (#527).
 func (s *fileSnapshots) Create(id string, meta coreconsensus.SnapshotMetaValue) (coreconsensus.SnapshotSink, int64, error) {
 	if !validID(id) {
 		return nil, 0, origin(coreconsensus.FrameInvalid, errs.String("snapshot_id", id))
 	}
-	path := filepath.Join(s.dir, id+".spool")
+	s.mu.Lock()
+	s.writing[id]++
+	s.mu.Unlock()
 	sink := &fileSink{s: s, id: id, meta: meta}
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	if err := s.sweepSpools(id); err != nil {
+		sink.closed()
+		return nil, 0, err
+	}
+	f, err := os.OpenFile(filepath.Join(s.dir, id+".spool"), os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
+		sink.closed()
 		return nil, 0, storageFailed("spool", err)
 	}
 	sink.f = f
-	prefix, err := io.ReadAll(f)
+	off, err := resumeOffset(f, meta.ChunkSize)
 	if err != nil {
-		return nil, 0, alsoFailed(storageFailed("spool", err), "close", f.Close())
-	}
-	off := alignedOffset(prefix)
-	if err := f.Truncate(off); err != nil {
-		return nil, 0, alsoFailed(storageFailed("spool", err), "close", f.Close())
-	}
-	if _, err := f.Seek(off, io.SeekStart); err != nil {
+		sink.closed()
 		return nil, 0, alsoFailed(storageFailed("spool", err), "close", f.Close())
 	}
 	return sink, off, nil
+}
+
+// spoolFile is what a resume needs of a spool's file.
+type spoolFile interface {
+	io.ReaderAt
+	io.Seeker
+	Stat() (os.FileInfo, error)
+	Truncate(size int64) error
+}
+
+// resumeOffset cuts the spool f back to its last whole chunk, of decoded
+// chunks of chunk bytes, and positions it there.
+func resumeOffset(f spoolFile, chunk int64) (int64, error) {
+	st, err := f.Stat()
+	if err != nil {
+		return 0, err
+	}
+	off, err := alignedOffsetAt(f, st.Size(), maxEncodedChunk(chunk))
+	if err != nil {
+		return 0, err
+	}
+	if err := f.Truncate(off); err != nil {
+		return 0, err
+	}
+	_, err = f.Seek(off, io.SeekStart)
+	return off, err
+}
+
+// closed counts the sink's spool as no longer written to, once.
+func (k *fileSink) closed() {
+	k.done.Do(func() {
+		k.s.mu.Lock()
+		if k.s.writing[k.id]--; k.s.writing[k.id] <= 0 {
+			delete(k.s.writing, k.id)
+		}
+		k.s.mu.Unlock()
+	})
 }
 
 // Write appends p to the spool file; nothing is durable until Commit syncs
@@ -110,6 +212,7 @@ func (k *fileSink) Write(p []byte) (int, error) { return k.f.Write(p) }
 // <id>.meta written atomically LAST, so a crash at any step leaves no
 // published snapshot without its bytes.
 func (k *fileSink) Commit(final coreconsensus.SnapshotMetaValue) error {
+	defer k.closed()
 	final.ID = k.id
 	size, err := k.f.Seek(0, io.SeekCurrent)
 	if err != nil {
@@ -171,11 +274,15 @@ func (s *fileSnapshots) published(name string) (coreconsensus.SnapshotMetaValue,
 // release closes the spool's handle and keeps the spool for a resume. A
 // failed Close is abandoned: the resume reads back only the chunks whose
 // checksums hold, so nothing it could say changes what is kept.
-func (k *fileSink) release() { abandon(k.f.Close()) }
+func (k *fileSink) release() {
+	defer k.closed()
+	abandon(k.f.Close())
+}
 
 // Abort closes and deletes the spool; a spool already gone is not a
 // failure, any other removal failure is a STORAGE_FAILED.
 func (k *fileSink) Abort() error {
+	defer k.closed()
 	// The spool is being discarded: what its descriptor's Close could say
 	// about bytes no one will read changes nothing. The removal is what
 	// Abort promises, and its failure is reported.

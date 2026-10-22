@@ -494,10 +494,74 @@ func (n *Node) Promote(ctx context.Context, op coreconsensus.Operator, id coreco
 // Remove removes a member and retires its id; removing the leader first
 // transfers leadership (D8).
 func (n *Node) Remove(ctx context.Context, op coreconsensus.Operator, id coreconsensus.NodeID) error {
-	if st := n.Status(); st.Leader == id && id == n.stamp.ID {
+	remove := wire.AdminValue{Operator: string(op), Change: wire.ChangeRemove, Target: id}
+	st := n.Status()
+	switch {
+	case st.Leader != id:
+		return n.admin(ctx, coreconsensus.EntryMembership, remove)
+	case id == n.stamp.ID:
 		n.handOff(ctx)
+	default:
+		// The leader is another node: it refuses a removal of itself, so
+		// the call moved leadership away first only when it landed on the
+		// leader — on a follower it was refused MEMBERSHIP_INVALID (#529).
+		// The transfer is an operator's act, recorded as one.
+		to, ok := n.successorOf(id)
+		if !ok {
+			return origin(coreconsensus.MembershipInvalid, errs.String("why", "no other voter to lead"))
+		}
+		if err := n.TransferLeadership(ctx, op, to); err != nil {
+			return err
+		}
 	}
-	return n.admin(ctx, coreconsensus.EntryMembership, wire.AdminValue{Operator: string(op), Change: wire.ChangeRemove, Target: id})
+	return n.removeAfterTransfer(ctx, remove)
+}
+
+// successorOf is the voter a removal of leader id hands leadership to: this
+// node when it votes, else the first other voter of the configuration.
+func (n *Node) successorOf(id coreconsensus.NodeID) (coreconsensus.NodeID, bool) {
+	conf := n.Membership()
+	if m, ok := conf.Member(n.stamp.ID); ok && m.Voter {
+		return n.stamp.ID, true
+	}
+	for _, m := range conf.Members {
+		if m.Voter && m.ID != id {
+			return m.ID, true
+		}
+	}
+	return 0, false
+}
+
+// removeAfterTransfer submits a removal right after leadership moved. The
+// new leader accepts no membership change before its term's no-op commits
+// (MEMBERSHIP_CHANGE_PENDING), an engine detail of the transfer the call
+// itself made, not the caller's: it is submitted again, each heartbeat, for
+// at most twice the maximum election timeout.
+func (n *Node) removeAfterTransfer(ctx context.Context, remove wire.AdminValue) error {
+	timing := n.Status().Timing
+	deadline := n.clk.Now().Add(2 * timing.ElectionTimeoutMax)
+	for {
+		err := n.admin(ctx, coreconsensus.EntryMembership, remove)
+		if !errs.HasCode(err, coreconsensus.CodeMembershipChangePending) || !n.clk.Now().Before(deadline) {
+			return err
+		}
+		if !n.pause(ctx, timing.HeartbeatInterval) {
+			return err
+		}
+	}
+}
+
+// pause waits d on the node's clock and reports whether it did, false
+// when ctx ended first.
+func (n *Node) pause(ctx context.Context, d time.Duration) bool {
+	t := n.clk.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C():
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // UpdateAddress changes where a member listens.
