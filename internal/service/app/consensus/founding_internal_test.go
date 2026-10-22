@@ -19,25 +19,27 @@ import (
 // generation 1 on its own InitialTiming again (#421). The contract in force
 // on every node is now exactly the one NewNode validated.
 func TestTheFoundingContractIsTheOneNewNodeValidates(t *testing.T) {
-	for _, tc := range []struct {
+	type foundingCase struct {
 		name   string
 		timing coreconsensus.TimingContractSpec
 		reads  ReadMode
-	}{
+	}
+	runCase := func(t *testing.T, tc foundingCase) {
+		c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{5, 2, 3}, size: 3, timing: tc.timing}
+		c.configure = func(_ *testNode, cfg *Config) { cfg.Reads = tc.reads }
+		newClusterWith(t, c)
+		for _, tn := range c.nodes {
+			want := must(withDefaults(new(c.config(tn))))(t).InitialTiming
+			if got := tn.node.Status().Timing; got != want {
+				t.Fatalf("node %d runs generation 1 as %+v; NewNode validated %+v", tn.id, got, want)
+			}
+		}
+	}
+	for _, tc := range []foundingCase{
 		{"drift only", coreconsensus.TimingContractSpec{Generation: 1, MaxClockDrift: 0.05}, ReadLease},
 		{"maximum unset", coreconsensus.TimingContractSpec{Generation: 1, HeartbeatInterval: 10 * time.Millisecond, ElectionTimeoutMin: 100 * time.Millisecond}, ReadIndex},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{5, 2, 3}, size: 3, timing: tc.timing}
-			c.configure = func(_ *testNode, cfg *Config) { cfg.Reads = tc.reads }
-			newClusterWith(t, c)
-			for _, tn := range c.nodes {
-				want := must(withDefaults(new(c.config(tn))))(t).InitialTiming
-				if got := tn.node.Status().Timing; got != want {
-					t.Fatalf("node %d runs generation 1 as %+v; NewNode validated %+v", tn.id, got, want)
-				}
-			}
-		})
+		t.Run(tc.name, func(t *testing.T) { runCase(t, tc) })
 	}
 }
 

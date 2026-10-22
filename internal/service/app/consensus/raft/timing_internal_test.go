@@ -219,6 +219,11 @@ func checkFoundingContractCompleted(mut mutation) error {
 }
 
 func TestTimingChecks(t *testing.T) {
+	runCase := func(t *testing.T, c func(mutation) error) {
+		if err := c(0); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for name, c := range map[string]func(mutation) error{
 		"contract reported once durable": checkContractReportedOnceDurable,
 		"no campaign in the vote window": checkNoCampaignInsideVoteWindow,
@@ -227,10 +232,6 @@ func TestTimingChecks(t *testing.T) {
 		"no lease without drift":         checkNoLeaseWithoutDrift,
 		"founding contract completed":    checkFoundingContractCompleted,
 	} {
-		t.Run(name, func(t *testing.T) {
-			if err := c(0); err != nil {
-				t.Fatal(err)
-			}
-		})
+		t.Run(name, func(t *testing.T) { runCase(t, c) })
 	}
 }
