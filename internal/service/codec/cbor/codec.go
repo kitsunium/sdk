@@ -5,7 +5,6 @@ package cbor
 
 import (
 	"io"
-	"slices"
 
 	gocbor "github.com/fxamacker/cbor/v2"
 
@@ -29,17 +28,12 @@ const (
 	maxCBORNestedLevels int = 32
 )
 
-// Package-level state: the codec singleton plus the hoisted MIME /
-// extension tables (hoisted).
+// The registered singleton. Its aliases are literals in MIMETypes and
+// Extensions, not package tables: Register reads them through the Codec
+// interface, which orders no table before this initialiser.
 var (
 	//: register the singleton and expose it as a typed package var.
 	Codec codec.Codec = codec.Register(&cborCodec{})
-
-	//: MIME table hoisted.
-	mimeTypes = []string{"application/cbor"}
-
-	//: extension table hoisted for the same reason.
-	extensions = []string{".cbor"}
 
 	//: decMode is the reusable hardened decoder used by every Unmarshal
 	//: call; built eagerly via mustHardenedDecMode so a mis-configuration
@@ -130,14 +124,14 @@ func (*cborCodec) Name() string {
 
 // MIMETypes lists every MIME alias.
 func (*cborCodec) MIMETypes() []string {
-	//: hand back the package-level slice.
-	return slices.Clone(mimeTypes)
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{"application/cbor"}
 }
 
 // Extensions lists every file extension.
 func (*cborCodec) Extensions() []string {
-	//: hand back the package-level slice.
-	return slices.Clone(extensions)
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{".cbor"}
 }
 
 // Marshal serialises v as CBOR bytes.

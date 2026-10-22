@@ -7,8 +7,6 @@
 package bson
 
 import (
-	"slices"
-
 	gobson "go.mongodb.org/mongo-driver/bson"
 
 	"github.com/kitsunium/sdk/internal/core/codec"
@@ -22,16 +20,8 @@ import (
 // documents and matches the other library-backed codecs.
 const maxBSONBytes int = 10 << 20
 
-var (
-	// Codec is the registered BSON singleton.
-	Codec codec.Codec = codec.Register(&bsonCodec{})
-
-	// mimeTypes hoisted so MIMETypes does not allocate the literal per call.
-	mimeTypes = []string{"application/bson"}
-
-	// extensions hoisted for the same reason.
-	extensions = []string{".bson"}
-)
+// Codec is the registered BSON singleton.
+var Codec codec.Codec = codec.Register(&bsonCodec{})
 
 // bsonCodec is the concrete Codec implementation for BSON. Stateless.
 type bsonCodec struct{}
@@ -50,14 +40,14 @@ func (*bsonCodec) Name() string {
 
 // MIMETypes returns a defensive copy of the MIME alias list.
 func (*bsonCodec) MIMETypes() []string {
-	//: callers must not mutate the package-level table.
-	return slices.Clone(mimeTypes)
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{"application/bson"}
 }
 
 // Extensions returns a defensive copy of the file-extension list.
 func (*bsonCodec) Extensions() []string {
-	//: callers must not mutate the package-level table.
-	return slices.Clone(extensions)
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{".bson"}
 }
 
 // Marshal encodes v as a BSON document. v must be a struct or map at the top

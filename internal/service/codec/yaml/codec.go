@@ -30,17 +30,12 @@ const maxYAMLBytes int = 10 << 20
 // and shrinks output by ~50% on deeply-nested configs.
 const yamlEncoderIndent int = 2
 
-// Package-level state: the codec singleton plus the hoisted MIME /
-// extension tables + the Marshal-side buffer pool.
+// The registered singleton. Its aliases are literals in MIMETypes and
+// Extensions, not package tables: Register reads them through the Codec
+// interface, which orders no table before this initialiser.
 var (
 	//: register the singleton and expose it as a typed package var.
 	Codec codec.Codec = codec.Register(&yamlCodec{})
-
-	//: MIME table hoisted.
-	mimeTypes = []string{"application/yaml", "text/yaml", "application/x-yaml"}
-
-	//: extension table hoisted for the same reason.
-	extensions = []string{".yaml", ".yml"}
 )
 
 // yamlCodec is the concrete Codec implementation for YAML.
@@ -60,14 +55,14 @@ func (*yamlCodec) Name() string {
 
 // MIMETypes lists every MIME alias.
 func (*yamlCodec) MIMETypes() []string {
-	//: hand back the package-level slice.
-	return slices.Clone(mimeTypes)
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{"application/yaml", "text/yaml", "application/x-yaml"}
 }
 
 // Extensions lists every file extension.
 func (*yamlCodec) Extensions() []string {
-	//: hand back the package-level slice.
-	return slices.Clone(extensions)
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{".yaml", ".yml"}
 }
 
 // Marshal serialises v as YAML bytes. Routes through a pooled

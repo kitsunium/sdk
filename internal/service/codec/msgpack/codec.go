@@ -23,17 +23,12 @@ import (
 // realistic configuration or event-stream document.
 const maxMsgPackBytes int = 10 << 20
 
-// Package-level state: the codec singleton plus the hoisted MIME /
-// extension tables (hoisted).
+// The registered singleton. Its aliases are literals in MIMETypes and
+// Extensions, not package tables: Register reads them through the Codec
+// interface, which orders no table before this initialiser.
 var (
 	//: register the singleton and expose it as a typed package var.
 	Codec codec.Codec = codec.Register(&msgpackCodec{})
-
-	//: MIME table hoisted.
-	mimeTypes = []string{"application/msgpack", "application/x-msgpack"}
-
-	//: extension table hoisted for the same reason.
-	extensions = []string{".msgpack", ".mpk"}
 )
 
 // msgpackCodec is the concrete Codec implementation for MessagePack.
@@ -53,14 +48,14 @@ func (*msgpackCodec) Name() string {
 
 // MIMETypes lists every MIME alias.
 func (*msgpackCodec) MIMETypes() []string {
-	//: hand back the package-level slice.
-	return slices.Clone(mimeTypes)
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{"application/msgpack", "application/x-msgpack"}
 }
 
 // Extensions lists every file extension.
 func (*msgpackCodec) Extensions() []string {
-	//: hand back the package-level slice.
-	return slices.Clone(extensions)
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{".msgpack", ".mpk"}
 }
 
 // Marshal serialises v as MessagePack bytes. Uses gomsgpack's exposed

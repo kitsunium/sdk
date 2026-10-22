@@ -23,17 +23,12 @@ import (
 // directly by the line splitter — no scanner buffer involved.
 const scannerMaxCapacity int = 10 * 1024 * 1024
 
-// Package-level state: the codec singleton plus the hoisted MIME /
-// extension tables (hoisted).
+// The registered singleton. Its aliases are literals in MIMETypes and
+// Extensions, not package tables: Register reads them through the Codec
+// interface, which orders no table before this initialiser.
 var (
 	//: register the singleton and expose it as a typed package var.
 	Codec codec.Codec = codec.Register(&ndjsonCodec{})
-
-	//: MIME table hoisted.
-	mimeTypes = []string{"application/x-ndjson", "application/jsonl"}
-
-	//: extension table hoisted for the same reason.
-	extensions = []string{".ndjson", ".jsonl"}
 )
 
 // ndjsonCodec is the concrete Codec implementation for NDJSON.
@@ -53,14 +48,14 @@ func (*ndjsonCodec) Name() string {
 
 // MIMETypes lists every MIME alias.
 func (*ndjsonCodec) MIMETypes() []string {
-	//: hand back the package-level slice.
-	return slices.Clone(mimeTypes)
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{"application/x-ndjson", "application/jsonl"}
 }
 
 // Extensions lists every file extension.
 func (*ndjsonCodec) Extensions() []string {
-	//: hand back the package-level slice.
-	return slices.Clone(extensions)
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{".ndjson", ".jsonl"}
 }
 
 // Marshal encodes a slice v as NDJSON bytes. Pre-encoded raw payloads

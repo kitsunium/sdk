@@ -81,23 +81,23 @@ type variant int
 // clear of init() and lets downstream callers refer to a specific variant.
 var (
 	// Base64 is the RFC 4648 standard base64 codec.
-	Base64 codec.Codec = codec.Register(&baseencCodec{variant: variantBase64})
+	Base64 codec.Codec = codec.Register(newVariant(variantBase64))
 	// Base64URL is the RFC 4648 URL-safe base64 codec.
-	Base64URL codec.Codec = codec.Register(&baseencCodec{variant: variantBase64URL})
+	Base64URL codec.Codec = codec.Register(newVariant(variantBase64URL))
 	// Base32 is the RFC 4648 standard base32 codec.
-	Base32 codec.Codec = codec.Register(&baseencCodec{variant: variantBase32})
+	Base32 codec.Codec = codec.Register(newVariant(variantBase32))
 	// Base16 is the uppercase hex codec.
-	Base16 codec.Codec = codec.Register(&baseencCodec{variant: variantBase16})
+	Base16 codec.Codec = codec.Register(newVariant(variantBase16))
 	// Hex is the lowercase hex codec.
-	Hex codec.Codec = codec.Register(&baseencCodec{variant: variantHex})
+	Hex codec.Codec = codec.Register(newVariant(variantHex))
 	// ASCII85 is the Adobe Ascii85 codec.
-	ASCII85 codec.Codec = codec.Register(&baseencCodec{variant: variantASCII85})
+	ASCII85 codec.Codec = codec.Register(newVariant(variantASCII85))
 	// Base45 is the RFC 9285 Base45 codec (QR-code alphanumeric safe).
-	Base45 codec.Codec = codec.Register(&baseencCodec{variant: variantBase45})
+	Base45 codec.Codec = codec.Register(newVariant(variantBase45))
 	// Base58 is the Bitcoin Base58 codec (base-conversion; short inputs only).
-	Base58 codec.Codec = codec.Register(&baseencCodec{variant: variantBase58})
+	Base58 codec.Codec = codec.Register(newVariant(variantBase58))
 	// Base62 is the Base62 codec (base-conversion; short inputs only).
-	Base62 codec.Codec = codec.Register(&baseencCodec{variant: variantBase62})
+	Base62 codec.Codec = codec.Register(newVariant(variantBase62))
 )
 
 // isBaseConversion reports whether v is one of the O(n²) base-conversion

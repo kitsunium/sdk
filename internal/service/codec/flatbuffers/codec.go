@@ -13,7 +13,6 @@ package flatbuffers
 
 import (
 	"encoding/binary"
-	"slices"
 
 	"github.com/kitsunium/sdk/internal/core/codec"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -44,18 +43,12 @@ const maxFlatBuffersBytes int = 64 << 20
 // magic-number constant.
 const PromotionMagic uint32 = 0x80000001
 
-// Package-level state: the codec singleton plus the hoisted MIME /
-// extension tables.
+// The registered singleton. Its aliases are literals in MIMETypes and
+// Extensions, not package tables: Register reads them through the Codec
+// interface, which orders no table before this initialiser.
 var (
 	//: register the singleton and expose it as a typed package var.
 	Codec codec.Codec = codec.Register(&flatbuffersCodec{})
-
-	//: MIME table hoisted; the second alias documents the passthrough
-	//: nature for consumers that resolve via Content-Type.
-	mimeTypes = []string{"application/x-flatbuffers", "application/octet-stream+flatbuffers"}
-
-	//: extension table hoisted. ".bin" is ambiguous on disk — see CLAUDE.md.
-	extensions = []string{".fbs", ".bin"}
 )
 
 // flatbuffersCodec is the concrete passthrough Codec for FlatBuffers.
@@ -75,14 +68,17 @@ func (*flatbuffersCodec) Name() string {
 
 // MIMETypes lists every MIME alias.
 func (*flatbuffersCodec) MIMETypes() []string {
-	//: hand back a defensive copy so callers cannot mutate package state.
-	return slices.Clone(mimeTypes)
+	//: the second alias documents the passthrough
+	//: nature for consumers that resolve via Content-Type.
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{"application/x-flatbuffers", "application/octet-stream+flatbuffers"}
 }
 
 // Extensions lists every file extension.
 func (*flatbuffersCodec) Extensions() []string {
-	//: hand back a defensive copy so callers cannot mutate package state.
-	return slices.Clone(extensions)
+	//: ".bin" is ambiguous on disk — see CLAUDE.md.
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{".fbs", ".bin"}
 }
 
 // Marshal resolves v to its already-encoded FlatBuffer bytes and returns

@@ -14,17 +14,12 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// Package-level state: the codec singleton plus the hoisted MIME /
-// extension tables.
+// The registered singleton. Its aliases are literals in MIMETypes and
+// Extensions, not package tables: Register reads them through the Codec
+// interface, which orders no table before this initialiser.
 var (
 	//: register the singleton and expose it as a typed package var.
 	Codec codec.Codec = codec.Register(&tomlCodec{})
-
-	//: MIME table hoisted.
-	mimeTypes = []string{"application/toml"}
-
-	//: extension table hoisted for the same reason.
-	extensions = []string{".toml"}
 )
 
 // tomlCodec is the concrete Codec implementation for TOML.
@@ -44,14 +39,14 @@ func (*tomlCodec) Name() string {
 
 // MIMETypes lists every MIME alias.
 func (*tomlCodec) MIMETypes() []string {
-	//: hand back the package-level slice.
-	return slices.Clone(mimeTypes)
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{"application/toml"}
 }
 
 // Extensions lists every file extension.
 func (*tomlCodec) Extensions() []string {
-	//: hand back the package-level slice.
-	return slices.Clone(extensions)
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{".toml"}
 }
 
 // Marshal serialises v as TOML bytes. Routes through a pooled
