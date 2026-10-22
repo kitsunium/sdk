@@ -1373,7 +1373,7 @@ ReceiptMessage returns the bytes a witness signs to attest a fenced voter.
 func Recover(d DataDir, newCluster ClusterID, members []MemberValue, opt *RecoverOptions) error
 ```
 
-Recover starts a new history from this node's committed log and the contiguous entries past it whose body and chain checksums verify and whose term does not decrease, every old voter left out attested fenced by every witness. An interrupted Recover leaves the stop marker STOP-RECOVER, which refuses a start until Recover runs again to the same new cluster.
+Recover starts a new history from this node's committed log and the contiguous entries past it whose body and chain checksums verify and whose term does not decrease, every old voter left out attested fenced by every witness. An interrupted Recover leaves the stop marker STOP-RECOVER, which refuses a start until Recover runs again to the same new cluster. It removes the silence condition TruncateAndStaySilent left.
 
 <a name="Redraw"></a>
 ## func [Redraw](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
@@ -2253,6 +2253,9 @@ type LogIdentityValue struct {
 	PredecessorEpoch uint64
 	// KeptIndex is the last index Recover kept from the predecessor. An
 	// applied position of the predecessor at or below it is still trusted.
+	// Every node of the history applies the entries at or below it under the
+	// predecessor's token: one admitted after the Recover learns it from the
+	// snapshot it installs, never from an append.
 	KeptIndex        uint64
 }
 ```

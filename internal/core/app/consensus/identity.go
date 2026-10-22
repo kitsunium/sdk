@@ -65,6 +65,9 @@ type LogIdentityValue struct {
 	PredecessorEpoch uint64
 	// KeptIndex is the last index Recover kept from the predecessor. An
 	// applied position of the predecessor at or below it is still trusted.
+	// Every node of the history applies the entries at or below it under the
+	// predecessor's token: one admitted after the Recover learns it from the
+	// snapshot it installs, never from an append.
 	KeptIndex uint64
 }
 

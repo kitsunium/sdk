@@ -4224,7 +4224,7 @@
         {
           "name": "KeptIndex",
           "type": "uint64",
-          "doc": "KeptIndex is the last index Recover kept from the predecessor. An\napplied position of the predecessor at or below it is still trusted.\n"
+          "doc": "KeptIndex is the last index Recover kept from the predecessor. An\napplied position of the predecessor at or below it is still trusted.\nEvery node of the history applies the entries at or below it under the\npredecessor's token: one admitted after the Recover learns it from the\nsnapshot it installs, never from an append.\n"
         }
       ],
       "doc": "LogIdentityValue scopes positions: the ClusterID and a log epoch that Recover and\nRestoreSnapshot bump, and the predecessor this history descends from with the\nlast index it kept. A position or a token from another identity is not\ncomparable with this log's.\n",
@@ -47567,7 +47567,7 @@
       "name": "Recover",
       "spelled": "func(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RecoverOptions) error",
       "canonical": "func(d github.com/kitsunium/sdk/internal/service/app/consensus.DataDir, newCluster github.com/kitsunium/sdk/internal/core/app/consensus.ClusterID, members []github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue, opt *github.com/kitsunium/sdk/internal/service/app/consensus.RecoverOptions) error",
-      "doc": "Recover starts a NEW history from this node's log: every entry up to its\npersisted commit, then the contiguous entries past it whose body and chain\nchecksums verify and whose term does not decrease, cut at the first that\nfails, so no write the old cluster acknowledged is lost;\na new cluster id that records its predecessor and the last index it kept;\nand a forced configuration. The audit file records how many entries past\nthe persisted commit were adopted. Every old voter left out must be\nattested fenced by every witness; without witness keys it fails closed.\nA stop marker, STOP-RECOVER, is durable before the forced entry and\nremoved once the new stamp is: a Recover interrupted between the two\nrefuses a start, and is completed by running Recover again to the same\nnew cluster, which resumes from the index the first one kept; one to\nanother cluster is refused.\n",
+      "doc": "Recover starts a NEW history from this node's log: every entry up to its\npersisted commit, then the contiguous entries past it whose body and chain\nchecksums verify and whose term does not decrease, cut at the first that\nfails, so no write the old cluster acknowledged is lost;\na new cluster id that records its predecessor and the last index it kept;\nand a forced configuration. The audit file records how many entries past\nthe persisted commit were adopted. Every old voter left out must be\nattested fenced by every witness; without witness keys it fails closed.\nA stop marker, STOP-RECOVER, is durable before the forced entry and\nremoved once the new stamp is: a Recover interrupted between the two\nrefuses a start, and is completed by running Recover again to the same\nnew cluster, which resumes from the index the first one kept; one to\nanother cluster is refused. A silence condition TruncateAndStaySilent\nleft is removed before the marker: the new history is closed to the\nterms it guarded, and a silent node never campaigns.\n",
       "file": "service/app/consensus/offline.go",
       "layer": "service",
       "family": "app"

@@ -308,7 +308,9 @@ func ReceiptMessage(old, next coreconsensus.ClusterID, voter coreconsensus.NodeI
 // removed once the new stamp is: a Recover interrupted between the two
 // refuses a start, and is completed by running Recover again to the same
 // new cluster, which resumes from the index the first one kept; one to
-// another cluster is refused.
+// another cluster is refused. A silence condition TruncateAndStaySilent
+// left is removed before the marker: the new history is closed to the
+// terms it guarded, and a silent node never campaigns.
 func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RecoverOptions) error {
 	if err := d.offline(); err != nil {
 		return err

@@ -2843,7 +2843,7 @@
       "name": "Recover",
       "spelled": "func(d DataDir, newCluster ClusterID, members []MemberValue, opt *RecoverOptions) error",
       "canonical": "func(d github.com/kitsunium/sdk/pkg/v1/app/consensus.DataDir, newCluster github.com/kitsunium/sdk/pkg/v1/app/consensus.ClusterID, members []github.com/kitsunium/sdk/pkg/v1/app/consensus.MemberValue, opt *github.com/kitsunium/sdk/pkg/v1/app/consensus.RecoverOptions) error",
-      "doc": "Recover starts a new history from this node's committed log and the\ncontiguous entries past it whose body and chain checksums verify and whose\nterm does not decrease, every old voter left out attested fenced by every\nwitness. An interrupted Recover leaves the stop marker STOP-RECOVER, which\nrefuses a start until Recover runs again to the same new cluster.\n",
+      "doc": "Recover starts a new history from this node's committed log and the\ncontiguous entries past it whose body and chain checksums verify and whose\nterm does not decrease, every old voter left out attested fenced by every\nwitness. An interrupted Recover leaves the stop marker STOP-RECOVER, which\nrefuses a start until Recover runs again to the same new cluster. It\nremoves the silence condition TruncateAndStaySilent left.\n",
       "file": "consensus/gen_facade.go",
       "layer": "public",
       "family": "app"

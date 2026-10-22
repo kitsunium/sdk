@@ -634,6 +634,7 @@ files:
       - (*fileLog).replay
       - (*fileLog).applyCheckpoint
       - (*fileLog).applyRecord
+      - (*fileLog).applyCompactRecord
       - (*fileLog).applyTruncate
       - decodeHS
       - (*fileLog).applyCompaction
@@ -827,6 +828,9 @@ files:
       - startStamp
       - refuseStamp
       - newNode
+      - (*Node).lineage
+      - (*Node).adoptLineage
+      - lineageAccepts
       - silenceOf
       - (*Node).bindTransport
       - (*Node).load
@@ -955,6 +959,7 @@ files:
       - recoverAuditLine
       - DataDir.resumedKept
       - DataDir.writeRecover
+      - DataDir.endRecoveredSilence
       - DataDir.finishRecover
       - DataDir.writeRecoverIntent
       - DataDir.readRecoverIntent
@@ -1103,11 +1108,13 @@ files:
       - clampDuration
       - NewTCPTransport
       - newTCPTransport
+      - listenTCP
       - (*TCPTransport).Addr
       - (*TCPTransport).Cluster
       - (*TCPTransport).Slot
       - (*TCPTransport).checkPeer
       - (*TCPTransport).accept
+      - acceptBackoff
       - (*TCPTransport).serve
       - (*TCPTransport).handshake
       - (*TCPTransport).serveAuthenticated
@@ -1705,6 +1712,13 @@ functions:
     params: cfg *Config, stamp *coreconsensus.StampValue
     results: "*Node"
   - doc: |-
+      lineageAccepts reports whether a snapshot of identity l, at index, belongs
+      to this node's history: of its own lineage, or of the predecessor's at or
+      below the index Recover kept, as durableIndex counts a machine's position.
+    name: lineageAccepts
+    params: cur, l coreconsensus.LogIdentityValue, index uint64
+    results: bool
+  - doc: |-
       silenceOf reads the silence condition a recovered log persists, the term
       and index raft stays silent until; a store that keeps none answers zeros,
       which is no silence. A condition that cannot be read stops the start.
@@ -2125,6 +2139,12 @@ functions:
     params: cfg *TransportConfig, id *tlsid.Identity
     results: "*TCPTransport, error"
   - doc: |-
+      acceptBackoff is the wait after a failed Accept that follows a wait of
+      prev: 5 ms first, doubled each time, at most a second.
+    name: acceptBackoff
+    params: prev time.Duration
+    results: time.Duration
+  - doc: |-
       readFrame reads one frame into buf, grown only when the announced length
       needs it; ok is false on a read error or a length outside
       [minFrameBody, limit-4].
@@ -2540,6 +2560,16 @@ types:
           one. The marker refuses that start (#405).
         name: writeRecover
         params: stamp *coreconsensus.StampValue, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, op coreconsensus.Operator, p *recoverPlan
+        recv: d DataDir
+        results: error
+      - doc: |-
+          endRecoveredSilence removes, durably and before STOP-RECOVER goes, the
+          silence condition a TruncateAndStaySilent left: the new history is closed
+          to the old terms it guarded, and a silent node never campaigns, so a
+          survivor kept silent would be the one voter of its history and never be
+          elected (#524). A crash before it is completed by the rerun, which finds
+          the new stamp and goes through finishRecover.
+        name: endRecoveredSilence
         recv: d DataDir
         results: error
       - doc: |-
@@ -2966,6 +2996,18 @@ types:
         params: seg uint64, r *record
         recv: l *fileLog
         results: error
+      - doc: |-
+          applyCompactRecord applies a compact record where it stands, as
+          compactPrefixAt applied it: the entries through index go, the log starts
+          past it, and the term before the log is the record's, which is the
+          compaction point's term past the log's end too. Only noted, and applied
+          once the whole replay was done, a compaction past the end left the log
+          starting below it, and the first entry appended after it — the next
+          index — read as out of sequence: every node that caught up by a snapshot
+          install and appended was quarantined at its next restart (#516).
+        name: applyCompactRecord
+        params: index, term uint64
+        recv: l *fileLog
       - doc: |-
           applyTruncate applies a truncate record at index. One that truncates into
           a dropped segment removes entries that are gone with it, and a later
@@ -3801,8 +3843,12 @@ types:
         type: clock.Timed
       - name: r
         type: "*raft.Raft"
-      - name: ident
-        type: coreconsensus.LogIdentityValue
+      - doc: |-
+          ident is the log identity, the stamp's: the loop adopts the lineage
+          an installed snapshot records (#507) while the apply goroutine reads
+          it for every token. Read it through lineage.
+        name: ident
+        type: atomic.Pointer[coreconsensus.LogIdentityValue]
       - name: stamp
         type: coreconsensus.StampValue
       - name: inCtrl
@@ -4143,6 +4189,23 @@ types:
         params: ctx context.Context, op coreconsensus.Operator, r *coreconsensus.JoinRequestValue
         recv: n *Node
         results: coreconsensus.PositionValue, errs.Code, string
+      - doc: lineage is the node's log identity as it stands.
+        name: lineage
+        recv: n *Node
+        results: coreconsensus.LogIdentityValue
+      - doc: |-
+          adoptLineage records, durably and before anything it covers is applied,
+          the predecessor and kept index an installed snapshot's identity names,
+          when this node's identity, of the same cluster and epoch, names none: a
+          node made with Init under the cluster a Recover created knows nothing of
+          the history kept, and applied the kept entries it received by append
+          under its own identity while the survivor applied them under the
+          predecessor's — two inputs for one committed entry (#507). It runs on the
+          loop, as checkAdmission's stamp write.
+        name: adoptLineage
+        params: l coreconsensus.LogIdentityValue
+        recv: n *Node
+        results: error
       - doc: |-
           bindTransport hands the transport the node's callbacks. An unreachable
           report is queued to the loop and dropped when the loop is saturated, as
@@ -5411,8 +5474,12 @@ types:
           accept is the listener's background goroutine: it admits or refuses each
           connection before any TLS byte is read, and launches one serve goroutine
           per admitted connection, counted in t.wg, which ends with its connection
-          (Close closes every one still raw). accept ends when the listener fails,
-          which is how Close stops it.
+          (Close closes every one still raw). accept ends when the listener is
+          closed, which is how Close stops it, and only then: any other failure —
+          EMFILE or ENFILE when descriptors run out — is waited out on a growing
+          backoff, as net/http's Serve does. Ending on it left the listener open,
+          the kernel completing handshakes into its backlog, and nothing accepting
+          them: the node sent but never received again, until a restart (#518).
         name: accept
         recv: t *TCPTransport
       - doc: |-
@@ -5775,3 +5842,10 @@ vars:
       - name: castagnoli
         value: crc32.MakeTable(crc32.Castagnoli)
     name: castagnoli
+  - doc: |-
+      listenTCP opens the transport's listener; a test replaces it to make
+      Accept fail the way an exhausted descriptor table does (#518).
+    items:
+      - name: listenTCP
+        value: net.Listen
+    name: listenTCP

@@ -2,9 +2,17 @@
 apiVersion: design/behaviour/v1
 sequences:
   - of: (*Node).token
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).token
+        kind: self
+      - id: n.lineage
+        kind: internal
     steps:
       - bind: l
-        eval: n.ident
+        eval: n.lineage()
+        to: n.lineage
       - opt:
           do:
             - return: "coreconsensus.TokenValue{Cluster: l.Predecessor, Epoch: l.PredecessorEpoch, Term: p.Term, Index: p.Index}"
@@ -176,6 +184,8 @@ sequences:
         kind: actor
       - id: (*Node).applyCommands
         kind: self
+      - id: n.applyLag.Add
+        kind: value
       - id: n.token
         kind: internal
       - id: n.clk.Now
@@ -199,6 +209,13 @@ sequences:
                   - op: ++
                     set: j
           when: batching
+      - loop:
+          cond: k < j
+          do:
+            - eval: n.applyLag.Add(-int64(len(es[k].Data)))
+              to: n.applyLag.Add
+          init: k := i + 1
+          post: k++
       - bind: results
         eval: make([]any, j-i)
       - loop:
@@ -2696,6 +2713,8 @@ sequences:
         kind: internal
       - id: decodeHS
         kind: internal
+      - id: l.applyCompactRecord
+        kind: internal
     steps:
       - switch:
           cases:
@@ -2726,10 +2745,26 @@ sequences:
                   value: max(l.hs.Commit, r.index)
             - case: recCompact
               do:
-                - set: l.compact, l.compactTerm
-                  value: max(l.compact, r.index), r.term
+                - eval: l.applyCompactRecord(r.index, r.term)
+                  to: l.applyCompactRecord
           "on": r.kind
       - return: nil
+  - of: (*fileLog).applyCompactRecord
+    steps:
+      - opt:
+          do:
+            - bind: drop
+              eval: min(index-l.first+1, uint64(len(l.slots)))
+            - set: l.slots
+              value: l.slots[drop:]
+            - set: l.first, l.prevTerm
+              value: index+1, term
+          when: index >= l.first
+      - opt:
+          do:
+            - set: l.compact, l.compactTerm
+              value: index, term
+          when: index >= l.compact
   - of: (*fileLog).applyTruncate
     steps:
       - switch:
@@ -5147,6 +5182,12 @@ sequences:
       - opt:
           do:
             - set: acc.Refused
+              value: coreconsensus.CodeLineageMismatch
+            - return: "true"
+          when: "!lineageAccepts(n.lineage(), o.Meta.Log, o.Meta.Position.Index)"
+      - opt:
+          do:
+            - set: acc.Refused
               value: coreconsensus.CodeSnapshotTooLarge
             - return: "true"
           when: o.Meta.DecodedSize > n.cfg.MaxSnapshotBytes || o.Meta.EncodedSize > n.cfg.MaxSnapshotBytes
@@ -5249,10 +5290,10 @@ sequences:
         kind: internal
       - id: abandon
         kind: internal
-      - id: sink.Commit
-        kind: value
       - id: n.stop
         kind: internal
+      - id: sink.Commit
+        kind: value
       - id: n.HardClose
         kind: internal
       - id: n.aq.push
@@ -5291,11 +5332,29 @@ sequences:
       - var:
           name: code
           type: errs.Code
+      - var:
+          name: adoptErr
+          type: error
       - opt:
           do:
             - return: n.stoppedErr()
               to: n.stoppedErr
-          when: "!n.exec(func() { code = n.r.CheckOffer(req.From.ID, req.Offer, n.r.NoTable()) })"
+          when: |-
+            !n.exec(func() {
+            		if code = n.r.CheckOffer(req.From.ID, req.Offer, n.r.NoTable()); code == 0 {
+            			// The lineage the snapshot records is durable before the
+            			// restore, and so before any entry it covers is applied (#507).
+            			adoptErr = n.adoptLineage(meta.Log)
+            		}
+            	})
+      - opt:
+          do:
+            - eval: abandon(sink.Abort())
+              to: abandon
+            - eval: n.stop(adoptErr, true)
+              to: n.stop
+            - return: adoptErr
+          when: adoptErr != nil
       - opt:
           do:
             - eval: abandon(sink.Abort())
@@ -5447,7 +5506,7 @@ sequences:
             - case: n.cfg.JoinAuthorizer == nil
               do:
                 - return: "\"this cluster admits no JOIN\""
-            - case: r.Cluster != n.ident.Cluster
+            - case: r.Cluster != n.lineage().Cluster
               do:
                 - return: "\"another cluster\""
             - case: r.Slot != from.Slot
@@ -6623,11 +6682,13 @@ sequences:
         kind: self
       - id: sync
         kind: stdlib
+      - id: n.ident.Store
+        kind: value
     steps:
       - bind: "n"
         eval: |-
           &Node{
-          		cfg: *cfg, clk: cfg.Clock, ident: stamp.Log, stamp: *stamp,
+          		cfg: *cfg, clk: cfg.Clock, stamp: *stamp,
           		inCtrl: make(chan coreconsensus.MessageValue, inboxDepth), inData: make(chan coreconsensus.MessageValue, inboxDepth),
           		propc: make(chan *proposal, inboxDepth), execc: make(chan func(), loopBacklog), storec: make(chan storeDone, loopBacklog),
           		stopc: make(chan struct{}), sq: newFifo[storeReq](), fetchq: newFifo[raft.FetchSpec](), fetchc: make(chan fetchDone, fetchBacklog), aq: newFifo[applyItem](),
@@ -6638,7 +6699,59 @@ sequences:
       - set: n.acond
         to: sync
         value: sync.NewCond(&n.am)
+      - bind: ident
+        eval: stamp.Log
+      - eval: n.ident.Store(&ident)
+        to: n.ident.Store
       - return: "n"
+  - of: (*Node).lineage
+    steps:
+      - return: "*n.ident.Load()"
+  - of: (*Node).adoptLineage
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).adoptLineage
+        kind: self
+      - id: n.lineage
+        kind: internal
+      - id: n.cfg.Log.WriteStamp
+        kind: value
+      - id: storageFailed
+        kind: internal
+      - id: n.ident.Store
+        kind: value
+    steps:
+      - bind: cur
+        eval: n.lineage()
+        to: n.lineage
+      - opt:
+          do:
+            - return: nil
+          when: "!l.Same(cur) || l.Predecessor == (coreconsensus.ClusterID{}) || cur.Predecessor != (coreconsensus.ClusterID{})"
+      - bind: s
+        eval: n.stamp
+      - set: s.Log
+        value: l
+      - opt:
+          do:
+            - return: storageFailed("stamp", err)
+              to: storageFailed
+          init:
+            bind: err
+            eval: n.cfg.Log.WriteStamp(s)
+            to: n.cfg.Log.WriteStamp
+          when: err != nil
+      - set: n.stamp
+        value: s
+      - eval: n.ident.Store(&l)
+        to: n.ident.Store
+      - return: nil
+  - of: lineageAccepts
+    steps:
+      - return: |-
+          l.Same(cur) || (cur.Predecessor != (coreconsensus.ClusterID{}) && l.Cluster == cur.Predecessor &&
+          		l.Epoch == cur.PredecessorEpoch && index <= cur.KeptIndex)
   - of: silenceOf
     participants:
       - id: caller
@@ -6819,6 +6932,8 @@ sequences:
         kind: self
       - id: d.AppliedPosition
         kind: value
+      - id: n.lineage
+        kind: internal
     steps:
       - bind: d, ok
         eval: n.cfg.Machine.(coreconsensus.DurableStateMachine)
@@ -6836,7 +6951,11 @@ sequences:
       - opt:
           do:
             - return: pos.Index, nil
-          when: li.Same(n.ident) || (pos.Index <= n.ident.KeptIndex && li.Cluster == n.ident.Predecessor)
+          init:
+            bind: l
+            eval: n.lineage()
+            to: n.lineage
+          when: li.Same(l) || (pos.Index <= l.KeptIndex && li.Cluster == l.Predecessor)
       - return: 0, nil
   - of: (*Node).restoreLatest
     participants:
@@ -8094,7 +8213,7 @@ sequences:
         eval: |-
           &coreconsensus.StatusValue{
           		ID: n.stamp.ID, Role: st.Role, Term: st.Term, Leader: st.Lead, Commit: st.Commit, Applied: applied,
-          		Log: n.ident, Timing: st.Timing, NoSpace: st.NoSpace,
+          		Log: n.lineage(), Timing: st.Timing, NoSpace: st.NoSpace,
           		Versions: coreconsensus.VersionsValue{ProtocolMin: 1, ProtocolMax: raft.ProtocolMax, Cluster: st.Cluster, ClusterGeneration: st.ClusterG},
           	}
       - bind: old
@@ -10478,6 +10597,8 @@ sequences:
         kind: internal
       - id: d.d.log.WriteStamp
         kind: internal
+      - id: d.endRecoveredSilence
+        kind: internal
       - id: d.clearRecoverIntent
         kind: internal
     steps:
@@ -10514,8 +10635,37 @@ sequences:
             eval: d.d.log.WriteStamp(*stamp)
             to: d.d.log.WriteStamp
           when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: d.endRecoveredSilence()
+            to: d.endRecoveredSilence
+          when: err != nil
       - return: d.clearRecoverIntent()
         to: d.clearRecoverIntent
+  - of: DataDir.endRecoveredSilence
+    participants:
+      - id: caller
+        kind: actor
+      - id: DataDir.endRecoveredSilence
+        kind: self
+      - id: d.d.log.endSilence
+        kind: internal
+      - id: storageFailed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: storageFailed("silence condition", err)
+              to: storageFailed
+          init:
+            bind: err
+            eval: d.d.log.endSilence()
+            to: d.d.log.endSilence
+          when: err != nil
+      - return: nil
   - of: DataDir.finishRecover
     participants:
       - id: caller
@@ -10525,6 +10675,8 @@ sequences:
       - id: recoverRefused
         kind: internal
       - id: d.audit
+        kind: internal
+      - id: d.endRecoveredSilence
         kind: internal
       - id: d.clearRecoverIntent
         kind: internal
@@ -10546,6 +10698,14 @@ sequences:
             bind: err
             eval: d.audit(opt.Operator, fmt.Sprintf("recover %s completed", newCluster))
             to: d.audit
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: d.endRecoveredSilence()
+            to: d.endRecoveredSilence
           when: err != nil
       - return: d.clearRecoverIntent()
         to: d.clearRecoverIntent
@@ -13500,7 +13660,7 @@ sequences:
           		conf.Index = idx
           		meta = coreconsensus.SnapshotMetaValue{
           			ID: fmt.Sprintf("%020d-%020d", idx, term), Version: 1,
-          			Position: coreconsensus.PositionValue{Term: term, Index: idx}, Log: n.ident, Membership: conf,
+          			Position: coreconsensus.PositionValue{Term: term, Index: idx}, Log: n.lineage(), Membership: conf,
           			ChainTip: n.r.ChainAt(idx), Codec: string(n.cfg.SnapshotCodec.Algorithm()), ChunkSize: defaultChunkSize,
           			Timing: eng.Timing, ClusterVersion: eng.Cluster, ClusterGeneration: eng.ClusterG, NoSpace: eng.NoSpace,
           		}
@@ -14010,6 +14170,8 @@ sequences:
         kind: internal
       - id: n.r.SnapshotDone
         kind: value
+      - id: n.lineage
+        kind: internal
       - id: n.cfg.Snapshots.Open
         kind: value
       - id: n.wg.Add
@@ -14032,6 +14194,18 @@ sequences:
           when: err != nil || len(metas) == 0
       - bind: meta
         eval: metas[0]
+      - opt:
+          do:
+            - eval: n.requestCut()
+              to: n.requestCut
+            - eval: n.r.SnapshotDone(to, false)
+              to: n.r.SnapshotDone
+            - return: ""
+          init:
+            bind: l
+            eval: n.lineage()
+            to: n.lineage
+          when: "!meta.Log.Same(l) || meta.Position.Index < l.KeptIndex"
       - bind: h, err
         eval: n.cfg.Snapshots.Open(meta.ID)
         to: n.cfg.Snapshots.Open
@@ -14356,8 +14530,6 @@ sequences:
         kind: value
       - id: parseSAN
         kind: internal
-      - id: net
-        kind: stdlib
       - id: t.wg.Add
         kind: value
       - id: t.accept
@@ -14414,8 +14586,7 @@ sequences:
           		done: make(chan struct{}),
           	}
       - bind: ln, err
-        eval: net.Listen("tcp", cfg.ListenAddress)
-        to: net
+        eval: listenTCP("tcp", cfg.ListenAddress)
       - opt:
           do:
             - return: nil, transportMisconfigured("ListenAddress", err.Error())
@@ -14488,6 +14659,8 @@ sequences:
         kind: value
       - id: t.ln.Accept
         kind: value
+      - id: acceptBackoff
+        kind: internal
       - id: t.mu.Lock
         kind: value
       - id: t.mu.Unlock
@@ -14503,6 +14676,9 @@ sequences:
     steps:
       - defer: t.wg.Done()
         to: t.wg.Done
+      - var:
+          name: delay
+          type: time.Duration
       - loop:
           do:
             - bind: c, err
@@ -14510,8 +14686,23 @@ sequences:
               to: t.ln.Accept
             - opt:
                 do:
-                  - return: ""
+                  - opt:
+                      do:
+                        - return: ""
+                      when: errors.Is(err, net.ErrClosed)
+                  - set: delay
+                    to: acceptBackoff
+                    value: acceptBackoff(delay)
+                  - select:
+                      cases:
+                        - comm: <-t.done
+                          do:
+                            - return: ""
+                        - comm: <-time.After(delay)
+                  - continue: true
                 when: err != nil
+            - set: delay
+              value: "0"
             - eval: t.mu.Lock()
               to: t.mu.Lock
             - opt:
@@ -14542,6 +14733,15 @@ sequences:
             - go: t.serve(c, release)
               to: t.serve
           forever: true
+  - of: acceptBackoff
+    steps:
+      - leaf: a const or type declaration in a body
+        stmt: const first, ceiling = 5 * time.Millisecond, time.Second
+      - opt:
+          do:
+            - return: first
+          when: prev == 0
+      - return: min(2*prev, ceiling)
   - of: (*TCPTransport).serve
     participants:
       - id: caller
