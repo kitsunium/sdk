@@ -3,6 +3,7 @@ package consensus
 import (
 	"encoding/binary"
 	"hash/crc32"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -96,6 +97,23 @@ func TestAnOrphanSpoolIsRemoved(t *testing.T) {
 	}
 	if got := spools(t, dir); !slices.Equal(got, []string{w + ".spool"}) {
 		t.Fatalf("spools after a reopen %v, want only the newest", got)
+	}
+}
+
+// The chunk size a resume reads by comes from the peer's offer: one near
+// the int64 limit overflowed the encoded bound into a negative buffer size,
+// and the resume panicked on the event loop.
+func TestAResumeBoundsTheChunkSizeAnOfferNames(t *testing.T) {
+	dir := t.TempDir()
+	s := must(newFileSnapshots(dir))(t)
+	id := "00000000000000000333-00000000000000000002"
+	brokenTransfer(t, s, id)
+	for _, size := range []int64{math.MaxInt64, math.MaxInt64 / 8 * 7, -1} {
+		sink, off := must2(s.Create(id, coreconsensus.SnapshotMetaValue{ID: id, ChunkSize: size}))(t)
+		sink.(*fileSink).release()
+		if want := int64(chunkHeaderLen + len("part of "+id)); off != want {
+			t.Fatalf("chunk size %d: resume offset %d, want %d", size, off, want)
+		}
 	}
 }
 

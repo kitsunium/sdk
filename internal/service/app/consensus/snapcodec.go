@@ -6,6 +6,7 @@ import (
 	"hash"
 	"hash/crc32"
 	"io"
+	"math"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	coretransform "github.com/kitsunium/sdk/internal/core/data/transform"
@@ -206,9 +207,11 @@ func verifySnapshot(r io.Reader, meta coreconsensus.SnapshotMetaValue, codec cor
 }
 
 // maxEncodedChunk is the largest encoded chunk a stream of decoded chunks
-// of chunk bytes may hold, the bound chunkReader applies.
+// of chunk bytes may hold, the bound chunkReader applies. chunk comes from
+// a peer's offer: it is clamped to what a chunk header's u32 lengths can
+// name, so the sum cannot overflow into a negative buffer size.
 func maxEncodedChunk(chunk int64) int64 {
-	chunk = max(chunk, 1)
+	chunk = min(max(chunk, 1), math.MaxUint32)
 	return chunk + chunk/8 + 1024
 }
 

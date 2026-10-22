@@ -2359,6 +2359,8 @@ sequences:
         kind: internal
       - id: l.checkBatchSequence
         kind: internal
+      - id: checkLayouts
+        kind: internal
       - id: l.trimTornTail
         kind: internal
       - id: l.replay
@@ -2404,6 +2406,14 @@ sequences:
             bind: err
             eval: l.checkBatchSequence(segs)
             to: l.checkBatchSequence
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: checkLayouts(segs)
+            to: checkLayouts
           when: err != nil
       - bind: last
         eval: segs[len(segs)-1]
@@ -2834,6 +2844,60 @@ sequences:
                   to: unknownLayout
           "on": r.kind
       - return: nil
+  - of: checkLayouts
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkLayouts
+        kind: self
+      - id: knownLayout
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - return: err
+                      init:
+                        bind: err
+                        eval: knownLayout(s.n, &s.recs[i])
+                        to: knownLayout
+                      when: err != nil
+                key: i
+                range: s.recs
+          key: _
+          range: segs
+          value: s
+      - return: nil
+  - of: knownLayout
+    participants:
+      - id: caller
+        kind: actor
+      - id: knownLayout
+        kind: self
+      - id: unknownLayout
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: recEntry, recTruncate, recCheckpt, recSeal, recCompact, recCommit
+              do:
+                - return: nil
+            - case: recHardState
+              do:
+                - opt:
+                    do:
+                      - return: unknownLayout(seg, r, "hard_state_bytes", len(r.data))
+                        to: unknownLayout
+                    when: len(r.data) != hardStateLen
+                - return: nil
+            - default: true
+              do:
+                - return: unknownLayout(seg, r, "record_kind", int(r.kind))
+                  to: unknownLayout
+          "on": r.kind
   - of: (*fileLog).applyHardState
     participants:
       - id: caller
@@ -7412,6 +7476,8 @@ sequences:
         kind: internal
       - id: n.finishInstall
         kind: internal
+      - id: n.unpublishNewer
+        kind: internal
       - id: n.readTail
         kind: internal
       - id: n.startApplied
@@ -7431,7 +7497,7 @@ sequences:
           do:
             - return: raft.StartState{}, err
           when: err != nil
-      - bind: base, err
+      - bind: base, failed, err
         eval: n.restoreLatest(metas, durIdx)
         to: n.restoreLatest
       - opt:
@@ -7469,6 +7535,14 @@ sequences:
             eval: n.finishInstall(&base, first, last)
             op: =
             to: n.finishInstall
+          when: err != nil
+      - opt:
+          do:
+            - return: raft.StartState{}, err
+          init:
+            bind: err
+            eval: n.unpublishNewer(failed)
+            to: n.unpublishNewer
           when: err != nil
       - bind: ents, err
         eval: n.readTail(first, last, snapIdx)
@@ -7533,23 +7607,31 @@ sequences:
     steps:
       - loop:
           do:
-            - bind: err
+            - bind: rerr
               eval: n.restoreFrom(m, durIdx)
               to: n.restoreFrom
             - opt:
                 do:
-                  - return: m, n.unpublishNewer(metas[:i])
-                when: err == nil
+                  - return: m, failed, nil
+                when: rerr == nil
             - opt:
                 do:
-                  - return: coreconsensus.SnapshotMetaValue{}, err
-                when: errs.HasCode(err, coreconsensus.CodeVersionUnsupported)
-            - eval: "n.obs.warn(\"consensus: a snapshot was not restored\", lstr(\"id\", m.ID), lstr(\"error\", err.Error()))"
+                  - return: coreconsensus.SnapshotMetaValue{}, nil, rerr
+                when: errs.HasCode(rerr, coreconsensus.CodeVersionUnsupported)
+            - eval: "n.obs.warn(\"consensus: a snapshot was not restored\", lstr(\"id\", m.ID), lstr(\"error\", rerr.Error()))"
               to: n.obs.warn
-          key: i
+            - opt:
+                do:
+                  - set: failed
+                    value: append(failed, m)
+                when: ownFailure(rerr)
+          key: _
           range: metas
           value: m
-      - return: coreconsensus.SnapshotMetaValue{}, nil
+      - return: coreconsensus.SnapshotMetaValue{}, nil, nil
+  - of: ownFailure
+    steps:
+      - return: "!errs.HasCode(err, coreconsensus.CodeStorageFailed) && !errs.HasCode(err, coreconsensus.CodeSnapshotTooLarge)"
   - of: (*Node).unpublishNewer
     participants:
       - id: caller
@@ -14615,7 +14697,7 @@ sequences:
   - of: maxEncodedChunk
     steps:
       - set: chunk
-        value: max(chunk, 1)
+        value: min(max(chunk, 1), math.MaxUint32)
       - return: chunk + chunk/8 + 1024
   - of: alignedOffsetAt
     participants:

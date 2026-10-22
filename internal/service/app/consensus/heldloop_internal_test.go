@@ -3,6 +3,7 @@ package consensus
 import (
 	"bytes"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -81,6 +82,84 @@ func TestASnapshotThatDidNotRestoreIsUnpublished(t *testing.T) {
 		}
 	}
 	caughtUp(t, c, l, f, x)
+}
+
+// A snapshot that did not restore for a reason of this node's — a disk
+// failure, a MaxSnapshotBytes lowered since — stays published: it may
+// restore at the next start, and the log may have been compacted to it.
+func TestASnapshotOverALoweredLimitStaysPublished(t *testing.T) {
+	var limit atomic.Int64
+	limit.Store(1 << 30)
+	c := newClusterWith(t, &cluster{
+		t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{5, 2, 8}, every: 20,
+		configure: func(_ *testNode, cfg *Config) { cfg.MaxSnapshotBytes, cfg.SnapshotEveryBytes = limit.Load(), 1 },
+	})
+	l := c.settledLeader(5 * time.Second)
+	f := c.otherThan(l)
+	var tok coreconsensus.TokenValue
+	for i := range 60 {
+		tok = proposeOnLeader(t, c, fmt.Sprintf("k%d=%s", i, bytes.Repeat([]byte("v"), 200)))
+	}
+	c.waitApplied(tok.Index, 10*time.Second)
+	cutsSettled(t, f)
+	metas := must(f.snaps.List())(t)
+	if len(metas) < 2 || max(metas[0].EncodedSize, metas[0].DecodedSize) <= max(metas[1].EncodedSize, metas[1].DecodedSize) {
+		t.Fatalf("setup: the follower holds no older, smaller snapshot: %+v", metas)
+	}
+	c.net.Isolate(f.id, true)
+	c.kill(f)
+	limit.Store((max(metas[0].EncodedSize, metas[0].DecodedSize) + max(metas[1].EncodedSize, metas[1].DecodedSize)) / 2)
+	c.start(f)
+	if f.node.r.NoTable() {
+		t.Fatal("setup: the follower started with no table")
+	}
+	held := false
+	for _, m := range must(f.snaps.List())(t) {
+		held = held || m.ID == metas[0].ID
+	}
+	if !held {
+		t.Fatalf("the snapshot over the lowered limit %d was unpublished", limit.Load())
+	}
+}
+
+// A snapshot that did not restore is unpublished only once the older one
+// restored in its place is known to continue the log: a log compacted past
+// the older one cannot start from it, and with the newer one gone no start
+// could ever succeed again.
+func TestNoSnapshotIsUnpublishedBeforeItsFallbackContinuesTheLog(t *testing.T) {
+	c := newCluster(t, 3, 20)
+	l := c.settledLeader(5 * time.Second)
+	f := c.otherThan(l)
+	var tok coreconsensus.TokenValue
+	for i := range 60 {
+		tok = proposeOnLeader(t, c, fmt.Sprintf("k%d=%d", i, i))
+	}
+	c.waitApplied(tok.Index, 10*time.Second)
+	cutsSettled(t, f)
+	metas := must(f.snaps.List())(t)
+	if len(metas) < 2 {
+		t.Fatalf("setup: the follower holds %d snapshots", len(metas))
+	}
+	c.net.Isolate(f.id, true)
+	c.kill(f)
+	// The log compacted to the newer snapshot, whose copy then rots.
+	if err := f.log.CompactPrefix(metas[0].Position.Index); err != nil {
+		t.Fatal(err)
+	}
+	f.snaps.mu.Lock()
+	f.snaps.done[metas[0].ID].data[len(f.snaps.done[metas[0].ID].data)/2] ^= 0xff
+	f.snaps.mu.Unlock()
+	f.sm = newKV()
+	if _, err := NewNode(c.config(f)); err == nil {
+		t.Fatal("setup: a node started from a snapshot its log does not continue")
+	}
+	held := false
+	for _, m := range must(f.snaps.List())(t) {
+		held = held || m.ID == metas[0].ID
+	}
+	if !held {
+		t.Fatal("the newer snapshot was unpublished though the start that fell back failed")
+	}
 }
 
 // A node answers held only for a snapshot it holds at or below what it

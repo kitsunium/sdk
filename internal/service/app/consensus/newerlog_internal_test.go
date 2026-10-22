@@ -29,73 +29,76 @@ func segmentBytes(t *testing.T, dir string) map[string][]byte {
 	return out
 }
 
-// reopenRefusedVersion closes d, reopens dir and requires the open to be
-// refused VERSION_UNSUPPORTED with every segment byte left as it was.
-func reopenRefusedVersion(t *testing.T, dir string, d DataDir) {
-	t.Helper()
-	d.d.log.Close()
-	if err := d.Close(); err != nil {
-		t.Fatalf("close before reopening: %v", err)
+// A log a newer build wrote stops the open VERSION_UNSUPPORTED and is left
+// byte for byte: a record whose crc holds but whose version this build
+// does not write, a record kind it does not know, or a hard state of
+// another length — in a finished batch or in the unfinished last one.
+// Taken for a hole, or skipped, they were zeroed as a torn tail after a
+// rollback, and the node forgot the entries it acknowledged and the vote
+// it cast (D18, #511).
+func TestALogANewerBuildWroteStopsTheOpen(t *testing.T) {
+	longHS := append(encodeHS(coreconsensus.HardState{Term: 2, Vote: 9}), make([]byte, 8)...)
+	type tc struct {
+		name string
+		// tail is what the newer build left past the base log, given the
+		// batch the base log continues with.
+		tail func(b uint64) [][]byte
 	}
-	before := segmentBytes(t, dir)
-	nd, err := NewDataDirWith(dir, DataDirOptions{SegmentBytes: 1 << 16})
-	if err == nil {
-		defer nd.Close()
-		_, last := nd.Log().Bounds()
-		t.Errorf("a log a newer build wrote opened: last=%d tailsTruncated=%d", last, nd.d.log.tailsTruncated)
-	} else if !errs.HasCode(err, coreconsensus.CodeVersionUnsupported) {
-		t.Errorf("open = %v %v, want VERSION_UNSUPPORTED", err, errs.FieldsOf(err))
+	cases := []tc{
+		{"newer version, finished batches", func(b uint64) [][]byte {
+			return [][]byte{
+				newer(rec(recEntry, b, 4, false), recVersion+1),
+				newer(rec(recEntry, b, 5, true), recVersion+1),
+				newer(appendRecord(nil, &record{
+					kind: recHardState, batch: b + 1, end: true,
+					data: encodeHS(coreconsensus.HardState{Term: 2, Vote: 9}),
+				}), recVersion+1),
+			}
+		}},
+		{"newer version after a hole", func(b uint64) [][]byte {
+			return [][]byte{[]byte("garbage!garbage!"), newer(rec(recEntry, b+1, 5, true), recVersion+1)}
+		}},
+		{"longer hard state", func(b uint64) [][]byte {
+			return [][]byte{appendRecord(nil, &record{kind: recHardState, batch: b, end: true, data: longHS})}
+		}},
+		{"longer hard state, unfinished batch", func(b uint64) [][]byte {
+			return [][]byte{appendRecord(nil, &record{kind: recHardState, batch: b, data: longHS})}
+		}},
+		{"unknown record kind", func(b uint64) [][]byte {
+			return [][]byte{rec(recCommit+1, b, 4, true)}
+		}},
+		{"unknown record kind, unfinished batch", func(b uint64) [][]byte {
+			return [][]byte{rec(recEntry, b, 4, false), rec(recCommit+1, b, 4, false)}
+		}},
 	}
-	after := segmentBytes(t, dir)
-	for n, b := range before {
-		if !bytes.Equal(b, after[n]) {
-			t.Errorf("segment %s changed by the refused open", n)
+	runCase := func(t *testing.T, c tc) {
+		dir, d := base(t)
+		var at int64
+		for _, r := range c.tail(d.d.log.batch) {
+			tail(t, d, r, at)
+			at += int64(len(r))
+		}
+		d.d.log.Close()
+		if err := d.Close(); err != nil {
+			t.Fatalf("close before reopening: %v", err)
+		}
+		before := segmentBytes(t, dir)
+		nd, err := NewDataDirWith(dir, DataDirOptions{SegmentBytes: 1 << 16})
+		if err == nil {
+			defer nd.Close()
+			_, last := nd.Log().Bounds()
+			t.Errorf("a log a newer build wrote opened: last=%d tailsTruncated=%d", last, nd.d.log.tailsTruncated)
+		} else if !errs.HasCode(err, coreconsensus.CodeVersionUnsupported) {
+			t.Errorf("open = %v %v, want VERSION_UNSUPPORTED", err, errs.FieldsOf(err))
+		}
+		after := segmentBytes(t, dir)
+		for n, b := range before {
+			if !bytes.Equal(b, after[n]) {
+				t.Errorf("segment %s changed by the refused open", n)
+			}
 		}
 	}
-}
-
-// A record whose crc holds but whose version this build does not know was
-// written by a newer build: D18 stops on it, and a rollback used to zero it
-// as a torn tail — entries acknowledged and a vote cast were lost (#511).
-func TestALogRecordOfANewerVersionStopsTheOpen(t *testing.T) {
-	dir, d := base(t)
-	b := d.d.log.batch
-	r1 := newer(rec(recEntry, b, 4, false), recVersion+1)
-	r2 := newer(rec(recEntry, b, 5, true), recVersion+1)
-	hs := newer(appendRecord(nil, &record{
-		kind: recHardState, batch: b + 1, end: true,
-		data: encodeHS(coreconsensus.HardState{Term: 2, Vote: 9}),
-	}), recVersion+1)
-	tail(t, d, r1, 0)
-	tail(t, d, r2, int64(len(r1)))
-	tail(t, d, hs, int64(len(r1)+len(r2)))
-	reopenRefusedVersion(t, dir, d)
-}
-
-// A newer record after a real hole is no torn tail either.
-func TestALogRecordOfANewerVersionAfterAHoleStopsTheOpen(t *testing.T) {
-	dir, d := base(t)
-	b := d.d.log.batch
-	garbage := []byte("garbage!garbage!")
-	r1 := newer(rec(recEntry, b+1, 5, true), recVersion+1)
-	tail(t, d, garbage, 0)
-	tail(t, d, r1, int64(len(garbage)))
-	reopenRefusedVersion(t, dir, d)
-}
-
-// A hard state of another length is a newer layout, never ignored (#511).
-func TestALongerHardStateStopsTheOpen(t *testing.T) {
-	dir, d := base(t)
-	b := d.d.log.batch
-	data := append(encodeHS(coreconsensus.HardState{Term: 2, Vote: 9}), make([]byte, 8)...)
-	tail(t, d, appendRecord(nil, &record{kind: recHardState, batch: b, end: true, data: data}), 0)
-	reopenRefusedVersion(t, dir, d)
-}
-
-// A record kind this build does not know is never skipped (#511).
-func TestAnUnknownRecordKindStopsTheOpen(t *testing.T) {
-	dir, d := base(t)
-	b := d.d.log.batch
-	tail(t, d, rec(recCommit+1, b, 4, true), 0)
-	reopenRefusedVersion(t, dir, d)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
 }

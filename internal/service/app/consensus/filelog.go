@@ -356,6 +356,9 @@ func (l *fileLog) recover() error {
 	if err := l.checkBatchSequence(segs); err != nil {
 		return err
 	}
+	if err := checkLayouts(segs); err != nil {
+		return err
+	}
 	last := segs[len(segs)-1]
 	if err := l.trimTornTail(last); err != nil {
 		return err
@@ -584,6 +587,37 @@ func (l *fileLog) applyRecord(seg uint64, r *record) error {
 		return unknownLayout(seg, r, "record_kind", int(r.kind))
 	}
 	return nil
+}
+
+// checkLayouts refuses, before any tail is classified or trimmed, a record
+// of a kind this build does not know or a hard state of another length:
+// left to replay, one in an unfinished last batch was trimmed with the tear
+// and zeroed, and the open succeeded (D18, #511).
+func checkLayouts(segs []*scanned) error {
+	for _, s := range segs {
+		for i := range s.recs {
+			if err := knownLayout(s.n, &s.recs[i]); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// knownLayout is nil for a record of a kind this build reads, with the
+// payload length that kind has where it has one.
+func knownLayout(seg uint64, r *record) error {
+	switch r.kind {
+	case recEntry, recTruncate, recCheckpt, recSeal, recCompact, recCommit:
+		return nil
+	case recHardState:
+		if len(r.data) != hardStateLen {
+			return unknownLayout(seg, r, "hard_state_bytes", len(r.data))
+		}
+		return nil
+	default:
+		return unknownLayout(seg, r, "record_kind", int(r.kind))
+	}
 }
 
 // applyHardState applies a hard-state record; one of another length is a
