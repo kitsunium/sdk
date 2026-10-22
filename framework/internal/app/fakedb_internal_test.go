@@ -516,6 +516,9 @@ func statement(d *fakeData, query string, args []driver.NamedValue) (driver.Rows
 	if strings.Contains(query, "FAIL") {
 		return nil, 0, fmt.Errorf("fake: syntax error in %q", query)
 	}
+	if strings.Contains(query, "pragma_table_info(") || strings.Contains(query, "information_schema.columns") {
+		return fakeTrailColumns(d, args), 0, nil
+	}
 	if strings.Contains(query, "LEFT JOIN") {
 		if names := quoted.FindStringSubmatch(query); names != nil && strings.HasSuffix(names[1], "___vs") {
 			return readTrashed(d, strings.TrimSuffix(names[1], "___vs"), args)

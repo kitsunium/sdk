@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"net/textproto"
+	"slices"
 	"testing"
 	"time"
 
@@ -65,8 +66,9 @@ func TestA552ToRCPTIsTemporary(t *testing.T) {
 
 // TestAPermanentRefusalIsDeadLetteredAtOnce pins RFC 5321 §4.2.1: a 5xx reply
 // is not repeated. The mail is dead-lettered on its first attempt, with
-// attempts left, the transport's verdict as the dead letter's reason, and the
-// event's error marked CodeMailRejected with the reply still reachable.
+// attempts left, the transport's verdict as the dead letter's reason and
+// CodeMailRejected in its trail (issue #500), and the event's error marked
+// CodeMailRejected with the reply still reachable.
 func TestAPermanentRefusalIsDeadLetteredAtOnce(t *testing.T) {
 	t.Parallel()
 	transport := &scripted{fail: refusedWith(550, "5.1.1 no such user")}
@@ -86,7 +88,8 @@ func TestAPermanentRefusalIsDeadLetteredAtOnce(t *testing.T) {
 	}
 	letter := eventuallyDeadLetters(t, s, 1)[0]
 	if letter.ID != id || letter.Attempts != 1 || letter.Reason != "SEND_REFUSED" ||
-		letter.Code != uint32(coremail.CodeSendRefused) || letter.Cause != errs.PublicOf(coremail.SendRefused) {
+		letter.Code != uint32(coremail.CodeSendRefused) || letter.Cause != errs.PublicOf(coremail.SendRefused) ||
+		!slices.Contains(letter.Trail, uint32(corespool.CodeMailRejected)) {
 		t.Fatalf("the dead letter %+v", letter)
 	}
 	if messages, _ := transport.seen(); len(messages) != 1 {
@@ -159,8 +162,8 @@ func TestRetryPermanentRetriesA5xx(t *testing.T) {
 
 // TestAMailOlderThanMaxAgeIsGivenUp pins Config.MaxAge on the manual clock: a
 // failure before the age is retried, the first failure at or after it
-// dead-letters the mail with that failure, marked CodeMailExpired, though
-// attempts are left.
+// dead-letters the mail with that failure, marked CodeMailExpired — in the
+// dead letter's trail too (issue #500) —, though attempts are left.
 func TestAMailOlderThanMaxAgeIsGivenUp(t *testing.T) {
 	t.Parallel()
 	transport := &scripted{fail: relayDown}
@@ -183,7 +186,8 @@ func TestAMailOlderThanMaxAgeIsGivenUp(t *testing.T) {
 		t.Fatalf("the dead letter event %+v", dead)
 	}
 	letter := eventuallyDeadLetters(t, s, 1)[0]
-	if letter.Attempts != 3 || letter.Reason != "DIAL_FAILED" || letter.Code != uint32(coremail.CodeDialFailed) {
+	if letter.Attempts != 3 || letter.Reason != "DIAL_FAILED" || letter.Code != uint32(coremail.CodeDialFailed) ||
+		!slices.Contains(letter.Trail, uint32(corespool.CodeMailExpired)) || slices.Contains(letter.Trail, uint32(corespool.CodeMailRejected)) {
 		t.Fatalf("the dead letter %+v", letter)
 	}
 }

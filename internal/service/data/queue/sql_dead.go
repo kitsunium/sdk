@@ -51,7 +51,7 @@ func (b *sqlBroker) DeadLetters(
 	defer func() { err = b.finishRows(rows, "read the dead letters", err) }()
 	//: one dead letter per row; nil until one is found.
 	for rows.Next() {
-		record, scanErr := scanDeadLetter(rows)
+		record, scanErr := scanDeadLetter(rows, b.stmts.trail)
 		//: a row the driver cannot hand over fails the read.
 		if scanErr != nil {
 			//: QueueBackendFailed.
@@ -69,13 +69,19 @@ type scanner interface {
 	Scan(dest ...any) error
 }
 
-// scanDeadLetter reads one dead letter's row.
-func scanDeadLetter(rows scanner) (corequeue.DeadLetterValue, error) {
-	var id, reason, cause, payload []byte
+// scanDeadLetter reads one dead letter's row: its trail too when the
+// statement names the column (SQLConfig.Trail).
+func scanDeadLetter(rows scanner, withTrail bool) (corequeue.DeadLetterValue, error) {
+	var id, reason, cause, trail, payload []byte
 	var enqueuedAt, deliveries, failedAt int64
 	var code stdsql.NullInt64
+	dest := []any{&id, &enqueuedAt, &deliveries, &failedAt, &reason, &cause, &code, &payload}
+	//: the trail is read between the code and the payload, as it is named.
+	if withTrail {
+		dest = []any{&id, &enqueuedAt, &deliveries, &failedAt, &reason, &cause, &code, &trail, &payload}
+	}
 	//: in the order the statement names the columns.
-	if err := rows.Scan(&id, &enqueuedAt, &deliveries, &failedAt, &reason, &cause, &code, &payload); err != nil {
+	if err := rows.Scan(dest...); err != nil {
 		//: the driver's failure, for the caller to wrap.
 		return corequeue.DeadLetterValue{}, err
 	}
@@ -86,6 +92,7 @@ func scanDeadLetter(rows scanner) (corequeue.DeadLetterValue, error) {
 		},
 		FailedAt: time.Unix(0, failedAt), Deliveries: int(deliveries),
 		Reason: string(reason), Cause: string(cause), Code: uint32(code.Int64), //nolint:gosec // written from a uint32
+		Trail: decodeTrail(string(trail)),
 	}, nil
 }
 
@@ -164,8 +171,7 @@ func (b *sqlBroker) PutDeadLetter(ctx context.Context, dead corequeue.DeadLetter
 	id := messageID(enqueuedAt, entropy)
 	err := b.run(ctx, false, func(txCtx context.Context, ex coresql.Executor) error {
 		_, execErr := ex.ExecContext(txCtx, b.stmts.putDead,
-			[]byte(id), dead.FailedAt.UnixNano(), enqueuedAt, int64(dead.Deliveries), dead.Message.Payload,
-			[]byte(dead.Reason), []byte(dead.Cause), int64(dead.Code))
+			b.stmts.putDeadArgs(id, dead)...)
 		//: the insertion did not complete.
 		if execErr != nil {
 			//: QueueBackendFailed, the driver's text withheld.

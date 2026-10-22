@@ -113,7 +113,17 @@ type frameworkTable struct {
 	// queue marks a consumer's queue: the SDK's SQL broker's one table, which
 	// the queue subsystem migrates, not a document store's.
 	queue bool
+	// trailOf is, for the trail column of a consumer's queue, the queue's
+	// table: no table of its own, but a migration of its own — the SDK's
+	// queue.SQLTrailMigration, which adds the column to a table an earlier
+	// release made (issue #500) —, recorded in kit's registry under the
+	// table's name and trailSuffix, which no table name can hold.
+	trailOf string
 }
+
+// trailSuffix ends the registry's name of a queue's trail column: '#' is in
+// no table name kit gives, so it is never a table's.
+const trailSuffix = "#trail"
 
 // frameworkTables are the tables kit keeps on d: each store it keeps, the former
 // values of those that remember, the journals of the workflows over them,
@@ -143,7 +153,9 @@ func (a *App) nodeTables(n node, d *database) []frameworkTable {
 	}
 	if q, ok := n.(queueOwner); ok {
 		if under := q.queueUnder(); under != "" && a.queueKeptOn(q.base(), d) {
-			out = append(out, frameworkTable{name: queueTable(q.base(), under), node: q.base().id, former: formerQueueTable(q.base(), under), queue: true})
+			table := queueTable(q.base(), under)
+			out = append(out, frameworkTable{name: table, node: q.base().id, former: formerQueueTable(q.base(), under), queue: true},
+				frameworkTable{name: table + trailSuffix, node: q.base().id, queue: true, trailOf: table})
 		}
 	}
 	return out

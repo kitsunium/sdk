@@ -15,9 +15,9 @@ type MailSpool interface {
 	Send(ctx context.Context, msg MailValue) (string, error)
 	// SendWithID puts msg in the outbox under id, minted by the framework.
 	SendWithID(ctx context.Context, id string, msg MailValue) error
-	// DeadLetters counts up to maxLetters of the mails earlier runs gave up
-	// on.
-	DeadLetters(ctx context.Context, maxLetters int) (int, error)
+	// DeadLetters returns up to maxLetters of the mails earlier runs gave up
+	// on, oldest first, each with why.
+	DeadLetters(ctx context.Context, maxLetters int) ([]MailDeadLetterValue, error)
 	// Run hands each mail to the transport until ctx ends.
 	Run(ctx context.Context) error
 	// Close releases the outbox.

@@ -247,12 +247,18 @@ func freeVersion(used map[uint64]bool, v uint64) uint64 {
 // subsystem writes it, the SDK's document store's two tables, and for a
 // store's versions the table of versions beside the store's, which the SDK
 // names from it; as the queue subsystem writes it, for a consumer's queue,
-// the SQL broker's one table (ADR 0178 C1).
+// the SQL broker's one table (ADR 0178 C1), and for its trail column the
+// column's addition to a table an earlier release made, which does nothing
+// on a table that has it or is not there yet — so it may run before the
+// table's own, whose version it does not follow (issue #500).
 func tableMigration(dialect Dialect, t frameworkTable, version uint64) (plug.MigrationValue, error) {
 	if t.queue {
 		queues := plug.Queues.Load()
-		if queues == nil || queues.TableMigration == nil {
+		if queues == nil || queues.TableMigration == nil || (t.trailOf != "" && queues.TrailMigration == nil) {
 			return plug.MigrationValue{}, queuesMissing()
+		}
+		if t.trailOf != "" {
+			return queues.TrailMigration(string(dialect), t.trailOf, version)
 		}
 		return queues.TableMigration(string(dialect), t.name, version)
 	}

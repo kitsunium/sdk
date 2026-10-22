@@ -343,7 +343,10 @@ func (b *fileBroker) readDead(
 // dead-letter store is read by whoever is investigating, frequently not the
 // process, the host or the trust domain that produced the failure, so it is
 // the wrong place for the half of an error the SDK defines as log-only. The
-// message identifier is the join key back to the log line that has it.
+// message identifier is the join key back to the log line that has it. The
+// trail's codes, the dotted-quad halves of the wrappers the cause went
+// through, are public as the code is, and are written on a line of their own
+// only when there are some (issue #500).
 func encodeDead(name nameValue, cause causeValue, failedAt int64, payload []byte) []byte {
 	var header strings.Builder
 	header.WriteString(deadMagic + "\n")
@@ -352,6 +355,12 @@ func encodeDead(name nameValue, cause causeValue, failedAt int64, payload []byte
 	header.WriteString("failed " + strconv.FormatInt(failedAt, decimalBase) + "\n")
 	header.WriteString("deliveries " + strconv.Itoa(name.Deliveries) + "\n")
 	header.WriteString("code " + strconv.FormatUint(uint64(cause.code), decimalBase) + "\n")
+	//: only when the cause had one, so a record without a trail is the
+	//: bytes this format always wrote, and a reader that predates the line
+	//: skips it as an unknown field.
+	if len(cause.trail) > 0 {
+		header.WriteString("trail " + encodeTrail(cause.trail) + "\n")
+	}
 	header.WriteString("reason " + oneLine(cause.reason) + "\n")
 	header.WriteString("public " + oneLine(cause.public) + "\n")
 	header.WriteString("\n")
@@ -387,6 +396,7 @@ func decodeDead(raw []byte) (record corequeue.DeadLetterValue, ok bool) {
 		},
 		FailedAt: nanoField(fields["failed"]), Deliveries: intField(fields["deliveries"]),
 		Code: uint32(intField(fields["code"])), Reason: fields["reason"], Cause: fields["public"],
+		Trail: decodeTrail(fields["trail"]),
 	}, true
 }
 

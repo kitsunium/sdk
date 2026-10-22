@@ -106,7 +106,7 @@ func NewSQL(cfg SQLConfig) (broker corequeue.Broker, err error) {
 	return &sqlBroker{
 		tm: cfg.Transactor, clk: clockOrSystem(cfg.Clock), tx: parts,
 		wake: sqlWakeFor(parts.join, cfg.Table), table: cfg.Table,
-		stmts: renderSQLStatements(cfg.Dialect, cfg.Table), own: sqlOwnTxOptions(cfg.Dialect),
+		stmts: renderSQLStatements(cfg.Dialect, cfg.Table, cfg.Trail), own: sqlOwnTxOptions(cfg.Dialect),
 		policy: cfg.Policy.Normalized(),
 	}, nil
 }
@@ -459,7 +459,7 @@ func (b *sqlBroker) buryHeld(ctx context.Context, held sqlReceipt, cause causeVa
 	}
 	//: one statement: dead only if the receipt still holds its lease.
 	return b.run(ctx, false, func(txCtx context.Context, ex coresql.Executor) error {
-		args := append(causeArgs(now.UnixNano(), cause), held.args(now.UnixNano())...)
+		args := append(b.stmts.causeArgs(now.UnixNano(), cause), held.args(now.UnixNano())...)
 		result, execErr := ex.ExecContext(txCtx, b.stmts.bury, args...)
 		//: dead, LeaseExpired, or QueueBackendFailed.
 		return b.leased(result, execErr, "dead-letter a message")
@@ -536,14 +536,6 @@ func (b *sqlBroker) failed(step string, cause error) error {
 func (r sqlReceipt) args(now int64) []any {
 	//: in the order the placeholders are numbered.
 	return []any{[]byte(r.id), []byte(r.lease), int64(r.deliveries), now}
-}
-
-// causeArgs binds a burial's instant and cause: the instant, the reason, the
-// wire-safe Public half and the code, each bounded as the file broker bounds
-// its record's header.
-func causeArgs(now int64, cause causeValue) []any {
-	//: in the order the placeholders are numbered.
-	return []any{now, []byte(oneLine(cause.reason)), []byte(oneLine(cause.public)), int64(cause.code)}
 }
 
 // sqlReceiptValue renders a receipt: the identifier, the delivery count, the

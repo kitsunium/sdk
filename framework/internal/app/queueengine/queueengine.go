@@ -14,7 +14,7 @@ import (
 // queue's table into the framework.
 func Enable() {
 	plug.Queues.Store(&plug.QueueDriverConfig{
-		Open: open, TableMigration: tableMigration,
+		Open: open, TableMigration: tableMigration, TrailMigration: trailMigration,
 		DoNotRetry: queue.DoNotRetry, NotRetryable: notRetryable,
 	})
 }
@@ -64,7 +64,9 @@ func openSQL(cfg *plug.QueueConfig, policy queue.Policy, clk clock.Timed) (queue
 		return nil, errs.Wrap(queue.SQLQueueMisconfigured, errs.WrapParams{},
 			errs.String("queue", cfg.Name), errs.String("problem", "the queue's database was not opened by the store subsystem"))
 	}
-	return queue.NewSQL(queue.SQLConfig{Table: cfg.Table, Policy: policy, Clock: clk, Transactor: tm, Dialect: dialect})
+	// Trail: the framework's queue tables have the column, which
+	// trailMigration adds to those an earlier release made (issue #500).
+	return queue.NewSQL(queue.SQLConfig{Table: cfg.Table, Policy: policy, Clock: clk, Transactor: tm, Dialect: dialect, Trail: true})
 }
 
 // policyOf is kit's policy as the SDK's queue takes it.
@@ -88,6 +90,22 @@ func tableMigration(dialect, table string, version uint64) (plug.MigrationValue,
 		return plug.MigrationValue{}, err
 	}
 	m, err := queue.SQLMigration(d, table, version)
+	if err != nil {
+		return plug.MigrationValue{}, err
+	}
+	return plug.MigrationValue{Version: m.Version, Name: m.Name, Up: pluggedStep(m.Up), Down: pluggedStep(m.Down)}, nil
+}
+
+// trailMigration is the migration that adds the column a consumer's queue's
+// dead letters keep their trails in to its table on a database of the dialect
+// named — the SDK's SQL broker's trail column, which a table made before it
+// existed lacks; nothing on a table that has it (issue #500).
+func trailMigration(dialect, table string, version uint64) (plug.MigrationValue, error) {
+	d, err := dialectOf(dialect)
+	if err != nil {
+		return plug.MigrationValue{}, err
+	}
+	m, err := queue.SQLTrailMigration(d, table, version)
 	if err != nil {
 		return plug.MigrationValue{}, err
 	}

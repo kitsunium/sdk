@@ -128,7 +128,7 @@ func (b *fileBroker) PutDeadLetter(ctx context.Context, dead corequeue.DeadLette
 		return "", backendFailed("rand", "", entropyErr)
 	}
 	name := nameValue{EnqueuedAt: dead.Message.EnqueuedAt.UnixNano(), Entropy: entropy, Deliveries: dead.Deliveries}
-	cause := causeValue{reason: dead.Reason, public: dead.Cause, code: dead.Code}
+	cause := causeValue{reason: dead.Reason, public: dead.Cause, code: dead.Code, trail: dead.Trail}
 	record := encodeDead(name, cause, dead.FailedAt.UnixNano(), dead.Message.Payload)
 	//: THE durable step, exactly as a burial takes it.
 	if writeErr := b.publisher.WriteAtomic(path.Join(dirDead, name.deadName()), record, messageMode); writeErr != nil {

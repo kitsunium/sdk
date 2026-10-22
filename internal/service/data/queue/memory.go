@@ -530,6 +530,7 @@ func (b *memoryBroker) PutDeadLetter(ctx context.Context, dead corequeue.DeadLet
 	b.seq++
 	dead.Message.ID = memID(dead.Message.EnqueuedAt, b.seq)
 	dead.Message.Payload = slices.Clone(dead.Message.Payload)
+	dead.Trail = cloneTrail(dead.Trail)
 	b.dead = append(b.dead, dead)
 	//: dead, as it was given, after every record the store already holds.
 	return dead.Message.ID, nil
@@ -720,14 +721,15 @@ func (b *memoryBroker) DeadLetters(
 	//: copy keeps the order and the nil an empty store has always returned.
 	dead = slices.Clone(b.dead[:min(max, len(b.dead))])
 	//: and it must not let the reader REWRITE it either: a DeadLetterValue
-	//: holds a slice, so the outer copy alone hands every caller the very
-	//: bytes this store keeps, and one that edits the payload it was given
-	//: changes what the next investigator reads. The port says the payload
+	//: holds two slices — the payload and the trail —, so the outer copy
+	//: alone hands every caller the very bytes this store keeps, and one that
+	//: edits what it was given changes what the next investigator reads. The port says the payload
 	//: belongs to the receiver; Receive copies for the same reason, and the
 	//: file broker re-reads the record from disk. Only the copy is written,
 	//: so the read lock is still the right one.
 	for index := range dead {
 		dead[index].Message.Payload = slices.Clone(dead[index].Message.Payload)
+		dead[index].Trail = cloneTrail(dead[index].Trail)
 	}
 	//: the caller's own, in the order the store holds them.
 	return dead, nil
@@ -818,7 +820,7 @@ func (b *memoryBroker) bury(record *memRecord, now time.Time, cause causeValue) 
 			ID: record.id, Payload: slices.Clone(record.payload), EnqueuedAt: record.enqueuedAt,
 		},
 		Deliveries: record.deliveries, FailedAt: now,
-		Reason: cause.reason, Cause: cause.public, Code: cause.code,
+		Reason: cause.reason, Cause: cause.public, Code: cause.code, Trail: cause.trail,
 	})
 }
 

@@ -186,6 +186,28 @@ type MailAttemptValue struct {
 	Attempt int
 }
 
+// MailDeadLetterValue is filled by kit gen.
+type MailDeadLetterValue struct {
+	// Meta is filled by kit gen.
+	Meta map[string]string
+	// FailedAt is filled by kit gen.
+	FailedAt time.Time
+	// QueuedAt is filled by kit gen.
+	QueuedAt time.Time
+	// Message is filled by kit gen.
+	Message MailValue
+	// ID is filled by kit gen.
+	ID string
+	// QueueID is filled by kit gen.
+	QueueID string
+	// Cause is filled by kit gen.
+	Cause string
+	// Attempts is filled by kit gen.
+	Attempts int
+	// GivenUp is filled by kit gen.
+	GivenUp MailGiveUp
+}
+
 // MailEventValue is what a spool reports of a mail: its kind, the mail and
 // its outbox ID, the attempt, when, the failure of a failed attempt, and why
 // a dead letter was given up.

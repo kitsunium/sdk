@@ -143,6 +143,8 @@ type DeadLetterValue struct {
 	Reason, Cause string
 	// Message is the mail, as it was spooled.
 	Message coremail.MessageValue
+	// Trail is filled by kit gen.
+	Trail []uint32
 	// Attempts is how many deliveries it got.
 	Attempts int
 	// Code is the last failure's dotted-quad code, or 0.

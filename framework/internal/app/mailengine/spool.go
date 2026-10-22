@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/textproto"
+	"slices"
 
 	"github.com/kitsunium/sdk/framework/internal/app/plug"
 	"github.com/kitsunium/sdk/framework/internal/app/queueengine"
@@ -159,10 +160,41 @@ func (s spool) SendWithID(ctx context.Context, id string, msg plug.MailValue) er
 	return s.s.SendWithID(ctx, id, messageOf(msg))
 }
 
-// DeadLetters counts up to maxLetters of the outbox's dead letters.
-func (s spool) DeadLetters(ctx context.Context, maxLetters int) (int, error) {
+// DeadLetters returns up to maxLetters of the outbox's dead letters, oldest
+// first, each with why it was given up.
+func (s spool) DeadLetters(ctx context.Context, maxLetters int) ([]plug.MailDeadLetterValue, error) {
 	dead, err := s.s.DeadLetters(ctx, maxLetters)
-	return len(dead), err
+	if err != nil {
+		return nil, err
+	}
+	out := make([]plug.MailDeadLetterValue, len(dead))
+	for i := range dead {
+		d := &dead[i]
+		out[i] = plug.MailDeadLetterValue{
+			Meta: d.Meta, FailedAt: d.FailedAt, QueuedAt: d.QueuedAt, Message: plug.MailValue{Value: d.Message},
+			ID: d.ID, QueueID: d.QueueID, Cause: d.Cause, Attempts: d.Attempts, GivenUp: deadGivenUp(d),
+		}
+	}
+	return out, nil
+}
+
+// deadGivenUp is why the spool gave up the mail of the dead letter d, read
+// as givenUpOf reads a live failure: the code the spool adds when it gives a
+// mail up early, which the queue kept in the dead letter's trail — or as its
+// code, when the transport's failure was no SDK error and the mark became
+// the origin —, else its last attempt (issue #500).
+func deadGivenUp(d *mailspool.DeadLetter) plug.MailGiveUp {
+	carries := func(code errs.Code) bool {
+		return d.Code == uint32(code) || slices.Contains(d.Trail, uint32(code))
+	}
+	switch {
+	case carries(mailspool.CodeMailRejected):
+		return plug.MailGivenUpRejected
+	case carries(mailspool.CodeMailExpired):
+		return plug.MailGivenUpExpired
+	default:
+		return plug.MailGivenUpExhausted
+	}
 }
 
 // Run hands each mail to the transport until ctx ends.

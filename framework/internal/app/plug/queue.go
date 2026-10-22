@@ -22,8 +22,9 @@ import (
 var Queues atomic.Pointer[QueueDriverConfig]
 
 // QueueDriverConfig is what framework/app/queue plugs into kit: how a
-// consumer's queue opens, the migration that makes its table on a database,
-// and how a delivery's handler says that no retry can help.
+// consumer's queue opens, the migrations that make its table on a database
+// and add the column its dead letters' trails are kept in, and how a
+// delivery's handler says that no retry can help.
 type QueueDriverConfig struct {
 	// Open opens one queue, as cfg places it: on a database, in a
 	// directory, or in memory.
@@ -31,6 +32,8 @@ type QueueDriverConfig struct {
 	// TableMigration is the migration that makes the queue table on a
 	// database of the dialect named, at version.
 	TableMigration func(dialect, table string, version uint64) (MigrationValue, error)
+	// TrailMigration is filled by kit gen.
+	TrailMigration func(dialect, table string, version uint64) (MigrationValue, error)
 	// DoNotRetry is err as a delivery's handler returns it when no retry
 	// can help: its queue dead-letters the message at once.
 	DoNotRetry func(err error) error
@@ -166,6 +169,8 @@ type DeadLetterValue struct {
 	Cause string
 	// Message is the message, unmodified.
 	Message MessageValue
+	// Trail is filled by kit gen.
+	Trail []uint32
 	// Code is the failure's error code, 0 for none.
 	Code uint32
 	// Deliveries counts its deliveries.

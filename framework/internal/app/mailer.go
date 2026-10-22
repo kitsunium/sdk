@@ -37,8 +37,9 @@ const (
 	// A failed attempt waits mailBackoffFirst, doubling up to mailBackoffMax.
 	mailBackoffFirst time.Duration = time.Second
 	mailBackoffMax   time.Duration = 5 * time.Minute
-	// maxDeadLetters is how many dead letters of earlier runs a mailer counts
-	// at its start.
+	// maxDeadLetters is how many dead letters of earlier runs a mailer reads
+	// at its start: it counts them, and its mailbox shows the newest of them
+	// with why each was given up (issue #500).
 	maxDeadLetters int = 1000
 )
 
@@ -531,7 +532,10 @@ func (m *Mailer) start(ctx context.Context, a *App) error {
 	m.transport, m.capture, m.spool, m.cancel, m.done, m.loop = transport, capture, spool, cancel, done, loop
 	m.relay, m.problem, m.composed, m.outboxDB = relay, "", map[string][]byte{}, db
 	m.ring.reset(capture != nil)
-	m.ring.dead, m.ring.deadKnown = dead, deadErr == nil
+	m.ring.dead, m.ring.deadKnown = len(dead), deadErr == nil
+	for i := range dead {
+		m.ring.add(m.deadLetterOf(&dead[i], m.ring.full))
+	}
 	m.mu.Unlock()
 	go func() {
 		defer close(done)
@@ -817,6 +821,19 @@ func (m *Mailer) messageOf(e *plug.MailEventValue, full bool) model.MailMessage 
 	if full {
 		out.Text, out.HTML, out.Headers = msg.Text, msg.HTML, headersOf(&msg)
 	}
+	return out
+}
+
+// deadLetterOf is the mailbox's record of a mail an earlier run gave up on,
+// as its outbox kept it: dead, with its attempts, its last failure's public
+// text and why it was given up — the SMTP reply's code is not kept with it.
+// A record that did not decode is named by its queue identifier.
+func (m *Mailer) deadLetterOf(d *plug.MailDeadLetterValue, full bool) model.MailMessage {
+	out := m.messageOf(&plug.MailEventValue{ID: d.ID, Meta: d.Meta, QueuedAt: d.QueuedAt, Message: d.Message}, full)
+	if out.ID == "" {
+		out.ID = d.QueueID
+	}
+	out.Status, out.Attempts, out.Error, out.GivenUp = model.MailDead, d.Attempts, d.Cause, givenUpName(d.GivenUp)
 	return out
 }
 

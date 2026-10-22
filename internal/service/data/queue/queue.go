@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"math"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -35,9 +37,21 @@ const reasonUnreported string = "UNREPORTED"
 // alike.
 const maxDeadDeliveries int = math.MaxInt32
 
+// maxDeadTrail is the most trail codes a dead letter keeps: the kernel's own
+// bound on an error's trail (errs keeps sixteen, its origin's first wrap and
+// the newest), so a trail describeCause reads is never cut, and one
+// PutDeadLetter is handed longer is refused rather than cut, by every broker
+// alike.
+const maxDeadTrail int = 16
+
+// trailSeparator joins a trail's codes where a broker writes it as text: the
+// file broker's header line and the SQL broker's column.
+const trailSeparator string = ","
+
 // causeValue is what a dead letter keeps of the failure that produced it:
-// the SCREAMING_SNAKE reason, the wire-safe Public half, and the dotted-quad
-// code.
+// the SCREAMING_SNAKE reason, the wire-safe Public half, the dotted-quad
+// code, and the codes its wraps added — the trail, where a sentinel a wrapper
+// added stays readable once the origin's code is all the rest says.
 //
 // It is deliberately NOT the error. An error cannot be written to a device
 // and read back as itself, and the half of it that could be — the Private
@@ -47,6 +61,7 @@ const maxDeadDeliveries int = math.MaxInt32
 type causeValue struct {
 	reason string
 	public string
+	trail  []uint32
 	code   uint32
 }
 
@@ -69,8 +84,83 @@ func describeCause(cause error) causeValue {
 	if coded {
 		described.code = uint32(code)
 	}
+	described.trail = trailCodes(kerrs.TrailOf(cause))
 	//: whatever the cause was willing to say in public.
 	return described
+}
+
+// trailCodes is what a dead letter keeps of an error's trail: its codes as
+// uint32, oldest first, the newest maxDeadTrail when there are more, and nil
+// for none — so a cause with no trail writes nothing a reader must skip.
+func trailCodes(trail []kerrs.Code) []uint32 {
+	//: no wrap added a code.
+	if len(trail) == 0 {
+		//: nothing to keep.
+		return nil
+	}
+	kept := trail[max(len(trail)-maxDeadTrail, 0):]
+	codes := make([]uint32, len(kept))
+	//: each code as the value carries it.
+	for i, code := range kept {
+		codes[i] = uint32(code)
+	}
+	//: oldest first, as the error holds them.
+	return codes
+}
+
+// cloneTrail is a copy of trail a caller cannot rewrite the store's through,
+// nil for an empty one, as every broker reads an empty trail back.
+func cloneTrail(trail []uint32) []uint32 {
+	//: none kept.
+	if len(trail) == 0 {
+		//: nil, never an empty slice.
+		return nil
+	}
+	//: the caller's own.
+	return slices.Clone(trail)
+}
+
+// encodeTrail renders a trail as a broker writes it as text: its codes in
+// decimal, oldest first, comma-separated; "" for none.
+func encodeTrail(trail []uint32) string {
+	parts := make([]string, len(trail))
+	//: each code as the "code" field is written.
+	for i, code := range trail {
+		parts[i] = strconv.FormatUint(uint64(code), decimalBase)
+	}
+	//: "" for an empty trail.
+	return strings.Join(parts, trailSeparator)
+}
+
+// decodeTrail reads back what encodeTrail wrote. A trail it cannot read
+// whole — a code that is not a uint32, more than maxDeadTrail of them — is
+// read as none: a corrupt field costs its own value and never the record.
+func decodeTrail(text string) []uint32 {
+	//: none written: a dead letter whose cause had no trail, or one buried
+	//: before trails were kept.
+	if text == "" {
+		//: no trail.
+		return nil
+	}
+	parts := strings.Split(text, trailSeparator)
+	//: more than any broker writes.
+	if len(parts) > maxDeadTrail {
+		//: no trail.
+		return nil
+	}
+	codes := make([]uint32, len(parts))
+	//: every code, or none of them.
+	for i, part := range parts {
+		code, err := strconv.ParseUint(part, decimalBase, uint32Bits)
+		//: not a code this package wrote.
+		if err != nil {
+			//: no trail.
+			return nil
+		}
+		codes[i] = uint32(code)
+	}
+	//: the trail the burial kept.
+	return codes
 }
 
 // checkBatch refuses a non-positive batch size.
@@ -158,6 +248,9 @@ func checkDeadLetter(dead corequeue.DeadLetterValue, maxBytes int) error {
 	//: the same bound on the cause.
 	case !keptAsWritten(dead.Cause):
 		field = "Cause"
+	//: the kernel's own bound on a trail; a longer one would be cut.
+	case len(dead.Trail) > maxDeadTrail:
+		field = "Trail"
 	}
 	//: one value no store keeps as given.
 	if field != "" {

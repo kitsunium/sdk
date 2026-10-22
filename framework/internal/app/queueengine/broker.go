@@ -133,7 +133,7 @@ func (b *broker) PutDeadLetter(ctx context.Context, dead plug.DeadLetterValue) (
 	}
 	return w.PutDeadLetter(ctx, queue.DeadLetter{
 		FailedAt: dead.FailedAt, Reason: dead.Reason, Cause: dead.Cause, Message: sdkMessage(dead.Message),
-		Code: dead.Code, Deliveries: dead.Deliveries,
+		Code: dead.Code, Deliveries: dead.Deliveries, Trail: dead.Trail,
 	})
 }
 
@@ -178,7 +178,7 @@ func sdkMessage(m plug.MessageValue) queue.Message {
 func pluggedDeadLetter(d *queue.DeadLetter) plug.DeadLetterValue {
 	return plug.DeadLetterValue{
 		FailedAt: d.FailedAt, Reason: d.Reason, Cause: d.Cause, Message: pluggedMessage(d.Message),
-		Code: d.Code, Deliveries: d.Deliveries,
+		Code: d.Code, Deliveries: d.Deliveries, Trail: d.Trail,
 	}
 }
 

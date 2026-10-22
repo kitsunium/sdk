@@ -118,3 +118,29 @@ func TestADeadLetterSaysWhyItWasGivenUp(t *testing.T) {
 		t.Errorf("replyOf of a failure without a reply = %v", got)
 	}
 }
+
+// A dead letter of an earlier run is given up as the spool gave it up, read
+// from what its outbox kept (issue #500): rejected or expired when the
+// spool's code is in its trail — the transport's failure its origin — or is
+// its code — a failure that was no SDK error, marked —, else exhausted. A
+// rejection wins over an expiry, as givenUpOf has it.
+func TestADeadLetterIsGivenUpAsItsOutboxKeptIt(t *testing.T) {
+	const refused uint32 = 0x00_03_3D_09
+	rejected, expired := uint32(mailspool.CodeMailRejected), uint32(mailspool.CodeMailExpired)
+	for _, c := range []struct {
+		dead mailspool.DeadLetter
+		want plug.MailGiveUp
+	}{
+		{mailspool.DeadLetter{Code: refused, Trail: []uint32{rejected, 1}}, plug.MailGivenUpRejected},
+		{mailspool.DeadLetter{Code: rejected}, plug.MailGivenUpRejected},
+		{mailspool.DeadLetter{Code: refused, Trail: []uint32{expired}}, plug.MailGivenUpExpired},
+		{mailspool.DeadLetter{Code: expired}, plug.MailGivenUpExpired},
+		{mailspool.DeadLetter{Code: refused, Trail: []uint32{expired, rejected}}, plug.MailGivenUpRejected},
+		{mailspool.DeadLetter{Code: refused}, plug.MailGivenUpExhausted},
+		{mailspool.DeadLetter{}, plug.MailGivenUpExhausted},
+	} {
+		if got := deadGivenUp(&c.dead); got != c.want {
+			t.Errorf("deadGivenUp(code %#x, trail %#x) = %d, want %d", c.dead.Code, c.dead.Trail, got, c.want)
+		}
+	}
+}

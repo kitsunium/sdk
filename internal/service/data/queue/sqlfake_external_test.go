@@ -58,10 +58,10 @@ func (e errDuplicate) Error() string {
 // queueRow is one row of the queue's table: NULL is nil in every column that
 // admits it.
 type queueRow struct {
-	lease, payload, reason, cause []byte
-	code                          driver.Value // nil or int64
-	id                            string
-	dead, due, enqueued, count    int64
+	lease, payload, reason, cause, trail []byte
+	code                                 driver.Value // nil or int64
+	id                                   string
+	dead, due, enqueued, count           int64
 }
 
 // queueTable is one version of the table, by identifier.
@@ -90,16 +90,30 @@ type sqlEngine struct {
 	stmts svcqueue.RenderedSQL
 	// dialect decides the aborted state.
 	dialect coresql.Dialect
+	// causeArgs is how many arguments a burial's cause binds: four, five
+	// with the trail column (SQLConfig.Trail).
+	causeArgs int
+	// trail is SQLConfig.Trail: the dead letters' rows carry the column.
+	trail bool
+	// noTable says the queue's table is not there yet, and trailColumn that
+	// it has the trail column: what SQLTrailMigration reads and changes.
+	noTable, trailColumn bool
 }
 
 // newSQLEngine returns an empty engine for the broker keeping its queue in
-// table on dialect.
-func newSQLEngine(dialect coresql.Dialect, table string) *sqlEngine {
+// table on dialect, with SQLConfig.Trail set or not.
+func newSQLEngine(dialect coresql.Dialect, table string, trail bool) *sqlEngine {
+	causeArgs := 4
+	if trail {
+		causeArgs = 5
+	}
 	return &sqlEngine{
 		committed: queueTable{},
 		failures:  map[string][]error{},
-		stmts:     svcqueue.RenderSQLForTest(dialect, table),
+		stmts:     svcqueue.RenderSQLForTest(dialect, table, trail),
 		dialect:   dialect,
+		causeArgs: causeArgs,
+		trail:     trail,
 	}
 }
 
@@ -308,7 +322,7 @@ func (c *fakeSQLConn) run(ctx context.Context, query string, args []driver.Value
 // writes reports whether an autocommit statement of role takes the writer.
 func writes(role string) bool {
 	switch role {
-	case "probe", "next", "pick", "deadList", "liveList", "oncePick":
+	case "probe", "next", "pick", "deadList", "liveList", "oncePick", "trailProbe":
 		return false
 	default:
 		return true
@@ -362,7 +376,7 @@ func (e *sqlEngine) recognise(query string, nargs int) string {
 	switch {
 	case nargs > 2 && query == e.stmts.LeaseRows(nargs-2):
 		return "leaseRows"
-	case nargs > 4 && query == e.stmts.BuryRows(nargs-4):
+	case nargs > e.causeArgs && query == e.stmts.BuryRows(nargs-e.causeArgs):
 		return "buryRows"
 	case nargs > 1 && query == e.stmts.OnceSweepRows(nargs-1):
 		return "onceSweepRows"
@@ -390,9 +404,16 @@ func (e *sqlEngine) execute(role, query string, args []driver.Value, work queueT
 			id: id, dead: 1, due: args[1].(int64), enqueued: args[2].(int64), count: args[3].(int64),
 			payload: blob(args[4]), reason: blob(args[5]), cause: blob(args[6]), code: args[7],
 		}
+		if e.trail {
+			row := work[id]
+			row.trail = blob(args[8])
+			work[id] = row
+		}
 		return answer{affected: 1}, nil
 	case "lock":
 		return answer{}, nil
+	case "trailProbe", "trailAdd", "trailDrop":
+		return e.alterTrail(role)
 	case "probe":
 		return minDue(work, func(queueRow) bool { return true }), nil
 	case "next":
@@ -401,7 +422,7 @@ func (e *sqlEngine) execute(role, query string, args []driver.Value, work queueT
 	case "pick":
 		return pick(work, args[0].(int64), int(args[1].(int64))), nil
 	case "deadList":
-		return deadList(work, int(args[0].(int64))), nil
+		return deadList(work, int(args[0].(int64)), e.trail), nil
 	case "liveList":
 		return liveList(work, str(args[0]), int(args[1].(int64))), nil
 	case "putLive":
@@ -440,7 +461,8 @@ func (e *sqlEngine) write(role, query string, args []driver.Value, work queueTab
 			row.count++
 		}), nil
 	case "buryRows":
-		return eachLive(work, args[4:], func(row *queueRow) { buryRow(row, args[:4]) }), nil
+		n := e.causeArgs
+		return eachLive(work, args[n:], func(row *queueRow) { buryRow(row, args[:n]) }), nil
 	case "ack":
 		return ifHeld(work, args, func(row *queueRow) bool { return false }), nil
 	case "retry":
@@ -457,8 +479,9 @@ func (e *sqlEngine) write(role, query string, args []driver.Value, work queueTab
 			return true
 		}), nil
 	case "bury":
-		return ifHeld(work, args[4:], func(row *queueRow) bool {
-			buryRow(row, args[:4])
+		n := e.causeArgs
+		return ifHeld(work, args[n:], func(row *queueRow) bool {
+			buryRow(row, args[:n])
 			return true
 		}), nil
 	case "extend":
@@ -470,7 +493,7 @@ func (e *sqlEngine) write(role, query string, args []driver.Value, work queueTab
 	case "replay":
 		return ifDead(work, str(args[1]), func(row *queueRow) bool {
 			row.dead, row.due, row.count = 0, args[0].(int64), 0
-			row.reason, row.cause, row.code = nil, nil, nil
+			row.reason, row.cause, row.code, row.trail = nil, nil, nil, nil
 			return true
 		}), nil
 	case "deleteDead":
@@ -481,6 +504,44 @@ func (e *sqlEngine) write(role, query string, args []driver.Value, work queueTab
 		return dropPassedReservations(work, args[0].(int64), args[1:]), nil
 	}
 	return answer{}, errors.New("the fake engine does not speak: " + query)
+}
+
+// alterTrail answers SQLTrailMigration's statements over the table's columns:
+// the catalogue's count of them — ten, and the trail —, and the column's
+// addition and removal, refused as an engine refuses them when the table or
+// the column is not where the statement expects, except on PostgreSQL, whose
+// statements say IF [NOT] EXISTS.
+func (e *sqlEngine) alterTrail(role string) (answer, error) {
+	lenient := e.dialect == coresql.DialectPostgres
+	switch role {
+	case "trailProbe":
+		columns, trails := int64(0), int64(0)
+		if !e.noTable {
+			columns = 10
+		}
+		if !e.noTable && e.trailColumn {
+			columns, trails = 11, 1
+		}
+		return answer{cols: []string{"columns", "trails"}, rows: [][]driver.Value{{columns, trails}}}, nil
+	case "trailAdd":
+		if e.noTable || e.trailColumn {
+			if lenient {
+				return answer{}, nil
+			}
+			return answer{}, errors.New("the fake engine cannot add the trail column: no table, or a duplicate column")
+		}
+		e.trailColumn = true
+		return answer{}, nil
+	default:
+		if e.noTable || !e.trailColumn {
+			if lenient {
+				return answer{}, nil
+			}
+			return answer{}, errors.New("the fake engine cannot drop the trail column: no table, or no such column")
+		}
+		e.trailColumn = false
+		return answer{}, nil
+	}
 }
 
 // dropPassedReservations deletes, among the identifiers ids, every
@@ -512,10 +573,14 @@ func (e *sqlEngine) reservations() int {
 }
 
 // buryRow makes row a dead letter with the instant and cause in args: the
-// instant, the reason, the cause and the code.
+// instant, the reason, the cause and the code — and the trail, when args
+// holds a fifth.
 func buryRow(row *queueRow, args []driver.Value) {
 	row.dead, row.due, row.lease = 1, args[0].(int64), nil
 	row.reason, row.cause, row.code = blob(args[1]), blob(args[2]), args[3]
+	if len(args) > 4 {
+		row.trail = blob(args[4])
+	}
 }
 
 // eachLive applies change to every live row among the identifiers ids and
@@ -601,17 +666,26 @@ func pick(work queueTable, now int64, limit int) answer {
 	return answer{cols: []string{"id", "enqueued_at", "deliveries", "lease", "payload"}, rows: rows}
 }
 
-// deadList answers the dead letters in the order they died, at most limit.
-func deadList(work queueTable, limit int) answer {
+// deadList answers the dead letters in the order they died, at most limit,
+// their trail before their payload when trail is set.
+func deadList(work queueTable, limit int, trail bool) answer {
 	dead := ordered(work, func(row queueRow) bool { return row.dead == 1 })
 	rows := make([][]driver.Value, 0, min(limit, len(dead)))
 	for _, row := range dead[:min(limit, len(dead))] {
-		rows = append(rows, []driver.Value{
+		values := []driver.Value{
 			[]byte(row.id), row.enqueued, row.count, row.due,
-			nullable(row.reason), nullable(row.cause), row.code, nullable(row.payload),
-		})
+			nullable(row.reason), nullable(row.cause), row.code,
+		}
+		if trail {
+			values = append(values, nullable(row.trail))
+		}
+		rows = append(rows, append(values, nullable(row.payload)))
 	}
-	return answer{cols: []string{"id", "enqueued_at", "deliveries", "due", "reason", "cause", "code", "payload"}, rows: rows}
+	cols := []string{"id", "enqueued_at", "deliveries", "due", "reason", "cause", "code"}
+	if trail {
+		cols = append(cols, "trail")
+	}
+	return answer{cols: append(cols, "payload"), rows: rows}
 }
 
 // liveList answers the live rows whose identifier sorts after after, in

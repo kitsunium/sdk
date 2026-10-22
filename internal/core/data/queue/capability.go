@@ -33,6 +33,8 @@ type DeadLetterValue struct {
 	// Message is the work, unmodified, with the identifier it was published
 	// under.
 	Message MessageValue
+	// Trail is filled by kit gen.
+	Trail []uint32
 	// Code is the dotted-quad errs.Code of the last failure, or 0 when the
 	// cause carried none. It is a uint32 rather than an errs.Code so that
 	// this package's values stay free of the kernel's error type in a shape

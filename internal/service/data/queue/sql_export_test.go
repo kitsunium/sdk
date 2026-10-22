@@ -19,9 +19,9 @@ type RenderedSQL struct {
 }
 
 // RenderSQLForTest renders the statements of a broker keeping its queue in
-// table on dialect.
-func RenderSQLForTest(dialect coresql.Dialect, table string) RenderedSQL {
-	s := renderSQLStatements(dialect, table)
+// table on dialect, with SQLConfig.Trail set or not.
+func RenderSQLForTest(dialect coresql.Dialect, table string, trail bool) RenderedSQL {
+	s := renderSQLStatements(dialect, table, trail)
 	fixed := map[string]string{
 		s.insert: "insert", s.probe: "probe", s.pick: "pick", s.next: "next",
 		s.ack: "ack", s.retry: "retry", s.bury: "bury", s.extend: "extend", s.release: "release",
@@ -33,7 +33,21 @@ func RenderSQLForTest(dialect coresql.Dialect, table string) RenderedSQL {
 	if s.lock != "" {
 		fixed[s.lock] = "lock"
 	}
+	column := renderTrailColumnStatements(dialect, table)
+	fixed[column.add], fixed[column.drop] = "trailAdd", "trailDrop"
+	//: PostgreSQL reads no catalogue first.
+	if column.probe != "" {
+		fixed[column.probe] = "trailProbe"
+	}
 	return RenderedSQL{Fixed: fixed, LeaseRows: s.leaseRows, BuryRows: s.buryRows, OnceSweepRows: s.onceSweepRows}
+}
+
+// TrailColumnSQLForTest renders what SQLTrailMigration sends: the catalogue
+// read ("" on PostgreSQL), the column's addition and its removal.
+func TrailColumnSQLForTest(dialect coresql.Dialect, table string) (probe, add, drop string) {
+	s := renderTrailColumnStatements(dialect, table)
+	//: in the order the migration may send them.
+	return s.probe, s.add, s.drop
 }
 
 // QueueTableSQLForTest renders the DDL SQLMigration's Up and Down run.

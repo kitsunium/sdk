@@ -6,6 +6,8 @@ import (
 
 	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
 	svcsql "github.com/kitsunium/sdk/internal/service/data/sql"
+
+	corequeue "github.com/kitsunium/sdk/internal/core/data/queue"
 )
 
 // sqlRowsPerStatement bounds how many identifiers one lease or burial of a
@@ -22,6 +24,17 @@ const sqlIDColumnLen int = 64
 // sqlLeaseColumnLen is the width of MySQL's lease column: the hex of the
 // lease's random half.
 const sqlLeaseColumnLen int = 32
+
+// sqlCauseArgs is how many arguments a burial's cause binds before the trail
+// and the identifiers: the instant, the reason, the cause and the code.
+const sqlCauseArgs int = 4
+
+// sqlTrailColumnLen is the width of MySQL's trail column: maxDeadTrail codes
+// of at most ten decimal digits, and the commas between them.
+const sqlTrailColumnLen int = maxDeadTrail*11 - 1
+
+// sqlTrailColumn is the column SQLConfig.Trail keeps a dead letter's trail in.
+const sqlTrailColumn string = "trail"
 
 // sqlCauseColumnLen is the width of MySQL's reason and cause columns. What a
 // dead letter keeps of a failure is bounded to publicMaxRunes runes, at most
@@ -84,14 +97,29 @@ type sqlStatements struct {
 	table string
 	// dialect selects the placeholder grammar of the per-call ones.
 	dialect coresql.Dialect
+	// trail is SQLConfig.Trail: every burial writes the trail column, the
+	// dead-letter read returns it, a replay clears it.
+	trail bool
 }
 
 // renderSQLStatements renders every fixed statement of the broker keeping its
-// queue in table, on dialect. The table name was validated at NewSQL.
-func renderSQLStatements(dialect coresql.Dialect, table string) sqlStatements {
+// queue in table, on dialect; with trail, the statements that write, read and
+// clear a dead letter's cause name the trail column too, and without it they
+// are the statements the broker sent before the column existed. The table
+// name was validated at NewSQL.
+func renderSQLStatements(dialect coresql.Dialect, table string, trail bool) sqlStatements {
 	q := dialect.QuoteIdent(table)
 	p := dialect.Placeholder
 	causeSet := "dead = 1, due = " + p(1) + ", lease = NULL, reason = " + p(2) + ", cause = " + p(3) + ", code = " + p(4)
+	heldFrom, deadColumns, cleared := sqlCauseArgs+1, "reason, cause, code", "reason = NULL, cause = NULL, code = NULL"
+	putColumns, putValues := "reason, cause, code", p(6)+", "+p(7)+", "+p(8)
+	//: one more column in every statement a cause goes through.
+	if trail {
+		causeSet += ", " + sqlTrailColumn + " = " + p(sqlCauseArgs+1)
+		heldFrom, deadColumns = sqlCauseArgs+2, deadColumns+", "+sqlTrailColumn
+		cleared += ", " + sqlTrailColumn + " = NULL"
+		putColumns, putValues = putColumns+", "+sqlTrailColumn, putValues+", "+p(9)
+	}
 	s := sqlStatements{
 		insert: "INSERT INTO " + q + " (id, dead, due, enqueued_at, deliveries, payload) VALUES (" +
 			p(1) + ", 0, " + p(2) + ", " + p(3) + ", 0, " + p(4) + ")",
@@ -107,16 +135,17 @@ func renderSQLStatements(dialect coresql.Dialect, table string) sqlStatements {
 		next:       "SELECT MIN(due) FROM " + q + " WHERE dead = 0 AND due > " + p(1),
 		ack:        "DELETE FROM " + q + " WHERE " + sqlHeldBy(dialect, 1),
 		retry:      "UPDATE " + q + " SET due = " + p(1) + ", lease = NULL WHERE " + sqlHeldBy(dialect, 2),
-		bury:       "UPDATE " + q + " SET " + causeSet + " WHERE " + sqlHeldBy(dialect, 5),
+		bury:       "UPDATE " + q + " SET " + causeSet + " WHERE " + sqlHeldBy(dialect, heldFrom),
 		extend:     "UPDATE " + q + " SET due = " + p(1) + ", lease = " + p(2) + " WHERE " + sqlHeldBy(dialect, 3),
 		release:    "UPDATE " + q + " SET due = " + p(1) + ", lease = NULL, deliveries = deliveries - 1 WHERE " + sqlHeldBy(dialect, 2),
-		deadList:   "SELECT id, enqueued_at, deliveries, due, reason, cause, code, payload FROM " + q + " WHERE dead = 1 ORDER BY due, id LIMIT " + p(1),
-		replay:     "UPDATE " + q + " SET dead = 0, due = " + p(1) + ", deliveries = 0, reason = NULL, cause = NULL, code = NULL WHERE id = " + p(2) + " AND dead = 1",
+		deadList:   "SELECT id, enqueued_at, deliveries, due, " + deadColumns + ", payload FROM " + q + " WHERE dead = 1 ORDER BY due, id LIMIT " + p(1),
+		replay:     "UPDATE " + q + " SET dead = 0, due = " + p(1) + ", deliveries = 0, " + cleared + " WHERE id = " + p(2) + " AND dead = 1",
 		deleteDead: "DELETE FROM " + q + " WHERE id = " + p(1) + " AND dead = 1",
 		table:      q,
 		dialect:    dialect,
-		putDead: "INSERT INTO " + q + " (id, dead, due, enqueued_at, deliveries, payload, reason, cause, code) VALUES (" +
-			p(1) + ", 1, " + p(2) + ", " + p(3) + ", " + p(4) + ", " + p(5) + ", " + p(6) + ", " + p(7) + ", " + p(8) + ")",
+		trail:      trail,
+		putDead: "INSERT INTO " + q + " (id, dead, due, enqueued_at, deliveries, payload, " + putColumns + ") VALUES (" +
+			p(1) + ", 1, " + p(2) + ", " + p(3) + ", " + p(4) + ", " + p(5) + ", " + putValues + ")",
 		liveList: "SELECT id, enqueued_at, deliveries, due, lease, payload FROM " + q + " WHERE dead = 0 AND id > " + p(1) +
 			" ORDER BY id LIMIT " + p(2),
 		putLive: "INSERT INTO " + q + " (id, dead, due, enqueued_at, deliveries, payload) VALUES (" +
@@ -154,12 +183,60 @@ func (s *sqlStatements) leaseRows(n int) string {
 }
 
 // buryRows renders the burial of n rows whose leases lapsed with no attempt
-// left: dead, with the failure's instant and cause.
+// left: dead, with the failure's instant and cause — and its trail, with
+// SQLConfig.Trail, so no trail an earlier death left survives this one.
 func (s *sqlStatements) buryRows(n int) string {
 	p := s.dialect.Placeholder
-	//: the instant and the cause, then the identifiers from the fifth.
+	set, first := "", sqlCauseArgs+1
+	//: the trail is a cause argument too.
+	if s.trail {
+		set, first = ", "+sqlTrailColumn+" = "+p(sqlCauseArgs+1), sqlCauseArgs+2
+	}
+	//: the instant and the cause, then the identifiers.
 	return "UPDATE " + s.table + " SET dead = 1, due = " + p(1) + ", lease = NULL, reason = " + p(2) + ", cause = " + p(3) +
-		", code = " + p(4) + " WHERE dead = 0 AND id IN (" + s.list(5, n) + ")"
+		", code = " + p(4) + set + " WHERE dead = 0 AND id IN (" + s.list(first, n) + ")"
+}
+
+// causeArgs binds a burial's instant and cause: the instant, the reason, the
+// wire-safe Public half and the code, each bounded as the file broker bounds
+// its record's header, then — with SQLConfig.Trail — the trail, NULL for
+// none.
+func (s *sqlStatements) causeArgs(now int64, cause causeValue) []any {
+	args := []any{now, []byte(oneLine(cause.reason)), []byte(oneLine(cause.public)), int64(cause.code)}
+	//: the statements name the column only with Trail.
+	if s.trail {
+		args = append(args, trailArg(cause.trail))
+	}
+	//: in the order the placeholders are numbered.
+	return args
+}
+
+// putDeadArgs binds PutDeadLetter's insertion of dead under id: the row's
+// identifier, instants, count and payload, then its cause, as given — with
+// SQLConfig.Trail, its trail last.
+func (s *sqlStatements) putDeadArgs(id string, dead corequeue.DeadLetterValue) []any {
+	args := []any{
+		[]byte(id), dead.FailedAt.UnixNano(), dead.Message.EnqueuedAt.UnixNano(), int64(dead.Deliveries), dead.Message.Payload,
+		[]byte(dead.Reason), []byte(dead.Cause), int64(dead.Code),
+	}
+	//: the statement names the column only with Trail.
+	if s.trail {
+		args = append(args, trailArg(dead.Trail))
+	}
+	//: in the order the placeholders are numbered.
+	return args
+}
+
+// trailArg binds a trail: its text, or NULL for none, as a dead letter buried
+// before the column existed holds.
+func trailArg(trail []uint32) []byte {
+	//: no trail is NULL, never an empty string.
+	if len(trail) == 0 {
+		//: a nil []byte binds as NULL.
+		return nil
+	}
+	//: the codes, comma-separated.
+	return []byte(encodeTrail(trail))
 }
 
 // sqlOnceStatements are PublishOnce's fixed statements (ADR 0183), over
@@ -253,19 +330,19 @@ func createQueueTableStatements(dialect coresql.Dialect, table string) []string 
 			" dead TINYINT NOT NULL, due BIGINT NOT NULL, enqueued_at BIGINT NOT NULL, deliveries INT NOT NULL," +
 			" lease VARBINARY(" + strconv.Itoa(sqlLeaseColumnLen) + ") NULL, payload LONGBLOB NULL," +
 			" reason VARBINARY(" + strconv.Itoa(sqlCauseColumnLen) + ") NULL, cause VARBINARY(" + strconv.Itoa(sqlCauseColumnLen) + ") NULL," +
-			" code BIGINT NULL, PRIMARY KEY (id), UNIQUE KEY (dead, due, id)) ENGINE=InnoDB"}
+			" code BIGINT NULL, " + sqlTrailColumn + " " + trailColumnType(dialect) + ", PRIMARY KEY (id), UNIQUE KEY (dead, due, id)) ENGINE=InnoDB"}
 	//: PostgreSQL: bytea, whose comparison is the bytes'.
 	case coresql.DialectPostgres:
 		//: the same columns, PostgreSQL's types.
 		return []string{"CREATE TABLE IF NOT EXISTS " + q + " (id bytea NOT NULL PRIMARY KEY, dead smallint NOT NULL," +
 			" due bigint NOT NULL, enqueued_at bigint NOT NULL, deliveries integer NOT NULL, lease bytea, payload bytea," +
-			" reason bytea, cause bytea, code bigint, UNIQUE (dead, due, id))"}
+			" reason bytea, cause bytea, code bigint, " + sqlTrailColumn + " " + trailColumnType(dialect) + ", UNIQUE (dead, due, id))"}
 	//: SQLite: BLOB, compared byte for byte.
 	default:
 		//: the same columns, SQLite's types.
 		return []string{"CREATE TABLE IF NOT EXISTS " + q + " (id BLOB NOT NULL PRIMARY KEY, dead INTEGER NOT NULL," +
 			" due INTEGER NOT NULL, enqueued_at INTEGER NOT NULL, deliveries INTEGER NOT NULL, lease BLOB, payload BLOB," +
-			" reason BLOB, cause BLOB, code INTEGER, UNIQUE (dead, due, id))"}
+			" reason BLOB, cause BLOB, code INTEGER, " + sqlTrailColumn + " " + trailColumnType(dialect) + ", UNIQUE (dead, due, id))"}
 	}
 }
 

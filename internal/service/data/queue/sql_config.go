@@ -70,6 +70,8 @@ type SQLConfig struct {
 	// Dialect is the engine's, and must be the Transactor's own: the SQL the
 	// broker speaks to it.
 	Dialect coresql.Dialect
+	// Trail is filled by kit gen.
+	Trail bool
 }
 
 // sqlParts are the two capabilities the SQL broker needs of its transactor,

@@ -97,19 +97,19 @@ func TestSQLTheStatementsAsSent(t *testing.T) {
 			" ORDER BY due, id LIMIT ? FOR UPDATE SKIP LOCKED"},
 		{dialect: coresql.DialectSQLite, role: "oncePick", text: `SELECT id FROM "app__jobs" WHERE dead = 2 AND due <= ? ORDER BY due, id LIMIT ?`},
 	} {
-		rendered := svcqueue.RenderSQLForTest(want.dialect, jobsTable)
+		rendered := svcqueue.RenderSQLForTest(want.dialect, jobsTable, false)
 		if got := statementFor(t, rendered, want.role); got != want.text {
 			t.Errorf("%s %s =\n%s\nwant\n%s", want.dialect, want.role, got, want.text)
 		}
 	}
 	for _, dialect := range []coresql.Dialect{coresql.DialectPostgres, coresql.DialectMySQL} {
-		for text, role := range svcqueue.RenderSQLForTest(dialect, jobsTable).Fixed {
+		for text, role := range svcqueue.RenderSQLForTest(dialect, jobsTable, false).Fixed {
 			if role == "lock" {
 				t.Errorf("%s sends a lock statement %q; only SQLite's lock is a write", dialect, text)
 			}
 		}
 	}
-	postgres := svcqueue.RenderSQLForTest(coresql.DialectPostgres, jobsTable)
+	postgres := svcqueue.RenderSQLForTest(coresql.DialectPostgres, jobsTable, false)
 	if got, want := postgres.LeaseRows(2), `UPDATE "app__jobs" SET due = $1, lease = $2, deliveries = deliveries + 1`+
 		` WHERE dead = 0 AND id IN ($3, $4)`; got != want {
 		t.Errorf("the lease of two rows =\n%s\nwant\n%s", got, want)
@@ -121,10 +121,128 @@ func TestSQLTheStatementsAsSent(t *testing.T) {
 	if got, want := postgres.OnceSweepRows(2), `DELETE FROM "app__jobs" WHERE dead = 2 AND due <= $1 AND id IN ($2, $3)`; got != want {
 		t.Errorf("the removal of two passed reservations =\n%s\nwant\n%s", got, want)
 	}
-	mysql := svcqueue.RenderSQLForTest(coresql.DialectMySQL, jobsTable)
+	mysql := svcqueue.RenderSQLForTest(coresql.DialectMySQL, jobsTable, false)
 	if got, want := mysql.LeaseRows(3), "UPDATE `app__jobs` SET due = ?, lease = ?, deliveries = deliveries + 1"+
 		" WHERE dead = 0 AND id IN (?, ?, ?)"; got != want {
 		t.Errorf("the lease of three rows on MySQL =\n%s\nwant\n%s", got, want)
+	}
+}
+
+// TestSQLTheTrailStatementsAsSent pins the statements SQLConfig.Trail changes
+// — every one a dead letter's cause goes through names the trail column, and
+// the placeholders after it move along by one — and every other statement
+// unchanged (issue #500).
+func TestSQLTheTrailStatementsAsSent(t *testing.T) {
+	t.Parallel()
+	type pinned struct {
+		role, text string
+		dialect    coresql.Dialect
+	}
+	for _, want := range []pinned{
+		{dialect: coresql.DialectPostgres, role: "bury", text: `UPDATE "app__jobs" SET dead = 1, due = $1, lease = NULL, reason = $2, cause = $3, code = $4,` +
+			` trail = $5 WHERE id = $6 AND lease = $7 AND deliveries = $8 AND dead = 0 AND due > $9`},
+		{dialect: coresql.DialectPostgres, role: "deadList", text: `SELECT id, enqueued_at, deliveries, due, reason, cause, code, trail, payload FROM "app__jobs"` +
+			` WHERE dead = 1 ORDER BY due, id LIMIT $1`},
+		{dialect: coresql.DialectPostgres, role: "replay", text: `UPDATE "app__jobs" SET dead = 0, due = $1, deliveries = 0, reason = NULL, cause = NULL, code = NULL,` +
+			` trail = NULL WHERE id = $2 AND dead = 1`},
+		{dialect: coresql.DialectPostgres, role: "putDead", text: `INSERT INTO "app__jobs" (id, dead, due, enqueued_at, deliveries, payload, reason, cause, code, trail)` +
+			` VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9)`},
+		{dialect: coresql.DialectMySQL, role: "putDead", text: "INSERT INTO `app__jobs` (id, dead, due, enqueued_at, deliveries, payload, reason, cause, code, trail)" +
+			" VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?)"},
+		{dialect: coresql.DialectSQLite, role: "bury", text: `UPDATE "app__jobs" SET dead = 1, due = ?, lease = NULL, reason = ?, cause = ?, code = ?,` +
+			` trail = ? WHERE id = ? AND lease = ? AND deliveries = ? AND dead = 0 AND due > ?`},
+	} {
+		if got := statementFor(t, svcqueue.RenderSQLForTest(want.dialect, jobsTable, true), want.role); got != want.text {
+			t.Errorf("%s %s with Trail =\n%s\nwant\n%s", want.dialect, want.role, got, want.text)
+		}
+	}
+	for _, dialect := range []coresql.Dialect{coresql.DialectPostgres, coresql.DialectMySQL, coresql.DialectSQLite} {
+		without, with := svcqueue.RenderSQLForTest(dialect, jobsTable, false), svcqueue.RenderSQLForTest(dialect, jobsTable, true)
+		for text, role := range without.Fixed {
+			if _, kept := with.Fixed[text]; !kept && !slices.Contains([]string{"bury", "deadList", "replay", "putDead"}, role) {
+				t.Errorf("%s: Trail changes %s, which no cause goes through", dialect, role)
+			}
+		}
+	}
+	postgres := svcqueue.RenderSQLForTest(coresql.DialectPostgres, jobsTable, true)
+	if got, want := postgres.BuryRows(2), `UPDATE "app__jobs" SET dead = 1, due = $1, lease = NULL, reason = $2, cause = $3, code = $4,`+
+		` trail = $5 WHERE dead = 0 AND id IN ($6, $7)`; got != want {
+		t.Errorf("the burial of two lapsed leases with Trail =\n%s\nwant\n%s", got, want)
+	}
+}
+
+// TestSQLTrailMigrationAddsTheColumnOnce pins SQLTrailMigration's statements
+// per dialect and runs it over the fake engine: the column added to a table
+// that lacks it and to no other — none there yet, or the column already
+// there — so it runs before or after SQLMigration and twice; its Down drops
+// the column once; and its refusals are SQLMigration's (issue #500).
+func TestSQLTrailMigrationAddsTheColumnOnce(t *testing.T) {
+	t.Parallel()
+	for dialect, want := range map[coresql.Dialect][3]string{
+		coresql.DialectPostgres: {
+			"", `ALTER TABLE IF EXISTS "app__jobs" ADD COLUMN IF NOT EXISTS trail bytea`,
+			`ALTER TABLE IF EXISTS "app__jobs" DROP COLUMN IF EXISTS trail`,
+		},
+		coresql.DialectMySQL: {
+			"SELECT COUNT(*), COALESCE(SUM(CASE WHEN column_name = 'trail' THEN 1 ELSE 0 END), 0)" +
+				" FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ?",
+			"ALTER TABLE `app__jobs` ADD COLUMN trail VARBINARY(175) NULL", "ALTER TABLE `app__jobs` DROP COLUMN trail",
+		},
+		coresql.DialectSQLite: {
+			"SELECT COUNT(*), COALESCE(SUM(CASE WHEN name = 'trail' THEN 1 ELSE 0 END), 0) FROM pragma_table_info(?)",
+			`ALTER TABLE "app__jobs" ADD COLUMN trail BLOB`, `ALTER TABLE "app__jobs" DROP COLUMN trail`,
+		},
+	} {
+		probe, add, drop := svcqueue.TrailColumnSQLForTest(dialect, jobsTable)
+		if got := [3]string{probe, add, drop}; got != want {
+			t.Errorf("%s: SQLTrailMigration's statements =\n%q\nwant\n%q", dialect, got, want)
+		}
+		migration, err := svcqueue.SQLTrailMigration(dialect, jobsTable, 20261022120000)
+		if err != nil {
+			t.Fatalf("%s: SQLTrailMigration() = %v", dialect, err)
+		}
+		if migration.Version != 20261022120000 || migration.Name != "queue trail app__jobs" {
+			t.Fatalf("%s: migration %d %q", dialect, migration.Version, migration.Name)
+		}
+		engine := newSQLEngine(dialect, jobsTable, false)
+		db := engine.open(t)
+		step := func(up bool) {
+			t.Helper()
+			run := migration.Down
+			if up {
+				run = migration.Up
+			}
+			if err := run(t.Context(), db); err != nil {
+				t.Fatalf("%s: the step (up %v) = %v", dialect, up, err)
+			}
+		}
+		engine.noTable = true
+		step(true)
+		if engine.trailColumn {
+			t.Errorf("%s: a table not created yet gained the column", dialect)
+		}
+		engine.noTable = false
+		for range 2 {
+			step(true)
+			if !engine.trailColumn {
+				t.Errorf("%s: Up left the table without the column", dialect)
+			}
+		}
+		for range 2 {
+			step(false)
+			if engine.trailColumn {
+				t.Errorf("%s: Down left the column", dialect)
+			}
+		}
+	}
+	if _, err := svcqueue.SQLTrailMigration(coresql.DialectUnknown, jobsTable, 1); !errs.HasCode(err, corequeue.CodeSQLQueueMisconfigured) {
+		t.Errorf("an unknown dialect = %v, want SQL_QUEUE_MISCONFIGURED", err)
+	}
+	if _, err := svcqueue.SQLTrailMigration(coresql.DialectSQLite, "Jobs", 1); !errs.HasCode(err, corequeue.CodeSQLQueueMisconfigured) {
+		t.Errorf("an upper-case table = %v, want SQL_QUEUE_MISCONFIGURED", err)
+	}
+	if _, err := svcqueue.SQLTrailMigration(coresql.DialectSQLite, jobsTable, 0); err == nil {
+		t.Error("version 0 was accepted")
 	}
 }
 
@@ -155,14 +273,14 @@ func TestSQLMigrationCreatesTheOneTable(t *testing.T) {
 	for dialect, want := range map[coresql.Dialect]string{
 		coresql.DialectPostgres: `CREATE TABLE IF NOT EXISTS "app__jobs" (id bytea NOT NULL PRIMARY KEY, dead smallint NOT NULL,` +
 			` due bigint NOT NULL, enqueued_at bigint NOT NULL, deliveries integer NOT NULL, lease bytea, payload bytea,` +
-			` reason bytea, cause bytea, code bigint, UNIQUE (dead, due, id))`,
+			` reason bytea, cause bytea, code bigint, trail bytea, UNIQUE (dead, due, id))`,
 		coresql.DialectMySQL: "CREATE TABLE IF NOT EXISTS `app__jobs` (id VARBINARY(64) NOT NULL, dead TINYINT NOT NULL," +
 			" due BIGINT NOT NULL, enqueued_at BIGINT NOT NULL, deliveries INT NOT NULL, lease VARBINARY(32) NULL," +
 			" payload LONGBLOB NULL, reason VARBINARY(480) NULL, cause VARBINARY(480) NULL, code BIGINT NULL," +
-			" PRIMARY KEY (id), UNIQUE KEY (dead, due, id)) ENGINE=InnoDB",
+			" trail VARBINARY(175) NULL, PRIMARY KEY (id), UNIQUE KEY (dead, due, id)) ENGINE=InnoDB",
 		coresql.DialectSQLite: `CREATE TABLE IF NOT EXISTS "app__jobs" (id BLOB NOT NULL PRIMARY KEY, dead INTEGER NOT NULL,` +
 			` due INTEGER NOT NULL, enqueued_at INTEGER NOT NULL, deliveries INTEGER NOT NULL, lease BLOB, payload BLOB,` +
-			` reason BLOB, cause BLOB, code INTEGER, UNIQUE (dead, due, id))`,
+			` reason BLOB, cause BLOB, code INTEGER, trail BLOB, UNIQUE (dead, due, id))`,
 	} {
 		migration, err := svcqueue.SQLMigration(dialect, jobsTable, 20260929120000)
 		if err != nil {
