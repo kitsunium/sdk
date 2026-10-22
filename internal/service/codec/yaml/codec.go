@@ -35,11 +35,20 @@ const yamlEncoderIndent int = 2
 // interface, which orders no table before this initialiser.
 var (
 	//: register the singleton and expose it as a typed package var.
-	Codec codec.Codec = codec.Register(&yamlCodec{})
+	Codec codec.Codec = codec.Register(&yamlCodec{mimeTypes: mimeTypes})
+
+	//: the MIME table, hoisted (KTN-VAR-CONSTSLICE) and handed to the
+	//: singleton by Codec's own initialiser: that reference is what orders it
+	//: before Register reads it, whatever the declaration order.
+	mimeTypes = []string{"application/yaml", "text/yaml", "application/x-yaml"}
 )
 
 // yamlCodec is the concrete Codec implementation for YAML.
-type yamlCodec struct{}
+type yamlCodec struct {
+	// mimeTypes is the MIME table this instance reports — the package table
+	// for the registered singleton, which is built with it.
+	mimeTypes []string
+}
 
 // New returns a YAML codec instance.
 func New() codec.Codec {
@@ -54,9 +63,9 @@ func (*yamlCodec) Name() string {
 }
 
 // MIMETypes lists every MIME alias.
-func (*yamlCodec) MIMETypes() []string {
-	//: a fresh literal the caller owns; no package variable is read when Register calls this.
-	return []string{"application/yaml", "text/yaml", "application/x-yaml"}
+func (c *yamlCodec) MIMETypes() []string {
+	//: a copy the caller owns; the table itself came through the initialiser.
+	return slices.Clone(c.mimeTypes)
 }
 
 // Extensions lists every file extension.

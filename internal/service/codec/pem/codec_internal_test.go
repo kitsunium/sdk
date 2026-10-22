@@ -71,8 +71,8 @@ func Test_pemCodec_Extensions(t *testing.T) {
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		c := &pemCodec{}
-		exts := c.Extensions()
+		//: the registered singleton: it carries the package table.
+		exts := Codec.Extensions()
 		if len(exts) == 0 || exts[0] != tc.wantHead {
 			t.Errorf("%s: Extensions=%v, want head %q", tc.name, exts, tc.wantHead)
 		}

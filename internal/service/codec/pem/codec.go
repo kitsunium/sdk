@@ -32,7 +32,13 @@ const (
 // cached promotion fast-path markers, and the Marshal-buffer pool.
 var (
 	//: register the singleton and expose it as a typed package var.
-	Codec codec.Codec = codec.Register(&pemCodec{})
+	Codec codec.Codec = codec.Register(&pemCodec{extensions: extensions})
+
+	//: .pem is the canonical extension; .crt and .key are historical aliases.
+	//: Hoisted (KTN-VAR-CONSTSLICE) and handed to the singleton by Codec's own
+	//: initialiser: that reference is what orders the table before Register
+	//: reads it, whatever the declaration order.
+	extensions = []string{".pem", ".crt", ".key"}
 
 	//: pemJSONBegin is the BEGIN marker for a "JSON"-typed PEM block.
 	//: Cached so the promotion fast-path never re-builds it.
@@ -43,7 +49,11 @@ var (
 )
 
 // pemCodec is the concrete Codec implementation for PEM.
-type pemCodec struct{}
+type pemCodec struct {
+	// extensions is the extension table this instance reports — the package
+	// table for the registered singleton, which is built with it.
+	extensions []string
+}
 
 // Block re-exports encoding/pem.Block so consumers do not need to import
 // the stdlib package directly.
@@ -69,10 +79,9 @@ func (*pemCodec) MIMETypes() []string {
 }
 
 // Extensions lists every file extension.
-func (*pemCodec) Extensions() []string {
-	//: .pem is the canonical extension; .crt and .key are historical aliases.
-	//: a fresh literal the caller owns; no package variable is read when Register calls this.
-	return []string{".pem", ".crt", ".key"}
+func (c *pemCodec) Extensions() []string {
+	//: a copy the caller owns; the table itself came through the initialiser.
+	return slices.Clone(c.extensions)
 }
 
 // Marshal encodes a *pem.Block into PEM bytes.
