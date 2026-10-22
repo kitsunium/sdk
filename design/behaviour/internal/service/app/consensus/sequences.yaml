@@ -10407,19 +10407,13 @@ sequences:
         kind: actor
       - id: lastTermOf
         kind: self
-      - id: l.Bounds
-        kind: internal
       - id: l.Term
         kind: internal
     steps:
       - opt:
           do:
             - return: r.Snapshots[0].Position.Term
-          init:
-            bind: _, last
-            eval: l.Bounds()
-            to: l.Bounds
-          when: r.Last > last && len(r.Snapshots) > 0
+          when: len(r.Snapshots) > 0 && r.Snapshots[0].Position.Index == r.Last
       - opt:
           do:
             - return: t

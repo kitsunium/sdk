@@ -3838,8 +3838,9 @@ Two gaps between this ADR and the code, closed in `pkg/v1/app` as additions
   vote term, not the term of the last entry. Compared on what it showed,
   an operator picked a longer log whose tail no majority ever held, and the
   committed writes only the right survivor held were lost. `ReportValue.LastTerm`
-  is the term of the entry at `Last`, or of the snapshot that holds `Last`
-  when an interrupted install published it past the log. The runbook
+  is the term of the entry at `Last`, or of the snapshot that ends at `Last`
+  when an interrupted install published it past the log or at its last index
+  under another term: the start, and `Recover`, move the log onto it. The runbook
   compares `(LastTerm, Last)`, in that order, never `Last` alone.
 - **A joiner announces its `MaxSnapshotBytes`, and `Health` warns before the
   limit (R2-30, [issue #556](https://github.com/kitsunium/sdk/issues/556),

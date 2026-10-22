@@ -170,14 +170,17 @@ func Inspect(d DataDir) (ReportValue, error) {
 	return r, nil
 }
 
-// lastTermOf is the term of the entry at r.Last: the log's, or the newest
-// snapshot's when that snapshot lies past the log. It is the half of the
-// survivor's key Inspect did not report: two survivors may show the same
-// Last and the same HardState.Term, the term of a vote, and only the term of
-// their last entries tells which one holds the writes a majority committed
-// (D17, #534). A log with no entry and no snapshot reports 0.
+// lastTermOf is the term of the entry at r.Last: the newest snapshot's when
+// it ends at r.Last, else the log's. It is the half of the survivor's key
+// Inspect did not report: two survivors may show the same Last and the same
+// HardState.Term, the term of a vote, and only the term of their last
+// entries tells which one holds the writes a majority committed (D17,
+// #534). A snapshot at r.Last wins over the log's entry there: an install a
+// crash interrupted published it past the log, or at the log's last index
+// under another term, and the start, or Recover, moves the log onto it
+// (#506). A log with no entry and no snapshot reports 0.
 func lastTermOf(l *fileLog, r *ReportValue) uint64 {
-	if _, last := l.Bounds(); r.Last > last && len(r.Snapshots) > 0 {
+	if len(r.Snapshots) > 0 && r.Snapshots[0].Position.Index == r.Last {
 		return r.Snapshots[0].Position.Term
 	}
 	if t, err := l.Term(r.Last); err == nil {

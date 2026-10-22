@@ -1,6 +1,7 @@
 package consensus
 
 import (
+	"fmt"
 	"testing"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
@@ -52,26 +53,43 @@ func TestInspectReportsTheTermOfTheLastEntry(t *testing.T) {
 	}
 }
 
-// A snapshot an interrupted install published past the log holds Last, and
-// its term is the last term (#506, #534).
-func TestInspectReportsTheTermOfASnapshotPastTheLog(t *testing.T) {
-	d := openDir(t, t.TempDir(), 1<<16)
-	defer d.Close()
-	if err := d.Log().Append(ents(1, 5, 1), nil); err != nil {
-		t.Fatal(err)
+// A snapshot an interrupted install published at Last — past the log, or at
+// its last index under another term — holds the state there: its term is
+// the last term, the one a start or Recover keeps (#506, #534).
+func TestInspectReportsTheTermOfASnapshotAtLast(t *testing.T) {
+	type tc struct {
+		name    string
+		logLast uint64
+		snap    coreconsensus.PositionValue
+		want    coreconsensus.PositionValue
 	}
-	mustSync(t, d.Log())
-	id := "00000000000000000010-00000000000000000004"
-	meta := coreconsensus.SnapshotMetaValue{ID: id, Position: coreconsensus.PositionValue{Term: 4, Index: 10}}
-	sink, _, err := d.Snapshots().Create(id, meta)
-	if err != nil {
-		t.Fatal(err)
+	cases := []tc{
+		{"past the log", 5, coreconsensus.PositionValue{Term: 4, Index: 10}, coreconsensus.PositionValue{Term: 4, Index: 10}},
+		{"at the log's last index, another term", 10, coreconsensus.PositionValue{Term: 4, Index: 10}, coreconsensus.PositionValue{Term: 4, Index: 10}},
+		{"behind the log", 12, coreconsensus.PositionValue{Term: 1, Index: 10}, coreconsensus.PositionValue{Term: 1, Index: 12}},
 	}
-	if err := sink.Commit(meta); err != nil {
-		t.Fatalf("publish: %v %v", err, errs.FieldsOf(err))
+	runCase := func(t *testing.T, c tc) {
+		d := openDir(t, t.TempDir(), 1<<16)
+		defer d.Close()
+		if err := d.Log().Append(ents(1, c.logLast, 1), nil); err != nil {
+			t.Fatal(err)
+		}
+		mustSync(t, d.Log())
+		id := fmt.Sprintf("%020d-%020d", c.snap.Index, c.snap.Term)
+		meta := coreconsensus.SnapshotMetaValue{ID: id, Position: c.snap}
+		sink, _, err := d.Snapshots().Create(id, meta)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := sink.Commit(meta); err != nil {
+			t.Fatalf("publish: %v %v", err, errs.FieldsOf(err))
+		}
+		r := must(Inspect(d))(t)
+		if r.Last != c.want.Index || r.LastTerm != c.want.Term {
+			t.Fatalf("Last %d LastTerm %d, want %d and %d", r.Last, r.LastTerm, c.want.Index, c.want.Term)
+		}
 	}
-	r := must(Inspect(d))(t)
-	if r.Last != 10 || r.LastTerm != 4 {
-		t.Fatalf("Last %d LastTerm %d, want the snapshot's 10 and 4", r.Last, r.LastTerm)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
