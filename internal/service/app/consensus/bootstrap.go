@@ -37,7 +37,9 @@ func byID(members []coreconsensus.MemberValue) []coreconsensus.MemberValue {
 // each idempotent: a bootstrap-pending stamp naming the founding list, the
 // founding configuration as entry 1, then the member stamp. Every founder
 // runs it with the IDENTICAL list (D8, R2-24, R3-02, R9-04). It never runs
-// inside NewNode.
+// inside NewNode. Entry 1 carries the generation 1 contract, cfg's
+// InitialTiming completed and refused as NewNode completes and refuses it:
+// the contract that rules every node is the one NewNode validates.
 func Bootstrap(ctx context.Context, cfg *Config, members []coreconsensus.MemberValue) error {
 	// Every phase below is a durable write: a caller that gave up before the
 	// first one gets its own cancellation back, and nothing is written.
@@ -48,6 +50,10 @@ func Bootstrap(ctx context.Context, cfg *Config, members []coreconsensus.MemberV
 		return misconfigured("Log", "nil")
 	}
 	if err := checkFounders(members, cfg.MinVoters); err != nil {
+		return err
+	}
+	timing, err := foundingTiming(cfg)
+	if err != nil {
 		return err
 	}
 	stamp, err := founderStamp(cfg)
@@ -61,7 +67,7 @@ func Bootstrap(ctx context.Context, cfg *Config, members []coreconsensus.MemberV
 	if done, err := advanceFounding(cfg.Log, &stamp, digest); done || err != nil {
 		return err
 	}
-	if err := writeFoundingEntry(cfg, members); err != nil {
+	if err := writeFoundingEntry(cfg, members, timing); err != nil {
 		return err
 	}
 	stamp.State = coreconsensus.StampMember
@@ -173,10 +179,29 @@ func advanceFounding(log coreconsensus.LogStore, stamp *coreconsensus.StampValue
 	return false, nil
 }
 
+// foundingTiming is the generation 1 contract the founding entry carries:
+// cfg's InitialTiming completed field by field and refused as NewNode
+// completes and refuses it, so the contract that rules once entry 1 commits
+// is exactly the one NewNode validated. Written raw, a timing with only its
+// drift set became TimingDefaults with no drift, one without its maximum
+// refused every promotion, one without its minimum was refused by the
+// engine and left each node on its own InitialTiming (#523).
+func foundingTiming(cfg *Config) (coreconsensus.TimingContractSpec, error) {
+	c := *cfg
+	clampTiming(&c.InitialTiming)
+	if err := refuseTiming(&c); err != nil {
+		return coreconsensus.TimingContractSpec{}, err
+	}
+	timing := c.InitialTiming
+	timing.Generation = 1
+	return timing, nil
+}
+
 // writeFoundingEntry writes the founding configuration as entry 1, at term
-// 1 and committed, then syncs it; a log that already holds an entry is left
-// alone, which is what makes a rerun idempotent.
-func writeFoundingEntry(cfg *Config, members []coreconsensus.MemberValue) error {
+// 1 and committed, with the generation 1 contract timing, then syncs it; a
+// log that already holds an entry is left alone, which is what makes a
+// rerun idempotent.
+func writeFoundingEntry(cfg *Config, members []coreconsensus.MemberValue, timing coreconsensus.TimingContractSpec) error {
 	if first, last := cfg.Log.Bounds(); last >= first {
 		return nil
 	}
@@ -184,11 +209,6 @@ func writeFoundingEntry(cfg *Config, members []coreconsensus.MemberValue) error 
 	for i := range conf.Members {
 		conf.Members[i].Joining = false
 	}
-	timing := cfg.InitialTiming
-	if timing.HeartbeatInterval == 0 {
-		timing = TimingDefaults()
-	}
-	timing.Generation = 1
 	data := wire.AppendAdmin(nil, &wire.AdminValue{Operator: "bootstrap", Change: wire.ChangeFounding, Membership: conf, Contract: timing})
 	e := coreconsensus.EntryValue{
 		Position: coreconsensus.PositionValue{Term: 1, Index: 1}, Kind: coreconsensus.EntryMembership,

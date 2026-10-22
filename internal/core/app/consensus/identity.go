@@ -64,7 +64,10 @@ type LogIdentityValue struct {
 	// PredecessorEpoch is the predecessor's epoch.
 	PredecessorEpoch uint64
 	// KeptIndex is the last index Recover kept from the predecessor. An
-	// applied position of the predecessor at or below it is still trusted.
+	// applied position of the predecessor at or below it is still trusted
+	// when its term is the one kept there: Recover adopts the verified
+	// suffix past the commit the survivor persisted, which may hold
+	// another term than the write the old cluster acknowledged.
 	// Every node of the history applies the entries at or below it under the
 	// predecessor's token: one admitted after the Recover learns it from the
 	// snapshot it installs, never from an append.

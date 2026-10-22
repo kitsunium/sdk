@@ -136,6 +136,48 @@ constants:
           mutNoSpaceAdmits admits a command while the no-space alarm is
           committed (#515).
         name: mutNoSpaceAdmits
+      - doc: |-
+          mutRefusedLeadHeard keeps answering, and taking as contact, the
+          appends and heartbeats of a leader the node refused for the term
+          after MaxChainRefusals chain refusals (#508).
+        name: mutRefusedLeadHeard
+      - doc: |-
+          mutDenyPinUnchecked admits a DenyPin of this leader, or one that
+          leaves no answering majority without its target (#530).
+        name: mutDenyPinUnchecked
+      - doc: |-
+          mutDenyPinAtAppend withdraws a denied pin from the admission set at
+          append instead of at commit (#530).
+        name: mutDenyPinAtAppend
+      - doc: |-
+          mutReportUnsyncedContract reports in a heartbeat answer the contract
+          generation applied in memory, durable or not (#521).
+        name: mutReportUnsyncedContract
+      - doc: |-
+          mutCampaignInVoteWindow lets the election timer campaign inside the
+          node's own vote-refusal window (#521).
+        name: mutCampaignInVoteWindow
+      - doc: |-
+          mutUnknownGenShortestKnown sizes an acknowledgement of a contract
+          generation the leader does not know as the shortest one it knows
+          (#522).
+        name: mutUnknownGenShortestKnown
+      - doc: |-
+          mutOwnTimingKept keeps the node's own InitialTiming as a known
+          contract after a snapshot named the cluster's (#522).
+        name: mutOwnTimingKept
+      - doc: |-
+          mutLeaseWithoutDrift grants a lease under a contract whose drift
+          budget is not in (0, 1) (#523).
+        name: mutLeaseWithoutDrift
+      - doc: |-
+          mutFoundingAsWritten runs the founding contract as written, its
+          maximum and drift not completed (#523).
+        name: mutFoundingAsWritten
+      - doc: |-
+          mutReadRespAnyPeer takes a read's answer from any peer of the term,
+          not only from the leader this node asked (#510).
+        name: mutReadRespAnyPeer
     name: mutAckBeforeSync
   - doc: The facts a PeerStatValue carries.
     grouped: true
@@ -250,8 +292,9 @@ files:
       - (*Raft).promote
       - (*Raft).removeMember
       - (*Raft).updateAddress
-      - denyPin
+      - (*Raft).denyPin
       - (*Raft).activeMajority
+      - (*Raft).activeMajorityWithout
       - fwdKey
       - fwdAnswer
       - fwdTable
@@ -344,6 +387,7 @@ files:
       - Raft
       - NewRaft
       - (*Raft).Tick
+      - (*Raft).outsideVoteWindow
       - (*Raft).StorageDone
       - (*Raft).noteSelfVote
       - (*Raft).ReportUnreachable
@@ -393,6 +437,7 @@ files:
       - (*Raft).resetEngines
       - actsAtCommit
       - foundingContract
+      - (*Raft).foundingContractOf
       - (*Raft).commitFounding
       - adoptsTiming
       - (*Raft).applyAdmin
@@ -423,8 +468,10 @@ files:
       - (*Raft).tallyVotes
       - (*Raft).countVotes
       - (*Raft).stepCandidate
+      - (*Raft).followWinner
       - (*Raft).stepFollower
       - (*Raft).followHeartbeat
+      - (*Raft).reportedContract
       - (*Raft).followTimeoutNow
       - (*Raft).handleAppend
       - (*Raft).rebaseOnCommit
@@ -434,15 +481,10 @@ files:
       - (*Raft).verifyChain
       - (*Raft).acknowledgeAppend
       - (*Raft).chainRefused
+      - (*Raft).refuses
       - (*Raft).maybeEndSilence
     name: step.go
 functions:
-  - doc: |-
-      denyPin withdraws the pin of the member at idx: its connections are
-      refused from then on, while it stays a member.
-    name: denyPin
-    params: cur *core.MembershipValue, idx int
-    results: errs.Code
   - doc: |-
       ownCopy returns a copy of b the step function owns, out of a frame the
       transport reuses. An empty b yields nil, exactly as the append([]byte(nil),
@@ -468,6 +510,13 @@ functions:
       foundingContract is the generation 1 contract a founding membership
       entry carries; ok is false for any other membership, and for a founding
       entry with no contract.
+
+      Bootstrap writes the contract NewNode validates, every field set. One
+      written before it did may lack its maximum or carry a drift outside
+      [0, 1): it is completed here, the same way on every node since it is a
+      function of the entry alone, with a maximum of twice the minimum and no
+      drift, which holds no lease. Run as written, a maximum of 0 refused every
+      promotion and drew every election timeout at exactly the minimum (#523).
     name: foundingContract
     params: admin *wire.AdminValue
     results: core.TimingContractSpec, bool
@@ -647,7 +696,7 @@ types:
       so no build of the engine can turn one on.
     kind: named
     name: mutation
-    underlying: uint32
+    underlying: uint64
   - fields:
       - name: ID
         type: core.NodeID
@@ -1124,8 +1173,19 @@ types:
         type: EngineValue
       - name: engines
         type: "[]engineAt"
-      - name: refusedLead
+      - doc: |-
+          refusedLead is the leader this node refused for the rest of
+          refusedTerm after MaxChainRefusals refusals of its chain (#508).
+        name: refusedLead
         type: core.NodeID
+      - name: refusedTerm
+        type: uint64
+      - doc: |-
+          ownTiming is the generation contracts holds this node's own
+          InitialTiming under, no entry or snapshot having confirmed it yet; 0
+          once one did (#522).
+        name: ownTiming
+        type: uint64
       - name: refusedAt
         type: uint64
       - name: refusedFrom
@@ -1360,10 +1420,30 @@ types:
         recv: r *Raft
         results: errs.Code
       - doc: |-
+          denyPin withdraws the pin of the member at idx, target: its connections
+          are refused once the change commits, while it stays a member. Never this
+          leader's own, and only while the voters that answer now, the target left
+          out, are a majority: the target is cut from the moment the change commits,
+          and the change itself must commit without it. Denying the pin of the one
+          live voter of three left the entry needing an acknowledgement the
+          transport no longer let through, and the cluster had no quorum until the
+          dead voter came back (#530, R2-27).
+        name: denyPin
+        params: cur *core.MembershipValue, target core.NodeID, idx int
+        recv: r *Raft
+        results: errs.Code
+      - doc: |-
           activeMajority is etcd's strict reconfiguration check: the voters of m
           that answer the leader NOW form a majority of m (R2-27).
         name: activeMajority
         params: m core.MembershipValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          activeMajorityWithout is activeMajority with silent counted as a voter
+          that does not answer, whatever it did last.
+        name: activeMajorityWithout
+        params: m core.MembershipValue, silent core.NodeID
         recv: r *Raft
         results: bool
       - doc: |-
@@ -1409,7 +1489,12 @@ types:
         recv: r *Raft
       - doc: |-
           contractWindow is the minimum election timeout of the contract a voter
-          applied; an unknown generation counts as the shortest contract known.
+          applied, the window it refuses votes in; an unknown generation grants no
+          lease. It used to count as the shortest contract known: a leader started
+          from a snapshot cut after a contract change knows only the newer one,
+          and sized the acknowledgements of a follower still on the older, shorter
+          contract at the newer window, longer than that follower refused votes
+          for (#522).
         name: contractWindow
         params: gen uint64
         recv: r *Raft
@@ -1534,6 +1619,18 @@ types:
       - name: Tick
         params: now time.Time
         recv: r *Raft
+      - doc: |-
+          outsideVoteWindow reports whether this node may campaign at now: never
+          inside the window it refuses votes in after a leader's contact or its own
+          start. A candidacy is a vote for itself, and the window is what a lease
+          granted on this node's acknowledgement relies on: a node restarted on an
+          older, shorter contract than the one present in its log campaigned on
+          that contract's timeout, inside the lease it had acknowledged (#521).
+          TimeoutNow does not come here: the leader that sends it dropped its lease.
+        name: outsideVoteWindow
+        params: now time.Time
+        recv: r *Raft
+        results: bool
       - name: StorageDone
         params: seq, index, term uint64
         recv: r *Raft
@@ -1655,7 +1752,10 @@ types:
         recv: r *Raft
       - doc: |-
           admitted is the transport's admission set: the union of the latest
-          appended configuration and the latest committed one (D4).
+          appended configuration and the latest committed one (D4). A member both
+          name keeps the committed pin while the appended one withdrew it: a
+          DenyPin cuts its target when it commits, never while its acknowledgement
+          may still be the one the entry needs (#530).
         name: admitted
         recv: r *Raft
         results: "[]core.MemberValue"
@@ -1741,6 +1841,13 @@ types:
           install replaced the state with the snapshot's.
         name: resetEngines
         recv: r *Raft
+      - doc: |-
+          foundingContractOf is foundingContract as this node reads it: as written,
+          with no completion, under the test mutation that reintroduces #523.
+        name: foundingContractOf
+        params: admin *wire.AdminValue
+        recv: r *Raft
+        results: core.TimingContractSpec, bool
       - doc: |-
           commitFounding makes the founding contract the one in force when its
           entry commits, unless a later generation already is: Bootstrap proposed
@@ -1918,18 +2025,37 @@ types:
         params: now time.Time, m core.MessageValue
         recv: r *Raft
       - doc: |-
+          followWinner follows the leader of the campaign's term that m comes
+          from, unless this node refused that leader for the term: its campaign is
+          how the refusal ends, and the leader's messages do not end it (#508).
+        name: followWinner
+        params: now time.Time, m core.MessageValue
+        recv: r *Raft
+      - doc: |-
           stepFollower handles a message of the leader's term at a follower or a
-          learner; an append or a heartbeat is contact with the leader.
+          learner; an append or a heartbeat is contact with the leader, unless this
+          node refused that leader for the term.
         name: stepFollower
         params: now time.Time, m core.MessageValue
         recv: r *Raft
       - doc: |-
           followHeartbeat records the leader's contact, commits what the heartbeat
-          allows of the entries held, and answers the round, unless this leader
-          was refused for good this term.
+          allows of the entries held, and answers the round.
         name: followHeartbeat
         params: now time.Time, m core.MessageValue
         recv: r *Raft
+      - doc: |-
+          reportedContract is the contract generation a heartbeat answer reports:
+          the one the committed entries this node holds durably put in force, the
+          one a restart rebuilds. The leader sizes its lease on the window of that
+          generation, and the node must refuse votes for at least that long after a
+          crash. Reporting the generation applied in memory, before the contract's
+          entry or the commit that applied it was durable, let a restarted node
+          fall back to the older, shorter window and vote or campaign inside the
+          lease it had granted (#521, R3-07).
+        name: reportedContract
+        recv: r *Raft
+        results: uint64
       - doc: |-
           followTimeoutNow starts an election at once, carrying the transfer flag,
           when the leader of this term hands leadership over and this node may
@@ -2002,6 +2128,13 @@ types:
         name: chainRefused
         params: m core.MessageValue, at uint64
         recv: r *Raft
+      - doc: |-
+          refuses reports whether this node refused the leader from for the rest
+          of the current term, after MaxChainRefusals refusals of its chain.
+        name: refuses
+        params: from core.NodeID
+        recv: r *Raft
+        results: bool
       - doc: |-
           maybeEndSilence lifts the silence condition once a leader of a term at
           least the node's own has rewritten its log past the truncation point and

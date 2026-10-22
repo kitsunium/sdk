@@ -142,6 +142,9 @@ type sim struct {
 	forwarded map[[2]uint64]core.MessageValue
 	fetches   int
 	kv        *kvWorld
+	// onSend, when set, sees every message a node sends, before the
+	// network drops or cuts it.
+	onSend func(core.MessageValue)
 }
 
 func rtt(a, b core.NodeID) time.Duration {
@@ -261,6 +264,9 @@ func (s *sim) fail(format string, args ...any) {
 }
 
 func (s *sim) deliver(m core.MessageValue) {
+	if s.onSend != nil {
+		s.onSend(m)
+	}
 	if s.cut[[2]core.NodeID{m.From, m.To}] || s.rng.Float64() < s.opt.drop {
 		return
 	}

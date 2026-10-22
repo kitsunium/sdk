@@ -98,7 +98,11 @@ func (r *Raft) stepAnyRole(now time.Time, m core.MessageValue) bool {
 		r.handleForward(m)
 		return true
 	case core.MsgReadIndexResp:
-		r.rd.ReadStates = append(r.rd.ReadStates, ReadState{Context: m.Context, Index: m.Index, Code: m.Code})
+		// Only the leader this node asked answers its reads: another
+		// peer's answer, of this term, is not one (#510).
+		if m.From == r.lead || r.mutated(mutReadRespAnyPeer) {
+			r.rd.ReadStates = append(r.rd.ReadStates, ReadState{Context: m.Context, Index: m.Index, Code: m.Code})
+		}
 		return true
 	case core.MsgForwardResp, core.MsgForwardAdminResp:
 		r.rd.Forwarded = append(r.rd.Forwarded, m)
@@ -221,7 +225,6 @@ func (r *Raft) becomeFollower(term uint64, lead core.NodeID) {
 	r.campaignIssuer, r.campaignTerm = 0, 0
 	r.facts &^= raftLeaseDropped
 	r.leaseStart = time.Time{}
-	r.refusedLead = 0
 	if wasLeader {
 		r.abortLeadership()
 	}
@@ -330,8 +333,7 @@ func (r *Raft) countVotes() (granted, rejected int) {
 func (r *Raft) stepCandidate(now time.Time, m core.MessageValue) {
 	switch m.Kind {
 	case core.MsgApp, core.MsgHeartbeat:
-		r.becomeFollower(m.Term, m.From)
-		r.stepFollower(now, m)
+		r.followWinner(now, m)
 	case core.MsgPreVoteResp:
 		if r.role == core.RolePreCandidate {
 			r.votes[m.From] = !m.Reject
@@ -351,9 +353,30 @@ func (r *Raft) stepCandidate(now time.Time, m core.MessageValue) {
 	}
 }
 
+// followWinner follows the leader of the campaign's term that m comes
+// from, unless this node refused that leader for the term: its campaign is
+// how the refusal ends, and the leader's messages do not end it (#508).
+func (r *Raft) followWinner(now time.Time, m core.MessageValue) {
+	if r.refuses(m.From) {
+		return
+	}
+	r.becomeFollower(m.Term, m.From)
+	r.stepFollower(now, m)
+}
+
 // stepFollower handles a message of the leader's term at a follower or a
-// learner; an append or a heartbeat is contact with the leader.
+// learner; an append or a heartbeat is contact with the leader, unless this
+// node refused that leader for the term.
 func (r *Raft) stepFollower(now time.Time, m core.MessageValue) {
+	if (m.Kind == core.MsgApp || m.Kind == core.MsgHeartbeat) && r.refuses(m.From) {
+		// After N chain refusals the leader's appends and heartbeats are
+		// neither answered nor taken as contact for the rest of the term
+		// (D4, R6-05). Answered, every rejection counted as contact for
+		// CheckQuorum and the leader resent at once, in a loop that never
+		// ended; taken as contact, they kept the refusing majority from
+		// ever campaigning, and the leader was never deposed (#508).
+		return
+	}
 	switch m.Kind {
 	case core.MsgApp:
 		r.lead = m.From
@@ -373,21 +396,30 @@ func (r *Raft) stepFollower(now time.Time, m core.MessageValue) {
 }
 
 // followHeartbeat records the leader's contact, commits what the heartbeat
-// allows of the entries held, and answers the round, unless this leader
-// was refused for good this term.
+// allows of the entries held, and answers the round.
 func (r *Raft) followHeartbeat(now time.Time, m core.MessageValue) {
 	r.lead = m.From
 	r.lastLeaderContact = now
 	r.resetElection(now)
-	if r.refusedLead == m.From {
-		// After N chain refusals, this leader's heartbeats are not
-		// answered for the rest of the term (D4, R6-05).
-		return
-	}
 	if c := min(m.Commit, r.log.lastIndex()); c > r.log.committed {
 		r.commitTo(c)
 	}
-	r.send(core.MessageValue{Kind: core.MsgHeartbeatResp, To: m.From, Context: m.Context, Contract: r.timing.Generation})
+	r.send(core.MessageValue{Kind: core.MsgHeartbeatResp, To: m.From, Context: m.Context, Contract: r.reportedContract()})
+}
+
+// reportedContract is the contract generation a heartbeat answer reports:
+// the one the committed entries this node holds durably put in force, the
+// one a restart rebuilds. The leader sizes its lease on the window of that
+// generation, and the node must refuse votes for at least that long after a
+// crash. Reporting the generation applied in memory, before the contract's
+// entry or the commit that applied it was durable, let a restarted node
+// fall back to the older, shorter window and vote or campaign inside the
+// lease it had granted (#521, R3-07).
+func (r *Raft) reportedContract() uint64 {
+	if r.mutated(mutReportUnsyncedContract) {
+		return r.timing.Generation
+	}
+	return r.EngineAt(min(r.log.committed, r.log.stable)).Timing.Generation
 }
 
 // followTimeoutNow starts an election at once, carrying the transfer flag,
@@ -555,10 +587,16 @@ func (r *Raft) chainRefused(m core.MessageValue, at uint64) {
 		r.refusedAt, r.refusedFrom, r.refusals = at, m.From, 1
 	}
 	if r.cfg.MaxChainRefusals > 0 && r.refusals >= r.cfg.MaxChainRefusals {
-		r.refusedLead = m.From
+		r.refusedLead, r.refusedTerm = m.From, r.term
 	}
 	r.rd.ChainRefusedBy = append(r.rd.ChainRefusedBy, m.From)
 	r.send(core.MessageValue{Kind: core.MsgAppResp, To: m.From, Index: m.Index, Reject: true, RejectHint: m.Index})
+}
+
+// refuses reports whether this node refused the leader from for the rest
+// of the current term, after MaxChainRefusals refusals of its chain.
+func (r *Raft) refuses(from core.NodeID) bool {
+	return r.refusedLead != 0 && r.refusedLead == from && r.refusedTerm == r.term && !r.mutated(mutRefusedLeadHeard)
 }
 
 // maybeEndSilence lifts the silence condition once a leader of a term at

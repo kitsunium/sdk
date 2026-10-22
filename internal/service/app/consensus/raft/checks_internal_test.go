@@ -347,7 +347,9 @@ func confirmedLeader(mut mutation) *Raft {
 	r.Step(r.now, m)
 	r.broadcastHeartbeat(r.now)
 	hb := msg(core.MsgHeartbeatResp, 2, 1, 2)
-	hb.Context = r.nextRound
+	// The follower reports the generation 1 contract it applies: a
+	// generation the leader does not know grants no lease (#522).
+	hb.Context, hb.Contract = r.nextRound, 1
 	r.Step(r.now, hb)
 	r.Ready()
 	return r
@@ -485,6 +487,16 @@ var checks = map[string]func(mutation) error{
 	"silent node never campaigns":   checkSilentNodeNeverCampaigns,
 	"kept entries never appended":   checkKeptEntriesNeverAppended,
 	"no space refuses commands":     checkNoSpaceRefusesCommands,
+	"refused leader not heard":      checkRefusedLeaderIsNotHeard,
+	"deny pin keeps a quorum":       checkDenyPinKeepsAQuorum,
+	"denied pin admitted to commit": checkDeniedPinAdmittedUntilCommit,
+	"contract reported if durable":  checkContractReportedOnceDurable,
+	"no campaign in vote window":    checkNoCampaignInsideVoteWindow,
+	"unknown generation no lease":   checkUnknownGenerationGrantsNoLease,
+	"own timing dropped on install": checkOwnTimingDroppedOnInstall,
+	"no lease without drift":        checkNoLeaseWithoutDrift,
+	"founding contract completed":   checkFoundingContractCompleted,
+	"read answered by its leader":   checkReadAnsweredByTheLeaderOnly,
 	"simulated safety":              checkSimSafety,
 	"simulated linearizability":     checkSimLinearizable,
 	"deposed leader read":           checkDeposedLeaderRead,
@@ -533,6 +545,16 @@ func TestMutationsAreCaught(t *testing.T) {
 		"silent node campaigns":           mutSilentCampaigns,
 		"kept entries appended":           mutKeptAppended,
 		"command under no-space":          mutNoSpaceAdmits,
+		"refused leader still heard":      mutRefusedLeadHeard,
+		"deny pin unchecked":              mutDenyPinUnchecked,
+		"denied pin cut at append":        mutDenyPinAtAppend,
+		"unsynced contract reported":      mutReportUnsyncedContract,
+		"campaign in the vote window":     mutCampaignInVoteWindow,
+		"unknown gen as shortest known":   mutUnknownGenShortestKnown,
+		"own timing kept on install":      mutOwnTimingKept,
+		"lease without drift":             mutLeaseWithoutDrift,
+		"founding contract as written":    mutFoundingAsWritten,
+		"read answered by any peer":       mutReadRespAnyPeer,
 	}
 	for name, m := range muts {
 		caught := ""

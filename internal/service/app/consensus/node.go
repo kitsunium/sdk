@@ -30,6 +30,9 @@ const (
 	// stageAppended is a proposal appended at a known position: it is
 	// resolved when that index is applied.
 	stageAppended
+	// stageAbandoned is a proposal its caller gave up on while it was
+	// unsent: the loop drops it and never hands it to raft (#519).
+	stageAbandoned
 )
 
 const (
@@ -118,7 +121,6 @@ type Node struct {
 	lastTerm      uint64
 	lastLead      coreconsensus.NodeID
 	lastRole      coreconsensus.Role
-	readSeq       uint64
 	canVote       bool
 	noTable       bool
 	snapState     snapState
@@ -176,7 +178,7 @@ type applyResult struct {
 type proposal struct {
 	entry coreconsensus.EntryValue
 	admin bool
-	stage atomic.Int32 // 0 unsent, 1 possibly accepted, 2 appended at pos
+	stage atomic.Int32 // 0 unsent, 1 possibly accepted, 2 appended at pos, 3 abandoned
 	pos   coreconsensus.PositionValue
 	local bool
 	done  chan propResult

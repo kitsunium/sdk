@@ -2,6 +2,7 @@ package consensus
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
@@ -19,6 +20,11 @@ func (n *Node) Propose(ctx context.Context, data []byte) (coreconsensus.TokenVal
 	if len(data) > n.cfg.MaxEntryBytes {
 		return coreconsensus.TokenValue{}, nil, origin(coreconsensus.EntryTooLarge, errs.Int("bytes", len(data)))
 	}
+	// The entry owns a copy: the leader keeps it in memory and sends it for
+	// as long as a peer lags, and a caller that reused its buffer after the
+	// call changed it under its body sum, which every follower then refused
+	// (#508).
+	data = slices.Clone(data)
 	e := coreconsensus.EntryValue{Kind: coreconsensus.EntryCommand, BodySum: wire.BodySum(data), Data: data}
 	return n.submit(ctx, e, false)
 }
@@ -89,8 +95,13 @@ func (n *Node) awaitProposal(ctx context.Context, p *proposal) propResult {
 		}
 		return propResult{err: outcomeUnknown("node stopped")}
 	case <-ctx.Done():
-		if p.stage.Load() == stageUnsent {
-			// Ended before the append: ctx.Err(), as everywhere in the SDK.
+		if p.stage.CompareAndSwap(stageUnsent, stageAbandoned) {
+			// Ended before the loop took it: the loop drops it, nothing is
+			// appended, and the answer is ctx.Err(), as everywhere in the
+			// SDK. Read without the swap, the stage said unsent while the
+			// proposal sat in propc, and the loop appended it afterwards: a
+			// caller told ctx.Err() retried a command that was applied
+			// (#519).
 			return propResult{err: ctx.Err()}
 		}
 		return propResult{err: origin(coreconsensus.OutcomeUnknown,
@@ -101,6 +112,7 @@ func (n *Node) awaitProposal(ctx context.Context, p *proposal) propResult {
 // handleProposals appends every proposal waiting at this turn as one batch
 // at a leader, or forwards each to the leader (D6).
 func (n *Node) handleProposals(ps []*proposal) {
+	ps = claimed(ps)
 	st := n.r.Status()
 	now := n.clk.Now()
 	if st.Role != coreconsensus.RoleLeader {
@@ -128,6 +140,21 @@ func (n *Node) handleProposals(ps []*proposal) {
 		ents = append(ents, p.entry)
 	}
 	flush()
+}
+
+// claimed keeps, in place, the proposals the loop takes from their callers:
+// each moves from unsent to possibly accepted, before raft or the leader
+// sees it, unless its caller abandoned it first, and an abandoned proposal
+// is dropped unanswered, its caller already told ctx.Err() (#519).
+func claimed(ps []*proposal) []*proposal {
+	k := 0
+	for _, p := range ps {
+		if p.stage.CompareAndSwap(stageUnsent, stagePossible) {
+			ps[k] = p
+			k++
+		}
+	}
+	return ps[:k]
 }
 
 // proposeBatch appends a batch of ordinary proposals as one Propose and
@@ -191,38 +218,59 @@ func (n *Node) appended(p *proposal, pos coreconsensus.PositionValue, local bool
 	if pos.Index <= n.applied {
 		r, ok := n.results[pos.Index]
 		n.am.Unlock()
-		if local {
-			// Answered here, never registered: no applied1 releases them
-			// (#419).
-			n.pendingBytes.Add(-int64(len(p.entry.Data)))
-		}
-		switch {
-		case ok && r.term == pos.Term:
-			p.done <- propResult{tok: n.token(pos), val: r.val}
-		case ok:
-			p.done <- propResult{err: withToken(coreconsensus.EntrySuperseded, n.token(pos))}
-		default:
-			p.done <- propResult{err: outcomeUnknown("applied before its position was known")}
-		}
+		n.answerApplied(p, pos, r, ok)
 		return
 	}
-	n.waiters[pos.Index] = p
+	displaced := p
+	if old := n.waiters[pos.Index]; old == nil || old.pos.Term < pos.Term {
+		n.waiters[pos.Index], displaced = p, old
+	}
 	n.am.Unlock()
+	if displaced != nil {
+		n.displace(displaced)
+	}
+}
+
+// answerApplied answers a proposal whose position is already applied,
+// from the result kept there when ok: it is never registered, so no applied1
+// releases its pending bytes (#419).
+func (n *Node) answerApplied(p *proposal, pos coreconsensus.PositionValue, r applyResult, ok bool) {
+	if p.local {
+		n.pendingBytes.Add(-int64(len(p.entry.Data)))
+	}
+	switch {
+	case ok && r.term == pos.Term:
+		p.done <- propResult{tok: n.token(pos), val: r.val}
+	case ok:
+		p.done <- propResult{err: withToken(coreconsensus.EntrySuperseded, n.token(pos))}
+	default:
+		p.done <- propResult{err: outcomeUnknown("applied before its position was known")}
+	}
+}
+
+// displace answers a proposal that lost its index's waiter to another one
+// appended at the same index under a later term: after a leader change, the
+// new leader hands out first the indexes the old one's unreplicated tail
+// held. Overwritten, the earlier waiter was answered by nothing — applied1,
+// sweepWaiters, answerCovered and failAllOnStop all walk the map — and its
+// caller waited for its own deadline, forever with none, its pending bytes
+// counted for good (#517). Either entry may still commit, so the answer is
+// OUTCOME_UNKNOWN, never ENTRY_SUPERSEDED (D6).
+func (n *Node) displace(p *proposal) {
+	if p.local {
+		n.pendingBytes.Add(-int64(len(p.entry.Data)))
+	}
+	p.done <- propResult{err: outcomeUnknown("another proposal took its index under a later term")}
 }
 
 // forward sends a proposal to the leader under a submission id that never
-// repeats across restarts: a random epoch in the high 32 bits, a counter in
-// the low 32, and a fresh epoch before the counter runs out (R7-23, R9-17).
+// repeats across restarts (nextID).
 func (n *Node) forward(p *proposal, st raft.StatusValue) {
 	if st.Lead == 0 || st.Lead == n.stamp.ID {
 		p.done <- propResult{err: notLeader(0)}
 		return
 	}
-	if n.subCount == ^uint32(0) {
-		n.subEpoch, n.subCount = newSubEpoch(), 0
-	}
-	n.subCount++
-	ctx := n.subEpoch | uint64(n.subCount)
+	ctx := n.nextID()
 	kind := coreconsensus.MsgForward
 	if p.admin {
 		kind = coreconsensus.MsgForwardAdmin
@@ -237,6 +285,22 @@ func (n *Node) forward(p *proposal, st raft.StatusValue) {
 	n.am.Unlock()
 	p.stage.Store(stagePossible)
 	n.cfg.Transport.Send(st.Lead, wire.AppendMessage(nil, &m))
+}
+
+// nextID is the next submission id of a forward or a read: a random epoch
+// drawn at start in the high 32 bits, a counter in the low 32, and a fresh
+// epoch before the counter runs out, so an id never repeats across restarts
+// (R7-23, R9-17). A leader may still hold a read of this node's previous
+// incarnation, unconfirmed, and answer it later: under a counter that
+// restarted at 1, the new incarnation's read of the same number took that
+// answer, at the old commit index, below a write acknowledged before the
+// call (#510).
+func (n *Node) nextID() uint64 {
+	if n.subCount == ^uint32(0) {
+		n.subEpoch, n.subCount = newSubEpoch(), 0
+	}
+	n.subCount++
+	return n.subEpoch | uint64(n.subCount)
 }
 
 // forwardAnswered resolves a forwarded proposal from the leader's answer.
@@ -289,8 +353,7 @@ func (n *Node) Barrier(ctx context.Context) (coreconsensus.TokenValue, error) {
 	}
 	defer func() { n.obs.record(mBarrierLatency, n.clk.Since(start).Seconds(), coreotel.String("mode", mode)) }()
 	if !n.exec(func() {
-		n.readSeq++
-		ctx := n.readSeq
+		ctx := n.nextID()
 		n.reads[ctx] = w
 		n.r.ReadIndex(n.clk.Now(), ctx, noLease)
 		n.handleReady()
@@ -322,8 +385,12 @@ func (n *Node) Barrier(ctx context.Context) (coreconsensus.TokenValue, error) {
 	return tok, nil
 }
 
-// WaitApplied returns once the local node has applied t. A token of another
-// lineage is LINEAGE_MISMATCH.
+// WaitApplied returns once the local node has applied t, the entry of t's
+// term at t's index. A token of another lineage is LINEAGE_MISMATCH. A token
+// whose index holds an entry of another term is ENTRY_SUPERSEDED, carrying
+// the token of the entry applied there, or LINEAGE_MISMATCH when it is one of
+// the predecessor's within the index Recover kept, as is a token of the
+// predecessor's whose term this node can no longer read there.
 func (n *Node) WaitApplied(ctx context.Context, t coreconsensus.TokenValue) error {
 	want := n.token(t.Position())
 	if t.Cluster != want.Cluster || t.Epoch != want.Epoch {
@@ -335,7 +402,57 @@ func (n *Node) WaitApplied(ctx context.Context, t coreconsensus.TokenValue) erro
 		}
 		return n.stoppedErr()
 	}
-	return nil
+	return n.appliedAs(t)
+}
+
+// appliedAs checks that the entry applied at t's index is t's: the index
+// alone named the predecessor's identity, and since Recover adopts the
+// verified suffix past the commit the survivor persisted (D17), an entry it
+// kept there may be of another term than the write the old cluster
+// committed and acknowledged at that index. That write is lost, and
+// WaitApplied reported it applied (#509). Where the term cannot be read any
+// more, a token of the current history is trusted by Log Matching, one of
+// the predecessor's is not: the kept range may hold such a suffix.
+func (n *Node) appliedAs(t coreconsensus.TokenValue) error {
+	term, known, ok := n.appliedTermAt(t.Index)
+	if !ok {
+		return n.stoppedErr()
+	}
+	l := n.lineage()
+	kept := l.Predecessor != (coreconsensus.ClusterID{}) && t.Index <= l.KeptIndex
+	switch {
+	case known && term == t.Term, !known && !kept:
+		return nil
+	case !known:
+		return origin(coreconsensus.LineageMismatch, errs.String("why", "the predecessor's entry at this index can no longer be read"))
+	case kept:
+		return origin(coreconsensus.LineageMismatch, errs.String("why", "the predecessor's entry at this index is not the one kept"))
+	default:
+		return withToken(coreconsensus.EntrySuperseded, n.token(coreconsensus.PositionValue{Term: term, Index: t.Index}))
+	}
+}
+
+// appliedTermAt is the term of the entry applied at index, which the caller
+// waited for: from the step function, whose committed log is the truth, then
+// from the store while index is one this node applied from its log, which
+// the store holds as committed. known is false when neither holds it any
+// more; ok is false when the node stopped.
+func (n *Node) appliedTermAt(index uint64) (term uint64, known, ok bool) {
+	if !n.exec(func() {
+		if index <= n.r.Status().Commit {
+			term, known = n.r.TermAt(index)
+		}
+	}) {
+		return 0, false, false
+	}
+	if known || index > n.logApplied.Load() {
+		return term, known, true
+	}
+	if first, _ := n.cfg.Log.Bounds(); index+1 < first {
+		return 0, false, true
+	}
+	t, err := n.cfg.Log.Term(index)
+	return t, err == nil, true
 }
 
 // ---- administration (D17): every operation takes its operator, can be
@@ -392,7 +509,10 @@ func (n *Node) UpdateAddress(ctx context.Context, op coreconsensus.Operator, id 
 	})
 }
 
-// DenyPin withdraws a member's SPKI pin (R9-18).
+// DenyPin withdraws a member's SPKI pin (R9-18). The transport refuses the
+// member once the change commits. It is refused MEMBERSHIP_INVALID for the
+// leader itself, and while the voters that answer the leader, the target
+// left out, are not a majority (R2-27).
 func (n *Node) DenyPin(ctx context.Context, op coreconsensus.Operator, id coreconsensus.NodeID) error {
 	return n.admin(ctx, coreconsensus.EntryMembership, wire.AdminValue{Operator: string(op), Change: wire.ChangeDenyPin, Target: id})
 }

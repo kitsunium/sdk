@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-22T18:00:00Z -->
+<!-- updated: 2026-10-22T23:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -58,3 +58,24 @@ under coverage before touching `shard_count`.
   a Recover kept carry the predecessor's identity, which only a snapshot of
   this lineage tells the peer, so `sendAppend` sends one (#507,
   `mutKeptAppended`, `checkKeptEntriesNeverAppended`).
+- Answer, or take as contact, the appends and heartbeats of a leader this
+  node refused for the term after `MaxChainRefusals` chain refusals: every
+  rejection was contact for CheckQuorum and the trigger of an immediate
+  resend, and the refusing majority never campaigned (#508,
+  `mutRefusedLeadHeard`, `checkRefusedLeaderIsNotHeard`).
+- Admit a DenyPin of this leader, or one that leaves no answering majority
+  without its target, or withdraw the pin from the admission set before the
+  change commits (#530, `mutDenyPinUnchecked`, `mutDenyPinAtAppend`).
+- Report to a heartbeat a contract generation a restart would not rebuild,
+  or campaign inside the node's own vote-refusal window: a lease granted on
+  that report outlived the window after a crash (#521,
+  `mutReportUnsyncedContract`, `mutCampaignInVoteWindow`).
+- Size an acknowledgement of a generation the leader does not know as any
+  window but none, or keep a node's own InitialTiming as a known contract
+  once a snapshot named the cluster's (#522, `mutUnknownGenShortestKnown`,
+  `mutOwnTimingKept`).
+- Hold a lease under a contract with no drift budget in (0, 1), or run a
+  founding contract without its maximum (#523, `mutLeaseWithoutDrift`,
+  `mutFoundingAsWritten`).
+- Take a read's answer from any peer but the leader this node asked (#510,
+  `mutReadRespAnyPeer`).

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-22T18:00:00Z -->
+<!-- updated: 2026-10-22T23:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -253,6 +253,41 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   while the alarm stands, and `SnapshotEveryBytes` cuts. A full disk used to stop every node
   on STORAGE_FAILED at the same rotation (#515,
   `TestALogPastItsQuotaRaisesNoSpaceAndRefusesWrites`).
+- Hand raft a caller's buffer: `Propose` copies its payload. The leader
+  keeps the entry and resends it while a peer lags, and a caller that
+  reused its buffer changed it under its body sum: every follower refused
+  it (#508, `TestAMajorityRefusingTheChainDeposesTheLeader` in `raft/`).
+- Number a read with a counter that restarts at 1: a leader may still hold
+  a read of the previous incarnation, unconfirmed, and answer it later, at
+  the commit index from before a write acknowledged since. `nextID` gives
+  reads the forwards' random epoch (#510,
+  `TestARestartedFollowersReadIsNeverAnsweredForItsPredecessor`).
+- Overwrite a waiter: a second position learned at an index already waited
+  on — the new leader hands out first the indexes the old one's tail held —
+  keeps the later term's waiter and answers the other OUTCOME_UNKNOWN, its
+  pending bytes released (`displace`, #517,
+  `TestAppendedNeverOrphansAWaiterAtTheSameIndex`).
+- Read a proposal's stage to answer a cancelled caller: the hand-off is a
+  compare-and-swap. The caller abandons an unsent proposal
+  (`stageAbandoned`) or the loop claims it (`claimed`) before raft or the
+  leader sees it; read without the swap, a proposal answered ctx.Err() was
+  appended from propc afterwards (#519,
+  `TestAProposeCancelledWhileQueuedIsNeverAppended`).
+- Report a token applied on its index alone: `WaitApplied` compares the
+  term of the entry applied there (`appliedAs`). Recover adopts a suffix
+  past the survivor's persisted commit that may hold another term than the
+  write the old cluster acknowledged, and a token of the predecessor whose
+  term cannot be read any more is LINEAGE_MISMATCH (#509,
+  `TestWaitAppliedComparesTheTermRecoverKept`).
+- Write the founding contract raw: `foundingTiming` completes and refuses
+  `InitialTiming` as NewNode does, so the contract that rules every node is
+  the one NewNode validated (#523,
+  `TestTheFoundingContractIsTheOneNewNodeValidates`,
+  `TestAFoundingContractWithoutItsMinimumRulesEveryNode`).
+- Cut a denied member before its DenyPin commits, or deny the pin of the
+  last voter a quorum needs: over TCP the entry then waited forever for the
+  acknowledgement the transport refused (#530,
+  `TestTCPDenyPinNeverCutsTheLastQuorum`; raft's `denyPin` and `admitted`).
 - Bound an election in a test by a fixed number of split votes: a split
   is a draw, about one round in a hundred on the memory network, and a
   third round fails a two-round total every ten to twenty runs. Derive

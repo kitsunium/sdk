@@ -247,6 +247,10 @@ constants:
           stageAppended is a proposal appended at a known position: it is
           resolved when that index is applied.
         name: stageAppended
+      - doc: |-
+          stageAbandoned is a proposal its caller gave up on while it was
+          unsent: the loop drops it and never hands it to raft (#519).
+        name: stageAbandoned
     name: stageUnsent
   - grouped: true
     items:
@@ -566,6 +570,7 @@ files:
       - founderStamp
       - checkSelfListed
       - advanceFounding
+      - foundingTiming
       - writeFoundingEntry
       - sharedKey
     name: bootstrap.go
@@ -1064,15 +1069,21 @@ files:
       - (*Node).submit
       - (*Node).awaitProposal
       - (*Node).handleProposals
+      - claimed
       - (*Node).proposeBatch
       - (*Node).refuseOverload
       - (*Node).proposeAlone
       - (*Node).appended
+      - (*Node).answerApplied
+      - (*Node).displace
       - (*Node).forward
+      - (*Node).nextID
       - (*Node).forwardAnswered
       - ProposeAs
       - (*Node).Barrier
       - (*Node).WaitApplied
+      - (*Node).appliedAs
+      - (*Node).appliedTermAt
       - (*Node).admin
       - (*Node).AddLearner
       - (*Node).Promote
@@ -1299,11 +1310,23 @@ functions:
     params: log coreconsensus.LogStore, stamp *coreconsensus.StampValue, digest [32]byte
     results: bool, error
   - doc: |-
+      foundingTiming is the generation 1 contract the founding entry carries:
+      cfg's InitialTiming completed field by field and refused as NewNode
+      completes and refuses it, so the contract that rules once entry 1 commits
+      is exactly the one NewNode validated. Written raw, a timing with only its
+      drift set became TimingDefaults with no drift, one without its maximum
+      refused every promotion, one without its minimum was refused by the
+      engine and left each node on its own InitialTiming (#523).
+    name: foundingTiming
+    params: cfg *Config
+    results: coreconsensus.TimingContractSpec, error
+  - doc: |-
       writeFoundingEntry writes the founding configuration as entry 1, at term
-      1 and committed, then syncs it; a log that already holds an entry is left
-      alone, which is what makes a rerun idempotent.
+      1 and committed, with the generation 1 contract timing, then syncs it; a
+      log that already holds an entry is left alone, which is what makes a
+      rerun idempotent.
     name: writeFoundingEntry
-    params: cfg *Config, members []coreconsensus.MemberValue
+    params: cfg *Config, members []coreconsensus.MemberValue, timing coreconsensus.TimingContractSpec
     results: error
   - doc: |-
       sharedKey reports whether two members are pinned to one key. The
@@ -2101,6 +2124,14 @@ functions:
     name: silenceRecord
     params: term, index uint64
     results: "[]byte"
+  - doc: |-
+      claimed keeps, in place, the proposals the loop takes from their callers:
+      each moves from unsent to possibly accepted, before raft or the leader
+      sees it, unless its caller abandoned it first, and an abandoned proposal
+      is dropped unanswered, its caller already told ctx.Err() (#519).
+    name: claimed
+    params: ps []*proposal
+    results: "[]*proposal"
   - name: ProposeAs
     params: ctx context.Context, r coreconsensus.Replicated, data []byte
     results: coreconsensus.TokenValue, R, error
@@ -4112,8 +4143,6 @@ types:
         type: coreconsensus.NodeID
       - name: lastRole
         type: coreconsensus.Role
-      - name: readSeq
-        type: uint64
       - name: canVote
         type: bool
       - name: noTable
@@ -4918,12 +4947,42 @@ types:
         params: p *proposal, pos coreconsensus.PositionValue, local bool
         recv: n *Node
       - doc: |-
+          answerApplied answers a proposal whose position is already applied,
+          from the result kept there when ok: it is never registered, so no applied1
+          releases its pending bytes (#419).
+        name: answerApplied
+        params: p *proposal, pos coreconsensus.PositionValue, r applyResult, ok bool
+        recv: n *Node
+      - doc: |-
+          displace answers a proposal that lost its index's waiter to another one
+          appended at the same index under a later term: after a leader change, the
+          new leader hands out first the indexes the old one's unreplicated tail
+          held. Overwritten, the earlier waiter was answered by nothing — applied1,
+          sweepWaiters, answerCovered and failAllOnStop all walk the map — and its
+          caller waited for its own deadline, forever with none, its pending bytes
+          counted for good (#517). Either entry may still commit, so the answer is
+          OUTCOME_UNKNOWN, never ENTRY_SUPERSEDED (D6).
+        name: displace
+        params: p *proposal
+        recv: n *Node
+      - doc: |-
           forward sends a proposal to the leader under a submission id that never
-          repeats across restarts: a random epoch in the high 32 bits, a counter in
-          the low 32, and a fresh epoch before the counter runs out (R7-23, R9-17).
+          repeats across restarts (nextID).
         name: forward
         params: p *proposal, st raft.StatusValue
         recv: n *Node
+      - doc: |-
+          nextID is the next submission id of a forward or a read: a random epoch
+          drawn at start in the high 32 bits, a counter in the low 32, and a fresh
+          epoch before the counter runs out, so an id never repeats across restarts
+          (R7-23, R9-17). A leader may still hold a read of this node's previous
+          incarnation, unconfirmed, and answer it later: under a counter that
+          restarted at 1, the new incarnation's read of the same number took that
+          answer, at the old commit index, below a write acknowledged before the
+          call (#510).
+        name: nextID
+        recv: n *Node
+        results: uint64
       - doc: forwardAnswered resolves a forwarded proposal from the leader's answer.
         name: forwardAnswered
         params: m coreconsensus.MessageValue
@@ -4936,6 +4995,29 @@ types:
         params: ctx context.Context, t coreconsensus.TokenValue
         recv: n *Node
         results: error
+      - doc: |-
+          appliedAs checks that the entry applied at t's index is t's: the index
+          alone named the predecessor's identity, and since Recover adopts the
+          verified suffix past the commit the survivor persisted (D17), an entry it
+          kept there may be of another term than the write the old cluster
+          committed and acknowledged at that index. That write is lost, and
+          WaitApplied reported it applied (#509). Where the term cannot be read any
+          more, a token of the current history is trusted by Log Matching, one of
+          the predecessor's is not: the kept range may hold such a suffix.
+        name: appliedAs
+        params: t coreconsensus.TokenValue
+        recv: n *Node
+        results: error
+      - doc: |-
+          appliedTermAt is the term of the entry applied at index, which the caller
+          waited for: from the step function, whose committed log is the truth, then
+          from the store while index is one this node applied from its log, which
+          the store holds as committed. known is false when neither holds it any
+          more; ok is false when the node stopped.
+        name: appliedTermAt
+        params: index uint64
+        recv: n *Node
+        results: term uint64, known, ok bool
       - doc: |-
           admin validates the operator, then submits an administrative entry and
           logs it at Warn with its outcome whatever that outcome is, so every

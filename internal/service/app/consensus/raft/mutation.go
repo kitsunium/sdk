@@ -3,7 +3,7 @@ package raft
 // mutation reintroduces one cited bug behind a test-only switch (D15). The
 // field that holds it is unexported and only the package's own tests set it,
 // so no build of the engine can turn one on.
-type mutation uint32
+type mutation uint64
 
 const (
 	// mutAckBeforeSync acknowledges an append before its sync (raft-sql-poc's
@@ -70,6 +70,38 @@ const (
 	// mutNoSpaceAdmits admits a command while the no-space alarm is
 	// committed (#515).
 	mutNoSpaceAdmits
+	// mutRefusedLeadHeard keeps answering, and taking as contact, the
+	// appends and heartbeats of a leader the node refused for the term
+	// after MaxChainRefusals chain refusals (#508).
+	mutRefusedLeadHeard
+	// mutDenyPinUnchecked admits a DenyPin of this leader, or one that
+	// leaves no answering majority without its target (#530).
+	mutDenyPinUnchecked
+	// mutDenyPinAtAppend withdraws a denied pin from the admission set at
+	// append instead of at commit (#530).
+	mutDenyPinAtAppend
+	// mutReportUnsyncedContract reports in a heartbeat answer the contract
+	// generation applied in memory, durable or not (#521).
+	mutReportUnsyncedContract
+	// mutCampaignInVoteWindow lets the election timer campaign inside the
+	// node's own vote-refusal window (#521).
+	mutCampaignInVoteWindow
+	// mutUnknownGenShortestKnown sizes an acknowledgement of a contract
+	// generation the leader does not know as the shortest one it knows
+	// (#522).
+	mutUnknownGenShortestKnown
+	// mutOwnTimingKept keeps the node's own InitialTiming as a known
+	// contract after a snapshot named the cluster's (#522).
+	mutOwnTimingKept
+	// mutLeaseWithoutDrift grants a lease under a contract whose drift
+	// budget is not in (0, 1) (#523).
+	mutLeaseWithoutDrift
+	// mutFoundingAsWritten runs the founding contract as written, its
+	// maximum and drift not completed (#523).
+	mutFoundingAsWritten
+	// mutReadRespAnyPeer takes a read's answer from any peer of the term,
+	// not only from the leader this node asked (#510).
+	mutReadRespAnyPeer
 )
 
 // mutated reports whether a test switched mutation m on; it is false in every
