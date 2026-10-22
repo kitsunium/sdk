@@ -329,12 +329,32 @@ func (l *fileLog) checkMarkers() error {
 	if l.refuse != nil {
 		return l.refuse
 	}
+	return l.markerApplies(false)
+}
+
+// storageFailedThisBoot is the STOP_MARKER_PRESENT of a STORAGE_FAILED
+// marker of the current boot, in either place, nil when none applies. In
+// that boot the page cache may still show bytes whose fdatasync failed:
+// nothing writes to the log, the snapshots or the stamp until a reboot, or
+// a recovery, a Recover or an Init writes durable data after pages the disk
+// does not hold, and the reboot that clears the marker quarantines the log
+// (ADR 0152 "fail closed before any mutation", #563).
+func (l *fileLog) storageFailedThisBoot() error {
+	return l.markerApplies(true)
+}
+
+// markerApplies is checkMarkers' reading of the markers, limited to the
+// STORAGE_FAILED ones when storageOnly is set.
+func (l *fileLog) markerApplies(storageOnly bool) error {
 	ents, err := os.ReadDir(l.dir)
 	if err != nil {
 		return storageFailed("markers", err)
 	}
 	boot := []byte("boot=" + bootID() + "\n")
 	for _, p := range l.markerPaths(ents) {
+		if storageOnly && !strings.HasSuffix(p, "STORAGE_FAILED") {
+			continue
+		}
 		b, err := os.ReadFile(p)
 		if errors.Is(err, os.ErrNotExist) {
 			// No marker there: the boot-scoped one is absent on every start

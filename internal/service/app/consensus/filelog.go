@@ -319,6 +319,15 @@ func openFileLog(dd *dataDir, segBytes int64) (*fileLog, error) {
 		l.refuse = origin(coreconsensus.LogQuarantined, errs.String("marker", strings.TrimSpace(string(q))))
 		return l, nil
 	}
+	if err := l.storageFailedThisBoot(); err != nil {
+		// Checked before recovery, which syncs, zeroes a torn tail and
+		// publishes the next segment: in the boot of a STORAGE_FAILED stop
+		// it wrote past pages the disk did not hold, and the reboot then
+		// found a hole in a sealed segment (#563). The log refuses every
+		// call; Inspect reads what it can without it.
+		l.refuse = err
+		return l, nil
+	}
 	if err := l.recover(); err != nil {
 		if errs.HasCode(err, coreconsensus.CodeLogQuarantined) {
 			l.refuse = err
@@ -1534,6 +1543,11 @@ func (l *fileLog) WriteStamp(s coreconsensus.StampValue) error {
 	defer l.wmu.Unlock()
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if errs.HasCode(l.refuse, coreconsensus.CodeStopMarkerPresent) {
+		// A STORAGE_FAILED stop of this boot: Init, Redraw and Bootstrap
+		// write nothing until a reboot (#563).
+		return l.refuse
+	}
 	if err := writeStamp(l.dir, s); err != nil {
 		return storageFailed("stamp", err)
 	}
