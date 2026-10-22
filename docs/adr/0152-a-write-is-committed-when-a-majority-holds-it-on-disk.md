@@ -2362,7 +2362,7 @@ transport. The cross-field rules are checked after defaults are applied
 | `MaxBatchBytes` | engine | 1 MiB | clamp; refuse if it plus 1 KiB of framing is above the shipped transport's `MaxFrameBytes` (review M2) |
 | `MaxInflight`, `MaxInflightBytes` | engine | 64, 8 MiB | clamp; refuse if `MaxInflightBytes` < `MaxBatchBytes` |
 | `MaxEntryBytes` | engine | 1 MiB | clamp; refuse if > `MaxBatchBytes` |
-| `MaxPendingBytes` | engine | 64 MiB | clamp |
+| `MaxPendingBytes` | engine | 64 MiB | clamp; refuse if < `MaxEntryBytes` (#557) |
 | `MaxApplyLagBytes` | engine | 256 MiB | clamp |
 | `RecentEntriesBytes` | engine | 32 MiB | clamp (R2-40) |
 | `SnapshotEvery`, `SnapshotEveryBytes` | engine | 16 384, 64 MiB | clamp |

@@ -257,6 +257,11 @@ func refuseBounds(c *Config) error {
 		return misconfigured("MaxInflightBytes", "below MaxBatchBytes")
 	case c.MaxEntryBytes > c.MaxBatchBytes:
 		return misconfigured("MaxEntryBytes", "above MaxBatchBytes")
+	case int64(c.MaxEntryBytes) > c.MaxPendingBytes:
+		// An entry between the two passes Propose's size gate, then the
+		// pending budget refuses it OVERLOADED on an idle cluster, forever
+		// (#557).
+		return misconfigured("MaxPendingBytes", "below MaxEntryBytes")
 	case framesBelow(c.Transport, c.MaxBatchBytes+batchFrameOverhead):
 		// A batch the transport cannot carry stalls every follower it is
 		// sent to (review M2).
