@@ -47,6 +47,7 @@ go_test(
         "matchbound_internal_test.go",
         "membershippub_internal_test.go",
         "notable_heartbeat_internal_test.go",
+        "protocol2_internal_test.go",
         "readresp_internal_test.go",
         "sim_internal_test.go",
         "sim_scenarios_internal_test.go",

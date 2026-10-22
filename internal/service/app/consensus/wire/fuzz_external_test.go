@@ -30,8 +30,7 @@ func FuzzParseMessage(f *testing.F) {
 
 // FuzzParseSnapshotMeta: the snapshot metadata decoder never panics and
 // round-trips what it accepts, in the version it was written in: one value
-// has one encoding per version, and version 2, read and not yet written,
-// is the encoding the release that writes it produces (#546).
+// has one encoding per version (#546).
 func FuzzParseSnapshotMeta(f *testing.F) {
 	m := &coreconsensus.SnapshotMetaValue{ID: "1-2", Version: 1, Position: coreconsensus.PositionValue{Term: 2, Index: 1}, Codec: "flate"}
 	f.Add(wire.AppendSnapshotMeta(nil, m))
@@ -41,7 +40,7 @@ func FuzzParseSnapshotMeta(f *testing.F) {
 		if err := wire.ParseSnapshotMeta(b, &out); err != nil {
 			return
 		}
-		again := wire.AppendSnapshotMeta(nil, &out)
+		again := wire.AppendSnapshotMetaV1ForTest(nil, &out)
 		if b[0] == 2 {
 			again = wire.AppendSnapshotMetaV2ForTest(nil, &out)
 		}

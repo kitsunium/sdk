@@ -116,6 +116,7 @@ go_test(
         "observed_internal_test.go",
         "offline_internal_test.go",
         "peerseries_internal_test.go",
+        "protocol2_internal_test.go",
         "readctx_internal_test.go",
         "recover_install_internal_test.go",
         "removeleader_internal_test.go",

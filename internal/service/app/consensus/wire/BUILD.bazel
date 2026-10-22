@@ -35,6 +35,7 @@ go_test(
         "export_test.go",
         "fuzz_external_test.go",
         "gen_api_test.go",
+        "meta_external_test.go",
         "metav2_external_test.go",
     ],
     data = glob(["testdata/**"]),
