@@ -6771,9 +6771,13 @@ sequences:
       - return: nil
   - of: lineageAccepts
     steps:
+      - opt:
+          do:
+            - return: index >= max(l.KeptIndex, cur.KeptIndex)
+          when: l.Same(cur)
       - return: |-
-          l.Same(cur) || (cur.Predecessor != (coreconsensus.ClusterID{}) && l.Cluster == cur.Predecessor &&
-          		l.Epoch == cur.PredecessorEpoch && index <= cur.KeptIndex)
+          cur.Predecessor != (coreconsensus.ClusterID{}) && l.Cluster == cur.Predecessor &&
+          		l.Epoch == cur.PredecessorEpoch && index <= cur.KeptIndex
   - of: silenceOf
     participants:
       - id: caller

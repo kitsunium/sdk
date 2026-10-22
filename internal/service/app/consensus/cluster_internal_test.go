@@ -1097,11 +1097,26 @@ func TestAnOfferOfAnotherLineageIsRefused(t *testing.T) {
 			},
 		})
 	}
-	if acc := offerOf(coreconsensus.LogIdentityValue{Cluster: coreconsensus.ClusterID{9}, Epoch: 1}); acc.Refused != coreconsensus.CodeLineageMismatch {
-		t.Fatalf("an offer of another cluster: %+v, want LINEAGE_MISMATCH", acc)
+	own := f.node.lineage()
+	belowKept := own
+	belowKept.Predecessor, belowKept.PredecessorEpoch, belowKept.KeptIndex = coreconsensus.ClusterID{9}, 1, st.Commit+200
+	type tc struct {
+		name    string
+		log     coreconsensus.LogIdentityValue
+		refused bool
 	}
-	if acc := offerOf(f.node.lineage()); acc.Refused == coreconsensus.CodeLineageMismatch {
-		t.Fatalf("an offer of the node's own lineage was refused: %+v", acc)
+	runCase := func(t *testing.T, c tc) {
+		acc := offerOf(c.log)
+		if got := acc.Refused == coreconsensus.CodeLineageMismatch; got != c.refused {
+			t.Fatalf("offer of %+v: %+v, want LINEAGE_MISMATCH %v", c.log, acc, c.refused)
+		}
+	}
+	for _, c := range []tc{
+		{name: "another cluster", log: coreconsensus.LogIdentityValue{Cluster: coreconsensus.ClusterID{9}, Epoch: 1}, refused: true},
+		{name: "own lineage below the kept index it records", log: belowKept, refused: true},
+		{name: "own lineage", log: own},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 

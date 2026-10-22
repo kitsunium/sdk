@@ -388,11 +388,19 @@ func (n *Node) adoptLineage(l coreconsensus.LogIdentityValue) error {
 }
 
 // lineageAccepts reports whether a snapshot of identity l, at index, belongs
-// to this node's history: of its own lineage, or of the predecessor's at or
-// below the index Recover kept, as durableIndex counts a machine's position.
+// to this node's history: of its own lineage at or past the index Recover
+// kept, which it records, or of the predecessor's at or below that index,
+// as durableIndex counts a machine's position. One of its own lineage below
+// the kept index is refused: the kept entries after it would reach this
+// node by append, which a leader never sends, and a node that adopted the
+// lineage from it would hold no entry at or below the index to append to
+// another once it leads, which raft's guard on the kept index relies on.
 func lineageAccepts(cur, l coreconsensus.LogIdentityValue, index uint64) bool {
-	return l.Same(cur) || (cur.Predecessor != (coreconsensus.ClusterID{}) && l.Cluster == cur.Predecessor &&
-		l.Epoch == cur.PredecessorEpoch && index <= cur.KeptIndex)
+	if l.Same(cur) {
+		return index >= max(l.KeptIndex, cur.KeptIndex)
+	}
+	return cur.Predecessor != (coreconsensus.ClusterID{}) && l.Cluster == cur.Predecessor &&
+		l.Epoch == cur.PredecessorEpoch && index <= cur.KeptIndex
 }
 
 // silenceOf reads the silence condition a recovered log persists, the term

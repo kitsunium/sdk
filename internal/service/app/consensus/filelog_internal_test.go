@@ -568,34 +568,40 @@ func TestACompactionPastTheEndRecordsTheTermItIsGiven(t *testing.T) {
 // the log starting below the appended entries, and the restart quarantined
 // a sound disk, "index out of sequence".
 func TestAnAppendAfterACompactionPastTheEndSurvivesARestart(t *testing.T) {
-	for _, truncated := range []bool{false, true} {
-		t.Run(fmt.Sprintf("truncated=%v", truncated), func(t *testing.T) {
-			dir, d := base(t)
-			l := d.d.log
-			if truncated {
-				// The install path: the suffix goes, then the compaction.
-				if err := l.TruncateSuffix(1); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if err := l.compactPrefixAt(100, 5); err != nil {
+	type tc struct {
+		name string
+		// truncated takes the install path: the suffix goes, then the
+		// compaction.
+		truncated bool
+	}
+	runCase := func(t *testing.T, c tc) {
+		dir, d := base(t)
+		l := d.d.log
+		if c.truncated {
+			if err := l.TruncateSuffix(1); err != nil {
 				t.Fatal(err)
 			}
-			mustSync(t, l)
-			if err := l.Append(ents(101, 103, 5), nil); err != nil {
-				t.Fatal(err)
-			}
-			mustSync(t, l)
-			nd := reopenExpect(t, dir, d, false)
-			defer nd.Close()
-			if f, la := nd.Log().Bounds(); f != 101 || la != 103 {
-				t.Fatalf("bounds %d %d, want 101 103", f, la)
-			}
-			checkEntries(t, nd.Log(), 101, 103, 5)
-			if tm, err := nd.Log().Term(100); err != nil || tm != 5 {
-				t.Fatalf("Term(100) = %d %v, want 5", tm, err)
-			}
-		})
+		}
+		if err := l.compactPrefixAt(100, 5); err != nil {
+			t.Fatal(err)
+		}
+		mustSync(t, l)
+		if err := l.Append(ents(101, 103, 5), nil); err != nil {
+			t.Fatal(err)
+		}
+		mustSync(t, l)
+		nd := reopenExpect(t, dir, d, false)
+		defer nd.Close()
+		if f, la := nd.Log().Bounds(); f != 101 || la != 103 {
+			t.Fatalf("bounds %d %d, want 101 103", f, la)
+		}
+		checkEntries(t, nd.Log(), 101, 103, 5)
+		if tm, err := nd.Log().Term(100); err != nil || tm != 5 {
+			t.Fatalf("Term(100) = %d %v, want 5", tm, err)
+		}
+	}
+	for _, c := range []tc{{name: "compacted"}, {name: "truncated then compacted", truncated: true}} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 

@@ -636,16 +636,33 @@ func (l *failingListener) Accept() (net.Conn, error) {
 // ENFILE — is waited out, never the end of the accept loop. It ended it,
 // and the node, its port still open, never received a frame again.
 func TestTCPAcceptSurvivesATransientFailure(t *testing.T) {
-	listenTCP = func(network, addr string) (net.Listener, error) {
-		ln, err := net.Listen(network, addr)
-		if err != nil {
-			return nil, err
-		}
-		fl := &failingListener{Listener: ln}
-		fl.fails.Store(3)
-		return fl, nil
+	type tc struct {
+		name string
+		// fails is how many Accepts in a row fail before one succeeds.
+		fails int32
 	}
-	t.Cleanup(func() { listenTCP = net.Listen })
+	runCase := func(t *testing.T, c tc) {
+		listenTCP = func(network, addr string) (net.Listener, error) {
+			ln, err := net.Listen(network, addr)
+			if err != nil {
+				return nil, err
+			}
+			fl := &failingListener{Listener: ln}
+			fl.fails.Store(c.fails)
+			return fl, nil
+		}
+		t.Cleanup(func() { listenTCP = net.Listen })
+		acceptAfterFailures(t, c.fails)
+	}
+	for _, c := range []tc{{name: "one failure", fails: 1}, {name: "a run of failures", fails: 8}} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// acceptAfterFailures starts two transports, the receiver's listener
+// failing its first fails Accepts, and requires a frame to reach it.
+func acceptAfterFailures(t *testing.T, fails int32) {
+	t.Helper()
 	ca := newTestCA(t)
 	cid := coreconsensus.ClusterID{0xc0, 0xff, 0xee}
 	a, b := &tcpNode{id: 1, slot: "a"}, &tcpNode{id: 2, slot: "b"}
@@ -671,7 +688,7 @@ func TestTCPAcceptSurvivesATransientFailure(t *testing.T) {
 			return
 		case <-time.After(200 * time.Millisecond):
 		case <-deadline:
-			t.Fatal("after three failed Accepts the transport never received a frame again")
+			t.Fatalf("after %d failed Accepts the transport never received a frame again", fails)
 		}
 	}
 }
