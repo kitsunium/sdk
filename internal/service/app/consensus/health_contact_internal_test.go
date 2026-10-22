@@ -92,3 +92,69 @@ func TestAnIsolatedLearnerIsNotReady(t *testing.T) {
 		t.Fatalf("the reconnected learner never became ready again: %+v", h.Status)
 	}
 }
+
+// #545: once caught up, a node stays ready through an apply lag of a few
+// entries that keeps moving, the window between a commit and the next
+// publication of what was applied; it is not ready before it first caught
+// up, past the lag bound, or once applying stalls.
+func TestApplyReadiness(t *testing.T) {
+	window := 100 * time.Millisecond
+	cases := []struct {
+		name            string
+		caughtUp        bool
+		commit, applied uint64
+		moved           time.Duration
+		want            bool
+	}{
+		{"caught up", false, 10, 10, time.Hour, true},
+		{"one entry behind, moving", true, 11, 10, time.Millisecond, true},
+		{"at the bound, moving", true, 10 + maxReadyLag, 10, time.Millisecond, true},
+		{"past the bound", true, 11 + maxReadyLag, 10, time.Millisecond, false},
+		{"one entry behind, stalled", true, 11, 10, 2 * window, false},
+		{"never caught up", false, 11, 10, time.Millisecond, false},
+	}
+	for _, c := range cases {
+		if got := applyReady(c.caughtUp, c.commit, c.applied, c.moved, window); got != c.want {
+			t.Errorf("%s: applyReady = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// #545, end to end: under a steady write load, a caught-up follower is
+// never reported not ready for a lag of a few entries. Its published
+// status paired each new commit with the applied index of the turn
+// before, and a strict comparison flapped its readiness.
+func TestAFollowerUnderLoadStaysReady(t *testing.T) {
+	c := newCluster(t, 3, 0)
+	l := c.settledLeader(5 * time.Second)
+	f := c.otherThan(l)
+	if h, ok := waitHealth(f, true, true, 5*time.Second); !ok {
+		t.Fatalf("setup: the follower never became ready: %+v", h.Status)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := range 400 {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_, _, _ = l.node.Propose(ctx, []byte(fmt.Sprintf("w%d=v", i)))
+			cancel()
+		}
+	}()
+	flaps, samples := 0, 0
+	for {
+		select {
+		case <-done:
+			if flaps > 0 {
+				t.Fatalf("a caught-up follower under load answered not ready %d times in %d samples with a lag within %d entries", flaps, samples, maxReadyLag)
+			}
+			return
+		default:
+		}
+		h := f.node.Health()
+		samples++
+		if !h.Flags.Has(HealthReady) && h.Flags.Has(HealthHasLeader) && h.ApplyLagEntries > 0 && h.ApplyLagEntries <= maxReadyLag {
+			flaps++
+		}
+		time.Sleep(time.Millisecond)
+	}
+}

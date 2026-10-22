@@ -125,6 +125,7 @@ type Node struct {
 	noTable       bool
 	snapState     snapState
 	contact       leaderContact
+	progress      applyProgress
 
 	watchMu  sync.Mutex
 	watchers map[chan coreconsensus.StatusValue]struct{}
@@ -1311,6 +1312,7 @@ func (n *Node) publish() {
 		Log: n.lineage(), Timing: st.Timing, NoSpace: st.NoSpace,
 		Versions: coreconsensus.VersionsValue{ProtocolMin: 1, ProtocolMax: raft.ProtocolMax, Cluster: st.Cluster, ClusterGeneration: st.ClusterG},
 	}
+	n.progress.noteApplied(s.Commit, s.Applied, n.clk.Now())
 	old := n.status.Load()
 	if old != nil && *old == *s {
 		return

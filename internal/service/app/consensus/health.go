@@ -134,11 +134,13 @@ func (n *Node) Health() HealthValue {
 		h.ApplyLagEntries = st.Commit - st.Applied
 	}
 	stopped := h.Flags.Has(HealthStopped)
-	confirmed := false
+	confirmed, applyOK := false, false
 	if !stopped {
 		n.exec(func() {
 			n.loopHealth(&h)
-			confirmed = n.leaderConfirmed(n.clk.Now())
+			now := n.clk.Now()
+			confirmed = n.leaderConfirmed(now)
+			applyOK = n.applyReady(&st, now)
 		})
 	}
 	n.snapshotHealth(&h)
@@ -146,7 +148,7 @@ func (n *Node) Health() HealthValue {
 	// answered one of its reads lately: a leader that does not hear this
 	// node is no leader of its (#540, #541).
 	h.Flags = h.Flags.set(HealthHasLeader, st.Leader != 0 && !stopped && confirmed)
-	h.Flags = h.Flags.set(HealthReady, isReady(&h, &st))
+	h.Flags = h.Flags.set(HealthReady, isReady(&h, &st, applyOK))
 	return h
 }
 
@@ -166,10 +168,61 @@ func (n *Node) snapshotHealth(h *HealthValue) {
 }
 
 // isReady is the verdict's Ready: running, a leader known, everything known
-// committed applied, and not refusing the current leader's chain (D4).
-func isReady(h *HealthValue, st *coreconsensus.StatusValue) bool {
-	return !h.Flags.Has(HealthStopped) && h.Flags.Has(HealthHasLeader) && st.Applied >= st.Commit &&
+// committed applied — or, once caught up, a lag that keeps moving within
+// its bound (applyOK) — and not refusing the current leader's chain (D4).
+func isReady(h *HealthValue, st *coreconsensus.StatusValue, applyOK bool) bool {
+	return !h.Flags.Has(HealthStopped) && h.Flags.Has(HealthHasLeader) && (st.Applied >= st.Commit || applyOK) &&
 		(h.ChainRefusals == 0 || h.ChainRefusalLeader != st.Leader)
+}
+
+// maxReadyLag is the apply lag, in entries, a caught-up node stays ready
+// through while what it applies keeps moving.
+const maxReadyLag = 64
+
+// applyProgress is what readiness knows of the apply goroutine's progress,
+// loop-owned and updated at every publication: whether the node caught up
+// once, the applied index last published and when applied last moved or
+// reached the commit.
+type applyProgress struct {
+	caughtUp bool
+	applied  uint64
+	movedAt  time.Time
+}
+
+// noteApplied records a publication's commit and applied index.
+func (p *applyProgress) noteApplied(commit, applied uint64, now time.Time) {
+	if applied != p.applied || applied >= commit {
+		p.applied, p.movedAt = applied, now
+	}
+	if applied >= commit {
+		p.caughtUp = true
+	}
+}
+
+// applyReady is the apply half of the verdict for st: caught up, or
+// caught up once and lagging by at most maxReadyLag entries with applied
+// moving within the minimum election timeout. Under a steady write load a
+// published status pairs a new commit with the applied index of the turn
+// before, and a strict comparison reported a healthy node not ready at
+// random (#545); the stall bound keeps a stuck apply from looking ready. A
+// node that fails it is caught up no longer, until it is again. It runs on
+// the loop.
+func (n *Node) applyReady(st *coreconsensus.StatusValue, now time.Time) bool {
+	p := &n.progress
+	ok := applyReady(p.caughtUp, st.Commit, st.Applied, now.Sub(p.movedAt), n.r.Status().Timing.ElectionTimeoutMin)
+	if !ok && st.Applied < st.Commit {
+		p.caughtUp = false
+	}
+	return ok
+}
+
+// applyReady is applyReady's rule over plain values: moved is how long ago
+// applied last moved, window the stall bound.
+func applyReady(caughtUp bool, commit, applied uint64, moved, window time.Duration) bool {
+	if applied >= commit {
+		return true
+	}
+	return caughtUp && commit-applied <= maxReadyLag && moved <= window
 }
 
 // loopHealth fills the part of a verdict only the event loop can read: the

@@ -2071,7 +2071,13 @@ the leader reaches the node, not that it hears it, and a follower whose
 answers were lost, or a learner cut off from the voters, kept its leader
 and reported ready on a frozen commit
 ([#541](https://github.com/kitsunium/sdk/issues/541),
-[#540](https://github.com/kitsunium/sdk/issues/540)) — quorum reachable, apply lag over its bound, every current alarm
+[#540](https://github.com/kitsunium/sdk/issues/540)) — quorum reachable,
+applied up to the commit (once caught up, a lag of at most 64 entries
+counts as caught up while the applied index moved within
+`ElectionTimeoutMin`: a published status pairs a new commit with the
+applied index of the turn before, and the strict comparison flapped a
+healthy node under load,
+[#545](https://github.com/kitsunium/sdk/issues/545)), apply lag over its bound, every current alarm
 with its `AlarmID` and the nodes it names (R5-09), the current timing
 contract and cluster version, so the product can fill an operation's
 preconditions, certificate expiry under its threshold, the smallest peer
