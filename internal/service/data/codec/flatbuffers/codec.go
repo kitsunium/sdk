@@ -33,8 +33,10 @@ const maxFlatBuffersBytes int = 64 << 20
 // magic-number constant.
 const PromotionMagic uint32 = 0x80000001
 
-// Package-level state: the codec singleton plus the hoisted MIME /
-// extension tables.
+// The registered singleton. Its aliases are literals in MIMETypes and
+// Extensions, not package tables: Register reads them through the Codec
+// interface, which orders no table before this initialiser (see
+// core/data/codec.Register).
 var (
 	//: register the singleton and expose it as a typed package var.
 	Codec codec.Codec = codec.Register(&flatbuffersCodec{})

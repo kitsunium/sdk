@@ -47,7 +47,10 @@ type BoundaryProvider interface {
 	Boundary() string
 }
 
-// Package-level state: the codec singleton plus the hoisted MIME table.
+// The registered singleton. Its aliases are literals in MIMETypes and
+// Extensions, not package tables: Register reads them through the Codec
+// interface, which orders no table before this initialiser (see
+// core/data/codec.Register).
 var (
 	//: register the singleton and expose it as a typed package var. The
 	//: registered instance carries the package defaults; a caller needing

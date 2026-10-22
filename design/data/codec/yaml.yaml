@@ -277,8 +277,9 @@ packages:
     path: github.com/kitsunium/sdk/internal/service/data/codec/yaml
     variables:
       - blockDoc: |-
-          Package-level state: the codec singleton plus the hoisted MIME and
-          extension tables.
+          Package-level state: the codec singleton, built with its hoisted MIME
+          table — the initialiser names the table, which is what orders it before
+          Register reads it (see core/data/codec.Register).
         doc: Codec is the registered YAML singleton.
         name: Codec
         type: codec.Codec

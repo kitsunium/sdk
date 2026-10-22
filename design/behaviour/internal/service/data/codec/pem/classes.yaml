@@ -73,6 +73,7 @@ imports:
   corepem: github.com/kitsunium/sdk/internal/core/data/codec/pem
   errs: github.com/kitsunium/sdk/internal/kernel/errs
   scratch: github.com/kitsunium/sdk/internal/core/data/codec/scratch
+  slices: slices
   stdpem: encoding/pem
 package:
   docFile: doc.go
@@ -81,6 +82,12 @@ package:
   purpose: Package pem wraps encoding/pem as a codec.Codec implementation.
 types:
   - doc: pemCodec is the concrete Codec implementation for PEM.
+    fields:
+      - doc: |-
+          extensions is the extension table this instance reports — the package
+          table for the registered singleton, which is built with it.
+        name: extensions
+        type: "[]string"
     kind: struct
     methods:
       - doc: Name implements codec.Codec.
@@ -93,7 +100,7 @@ types:
         results: "[]string"
       - doc: Extensions lists every file extension.
         name: Extensions
-        recv: "*pemCodec"
+        recv: c *pemCodec
         results: "[]string"
       - doc: Marshal encodes a *pem.Block into PEM bytes.
         name: Marshal
@@ -124,14 +131,23 @@ types:
     underlying: stdpem.Block
 vars:
   - doc: |-
-      Package-level state: the codec singleton, MIME/extension tables, the
-      cached promotion fast-path markers, and the Marshal-buffer pool.
+      Package-level state: the codec singleton, built with its hoisted extension
+      table — the initialiser names the table, which is what orders it before
+      Register reads it (see core/data/codec.Register) —, the cached promotion
+      fast-path markers, and the Marshal-buffer pool.
     grouped: true
     items:
       - doc: ": register the singleton and expose it as a typed package var."
         name: Codec
         type: codec.Codec
-        value: codec.Register(&pemCodec{})
+        value: "codec.Register(&pemCodec{extensions: extensions})"
+      - doc: |-
+          : .pem is the canonical extension; .crt and .key are historical aliases.
+          : Hoisted (KTN-VAR-CONSTSLICE) and handed to the singleton by Codec's own
+          : initialiser: that reference is what orders the table before Register
+          : reads it, whatever the declaration order (see core/data/codec.Register).
+        name: extensions
+        value: "[]string{\".pem\", \".crt\", \".key\"}"
       - doc: |-
           : pemJSONBegin is the BEGIN marker for a "JSON"-typed PEM block.
           : Cached so the promotion fast-path never re-builds it.

@@ -4,6 +4,7 @@ package baseenc
 // Extensions. Hoisted into a package-level array so each method call is a
 // pointer dereference rather than a string allocation.
 type variantSpec struct {
+	variant    variant
 	name       string
 	mimeTypes  []string
 	extensions []string
@@ -16,6 +17,7 @@ type variantSpec struct {
 var variantSpecs = [...]variantSpec{
 	//: variantBase64 — standard base64.
 	{
+		variant:    variantBase64,
 		name:       "base64",
 		mimeTypes:  []string{"application/base64", "text/base64"},
 		extensions: []string{".b64", ".base64"},
@@ -27,48 +29,56 @@ var variantSpecs = [...]variantSpec{
 	//: collided with base64 once registration normalises params symmetrically
 	//: (issue #36). base64url stays routable by name and the .b64url extension.
 	{
+		variant:    variantBase64URL,
 		name:       "base64url",
 		mimeTypes:  []string{"application/base64url"},
 		extensions: []string{".b64url"},
 	},
 	//: variantBase32 — standard base32.
 	{
+		variant:    variantBase32,
 		name:       "base32",
 		mimeTypes:  []string{"application/base32"},
 		extensions: []string{".b32"},
 	},
 	//: variantBase16 — uppercase hex.
 	{
+		variant:    variantBase16,
 		name:       "base16",
 		mimeTypes:  []string{"application/base16"},
 		extensions: []string{".b16"},
 	},
 	//: variantHex — lowercase hex.
 	{
+		variant:    variantHex,
 		name:       "hex",
 		mimeTypes:  []string{"application/hex"},
 		extensions: []string{".hex"},
 	},
 	//: variantASCII85 — Adobe Ascii85.
 	{
+		variant:    variantASCII85,
 		name:       "ascii85",
 		mimeTypes:  []string{"application/ascii85"},
 		extensions: []string{".a85"},
 	},
 	//: variantBase45 — RFC 9285 Base45 (QR-code alphanumeric safe).
 	{
+		variant:    variantBase45,
 		name:       "base45",
 		mimeTypes:  []string{"application/base45"},
 		extensions: []string{".b45"},
 	},
 	//: variantBase58 — Bitcoin Base58 (base-conversion, short inputs).
 	{
+		variant:    variantBase58,
 		name:       "base58",
 		mimeTypes:  []string{"application/base58"},
 		extensions: []string{".b58"},
 	},
 	//: variantBase62 — Base62 (base-conversion, short inputs).
 	{
+		variant:    variantBase62,
 		name:       "base62",
 		mimeTypes:  []string{"application/base62"},
 		extensions: []string{".b62"},
@@ -86,15 +96,13 @@ var variantSpecs = [...]variantSpec{
 // variantSpecs, and only the compiler's static initialisation of constant
 // composite literals made that work. A build that turns those literals into
 // code (garble -literals) left every Name and alias empty at Register time.
-// Referencing the table from a function the initialiser calls makes each
-// singleton depend on it, so variantSpecs is initialised first whatever the
-// file order or the build.
+// Taking the variant from its own row makes each singleton's initialiser
+// depend on the table, so variantSpecs is initialised first whatever the file
+// order or the build.
 func newVariant(v variant) *baseencCodec {
-	//: index the row: the dependency on variantSpecs, and an out-of-range
-	//: variant fails here, at import, instead of in the first spec() call.
-	_ = variantSpecs[v]
-	//: the codec itself stays the one-field value the rest of the package builds.
-	return &baseencCodec{variant: v}
+	//: the row's own variant — equal to v by the table's index rule, and the
+	//: reference that orders variantSpecs before every singleton.
+	return &baseencCodec{variant: variantSpecs[v].variant}
 }
 
 // spec returns the variantSpec for c.variant. Bounds are guaranteed by

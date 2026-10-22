@@ -1131,9 +1131,7 @@ sequences:
       - return: nil
   - of: newVariant
     steps:
-      - set: _
-        value: variantSpecs[v]
-      - return: "&baseencCodec{variant: v}"
+      - return: "&baseencCodec{variant: variantSpecs[v].variant}"
   - of: (*baseencCodec).spec
     steps:
       - return: "&variantSpecs[c.variant]"

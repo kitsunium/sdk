@@ -845,7 +845,11 @@ types:
         results: knob string, found bool
     name: LimitsConfig
 vars:
-  - doc: "Package-level state: the codec singleton plus the hoisted MIME table."
+  - doc: |-
+      The registered singleton. Its aliases are literals in MIMETypes and
+      Extensions, not package tables: Register reads them through the Codec
+      interface, which orders no table before this initialiser (see
+      core/data/codec.Register).
     grouped: true
     items:
       - doc: |-

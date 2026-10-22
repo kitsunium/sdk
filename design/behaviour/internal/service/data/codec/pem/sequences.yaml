@@ -11,8 +11,16 @@ sequences:
     steps:
       - return: "[]string{\"application/x-pem-file\"}"
   - of: (*pemCodec).Extensions
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*pemCodec).Extensions
+        kind: self
+      - id: slices
+        kind: stdlib
     steps:
-      - return: "[]string{\".pem\", \".crt\", \".key\"}"
+      - return: slices.Clone(c.extensions)
+        to: slices
   - of: (*pemCodec).Marshal
     participants:
       - id: caller

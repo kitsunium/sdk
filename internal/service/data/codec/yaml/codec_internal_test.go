@@ -55,8 +55,8 @@ func Test_yamlCodec_MIMETypes(t *testing.T) {
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		c := &yamlCodec{}
-		mimes := c.MIMETypes()
+		//: the registered singleton: it carries the package table.
+		mimes := Codec.MIMETypes()
 		if len(mimes) == 0 || mimes[0] != tc.wantHead {
 			t.Errorf("%s: MIMETypes=%v, want head %q", tc.name, mimes, tc.wantHead)
 		}
