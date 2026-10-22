@@ -69,11 +69,17 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64) (er
 // before its codec was changed failed its checksums at the next start, and
 // every snapshot of every node at once (#512).
 func (n *Node) codecOf(m *coreconsensus.SnapshotMetaValue) (coretransform.BoundedDecompressor, error) {
+	return snapshotCodec(m, n.cfg.SnapshotCodec)
+}
+
+// snapshotCodec is codecOf for a node whose own codec is own; an offline
+// operation, which has none, passes nil and reads only the codecs this build
+// links.
+func snapshotCodec(m *coreconsensus.SnapshotMetaValue, own coretransform.BoundedDecompressor) (coretransform.BoundedDecompressor, error) {
 	if m.Version != 1 {
 		return nil, origin(coreconsensus.VersionUnsupported, errs.Int("snapshot_version", int(m.Version)))
 	}
-	own := n.cfg.SnapshotCodec
-	if m.Codec == "" || coretransform.Algorithm(m.Codec) == own.Algorithm() {
+	if own != nil && (m.Codec == "" || coretransform.Algorithm(m.Codec) == own.Algorithm()) {
 		return own, nil
 	}
 	if c, ok := coretransform.Lookup(coretransform.Algorithm(m.Codec)); ok {
