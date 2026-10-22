@@ -29,6 +29,13 @@ func (n *Node) joinReason(ctx context.Context, from coreconsensus.AuthenticatedP
 		return refuse(why)
 	}
 	r.SPKI = from.SPKI
+	if pos, ok := n.alreadyJoined(&r); ok {
+		// The member itself asks again: a joiner restarted before anything
+		// reached its log, or one whose answer was lost. It is answered with
+		// the members, which its transport admits only from a JOIN answer,
+		// and nothing is proposed, nor counted against the slot (#533).
+		return pos, 0, ""
+	}
 	if n.joinRateLimited(r.Slot) {
 		return refuse("one JOIN per slot per election timeout")
 	}
@@ -84,6 +91,26 @@ func (n *Node) joinRateLimited(slot string) bool {
 	n.lastJoin[slot] = now
 	n.joinMu.Unlock()
 	return false
+}
+
+// alreadyJoined reports whether the membership in force lists the
+// requester itself — its id, incarnation, slot and key all equal — and
+// answers with the position of that membership. Any other request on a held
+// slot is slotTaken's to refuse (R8-11): the guard is against another node
+// taking it, never against the member asking again.
+func (n *Node) alreadyJoined(r *coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, bool) {
+	var pos coreconsensus.PositionValue
+	found := false
+	n.exec(func() {
+		conf := n.r.Status().Conf
+		m, ok := conf.Member(r.ID)
+		if !ok || m.Incarnation != r.Incarnation || m.Slot != r.Slot || m.SPKI != r.SPKI {
+			return
+		}
+		term, _ := n.r.TermAt(conf.Index)
+		pos, found = coreconsensus.PositionValue{Term: term, Index: conf.Index}, true
+	})
+	return pos, found
 }
 
 // slotTaken reports whether a current member already holds slot.

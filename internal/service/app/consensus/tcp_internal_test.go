@@ -321,9 +321,77 @@ func TestTCPJoinAddsALearner(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	// A second JOIN for a slot with a live member is refused (R8-11).
-	if _, err := j.tr.Join(ctx, coreconsensus.JoinConfig{Addresses: []string{ns[0].addr}, Stamp: st, Address: j.addr, Pins: pinsOf(ns)}); !errors.Is(err, coreconsensus.JoinRefused) {
-		t.Fatalf("second join: %v", err)
+	// A second JOIN for a slot with a live member is refused (R8-11) when it
+	// names another node or another incarnation of it; the same identity
+	// under the same key is the member itself asking again (#533).
+	other := st
+	other.ID++
+	if _, err := j.tr.Join(ctx, coreconsensus.JoinConfig{Addresses: []string{ns[0].addr}, Stamp: other, Address: j.addr, Pins: pinsOf(ns)}); !errors.Is(err, coreconsensus.JoinRefused) {
+		t.Fatalf("a JOIN of another id on a held slot: %v", err)
+	}
+	other = st
+	other.Incarnation[0]++
+	if _, err := j.tr.Join(ctx, coreconsensus.JoinConfig{Addresses: []string{ns[0].addr}, Stamp: other, Address: j.addr, Pins: pinsOf(ns)}); !errors.Is(err, coreconsensus.JoinRefused) {
+		t.Fatalf("a JOIN of another incarnation on a held slot: %v", err)
+	}
+	if _, err := j.tr.Join(ctx, coreconsensus.JoinConfig{Addresses: []string{ns[0].addr}, Stamp: st, Address: j.addr, Pins: pinsOf(ns)}); err != nil {
+		t.Fatalf("the member's own JOIN again: %v", err)
+	}
+}
+
+// A joiner that restarts before anything reached its log JOINs again with
+// its own stamp, is answered, and is fed: its transport admits the members
+// only from a JOIN answer, and the slot it asks for is held by its own
+// learner entry. It used to be refused "the slot still has a member" and
+// to admit nobody, the leader's snapshot lane closed on every attempt
+// (#533).
+func TestAJoinerRestartedBeforeItsFirstInstallRejoins(t *testing.T) {
+	ca, cid, ns := newTCPCluster(t)
+	l := tcpLeader(t, ns)
+	propose(t, l.node, "a=1")
+	j := &tcpNode{slot: "site-new", log: NewMemoryLog(), snaps: NewMemorySnapshots()}
+	j.cert, j.spki = ca.issue(t, SAN(cid, j.slot), nil)
+	j.listen(t, ca)
+	id, _, err := InitLog(j.log, cid, j.slot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j.id = id
+	st := must(j.log.Stamp())(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	join := func() error {
+		_, err := j.tr.Join(ctx, coreconsensus.JoinConfig{Addresses: []string{ns[0].addr, ns[1].addr, ns[2].addr}, Stamp: st, Address: j.addr, Pins: pinsOf(ns)})
+		return err
+	}
+	// The JOIN is acknowledged before the joiner's node runs: nothing the
+	// leader sends reaches its log, as when it restarts mid-transfer.
+	if err := join(); err != nil {
+		t.Fatalf("first join: %v", err)
+	}
+	if _, ok := l.node.Membership().Member(id); !ok {
+		t.Fatal("the learner is not listed")
+	}
+	if err := j.tr.Close(); err != nil {
+		t.Fatal(err)
+	}
+	j.listen(t, ca) // the same address and certificate, a new process
+	j.start(t, cid)
+	defer j.stop(t)
+	if err := join(); err != nil {
+		t.Fatalf("the restarted joiner's JOIN: %v", err)
+	}
+	propose(t, l.node, "b=2")
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if v, _ := j.sm.get("b"); v == "2" {
+			return
+		}
+		if time.Now().After(deadline) {
+			first, last := j.log.Bounds()
+			t.Fatalf("the restarted joiner was never fed: %+v, log [%d,%d]", j.node.Status(), first, last)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
