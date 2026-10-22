@@ -4224,7 +4224,7 @@
         {
           "name": "KeptIndex",
           "type": "uint64",
-          "doc": "KeptIndex is the last index Recover kept from the predecessor. An\napplied position of the predecessor at or below it is still trusted.\nEvery node of the history applies the entries at or below it under the\npredecessor's token: one admitted after the Recover learns it from the\nsnapshot it installs, never from an append.\n"
+          "doc": "KeptIndex is the last index Recover kept from the predecessor. An\napplied position of the predecessor at or below it is still trusted\nwhen its term is the one kept there: Recover adopts the verified\nsuffix past the commit the survivor persisted, which may hold\nanother term than the write the old cluster acknowledged.\nEvery node of the history applies the entries at or below it under the\npredecessor's token: one admitted after the Recover learns it from the\nsnapshot it installs, never from an append.\n"
         }
       ],
       "doc": "LogIdentityValue scopes positions: the ClusterID and a log epoch that Recover and\nRestoreSnapshot bump, and the predecessor this history descends from with the\nlast index it kept. A position or a token from another identity is not\ncomparable with this log's.\n",
@@ -5267,7 +5267,7 @@
       "recv": "Replicated",
       "spelled": "func(ctx context.Context, t TokenValue) error",
       "canonical": "func(ctx context.Context, t github.com/kitsunium/sdk/internal/core/app/consensus.TokenValue) error",
-      "doc": "WaitApplied returns once the local node has applied t. A token of\nanother lineage is LINEAGE_MISMATCH.\n",
+      "doc": "WaitApplied returns once the local node has applied t, the entry of\nt's term at t's index. A token of another lineage is\nLINEAGE_MISMATCH. A token whose index holds an entry of another term\nis ENTRY_SUPERSEDED, or LINEAGE_MISMATCH when it is one of the\npredecessor's within the index Recover kept, as is a token of the\npredecessor's whose term the node can no longer read there.\n",
       "file": "core/app/consensus/gen_ports.go",
       "layer": "core",
       "family": "app"
@@ -45888,7 +45888,7 @@
       "name": "Bootstrap",
       "spelled": "func(ctx context.Context, cfg *Config, members []coreconsensus.MemberValue) error",
       "canonical": "func(ctx context.Context, cfg *github.com/kitsunium/sdk/internal/service/app/consensus.Config, members []github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue) error",
-      "doc": "Bootstrap founds a cluster on one founding node's log, in phases that are\neach idempotent: a bootstrap-pending stamp naming the founding list, the\nfounding configuration as entry 1, then the member stamp. Every founder\nruns it with the IDENTICAL list (D8, R2-24, R3-02, R9-04). It never runs\ninside NewNode.\n",
+      "doc": "Bootstrap founds a cluster on one founding node's log, in phases that are\neach idempotent: a bootstrap-pending stamp naming the founding list, the\nfounding configuration as entry 1, then the member stamp. Every founder\nruns it with the IDENTICAL list (D8, R2-24, R3-02, R9-04). It never runs\ninside NewNode. Entry 1 carries the generation 1 contract, cfg's\nInitialTiming completed and refused as NewNode completes and refuses it:\nthe contract that rules every node is the one NewNode validates.\n",
       "file": "service/app/consensus/bootstrap.go",
       "layer": "service",
       "family": "app"
@@ -47088,7 +47088,7 @@
       "recv": "Node",
       "spelled": "func(ctx context.Context, op coreconsensus.Operator, id coreconsensus.NodeID) error",
       "canonical": "func(ctx context.Context, op github.com/kitsunium/sdk/internal/core/app/consensus.Operator, id github.com/kitsunium/sdk/internal/core/app/consensus.NodeID) error",
-      "doc": "DenyPin withdraws a member's SPKI pin (R9-18).\n",
+      "doc": "DenyPin withdraws a member's SPKI pin (R9-18). The transport refuses the\nmember once the change commits. It is refused MEMBERSHIP_INVALID for the\nleader itself, and while the voters that answer the leader, the target\nleft out, are not a majority (R2-27).\n",
       "file": "service/app/consensus/ops.go",
       "layer": "service",
       "family": "app"
@@ -47283,7 +47283,7 @@
       "recv": "Node",
       "spelled": "func(ctx context.Context, t coreconsensus.TokenValue) error",
       "canonical": "func(ctx context.Context, t github.com/kitsunium/sdk/internal/core/app/consensus.TokenValue) error",
-      "doc": "WaitApplied returns once the local node has applied t. A token of another\nlineage is LINEAGE_MISMATCH.\n",
+      "doc": "WaitApplied returns once the local node has applied t, the entry of t's\nterm at t's index. A token of another lineage is LINEAGE_MISMATCH. A token\nwhose index holds an entry of another term is ENTRY_SUPERSEDED, carrying\nthe token of the entry applied there, or LINEAGE_MISMATCH when it is one of\nthe predecessor's within the index Recover kept, as is a token of the\npredecessor's whose term this node can no longer read there.\n",
       "file": "service/app/consensus/ops.go",
       "layer": "service",
       "family": "app"

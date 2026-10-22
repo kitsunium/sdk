@@ -230,6 +230,23 @@ workflows:
           range: metas
           value: m
       - return: coreconsensus.SnapshotMetaValue{}, false
+  - of: claimed
+    steps:
+      - bind: k
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: ps[k]
+                    value: p
+                  - op: ++
+                    set: k
+                when: p.stage.CompareAndSwap(stageUnsent, stagePossible)
+          key: _
+          range: ps
+          value: p
+      - return: ps[:k]
   - of: alignedOffset
     steps:
       - var:

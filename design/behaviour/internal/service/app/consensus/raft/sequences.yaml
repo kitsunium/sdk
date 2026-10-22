@@ -871,7 +871,7 @@ sequences:
             - return: codeMisconfigured
           when: |-
             c.HeartbeatInterval <= 0 || c.ElectionTimeoutMin <= 0 || c.HeartbeatInterval*5 > c.ElectionTimeoutMin ||
-            		c.ElectionTimeoutMax <= c.ElectionTimeoutMin || c.MaxClockDrift < 0 || c.MaxClockDrift >= 1
+            		c.ElectionTimeoutMax <= c.ElectionTimeoutMin || !(c.MaxClockDrift >= 0 && c.MaxClockDrift < 1)
       - op: "|="
         set: r.facts
         value: raftLeaseDropped
@@ -919,7 +919,7 @@ sequences:
         kind: internal
       - id: r.updateAddress
         kind: internal
-      - id: denyPin
+      - id: r.denyPin
         kind: internal
     steps:
       - bind: cur
@@ -956,8 +956,8 @@ sequences:
             - case: wire.ChangeDenyPin
               do:
                 - set: code
-                  to: denyPin
-                  value: denyPin(&cur, idx)
+                  to: r.denyPin
+                  value: r.denyPin(&cur, admin.Target, idx)
             - default: true
               do:
                 - set: code
@@ -1077,12 +1077,16 @@ sequences:
       - set: cur.Members[idx].Address
         value: admin.Membership.Members[0].Address
       - return: "0"
-  - of: denyPin
+  - of: (*Raft).denyPin
     steps:
       - opt:
           do:
             - return: codeMembershipInvalid
           when: idx < 0
+      - opt:
+          do:
+            - return: codeMembershipInvalid
+          when: "!r.mutated(mutDenyPinUnchecked) && (target == r.id || !r.activeMajorityWithout(*cur, target))"
       - eval: clear(cur.Members[idx].SPKI[:])
       - return: "0"
   - of: (*Raft).activeMajority
@@ -1090,6 +1094,17 @@ sequences:
       - id: caller
         kind: actor
       - id: (*Raft).activeMajority
+        kind: self
+      - id: r.activeMajorityWithout
+        kind: internal
+    steps:
+      - return: r.activeMajorityWithout(m, 0)
+        to: r.activeMajorityWithout
+  - of: (*Raft).activeMajorityWithout
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).activeMajorityWithout
         kind: self
       - id: m.Voters
         kind: value
@@ -1107,6 +1122,10 @@ sequences:
                     set: "n"
                   - continue: true
                 when: id == r.id
+            - opt:
+                do:
+                  - continue: true
+                when: id == silent
             - opt:
                 do:
                   - op: ++
@@ -1386,16 +1405,20 @@ sequences:
             bind: c, ok
             eval: r.contracts[gen]
           when: ok
-      - bind: w
-        eval: r.timing.ElectionTimeoutMin
-      - loop:
+      - opt:
           do:
-            - set: w
-              value: min(w, c.ElectionTimeoutMin)
-          key: _
-          range: r.contracts
-          value: c
-      - return: w
+            - bind: w
+              eval: r.timing.ElectionTimeoutMin
+            - loop:
+                do:
+                  - set: w
+                    value: min(w, c.ElectionTimeoutMin)
+                key: _
+                range: r.contracts
+                value: c
+            - return: w
+          when: r.mutated(mutUnknownGenShortestKnown)
+      - return: "0"
   - of: (*Raft).confirmRounds
     participants:
       - id: caller
@@ -1481,8 +1504,6 @@ sequences:
           do:
             - opt:
                 do:
-                  - op: ++
-                    set: "n"
                   - opt:
                       do:
                         - set: minWindow
@@ -1491,7 +1512,9 @@ sequences:
                         bind: w
                         eval: r.contractWindow(g - 1)
                         to: r.contractWindow
-                      when: minWindow == 0 || w < minWindow
+                      when: n == 0 || w < minWindow
+                  - op: ++
+                    set: "n"
                 init:
                   bind: g
                   eval: rd.acks[id]
@@ -1778,6 +1801,12 @@ sequences:
     steps:
       - opt:
           do:
+            - opt:
+                do:
+                  - eval: delete(r.contracts, r.ownTiming)
+                  - set: r.ownTiming
+                    value: "0"
+                when: r.ownTiming != 0 && !r.mutated(mutOwnTimingKept)
             - set: r.timing
               value: meta.Timing
             - set: r.contracts[r.timing.Generation]
@@ -2269,11 +2298,15 @@ sequences:
         value: sm.Membership.Clone()
       - set: node.base.Index
         value: sm.Position.Index
-      - opt:
-          do:
-            - set: node.timing
-              value: sm.Timing
-          when: adoptsTiming(sm.Timing, node.timing)
+      - alt:
+          - do:
+              - set: node.timing
+                value: sm.Timing
+            when: adoptsTiming(sm.Timing, node.timing)
+          - do:
+              - set: node.ownTiming
+                value: node.timing.Generation
+            else: true
       - set: node.clusterVer, node.clusterGen, node.noSpace
         value: sm.ClusterVersion, sm.ClusterGeneration, sm.NoSpace
       - set: node.voteWindow
@@ -2361,8 +2394,11 @@ sequences:
                 do:
                   - eval: r.campaign(true, 0, 0)
                     to: r.campaign
-                when: r.promotable()
+                when: r.promotable() && r.outsideVoteWindow(now)
           when: "!now.Before(r.electionDeadline)"
+  - of: (*Raft).outsideVoteWindow
+    steps:
+      - return: r.lastLeaderContact.IsZero() || now.Sub(r.lastLeaderContact) >= r.voteWindow || r.mutated(mutCampaignInVoteWindow)
   - of: (*Raft).StorageDone
     participants:
       - id: caller
@@ -2594,6 +2630,13 @@ sequences:
           do:
             - return: "false"
           when: "!r.cfg.Lease || r.role != core.RoleLeader || r.facts&raftLeaseDropped != 0 || r.leaseStart.IsZero() || r.log.committed < r.termStart"
+      - opt:
+          do:
+            - return: "false"
+          init:
+            bind: d
+            eval: r.timing.MaxClockDrift
+          when: "!(d > 0 && d < 1) && !r.mutated(mutLeaseWithoutDrift)"
       - return: now.Sub(r.leaseStart) < r.leaseLen
   - of: (*Raft).DropLease
     steps:
@@ -2784,13 +2827,24 @@ sequences:
       - bind: out
         eval: slices.Clone(r.conf().Members)
         to: slices
+      - var:
+          name: unpinned
+          type: "[32]byte"
       - loop:
           do:
-            - opt:
-                do:
-                  - set: out
-                    value: append(out, m)
-                when: "!slices.ContainsFunc(out, func(x core.MemberValue) bool { return x.ID == m.ID })"
+            - bind: k
+              eval: slices.IndexFunc(out, func(x core.MemberValue) bool { return x.ID == m.ID })
+              to: slices
+            - switch:
+                cases:
+                  - case: k < 0
+                    do:
+                      - set: out
+                        value: append(out, m)
+                  - case: out[k].SPKI == unpinned && !r.mutated(mutDenyPinAtAppend)
+                    do:
+                      - set: out[k].SPKI
+                        value: m.SPKI
           key: _
           range: r.confAt(r.log.committed).Members
           value: m
@@ -2839,7 +2893,7 @@ sequences:
         kind: package
       - id: r.confChanged
         kind: internal
-      - id: foundingContract
+      - id: r.foundingContractOf
         kind: internal
     steps:
       - switch:
@@ -2863,8 +2917,8 @@ sequences:
                   to: r.confChanged
                 - opt:
                     do:
-                      - set: r.contracts[1]
-                        value: c
+                      - set: r.contracts[1], r.ownTiming
+                        value: c, 0
                       - opt:
                           do:
                             - set: r.voteWindow
@@ -2872,8 +2926,8 @@ sequences:
                           when: c.ElectionTimeoutMin > r.voteWindow
                     init:
                       bind: c, ok
-                      eval: foundingContract(&a)
-                      to: foundingContract
+                      eval: r.foundingContractOf(&a)
+                      to: r.foundingContractOf
                     when: ok
             - case: core.EntryTimingContract
               do:
@@ -3134,12 +3188,22 @@ sequences:
           when: admin.Change != wire.ChangeFounding || c.HeartbeatInterval <= 0 || c.ElectionTimeoutMin <= 0
       - set: c.Generation
         value: "1"
+      - opt:
+          do:
+            - set: c.ElectionTimeoutMax
+              value: 2 * c.ElectionTimeoutMin
+          when: c.ElectionTimeoutMax <= c.ElectionTimeoutMin
+      - opt:
+          do:
+            - set: c.MaxClockDrift
+              value: "0"
+          when: "!(c.MaxClockDrift >= 0 && c.MaxClockDrift < 1)"
       - return: c, true
-  - of: (*Raft).commitFounding
+  - of: (*Raft).foundingContractOf
     participants:
       - id: caller
         kind: actor
-      - id: (*Raft).commitFounding
+      - id: (*Raft).foundingContractOf
         kind: self
       - id: foundingContract
         kind: internal
@@ -3149,12 +3213,30 @@ sequences:
         to: foundingContract
       - opt:
           do:
+            - set: c.ElectionTimeoutMax, c.MaxClockDrift
+              value: admin.Contract.ElectionTimeoutMax, admin.Contract.MaxClockDrift
+          when: ok && r.mutated(mutFoundingAsWritten)
+      - return: c, ok
+  - of: (*Raft).commitFounding
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).commitFounding
+        kind: self
+      - id: r.foundingContractOf
+        kind: internal
+    steps:
+      - bind: c, ok
+        eval: r.foundingContractOf(admin)
+        to: r.foundingContractOf
+      - opt:
+          do:
             - return: ""
           when: "!ok || r.timing.Generation > 1"
       - set: r.timing
         value: c
-      - set: r.contracts[1]
-        value: c
+      - set: r.contracts[1], r.ownTiming
+        value: c, 0
       - opt:
           do:
             - set: r.voteWindow
@@ -3440,8 +3522,11 @@ sequences:
                 - return: "true"
             - case: core.MsgReadIndexResp
               do:
-                - set: r.rd.ReadStates
-                  value: "append(r.rd.ReadStates, ReadState{Context: m.Context, Index: m.Index, Code: m.Code})"
+                - opt:
+                    do:
+                      - set: r.rd.ReadStates
+                        value: "append(r.rd.ReadStates, ReadState{Context: m.Context, Index: m.Index, Code: m.Code})"
+                    when: m.From == r.lead || r.mutated(mutReadRespAnyPeer)
                 - return: "true"
             - case: core.MsgForwardResp, core.MsgForwardAdminResp
               do:
@@ -3616,8 +3701,6 @@ sequences:
         value: raftLeaseDropped
       - set: r.leaseStart
         value: time.Time{}
-      - set: r.refusedLead
-        value: "0"
       - opt:
           do:
             - eval: r.abortLeadership()
@@ -3799,6 +3882,10 @@ sequences:
           cases:
             - case: core.MsgApp, core.MsgHeartbeat
               do:
+                - opt:
+                    do:
+                      - return: ""
+                    when: r.refuses(m.From)
                 - eval: r.becomeFollower(m.Term, m.From)
                   to: r.becomeFollower
                 - eval: r.stepFollower(now, m)
@@ -3849,6 +3936,10 @@ sequences:
       - id: r.send
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: ""
+          when: (m.Kind == core.MsgApp || m.Kind == core.MsgHeartbeat) && r.refuses(m.From)
       - switch:
           cases:
             - case: core.MsgApp
@@ -3898,18 +3989,21 @@ sequences:
         to: r.resetElection
       - opt:
           do:
-            - return: ""
-          when: r.refusedLead == m.From
-      - opt:
-          do:
             - eval: r.commitTo(c)
               to: r.commitTo
           init:
             bind: c
             eval: min(m.Commit, r.log.lastIndex())
           when: c > r.log.committed
-      - eval: "r.send(core.MessageValue{Kind: core.MsgHeartbeatResp, To: m.From, Context: m.Context, Contract: r.timing.Generation})"
+      - eval: "r.send(core.MessageValue{Kind: core.MsgHeartbeatResp, To: m.From, Context: m.Context, Contract: r.reportedContract()})"
         to: r.send
+  - of: (*Raft).reportedContract
+    steps:
+      - opt:
+          do:
+            - return: r.timing.Generation
+          when: r.mutated(mutReportUnsyncedContract)
+      - return: r.EngineAt(min(r.log.committed, r.log.stable)).Timing.Generation
   - of: (*Raft).followTimeoutNow
     participants:
       - id: caller
@@ -4169,13 +4263,16 @@ sequences:
             else: true
       - opt:
           do:
-            - set: r.refusedLead
-              value: m.From
+            - set: r.refusedLead, r.refusedTerm
+              value: m.From, r.term
           when: r.cfg.MaxChainRefusals > 0 && r.refusals >= r.cfg.MaxChainRefusals
       - set: r.rd.ChainRefusedBy
         value: append(r.rd.ChainRefusedBy, m.From)
       - eval: "r.send(core.MessageValue{Kind: core.MsgAppResp, To: m.From, Index: m.Index, Reject: true, RejectHint: m.Index})"
         to: r.send
+  - of: (*Raft).refuses
+    steps:
+      - return: r.refusedLead != 0 && r.refusedLead == from && r.refusedTerm == r.term && !r.mutated(mutRefusedLeadHeard)
   - of: (*Raft).maybeEndSilence
     participants:
       - id: caller

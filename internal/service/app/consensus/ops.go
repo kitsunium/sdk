@@ -504,7 +504,10 @@ func (n *Node) UpdateAddress(ctx context.Context, op coreconsensus.Operator, id 
 	})
 }
 
-// DenyPin withdraws a member's SPKI pin (R9-18).
+// DenyPin withdraws a member's SPKI pin (R9-18). The transport refuses the
+// member once the change commits. It is refused MEMBERSHIP_INVALID for the
+// leader itself, and while the voters that answer the leader, the target
+// left out, are not a majority (R2-27).
 func (n *Node) DenyPin(ctx context.Context, op coreconsensus.Operator, id coreconsensus.NodeID) error {
 	return n.admin(ctx, coreconsensus.EntryMembership, wire.AdminValue{Operator: string(op), Change: wire.ChangeDenyPin, Target: id})
 }

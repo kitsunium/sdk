@@ -529,6 +529,8 @@ sequences:
         kind: internal
       - id: checkFounders
         kind: internal
+      - id: foundingTiming
+        kind: internal
       - id: founderStamp
         kind: internal
       - id: checkSelfListed
@@ -565,6 +567,13 @@ sequences:
             eval: checkFounders(members, cfg.MinVoters)
             to: checkFounders
           when: err != nil
+      - bind: timing, err
+        eval: foundingTiming(cfg)
+        to: foundingTiming
+      - opt:
+          do:
+            - return: err
+          when: err != nil
       - bind: stamp, err
         eval: founderStamp(cfg)
         to: founderStamp
@@ -596,7 +605,7 @@ sequences:
             - return: err
           init:
             bind: err
-            eval: writeFoundingEntry(cfg, members)
+            eval: writeFoundingEntry(cfg, members, timing)
             to: writeFoundingEntry
           when: err != nil
       - set: stamp.State
@@ -756,6 +765,34 @@ sequences:
                 - return: false, origin(coreconsensus.DataDirMismatch, errs.String("why", "unknown stamp state"))
           "on": stamp.State
       - return: false, nil
+  - of: foundingTiming
+    participants:
+      - id: caller
+        kind: actor
+      - id: foundingTiming
+        kind: self
+      - id: clampTiming
+        kind: internal
+      - id: refuseTiming
+        kind: internal
+    steps:
+      - bind: c
+        eval: "*cfg"
+      - eval: clampTiming(&c.InitialTiming)
+        to: clampTiming
+      - opt:
+          do:
+            - return: coreconsensus.TimingContractSpec{}, err
+          init:
+            bind: err
+            eval: refuseTiming(&c)
+            to: refuseTiming
+          when: err != nil
+      - bind: timing
+        eval: c.InitialTiming
+      - set: timing.Generation
+        value: "1"
+      - return: timing, nil
   - of: writeFoundingEntry
     participants:
       - id: caller
@@ -764,8 +801,6 @@ sequences:
         kind: self
       - id: cfg.Log.Bounds
         kind: value
-      - id: TimingDefaults
-        kind: internal
       - id: wire
         kind: package
       - id: cfg.Log.Append
@@ -791,16 +826,6 @@ sequences:
               value: "false"
           key: i
           range: conf.Members
-      - bind: timing
-        eval: cfg.InitialTiming
-      - opt:
-          do:
-            - set: timing
-              to: TimingDefaults
-              value: TimingDefaults()
-          when: timing.HeartbeatInterval == 0
-      - set: timing.Generation
-        value: "1"
       - bind: data
         eval: "wire.AppendAdmin(nil, &wire.AdminValue{Operator: \"bootstrap\", Change: wire.ChangeFounding, Membership: conf, Contract: timing})"
         to: wire
@@ -12588,6 +12613,8 @@ sequences:
         kind: actor
       - id: (*Node).Propose
         kind: self
+      - id: slices
+        kind: stdlib
       - id: n.submit
         kind: internal
     steps:
@@ -12595,6 +12622,9 @@ sequences:
           do:
             - return: coreconsensus.TokenValue{}, nil, origin(coreconsensus.EntryTooLarge, errs.Int("bytes", len(data)))
           when: len(data) > n.cfg.MaxEntryBytes
+      - set: data
+        to: slices
+        value: slices.Clone(data)
       - bind: e
         eval: "coreconsensus.EntryValue{Kind: coreconsensus.EntryCommand, BodySum: wire.BodySum(data), Data: data}"
       - return: n.submit(ctx, e, false)
@@ -12708,7 +12738,7 @@ sequences:
                 - opt:
                     do:
                       - return: "propResult{err: ctx.Err()}"
-                    when: p.stage.Load() == stageUnsent
+                    when: p.stage.CompareAndSwap(stageUnsent, stageAbandoned)
                 - return: |-
                     propResult{err: origin(coreconsensus.OutcomeUnknown,
                     			errs.String("why", "context ended after the append"), errs.String("cause", ctx.Err().Error()))}
@@ -12718,6 +12748,8 @@ sequences:
         kind: actor
       - id: (*Node).handleProposals
         kind: self
+      - id: claimed
+        kind: internal
       - id: n.r.Status
         kind: value
       - id: n.clk.Now
@@ -12729,6 +12761,9 @@ sequences:
       - id: n.proposeAlone
         kind: internal
     steps:
+      - set: ps
+        to: claimed
+        value: claimed(ps)
       - bind: st
         eval: n.r.Status()
         to: n.r.Status
@@ -12871,6 +12906,8 @@ sequences:
         kind: value
       - id: n.am.Unlock
         kind: value
+      - id: n.displace
+        kind: internal
     steps:
       - set: p.pos, p.local
         value: pos, local
@@ -12913,16 +12950,48 @@ sequences:
                           value: "propResult{err: outcomeUnknown(\"applied before its position was known\")}"
             - return: ""
           when: pos.Index <= n.applied
-      - set: n.waiters[pos.Index]
-        value: p
+      - bind: displaced
+        eval: p
+      - opt:
+          do:
+            - set: n.waiters[pos.Index], displaced
+              value: p, old
+          init:
+            bind: old
+            eval: n.waiters[pos.Index]
+          when: old == nil || old.pos.Term < pos.Term
       - eval: n.am.Unlock()
         to: n.am.Unlock
+      - opt:
+          do:
+            - eval: n.displace(displaced)
+              to: n.displace
+          when: displaced != nil
+  - of: (*Node).displace
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).displace
+        kind: self
+      - id: n.pendingBytes.Add
+        kind: value
+    steps:
+      - opt:
+          do:
+            - eval: n.pendingBytes.Add(-int64(len(p.entry.Data)))
+              to: n.pendingBytes.Add
+          when: p.local
+      - send:
+          chan: p.done
+          value: "propResult{err: outcomeUnknown(\"another proposal took its index under a later term\")}"
   - of: (*Node).forward
     participants:
       - id: caller
         kind: actor
       - id: (*Node).forward
         kind: self
+      - id: n.nextID
+        kind: internal
       - id: n.am.Lock
         kind: value
       - id: n.am.Unlock
@@ -12939,15 +13008,9 @@ sequences:
                 value: "propResult{err: notLeader(0)}"
             - return: ""
           when: st.Lead == 0 || st.Lead == n.stamp.ID
-      - opt:
-          do:
-            - set: n.subEpoch, n.subCount
-              value: newSubEpoch(), 0
-          when: n.subCount == ^uint32(0)
-      - op: ++
-        set: n.subCount
       - bind: ctx
-        eval: n.subEpoch | uint64(n.subCount)
+        eval: n.nextID()
+        to: n.nextID
       - bind: kind
         eval: coreconsensus.MsgForward
       - opt:
@@ -12973,6 +13036,16 @@ sequences:
         to: p.stage.Store
       - eval: n.cfg.Transport.Send(st.Lead, wire.AppendMessage(nil, &m))
         to: n.cfg.Transport.Send
+  - of: (*Node).nextID
+    steps:
+      - opt:
+          do:
+            - set: n.subEpoch, n.subCount
+              value: newSubEpoch(), 0
+          when: n.subCount == ^uint32(0)
+      - op: ++
+        set: n.subCount
+      - return: n.subEpoch | uint64(n.subCount)
   - of: (*Node).forwardAnswered
     participants:
       - id: caller
@@ -13070,8 +13143,7 @@ sequences:
             - return: coreconsensus.TokenValue{}, n.stoppedErr()
           when: |-
             !n.exec(func() {
-            		n.readSeq++
-            		ctx := n.readSeq
+            		ctx := n.nextID()
             		n.reads[ctx] = w
             		n.r.ReadIndex(n.clk.Now(), ctx, noLease)
             		n.handleReady()
@@ -13125,6 +13197,8 @@ sequences:
         kind: value
       - id: n.stoppedErr
         kind: internal
+      - id: n.appliedAs
+        kind: internal
     steps:
       - bind: want
         eval: n.token(t.Position())
@@ -13144,7 +13218,91 @@ sequences:
             - return: n.stoppedErr()
               to: n.stoppedErr
           when: "!n.waitApplied(ctx.Done(), t.Index)"
-      - return: nil
+      - return: n.appliedAs(t)
+        to: n.appliedAs
+  - of: (*Node).appliedAs
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).appliedAs
+        kind: self
+      - id: n.appliedTermAt
+        kind: internal
+      - id: n.stoppedErr
+        kind: internal
+      - id: n.lineage
+        kind: internal
+      - id: origin
+        kind: internal
+      - id: withToken
+        kind: internal
+    steps:
+      - bind: term, known, ok
+        eval: n.appliedTermAt(t.Index)
+        to: n.appliedTermAt
+      - opt:
+          do:
+            - return: n.stoppedErr()
+              to: n.stoppedErr
+          when: "!ok"
+      - bind: l
+        eval: n.lineage()
+        to: n.lineage
+      - bind: kept
+        eval: l.Predecessor != (coreconsensus.ClusterID{}) && t.Index <= l.KeptIndex
+      - switch:
+          cases:
+            - case: known && term == t.Term, !known && !kept
+              do:
+                - return: nil
+            - case: "!known"
+              do:
+                - return: origin(coreconsensus.LineageMismatch, errs.String("why", "the predecessor's entry at this index can no longer be read"))
+                  to: origin
+            - case: kept
+              do:
+                - return: origin(coreconsensus.LineageMismatch, errs.String("why", "the predecessor's entry at this index is not the one kept"))
+                  to: origin
+            - default: true
+              do:
+                - return: "withToken(coreconsensus.EntrySuperseded, n.token(coreconsensus.PositionValue{Term: term, Index: t.Index}))"
+                  to: withToken
+  - of: (*Node).appliedTermAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).appliedTermAt
+        kind: self
+      - id: n.cfg.Log.Bounds
+        kind: value
+      - id: n.cfg.Log.Term
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: 0, false, false
+          when: |-
+            !n.exec(func() {
+            		if index <= n.r.Status().Commit {
+            			term, known = n.r.TermAt(index)
+            		}
+            	})
+      - opt:
+          do:
+            - return: term, known, true
+          when: known || index > n.logApplied.Load()
+      - opt:
+          do:
+            - return: 0, false, true
+          init:
+            bind: first, _
+            eval: n.cfg.Log.Bounds()
+            to: n.cfg.Log.Bounds
+          when: index+1 < first
+      - bind: t, err
+        eval: n.cfg.Log.Term(index)
+        to: n.cfg.Log.Term
+      - return: t, err == nil, true
   - of: (*Node).admin
     participants:
       - id: caller

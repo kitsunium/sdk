@@ -550,14 +550,14 @@ func (r *Raft) Progress(id core.NodeID) (match uint64, lastHeard time.Time, ok b
 	return pr.match, pr.lastHeard, true
 }
 
-// LeaseValid reports whether the leader's lease holds at now (D9). A
-// contract in force with no drift budget in (0, 1) holds no lease at all:
-// the lease would be the whole election window, and the long-turn guard,
-// whose budget is that drift, would never drop it (#523).
+// LeaseValid reports whether the leader's lease holds at now (D9).
 func (r *Raft) LeaseValid(now time.Time) bool {
 	if !r.cfg.Lease || r.role != core.RoleLeader || r.facts&raftLeaseDropped != 0 || r.leaseStart.IsZero() || r.log.committed < r.termStart {
 		return false
 	}
+	// A contract in force with no drift budget in (0, 1) holds no lease at
+	// all: the lease would be the whole election window, and the long-turn
+	// guard, whose budget is that drift, would never drop it (#523).
 	if d := r.timing.MaxClockDrift; !(d > 0 && d < 1) && !r.mutated(mutLeaseWithoutDrift) {
 		return false
 	}

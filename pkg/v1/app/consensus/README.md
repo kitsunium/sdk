@@ -1130,7 +1130,7 @@ AppendToken appends the 41-byte encoding of t.
 func Bootstrap(ctx context.Context, cfg *Config, members []MemberValue) error
 ```
 
-Bootstrap founds a cluster on one founding node, with the IDENTICAL member list on every founder. Idempotent and resumable.
+Bootstrap founds a cluster on one founding node, with the IDENTICAL member list on every founder. Idempotent and resumable. Its InitialTiming is completed and refused as NewNode's is, and rules every node once founded.
 
 <a name="ClearQuarantine"></a>
 ## func [ClearQuarantine](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
@@ -2252,7 +2252,10 @@ type LogIdentityValue struct {
 	// PredecessorEpoch is the predecessor's epoch.
 	PredecessorEpoch uint64
 	// KeptIndex is the last index Recover kept from the predecessor. An
-	// applied position of the predecessor at or below it is still trusted.
+	// applied position of the predecessor at or below it is still trusted
+	// when its term is the one kept there: Recover adopts the verified
+	// suffix past the commit the survivor persisted, which may hold
+	// another term than the write the old cluster acknowledged.
 	// Every node of the history applies the entries at or below it under the
 	// predecessor's token: one admitted after the Recover learns it from the
 	// snapshot it installs, never from an append.
@@ -2953,7 +2956,7 @@ Close transfers leadership first, then stops every goroutine after the storage a
 func (*Node) DenyPin(ctx context.Context, op coreconsensus.Operator, id coreconsensus.NodeID) error
 ```
 
-DenyPin withdraws a member's SPKI pin (R9-18).
+DenyPin withdraws a member's SPKI pin (R9-18). The transport refuses the member once the change commits. It is refused MEMBERSHIP\_INVALID for the leader itself, and while the voters that answer the leader, the target left out, are not a majority (R2-27).
 
 <a name="Node.HardClose"></a>
 ### func \(Node\) [HardClose](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/node.go>)
@@ -3088,7 +3091,7 @@ UpdateAddress changes where a member listens.
 func (*Node) WaitApplied(ctx context.Context, t coreconsensus.TokenValue) error
 ```
 
-WaitApplied returns once the local node has applied t. A token of another lineage is LINEAGE\_MISMATCH.
+WaitApplied returns once the local node has applied t, the entry of t's term at t's index. A token of another lineage is LINEAGE\_MISMATCH. A token whose index holds an entry of another term is ENTRY\_SUPERSEDED, carrying the token of the entry applied there, or LINEAGE\_MISMATCH when it is one of the predecessor's within the index Recover kept, as is a token of the predecessor's whose term this node can no longer read there.
 
 <a name="Node.Watch"></a>
 ### func \(Node\) [Watch](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/node.go>)
@@ -3367,8 +3370,12 @@ type Replicated interface {
 	Propose(ctx context.Context, data []byte) (TokenValue, any, error)
 	// Status returns the node's view after its last turn.
 	Status() StatusValue
-	// WaitApplied returns once the local node has applied t. A token of
-	// another lineage is LINEAGE_MISMATCH.
+	// WaitApplied returns once the local node has applied t, the entry of
+	// t's term at t's index. A token of another lineage is
+	// LINEAGE_MISMATCH. A token whose index holds an entry of another term
+	// is ENTRY_SUPERSEDED, or LINEAGE_MISMATCH when it is one of the
+	// predecessor's within the index Recover kept, as is a token of the
+	// predecessor's whose term the node can no longer read there.
 	WaitApplied(ctx context.Context, t TokenValue) error
 }
 ```
@@ -3407,7 +3414,7 @@ Status returns the node's view after its last turn.
 func (Replicated) WaitApplied(ctx context.Context, t TokenValue) error
 ```
 
-WaitApplied returns once the local node has applied t. A token of another lineage is LINEAGE\_MISMATCH.
+WaitApplied returns once the local node has applied t, the entry of t's term at t's index. A token of another lineage is LINEAGE\_MISMATCH. A token whose index holds an entry of another term is ENTRY\_SUPERSEDED, or LINEAGE\_MISMATCH when it is one of the predecessor's within the index Recover kept, as is a token of the predecessor's whose term the node can no longer read there.
 
 <a name="ReportValue"></a>
 ## type [ReportValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)

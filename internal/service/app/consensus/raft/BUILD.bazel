@@ -41,11 +41,14 @@ go_test(
     srcs = [
         "chainrefusal_internal_test.go",
         "checks_internal_test.go",
+        "denypin_internal_test.go",
         "gen_api_test.go",
         "lincheck_internal_test.go",
+        "readresp_internal_test.go",
         "sim_internal_test.go",
         "sim_scenarios_internal_test.go",
         "soak_internal_test.go",
+        "timing_internal_test.go",
     ],
     embed = [":raft"],
     # The deterministic simulations take ~300 CPU-seconds under race and

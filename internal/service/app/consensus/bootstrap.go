@@ -37,7 +37,9 @@ func byID(members []coreconsensus.MemberValue) []coreconsensus.MemberValue {
 // each idempotent: a bootstrap-pending stamp naming the founding list, the
 // founding configuration as entry 1, then the member stamp. Every founder
 // runs it with the IDENTICAL list (D8, R2-24, R3-02, R9-04). It never runs
-// inside NewNode.
+// inside NewNode. Entry 1 carries the generation 1 contract, cfg's
+// InitialTiming completed and refused as NewNode completes and refuses it:
+// the contract that rules every node is the one NewNode validates.
 func Bootstrap(ctx context.Context, cfg *Config, members []coreconsensus.MemberValue) error {
 	// Every phase below is a durable write: a caller that gave up before the
 	// first one gets its own cancellation back, and nothing is written.

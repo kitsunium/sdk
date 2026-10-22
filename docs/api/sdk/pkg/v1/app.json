@@ -963,7 +963,7 @@
       "name": "Bootstrap",
       "spelled": "func(ctx context.Context, cfg *Config, members []MemberValue) error",
       "canonical": "func(ctx context.Context, cfg *github.com/kitsunium/sdk/pkg/v1/app/consensus.Config, members []github.com/kitsunium/sdk/pkg/v1/app/consensus.MemberValue) error",
-      "doc": "Bootstrap founds a cluster on one founding node, with the IDENTICAL member\nlist on every founder. Idempotent and resumable.\n",
+      "doc": "Bootstrap founds a cluster on one founding node, with the IDENTICAL member\nlist on every founder. Idempotent and resumable. Its InitialTiming is\ncompleted and refused as NewNode's is, and rules every node once founded.\n",
       "file": "consensus/gen_facade.go",
       "layer": "public",
       "family": "app"
