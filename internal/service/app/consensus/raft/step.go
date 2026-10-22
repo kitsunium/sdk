@@ -405,6 +405,17 @@ func (r *Raft) followHeartbeat(now time.Time, m core.MessageValue) {
 		r.commitTo(c)
 	}
 	r.send(core.MessageValue{Kind: core.MsgHeartbeatResp, To: m.From, Context: m.Context, Contract: r.reportedContract()})
+	if r.cfg.NoTable {
+		// A node with no table asks for a snapshot on every heartbeat, as
+		// on an append (D7, R7-18): a leader with nothing to append to it
+		// sends only heartbeats, and the node held no state for as long as
+		// the cluster stayed quiet (#549). The leader ignores the ask while
+		// a transfer to it is under way.
+		r.send(core.MessageValue{
+			Kind: core.MsgAppResp, To: m.From, Index: r.log.lastIndex(), Reject: true,
+			RejectHint: r.log.lastIndex(), Flags: core.FlagNeedSnapshot,
+		})
+	}
 }
 
 // reportedContract is the contract generation a heartbeat answer reports:

@@ -1384,8 +1384,11 @@ is refused with `OVERLOADED`. Nothing is appended in either case.
   - **a node whose two snapshots both fail** starts with no table. It keeps
     its term, vote and commit index, votes and stores the log (R6-13), and
     applies nothing until an install. **It asks for one (R7-18):** it answers
-    the leader's next append with an explicit "need snapshot" rejection, so
-    the leader moves it to the snapshot path at once. It is exempt from the
+    the leader's next append, and every heartbeat, with an explicit "need
+    snapshot" rejection, so the leader moves it to the snapshot path at
+    once: a leader with nothing to append to it sends only heartbeats, and
+    the node held no state for as long as the cluster stayed quiet
+    ([#549](https://github.com/kitsunium/sdk/issues/549)). It is exempt from the
     install's freshness rule up to the leader's snapshot index, so an install
     at or below its own commit index is accepted. Its may-campaign gate is
     closed while it holds no table, so it can vote but never lead. A test

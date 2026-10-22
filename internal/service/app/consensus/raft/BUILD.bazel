@@ -46,6 +46,7 @@ go_test(
         "lincheck_internal_test.go",
         "matchbound_internal_test.go",
         "membershippub_internal_test.go",
+        "notable_heartbeat_internal_test.go",
         "readresp_internal_test.go",
         "sim_internal_test.go",
         "sim_scenarios_internal_test.go",
