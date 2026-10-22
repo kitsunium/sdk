@@ -19,11 +19,15 @@ import (
 
 // The numbers every case shares. An attempt, a lease and a settle are
 // bounded far beyond anything a case advances, so none ends inside one; the
-// driver advances the clock past every wait shorter than ceiling — the
+// driver advances the clock past every wait from floor to ceiling — the
 // backoff, a Retry-After and the batch sink's delay among them —, but for
 // the batch sink's export bound, exportBound, and never past an attempt's
-// bound, a lease's or a settle's.
+// bound, a lease's or a settle's. A consumer's idle poll, below floor, is
+// never advanced: a batch queued in the process wakes its consumer at once,
+// and a clock moved by the polls would reach the export bound while a slow
+// machine is still queueing the batch.
 const (
+	floor           time.Duration = time.Second
 	exportBound     time.Duration = 30 * time.Second
 	testSettle      time.Duration = time.Hour
 	testSendTimeout time.Duration = 10 * time.Hour
@@ -89,7 +93,7 @@ func (t *reportedTimer) Reset(d time.Duration) bool {
 	return active
 }
 
-// drive advances the clock past each wait shorter than ceiling as it is
+// drive advances the clock past each wait from floor to ceiling as it is
 // armed, until done holds; it fails the test once waitBudget passed on the
 // wall clock. It never sleeps: between two waits it yields.
 func (c *testClock) drive(t *testing.T, what string, done func() bool) {
@@ -101,7 +105,7 @@ func (c *testClock) drive(t *testing.T, what string, done func() bool) {
 		}
 		select {
 		case d := <-c.armed:
-			if d > 0 && d < ceiling && d != exportBound {
+			if d >= floor && d < ceiling && d != exportBound {
 				c.Advance(d)
 			}
 		default:

@@ -203,20 +203,84 @@ func (c *collected) holds(path string, words ...string) bool {
 	return false
 }
 
-// advanceUntil moves clk a tenth of a second at a time, yielding between
-// steps, until done holds — at most ten minutes of the clock, and
-// waitBudget on the wall clock, which it never sleeps on.
-func advanceUntil(t *testing.T, clk *clock.ManualClock, what string, done func() bool) {
+// drivenClock is a manual clock that reports every wait armed on it — a
+// timer made or reset, a ticker, an After —, so a case advances it exactly
+// when something waits, as otlpengine's harness does.
+type drivenClock struct {
+	*clock.ManualClock
+	armed chan time.Duration
+}
+
+// newDrivenClock is a drivenClock at a fixed instant.
+func newDrivenClock() *drivenClock {
+	return &drivenClock{ManualClock: clock.NewManualClock(time.Date(2026, 10, 22, 9, 0, 0, 0, time.UTC)), armed: make(chan time.Duration, 1<<16)}
+}
+
+// report says a wait of d was armed.
+func (c *drivenClock) report(d time.Duration) {
+	select {
+	case c.armed <- d:
+	default:
+	}
+}
+
+// NewTimer arms a timer and reports it; its Reset reports too.
+func (c *drivenClock) NewTimer(d time.Duration) clock.Timer {
+	timer := &drivenTimer{Timer: c.ManualClock.NewTimer(d), c: c}
+	c.report(d)
+	return timer
+}
+
+// NewTicker arms a ticker and reports its period.
+func (c *drivenClock) NewTicker(d time.Duration) clock.Ticker {
+	ticker := c.ManualClock.NewTicker(d)
+	c.report(d)
+	return ticker
+}
+
+// After arms a wait and reports it.
+func (c *drivenClock) After(d time.Duration) <-chan time.Time {
+	ch := c.ManualClock.After(d)
+	c.report(d)
+	return ch
+}
+
+// drivenTimer is a timer whose Reset is reported.
+type drivenTimer struct {
+	clock.Timer
+	c *drivenClock
+}
+
+// Reset re-arms the timer and reports it.
+func (t *drivenTimer) Reset(d time.Duration) bool {
+	active := t.Timer.Reset(d)
+	t.c.report(d)
+	return active
+}
+
+// drive advances the clock past each wait of one second to ten minutes as
+// it is armed, until done holds, failing once twenty seconds passed on the
+// wall clock, which it never sleeps on. A wait below a second — a consumer's
+// idle poll — is never advanced: a batch queued in the process wakes its
+// consumer at once, and a clock moved by the polls would reach the batch
+// sink's export bound, thirty seconds, which is never advanced either, while
+// a slow machine is still queueing the batch; nor is an attempt's bound,
+// above ten minutes in these cases.
+func (c *drivenClock) drive(t *testing.T, what string, done func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
-	for step := 0; !done(); step++ {
+	for !done() {
 		if time.Now().After(deadline) {
 			t.Fatalf("%s: not reached", what)
 		}
-		if step < 6000 {
-			clk.Advance(100 * time.Millisecond)
+		select {
+		case d := <-c.armed:
+			if d >= time.Second && d < 10*time.Minute && d != 30*time.Second {
+				c.Advance(d)
+			}
+		default:
+			runtime.Gosched()
 		}
-		runtime.Gosched()
 	}
 }
 
@@ -228,14 +292,15 @@ func TestAnAppsSpansAndMetricsReachTheCollector(t *testing.T) {
 	col := &collected{posts: map[string][]string{}}
 	srv := httptest.NewServer(http.HandlerFunc(col.serve))
 	t.Cleanup(srv.Close)
-	clk := clock.NewManualClock(time.Date(2026, 10, 22, 9, 0, 0, 0, time.UTC))
+	clk := newDrivenClock()
 	a, err := startPolicies(t, []*app.Service{pingService()}, app.Clock(clk),
-		app.OTLP(app.OTLPEndpoint(srv.URL), app.OTLPSendTimeout(10*time.Hour)), app.Set("otlp-drain", time.Duration(0)))
+		app.OTLP(app.OTLPEndpoint(srv.URL), app.OTLPSendTimeout(10*time.Hour)),
+		app.Set("otlp-drain", time.Duration(0)), app.Set("otlp-interval", 7*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
 	expectAnswer(t, call(t, a, "GET /orders/ping", noBody), http.StatusNoContent, "")
-	advanceUntil(t, clk, "the span and the metrics sent", func() bool {
+	clk.drive(t, "the span and the metrics sent", func() bool {
 		return col.holds("/v1/traces", `"shop"`, "ping") && col.holds("/v1/metrics", "app.node.runs", "orders/endpoint/ping")
 	})
 	if r := readiness(t, a); !strings.Contains(string(r.body), `"name":"otlp","status":"healthy"`) {
@@ -251,7 +316,7 @@ func TestAnAppsSpansAndMetricsReachTheCollector(t *testing.T) {
 // out of rotation, once: the next answer is healthy again while nothing
 // more is lost.
 func TestALostBatchDegradesTheReadinessOnce(t *testing.T) {
-	clk := clock.NewManualClock(time.Date(2026, 10, 22, 9, 0, 0, 0, time.UTC))
+	clk := newDrivenClock()
 	var mu sync.Mutex
 	var signals []string
 	send := func(_ context.Context, b app.OTLPBatchValue) error {
@@ -261,17 +326,20 @@ func TestALostBatchDegradesTheReadinessOnce(t *testing.T) {
 		return app.NewError(http.StatusBadRequest, "invalid", "refused")
 	}
 	a, err := startPolicies(t, []*app.Service{pingService()}, app.Clock(clk),
-		app.OTLP(app.OTLPSender(send), app.OTLPSendTimeout(10*time.Hour)), app.Set("otlp-drain", time.Duration(0)))
+		app.OTLP(app.OTLPSender(send), app.OTLPSendTimeout(10*time.Hour)),
+		// No snapshot of the metrics within the case: the one batch lost is
+		// the span's.
+		app.Set("otlp-drain", time.Duration(0)), app.Set("otlp-interval", 100*time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
 	expectAnswer(t, call(t, a, "GET /orders/ping", noBody), http.StatusNoContent, "")
-	advanceUntil(t, clk, "the batch refused", func() bool {
+	clk.drive(t, "the batch refused", func() bool {
 		mu.Lock()
 		defer mu.Unlock()
 		return len(signals) > 0
 	})
-	advanceUntil(t, clk, "the readiness degraded", func() bool {
+	clk.drive(t, "the readiness degraded", func() bool {
 		r := readiness(t, a)
 		if r.status != http.StatusOK {
 			t.Fatalf("a lost batch took the product out of rotation: %d %s", r.status, r.body)
@@ -283,28 +351,19 @@ func TestALostBatchDegradesTheReadinessOnce(t *testing.T) {
 	}
 }
 
-// With a data directory, each signal's queue lies under <data>/.otlp —
-// durable where the SDK's durable queue runs; where it refuses the
-// platform, the export keeps it in memory and the start says so.
+// With a data directory, each signal's queue lies under <data>/.otlp. A
+// platform whose data directory the SDK refuses (ADR 0018, ADR 0144) refuses
+// the app's start before any export: needsFileStore asserts that refusal,
+// then skips — otlpengine's suite holds the export's memory fallback there.
 func TestTheOTLPQueuesLieInTheDataDirectory(t *testing.T) {
+	needsFileStore(t)
 	dir := t.TempDir()
-	a, err := startPolicies(t, []*app.Service{pingService()}, app.DataDir(dir), app.OTLP(app.OTLPEndpoint("http://127.0.0.1:1")))
-	if err != nil {
-		if runtime.GOOS == "windows" || runtime.GOOS == "plan9" {
-			t.Skipf("the data directory is refused on %s by design: %v", runtime.GOOS, err)
-		}
+	if _, err := startPolicies(t, []*app.Service{pingService()}, app.DataDir(dir), app.OTLP(app.OTLPEndpoint("http://127.0.0.1:1"))); err != nil {
 		t.Fatal(err)
 	}
-	switch runtime.GOOS {
-	case "linux", "android", "darwin", "ios", "freebsd", "openbsd", "netbsd", "dragonfly":
-		for _, signal := range []string{"traces", "metrics"} {
-			if info, err := os.Stat(filepath.Join(dir, ".otlp", signal)); err != nil || !info.IsDir() {
-				t.Errorf("no queue directory for %s: %v", signal, err)
-			}
-		}
-	default:
-		if !problemSays(a, "the OTLP export keeps its traces in memory") {
-			t.Errorf("the memory fallback is not said: %+v", a.Graph().Diagnostics)
+	for _, signal := range []string{"traces", "metrics"} {
+		if info, err := os.Stat(filepath.Join(dir, ".otlp", signal)); err != nil || !info.IsDir() {
+			t.Errorf("no queue directory for %s: %v", signal, err)
 		}
 	}
 }
@@ -318,14 +377,4 @@ func componentNamed(a *app.App, name string) *model.Component {
 		}
 	}
 	return nil
-}
-
-// problemSays reports whether one of the app's problems says text.
-func problemSays(a *app.App, text string) bool {
-	for _, p := range a.Graph().Diagnostics {
-		if strings.Contains(p.Message, text) {
-			return true
-		}
-	}
-	return false
 }
