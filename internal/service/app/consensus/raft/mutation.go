@@ -108,6 +108,9 @@ const (
 	// mutMatchPastLastIndex takes an acknowledgement past the leader's last
 	// index as the follower's match (#546).
 	mutMatchPastLastIndex
+	// mutRaiseUnannounced raises the cluster version while a member does not
+	// announce it (D18, lot S3).
+	mutRaiseUnannounced
 )
 
 // mutated reports whether a test switched mutation m on; it is false in every

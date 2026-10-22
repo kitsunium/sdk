@@ -75,7 +75,7 @@ func _(x raft.PeerStatValue) {
 func _() {
 	x := raft.ProtocolMax
 	var _ *uint32 = &x
-	_ = map[bool]int{false: 0, raft.ProtocolMax == 1: 1}
+	_ = map[bool]int{false: 0, raft.ProtocolMax == 2: 1}
 }
 
 // go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.Raft type struct{} doc:03712edbacec8034221903e4a019b859f45e3b64827e7caa335affcb1e4fb25b

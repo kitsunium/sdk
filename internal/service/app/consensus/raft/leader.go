@@ -53,6 +53,9 @@ func (r *Raft) becomeLeader() {
 	if pr := r.prs[r.id]; pr != nil {
 		pr.match = r.log.stable
 		pr.facts |= peerHeard
+		if r.speaks() >= Protocol2 {
+			pr.facts |= peerProtocol2
+		}
 	}
 	r.facts &^= raftLeaseDropped
 	r.leaseStart = time.Time{}
@@ -323,6 +326,13 @@ func (r *Raft) stepLeader(now time.Time, m core.MessageValue) {
 	}
 	pr.lastHeard = now
 	pr.facts |= peerHeard
+	// The announcement follows the peer's last message: a member rolled
+	// back to the previous release stops carrying it at once.
+	if m.Flags&core.FlagProtocol2 != 0 {
+		pr.facts |= peerProtocol2
+	} else {
+		pr.facts &^= peerProtocol2
+	}
 	switch m.Kind {
 	case core.MsgAppResp:
 		r.handleAppResp(pr, m)
@@ -579,12 +589,30 @@ func (r *Raft) checkTimingContract(admin *wire.AdminValue) errs.Code {
 // checkClusterVersion admits only a raise, proposed against the current
 // cluster generation of this log.
 func (r *Raft) checkClusterVersion(admin *wire.AdminValue) errs.Code {
-	if admin.ClusterVersion > ProtocolMax {
+	if admin.ClusterVersion > r.speaks() {
 		// No member of this version announces more (D18, review M3).
 		return codeVersion
 	}
 	if !admin.Pre.Log.Same(r.cfg.Log) || admin.Pre.Generation != r.clusterGen || admin.ClusterVersion <= r.clusterVer {
 		return codePrecondition
+	}
+	return r.checkAnnounced(admin.ClusterVersion)
+}
+
+// checkAnnounced refuses a raise to v while a member of the latest
+// configuration, voter or learner, was not heard in this term announcing
+// it: the operation is refused while any member does not speak the version
+// (D18). A member of the previous release would stop on the raise, and on
+// every format written after it.
+func (r *Raft) checkAnnounced(v uint32) errs.Code {
+	if v < Protocol2 || r.mutated(mutRaiseUnannounced) {
+		return 0
+	}
+	for _, m := range r.conf().Members {
+		pr := r.prs[m.ID]
+		if pr == nil || pr.facts&peerHeard == 0 || pr.facts&peerProtocol2 == 0 {
+			return codeVersion
+		}
 	}
 	return 0
 }

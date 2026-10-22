@@ -29,7 +29,14 @@ const (
 
 // ProtocolMax is the highest protocol version this engine speaks: a cluster
 // version above it is refused, and stops a node that finds it committed.
-const ProtocolMax uint32 = 1
+// Version 2 adds the snapshot metadata's checksum, the admin payload's
+// Origin and the log identity's AdoptedFrom, each written only once the
+// committed cluster version is 2 (lot S3).
+const ProtocolMax uint32 = 2
+
+// Protocol2 is the protocol version whose formats a node writes once the
+// cluster version is raised to it.
+const Protocol2 uint32 = 2
 
 // raftFacts are the step function's own yes/no state, one bit each.
 type raftFacts uint8
@@ -84,6 +91,10 @@ type Config struct {
 	MaxForwardBytes int64
 	// mut is set by the package's own tests only.
 	mut mutation
+	// speaks, when not 0, is the protocol version this node speaks in place
+	// of ProtocolMax: the package's own tests run a node of the previous
+	// release with it.
+	speaks uint32
 }
 
 // fwdEntry is one forwarded command a leader appended.
@@ -733,6 +744,9 @@ func (r *Raft) send(m core.MessageValue) {
 	m.Version = 1
 	m.Group = r.cfg.Group
 	m.From = r.id
+	if r.speaks() >= Protocol2 {
+		m.Flags |= core.FlagProtocol2
+	}
 	if m.Term == 0 && m.Kind != core.MsgPreVote && m.Kind != core.MsgPreVoteResp {
 		m.Term = r.term
 	}
@@ -1066,7 +1080,7 @@ func (r *Raft) commitTimingContract(admin *wire.AdminValue) {
 // version above ProtocolMax is not applied: it is named in the Ready for the
 // driver to stop the node, and true stops the walk there.
 func (r *Raft) commitClusterVersion(i uint64, admin *wire.AdminValue) bool {
-	if admin.ClusterVersion > ProtocolMax {
+	if admin.ClusterVersion > r.speaks() {
 		// Unknown means stop (D18, review M3).
 		r.rd.Unsupported = UnsupportedEntryValue{Index: i, Kind: core.EntryClusterVersion}
 		return true
@@ -1075,6 +1089,15 @@ func (r *Raft) commitClusterVersion(i uint64, admin *wire.AdminValue) bool {
 		r.clusterVer, r.clusterGen = admin.ClusterVersion, r.clusterGen+1
 	}
 	return false
+}
+
+// speaks is the highest protocol version this node speaks: ProtocolMax,
+// unless a test runs it as a node of the previous release.
+func (r *Raft) speaks() uint32 {
+	if r.cfg.speaks != 0 {
+		return r.cfg.speaks
+	}
+	return ProtocolMax
 }
 
 // commitTo advances the commit to i, never back, applying the engine's own

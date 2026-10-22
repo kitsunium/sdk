@@ -61,6 +61,12 @@ const (
 	// acknowledged entries through TruncateAndStaySilent: the leader lowers
 	// its match to the node's log, the one exception to "match only grows".
 	FlagTruncated
+	// FlagProtocol2 marks a frame from a node that speaks protocol version
+	// 2. It is the announcement D18 asks for: a node of protocol 1 tests
+	// the bits it names only and ignores it, and a leader refuses to raise
+	// the cluster version to 2 while a member's last frame of the term
+	// lacks it.
+	FlagProtocol2
 )
 
 // Lane returns the connection the kind belongs on.
