@@ -861,7 +861,27 @@ func (t *TCPTransport) redial(k outKey, link *senderLink) bool {
 		return false
 	}
 	link.conn, link.w, link.created = c, bufio.NewWriterSize(c, connBufferBytes), time.Now()
+	t.wg.Add(1)
+	go watchLink(&t.wg, c)
 	return true
+}
+
+// watchLink reads an outbound connection until it ends, then closes its
+// socket. The receiver writes nothing on a member's lane, so a read only
+// returns once the peer closed its end or the sender closed the link: a
+// write into a link the peer closed cleanly (a FIN) succeeded and its
+// batch was lost to the peer's reset, while a closed socket fails the next
+// write, which sendBatch dials again and resends (#553). It is the
+// background goroutine redial launches per connection, counted in wg, and
+// ends when the connection does; TLS's post-handshake messages are read
+// and discarded on the way.
+func watchLink(wg *sync.WaitGroup, c *tls.Conn) {
+	defer wg.Done()
+	// Whatever the read returned, the link is over: nothing reads this
+	// result, and the socket is closed so that no write lands in it.
+	_, err := io.Copy(io.Discard, c)
+	abandon(err)
+	abandon(c.NetConn().Close())
 }
 
 // reportUnreachable tells the engine, when it asked to know, that a peer
