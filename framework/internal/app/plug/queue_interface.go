@@ -5,12 +5,12 @@ import (
 	"time"
 )
 
-// The queue subsystem's broker and its sibling (ADR 0179 §3, step 4), which
+// The queue subsystem's broker and its siblings (ADR 0179 §3, step 4), which
 // framework/internal/app/queueengine implements over the SDK's queue, and the
 // app's clock as a queue stamps and waits on it, which the core implements.
 
 // Broker is one queue as the framework's core uses it: a publication, the consumer
-// that delivers it, and its dead letters. It grows by the sibling below.
+// that delivers it, and its dead letters. It grows by the siblings below.
 type Broker interface {
 	// Publish puts payload in the queue: in the transaction ctx carries for
 	// its database, when it lives on one.
@@ -36,6 +36,18 @@ type MessageMover interface {
 	// PutDeadLetter writes dead, with its cause, under an identifier of the
 	// queue's own, and returns it.
 	PutDeadLetter(ctx context.Context, dead DeadLetterValue) (string, error)
+}
+
+// LaterPublisher is a Broker that publishes a message for later, and once
+// per key. A sibling of [Broker].
+type LaterPublisher interface {
+	// PublishAt puts payload in the queue, received by no consumer before
+	// at: in the transaction ctx carries for its database, when it lives on
+	// one.
+	PublishAt(ctx context.Context, payload []byte, at time.Time) error
+	// PublishOnce puts payload in the queue unless a publication under key
+	// was made within window, and reports whether it did.
+	PublishOnce(ctx context.Context, key string, payload []byte, window time.Duration) (published bool, err error)
 }
 
 // Clock is the app's clock as a queue stamps and waits on it: the framework's core

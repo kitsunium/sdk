@@ -87,6 +87,8 @@ sequences:
     of: Forbidden
   - forward: iapp.Unavailable
     of: Unavailable
+  - forward: iapp.RetryIn
+    of: RetryIn
   - forward: iapp.Anyone
     of: Anyone
   - forward: iapp.AnyUser
@@ -277,6 +279,14 @@ sequences:
     of: MaxDeliveries
   - forward: iapp.Parallelism
     of: Parallelism
+  - forward: iapp.Drain
+    of: Drain
+  - forward: iapp.Settle
+    of: Settle
+  - forward: iapp.Lease
+    of: Lease
+  - forward: iapp.AutoExtend
+    of: AutoExtend
   - forward: iapp.OwnStores
     of: OwnStores
   - forward: iapp.Transact

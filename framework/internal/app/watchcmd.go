@@ -102,7 +102,7 @@ func (a *App) watchIDs() []string {
 // queued, the failure that ended it among them. Each store's listing is
 // journaled before its first key is read.
 func (w *Watch) replayNow(ctx context.Context, a *App) (stores, queued int, err error) {
-	broker, db, err := a.openConsumerQueue(&w.nodeBase, w.queueUnder(), w.maxDeliver)
+	broker, db, err := a.openConsumerQueue(&w.nodeBase, w.queueUnder(), w.knobs.values().policy(w.maxDeliver))
 	if err != nil {
 		return 0, 0, failure(CodeWatchQueue, "WATCH_QUEUE", "a watch's queue cannot be opened", err, errs.String("watch", w.id))
 	}

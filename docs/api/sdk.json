@@ -442,6 +442,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/app.AutoExtend",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "AutoExtend",
+      "spelled": "func(on bool) DeliveryOption",
+      "canonical": "func(on bool) github.com/kitsunium/sdk/framework/app.DeliveryOption",
+      "doc": "AutoExtend says whether the lease of the message a handler is running is\nrenewed, a third of the lease after it was granted or last renewed, for as\nlong as the handler runs — a subscription's, a watch's, or a queued\ncommand's. It is on by default: a slow handler keeps its message instead of\nseeing it delivered to another while it runs. Off, the handler is stopped a\nmargin before its [Lease] ends. A renewal the queue refuses cancels the\nhandler's context. A mailer's outbox never renews: the mail spool parks a\nmail by its own lease.\n\non is the default of the consumer's setting\n<service>-<kind>-<name>-auto-extend, which config/<env>.* and\n<PRODUCT>_<NAME> override.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/app/topic.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/app.Binary",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/framework/app",
@@ -1464,6 +1475,22 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/app.CodeRetryIn",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "CodeRetryIn",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "262744",
+      "init": "go:github.com/kitsunium/sdk/framework/internal/app.CodeRetryIn",
+      "code": {
+        "value": "0.4.2.88"
+      },
+      "doc": "CodeRetryIn marks a failure a handler returned through [RetryIn]: its\nqueue hands the message back with the delay it asked for, the delivery\ncounted.\n",
+      "file": "framework/app/errors.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/app.CodeRevisionDecode",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/app",
@@ -2287,6 +2314,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/app.Drain",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "Drain",
+      "spelled": "func(d time.Duration) DeliveryOption",
+      "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/app.DeliveryOption",
+      "doc": "Drain is how long the message a handler is running when the app stops may\nstill run before its context is cancelled — a subscription's, a watch's, or\na queued command's. A handler that finishes within it is acknowledged; one\nit cuts short is handed back uncounted, delivered again at the next start,\nand is no failure. The default is 5 seconds; zero cancels the handler at\nonce, and a negative one stops the start. The app's stop gives each\ncomponent the longest drain plus its settle ([Settle]), and tells every\nconsumer at once, so that their drains overlap.\n\nd is the default of the consumer's setting <service>-<kind>-<name>-drain,\nthe kind subscription or command, which config/<env>.* and\n<PRODUCT>_<NAME> override.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/app/topic.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/app.Edit",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/framework/app",
@@ -2708,6 +2746,17 @@
       "canonical": "func(things ...github.com/kitsunium/sdk/framework/app.Keepable) github.com/kitsunium/sdk/framework/app.DatabaseOption",
       "doc": "Keeps says what the database keeps: a service's stores, a store, a\nmodule's stores. The most precise wins: a store kept by name, then its\nservice, then its module, then the default database — the one declared\nwithout Keeps —, then the data directory, then memory. [InMemory] wins\nover all of them, on the app as on a store.\n",
       "file": "framework/app/database.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.Lease",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "Lease",
+      "spelled": "func(d time.Duration) DeliveryOption",
+      "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/app.DeliveryOption",
+      "doc": "Lease is how long a delivered message is held by its consumer before the\nqueue hands it to another — a subscription's, a watch's, or a queued\ncommand's. The default is 30 seconds; one that is not positive stops the\nstart. With [AutoExtend], a handler that runs longer keeps it.\n\nd is the default of the consumer's setting <service>-<kind>-<name>-lease,\nwhich config/<env>.* and <PRODUCT>_<NAME> override.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/app/topic.go",
       "layer": "framework"
     },
     {
@@ -3605,6 +3654,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/app.RetryIn",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "RetryIn",
+      "spelled": "func(d time.Duration, cause error) error",
+      "canonical": "func(d time.Duration, cause error) error",
+      "doc": "RetryIn marks cause as a failure to retry in d, no sooner: returned from\nthe handler of a subscription, a watch or a queued command, it hands the\nmessage back to its queue with that delay, in place of the queue's own —\nhalf a second after a first failure, doubling, never more than a minute —:\na downstream that answered with a Retry-After, a resource that frees at a\nknown instant. The delivery counts as an attempt: a message that used its\n[MaxDeliveries] is dead-lettered with cause, the delay unused. A negative\nd is read as zero.\n\n\tif resp.StatusCode == http.StatusTooManyRequests {\n\t\treturn app.RetryIn(30*time.Second, errThrottled)\n\t}\n\ncause keeps its own code, reason and words — what a dead letter records —\nand [CodeRetryIn] joins its trail; a cause that is no error of the SDK's,\nor none, is recorded as CodeRetryIn itself. Outside a consumer's handler\nit is an error like any other.\n",
+      "file": "framework/app/errors.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/app.RetryMaxDelay",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/app",
@@ -3810,6 +3870,17 @@
       "owner": "go:github.com/kitsunium/sdk/framework/internal/app.SettingValue",
       "doc": "SettingValue is what a setting may hold.\n",
       "file": "framework/app/setting_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.Settle",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "Settle",
+      "spelled": "func(d time.Duration) DeliveryOption",
+      "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/app.DeliveryOption",
+      "doc": "Settle bounds each outcome a consumer sends once the app began to stop —\nan acknowledgement, a nack, a message handed back — and each renewal of a\nlease ([AutoExtend]): a queue that stopped answering cannot hold the stop.\nThe default is 5 seconds; one that is not positive stops the start.\n\nd is the default of the consumer's setting <service>-<kind>-<name>-settle,\nwhich config/<env>.* and <PRODUCT>_<NAME> override.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/app/topic.go",
       "layer": "framework"
     },
     {
@@ -5863,6 +5934,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.AutoExtend",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "AutoExtend",
+      "spelled": "func(on bool) DeliveryOption",
+      "canonical": "func(on bool) github.com/kitsunium/sdk/framework/internal/app.DeliveryOption",
+      "doc": "AutoExtend says whether the lease of the message a handler is running is\nrenewed, a third of the lease after it was granted or last renewed, for as\nlong as the handler runs — a subscription's, a watch's, or a queued\ncommand's. It is on by default: a slow handler keeps its message instead of\nseeing it delivered to another while it runs. Off, the handler is stopped a\nmargin before its [Lease] ends. A renewal the queue refuses cancels the\nhandler's context. A mailer's outbox never renews: the mail spool parks a\nmail by its own lease.\n\non is the default of the consumer's setting\n<service>-<kind>-<name>-auto-extend, which config/<env>.* and\n<PRODUCT>_<NAME> override.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/topic.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app.Binary",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/app",
@@ -6940,6 +7022,21 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.CodeRetryIn",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "CodeRetryIn",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "262744",
+      "code": {
+        "value": "0.4.2.88"
+      },
+      "doc": "CodeRetryIn marks a failure a handler returned through [RetryIn]: the\nqueue of the subscription, the watch or the queued command that ran\nit hands the message back with the delay it asked for, the delivery\ncounted. It joins the trail of an SDK cause, whose own code a dead\nletter records; any other cause is recorded under it.\n",
+      "file": "framework/internal/app/gen_codes.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app.CodeRevisionDecode",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/internal/app",
@@ -7527,6 +7624,18 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.(*Command[...]).DispatchAt",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "DispatchAt",
+      "recv": "Command",
+      "spelled": "func(ctx context.Context, in C, at time.Time) error",
+      "canonical": "func(ctx context.Context, in C, at time.Time) error",
+      "doc": "DispatchAt queues a dispatch of the queued command that its consumer\nhandles no sooner than at — a reminder, a trial that ends, an order\ncancelled if still unpaid —, checked now as [Command.Dispatch] checks it,\nas its caller: its validate tags, its authorization, its key. It returns\nonce the command's queue accepted it; inside a transaction it is held to\nthe commit as a dispatch is. A dispatch whose key ([Command.Key]) waits —\nfor later too — or runs is not queued again. An instant already past is\nnow. A command that is not queued refuses it: only a queue holds a\ndispatch until its instant. It is the SDK's queue.PublishAt.\n",
+      "file": "framework/internal/app/command.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app.(*Command[...]).Expose",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/framework/internal/app",
@@ -7855,6 +7964,17 @@
       "value": "\"sqlite\"",
       "doc": "DialectSQLite is SQLite.\n",
       "file": "framework/internal/app/database.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.Drain",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "Drain",
+      "spelled": "func(d time.Duration) DeliveryOption",
+      "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/internal/app.DeliveryOption",
+      "doc": "Drain is how long the message a handler is running when the app stops may\nstill run before its context is cancelled — a subscription's, a watch's, or\na queued command's. A handler that finishes within it is acknowledged; one\nit cuts short is handed back uncounted, delivered again at the next start,\nand is no failure. The default is 5 seconds; zero cancels the handler at\nonce, and a negative one stops the start. The app's stop gives each\ncomponent the longest drain plus its settle ([Settle]), and tells every\nconsumer at once, so that their drains overlap.\n\nd is the default of the consumer's setting <service>-<kind>-<name>-drain,\nthe kind subscription or command, which config/<env>.* and\n<PRODUCT>_<NAME> override.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/topic.go",
       "layer": "framework"
     },
     {
@@ -8432,6 +8552,17 @@
       "canonical": "func(things ...github.com/kitsunium/sdk/framework/internal/app.Keeper) github.com/kitsunium/sdk/framework/internal/app.DatabaseConfigurer",
       "doc": "Keeps says what the database keeps: a service's stores, a store, a\nmodule's stores. The most precise wins: a store kept by name, then its\nservice, then its module, then the default database — the one declared\nwithout Keeps —, then the data directory, then memory. [InMemory] wins\nover all of them, on the app as on a store. The framework's data keys never live on\nSQLite: Keeps(app.Privacy) there keeps its holds and its journal\n([Privacy]).\n",
       "file": "framework/internal/app/database.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.Lease",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "Lease",
+      "spelled": "func(d time.Duration) DeliveryOption",
+      "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/internal/app.DeliveryOption",
+      "doc": "Lease is how long a delivered message is held by its consumer before the\nqueue hands it to another — a subscription's, a watch's, or a queued\ncommand's. The default is 30 seconds; one that is not positive stops the\nstart. With [AutoExtend], a handler that runs longer keeps it.\n\nd is the default of the consumer's setting <service>-<kind>-<name>-lease,\nwhich config/<env>.* and <PRODUCT>_<NAME> override.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/topic.go",
       "layer": "framework"
     },
     {
@@ -9795,6 +9926,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.RetryIn",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "RetryIn",
+      "spelled": "func(d time.Duration, cause error) error",
+      "canonical": "func(d time.Duration, cause error) error",
+      "doc": "RetryIn marks cause as a failure to retry in d, no sooner: returned from\nthe handler of a subscription, a watch or a queued command, it hands the\nmessage back to its queue with that delay, in place of the queue's own —\nhalf a second after a first failure, doubling, never more than a minute —:\na downstream that answered with a Retry-After, a resource that frees at a\nknown instant. The delivery counts as an attempt: a message that used its\n[MaxDeliveries] is dead-lettered with cause, the delay unused. A negative\nd is read as zero.\n\n\tif resp.StatusCode == http.StatusTooManyRequests {\n\t\treturn app.RetryIn(30*time.Second, errThrottled)\n\t}\n\ncause keeps its own code, reason and words — what a dead letter records —\nand [CodeRetryIn] joins its trail; a cause that is no error of the SDK's,\nor none, is recorded as CodeRetryIn itself. Outside a consumer's handler\nit is an error like any other.\n",
+      "file": "framework/internal/app/consumer_retry.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app.RetryMaxDelay",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/internal/app",
@@ -10376,6 +10518,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.Settle",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "Settle",
+      "spelled": "func(d time.Duration) DeliveryOption",
+      "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/internal/app.DeliveryOption",
+      "doc": "Settle bounds each outcome a consumer sends once the app began to stop —\nan acknowledgement, a nack, a message handed back — and each renewal of a\nlease ([AutoExtend]): a queue that stopped answering cannot hold the stop.\nThe default is 5 seconds; one that is not positive stops the start.\n\nd is the default of the consumer's setting <service>-<kind>-<name>-settle,\nwhich config/<env>.* and <PRODUCT>_<NAME> override.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/topic.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app.Singleton",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/internal/app",
@@ -10896,6 +11049,18 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.(*TopicService[...]).Once",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "Once",
+      "recv": "TopicService",
+      "spelled": "func(key func(T) string, window time.Duration) *TopicService[T]",
+      "canonical": "func(key func(T) string, window time.Duration) *github.com/kitsunium/sdk/framework/internal/app.TopicService[T]",
+      "doc": "Once makes the topic publish a message at most once per key over window:\na second [TopicService.Publish] whose message has the key of one published\nwithin the window publishes nothing, in no subscription's queue, and\nanswers nil — a producer that retries a publication it never heard back\nfrom adds no copy. The window is counted by each subscription's queue,\nfrom its first publication under the key; it is the SDK's\nqueue.PublishOnce. A message whose key is empty is refused. Delivery stays\nat least once: a handler still tolerates a redelivery.\n\nwindow is the default of the topic's setting\n<service>-topic-<name>-once-window, which config/<env>.* and\n<PRODUCT>_<NAME> override; one that is not positive stops the start. A\nqueued command keeps its own key ([Command.Key]): a dispatch whose key\nwaits or runs is not queued again, however long ago it was dispatched.\n",
+      "file": "framework/internal/app/topic.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app.(*TopicService[...]).Publish",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/framework/internal/app",
@@ -10903,7 +11068,19 @@
       "recv": "TopicService",
       "spelled": "func(ctx context.Context, msg T) error",
       "canonical": "func(ctx context.Context, msg T) error",
-      "doc": "Publish sends msg to every subscription. It returns once every\nsubscription's queue has accepted the message; delivery happens later.\nInside a transaction ([Transact], a command's) the message is encoded now\nand queued at the commit: in the transaction, just before it commits, for\na subscription whose queue lives on the transaction's database — a queue\nthat refuses it then fails the transaction —, once it committed for the\nothers. A rollback drops it.\n",
+      "doc": "Publish sends msg to every subscription. It returns once every\nsubscription's queue has accepted the message; delivery happens later.\nInside a transaction ([Transact], a command's) the message is encoded now\nand queued at the commit: in the transaction, just before it commits, for\na subscription whose queue lives on the transaction's database — a queue\nthat refuses it then fails the transaction —, once it committed for the\nothers. A rollback drops it. A topic that publishes once ([TopicService.Once])\npublishes a message whose key it published within its window in no queue.\n",
+      "file": "framework/internal/app/topic.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.(*TopicService[...]).PublishAt",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "PublishAt",
+      "recv": "TopicService",
+      "spelled": "func(ctx context.Context, msg T, at time.Time) error",
+      "canonical": "func(ctx context.Context, msg T, at time.Time) error",
+      "doc": "PublishAt sends msg to every subscription as [TopicService.Publish] does,\nbut no subscription receives it before at: a reminder, a trial that ends,\nan order cancelled if still unpaid. It is as durable as any message, held\nto the commit inside a transaction as a publication is; an instant already\npast is now. It does not recur — a job does. A topic that publishes once\nrefuses it: the SDK has no publication once for later yet. It is the SDK's\nqueue.PublishAt.\n",
       "file": "framework/internal/app/topic.go",
       "layer": "framework"
     },
@@ -11472,7 +11649,7 @@
       "name": "Broker",
       "spelled": "interface{Consume(ctx context.Context, cfg ConsumeConfig) error; DeadLetters(ctx context.Context, maxLetters int) ([]DeadLetterValue, error); Publish(ctx context.Context, payload []byte) error}",
       "canonical": "interface{Consume(ctx context.Context, cfg github.com/kitsunium/sdk/framework/internal/app/plug.ConsumeConfig) error; DeadLetters(ctx context.Context, maxLetters int) ([]github.com/kitsunium/sdk/framework/internal/app/plug.DeadLetterValue, error); Publish(ctx context.Context, payload []byte) error}",
-      "doc": "Broker is one queue as the framework's core uses it: a publication, the consumer\nthat delivers it, and its dead letters. It grows by the sibling below.\n",
+      "doc": "Broker is one queue as the framework's core uses it: a publication, the consumer\nthat delivers it, and its dead letters. It grows by the siblings below.\n",
       "file": "framework/internal/app/plug/queue_interface.go",
       "layer": "framework"
     },
@@ -11623,8 +11800,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
       "name": "ConsumeConfig",
-      "spelled": "struct{Handler func(ctx context.Context, d DeliveryValue) error; PollInterval time.Duration; Parallelism int; BatchSize int}",
-      "canonical": "struct{Handler func(ctx context.Context, d github.com/kitsunium/sdk/framework/internal/app/plug.DeliveryValue) error; PollInterval time.Duration; Parallelism int; BatchSize int}",
+      "spelled": "struct{Handler func(ctx context.Context, d DeliveryValue) error; PollInterval time.Duration; Parallelism int; BatchSize int; DrainTimeout time.Duration; SettleTimeout time.Duration; AutoExtend bool; RetryIn func(err error) (delay time.Duration, asked bool)}",
+      "canonical": "struct{Handler func(ctx context.Context, d github.com/kitsunium/sdk/framework/internal/app/plug.DeliveryValue) error; PollInterval time.Duration; Parallelism int; BatchSize int; DrainTimeout time.Duration; SettleTimeout time.Duration; AutoExtend bool; RetryIn func(err error) (delay time.Duration, asked bool)}",
       "fields": [
         {
           "name": "Handler",
@@ -11645,9 +11822,29 @@
           "name": "BatchSize",
           "type": "int",
           "doc": "BatchSize is how many messages the consumer takes at a time.\n"
+        },
+        {
+          "name": "DrainTimeout",
+          "type": "time.Duration",
+          "doc": "DrainTimeout is how long the handler running when ctx ends may still\nrun before its context is cancelled; zero cancels it at once.\n"
+        },
+        {
+          "name": "SettleTimeout",
+          "type": "time.Duration",
+          "doc": "SettleTimeout bounds each outcome sent once ctx ended, and each lease\nrenewal; zero is the queue's own bound.\n"
+        },
+        {
+          "name": "AutoExtend",
+          "type": "bool",
+          "doc": "AutoExtend renews the lease of the message a handler runs for as long\nas it runs.\n"
+        },
+        {
+          "name": "RetryIn",
+          "type": "func(err error) (delay time.Duration, asked bool)",
+          "doc": "RetryIn reads, from the error a delivery's handler returned, the delay\nit asked to be retried after: its queue hands the message back with\nthat delay, the delivery counted. Nil, or false, keeps the queue's own\nretry delay.\n"
         }
       ],
-      "doc": "ConsumeConfig is how a queue's consumer runs: its handler, how long it\nwaits idle, how many messages it handles at once and takes at a time.\n",
+      "doc": "ConsumeConfig is how a queue's consumer runs: its handler, how long it\nwaits idle, how many messages it handles at once and takes at a time, how\nit stops, whether it renews a running handler's lease, and when a handler\nasked to be retried.\n",
       "file": "framework/internal/app/plug/queue.go",
       "layer": "framework"
     },
@@ -12518,6 +12715,41 @@
       "value": "\"app_node\"",
       "doc": "LabelNode is the pprof label naming the node a goroutine works for.\n",
       "file": "framework/internal/app/plug/plug.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.LaterPublisher",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "LaterPublisher",
+      "spelled": "interface{PublishAt(ctx context.Context, payload []byte, at time.Time) error; PublishOnce(ctx context.Context, key string, payload []byte, window time.Duration) (published bool, err error)}",
+      "canonical": "interface{PublishAt(ctx context.Context, payload []byte, at time.Time) error; PublishOnce(ctx context.Context, key string, payload []byte, window time.Duration) (published bool, err error)}",
+      "doc": "LaterPublisher is a Broker that publishes a message for later, and once\nper key. A sibling of [Broker].\n",
+      "file": "framework/internal/app/plug/queue_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.LaterPublisher.PublishAt",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "PublishAt",
+      "recv": "LaterPublisher",
+      "spelled": "func(ctx context.Context, payload []byte, at time.Time) error",
+      "canonical": "func(ctx context.Context, payload []byte, at time.Time) error",
+      "doc": "PublishAt puts payload in the queue, received by no consumer before\nat: in the transaction ctx carries for its database, when it lives on\none.\n",
+      "file": "framework/internal/app/plug/queue_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.LaterPublisher.PublishOnce",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "PublishOnce",
+      "recv": "LaterPublisher",
+      "spelled": "func(ctx context.Context, key string, payload []byte, window time.Duration) (published bool, err error)",
+      "canonical": "func(ctx context.Context, key string, payload []byte, window time.Duration) (published bool, err error)",
+      "doc": "PublishOnce puts payload in the queue unless a publication under key\nwas made within window, and reports whether it did.\n",
+      "file": "framework/internal/app/plug/queue_interface.go",
       "layer": "framework"
     },
     {

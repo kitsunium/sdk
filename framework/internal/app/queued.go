@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/kitsunium/sdk/framework/internal/app/plug"
 	"github.com/kitsunium/sdk/framework/model"
@@ -77,10 +78,11 @@ type queuedEnvelope[C any] struct {
 }
 
 // accept checks a dispatch of the queued command as its caller — the
-// input's validate tags, its authorization, its key — and queues it. A
-// dispatch whose key waits or runs is not queued again: it is answered as
-// accepted, and its span says it was deduplicated.
-func (c *Command[C, R]) accept(ctx context.Context, a *App, from string, in C) (err error) {
+// input's validate tags, its authorization, its key — and queues it, for
+// at when it is not zero (DispatchAt). A dispatch whose key waits or runs is
+// not queued again: it is answered as accepted, and its span says it was
+// deduplicated — a dispatch for later holds its key until it is handled.
+func (c *Command[C, R]) accept(ctx context.Context, a *App, from string, in C, at time.Time) (err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			err = panicked(ctx, a, c.id, "command panicked at its dispatch", p)
@@ -100,7 +102,7 @@ func (c *Command[C, R]) accept(ctx context.Context, a *App, from string, in C) (
 	if err != nil || !fresh {
 		return err
 	}
-	if err := c.put(ctx, q, key, queuedEnvelope[C]{From: from, Key: key, Input: in}); err != nil {
+	if err := c.put(ctx, q, key, queuedEnvelope[C]{From: from, Key: key, Input: in}, at); err != nil {
 		q.release(key)
 		return err
 	}
@@ -129,13 +131,13 @@ func (c *Command[C, R]) claim(ctx context.Context, a *App, q *commandQueue, in C
 	return key, true, nil
 }
 
-// put queues env, with the dispatch's trace and user — inside a
-// transaction, encoded now and queued at the commit: in the transaction,
-// just before it commits, when the command's queue lives on the
-// transaction's database — a queue that refuses it then fails the
-// transaction —, once it committed otherwise. A rollback drops it, and gives
-// its key back.
-func (c *Command[C, R]) put(ctx context.Context, q *commandQueue, key string, env queuedEnvelope[C]) error {
+// put queues env, with the dispatch's trace and user, received by no
+// consumer before at when it is not zero — inside a transaction, encoded now
+// and queued at the commit: in the transaction, just before it commits, when
+// the command's queue lives on the transaction's database — a queue that
+// refuses it then fails the transaction —, once it committed otherwise. A
+// rollback drops it, and gives its key back.
+func (c *Command[C, R]) put(ctx context.Context, q *commandQueue, key string, env queuedEnvelope[C], at time.Time) error {
 	env.Trace, _ = trace.FormatTraceParent(trace.SpanContextFromContext(ctx))
 	if uid, ok := UserID(ctx); ok {
 		env.User = string(uid)
@@ -147,8 +149,9 @@ func (c *Command[C, R]) put(ctx context.Context, q *commandQueue, key string, en
 	case err != nil:
 		return failure(CodeCommandEncode, "COMMAND_ENCODE", "the command cannot be queued", err, errs.String("command", c.id))
 	}
+	pub := publication{at: at}
 	queue := func(ctx context.Context) error {
-		if err := q.broker.Publish(ctx, payload); err != nil {
+		if _, err := pub.into(ctx, q.broker, payload); err != nil {
 			return failure(CodeCommandQueue, "COMMAND_QUEUE", "the command's queue refused it", err, errs.String("command", c.id))
 		}
 		return nil
@@ -175,7 +178,10 @@ func (c *Command[C, R]) put(ctx context.Context, q *commandQueue, key string, en
 // or dead-lettered — after its last attempt, or at once when no retry can
 // help (doNotRetry) —, gives its key back. A dispatch that does not
 // decode will not decode on its next attempt either: it is dead-lettered on
-// its first (ADR 0151 §D8).
+// its first (ADR 0151 §D8). A handling that said when to try again
+// ([RetryIn]) is handed back with that delay, its key kept; one the app's
+// stop cut short is no failure, keeps its key even on its last delivery,
+// and is handled again at the next start (settled).
 func (c *Command[C, R]) handler(a *App, q *commandQueue, loop *loopState) deliveryHandler {
 	return func(ctx context.Context, d plug.DeliveryValue) (err error) {
 		env, decodeErr, openErr := c.decode(ctx, a, d.Message.Payload)
@@ -189,9 +195,8 @@ func (c *Command[C, R]) handler(a *App, q *commandQueue, loop *loopState) delive
 			if p := recover(); p != nil {
 				err = panicked(ctx, a, c.id, "handler panicked", p)
 			}
-			sp.end(err)
-			loop.ran(a, started, a.clock.Now(), err)
-			if err == nil || d.Deliveries >= c.opts.deliveries.maxDeliveries || notRetryable(err) {
+			loop.ended(ctx, a, sp, started, err)
+			if c.settled(ctx, a, d.Deliveries, err) {
 				q.release(env.Key)
 			}
 		}()
@@ -204,6 +209,23 @@ func (c *Command[C, R]) handler(a *App, q *commandQueue, loop *loopState) delive
 		}
 		return c.handle(ctx, a, sp, env)
 	}
+}
+
+// settled reports whether a handling that ended with err, on its
+// deliveries-th delivery, leaves its dispatch out of the queue — handled,
+// refused for good, or out of attempts —, so that its key can be given
+// back. A handling the app's stop cut short leaves it in, whatever its
+// delivery: its queue hands it back uncounted (stoppedBy), and it is
+// handled again at the next start — its key given back then would let a
+// dispatch with the same key be queued beside it.
+func (c *Command[C, R]) settled(ctx context.Context, a *App, deliveries int, err error) bool {
+	switch {
+	case err == nil:
+		return true
+	case stoppedBy(ctx, a, err):
+		return false
+	}
+	return deliveries >= c.opts.deliveries.maxDeliveries || notRetryable(err)
 }
 
 // handleSpan begins the span of a handling: on the command, from the node
@@ -267,16 +289,17 @@ func (c *Command[C, R]) start(_ context.Context, a *App) error {
 	if !c.opts.queued {
 		return nil
 	}
-	broker, db, err := a.openConsumerQueue(&c.nodeBase, c.queueUnder(), c.opts.deliveries.maxDeliveries)
+	run := c.opts.deliveries.knobs.values()
+	broker, db, err := a.openConsumerQueue(&c.nodeBase, c.queueUnder(), run.policy(c.opts.deliveries.maxDeliveries))
 	if err != nil {
 		return failure(CodeCommandQueue, "COMMAND_QUEUE", "a queued command's queue cannot be opened", err, errs.String("command", c.id))
 	}
 	q := &commandQueue{broker: broker, db: db, pending: map[string]bool{}}
 	loop := a.loop(c.id+" consumer", c.id, model.LoopConsumer, consumerHow)
 	c.queue.Store(q)
-	run := consumer{a: a, loop: loop, node: c.id, name: c.name, wake: model.WakeTopic}
+	cons := consumer{a: a, loop: loop, node: c.id, name: c.name, wake: model.WakeTopic}
 	handler := c.handler(a, q, loop)
-	sup, err := run.supervise(func(ctx context.Context) error { return c.consume(ctx, q, handler) })
+	sup, err := cons.supervise(func(ctx context.Context) error { return c.consume(ctx, q, run, handler) })
 	if err != nil {
 		return failure(CodeLoopStart, "LOOP_START", "a queued command's consumer cannot start", err, errs.String("command", c.id))
 	}
@@ -299,13 +322,13 @@ func (c *Command[C, R]) queueUnder() string {
 // worker handles its batch in turn, so a batch of several would hold
 // dispatches behind a slow one — their leases lapsing — and Parallelism
 // would not say how many run.
-func (c *Command[C, R]) consume(ctx context.Context, q *commandQueue, handler deliveryHandler) error {
-	return q.broker.Consume(ctx, plug.ConsumeConfig{
+func (c *Command[C, R]) consume(ctx context.Context, q *commandQueue, run consumerRun, handler deliveryHandler) error {
+	return q.broker.Consume(ctx, run.consume(plug.ConsumeConfig{
 		Handler:      handler,
 		PollInterval: pollInterval,
 		Parallelism:  c.opts.deliveries.parallelism,
 		BatchSize:    1,
-	})
+	}))
 }
 
 // stop ends a queued command's consumer; what waits in a file queue is
@@ -322,6 +345,27 @@ func (c *Command[C, R]) stop(ctx context.Context, _ *App) error {
 		return nil
 	}
 	return sup.Stop(ctx)
+}
+
+// stopTakes is the most a queued command's stop takes: its drain and its
+// settle; nothing for a command that is not queued.
+func (c *Command[C, R]) stopTakes() time.Duration {
+	if !c.opts.queued {
+		return 0
+	}
+	return c.opts.deliveries.knobs.values().stopTakes()
+}
+
+// beginDrain tells a queued command's consumer the app is stopping.
+func (c *Command[C, R]) beginDrain() error {
+	q := c.queue.Load()
+	if q == nil {
+		return nil
+	}
+	q.mu.Lock()
+	sup := q.sup
+	q.mu.Unlock()
+	return beginStop(sup)
 }
 
 // describeQueue fills what a queued command's node says of its queue: its
@@ -360,12 +404,15 @@ func queueWhere(a *App, b *nodeBase) string {
 }
 
 // queueMechanic is a queued command's queue, among the steps of its
-// pipeline: where it waits, and how many attempts it gets.
+// pipeline: where it waits, how many attempts it gets, and its stop and
+// lease.
 func (c *Command[C, R]) queueMechanic(a *App) model.Mechanic {
 	d := c.opts.deliveries
 	where := queueWhere(a, &c.nodeBase)
+	config := map[string]string{"queue": where, "maxDeliveries": strconv.Itoa(d.maxDeliveries), "parallelism": strconv.Itoa(d.parallelism)}
+	d.knobs.values().config(config)
 	return model.Mechanic{
 		Kind: "queue", Label: fmt.Sprintf("%s · %d attempts", queuePlace[where], d.maxDeliveries), Package: "github.com/kitsunium/sdk/pkg/v1/data/queue",
-		Config: map[string]string{"queue": where, "maxDeliveries": strconv.Itoa(d.maxDeliveries), "parallelism": strconv.Itoa(d.parallelism)},
+		Config: config,
 	}
 }

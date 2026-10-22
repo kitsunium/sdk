@@ -502,7 +502,9 @@ func (a *App) Start(ctx context.Context) error {
 		a.cancel()
 		return a.failStart(err)
 	}
-	a.lc = lifecycle.New(lifecycle.Config{Clock: a.clock, StopTimeout: 10 * time.Second, OnTransition: a.onTransition})
+	// Each component's stop gets the longest a consumer's drain and settle
+	// take, ten seconds at least (consumer_policy.go).
+	a.lc = lifecycle.New(lifecycle.Config{Clock: a.clock, StopTimeout: a.componentStopBudget(), OnTransition: a.onTransition})
 	if err := a.addComponents(); err != nil {
 		return a.failStart(err)
 	}
@@ -1219,6 +1221,9 @@ func (a *App) stop(ctx context.Context, reason string) error {
 	a.setPhase(model.PhaseDraining, reason)
 	a.endStreams()
 	a.health.Drain()
+	// Every consumer stops leasing now and drains its running handler while
+	// the components before it stop: the drains overlap.
+	a.beginDrains()
 	err := a.lc.Stop(ctx)
 	if a.cancel != nil {
 		a.cancel()
@@ -1266,7 +1271,7 @@ func (a *App) Run(ctx context.Context) error {
 		reason = "asked"
 	}
 	logger.Info(context.WithoutCancel(ctx), a.log, "draining", logger.String("reason", reason))
-	stopCtx, stopCancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	stopCtx, stopCancel := context.WithTimeout(context.WithoutCancel(ctx), a.stopDeadline(runStopDeadline))
 	defer stopCancel()
 	return a.stop(stopCtx, reason)
 }

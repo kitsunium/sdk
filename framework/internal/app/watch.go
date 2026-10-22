@@ -78,6 +78,9 @@ type Watch struct {
 	// ownStores: it hears its own module's stores too, and never the
 	// writes of its own handler (OwnStores).
 	ownStores bool
+	// knobs are its consumer's stop and lease, declared as settings of its
+	// service (consumer_policy.go).
+	knobs consumerKnobs
 
 	// run is the watch in its app's current run, or its last one.
 	run atomic.Pointer[watchRun]
@@ -112,10 +115,11 @@ func (s *Service) Watch(name string, mark Mark, handler func(context.Context, Wr
 	for _, opt := range opts {
 		opt.subscriptionConfigure(&o)
 	}
-	w := &Watch{mark: mark, handler: handler, maxDeliver: o.maxDeliveries, parallelism: o.parallelism, ownStores: o.ownStores}
+	w := &Watch{mark: mark, handler: handler, maxDeliver: o.maxDeliveries, parallelism: o.parallelism, ownStores: o.ownStores, knobs: o.knobs}
 	w.kind, w.name, w.decl = model.KindSubscription, name, callerPos()
 	w.body = bodyOf(handler)
 	s.add(w, true)
+	w.knobs.declare(s, &w.nodeBase)
 	switch {
 	case !slices.Contains(marks, mark):
 		s.problem(w.decl, w.id, "watch.mark", "name", name, "mark", string(mark))

@@ -95,28 +95,29 @@ func queueSuffix(b *nodeBase, under string) string {
 }
 
 // consumerPolicy is the policy of every consumer's queue: a message is leased
-// for thirty seconds, retried half a second after its first failure, the
+// for thirty seconds — its consumer's lease setting says otherwise
+// (consumerRun.policy) —, retried half a second after its first failure, the
 // wait doubling after each — the queue's own growing delay (ADR 0151 §D7),
 // never more than kit's backoff ceiling, a minute —, and dead-lettered after
 // maxDeliveries attempts, or at its first failure when no retry can help
 // (doNotRetry).
 func consumerPolicy(maxDeliveries int) plug.QueuePolicyValue {
-	return plug.QueuePolicyValue{VisibilityTimeout: 30 * time.Second, RetryDelay: 500 * time.Millisecond, MaxRetryDelay: loopBackoffMax, MaxDeliveries: maxDeliveries}
+	return plug.QueuePolicyValue{VisibilityTimeout: defaultLease, RetryDelay: 500 * time.Millisecond, MaxRetryDelay: loopBackoffMax, MaxDeliveries: maxDeliveries}
 }
 
 // openConsumerQueue opens the queue of the consumer b — a subscription's, a
-// watch's, a queued command's —, kept under under: on the database that
+// watch's, a queued command's —, kept under under, under policy: on the database that
 // keeps the consumer when it is open (ADR 0178 C1), one table of the SDK's
 // SQL broker, and the database it returns is where a publication made in a
 // transaction on it joins that transaction; else a file or a memory queue
 // (openQueue), and no database. A test's wrapper stands in front of either.
-func (a *App) openConsumerQueue(b *nodeBase, under string, maxDeliveries int) (plug.Broker, *databaseRun, error) {
+func (a *App) openConsumerQueue(b *nodeBase, under string, policy plug.QueuePolicyValue) (plug.Broker, *databaseRun, error) {
 	r := a.queueDatabase(b)
 	if r == nil {
-		broker, err := a.openQueue(b, filepath.Join(b.svc.name, under, b.name), maxDeliveries)
+		broker, err := a.openQueue(b, filepath.Join(b.svc.name, under, b.name), policy)
 		return broker, nil, err
 	}
-	broker, err := a.openSQLQueue(b, under, r, plug.QueueConfig{Policy: consumerPolicy(maxDeliveries)})
+	broker, err := a.openSQLQueue(b, under, r, plug.QueueConfig{Policy: policy})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -185,9 +186,9 @@ func fileQueueHolds(dir string) bool {
 
 // openQueue opens the queue of the consumer b that no open database keeps:
 // a file queue at dir under the data directory, memory without one, under
-// consumerPolicy, behind a test's wrapper.
-func (a *App) openQueue(b *nodeBase, dir string, maxDeliveries int) (plug.Broker, error) {
-	cfg := plug.QueueConfig{Name: b.id, Policy: consumerPolicy(maxDeliveries), Wrap: a.wrapQueue}
+// policy, behind a test's wrapper.
+func (a *App) openQueue(b *nodeBase, dir string, policy plug.QueuePolicyValue) (plug.Broker, error) {
+	cfg := plug.QueueConfig{Name: b.id, Policy: policy, Wrap: a.wrapQueue}
 	if a.dataDir != "" {
 		cfg.Dir = filepath.Join(a.dataDir, dir)
 	}
@@ -209,7 +210,10 @@ type origin struct{ trace, node string }
 // deliver runs one delivery in the trace its message carries, in a span on
 // the consumer's node from the node the message came from, over a delivers
 // edge, and reports it to the consumer's loop. A panic in handle is the
-// handler's failure.
+// handler's failure; a handler the app's stop cut short is none — its
+// message is handed back uncounted (stoppedBy) —; one that said when to
+// try again ([RetryIn]) is handed back by its queue with that delay
+// (consumerRun.consume).
 func (c *consumer) deliver(ctx context.Context, d *plug.DeliveryValue, from origin, handle func(context.Context, *span) error) (err error) {
 	if from.trace != "" {
 		if sc, perr := trace.ParseTraceParent(from.trace); perr == nil {
@@ -226,8 +230,7 @@ func (c *consumer) deliver(ctx context.Context, d *plug.DeliveryValue, from orig
 			err = failure(CodeHandlerPanic, "HANDLER_PANICKED", "the subscription's handler panicked", nil,
 				errs.String("subscription", c.node), errs.String("panic", fmt.Sprint(p)))
 		}
-		sp.end(err)
-		c.loop.ran(a, started, a.clock.Now(), err)
+		c.loop.ended(ctx, a, sp, started, err)
 	}()
 	return handle(ctx, sp)
 }
@@ -288,7 +291,8 @@ func (c *consumer) observe(e *lifecycle.SupervisionEvent) {
 }
 
 // defaultDeliveries are a consumer's delivery options until one is given:
-// defaultMaxDeliveries attempts, one message at a time.
+// defaultMaxDeliveries attempts, one message at a time, and the default stop
+// and lease (consumer_policy.go).
 func defaultDeliveries() deliveryOptions {
-	return deliveryOptions{maxDeliveries: defaultMaxDeliveries, parallelism: 1}
+	return deliveryOptions{maxDeliveries: defaultMaxDeliveries, parallelism: 1, knobs: defaultConsumerKnobs()}
 }

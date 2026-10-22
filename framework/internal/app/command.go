@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 	"sync/atomic"
+	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/security/authz"
@@ -121,6 +122,9 @@ func (s *Service) Command[C, R any](name string, handler func(context.Context, C
 	c.body = bodyOf(handler)
 	s.add(c, true)
 	declarePolicies(s, &c.nodeBase, c.opts.policies)
+	if c.opts.queued {
+		c.opts.deliveries.knobs.declare(s, &c.nodeBase)
+	}
 	if handler == nil {
 		s.problem(c.decl, c.id, "command.nil", "command", c.id)
 	}
@@ -249,7 +253,7 @@ func (c *Command[C, R]) Dispatch(ctx context.Context, in C) (R, error) {
 		from := currentNode(ctx)
 		return inProcess(ctx, &call, in, func(ctx context.Context) (R, error) {
 			var zero R
-			return zero, c.accept(ctx, a, from, in)
+			return zero, c.accept(ctx, a, from, in, time.Time{})
 		})
 	}
 	return inProcess(ctx, &call, in, func(ctx context.Context) (R, error) {
@@ -262,6 +266,35 @@ func (c *Command[C, R]) Dispatch(ctx context.Context, in C) (R, error) {
 		// command made it (ADR 0007 §3).
 		return c.pipe.invoke(withCommand(ctx, c.id), a, c, in, c.steps(a, key))
 	})
+}
+
+// DispatchAt queues a dispatch of the queued command that its consumer
+// handles no sooner than at — a reminder, a trial that ends, an order
+// cancelled if still unpaid —, checked now as [Command.Dispatch] checks it,
+// as its caller: its validate tags, its authorization, its key. It returns
+// once the command's queue accepted it; inside a transaction it is held to
+// the commit as a dispatch is. A dispatch whose key ([Command.Key]) waits —
+// for later too — or runs is not queued again. An instant already past is
+// now. A command that is not queued refuses it: only a queue holds a
+// dispatch until its instant. It is the SDK's queue.PublishAt.
+func (c *Command[C, R]) DispatchAt(ctx context.Context, in C, at time.Time) error {
+	a := c.app()
+	if a == nil {
+		return unmounted(&c.nodeBase)
+	}
+	if !c.opts.queued {
+		return notQueued(&c.nodeBase)
+	}
+	call := callSpec{app: a, node: c, edge: model.EdgeDispatches, op: model.OpDispatch, name: c.name, auth: c.authMode(), payloads: true}
+	from := currentNode(ctx)
+	_, err := inProcess(ctx, &call, in, func(ctx context.Context) (R, error) {
+		var zero R
+		if !at.IsZero() {
+			markSpan(ctx, c.id, "at", at.UTC().Format(time.RFC3339Nano))
+		}
+		return zero, c.accept(ctx, a, from, in, at)
+	})
+	return err
 }
 
 // steps are a command's own, inside its policies: its key, then its

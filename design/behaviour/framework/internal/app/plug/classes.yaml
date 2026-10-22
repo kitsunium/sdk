@@ -316,6 +316,7 @@ files:
   - decls:
       - Broker
       - MessageMover
+      - LaterPublisher
       - Clock
       - Timer
       - Ticker
@@ -900,6 +901,28 @@ types:
       - doc: BatchSize is how many messages the consumer takes at a time.
         name: BatchSize
         type: int
+      - doc: |-
+          DrainTimeout is how long the handler running when ctx ends may still
+          run before its context is cancelled; zero cancels it at once.
+        name: DrainTimeout
+        type: time.Duration
+      - doc: |-
+          SettleTimeout bounds each outcome sent once ctx ended, and each lease
+          renewal; zero is the queue's own bound.
+        name: SettleTimeout
+        type: time.Duration
+      - doc: |-
+          AutoExtend renews the lease of the message a handler runs for as long
+          as it runs.
+        name: AutoExtend
+        type: bool
+      - doc: |-
+          RetryIn reads, from the error a delivery's handler returned, the delay
+          it asked to be retried after: its queue hands the message back with
+          that delay, the delivery counted. Nil, or false, keeps the queue's own
+          retry delay.
+        name: RetryIn
+        type: func(err error) (delay time.Duration, asked bool)
     kind: struct
     name: ConsumeConfig
   - fields:
@@ -986,6 +1009,18 @@ types:
       	// PutDeadLetter writes dead, with its cause, under an identifier of the
       	// queue's own, and returns it.
       	PutDeadLetter(ctx context.Context, dead DeadLetterValue) (string, error)
+      }
+  - kind: named
+    name: LaterPublisher
+    underlying: |-
+      interface {
+      	// PublishAt puts payload in the queue, received by no consumer before
+      	// at: in the transaction ctx carries for its database, when it lives on
+      	// one.
+      	PublishAt(ctx context.Context, payload []byte, at time.Time) error
+      	// PublishOnce puts payload in the queue unless a publication under key
+      	// was made within window, and reports whether it did.
+      	PublishOnce(ctx context.Context, key string, payload []byte, window time.Duration) (published bool, err error)
       }
   - kind: named
     name: Clock
