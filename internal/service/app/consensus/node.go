@@ -461,7 +461,10 @@ func (n *Node) load() (raft.StartState, error) {
 	if err != nil {
 		return raft.StartState{}, err
 	}
-	base := n.restoreLatest(metas, durIdx)
+	base, err := n.restoreLatest(metas, durIdx)
+	if err != nil {
+		return raft.StartState{}, err
+	}
 	n.snapState.last = base.Position.Index
 	hs, err := n.cfg.Log.HardState()
 	if err != nil {
@@ -511,15 +514,22 @@ func (n *Node) durableIndex() (uint64, error) {
 
 // restoreLatest restores from the newest snapshot that verifies, falling
 // back to the older one when it does not (D7); none restores is the zero
-// base.
-func (n *Node) restoreLatest(metas []coreconsensus.SnapshotMetaValue, durIdx uint64) coreconsensus.SnapshotMetaValue {
+// base. Each one discarded is logged with its reason: a node that starts
+// with no table otherwise says nothing of why (#512). One of a version or
+// format this build does not know refuses the start instead: unknown means
+// stop, never skip (D18, #513).
+func (n *Node) restoreLatest(metas []coreconsensus.SnapshotMetaValue, durIdx uint64) (coreconsensus.SnapshotMetaValue, error) {
 	for _, m := range metas {
-		if err := n.restoreFrom(m, durIdx); err != nil {
-			continue // fall back to the older one (D7)
+		err := n.restoreFrom(m, durIdx)
+		if err == nil {
+			return m, nil
 		}
-		return m
+		if errs.HasCode(err, coreconsensus.CodeVersionUnsupported) {
+			return coreconsensus.SnapshotMetaValue{}, err
+		}
+		n.obs.warn("consensus: a snapshot was not restored", lstr("id", m.ID), lstr("error", err.Error()))
 	}
-	return coreconsensus.SnapshotMetaValue{}
+	return coreconsensus.SnapshotMetaValue{}, nil
 }
 
 // baseOrNoTable keeps a restored base, or starts the node with no table

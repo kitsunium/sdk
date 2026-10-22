@@ -7,6 +7,7 @@ import (
 	"io"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	coretransform "github.com/kitsunium/sdk/internal/core/data/transform"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -36,11 +37,15 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64) (er
 			err = cerr
 		}
 	}()
-	if err := verifySnapshot(io.NewSectionReader(h, 0, m.EncodedSize), m, n.cfg.SnapshotCodec, n.cfg.MaxSnapshotBytes); err != nil {
+	codec, err := n.codecOf(&m)
+	if err != nil {
+		return err
+	}
+	if err := verifySnapshot(io.NewSectionReader(h, 0, m.EncodedSize), m, codec, n.cfg.MaxSnapshotBytes); err != nil {
 		return err
 	}
 	if durIdx < m.Position.Index {
-		cr := newChunkReader(io.NewSectionReader(h, 0, m.EncodedSize), n.cfg.SnapshotCodec, max(m.ChunkSize, 1), n.cfg.MaxSnapshotBytes)
+		cr := newChunkReader(io.NewSectionReader(h, 0, m.EncodedSize), codec, max(m.ChunkSize, 1), n.cfg.MaxSnapshotBytes)
 		if err := n.cfg.Machine.Restore(cr, m); err != nil {
 			return err
 		}
@@ -54,6 +59,29 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64) (er
 	n.snapState.last = max(n.snapState.last, m.Position.Index)
 	n.snapState.mu.Unlock()
 	return nil
+}
+
+// codecOf is the codec a snapshot of metadata m is decoded with, refused
+// VERSION_UNSUPPORTED for a metadata version or a codec this build does
+// not know: unknown means stop, never skip (D18). The codec is the one the
+// metadata names (D18 "Compression"): the node's own, or another bounded
+// codec this build links. Read with the node's own, a snapshot written
+// before its codec was changed failed its checksums at the next start, and
+// every snapshot of every node at once (#512).
+func (n *Node) codecOf(m *coreconsensus.SnapshotMetaValue) (coretransform.BoundedDecompressor, error) {
+	if m.Version != 1 {
+		return nil, origin(coreconsensus.VersionUnsupported, errs.Int("snapshot_version", int(m.Version)))
+	}
+	own := n.cfg.SnapshotCodec
+	if m.Codec == "" || coretransform.Algorithm(m.Codec) == own.Algorithm() {
+		return own, nil
+	}
+	if c, ok := coretransform.Lookup(coretransform.Algorithm(m.Codec)); ok {
+		if b, ok := c.(coretransform.BoundedDecompressor); ok {
+			return b, nil
+		}
+	}
+	return nil, origin(coreconsensus.VersionUnsupported, errs.String("snapshot_codec", m.Codec))
 }
 
 // maybeSnapshot cuts a snapshot after SnapshotEvery applied entries, on the

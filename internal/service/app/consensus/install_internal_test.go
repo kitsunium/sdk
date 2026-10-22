@@ -10,6 +10,9 @@ import (
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	coretransform "github.com/kitsunium/sdk/internal/core/data/transform"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
+	svctransform "github.com/kitsunium/sdk/internal/service/data/transform"
 )
 
 // refusingKV is the kv machine of a test that makes Restore fail on demand:
@@ -129,6 +132,128 @@ func TestANodeWithNoTableKeepsItsMembersThroughAFailedReplacement(t *testing.T) 
 	c.waitApplied(tok.Index, 10*time.Second)
 	if v, _ := f.sm.get("k5"); v != "5" {
 		t.Fatalf("the node was never installed again: k5=%q", v)
+	}
+}
+
+// A snapshot whose state the machine refuses as VERSION_UNSUPPORTED — a
+// format this build does not read — stops the node, as an unknown entry
+// kind does (D18): it used to be removed and answered as a failure, the
+// leader streamed it again at every probe, and the node silently left the
+// quorum while it reported ready. The copy is kept, and a restart refuses
+// to open on it rather than fall back to no table (#513).
+func TestASnapshotOfAnUnknownFormatStopsTheNode(t *testing.T) {
+	c, refuse, refused := refusingCluster(t, origin(coreconsensus.VersionUnsupported, errs.String("why", "state format 2")))
+	l := c.settledLeader(5 * time.Second)
+	f := c.otherThan(l)
+	lagBehindAnInstall(t, c, f, 120)
+	refuse.Store(uint64(f.id))
+	c.start(f)
+	c.net.Isolate(f.id, false)
+	deadline := time.Now().Add(10 * time.Second)
+	for !f.node.stopped.Load() {
+		if time.Now().After(deadline) {
+			t.Fatalf("the node kept running after %d refused restores", refused.Load())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if r, ok := f.node.StopReason(); !ok || !errors.Is(r.Err, coreconsensus.VersionUnsupported) {
+		t.Fatalf("stop reason: %+v", r)
+	}
+	if got := refused.Load(); got != 1 {
+		t.Fatalf("the node restored %d snapshots it cannot read, want 1", got)
+	}
+	c.kill(f)
+	if metas := must(f.snaps.List())(t); len(metas) == 0 {
+		t.Fatal("the snapshot the node cannot read was removed")
+	}
+	f.sm = newKV()
+	if n, err := NewNode(c.config(f)); !errors.Is(err, coreconsensus.VersionUnsupported) {
+		if n != nil {
+			_ = n.HardClose()
+		}
+		t.Fatalf("a restart over a snapshot this build cannot read: %v", err)
+	}
+}
+
+// An offer whose snapshot metadata is of a version this node does not know
+// stops the node, after refusing it (D18, #513).
+func TestAnOfferOfAnUnknownSnapshotVersionStopsTheNode(t *testing.T) {
+	c := newCluster(t, 3, 0)
+	l := c.settledLeader(5 * time.Second)
+	f := c.otherThan(l)
+	st := f.node.Status()
+	id := fmt.Sprintf("%020d-%020d", st.Commit+100, st.Term)
+	acc := f.node.offer(coreconsensus.AuthenticatedPeerValue{ID: l.id}, coreconsensus.InstallOfferValue{
+		Term: st.Term, SnapshotID: id,
+		Meta: coreconsensus.SnapshotMetaValue{
+			ID: id, Version: 2, Log: f.node.lineage(),
+			Position: coreconsensus.PositionValue{Term: st.Term, Index: st.Commit + 100},
+		},
+	})
+	if acc.Refused != coreconsensus.CodeVersionUnsupported {
+		t.Fatalf("offer of a version 2 snapshot: %+v", acc)
+	}
+	if !f.node.stopped.Load() {
+		t.Fatal("the node kept running after a snapshot version it does not know")
+	}
+	if r, ok := f.node.StopReason(); !ok || !errors.Is(r.Err, coreconsensus.VersionUnsupported) {
+		t.Fatalf("stop reason: %+v", r)
+	}
+}
+
+// A snapshot is decoded with the codec its metadata names: a node whose
+// SnapshotCodec changed between two starts reads the snapshots it cut
+// before, where it used to fail every one of them and start with no table.
+// A codec this build does not know refuses the start, VERSION_UNSUPPORTED
+// (D18 "Compression", #512).
+func TestASnapshotIsReadWithTheCodecItWasWrittenWith(t *testing.T) {
+	var gzip atomic.Bool
+	c := newClusterWith(t, &cluster{
+		t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{5, 1, 2}, every: 20, size: 1,
+		configure: func(_ *testNode, cfg *Config) {
+			if gzip.Load() {
+				cfg.SnapshotCodec = svctransform.GzipCompressor.(coretransform.BoundedDecompressor)
+			}
+		},
+	})
+	tn := c.nodes[0]
+	c.leader(5 * time.Second)
+	var tok coreconsensus.TokenValue
+	for i := range 80 {
+		tok = propose(t, tn.node, fmt.Sprintf("k%d=%d", i, i))
+	}
+	c.waitApplied(tok.Index, 10*time.Second)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if first, _ := tn.log.Bounds(); first > 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the node never compacted")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	c.kill(tn)
+	gzip.Store(true)
+	c.start(tn)
+	if tn.node.r.NoTable() {
+		t.Fatal("a node whose codec changed started with no table")
+	}
+	if v, _ := tn.sm.get("k5"); v != "5" {
+		t.Fatalf("the snapshot was not restored: k5=%q", v)
+	}
+	c.kill(tn)
+	tn.snaps.mu.Lock()
+	for _, s := range tn.snaps.done {
+		s.meta.Codec = "unknown-codec"
+	}
+	tn.snaps.mu.Unlock()
+	tn.sm = newKV()
+	if n, err := NewNode(c.config(tn)); !errors.Is(err, coreconsensus.VersionUnsupported) {
+		if n != nil {
+			_ = n.HardClose()
+		}
+		t.Fatalf("a start over a snapshot of an unknown codec: %v", err)
 	}
 }
 

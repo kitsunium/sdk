@@ -17,6 +17,14 @@ func (n *Node) offer(from coreconsensus.AuthenticatedPeerValue, o coreconsensus.
 	if !ok {
 		acc.Refused = coreconsensus.CodeNodeStopped
 	}
+	if acc.Refused == coreconsensus.CodeVersionUnsupported {
+		// A snapshot version this node does not know stops it (D18): only
+		// refused, it was offered again at every probe while the node
+		// stayed out of replication and reported ready (#513). The stop
+		// is off the loop, which never waits on the marker's write.
+		n.stop(origin(coreconsensus.VersionUnsupported, errs.Int("snapshot_version", int(o.Meta.Version)),
+			errs.String("snapshot_codec", o.Meta.Codec)), false)
+	}
 	return acc
 }
 
@@ -52,7 +60,13 @@ func (n *Node) screenOffer(from coreconsensus.NodeID, o *coreconsensus.InstallOf
 		acc.Refused = code
 		return true
 	}
-	if o.SnapshotID != o.Meta.ID || o.Meta.Version != 1 {
+	if o.SnapshotID != o.Meta.ID {
+		acc.Refused = coreconsensus.CodeFrameInvalid
+		return true
+	}
+	if _, err := n.codecOf(&o.Meta); err != nil {
+		// A metadata version or a codec this build does not know: offer
+		// stops the node on this refusal (D18, #513).
 		acc.Refused = coreconsensus.CodeVersionUnsupported
 		return true
 	}
@@ -172,6 +186,14 @@ func (n *Node) install(req coreconsensus.InstallParams) error {
 // starts with no member to admit (#526). The copy stays until another is
 // published over it, and a restart falls back to no table again.
 func (n *Node) restoreFailed(snapID string, err error) error {
+	if errs.HasCode(err, coreconsensus.CodeVersionUnsupported) {
+		// A state this build cannot read: unknown means stop, never skip
+		// (D18). Removed and answered as a failure, it was streamed again
+		// at every probe and the node left the quorum while it reported
+		// ready (#513). The copy stays, and a restart refuses to open on it.
+		n.stop(err, false)
+		return err
+	}
 	noTable := false
 	if !n.exec(func() { noTable = n.r.NoTable() }) {
 		return err

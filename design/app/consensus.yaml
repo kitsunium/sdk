@@ -565,7 +565,11 @@ packages:
               - type: error
           - doc: |-
               Restore replaces the state with a snapshot's. It is serialised with
-              Apply.
+              Apply. An error coded VERSION_UNSUPPORTED says the snapshot is of a
+              format this build does not read: the node stops, as for an entry
+              kind it does not know, and a restart over that snapshot is refused
+              (D18). Any other error refuses that one install, and the leader
+              offers a snapshot again.
             in:
               - name: r
                 type: io.Reader
