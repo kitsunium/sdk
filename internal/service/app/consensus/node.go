@@ -124,6 +124,7 @@ type Node struct {
 	canVote       bool
 	noTable       bool
 	snapState     snapState
+	contact       leaderContact
 
 	watchMu  sync.Mutex
 	watchers map[chan coreconsensus.StatusValue]struct{}
@@ -894,6 +895,7 @@ func (n *Node) onTick(tick clock.Ticker, ok bool) (time.Time, bool) {
 	}
 	turn := n.clk.Now()
 	n.r.Tick(n.clk.Now())
+	n.probeLeader(turn)
 	if d := n.tickInterval(); d != time.Duration(n.tickEvery.Load()) {
 		// A committed contract changed the heartbeat (review of PR
 		// #301, L5).
@@ -1187,7 +1189,11 @@ func (n *Node) queueApply(entries []coreconsensus.EntryValue) {
 
 // answerReady answers the reads, forwards and transfers a Ready resolved.
 func (n *Node) answerReady(rd *raft.ReadyValue) {
+	now := n.clk.Now()
 	for _, rs := range rd.ReadStates {
+		if n.readAnswered(rs.Context, rs.Code, now) {
+			continue
+		}
 		if w, ok := n.reads[rs.Context]; ok {
 			delete(n.reads, rs.Context)
 			w.done <- readResult{index: rs.Index, code: rs.Code}
@@ -1241,6 +1247,9 @@ func (n *Node) leadershipChanged() {
 		return
 	}
 	n.lastTerm, n.lastLead, n.lastRole = st.Term, st.Lead, st.Role
+	// A new leader is probed at the next tick: until it answers, this
+	// node does not know it hears it (#541).
+	n.contact.probeCtx, n.contact.probeAt = 0, time.Time{}
 	n.startGrace(st.Commit)
 	for ctx, w := range n.reads {
 		delete(n.reads, ctx)

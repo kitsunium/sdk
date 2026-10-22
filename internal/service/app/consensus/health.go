@@ -134,11 +134,18 @@ func (n *Node) Health() HealthValue {
 		h.ApplyLagEntries = st.Commit - st.Applied
 	}
 	stopped := h.Flags.Has(HealthStopped)
-	h.Flags = h.Flags.set(HealthHasLeader, st.Leader != 0 && !stopped)
+	confirmed := false
 	if !stopped {
-		n.exec(func() { n.loopHealth(&h) })
+		n.exec(func() {
+			n.loopHealth(&h)
+			confirmed = n.leaderConfirmed(n.clk.Now())
+		})
 	}
 	n.snapshotHealth(&h)
+	// A leader is known when this node leads, or when the leader it names
+	// answered one of its reads lately: a leader that does not hear this
+	// node is no leader of its (#540, #541).
+	h.Flags = h.Flags.set(HealthHasLeader, st.Leader != 0 && !stopped && confirmed)
 	h.Flags = h.Flags.set(HealthReady, isReady(&h, &st))
 	return h
 }

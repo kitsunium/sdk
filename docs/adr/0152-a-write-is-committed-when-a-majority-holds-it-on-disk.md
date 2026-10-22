@@ -2064,7 +2064,14 @@ thresholds, provisional like D16's numbers:
 | snapshot pin | `consensus_snapshot_pins` held longer than the pin TTL of D19 |
 
 `Node.Health()` returns a structured verdict an orchestrator can poll: role,
-leader known, quorum reachable, apply lag over its bound, every current alarm
+leader known — on a node that does not lead, a leader that answered one of
+its reads within `ElectionTimeoutMax`, a probe read sent every half minimum
+election timeout keeping it fresh in a quiet cluster; a heartbeat only says
+the leader reaches the node, not that it hears it, and a follower whose
+answers were lost, or a learner cut off from the voters, kept its leader
+and reported ready on a frozen commit
+([#541](https://github.com/kitsunium/sdk/issues/541),
+[#540](https://github.com/kitsunium/sdk/issues/540)) — quorum reachable, apply lag over its bound, every current alarm
 with its `AlarmID` and the nodes it names (R5-09), the current timing
 contract and cluster version, so the product can fill an operation's
 preconditions, certificate expiry under its threshold, the smallest peer
