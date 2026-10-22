@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-22T23:00:00Z -->
+<!-- updated: 2026-10-22T23:30:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -352,3 +352,27 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   the bound from the rounds the winner's term counts, each one election
   timeout and a tick, and cap the rounds by the odds of that many splits
   (`electionBound`, `maxRounds`).
+- Decode an offline restore with flate when the expected metadata names
+  another codec: `OpenSnapshot`, `RestoreSnapshot` and `ImportObserved`
+  read the codec `RestoreOptions.Expected` names when the caller gives
+  none, and refuse VERSION_UNSUPPORTED one this build does not link (#548,
+  `TestTheOfflineReadersUseTheCodecTheMetadataNames`; the whole rolling
+  codec change of the issue is `TestARollingSnapshotCodecChangeKeepsALeader`).
+- Resume a durable machine past its snapshot without the term of its
+  position, or cut, offer, send or restore a snapshot at term 0 above
+  index 0: the next start truncated the log, then refused to compact it,
+  STORAGE_FAILED at every start of the cutter and of every peer that
+  installed it (#544, `TestADurableRestartResumesWithTheAppliedTerm`,
+  `TestASnapshotPublishedAtTermZeroIsSetAside`,
+  `TestAPeerInstallsTheSnapshotOfADurableLeaderRestarted`).
+- Trust a version 1 `.meta` whose id does not name its position, or take
+  an acknowledgement past the leader's last index as match: version 1
+  carries no checksum, and one bit of `Position.Index` erased the log,
+  served unapplied reads and committed writes on the leader's disk alone
+  (#546, `TestAMetadataWhosePositionRottedIsNotRestored`, raft's
+  `checkMatchBoundedByLastIndex` and its mutation).
+- Refuse, skip or write a version 2 `SnapshotMeta`: this release reads it
+  (the fields of version 1, then their CRC-32C, `wire`) so that it runs
+  beside, or is rolled back under, the release that writes it; the writer
+  ships with the cluster version that admits it (#546 phase 2, batch S3 of
+  #564; `TestASnapshotMetaOfVersion2IsRestored`).

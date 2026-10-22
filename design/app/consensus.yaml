@@ -2431,7 +2431,8 @@ packages:
           wrote it, without a node: the reader returns the decoded stream, checks
           each chunk as it decodes it, bounds the total by opt.MaxDecoded, and
           answers SNAPSHOT_CORRUPT instead of io.EOF when the sizes or the SHA-256
-          differ from opt.Expected's. opt.Codec is flate when nil.
+          differ from opt.Expected's. opt.Codec is, when nil, the codec
+          opt.Expected names, flate when it names none.
         in:
           - name: r
             type: io.Reader
@@ -3430,7 +3431,9 @@ packages:
             - doc: MaxEncoded and MaxDecoded bound what is read.
               name: MaxDecoded
               type: int64
-            - doc: Codec decodes the chunks; nil is flate.
+            - doc: |-
+                Codec decodes the chunks; nil is the codec Expected names, flate
+                when it names none.
               name: Codec
               type: coretransform.BoundedDecompressor
       - doc: |-
@@ -4462,7 +4465,9 @@ packages:
         out:
           - type: coreconsensus.TokenValue
           - type: error
-      - doc: AppendSnapshotMeta appends the versioned encoding of m.
+      - doc: |-
+          AppendSnapshotMeta appends the versioned encoding of m, in version 1:
+          this release reads version 2 and never writes it.
         in:
           - name: dst
             type: "[]byte"
@@ -4471,7 +4476,11 @@ packages:
         name: AppendSnapshotMeta
         out:
           - type: "[]byte"
-      - doc: ParseSnapshotMeta decodes a SnapshotMeta, copying every byte it keeps.
+      - doc: |-
+          ParseSnapshotMeta decodes a SnapshotMeta, copying every byte it keeps:
+          version 1, or version 2 once its trailing CRC-32C holds. Another
+          version is VERSION_UNSUPPORTED, a version 2 whose sum fails
+          FRAME_INVALID.
         in:
           - name: b
             type: "[]byte"
@@ -5326,7 +5335,9 @@ packages:
           out:
             - type: "[]byte"
       - func:
-          doc: ParseSnapshotMeta decodes a SnapshotMeta.
+          doc: |-
+            ParseSnapshotMeta decodes a SnapshotMeta: version 1, or version 2
+            once its trailing CRC-32C holds.
           forward: wire.ParseSnapshotMeta
           in:
             - name: b

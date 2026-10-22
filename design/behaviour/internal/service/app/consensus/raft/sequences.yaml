@@ -603,6 +603,10 @@ sequences:
               to: r.handleAppReject
             - return: ""
           when: m.Reject
+      - opt:
+          do:
+            - return: ""
+          when: m.Index > r.log.lastIndex() && !r.mutated(mutMatchPastLastIndex)
       - alt:
           - do:
               - switch:

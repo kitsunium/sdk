@@ -3865,6 +3865,47 @@ Two gaps between this ADR and the code, closed in `pkg/v1/app` as additions
     depend on it: the node still serves; it says the next cuts are about to
     be refused `SNAPSHOT_TOO_LARGE`.
 
+## Amendment — what a snapshot's metadata is trusted for, and its checksummed version read before it is written (2026-10-22)
+
+Three defects of the snapshot metadata, closed in batch S1 of the Raft
+roadmap ([issue #564](https://github.com/kitsunium/sdk/issues/564)) with no
+format written that a node of the previous release cannot read:
+
+- **The codec the metadata names is the codec read ([issue
+  #548](https://github.com/kitsunium/sdk/issues/548)).** D18 records the
+  codec id "so a snapshot written with a codec a node does not know is
+  refused cleanly". The node's restore and install already decode with it
+  (#512); the offline readers (`OpenSnapshot`, `RestoreSnapshot`,
+  `ImportObserved`) now do too when the caller names no codec, and refuse
+  `VERSION_UNSUPPORTED` one this build does not link. A rolling change of
+  `SnapshotCodec` keeps a leader throughout. This guard ships before any
+  change of the codec a product cuts with.
+- **No committed entry has term 0 ([issue
+  #544](https://github.com/kitsunium/sdk/issues/544)).** A durable machine
+  resumed past its snapshot resumes at the term of its applied position,
+  the log's term there (a machine that reports another refuses the start,
+  `LOG_CORRUPT`). A cut, an offer or a send at term 0 above index 0 is
+  refused, and a snapshot already published so is set aside at the start
+  as unreadable, never restored by truncating the log.
+- **The metadata is checked before it drives the log ([issue
+  #546](https://github.com/kitsunium/sdk/issues/546)).** Version 1 of the
+  `SnapshotMeta` encoding has no checksum. Until version 2 is written, its
+  id (`%020d-%020d`, index then term) must name its position, or the
+  snapshot is not listed, not restored and not installed; and a leader
+  ignores an acknowledgement past its own last index, which no honest
+  follower sends (Leader Completeness).
+  - **Version 2 is fixed, and read one release before it is written.**
+    Its leading byte is 2, then the fields of version 1 unchanged, then the
+    little-endian CRC-32C (Castagnoli) of every byte before it. A version 2
+    whose sum fails is `FRAME_INVALID`: on disk the snapshot is not
+    listed, in an offer it is refused. This release reads both versions
+    and writes version 1 only; the writer ships in batch S3 behind the one
+    raise of the cluster version, so that every member, and every release
+    a node may be rolled back to from then on, reads what it writes (rule 5
+    of #564). The wire rule "one encoding per value" holds per version:
+    a version 2 accepted round-trips as version 2. Once a version 2 is
+    written, rolling back below this release is not supported.
+
 ## Revision history
 
 | Version | Round | What changed |

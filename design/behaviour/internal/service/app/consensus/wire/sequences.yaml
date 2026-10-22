@@ -564,11 +564,11 @@ sequences:
         kind: actor
       - id: ParseSnapshotMeta
         kind: self
-      - id: r.u8
+      - id: metaFields
         kind: internal
-      - id: errs
-        kind: package
       - id: r.str
+        kind: internal
+      - id: r.u8
         kind: internal
       - id: r.u64
         kind: internal
@@ -589,23 +589,15 @@ sequences:
       - id: frameInvalid
         kind: internal
     steps:
-      - bind: r
-        eval: "reader{b: b}"
+      - bind: body, err
+        eval: metaFields(b)
+        to: metaFields
       - opt:
           do:
-            - opt:
-                do:
-                  - return: r.err
-                when: r.err != nil
-            - return: |-
-                errs.Wrap(coreconsensus.VersionUnsupported, errs.WrapParams{},
-                			errs.Int("snapshot_meta_version", int(v)))
-              to: errs
-          init:
-            bind: v
-            eval: r.u8()
-            to: r.u8
-          when: v != metaVersion1
+            - return: err
+          when: err != nil
+      - bind: r
+        eval: "reader{b: body}"
       - var:
           name: out
           type: coreconsensus.SnapshotMetaValue
@@ -675,6 +667,36 @@ sequences:
       - set: "*m"
         value: out
       - return: nil
+  - of: metaFields
+    steps:
+      - opt:
+          do:
+            - return: nil, frameInvalid("short field", 0)
+          when: len(b) == 0
+      - switch:
+          cases:
+            - case: metaVersion1
+              do:
+                - return: b[1:], nil
+            - case: metaVersion2
+              do:
+                - opt:
+                    do:
+                      - return: nil, frameInvalid("short field", len(b)-1)
+                    when: len(b) < 1+metaSumLen
+                - bind: end
+                  eval: len(b) - metaSumLen
+                - opt:
+                    do:
+                      - return: nil, frameInvalid("snapshot meta checksum", len(b))
+                    when: crc32.Checksum(b[:end], castagnoli) != binary.LittleEndian.Uint32(b[end:])
+                - return: b[1:end], nil
+            - default: true
+              do:
+                - return: |-
+                    nil, errs.Wrap(coreconsensus.VersionUnsupported, errs.WrapParams{},
+                    			errs.Int("snapshot_meta_version", int(b[0])))
+          "on": b[0]
   - of: AppendMembership
     participants:
       - id: caller

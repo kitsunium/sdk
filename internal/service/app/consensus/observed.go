@@ -63,7 +63,8 @@ func (n *Node) ReadCommitted(ctx context.Context, from, to uint64, maxBytes int)
 // wrote it, without a node: the reader returns the decoded stream, checks
 // each chunk as it decodes it, bounds the total by opt.MaxDecoded, and
 // answers SNAPSHOT_CORRUPT instead of io.EOF when the sizes or the SHA-256
-// differ from opt.Expected's. opt.Codec is flate when nil.
+// differ from opt.Expected's. opt.Codec is, when nil, the codec
+// opt.Expected names, flate when it names none.
 func OpenSnapshot(r io.Reader, opt *RestoreOptions) (io.Reader, error) {
 	if opt == nil || opt.MaxDecoded <= 0 {
 		return nil, restoreRefused("size bounds")

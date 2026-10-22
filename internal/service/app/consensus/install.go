@@ -61,7 +61,11 @@ func (n *Node) screenOffer(from coreconsensus.NodeID, o *coreconsensus.InstallOf
 		acc.Refused = code
 		return true
 	}
-	if o.SnapshotID != o.Meta.ID {
+	if o.SnapshotID != o.Meta.ID || termless(&o.Meta) || !idNamesPosition(&o.Meta) {
+		// An offer at term 0 above index 0 names no committed entry:
+		// installed, it stopped this node at the compaction (#544). One
+		// whose id does not name its position carries a metadata that
+		// rotted (#546).
 		acc.Refused = coreconsensus.CodeFrameInvalid
 		return true
 	}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
@@ -44,6 +45,9 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64) (er
 			err = cerr
 		}
 	}()
+	if !idNamesPosition(&m) {
+		return origin(coreconsensus.SnapshotCorrupt, errs.String("why", "the metadata's id does not name its position"), errs.String("id", m.ID))
+	}
 	codec, err := n.codecOf(&m)
 	if err != nil {
 		return err
@@ -68,6 +72,24 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64) (er
 	return nil
 }
 
+// idNamesPosition reports whether a snapshot id of the form a cut writes,
+// index then term on 20 digits each, names m's position. The .meta carries
+// no checksum: a bit flipped in Position.Index was read as is, and the node
+// erased its log, answered reads it had not applied and acknowledged past
+// the leader's log (#546). An id of another form names no position and is
+// not checked: a bit flipped in it already fails the file name.
+func idNamesPosition(m *coreconsensus.SnapshotMetaValue) bool {
+	if len(m.ID) != 41 || m.ID[20] != '-' {
+		return true
+	}
+	idx, ierr := strconv.ParseUint(m.ID[:20], 10, 64)
+	term, terr := strconv.ParseUint(m.ID[21:], 10, 64)
+	if ierr != nil || terr != nil {
+		return true
+	}
+	return idx == m.Position.Index && term == m.Position.Term
+}
+
 // codecOf is the codec a snapshot of metadata m is decoded with, refused
 // VERSION_UNSUPPORTED for a metadata version or a codec this build does
 // not know: unknown means stop, never skip (D18). The codec is the one the
@@ -89,12 +111,18 @@ func snapshotCodec(m *coreconsensus.SnapshotMetaValue, own coretransform.Bounded
 	if own != nil && (m.Codec == "" || coretransform.Algorithm(m.Codec) == own.Algorithm()) {
 		return own, nil
 	}
-	if c, ok := coretransform.Lookup(coretransform.Algorithm(m.Codec)); ok {
+	return linkedCodec(m.Codec)
+}
+
+// linkedCodec is the bounded codec this build links under name, refused
+// VERSION_UNSUPPORTED when there is none.
+func linkedCodec(name string) (coretransform.BoundedDecompressor, error) {
+	if c, ok := coretransform.Lookup(coretransform.Algorithm(name)); ok {
 		if b, ok := c.(coretransform.BoundedDecompressor); ok {
 			return b, nil
 		}
 	}
-	return nil, origin(coreconsensus.VersionUnsupported, errs.String("snapshot_codec", m.Codec))
+	return nil, origin(coreconsensus.VersionUnsupported, errs.String("snapshot_codec", name))
 }
 
 // maybeSnapshot cuts a snapshot after SnapshotEvery applied entries or
@@ -186,6 +214,12 @@ func (n *Node) metaAt(idx, term uint64) (coreconsensus.SnapshotMetaValue, bool) 
 // background goroutine counted in n.wg, which ends when the write does, so
 // Close waits for it; its failure reaches cutFailed instead of the caller.
 func (n *Node) cut(idx, term uint64, w io.Writer) error {
+	if idx > 0 && term == 0 {
+		// No committed entry has term 0: such a snapshot stopped at its
+		// next start the node that cut it and every peer that installed it
+		// (#544).
+		return origin(coreconsensus.SnapshotCorrupt, errs.String("why", "a cut at term 0"), errs.String("index", u64s(idx)))
+	}
 	n.snapState.mu.Lock()
 	n.snapState.sinceBytes = 0
 	n.snapState.mu.Unlock()
@@ -556,14 +590,15 @@ func (n *Node) save(req *saveReq) {
 // history before a Recover, or below the index it kept — the entries kept
 // after it would reach the peer by append and be applied there under the
 // new identity, not the predecessor's (#507). A cut of this lineage, at or
-// past the kept index, names both.
+// past the kept index, names both. One recorded at term 0 is never sent
+// either: the peer would stop installing it (#544).
 func (n *Node) snapshotToSend() (coreconsensus.SnapshotMetaValue, bool) {
 	metas, err := n.cfg.Snapshots.List()
 	if err != nil || len(metas) == 0 {
 		return coreconsensus.SnapshotMetaValue{}, false
 	}
 	l := n.lineage()
-	if !metas[0].Log.Same(l) || metas[0].Position.Index < l.KeptIndex {
+	if !metas[0].Log.Same(l) || metas[0].Position.Index < l.KeptIndex || termless(&metas[0]) {
 		return coreconsensus.SnapshotMetaValue{}, false
 	}
 	return metas[0], true

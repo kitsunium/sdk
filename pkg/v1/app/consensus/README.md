@@ -1346,7 +1346,7 @@ ParseMessage decodes a frame: FRAME\_INVALID, VERSION\_UNSUPPORTED.
 func ParseSnapshotMeta(b []byte, m *SnapshotMetaValue) error
 ```
 
-ParseSnapshotMeta decodes a SnapshotMeta.
+ParseSnapshotMeta decodes a SnapshotMeta: version 1, or version 2 once its trailing CRC-32C holds.
 
 <a name="ParseToken"></a>
 ## func [ParseToken](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
@@ -3495,7 +3495,8 @@ type RestoreOptions struct {
 	MaxEncoded int64
 	// MaxEncoded and MaxDecoded bound what is read.
 	MaxDecoded int64
-	// Codec decodes the chunks; nil is flate.
+	// Codec decodes the chunks; nil is the codec Expected names, flate
+	// when it names none.
 	Codec      coretransform.BoundedDecompressor
 }
 ```

@@ -933,7 +933,8 @@ files:
       - silenceOf
       - (*Node).bindTransport
       - (*Node).load
-      - (*Node).durableIndex
+      - termless
+      - (*Node).durablePosition
       - (*Node).restoreLatest
       - ownFailure
       - (*Node).unpublishNewer
@@ -941,6 +942,7 @@ files:
       - (*Node).finishInstall
       - (*Node).readTail
       - (*Node).startApplied
+      - (*Node).durableTerm
       - noTableBase
       - isMembershipEntry
       - baseTerm
@@ -1190,8 +1192,10 @@ files:
       - cutRetryMin
       - Latest
       - (*Node).restoreFrom
+      - idNamesPosition
       - (*Node).codecOf
       - snapshotCodec
+      - linkedCodec
       - (*Node).maybeSnapshot
       - (*Node).cutFailed
       - (*Node).metaAt
@@ -1939,7 +1943,7 @@ functions:
       lineageAccepts reports whether a snapshot of identity l, at index, belongs
       to this node's history: of its own lineage at or past the index Recover
       kept, which it records, or of the predecessor's at or below that index,
-      as durableIndex counts a machine's position. One of its own lineage below
+      as durablePosition counts a machine's position. One of its own lineage below
       the kept index is refused: the kept entries after it would reach this
       node by append, which a leader never sends, and a node that adopted the
       lineage from it would hold no entry at or below the index to append to
@@ -1958,6 +1962,12 @@ functions:
     name: silenceOf
     params: log coreconsensus.LogStore, o *obs
     results: term, index uint64, err error
+  - doc: |-
+      termless reports whether m names an index above 0 at term 0, which no
+      committed entry has.
+    name: termless
+    params: m *coreconsensus.SnapshotMetaValue
+    results: bool
   - doc: |-
       ownFailure reports whether a snapshot failed to restore for a reason of
       its own — its checksums, or the machine refusing its state — rather than
@@ -2176,7 +2186,10 @@ functions:
     results: error
   - doc: |-
       restoreCodec is the codec the restored chunks are decoded with: the
-      caller's, else the default, flate.
+      caller's, else the one the expected metadata names, else the default,
+      flate. Read with flate whatever the metadata said, a snapshot a node cut
+      with another codec failed as corrupt instead of being refused cleanly
+      when this build does not link its codec (D18, #548).
     name: restoreCodec
     params: opt *RestoreOptions
     results: coretransform.BoundedDecompressor, error
@@ -2350,11 +2363,27 @@ functions:
     params: s coreconsensus.SnapshotStore
     results: coreconsensus.SnapshotHandle, error
   - doc: |-
+      idNamesPosition reports whether a snapshot id of the form a cut writes,
+      index then term on 20 digits each, names m's position. The .meta carries
+      no checksum: a bit flipped in Position.Index was read as is, and the node
+      erased its log, answered reads it had not applied and acknowledged past
+      the leader's log (#546). An id of another form names no position and is
+      not checked: a bit flipped in it already fails the file name.
+    name: idNamesPosition
+    params: m *coreconsensus.SnapshotMetaValue
+    results: bool
+  - doc: |-
       snapshotCodec is codecOf for a node whose own codec is own; an offline
       operation, which has none, passes nil and reads only the codecs this build
       links.
     name: snapshotCodec
     params: m *coreconsensus.SnapshotMetaValue, own coretransform.BoundedDecompressor
+    results: coretransform.BoundedDecompressor, error
+  - doc: |-
+      linkedCodec is the bounded codec this build links under name, refused
+      VERSION_UNSUPPORTED when there is none.
+    name: linkedCodec
+    params: name string
     results: coretransform.BoundedDecompressor, error
   - doc: payloadBytes is the payload es carries, what SnapshotEveryBytes counts.
     name: payloadBytes
@@ -3813,9 +3842,10 @@ types:
       - doc: |-
           published reads the snapshot a directory entry named name publishes. ok
           is false for anything that is not a complete snapshot: another file, a
-          .meta that does not parse or names another id, or one whose .snap is
-          missing. Such an entry is skipped: it is a publication a crash
-          interrupted, not a snapshot that failed. A .meta or a .snap that is there
+          .meta that does not parse, names another id or a position its id does
+          not name (#546), or one whose .snap is missing. Such an entry is
+          skipped: it is a publication a crash interrupted or a .meta that rotted,
+          not a snapshot to restore from. A .meta or a .snap that is there
           but cannot be read is neither: it is an I/O failure, and it is reported,
           so that a listing never reads a failing disk as "no snapshot".
         name: published
@@ -4749,12 +4779,16 @@ types:
         recv: n *Node
         results: raft.StartState, error
       - doc: |-
-          durableIndex is the index a DurableStateMachine already holds applied,
-          counted only when it was applied in this log's lineage, or in the
-          predecessor's below the kept index; any other machine answers 0.
-        name: durableIndex
+          durablePosition is the position a DurableStateMachine already holds
+          applied, counted only when it was applied in this log's lineage, or in the
+          predecessor's below the kept index; any other machine answers the zero
+          position. The term is kept with the index: dropped, a node restarted past
+          its snapshot resumed with an applied term of 0, and its next cut
+          published a snapshot at term 0 that stopped it at every later start and
+          every peer that installed it (#544).
+        name: durablePosition
         recv: n *Node
-        results: uint64, error
+        results: coreconsensus.PositionValue, error
       - doc: |-
           restoreLatest restores from the newest snapshot that verifies, falling
           back to the older one when it does not (D7); none restores is the zero
@@ -4809,12 +4843,23 @@ types:
         results: "[]coreconsensus.EntryValue, error"
       - doc: |-
           startApplied sets where apply resumes: past the base, or past what a
-          durable machine already holds. It returns the applied index raft starts
-          from; a node with no table records nothing applied until an install.
+          durable machine already holds, with the term of that position. It returns
+          the applied index raft starts from; a node with no table records nothing
+          applied until an install.
         name: startApplied
-        params: base *coreconsensus.SnapshotMetaValue, durIdx uint64
+        params: base *coreconsensus.SnapshotMetaValue, dur coreconsensus.PositionValue
         recv: n *Node
-        results: uint64
+        results: uint64, error
+      - doc: |-
+          durableTerm is the term of the position a durable machine holds applied
+          past the base: the log's term there, which the machine's must equal when
+          it reports one, or the machine's when the log no longer holds the index.
+          A machine that applied another entry at that index than the log holds
+          diverged from it, and the start is refused (#544).
+        name: durableTerm
+        params: dur coreconsensus.PositionValue
+        recv: n *Node
+        results: uint64, error
       - doc: |-
           deliver is the transport's inbound callback: it parses a frame, drops it
           when its From is not the authenticated peer (R7-05), and queues it on its
@@ -5577,7 +5622,8 @@ types:
           history before a Recover, or below the index it kept — the entries kept
           after it would reach the peer by append and be applied there under the
           new identity, not the predecessor's (#507). A cut of this lineage, at or
-          past the kept index, names both.
+          past the kept index, names both. One recorded at term 0 is never sent
+          either: the peer would stop installing it (#544).
         name: snapshotToSend
         recv: n *Node
         results: coreconsensus.SnapshotMetaValue, bool
@@ -5976,7 +6022,9 @@ types:
       - doc: MaxEncoded and MaxDecoded bound what is read.
         name: MaxDecoded
         type: int64
-      - doc: Codec decodes the chunks; nil is flate.
+      - doc: |-
+          Codec decodes the chunks; nil is the codec Expected names, flate
+          when it names none.
         name: Codec
         type: coretransform.BoundedDecompressor
     kind: struct

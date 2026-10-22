@@ -47341,7 +47341,7 @@
       "name": "OpenSnapshot",
       "spelled": "func(r io.Reader, opt *RestoreOptions) (io.Reader, error)",
       "canonical": "func(r io.Reader, opt *github.com/kitsunium/sdk/internal/service/app/consensus.RestoreOptions) (io.Reader, error)",
-      "doc": "OpenSnapshot reads a saved snapshot's encoded stream, as SaveSnapshot\nwrote it, without a node: the reader returns the decoded stream, checks\neach chunk as it decodes it, bounds the total by opt.MaxDecoded, and\nanswers SNAPSHOT_CORRUPT instead of io.EOF when the sizes or the SHA-256\ndiffer from opt.Expected's. opt.Codec is flate when nil.\n",
+      "doc": "OpenSnapshot reads a saved snapshot's encoded stream, as SaveSnapshot\nwrote it, without a node: the reader returns the decoded stream, checks\neach chunk as it decodes it, bounds the total by opt.MaxDecoded, and\nanswers SNAPSHOT_CORRUPT instead of io.EOF when the sizes or the SHA-256\ndiffer from opt.Expected's. opt.Codec is, when nil, the codec\nopt.Expected names, flate when it names none.\n",
       "file": "service/app/consensus/observed.go",
       "layer": "service",
       "family": "app"
@@ -47747,7 +47747,7 @@
         {
           "name": "Codec",
           "type": "coretransform.BoundedDecompressor",
-          "doc": "Codec decodes the chunks; nil is flate.\n"
+          "doc": "Codec decodes the chunks; nil is the codec Expected names, flate\nwhen it names none.\n"
         }
       ],
       "doc": "RestoreOptions are RestoreSnapshot's preconditions (R3-15). Expected and\nboth bounds are required; the stream is refused when its size or digest\ndiffers from Expected.\n",
@@ -49240,7 +49240,7 @@
       "name": "AppendSnapshotMeta",
       "spelled": "func(dst []byte, m *coreconsensus.SnapshotMetaValue) []byte",
       "canonical": "func(dst []byte, m *github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue) []byte",
-      "doc": "AppendSnapshotMeta appends the versioned encoding of m.\n",
+      "doc": "AppendSnapshotMeta appends the versioned encoding of m, in version 1:\nthis release reads version 2 and never writes it.\n",
       "file": "service/app/consensus/wire/codec.go",
       "layer": "service",
       "family": "app"
@@ -49439,7 +49439,7 @@
       "name": "ParseSnapshotMeta",
       "spelled": "func(b []byte, m *coreconsensus.SnapshotMetaValue) error",
       "canonical": "func(b []byte, m *github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue) error",
-      "doc": "ParseSnapshotMeta decodes a SnapshotMeta, copying every byte it keeps.\n",
+      "doc": "ParseSnapshotMeta decodes a SnapshotMeta, copying every byte it keeps:\nversion 1, or version 2 once its trailing CRC-32C holds. Another\nversion is VERSION_UNSUPPORTED, a version 2 whose sum fails\nFRAME_INVALID.\n",
       "file": "service/app/consensus/wire/codec.go",
       "layer": "service",
       "family": "app"
