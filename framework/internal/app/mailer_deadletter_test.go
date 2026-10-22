@@ -20,6 +20,7 @@ import (
 // is given up through the queue's Rejecter, whose verdict lands past the
 // stop that follows (#487).
 func TestAMailAnEarlierRunGaveUpKeepsWhy(t *testing.T) {
+	needsFileStore(t)
 	for name, c := range map[string]struct {
 		reply    string
 		code     int
