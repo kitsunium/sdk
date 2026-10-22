@@ -404,6 +404,12 @@ func (n *Node) sentCorrupt(meta coreconsensus.SnapshotMetaValue, to coreconsensu
 		n.obs.warn("consensus: a peer found a sound snapshot corrupt", lstr("id", meta.ID), lattr("peer", uint64(to)))
 		return
 	}
+	if !errs.HasCode(verr, coreconsensus.CodeSnapshotCorrupt) {
+		// Unreadable is not corrupt: the copy stays, and the next refusal
+		// reads it again.
+		n.obs.warn("consensus: a held snapshot could not be verified", lstr("id", meta.ID), lstr("error", verr.Error()))
+		return
+	}
 	n.obs.warn("consensus: a snapshot failed its checksums and is replaced", lstr("id", meta.ID), lstr("error", verr.Error()))
 	if err := n.cfg.Snapshots.Remove(meta.ID); err != nil {
 		if errs.HasCode(err, coreconsensus.CodeStorageFailed) {

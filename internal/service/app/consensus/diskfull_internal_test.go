@@ -72,6 +72,49 @@ func TestAFailedCutWaitsBeforeTheNext(t *testing.T) {
 	}
 }
 
+// The bytes the event loop reads without the log's lock are the segments'
+// own, through rotations, a compaction and a reopen (#515: a rotation holds
+// the lock across an fsync, and the guard reads at every tick).
+func TestTheLogsBytesAreItsSegments(t *testing.T) {
+	dir := t.TempDir()
+	d := openDir(t, dir, 4096)
+	same := func(when string) {
+		t.Helper()
+		l := d.d.log
+		l.mu.RLock()
+		var want int64
+		for _, s := range l.segs {
+			want += s.size
+		}
+		l.mu.RUnlock()
+		if got := l.logBytes(); got != want || want == 0 {
+			t.Fatalf("%s: logBytes %d, the segments hold %d", when, got, want)
+		}
+	}
+	l := d.Log()
+	hs := coreconsensus.HardState{Term: 1, Commit: 40}
+	if err := l.Append(ents(1, 60, 1), &hs); err != nil {
+		t.Fatal(err)
+	}
+	mustSync(t, l)
+	same("after rotations")
+	if err := l.CompactPrefix(50); err != nil {
+		t.Fatal(err)
+	}
+	mustSync(t, l)
+	same("after a compaction")
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	d = openDir(t, dir, 4096)
+	defer func() {
+		if err := d.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	same("after a reopen")
+}
+
 // A segment whose zero-fill fails — in the background, or on the writer's
 // path — leaves no .tmp behind: the partial file held every byte the fill
 // wrote until the next rotation or start, on a disk the log shares with

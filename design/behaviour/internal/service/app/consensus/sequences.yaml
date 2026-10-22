@@ -2816,6 +2816,8 @@ sequences:
         kind: stdlib
       - id: storageFailed
         kind: internal
+      - id: l.occupied.Add
+        kind: value
     steps:
       - loop:
           do:
@@ -2829,6 +2831,8 @@ sequences:
                 when: err != nil
             - set: l.segs
               value: "append(l.segs, &segment{n: s.n, f: f, size: int64(len(s.data))})"
+            - eval: l.occupied.Add(int64(len(s.data)))
+              to: l.occupied.Add
           key: _
           range: segs
           value: s
@@ -3094,6 +3098,8 @@ sequences:
         kind: stdlib
       - id: syncDir
         kind: internal
+      - id: l.occupied.Add
+        kind: value
       - id: l.prepare
         kind: internal
     steps:
@@ -3170,6 +3176,8 @@ sequences:
           when: err != nil
       - set: l.segs
         value: "append(l.segs, &segment{n: n, f: f, size: size})"
+      - eval: l.occupied.Add(size)
+        to: l.occupied.Add
       - set: l.off
         value: int64(len(cpRec))
       - set: l.batch
@@ -4183,6 +4191,8 @@ sequences:
         kind: internal
       - id: os
         kind: stdlib
+      - id: l.occupied.Add
+        kind: value
     steps:
       - opt:
           do:
@@ -4202,6 +4212,8 @@ sequences:
             eval: os.Remove(filepath.Join(l.logDir(), segName(l.segs[0].n)))
             to: os
           when: err != nil
+      - eval: l.occupied.Add(-l.segs[0].size)
+        to: l.occupied.Add
       - set: l.segs
         value: l.segs[1:]
       - return: nil
@@ -4254,6 +4266,8 @@ sequences:
         kind: value
       - id: storageFailed
         kind: internal
+      - id: l.occupied.Store
+        kind: value
       - id: abandon
         kind: internal
     steps:
@@ -4281,6 +4295,8 @@ sequences:
           value: s
       - set: l.segs
         value: nil
+      - eval: l.occupied.Store(0)
+        to: l.occupied.Store
       - opt:
           do:
             - set: l.prep
@@ -4318,22 +4334,16 @@ sequences:
       - return: l.logBytes(), l.freeBytes(), tails
         to: l.logBytes
   - of: (*fileLog).logBytes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLog).logBytes
+        kind: self
+      - id: l.occupied.Load
+        kind: value
     steps:
-      - lock:
-          mutex: l.mu
-          read: true
-      - var:
-          name: bytes
-          type: int64
-      - loop:
-          do:
-            - op: +=
-              set: bytes
-              value: s.size
-          key: _
-          range: l.segs
-          value: s
-      - return: bytes
+      - return: l.occupied.Load()
+        to: l.occupied.Load
   - of: (*fileLog).freeBytes
     participants:
       - id: caller
@@ -14563,6 +14573,12 @@ sequences:
               to: n.obs.warn
             - return: ""
           when: verr == nil
+      - opt:
+          do:
+            - eval: "n.obs.warn(\"consensus: a held snapshot could not be verified\", lstr(\"id\", meta.ID), lstr(\"error\", verr.Error()))"
+              to: n.obs.warn
+            - return: ""
+          when: "!errs.HasCode(verr, coreconsensus.CodeSnapshotCorrupt)"
       - eval: "n.obs.warn(\"consensus: a snapshot failed its checksums and is replaced\", lstr(\"id\", meta.ID), lstr(\"error\", verr.Error()))"
         to: n.obs.warn
       - opt:

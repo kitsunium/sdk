@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -244,6 +245,10 @@ type fileLog struct {
 	// fill replaces zeroFrom when a test sets it, to fail as a full disk
 	// does; nil otherwise.
 	fill func(f *os.File, off, size int64) error
+	// occupied is the bytes the segments occupy, kept beside segs wherever
+	// a segment is added or dropped, so the event loop reads it without mu:
+	// a rotation holds mu across an fsync (D5b).
+	occupied atomic.Int64
 	// wmu serialises the writers. A sync holds it, not mu, across its
 	// write and fdatasync, so readers do not wait for the disk (review of
 	// PR #301, L6).
@@ -608,6 +613,7 @@ func (l *fileLog) openSegments(segs []*scanned) error {
 			return storageFailed("open segment", err)
 		}
 		l.segs = append(l.segs, &segment{n: s.n, f: f, size: int64(len(s.data))})
+		l.occupied.Add(int64(len(s.data)))
 	}
 	return nil
 }
@@ -795,6 +801,7 @@ func (l *fileLog) createSegment(n uint64, cp *checkpoint) error {
 		return storageFailed("open segment", err)
 	}
 	l.segs = append(l.segs, &segment{n: n, f: f, size: size})
+	l.occupied.Add(size)
 	l.off = int64(len(cpRec))
 	l.batch = cp.nextBatchSeq + 1
 	l.prepare(n+1, l.segBytes)
@@ -1412,6 +1419,7 @@ func (l *fileLog) removeFirstSegment() error {
 	if err := os.Remove(filepath.Join(l.logDir(), segName(l.segs[0].n))); err != nil {
 		return storageFailed("remove segment", err)
 	}
+	l.occupied.Add(-l.segs[0].size)
 	l.segs = l.segs[1:]
 	return nil
 }
@@ -1459,6 +1467,7 @@ func (l *fileLog) Close() error {
 		}
 	}
 	l.segs = nil
+	l.occupied.Store(0)
 	if p := l.prep; p != nil {
 		l.prep = nil
 		<-p.done
@@ -1480,17 +1489,10 @@ func (l *fileLog) logStats() (bytes, free, tails int64) {
 	return l.logBytes(), l.freeBytes(), tails
 }
 
-// logBytes is the bytes the segments occupy, the next one being prepared
-// included once published: what the no-space alarm's quota counts (D17).
-func (l *fileLog) logBytes() int64 {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	var bytes int64
-	for _, s := range l.segs {
-		bytes += s.size
-	}
-	return bytes
-}
+// logBytes is the bytes the published segments occupy: what the no-space
+// alarm's quota counts (D17). It takes no lock: the event loop reads it at
+// every tick.
+func (l *fileLog) logBytes() int64 { return l.occupied.Load() }
 
 // freeBytes is the free space of the log's filesystem, -1 where it is not
 // read.

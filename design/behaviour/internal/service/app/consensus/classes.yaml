@@ -3024,6 +3024,12 @@ types:
         name: fill
         type: func(f *os.File, off, size int64) error
       - doc: |-
+          occupied is the bytes the segments occupy, kept beside segs wherever
+          a segment is added or dropped, so the event loop reads it without mu:
+          a rotation holds mu across an fsync (D5b).
+        name: occupied
+        type: atomic.Int64
+      - doc: |-
           wmu serialises the writers. A sync holds it, not mu, across its
           write and fdatasync, so readers do not wait for the disk (review of
           PR #301, L6).
@@ -3444,8 +3450,9 @@ types:
         recv: l *fileLog
         results: bytes, free, tails int64
       - doc: |-
-          logBytes is the bytes the segments occupy, the next one being prepared
-          included once published: what the no-space alarm's quota counts (D17).
+          logBytes is the bytes the published segments occupy: what the no-space
+          alarm's quota counts (D17). It takes no lock: the event loop reads it at
+          every tick.
         name: logBytes
         recv: l *fileLog
         results: int64
