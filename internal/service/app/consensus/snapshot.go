@@ -314,6 +314,57 @@ func (n *Node) removeOld(old []coreconsensus.SnapshotMetaValue) {
 	}
 }
 
+// sentCorrupt is the sender's answer to a peer that refused a snapshot as
+// SNAPSHOT_CORRUPT: its own copy is read back. The transport is
+// authenticated and checksummed, so a copy that verifies leaves the fault
+// with the peer, which is logged. One that does not is removed, the cut
+// index lowered past it, and a cut asked for at the applied index: the next
+// probe sends that one, or the older copy left. It used to be streamed
+// again at every probe, never read back, and the peer stayed out until the
+// next cut, SnapshotEvery entries later (#525). It runs off the loop.
+func (n *Node) sentCorrupt(meta coreconsensus.SnapshotMetaValue, to coreconsensus.NodeID) {
+	verr := n.verifyHeld(meta)
+	if verr == nil {
+		n.obs.warn("consensus: a peer found a sound snapshot corrupt", lstr("id", meta.ID), lattr("peer", uint64(to)))
+		return
+	}
+	n.obs.warn("consensus: a snapshot failed its checksums and is replaced", lstr("id", meta.ID), lstr("error", verr.Error()))
+	if err := n.cfg.Snapshots.Remove(meta.ID); err != nil {
+		if errs.HasCode(err, coreconsensus.CodeStorageFailed) {
+			n.cutFailed(err)
+		}
+		// Pinned by another transfer: the next refusal tries again.
+		return
+	}
+	var below uint64
+	if metas, err := n.cfg.Snapshots.List(); err == nil && len(metas) > 0 {
+		below = metas[0].Position.Index
+	}
+	ss := &n.snapState
+	ss.mu.Lock()
+	ss.last = min(ss.last, below)
+	ss.mu.Unlock()
+	n.requestCut()
+}
+
+// verifyHeld reads a held snapshot back and checks its sizes and digest.
+func (n *Node) verifyHeld(m coreconsensus.SnapshotMetaValue) (err error) {
+	codec, err := n.codecOf(&m)
+	if err != nil {
+		return err
+	}
+	h, err := n.cfg.Snapshots.Open(m.ID)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := h.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
+	return verifySnapshot(io.NewSectionReader(h, 0, m.EncodedSize), m, codec, n.cfg.MaxSnapshotBytes)
+}
+
 // requestCut asks the apply goroutine for a cut, unless one is in flight.
 func (n *Node) requestCut() {
 	n.snapState.mu.Lock()
@@ -457,10 +508,16 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 			// it held is released either way.
 			n.obs.warn("consensus: snapshot handle close failed", lstr("id", meta.ID), lstr("error", cerr.Error()))
 		}
-		if errors.Is(err, coreconsensus.Compacted) {
+		switch {
+		case errors.Is(err, coreconsensus.Compacted):
 			// The peer's log starts past this snapshot: cut a newer one,
 			// which the next probe sends.
 			n.requestCut()
+		case errs.HasCode(err, coreconsensus.CodeSnapshotCorrupt):
+			n.sentCorrupt(meta, to)
+		case errs.HasCode(err, coreconsensus.CodeVersionUnsupported):
+			n.obs.warn("consensus: a peer cannot read this snapshot's version or codec, and stops",
+				lstr("id", meta.ID), lattr("peer", uint64(to)))
 		}
 		n.exec(func() {
 			delete(n.sending, to)

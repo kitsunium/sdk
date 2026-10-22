@@ -2,9 +2,11 @@ package consensus
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -254,6 +256,91 @@ func TestASnapshotIsReadWithTheCodecItWasWrittenWith(t *testing.T) {
 			_ = n.HardClose()
 		}
 		t.Fatalf("a start over a snapshot of an unknown codec: %v", err)
+	}
+}
+
+// cutsSettled waits until tn has no cut in flight and none coalesced, five
+// checks in a row: the snapshot a test then reads is the newest it keeps.
+func cutsSettled(t *testing.T, tn *testNode) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for quiet := 0; quiet < 5; {
+		ss := &tn.node.snapState
+		ss.mu.Lock()
+		busy := ss.inFlight || ss.pending
+		ss.mu.Unlock()
+		if busy {
+			quiet = 0
+		} else {
+			quiet++
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the node's cuts never settled")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// streamingTransport is a node's end of a memory network that counts the
+// snapshot streams the node sends, and those its peer refused as corrupt.
+type streamingTransport struct {
+	*MemoryTransport
+	streams, corrupt atomic.Int64
+}
+
+// Stream implements Transport, counting the stream and its verdict.
+func (t *streamingTransport) Stream(ctx context.Context, to coreconsensus.NodeID, offer coreconsensus.InstallOfferValue, open func(int64) (io.ReadCloser, error)) error {
+	t.streams.Add(1)
+	err := t.MemoryTransport.Stream(ctx, to, offer, open)
+	if errors.Is(err, coreconsensus.SnapshotCorrupt) {
+		t.corrupt.Add(1)
+	}
+	return err
+}
+
+// A leader whose newest snapshot rotted on its disk checks its own copy
+// when a peer refuses it as corrupt, removes it and cuts a new one: it used
+// to stream it again at every probe, never reading it back, and the peer
+// stayed out of replication until the leader's next cut, SnapshotEvery
+// entries later (#525).
+func TestALeaderReplacesASnapshotItsPeerFindsCorrupt(t *testing.T) {
+	var mu sync.Mutex
+	streaming := map[coreconsensus.NodeID]*streamingTransport{}
+	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{5, 2, 5}, every: 20, size: 3}
+	c.configure = func(tn *testNode, cfg *Config) {
+		mu.Lock()
+		defer mu.Unlock()
+		st := streaming[tn.id]
+		if st == nil {
+			st = &streamingTransport{MemoryTransport: NewMemoryTransport(c.net, tn.id)}
+			streaming[tn.id] = st
+		}
+		cfg.Transport = st
+	}
+	newClusterWith(t, c)
+	l := c.settledLeader(5 * time.Second)
+	f := c.otherThan(l)
+	tok := lagBehindAnInstall(t, c, f, 200)
+	c.waitApplied(tok.Index, 10*time.Second)
+	l = c.leader(5 * time.Second)
+	cutsSettled(t, l)
+	newest := leaderSnapshots(t, l)[0]
+	l.snaps.mu.Lock()
+	bad := l.snaps.done[newest.ID].data
+	bad[len(bad)/2] ^= 0xff
+	l.snaps.mu.Unlock()
+	mu.Lock()
+	lt := streaming[l.id]
+	mu.Unlock()
+	c.start(f)
+	c.net.Isolate(f.id, false)
+	// No write follows: only the leader's own repair lets the peer in.
+	c.waitApplied(tok.Index, 10*time.Second)
+	if v, _ := f.sm.get("k199"); v != "199" {
+		t.Fatalf("the lagging node: k199=%q", v)
+	}
+	if got := lt.corrupt.Load(); got > 1 {
+		t.Fatalf("the leader streamed a snapshot its peer found corrupt %d times", got)
 	}
 }
 
