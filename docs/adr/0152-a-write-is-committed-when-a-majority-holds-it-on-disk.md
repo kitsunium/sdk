@@ -3144,7 +3144,7 @@ The rules:
   1 has no member announcing more than 1, so the engine refuses any raise
   above its own `ProtocolMax`, and a node that finds such a raise committed
   stops (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), M3). Members announce their range in the
-  version that first raises it.
+  version that first raises it. Protocol 2 is that version: see the amendment of 2026-10-23.
 - **Timing contract.** It has its own committed entry and its own version (D9,
   R2-14).
 - **Unknown means stop.** An entry kind, record version, frame version or
@@ -3932,6 +3932,51 @@ format written that a node of the previous release cannot read:
     a version 2 accepted round-trips as version 2. Once a version 2 is
     written, rolling back below this release is not supported.
 
+## Amendment — protocol version 2, raised once (2026-10-23, lot S3)
+
+The formats lot S3 of the Raft hunt needs (kitsunium/sdk#564) ride on one
+protocol version, 2, and one raise of the cluster version. D18 is kept and
+completed:
+
+- **Announcement.** A node of protocol 2 sets `FlagProtocol2` on every frame
+  it sends. A node of protocol 1 tests only the flag bits it names, so the
+  frame stays a version 1 frame it parses and acts on as before: this is an
+  announcement, not a field a version 1 node skips. The leader keeps, per
+  member, whether its last message of the term carried the flag. The ranges
+  are not stored in the replicated membership: only the leader that admits
+  the raise reads them, and it hears every member within a heartbeat.
+- **The raise.** `RaiseClusterVersion(2)` is refused with
+  `VERSION_UNSUPPORTED` while any member of the latest configuration, voter
+  or learner, was not heard in the term announcing protocol 2. A member
+  rolled back stops announcing at its next message. A node of protocol 1
+  that finds the raise committed stops (`VERSION_UNSUPPORTED`): the rollback
+  after the raise is refused cleanly, never run on the formats below.
+- **What protocol 2 writes**, each chosen by the committed cluster version,
+  never before the raise, and each older form still read:
+  - the snapshot metadata in version 2, exactly as the amendment of
+    2026-10-22 fixed it and the release before reads it: version 1's fields
+    followed by a CRC-32C (#546 phase 2). The version follows the
+    `ClusterVersion` the meta carries;
+  - the admin payload of entry version 2 (`wire.AdminVersion2`), which adds
+    `Origin`: the authenticated node the leader received the operation
+    from, written by the leader over whatever the proposer wrote, as D8
+    requires. The leader logs every engine entry it appends with its origin
+    (#561). An admin payload version a node does not know stops it when the
+    entry commits;
+  - the stamp in version 2 when the log identity records `AdoptedFrom`,
+    which Recover and RestoreSnapshot set only in a history at protocol 2:
+    the last kept index the predecessor had committed. Only the stamp of
+    the node they ran on carries it; the snapshot meta does not, so a node
+    that learns the lineage from a snapshot keeps phase 1's answer. A predecessor's token at or below it is
+    trusted by its index once its term can no longer be read; one in the
+    adopted range above it is `LINEAGE_MISMATCH`, as phase 1 answered for
+    the whole kept range (#509).
+- **Not in protocol 2.** The admission of a stale voter by a leader it does
+  not know (#542) changes D4's threat model and waits for its arbitration.
+  The fresh epoch in the stamp and D18's announced `PayloadMax` with
+  `PAYLOAD_VERSION_REFUSED` (follow-ups of kodflow/forgejo-raft#65 and #50)
+  have no issue yet. Each that changes a format will need protocol 3.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -3944,6 +3989,7 @@ format written that a node of the previous release cannot read:
 | R8 | review run 3, round 2 (overall round 8), 2026-10-13 | **State: rewritten-unreviewed.** Log recovery as one procedure: explicit truncate records, the effective log, a torn tail only in the highest batch and only with a tear pattern, zeroing only after classification, no batch across a rotation, the `STORAGE_FAILED` marker keyed on `boot_id` (R8-01 to R8-06). Identity: the member's key pinned by SPKI, slots pinned on Nomad node ids and bound by `nomad_job_id` and `nomad_task`, a published JOIN surface with the product's `JoinAuthorizer`, `Init` offline with `Redraw`, the replacement marker's owner and exit, an executable key-compromise runbook, the renewer, Consul ACLs (R8-07 to R8-14). Nomad: reschedule and disconnect corrected, the slot on a replacement VPS, `max_kill_timeout`, offline subcommands outside Nomad, the rolling script of Q16 (R8-15 to R8-19). The Recover fence is a witness on the NAS that fails closed (Q17, R8-20). Snapshot ports completed and rotation with pinned anchors (R8-21, R8-22). The SQL event lifecycle, its cursor and its batches (R8-23 to R8-30). Infrastructure rows and stale making.codes facts (R8-31 to R8-34). Exit codes through `errs.WithExitCode`, API and editorial fixes, the dead-voter gate stated (R8-35 to R8-38) |
 | R9 | review run 3, round 3 (final, overall round 9), 2026-10-13 | **State: rewritten after the final round, not re-reviewed.** Batch sequences contiguous, stale recovery rules withdrawn, tears judged on the highest batch's end record per 512 B chunk (R9-01 to R9-03). SPKI required at every founding and recovery, break-glass certificates over the pinned key, `STORAGE_FAILED` markers in two places, a `join` callback off the event loop, the lane in the frame type's high bits (R9-04 to R9-07). The witness: signed receipts from both NAS, a check that blocks Forgejo only and fails closed, reached through a dated read-only matrix exception (Q18, Q19, Q20, R9-08 to R9-11). The job kept from generic submitters and rolled with a plan check, Vault roles bound by namespace with a claim per slot (R9-12, R9-13). The SQL boundary: backup cursor, step table, per-database dumps, predecessor events drained (R9-14 to R9-16, R9-19). Submission counter exhaustion, `DenyPin`, the image outside the forge, `require_cn` lab-gated (R9-17, R9-18, R9-20, R9-21) |
 | Accepted | the owner's decision, 2026-10-13 | Accepted on R9 as written; the SDK stays public. No text changed but the status |
+| S3 | Raft hunt lot S3, 2026-10-23 | protocol version 2 raised once: the announcement, the raise refused until every member speaks it, the checksummed snapshot meta, `Origin`, `AdoptedFrom` (amendment of 2026-10-23) |
 
 ## raft-sql-poc (owner's prior Raft)
 
