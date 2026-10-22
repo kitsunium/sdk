@@ -468,6 +468,7 @@ files:
       - (*Raft).tallyVotes
       - (*Raft).countVotes
       - (*Raft).stepCandidate
+      - (*Raft).followWinner
       - (*Raft).stepFollower
       - (*Raft).followHeartbeat
       - (*Raft).reportedContract
@@ -2021,6 +2022,13 @@ types:
           stepCandidate handles a message of the campaign's term: an append or a
           heartbeat means a leader won it, an answer is tallied, a read is refused.
         name: stepCandidate
+        params: now time.Time, m core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          followWinner follows the leader of the campaign's term that m comes
+          from, unless this node refused that leader for the term: its campaign is
+          how the refusal ends, and the leader's messages do not end it (#508).
+        name: followWinner
         params: now time.Time, m core.MessageValue
         recv: r *Raft
       - doc: |-

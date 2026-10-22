@@ -1074,6 +1074,7 @@ files:
       - (*Node).refuseOverload
       - (*Node).proposeAlone
       - (*Node).appended
+      - (*Node).answerApplied
       - (*Node).displace
       - (*Node).forward
       - (*Node).nextID
@@ -4944,6 +4945,13 @@ types:
       - doc: appended registers a proposal's waiter at its position.
         name: appended
         params: p *proposal, pos coreconsensus.PositionValue, local bool
+        recv: n *Node
+      - doc: |-
+          answerApplied answers a proposal whose position is already applied,
+          from the result kept there when ok: it is never registered, so no applied1
+          releases its pending bytes (#419).
+        name: answerApplied
+        params: p *proposal, pos coreconsensus.PositionValue, r applyResult, ok bool
         recv: n *Node
       - doc: |-
           displace answers a proposal that lost its index's waiter to another one

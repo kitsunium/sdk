@@ -12906,6 +12906,8 @@ sequences:
         kind: value
       - id: n.am.Unlock
         kind: value
+      - id: n.answerApplied
+        kind: internal
       - id: n.displace
         kind: internal
     steps:
@@ -12926,28 +12928,8 @@ sequences:
               eval: n.results[pos.Index]
             - eval: n.am.Unlock()
               to: n.am.Unlock
-            - opt:
-                do:
-                  - eval: n.pendingBytes.Add(-int64(len(p.entry.Data)))
-                    to: n.pendingBytes.Add
-                when: local
-            - switch:
-                cases:
-                  - case: ok && r.term == pos.Term
-                    do:
-                      - send:
-                          chan: p.done
-                          value: "propResult{tok: n.token(pos), val: r.val}"
-                  - case: ok
-                    do:
-                      - send:
-                          chan: p.done
-                          value: "propResult{err: withToken(coreconsensus.EntrySuperseded, n.token(pos))}"
-                  - default: true
-                    do:
-                      - send:
-                          chan: p.done
-                          value: "propResult{err: outcomeUnknown(\"applied before its position was known\")}"
+            - eval: n.answerApplied(p, pos, r, ok)
+              to: n.answerApplied
             - return: ""
           when: pos.Index <= n.applied
       - bind: displaced
@@ -12967,6 +12949,37 @@ sequences:
             - eval: n.displace(displaced)
               to: n.displace
           when: displaced != nil
+  - of: (*Node).answerApplied
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).answerApplied
+        kind: self
+      - id: n.pendingBytes.Add
+        kind: value
+    steps:
+      - opt:
+          do:
+            - eval: n.pendingBytes.Add(-int64(len(p.entry.Data)))
+              to: n.pendingBytes.Add
+          when: p.local
+      - switch:
+          cases:
+            - case: ok && r.term == pos.Term
+              do:
+                - send:
+                    chan: p.done
+                    value: "propResult{tok: n.token(pos), val: r.val}"
+            - case: ok
+              do:
+                - send:
+                    chan: p.done
+                    value: "propResult{err: withToken(coreconsensus.EntrySuperseded, n.token(pos))}"
+            - default: true
+              do:
+                - send:
+                    chan: p.done
+                    value: "propResult{err: outcomeUnknown(\"applied before its position was known\")}"
   - of: (*Node).displace
     participants:
       - id: caller

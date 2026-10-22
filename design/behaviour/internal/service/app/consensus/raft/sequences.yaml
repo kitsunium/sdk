@@ -1082,11 +1082,7 @@ sequences:
       - opt:
           do:
             - return: codeMembershipInvalid
-          when: idx < 0
-      - opt:
-          do:
-            - return: codeMembershipInvalid
-          when: "!r.mutated(mutDenyPinUnchecked) && (target == r.id || !r.activeMajorityWithout(*cur, target))"
+          when: idx < 0 || (!r.mutated(mutDenyPinUnchecked) && (target == r.id || !r.activeMajorityWithout(*cur, target)))
       - eval: clear(cur.Members[idx].SPKI[:])
       - return: "0"
   - of: (*Raft).activeMajority
@@ -3869,9 +3865,7 @@ sequences:
         kind: actor
       - id: (*Raft).stepCandidate
         kind: self
-      - id: r.becomeFollower
-        kind: internal
-      - id: r.stepFollower
+      - id: r.followWinner
         kind: internal
       - id: r.tallyVotes
         kind: internal
@@ -3882,14 +3876,8 @@ sequences:
           cases:
             - case: core.MsgApp, core.MsgHeartbeat
               do:
-                - opt:
-                    do:
-                      - return: ""
-                    when: r.refuses(m.From)
-                - eval: r.becomeFollower(m.Term, m.From)
-                  to: r.becomeFollower
-                - eval: r.stepFollower(now, m)
-                  to: r.stepFollower
+                - eval: r.followWinner(now, m)
+                  to: r.followWinner
             - case: core.MsgPreVoteResp
               do:
                 - opt:
@@ -3917,6 +3905,25 @@ sequences:
                   to: r.send
             - default: true
           "on": m.Kind
+  - of: (*Raft).followWinner
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).followWinner
+        kind: self
+      - id: r.becomeFollower
+        kind: internal
+      - id: r.stepFollower
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: r.refuses(m.From)
+      - eval: r.becomeFollower(m.Term, m.From)
+        to: r.becomeFollower
+      - eval: r.stepFollower(now, m)
+        to: r.stepFollower
   - of: (*Raft).stepFollower
     participants:
       - id: caller

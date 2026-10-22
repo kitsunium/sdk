@@ -218,19 +218,7 @@ func (n *Node) appended(p *proposal, pos coreconsensus.PositionValue, local bool
 	if pos.Index <= n.applied {
 		r, ok := n.results[pos.Index]
 		n.am.Unlock()
-		if local {
-			// Answered here, never registered: no applied1 releases them
-			// (#419).
-			n.pendingBytes.Add(-int64(len(p.entry.Data)))
-		}
-		switch {
-		case ok && r.term == pos.Term:
-			p.done <- propResult{tok: n.token(pos), val: r.val}
-		case ok:
-			p.done <- propResult{err: withToken(coreconsensus.EntrySuperseded, n.token(pos))}
-		default:
-			p.done <- propResult{err: outcomeUnknown("applied before its position was known")}
-		}
+		n.answerApplied(p, pos, r, ok)
 		return
 	}
 	displaced := p
@@ -240,6 +228,23 @@ func (n *Node) appended(p *proposal, pos coreconsensus.PositionValue, local bool
 	n.am.Unlock()
 	if displaced != nil {
 		n.displace(displaced)
+	}
+}
+
+// answerApplied answers a proposal whose position is already applied,
+// from the result kept there when ok: it is never registered, so no applied1
+// releases its pending bytes (#419).
+func (n *Node) answerApplied(p *proposal, pos coreconsensus.PositionValue, r applyResult, ok bool) {
+	if p.local {
+		n.pendingBytes.Add(-int64(len(p.entry.Data)))
+	}
+	switch {
+	case ok && r.term == pos.Term:
+		p.done <- propResult{tok: n.token(pos), val: r.val}
+	case ok:
+		p.done <- propResult{err: withToken(coreconsensus.EntrySuperseded, n.token(pos))}
+	default:
+		p.done <- propResult{err: outcomeUnknown("applied before its position was known")}
 	}
 }
 

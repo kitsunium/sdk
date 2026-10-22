@@ -703,10 +703,7 @@ func (r *Raft) updateAddress(cur *core.MembershipValue, admin *wire.AdminValue, 
 // transport no longer let through, and the cluster had no quorum until the
 // dead voter came back (#530, R2-27).
 func (r *Raft) denyPin(cur *core.MembershipValue, target core.NodeID, idx int) errs.Code {
-	if idx < 0 {
-		return codeMembershipInvalid
-	}
-	if !r.mutated(mutDenyPinUnchecked) && (target == r.id || !r.activeMajorityWithout(*cur, target)) {
+	if idx < 0 || (!r.mutated(mutDenyPinUnchecked) && (target == r.id || !r.activeMajorityWithout(*cur, target))) {
 		return codeMembershipInvalid
 	}
 	clear(cur.Members[idx].SPKI[:])

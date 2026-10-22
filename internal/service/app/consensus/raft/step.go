@@ -333,13 +333,7 @@ func (r *Raft) countVotes() (granted, rejected int) {
 func (r *Raft) stepCandidate(now time.Time, m core.MessageValue) {
 	switch m.Kind {
 	case core.MsgApp, core.MsgHeartbeat:
-		if r.refuses(m.From) {
-			// The leader this node refused for the term does not end its
-			// campaign: the campaign is how the refusal ends (#508).
-			return
-		}
-		r.becomeFollower(m.Term, m.From)
-		r.stepFollower(now, m)
+		r.followWinner(now, m)
 	case core.MsgPreVoteResp:
 		if r.role == core.RolePreCandidate {
 			r.votes[m.From] = !m.Reject
@@ -357,6 +351,17 @@ func (r *Raft) stepCandidate(now time.Time, m core.MessageValue) {
 	default:
 		// Nothing else concerns a campaign: it is dropped.
 	}
+}
+
+// followWinner follows the leader of the campaign's term that m comes
+// from, unless this node refused that leader for the term: its campaign is
+// how the refusal ends, and the leader's messages do not end it (#508).
+func (r *Raft) followWinner(now time.Time, m core.MessageValue) {
+	if r.refuses(m.From) {
+		return
+	}
+	r.becomeFollower(m.Term, m.From)
+	r.stepFollower(now, m)
 }
 
 // stepFollower handles a message of the leader's term at a follower or a
