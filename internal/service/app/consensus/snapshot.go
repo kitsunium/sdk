@@ -91,18 +91,24 @@ func snapshotCodec(m *coreconsensus.SnapshotMetaValue, own coretransform.Bounded
 	return nil, origin(coreconsensus.VersionUnsupported, errs.String("snapshot_codec", m.Codec))
 }
 
-// maybeSnapshot cuts a snapshot after SnapshotEvery applied entries, on the
-// apply goroutine; the write runs off it unless the machine cannot cut
-// cheaply (D7). A trigger during a cut in flight is coalesced, not dropped:
-// the cut is made once that one is written (cutPending), or a node that
-// applies nothing more would keep the tail uncut and its log uncompacted.
-func (n *Node) maybeSnapshot() {
+// maybeSnapshot cuts a snapshot after SnapshotEvery applied entries or
+// SnapshotEveryBytes of applied payload, whichever comes first, on the apply
+// goroutine; the write runs off it unless the machine cannot cut cheaply
+// (D7). applied is the payload of the batch just applied: the byte trigger
+// was validated and read nowhere, and a log of large entries grew to the
+// disk's end between two cuts (#515). A trigger during a cut in flight is
+// coalesced, not dropped: the cut is made once that one is written
+// (cutPending), or a node that applies nothing more would keep the tail
+// uncut and its log uncompacted.
+func (n *Node) maybeSnapshot(applied int64) {
 	n.am.Lock()
 	idx, term := n.applied, n.appliedTerm
 	n.am.Unlock()
 	ss := &n.snapState
 	ss.mu.Lock()
-	if idx < ss.last+n.cfg.SnapshotEvery || n.clk.Now().Before(ss.retryAt) {
+	ss.sinceBytes += applied
+	due := idx >= ss.last+n.cfg.SnapshotEvery || (n.cfg.SnapshotEveryBytes > 0 && ss.sinceBytes >= n.cfg.SnapshotEveryBytes && idx > ss.last)
+	if !due || n.clk.Now().Before(ss.retryAt) {
 		ss.mu.Unlock()
 		return
 	}
@@ -180,6 +186,9 @@ func (n *Node) metaAt(idx, term uint64) (coreconsensus.SnapshotMetaValue, bool) 
 // background goroutine counted in n.wg, which ends when the write does, so
 // Close waits for it; its failure reaches cutFailed instead of the caller.
 func (n *Node) cut(idx, term uint64, w io.Writer) error {
+	n.snapState.mu.Lock()
+	n.snapState.sinceBytes = 0
+	n.snapState.mu.Unlock()
 	meta, ok := n.metaAt(idx, term)
 	if !ok {
 		return n.stoppedErr()
@@ -282,6 +291,15 @@ func (n *Node) publishSnapshot(snap coreconsensus.Snapshot, meta coreconsensus.S
 	state.mu.Unlock()
 	n.afterCut()
 	return nil
+}
+
+// payloadBytes is the payload es carries, what SnapshotEveryBytes counts.
+func payloadBytes(es []coreconsensus.EntryValue) int64 {
+	var b int64
+	for i := range es {
+		b += int64(len(es[i].Data))
+	}
+	return b
 }
 
 // snapshotLimit is the largest snapshot a cut may write: this node's

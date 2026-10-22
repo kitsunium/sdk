@@ -95,7 +95,7 @@ func (n *Node) applyItems(items []applyItem) bool {
 		if !n.applyEntries(it.entries) {
 			return false
 		}
-		n.maybeSnapshot()
+		n.maybeSnapshot(payloadBytes(it.entries))
 	}
 	return true
 }

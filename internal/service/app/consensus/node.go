@@ -143,6 +143,8 @@ type Node struct {
 	joinMu      sync.Mutex
 	lastJoin    map[string]time.Time
 	joinRefused atomic.Int64
+	// space is the no-space guard's state (#515).
+	space spaceGuard
 	// crashAfterPublish is set by the package's own tests only.
 	crashAfterPublish atomic.Bool
 }
@@ -161,6 +163,9 @@ type snapState struct {
 	// publishes; no automatic cut starts before retryAt (#520).
 	backoff time.Duration
 	retryAt time.Time
+	// sinceBytes is the payload applied since the last cut started, which
+	// SnapshotEveryBytes bounds (D7, #515).
+	sinceBytes int64
 }
 
 type applyResult struct {
@@ -808,6 +813,7 @@ func (n *Node) onTick(tick clock.Ticker, ok bool) (time.Time, bool) {
 	n.sweep()
 	n.observePeers()
 	n.observeResources()
+	n.guardSpace(turn)
 	return turn, true
 }
 

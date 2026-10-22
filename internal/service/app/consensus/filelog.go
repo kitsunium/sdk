@@ -1475,9 +1475,22 @@ func (l *fileLog) Close() error {
 // filesystem, and the torn tails truncated at open, for D13's gauges.
 func (l *fileLog) logStats() (bytes, free, tails int64) {
 	l.mu.RLock()
+	tails = l.tailsTruncated
+	l.mu.RUnlock()
+	return l.logBytes(), l.freeBytes(), tails
+}
+
+// logBytes is the bytes the segments occupy, the next one being prepared
+// included once published: what the no-space alarm's quota counts (D17).
+func (l *fileLog) logBytes() (bytes int64) {
+	l.mu.RLock()
 	defer l.mu.RUnlock()
 	for _, s := range l.segs {
 		bytes += s.size
 	}
-	return bytes, fsFree(l.dir), l.tailsTruncated
+	return bytes
 }
+
+// freeBytes is the free space of the log's filesystem, -1 where it is not
+// read.
+func (l *fileLog) freeBytes() int64 { return fsFree(l.dir) }

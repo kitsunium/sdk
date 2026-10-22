@@ -458,12 +458,20 @@ func (r *Raft) Propose(now time.Time, es []core.EntryValue) ([]core.PositionValu
 }
 
 // checkProposed admits one proposed entry that would land at index: a
-// command as it is, a no-op or an unknown kind never, an engine entry once
-// validateAdmin accepts and rewrites it. It returns the target of a
-// transfer the entry asks for.
+// command as it is unless the no-space alarm is committed, a no-op or an
+// unknown kind never, an engine entry once validateAdmin accepts and
+// rewrites it. It returns the target of a transfer the entry asks for.
+//
+// While the alarm stands every command is refused NO_SPACE, a forwarded one
+// too, and the engine entries — the alarm, its clearing, a membership
+// change, a transfer — are still admitted, so the cluster can be repaired
+// (D17, R2-29). It used to admit every command (#515).
 func (r *Raft) checkProposed(e *core.EntryValue, index uint64) (core.NodeID, errs.Code) {
 	switch {
 	case e.Kind == core.EntryCommand:
+		if r.noSpace != 0 && !r.mutated(mutNoSpaceAdmits) {
+			return 0, core.CodeNoSpace
+		}
 		return 0, 0
 	case e.Kind == core.EntryNoOp || !e.Kind.Known():
 		return 0, codeVersion
