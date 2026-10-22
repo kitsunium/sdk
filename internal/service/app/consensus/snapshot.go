@@ -89,12 +89,18 @@ func snapshotCodec(m *coreconsensus.SnapshotMetaValue, own coretransform.Bounded
 	if own != nil && (m.Codec == "" || coretransform.Algorithm(m.Codec) == own.Algorithm()) {
 		return own, nil
 	}
-	if c, ok := coretransform.Lookup(coretransform.Algorithm(m.Codec)); ok {
+	return linkedCodec(m.Codec)
+}
+
+// linkedCodec is the bounded codec this build links under name, refused
+// VERSION_UNSUPPORTED when there is none.
+func linkedCodec(name string) (coretransform.BoundedDecompressor, error) {
+	if c, ok := coretransform.Lookup(coretransform.Algorithm(name)); ok {
 		if b, ok := c.(coretransform.BoundedDecompressor); ok {
 			return b, nil
 		}
 	}
-	return nil, origin(coreconsensus.VersionUnsupported, errs.String("snapshot_codec", m.Codec))
+	return nil, origin(coreconsensus.VersionUnsupported, errs.String("snapshot_codec", name))
 }
 
 // maybeSnapshot cuts a snapshot after SnapshotEvery applied entries or

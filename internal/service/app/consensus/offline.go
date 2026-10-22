@@ -947,7 +947,8 @@ type RestoreOptions struct {
 	Operator coreconsensus.Operator
 	// MaxEncoded and MaxDecoded bound what is read.
 	MaxEncoded, MaxDecoded int64
-	// Codec decodes the chunks; nil is flate.
+	// Codec decodes the chunks; nil is the codec Expected names, flate
+	// when it names none.
 	Codec coretransform.BoundedDecompressor
 }
 
@@ -1005,10 +1006,16 @@ func checkRestore(flog *fileLog, stamp *coreconsensus.StampValue, newCluster cor
 }
 
 // restoreCodec is the codec the restored chunks are decoded with: the
-// caller's, else the default, flate.
+// caller's, else the one the expected metadata names, else the default,
+// flate. Read with flate whatever the metadata said, a snapshot a node cut
+// with another codec failed as corrupt instead of being refused cleanly
+// when this build does not link its codec (D18, #548).
 func restoreCodec(opt *RestoreOptions) (coretransform.BoundedDecompressor, error) {
 	if opt.Codec != nil {
 		return opt.Codec, nil
+	}
+	if opt.Expected.Codec != "" {
+		return linkedCodec(opt.Expected.Codec)
 	}
 	return defaultRestoreCodec()
 }

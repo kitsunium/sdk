@@ -2431,7 +2431,8 @@ packages:
           wrote it, without a node: the reader returns the decoded stream, checks
           each chunk as it decodes it, bounds the total by opt.MaxDecoded, and
           answers SNAPSHOT_CORRUPT instead of io.EOF when the sizes or the SHA-256
-          differ from opt.Expected's. opt.Codec is flate when nil.
+          differ from opt.Expected's. opt.Codec is, when nil, the codec
+          opt.Expected names, flate when it names none.
         in:
           - name: r
             type: io.Reader
@@ -3430,7 +3431,9 @@ packages:
             - doc: MaxEncoded and MaxDecoded bound what is read.
               name: MaxDecoded
               type: int64
-            - doc: Codec decodes the chunks; nil is flate.
+            - doc: |-
+                Codec decodes the chunks; nil is the codec Expected names, flate
+                when it names none.
               name: Codec
               type: coretransform.BoundedDecompressor
       - doc: |-
