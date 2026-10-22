@@ -160,7 +160,7 @@ func (a *App) componentStopBudget() time.Duration {
 	for _, d := range a.drainers() {
 		budget = max(budget, d.stopTakes()+stopMargin)
 	}
-	return budget
+	return max(budget, a.otlpStopTakes()+stopMargin)
 }
 
 // stopDeadline is how long a whole stop of the app may take, base when no

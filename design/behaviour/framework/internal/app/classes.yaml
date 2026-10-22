@@ -885,6 +885,110 @@ constants:
         type: int
         value: 8 << 10
     name: payloadLimit
+  - doc: The settings' knobs, each named otlp-<knob>.
+    grouped: true
+    items:
+      - name: otlpPrefix
+        value: "\"otlp-\""
+      - name: knobOTLPEndpoint
+        value: "\"endpoint\""
+      - name: knobOTLPMaxBatches
+        value: "\"max-batches\""
+      - name: knobOTLPMaxBytes
+        value: "\"max-bytes\""
+      - name: knobOTLPWhenFull
+        value: "\"when-full\""
+      - name: knobOTLPMaxAge
+        value: "\"max-age\""
+      - name: knobOTLPSendTimeout
+        value: "\"send-timeout\""
+      - name: knobOTLPInterval
+        value: "\"interval\""
+      - name: knobOTLPDrain
+        value: "\"drain\""
+      - name: knobOTLPSettle
+        value: "\"settle\""
+      - name: otlpHeadersSecret
+        value: "\"otlp-headers\""
+      - name: varOTLPHeaders
+        value: "\"OTLP_HEADERS\""
+      - name: otlpPackage
+        value: "\"github.com/kitsunium/sdk/framework/app/otlp\""
+      - name: otlpDataDir
+        value: "\".otlp\""
+      - name: otlpNode
+        value: "\"otlp\""
+      - name: otlpComponent
+        value: "\"otlp\""
+    name: otlpPrefix
+  - doc: |-
+      The export's defaults, the settings' when the code names none, and the
+      share of a bound past which the readiness says the export is behind.
+    grouped: true
+    items:
+      - name: otlpDefaultBatches
+        type: int
+        value: "10_000"
+      - name: otlpDefaultBytes
+        type: int
+        value: 256 << 20
+      - name: otlpDefaultMaxAge
+        type: time.Duration
+        value: 24 * time.Hour
+      - name: otlpDefaultTimeout
+        type: time.Duration
+        value: 10 * time.Second
+      - name: otlpDefaultInterval
+        type: time.Duration
+        value: time.Minute
+      - name: otlpDefaultDrain
+        type: time.Duration
+        value: 5 * time.Second
+      - name: otlpDefaultSettle
+        type: time.Duration
+        value: 5 * time.Second
+      - name: otlpReadinessBacklog
+        type: float64
+        value: "0.8"
+    name: otlpDefaultBatches
+  - doc: The two signals an export forwards, as an [OTLPBatchValue] names them.
+    grouped: true
+    items:
+      - doc: |-
+          OTLPTraces names the trace signal: an OTLP/JSON
+          ExportTraceServiceRequest.
+        name: OTLPTraces
+        type: string
+        value: plug.OTLPTraces
+      - doc: |-
+          OTLPMetrics names the metrics signal: an OTLP/JSON
+          ExportMetricsServiceRequest.
+        name: OTLPMetrics
+        type: string
+        value: plug.OTLPMetrics
+    name: OTLPTraces
+  - doc: |-
+      What an export's full queue does with a new batch: the setting
+      otlp-when-full spells it.
+    grouped: true
+    items:
+      - doc: |-
+          OTLPDropOldest, the default: the oldest batches not being sent are
+          taken out, counted dropped, until the new one fits.
+        name: OTLPDropOldest
+        type: OTLPFullPolicy
+        value: "\"drop-oldest\""
+      - doc: "OTLPDropNewest: the new batch is refused, counted dropped."
+        name: OTLPDropNewest
+        type: OTLPFullPolicy
+        value: "\"drop-newest\""
+      - doc: |-
+          OTLPBlock: the span or the snapshot waits for room a few seconds, then
+          is refused, counted dropped.
+        name: OTLPBlock
+        type: OTLPFullPolicy
+        value: "\"block\""
+    name: OTLPDropOldest
   - doc: The policy's bounds.
     grouped: true
     items:
@@ -3441,6 +3545,63 @@ files:
       - unmounted
     name: operation.go
   - decls:
+      - otlpPrefix
+      - otlpDefaultBatches
+      - OTLPTraces
+      - OTLPDropOldest
+      - OTLPFullPolicy
+      - OTLPBatchValue
+      - otlpExport
+      - otlpOptions
+      - otlpOption
+      - otlpOption.openTelemetryConfigure
+      - OTLP
+      - OTLPEndpoint
+      - OTLPBounds
+      - OTLPWhenFull
+      - OTLPMaxAge
+      - OTLPSendTimeout
+      - OTLPSender
+      - (*otlpExport).declareSettings
+      - otlpSetting
+      - (*otlpExport).settingDecls
+      - (*App).otlpStopBudget
+      - (*App).otlpSettings
+      - (*App).otlpProblems
+      - checkOTLPEndpoint
+      - checkOTLPWhenFull
+      - parseOTLPHeaders
+    name: otlp.go
+  - decls:
+      - otlpHooks
+      - otlpCode
+      - EnableOTLP
+      - (*App).addOTLPComponent
+      - (*App).otlpCodeSettings
+      - (*App).otlpCodeProblems
+      - (*App).otlpStopTakes
+      - (*App).otlpCodeHeaderSettings
+    name: otlp_enable.go
+  - decls:
+      - OpenTelemetryConfigurer
+    name: otlp_interface.go
+  - decls:
+      - otlpRunning
+      - otlpLinked
+      - otlpDeclared
+      - (*App).otlpSink
+      - (*App).otlpRecord
+      - (*App).addOTLP
+      - (*App).startOTLP
+      - (*App).stopOTLP
+      - (*App).otlpConfig
+      - (*App).otlpHeaders
+      - (*App).otlpHeaderSettings
+      - otlpRetryable
+      - (*App).otlpReady
+      - backlogged
+    name: otlp_run.go
+  - decls:
       - defaultMinLength
       - PasswordPolicyService
       - passwordRule
@@ -4980,6 +5141,7 @@ files:
       - unlinkedDecl
       - unlinkedSubsystems
       - (*App).unlinkedDeclarations
+      - (*App).unlinkedApp
       - (*App).unlinkedNodes
       - sealsAtRest
       - (*App).subsystemProblems
@@ -7403,6 +7565,71 @@ functions:
     name: unmounted
     params: n *nodeBase
     results: error
+  - name: OTLP
+    params: opts ...OpenTelemetryConfigurer
+    results: AppConfigurer
+  - name: OTLPEndpoint
+    params: url string
+    results: OpenTelemetryConfigurer
+  - name: OTLPBounds
+    params: maxBatches, maxBytes int
+    results: OpenTelemetryConfigurer
+  - name: OTLPWhenFull
+    params: p OTLPFullPolicy
+    results: OpenTelemetryConfigurer
+  - name: OTLPMaxAge
+    params: d time.Duration
+    results: OpenTelemetryConfigurer
+  - name: OTLPSendTimeout
+    params: d time.Duration
+    results: OpenTelemetryConfigurer
+  - name: OTLPSender
+    params: send func(ctx context.Context, batch OTLPBatchValue) error
+    results: OpenTelemetryConfigurer
+  - doc: "otlpSetting declares one setting of the export: otlp-<knob>."
+    name: otlpSetting
+    params: e *otlpExport, knob string, def T, check func(any) phrase
+    results: "*SettingService[T]"
+    typeParams: T SettingValue
+  - doc: |-
+      checkOTLPEndpoint refuses an endpoint that is not empty and not an
+      absolute http or https URL with a host and no query nor fragment: the
+      signals' paths are appended to it.
+    name: checkOTLPEndpoint
+    results: func(v any) phrase
+  - doc: checkOTLPWhenFull refuses a full policy the export does not know.
+    name: checkOTLPWhenFull
+    results: func(v any) phrase
+  - doc: |-
+      parseOTLPHeaders reads the secret otlp-headers: "key=value" pairs joined
+      by commas, each value percent-decoded, as OTEL_EXPORTER_OTLP_HEADERS
+      spells them.
+    name: parseOTLPHeaders
+    params: raw string
+    results: map[string]string, bool
+  - name: EnableOTLP
+  - doc: otlpLinked reports whether the program imports framework/app/otlp.
+    name: otlpLinked
+    results: bool
+  - doc: |-
+      otlpDeclared is where the app declared its export, nil when it declares
+      none.
+    name: otlpDeclared
+    params: a *App
+    results: "*pos"
+  - doc: |-
+      otlpRetryable reports whether a failure of the product's own sender may
+      be cured by a later attempt: all but a refusal the caller must fix, a 4xx
+      other than 408 and 429.
+    name: otlpRetryable
+    params: err error
+    results: bool
+  - doc: |-
+      backlogged reports whether a signal's queue is above the readiness's share
+      of either of its bounds.
+    name: backlogged
+    params: st *plug.OTLPStatsValue
+    results: bool
   - name: MinLength
     params: n int
     results: PasswordConfigurer
@@ -9962,6 +10189,11 @@ types:
         name: wired
         type: atomic.Pointer[wiring]
       - doc: |-
+          otlpRun is the OTLP export while the app runs, nil otherwise
+          (otlp_run.go).
+        name: otlpRun
+        type: atomic.Pointer[otlpRunning]
+      - doc: |-
           privacy is what the app keeps for personal data: kit's own service,
           the reference keys, the journal's chain (privacy.go).
         name: privacy
@@ -11762,6 +11994,125 @@ types:
         params: sp *span
         recv: a *App
       - doc: |-
+          otlpStopBudget is the most the export's stop takes, nothing without an
+          export: the flush of what it holds in memory and of one last snapshot, a
+          settle each, then the batch being sent, its drain and its
+          acknowledgement's settle.
+        name: otlpStopBudget
+        recv: a *App
+        results: time.Duration
+      - doc: |-
+          otlpSettings are the export's settings, but for one whose name the
+          product's settings take: the export's problem (otlpProblems).
+        name: otlpSettings
+        params: byName map[string]settingDecl
+        recv: a *App
+        results: "[]settingDecl"
+      - doc: |-
+          otlpProblems are what stops a start in the app's export: a setting of
+          its own a product's setting already names.
+        name: otlpProblems
+        recv: a *App
+        results: "[]model.Diagnostic"
+      - doc: |-
+          addOTLPComponent adds the export's component, when the program imports
+          framework/app/otlp; an export declared without it is refused before
+          (subsystem.go).
+        name: addOTLPComponent
+        recv: a *App
+        results: error
+      - doc: |-
+          otlpCodeSettings are the export's settings, none without
+          framework/app/otlp.
+        name: otlpCodeSettings
+        params: byName map[string]settingDecl
+        recv: a *App
+        results: "[]settingDecl"
+      - doc: |-
+          otlpCodeProblems are what refuses the export's start, none without
+          framework/app/otlp — whose absence is a problem of its own.
+        name: otlpCodeProblems
+        recv: a *App
+        results: "[]model.Diagnostic"
+      - doc: |-
+          otlpStopTakes is the most the export's stop takes, nothing without
+          framework/app/otlp.
+        name: otlpStopTakes
+        recv: a *App
+        results: time.Duration
+      - doc: |-
+          otlpCodeHeaderSettings is the export's secret as the configuration shows
+          it, nothing without framework/app/otlp.
+        name: otlpCodeHeaderSettings
+        params: ctx context.Context
+        recv: a *App
+        results: "[]model.Setting"
+      - doc: |-
+          otlpSink is the tracer's sink when the app declares an export: every span
+          that ends goes to the export while it runs, nowhere otherwise. nil for an
+          app that declares none, whose tracer then records nothing.
+        name: otlpSink
+        recv: a *App
+        results: trace.SpanSink
+      - doc: |-
+          otlpRecord counts a unit of work that ended for the export's metrics.
+          Without an export it costs one atomic load.
+        name: otlpRecord
+        params: sp *span
+        recv: a *App
+      - doc: |-
+          addOTLP adds the export's component and its readiness check, when the
+          app declares one.
+        name: addOTLP
+        recv: a *App
+        results: error
+      - doc: |-
+          startOTLP opens the export and starts the loop that sends: nothing while
+          its endpoint is empty and no sender replaces the network.
+
+          Goroutine lifecycle: one, which ends when stopOTLP cancels its context and
+          the export has flushed and closed its queues; done, closed once, says so.
+        name: startOTLP
+        params: ctx context.Context
+        recv: a *App
+        results: error
+      - doc: |-
+          stopOTLP stops the export: what it holds in memory flushed into its
+          queues, the batch being sent given its drain, the queues closed — within
+          the component's budget. A batch still queued in memory is lost, and said.
+        name: stopOTLP
+        params: ctx context.Context
+        recv: a *App
+        results: error
+      - doc: |-
+          otlpConfig is the export as the start resolved its settings and its
+          secret; nil while it is off: no endpoint, and no sender of the product's.
+        name: otlpConfig
+        params: ctx context.Context
+        recv: a *App
+        results: "*plug.OTLPConfig, error"
+      - doc: otlpHeaders reads the secret otlp-headers; none when it is set nowhere.
+        name: otlpHeaders
+        params: ctx context.Context
+        recv: a *App
+        results: map[string]string, error
+      - doc: |-
+          otlpHeaderSettings is <PRODUCT>_OTLP_HEADERS, when the app declares an
+          export. A collector's credentials live in it: whether it is set, and
+          where, is all that shows.
+        name: otlpHeaderSettings
+        params: ctx context.Context
+        recv: a *App
+        results: "[]model.Setting"
+      - doc: |-
+          otlpReady is the export's readiness, which is not critical: degraded
+          while a signal's queue is above 80% of either bound, or since it last
+          answered a batch was lost.
+        name: otlpReady
+        params: _ context.Context
+        recv: a *App
+        results: error
+      - doc: |-
           passwordWarnings are the warnings of the endpoints of g that set or
           change a password with no rate limit in their pipeline, found among g's
           edges and static's, the static analysis — nil before it ran. Outside dev,
@@ -13051,8 +13402,15 @@ types:
           unlinkedDeclarations are the declarations of the app whose subsystem the
           program does not link, in declaration order: the nodes of the services it
           mounts — kit's own privacy service apart, which only a product's own
-          declarations bring —, then its databases.
+          declarations bring —, then its databases, then its OTLP export.
         name: unlinkedDeclarations
+        recv: a *App
+        results: "[]unlinkedDecl"
+      - doc: |-
+          unlinkedApp are the app's own declarations that need one of the missing
+          subsystems: its OTLP export.
+        name: unlinkedApp
+        params: missing []subsystem
         recv: a *App
         results: "[]unlinkedDecl"
       - doc: |-
@@ -14633,6 +14991,11 @@ types:
       - doc: digest is DesignDigest's (telemetry.go).
         name: digest
         type: string
+      - doc: |-
+          otlp is what OTLP declared (otlp.go), nil when the app exports
+          nothing over OTLP.
+        name: otlp
+        type: "*otlpExport"
     kind: struct
     methods:
       - doc: |-
@@ -18587,6 +18950,138 @@ types:
     name: ran
     typeParams: Resp any
     underlying: func(context.Context) (Resp, error)
+  - kind: named
+    name: OTLPFullPolicy
+    underlying: string
+  - fields:
+      - doc: Signal is OTLPTraces or OTLPMetrics.
+        name: Signal
+        type: string
+      - doc: Document is the OTLP/JSON export request.
+        name: Document
+        type: "[]byte"
+    kind: struct
+    name: OTLPBatchValue
+  - doc: |-
+      otlpExport is what app.OTLP declared: where, its code's values, and the
+      settings that tune it.
+    fields:
+      - name: decl
+        type: pos
+      - name: send
+        type: func(ctx context.Context, batch OTLPBatchValue) error
+      - name: endpoint
+        type: "*SettingService[string]"
+      - name: maxBatches
+        type: "*SettingService[int]"
+      - name: maxBytes
+        type: "*SettingService[int]"
+      - name: whenFull
+        type: "*SettingService[string]"
+      - name: maxAge
+        type: "*SettingService[time.Duration]"
+      - name: sendTimeout
+        type: "*SettingService[time.Duration]"
+      - name: interval
+        type: "*SettingService[time.Duration]"
+      - name: drain
+        type: "*SettingService[time.Duration]"
+      - name: settle
+        type: "*SettingService[time.Duration]"
+    kind: struct
+    methods:
+      - doc: |-
+          declareSettings declares the export's settings, the code's values their
+          defaults.
+        name: declareSettings
+        params: o *otlpOptions
+        recv: e *otlpExport
+      - doc: settingDecls are the export's settings, in the table's order.
+        name: settingDecls
+        recv: e *otlpExport
+        results: "[]settingDecl"
+    name: otlpExport
+  - doc: otlpOptions are an export's code values, the settings' defaults.
+    fields:
+      - name: send
+        type: func(ctx context.Context, batch OTLPBatchValue) error
+      - name: endpoint
+        type: string
+      - name: whenFull
+        type: OTLPFullPolicy
+      - name: maxBytes
+        type: int
+      - name: maxBatches
+        type: int
+      - name: maxAge
+        type: time.Duration
+      - name: sendTimeout
+        type: time.Duration
+    kind: struct
+    name: otlpOptions
+  - doc: otlpOption configures an export.
+    kind: named
+    methods:
+      - doc: openTelemetryConfigure sets the option on what it configures.
+        name: openTelemetryConfigure
+        params: o *otlpOptions
+        recv: f otlpOption
+    name: otlpOption
+    underlying: func(o *otlpOptions)
+  - doc: |-
+      otlpHooks are the entries of the framework's own export code that the
+      rest of the core calls, each a function of the app.
+    fields:
+      - doc: add registers the export's component and its readiness check.
+        name: add
+        type: func(a *App) error
+      - doc: |-
+          settings are the export's settings but for those a product's setting
+          names; problems what refuses the export's start.
+        name: settings
+        type: func(a *App, byName map[string]settingDecl) []settingDecl
+      - name: problems
+        type: func(a *App) []model.Diagnostic
+      - doc: stopTakes is the most the export's stop takes.
+        name: stopTakes
+        type: func(a *App) time.Duration
+      - doc: headerSettings is the export's secret as the configuration shows it.
+        name: headerSettings
+        type: func(a *App, ctx context.Context) []model.Setting
+    kind: struct
+    name: otlpHooks
+  - kind: named
+    name: OpenTelemetryConfigurer
+    underlying: |-
+      interface {
+      	openTelemetryConfigure(o *otlpOptions)
+      }
+  - doc: |-
+      otlpRunning is the export of a running app: the subsystem's export, the
+      tracer's sink into it, and the loop that sends.
+    fields:
+      - name: ex
+        type: plug.OTLPExporter
+      - name: sink
+        type: trace.SpanSink
+      - doc: |-
+          cancel ends the loop; done is closed once it returned, err — written
+          before done closes — what it returned.
+        name: cancel
+        type: context.CancelFunc
+      - name: done
+        type: chan struct{}
+      - name: ended
+        type: sync.Once
+      - name: err
+        type: error
+      - doc: mu guards lost, the batches lost when readiness last answered.
+        name: mu
+        type: sync.Mutex
+      - name: lost
+        type: map[string]uint64
+    kind: struct
+    name: otlpRunning
   - fields:
       - doc: |-
           passwordRule is the policy without its entity type, which the store's
@@ -25069,6 +25564,12 @@ types:
           needs the subsystem all the same.
         name: needs
         type: func(a *App, n node) bool
+      - doc: |-
+          app, when set, says the declaration of the app's own that needs the
+          subsystem — the OTLP export (app.OTLP) — and where it is; nil
+          when the app makes none.
+        name: app
+        type: func(a *App) *pos
       - doc: linked reports whether the program links the subsystem.
         name: linked
         type: func() bool
@@ -28044,6 +28545,13 @@ vars:
       - name: emptyType
         value: reflect.TypeFor[EmptyValue]()
     name: emptyType
+  - doc: |-
+      otlpCode is the framework's own export code, nil until framework/app/otlp
+      is imported.
+    items:
+      - name: otlpCode
+        type: atomic.Pointer[otlpHooks]
+    name: otlpCode
   - doc: "The PHC string format: $id[$v=version][$param=value(,param=value)*][$salt$hash]."
     grouped: true
     items:
@@ -28209,7 +28717,7 @@ vars:
         value: |-
           []string{
           	varAddr, varAllowedHosts, varDataDir, varDataKeyStem, varDataKeyStem + varFileSuffix, varEnv,
-          	varIndexKeyStem, varIndexKeyStem + varFileSuffix, varLogLevel, varRetention, varSecrets,
+          	varIndexKeyStem, varIndexKeyStem + varFileSuffix, varLogLevel, varOTLPHeaders, varOTLPHeaders + varFileSuffix, varRetention, varSecrets,
           	varSecretsKey, varSecretsKeyFile, varSMTPURL, varSMTPURLFile, varTelemetry, varTelemetryGIDs,
           	varTrustProxy,
           }
@@ -28559,7 +29067,8 @@ vars:
       plug.Workflows; the mailers' since step 6, linked when framework/app/mail
       set plug.Mail — a mailer whose outbox is on a database needs the queues'
       too, the row above —; the jobs' since step 7, linked when
-      framework/app/jobs set plug.Jobs. A test sets
+      framework/app/jobs set plug.Jobs; the OTLP export's since issue #483,
+      linked when framework/app/otlp set plug.OTLP. A test sets
       the hooks as a program that does not import the package would see them.
     items:
       - name: subsystems
@@ -28581,6 +29090,8 @@ vars:
           }, {
           	name: "jobs", pkg: jobsPackage,
           	kinds: []model.NodeKind{model.KindJob}, linked: jobsLinked,
+          }, {
+          	name: "otlp", pkg: otlpPackage, app: otlpDeclared, linked: otlpLinked,
           }}
     name: subsystems
   - doc: |-

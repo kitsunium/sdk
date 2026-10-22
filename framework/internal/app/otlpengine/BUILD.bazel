@@ -1,0 +1,54 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "otlpengine",
+    srcs = [
+        "clock.go",
+        "doc.go",
+        "export.go",
+        "otlpengine.go",
+        "otlpengine_compliance.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/framework/internal/app/otlpengine",
+    visibility = [
+        "//framework:__subpackages__",
+        "//visibility:public",
+    ],
+    deps = [
+        "//framework/internal/app/plug",
+        "//pkg/v1/app/forward",
+        "//pkg/v1/clock",
+        "//pkg/v1/concur/group",
+        "//pkg/v1/data/queue",
+        "//pkg/v1/errs",
+        "//pkg/v1/observe/metrics",
+        "//pkg/v1/observe/trace",
+        "//pkg/v1/proc",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":otlpengine",
+    visibility = [
+        "//framework:__subpackages__",
+        "//visibility:public",
+    ],
+)
+
+go_test(
+    name = "otlpengine_test",
+    srcs = [
+        "gen_api_test.go",
+        "harness_external_test.go",
+        "otlpengine_external_test.go",
+    ],
+    deps = [
+        ":otlpengine",
+        "//framework/internal/app/plug",
+        "//pkg/v1/clock",
+        "//pkg/v1/observe/trace",
+    ],
+)

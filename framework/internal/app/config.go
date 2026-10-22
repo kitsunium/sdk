@@ -112,6 +112,9 @@ type appOptions struct {
 	telemetryGIDs []int
 	// digest is DesignDigest's (telemetry.go).
 	digest string
+	// otlp is what OTLP declared (otlp.go), nil when the app exports
+	// nothing over OTLP.
+	otlp *otlpExport
 }
 
 type appOption func(o *appOptions)
@@ -408,7 +411,7 @@ func onOff(b bool) string {
 // stores are open: where it keeps them and, for a mailer, whether the SMTP
 // URL is set and where, and for a database its URL's — never a value.
 func (a *App) secretSettings(ctx context.Context) []model.Setting {
-	out := slices.Concat(a.secretStoreSettings(ctx), a.smtpSettings(ctx), a.databaseSecretSettings(ctx))
+	out := slices.Concat(a.secretStoreSettings(ctx), a.smtpSettings(ctx), a.otlpCodeHeaderSettings(ctx), a.databaseSecretSettings(ctx))
 	// Those of the personal data it keeps: <PRODUCT>_RETENTION and
 	// <PRODUCT>_INDEX_KEY.
 	return append(out, a.privacySettings(ctx)...)

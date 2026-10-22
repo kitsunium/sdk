@@ -314,6 +314,11 @@ const (
 	// longer live until the process restarts.
 	CodeGaveUp errs.Code = iapp.CodeGaveUp
 
+	// CodeOTLPExport refuses a start whose OTLP export ([OTLP]) cannot be
+	// opened — its queue, its collector's endpoint, its headers —, and says
+	// a stop that did not let it flush within its budget.
+	CodeOTLPExport errs.Code = iapp.CodeOTLPExport
+
 	// The signals the framework ends one of its own steps with and catches itself — a
 	// caller never receives one —, typed when the SDK made rule 2 a gate.
 	CodeSealErased errs.Code = iapp.CodeSealErased

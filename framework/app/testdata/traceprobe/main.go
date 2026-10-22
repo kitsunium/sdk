@@ -2,7 +2,7 @@
 // but the Studio imported: a store holding a personal field, a frontend
 // served from embedded files, a topic and its subscription, a workflow, a
 // mailer, two jobs, a command and a query exposed over HTTP, a webhook, a
-// setting and a secret. framework/app's guard builds it as a release is
+// setting and a secret, and an OTLP export, off until its endpoint is set. framework/app's guard builds it as a release is
 // built and reads its sources, its binary and what it says when it runs.
 package main
 
@@ -15,6 +15,7 @@ import (
 	"github.com/kitsunium/sdk/framework/app"
 	_ "github.com/kitsunium/sdk/framework/app/jobs"
 	_ "github.com/kitsunium/sdk/framework/app/mail"
+	_ "github.com/kitsunium/sdk/framework/app/otlp"
 	_ "github.com/kitsunium/sdk/framework/app/queue"
 	_ "github.com/kitsunium/sdk/framework/app/server"
 	_ "github.com/kitsunium/sdk/framework/app/store"
@@ -105,6 +106,6 @@ var _ = Shop.Every("sweep", time.Hour, func(context.Context) error { return nil 
 var _ = Shop.Cron("report", "0 3 * * *", func(context.Context) error { return nil })
 
 // App is the product.
-var App = app.NewApp("shop", Shop)
+var App = app.NewApp("shop", Shop).With(app.OTLP())
 
 func main() { os.Exit(App.Main(context.Background(), os.Args[1:])) }

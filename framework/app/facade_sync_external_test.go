@@ -70,6 +70,8 @@ var facadeNames = [][2]string{
 	{"CommandLineConfigurer", "CLIOption"},
 	{"ScopeValue", "Scope"},
 	{"ActivityHandler", "Activity"},
+	{"OTLPBatchValue", "OTLPBatch"},
+	{"OpenTelemetryConfigurer", "OTLPOption"},
 }
 
 // internalOnly are the exported internal names a product never reaches: the
@@ -80,7 +82,7 @@ var internalOnly = []string{
 	"NewCommand", "NewEndpointService", "NewError", "NewListener", "NewLoop",
 	"NewMailer", "NewPortService", "NewQuery", "NewRecordsService", "NewSecret",
 	"NewSettingService", "NewStoreService", "NewTopicService", "NewWorkflowService",
-	"RegisterConfigFormat", "EnableStudio", "EnableServer", "EnableStores",
+	"RegisterConfigFormat", "EnableStudio", "EnableServer", "EnableStores", "EnableOTLP",
 }
 
 // topLevelNames are the exported top-level names the Go files of dir declare,

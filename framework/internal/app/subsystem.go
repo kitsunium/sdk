@@ -41,6 +41,10 @@ type subsystem struct {
 	// needs, when set, reports whether the node n, of no kind of kinds,
 	// needs the subsystem all the same.
 	needs func(a *App, n node) bool
+	// app, when set, says the declaration of the app's own that needs the
+	// subsystem — the OTLP export (app.OTLP) — and where it is; nil
+	// when the app makes none.
+	app func(a *App) *pos
 	// linked reports whether the program links the subsystem.
 	linked func() bool
 }
@@ -54,7 +58,8 @@ type subsystem struct {
 // plug.Workflows; the mailers' since step 6, linked when framework/app/mail
 // set plug.Mail — a mailer whose outbox is on a database needs the queues'
 // too, the row above —; the jobs' since step 7, linked when
-// framework/app/jobs set plug.Jobs. A test sets
+// framework/app/jobs set plug.Jobs; the OTLP export's since issue #483,
+// linked when framework/app/otlp set plug.OTLP. A test sets
 // the hooks as a program that does not import the package would see them.
 var subsystems = []subsystem{{
 	name: "store", pkg: storePackage,
@@ -73,6 +78,8 @@ var subsystems = []subsystem{{
 }, {
 	name: "jobs", pkg: jobsPackage,
 	kinds: []model.NodeKind{model.KindJob}, linked: jobsLinked,
+}, {
+	name: "otlp", pkg: otlpPackage, app: otlpDeclared, linked: otlpLinked,
 }}
 
 // needsQueue reports whether n needs the queue subsystem beside the topics
@@ -114,7 +121,7 @@ func unlinkedSubsystems() []subsystem {
 // unlinkedDeclarations are the declarations of the app whose subsystem the
 // program does not link, in declaration order: the nodes of the services it
 // mounts — kit's own privacy service apart, which only a product's own
-// declarations bring —, then its databases.
+// declarations bring —, then its databases, then its OTLP export.
 func (a *App) unlinkedDeclarations() []unlinkedDecl {
 	missing := unlinkedSubsystems()
 	if len(missing) == 0 {
@@ -134,6 +141,21 @@ func (a *App) unlinkedDeclarations() []unlinkedDecl {
 			if s.databases {
 				out = append(out, unlinkedDecl{node: "database:" + d.name, at: a.source(&d.decl), sub: s})
 			}
+		}
+	}
+	return append(out, a.unlinkedApp(missing)...)
+}
+
+// unlinkedApp are the app's own declarations that need one of the missing
+// subsystems: its OTLP export.
+func (a *App) unlinkedApp(missing []subsystem) []unlinkedDecl {
+	var out []unlinkedDecl
+	for _, s := range missing {
+		if s.app == nil {
+			continue
+		}
+		if at := s.app(a); at != nil {
+			out = append(out, unlinkedDecl{node: otlpNode, at: a.source(at), sub: s})
 		}
 	}
 	return out

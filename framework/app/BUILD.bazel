@@ -32,6 +32,7 @@ go_library(
         "module.go",
         "mount.go",
         "operation.go",
+        "otlp.go",
         "passwords.go",
         "policy.go",
         "policy_interface.go",

@@ -534,6 +534,9 @@ sequences:
           		Resource: trace.Resource{Attrs: []trace.Attr{metrics.String(trace.ServiceNameKey, a.name)}},
           		Scope:    trace.Scope{Name: "github.com/kitsunium/sdk/framework/internal/app", Version: frameworkVersion()},
           		Clock:    a.clock,
+          		// Every span that ends goes to the OTLP export, when the app
+          		// declares one (otlp_run.go); none records anything otherwise.
+          		Sink: a.otlpSink(),
           	})
       - set: a.root, a.module
         to: findModule
@@ -708,7 +711,7 @@ sequences:
             - set: out
               value: append(out, diagnosticOf("warning", "", nil, say("config.studio-missing", "package", studioPackage)))
           when: a.cfg.studio.on && a.serves() && studioMount.Load() == nil
-      - return: slices.Concat(out, a.moduleProblems(), a.appProblems(), a.serverProblems(), a.subsystemProblems(), a.portPolicyProblems())
+      - return: slices.Concat(out, a.moduleProblems(), a.appProblems(), a.serverProblems(), a.subsystemProblems(), a.portPolicyProblems(), a.otlpCodeProblems())
         to: slices
   - of: (*App).serviceProblems
     participants:
@@ -1512,6 +1515,9 @@ sequences:
           when: cli
       - return: |-
           firstError(
+          		// The OTLP export before anything whose spans it forwards, so that
+          		// it stops after them (otlp_enable.go).
+          		a.addOTLPComponent,
           		func() error { return a.startGroups(g.stores, g.workflows, g.mailers, g.subs, g.commands) },
           		// What a former release sealed under its references, sealed again
           		// under the present ones, once the stores are open (renamed_refs.go).
@@ -7716,7 +7722,7 @@ sequences:
         kind: stdlib
     steps:
       - bind: out
-        eval: slices.Concat(a.secretStoreSettings(ctx), a.smtpSettings(ctx), a.databaseSecretSettings(ctx))
+        eval: slices.Concat(a.secretStoreSettings(ctx), a.smtpSettings(ctx), a.otlpCodeHeaderSettings(ctx), a.databaseSecretSettings(ctx))
         to: slices
       - return: append(out, a.privacySettings(ctx)...)
   - of: (*App).secretStoreSettings
@@ -8424,7 +8430,7 @@ sequences:
           key: _
           range: a.drainers()
           value: d
-      - return: budget
+      - return: max(budget, a.otlpStopTakes()+stopMargin)
   - of: (*App).stopDeadline
     steps:
       - return: base + max(a.componentStopBudget()-defaultStopBudget, 0)
@@ -27135,6 +27141,8 @@ sequences:
         kind: stdlib
       - id: sp.a.report
         kind: internal
+      - id: sp.a.otlpRecord
+        kind: internal
       - id: sp.a.hub.record
         kind: internal
     steps:
@@ -27173,6 +27181,8 @@ sequences:
           when: sp.restore != nil
       - eval: sp.a.report(sp, err)
         to: sp.a.report
+      - eval: sp.a.otlpRecord(sp)
+        to: sp.a.otlpRecord
       - eval: sp.a.hub.record(sp.s, sp.root)
         to: sp.a.hub.record
   - of: (*App).callSite
@@ -27474,6 +27484,701 @@ sequences:
     steps:
       - return: Unavailable(fmt.Sprintf("service %q is not running in this process", n.svc.name))
         to: Unavailable
+  - of: otlpOption.openTelemetryConfigure
+    steps:
+      - eval: f(o)
+  - of: OTLP
+    participants:
+      - id: caller
+        kind: actor
+      - id: OTLP
+        kind: self
+      - id: opt.openTelemetryConfigure
+        kind: internal
+      - id: e.declareSettings
+        kind: internal
+    steps:
+      - bind: o
+        eval: |-
+          otlpOptions{
+          		whenFull: OTLPDropOldest, maxBatches: otlpDefaultBatches, maxBytes: otlpDefaultBytes,
+          		maxAge: otlpDefaultMaxAge, sendTimeout: otlpDefaultTimeout,
+          	}
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: opt.openTelemetryConfigure(&o)
+                    to: opt.openTelemetryConfigure
+                when: opt != nil
+          key: _
+          range: opts
+          value: opt
+      - bind: e
+        eval: "&otlpExport{decl: callerPos(), send: o.send}"
+      - eval: e.declareSettings(&o)
+        to: e.declareSettings
+      - return: appOption(func(ao *appOptions) { ao.otlp = e })
+  - of: OTLPEndpoint
+    steps:
+      - return: otlpOption(func(o *otlpOptions) { o.endpoint = url })
+  - of: OTLPBounds
+    steps:
+      - return: otlpOption(func(o *otlpOptions) { o.maxBatches, o.maxBytes = maxBatches, maxBytes })
+  - of: OTLPWhenFull
+    steps:
+      - return: otlpOption(func(o *otlpOptions) { o.whenFull = p })
+  - of: OTLPMaxAge
+    steps:
+      - return: otlpOption(func(o *otlpOptions) { o.maxAge = d })
+  - of: OTLPSendTimeout
+    steps:
+      - return: otlpOption(func(o *otlpOptions) { o.sendTimeout = d })
+  - of: OTLPSender
+    steps:
+      - return: otlpOption(func(o *otlpOptions) { o.send = send })
+  - of: (*otlpExport).declareSettings
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpExport).declareSettings
+        kind: self
+      - id: otlpSetting
+        kind: internal
+    steps:
+      - set: e.endpoint
+        to: otlpSetting
+        value: otlpSetting(e, knobOTLPEndpoint, o.endpoint, checkOTLPEndpoint())
+      - set: e.maxBatches
+        to: otlpSetting
+        value: otlpSetting(e, knobOTLPMaxBatches, o.maxBatches, checkAtLeastOne())
+      - set: e.maxBytes
+        to: otlpSetting
+        value: otlpSetting(e, knobOTLPMaxBytes, o.maxBytes, checkAtLeastOne())
+      - set: e.whenFull
+        to: otlpSetting
+        value: otlpSetting(e, knobOTLPWhenFull, string(o.whenFull), checkOTLPWhenFull())
+      - set: e.maxAge
+        to: otlpSetting
+        value: otlpSetting(e, knobOTLPMaxAge, o.maxAge, checkPositive())
+      - set: e.sendTimeout
+        to: otlpSetting
+        value: otlpSetting(e, knobOTLPSendTimeout, o.sendTimeout, checkPositive())
+      - set: e.interval
+        to: otlpSetting
+        value: otlpSetting(e, knobOTLPInterval, otlpDefaultInterval, checkPositive())
+      - set: e.drain
+        to: otlpSetting
+        value: otlpSetting(e, knobOTLPDrain, otlpDefaultDrain, checkWait())
+      - set: e.settle
+        to: otlpSetting
+        value: otlpSetting(e, knobOTLPSettle, otlpDefaultSettle, checkPositive())
+  - of: otlpSetting
+    participants:
+      - id: caller
+        kind: actor
+      - id: otlpSetting
+        kind: self
+      - id: NewSettingService
+        kind: internal
+    steps:
+      - bind: s
+        eval: NewSettingService(def)
+        to: NewSettingService
+      - set: s.name, s.decl, s.check
+        value: otlpPrefix+knob, e.decl, check
+      - set: s.id
+        value: otlpNode + "/setting/" + knob
+      - return: s
+  - of: (*otlpExport).settingDecls
+    steps:
+      - return: "[]settingDecl{e.endpoint, e.maxBatches, e.maxBytes, e.whenFull, e.maxAge, e.sendTimeout, e.interval, e.drain, e.settle}"
+  - of: (*App).otlpStopBudget
+    steps:
+      - bind: e
+        eval: a.opts.otlp
+      - opt:
+          do:
+            - return: "0"
+          when: e == nil
+      - return: resolvedSetting(a, e.drain) + 3*resolvedSetting(a, e.settle)
+  - of: checkOTLPEndpoint
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkOTLPEndpoint
+        kind: self
+      - id: judged
+        kind: internal
+    steps:
+      - return: |-
+          judged(func(s string) bool {
+          		if s == "" {
+          			return true
+          		}
+          		u, err := url.Parse(s)
+          		return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" && u.RawQuery == "" && u.Fragment == "" && u.User == nil
+          	}, func() phrase { return say("otlp.endpoint") })
+        to: judged
+  - of: checkOTLPWhenFull
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkOTLPWhenFull
+        kind: self
+      - id: judged
+        kind: internal
+    steps:
+      - return: |-
+          judged(func(s string) bool {
+          		switch OTLPFullPolicy(s) {
+          		case OTLPDropOldest, OTLPDropNewest, OTLPBlock:
+          			return true
+          		}
+          		return false
+          	}, func() phrase { return say("otlp.when-full") })
+        to: judged
+  - of: parseOTLPHeaders
+    participants:
+      - id: caller
+        kind: actor
+      - id: parseOTLPHeaders
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: url
+        kind: stdlib
+    steps:
+      - bind: out
+        eval: map[string]string{}
+      - loop:
+          do:
+            - set: pair
+              to: strings
+              value: strings.TrimSpace(pair)
+            - opt:
+                do:
+                  - continue: true
+                when: pair == ""
+            - bind: key, value, found
+              eval: strings.Cut(pair, "=")
+              to: strings
+            - set: key
+              to: strings
+              value: strings.TrimSpace(key)
+            - bind: decoded, err
+              eval: url.PathUnescape(strings.TrimSpace(value))
+              to: url
+            - opt:
+                do:
+                  - return: nil, false
+                when: "!found || key == \"\" || err != nil"
+            - set: out[key]
+              value: decoded
+          key: pair
+          range: strings.SplitSeq(raw, ",")
+      - return: out, true
+  - of: EnableOTLP
+    participants:
+      - id: caller
+        kind: actor
+      - id: EnableOTLP
+        kind: self
+      - id: otlpCode.Store
+        kind: value
+    steps:
+      - eval: |-
+          otlpCode.Store(&otlpHooks{
+          		add:            (*App).addOTLP,
+          		settings:       (*App).otlpSettings,
+          		problems:       (*App).otlpProblems,
+          		stopTakes:      (*App).otlpStopBudget,
+          		headerSettings: (*App).otlpHeaderSettings,
+          	})
+        to: otlpCode.Store
+  - of: (*App).addOTLPComponent
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).addOTLPComponent
+        kind: self
+      - id: otlpCode.Load
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: h.add(a)
+          init:
+            bind: h
+            eval: otlpCode.Load()
+            to: otlpCode.Load
+          when: h != nil
+      - return: nil
+  - of: (*App).otlpCodeSettings
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).otlpCodeSettings
+        kind: self
+      - id: otlpCode.Load
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: h.settings(a, byName)
+          init:
+            bind: h
+            eval: otlpCode.Load()
+            to: otlpCode.Load
+          when: h != nil
+      - return: nil
+  - of: (*App).otlpCodeProblems
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).otlpCodeProblems
+        kind: self
+      - id: otlpCode.Load
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: h.problems(a)
+          init:
+            bind: h
+            eval: otlpCode.Load()
+            to: otlpCode.Load
+          when: h != nil
+      - return: nil
+  - of: (*App).otlpStopTakes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).otlpStopTakes
+        kind: self
+      - id: otlpCode.Load
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: h.stopTakes(a)
+          init:
+            bind: h
+            eval: otlpCode.Load()
+            to: otlpCode.Load
+          when: h != nil
+      - return: "0"
+  - of: (*App).otlpCodeHeaderSettings
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).otlpCodeHeaderSettings
+        kind: self
+      - id: otlpCode.Load
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: h.headerSettings(a, ctx)
+          init:
+            bind: h
+            eval: otlpCode.Load()
+            to: otlpCode.Load
+          when: h != nil
+      - return: nil
+  - of: otlpLinked
+    steps:
+      - return: plug.OTLP.Load() != nil
+  - of: otlpDeclared
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: a.opts.otlp == nil
+      - return: "&a.opts.otlp.decl"
+  - of: (*App).otlpSink
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).otlpSink
+        kind: self
+      - id: a.otlpRun.Load
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: a.opts.otlp == nil
+      - return:
+          closure:
+            params: span trace.SpanData
+            steps:
+              - opt:
+                  do:
+                    - eval: r.sink(span)
+                  init:
+                    bind: r
+                    eval: a.otlpRun.Load()
+                    to: a.otlpRun.Load
+                  when: r != nil && r.sink != nil
+  - of: (*App).otlpRecord
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).otlpRecord
+        kind: self
+      - id: a.otlpRun.Load
+        kind: value
+      - id: r.ex.Record
+        kind: value
+    steps:
+      - bind: r
+        eval: a.otlpRun.Load()
+        to: a.otlpRun.Load
+      - opt:
+          do:
+            - return: ""
+          when: r == nil
+      - eval: r.ex.Record(sp.s.Node, sp.s.Op, a.clock.Since(sp.start), sp.s.Status == model.StatusError)
+        to: r.ex.Record
+  - of: (*App).addOTLP
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).addOTLP
+        kind: self
+      - id: a.health.AddReadiness
+        kind: value
+      - id: a.component
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: a.opts.otlp == nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: "a.health.AddReadiness(health.ReadinessCheck{Name: otlpComponent, NonCritical: true, Check: a.otlpReady})"
+            to: a.health.AddReadiness
+          when: err != nil
+      - return: a.component(otlpComponent, "", a.startOTLP, a.stopOTLP)
+        to: a.component
+  - of: (*App).startOTLP
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).startOTLP
+        kind: self
+      - id: a.otlpConfig
+        kind: internal
+      - id: plug.OTLP.Load
+        kind: value
+      - id: errs
+        kind: package
+      - id: failure
+        kind: internal
+      - id: context
+        kind: stdlib
+      - id: a.problem
+        kind: internal
+      - id: logger
+        kind: package
+      - id: a.otlpRun.Store
+        kind: value
+    steps:
+      - bind: cfg, err
+        eval: a.otlpConfig(ctx)
+        to: a.otlpConfig
+      - opt:
+          do:
+            - return: err
+          when: err != nil || cfg == nil
+      - bind: driver
+        eval: plug.OTLP.Load()
+        to: plug.OTLP.Load
+      - opt:
+          do:
+            - return: |-
+                errs.New(CodeSubsystemMissing, "SUBSYSTEM_NOT_IMPORTED", subsystemPublic,
+                			"app: an OTLP export needs the otlp subsystem, which the program does not import: "+otlpPackage,
+                			errs.String("packages", otlpPackage))
+              to: errs
+          when: driver == nil
+      - bind: ex, err
+        eval: driver.Open(ctx, cfg)
+      - opt:
+          do:
+            - return: failure(CodeOTLPExport, "OTLP_OPEN", "the OTLP export cannot be opened", err)
+              to: failure
+          when: err != nil
+      - bind: sink, _
+        eval: ex.SpanSink().Sink.(trace.SpanSink)
+      - bind: runCtx, cancel
+        eval: context.WithCancel(context.WithoutCancel(ctx))
+        to: context
+      - bind: r
+        eval: "&otlpRunning{ex: ex, sink: sink, cancel: cancel, done: make(chan struct{}), lost: map[string]uint64{}}"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: a.problem("", say("otlp.memory", "signal", st.Signal))
+                    to: a.problem
+                when: cfg.Dir != "" && !st.Durable
+            - opt:
+                do:
+                  - eval: logger.Info(ctx, a.log, "the OTLP export resumes a backlog", logger.String("signal", st.Signal), logger.Int("batches", st.Pending))
+                    to: logger
+                when: st.Pending > 0
+          key: _
+          range: ex.Stats()
+          value: st
+      - go: |-
+          func() {
+          		defer r.ended.Do(func() { close(r.done) })
+          		r.err = ex.Run(runCtx)
+          	}()
+      - eval: a.otlpRun.Store(r)
+        to: a.otlpRun.Store
+      - return: nil
+  - of: (*App).stopOTLP
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).stopOTLP
+        kind: self
+      - id: a.otlpRun.Swap
+        kind: value
+      - id: failure
+        kind: internal
+      - id: logger
+        kind: package
+    steps:
+      - bind: r
+        eval: a.otlpRun.Swap(nil)
+        to: a.otlpRun.Swap
+      - opt:
+          do:
+            - return: nil
+          when: r == nil
+      - eval: r.cancel()
+      - select:
+          cases:
+            - comm: <-r.done
+            - comm: <-ctx.Done()
+              do:
+                - return: failure(CodeOTLPExport, "OTLP_STOP", "the OTLP export did not stop within its budget", ctx.Err())
+                  to: failure
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: logger.Warn(ctx, a.log, "the OTLP export lost the batches it held in memory", logger.String("signal", st.Signal), logger.Int("batches", st.Pending))
+                    to: logger
+                when: "!st.Durable && st.Pending > 0"
+          key: _
+          range: r.ex.Stats()
+          value: st
+      - opt:
+          do:
+            - eval: logger.Warn(ctx, a.log, "the OTLP export stopped with an error", logger.String("error", errs.PublicOf(r.err)))
+              to: logger
+          when: r.err != nil && !errors.Is(r.err, context.Canceled)
+      - return: nil
+  - of: (*App).otlpConfig
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).otlpConfig
+        kind: self
+      - id: resolvedSetting
+        kind: internal
+      - id: logger
+        kind: package
+      - id: a.otlpHeaders
+        kind: internal
+      - id: filepath
+        kind: stdlib
+    steps:
+      - bind: e
+        eval: a.opts.otlp
+      - bind: endpoint
+        eval: resolvedSetting(a, e.endpoint)
+        to: resolvedSetting
+      - opt:
+          do:
+            - eval: "logger.Info(ctx, a.log, \"the OTLP export is off: \"+variableOf(appPrefix(a.name), otlpPrefix+knobOTLPEndpoint)+\" is not set\")"
+              to: logger
+            - return: nil, nil
+          when: endpoint == "" && e.send == nil
+      - bind: headers, err
+        eval: a.otlpHeaders(ctx)
+        to: a.otlpHeaders
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: cfg
+        eval: |-
+          &plug.OTLPConfig{
+          		Clock: pluggedClock{Timed: a.clock}, Headers: headers,
+          		Service: a.name, Version: frameworkVersion(), Endpoint: endpoint,
+          		WhenFull: resolvedSetting(a, e.whenFull), MaxBytes: int64(resolvedSetting(a, e.maxBytes)),
+          		MaxBatches: resolvedSetting(a, e.maxBatches), MaxAge: resolvedSetting(a, e.maxAge),
+          		SendTimeout: resolvedSetting(a, e.sendTimeout), Interval: resolvedSetting(a, e.interval),
+          		DrainTimeout: resolvedSetting(a, e.drain), SettleTimeout: resolvedSetting(a, e.settle),
+          		OnError: func(err error) {
+          			logger.Warn(context.Background(), a.log, "the OTLP export could not keep or close what it holds", logger.String("error", errs.PublicOf(err)))
+          		},
+          	}
+      - opt:
+          do:
+            - set: cfg.Dir
+              to: filepath
+              value: filepath.Join(a.dataDir, otlpDataDir)
+          when: a.dataDir != "" && !a.opts.memory
+      - opt:
+          do:
+            - set: cfg.Send
+              value:
+                closure:
+                  params: ctx context.Context, b plug.OTLPBatchValue
+                  results: error
+                  steps:
+                    - return: "send(ctx, OTLPBatchValue{Signal: b.Signal, Document: b.Document})"
+            - set: cfg.Retryable
+              value: otlpRetryable
+          init:
+            bind: send
+            eval: e.send
+          when: send != nil
+      - return: cfg, nil
+  - of: (*App).otlpHeaders
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).otlpHeaders
+        kind: self
+      - id: a.frameworkSecret
+        kind: internal
+      - id: parseOTLPHeaders
+        kind: internal
+    steps:
+      - bind: v, _, err
+        eval: a.frameworkSecret(ctx, otlpHeadersSecret)
+        to: a.frameworkSecret
+      - switch:
+          cases:
+            - case: errors.Is(err, secret.NotFound)
+              do:
+                - return: nil, nil
+            - case: err != nil
+              do:
+                - return: nil, failure(CodeOTLPExport, "OTLP_HEADERS", "the OTLP export's headers cannot be read", err)
+      - bind: headers, ok
+        eval: parseOTLPHeaders(v.Value.RevealString())
+        to: parseOTLPHeaders
+      - opt:
+          do:
+            - return: |-
+                nil, failure(CodeOTLPExport, "OTLP_HEADERS", "the OTLP export's headers are not key=value pairs joined by commas", nil,
+                			errs.String("variable", a.variable(varOTLPHeaders)))
+          when: "!ok"
+      - return: headers, nil
+  - of: (*App).otlpHeaderSettings
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).otlpHeaderSettings
+        kind: self
+      - id: a.frameworkSecret
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: a.opts.otlp == nil
+      - bind: _, from, err
+        eval: a.frameworkSecret(ctx, otlpHeadersSecret)
+        to: a.frameworkSecret
+      - opt:
+          do:
+            - set: from
+              value: "\"\""
+          when: err != nil
+      - return: "[]model.Setting{{Name: a.variable(varOTLPHeaders), Secret: true, From: settingFrom(from)}}"
+  - of: otlpRetryable
+    participants:
+      - id: caller
+        kind: actor
+      - id: otlpRetryable
+        kind: self
+      - id: describe
+        kind: internal
+    steps:
+      - bind: status, _
+        eval: describe(err)
+        to: describe
+      - return: status >= http.StatusInternalServerError || status == http.StatusRequestTimeout || status == http.StatusTooManyRequests
+  - of: (*App).otlpReady
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).otlpReady
+        kind: self
+      - id: a.otlpRun.Load
+        kind: value
+      - id: Unavailable
+        kind: internal
+    steps:
+      - bind: r
+        eval: a.otlpRun.Load()
+        to: a.otlpRun.Load
+      - opt:
+          do:
+            - return: nil
+          when: r == nil
+      - lock:
+          mutex: r.mu
+      - var:
+          name: problems
+          type: "[]string"
+      - loop:
+          do:
+            - bind: lost
+              eval: st.Dropped + st.Expired + st.DeadLettered
+            - opt:
+                do:
+                  - set: problems
+                    value: |-
+                      append(problems, st.Signal+": "+strconv.FormatUint(lost-r.lost[st.Signal], 10)+" batches lost ("+
+                      				strconv.FormatUint(st.Dropped, 10)+" dropped, "+strconv.FormatUint(st.Expired, 10)+" expired, "+
+                      				strconv.FormatUint(st.DeadLettered, 10)+" dead-lettered)")
+                when: lost > r.lost[st.Signal]
+            - set: r.lost[st.Signal]
+              value: lost
+            - opt:
+                do:
+                  - set: problems
+                    value: "append(problems, st.Signal+\": \"+strconv.Itoa(st.Pending)+\" batches, \"+strconv.FormatInt(st.PendingBytes, 10)+\" bytes waiting\")"
+                when: backlogged(&st)
+          key: _
+          range: r.ex.Stats()
+          value: st
+      - opt:
+          do:
+            - return: nil
+          when: len(problems) == 0
+      - return: "Unavailable(\"the OTLP export is behind: \" + strings.Join(problems, \"; \"))"
+        to: Unavailable
+  - of: backlogged
+    steps:
+      - return: |-
+          st.MaxBatches > 0 && float64(st.Pending) > otlpReadinessBacklog*float64(st.MaxBatches) ||
+          		st.MaxBytes > 0 && float64(st.PendingBytes) > otlpReadinessBacklog*float64(st.MaxBytes)
   - of: passwordOption.passwordConfigure
     steps:
       - eval: f(o)
@@ -48998,6 +49703,11 @@ sequences:
             - set: out
               value: "append(out, managedSecret{name: ownSecretPrefix + smtpSecret, stored: ownSecretPrefix + smtpSecret, env: st.frameworkEnv, envName: smtpSecret, variable: secretVariable(prefix, smtpSecret)})"
           when: a.hasMailer()
+      - opt:
+          do:
+            - set: out
+              value: "append(out, managedSecret{name: ownSecretPrefix + otlpHeadersSecret, stored: ownSecretPrefix + otlpHeadersSecret, env: st.frameworkEnv, envName: otlpHeadersSecret, variable: secretVariable(prefix, otlpHeadersSecret)})"
+          when: a.opts.otlp != nil
       - return: out
   - of: (*App).managedDeclared
     participants:
@@ -51375,6 +52085,15 @@ sequences:
               value: append(decls, d)
           key: _
           range: a.databaseSettings(byName)
+          value: d
+      - loop:
+          do:
+            - set: byName[d.base().name]
+              value: d
+            - set: decls
+              value: append(decls, d)
+          key: _
+          range: a.otlpCodeSettings(byName)
           value: d
       - return: decls, byName
   - of: (*App).serviceSettings
@@ -55474,7 +56193,7 @@ sequences:
           key: _
           range: a.opts.databases
           value: d
-      - return: out
+      - return: append(out, a.unlinkedApp(missing)...)
   - of: (*App).unlinkedNodes
     participants:
       - id: caller

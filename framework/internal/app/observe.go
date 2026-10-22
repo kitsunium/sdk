@@ -562,6 +562,7 @@ func (sp *span) end(err error) {
 		pprof.SetGoroutineLabels(sp.restore)
 	}
 	sp.a.report(sp, err)
+	sp.a.otlpRecord(sp)
 	sp.a.hub.record(sp.s, sp.root)
 }
 

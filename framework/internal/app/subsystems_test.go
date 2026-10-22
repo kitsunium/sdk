@@ -29,6 +29,10 @@ import (
 	// it does (ADR 0179 step 7); subsystems_internal_test.go takes it out
 	// too.
 	_ "github.com/kitsunium/sdk/framework/app/jobs"
+	// The suite's exports run on the OTLP export subsystem, as a product
+	// that imports it does (issue #483); subsystems_internal_test.go takes
+	// it out too.
+	_ "github.com/kitsunium/sdk/framework/app/otlp"
 	// The suite's dev apps serve the Studio's API, as a product that imports
 	// it does.
 	_ "github.com/kitsunium/sdk/framework/app/studio"

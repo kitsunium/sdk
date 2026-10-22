@@ -19,15 +19,16 @@ const sdk = "github.com/kitsunium/sdk/"
 // registration are the registration packages of kit's subsystems: a program
 // has a subsystem if and only if it imports its package (ADR 0179 §1, ADR
 // 0172) — the stores, the queues, the workflows, the mailers and the jobs,
-// the HTTP engine, and the Studio. Since ADR 0179's step 10 the facade
-// imports none of them: a product imports those it declares, as kit gen
-// writes them.
+// the OTLP export (issue #483), the HTTP engine, and the Studio. Since ADR
+// 0179's step 10 the facade imports none of them: a product imports those it
+// declares, as kit gen writes them.
 var registration = []string{
 	"framework/app/store",
 	"framework/app/queue",
 	"framework/app/workflow",
 	"framework/app/mail",
 	"framework/app/jobs",
+	"framework/app/otlp",
 	"framework/app/server",
 	"framework/app/studio",
 }
@@ -84,6 +85,13 @@ func TestTheFacadeImportsNoOptInSubsystem(t *testing.T) {
 			}
 		}
 	}
+	for _, o := range optInSDK {
+		for _, pkg := range o.packages() {
+			if deps[sdk+pkg] {
+				t.Errorf("framework/app imports %s, which only %s may bring", pkg, o.by)
+			}
+		}
+	}
 }
 
 // leaving are the subsystems ADR 0179 §1 took out of framework/internal/app,
@@ -99,6 +107,14 @@ var leaving = []leavingCase{
 	{"pkg/v1/app/mail/spool", "framework/app/mail", 6, []string{"internal/core/app/mail/spool.", "internal/service/app/mail/spool."}},
 	{"pkg/v1/app/scheduler", "framework/app/jobs", 7, []string{"internal/core/app/scheduler.", "internal/service/app/scheduler."}},
 	{"pkg/v1/app/i18n", "framework/app/studio", 8, []string{"internal/core/app/i18n.", "internal/service/app/i18n."}},
+}
+
+// optInSDK are the SDK packages a subsystem brings that never were in the
+// core — it was born a subsystem —, each by its registration package: the
+// export's store and forward (issue #483, ADR 0185), with the core and
+// service halves whose names its symbols carry. The step is none.
+var optInSDK = []leavingCase{
+	{"pkg/v1/app/forward", "framework/app/otlp", 0, []string{"internal/core/app/forward.", "internal/service/app/forward."}},
 }
 
 // leavingCase is one subsystem of leaving: the SDK package its engine lives
@@ -127,6 +143,7 @@ var kitEngines = map[string]string{
 	"framework/app/workflow": "framework/internal/app/workflowengine.",
 	"framework/app/mail":     "framework/internal/app/mailengine.",
 	"framework/app/jobs":     "framework/internal/app/jobengine.",
+	"framework/app/otlp":     "framework/internal/app/otlpengine.",
 }
 
 // studioKit is the implementation package framework/app/studio alone
@@ -182,6 +199,13 @@ func TestTheCoreImportsNoSubsystem(t *testing.T) {
 		for _, pkg := range l.packages() {
 			if core[sdk+pkg] {
 				t.Errorf("framework/internal/app imports %s, which only %s may bring once step %d of ADR 0179 moved it", pkg, l.by, l.step)
+			}
+		}
+	}
+	for _, o := range optInSDK {
+		for _, pkg := range o.packages() {
+			if core[sdk+pkg] {
+				t.Errorf("framework/internal/app imports %s, which only %s may bring", pkg, o.by)
 			}
 		}
 	}
@@ -300,6 +324,24 @@ var kitStoreCode = []string{
 	"(*App).watchCommand",
 }
 
+// otlpCode is the framework's own export code (issue #483), which names no
+// SDK type of the export's and stays in the core, reached only through
+// framework/app/otlp (iapp.EnableOTLP): one function of each part — the
+// component's start and stop, the configuration and the secret it reads,
+// the readiness, the settings and what refuses them. A product that does not
+// import the package links none of them; one that does links every one, so
+// that the list cannot go stale by naming what nothing links.
+var otlpCode = []string{
+	"(*App).startOTLP",
+	"(*App).stopOTLP",
+	"(*App).otlpConfig",
+	"(*App).otlpHeaders",
+	"(*App).otlpReady",
+	"(*App).otlpSettings",
+	"(*App).otlpProblems",
+	"(*App).otlpStopBudget",
+}
+
 // studioCode is the Studio's code ADR 0180's step 1 took out of kit's core
 // into framework/internal/app/studioengine — its routes, their guard and their
 // handlers, the event stream, the source endpoint, the mailbox, and the
@@ -365,7 +407,7 @@ func kitStoreSymbol(fn string) string { return sdk + "framework/internal/app." +
 // implementation package that left the core, by its registration package.
 func owners() map[string][]string {
 	out := map[string][]string{}
-	for _, l := range leaving {
+	for _, l := range slices.Concat(leaving, optInSDK) {
 		out[l.pkg] = l.code
 	}
 	for by, engine := range kitEngines {
@@ -407,6 +449,11 @@ func linksNoSubsystem(t *testing.T, goTool, dir string) {
 	for _, fn := range kitStoreCode {
 		if syms[kitStoreSymbol(fn)] {
 			t.Errorf("a product that does not import framework/app/store links the framework's own store code: %s", fn)
+		}
+	}
+	for _, fn := range otlpCode {
+		if syms[kitStoreSymbol(fn)] {
+			t.Errorf("a product that does not import framework/app/otlp links the framework's own export code: %s", fn)
 		}
 	}
 	linksNoStudio(t, "framework/app", syms, image)
@@ -719,6 +766,55 @@ func TestAProductThatImportsTheJobsLinksThem(t *testing.T) {
 	}
 	linksNoWords(t, "framework/app/jobs", image, linked)
 	linksNoStudio(t, "framework/app/jobs", syms, image)
+}
+
+// The same half of §7 for issue #483's export: testdata/otlpprobe,
+// coreprobe with framework/app/otlp and an export declared, links the
+// export's engine and the SDK's store and forward under it, beyond its
+// inits — and with it the SDK's queue, which the forwarder keeps its batches
+// in —, and nothing of the store, queue, workflow, mail and jobs
+// subsystems' engines: the export keeps its queues itself and imports no
+// other registration package.
+func TestAProductThatImportsTheOTLPExportLinksIt(t *testing.T) {
+	goTool := goToList(t)
+	syms, image := textSymbols(t, goTool, "./testdata/otlpprobe")
+	linked := linkedSymbols(syms, owners())
+	for _, c := range []struct {
+		owner  string
+		linked bool
+	}{
+		{"framework/app/otlp", true},
+		{"pkg/v1/app/forward", true},
+		{"pkg/v1/data/queue", true},
+		{"framework/app/store", false},
+		{"pkg/v1/data/docstore", false},
+		{"framework/app/queue", false},
+		{"framework/app/workflow", false},
+		{"pkg/v1/app/statemachine", false},
+		{"framework/app/mail", false},
+		{"pkg/v1/app/mail/spool", false},
+		{"framework/app/jobs", false},
+		{"pkg/v1/app/scheduler", false},
+	} {
+		if n := linked[c.owner]; (n > 0) != c.linked {
+			t.Errorf("a product that imports framework/app/otlp links %d text symbols of %s, want linked %v", n, c.owner, c.linked)
+		}
+	}
+	if code := beyondInits(syms, owners()["pkg/v1/app/forward"]); len(code) == 0 {
+		t.Error("a product that imports framework/app/otlp links nothing of the SDK's forward beyond its inits")
+	}
+	for _, fn := range kitStoreCode {
+		if syms[kitStoreSymbol(fn)] {
+			t.Errorf("a product that imports framework/app/otlp alone links the framework's own store code: %s", fn)
+		}
+	}
+	for _, fn := range otlpCode {
+		if !syms[kitStoreSymbol(fn)] {
+			t.Errorf("a product that imports framework/app/otlp does not link the framework's own export code: %s", fn)
+		}
+	}
+	linksNoWords(t, "framework/app/otlp", image, linked)
+	linksNoStudio(t, "framework/app/otlp", syms, image)
 }
 
 // The same half of §7 for step 8: testdata/studioprobe, coreprobe with

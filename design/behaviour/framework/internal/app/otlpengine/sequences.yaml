@@ -1,0 +1,601 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: clockOf
+    steps:
+      - opt:
+          do:
+            - return: clock.System
+          when: c == nil
+      - return: "sdkClock{Clock: c}"
+  - of: sdkClock.NewTimer
+    participants:
+      - id: caller
+        kind: actor
+      - id: sdkClock.NewTimer
+        kind: self
+      - id: c.Clock.NewTimer
+        kind: value
+    steps:
+      - return: c.Clock.NewTimer(d)
+        to: c.Clock.NewTimer
+  - of: sdkClock.NewTicker
+    participants:
+      - id: caller
+        kind: actor
+      - id: sdkClock.NewTicker
+        kind: self
+      - id: c.Clock.NewTicker
+        kind: value
+    steps:
+      - return: c.Clock.NewTicker(d)
+        to: c.Clock.NewTicker
+  - of: (*export).SpanSink
+    steps:
+      - return: "plug.OTLPSinkValue{Sink: e.batch.Sink()}"
+  - of: (*export).Record
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*export).Record
+        kind: self
+      - id: e.instruments.Load
+        kind: value
+      - id: e.instruments.LoadOrStore
+        kind: value
+      - id: in.runs.Inc
+        kind: value
+      - id: in.failures.Inc
+        kind: value
+      - id: in.duration.RecordDuration
+        kind: value
+    steps:
+      - bind: key
+        eval: node + "\x00" + op
+      - bind: got, ok
+        eval: e.instruments.Load(key)
+        to: e.instruments.Load
+      - opt:
+          do:
+            - bind: attrs
+              eval: "[]metrics.Attr{metrics.String(nodeAttr, node), metrics.String(opAttr, op)}"
+            - set: got, _
+              to: e.instruments.LoadOrStore
+              value: |-
+                e.instruments.LoadOrStore(key, &nodeInstruments{
+                			runs:     e.meter.Counter(runsMetric, attrs...),
+                			failures: e.meter.Counter(failuresMetric, attrs...),
+                			duration: e.meter.Histogram(durationMetric, durationBuckets, attrs...),
+                		})
+          when: "!ok"
+      - bind: in, _
+        eval: got.(*nodeInstruments)
+      - eval: in.runs.Inc()
+        to: in.runs.Inc
+      - opt:
+          do:
+            - eval: in.failures.Inc()
+              to: in.failures.Inc
+          when: failed
+      - eval: in.duration.RecordDuration(took)
+        to: in.duration.RecordDuration
+  - of: (*export).Stats
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*export).Stats
+        kind: self
+      - id: s.forwarder.Stats
+        kind: value
+    steps:
+      - bind: out
+        eval: make([]plug.OTLPStatsValue, 0, len(e.signals))
+      - loop:
+          do:
+            - bind: st
+              eval: s.forwarder.Stats()
+              to: s.forwarder.Stats
+            - set: out
+              value: |-
+                append(out, plug.OTLPStatsValue{
+                			LastRetryAfterAt: st.LastRetryAfterAt, Signal: s.name,
+                			PendingBytes: st.PendingBytes, MaxBytes: s.maxBytes, LastRetryAfter: st.LastRetryAfter,
+                			Pending: st.Pending, MaxBatches: s.maxBatches,
+                			Enqueued: st.Enqueued, Sent: st.Sent, Retries: st.Retries,
+                			Dropped: st.Dropped, Expired: st.Expired, DeadLettered: st.DeadLettered,
+                			Durable: s.durable,
+                		})
+          key: _
+          range: e.signals
+          value: s
+      - return: out
+  - of: (*export).Run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*export).Run
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: group
+        kind: package
+      - id: g.Go
+        kind: value
+      - id: collecting.Done
+        kind: value
+      - id: e.flush
+        kind: internal
+      - id: errors
+        kind: stdlib
+    steps:
+      - bind: sending, cancel
+        eval: context.WithCancel(context.WithoutCancel(ctx))
+        to: context
+      - defer: cancel()
+      - bind: g, gctx
+        eval: group.NewJoined(sending, len(e.signals)+1)
+        to: group
+      - loop:
+          do:
+            - eval: g.Go(s.forwarder.Run)
+              to: g.Go
+          key: _
+          range: e.signals
+          value: s
+      - bind: collecting, stopCollecting
+        eval: context.WithCancel(gctx)
+        to: context
+      - defer: stopCollecting()
+      - bind: stop
+        eval: context.AfterFunc(ctx, stopCollecting)
+        to: context
+      - defer: stop()
+      - eval: g.Go(func(context.Context) error { e.collect(collecting); return nil })
+        to: g.Go
+      - eval: <-collecting.Done()
+        to: collecting.Done
+      - bind: flushErr
+        eval: e.flush()
+        to: e.flush
+      - eval: cancel()
+      - return: errors.Join(g.Wait(), flushErr, e.close())
+        to: errors
+  - of: (*export).collect
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*export).collect
+        kind: self
+      - id: e.clock.NewTicker
+        kind: value
+      - id: t.Stop
+        kind: value
+      - id: e.snapshots.ExportContext
+        kind: value
+      - id: e.report
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: e.interval <= 0
+      - bind: t
+        eval: e.clock.NewTicker(e.interval)
+        to: e.clock.NewTicker
+      - defer: t.Stop()
+        to: t.Stop
+      - loop:
+          do:
+            - select:
+                cases:
+                  - comm: <-ctx.Done()
+                    do:
+                      - return: ""
+                  - comm: _, open := <-t.C()
+                    do:
+                      - opt:
+                          do:
+                            - return: ""
+                          when: "!open"
+                      - opt:
+                          do:
+                            - eval: e.report(err)
+                              to: e.report
+                          init:
+                            bind: err
+                            eval: e.snapshots.ExportContext(ctx, e.meter.Collect())
+                            to: e.snapshots.ExportContext
+                          when: err != nil
+          forever: true
+  - of: (*export).report
+    steps:
+      - opt:
+          do:
+            - eval: e.onError(err)
+          when: e.onError != nil
+  - of: (*export).flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*export).flush
+        kind: self
+      - id: e.bounded
+        kind: internal
+      - id: e.batch.Shutdown
+        kind: value
+      - id: errors
+        kind: stdlib
+    steps:
+      - bind: ctx, cancel
+        eval: e.bounded()
+        to: e.bounded
+      - defer: cancel()
+      - bind: err
+        eval: e.batch.Shutdown(ctx)
+        to: e.batch.Shutdown
+      - bind: ctx2, cancel2
+        eval: e.bounded()
+        to: e.bounded
+      - defer: cancel2()
+      - return: errors.Join(err, e.snapshots.ExportContext(ctx2, e.meter.Collect()))
+        to: errors
+  - of: (*export).bounded
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*export).bounded
+        kind: self
+      - id: context
+        kind: stdlib
+      - id: e.clock.NewTimer
+        kind: value
+    steps:
+      - bind: ctx, cancel
+        eval: context.WithCancel(context.Background())
+        to: context
+      - bind: timer
+        eval: e.clock.NewTimer(max(e.settle, time.Millisecond))
+        to: e.clock.NewTimer
+      - go: |-
+          func() {
+          		defer timer.Stop()
+          		select {
+          		case <-timer.C():
+          			cancel()
+          		case <-ctx.Done():
+          		}
+          	}()
+      - return: ctx, cancel
+  - of: (*export).close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*export).close
+        kind: self
+      - id: errors
+        kind: stdlib
+    steps:
+      - var:
+          name: errs
+          type: "[]error"
+      - loop:
+          do:
+            - set: errs
+              value: append(errs, closeQueue(s.broker))
+          key: _
+          range: e.signals
+          value: s
+      - return: errors.Join(errs...)
+        to: errors
+  - of: (*export).observeStats
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*export).observeStats
+        kind: self
+      - id: e.meter.ObservableGauge
+        kind: value
+      - id: e.meter.ObservableCounter
+        kind: value
+    steps:
+      - bind: gauge
+        eval:
+          closure:
+            params: name string, read func(st *plug.OTLPStatsValue) float64
+            steps:
+              - eval: |-
+                  e.meter.ObservableGauge(name, func(observe metrics.ObserveFloat64) {
+                  			for _, st := range e.Stats() {
+                  				observe(read(&st), metrics.String(signalAttr, st.Signal))
+                  			}
+                  		})
+                to: e.meter.ObservableGauge
+      - bind: counter
+        eval:
+          closure:
+            params: name string, read func(st *plug.OTLPStatsValue) uint64
+            steps:
+              - eval: |-
+                  e.meter.ObservableCounter(name, func(observe metrics.ObserveInt64) {
+                  			for _, st := range e.Stats() {
+                  				observe(int64(read(&st)), metrics.String(signalAttr, st.Signal))
+                  			}
+                  		})
+                to: e.meter.ObservableCounter
+      - eval: gauge(pendingMetric, func(st *plug.OTLPStatsValue) float64 { return float64(st.Pending) })
+      - eval: gauge(pendingBytesMetric, func(st *plug.OTLPStatsValue) float64 { return float64(st.PendingBytes) })
+      - eval: gauge(lastRetryAfterMetric, func(st *plug.OTLPStatsValue) float64 { return st.LastRetryAfter.Seconds() })
+      - eval: counter(sentMetric, func(st *plug.OTLPStatsValue) uint64 { return st.Sent })
+      - eval: counter(retriesMetric, func(st *plug.OTLPStatsValue) uint64 { return st.Retries })
+      - eval: counter(droppedMetric, func(st *plug.OTLPStatsValue) uint64 { return st.Dropped })
+      - eval: counter(expiredMetric, func(st *plug.OTLPStatsValue) uint64 { return st.Expired })
+      - eval: counter(deadLetteredMetric, func(st *plug.OTLPStatsValue) uint64 { return st.DeadLettered })
+  - of: Enable
+    participants:
+      - id: caller
+        kind: actor
+      - id: Enable
+        kind: self
+      - id: plug.OTLP.Store
+        kind: value
+    steps:
+      - eval: "plug.OTLP.Store(&plug.OTLPDriverConfig{Open: open})"
+        to: plug.OTLP.Store
+  - of: open
+    participants:
+      - id: caller
+        kind: actor
+      - id: open
+        kind: self
+      - id: clockOf
+        kind: internal
+      - id: openSignal
+        kind: internal
+      - id: forward
+        kind: package
+      - id: trace
+        kind: package
+      - id: metrics
+        kind: package
+      - id: e.observeStats
+        kind: internal
+    steps:
+      - bind: clk
+        eval: clockOf(cfg.Clock)
+        to: clockOf
+      - bind: e
+        eval: "&export{clock: clk, interval: cfg.Interval, settle: cfg.SettleTimeout, onError: cfg.OnError}"
+      - loop:
+          do:
+            - bind: s, err
+              eval: openSignal(ctx, cfg, clk, name)
+              to: openSignal
+            - opt:
+                do:
+                  - return: nil, errors.Join(err, e.close())
+                when: err != nil
+            - set: e.signals
+              value: append(e.signals, s)
+          key: _
+          range: "[]string{plug.OTLPTraces, plug.OTLPMetrics}"
+          value: name
+      - bind: resource
+        eval: "trace.Resource{Attrs: []trace.Attr{metrics.String(trace.ServiceNameKey, cfg.Service)}}"
+      - bind: scope
+        eval: "trace.Scope{Name: scopeName, Version: cfg.Version}"
+      - bind: spans, err
+        eval: forward.NewSpanExporter(spanExporterName, e.signals[0].forwarder)
+        to: forward
+      - opt:
+          do:
+            - set: e.batch, err
+              to: trace
+              value: "trace.NewBatchSink(trace.BatchSinkConfig{Exporter: spans, Resource: resource, Scope: scope, Clock: clk, OnError: e.report})"
+          when: err == nil
+      - opt:
+          do:
+            - set: e.snapshots, err
+              to: forward
+              value: forward.NewMetricExporter(metricExporterName, e.signals[1].forwarder)
+          when: err == nil
+      - opt:
+          do:
+            - return: nil, errors.Join(err, e.close())
+          when: err != nil
+      - set: e.meter
+        to: metrics
+        value: "metrics.NewMeterWithConfig(metrics.MeterConfig{Resource: resource, Scope: scope})"
+      - eval: e.observeStats()
+        to: e.observeStats
+      - return: e, nil
+  - of: openSignal
+    participants:
+      - id: caller
+        kind: actor
+      - id: openSignal
+        kind: self
+      - id: senderOf
+        kind: internal
+      - id: openQueue
+        kind: internal
+      - id: forward
+        kind: package
+    steps:
+      - bind: send, retryable, err
+        eval: senderOf(cfg, name)
+        to: senderOf
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: broker, durable, err
+        eval: openQueue(cfg, clk, name)
+        to: openQueue
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: f, err
+        eval: |-
+          forward.New(ctx, forward.Config{
+          		Broker: broker, Send: send, Retryable: retryable, Clock: clk,
+          		MaxBatches: cfg.MaxBatches, MaxBytes: cfg.MaxBytes, WhenFull: fullPolicyOf(cfg.WhenFull),
+          		SendTimeout: cfg.SendTimeout, MaxAge: cfg.MaxAge,
+          		DrainTimeout: cfg.DrainTimeout, SettleTimeout: cfg.SettleTimeout,
+          	})
+        to: forward
+      - opt:
+          do:
+            - return: nil, errors.Join(err, closeQueue(broker))
+          when: err != nil
+      - return: "&signal{name: name, broker: broker, forwarder: f, durable: durable, maxBatches: cfg.MaxBatches, maxBytes: cfg.MaxBytes}, nil"
+  - of: openQueue
+    participants:
+      - id: caller
+        kind: actor
+      - id: openQueue
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: queue
+        kind: package
+    steps:
+      - bind: policy
+        eval: |-
+          queue.Policy{
+          		VisibilityTimeout: 2*cfg.SendTimeout + leaseMargin,
+          		MaxDeliveries:     maxDeliveries,
+          		MaxMessageBytes:   int(min(cfg.MaxBytes, maxQueueMessage)),
+          	}
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: nil, false, err
+                init:
+                  bind: err
+                  eval: os.MkdirAll(cfg.Dir, 0o700)
+                  to: os
+                when: err != nil
+            - bind: b, err
+              eval: "queue.NewFile(queue.FileConfig{Clock: clk, Dir: filepath.Join(cfg.Dir, name), Policy: policy})"
+              to: queue
+            - opt:
+                do:
+                  - return: b, err == nil, err
+                when: "!errors.Is(err, proc.UnsupportedPlatform)"
+          when: cfg.Dir != ""
+      - bind: b, err
+        eval: "queue.NewMemory(queue.MemoryConfig{Clock: clk, Policy: policy})"
+        to: queue
+      - return: b, false, err
+  - of: senderOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: senderOf
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: trace
+        kind: package
+      - id: metrics
+        kind: package
+    steps:
+      - opt:
+          do:
+            - bind: retryable
+              eval: cfg.Retryable
+            - opt:
+                do:
+                  - set: retryable
+                    value:
+                      closure:
+                        params: error
+                        results: bool
+                        steps:
+                          - return: "true"
+                when: retryable == nil
+            - return: |-
+                func(ctx context.Context, batch []byte) error {
+                			return own(ctx, plug.OTLPBatchValue{Signal: name, Document: batch})
+                		}, retryable, nil
+          init:
+            bind: own
+            eval: cfg.Send
+          when: own != nil
+      - bind: base
+        eval: strings.TrimRight(cfg.Endpoint, "/")
+        to: strings
+      - opt:
+          do:
+            - bind: ex, err
+              eval: "trace.NewOTLPHTTPExporter(spanExporterName, trace.OTLPHTTPConfig{Endpoint: base + trace.OTLPTracesPath, Headers: cfg.Headers, Timeout: cfg.SendTimeout})"
+              to: trace
+            - opt:
+                do:
+                  - return: nil, nil, err
+                when: err != nil
+            - bind: doc, ok
+              eval: ex.(trace.DocumentExporter)
+            - opt:
+                do:
+                  - return: nil, nil, lacks(name)
+                when: "!ok"
+            - return: doc.ExportDocument, trace.OTLPRetryable, nil
+          when: name == plug.OTLPTraces
+      - bind: ex, err
+        eval: "metrics.NewOTLPHTTPExporter(metricExporterName, metrics.OTLPHTTPConfig{Endpoint: base + metrics.OTLPMetricsPath, Headers: cfg.Headers, Timeout: cfg.SendTimeout})"
+        to: metrics
+      - opt:
+          do:
+            - return: nil, nil, err
+          when: err != nil
+      - bind: doc, ok
+        eval: ex.(metrics.DocumentExporter)
+      - opt:
+          do:
+            - return: nil, nil, lacks(name)
+          when: "!ok"
+      - return: doc.ExportDocument, metrics.OTLPRetryable, nil
+  - of: lacks
+    participants:
+      - id: caller
+        kind: actor
+      - id: lacks
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(forward.Misconfigured, errs.WrapParams{}, errs.String("signal", name), errs.String("problem", "no DocumentExporter"))
+        to: errs
+  - of: fullPolicyOf
+    steps:
+      - switch:
+          cases:
+            - case: plug.OTLPDropNewest
+              do:
+                - return: forward.DropNewest
+            - case: plug.OTLPBlock
+              do:
+                - return: forward.Block
+          "on": name
+      - return: forward.DropOldest
+  - of: closeQueue
+    participants:
+      - id: caller
+        kind: actor
+      - id: closeQueue
+        kind: self
+      - id: c.Close
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: c.Close()
+              to: c.Close
+          init:
+            bind: c, ok
+            eval: b.(interface{ Close() error })
+          when: ok
+      - return: nil

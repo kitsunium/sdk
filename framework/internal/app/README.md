@@ -313,6 +313,7 @@ Package app — the ports the workflow engine reaches a store through.
 - [func DeleteOnErasure\(\) StoreConfigurer](<#DeleteOnErasure>)
 - [func DesignDigest\(digest string\) AppConfigurer](<#DesignDigest>)
 - [func Drain\(d time.Duration\) DeliveryOption](<#Drain>)
+- [func EnableOTLP\(\)](<#EnableOTLP>)
 - [func EnableServer\(\)](<#EnableServer>)
 - [func EnableStores\(\)](<#EnableStores>)
 - [func EnableStudio\(\)](<#EnableStudio>)
@@ -378,6 +379,13 @@ Package app — the ports the workflow engine reaches a store through.
 - [func NotFound\(message string\) \*Error](<#NotFound>)
 - [func NotReused\(n int\) PasswordConfigurer](<#NotReused>)
 - [func Now\(ctx context.Context\) time.Time](<#Now>)
+- [func OTLP\(opts ...OpenTelemetryConfigurer\) AppConfigurer](<#OTLP>)
+- [func OTLPBounds\(maxBatches int, maxBytes int\) OpenTelemetryConfigurer](<#OTLPBounds>)
+- [func OTLPEndpoint\(url string\) OpenTelemetryConfigurer](<#OTLPEndpoint>)
+- [func OTLPMaxAge\(d time.Duration\) OpenTelemetryConfigurer](<#OTLPMaxAge>)
+- [func OTLPSendTimeout\(d time.Duration\) OpenTelemetryConfigurer](<#OTLPSendTimeout>)
+- [func OTLPSender\(send func\(ctx context.Context, batch OTLPBatchValue\) error\) OpenTelemetryConfigurer](<#OTLPSender>)
+- [func OTLPWhenFull\(p OTLPFullPolicy\) OpenTelemetryConfigurer](<#OTLPWhenFull>)
 - [func OnBounce\(fn func\(ctx context.Context, b \*BounceEvent\)\) MailerConfigurer](<#OnBounce>)
 - [func Only\(envs ...string\) MountConfigurer](<#Only>)
 - [func OpenBackoff\(maxOpen time.Duration\) BreakerConfigurer](<#OpenBackoff>)
@@ -526,6 +534,9 @@ Package app — the ports the workflow engine reaches a store through.
   - [func \(\*Module\) Prefix\(\) string](<#Module.Prefix>)
 - [type ModuleConfigurer](<#ModuleConfigurer>)
 - [type MountConfigurer](<#MountConfigurer>)
+- [type OTLPBatchValue](<#OTLPBatchValue>)
+- [type OTLPFullPolicy](<#OTLPFullPolicy>)
+- [type OpenTelemetryConfigurer](<#OpenTelemetryConfigurer>)
 - [type Operation](<#Operation>)
 - [type OperationOption](<#OperationOption>)
 - [type OverlapPolicy](<#OverlapPolicy>)
@@ -981,6 +992,15 @@ const CodeNothingToErase errs.Code = 262709
 The framework's own failures carry SDK error codes in 0.4.2.\* — layer 4 is the framework's, PP 2 this package (ADR 0147 §3) — so a product keeps the whole application range 0x40–0x7F for its own codes. Match them with errs.HasCode. Their Public text is the only part that may reach a caller; none of them is a 4xx, so a caller only ever reads "internal error".
 
 Code `0.4.2.53`
+
+<a name="CodeOTLPExport"></a>
+```go
+const CodeOTLPExport errs.Code = 262746
+```
+
+CodeOTLPExport refuses a start whose OTLP export ([OTLP](#OTLP)) cannot be opened — its queue, its collector's endpoint, its headers —, and says a stop that did not let it flush within its budget.
+
+Code `0.4.2.90`
 
 <a name="CodePasswordHash"></a>
 ```go
@@ -1499,6 +1519,45 @@ const Moderated Mark = "moderated"
 
 Moderated marks content others see and a moderator may act on.
 
+<a name="OTLPBlock"></a>
+```go
+const OTLPBlock OTLPFullPolicy = "block"
+```
+
+OTLPBlock: the span or the snapshot waits for room a few seconds, then is refused, counted dropped.
+
+<a name="OTLPDropNewest"></a>
+```go
+const OTLPDropNewest OTLPFullPolicy = "drop-newest"
+```
+
+OTLPDropNewest: the new batch is refused, counted dropped.
+
+<a name="OTLPDropOldest"></a>
+```go
+const OTLPDropOldest OTLPFullPolicy = "drop-oldest"
+```
+
+OTLPDropOldest, the default: the oldest batches not being sent are taken out, counted dropped, until the new one fits.
+
+<a name="OTLPMetrics"></a>
+```go
+const OTLPMetrics string = "metrics"
+```
+
+OTLPMetrics names the metrics signal: an OTLP/JSON ExportMetricsServiceRequest.
+
+Initialised with `github.com/kitsunium/sdk/framework/internal/app/plug.OTLPMetrics`.
+
+<a name="OTLPTraces"></a>
+```go
+const OTLPTraces string = "traces"
+```
+
+OTLPTraces names the trace signal: an OTLP/JSON ExportTraceServiceRequest.
+
+Initialised with `github.com/kitsunium/sdk/framework/internal/app/plug.OTLPTraces`.
+
 <a name="OverlapAllow"></a>
 ```go
 const OverlapAllow OverlapPolicy = "allow"
@@ -2005,6 +2064,15 @@ Drain is how long the message a handler is running when the app stops may still 
 d is the default of the consumer's setting \<service>-\<kind>-\<name>-drain, the kind subscription or command, which config/\<env>.\* and \<PRODUCT>\_\<NAME> override.
 
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
+
+<a name="EnableOTLP"></a>
+## func [EnableOTLP](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/otlp_enable.go>)
+
+```go
+func EnableOTLP()
+```
+
+EnableOTLP makes the framework's own export code reachable: the settings, the component, the readiness and the stop of the OTLP export a product declares. framework/app/otlp calls it as it is imported; a product never does.
 
 <a name="EnableServer"></a>
 ## func [EnableServer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/app.go>)
@@ -2659,6 +2727,91 @@ func Now(ctx context.Context) time.Time
 ```
 
 Now returns the app's time: the system clock, or the clock a test gave with [Clock](#Clock). Product code that compares with a deadline reads it rather than time.Now, so that a test's manual clock reaches it.
+
+<a name="OTLP"></a>
+## func [OTLP](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/otlp.go>)
+
+```go
+func OTLP(opts ...OpenTelemetryConfigurer) AppConfigurer
+```
+
+OTLP declares that the app forwards its traces and the metrics the framework derives from them to an OpenTelemetry collector over OTLP/HTTP: every span the framework starts, and per node and operation its runs, failures and durations (app.node.runs, app.node.failures, app.node.duration), with what the export itself holds and lost (app.otlp.\*). The export is on once its endpoint is set — the setting otlp-endpoint, [OTLPEndpoint](#OTLPEndpoint) its default — or once [OTLPSender](#OTLPSender) replaces the network; a CLI command never exports. A program that declares it imports framework/app/otlp, or its start is refused, naming the import:
+
+```
+import _ "github.com/kitsunium/sdk/framework/app/otlp"
+
+var App = app.NewApp("shop", catalog.Service).With(
+	app.OTLP(app.OTLPEndpoint("http://collector:4318")),
+)
+```
+
+Every value given here is the default of the setting that tunes it, which config/\<env>.\* and \<PRODUCT>\_OTLP\_\<KNOB> override. Given twice, the last wins.
+
+<a name="OTLPBounds"></a>
+## func [OTLPBounds](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/otlp.go>)
+
+```go
+func OTLPBounds(maxBatches int, maxBytes int) OpenTelemetryConfigurer
+```
+
+OTLPBounds bounds each signal's queue: at most maxBatches batches and maxBytes bytes — the defaults of the settings otlp-max-batches (10000) and otlp-max-bytes (256 MiB). A batch larger than maxBytes on its own is dropped.
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
+
+<a name="OTLPEndpoint"></a>
+## func [OTLPEndpoint](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/otlp.go>)
+
+```go
+func OTLPEndpoint(url string) OpenTelemetryConfigurer
+```
+
+OTLPEndpoint is the collector's base URL — "[http://collector:4318](http://collector:4318)" —, each signal's path (/v1/traces, /v1/metrics) appended to it: the default of the setting otlp-endpoint. An absolute http or https URL with a host; the empty default leaves the export off.
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
+
+<a name="OTLPMaxAge"></a>
+## func [OTLPMaxAge](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/otlp.go>)
+
+```go
+func OTLPMaxAge(d time.Duration) OpenTelemetryConfigurer
+```
+
+OTLPMaxAge is how long after it was queued a batch may still be sent — the default of the setting otlp-max-age (24h): one older is dropped unsent, counted expired. A collector's Retry-After is waited in full, but never past it.
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
+
+<a name="OTLPSendTimeout"></a>
+## func [OTLPSendTimeout](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/otlp.go>)
+
+```go
+func OTLPSendTimeout(d time.Duration) OpenTelemetryConfigurer
+```
+
+OTLPSendTimeout bounds one attempt to send a batch — the default of the setting otlp-send-timeout (10s, OTEL\_EXPORTER\_OTLP\_TIMEOUT's).
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
+
+<a name="OTLPSender"></a>
+## func [OTLPSender](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/otlp.go>)
+
+```go
+func OTLPSender(send func(ctx context.Context, batch OTLPBatchValue) error) OpenTelemetryConfigurer
+```
+
+OTLPSender replaces the network: each batch is handed to send instead of being posted to a collector — the product's own sender, a bridge to another transport. The queue, its bounds, its age and its retries stay the framework's. A failure send returns is tried again on the backoff — after the delay it carries when it is a resilience.RetryAfter's —, but for a refusal the caller must fix, an [Error](#Error) of a 4xx other than 408 and 429, which dead-letters the batch. The export is then on whatever otlp-endpoint says. A nil send keeps the network.
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
+
+<a name="OTLPWhenFull"></a>
+## func [OTLPWhenFull](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/otlp.go>)
+
+```go
+func OTLPWhenFull(p OTLPFullPolicy) OpenTelemetryConfigurer
+```
+
+OTLPWhenFull is what a full queue does with a new batch — the default of the setting otlp-when-full: [OTLPDropOldest](#OTLPDropOldest) (the default), [OTLPDropNewest](#OTLPDropNewest) or [OTLPBlock](#OTLPBlock).
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
 <a name="OnBounce"></a>
 ## func [OnBounce](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/mailer_bounce.go>)
@@ -4397,6 +4550,40 @@ MountConfigurer configures the mount of a module: [Prefix](#Prefix), [Bind](#Bin
 ```go
 type MountConfigurer interface {
 	mountConfigure(d *mountDecl)
+}
+```
+
+<a name="OTLPBatchValue"></a>
+## type [OTLPBatchValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/otlp.go>)
+
+OTLPBatchValue is one batch as the product's own sender receives it ([OTLPSender](#OTLPSender)): its signal, [OTLPTraces](#OTLPTraces) or [OTLPMetrics](#OTLPMetrics), and its OTLP/JSON document, which a collector takes as it is.
+
+```go
+type OTLPBatchValue struct {
+	// Signal is OTLPTraces or OTLPMetrics.
+	Signal   string
+	// Document is the OTLP/JSON export request.
+	Document []byte
+}
+```
+
+<a name="OTLPFullPolicy"></a>
+## type [OTLPFullPolicy](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/otlp.go>)
+
+OTLPFullPolicy is what an export's full queue does with a new batch.
+
+```go
+type OTLPFullPolicy string
+```
+
+<a name="OpenTelemetryConfigurer"></a>
+## type [OpenTelemetryConfigurer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/otlp_interface.go>)
+
+OpenTelemetryConfigurer configures the app's OTLP export: [OTLPEndpoint](#OTLPEndpoint), [OTLPBounds](#OTLPBounds), [OTLPWhenFull](#OTLPWhenFull), [OTLPMaxAge](#OTLPMaxAge), [OTLPSendTimeout](#OTLPSendTimeout), [OTLPSender](#OTLPSender).
+
+```go
+type OpenTelemetryConfigurer interface {
+	openTelemetryConfigure(o *otlpOptions)
 }
 ```
 

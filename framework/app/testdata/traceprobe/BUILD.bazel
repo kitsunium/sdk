@@ -12,6 +12,7 @@ go_library(
         "//framework/app",
         "//framework/app/jobs",
         "//framework/app/mail",
+        "//framework/app/otlp",
         "//framework/app/queue",
         "//framework/app/server",
         "//framework/app/store",
