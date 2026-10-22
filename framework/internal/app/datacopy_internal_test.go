@@ -186,7 +186,14 @@ func TestAVersionRenumberedChangesItsFingerprint(t *testing.T) {
 	if mustVersionDigest(t, &spaced) != base {
 		t.Error("the whitespace of a snapshot changed a version's fingerprint")
 	}
-	if messageDigest([]byte("m"), false, 2, "", 0) == messageDigest([]byte("m"), false, 1, "", 0) {
+	trailed, bare := &plug.DeadLetterValue{Reason: "R", Code: 5, Trail: []uint32{7}}, &plug.DeadLetterValue{Reason: "R", Code: 5}
+	if messageDigest([]byte("m"), 1, trailed) == messageDigest([]byte("m"), 1, bare) {
+		t.Error("a dead letter's trail does not change its fingerprint")
+	}
+	if messageDigest([]byte("m"), 1, bare) == messageDigest([]byte("m"), 1, nil) {
+		t.Error("a dead letter and a live message share a fingerprint")
+	}
+	if messageDigest([]byte("m"), 2, nil) == messageDigest([]byte("m"), 1, nil) {
 		t.Error("a message's delivery count is not in its fingerprint")
 	}
 }

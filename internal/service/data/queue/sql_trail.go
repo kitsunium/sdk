@@ -12,10 +12,10 @@ import (
 // the trail column to a queue's table, or to drop it, on one dialect.
 //
 // PostgreSQL says "only when it is (not) there" in the statement itself.
-// SQLite and MySQL have no IF [NOT] EXISTS on a column, so the migration
-// reads the table's columns from the catalogue first — with the table's name
-// bound, never interpolated — and sends the ALTER only when it changes
-// something: a run that MySQL's implicit commit stopped after its ALTER, a
+// SQLite and MySQL have no IF EXISTS nor IF NOT EXISTS on a column, so the
+// migration reads the table's columns from the catalogue first — with the
+// table's name bound, never interpolated — and sends the ALTER only when it
+// changes something: a run that MySQL's implicit commit stopped after its ALTER, a
 // table SQLMigration created with the column, and a table not created yet
 // all leave nothing to do.
 type trailColumnStatements struct {

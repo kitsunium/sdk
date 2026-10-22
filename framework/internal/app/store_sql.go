@@ -19,11 +19,14 @@ import (
 // Table name suffixes of what kit keeps beside a store: its records'
 // former values (ADR 0007), a workflow's journal; and the SDK's own for a
 // store's versions, <table>___vs (kitsunium/sdk ADR 0143), which three
-// underscores keep apart from every table kit names.
+// underscores keep apart from every table kit names. trailSuffix ends the
+// registry's name of a queue's trail column (issue #500): '#' is in no table
+// name kit gives, so it is never a table's.
 const (
 	historySuffix  = "__history"
 	workflowSuffix = "__workflow"
 	versionsSuffix = "___vs"
+	trailSuffix    = "#trail"
 )
 
 // Stores on SQL (ADR 0004, step 2). A store a database keeps is still a
@@ -120,10 +123,6 @@ type frameworkTable struct {
 	// table's name and trailSuffix, which no table name can hold.
 	trailOf string
 }
-
-// trailSuffix ends the registry's name of a queue's trail column: '#' is in
-// no table name kit gives, so it is never a table's.
-const trailSuffix = "#trail"
 
 // frameworkTables are the tables kit keeps on d: each store it keeps, the former
 // values of those that remember, the journals of the workflows over them,

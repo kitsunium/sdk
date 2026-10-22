@@ -510,7 +510,7 @@ func (e *sqlEngine) write(role, query string, args []driver.Value, work queueTab
 // the catalogue's count of them — ten, and the trail —, and the column's
 // addition and removal, refused as an engine refuses them when the table or
 // the column is not where the statement expects, except on PostgreSQL, whose
-// statements say IF [NOT] EXISTS.
+// statements say IF EXISTS and IF NOT EXISTS.
 func (e *sqlEngine) alterTrail(role string) (answer, error) {
 	lenient := e.dialect == coresql.DialectPostgres
 	switch role {

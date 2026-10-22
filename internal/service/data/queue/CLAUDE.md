@@ -25,7 +25,7 @@ package declares no code.
 | File | Holds |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
-| `queue.go` | the dead-letter `causeValue` reduction, `randomHex`, the shared guards (`checkBatch`, `checkSize`, `checkDeadLetter` and `checkLiveMessage` — the refusals of `PutDeadLetter` and `PutMessage`, identical on the three brokers, ADR 0178; `nackDeadline`, `publishVisibleAt` and `onceUntil` — the arguments of `NackAfter`, `PublishAt` and `PublishOnce`, read and refused identically on the three, and `onceDigest`, the SHA-256 the durable brokers keep of a key, ADR 0183), `deadLetterNotFound` |
+| `queue.go` | the dead-letter `causeValue` reduction — the cause's trail with it, `trailCodes`, and its text form, `encodeTrail` / `decodeTrail`, `cloneTrail` (issue #500) —, `randomHex`, the shared guards (`checkBatch`, `checkSize`, `checkDeadLetter` and `checkLiveMessage` — the refusals of `PutDeadLetter` and `PutMessage`, identical on the three brokers, ADR 0178; `nackDeadline`, `publishVisibleAt` and `onceUntil` — the arguments of `NackAfter`, `PublishAt` and `PublishOnce`, read and refused identically on the three, and `onceDigest`, the SHA-256 the durable brokers keep of a key, ADR 0183), `deadLetterNotFound` |
 | `retry.go` | `retryDelay`: RetryDelay, or the `kernel/backoff` curve from it to `MaxRetryDelay` — one function the three brokers call (ADR 0151) |
 | `memory.go` | `NewMemory` and the in-heap broker: the heap-ordered lease expiry, the ready list ordered at insertion; `Reject`, `Release`, `NackAfter`, `PublishAt`, `PublishOnce` (a map of the keys reserved and a heap of their windows' ends, `dropPassedOnce`), `ReplayDeadLetter`, `DeleteDeadLetter`, `PutDeadLetter`, `Messages`, `PutMessage` |
 | `memory_config.go` / `mem_record.go` / `lease_expiry.go` / `once_end.go` | `MemoryConfig` and the three values the memory broker keeps |
@@ -35,15 +35,16 @@ package declares no code.
 | `dirtrust_posix.go` / `dirtrust_windows.go` | the permission half of those refusals: the mode bits on Unix, the directory's DACL on Windows, read through the kernel's reader, `internal/kernel/fs/winacl` |
 | `file_name.go` | the NAME grammar — the durable broker's entire state machine — and `nameable`, the range of instants a name can carry. Every field is held to the exact width and spelling the renderers write (entropy and lease as wide as `randomHex` makes them, the count as `padCount` spells it), so a stray file of the right shape is skipped rather than delivered |
 | `file_receive.go` | `Receive`, the reclaim scan, the rename that IS the exclusion |
-| `file_dead.go` | `Nack` and `NackAfter` (one `nackWith`, the delay the policy's or the caller's), `Reject`, `Release` (one rename back into `ready/`, visible now, the count one lower), `Extend`, `DeadLetters`, the burial, the dead-letter record's encoding |
+| `file_dead.go` | `Nack` and `NackAfter` (one `nackWith`, the delay the policy's or the caller's), `Reject`, `Release` (one rename back into `ready/`, visible now, the count one lower), `Extend`, `DeadLetters`, the burial, the dead-letter record's encoding — a `trail` header line only when the cause has one (issue #500) |
 | `file_replay.go` | `ReplayDeadLetter`, `DeleteDeadLetter`, `PutDeadLetter` (a burial's record, published atomically and durably), `Messages` (`liveFiles`, `parseLive`: the two state directories' names, sorted by identifier) and `PutMessage` (a `ready/` file, as a retry leaves one), `deadRecordsOf` — every record of one message by its ID |
 | `sql.go` | `NewSQL`, the SQL broker, `Publish` and `PublishAt` (one INSERT, `due` the instant), `Ack`, `Nack` and `NackAfter` (one `nackWith`), `Release`, `Extend`, `Wake`; `run` (a savepoint of the caller's transaction, a transaction of the broker's own, or one statement on the pool), `announce` (the wake through `Deferrer`), the receipt grammar, `failed` (QUEUE_BACKEND_FAILED + the driver's error through `service/data/sql`'s `Withheld`, its text out of every rendering), the process-wide `sqlWakes` table |
 | `sql_once.go` | `PublishOnce` (ADR 0183): one transaction — the key's passed reservation dropped, the key claimed by an insertion that affects no row when it is taken, the message inserted when the claim took, and up to 100 passed reservations of other keys read `SKIP LOCKED` and removed (`claimOnce`, `sweepOnce`) |
 | `sql_receive.go` | `Receive`: the probe, then — only when something is due — the lease transaction: `pickDue`, `buryLapsed`, `leaseRows`, `minDue` |
 | `sql_dead.go` | `Reject`, `DeadLetters`, `ReplayDeadLetter`, `DeleteDeadLetter`, `PutDeadLetter` (one INSERT of a dead row, in the caller's transaction when its context carries one), `Messages` (one unlocked read of the live rows after an identifier) and `PutMessage` (one INSERT of a live row with its count) on the table |
 | `sql_config.go` | `SQLConfig`, `MaxSQLTableLen`, the table-name rule, the refusals (`SQL_QUEUE_MISCONFIGURED`) |
-| `sql_dialect.go` | **the only place the SQL broker renders SQL**: every statement per dialect, `leaseRows` / `buryRows` / `onceSweepRows` rendered per call, `onceClaimStatement` (`ON CONFLICT (id) DO NOTHING`, MySQL's `INSERT IGNORE`), the DDL; every marker, quoted name and the lease's `FOR UPDATE SKIP LOCKED` is `core/data/sql.Dialect`'s (`Placeholder`, `QuoteIdent`, `ForUpdateSkipLocked`) |
-| `sql_migration.go` | `SQLMigration`: the one table as an idempotent `core/data/sql` migration the caller numbers |
+| `sql_dialect.go` | **the only place the SQL broker renders SQL**: every statement per dialect — those a cause goes through naming the `trail` column with `SQLConfig.Trail`, and the arguments they bind, `causeArgs` / `putDeadArgs` (issue #500) —, `leaseRows` / `buryRows` / `onceSweepRows` rendered per call, `onceClaimStatement` (`ON CONFLICT (id) DO NOTHING`, MySQL's `INSERT IGNORE`), the DDL; every marker, quoted name and the lease's `FOR UPDATE SKIP LOCKED` is `core/data/sql.Dialect`'s (`Placeholder`, `QuoteIdent`, `ForUpdateSkipLocked`) |
+| `sql_migration.go` | `SQLMigration`: the one table as an idempotent `core/data/sql` migration the caller numbers; `SQLTrailMigration`: the `trail` column added to a table an earlier `SQLMigration` made (issue #500) |
+| `sql_trail.go` | `SQLTrailMigration`'s statements and steps: PostgreSQL's `ALTER TABLE IF EXISTS … ADD COLUMN IF NOT EXISTS`, and on SQLite (`pragma_table_info`) and MySQL (`information_schema.columns`) a read of the table's columns first, the `ALTER` sent only when it changes something; `trailColumnType` |
 | `consume.go` | `Consume` (its workers in a `kernel/concur/group` joined group) and `consumer`, the siblings asked once; the pull loop, the batch (`settleBatch`, `prepare`: a message whose lease ran down is handed back or renewed before it starts), the outcomes (`settle` — `NackAfter` for a `RetryAfter` failure when the broker has the sibling, ADR 0183 —, `handBack` — `Release`, or `Nack` without the sibling — `nack`), the panic guard, and the idle wait on a `Waker` (`idleFor`, `idle`, `armUntil`: the wait armed until an instant measured before the broker is asked, re-armed when the clock moved across its registration — a ManualClock advanced while a worker armed its wait fired it that much late, and a spool retry was missed on OpenBSD's CI; `TestAnIdleConsumerWakesAtTheDueInstantWhenTheClockMovesWhileItArms`) |
 | `consume_lease.go` | the handler's watch (kitsunium/sdk#474): `leasePlan` (the lease as granted, its margin — a tenth, at most `SettleTimeout` — and AutoExtend's third), `watch`/`oversee`/`finish` (one goroutine per handled message that ends its context on the stop, after `DrainTimeout`, and a margin before the lease ends, and renews it under AutoExtend), `renew`, and `bounded`/`bound` — every outcome on its context without the cancellation, bounded by `SettleTimeout` from the stop on, a renewal always |
 | `wake.go` | `wakeSignal` (the broadcast every broker closes on Publish, Nack and a replay, and a durable broker's recorded due instant), `wakeValue`, `earliest`, and `wakeTable[K]` — the process-wide, weakly-held table that makes every durable broker over one queue share one signal: `fileWakes` by directory, `sqlWakes` by pool and table |
@@ -288,6 +289,21 @@ exists if and only if that transaction commits** — the transactional outbox.
   statement touched. The transactor's own verdicts pass through.
 - **`SQLMigration(dialect, table, version)`** creates the table in one
   `CREATE TABLE IF NOT EXISTS`; the SDK numbers nothing (ADR 0055 §D12).
+- **A dead letter's trail is a nullable `trail` column, written only with
+  `SQLConfig.Trail` (issue #500).** `SQLMigration` creates the table with it;
+  `SQLTrailMigration(dialect, table, version)` adds it to a table an earlier
+  release made, and does nothing on a table that has it or that is not there
+  yet, so it runs before or after `SQLMigration` and twice. PostgreSQL says so
+  in the statement (`IF [NOT] EXISTS`); SQLite and MySQL have no such clause on
+  a column, so the step reads the catalogue first — the table's name bound —
+  and alters only when the change is due, which also covers a run MySQL's
+  implicit DDL commit stopped after the `ALTER`. Its Down drops the column
+  (SQLite from 3.35). Without `Trail` the broker sends, byte for byte, the
+  statements it sent before the column existed — a deployment that upgrades
+  the SDK before it runs the migration keeps working —, and its dead letters
+  have no trail. With it, the burial, `PutDeadLetter` and the dead-letter
+  read name the column (the codes in decimal, comma-separated, `NULL` for
+  none), and a replay and a burial of lapsed leases clear it.
 - **Two brokers over one pool and table share a wake** (`sqlWakes`), keyed by
   the executor `Join` answers outside a transaction and the table; a joiner
   whose pool is nil or incomparable gets a signal of its own.
@@ -324,18 +340,35 @@ returns on a storage failure: a consumer over the SQL broker runs under
   replays is refused `DEAD_LETTER_NOT_FOUND`.
 - **`PutDeadLetter` writes a dead letter as it lies (ADR 0178)**, on all three
   brokers, for a copy of a queue from one broker to another: payload, both
-  instants, count, reason, cause and code — 0 included — kept, under an
+  instants, count, reason, cause, code — 0 included — and trail (none on an
+  SQL broker without `SQLConfig.Trail`) kept, under an
   identifier the broker mints from the enqueue instant (the memory broker
   from it and its sequence). `checkDeadLetter` refuses first, identically
   everywhere: an identifier set, a count below 1 or above 2³¹−1 (MySQL's
   `INT`), an instant `nameable` refuses, a reason or cause `oneLine` would
-  rewrite — `INVALID_DEAD_LETTER`, naming the field — then a payload over the
-  bound, `MESSAGE_TOO_LARGE`. The file broker writes the record a burial
+  rewrite, a trail over sixteen codes — `INVALID_DEAD_LETTER`, naming the
+  field — then a payload over the bound, `MESSAGE_TOO_LARGE`. The file broker writes the record a burial
   writes, through the same `WriteAtomic`; the SQL broker one INSERT with
   `dead = 1` and the failure instant as `due`, a savepoint of the caller's
   transaction when there is one. A dead letter is never receivable, so none
   wakes a consumer. `deadletter_write_external_test.go` holds it on every
   broker, and the SQL one in and out of a rolled-back transaction.
+- **A dead letter keeps the trail of its cause (issue #500).** `describeCause`
+  keeps `errs.TrailOf(cause)` beside the origin's reason, Public half and
+  code: at most sixteen codes, the kernel's own bound (`maxDeadTrail`), oldest
+  first, nil for none. It is the part of a failure only the trail carries — a
+  mail spool's `MAIL_REJECTED` or `MAIL_EXPIRED` behind the transport's
+  `SEND_REFUSED`, the queue's own `NOT_RETRYABLE` behind both. The memory
+  broker keeps a copy and hands every reader its own; the file broker writes
+  a `trail <code>,<code>` header line after `code`, ONLY when there is one, so
+  a record whose cause had none is the bytes `ktnq/1` always was and a reader
+  older than the line skips it as an unknown field; a line that does not
+  parse, or holds more than sixteen codes, reads as no trail and costs the
+  record nothing else. `deadletter_trail_external_test.go` holds it on every
+  broker: a rejection and a last nack keep it, a death by lapsed leases and a
+  cause without one have none, a replayed message that dies again keeps
+  nothing of its first death, the file record without a trail and with a
+  corrupt one, and the SQL broker without `Trail`.
 - **`Messages` and `PutMessage` move a live message as it lies (ADR 0178)**,
   on all three brokers, for the same copy. `Messages(ctx, after, max)` lists
   the queued and leased messages in identifier order, resuming after `after`:

@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Amended**: 2026-10-15 — a sixth capability sibling, `DeadLetterWriter`, and `INVALID_DEAD_LETTER` `0.2.23.8` (see the dated section at the end), for ADR 0178's `data copy`
 - **Amended**: 2026-10-15 — a seventh and an eighth capability sibling, `MessageReader` and `MessageWriter`, and `INVALID_MESSAGE` `0.2.23.9` (see the second dated section at the end), for ADR 0178's `data copy`
+- **Amended**: 2026-10-23 — a dead letter keeps the trail of its cause on every broker, and the SQL table a nullable `trail` column: `SQLConfig.Trail`, `SQLTrailMigration` (see the third dated section at the end), for kitsunium/sdk#500
 - **Date**: 2026-09-30
 - **Deciders**: SDK maintainers
 - **Amended by**: [ADR 0159](0159-the-kernel-holds-what-the-domains-rewrote-and-is-published-by-nature.md) §Consequences — §D6: the driver's withheld text is one `Withheld` in `service/data/sql`, shared by the queue's and the document store's SQL engines, not a copy per package
@@ -543,6 +544,75 @@ their instant; every refusal naming its field, nothing written; the SQL
 broker's in a rolled-back transaction, then a committed one waking its
 consumers. `sql_statements_external_test.go` pins the two statements;
 `pkg/v1/data/queue` builds the five new names without an internal import.
+
+## Amendment (2026-10-23): a dead letter keeps the trail of its cause, and the table a trail column
+
+**Why.** A dead letter kept what D10 of ADR 0054 named — the cause's reason,
+Public half and code — and those three are the ORIGIN's: `errs.Wrap` keeps the
+first error's and adds a wrapper's code to the trail. The mail spool gives a
+mail up early by adding `MAIL_REJECTED` or `MAIL_EXPIRED` to the trail of the
+transport's `SEND_REFUSED`, as `DoNotRetry` adds `NOT_RETRYABLE`; the event of
+the process that gave it up carries the error, but the dead letter kept only
+`SEND_REFUSED`, so the framework could count the dead letters of an earlier
+run and could not say why any of them was given up (kitsunium/sdk#500,
+following #489).
+
+**Decision.**
+
+- `DeadLetterValue` gains `Trail []uint32`: `errs.TrailOf(cause)`, oldest
+  first, at most sixteen codes — the kernel's own bound on a trail, so nothing
+  a cause carries is cut, the newest kept if it ever were —, nil for none.
+  It is public as `Code` is: codes, never words. `PutDeadLetter` keeps it as
+  given and refuses more than sixteen (`INVALID_DEAD_LETTER`, field `Trail`).
+- The memory broker keeps a copy and hands every reader its own.
+- The file broker writes `trail <code>,<code>` after the `code` header line,
+  in decimal, and ONLY when there is a trail: a record whose cause had none is
+  the bytes `ktnq/1` always was, a record written before the line reads with
+  no trail, and a reader older than the line skips it as an unknown field, as
+  the decoder always did. A line that does not parse, or holds more than
+  sixteen codes, reads as no trail and costs the record nothing else. The
+  format keeps its magic: nothing an older reader relies on moved.
+- The SQL broker keeps it in a nullable `trail` column, the same text,
+  `NULL` for none. A column is a migration, and the SDK numbers none (ADR
+  0055 §D12), so the column is opt-in on both sides: `SQLMigration` creates
+  the table with it, `SQLTrailMigration(dialect, table, version)` adds it to a
+  table an earlier `SQLMigration` made, and `SQLConfig.Trail` makes the broker
+  name it — unset, the broker sends byte for byte the statements it sent
+  before, so a deployment that takes the SDK before it runs the migration
+  keeps working, its dead letters without a trail. `SQLTrailMigration` does
+  nothing on a table that has the column or is not there yet, so it may run
+  before `SQLMigration`, after it and twice: PostgreSQL says so in the
+  statement (`ALTER TABLE IF EXISTS … ADD COLUMN IF NOT EXISTS`); SQLite and
+  MySQL have no such clause on a column, so its step reads the catalogue
+  first (`pragma_table_info`, `information_schema.columns`, the name bound)
+  and alters only when the change is due — which also covers a run MySQL's
+  implicit DDL commit stopped between the `ALTER` and the version row. Its
+  Down drops the column (SQLite from 3.35). With `Trail`, a replay clears the
+  trail with the cause, and a burial of lapsed leases writes none.
+- The framework sets `Trail` on every queue it keeps on a database, gives
+  each queue table's trail migration an entry of its own in its registry
+  (`<table>#trail`), and its mailers read the dead letters of earlier runs —
+  rejected or expired when the spool's code is in the trail, or is the code of
+  a failure that was no SDK error — into the Studio's mailbox.
+
+**Not decided here.** The SMTP reply's code is not kept with a dead letter: it
+is a field of the transport's failure, not a code, and a dead letter keeps no
+field (D10's split). A trail is not shown in `Cause` nor folded into `Reason`.
+
+**Verification.** `deadletter_trail_external_test.go` on the five brokers of
+the suite: a rejection and a last nack keep the trail, a death by lapsed
+leases and a cause without one have none, a replayed message that dies again
+keeps nothing of its first death, a reader cannot rewrite the stored trail,
+the file record without a trail line and with a corrupt one, the SQL broker
+without `Trail`; `deadletter_write_external_test.go` writes trails of two and
+sixteen codes and refuses seventeen; `sql_statements_external_test.go` pins
+the statements `Trail` changes and `SQLTrailMigration`'s, and runs it before
+the table, twice, and back down over the fake engine;
+`e2e/integration/sql/queue_integration_test.go` runs the trail through every
+statement on SQLite, PostgreSQL and MySQL, and the migration over a table
+made without the column. In the spool, `TestAMailGivenUpKeepsWhyAfterItsProcess`;
+in the framework, `TestAMailAnEarlierRunGaveUpKeepsWhy` (on disk) and
+`TestAMailAnEarlierRunGaveUpOnTheDatabaseKeepsWhy` (the sealed SQL outbox).
 
 ## References
 

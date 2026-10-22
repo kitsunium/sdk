@@ -32,7 +32,10 @@ type QueueDriverConfig struct {
 	// TableMigration is the migration that makes the queue table on a
 	// database of the dialect named, at version.
 	TableMigration func(dialect, table string, version uint64) (MigrationValue, error)
-	// TrailMigration is filled by kit gen.
+	// TrailMigration is the migration that adds the column a dead letter's
+	// trail is kept in to a queue table an earlier release made on a
+	// database of the dialect named, at version; it does nothing on a table
+	// that has it, or that is not there yet.
 	TrailMigration func(dialect, table string, version uint64) (MigrationValue, error)
 	// DoNotRetry is err as a delivery's handler returns it when no retry
 	// can help: its queue dead-letters the message at once.
@@ -169,7 +172,8 @@ type DeadLetterValue struct {
 	Cause string
 	// Message is the message, unmodified.
 	Message MessageValue
-	// Trail is filled by kit gen.
+	// Trail is the codes the failure gathered as it was wrapped, oldest
+	// first, nil for none.
 	Trail []uint32
 	// Code is the failure's error code, 0 for none.
 	Code uint32

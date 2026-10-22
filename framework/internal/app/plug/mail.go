@@ -186,25 +186,29 @@ type MailAttemptValue struct {
 	Attempt int
 }
 
-// MailDeadLetterValue is filled by kit gen.
+// MailDeadLetterValue is a mail an outbox gave up on, read back from its dead
+// letters: what the mailbox of a later run shows of it, why it was given up
+// included.
 type MailDeadLetterValue struct {
-	// Meta is filled by kit gen.
+	// Meta is what Annotate kept of the Send.
 	Meta map[string]string
-	// FailedAt is filled by kit gen.
+	// FailedAt is when its last attempt failed.
 	FailedAt time.Time
-	// QueuedAt is filled by kit gen.
+	// QueuedAt is when the mail was put in the outbox.
 	QueuedAt time.Time
-	// Message is filled by kit gen.
+	// Message is the mail.
 	Message MailValue
-	// ID is filled by kit gen.
+	// ID is the mail's outbox ID; empty when its record did not decode, and
+	// QueueID then names it.
 	ID string
-	// QueueID is filled by kit gen.
+	// QueueID is the outbox queue's identifier for its record.
 	QueueID string
-	// Cause is filled by kit gen.
+	// Cause is its last failure's public text, "" for none.
 	Cause string
-	// Attempts is filled by kit gen.
+	// Attempts counts its delivery attempts.
 	Attempts int
-	// GivenUp is filled by kit gen.
+	// GivenUp is why it was given up, read from its last failure's code and
+	// trail as the outbox kept them.
 	GivenUp MailGiveUp
 }
 

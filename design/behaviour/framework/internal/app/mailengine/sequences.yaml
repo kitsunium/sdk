@@ -310,7 +310,45 @@ sequences:
       - bind: dead, err
         eval: s.s.DeadLetters(ctx, maxLetters)
         to: s.s.DeadLetters
-      - return: len(dead), err
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: out
+        eval: make([]plug.MailDeadLetterValue, len(dead))
+      - loop:
+          do:
+            - bind: d
+              eval: "&dead[i]"
+            - set: out[i]
+              value: |-
+                plug.MailDeadLetterValue{
+                			Meta: d.Meta, FailedAt: d.FailedAt, QueuedAt: d.QueuedAt, Message: plug.MailValue{Value: d.Message},
+                			ID: d.ID, QueueID: d.QueueID, Cause: d.Cause, Attempts: d.Attempts, GivenUp: deadGivenUp(d),
+                		}
+          key: i
+          range: dead
+      - return: out, nil
+  - of: deadGivenUp
+    steps:
+      - bind: carries
+        eval:
+          closure:
+            params: code errs.Code
+            results: bool
+            steps:
+              - return: d.Code == uint32(code) || slices.Contains(d.Trail, uint32(code))
+      - switch:
+          cases:
+            - case: carries(mailspool.CodeMailRejected)
+              do:
+                - return: plug.MailGivenUpRejected
+            - case: carries(mailspool.CodeMailExpired)
+              do:
+                - return: plug.MailGivenUpExpired
+            - default: true
+              do:
+                - return: plug.MailGivenUpExhausted
   - of: spool.Run
     participants:
       - id: caller

@@ -12735,16 +12735,23 @@ sequences:
       - id: digestOf
         kind: internal
     steps:
-      - bind: state
-        eval: "\"live\""
+      - bind: state, reason, code, codes
+        eval: "\"live\", \"\", uint32(0), []string(nil)"
       - opt:
           do:
-            - set: state
-              value: "\"dead\""
-          when: dead
+            - set: state, reason, code
+              value: "\"dead\", dead.Reason, dead.Code"
+            - loop:
+                do:
+                  - set: codes
+                    value: append(codes, strconv.FormatUint(uint64(c), 10))
+                key: _
+                range: dead.Trail
+                value: c
+          when: dead != nil
       - return: |-
           digestOf(payload, []byte(state), []byte(strconv.Itoa(deliveries)), []byte(reason),
-          		[]byte(strconv.FormatUint(uint64(code), 10)))
+          		[]byte(strconv.FormatUint(uint64(code), 10)), []byte(strings.Join(codes, ",")))
         to: digestOf
   - of: documentsOf
     participants:
@@ -13188,7 +13195,7 @@ sequences:
                   - set: after
                     value: m.Message.ID
                   - set: out
-                    value: append(out, messageDigest(m.Message.Payload, false, m.Deliveries, "", 0))
+                    value: append(out, messageDigest(m.Message.Payload, m.Deliveries, nil))
                 key: _
                 range: page
                 value: m
@@ -13203,10 +13210,9 @@ sequences:
       - loop:
           do:
             - set: out
-              value: append(out, messageDigest(d.Message.Payload, true, d.Deliveries, d.Reason, d.Code))
-          key: _
+              value: append(out, messageDigest(dead[i].Message.Payload, dead[i].Deliveries, &dead[i]))
+          key: i
           range: dead
-          value: d
       - eval: slices.SortFunc(out, func(x, y digest) int { return bytes.Compare(x[:], y[:]) })
         to: slices
       - return: out, nil
@@ -22497,6 +22503,8 @@ sequences:
         kind: value
       - id: m.ring.reset
         kind: internal
+      - id: m.ring.add
+        kind: internal
       - id: m.mu.Unlock
         kind: value
     steps:
@@ -22583,7 +22591,13 @@ sequences:
       - eval: m.ring.reset(capture != nil)
         to: m.ring.reset
       - set: m.ring.dead, m.ring.deadKnown
-        value: dead, deadErr == nil
+        value: len(dead), deadErr == nil
+      - loop:
+          do:
+            - eval: m.ring.add(m.deadLetterOf(&dead[i], m.ring.full))
+              to: m.ring.add
+          key: i
+          range: dead
       - eval: m.mu.Unlock()
         to: m.mu.Unlock
       - go: |-
@@ -23096,6 +23110,26 @@ sequences:
             - set: out.Text, out.HTML, out.Headers
               value: msg.Text, msg.HTML, headersOf(&msg)
           when: full
+      - return: out
+  - of: (*Mailer).deadLetterOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Mailer).deadLetterOf
+        kind: self
+      - id: m.messageOf
+        kind: internal
+    steps:
+      - bind: out
+        eval: "m.messageOf(&plug.MailEventValue{ID: d.ID, Meta: d.Meta, QueuedAt: d.QueuedAt, Message: d.Message}, full)"
+        to: m.messageOf
+      - opt:
+          do:
+            - set: out.ID
+              value: d.QueueID
+          when: out.ID == ""
+      - set: out.Status, out.Attempts, out.Error, out.GivenUp
+        value: model.MailDead, d.Attempts, d.Cause, givenUpName(d.GivenUp)
       - return: out
   - of: publicText
     participants:
@@ -54801,6 +54835,8 @@ sequences:
         kind: internal
       - id: q.queueUnder
         kind: internal
+      - id: queueTable
+        kind: internal
     steps:
       - var:
           name: out
@@ -54824,8 +54860,13 @@ sequences:
           do:
             - opt:
                 do:
+                  - bind: table
+                    eval: queueTable(q.base(), under)
+                    to: queueTable
                   - set: out
-                    value: "append(out, frameworkTable{name: queueTable(q.base(), under), node: q.base().id, former: formerQueueTable(q.base(), under), queue: true})"
+                    value: |-
+                      append(out, frameworkTable{name: table, node: q.base().id, former: formerQueueTable(q.base(), under), queue: true},
+                      				frameworkTable{name: table + trailSuffix, node: q.base().id, queue: true, trailOf: table})
                 init:
                   bind: under
                   eval: q.queueUnder()
@@ -55551,7 +55592,11 @@ sequences:
             - opt:
                 do:
                   - return: plug.MigrationValue{}, queuesMissing()
-                when: queues == nil || queues.TableMigration == nil
+                when: queues == nil || queues.TableMigration == nil || (t.trailOf != "" && queues.TrailMigration == nil)
+            - opt:
+                do:
+                  - return: queues.TrailMigration(string(dialect), t.trailOf, version)
+                when: t.trailOf != ""
             - return: queues.TableMigration(string(dialect), t.name, version)
           when: t.queue
       - bind: stores

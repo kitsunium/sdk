@@ -1879,6 +1879,11 @@ sequences:
         to: header.WriteString
       - eval: header.WriteString("code " + strconv.FormatUint(uint64(cause.code), decimalBase) + "\n")
         to: header.WriteString
+      - opt:
+          do:
+            - eval: header.WriteString("trail " + encodeTrail(cause.trail) + "\n")
+              to: header.WriteString
+          when: len(cause.trail) > 0
       - eval: header.WriteString("reason " + oneLine(cause.reason) + "\n")
         to: header.WriteString
       - eval: header.WriteString("public " + oneLine(cause.public) + "\n")
@@ -1933,6 +1938,7 @@ sequences:
           		},
           		FailedAt: nanoField(fields["failed"]), Deliveries: intField(fields["deliveries"]),
           		Code: uint32(intField(fields["code"])), Reason: fields["reason"], Cause: fields["public"],
+          		Trail: decodeTrail(fields["trail"]),
           	}, true
   - of: oneLine
     participants:
@@ -3176,7 +3182,7 @@ sequences:
       - bind: name
         eval: "nameValue{EnqueuedAt: dead.Message.EnqueuedAt.UnixNano(), Entropy: entropy, Deliveries: dead.Deliveries}"
       - bind: cause
-        eval: "causeValue{reason: dead.Reason, public: dead.Cause, code: dead.Code}"
+        eval: "causeValue{reason: dead.Reason, public: dead.Cause, code: dead.Code, trail: dead.Trail}"
       - bind: record
         eval: encodeDead(name, cause, dead.FailedAt.UnixNano(), dead.Message.Payload)
         to: encodeDead
@@ -4061,6 +4067,8 @@ sequences:
         kind: internal
       - id: slices
         kind: stdlib
+      - id: cloneTrail
+        kind: internal
     steps:
       - opt:
           do:
@@ -4084,6 +4092,9 @@ sequences:
       - set: dead.Message.Payload
         to: slices
         value: slices.Clone(dead.Message.Payload)
+      - set: dead.Trail
+        to: cloneTrail
+        value: cloneTrail(dead.Trail)
       - set: b.dead
         value: append(b.dead, dead)
       - return: dead.Message.ID, nil
@@ -4311,6 +4322,8 @@ sequences:
         kind: internal
       - id: slices
         kind: stdlib
+      - id: cloneTrail
+        kind: internal
     steps:
       - opt:
           do:
@@ -4335,6 +4348,9 @@ sequences:
             - set: dead[index].Message.Payload
               to: slices
               value: slices.Clone(dead[index].Message.Payload)
+            - set: dead[index].Trail
+              to: cloneTrail
+              value: cloneTrail(dead[index].Trail)
           key: index
           range: dead
       - return: dead, nil
@@ -4419,7 +4435,7 @@ sequences:
           			ID: record.id, Payload: slices.Clone(record.payload), EnqueuedAt: record.enqueuedAt,
           		},
           		Deliveries: record.deliveries, FailedAt: now,
-          		Reason: cause.reason, Cause: cause.public, Code: cause.code,
+          		Reason: cause.reason, Cause: cause.public, Code: cause.code, Trail: cause.trail,
           	})
   - of: (*memoryBroker).insertReady
     participants:
@@ -4475,6 +4491,8 @@ sequences:
         kind: self
       - id: kerrs
         kind: package
+      - id: trailCodes
+        kind: internal
     steps:
       - opt:
           do:
@@ -4498,7 +4516,105 @@ sequences:
             - set: described.code
               value: uint32(code)
           when: coded
+      - set: described.trail
+        to: trailCodes
+        value: trailCodes(kerrs.TrailOf(cause))
       - return: described
+  - of: trailCodes
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(trail) == 0
+      - bind: kept
+        eval: trail[max(len(trail)-maxDeadTrail, 0):]
+      - bind: codes
+        eval: make([]uint32, len(kept))
+      - loop:
+          do:
+            - set: codes[i]
+              value: uint32(code)
+          key: i
+          range: kept
+          value: code
+      - return: codes
+  - of: cloneTrail
+    participants:
+      - id: caller
+        kind: actor
+      - id: cloneTrail
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(trail) == 0
+      - return: slices.Clone(trail)
+        to: slices
+  - of: encodeTrail
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeTrail
+        kind: self
+      - id: strconv
+        kind: stdlib
+      - id: strings
+        kind: stdlib
+    steps:
+      - bind: parts
+        eval: make([]string, len(trail))
+      - loop:
+          do:
+            - set: parts[i]
+              to: strconv
+              value: strconv.FormatUint(uint64(code), decimalBase)
+          key: i
+          range: trail
+          value: code
+      - return: strings.Join(parts, trailSeparator)
+        to: strings
+  - of: decodeTrail
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeTrail
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: strconv
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: text == ""
+      - bind: parts
+        eval: strings.Split(text, trailSeparator)
+        to: strings
+      - opt:
+          do:
+            - return: nil
+          when: len(parts) > maxDeadTrail
+      - bind: codes
+        eval: make([]uint32, len(parts))
+      - loop:
+          do:
+            - bind: code, err
+              eval: strconv.ParseUint(part, decimalBase, uint32Bits)
+              to: strconv
+            - opt:
+                do:
+                  - return: nil
+                when: err != nil
+            - set: codes[i]
+              value: uint32(code)
+          key: i
+          range: parts
+          value: part
+      - return: codes
   - of: checkBatch
     participants:
       - id: caller
@@ -4572,46 +4688,66 @@ sequences:
         kind: actor
       - id: checkDeadLetter
         kind: self
+      - id: messageField
+        kind: internal
+      - id: causeField
+        kind: internal
       - id: kerrs
         kind: package
       - id: checkSize
         kind: internal
     steps:
-      - bind: field
-        eval: "\"\""
-      - switch:
-          cases:
-            - case: dead.Message.ID != ""
-              do:
-                - set: field
-                  value: "\"Message.ID\""
-            - case: dead.Deliveries < 1 || dead.Deliveries > maxDeadDeliveries
-              do:
-                - set: field
-                  value: "\"Deliveries\""
-            - case: "!nameable(dead.Message.EnqueuedAt)"
-              do:
-                - set: field
-                  value: "\"Message.EnqueuedAt\""
-            - case: "!nameable(dead.FailedAt)"
-              do:
-                - set: field
-                  value: "\"FailedAt\""
-            - case: "!keptAsWritten(dead.Reason)"
-              do:
-                - set: field
-                  value: "\"Reason\""
-            - case: "!keptAsWritten(dead.Cause)"
-              do:
-                - set: field
-                  value: "\"Cause\""
+      - bind: field, refused
+        eval: messageField(dead)
+        to: messageField
+      - opt:
+          do:
+            - set: field, refused
+              to: causeField
+              value: causeField(dead)
+          when: "!refused"
       - opt:
           do:
             - return: kerrs.Wrap(corequeue.InvalidDeadLetter, kerrs.WrapParams{}, kerrs.String("field", field))
               to: kerrs
-          when: field != ""
+          when: refused
       - return: checkSize(len(dead.Message.Payload), maxBytes)
         to: checkSize
+  - of: messageField
+    steps:
+      - switch:
+          cases:
+            - case: dead.Message.ID != ""
+              do:
+                - return: "\"Message.ID\", true"
+            - case: dead.Deliveries < 1 || dead.Deliveries > maxDeadDeliveries
+              do:
+                - return: "\"Deliveries\", true"
+            - case: "!nameable(dead.Message.EnqueuedAt)"
+              do:
+                - return: "\"Message.EnqueuedAt\", true"
+            - case: "!nameable(dead.FailedAt)"
+              do:
+                - return: "\"FailedAt\", true"
+            - default: true
+              do:
+                - return: "\"\", false"
+  - of: causeField
+    steps:
+      - switch:
+          cases:
+            - case: "!keptAsWritten(dead.Reason)"
+              do:
+                - return: "\"Reason\", true"
+            - case: "!keptAsWritten(dead.Cause)"
+              do:
+                - return: "\"Cause\", true"
+            - case: len(dead.Trail) > maxDeadTrail
+              do:
+                - return: "\"Trail\", true"
+            - default: true
+              do:
+                - return: "\"\", false"
   - of: checkLiveMessage
     participants:
       - id: caller
@@ -4771,7 +4907,7 @@ sequences:
           &sqlBroker{
           		tm: cfg.Transactor, clk: clockOrSystem(cfg.Clock), tx: parts,
           		wake: sqlWakeFor(parts.join, cfg.Table), table: cfg.Table,
-          		stmts: renderSQLStatements(cfg.Dialect, cfg.Table), own: sqlOwnTxOptions(cfg.Dialect),
+          		stmts: renderSQLStatements(cfg.Dialect, cfg.Table, cfg.Trail), own: sqlOwnTxOptions(cfg.Dialect),
           		policy: cfg.Policy.Normalized(),
           	}, nil
   - of: sqlWakeFor
@@ -5218,7 +5354,7 @@ sequences:
           when: "!nameable(now)"
       - return: |-
           b.run(ctx, false, func(txCtx context.Context, ex coresql.Executor) error {
-          		args := append(causeArgs(now.UnixNano(), cause), held.args(now.UnixNano())...)
+          		args := append(b.stmts.causeArgs(now.UnixNano(), cause), held.args(now.UnixNano())...)
           		result, execErr := ex.ExecContext(txCtx, b.stmts.bury, args...)
           		//: dead, LeaseExpired, or QueueBackendFailed.
           		return b.leased(result, execErr, "dead-letter a message")
@@ -5304,9 +5440,6 @@ sequences:
   - of: sqlReceipt.args
     steps:
       - return: "[]any{[]byte(r.id), []byte(r.lease), int64(r.deliveries), now}"
-  - of: causeArgs
-    steps:
-      - return: "[]any{now, []byte(oneLine(cause.reason)), []byte(oneLine(cause.public)), int64(cause.code)}"
   - of: sqlReceiptValue
     participants:
       - id: caller
@@ -5520,7 +5653,7 @@ sequences:
           cond: rows.Next()
           do:
             - bind: record, scanErr
-              eval: scanDeadLetter(rows)
+              eval: scanDeadLetter(rows, b.stmts.trail)
               to: scanDeadLetter
             - opt:
                 do:
@@ -5539,18 +5672,25 @@ sequences:
         kind: internal
     steps:
       - leaf: a var of several names, or of no type
-        stmt: var id, reason, cause, payload []byte
+        stmt: var id, reason, cause, trail, payload []byte
       - leaf: a var of several names, or of no type
         stmt: var enqueuedAt, deliveries, failedAt int64
       - var:
           name: code
           type: stdsql.NullInt64
+      - bind: dest
+        eval: "[]any{&id, &enqueuedAt, &deliveries, &failedAt, &reason, &cause, &code, &payload}"
+      - opt:
+          do:
+            - set: dest
+              value: "[]any{&id, &enqueuedAt, &deliveries, &failedAt, &reason, &cause, &code, &trail, &payload}"
+          when: withTrail
       - opt:
           do:
             - return: corequeue.DeadLetterValue{}, err
           init:
             bind: err
-            eval: rows.Scan(&id, &enqueuedAt, &deliveries, &failedAt, &reason, &cause, &code, &payload)
+            eval: rows.Scan(dest...)
             to: rows.Scan
           when: err != nil
       - return: |-
@@ -5560,6 +5700,7 @@ sequences:
           		},
           		FailedAt: time.Unix(0, failedAt), Deliveries: int(deliveries),
           		Reason: string(reason), Cause: string(cause), Code: uint32(code.Int64), //nolint:gosec // written from a uint32
+          		Trail: decodeTrail(string(trail)),
           	}, nil
   - of: (*sqlBroker).ReplayDeadLetter
     participants:
@@ -5668,8 +5809,7 @@ sequences:
         eval: |-
           b.run(ctx, false, func(txCtx context.Context, ex coresql.Executor) error {
           		_, execErr := ex.ExecContext(txCtx, b.stmts.putDead,
-          			[]byte(id), dead.FailedAt.UnixNano(), enqueuedAt, int64(dead.Deliveries), dead.Message.Payload,
-          			[]byte(dead.Reason), []byte(dead.Cause), int64(dead.Code))
+          			b.stmts.putDeadArgs(id, dead)...)
           		//: the insertion did not complete.
           		if execErr != nil {
           			//: QueueBackendFailed, the driver's text withheld.
@@ -5851,51 +5991,69 @@ sequences:
       - id: svcsql
         kind: package
     steps:
-      - bind: q
+      - bind: quoted
         eval: dialect.QuoteIdent(table)
         to: dialect.QuoteIdent
       - bind: p
         eval: dialect.Placeholder
       - bind: causeSet
         eval: "\"dead = 1, due = \" + p(1) + \", lease = NULL, reason = \" + p(2) + \", cause = \" + p(3) + \", code = \" + p(4)"
+      - bind: heldFrom, deadColumns, cleared
+        eval: sqlCauseArgs+1, "reason, cause, code", "reason = NULL, cause = NULL, code = NULL"
+      - bind: putColumns, putValues
+        eval: "\"reason, cause, code\", p(6)+\", \"+p(7)+\", \"+p(8)"
+      - opt:
+          do:
+            - op: +=
+              set: causeSet
+              value: "\", \" + sqlTrailColumn + \" = \" + p(sqlCauseArgs+1)"
+            - set: heldFrom, deadColumns
+              value: sqlCauseArgs+2, deadColumns+", "+sqlTrailColumn
+            - op: +=
+              set: cleared
+              value: "\", \" + sqlTrailColumn + \" = NULL\""
+            - set: putColumns, putValues
+              value: putColumns+", "+sqlTrailColumn, putValues+", "+p(9)
+          when: trail
       - bind: s
         eval: |-
           sqlStatements{
-          		insert: "INSERT INTO " + q + " (id, dead, due, enqueued_at, deliveries, payload) VALUES (" +
+          		insert: "INSERT INTO " + quoted + " (id, dead, due, enqueued_at, deliveries, payload) VALUES (" +
           			p(1) + ", 0, " + p(2) + ", " + p(3) + ", 0, " + p(4) + ")",
-          		probe: "SELECT MIN(due) FROM " + q + " WHERE dead = 0",
+          		probe: "SELECT MIN(due) FROM " + quoted + " WHERE dead = 0",
           		//: the lease's read locks the rows it returns and skips those another
           		//: transaction holds, so two consumers never wait on each other's
           		//: messages and never take the same one; MySQL needs 8.0.1 for it and
           		//: MariaDB 10.6, and an older server's refusal is QUEUE_BACKEND_FAILED.
           		//: SQLite has no such clause and needs none: its writer holds the
           		//: database's only write lock.
-          		pick: "SELECT id, enqueued_at, deliveries, lease, payload FROM " + q + " WHERE dead = 0 AND due <= " + p(1) +
+          		pick: "SELECT id, enqueued_at, deliveries, lease, payload FROM " + quoted + " WHERE dead = 0 AND due <= " + p(1) +
           			" ORDER BY due, id LIMIT " + p(2) + dialect.ForUpdateSkipLocked(),
-          		next:       "SELECT MIN(due) FROM " + q + " WHERE dead = 0 AND due > " + p(1),
-          		ack:        "DELETE FROM " + q + " WHERE " + sqlHeldBy(dialect, 1),
-          		retry:      "UPDATE " + q + " SET due = " + p(1) + ", lease = NULL WHERE " + sqlHeldBy(dialect, 2),
-          		bury:       "UPDATE " + q + " SET " + causeSet + " WHERE " + sqlHeldBy(dialect, 5),
-          		extend:     "UPDATE " + q + " SET due = " + p(1) + ", lease = " + p(2) + " WHERE " + sqlHeldBy(dialect, 3),
-          		release:    "UPDATE " + q + " SET due = " + p(1) + ", lease = NULL, deliveries = deliveries - 1 WHERE " + sqlHeldBy(dialect, 2),
-          		deadList:   "SELECT id, enqueued_at, deliveries, due, reason, cause, code, payload FROM " + q + " WHERE dead = 1 ORDER BY due, id LIMIT " + p(1),
-          		replay:     "UPDATE " + q + " SET dead = 0, due = " + p(1) + ", deliveries = 0, reason = NULL, cause = NULL, code = NULL WHERE id = " + p(2) + " AND dead = 1",
-          		deleteDead: "DELETE FROM " + q + " WHERE id = " + p(1) + " AND dead = 1",
-          		table:      q,
+          		next:       "SELECT MIN(due) FROM " + quoted + " WHERE dead = 0 AND due > " + p(1),
+          		ack:        "DELETE FROM " + quoted + " WHERE " + sqlHeldBy(dialect, 1),
+          		retry:      "UPDATE " + quoted + " SET due = " + p(1) + ", lease = NULL WHERE " + sqlHeldBy(dialect, 2),
+          		bury:       "UPDATE " + quoted + " SET " + causeSet + " WHERE " + sqlHeldBy(dialect, heldFrom),
+          		extend:     "UPDATE " + quoted + " SET due = " + p(1) + ", lease = " + p(2) + " WHERE " + sqlHeldBy(dialect, 3),
+          		release:    "UPDATE " + quoted + " SET due = " + p(1) + ", lease = NULL, deliveries = deliveries - 1 WHERE " + sqlHeldBy(dialect, 2),
+          		deadList:   "SELECT id, enqueued_at, deliveries, due, " + deadColumns + ", payload FROM " + quoted + " WHERE dead = 1 ORDER BY due, id LIMIT " + p(1),
+          		replay:     "UPDATE " + quoted + " SET dead = 0, due = " + p(1) + ", deliveries = 0, " + cleared + " WHERE id = " + p(2) + " AND dead = 1",
+          		deleteDead: "DELETE FROM " + quoted + " WHERE id = " + p(1) + " AND dead = 1",
+          		table:      quoted,
           		dialect:    dialect,
-          		putDead: "INSERT INTO " + q + " (id, dead, due, enqueued_at, deliveries, payload, reason, cause, code) VALUES (" +
-          			p(1) + ", 1, " + p(2) + ", " + p(3) + ", " + p(4) + ", " + p(5) + ", " + p(6) + ", " + p(7) + ", " + p(8) + ")",
-          		liveList: "SELECT id, enqueued_at, deliveries, due, lease, payload FROM " + q + " WHERE dead = 0 AND id > " + p(1) +
+          		trail:      trail,
+          		putDead: "INSERT INTO " + quoted + " (id, dead, due, enqueued_at, deliveries, payload, " + putColumns + ") VALUES (" +
+          			p(1) + ", 1, " + p(2) + ", " + p(3) + ", " + p(4) + ", " + p(5) + ", " + putValues + ")",
+          		liveList: "SELECT id, enqueued_at, deliveries, due, lease, payload FROM " + quoted + " WHERE dead = 0 AND id > " + p(1) +
           			" ORDER BY id LIMIT " + p(2),
-          		putLive: "INSERT INTO " + q + " (id, dead, due, enqueued_at, deliveries, payload) VALUES (" +
+          		putLive: "INSERT INTO " + quoted + " (id, dead, due, enqueued_at, deliveries, payload) VALUES (" +
           			p(1) + ", 0, " + p(2) + ", " + p(3) + ", " + p(4) + ", " + p(5) + ")",
-          		once: renderSQLOnceStatements(dialect, q),
+          		once: renderSQLOnceStatements(dialect, quoted),
           	}
       - opt:
           do:
             - set: s.lock
               to: svcsql
-              value: svcsql.FileLockSQL(q)
+              value: svcsql.FileLockSQL(quoted)
           when: dialect == coresql.DialectSQLite
       - return: s
   - of: sqlHeldBy
@@ -5925,9 +6083,47 @@ sequences:
     steps:
       - bind: p
         eval: s.dialect.Placeholder
+      - bind: set, first
+        eval: "\"\", sqlCauseArgs+1"
+      - opt:
+          do:
+            - set: set, first
+              value: "\", \"+sqlTrailColumn+\" = \"+p(sqlCauseArgs+1), sqlCauseArgs+2"
+          when: s.trail
       - return: |-
           "UPDATE " + s.table + " SET dead = 1, due = " + p(1) + ", lease = NULL, reason = " + p(2) + ", cause = " + p(3) +
-          		", code = " + p(4) + " WHERE dead = 0 AND id IN (" + s.list(5, n) + ")"
+          		", code = " + p(4) + set + " WHERE dead = 0 AND id IN (" + s.list(first, n) + ")"
+  - of: (*sqlStatements).causeArgs
+    steps:
+      - bind: args
+        eval: "[]any{now, []byte(oneLine(cause.reason)), []byte(oneLine(cause.public)), int64(cause.code)}"
+      - opt:
+          do:
+            - set: args
+              value: append(args, trailArg(cause.trail))
+          when: s.trail
+      - return: args
+  - of: (*sqlStatements).putDeadArgs
+    steps:
+      - bind: args
+        eval: |-
+          []any{
+          		[]byte(id), dead.FailedAt.UnixNano(), dead.Message.EnqueuedAt.UnixNano(), int64(dead.Deliveries), dead.Message.Payload,
+          		[]byte(dead.Reason), []byte(dead.Cause), int64(dead.Code),
+          	}
+      - opt:
+          do:
+            - set: args
+              value: append(args, trailArg(dead.Trail))
+          when: s.trail
+      - return: args
+  - of: trailArg
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: len(trail) == 0
+      - return: "[]byte(encodeTrail(trail))"
   - of: renderSQLOnceStatements
     steps:
       - bind: p
@@ -5997,19 +6193,19 @@ sequences:
                     			" dead TINYINT NOT NULL, due BIGINT NOT NULL, enqueued_at BIGINT NOT NULL, deliveries INT NOT NULL," +
                     			" lease VARBINARY(" + strconv.Itoa(sqlLeaseColumnLen) + ") NULL, payload LONGBLOB NULL," +
                     			" reason VARBINARY(" + strconv.Itoa(sqlCauseColumnLen) + ") NULL, cause VARBINARY(" + strconv.Itoa(sqlCauseColumnLen) + ") NULL," +
-                    			" code BIGINT NULL, PRIMARY KEY (id), UNIQUE KEY (dead, due, id)) ENGINE=InnoDB"}
+                    			" code BIGINT NULL, " + sqlTrailColumn + " " + trailColumnType(dialect) + ", PRIMARY KEY (id), UNIQUE KEY (dead, due, id)) ENGINE=InnoDB"}
             - case: coresql.DialectPostgres
               do:
                 - return: |-
                     []string{"CREATE TABLE IF NOT EXISTS " + q + " (id bytea NOT NULL PRIMARY KEY, dead smallint NOT NULL," +
                     			" due bigint NOT NULL, enqueued_at bigint NOT NULL, deliveries integer NOT NULL, lease bytea, payload bytea," +
-                    			" reason bytea, cause bytea, code bigint, UNIQUE (dead, due, id))"}
+                    			" reason bytea, cause bytea, code bigint, " + sqlTrailColumn + " " + trailColumnType(dialect) + ", UNIQUE (dead, due, id))"}
             - default: true
               do:
                 - return: |-
                     []string{"CREATE TABLE IF NOT EXISTS " + q + " (id BLOB NOT NULL PRIMARY KEY, dead INTEGER NOT NULL," +
                     			" due INTEGER NOT NULL, enqueued_at INTEGER NOT NULL, deliveries INTEGER NOT NULL, lease BLOB, payload BLOB," +
-                    			" reason BLOB, cause BLOB, code INTEGER, UNIQUE (dead, due, id))"}
+                    			" reason BLOB, cause BLOB, code INTEGER, " + sqlTrailColumn + " " + trailColumnType(dialect) + ", UNIQUE (dead, due, id))"}
           "on": dialect
   - of: dropQueueTableStatements
     steps:
@@ -6044,6 +6240,51 @@ sequences:
           		Name:    sqlMigrationPrefix + table,
           		Up:      svcsql.Statements(createQueueTableStatements(dialect, table)...),
           		Down:    svcsql.Statements(dropQueueTableStatements(dialect, table)...),
+          	}
+      - opt:
+          do:
+            - return: coresql.MigrationValue{}, err
+          init:
+            bind: err
+            eval: migration.Validate()
+            to: migration.Validate
+          when: err != nil
+      - return: migration, nil
+  - of: SQLTrailMigration
+    participants:
+      - id: caller
+        kind: actor
+      - id: SQLTrailMigration
+        kind: self
+      - id: validateSQLTable
+        kind: internal
+      - id: renderTrailColumnStatements
+        kind: internal
+      - id: migration.Validate
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "coresql.MigrationValue{}, sqlMisconfigured(\"Dialect\", \"not one the SDK speaks: \"+dialect.String())"
+          when: "!dialect.Valid()"
+      - opt:
+          do:
+            - return: coresql.MigrationValue{}, err
+          init:
+            bind: err
+            eval: validateSQLTable(table)
+            to: validateSQLTable
+          when: err != nil
+      - bind: statements
+        eval: renderTrailColumnStatements(dialect, table)
+        to: renderTrailColumnStatements
+      - bind: migration
+        eval: |-
+          coresql.MigrationValue{
+          		Version: version,
+          		Name:    sqlTrailMigrationPrefix + table,
+          		Up:      statements.step(table, false),
+          		Down:    statements.step(table, true),
           	}
       - opt:
           do:
@@ -6482,7 +6723,7 @@ sequences:
       - loop:
           do:
             - bind: args
-              eval: "append(causeArgs(now, causeValue{reason: reasonLeaseExpired}), idArgs(chunk)...)"
+              eval: "append(b.stmts.causeArgs(now, causeValue{reason: reasonLeaseExpired}), idArgs(chunk)...)"
             - opt:
                 do:
                   - return: b.failed("dead-letter lapsed leases", err)
@@ -6607,6 +6848,112 @@ sequences:
           range: rows
           value: row
       - return: args
+  - of: renderTrailColumnStatements
+    participants:
+      - id: caller
+        kind: actor
+      - id: renderTrailColumnStatements
+        kind: self
+      - id: dialect.QuoteIdent
+        kind: value
+    steps:
+      - bind: q
+        eval: dialect.QuoteIdent(table)
+        to: dialect.QuoteIdent
+      - bind: column
+        eval: sqlTrailColumn + " " + trailColumnType(dialect)
+      - switch:
+          cases:
+            - case: coresql.DialectPostgres
+              do:
+                - return: |-
+                    trailColumnStatements{
+                    			add:  "ALTER TABLE IF EXISTS " + q + " ADD COLUMN IF NOT EXISTS " + column,
+                    			drop: "ALTER TABLE IF EXISTS " + q + " DROP COLUMN IF EXISTS " + sqlTrailColumn,
+                    		}
+            - case: coresql.DialectMySQL
+              do:
+                - return: |-
+                    trailColumnStatements{
+                    			probe: trailProbe("column_name",
+                    				"information_schema.columns WHERE table_schema = DATABASE() AND table_name = "+dialect.Placeholder(1)),
+                    			add:  "ALTER TABLE " + q + " ADD COLUMN " + column,
+                    			drop: "ALTER TABLE " + q + " DROP COLUMN " + sqlTrailColumn,
+                    		}
+            - default: true
+              do:
+                - return: |-
+                    trailColumnStatements{
+                    			probe: trailProbe("name", "pragma_table_info("+dialect.Placeholder(1)+")"),
+                    			add:   "ALTER TABLE " + q + " ADD COLUMN " + column,
+                    			drop:  "ALTER TABLE " + q + " DROP COLUMN " + sqlTrailColumn,
+                    		}
+          "on": dialect
+  - of: trailProbe
+    steps:
+      - return: "\"SELECT COUNT(*), COALESCE(SUM(CASE WHEN \" + nameColumn + \" = '\" + sqlTrailColumn + \"' THEN 1 ELSE 0 END), 0) FROM \" + catalogue"
+  - of: trailColumnStatements.step
+    participants:
+      - id: caller
+        kind: actor
+      - id: trailColumnStatements.step
+        kind: self
+      - id: svcsql
+        kind: package
+      - id: ex.QueryRowContext(ctx, s.probe, table).Scan
+        kind: value
+      - id: ex.ExecContext
+        kind: value
+    steps:
+      - bind: statement
+        eval: s.add
+      - opt:
+          do:
+            - set: statement
+              value: s.drop
+          when: drop
+      - opt:
+          do:
+            - return: svcsql.Statements(statement)
+              to: svcsql
+          when: s.probe == ""
+      - return:
+          closure:
+            params: ctx context.Context, ex coresql.Executor
+            results: error
+            steps:
+              - leaf: a var of several names, or of no type
+                stmt: var columns, trails int64
+              - opt:
+                  do:
+                    - return: err
+                  init:
+                    bind: err
+                    eval: ex.QueryRowContext(ctx, s.probe, table).Scan(&columns, &trails)
+                    to: ex.QueryRowContext(ctx, s.probe, table).Scan
+                  when: err != nil
+              - opt:
+                  do:
+                    - return: nil
+                  when: columns == 0 || (trails > 0) != drop
+              - bind: _, err
+                eval: ex.ExecContext(ctx, statement)
+                to: ex.ExecContext
+              - return: err
+  - of: trailColumnType
+    steps:
+      - switch:
+          cases:
+            - case: coresql.DialectMySQL
+              do:
+                - return: "\"VARBINARY(\" + strconv.Itoa(sqlTrailColumnLen) + \") NULL\""
+            - case: coresql.DialectPostgres
+              do:
+                - return: "\"bytea\""
+            - default: true
+              do:
+                - return: "\"BLOB\""
+          "on": dialect
   - of: newWakeSignal
     steps:
       - return: "&wakeSignal{ch: make(chan struct{})}"

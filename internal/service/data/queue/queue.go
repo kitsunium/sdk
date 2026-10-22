@@ -225,40 +225,69 @@ func deadLetterNotFound(broker, id string) error {
 // inputs identically, then a payload the policy's bound refuses. What it
 // reports names a field, never a value.
 func checkDeadLetter(dead corequeue.DeadLetterValue, maxBytes int) error {
-	field := ""
-	switch {
-	//: the identifier is the broker's to mint; one the caller set would not
-	//: be kept, and a copy that silently renamed what it copied is refused.
-	case dead.Message.ID != "":
-		field = "Message.ID"
-	//: a dead letter was delivered at least once, and a count a durable
-	//: broker cannot record would come back as another number.
-	case dead.Deliveries < 1 || dead.Deliveries > maxDeadDeliveries:
-		field = "Deliveries"
-	//: an instant outside int64 Unix nanoseconds — the zero time.Time
-	//: included — is one no name and no column carries back.
-	case !nameable(dead.Message.EnqueuedAt):
-		field = "Message.EnqueuedAt"
-	//: the same bound on the failure's instant.
-	case !nameable(dead.FailedAt):
-		field = "FailedAt"
-	//: what every store would otherwise cut: one line, publicMaxRunes runes.
-	case !keptAsWritten(dead.Reason):
-		field = "Reason"
-	//: the same bound on the cause.
-	case !keptAsWritten(dead.Cause):
-		field = "Cause"
-	//: the kernel's own bound on a trail; a longer one would be cut.
-	case len(dead.Trail) > maxDeadTrail:
-		field = "Trail"
+	field, refused := messageField(dead)
+	//: the message is kept as given; its failure may not be.
+	if !refused {
+		field, refused = causeField(dead)
 	}
 	//: one value no store keeps as given.
-	if field != "" {
+	if refused {
 		//: InvalidDeadLetter, naming the field and never its value.
 		return kerrs.Wrap(corequeue.InvalidDeadLetter, kerrs.WrapParams{}, kerrs.String("field", field))
 	}
 	//: MessageTooLarge, or nil: the bound Publish enforces.
 	return checkSize(len(dead.Message.Payload), maxBytes)
+}
+
+// messageField names the part of dead's message, its count or its instants
+// that no store keeps as it is given, and reports whether there is one.
+func messageField(dead corequeue.DeadLetterValue) (field string, refused bool) {
+	switch {
+	//: the identifier is the broker's to mint; one the caller set would not
+	//: be kept, and a copy that silently renamed what it copied is refused.
+	case dead.Message.ID != "":
+		//: the identifier.
+		return "Message.ID", true
+	//: a dead letter was delivered at least once, and a count a durable
+	//: broker cannot record would come back as another number.
+	case dead.Deliveries < 1 || dead.Deliveries > maxDeadDeliveries:
+		//: the count.
+		return "Deliveries", true
+	//: an instant outside int64 Unix nanoseconds — the zero time.Time
+	//: included — is one no name and no column carries back.
+	case !nameable(dead.Message.EnqueuedAt):
+		//: the enqueue instant.
+		return "Message.EnqueuedAt", true
+	//: the same bound on the failure's instant.
+	case !nameable(dead.FailedAt):
+		//: the failure's instant.
+		return "FailedAt", true
+	default:
+		//: kept as given.
+		return "", false
+	}
+}
+
+// causeField names the part of dead's failure no store keeps as it is
+// given, and reports whether there is one.
+func causeField(dead corequeue.DeadLetterValue) (field string, refused bool) {
+	switch {
+	//: what every store would otherwise cut: one line, publicMaxRunes runes.
+	case !keptAsWritten(dead.Reason):
+		//: the reason.
+		return "Reason", true
+	//: the same bound on the cause.
+	case !keptAsWritten(dead.Cause):
+		//: the cause.
+		return "Cause", true
+	//: the kernel's own bound on a trail; a longer one would be cut.
+	case len(dead.Trail) > maxDeadTrail:
+		//: the trail.
+		return "Trail", true
+	default:
+		//: kept as given.
+		return "", false
+	}
 }
 
 // checkLiveMessage refuses a live message no broker keeps as it is given

@@ -225,6 +225,7 @@ Idle consumers are woken once the publication's transaction commits, never for o
 - [func NewSQL\(cfg SQLConfig\) \(broker Broker, err error\)](<#NewSQL>)
 - [func RetryAfter\(cause error, delay time.Duration\) error](<#RetryAfter>)
 - [func SQLMigration\(dialect sql.Dialect, table string, version uint64\) \(sql.Migration, error\)](<#SQLMigration>)
+- [func SQLTrailMigration\(dialect sql.Dialect, table string, version uint64\) \(sql.Migration, error\)](<#SQLTrailMigration>)
 - [type Broker](<#Broker>)
   - [func \(Broker\) Ack\(ctx context.Context, receipt ReceiptValue\) error](<#Broker.Ack>)
   - [func \(Broker\) Nack\(ctx context.Context, receipt ReceiptValue, cause error\) \(NackValue, error\)](<#Broker.Nack>)
@@ -637,6 +638,15 @@ func SQLMigration(dialect sql.Dialect, table string, version uint64) (sql.Migrat
 
 SQLMigration returns the migration that creates the one table an SQL queue named table keeps on dialect, numbered version for the caller's own version table. Its Down drops the table, and every message in it. Its statement does nothing when the table exists.
 
+<a name="SQLTrailMigration"></a>
+## func [SQLTrailMigration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
+
+```go
+func SQLTrailMigration(dialect sql.Dialect, table string, version uint64) (sql.Migration, error)
+```
+
+SQLTrailMigration returns the migration that adds the trail column a broker with [SQLConfig](#SQLConfig).Trail writes to a table an earlier [SQLMigration](#SQLMigration) created, numbered version for the caller's own version table. It does nothing when the table has the column or does not exist; its Down drops the column.
+
 <a name="Broker"></a>
 ## type [Broker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
@@ -945,6 +955,17 @@ type DeadLetter struct {
 	// Message is the work, unmodified, with the identifier it was published
 	// under.
 	Message    MessageValue
+	// Trail is the dotted-quad codes the last failure gathered as it was
+	// wrapped, oldest first — errs.TrailOf of the cause, whose origin is
+	// Code and not repeated here —, at most sixteen, the newest kept when
+	// there were more. It is what tells a failure apart once its process
+	// is gone: a mail spool's SEND_REFUSED is a rejected mail when the
+	// spool added MAIL_REJECTED to its trail, and a dead letter keeps that
+	// code where its Reason and Cause keep only the origin's. Nil when the
+	// cause gathered none, for a dead letter written before the field
+	// existed, and on an SQL broker whose SQLConfig.Trail is not set.
+	// Like Code, each entry is a uint32: errs.Code(dl.Trail[i]) converts.
+	Trail      []uint32
 	// Code is the dotted-quad errs.Code of the last failure, or 0 when the
 	// cause carried none. It is a uint32 rather than an errs.Code so that
 	// this package's values stay free of the kernel's error type in a shape
@@ -1062,19 +1083,22 @@ type DeadLetterWriter interface {
 	// PutDeadLetter writes dead into the dead-letter store and returns the
 	// identifier the broker minted for it. Everything else is kept as given:
 	// the payload, the enqueue instant, the failure instant, the delivery
-	// count, the reason, the cause and the code — 0 included, the code of a
-	// failure that carried none. What [DeadLetterReader.DeadLetters] then
-	// returns of it equals dead but for the identifier, and
+	// count, the reason, the cause, the code — 0 included, the code of a
+	// failure that carried none — and the trail, which an SQL broker
+	// without SQLConfig.Trail does not keep. What
+	// [DeadLetterReader.DeadLetters] then returns of it equals dead but for
+	// the identifier — an empty trail read back nil —, and
 	// [DeadLetterManager] acts on it as on any other dead letter.
 	//
 	// dead.Message.ID must be empty: the identifier is the broker's to mint,
 	// as [Broker.Publish] mints it, and one a caller set would not be kept.
 	// dead is refused with [InvalidDeadLetter] — the "field" field naming
 	// which — when its Deliveries is below one or above 2147483647, when an
-	// instant lies outside what a durable broker records (1970 to 2262), or
+	// instant lies outside what a durable broker records (1970 to 2262),
 	// when its Reason or Cause is longer than 120 runes or holds a line
-	// break; a payload above [PolicyValue.MaxMessageBytes] is
-	// [MessageTooLarge]. A refused dead letter writes nothing.
+	// break, or when its Trail holds more than sixteen codes; a payload
+	// above [PolicyValue.MaxMessageBytes] is [MessageTooLarge]. A refused
+	// dead letter writes nothing.
 	//
 	// It is never delivered and wakes no consumer. A broker that joins the
 	// transaction ctx carries (ADR 0151) writes it in that transaction, so
@@ -1090,9 +1114,9 @@ type DeadLetterWriter interface {
 func (DeadLetterWriter) PutDeadLetter(ctx context.Context, dead DeadLetterValue) (string, error)
 ```
 
-PutDeadLetter writes dead into the dead-letter store and returns the identifier the broker minted for it. Everything else is kept as given: the payload, the enqueue instant, the failure instant, the delivery count, the reason, the cause and the code — 0 included, the code of a failure that carried none. What [DeadLetterReader.DeadLetters](#DeadLetterReader.DeadLetters) then returns of it equals dead but for the identifier, and [DeadLetterManager](#DeadLetterManager) acts on it as on any other dead letter.
+PutDeadLetter writes dead into the dead-letter store and returns the identifier the broker minted for it. Everything else is kept as given: the payload, the enqueue instant, the failure instant, the delivery count, the reason, the cause, the code — 0 included, the code of a failure that carried none — and the trail, which an SQL broker without SQLConfig.Trail does not keep. What [DeadLetterReader.DeadLetters](#DeadLetterReader.DeadLetters) then returns of it equals dead but for the identifier — an empty trail read back nil —, and [DeadLetterManager](#DeadLetterManager) acts on it as on any other dead letter.
 
-dead.Message.ID must be empty: the identifier is the broker's to mint, as [Broker.Publish](#Broker.Publish) mints it, and one a caller set would not be kept. dead is refused with [InvalidDeadLetter](#InvalidDeadLetter) — the "field" field naming which — when its Deliveries is below one or above 2147483647, when an instant lies outside what a durable broker records (1970 to 2262), or when its Reason or Cause is longer than 120 runes or holds a line break; a payload above \[PolicyValue.MaxMessageBytes] is [MessageTooLarge](#MessageTooLarge). A refused dead letter writes nothing.
+dead.Message.ID must be empty: the identifier is the broker's to mint, as [Broker.Publish](#Broker.Publish) mints it, and one a caller set would not be kept. dead is refused with [InvalidDeadLetter](#InvalidDeadLetter) — the "field" field naming which — when its Deliveries is below one or above 2147483647, when an instant lies outside what a durable broker records (1970 to 2262), when its Reason or Cause is longer than 120 runes or holds a line break, or when its Trail holds more than sixteen codes; a payload above \[PolicyValue.MaxMessageBytes] is [MessageTooLarge](#MessageTooLarge). A refused dead letter writes nothing.
 
 It is never delivered and wakes no consumer. A broker that joins the transaction ctx carries (ADR 0151) writes it in that transaction, so it exists if and only if the transaction commits.
 
@@ -1826,7 +1850,7 @@ A lapsed receipt is [LeaseExpired](#LeaseExpired) and one this broker cannot rea
 <a name="SQLConfig"></a>
 ## type [SQLConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/gen_facade.go>)
 
-SQLConfig is the public alias for [NewSQL](#NewSQL)'s configuration: Transactor, Dialect and Table (required), Policy, and Clock.
+SQLConfig is the public alias for [NewSQL](#NewSQL)'s configuration: Transactor, Dialect and Table (required), Policy, Clock, and Trail, which keeps a dead letter's trail once [SQLTrailMigration](#SQLTrailMigration) has run.
 
 ```go
 type SQLConfig = svcqueue.SQLConfig
@@ -1867,6 +1891,13 @@ type SQLConfig struct {
 	// Dialect is the engine's, and must be the Transactor's own: the SQL the
 	// broker speaks to it.
 	Dialect    coresql.Dialect
+	// Trail makes the broker keep a dead letter's trail
+	// (core/data/queue.DeadLetterValue.Trail) in the table's trail column,
+	// which [SQLMigration] creates and [SQLTrailMigration] adds to a table an
+	// earlier SQLMigration created: run that migration before setting it.
+	// Unset, the broker sends the statements it sent before the column
+	// existed, and a dead letter it buries or reads has no trail.
+	Trail      bool
 }
 ```
 

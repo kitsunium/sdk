@@ -33,7 +33,16 @@ type DeadLetterValue struct {
 	// Message is the work, unmodified, with the identifier it was published
 	// under.
 	Message MessageValue
-	// Trail is filled by kit gen.
+	// Trail is the dotted-quad codes the last failure gathered as it was
+	// wrapped, oldest first — errs.TrailOf of the cause, whose origin is
+	// Code and not repeated here —, at most sixteen, the newest kept when
+	// there were more. It is what tells a failure apart once its process
+	// is gone: a mail spool's SEND_REFUSED is a rejected mail when the
+	// spool added MAIL_REJECTED to its trail, and a dead letter keeps that
+	// code where its Reason and Cause keep only the origin's. Nil when the
+	// cause gathered none, for a dead letter written before the field
+	// existed, and on an SQL broker whose SQLConfig.Trail is not set.
+	// Like Code, each entry is a uint32: errs.Code(dl.Trail[i]) converts.
 	Trail []uint32
 	// Code is the dotted-quad errs.Code of the last failure, or 0 when the
 	// cause carried none. It is a uint32 rather than an errs.Code so that

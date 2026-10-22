@@ -694,8 +694,9 @@ constants:
         type: time.Duration
         value: 5 * time.Minute
       - doc: |-
-          maxDeadLetters is how many dead letters of earlier runs a mailer counts
-          at its start.
+          maxDeadLetters is how many dead letters of earlier runs a mailer reads
+          at its start: it counts them, and its mailbox shows the newest of them
+          with why each was given up (issue #500).
         name: maxDeadLetters
         type: int
         value: "1000"
@@ -1786,7 +1787,9 @@ constants:
       Table name suffixes of what kit keeps beside a store: its records'
       former values (ADR 0007), a workflow's journal; and the SDK's own for a
       store's versions, <table>___vs (kitsunium/sdk ADR 0143), which three
-      underscores keep apart from every table kit names.
+      underscores keep apart from every table kit names. trailSuffix ends the
+      registry's name of a queue's trail column (issue #500): '#' is in no table
+      name kit gives, so it is never a table's.
     grouped: true
     items:
       - name: historySuffix
@@ -1795,6 +1798,8 @@ constants:
         value: "\"__workflow\""
       - name: versionsSuffix
         value: "\"___vs\""
+      - name: trailSuffix
+        value: "\"#trail\""
     name: historySuffix
   - grouped: true
     items:
@@ -3281,6 +3286,7 @@ files:
       - (*Mailer).transmit
       - (*Mailer).observe
       - (*Mailer).messageOf
+      - (*Mailer).deadLetterOf
       - publicText
       - summaryOf
       - cloneMail
@@ -6557,10 +6563,11 @@ functions:
     results: digest
   - doc: |-
       messageDigest is a message's fingerprint: SHA-256(payload ‖ dead ‖
-      deliveries ‖ reason ‖ code). Its identifier is not in it: the target mints
-      its own.
+      deliveries ‖ reason ‖ code ‖ trail) — dead the failure of a dead letter,
+      nil for a live message, its trail's codes in decimal, comma-separated
+      (issue #500). Its identifier is not in it: the target mints its own.
     name: messageDigest
-    params: payload []byte, dead bool, deliveries int, reason string, code uint32
+    params: payload []byte, deliveries int, dead *plug.DeadLetterValue
     results: digest
   - doc: documentsOf is the document store eng runs on, through what wraps it.
     name: documentsOf
@@ -9381,7 +9388,10 @@ functions:
       subsystem writes it, the SDK's document store's two tables, and for a
       store's versions the table of versions beside the store's, which the SDK
       names from it; as the queue subsystem writes it, for a consumer's queue,
-      the SQL broker's one table (ADR 0178 C1).
+      the SQL broker's one table (ADR 0178 C1), and for its trail column the
+      column's addition to a table an earlier release made, which does nothing
+      on a table that has it or is not there yet — so it may run before the
+      table's own, whose version it does not follow (issue #500).
     name: tableMigration
     params: dialect Dialect, t frameworkTable, version uint64
     results: plug.MigrationValue, error
@@ -17901,6 +17911,15 @@ types:
         recv: m *Mailer
         results: model.MailMessage
       - doc: |-
+          deadLetterOf is the mailbox's record of a mail an earlier run gave up on,
+          as its outbox kept it: dead, with its attempts, its last failure's public
+          text and why it was given up — the SMTP reply's code is not kept with it.
+          A record that did not decode is named by its queue identifier.
+        name: deadLetterOf
+        params: d *plug.MailDeadLetterValue, full bool
+        recv: m *Mailer
+        results: model.MailMessage
+      - doc: |-
           senderProblem is what the SDK refuses the mailer's sender ([From]) for,
           through the mail subsystem: empty when it names none. It is judged at the
           start, where the subsystem is known to be there or refused, not at the
@@ -25268,6 +25287,14 @@ types:
           the queue subsystem migrates, not a document store's.
         name: queue
         type: bool
+      - doc: |-
+          trailOf is, for the trail column of a consumer's queue, the queue's
+          table: no table of its own, but a migration of its own — the SDK's
+          queue.SQLTrailMigration, which adds the column to a table an earlier
+          release made (issue #500) —, recorded in kit's registry under the
+          table's name and trailSuffix, which no table name can hold.
+        name: trailOf
+        type: string
     kind: struct
     methods:
       - doc: formerTable is t as a former release named it.

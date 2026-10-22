@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"hash"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kitsunium/sdk/framework/internal/app/plug"
@@ -88,13 +89,17 @@ func trashDigest(store, key string, at time.Time) digest {
 }
 
 // messageDigest is a message's fingerprint: SHA-256(payload ‖ dead ‖
-// deliveries ‖ reason ‖ code). Its identifier is not in it: the target mints
-// its own.
-func messageDigest(payload []byte, dead bool, deliveries int, reason string, code uint32) digest {
-	state := "live"
-	if dead {
-		state = "dead"
+// deliveries ‖ reason ‖ code ‖ trail) — dead the failure of a dead letter,
+// nil for a live message, its trail's codes in decimal, comma-separated
+// (issue #500). Its identifier is not in it: the target mints its own.
+func messageDigest(payload []byte, deliveries int, dead *plug.DeadLetterValue) digest {
+	state, reason, code, codes := "live", "", uint32(0), []string(nil)
+	if dead != nil {
+		state, reason, code = "dead", dead.Reason, dead.Code
+		for _, c := range dead.Trail {
+			codes = append(codes, strconv.FormatUint(uint64(c), 10))
+		}
 	}
 	return digestOf(payload, []byte(state), []byte(strconv.Itoa(deliveries)), []byte(reason),
-		[]byte(strconv.FormatUint(uint64(code), 10)))
+		[]byte(strconv.FormatUint(uint64(code), 10)), []byte(strings.Join(codes, ",")))
 }

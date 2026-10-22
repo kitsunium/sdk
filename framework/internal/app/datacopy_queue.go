@@ -186,15 +186,15 @@ func messageDigests(ctx context.Context, r copyQueue) ([]digest, error) {
 		}
 		for _, m := range page {
 			after = m.Message.ID
-			out = append(out, messageDigest(m.Message.Payload, false, m.Deliveries, "", 0))
+			out = append(out, messageDigest(m.Message.Payload, m.Deliveries, nil))
 		}
 	}
 	dead, err := r.DeadLetters(ctx, copyDeadMax)
 	if err != nil {
 		return nil, err
 	}
-	for _, d := range dead {
-		out = append(out, messageDigest(d.Message.Payload, true, d.Deliveries, d.Reason, d.Code))
+	for i := range dead {
+		out = append(out, messageDigest(dead[i].Message.Payload, dead[i].Deliveries, &dead[i]))
 	}
 	slices.SortFunc(out, func(x, y digest) int { return bytes.Compare(x[:], y[:]) })
 	return out, nil

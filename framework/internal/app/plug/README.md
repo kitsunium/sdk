@@ -86,6 +86,7 @@ The package imports the standard library and the framework's model only, so that
 - [type MailAttemptValue](<#MailAttemptValue>)
 - [type MailCaptureSource](<#MailCaptureSource>)
   - [func \(MailCaptureSource\) Composed\(\) \[\]byte](<#MailCaptureSource.Composed>)
+- [type MailDeadLetterValue](<#MailDeadLetterValue>)
 - [type MailDriverConfig](<#MailDriverConfig>)
 - [type MailEvent](<#MailEvent>)
 - [type MailEventValue](<#MailEventValue>)
@@ -96,7 +97,7 @@ The package imports the standard library and the framework's model only, so that
   - [func \(MailSink\) Send\(ctx context.Context, msg MailValue\) error](<#MailSink.Send>)
 - [type MailSpool](<#MailSpool>)
   - [func \(MailSpool\) Close\(\) error](<#MailSpool.Close>)
-  - [func \(MailSpool\) DeadLetters\(ctx context.Context, maxLetters int\) \(int, error\)](<#MailSpool.DeadLetters>)
+  - [func \(MailSpool\) DeadLetters\(ctx context.Context, maxLetters int\) \(\[\]MailDeadLetterValue, error\)](<#MailSpool.DeadLetters>)
   - [func \(MailSpool\) Run\(ctx context.Context\) error](<#MailSpool.Run>)
   - [func \(MailSpool\) Send\(ctx context.Context, msg MailValue\) \(string, error\)](<#MailSpool.Send>)
   - [func \(MailSpool\) SendWithID\(ctx context.Context, id string, msg MailValue\) error](<#MailSpool.SendWithID>)
@@ -1156,6 +1157,9 @@ type DeadLetterValue struct {
 	Cause      string
 	// Message is the message, unmodified.
 	Message    MessageValue
+	// Trail is the codes the failure gathered as it was wrapped, oldest
+	// first, nil for none.
+	Trail      []uint32
 	// Code is the failure's error code, 0 for none.
 	Code       uint32
 	// Deliveries counts its deliveries.
@@ -1777,6 +1781,36 @@ func (MailCaptureSource) Composed() []byte
 
 Composed is the last message the transport composed, nil for none.
 
+<a name="MailDeadLetterValue"></a>
+## type [MailDeadLetterValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/mail.go>)
+
+MailDeadLetterValue is a mail an outbox gave up on, read back from its dead letters: what the mailbox of a later run shows of it, why it was given up included.
+
+```go
+type MailDeadLetterValue struct {
+	// Meta is what Annotate kept of the Send.
+	Meta     map[string]string
+	// FailedAt is when its last attempt failed.
+	FailedAt time.Time
+	// QueuedAt is when the mail was put in the outbox.
+	QueuedAt time.Time
+	// Message is the mail.
+	Message  MailValue
+	// ID is the mail's outbox ID; empty when its record did not decode, and
+	// QueueID then names it.
+	ID       string
+	// QueueID is the outbox queue's identifier for its record.
+	QueueID  string
+	// Cause is its last failure's public text, "" for none.
+	Cause    string
+	// Attempts counts its delivery attempts.
+	Attempts int
+	// GivenUp is why it was given up, read from its last failure's code and
+	// trail as the outbox kept them.
+	GivenUp  MailGiveUp
+}
+```
+
 <a name="MailDriverConfig"></a>
 ## type [MailDriverConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/mail.go>)
 
@@ -1910,9 +1944,9 @@ MailSpool is one mailer's outbox as the framework's core uses it: a mail put in 
 type MailSpool interface {
 	// Close releases the outbox.
 	Close() error
-	// DeadLetters counts up to maxLetters of the mails earlier runs gave up
-	// on.
-	DeadLetters(ctx context.Context, maxLetters int) (int, error)
+	// DeadLetters returns up to maxLetters of the mails earlier runs gave up
+	// on, oldest first, each with why.
+	DeadLetters(ctx context.Context, maxLetters int) ([]MailDeadLetterValue, error)
 	// Run hands each mail to the transport until ctx ends.
 	Run(ctx context.Context) error
 	// Send puts msg in the outbox — in the transaction ctx carries for its
@@ -1936,10 +1970,10 @@ Close releases the outbox.
 ### func \(MailSpool\) [DeadLetters](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/mail_interface.go>)
 
 ```go
-func (MailSpool) DeadLetters(ctx context.Context, maxLetters int) (int, error)
+func (MailSpool) DeadLetters(ctx context.Context, maxLetters int) ([]MailDeadLetterValue, error)
 ```
 
-DeadLetters counts up to maxLetters of the mails earlier runs gave up on.
+DeadLetters returns up to maxLetters of the mails earlier runs gave up on, oldest first, each with why.
 
 <a name="MailSpool.Run"></a>
 ### func \(MailSpool\) [Run](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/mail_interface.go>)
@@ -2427,7 +2461,7 @@ type QueueConfig struct {
 <a name="QueueDriverConfig"></a>
 ## type [QueueDriverConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/queue.go>)
 
-QueueDriverConfig is what framework/app/queue plugs into kit: how a consumer's queue opens, the migration that makes its table on a database, and how a delivery's handler says that no retry can help.
+QueueDriverConfig is what framework/app/queue plugs into kit: how a consumer's queue opens, the migrations that make its table on a database and add the column its dead letters' trails are kept in, and how a delivery's handler says that no retry can help.
 
 ```go
 type QueueDriverConfig struct {
@@ -2437,6 +2471,11 @@ type QueueDriverConfig struct {
 	// TableMigration is the migration that makes the queue table on a
 	// database of the dialect named, at version.
 	TableMigration func(dialect string, table string, version uint64) (MigrationValue, error)
+	// TrailMigration is the migration that adds the column a dead letter's
+	// trail is kept in to a queue table an earlier release made on a
+	// database of the dialect named, at version; it does nothing on a table
+	// that has it, or that is not there yet.
+	TrailMigration func(dialect string, table string, version uint64) (MigrationValue, error)
 	// DoNotRetry is err as a delivery's handler returns it when no retry
 	// can help: its queue dead-letters the message at once.
 	DoNotRetry     func(err error) error

@@ -70,7 +70,12 @@ type SQLConfig struct {
 	// Dialect is the engine's, and must be the Transactor's own: the SQL the
 	// broker speaks to it.
 	Dialect coresql.Dialect
-	// Trail is filled by kit gen.
+	// Trail makes the broker keep a dead letter's trail
+	// (core/data/queue.DeadLetterValue.Trail) in the table's trail column,
+	// which [SQLMigration] creates and [SQLTrailMigration] adds to a table an
+	// earlier SQLMigration created: run that migration before setting it.
+	// Unset, the broker sends the statements it sent before the column
+	// existed, and a dead letter it buries or reads has no trail.
 	Trail bool
 }
 

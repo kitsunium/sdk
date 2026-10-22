@@ -320,6 +320,7 @@ files:
       - MailValue
       - MailRelayValue
       - MailAttemptValue
+      - MailDeadLetterValue
       - MailEventValue
     name: mail.go
   - decls:
@@ -737,6 +738,40 @@ types:
     kind: struct
     name: MailAttemptValue
   - fields:
+      - doc: Meta is what Annotate kept of the Send.
+        name: Meta
+        type: map[string]string
+      - doc: FailedAt is when its last attempt failed.
+        name: FailedAt
+        type: time.Time
+      - doc: QueuedAt is when the mail was put in the outbox.
+        name: QueuedAt
+        type: time.Time
+      - doc: Message is the mail.
+        name: Message
+        type: MailValue
+      - doc: |-
+          ID is the mail's outbox ID; empty when its record did not decode, and
+          QueueID then names it.
+        name: ID
+        type: string
+      - doc: QueueID is the outbox queue's identifier for its record.
+        name: QueueID
+        type: string
+      - doc: Cause is its last failure's public text, "" for none.
+        name: Cause
+        type: string
+      - doc: Attempts counts its delivery attempts.
+        name: Attempts
+        type: int
+      - doc: |-
+          GivenUp is why it was given up, read from its last failure's code and
+          trail as the outbox kept them.
+        name: GivenUp
+        type: MailGiveUp
+    kind: struct
+    name: MailDeadLetterValue
+  - fields:
       - doc: Err is a failed attempt's failure.
         name: Err
         type: error
@@ -780,9 +815,9 @@ types:
       	Send(ctx context.Context, msg MailValue) (string, error)
       	// SendWithID puts msg in the outbox under id, minted by the framework.
       	SendWithID(ctx context.Context, id string, msg MailValue) error
-      	// DeadLetters counts up to maxLetters of the mails earlier runs gave up
-      	// on.
-      	DeadLetters(ctx context.Context, maxLetters int) (int, error)
+      	// DeadLetters returns up to maxLetters of the mails earlier runs gave up
+      	// on, oldest first, each with why.
+      	DeadLetters(ctx context.Context, maxLetters int) ([]MailDeadLetterValue, error)
       	// Run hands each mail to the transport until ctx ends.
       	Run(ctx context.Context) error
       	// Close releases the outbox.
@@ -1056,6 +1091,13 @@ types:
         name: TableMigration
         type: func(dialect, table string, version uint64) (MigrationValue, error)
       - doc: |-
+          TrailMigration is the migration that adds the column a dead letter's
+          trail is kept in to a queue table an earlier release made on a
+          database of the dialect named, at version; it does nothing on a table
+          that has it, or that is not there yet.
+        name: TrailMigration
+        type: func(dialect, table string, version uint64) (MigrationValue, error)
+      - doc: |-
           DoNotRetry is err as a delivery's handler returns it when no retry
           can help: its queue dead-letters the message at once.
         name: DoNotRetry
@@ -1226,6 +1268,11 @@ types:
       - doc: Message is the message, unmodified.
         name: Message
         type: MessageValue
+      - doc: |-
+          Trail is the codes the failure gathered as it was wrapped, oldest
+          first, nil for none.
+        name: Trail
+        type: "[]uint32"
       - doc: Code is the failure's error code, 0 for none.
         name: Code
         type: uint32

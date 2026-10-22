@@ -108,7 +108,7 @@ type sqlStatements struct {
 // are the statements the broker sent before the column existed. The table
 // name was validated at NewSQL.
 func renderSQLStatements(dialect coresql.Dialect, table string, trail bool) sqlStatements {
-	q := dialect.QuoteIdent(table)
+	quoted := dialect.QuoteIdent(table)
 	p := dialect.Placeholder
 	causeSet := "dead = 1, due = " + p(1) + ", lease = NULL, reason = " + p(2) + ", cause = " + p(3) + ", code = " + p(4)
 	heldFrom, deadColumns, cleared := sqlCauseArgs+1, "reason, cause, code", "reason = NULL, cause = NULL, code = NULL"
@@ -121,43 +121,43 @@ func renderSQLStatements(dialect coresql.Dialect, table string, trail bool) sqlS
 		putColumns, putValues = putColumns+", "+sqlTrailColumn, putValues+", "+p(9)
 	}
 	s := sqlStatements{
-		insert: "INSERT INTO " + q + " (id, dead, due, enqueued_at, deliveries, payload) VALUES (" +
+		insert: "INSERT INTO " + quoted + " (id, dead, due, enqueued_at, deliveries, payload) VALUES (" +
 			p(1) + ", 0, " + p(2) + ", " + p(3) + ", 0, " + p(4) + ")",
-		probe: "SELECT MIN(due) FROM " + q + " WHERE dead = 0",
+		probe: "SELECT MIN(due) FROM " + quoted + " WHERE dead = 0",
 		//: the lease's read locks the rows it returns and skips those another
 		//: transaction holds, so two consumers never wait on each other's
 		//: messages and never take the same one; MySQL needs 8.0.1 for it and
 		//: MariaDB 10.6, and an older server's refusal is QUEUE_BACKEND_FAILED.
 		//: SQLite has no such clause and needs none: its writer holds the
 		//: database's only write lock.
-		pick: "SELECT id, enqueued_at, deliveries, lease, payload FROM " + q + " WHERE dead = 0 AND due <= " + p(1) +
+		pick: "SELECT id, enqueued_at, deliveries, lease, payload FROM " + quoted + " WHERE dead = 0 AND due <= " + p(1) +
 			" ORDER BY due, id LIMIT " + p(2) + dialect.ForUpdateSkipLocked(),
-		next:       "SELECT MIN(due) FROM " + q + " WHERE dead = 0 AND due > " + p(1),
-		ack:        "DELETE FROM " + q + " WHERE " + sqlHeldBy(dialect, 1),
-		retry:      "UPDATE " + q + " SET due = " + p(1) + ", lease = NULL WHERE " + sqlHeldBy(dialect, 2),
-		bury:       "UPDATE " + q + " SET " + causeSet + " WHERE " + sqlHeldBy(dialect, heldFrom),
-		extend:     "UPDATE " + q + " SET due = " + p(1) + ", lease = " + p(2) + " WHERE " + sqlHeldBy(dialect, 3),
-		release:    "UPDATE " + q + " SET due = " + p(1) + ", lease = NULL, deliveries = deliveries - 1 WHERE " + sqlHeldBy(dialect, 2),
-		deadList:   "SELECT id, enqueued_at, deliveries, due, " + deadColumns + ", payload FROM " + q + " WHERE dead = 1 ORDER BY due, id LIMIT " + p(1),
-		replay:     "UPDATE " + q + " SET dead = 0, due = " + p(1) + ", deliveries = 0, " + cleared + " WHERE id = " + p(2) + " AND dead = 1",
-		deleteDead: "DELETE FROM " + q + " WHERE id = " + p(1) + " AND dead = 1",
-		table:      q,
+		next:       "SELECT MIN(due) FROM " + quoted + " WHERE dead = 0 AND due > " + p(1),
+		ack:        "DELETE FROM " + quoted + " WHERE " + sqlHeldBy(dialect, 1),
+		retry:      "UPDATE " + quoted + " SET due = " + p(1) + ", lease = NULL WHERE " + sqlHeldBy(dialect, 2),
+		bury:       "UPDATE " + quoted + " SET " + causeSet + " WHERE " + sqlHeldBy(dialect, heldFrom),
+		extend:     "UPDATE " + quoted + " SET due = " + p(1) + ", lease = " + p(2) + " WHERE " + sqlHeldBy(dialect, 3),
+		release:    "UPDATE " + quoted + " SET due = " + p(1) + ", lease = NULL, deliveries = deliveries - 1 WHERE " + sqlHeldBy(dialect, 2),
+		deadList:   "SELECT id, enqueued_at, deliveries, due, " + deadColumns + ", payload FROM " + quoted + " WHERE dead = 1 ORDER BY due, id LIMIT " + p(1),
+		replay:     "UPDATE " + quoted + " SET dead = 0, due = " + p(1) + ", deliveries = 0, " + cleared + " WHERE id = " + p(2) + " AND dead = 1",
+		deleteDead: "DELETE FROM " + quoted + " WHERE id = " + p(1) + " AND dead = 1",
+		table:      quoted,
 		dialect:    dialect,
 		trail:      trail,
-		putDead: "INSERT INTO " + q + " (id, dead, due, enqueued_at, deliveries, payload, " + putColumns + ") VALUES (" +
+		putDead: "INSERT INTO " + quoted + " (id, dead, due, enqueued_at, deliveries, payload, " + putColumns + ") VALUES (" +
 			p(1) + ", 1, " + p(2) + ", " + p(3) + ", " + p(4) + ", " + p(5) + ", " + putValues + ")",
-		liveList: "SELECT id, enqueued_at, deliveries, due, lease, payload FROM " + q + " WHERE dead = 0 AND id > " + p(1) +
+		liveList: "SELECT id, enqueued_at, deliveries, due, lease, payload FROM " + quoted + " WHERE dead = 0 AND id > " + p(1) +
 			" ORDER BY id LIMIT " + p(2),
-		putLive: "INSERT INTO " + q + " (id, dead, due, enqueued_at, deliveries, payload) VALUES (" +
+		putLive: "INSERT INTO " + quoted + " (id, dead, due, enqueued_at, deliveries, payload) VALUES (" +
 			p(1) + ", 0, " + p(2) + ", " + p(3) + ", " + p(4) + ", " + p(5) + ")",
-		once: renderSQLOnceStatements(dialect, q),
+		once: renderSQLOnceStatements(dialect, quoted),
 	}
 	//: SQLite's lock is the database's, taken by a transaction's first
 	//: WRITE: a lease that read first could be refused busy at its update,
 	//: its snapshot stale, so it writes first — with ADR 0140's statement,
 	//: the one the migration runner takes the same lock with.
 	if dialect == coresql.DialectSQLite {
-		s.lock = svcsql.FileLockSQL(q)
+		s.lock = svcsql.FileLockSQL(quoted)
 	}
 	//: rendered once, sent many times.
 	return s

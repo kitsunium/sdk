@@ -13,11 +13,11 @@ SQL (ADR 0151) and memory — the SQL broker's migration, the `DoNotRetry` and
 | Kind | Names |
 |---|---|
 | Ports | `Broker` (frozen at four methods), `Handler` (func port) |
-| Values | `Message`, `LiveMessage` (ADR 0178), `Delivery`, `Lease`, `Receipt`, `Nack`, `Policy` (with `MaxRetryDelay`, ADR 0151), `DeadLetter` |
+| Values | `Message`, `LiveMessage` (ADR 0178), `Delivery`, `Lease`, `Receipt`, `Nack`, `Policy` (with `MaxRetryDelay`, ADR 0151), `DeadLetter` (with `Trail`, the codes its cause's wrappers added, issue #500) |
 | ADR 0039 siblings | `DeadLetterReader`, `LeaseExtender`, `Waker` (+ its value `Wake`), `Rejecter`, `DeadLetterManager`, `DeadLetterWriter`, `MessageReader`, `MessageWriter` (ADR 0178), `Releaser` (kitsunium/sdk#474), `DelayedNacker`, `DelayedPublisher`, `OncePublisher` (ADR 0183) — reached by type assertion |
 | Configs | `FileConfig`, `SQLConfig`, `MemoryConfig`, `ConsumerConfig` |
 | Constructors | `NewFile` (its broker also answers `io.Closer` by type assertion, releasing its two directory descriptors; the messages stay on disk), `NewSQL`, `NewMemory` |
-| Functions | `SQLMigration` (the SQL broker's one table, a `sql.Migration` the caller numbers), `DoNotRetry` (a failure no retry can fix), `RetryAfter` (a failure to retry after the handler's delay, ADR 0183) |
+| Functions | `SQLMigration` (the SQL broker's one table, a `sql.Migration` the caller numbers), `SQLTrailMigration` (the `trail` column `SQLConfig.Trail` writes, added to a table an earlier `SQLMigration` made, issue #500), `DoNotRetry` (a failure no retry can fix), `RetryAfter` (a failure to retry after the handler's delay, ADR 0183) |
 | Engine | `Consume` |
 | Constants | `DefaultMaxMessageBytes`, `MaxDeadlineOffset`, `DefaultPollInterval`, `DefaultSettleTimeout`, `MaxSQLTableLen`, `CodeNotRetryable`, `CodeDeadLetterNotFound`, `CodeSQLQueueMisconfigured`, `CodeInvalidDeadLetter`, `CodeInvalidMessage`, `CodeRetryRequested` |
 | Sentinels | `QueueMisconfigured`, `MessageTooLarge`, `UnknownReceipt`, `LeaseExpired`, `InvalidBatchSize`, `NotRetryable`, `DeadLetterNotFound`, `InvalidDeadLetter`, `InvalidMessage`, `RetryRequested`, `QueueBackendFailed`, `QueueDirectoryUnusable`, `SQLQueueMisconfigured`, `ConsumerMisconfigured`, `HandlerPanicked` |
