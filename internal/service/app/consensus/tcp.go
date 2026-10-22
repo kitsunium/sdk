@@ -733,12 +733,17 @@ func (t *TCPTransport) sender(k outKey, pc *peerConn) {
 }
 
 // senderLink is a sender's connection to its peer and lane, with what it
-// needs to retire it by age and to pace redials after a failure.
+// needs to retire it by age, by the key it was dialled to and by that
+// key's certificate, and to pace redials after a failure.
 type senderLink struct {
 	conn    *tls.Conn
 	w       *bufio.Writer
 	created time.Time
 	backoff time.Time
+	// pin is the key the peer was pinned to when the link was dialled,
+	// and notAfter the end of the certificate it presented.
+	pin      [32]byte
+	notAfter time.Time
 }
 
 // close drops the link's connection: the sender is stopping, or the
@@ -792,6 +797,12 @@ func (t *TCPTransport) sendBatch(k outKey, link *senderLink, batch [][]byte) {
 	if link.conn != nil && time.Since(link.created) > t.cfg.MaxConnectionAge {
 		// Retired by age, every frame of it flushed: the next batch
 		// dials a fresh one.
+		link.close()
+	}
+	if link.conn != nil && !t.stillAdmitted(k.to, link) {
+		// The key it was dialled to is no longer the member's — denied,
+		// replaced or gone — or its certificate expired: nothing more is
+		// written on it, and the redial checks the current pin (#551).
 		link.close()
 	}
 	reused := link.conn != nil
@@ -861,6 +872,10 @@ func (t *TCPTransport) redial(k outKey, link *senderLink) bool {
 		return false
 	}
 	link.conn, link.w, link.created = c, bufio.NewWriterSize(c, connBufferBytes), time.Now()
+	link.pin, link.notAfter = pin, time.Time{}
+	if certs := c.ConnectionState().PeerCertificates; len(certs) > 0 {
+		link.notAfter = certs[0].NotAfter
+	}
 	t.wg.Add(1)
 	go watchLink(&t.wg, c)
 	return true
@@ -882,6 +897,16 @@ func watchLink(wg *sync.WaitGroup, c *tls.Conn) {
 	_, err := io.Copy(io.Discard, c)
 	abandon(err)
 	abandon(c.NetConn().Close())
+}
+
+// stillAdmitted reports whether a link may still carry frames: its peer is
+// a member pinned to the key the link was dialled to, and the certificate
+// the peer presented has not expired. DenyPin and SetMembership closed
+// only the inbound connections of a member that lost its key, and the
+// leader kept replicating to it on the lanes it had dialled (#551).
+func (t *TCPTransport) stillAdmitted(to coreconsensus.NodeID, link *senderLink) bool {
+	_, pin, ok := t.address(to)
+	return ok && pin == link.pin && time.Now().Before(link.notAfter)
 }
 
 // reportUnreachable tells the engine, when it asked to know, that a peer

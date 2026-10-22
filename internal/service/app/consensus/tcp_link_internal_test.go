@@ -104,3 +104,42 @@ func TestTCPFrameAfterACleanCloseByTheReceiverIsDelivered(t *testing.T) {
 		})
 	}
 }
+
+// #551: once a member's key is no longer admitted — DenyPin left it
+// without a pin, or it left the membership — nothing more is written to
+// it on a lane dialled before. The sender reused its open lanes with no
+// check, so the leader kept replicating to the holder of a fenced key.
+func TestTCPNothingIsSentOnAnOldLaneToAKeyNoLongerAdmitted(t *testing.T) {
+	cases := []struct {
+		name string
+		view func(p *linkPair) []coreconsensus.MemberValue
+	}{
+		{"pin denied", func(p *linkPair) []coreconsensus.MemberValue {
+			ms := append([]coreconsensus.MemberValue(nil), p.members...)
+			ms[1].SPKI = [32]byte{}
+			return ms
+		}},
+		{"pin replaced", func(p *linkPair) []coreconsensus.MemberValue {
+			ms := append([]coreconsensus.MemberValue(nil), p.members...)
+			ms[1].SPKI = [32]byte{9}
+			return ms
+		}},
+		{"member removed", func(p *linkPair) []coreconsensus.MemberValue { return p.members[:1] }},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p := newLinkPair(t)
+			p.a.tr.Send(p.b.id, p.frame(2))
+			if !p.delivered(2 * time.Second) {
+				t.Fatal("the first frame never arrived")
+			}
+			p.a.tr.SetMembership(1, c.view(p))
+			for term := uint64(3); term < 8; term++ {
+				p.a.tr.Send(p.b.id, p.frame(term))
+			}
+			if p.delivered(500 * time.Millisecond) {
+				t.Fatal("a frame reached a key the sender no longer admits, on a lane dialled before")
+			}
+		})
+	}
+}
