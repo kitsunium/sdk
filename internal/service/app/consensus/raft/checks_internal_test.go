@@ -503,6 +503,7 @@ var checks = map[string]func(mutation) error{
 	"deposed leader read":             checkDeposedLeaderRead,
 	"match bounded by last index":     checkMatchBoundedByLastIndex,
 	"raise announced by every member": checkRaiseAnnounced,
+	"origin authenticated":            checkOriginAuthenticated,
 }
 
 func TestChecksPassUnmutated(t *testing.T) {
@@ -561,6 +562,7 @@ func TestMutationsAreCaught(t *testing.T) {
 		"membership every commit":         mutMembershipEveryCommit,
 		"match past the last index":       mutMatchPastLastIndex,
 		"raise not announced":             mutRaiseUnannounced,
+		"origin as written":               mutOriginAsWritten,
 	}
 	for name, m := range muts {
 		caught := ""

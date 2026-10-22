@@ -11,6 +11,8 @@ import (
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/raft"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
@@ -149,4 +151,92 @@ func TestAVersion2MetaThatRottedIsNotRestored(t *testing.T) {
 	}
 	tok = propose(t, l.node, "after=1")
 	c.waitApplied(tok.Index, 5*time.Second)
+}
+
+// attrLogger keeps every Warn line with its attributes.
+type attrLogger struct {
+	mu    sync.Mutex
+	lines []map[string]string
+}
+
+func (l *attrLogger) Log(_ context.Context, lv level.Level, msg string, attrs ...corelogger.AttrValue) {
+	if lv != level.Warn {
+		return
+	}
+	line := map[string]string{"msg": msg}
+	for _, a := range attrs {
+		if a.Value.Kind() == corelogger.KindUint64 {
+			line[a.Key] = fmt.Sprint(a.Value.Uint64())
+		} else {
+			line[a.Key] = a.Value.String()
+		}
+	}
+	l.mu.Lock()
+	l.lines = append(l.lines, line)
+	l.mu.Unlock()
+}
+func (l *attrLogger) With(...corelogger.AttrValue) corelogger.Logger { return l }
+func (l *attrLogger) WithGroup(string) corelogger.Logger             { return l }
+func (l *attrLogger) Enabled(context.Context, level.Level) bool      { return true }
+
+// A Remove submitted on a follower with an operator of the caller's choice
+// is committed, once the cluster speaks protocol 2, with the follower's
+// authenticated id as its origin, and the leader logs the entry it appended
+// naming that follower: the leader logged nothing, and no field of the
+// entry named the node that sent it (ADR 0152 D8, #561).
+func TestAForwardedRemoveRecordsTheFollowerAsItsOrigin(t *testing.T) {
+	logs := map[coreconsensus.NodeID]*attrLogger{}
+	var mu sync.Mutex
+	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{7, 7, 9}, size: 3}
+	c.configure = func(tn *testNode, cfg *Config) {
+		mu.Lock()
+		defer mu.Unlock()
+		if logs[tn.id] == nil {
+			logs[tn.id] = &attrLogger{}
+		}
+		cfg.Logger = logs[tn.id]
+	}
+	newClusterWith(t, c)
+	raiseToProtocol2(t, c)
+	l := c.settledLeader(5 * time.Second)
+	f := c.otherThan(l)
+	var victim *testNode
+	for _, tn := range c.nodes {
+		if tn != l && tn != f {
+			victim = tn
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := f.node.Remove(ctx, "forgejo-user:1", victim.id); err != nil {
+		t.Fatalf("remove through the follower: %v", err)
+	}
+	_, last := l.log.Bounds()
+	es := must(l.log.Entries(1, last+1, 1<<30, nil))(t)
+	var found bool
+	for _, e := range es {
+		if e.Kind != coreconsensus.EntryMembership {
+			continue
+		}
+		a, err := wire.ParseAdminAt(e.Version, e.Data)
+		if err != nil || a.Change != wire.ChangeRemove {
+			continue
+		}
+		found = true
+		if e.Version != wire.AdminVersion2 || a.Origin != f.id || a.Operator != "forgejo-user:1" {
+			t.Fatalf("the Remove f forwarded: version %d origin %d operator %q, want version %d origin %d", e.Version, a.Origin, a.Operator, wire.AdminVersion2, f.id)
+		}
+	}
+	if !found {
+		t.Fatal("setup: no Remove in the leader's log")
+	}
+	lg := logs[l.id]
+	lg.mu.Lock()
+	defer lg.mu.Unlock()
+	for _, line := range lg.lines {
+		if line["msg"] == "consensus: administrative entry appended" && line["origin"] == fmt.Sprint(uint64(f.id)) && line["change"] == fmt.Sprint(wire.ChangeRemove) {
+			return
+		}
+	}
+	t.Fatalf("the leader logged no administrative entry naming %d: %v", f.id, lg.lines)
 }

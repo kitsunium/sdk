@@ -936,7 +936,7 @@ func lastMembership(l *fileLog, snaps *fileSnapshots, index uint64) (coreconsens
 		}
 		for _, e := range es {
 			if e.Kind == coreconsensus.EntryMembership {
-				if a, err := wire.ParseAdmin(e.Data); err == nil {
+				if a, err := wire.ParseAdminAt(e.Version, e.Data); err == nil {
 					m = a.Membership
 				}
 			}

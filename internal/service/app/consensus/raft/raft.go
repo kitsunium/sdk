@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"errors"
 	"math/rand/v2"
 	"slices"
 	"time"
@@ -776,7 +777,7 @@ func (r *Raft) waitsForSync(kind core.MessageKind) bool {
 func (r *Raft) noteAppended(e *core.EntryValue) {
 	switch e.Kind {
 	case core.EntryMembership:
-		a, err := wire.ParseAdmin(e.Data)
+		a, err := wire.ParseAdminAt(e.Version, e.Data)
 		if err != nil {
 			return
 		}
@@ -794,7 +795,7 @@ func (r *Raft) noteAppended(e *core.EntryValue) {
 			}
 		}
 	case core.EntryTimingContract:
-		if a, err := wire.ParseAdmin(e.Data); err == nil {
+		if a, err := wire.ParseAdminAt(e.Version, e.Data); err == nil {
 			c := a.Contract
 			c.Generation = a.Pre.Generation + 1
 			r.contracts[c.Generation] = c
@@ -899,7 +900,14 @@ func (r *Raft) applyCommitEffect(i uint64, e *core.EntryValue) bool {
 	if !actsAtCommit(e.Kind) {
 		return false
 	}
-	admin, err := wire.ParseAdmin(e.Data)
+	admin, err := wire.ParseAdminAt(e.Version, e.Data)
+	if errors.Is(err, core.VersionUnsupported) {
+		// An admin payload version this node does not know stops it
+		// there, as an unknown kind does: skipped, the entry would leave
+		// its engine state behind every other node's (D18).
+		r.rd.Unsupported = UnsupportedEntryValue{Index: i, Kind: e.Kind}
+		return true
+	}
 	if err != nil {
 		return false
 	}

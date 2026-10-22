@@ -111,6 +111,9 @@ const (
 	// mutRaiseUnannounced raises the cluster version while a member does not
 	// announce it (D18, lot S3).
 	mutRaiseUnannounced
+	// mutOriginAsWritten keeps the admin payload the proposer wrote, with
+	// no origin the leader authenticated (#561).
+	mutOriginAsWritten
 )
 
 // mutated reports whether a test switched mutation m on; it is false in every

@@ -465,13 +465,19 @@ func (r *Raft) handleAppReject(pr *progress, m core.MessageValue) {
 // the proposer's; positions and chain values are assigned here. A refusal
 // appends nothing.
 func (r *Raft) Propose(now time.Time, es []core.EntryValue) ([]core.PositionValue, errs.Code) {
+	return r.propose(now, es, r.id)
+}
+
+// propose is Propose for entries received from origin: this leader, or
+// the member that forwarded them, authenticated by the transport.
+func (r *Raft) propose(now time.Time, es []core.EntryValue, origin core.NodeID) ([]core.PositionValue, errs.Code) {
 	r.now = now
 	if r.role != core.RoleLeader || r.transferTo != 0 {
 		return nil, codeNotLeader
 	}
 	var transfer core.NodeID
 	for i := range es {
-		to, code := r.checkProposed(&es[i], r.log.lastIndex()+uint64(i)+1)
+		to, code := r.checkProposed(&es[i], r.log.lastIndex()+uint64(i)+1, origin)
 		if code != 0 {
 			return nil, code
 		}
@@ -496,7 +502,7 @@ func (r *Raft) Propose(now time.Time, es []core.EntryValue) ([]core.PositionValu
 // too, and the engine entries — the alarm, its clearing, a membership
 // change, a transfer — are still admitted, so the cluster can be repaired
 // (D17, R2-29). It used to admit every command (#515).
-func (r *Raft) checkProposed(e *core.EntryValue, index uint64) (core.NodeID, errs.Code) {
+func (r *Raft) checkProposed(e *core.EntryValue, index uint64, origin core.NodeID) (core.NodeID, errs.Code) {
 	switch {
 	case e.Kind == core.EntryCommand:
 		if r.noSpace != 0 && !r.mutated(mutNoSpaceAdmits) {
@@ -506,14 +512,20 @@ func (r *Raft) checkProposed(e *core.EntryValue, index uint64) (core.NodeID, err
 	case e.Kind == core.EntryNoOp || !e.Kind.Known():
 		return 0, codeVersion
 	default:
-		return r.validateAdmin(e, index)
+		return r.validateAdmin(e, index, origin)
 	}
 }
 
 // validateAdmin re-validates an engine entry against the leader's own state
 // and rewrites a membership change into the whole configuration (D8).
-func (r *Raft) validateAdmin(e *core.EntryValue, index uint64) (core.NodeID, errs.Code) {
-	admin, err := wire.ParseAdmin(e.Data)
+//
+// Once the committed cluster version is 2 it records in the entry the node
+// it received the operation from, overwriting whatever the proposer wrote:
+// the ORIGIN of D8 is the TLS identity of the forwarding connection, never
+// a field the forwarder wrote. Before, the entry is of payload version 0,
+// which carries none, so a node of protocol 1 still reads it (#561).
+func (r *Raft) validateAdmin(e *core.EntryValue, index uint64, origin core.NodeID) (core.NodeID, errs.Code) {
+	admin, err := wire.ParseAdminAt(e.Version, e.Data)
 	if err != nil {
 		return 0, codeVersion
 	}
@@ -521,7 +533,15 @@ func (r *Raft) validateAdmin(e *core.EntryValue, index uint64) (core.NodeID, err
 	if code != 0 {
 		return 0, code
 	}
-	e.Data = wire.AppendAdmin(nil, &admin)
+	switch {
+	case r.mutated(mutOriginAsWritten):
+		// The payload stays as the proposer wrote it.
+	case r.clusterVer >= Protocol2:
+		e.Version, admin.Origin = wire.AdminVersion2, origin
+	default:
+		e.Version, admin.Origin = 0, 0
+	}
+	e.Data = wire.AppendAdminAt(nil, e.Version, &admin)
 	e.BodySum = wire.BodySum(e.Data)
 	return transfer, 0
 }
@@ -878,7 +898,7 @@ func (r *Raft) answerForward(m core.MessageValue) fwdAnswer {
 			return fwdAnswer{reject: true, code: code}
 		}
 	}
-	pos, code := r.Propose(r.now, []core.EntryValue{e})
+	pos, code := r.propose(r.now, []core.EntryValue{e}, m.From)
 	if code != 0 {
 		return fwdAnswer{reject: true, code: code, hint: uint64(r.lead)}
 	}

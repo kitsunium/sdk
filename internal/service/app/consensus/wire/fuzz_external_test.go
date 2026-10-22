@@ -50,14 +50,18 @@ func FuzzParseSnapshotMeta(f *testing.F) {
 	})
 }
 
-// FuzzParseAdmin: the admin payload decoder never panics. A refusal is the
-// expected outcome for most inputs and carries nothing to assert; the
-// property under test is that the call returns at all.
+// FuzzParseAdmin: the admin payload decoder never panics, in either
+// payload version. A refusal is the expected outcome for most inputs and
+// carries nothing to assert; the property under test is that the call
+// returns at all.
 func FuzzParseAdmin(f *testing.F) {
 	f.Add(wire.AppendAdmin(nil, &wire.AdminValue{Operator: "op", Change: wire.ChangeRemove, Target: 9}))
+	f.Add(wire.AppendAdminAt(nil, wire.AdminVersion2, &wire.AdminValue{Operator: "op", Change: wire.ChangeRemove, Target: 9, Origin: 4}))
 	f.Fuzz(func(_ *testing.T, b []byte) {
-		if _, err := wire.ParseAdmin(b); err != nil {
-			return
+		for _, v := range []uint32{0, wire.AdminVersion2} {
+			if _, err := wire.ParseAdminAt(v, b); err != nil {
+				continue
+			}
 		}
 	})
 }
