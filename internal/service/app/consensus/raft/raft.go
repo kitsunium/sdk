@@ -645,10 +645,15 @@ func (r *Raft) voters() []core.NodeID { return r.conf().Voters() }
 func (r *Raft) quorum() int { return len(r.voters())/2 + 1 }
 
 // promotable reports whether this node may campaign: a voter of the current
-// configuration, whose directory may vote.
+// configuration, whose directory may vote, and which is not silent. A
+// candidacy is a vote for itself, and the silence grants none: a silent node
+// that campaigned was elected with one other grant once the leader was down,
+// and overwrote the acknowledged entries it had truncated (#524, R5-13).
+// Both the election timer and TimeoutNow go through here.
 func (r *Raft) promotable() bool {
 	m, ok := r.conf().Member(r.id)
-	return ok && m.Voter && !m.Joining && r.cfg.CanVote && !r.cfg.NoTable
+	return ok && m.Voter && !m.Joining && r.cfg.CanVote && !r.cfg.NoTable &&
+		(r.cfg.SilentIndex == 0 || r.mutated(mutSilentCampaigns))
 }
 
 // randomTimeout draws an election timeout in [min, max) from the seeded

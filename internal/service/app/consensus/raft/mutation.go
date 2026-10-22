@@ -61,6 +61,12 @@ const (
 	// mutForwardNoDedupe proposes a forward each time it is delivered, the
 	// duplicate a transport resent included (#401).
 	mutForwardNoDedupe
+	// mutSilentCampaigns lets a silent node campaign, on its election timer
+	// or a TimeoutNow (#524).
+	mutSilentCampaigns
+	// mutKeptAppended appends the entries Recover kept to a peer instead
+	// of sending a snapshot (#507).
+	mutKeptAppended
 )
 
 // mutated reports whether a test switched mutation m on; it is false in every

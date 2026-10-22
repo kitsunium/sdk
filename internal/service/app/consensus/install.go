@@ -56,6 +56,13 @@ func (n *Node) screenOffer(from coreconsensus.NodeID, o *coreconsensus.InstallOf
 		acc.Refused = coreconsensus.CodeVersionUnsupported
 		return true
 	}
+	if !lineageAccepts(n.lineage(), o.Meta.Log, o.Meta.Position.Index) {
+		// A snapshot of another history: the entries after it would be
+		// applied under an identity it does not continue (#507). A leader
+		// never offers one; it cuts a snapshot of its own lineage instead.
+		acc.Refused = coreconsensus.CodeLineageMismatch
+		return true
+	}
 	if o.Meta.DecodedSize > n.cfg.MaxSnapshotBytes || o.Meta.EncodedSize > n.cfg.MaxSnapshotBytes {
 		acc.Refused = coreconsensus.CodeSnapshotTooLarge
 		return true
@@ -135,8 +142,20 @@ func (n *Node) install(req coreconsensus.InstallParams) error {
 	// accepted (D7): the receiver may have committed past the snapshot
 	// through a new leader's appends while the body streamed (review H3).
 	var code errs.Code
-	if !n.exec(func() { code = n.r.CheckOffer(req.From.ID, req.Offer, n.r.NoTable()) }) {
+	var adoptErr error
+	if !n.exec(func() {
+		if code = n.r.CheckOffer(req.From.ID, req.Offer, n.r.NoTable()); code == 0 {
+			// The lineage the snapshot records is durable before the
+			// restore, and so before any entry it covers is applied (#507).
+			adoptErr = n.adoptLineage(meta.Log)
+		}
+	}) {
 		return n.stoppedErr()
+	}
+	if adoptErr != nil {
+		abandon(sink.Abort())
+		n.stop(adoptErr, true)
+		return adoptErr
 	}
 	if code != 0 {
 		// The spool is discarded either way: the refusal is the answer the

@@ -116,7 +116,7 @@ func (n *Node) metaAt(idx, term uint64) (coreconsensus.SnapshotMetaValue, bool) 
 		conf.Index = idx
 		meta = coreconsensus.SnapshotMetaValue{
 			ID: fmt.Sprintf("%020d-%020d", idx, term), Version: 1,
-			Position: coreconsensus.PositionValue{Term: term, Index: idx}, Log: n.ident, Membership: conf,
+			Position: coreconsensus.PositionValue{Term: term, Index: idx}, Log: n.lineage(), Membership: conf,
 			ChainTip: n.r.ChainAt(idx), Codec: string(n.cfg.SnapshotCodec.Algorithm()), ChunkSize: defaultChunkSize,
 			Timing: eng.Timing, ClusterVersion: eng.Cluster, ClusterGeneration: eng.ClusterG, NoSpace: eng.NoSpace,
 		}
@@ -381,6 +381,16 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 		return
 	}
 	meta := metas[0]
+	if l := n.lineage(); !meta.Log.Same(l) || meta.Position.Index < l.KeptIndex {
+		// The newest snapshot is of the history before a Recover, or below
+		// the index it kept: the entries kept after it would reach the
+		// peer by append, and be applied there under the new identity,
+		// not the predecessor's (#507). A cut of this lineage, at or past
+		// the kept index, is sent instead, and names both.
+		n.requestCut()
+		n.r.SnapshotDone(to, false)
+		return
+	}
 	h, err := n.cfg.Snapshots.Open(meta.ID)
 	if err != nil {
 		n.r.SnapshotDone(to, false)

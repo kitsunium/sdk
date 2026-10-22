@@ -60,10 +60,13 @@ const (
 // function, its storage actor, its apply goroutine and its snapshot
 // goroutines (D5b). A Node never closes what it was handed.
 type Node struct {
-	cfg   Config
-	clk   clock.Timed
-	r     *raft.Raft
-	ident coreconsensus.LogIdentityValue
+	cfg Config
+	clk clock.Timed
+	r   *raft.Raft
+	// ident is the log identity, the stamp's: the loop adopts the lineage
+	// an installed snapshot records (#507) while the apply goroutine reads
+	// it for every token. Read it through lineage.
+	ident atomic.Pointer[coreconsensus.LogIdentityValue]
 	stamp coreconsensus.StampValue
 
 	inCtrl chan coreconsensus.MessageValue
@@ -344,7 +347,7 @@ func refuseStamp(cfg *Config, stamp *coreconsensus.StampValue) error {
 // newNode allocates a node's queues and maps; it starts nothing.
 func newNode(cfg *Config, stamp *coreconsensus.StampValue) *Node {
 	n := &Node{
-		cfg: *cfg, clk: cfg.Clock, ident: stamp.Log, stamp: *stamp,
+		cfg: *cfg, clk: cfg.Clock, stamp: *stamp,
 		inCtrl: make(chan coreconsensus.MessageValue, inboxDepth), inData: make(chan coreconsensus.MessageValue, inboxDepth),
 		propc: make(chan *proposal, inboxDepth), execc: make(chan func(), loopBacklog), storec: make(chan storeDone, loopBacklog),
 		stopc: make(chan struct{}), sq: newFifo[storeReq](), fetchq: newFifo[raft.FetchSpec](), fetchc: make(chan fetchDone, fetchBacklog), aq: newFifo[applyItem](),
@@ -353,7 +356,43 @@ func newNode(cfg *Config, stamp *coreconsensus.StampValue) *Node {
 		watchers: map[chan coreconsensus.StatusValue]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
 	}
 	n.acond = sync.NewCond(&n.am)
+	ident := stamp.Log
+	n.ident.Store(&ident)
 	return n
+}
+
+// lineage is the node's log identity as it stands.
+func (n *Node) lineage() coreconsensus.LogIdentityValue { return *n.ident.Load() }
+
+// adoptLineage records, durably and before anything it covers is applied,
+// the predecessor and kept index an installed snapshot's identity names,
+// when this node's identity, of the same cluster and epoch, names none: a
+// node made with Init under the cluster a Recover created knows nothing of
+// the history kept, and applied the kept entries it received by append
+// under its own identity while the survivor applied them under the
+// predecessor's — two inputs for one committed entry (#507). It runs on the
+// loop, as checkAdmission's stamp write.
+func (n *Node) adoptLineage(l coreconsensus.LogIdentityValue) error {
+	cur := n.lineage()
+	if !l.Same(cur) || l.Predecessor == (coreconsensus.ClusterID{}) || cur.Predecessor != (coreconsensus.ClusterID{}) {
+		return nil
+	}
+	s := n.stamp
+	s.Log = l
+	if err := n.cfg.Log.WriteStamp(s); err != nil {
+		return storageFailed("stamp", err)
+	}
+	n.stamp = s
+	n.ident.Store(&l)
+	return nil
+}
+
+// lineageAccepts reports whether a snapshot of identity l, at index, belongs
+// to this node's history: of its own lineage, or of the predecessor's at or
+// below the index Recover kept, as durableIndex counts a machine's position.
+func lineageAccepts(cur, l coreconsensus.LogIdentityValue, index uint64) bool {
+	return l.Same(cur) || (cur.Predecessor != (coreconsensus.ClusterID{}) && l.Cluster == cur.Predecessor &&
+		l.Epoch == cur.PredecessorEpoch && index <= cur.KeptIndex)
 }
 
 // silenceOf reads the silence condition a recovered log persists, the term
@@ -448,7 +487,7 @@ func (n *Node) durableIndex() (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if li.Same(n.ident) || (pos.Index <= n.ident.KeptIndex && li.Cluster == n.ident.Predecessor) {
+	if l := n.lineage(); li.Same(l) || (pos.Index <= l.KeptIndex && li.Cluster == l.Predecessor) {
 		return pos.Index, nil
 	}
 	return 0, nil
@@ -1113,7 +1152,7 @@ func (n *Node) publish() {
 	n.am.Unlock()
 	s := &coreconsensus.StatusValue{
 		ID: n.stamp.ID, Role: st.Role, Term: st.Term, Leader: st.Lead, Commit: st.Commit, Applied: applied,
-		Log: n.ident, Timing: st.Timing, NoSpace: st.NoSpace,
+		Log: n.lineage(), Timing: st.Timing, NoSpace: st.NoSpace,
 		Versions: coreconsensus.VersionsValue{ProtocolMin: 1, ProtocolMax: raft.ProtocolMax, Cluster: st.Cluster, ClusterGeneration: st.ClusterG},
 	}
 	old := n.status.Load()

@@ -534,9 +534,28 @@ func (l *fileLog) applyRecord(seg uint64, r *record) error {
 	case recCommit:
 		l.hs.Commit = max(l.hs.Commit, r.index)
 	case recCompact:
-		l.compact, l.compactTerm = max(l.compact, r.index), r.term
+		l.applyCompactRecord(r.index, r.term)
 	}
 	return nil
+}
+
+// applyCompactRecord applies a compact record where it stands, as
+// compactPrefixAt applied it: the entries through index go, the log starts
+// past it, and the term before the log is the record's, which is the
+// compaction point's term past the log's end too. Only noted, and applied
+// once the whole replay was done, a compaction past the end left the log
+// starting below it, and the first entry appended after it — the next
+// index — read as out of sequence: every node that caught up by a snapshot
+// install and appended was quarantined at its next restart (#516).
+func (l *fileLog) applyCompactRecord(index, term uint64) {
+	if index >= l.first {
+		drop := min(index-l.first+1, uint64(len(l.slots)))
+		l.slots = l.slots[drop:]
+		l.first, l.prevTerm = index+1, term
+	}
+	if index >= l.compact {
+		l.compact, l.compactTerm = index, term
+	}
 }
 
 // applyTruncate applies a truncate record at index. One that truncates into

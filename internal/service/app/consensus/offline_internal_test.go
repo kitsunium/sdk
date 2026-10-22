@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -394,20 +395,223 @@ func TestRestoreSnapshotIntoAnEmptyDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	fresh.node = n
-	defer fresh.crash(t, c)
 	if v, _ := fresh.sm.get("k19"); v != "v19" {
 		t.Fatalf("restored state: k19=%q", v)
 	}
 	propose(t, n, "after=restore")
+	// The restore compacted the empty log past its end, and the proposal
+	// appended after it: the restart replays both (#516).
+	fresh.crash(t, c)
+	fresh.dd = openDir(t, fresh.dir, 16<<10)
+	fresh.sm = newKV()
+	cfg = diskConfig(c, fresh)
+	cfg.MinVoters = 1
+	n, err = NewNode(cfg)
+	if err != nil {
+		t.Fatalf("restart after restore and propose: %v", err)
+	}
+	fresh.node = n
+	defer fresh.crash(t, c)
+	propose(t, n, "again=restart")
+	if v, _ := fresh.sm.get("after"); v != "restore" {
+		t.Fatalf("after the restart: after=%q, want restore", v)
+	}
 }
 
-// TruncateAndStaySilent: a node quarantined for damage to synced data
-// truncates at the damage, stays silent, and votes again only once a leader
-// rewrote its log and committed in its own term (R3-09, R4-03).
-func TestTruncateAndStaySilentRejoins(t *testing.T) {
-	c, nodes := threeOnDisk(t, 40)
-	victim := nodes[2]
-	victim.crash(t, c)
+// tokenKV is a kv that records the token each command was applied under.
+type tokenKV struct {
+	*kv
+	mu     sync.Mutex
+	tokens map[uint64]coreconsensus.TokenValue
+}
+
+func newTokenKV(sm *kv) *tokenKV {
+	return &tokenKV{kv: sm, tokens: map[uint64]coreconsensus.TokenValue{}}
+}
+
+func (s *tokenKV) Apply(e coreconsensus.EntryValue) any {
+	s.mu.Lock()
+	s.tokens[e.Position.Index] = e.Token
+	s.mu.Unlock()
+	return s.kv.Apply(e)
+}
+
+func (s *tokenKV) token(index uint64) (coreconsensus.TokenValue, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tok, ok := s.tokens[index]
+	return tok, ok
+}
+
+// #507: the entries Recover keeps reach the state machine under the same
+// token on every node. The survivor applies them under the predecessor's
+// identity; a node made with Init under the new cluster and admitted after
+// Recover applied the ones it received by append under the new identity,
+// which never learned the lineage, and the replicated state built on the
+// token diverged. The joiner learns the lineage from the snapshot it
+// installs, and a leader never ships one of another lineage: every kept
+// entry it applies carries the survivor's token, and its identity names
+// the predecessor and the index kept.
+func TestTheEntriesRecoverKeepsHaveOneTokenOnEveryNode(t *testing.T) {
+	for _, keys := range []int{40, 140} {
+		t.Run(fmt.Sprintf("keys=%d", keys), func(t *testing.T) {
+			c, nodes := threeOnDisk(t, keys)
+			for _, dn := range nodes {
+				dn.crash(t, c)
+			}
+			keep := nodes[0]
+			keep.dd = openDir(t, keep.dir, 16<<10)
+			old := c.cid
+			next := coreconsensus.ClusterID{21}
+			joiner := &diskNode{dir: t.TempDir()}
+			joiner.dd = openDir(t, joiner.dir, 16<<10)
+			jid, jinc, err := Init(joiner.dd, next, "joiner")
+			if err != nil {
+				t.Fatal(err)
+			}
+			joiner.id = jid
+			members, opt := recoverArgs(t, c, nodes, keep, next)
+			members = append(members, coreconsensus.MemberValue{ID: jid, Incarnation: jinc, Slot: "joiner", SPKI: MemorySPKI(jid)})
+			if err := Recover(keep.dd, next, members, opt); err != nil {
+				t.Fatal(err)
+			}
+			kept := must(keep.dd.Log().Stamp())(t).Log.KeptIndex
+			c.cid = next
+			machines := map[*diskNode]*tokenKV{}
+			for _, dn := range []*diskNode{keep, joiner} {
+				dn.sm = newKV()
+				machines[dn] = newTokenKV(dn.sm)
+				cfg := diskConfig(c, dn)
+				cfg.Machine, cfg.MinVoters = machines[dn], 1
+				dn.node = must(NewNode(cfg))(t)
+			}
+			defer keep.crash(t, c)
+			defer joiner.crash(t, c)
+			tok := propose(t, keep.node, "after=recover")
+			c.waitAppliedDisk([]*diskNode{keep, joiner}, tok.Index)
+			var differ []uint64
+			for i := uint64(1); i <= kept; i++ {
+				jt, ok := machines[joiner].token(i)
+				if !ok {
+					continue
+				}
+				if kt, _ := machines[keep].token(i); kt != jt {
+					differ = append(differ, i)
+				}
+			}
+			if len(differ) > 0 {
+				i := differ[0]
+				kt, _ := machines[keep].token(i)
+				jt, _ := machines[joiner].token(i)
+				t.Fatalf("kept entries %v applied under another token on the joiner (e.g. %d: survivor %v, joiner %v)", differ, i, kt, jt)
+			}
+			if got := joiner.node.Status().Log; got.Predecessor != old || got.KeptIndex != kept {
+				t.Fatalf("the joiner's lineage %+v, want predecessor %s kept %d", got, old, kept)
+			}
+			if st := must(joiner.dd.Log().Stamp())(t); st.Log.Predecessor != old || st.Log.KeptIndex != kept {
+				t.Fatalf("the joiner's stamp %+v does not record the lineage", st.Log)
+			}
+		})
+	}
+}
+
+// proposeOnDisk proposes kv to whichever of the live nodes leads, again on a
+// new leader when the one asked lost its leadership before answering; only
+// for a set the test may write twice, as proposeOnLeader.
+func proposeOnDisk(t *testing.T, live []*diskNode, kv string) coreconsensus.TokenValue {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		l := leaderOf(t, live)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		tok, _, err := l.node.Propose(ctx, []byte(kv))
+		cancel()
+		if err == nil {
+			return tok
+		}
+		retry := errors.Is(err, coreconsensus.NotLeader) ||
+			errs.HasCode(err, coreconsensus.CodeOutcomeUnknown) || errs.HasCode(err, coreconsensus.CodeEntrySuperseded)
+		if !retry || time.Now().After(deadline) {
+			t.Fatalf("propose %q: %v", kv, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// #516 through the driver, on disk: a node that fell behind the leader's
+// compaction catches up by an install — its log compacted past its end —
+// appends the entries that follow, and restarts. The restart replays the
+// compaction where it stands; it used to quarantine the sound disk.
+func TestAnInstalledNodeRestartsAfterAppending(t *testing.T) {
+	c, nodes := threeOnDisk(t, 3)
+	lead := nodes[0]
+	for _, dn := range nodes {
+		if dn.node.Status().Role == coreconsensus.RoleLeader {
+			lead = dn
+		}
+	}
+	lag := nodes[0]
+	if lag == lead {
+		lag = nodes[1]
+	}
+	_, lagLast := lag.dd.Log().Bounds()
+	live := []*diskNode{lead}
+	for _, dn := range nodes {
+		if dn != lead && dn != lag {
+			live = append(live, dn)
+		}
+	}
+	c.net.Isolate(lag.id, true)
+	lag.crash(t, c)
+	var tok coreconsensus.TokenValue
+	for i := range 200 {
+		tok = proposeOnDisk(t, live, fmt.Sprintf("k%d=v%d", i, i))
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if first, _ := leaderOf(t, live).dd.Log().Bounds(); first > lagLast+1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the leader never compacted past %d", lagLast)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	lag.open(t, c)
+	c.net.Isolate(lag.id, false)
+	c.waitAppliedDisk([]*diskNode{lag}, tok.Index)
+	if metas := must(lag.dd.Snapshots().List())(t); len(metas) == 0 {
+		t.Fatal("setup: the lagging node caught up without an install")
+	}
+	for i := range 5 {
+		tok = proposeOnDisk(t, nodes, fmt.Sprintf("post%d=v", i))
+	}
+	c.waitAppliedDisk([]*diskNode{lag}, tok.Index)
+	c.net.Isolate(lag.id, true)
+	lag.crash(t, c)
+	lag.dd = openDir(t, lag.dir, 16<<10)
+	lag.sm = newKV()
+	n, err := NewNode(diskConfig(c, lag))
+	if err != nil {
+		t.Fatalf("the installed node does not restart: %v", err)
+	}
+	lag.node = n
+	c.net.Isolate(lag.id, false)
+	tok = proposeOnDisk(t, nodes, "after=restart")
+	c.waitAppliedDisk([]*diskNode{lag}, tok.Index)
+	if v, _ := lag.sm.get("post4"); v != "v" {
+		t.Fatalf("the restarted node: post4=%q, want v", v)
+	}
+	for _, dn := range nodes {
+		dn.crash(t, c)
+	}
+}
+
+// silenceByDamage damages synced data in the last segment of the crashed
+// victim, checks the start is refused LOG_QUARANTINED, and takes the
+// TruncateAndStaySilent exit, leaving victim's directory open and silent.
+func silenceByDamage(t *testing.T, c *cluster, victim *diskNode) {
+	t.Helper()
 	segs := must(filepath.Glob(filepath.Join(victim.dir, "log", "seg-????????????????")))(t)
 	if len(segs) == 0 {
 		t.Fatal("setup: the victim has no published segment")
@@ -441,6 +645,90 @@ func TestTruncateAndStaySilentRejoins(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(victim.dir, fileSilent)); err != nil {
 		t.Fatal("no silence condition persisted")
 	}
+}
+
+// #524: a silent node never campaigns. The lagging third node is down while
+// the leader commits with the victim, then the leader goes down and the
+// victim truncates at damage to entries that leader acknowledged. With the
+// leader still down the victim and the lagger must not elect anyone: the
+// victim's own candidacy is a vote, and the silence grants none. It
+// campaigned, won with the lagger's grant, and overwrote the acknowledged
+// entries it had truncated. The network is isolated: a node really down
+// sends nothing, and frames the memory network kept would reach the lagger
+// at its restart and hide the defect.
+func TestASilentNodeIsNeverElected(t *testing.T) {
+	c, nodes := threeOnDisk(t, 3)
+	var lead, victim, lagger *diskNode
+	for _, dn := range nodes {
+		switch {
+		case dn.node.Status().Role == coreconsensus.RoleLeader && lead == nil:
+			lead = dn
+		case victim == nil:
+			victim = dn
+		default:
+			lagger = dn
+		}
+	}
+	if lead == nil || victim == nil || lagger == nil {
+		t.Fatal("setup: no leader among the three")
+	}
+	c.net.Isolate(lagger.id, true)
+	lagger.crash(t, c)
+	var tok coreconsensus.TokenValue
+	for i := range 30 {
+		tok = propose(t, lead.node, fmt.Sprintf("ack%d=%s", i, strings.Repeat("v", 1024)))
+	}
+	c.waitAppliedDisk([]*diskNode{lead, victim}, tok.Index)
+	c.net.Isolate(lead.id, true)
+	lead.crash(t, c)
+	c.net.Isolate(victim.id, true)
+	victim.crash(t, c)
+	silenceByDamage(t, c, victim)
+	victim.node = must(NewNode(diskConfig(c, victim)))(t)
+	lagger.open(t, c)
+	c.net.Cut(victim.id, lagger.id, false)
+	c.net.Cut(lagger.id, victim.id, false)
+	// Six election timeouts at the disk timing's maximum, the lagger's
+	// restart window long over: unfixed, the victim led within two.
+	deadline := time.Now().Add(6 * testTimingDisk().ElectionTimeoutMax)
+	for time.Now().Before(deadline) {
+		for _, dn := range []*diskNode{victim, lagger} {
+			if st := dn.node.Status(); st.Role == coreconsensus.RoleLeader {
+				t.Fatalf("a leader was elected while the victim is silent and the old leader down: node %d (victim %v) %+v",
+					dn.id, dn == victim, st)
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	victim.crash(t, c)
+	lagger.crash(t, c)
+}
+
+// #524: Recover removes the silence condition. The survivor's new history
+// is closed to the old terms, and with the silence kept it would be the
+// only voter of that history and never campaign, so never be elected.
+func TestRecoverEndsTheSilence(t *testing.T) {
+	c, nodes := threeOnDisk(t, 40)
+	for _, dn := range nodes {
+		dn.crash(t, c)
+	}
+	victim := nodes[2]
+	silenceByDamage(t, c, victim)
+	recoverAlone(t, c, nodes, victim, coreconsensus.ClusterID{6})
+	if _, err := os.Stat(filepath.Join(victim.dir, fileSilent)); !os.IsNotExist(err) {
+		t.Fatalf("the silence condition survived Recover: %v", err)
+	}
+	victim.crash(t, c)
+}
+
+// TruncateAndStaySilent: a node quarantined for damage to synced data
+// truncates at the damage, stays silent, and votes again only once a leader
+// rewrote its log and committed in its own term (R3-09, R4-03).
+func TestTruncateAndStaySilentRejoins(t *testing.T) {
+	c, nodes := threeOnDisk(t, 40)
+	victim := nodes[2]
+	victim.crash(t, c)
+	silenceByDamage(t, c, victim)
 	n, err := NewNode(diskConfig(c, victim))
 	if err != nil {
 		t.Fatal(err)

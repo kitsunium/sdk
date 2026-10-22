@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-14T16:40:00Z -->
+<!-- updated: 2026-10-22T12:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -45,3 +45,12 @@ under coverage before touching `shard_count`.
   position or refusal, never proposing it again (#401, `mutForwardNoDedupe`,
   `TestForwardedWritesUnderDuplicationAreAppliedOnce`). Every other kind
   is idempotent under duplication, which that scenario exercises.
+- Let a silent node campaign, on its election timer or a TimeoutNow: its
+  candidacy is a vote for itself, and the silence grants none. Elected with
+  one other grant while the leader was down, it overwrote the acknowledged
+  entries it had truncated (#524, `mutSilentCampaigns`,
+  `checkSilentNodeNeverCampaigns`).
+- Append to a peer an entry at or below `Config.Log.KeptIndex`: the entries
+  a Recover kept carry the predecessor's identity, which only a snapshot of
+  this lineage tells the peer, so `sendAppend` sends one (#507,
+  `mutKeptAppended`, `checkKeptEntriesNeverAppended`).
