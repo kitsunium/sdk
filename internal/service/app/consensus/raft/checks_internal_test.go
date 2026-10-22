@@ -504,6 +504,7 @@ var checks = map[string]func(mutation) error{
 	"match bounded by last index":     checkMatchBoundedByLastIndex,
 	"raise announced by every member": checkRaiseAnnounced,
 	"origin authenticated":            checkOriginAuthenticated,
+	"leader record replication only":  checkLeaderRecordReplicationOnly,
 }
 
 func TestChecksPassUnmutated(t *testing.T) {
@@ -563,6 +564,7 @@ func TestMutationsAreCaught(t *testing.T) {
 		"match past the last index":       mutMatchPastLastIndex,
 		"raise not announced":             mutRaiseUnannounced,
 		"origin as written":               mutOriginAsWritten,
+		"hinted leader any kind":          mutHintAnyKind,
 	}
 	for name, m := range muts {
 		caught := ""

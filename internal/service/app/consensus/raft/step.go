@@ -11,7 +11,7 @@ import (
 // the peer the transport authenticated (R7-05).
 func (r *Raft) Step(now time.Time, m core.MessageValue) {
 	r.now = now
-	if m.Group != r.cfg.Group || !r.stepTerm(now, m) || r.stepAnyRole(now, m) {
+	if m.Group != r.cfg.Group || r.stepLeaderRecord(now, m) || !r.stepTerm(now, m) || r.stepAnyRole(now, m) {
 		return
 	}
 	switch r.role {

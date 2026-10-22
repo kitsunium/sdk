@@ -186,6 +186,9 @@ type ReadyValue struct {
 	Fetch []FetchSpec
 	// Membership is set when the admitted set changed.
 	Membership []core.MemberValue
+	// LeaderHint is the leader a member vouched for in a MsgLeaderRecord,
+	// admitted provisionally in Membership, for the driver to log (#542).
+	LeaderHint core.MemberValue
 	// Unsupported names an entry whose kind this version does not know:
 	// the driver stops the node with VERSION_UNSUPPORTED.
 	Unsupported UnsupportedEntryValue
@@ -268,6 +271,12 @@ type Raft struct {
 	// admittedPub is the admission set last handed to the driver: it is
 	// handed again only when it changes (#531).
 	admittedPub []core.MemberValue
+	// hint is the leader a member vouched for in a MsgLeaderRecord while
+	// this node knew no leader, admitted at the transport for replication
+	// only until hintUntil, until a configuration of this node lists it, or
+	// retires it (#542). Its ID is 0 when there is none.
+	hint      core.MemberValue
+	hintUntil time.Time
 
 	prs   map[core.NodeID]*progress
 	votes map[core.NodeID]bool
@@ -387,6 +396,7 @@ func NewRaft(cfg *Config, st *StartState) *Raft {
 // Tick advances the timers to now.
 func (r *Raft) Tick(now time.Time) {
 	r.now = now
+	r.endHintOnTimeout(now)
 	if r.role == core.RoleLeader {
 		r.tickLeader(now)
 		return
@@ -735,6 +745,9 @@ func (r *Raft) admitted() []core.MemberValue {
 			out[k].SPKI = m.SPKI
 		}
 	}
+	if r.hint.ID != 0 && !slices.ContainsFunc(out, func(x core.MemberValue) bool { return x.ID == r.hint.ID }) {
+		out = append(out, r.hint)
+	}
 	return out
 }
 
@@ -812,6 +825,7 @@ func (r *Raft) noteAppended(e *core.EntryValue) {
 // set is republished, a leader tracks exactly the new members, and a
 // follower or learner takes the role the new configuration gives it.
 func (r *Raft) confChanged() {
+	r.endHintOnConf()
 	r.publishAdmitted()
 	switch r.role {
 	case core.RoleLeader:

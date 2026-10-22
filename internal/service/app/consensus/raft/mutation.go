@@ -114,6 +114,9 @@ const (
 	// mutOriginAsWritten keeps the admin payload the proposer wrote, with
 	// no origin the leader authenticated (#561).
 	mutOriginAsWritten
+	// mutHintAnyKind accepts every kind of message from a leader admitted
+	// by a leader record alone, a vote included (#542).
+	mutHintAnyKind
 )
 
 // mutated reports whether a test switched mutation m on; it is false in every

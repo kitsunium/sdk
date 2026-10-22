@@ -48,6 +48,7 @@ var (
 	} = (*TCPTransport)(nil)
 	_ interface{ maxFrameBytes() int } = (*TCPTransport)(nil)
 	_ joinReleaser                     = (*TCPTransport)(nil)
+	_ joinReleaser                     = (*MemoryTransport)(nil)
 	_ interface {
 		CertExpiry() time.Time
 		PeerCertExpiry() map[coreconsensus.NodeID]time.Time

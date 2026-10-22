@@ -1154,6 +1154,11 @@ func (n *Node) handleOne(rd *raft.ReadyValue) {
 	for _, m := range rd.Messages {
 		n.cfg.Transport.Send(m.To, wire.AppendMessage(nil, &m))
 	}
+	if h := rd.LeaderHint; h.ID != 0 {
+		// A member vouched for a leader this node's configuration does not
+		// list: admitted for its appends and heartbeats only (D4, #542).
+		n.obs.warn("consensus: leader admitted on a member's record", lattr("leader", uint64(h.ID)), lstr("slot", h.Slot))
+	}
 	if len(rd.Membership) > 0 {
 		n.cfg.Transport.SetMembership(n.cfg.Group, rd.Membership)
 		n.obs.info("consensus: admitted members changed", lattr("members", uint64(len(rd.Membership))))

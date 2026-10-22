@@ -125,6 +125,7 @@ go_test(
         "runtimedir_unix_internal_test.go",
         "snaplimit_internal_test.go",
         "space_internal_test.go",
+        "staleleader_internal_test.go",
         "spool_internal_test.go",
         "stopmark_unix_internal_test.go",
         "storagefailed_open_internal_test.go",
