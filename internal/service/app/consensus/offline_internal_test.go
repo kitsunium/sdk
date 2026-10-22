@@ -488,7 +488,8 @@ func TestTheEntriesRecoverKeepsHaveOneTokenOnEveryNode(t *testing.T) {
 			defer keep.crash(t, c)
 			defer joiner.crash(t, c)
 			tok := propose(t, keep.node, "after=recover")
-			c.waitAppliedDisk([]*diskNode{keep, joiner}, tok.Index)
+			waitAppliedOnly(t, keep, tok.Index)
+			waitAppliedOnly(t, joiner, tok.Index)
 			var differ []uint64
 			for i := uint64(1); i <= kept; i++ {
 				jt, ok := machines[joiner].token(i)
@@ -538,6 +539,20 @@ func proposeOnDisk(t *testing.T, live []*diskNode, kv string) coreconsensus.Toke
 	}
 }
 
+// waitAppliedOnly waits until dn applied index. The commit its store records
+// is not waited for: an install moves the commit past it, and the store
+// records one again only with a later batch, which a test that stops
+// proposing may never send.
+func waitAppliedOnly(t *testing.T, dn *diskNode, index uint64) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); dn.node.Status().Applied < index; {
+		if time.Now().After(deadline) {
+			t.Fatalf("node %d applied %d, want %d", dn.id, dn.node.Status().Applied, index)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 // #516 through the driver, on disk: a node that fell behind the leader's
 // compaction catches up by an install — its log compacted past its end —
 // appends the entries that follow, and restarts. The restart replays the
@@ -579,14 +594,14 @@ func TestAnInstalledNodeRestartsAfterAppending(t *testing.T) {
 	}
 	lag.open(t, c)
 	c.net.Isolate(lag.id, false)
-	c.waitAppliedDisk([]*diskNode{lag}, tok.Index)
+	waitAppliedOnly(t, lag, tok.Index)
 	if metas := must(lag.dd.Snapshots().List())(t); len(metas) == 0 {
 		t.Fatal("setup: the lagging node caught up without an install")
 	}
 	for i := range 5 {
 		tok = proposeOnDisk(t, nodes, fmt.Sprintf("post%d=v", i))
 	}
-	c.waitAppliedDisk([]*diskNode{lag}, tok.Index)
+	waitAppliedOnly(t, lag, tok.Index)
 	c.net.Isolate(lag.id, true)
 	lag.crash(t, c)
 	lag.dd = openDir(t, lag.dir, 16<<10)
@@ -598,7 +613,7 @@ func TestAnInstalledNodeRestartsAfterAppending(t *testing.T) {
 	lag.node = n
 	c.net.Isolate(lag.id, false)
 	tok = proposeOnDisk(t, nodes, "after=restart")
-	c.waitAppliedDisk([]*diskNode{lag}, tok.Index)
+	waitAppliedOnly(t, lag, tok.Index)
 	if v, _ := lag.sm.get("post4"); v != "v" {
 		t.Fatalf("the restarted node: post4=%q, want v", v)
 	}
@@ -678,7 +693,8 @@ func TestASilentNodeIsNeverElected(t *testing.T) {
 	for i := range 30 {
 		tok = propose(t, lead.node, fmt.Sprintf("ack%d=%s", i, strings.Repeat("v", 1024)))
 	}
-	c.waitAppliedDisk([]*diskNode{lead, victim}, tok.Index)
+	waitAppliedOnly(t, lead, tok.Index)
+	waitAppliedOnly(t, victim, tok.Index)
 	c.net.Isolate(lead.id, true)
 	lead.crash(t, c)
 	c.net.Isolate(victim.id, true)
