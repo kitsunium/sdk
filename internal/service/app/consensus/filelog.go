@@ -261,9 +261,8 @@ type fileLog struct {
 	refuse       error
 	dd           *dataDir
 	// runDir is the boot-scoped directory of the second STORAGE_FAILED
-	// marker (R9-05). It is read once at open from runtimeMarkerDir and is
-	// a field, not a constant, so a test can point it at a directory an
-	// unprivileged process may create: /run is root's.
+	// marker (R9-05): DataDirOptions.RuntimeDir, else runtimeMarkerDir. A
+	// test may point it elsewhere after the open.
 	runDir string
 	// afterSeal runs once a rotation's seal is durable and before the next
 	// segment is published. Only the dm-crypt lane sets it, to cut power in
@@ -306,7 +305,13 @@ func openFileLog(dd *dataDir, segBytes int64) (*fileLog, error) {
 	if segBytes <= 0 {
 		segBytes = DefaultSegmentBytes
 	}
-	l := &fileLog{dir: dd.dir, segBytes: segBytes, dd: dd, first: 1, pendingLast: -1, runDir: runtimeMarkerDir()}
+	l := &fileLog{dir: dd.dir, segBytes: segBytes, dd: dd, first: 1, pendingLast: -1, runDir: dd.opts.RuntimeDir}
+	if l.runDir == "" {
+		l.runDir = runtimeMarkerDir()
+	}
+	if err := l.probeRuntimeDir(); err != nil {
+		return nil, err
+	}
 	if err := mkdirDurable(l.logDir()); err != nil {
 		return nil, err
 	}

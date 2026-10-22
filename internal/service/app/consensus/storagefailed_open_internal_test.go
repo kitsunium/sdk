@@ -186,5 +186,5 @@ func slicesContain(xs []string, x string) bool {
 }
 
 // testRuntimeDir is the boot-scoped directory the tests' data directories
-// use.
-func testRuntimeDir() string { return runtimeMarkerDir() }
+// use: one any user may create, where /run is root's.
+func testRuntimeDir() string { return filepath.Join(os.TempDir(), "kitsunium-consensus-test") }

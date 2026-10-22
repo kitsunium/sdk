@@ -116,12 +116,14 @@ func TestFacadeThreeNodesOverPEMAndDataDirs(t *testing.T) {
 		}
 		slot := fmt.Sprintf("site-%d", i)
 		spki := issue(t, p.dir, ca, caKey, consensus.SAN(cluster, slot))
-		dd, err := consensus.NewDataDir(filepath.Join(p.dir, "data"))
+		// The boot-scoped marker directory under the test's own root: /run
+		// is root's, and the data directory refuses one it cannot write.
+		dd, err := consensus.NewDataDirWith(filepath.Join(p.dir, "data"), consensus.DataDirOptions{RuntimeDir: filepath.Join(root, "run")})
 		//: illumos and Solaris have no flock(2), so no data directory (ADR
 		//: 0144): the refusal is asserted, then the case skips.
 		if runtime.GOOS == "illumos" || runtime.GOOS == "solaris" {
 			if !errors.Is(err, coreproc.UnsupportedPlatform) {
-				t.Fatalf("NewDataDir on %s = %v, want UNSUPPORTED_PLATFORM", runtime.GOOS, err)
+				t.Fatalf("NewDataDirWith on %s = %v, want UNSUPPORTED_PLATFORM", runtime.GOOS, err)
 			}
 			t.Skipf("%s has no flock(2), so a data directory is refused there (ADR 0144); the refusal is asserted above", runtime.GOOS)
 		}

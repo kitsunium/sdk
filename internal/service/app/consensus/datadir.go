@@ -44,6 +44,15 @@ const (
 type DataDirOptions struct {
 	// SegmentBytes is the fixed size of a log segment; 0 is 64 MiB.
 	SegmentBytes int64
+	// RuntimeDir is the boot-scoped directory of the second STORAGE_FAILED
+	// marker (R9-05); empty is /run/kitsunium-consensus on Linux, and
+	// kitsunium-consensus in the temporary directory elsewhere. It must
+	// outlive the process within the boot and be gone at the next one: a
+	// host tmpfs, or systemd's RuntimeDirectory= with
+	// RuntimeDirectoryPreserve=yes. The process must be able to create it
+	// and write in it: NewDataDirWith refuses CONSENSUS_MISCONFIGURED
+	// otherwise, naming the path.
+	RuntimeDir string
 }
 
 type dataDir struct {
@@ -72,6 +81,9 @@ func NewDataDir(dir string) (DataDir, error) { return NewDataDirWith(dir, DataDi
 
 // NewDataDirWith is NewDataDir with options.
 func NewDataDirWith(dir string, opts DataDirOptions) (DataDir, error) {
+	if err := refuseUnmarked(dir); err != nil {
+		return DataDir{}, err
+	}
 	// The directory lock is the first thing taken (D11), and there is none to
 	// take where the kernel has no flock(2) — illumos and Solaris (ADR 0144):
 	// the refusal is the platform's, at construction and before anything is
@@ -106,6 +118,55 @@ func NewDataDirWith(dir string, opts DataDirOptions) (DataDir, error) {
 		return DataDir{}, alsoFailed(err, "close", lf.Close())
 	}
 	return DataDir{d: d}, nil
+}
+
+// unmarked holds, by absolute path, every data directory a node of this
+// process stopped on with STORAGE_FAILED and no marker written in either
+// place. A consumer that does not exit on that stop would otherwise open it
+// again in the same boot and trust the page cache the failed fdatasync left
+// (R9-05, #562).
+var unmarked sync.Map
+
+// noteUnmarked records dir in unmarked.
+func noteUnmarked(dir string) {
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	unmarked.Store(dir, struct{}{})
+}
+
+// refuseUnmarked refuses a data directory a node of this process stopped on
+// with no marker: the process must exit, and the directory waits for a
+// reboot.
+func refuseUnmarked(dir string) error {
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	if _, ok := unmarked.Load(dir); ok {
+		return origin(coreconsensus.StopMarkerPresent, errs.String("dir", dir),
+			errs.String("detail", "a STORAGE_FAILED stop of this process wrote no marker: exit, and start again after a reboot"))
+	}
+	return nil
+}
+
+// probeRuntimeDir creates the boot-scoped directory and writes, then
+// removes, a file there. A directory the process cannot write in left every
+// STORAGE_FAILED stop with one marker of two, and with none when the data
+// directory's failed too: the start is refused while nothing has been
+// written (R9-05, #562).
+func (l *fileLog) probeRuntimeDir() error {
+	probe := l.runtimeMarker("PROBE")
+	err := os.MkdirAll(l.runDir, 0o700)
+	if err == nil {
+		err = writeFileSync(probe, nil)
+	}
+	if err == nil {
+		err = os.Remove(probe)
+	}
+	if err != nil {
+		return misconfigured("RuntimeDir", fmt.Sprintf("the boot-scoped marker directory %s is not writable: %v", l.runDir, err))
+	}
+	return nil
 }
 
 // open opens the log, then the snapshots; when the snapshots fail the log

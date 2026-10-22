@@ -1569,6 +1569,9 @@ func (n *Node) stop(err error, storage bool) {
 		dirErr, runErr := m.markStopEach(code, err.Error())
 		if dirErr != nil && (runErr != nil || code != coreconsensus.CodeStorageFailed) && storage {
 			reason.Unmarked = true
+			if d, ok := n.cfg.Log.(*fileLog); ok {
+				noteUnmarked(d.dir)
+			}
 		}
 		n.reportUnwrittenMarkers(dirErr, runErr)
 	}

@@ -34,7 +34,7 @@ func ents(from, to, term uint64) []coreconsensus.EntryValue {
 
 func openDir(t *testing.T, dir string, seg int64) DataDir {
 	t.Helper()
-	d, err := NewDataDirWith(dir, DataDirOptions{SegmentBytes: seg})
+	d, err := NewDataDirWith(dir, DataDirOptions{SegmentBytes: seg, RuntimeDir: testRuntimeDir()})
 	//: no flock(2), no data directory (illumos, Solaris): the refusal is
 	//: asserted, then the case skips — it needs a directory that exists.
 	if !flock.Native {
