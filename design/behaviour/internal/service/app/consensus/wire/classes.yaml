@@ -22,6 +22,15 @@ constants:
         name: ChangeForced
     name: ChangeFounding
   - doc: |-
+      AdminVersion2 is the payload version of an engine entry whose admin
+      carries Origin. A leader writes it once the committed cluster version is
+      2, never before: a node of protocol 1 reads version 0 only (D18, #561).
+    items:
+      - name: AdminVersion2
+        type: uint32
+        value: "2"
+    name: AdminVersion2
+  - doc: |-
       The frame header is frozen in every protocol version (ADR 0152 D18):
       length (u32) | version (u8) | type (u8) | group (u64), little-endian. length
       counts the bytes AFTER the length field. The two high bits of type are the
@@ -45,19 +54,25 @@ constants:
         type: int
         value: "41"
       - doc: |-
-          metaVersion1 is the leading byte of an encoded SnapshotMeta, the only
-          version this node writes.
+          metaVersion1 is the leading byte of a SnapshotMeta of a cluster below
+          protocol version 2.
         name: metaVersion1
         type: byte
         value: "1"
       - doc: |-
           metaVersion2 is the leading byte of a SnapshotMeta checksummed: the
-          fields of version 1, then the CRC-32C of every byte before it. This
-          node reads it and never writes it: the writer comes with the cluster
-          version that admits it, one release after every member reads it
-          (#546, ADR 0152 amendment of 2026-10-22).
+          fields of version 1, then the CRC-32C of every byte before it. The
+          release before read it without writing it; this one writes it for a
+          cluster at protocol version 2 (#546 phase 2, ADR 0152 amendments of
+          2026-10-22 and 2026-10-23).
         name: metaVersion2
         type: byte
+        value: "2"
+      - doc: |-
+          metaProtocol2 is the cluster version from which a SnapshotMeta is
+          written in version 2.
+        name: metaProtocol2
+        type: uint32
         value: "2"
       - doc: metaSumLen is the length of version 2's trailing CRC-32C.
         name: metaSumLen
@@ -78,9 +93,12 @@ constants:
 files:
   - decls:
       - ChangeFounding
+      - AdminVersion2
       - AdminValue
       - AppendAdmin
+      - AppendAdminAt
       - ParseAdmin
+      - ParseAdminAt
     name: admin.go
   - decls:
       - frameHeaderLen
@@ -95,6 +113,7 @@ files:
       - AppendToken
       - ParseToken
       - AppendSnapshotMeta
+      - appendMeta
       - ParseSnapshotMeta
       - metaFields
       - AppendMembership
@@ -124,8 +143,14 @@ functions:
   - name: AppendAdmin
     params: dst []byte, a *AdminValue
     results: "[]byte"
+  - name: AppendAdminAt
+    params: dst []byte, v uint32, a *AdminValue
+    results: "[]byte"
   - name: ParseAdmin
     params: b []byte
+    results: AdminValue, error
+  - name: ParseAdminAt
+    params: v uint32, b []byte
     results: AdminValue, error
   - name: BodySum
     params: data []byte
@@ -158,6 +183,12 @@ functions:
     results: coreconsensus.TokenValue, error
   - name: AppendSnapshotMeta
     params: dst []byte, m *coreconsensus.SnapshotMetaValue
+    results: "[]byte"
+  - doc: |-
+      appendMeta appends m in version v: the version byte, the fields of
+      version 1, then for version 2 the CRC-32C of every byte before it.
+    name: appendMeta
+    params: dst []byte, v byte, m *coreconsensus.SnapshotMetaValue
     results: "[]byte"
   - name: ParseSnapshotMeta
     params: b []byte, m *coreconsensus.SnapshotMetaValue
@@ -240,6 +271,13 @@ types:
       - doc: ClusterVersion is the version an EntryClusterVersion raises to.
         name: ClusterVersion
         type: uint32
+      - doc: |-
+          Origin is the authenticated node the leader received the operation
+          from: the member that forwarded it, or the leader itself. The leader
+          writes it, overwriting whatever the proposer wrote, and only in an
+          entry of payload version AdminVersion2 (ADR 0152 D8, #561).
+        name: Origin
+        type: coreconsensus.NodeID
     kind: struct
     name: AdminValue
   - doc: |-

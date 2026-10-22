@@ -65,6 +65,12 @@ sequences:
             - op: "|="
               set: pr.facts
               value: peerHeard
+            - opt:
+                do:
+                  - op: "|="
+                    set: pr.facts
+                    value: peerProtocol2
+                when: r.speaks() >= Protocol2
           init:
             bind: pr
             eval: r.prs[r.id]
@@ -527,6 +533,17 @@ sequences:
       - op: "|="
         set: pr.facts
         value: peerHeard
+      - alt:
+          - do:
+              - op: "|="
+                set: pr.facts
+                value: peerProtocol2
+            when: m.Flags&core.FlagProtocol2 != 0
+          - do:
+              - op: "&^="
+                set: pr.facts
+                value: peerProtocol2
+            else: true
       - switch:
           cases:
             - case: core.MsgAppResp
@@ -718,6 +735,17 @@ sequences:
         kind: actor
       - id: (*Raft).Propose
         kind: self
+      - id: r.propose
+        kind: internal
+    steps:
+      - return: r.propose(now, es, r.id)
+        to: r.propose
+  - of: (*Raft).propose
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).propose
+        kind: self
       - id: r.checkProposed
         kind: internal
       - id: r.appendAsLeader
@@ -739,7 +767,7 @@ sequences:
       - loop:
           do:
             - bind: to, code
-              eval: r.checkProposed(&es[i], r.log.lastIndex()+uint64(i)+1)
+              eval: r.checkProposed(&es[i], r.log.lastIndex()+uint64(i)+1, origin)
               to: r.checkProposed
             - opt:
                 do:
@@ -786,7 +814,7 @@ sequences:
                 - return: 0, codeVersion
             - default: true
               do:
-                - return: r.validateAdmin(e, index)
+                - return: r.validateAdmin(e, index, origin)
                   to: r.validateAdmin
   - of: (*Raft).validateAdmin
     participants:
@@ -800,7 +828,7 @@ sequences:
         kind: internal
     steps:
       - bind: admin, err
-        eval: wire.ParseAdmin(e.Data)
+        eval: wire.ParseAdminAt(e.Version, e.Data)
         to: wire
       - opt:
           do:
@@ -813,9 +841,20 @@ sequences:
           do:
             - return: 0, code
           when: code != 0
+      - switch:
+          cases:
+            - case: r.mutated(mutOriginAsWritten)
+            - case: r.clusterVer >= Protocol2
+              do:
+                - set: e.Version, admin.Origin
+                  value: wire.AdminVersion2, origin
+            - default: true
+              do:
+                - set: e.Version, admin.Origin
+                  value: 0, 0
       - set: e.Data
         to: wire
-        value: wire.AppendAdmin(nil, &admin)
+        value: wire.AppendAdminAt(nil, e.Version, &admin)
       - set: e.BodySum
         to: wire
         value: wire.BodySum(e.Data)
@@ -895,16 +934,24 @@ sequences:
         value: raftLeaseDropped
       - return: "0"
   - of: (*Raft).checkClusterVersion
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).checkClusterVersion
+        kind: self
+      - id: r.checkAnnounced
+        kind: internal
     steps:
       - opt:
           do:
             - return: codeVersion
-          when: admin.ClusterVersion > ProtocolMax
+          when: admin.ClusterVersion > r.speaks()
       - opt:
           do:
             - return: codePrecondition
           when: "!admin.Pre.Log.Same(r.cfg.Log) || admin.Pre.Generation != r.clusterGen || admin.ClusterVersion <= r.clusterVer"
-      - return: "0"
+      - return: r.checkAnnounced(admin.ClusterVersion)
+        to: r.checkAnnounced
   - of: (*Raft).checkNoSpaceClear
     steps:
       - opt:
@@ -1229,7 +1276,7 @@ sequences:
         kind: internal
       - id: r.admitForward
         kind: internal
-      - id: r.Propose
+      - id: r.propose
         kind: internal
     steps:
       - opt:
@@ -1261,8 +1308,8 @@ sequences:
                 when: code != 0
           when: e.Kind == core.EntryCommand
       - bind: pos, code
-        eval: r.Propose(r.now, []core.EntryValue{e})
-        to: r.Propose
+        eval: r.propose(r.now, []core.EntryValue{e}, m.From)
+        to: r.propose
       - opt:
           do:
             - return: "fwdAnswer{reject: true, code: code, hint: uint64(r.lead)}"
@@ -2879,6 +2926,12 @@ sequences:
         value: r.id
       - opt:
           do:
+            - op: "|="
+              set: m.Flags
+              value: core.FlagProtocol2
+          when: r.speaks() >= Protocol2
+      - opt:
+          do:
             - set: m.Term
               value: r.term
           when: m.Term == 0 && m.Kind != core.MsgPreVote && m.Kind != core.MsgPreVoteResp
@@ -2921,7 +2974,7 @@ sequences:
             - case: core.EntryMembership
               do:
                 - bind: a, err
-                  eval: wire.ParseAdmin(e.Data)
+                  eval: wire.ParseAdminAt(e.Version, e.Data)
                   to: wire
                 - opt:
                     do:
@@ -2966,7 +3019,7 @@ sequences:
                           when: c.ElectionTimeoutMin > r.voteWindow
                     init:
                       bind: a, err
-                      eval: wire.ParseAdmin(e.Data)
+                      eval: wire.ParseAdminAt(e.Version, e.Data)
                       to: wire
                     when: err == nil
             - default: true
@@ -3127,8 +3180,14 @@ sequences:
             - return: "false"
           when: "!actsAtCommit(e.Kind)"
       - bind: admin, err
-        eval: wire.ParseAdmin(e.Data)
+        eval: wire.ParseAdminAt(e.Version, e.Data)
         to: wire
+      - opt:
+          do:
+            - set: r.rd.Unsupported
+              value: "UnsupportedEntryValue{Index: i, Kind: e.Kind}"
+            - return: "true"
+          when: errors.Is(err, core.VersionUnsupported)
       - opt:
           do:
             - return: "false"
@@ -3337,13 +3396,20 @@ sequences:
             - set: r.rd.Unsupported
               value: "UnsupportedEntryValue{Index: i, Kind: core.EntryClusterVersion}"
             - return: "true"
-          when: admin.ClusterVersion > ProtocolMax
+          when: admin.ClusterVersion > r.speaks()
       - opt:
           do:
             - set: r.clusterVer, r.clusterGen
               value: admin.ClusterVersion, r.clusterGen+1
           when: admin.Pre.Generation == r.clusterGen && admin.ClusterVersion > r.clusterVer
       - return: "false"
+  - of: (*Raft).speaks
+    steps:
+      - opt:
+          do:
+            - return: r.cfg.speaks
+          when: r.cfg.speaks != 0
+      - return: ProtocolMax
   - of: (*Raft).commitTo
     participants:
       - id: caller

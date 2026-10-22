@@ -52,6 +52,24 @@ workflows:
           key: _
           range: r.rounds
           value: rd
+  - of: (*Raft).checkAnnounced
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: v < Protocol2 || r.mutated(mutRaiseUnannounced)
+      - loop:
+          do:
+            - bind: pr
+              eval: r.prs[m.ID]
+            - opt:
+                do:
+                  - return: codeVersion
+                when: pr == nil || pr.facts&peerHeard == 0 || pr.facts&peerProtocol2 == 0
+          key: _
+          range: r.conf().Members
+          value: m
+      - return: "0"
   - of: (*Raft).EngineAt
     steps:
       - bind: v

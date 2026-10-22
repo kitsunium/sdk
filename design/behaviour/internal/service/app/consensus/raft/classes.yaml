@@ -186,6 +186,14 @@ constants:
           mutMatchPastLastIndex takes an acknowledgement past the leader's last
           index as the follower's match (#546).
         name: mutMatchPastLastIndex
+      - doc: |-
+          mutRaiseUnannounced raises the cluster version while a member does not
+          announce it (D18, lot S3).
+        name: mutRaiseUnannounced
+      - doc: |-
+          mutOriginAsWritten keeps the admin payload the proposer wrote, with
+          no origin the leader authenticated (#561).
+        name: mutOriginAsWritten
     name: mutAckBeforeSync
   - doc: The facts a PeerStatValue carries.
     grouped: true
@@ -218,6 +226,10 @@ constants:
           peerFetching pauses the peer while the driver reads entries the step
           function evicted.
         name: peerFetching
+      - doc: |-
+          peerProtocol2 is set while the peer's last message of the term
+          carried FlagProtocol2.
+        name: peerProtocol2
     name: peerProbeSent
   - grouped: true
     items:
@@ -256,11 +268,22 @@ constants:
   - doc: |-
       ProtocolMax is the highest protocol version this engine speaks: a cluster
       version above it is refused, and stops a node that finds it committed.
+      Version 2 adds the snapshot metadata's checksum, the admin payload's
+      Origin and the log identity's AdoptedFrom, each written only once the
+      committed cluster version is 2 (lot S3).
     items:
       - name: ProtocolMax
         type: uint32
-        value: "1"
+        value: "2"
     name: ProtocolMax
+  - doc: |-
+      Protocol2 is the protocol version whose formats a node writes once the
+      cluster version is raised to it.
+    items:
+      - name: Protocol2
+        type: uint32
+        value: "2"
+    name: Protocol2
 files:
   - decls:
       - (*Raft).Debug
@@ -288,12 +311,14 @@ files:
       - (*Raft).ackMoved
       - (*Raft).handleAppReject
       - (*Raft).Propose
+      - (*Raft).propose
       - (*Raft).checkProposed
       - (*Raft).validateAdmin
       - (*Raft).checkAdmin
       - (*Raft).checkMembership
       - (*Raft).checkTimingContract
       - (*Raft).checkClusterVersion
+      - (*Raft).checkAnnounced
       - (*Raft).checkNoSpaceClear
       - (*Raft).checkTransfer
       - (*Raft).nextConf
@@ -379,6 +404,7 @@ files:
   - decls:
       - raftSelfVoteDurable
       - ProtocolMax
+      - Protocol2
       - raftFacts
       - Config
       - fwdEntry
@@ -452,6 +478,7 @@ files:
       - (*Raft).applyAdmin
       - (*Raft).commitTimingContract
       - (*Raft).commitClusterVersion
+      - (*Raft).speaks
       - (*Raft).commitTo
       - (*Raft).publishAdmitted
       - (*Raft).PeerStats
@@ -540,6 +567,7 @@ functions:
     results: bool
 imports:
   core: github.com/kitsunium/sdk/internal/core/app/consensus
+  errors: errors
   errs: github.com/kitsunium/sdk/internal/kernel/errs
   fmt: fmt
   rand: math/rand/v2
@@ -904,6 +932,12 @@ types:
       - doc: mut is set by the package's own tests only.
         name: mut
         type: mutation
+      - doc: |-
+          speaks, when not 0, is the protocol version this node speaks in place
+          of ProtocolMax: the package's own tests run a node of the previous
+          release with it.
+        name: speaks
+        type: uint32
     kind: struct
     name: Config
   - doc: fwdEntry is one forwarded command a leader appended.
@@ -1339,6 +1373,13 @@ types:
         recv: r *Raft
         results: "[]core.PositionValue, errs.Code"
       - doc: |-
+          propose is Propose for entries received from origin: this leader, or
+          the member that forwarded them, authenticated by the transport.
+        name: propose
+        params: now time.Time, es []core.EntryValue, origin core.NodeID
+        recv: r *Raft
+        results: "[]core.PositionValue, errs.Code"
+      - doc: |-
           checkProposed admits one proposed entry that would land at index: a
           command as it is unless the no-space alarm is committed, a no-op or an
           unknown kind never, an engine entry once validateAdmin accepts and
@@ -1349,14 +1390,20 @@ types:
           change, a transfer — are still admitted, so the cluster can be repaired
           (D17, R2-29). It used to admit every command (#515).
         name: checkProposed
-        params: e *core.EntryValue, index uint64
+        params: e *core.EntryValue, index uint64, origin core.NodeID
         recv: r *Raft
         results: core.NodeID, errs.Code
       - doc: |-
           validateAdmin re-validates an engine entry against the leader's own state
           and rewrites a membership change into the whole configuration (D8).
+
+          Once the committed cluster version is 2 it records in the entry the node
+          it received the operation from, overwriting whatever the proposer wrote:
+          the ORIGIN of D8 is the TLS identity of the forwarding connection, never
+          a field the forwarder wrote. Before, the entry is of payload version 0,
+          which carries none, so a node of protocol 1 still reads it (#561).
         name: validateAdmin
-        params: e *core.EntryValue, index uint64
+        params: e *core.EntryValue, index uint64, origin core.NodeID
         recv: r *Raft
         results: core.NodeID, errs.Code
       - doc: |-
@@ -1389,6 +1436,16 @@ types:
           cluster generation of this log.
         name: checkClusterVersion
         params: admin *wire.AdminValue
+        recv: r *Raft
+        results: errs.Code
+      - doc: |-
+          checkAnnounced refuses a raise to v while a member of the latest
+          configuration, voter or learner, was not heard in this term announcing
+          it: the operation is refused while any member does not speak the version
+          (D18). A member of the previous release would stop on the raise, and on
+          every format written after it.
+        name: checkAnnounced
+        params: v uint32
         recv: r *Raft
         results: errs.Code
       - doc: |-
@@ -1903,6 +1960,12 @@ types:
         params: i uint64, admin *wire.AdminValue
         recv: r *Raft
         results: bool
+      - doc: |-
+          speaks is the highest protocol version this node speaks: ProtocolMax,
+          unless a test runs it as a node of the previous release.
+        name: speaks
+        recv: r *Raft
+        results: uint32
       - doc: |-
           commitTo advances the commit to i, never back, applying the engine's own
           effects of the entries it covers and republishing the admission set when
