@@ -245,6 +245,7 @@ func (n *Node) publishSnapshot(snap coreconsensus.Snapshot, meta coreconsensus.S
 		out = io.MultiWriter(sink, extra)
 	}
 	cw := newChunkWriter(out, n.cfg.SnapshotCodec, defaultChunkSize)
+	cw.limit = snapshotLimit(n.cfg.MaxSnapshotBytes, &meta.Membership)
 	if _, err := snap.WriteTo(cw); err != nil {
 		return alsoFailed(err, "abort", sink.Abort())
 	}
@@ -264,6 +265,22 @@ func (n *Node) publishSnapshot(snap coreconsensus.Snapshot, meta coreconsensus.S
 	state.mu.Unlock()
 	n.afterCut()
 	return nil
+}
+
+// snapshotLimit is the largest snapshot a cut may write: this node's
+// MaxSnapshotBytes, or the smallest limit a member announces when lower. A
+// cut over it is refused and compacts nothing: published, no follower could
+// be installed from it, and every node, this one included, failed to restore
+// it at its next start and came up with no table — a rolling restart left
+// the cluster with no leader (#512).
+func snapshotLimit(own int64, conf *coreconsensus.MembershipValue) int64 {
+	limit := own
+	for _, m := range conf.Members {
+		if m.MaxSnapshotBytes > 0 {
+			limit = min(limit, m.MaxSnapshotBytes)
+		}
+	}
+	return limit
 }
 
 // afterCut keeps the two newest snapshots and compacts the log back to the

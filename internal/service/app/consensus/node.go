@@ -471,7 +471,7 @@ func (n *Node) load() (raft.StartState, error) {
 		return raft.StartState{}, origin(coreconsensus.HardStateCorrupt, errs.String("cause", err.Error()))
 	}
 	first, last := n.cfg.Log.Bounds()
-	if base, err = n.baseOrNoTable(base, metas, first); err != nil {
+	if base, err = n.baseOrNoTable(base, metas, first, last, hs.Commit); err != nil {
 		return raft.StartState{}, err
 	}
 	snapIdx := base.Position.Index
@@ -533,9 +533,13 @@ func (n *Node) restoreLatest(metas []coreconsensus.SnapshotMetaValue, durIdx uin
 }
 
 // baseOrNoTable keeps a restored base, or starts the node with no table
-// when a snapshot was needed and none restored.
-func (n *Node) baseOrNoTable(base coreconsensus.SnapshotMetaValue, metas []coreconsensus.SnapshotMetaValue, first uint64) (coreconsensus.SnapshotMetaValue, error) {
-	if base.Position.Index != 0 || (len(metas) == 0 && first <= 1) {
+// when a snapshot was needed and none restored. None is needed while the
+// log still holds every entry from index 1 through its commit: the node
+// replays it, as a node that never cut one does. It used to start with no
+// table as soon as a snapshot existed, and a cluster whose every snapshot
+// failed to restore lost every leader at a rolling restart (#512).
+func (n *Node) baseOrNoTable(base coreconsensus.SnapshotMetaValue, metas []coreconsensus.SnapshotMetaValue, first, last, commit uint64) (coreconsensus.SnapshotMetaValue, error) {
+	if base.Position.Index != 0 || (first <= 1 && (len(metas) == 0 || commit <= last)) {
 		return base, nil
 	}
 	// Every snapshot fails its checksums, or none is left where the
