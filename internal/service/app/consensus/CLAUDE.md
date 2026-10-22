@@ -35,6 +35,10 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
 | fuzz | `go test -fuzz` on the targets of `wire/` and this package; nightly in CI |
 | dm-crypt | `testdata/dmcrypt/run.sh` (Docker, privileged): fsync latency and power cuts through LUKS; results in `testdata/dmcrypt/RESULTS.md` |
 
+Under Bazel `consensus_test` has 4 shards: under race and coverage the suite
+passed the 60 s cap per target once the disk scenarios of #507, #516 and
+#524 joined it.
+
 ## Do NOT
 
 - Let the event loop wait on storage or a socket (D5b).

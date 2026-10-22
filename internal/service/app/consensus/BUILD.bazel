@@ -101,6 +101,7 @@ go_test(
     ],
     data = glob(["testdata/**"]),
     embed = [":consensus"],
+    shard_count = 4,
     deps = [
         "//internal/core/app/consensus",
         "//internal/core/data/transform",
