@@ -1107,8 +1107,11 @@ func TestAnOfferOfAnotherLineageIsRefused(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		acc := offerOf(c.log)
-		if got := acc.Refused == coreconsensus.CodeLineageMismatch; got != c.refused {
-			t.Fatalf("offer of %+v: %+v, want LINEAGE_MISMATCH %v", c.log, acc, c.refused)
+		if c.refused && acc.Refused != coreconsensus.CodeLineageMismatch {
+			t.Fatalf("offer of %+v: %+v, want LINEAGE_MISMATCH", c.log, acc)
+		}
+		if !c.refused && (acc.Refused != 0 || acc.Held) {
+			t.Fatalf("offer of %+v: %+v, want it accepted", c.log, acc)
 		}
 	}
 	for _, c := range []tc{
