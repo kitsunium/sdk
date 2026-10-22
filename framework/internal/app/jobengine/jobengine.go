@@ -50,9 +50,13 @@ type runner struct {
 	s scheduler.Scheduler
 }
 
-// Add registers entry with the SDK's scheduler.
+// Add registers entry with the SDK's scheduler: its overlap policy and its
+// starting deadline the SDK's (ADR 0184).
 func (r runner) Add(entry plug.JobEntryValue) error {
-	return r.s.Add(scheduler.Entry{Name: entry.Name, Schedule: scheduler.Schedule(entry.Schedule), Job: entry.Run})
+	return r.s.Add(scheduler.Entry{
+		Name: entry.Name, Schedule: scheduler.Schedule(entry.Schedule), Job: entry.Run,
+		Overlap: scheduler.OverlapPolicy(entry.Overlap), StartingDeadline: entry.StartingDeadline,
+	})
 }
 
 // Run fires the jobs until ctx ends.
@@ -62,6 +66,6 @@ func (r runner) Run(ctx context.Context) error { return r.s.Run(ctx) }
 func resultOf(r *scheduler.Result) plug.JobResultValue {
 	return plug.JobResultValue{
 		Name: r.Name, Scheduled: r.Scheduled, Started: r.Started, Finished: r.Finished,
-		Missed: r.Missed, Skipped: r.Skipped, Err: r.Err,
+		Missed: r.Missed, Skipped: r.Skipped, Expired: r.Expired, Replaced: r.Replaced, Err: r.Err,
 	}
 }

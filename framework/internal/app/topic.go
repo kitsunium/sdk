@@ -480,7 +480,7 @@ func (sb *SubscriptionWorker[T]) start(_ context.Context, a *App) error {
 			Parallelism:  sb.parallelism,
 			BatchSize:    consumerBatch,
 		}))
-	})
+	}, run.giveUp)
 	if err != nil {
 		return failure(CodeLoopStart, "LOOP_START", "a subscription's consumer cannot start", err, errs.String("subscription", sb.id))
 	}

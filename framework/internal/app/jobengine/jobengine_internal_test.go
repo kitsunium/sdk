@@ -3,6 +3,7 @@ package jobengine
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -80,6 +81,65 @@ func TestTheSchedulerFiresOnTheAppsClock(t *testing.T) {
 	if want := time.Date(2026, 10, 17, 8, 1, 0, 0, time.UTC); !r.Scheduled.Equal(want) {
 		t.Errorf("scheduled at %v, want %v", r.Scheduled, want)
 	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Errorf("the run ended: %v", err)
+	}
+}
+
+// A job's overlap policy and starting deadline are the SDK's: a fire the
+// scheduler comes to past the deadline is heard expired, never run; a fire
+// due while the run of a job that replaces its runs still goes cancels that
+// run, which the framework hears replaced; and a policy the SDK does not
+// define is the SDK's refusal.
+func TestTheOverlapAndTheDeadlineAreTheSDKs(t *testing.T) {
+	mc := clock.NewManualClock(time.Date(2026, 10, 22, 8, 0, 0, 0, time.UTC))
+	results := make(chan plug.JobResultValue, 8)
+	s := open(&plug.JobSchedulerConfig{Clock: manual{mc}, OnResult: func(r plug.JobResultValue) { results <- r }})
+	hourly, err := every(time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{}, 4)
+	if err := s.Add(plug.JobEntryValue{Name: "sync", Schedule: hourly, Overlap: 2, Run: func(ctx context.Context) error {
+		started <- struct{}{}
+		<-ctx.Done()
+		return ctx.Err()
+	}}); err != nil {
+		t.Fatalf("add a job that replaces its runs: %v", err)
+	}
+	var lateRuns atomic.Int32
+	if err := s.Add(plug.JobEntryValue{Name: "late", Schedule: hourly, StartingDeadline: time.Minute, Run: func(context.Context) error {
+		lateRuns.Add(1)
+		return nil
+	}}); err != nil {
+		t.Fatalf("add a job with a deadline: %v", err)
+	}
+	odd := plug.JobEntryValue{Name: "odd", Schedule: hourly, Overlap: 9, Run: func(context.Context) error { return nil }}
+	if err := s.Add(odd); !errors.Is(err, scheduler.InvalidEntry) {
+		t.Errorf("an overlap the SDK does not define: %v, want InvalidEntry", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- s.Run(ctx) }()
+	mc.BlockUntil(1)
+	mc.Advance(time.Hour + 2*time.Minute) // the scheduler comes to the 9:00 fires two minutes late
+	<-started
+	if r := <-results; r.Name != "late" || !r.Expired || !r.Started.IsZero() || lateRuns.Load() != 0 {
+		t.Errorf("the late fire: %+v, %d runs; want expired, never run", r, lateRuns.Load())
+	}
+	mc.BlockUntil(1)
+	mc.Advance(58 * time.Minute) // 10:00, on time: the next fire replaces the run still going
+	for r := range results {
+		if r.Name != "sync" {
+			continue
+		}
+		if !r.Replaced || !errors.Is(r.Err, context.Canceled) || r.Started.IsZero() {
+			t.Errorf("the run a newer fire replaced: %+v", r)
+		}
+		break
+	}
+	<-started
 	cancel()
 	if err := <-done; err != nil {
 		t.Errorf("the run ended: %v", err)

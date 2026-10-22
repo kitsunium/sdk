@@ -1987,11 +1987,15 @@ sequences:
           when: sched != nil
       - switch:
           cases:
-            - case: errors.Is(r.Err, errOverlapped)
+            - case: errors.Is(r.Err, errOverlapped), r.Replaced && r.Started.IsZero()
               do:
                 - eval: l.skipped(a)
                   to: l.skipped
-            - case: "!r.Skipped"
+            - case: r.Replaced && errors.Is(r.Err, context.Canceled)
+              do:
+                - eval: l.ran(a, r.Started, r.Finished, nil)
+                  to: l.ran
+            - case: "!r.Skipped && !r.Expired"
               do:
                 - eval: l.ran(a, r.Started, r.Finished, r.Err)
                   to: l.ran
@@ -2000,6 +2004,11 @@ sequences:
       - op: +=
         set: l.Missed
         value: int64(r.Missed)
+      - opt:
+          do:
+            - op: ++
+              set: l.Missed
+          when: r.Expired
       - opt:
           do:
             - op: ++
@@ -8194,11 +8203,16 @@ sequences:
         kind: self
       - id: lifecycle
         kind: package
+      - id: a.supervise
+        kind: internal
       - id: sup.Start
         kind: value
     steps:
       - bind: a, loop
         eval: c.a, c.loop
+      - var:
+          name: lastErr
+          type: error
       - bind: sup, err
         eval: |-
           lifecycle.NewSupervisor(loop.Name, func(ctx context.Context) error {
@@ -8207,14 +8221,23 @@ sequences:
           		Clock:        a.clock,
           		Backoff:      loopBackoff,
           		HealthyAfter: healthyRun,
+          		GiveUpAfter:  giveUp,
           		Observe: func(e lifecycle.SupervisionEvent) {
-          			c.observe(&e)
+          			lastErr = c.observe(&e, giveUp, lastErr)
           		},
           	})
         to: lifecycle
       - opt:
           do:
             - return: nil, err
+          when: err != nil
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: a.supervise(c.node, supervisorCheck(sup))
+            to: a.supervise
           when: err != nil
       - opt:
           do:
@@ -8233,15 +8256,17 @@ sequences:
         kind: self
       - id: loop.restarted
         kind: internal
-      - id: a.problem
-        kind: internal
-      - id: loop.failed
+      - id: c.ended
         kind: internal
       - id: logger
         kind: package
       - id: loop.idle
         kind: internal
       - id: loop.setState
+        kind: internal
+      - id: a.reportRestart
+        kind: internal
+      - id: a.gaveUp
         kind: internal
     steps:
       - bind: a, loop
@@ -8257,13 +8282,10 @@ sequences:
                     when: e.Run > 1
             - case: lifecycle.SupervisionRunEnded
               do:
-                - opt:
-                    do:
-                      - eval: a.problem(c.node, say("consumer.failed", "node", c.node, "detail", errs.PublicOf(e.Err)))
-                        to: a.problem
-                      - eval: loop.failed(a, e.Err)
-                        to: loop.failed
-                    when: e.Err != nil && !e.Stopping
+                - set: lastErr
+                  value: e.Err
+                - eval: c.ended(e)
+                  to: c.ended
             - case: lifecycle.SupervisionRestarting
               do:
                 - eval: logger.Warn(context.Background(), a.log, "a consumer stopped; restarting it", logger.String("node", c.node), logger.String("after", e.Delay.String()))
@@ -8272,18 +8294,44 @@ sequences:
                   to: loop.idle
                 - eval: loop.setState(a, model.LoopRestarting)
                   to: loop.setState
+                - eval: a.reportRestart(c.node, lastErr, e.Delay)
+                  to: a.reportRestart
+            - case: lifecycle.SupervisionGaveUp
+              do:
+                - eval: a.gaveUp(loop, c.node, giveUp, e.Err)
+                  to: a.gaveUp
             - case: lifecycle.SupervisionStopped
               do:
                 - eval: loop.setState(a, model.LoopStopped)
                   to: loop.setState
             - default: true
           "on": e.Phase
+      - return: lastErr
+  - of: (*consumer).ended
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*consumer).ended
+        kind: self
+      - id: c.a.problem
+        kind: internal
+      - id: c.loop.failed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: e.Err == nil || e.Stopping
+      - eval: c.a.problem(c.node, say("consumer.failed", "node", c.node, "detail", errs.PublicOf(e.Err)))
+        to: c.a.problem
+      - eval: c.loop.failed(c.a, e.Err)
+        to: c.loop.failed
   - of: defaultDeliveries
     steps:
       - return: "deliveryOptions{maxDeliveries: defaultMaxDeliveries, parallelism: 1, knobs: defaultConsumerKnobs()}"
   - of: defaultConsumerKnobs
     steps:
-      - return: "consumerKnobs{drain: defaultDrain, settle: defaultSettle, lease: defaultLease, autoExtend: true}"
+      - return: "consumerKnobs{drain: defaultDrain, settle: defaultSettle, lease: defaultLease, autoExtend: true, giveUp: defaultGiveUp()}"
   - of: (*consumerKnobs).declare
     participants:
       - id: caller
@@ -8291,6 +8339,8 @@ sequences:
       - id: (*consumerKnobs).declare
         kind: self
       - id: declarePolicySetting
+        kind: internal
+      - id: k.giveUp.declare
         kind: internal
     steps:
       - set: k.drainFor
@@ -8305,12 +8355,15 @@ sequences:
       - set: k.autoExtendFor
         to: declarePolicySetting
         value: declarePolicySetting(svc, n, knobAutoExtend, k.autoExtend, nil)
+      - eval: k.giveUp.declare(svc, n)
+        to: k.giveUp.declare
   - of: (*consumerKnobs).values
     steps:
       - return: |-
           consumerRun{
           		drain: knobValue(k.drainFor, k.drain), settle: knobValue(k.settleFor, k.settle),
           		lease: knobValue(k.leaseFor, k.lease), autoExtend: knobValue(k.autoExtendFor, k.autoExtend),
+          		giveUp: k.giveUp.value(),
           	}
   - of: consumerRun.policy
     participants:
@@ -8345,12 +8398,17 @@ sequences:
         kind: self
       - id: strconv
         kind: stdlib
+      - id: giveUpText
+        kind: internal
     steps:
       - set: into["drain"], into["settle"], into["lease"]
         value: r.drain.String(), r.settle.String(), r.lease.String()
       - set: into["autoExtend"]
         to: strconv
         value: strconv.FormatBool(r.autoExtend)
+      - set: into["giveUp"]
+        to: giveUpText
+        value: giveUpText(r.giveUp)
   - of: (*App).componentStopBudget
     steps:
       - bind: budget
@@ -9183,16 +9241,27 @@ sequences:
           when: a.hub != nil && a.hub.enabled
       - return: ctx
   - of: (*App).scheduled
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).scheduled
+        kind: self
+      - id: l.begin
+        kind: internal
     steps:
       - return:
           closure:
             params: ctx context.Context
             results: error
             steps:
-              - opt:
-                  do:
-                    - return: errOverlapped
-                  when: "!l.tryBegin(a, wake)"
+              - alt:
+                  - do:
+                      - eval: l.begin(a, wake)
+                        to: l.begin
+                    when: overlap == OverlapAllow
+                  - do:
+                      - return: errOverlapped
+                    when: "!l.tryBegin(a, wake)"
               - return: job(ctx)
   - of: (*App).newSchedRunner
     participants:
@@ -19199,7 +19268,7 @@ sequences:
         kind: internal
     steps:
       - bind: j
-        eval: s.job(name, fn, "interval", "every "+period.String())
+        eval: s.job(name, fn, "interval", "every "+period.String(), opts)
         to: s.job
       - set: j.period
         value: period
@@ -19214,7 +19283,7 @@ sequences:
         kind: internal
     steps:
       - bind: j
-        eval: s.job(name, fn, "cron", expr)
+        eval: s.job(name, fn, "cron", expr, opts)
         to: s.job
       - set: j.expr
         value: expr
@@ -19225,17 +19294,31 @@ sequences:
         kind: actor
       - id: (*Service).job
         kind: self
+      - id: o.jobConfigure
+        kind: internal
       - id: callerFrame
         kind: internal
       - id: bodyOf
         kind: internal
       - id: s.add
         kind: internal
+      - id: j.knobs.declare
+        kind: internal
       - id: s.problem
         kind: internal
     steps:
       - bind: j
-        eval: "&Job{fn: fn, schedule: schedule, jobKind: kind}"
+        eval: "&Job{fn: fn, schedule: schedule, jobKind: kind, knobs: defaultJobKnobs()}"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: o.jobConfigure(&j.knobs)
+                    to: o.jobConfigure
+                when: o != nil
+          key: _
+          range: opts
+          value: o
       - set: j.kind, j.name
         value: model.KindJob, name
       - set: j.decl
@@ -19246,6 +19329,8 @@ sequences:
         value: bodyOf(fn)
       - eval: s.add(j, true)
         to: s.add
+      - eval: j.knobs.declare(s, &j.nodeBase)
+        to: j.knobs.declare
       - opt:
           do:
             - eval: s.problem(j.decl, j.id, "job.nil", "name", name)
@@ -19298,6 +19383,8 @@ sequences:
         kind: self
       - id: a.begin
         kind: internal
+      - id: sp.attr
+        kind: internal
       - id: sp.end
         kind: internal
     steps:
@@ -19311,6 +19398,14 @@ sequences:
                 to: a.begin
               - bind: err
                 eval: j.fn(ctx)
+              - opt:
+                  do:
+                    - eval: sp.attr("cancelled", "true")
+                      to: sp.attr
+                    - eval: sp.end(nil)
+                      to: sp.end
+                    - return: err
+                  when: ctx.Err() != nil && errors.Is(err, context.Canceled)
               - eval: sp.end(err)
                 to: sp.end
               - return: err
@@ -19326,6 +19421,88 @@ sequences:
       - set: out.Job
         value: "&model.JobInfo{Schedule: j.schedule, Kind: j.jobKind}"
       - return: nil
+  - of: jobOption.jobConfigure
+    steps:
+      - eval: f(k)
+  - of: Overlap
+    steps:
+      - return: jobOption(func(k *jobKnobs) { k.overlap = string(p) })
+  - of: StartingDeadline
+    steps:
+      - return: jobOption(func(k *jobKnobs) { k.deadline = d })
+  - of: defaultJobKnobs
+    steps:
+      - return: "jobKnobs{overlap: string(OverlapSkip)}"
+  - of: (*jobKnobs).declare
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*jobKnobs).declare
+        kind: self
+      - id: declarePolicySetting
+        kind: internal
+    steps:
+      - set: k.overlapFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobOverlap, k.overlap, checkOverlap())
+      - set: k.deadlineFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobStartingDeadline, k.deadline, checkStartingDeadline())
+  - of: (*jobKnobs).overlapIn
+    steps:
+      - return: OverlapPolicy(knobValue(k.overlapFor, k.overlap))
+  - of: (*jobKnobs).deadlineIn
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*jobKnobs).deadlineIn
+        kind: self
+      - id: knobValue
+        kind: internal
+    steps:
+      - return: knobValue(k.deadlineFor, k.deadline)
+        to: knobValue
+  - of: OverlapPolicy.number
+    steps:
+      - switch:
+          cases:
+            - case: OverlapSkip
+              do:
+                - return: "0"
+            - case: OverlapAllow
+              do:
+                - return: "1"
+            - case: OverlapReplace
+              do:
+                - return: "2"
+          "on": p
+      - return: unknownOverlap
+  - of: checkOverlap
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkOverlap
+        kind: self
+      - id: judged
+        kind: internal
+    steps:
+      - return: |-
+          judged(func(s string) bool {
+          		p := OverlapPolicy(s)
+          		return p == OverlapSkip || p == OverlapAllow || p == OverlapReplace
+          	}, func() phrase { return say("policy.overlap") })
+        to: judged
+  - of: checkStartingDeadline
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkStartingDeadline
+        kind: self
+      - id: judged
+        kind: internal
+    steps:
+      - return: judged(func(d time.Duration) bool { return d >= 0 }, func() phrase { return say("policy.starting-deadline") })
+        to: judged
   - of: jobsMissing
     participants:
       - id: caller
@@ -19354,6 +19531,8 @@ sequences:
       - id: j.scheduleOf
         kind: internal
       - id: a.loop
+        kind: internal
+      - id: j.knobs.overlapIn
         kind: internal
       - id: sched.Add
         kind: value
@@ -19385,12 +19564,21 @@ sequences:
               to: a.loop
             - set: l.schedule
               value: schedule
+            - bind: overlap
+              eval: j.knobs.overlapIn()
+              to: j.knobs.overlapIn
+            - bind: entry
+              eval: |-
+                plug.JobEntryValue{
+                			Name: j.id, Schedule: schedule, Run: a.scheduled(l, j.wake(), overlap, j.run(a)),
+                			Overlap: overlap.number(), StartingDeadline: j.knobs.deadlineIn(),
+                		}
             - opt:
                 do:
                   - return: nil, err
                 init:
                   bind: err
-                  eval: "sched.Add(plug.JobEntryValue{Name: j.id, Schedule: schedule, Run: a.scheduled(l, j.wake(), j.run(a))})"
+                  eval: sched.Add(entry)
                   to: sched.Add
                 when: err != nil
           key: _
@@ -20732,6 +20920,8 @@ sequences:
         kind: internal
       - id: s.add
         kind: internal
+      - id: l.opts.giveUp.declare
+        kind: internal
       - id: s.problem
         kind: internal
     steps:
@@ -20761,6 +20951,8 @@ sequences:
           when: p.file() != ""
       - eval: s.add(l, true)
         to: s.add
+      - eval: l.opts.giveUp.declare(s, &l.nodeBase)
+        to: l.opts.giveUp.declare
       - opt:
           do:
             - eval: s.problem(l.decl, l.id, "loop.nil", "name", name)
@@ -20791,7 +20983,7 @@ sequences:
   - of: (*Loop).describe
     steps:
       - bind: info
-        eval: "&model.LoopInfo{Style: model.LoopDeclared, Restart: \"after a failure or a panic, backing off from 1s to 1m\"}"
+        eval: "&model.LoopInfo{Style: model.LoopDeclared, Restart: restartText(\"after a failure or a panic\", l.opts.giveUp.value())}"
       - set: info.Wakes
         value: "append(info.Wakes, model.WakeSource{Kind: model.WakeStart})"
       - opt:
@@ -20944,6 +21136,8 @@ sequences:
         kind: self
       - id: failure
         kind: internal
+      - id: a.supervise
+        kind: internal
       - id: context
         kind: stdlib
       - id: l.mu.Lock
@@ -20965,18 +21159,28 @@ sequences:
           key: _
           range: l.opts.topics
           value: t
-      - bind: ctx, cancel
-        eval: context.WithCancel(context.WithoutCancel(a.baseCtx))
-        to: context
       - bind: r
         eval: |-
           &loopRun{
-          		a:      a,
-          		state:  a.frameworkLoop(l.id, l.id, model.LoopWake, l.schedule(), loopOrigin{model.ProvenanceApp, frameworkName}),
-          		wake:   make(chan struct{}, 1),
-          		cancel: cancel,
-          		done:   make(chan struct{}),
+          		a:     a,
+          		state: a.frameworkLoop(l.id, l.id, model.LoopWake, l.schedule(), loopOrigin{model.ProvenanceApp, frameworkName}),
+          		wake:  make(chan struct{}, 1),
+          		done:  make(chan struct{}),
           	}
+      - opt:
+          do:
+            - return: failure(CodeLoopStart, "LOOP_START", "a loop cannot start", err, errs.String("loop", l.id))
+              to: failure
+          init:
+            bind: err
+            eval: a.supervise(l.id, func() error { return l.gaveUpOf(r) })
+            to: a.supervise
+          when: err != nil
+      - bind: ctx, cancel
+        eval: context.WithCancel(context.WithoutCancel(a.baseCtx))
+        to: context
+      - set: r.cancel
+        value: cancel
       - loop:
           do:
             - bind: topic
@@ -21049,6 +21253,8 @@ sequences:
         kind: internal
       - id: wakeOf
         kind: internal
+      - id: l.opts.giveUp.value
+        kind: internal
       - id: a.clock.Now
         kind: value
       - id: l.once
@@ -21075,6 +21281,9 @@ sequences:
         to: wakeOf
       - bind: failures
         eval: "0"
+      - bind: giveUp
+        eval: l.opts.giveUp.value()
+        to: l.opts.giveUp.value
       - loop:
           do:
             - bind: started
@@ -21111,6 +21320,10 @@ sequences:
                 do:
                   - return: ""
                 when: ctx.Err() != nil
+            - opt:
+                do:
+                  - return: ""
+                when: l.failed(r, giveUp, ended, next.floor, err)
             - var:
                 name: ok
                 type: bool
@@ -21435,15 +21648,29 @@ sequences:
         kind: actor
       - id: (*Service).Go
         kind: self
+      - id: o.routineConfigure
+        kind: internal
       - id: bodyOf
         kind: internal
       - id: s.add
+        kind: internal
+      - id: r.opts.giveUp.declare
         kind: internal
       - id: s.problem
         kind: internal
     steps:
       - bind: r
-        eval: "&Routine{run: run}"
+        eval: "&Routine{run: run, opts: routineOptions{giveUp: defaultGiveUp()}}"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: o.routineConfigure(&r.opts)
+                    to: o.routineConfigure
+                when: o != nil
+          key: _
+          range: opts
+          value: o
       - set: r.kind, r.name, r.decl
         value: model.KindLoop, name, callerPos()
       - set: r.body
@@ -21451,6 +21678,8 @@ sequences:
         value: bodyOf(run)
       - eval: s.add(r, true)
         to: s.add
+      - eval: r.opts.giveUp.declare(s, &r.nodeBase)
+        to: r.opts.giveUp.declare
       - opt:
           do:
             - eval: s.problem(r.decl, r.id, "routine.nil", "name", name)
@@ -21458,9 +21687,17 @@ sequences:
           when: run == nil
       - return: r
   - of: (*Routine).describe
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Routine).describe
+        kind: self
+      - id: r.opts.info
+        kind: internal
     steps:
       - set: out.Loop
-        value: "&model.LoopInfo{Style: model.LoopGoroutine, Restart: \"after an error or a panic, backing off from 1s to 1m\"}"
+        to: r.opts.info
+        value: r.opts.info()
       - return: nil
   - of: (*Routine).start
     participants:
@@ -21470,8 +21707,12 @@ sequences:
         kind: self
       - id: a.frameworkLoop
         kind: internal
+      - id: r.opts.giveUp.value
+        kind: internal
       - id: lifecycle
         kind: package
+      - id: a.supervise
+        kind: internal
       - id: sup.Start
         kind: value
       - id: failure
@@ -21487,6 +21728,9 @@ sequences:
       - var:
           name: lastErr
           type: error
+      - bind: giveUp
+        eval: r.opts.giveUp.value()
+        to: r.opts.giveUp.value
       - bind: sup, err
         eval: |-
           lifecycle.NewSupervisor(r.id, func(ctx context.Context) error {
@@ -21498,11 +21742,18 @@ sequences:
           		Clock:        a.clock,
           		Backoff:      loopBackoff,
           		HealthyAfter: healthyRun,
+          		GiveUpAfter:  giveUp,
           		Observe: func(e lifecycle.SupervisionEvent) {
-          			lastErr = r.observe(a, state, &e, lastErr)
+          			lastErr = r.observe(a, state, &e, giveUp, lastErr)
           		},
           	})
         to: lifecycle
+      - opt:
+          do:
+            - set: err
+              to: a.supervise
+              value: a.supervise(r.id, supervisorCheck(sup))
+          when: err == nil
       - opt:
           do:
             - set: err
@@ -21542,6 +21793,10 @@ sequences:
       - id: logger
         kind: package
       - id: state.setState
+        kind: internal
+      - id: a.reportRestart
+        kind: internal
+      - id: a.gaveUp
         kind: internal
     steps:
       - switch:
@@ -21590,6 +21845,12 @@ sequences:
                   to: state.idle
                 - eval: state.setState(a, model.LoopRestarting)
                   to: state.setState
+                - eval: a.reportRestart(r.id, lastErr, e.Delay)
+                  to: a.reportRestart
+            - case: lifecycle.SupervisionGaveUp
+              do:
+                - eval: a.gaveUp(state, r.id, giveUp, e.Err)
+                  to: a.gaveUp
             - case: lifecycle.SupervisionStopped
               do:
                 - eval: state.setState(a, model.LoopStopped)
@@ -21693,7 +21954,7 @@ sequences:
         to: a.mu.Unlock
   - of: NewLoop
     steps:
-      - return: "&Loop{run: run}"
+      - return: "&Loop{run: run, opts: loopOptions{giveUp: defaultGiveUp()}}"
   - of: laterOf
     steps:
       - opt:
@@ -34779,7 +35040,7 @@ sequences:
         eval: c.handler(a, q, loop)
         to: c.handler
       - bind: sup, err
-        eval: cons.supervise(func(ctx context.Context) error { return c.consume(ctx, q, run, handler) })
+        eval: cons.supervise(func(ctx context.Context) error { return c.consume(ctx, q, run, handler) }, run.giveUp)
         to: cons.supervise
       - opt:
           do:
@@ -55298,6 +55559,307 @@ sequences:
         to: slices
       - return: slices.Compact(pkgs)
         to: slices
+  - of: defaultGiveUp
+    steps:
+      - return: "giveUpKnobs{restarts: defaultGiveUpRestarts, within: defaultGiveUpWithin}"
+  - of: (*giveUpKnobs).declare
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*giveUpKnobs).declare
+        kind: self
+      - id: declarePolicySetting
+        kind: internal
+    steps:
+      - set: k.restartsFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobGiveUpRestarts, k.restarts, checkNotNegative())
+      - set: k.withinFor
+        to: declarePolicySetting
+        value: declarePolicySetting(svc, n, knobGiveUpWithin, k.within, checkGiveUpWithin())
+  - of: (*giveUpKnobs).value
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*giveUpKnobs).value
+        kind: self
+      - id: knobValue
+        kind: internal
+    steps:
+      - bind: within
+        eval: knobValue(k.withinFor, k.within)
+        to: knobValue
+      - opt:
+          do:
+            - return: lifecycle.GiveUp{}
+          when: within <= 0
+      - return: "lifecycle.GiveUp{Restarts: knobValue(k.restartsFor, k.restarts), Within: within}"
+  - of: giveUpText
+    steps:
+      - opt:
+          do:
+            - return: "\"never gives up\""
+          when: g.Within <= 0
+      - return: "\"gives up after \" + strconv.Itoa(g.Restarts) + \" within \" + g.Within.String()"
+  - of: checkGiveUpWithin
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkGiveUpWithin
+        kind: self
+      - id: judged
+        kind: internal
+    steps:
+      - return: judged(func(d time.Duration) bool { return d >= 0 }, func() phrase { return say("policy.give-up-within") })
+        to: judged
+  - of: (*routineOptions).info
+    steps:
+      - return: "&model.LoopInfo{Style: model.LoopGoroutine, Restart: restartText(\"after an error or a panic\", o.giveUp.value())}"
+  - of: giveUpOption.set
+    steps:
+      - set: k.restarts, k.within
+        value: g.restarts, g.within
+  - of: giveUpOption.subscriptionConfigure
+    participants:
+      - id: caller
+        kind: actor
+      - id: giveUpOption.subscriptionConfigure
+        kind: self
+      - id: g.set
+        kind: internal
+    steps:
+      - eval: g.set(&o.knobs.giveUp)
+        to: g.set
+  - of: giveUpOption.commandConfigure
+    participants:
+      - id: caller
+        kind: actor
+      - id: giveUpOption.commandConfigure
+        kind: self
+      - id: g.set
+        kind: internal
+    steps:
+      - set: o.deliveriesGiven
+        value: "true"
+      - eval: g.set(&o.deliveries.knobs.giveUp)
+        to: g.set
+  - of: giveUpOption.loopConfigure
+    participants:
+      - id: caller
+        kind: actor
+      - id: giveUpOption.loopConfigure
+        kind: self
+      - id: g.set
+        kind: internal
+    steps:
+      - eval: g.set(&o.giveUp)
+        to: g.set
+  - of: giveUpOption.routineConfigure
+    participants:
+      - id: caller
+        kind: actor
+      - id: giveUpOption.routineConfigure
+        kind: self
+      - id: g.set
+        kind: internal
+    steps:
+      - eval: g.set(&o.giveUp)
+        to: g.set
+  - of: GiveUpAfter
+    steps:
+      - return: "giveUpOption{restarts: restarts, within: within}"
+  - of: (*App).supervise
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).supervise
+        kind: self
+      - id: a.health.AddLiveness
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: a.health == nil
+      - return: "a.health.AddLiveness(health.LivenessCheck{Name: supervisedCheck + node, Check: check})"
+        to: a.health.AddLiveness
+  - of: supervisorCheck
+    participants:
+      - id: caller
+        kind: actor
+      - id: supervisorCheck
+        kind: self
+      - id: sup.Check
+        kind: value
+    steps:
+      - return:
+          closure:
+            results: error
+            steps:
+              - return: sup.Check(context.Background())
+                to: sup.Check
+  - of: (*App).gaveUp
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).gaveUp
+        kind: self
+      - id: l.givenUp
+        kind: internal
+      - id: a.problem
+        kind: internal
+      - id: logger
+        kind: package
+      - id: a.reportGaveUp
+        kind: internal
+    steps:
+      - eval: l.givenUp(a, err)
+        to: l.givenUp
+      - eval: |-
+          a.problem(node, say("supervision.gave-up", "node", node, "restarts", g.Restarts, "within", g.Within.String(),
+          		"check", supervisedCheck+node))
+        to: a.problem
+      - eval: |-
+          logger.Error(context.Background(), a.log, "the framework gave up restarting "+node+": the product is no longer live",
+          		logger.String("node", node), logger.Int("restarts", g.Restarts), logger.String("within", g.Within.String()),
+          		logger.String("error", errs.PublicOf(err)))
+        to: logger
+      - eval: a.reportGaveUp(node, err)
+        to: a.reportGaveUp
+  - of: loopGaveUp
+    participants:
+      - id: caller
+        kind: actor
+      - id: loopGaveUp
+        kind: self
+      - id: failure
+        kind: internal
+    steps:
+      - bind: fields
+        eval: |-
+          []errs.Field{
+          		errs.String("loop", node), errs.Int("restarts", g.Restarts), errs.String("within", g.Within.String()),
+          	}
+      - opt:
+          do:
+            - set: fields
+              value: append(fields, errs.String("last", errs.PublicOf(last)))
+          when: last != nil
+      - return: failure(CodeGaveUp, "GAVE_UP", "a loop failed too often and the framework stopped running it", nil, fields...)
+        to: failure
+  - of: restartText
+    steps:
+      - return: what + ", backing off from 1s to 1m; " + giveUpText(g)
+  - of: endsWithin
+    steps:
+      - opt:
+          do:
+            - return: ends[:0]
+          when: within <= 0
+      - bind: stale
+        eval: "0"
+      - loop:
+          cond: stale < len(ends) && at.Sub(ends[stale]) >= within
+          do:
+            - op: ++
+              set: stale
+      - set: ends
+        value: ends[:copy(ends, ends[stale:])]
+      - return: append(ends, at)
+  - of: (*Loop).failed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Loop).failed
+        kind: self
+      - id: endsWithin
+        kind: internal
+      - id: l.giveUp
+        kind: internal
+      - id: r.a.reportRestart
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: err == nil
+      - set: r.ends
+        to: endsWithin
+        value: endsWithin(r.ends, ended, g.Within)
+      - opt:
+          do:
+            - eval: l.giveUp(r, g, err)
+              to: l.giveUp
+            - return: "true"
+          when: g.Within > 0 && len(r.ends) > g.Restarts
+      - eval: r.a.reportRestart(l.id, err, floor.Sub(ended))
+        to: r.a.reportRestart
+      - return: "false"
+  - of: (*Loop).giveUp
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Loop).giveUp
+        kind: self
+      - id: loopGaveUp
+        kind: internal
+      - id: r.a.gaveUp
+        kind: internal
+      - id: l.mu.Lock
+        kind: value
+      - id: l.mu.Unlock
+        kind: value
+    steps:
+      - bind: err
+        eval: loopGaveUp(l.id, g, last)
+        to: loopGaveUp
+      - eval: r.a.gaveUp(r.state, l.id, g, err)
+        to: r.a.gaveUp
+      - eval: l.mu.Lock()
+        to: l.mu.Lock
+      - set: r.gaveUp
+        value: err
+      - eval: l.mu.Unlock()
+        to: l.mu.Unlock
+  - of: (*Loop).gaveUpOf
+    steps:
+      - lock:
+          mutex: l.mu
+      - return: r.gaveUp
+  - of: (*loopState).givenUp
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loopState).givenUp
+        kind: self
+      - id: a.mu.Lock
+        kind: value
+      - id: describe
+        kind: internal
+      - id: a.mu.Unlock
+        kind: value
+      - id: a.hub.publish
+        kind: internal
+    steps:
+      - eval: a.mu.Lock()
+        to: a.mu.Lock
+      - set: l.State
+        value: model.LoopStopped
+      - set: l.active
+        value: "0"
+      - set: l.NextRun
+        value: nil
+      - bind: _, body
+        eval: describe(err)
+        to: describe
+      - set: l.LastError
+        value: body.Message
+      - bind: snapshot
+        eval: l.Loop
+      - eval: a.mu.Unlock()
+        to: a.mu.Unlock
+      - eval: "a.hub.publish(model.Event{Type: model.EventLoop, Loop: &snapshot})"
+        to: a.hub.publish
   - of: Telemetry
     steps:
       - return: appOption(func(o *appOptions) { o.telemetry, o.telemetryGIDs = &path, gids })
@@ -55629,6 +56191,80 @@ sequences:
             - set: ev.Outcome
               value: telemetry.OutcomeError
           when: to == resilience.BreakerOpen
+      - eval: ex.Emit(&ev)
+        to: ex.Emit
+  - of: (*App).reportRestart
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).reportRestart
+        kind: self
+      - id: a.tel.Load
+        kind: value
+      - id: errs
+        kind: package
+      - id: ex.Emit
+        kind: value
+    steps:
+      - bind: ex
+        eval: a.tel.Load()
+        to: a.tel.Load
+      - opt:
+          do:
+            - return: ""
+          when: ex == nil
+      - bind: ev
+        eval: |-
+          telemetry.Event{
+          		Kind: telemetry.KindRestart, Op: telemetry.OpRun, Outcome: telemetry.OutcomeError,
+          		Node: ex.Ref(node), Start: a.clock.Now().UnixNano(), Duration: int64(delay),
+          	}
+      - opt:
+          do:
+            - set: ev.Code
+              value: uint32(code)
+          init:
+            bind: code, ok
+            eval: errs.CodeOf(err)
+            to: errs
+          when: ok
+      - eval: ex.Emit(&ev)
+        to: ex.Emit
+  - of: (*App).reportGaveUp
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).reportGaveUp
+        kind: self
+      - id: a.tel.Load
+        kind: value
+      - id: errs
+        kind: package
+      - id: ex.Emit
+        kind: value
+    steps:
+      - bind: ex
+        eval: a.tel.Load()
+        to: a.tel.Load
+      - opt:
+          do:
+            - return: ""
+          when: ex == nil
+      - bind: ev
+        eval: |-
+          telemetry.Event{
+          		Kind: telemetry.KindGaveUp, Op: telemetry.OpStopped, Outcome: telemetry.OutcomeError,
+          		Node: ex.Ref(node), Start: a.clock.Now().UnixNano(),
+          	}
+      - opt:
+          do:
+            - set: ev.Code
+              value: uint32(code)
+          init:
+            bind: code, ok
+            eval: errs.CodeOf(err)
+            to: errs
+          when: ok
       - eval: ex.Emit(&ev)
         to: ex.Emit
   - of: (*Service).Topic
@@ -56181,7 +56817,7 @@ sequences:
           			Parallelism:  sb.parallelism,
           			BatchSize:    consumerBatch,
           		}))
-          	})
+          	}, run.giveUp)
       - opt:
           do:
             - return: failure(CodeLoopStart, "LOOP_START", "a subscription's consumer cannot start", err, errs.String("subscription", sb.id))
@@ -59888,7 +60524,7 @@ sequences:
         to: cr.consume
       - set: r.sup, err
         to: c.supervise
-        value: c.supervise(func(ctx context.Context) error { return w.consume(ctx, r, cfg) })
+        value: c.supervise(func(ctx context.Context) error { return w.consume(ctx, r, cfg) }, cr.giveUp)
       - opt:
           do:
             - loop:

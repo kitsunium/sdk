@@ -299,7 +299,7 @@ func (c *Command[C, R]) start(_ context.Context, a *App) error {
 	c.queue.Store(q)
 	cons := consumer{a: a, loop: loop, node: c.id, name: c.name, wake: model.WakeTopic}
 	handler := c.handler(a, q, loop)
-	sup, err := cons.supervise(func(ctx context.Context) error { return c.consume(ctx, q, run, handler) })
+	sup, err := cons.supervise(func(ctx context.Context) error { return c.consume(ctx, q, run, handler) }, run.giveUp)
 	if err != nil {
 		return failure(CodeLoopStart, "LOOP_START", "a queued command's consumer cannot start", err, errs.String("command", c.id))
 	}

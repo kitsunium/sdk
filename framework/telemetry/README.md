@@ -88,12 +88,26 @@ const KindBreaker Kind = 4
 
 KindBreaker is a port's breaker changing phase: Node is the port, Op the phase it enters — closed, open, half-open.
 
+<a name="KindGaveUp"></a>
+```go
+const KindGaveUp Kind = 6
+```
+
+KindGaveUp is a supervised loop the framework stopped restarting, its failures over their bound: Node is its node, Code the give-up's. The product is no longer live from then on.
+
 <a name="KindPhase"></a>
 ```go
 const KindPhase Kind = 2
 ```
 
 KindPhase is the process changing phase: starting, serving, draining, stopped, failed — Op carries it.
+
+<a name="KindRestart"></a>
+```go
+const KindRestart Kind = 5
+```
+
+KindRestart is a supervised loop restarting after a failure — a consumer, a declared or a hand-written loop —: Node is its node, Code the failure's, Duration the wait before it runs again. A reader counts a node's restarts by counting these.
 
 <a name="KindRetry"></a>
 ```go

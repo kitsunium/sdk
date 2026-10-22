@@ -22,7 +22,11 @@ kit's own job code — the declaration (`Job`, `Every`, `Cron`), the
 scheduler's component and loop, each job's loop and span, the overlap with a
 run the Studio started — names no SDK type and stays in the core; a job's
 schedule is read at the start, through the subsystem, never at the
-declaration, which a package's init may run before this package's.
+declaration, which a package's init may run before this package's. So are
+a job's overlap policy and starting deadline (issue #483 part 4,
+`app.Overlap`, `app.StartingDeadline`, the settings
+`<service>-job-<name>-overlap` and `-starting-deadline`): the core hands
+them to the subsystem as plug values, and the SDK's scheduler applies them.
 
 ## Contents
 

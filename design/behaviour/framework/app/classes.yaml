@@ -466,6 +466,13 @@ constants:
         type: errs.Code
         value: iapp.CodeRetryIn
       - doc: |-
+          CodeGaveUp marks a declared loop the framework stopped running: its runs
+          failed more often than its [GiveUpAfter] allows, and the product is no
+          longer live until the process restarts.
+        name: CodeGaveUp
+        type: errs.Code
+        value: iapp.CodeGaveUp
+      - doc: |-
           The signals the framework ends one of its own steps with and catches itself — a
           caller never receives one —, typed when the SDK made rule 2 a gate.
         name: CodeSealErased
@@ -492,6 +499,26 @@ constants:
         type: errs.Code
         value: iapp.CodeTransactionPanic
     name: WireInvalid
+  - grouped: true
+    items:
+      - doc: |-
+          OverlapSkip skips the fire, counted, the previous run going on: the
+          default, since the framework cannot know that two runs of a job may
+          run at once.
+        name: OverlapSkip
+        type: OverlapPolicy
+        value: iapp.OverlapSkip
+      - doc: OverlapAllow runs the fire beside the previous run.
+        name: OverlapAllow
+        type: OverlapPolicy
+        value: iapp.OverlapAllow
+      - doc: |-
+          OverlapReplace cancels the previous run's context and runs the fire
+          once that run returned: the newest fire wins, two runs never overlap.
+        name: OverlapReplace
+        type: OverlapPolicy
+        value: iapp.OverlapReplace
+    name: OverlapSkip
   - doc: |-
       CodeProfileRead reports a profile of the process that could not be written
       or read back. It is in the framework's 0.4.2.* range.
@@ -653,6 +680,11 @@ files:
     name: index.go
   - decls:
       - Job
+      - JobOption
+      - OverlapPolicy
+      - OverlapSkip
+      - Overlap
+      - StartingDeadline
     name: job.go
   - decls:
       - ListenHandler
@@ -671,6 +703,9 @@ files:
       - WakeEvery
       - WakeAt
       - WakeOn
+      - RoutineOption
+      - SupervisionOption
+      - GiveUpAfter
     name: loop.go
   - decls:
       - Mailer
@@ -1017,6 +1052,12 @@ functions:
     params: name string, keys func(T) []string
     results: StoreOption
     typeParams: T any
+  - name: Overlap
+    params: p OverlapPolicy
+    results: JobOption
+  - name: StartingDeadline
+    params: d time.Duration
+    results: JobOption
   - name: SocketPath
     params: path string
     results: ListenerOption
@@ -1039,6 +1080,9 @@ functions:
     params: topic *iapp.TopicService[T]
     results: LoopOption
     typeParams: T any
+  - name: GiveUpAfter
+    params: restarts int, within time.Duration
+    results: SupervisionOption
   - name: From
     params: name, addr string
     results: MailerOption
@@ -1575,6 +1619,21 @@ types:
     underlying: iapp.Job
   - alias: true
     doc: |-
+      JobOption configures a job ([Service].Every, [Service].Cron):
+      [Overlap], [StartingDeadline].
+    kind: alias
+    name: JobOption
+    underlying: iapp.JobConfigurer
+  - alias: true
+    doc: |-
+      OverlapPolicy is what a job's fire does while the job's previous run is
+      still going: [OverlapSkip], [OverlapAllow] or [OverlapReplace]. It is
+      the word of the job's setting <service>-job-<name>-overlap.
+    kind: alias
+    name: OverlapPolicy
+    underlying: iapp.OverlapPolicy
+  - alias: true
+    doc: |-
       ListenHandler serves one connection of a [Listener] until it returns; the
       connection is closed after it. conn.Peer says who connected, as the kernel
       says where it can (pkg/v1/proc/ipc).
@@ -1630,6 +1689,19 @@ types:
     kind: alias
     name: Routine
     underlying: iapp.Routine
+  - alias: true
+    doc: RoutineOption configures a hand-written loop ([Service].Go).
+    kind: alias
+    name: RoutineOption
+    underlying: iapp.RoutineConfigurer
+  - alias: true
+    doc: |-
+      SupervisionOption configures what the framework restarts after a
+      failure: a subscription's, a watch's or a queued command's consumer, a
+      declared loop, a hand-written loop ([GiveUpAfter]).
+    kind: alias
+    name: SupervisionOption
+    underlying: iapp.SupervisionConfigurer
   - alias: true
     doc: |-
       Mailer is outbound mail: a durable outbox and the transport that empties

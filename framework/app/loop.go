@@ -59,3 +59,39 @@ func WakeOn[T any](topic *iapp.TopicService[T]) LoopOption {
 	//: the implementation is framework/internal/app's; this facade only forwards.
 	return iapp.WakeOn[T](topic)
 }
+
+// RoutineOption configures a hand-written loop ([Service].Go).
+type RoutineOption = iapp.RoutineConfigurer
+
+// SupervisionOption configures what the framework restarts after a
+// failure: a subscription's, a watch's or a queued command's consumer, a
+// declared loop, a hand-written loop ([GiveUpAfter]).
+type SupervisionOption = iapp.SupervisionConfigurer
+
+// GiveUpAfter bounds how often the framework restarts what fails — a
+// subscription's, a watch's or a queued command's consumer whose queue
+// failed, a hand-written loop ([Service].Go) that returned, a declared
+// loop ([Service].Loop) whose run failed or panicked —: once it failed
+// more than restarts times within within, it is not restarted again, and
+// the product is no longer live — its liveness check
+// "supervised:<node>" fails, the problem names it — so that the process is
+// restarted rather than left running without it. It is Erlang's restart
+// intensity, the SDK's lifecycle supervisor's GiveUpAfter.
+//
+// The default is 10 within 10 minutes: with the restarts' backoff — one
+// second, doubling up to a minute — a component that fails at every start
+// is given up about five minutes after its first failure, and one that
+// fails once a minute or less often is restarted forever. A within of zero
+// never gives up; a negative value stops the start.
+//
+// restarts and within are the defaults of the settings
+// <service>-<kind>-<name>-give-up-restarts and -give-up-within, the kind
+// subscription, command or loop, which config/<env>.* and <PRODUCT>_<NAME>
+// override.
+//
+// IFACE-OPAQUE: the option is sealed — its methods are unexported — so a
+// caller only hands it to the declaration it configures.
+func GiveUpAfter(restarts int, within time.Duration) SupervisionOption {
+	//: the implementation is framework/internal/app's; this facade only forwards.
+	return iapp.GiveUpAfter(restarts, within)
+}

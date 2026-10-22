@@ -43,6 +43,23 @@ packages:
         name: KindBreaker
         type: Kind
         value: "4"
+      - blockDoc: The kinds.
+        doc: |-
+          KindRestart is a supervised loop restarting after a failure — a
+          consumer, a declared or a hand-written loop —: Node is its node, Code
+          the failure's, Duration the wait before it runs again. A reader counts
+          a node's restarts by counting these.
+        name: KindRestart
+        type: Kind
+        value: "5"
+      - blockDoc: The kinds.
+        doc: |-
+          KindGaveUp is a supervised loop the framework stopped restarting, its
+          failures over their bound: Node is its node, Code the give-up's. The
+          product is no longer live from then on.
+        name: KindGaveUp
+        type: Kind
+        value: "6"
       - blockDoc: The operations, in the order of their names in [OpNames]; zero is none.
         name: OpNone
         type: Op

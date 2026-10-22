@@ -915,6 +915,22 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/app.CodeGaveUp",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "CodeGaveUp",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "262745",
+      "init": "go:github.com/kitsunium/sdk/framework/internal/app.CodeGaveUp",
+      "code": {
+        "value": "0.4.2.89"
+      },
+      "doc": "CodeGaveUp marks a declared loop the framework stopped running: its runs\nfailed more often than its [GiveUpAfter] allows, and the product is no\nlonger live until the process restarts.\n",
+      "file": "framework/app/errors.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/app.CodeHandlerPanic",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/app",
@@ -2593,6 +2609,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/app.GiveUpAfter",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "GiveUpAfter",
+      "spelled": "func(restarts int, within time.Duration) SupervisionOption",
+      "canonical": "func(restarts int, within time.Duration) github.com/kitsunium/sdk/framework/app.SupervisionOption",
+      "doc": "GiveUpAfter bounds how often the framework restarts what fails — a\nsubscription's, a watch's or a queued command's consumer whose queue\nfailed, a hand-written loop ([Service].Go) that returned, a declared\nloop ([Service].Loop) whose run failed or panicked —: once it failed\nmore than restarts times within within, it is not restarted again, and\nthe product is no longer live — its liveness check\n\"supervised:<node>\" fails, the problem names it — so that the process is\nrestarted rather than left running without it. It is Erlang's restart\nintensity, the SDK's lifecycle supervisor's GiveUpAfter.\n\nThe default is 10 within 10 minutes: with the restarts' backoff — one\nsecond, doubling up to a minute — a component that fails at every start\nis given up about five minutes after its first failure, and one that\nfails once a minute or less often is restarted forever. A within of zero\nnever gives up; a negative value stops the start.\n\nrestarts and within are the defaults of the settings\n<service>-<kind>-<name>-give-up-restarts and -give-up-within, the kind\nsubscription, command or loop, which config/<env>.* and <PRODUCT>_<NAME>\noverride.\n\nIFACE-OPAQUE: the option is sealed — its methods are unexported — so a\ncaller only hands it to the declaration it configures.\n",
+      "file": "framework/app/loop.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/app.HalfOpenTrials",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/app",
@@ -2711,6 +2738,18 @@
       "canonical": "github.com/kitsunium/sdk/framework/internal/app.Job",
       "owner": "go:github.com/kitsunium/sdk/framework/internal/app.Job",
       "doc": "Job is scheduled work: a piece of the daemon's internal loop. It runs on\nthe SDK scheduler, whose decisions about time are documented rather than\nemergent: a fire that is due while the previous run of the same job is\nstill going is skipped and counted, and a missed deadline is skipped and\ncounted, never caught up.\n",
+      "file": "framework/app/job.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.JobOption",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "JobOption",
+      "spelled": "iapp.JobConfigurer",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/app.JobConfigurer",
+      "owner": "go:github.com/kitsunium/sdk/framework/internal/app.JobConfigurer",
+      "doc": "JobOption configures a job ([Service].Every, [Service].Cron):\n[Overlap], [StartingDeadline].\n",
       "file": "framework/app/job.go",
       "layer": "framework"
     },
@@ -3285,6 +3324,68 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/app.Overlap",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "Overlap",
+      "spelled": "func(p OverlapPolicy) JobOption",
+      "canonical": "func(p github.com/kitsunium/sdk/framework/app.OverlapPolicy) github.com/kitsunium/sdk/framework/app.JobOption",
+      "doc": "Overlap says what a fire of the job does while its previous run is still\ngoing: [OverlapSkip], the default, skips it and counts it; [OverlapAllow]\nruns it beside; [OverlapReplace] cancels the previous run's context and\nruns it once that run returned. Any other word stops the start.\n\np is the default of the job's setting <service>-job-<name>-overlap, which\nconfig/<env>.* and <PRODUCT>_<NAME> override.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/app/job.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.OverlapAllow",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "OverlapAllow",
+      "spelled": "OverlapPolicy",
+      "canonical": "github.com/kitsunium/sdk/framework/app.OverlapPolicy",
+      "value": "\"allow\"",
+      "init": "go:github.com/kitsunium/sdk/framework/internal/app.OverlapAllow",
+      "doc": "OverlapAllow runs the fire beside the previous run.\n",
+      "file": "framework/app/job.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.OverlapPolicy",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "OverlapPolicy",
+      "spelled": "iapp.OverlapPolicy",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/app.OverlapPolicy",
+      "owner": "go:github.com/kitsunium/sdk/framework/internal/app.OverlapPolicy",
+      "doc": "OverlapPolicy is what a job's fire does while the job's previous run is\nstill going: [OverlapSkip], [OverlapAllow] or [OverlapReplace]. It is\nthe word of the job's setting <service>-job-<name>-overlap.\n",
+      "file": "framework/app/job.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.OverlapReplace",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "OverlapReplace",
+      "spelled": "OverlapPolicy",
+      "canonical": "github.com/kitsunium/sdk/framework/app.OverlapPolicy",
+      "value": "\"replace\"",
+      "init": "go:github.com/kitsunium/sdk/framework/internal/app.OverlapReplace",
+      "doc": "OverlapReplace cancels the previous run's context and runs the fire\nonce that run returned: the newest fire wins, two runs never overlap.\n",
+      "file": "framework/app/job.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.OverlapSkip",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "OverlapSkip",
+      "spelled": "OverlapPolicy",
+      "canonical": "github.com/kitsunium/sdk/framework/app.OverlapPolicy",
+      "value": "\"skip\"",
+      "init": "go:github.com/kitsunium/sdk/framework/internal/app.OverlapSkip",
+      "doc": "OverlapSkip skips the fire, counted, the previous run going on: the\ndefault, since the framework cannot know that two runs of a job may\nrun at once.\n",
+      "file": "framework/app/job.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/app.OwnStores",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/app",
@@ -3745,6 +3846,18 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/app.RoutineOption",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "RoutineOption",
+      "spelled": "iapp.RoutineConfigurer",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/app.RoutineConfigurer",
+      "owner": "go:github.com/kitsunium/sdk/framework/internal/app.RoutineConfigurer",
+      "doc": "RoutineOption configures a hand-written loop ([Service].Go).\n",
+      "file": "framework/app/loop.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/app.Scope",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/framework/app",
@@ -3952,6 +4065,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/app.StartingDeadline",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "StartingDeadline",
+      "spelled": "func(d time.Duration) JobOption",
+      "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/app.JobOption",
+      "doc": "StartingDeadline bounds how late a fire of the job may still start: a\nscheduler that comes to a fire more than d after its instant — a machine\nthat slept, a run that held the slot — does not run it, and counts it\nmissed, as Kubernetes' startingDeadlineSeconds does. The default, zero, is\nno bound: the latest fire missed runs however late, never more than one.\nA negative d stops the start.\n\nd is the default of the job's setting\n<service>-job-<name>-starting-deadline, which config/<env>.* and\n<PRODUCT>_<NAME> override.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/app/job.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/app.Statements",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/app",
@@ -4054,6 +4178,18 @@
       "owner": "go:github.com/kitsunium/sdk/framework/internal/app.SubscriptionConfigurer",
       "doc": "SubscriptionOption configures a subscription.\n",
       "file": "framework/app/topic.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.SupervisionOption",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "SupervisionOption",
+      "spelled": "iapp.SupervisionConfigurer",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/app.SupervisionConfigurer",
+      "owner": "go:github.com/kitsunium/sdk/framework/internal/app.SupervisionConfigurer",
+      "doc": "SupervisionOption configures what the framework restarts after a\nfailure: a subscription's, a watch's or a queued command's consumer, a\ndeclared loop, a hand-written loop ([GiveUpAfter]).\n",
+      "file": "framework/app/loop.go",
       "layer": "framework"
     },
     {
@@ -6497,6 +6633,21 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.CodeGaveUp",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "CodeGaveUp",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "262745",
+      "code": {
+        "value": "0.4.2.89"
+      },
+      "doc": "CodeGaveUp marks a declared loop the framework stopped running: its\nruns failed more often than its [GiveUpAfter] allows, and the product\nis no longer live until the process restarts. A consumer and a\nhand-written loop give up through the SDK's supervisor, whose own\ncode — lifecycle's SupervisorGaveUp — their liveness check answers.\n",
+      "file": "framework/internal/app/gen_codes.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app.CodeHandlerPanic",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/internal/app",
@@ -8401,6 +8552,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.GiveUpAfter",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "GiveUpAfter",
+      "spelled": "func(restarts int, within time.Duration) SupervisionConfigurer",
+      "canonical": "func(restarts int, within time.Duration) github.com/kitsunium/sdk/framework/internal/app.SupervisionConfigurer",
+      "doc": "GiveUpAfter bounds how often the framework restarts what fails — a\nsubscription's, a watch's or a queued command's consumer whose queue\nfailed, a hand-written loop ([Service.Go]) that returned, a declared\nloop ([Service.Loop]) whose run failed or panicked —: once it failed\nmore than restarts times within within, it is not restarted again, and\nthe product is no longer live — its liveness check\n\"supervised:<node>\" fails, the problem names it — so that the process is\nrestarted rather than left running without it. It is Erlang's restart\nintensity, the SDK's lifecycle supervisor's GiveUpAfter.\n\nThe default is 10 within 10 minutes: with the restarts' backoff — one\nsecond, doubling up to a minute — a component that fails at every start\nis given up about five minutes after its first failure, and one that\nfails once a minute or less often is restarted forever. A within of zero\nnever gives up; a negative value stops the start.\n\nrestarts and within are the defaults of the settings\n<service>-<kind>-<name>-give-up-restarts and -give-up-within, the kind\nsubscription, command or loop, which config/<env>.* and <PRODUCT>_<NAME>\noverride.\n\nIFACE-OPAQUE: the option is sealed — its methods are unexported — so a\ncaller only hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/supervision.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app.HalfOpenTrials",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/internal/app",
@@ -8519,6 +8681,17 @@
       "canonical": "struct{}",
       "doc": "Job is scheduled work: a piece of the daemon's internal loop. It runs on\nthe SDK scheduler, whose decisions about time are documented rather than\nemergent: a fire that is due while the previous run of the same job is\nstill going is skipped and counted, and a missed deadline is skipped and\ncounted, never caught up.\n",
       "file": "framework/internal/app/job.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.JobConfigurer",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "JobConfigurer",
+      "spelled": "interface{jobConfigure(k *jobKnobs)}",
+      "canonical": "interface{jobConfigure(k *github.com/kitsunium/sdk/framework/internal/app.jobKnobs)}",
+      "doc": "JobConfigurer configures a job ([Service.Every], [Service.Cron]):\n[Overlap], [StartingDeadline].\n",
+      "file": "framework/internal/app/job_policy_interface.go",
       "layer": "framework"
     },
     {
@@ -9405,6 +9578,64 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.Overlap",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "Overlap",
+      "spelled": "func(p OverlapPolicy) JobConfigurer",
+      "canonical": "func(p github.com/kitsunium/sdk/framework/internal/app.OverlapPolicy) github.com/kitsunium/sdk/framework/internal/app.JobConfigurer",
+      "doc": "Overlap says what a fire of the job does while its previous run is still\ngoing: [OverlapSkip], the default, skips it and counts it; [OverlapAllow]\nruns it beside; [OverlapReplace] cancels the previous run's context and\nruns it once that run returned. Any other word stops the start.\n\np is the default of the job's setting <service>-job-<name>-overlap, which\nconfig/<env>.* and <PRODUCT>_<NAME> override.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/job_policy.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.OverlapAllow",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "OverlapAllow",
+      "spelled": "OverlapPolicy",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/app.OverlapPolicy",
+      "value": "\"allow\"",
+      "doc": "OverlapAllow runs the fire beside the previous run.\n",
+      "file": "framework/internal/app/job_policy.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.OverlapPolicy",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "OverlapPolicy",
+      "spelled": "string",
+      "canonical": "string",
+      "doc": "OverlapPolicy is what a job's fire does while the job's previous run is\nstill going: [OverlapSkip], [OverlapAllow] or [OverlapReplace]. It is\nthe word of the job's setting <service>-job-<name>-overlap.\n",
+      "file": "framework/internal/app/job_policy.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.OverlapReplace",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "OverlapReplace",
+      "spelled": "OverlapPolicy",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/app.OverlapPolicy",
+      "value": "\"replace\"",
+      "doc": "OverlapReplace cancels the previous run's context and runs the fire\nonce that run returned: the newest fire wins, two runs never overlap.\n",
+      "file": "framework/internal/app/job_policy.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.OverlapSkip",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "OverlapSkip",
+      "spelled": "OverlapPolicy",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/app.OverlapPolicy",
+      "value": "\"skip\"",
+      "doc": "OverlapSkip skips the fire, counted, the previous run going on: the\ndefault, since the framework cannot know that two runs of a job may\nrun at once.\n",
+      "file": "framework/internal/app/job_policy.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app.OwnStores",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/internal/app",
@@ -10025,6 +10256,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.RoutineConfigurer",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "RoutineConfigurer",
+      "spelled": "interface{routineConfigure(o *routineOptions)}",
+      "canonical": "interface{routineConfigure(o *github.com/kitsunium/sdk/framework/internal/app.routineOptions)}",
+      "doc": "RoutineConfigurer configures a hand-written loop ([Service.Go]).\n",
+      "file": "framework/internal/app/supervision_interface.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app.ScopeKey",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/internal/app",
@@ -10216,9 +10458,9 @@
       "package": "github.com/kitsunium/sdk/framework/internal/app",
       "name": "Cron",
       "recv": "Service",
-      "spelled": "func(name string, expr string, fn func(context.Context) error) *Job",
-      "canonical": "func(name string, expr string, fn func(context.Context) error) *github.com/kitsunium/sdk/framework/internal/app.Job",
-      "doc": "Cron declares a job that runs on a five-field POSIX cron expression, in the\nprocess's local time zone.\n",
+      "spelled": "func(name string, expr string, fn func(context.Context) error, opts ...JobConfigurer) *Job",
+      "canonical": "func(name string, expr string, fn func(context.Context) error, opts ...github.com/kitsunium/sdk/framework/internal/app.JobConfigurer) *github.com/kitsunium/sdk/framework/internal/app.Job",
+      "doc": "Cron declares a job that runs on a five-field POSIX cron expression, in the\nprocess's local time zone. A fire due while its previous run still goes is\nskipped, and a late fire runs however late, unless [Overlap] and\n[StartingDeadline] say otherwise.\n",
       "file": "framework/internal/app/job.go",
       "layer": "framework"
     },
@@ -10240,9 +10482,9 @@
       "package": "github.com/kitsunium/sdk/framework/internal/app",
       "name": "Every",
       "recv": "Service",
-      "spelled": "func(name string, period time.Duration, fn func(context.Context) error) *Job",
-      "canonical": "func(name string, period time.Duration, fn func(context.Context) error) *github.com/kitsunium/sdk/framework/internal/app.Job",
-      "doc": "Every declares a job that runs every period, first one period after the\napp starts.\n",
+      "spelled": "func(name string, period time.Duration, fn func(context.Context) error, opts ...JobConfigurer) *Job",
+      "canonical": "func(name string, period time.Duration, fn func(context.Context) error, opts ...github.com/kitsunium/sdk/framework/internal/app.JobConfigurer) *github.com/kitsunium/sdk/framework/internal/app.Job",
+      "doc": "Every declares a job that runs every period, first one period after the\napp starts. A fire due while its previous run still goes is skipped, and a\nlate fire runs however late, unless [Overlap] and [StartingDeadline] say\notherwise.\n",
       "file": "framework/internal/app/job.go",
       "layer": "framework"
     },
@@ -10252,9 +10494,9 @@
       "package": "github.com/kitsunium/sdk/framework/internal/app",
       "name": "Go",
       "recv": "Service",
-      "spelled": "func(name string, run func(context.Context) error) *Routine",
-      "canonical": "func(name string, run func(context.Context) error) *github.com/kitsunium/sdk/framework/internal/app.Routine",
-      "doc": "Go declares a hand-written loop. run must return when ctx ends; returning\nearlier, with or without an error, restarts it after a backoff.\n\nEverything run does is drawn from the loop's node: a store it reads, a\ntopic it publishes on. The framework has no span around it — a run lasts as long as\nthe app — so each of those calls starts a trace of its own.\n",
+      "spelled": "func(name string, run func(context.Context) error, opts ...RoutineConfigurer) *Routine",
+      "canonical": "func(name string, run func(context.Context) error, opts ...github.com/kitsunium/sdk/framework/internal/app.RoutineConfigurer) *github.com/kitsunium/sdk/framework/internal/app.Routine",
+      "doc": "Go declares a hand-written loop. run must return when ctx ends; returning\nearlier, with or without an error, restarts it after a backoff — more than\nten times within ten minutes, and it is not restarted again: the product\nis no longer live ([GiveUpAfter]).\n\nEverything run does is drawn from the loop's node: a store it reads, a\ntopic it publishes on. The framework has no span around it — a run lasts as long as\nthe app — so each of those calls starts a trace of its own.\n",
       "file": "framework/internal/app/loop.go",
       "layer": "framework"
     },
@@ -10290,7 +10532,7 @@
       "recv": "Service",
       "spelled": "func(name string, run func(context.Context, WakeEvent) error, opts ...LoopConfigurer) *Loop",
       "canonical": "func(name string, run func(context.Context, github.com/kitsunium/sdk/framework/internal/app.WakeEvent) error, opts ...github.com/kitsunium/sdk/framework/internal/app.LoopConfigurer) *github.com/kitsunium/sdk/framework/internal/app.Loop",
-      "doc": "Loop declares a loop run by kit: run is called once at start, then on\nevery wake.\n\nRuns never overlap: wakes that come while the function runs are gathered\ninto one run after it. A run that fails or panics is counted, and the next\none waits a backoff — one second, doubling up to a minute — unless it is\na [Loop.Nudge]. A deadline already past wakes the loop at once, but never\nsooner than a second after the previous run: a WakeAt that keeps answering\nthe past costs a run a second, not a spinning core.\n",
+      "doc": "Loop declares a loop run by kit: run is called once at start, then on\nevery wake.\n\nRuns never overlap: wakes that come while the function runs are gathered\ninto one run after it. A run that fails or panics is counted, and the next\none waits a backoff — one second, doubling up to a minute — unless it is\na [Loop.Nudge]. A deadline already past wakes the loop at once, but never\nsooner than a second after the previous run: a WakeAt that keeps answering\nthe past costs a run a second, not a spinning core. A loop whose runs\nfailed more than ten times within ten minutes stops, and the product is no\nlonger live ([GiveUpAfter]).\n",
       "file": "framework/internal/app/loop.go",
       "layer": "framework"
     },
@@ -10593,6 +10835,17 @@
       "value": "\"special\"",
       "doc": "Special marks a field of GDPR art. 9(1) or art. 10.\n",
       "file": "framework/internal/app/records.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.StartingDeadline",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "StartingDeadline",
+      "spelled": "func(d time.Duration) JobConfigurer",
+      "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/internal/app.JobConfigurer",
+      "doc": "StartingDeadline bounds how late a fire of the job may still start: a\nscheduler that comes to a fire more than d after its instant — a machine\nthat slept, a run that held the slot — does not run it, and counts it\nmissed, as Kubernetes' startingDeadlineSeconds does. The default, zero, is\nno bound: the latest fire missed runs however late, never more than one.\nA negative d stops the start.\n\nd is the default of the job's setting\n<service>-job-<name>-starting-deadline, which config/<env>.* and\n<PRODUCT>_<NAME> override.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/job_policy.go",
       "layer": "framework"
     },
     {
@@ -10966,6 +11219,17 @@
       "canonical": "[T any] struct{}",
       "doc": "SubscriptionWorker consumes a topic: its handler runs once per message, at least\nonce, retried on error, and dead-lettered after MaxDeliveries attempts.\n",
       "file": "framework/internal/app/topic.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.SupervisionConfigurer",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "SupervisionConfigurer",
+      "spelled": "interface{DeliveryOption; LoopConfigurer; RoutineConfigurer}",
+      "canonical": "interface{github.com/kitsunium/sdk/framework/internal/app.DeliveryOption; github.com/kitsunium/sdk/framework/internal/app.LoopConfigurer; github.com/kitsunium/sdk/framework/internal/app.RoutineConfigurer}",
+      "doc": "SupervisionConfigurer configures what the framework restarts after a\nfailure: a subscription's, a watch's or a queued command's consumer, a\ndeclared loop, a hand-written loop ([GiveUpAfter]).\n",
+      "file": "framework/internal/app/supervision_interface.go",
       "layer": "framework"
     },
     {
@@ -12519,8 +12783,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
       "name": "JobEntryValue",
-      "spelled": "struct{Name string; Schedule JobScheduleFunc; Run func(ctx context.Context) error}",
-      "canonical": "struct{Name string; Schedule github.com/kitsunium/sdk/framework/internal/app/plug.JobScheduleFunc; Run func(ctx context.Context) error}",
+      "spelled": "struct{Name string; Schedule JobScheduleFunc; Run func(ctx context.Context) error; Overlap uint8; StartingDeadline time.Duration}",
+      "canonical": "struct{Name string; Schedule github.com/kitsunium/sdk/framework/internal/app/plug.JobScheduleFunc; Run func(ctx context.Context) error; Overlap uint8; StartingDeadline time.Duration}",
       "fields": [
         {
           "name": "Name",
@@ -12536,6 +12800,16 @@
           "name": "Run",
           "type": "func(ctx context.Context) error",
           "doc": "Run runs the job once; its error is the result's.\n"
+        },
+        {
+          "name": "Overlap",
+          "type": "uint8",
+          "doc": "Overlap is what a fire does while the job's previous run goes, as the\nSDK scheduler's OverlapPolicy numbers it: 0 skips it — the zero —, 1\nruns it beside, 2 replaces the run; the scheduler refuses any other.\n"
+        },
+        {
+          "name": "StartingDeadline",
+          "type": "time.Duration",
+          "doc": "StartingDeadline bounds how late a fire may still start; zero is no\nbound.\n"
         }
       ],
       "doc": "JobEntryValue is one job as the scheduler fires it: its name, its\nschedule, and the run.\n",
@@ -12547,8 +12821,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
       "name": "JobResultValue",
-      "spelled": "struct{Name string; Scheduled time.Time; Started time.Time; Finished time.Time; Missed int; Skipped bool; Err error}",
-      "canonical": "struct{Name string; Scheduled time.Time; Started time.Time; Finished time.Time; Missed int; Skipped bool; Err error}",
+      "spelled": "struct{Name string; Scheduled time.Time; Started time.Time; Finished time.Time; Missed int; Skipped bool; Expired bool; Replaced bool; Err error}",
+      "canonical": "struct{Name string; Scheduled time.Time; Started time.Time; Finished time.Time; Missed int; Skipped bool; Expired bool; Replaced bool; Err error}",
       "fields": [
         {
           "name": "Name",
@@ -12579,6 +12853,16 @@
           "name": "Skipped",
           "type": "bool",
           "doc": "Skipped says the fire did not run: a run of the same job was going.\n"
+        },
+        {
+          "name": "Expired",
+          "type": "bool",
+          "doc": "Expired says the fire did not run: the scheduler came to it more\nthan the job's starting deadline after its instant.\n"
+        },
+        {
+          "name": "Replaced",
+          "type": "bool",
+          "doc": "Replaced says a newer fire of a job that replaces its runs cancelled\nthis one — before it started when Started is zero.\n"
         },
         {
           "name": "Err",
@@ -35250,6 +35534,18 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/telemetry.KindGaveUp",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/telemetry",
+      "name": "KindGaveUp",
+      "spelled": "Kind",
+      "canonical": "github.com/kitsunium/sdk/framework/telemetry.Kind",
+      "value": "6",
+      "doc": "KindGaveUp is a supervised loop the framework stopped restarting, its\nfailures over their bound: Node is its node, Code the give-up's. The\nproduct is no longer live from then on.\n",
+      "file": "framework/telemetry/telemetry.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/telemetry.KindPhase",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/telemetry",
@@ -35258,6 +35554,18 @@
       "canonical": "github.com/kitsunium/sdk/framework/telemetry.Kind",
       "value": "2",
       "doc": "KindPhase is the process changing phase: starting, serving, draining,\nstopped, failed — Op carries it.\n",
+      "file": "framework/telemetry/telemetry.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/telemetry.KindRestart",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/telemetry",
+      "name": "KindRestart",
+      "spelled": "Kind",
+      "canonical": "github.com/kitsunium/sdk/framework/telemetry.Kind",
+      "value": "5",
+      "doc": "KindRestart is a supervised loop restarting after a failure — a\nconsumer, a declared or a hand-written loop —: Node is its node, Code\nthe failure's, Duration the wait before it runs again. A reader counts\na node's restarts by counting these.\n",
       "file": "framework/telemetry/telemetry.go",
       "layer": "framework"
     },

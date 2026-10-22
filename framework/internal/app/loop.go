@@ -131,6 +131,8 @@ type loopOptions struct {
 	// the declaration to report.
 	everySet bool
 	nilTopic bool
+	// giveUp is when the loop's failures stop it (supervision.go).
+	giveUp giveUpKnobs
 }
 
 // topicWaker is a topic a loop wakes on, whatever its message type.
@@ -156,6 +158,12 @@ type loopRun struct {
 	cancel  context.CancelFunc
 	done    chan struct{}
 	unhook  []func()
+	// gaveUp is the error its liveness check answers once its failures
+	// stopped it, nil before; guarded by Loop.mu.
+	gaveUp error
+	// ends are its failed runs within its GiveUpAfter's span, oldest first;
+	// the cycle's goroutine's alone.
+	ends []time.Time
 }
 
 // nextWake is when a declared loop wakes by itself, and why; a zero at means
@@ -173,7 +181,8 @@ type nextWake struct {
 // to one minute — and reads its select statements to draw what it waits on.
 type Routine struct {
 	nodeBase
-	run func(context.Context) error
+	run  func(context.Context) error
+	opts routineOptions
 
 	mu sync.Mutex
 	// sup runs the function while the app runs: the SDK's supervisor.
@@ -225,7 +234,9 @@ func WakeOn[T any](topic *TopicService[T]) LoopConfigurer {
 // one waits a backoff — one second, doubling up to a minute — unless it is
 // a [Loop.Nudge]. A deadline already past wakes the loop at once, but never
 // sooner than a second after the previous run: a WakeAt that keeps answering
-// the past costs a run a second, not a spinning core.
+// the past costs a run a second, not a spinning core. A loop whose runs
+// failed more than ten times within ten minutes stops, and the product is no
+// longer live ([GiveUpAfter]).
 //
 //go:noinline
 func (s *Service) Loop(name string, run func(context.Context, WakeEvent) error, opts ...LoopConfigurer) *Loop {
@@ -239,6 +250,7 @@ func (s *Service) Loop(name string, run func(context.Context, WakeEvent) error, 
 		l.deadlineAt = &p
 	}
 	s.add(l, true)
+	l.opts.giveUp.declare(s, &l.nodeBase)
 	if run == nil {
 		s.problem(l.decl, l.id, "loop.nil", "name", name)
 	}
@@ -259,7 +271,7 @@ func (l *Loop) Nudge() { l.signal(WakeEvent{Reason: model.WakeManual}) }
 // describe fills the graph node out with what the Loop declares, and returns
 // its edges.
 func (l *Loop) describe(a *App, out *model.Node) []model.Edge {
-	info := &model.LoopInfo{Style: model.LoopDeclared, Restart: "after a failure or a panic, backing off from 1s to 1m"}
+	info := &model.LoopInfo{Style: model.LoopDeclared, Restart: restartText("after a failure or a panic", l.opts.giveUp.value())}
 	info.Wakes = append(info.Wakes, model.WakeSource{Kind: model.WakeStart})
 	if l.opts.every > 0 {
 		info.Wakes = append(info.Wakes, model.WakeSource{Kind: model.WakeInterval, Every: l.opts.every.String()})
@@ -354,14 +366,17 @@ func (l *Loop) start(_ context.Context, a *App) error {
 				errs.String("loop", l.id), errs.String("topic", t.base().id))
 		}
 	}
-	ctx, cancel := context.WithCancel(context.WithoutCancel(a.baseCtx))
 	r := &loopRun{
-		a:      a,
-		state:  a.frameworkLoop(l.id, l.id, model.LoopWake, l.schedule(), loopOrigin{model.ProvenanceApp, frameworkName}),
-		wake:   make(chan struct{}, 1),
-		cancel: cancel,
-		done:   make(chan struct{}),
+		a:     a,
+		state: a.frameworkLoop(l.id, l.id, model.LoopWake, l.schedule(), loopOrigin{model.ProvenanceApp, frameworkName}),
+		wake:  make(chan struct{}, 1),
+		done:  make(chan struct{}),
 	}
+	if err := a.supervise(l.id, func() error { return l.gaveUpOf(r) }); err != nil {
+		return failure(CodeLoopStart, "LOOP_START", "a loop cannot start", err, errs.String("loop", l.id))
+	}
+	ctx, cancel := context.WithCancel(context.WithoutCancel(a.baseCtx))
+	r.cancel = cancel
 	for _, t := range l.opts.topics {
 		topic := t.base().id
 		r.unhook = append(r.unhook, t.onPublish(func() { l.signal(WakeEvent{Reason: model.WakeTopic, Topic: topic}) }))
@@ -403,6 +418,7 @@ func (l *Loop) cycle(ctx context.Context, r *loopRun) {
 	ctx = a.asLoop(ctx, l.id)
 	w := wakeOf(model.WakeStart, a.clock.Now(), "")
 	failures := 0
+	giveUp := l.opts.giveUp.value()
 	for {
 		started := a.clock.Now()
 		due, hasDue, err := l.once(ctx, r, w)
@@ -419,6 +435,9 @@ func (l *Loop) cycle(ctx context.Context, r *loopRun) {
 		r.state.idle(a, next.at)
 		r.state.ran(a, started, ended, err)
 		if ctx.Err() != nil {
+			return
+		}
+		if l.failed(r, giveUp, ended, next.floor, err) {
 			return
 		}
 		var ok bool
@@ -613,18 +632,26 @@ func (t *TopicService[T]) wake() {
 }
 
 // Go declares a hand-written loop. run must return when ctx ends; returning
-// earlier, with or without an error, restarts it after a backoff.
+// earlier, with or without an error, restarts it after a backoff — more than
+// ten times within ten minutes, and it is not restarted again: the product
+// is no longer live ([GiveUpAfter]).
 //
 // Everything run does is drawn from the loop's node: a store it reads, a
 // topic it publishes on. The framework has no span around it — a run lasts as long as
 // the app — so each of those calls starts a trace of its own.
 //
 //go:noinline
-func (s *Service) Go(name string, run func(context.Context) error) *Routine {
-	r := &Routine{run: run}
+func (s *Service) Go(name string, run func(context.Context) error, opts ...RoutineConfigurer) *Routine {
+	r := &Routine{run: run, opts: routineOptions{giveUp: defaultGiveUp()}}
+	for _, o := range opts {
+		if o != nil {
+			o.routineConfigure(&r.opts)
+		}
+	}
 	r.kind, r.name, r.decl = model.KindLoop, name, callerPos()
 	r.body = bodyOf(run)
 	s.add(r, true)
+	r.opts.giveUp.declare(s, &r.nodeBase)
 	if run == nil {
 		s.problem(r.decl, r.id, "routine.nil", "name", name)
 	}
@@ -634,7 +661,7 @@ func (s *Service) Go(name string, run func(context.Context) error) *Routine {
 // describe fills the graph node out with what the Routine declares, and
 // returns its edges.
 func (r *Routine) describe(_ *App, out *model.Node) []model.Edge {
-	out.Loop = &model.LoopInfo{Style: model.LoopGoroutine, Restart: "after an error or a panic, backing off from 1s to 1m"}
+	out.Loop = r.opts.info()
 	return nil
 }
 
@@ -643,8 +670,10 @@ func (r *Routine) start(_ context.Context, a *App) error {
 	state := a.frameworkLoop(r.id, r.id, model.LoopRoutine, "supervised · restarts after 1s to 1m", loopOrigin{provenance: model.ProvenanceProduct})
 	// The SDK's supervisor runs the function and restarts it after every
 	// early end, on the app's clock and kit's backoff; kit draws what it
-	// reports.
+	// reports. Past its intensity it gives the function up, and its
+	// liveness check answers the supervisor's Check (supervision.go).
 	var lastErr error
+	giveUp := r.opts.giveUp.value()
 	sup, err := lifecycle.NewSupervisor(r.id, func(ctx context.Context) error {
 		// The goroutine is the loop's: its pprof label (dev) lets the
 		// goroutine view and the profiles name it, whatever the product's
@@ -654,10 +683,14 @@ func (r *Routine) start(_ context.Context, a *App) error {
 		Clock:        a.clock,
 		Backoff:      loopBackoff,
 		HealthyAfter: healthyRun,
+		GiveUpAfter:  giveUp,
 		Observe: func(e lifecycle.SupervisionEvent) {
-			lastErr = r.observe(a, state, &e, lastErr)
+			lastErr = r.observe(a, state, &e, giveUp, lastErr)
 		},
 	})
+	if err == nil {
+		err = a.supervise(r.id, supervisorCheck(sup))
+	}
 	if err == nil {
 		err = sup.Start(withNode(context.WithoutCancel(a.baseCtx), r.id, a))
 	}
@@ -674,7 +707,7 @@ func (r *Routine) start(_ context.Context, a *App) error {
 // kit's log. It runs on the supervisor's goroutine, one event at a time, and
 // returns the last run's error, which a run's end replaces and a restart
 // reports.
-func (r *Routine) observe(a *App, state *loopState, e *lifecycle.SupervisionEvent, lastErr error) error {
+func (r *Routine) observe(a *App, state *loopState, e *lifecycle.SupervisionEvent, giveUp lifecycle.GiveUp, lastErr error) error {
 	switch e.Phase {
 	case lifecycle.SupervisionRunStarted:
 		if e.Run > 1 {
@@ -697,6 +730,9 @@ func (r *Routine) observe(a *App, state *loopState, e *lifecycle.SupervisionEven
 		}
 		state.idle(a, e.At.Add(e.Delay))
 		state.setState(a, model.LoopRestarting)
+		a.reportRestart(r.id, lastErr, e.Delay)
+	case lifecycle.SupervisionGaveUp:
+		a.gaveUp(state, r.id, giveUp, e.Err)
 	case lifecycle.SupervisionStopped:
 		state.setState(a, model.LoopStopped)
 	default:
@@ -766,7 +802,9 @@ func (l *loopState) idle(a *App, at time.Time) {
 
 // NewLoop is a loop no service declares yet, whose runs are run:
 // [Service.Loop] makes one and declares it, which is how a product gets one.
-func NewLoop(run func(context.Context, WakeEvent) error) *Loop { return &Loop{run: run} }
+func NewLoop(run func(context.Context, WakeEvent) error) *Loop {
+	return &Loop{run: run, opts: loopOptions{giveUp: defaultGiveUp()}}
+}
 
 // laterOf is the later of two instants.
 func laterOf(x, y time.Time) time.Time {

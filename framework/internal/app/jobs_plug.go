@@ -52,7 +52,12 @@ func (a *App) openScheduler(jobs []*Job) (plug.JobScheduler, error) {
 		}
 		l := a.loop(j.id, j.id, model.LoopJob, j.schedule)
 		l.schedule = schedule
-		if err := sched.Add(plug.JobEntryValue{Name: j.id, Schedule: schedule, Run: a.scheduled(l, j.wake(), j.run(a))}); err != nil {
+		overlap := j.knobs.overlapIn()
+		entry := plug.JobEntryValue{
+			Name: j.id, Schedule: schedule, Run: a.scheduled(l, j.wake(), overlap, j.run(a)),
+			Overlap: overlap.number(), StartingDeadline: j.knobs.deadlineIn(),
+		}
+		if err := sched.Add(entry); err != nil {
 			return nil, err
 		}
 	}

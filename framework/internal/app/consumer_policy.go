@@ -74,11 +74,14 @@ type consumerKnobs struct {
 
 	drainFor, settleFor, leaseFor *SettingService[time.Duration]
 	autoExtendFor                 *SettingService[bool]
+
+	// giveUp is when its supervisor stops restarting it (supervision.go).
+	giveUp giveUpKnobs
 }
 
 // defaultConsumerKnobs are a consumer's knobs until an option says otherwise.
 func defaultConsumerKnobs() consumerKnobs {
-	return consumerKnobs{drain: defaultDrain, settle: defaultSettle, lease: defaultLease, autoExtend: true}
+	return consumerKnobs{drain: defaultDrain, settle: defaultSettle, lease: defaultLease, autoExtend: true, giveUp: defaultGiveUp()}
 }
 
 // declare declares the consumer n's settings in svc.
@@ -87,6 +90,7 @@ func (k *consumerKnobs) declare(svc *Service, n *nodeBase) {
 	k.settleFor = declarePolicySetting(svc, n, knobSettle, k.settle, checkPositive())
 	k.leaseFor = declarePolicySetting(svc, n, knobLease, k.lease, checkPositive())
 	k.autoExtendFor = declarePolicySetting(svc, n, knobAutoExtend, k.autoExtend, nil)
+	k.giveUp.declare(svc, n)
 }
 
 // consumerRun is what a consumer runs with in the app that runs it — its
@@ -94,6 +98,7 @@ func (k *consumerKnobs) declare(svc *Service, n *nodeBase) {
 type consumerRun struct {
 	drain, settle, lease time.Duration
 	autoExtend           bool
+	giveUp               lifecycle.GiveUp
 }
 
 // values are the knobs' values in the app that runs them.
@@ -101,6 +106,7 @@ func (k *consumerKnobs) values() consumerRun {
 	return consumerRun{
 		drain: knobValue(k.drainFor, k.drain), settle: knobValue(k.settleFor, k.settle),
 		lease: knobValue(k.leaseFor, k.lease), autoExtend: knobValue(k.autoExtendFor, k.autoExtend),
+		giveUp: k.giveUp.value(),
 	}
 }
 
@@ -128,6 +134,7 @@ func (r consumerRun) stopTakes() time.Duration { return r.drain + r.settle }
 func (r consumerRun) config(into map[string]string) {
 	into["drain"], into["settle"], into["lease"] = r.drain.String(), r.settle.String(), r.lease.String()
 	into["autoExtend"] = strconv.FormatBool(r.autoExtend)
+	into["giveUp"] = giveUpText(r.giveUp)
 }
 
 // drainer is a consumer the app tells of its stop before its component
