@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-13T12:00:00Z -->
+<!-- updated: 2026-10-22T23:30:00Z -->
 # internal/service/app/consensus/wire/
 
 ## Purpose
@@ -10,5 +10,11 @@ They are not codec formats: two nodes must write the same bytes.
 
 ## Do NOT
 
-- Accept two encodings of one value: a decoder refuses a non-canonical
-  input, and the fuzz targets require every accepted frame to round-trip.
+- Accept two encodings of one value in one version: a decoder refuses a
+  non-canonical input, and the fuzz targets require every accepted frame
+  to round-trip in the version it was written in. `SnapshotMeta` is read
+  in version 1 and version 2 (version 1's fields, then their CRC-32C) and
+  written in version 1 only: the reader ships one release before the
+  writer, which comes with the cluster version that admits it (#546,
+  ADR 0152 amendment of 2026-10-22). `export_test.go` writes version 2 for
+  the suite.

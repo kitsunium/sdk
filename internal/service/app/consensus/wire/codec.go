@@ -24,8 +24,17 @@ const (
 	tokenVersion1 byte = 1
 	// tokenLen is a token's whole length: version, ClusterID, three uint64.
 	tokenLen int = 41
-	// metaVersion1 is the leading byte of an encoded SnapshotMeta.
+	// metaVersion1 is the leading byte of an encoded SnapshotMeta, the only
+	// version this node writes.
 	metaVersion1 byte = 1
+	// metaVersion2 is the leading byte of a SnapshotMeta checksummed: the
+	// fields of version 1, then the CRC-32C of every byte before it. This
+	// node reads it and never writes it: the writer comes with the cluster
+	// version that admits it, one release after every member reads it
+	// (#546, ADR 0152 amendment of 2026-10-22).
+	metaVersion2 byte = 2
+	// metaSumLen is the length of version 2's trailing CRC-32C.
+	metaSumLen int = 4
 	// entryFixedLen is an entry's header before its data: term, index,
 	// kind, version, body sum, chain sum and data length.
 	entryFixedLen = 8 + 8 + 1 + 4 + 4 + 4 + 4
@@ -216,7 +225,8 @@ func ParseToken(b []byte) (coreconsensus.TokenValue, error) {
 	return t, nil
 }
 
-// AppendSnapshotMeta appends the versioned encoding of m.
+// AppendSnapshotMeta appends the versioned encoding of m, in version 1:
+// this release reads version 2 and never writes it.
 func AppendSnapshotMeta(dst []byte, m *coreconsensus.SnapshotMetaValue) []byte {
 	dst = append(dst, metaVersion1)
 	dst = appendString(dst, m.ID)
@@ -238,16 +248,16 @@ func AppendSnapshotMeta(dst []byte, m *coreconsensus.SnapshotMetaValue) []byte {
 	return appendBytes(dst, m.Reserved)
 }
 
-// ParseSnapshotMeta decodes a SnapshotMeta, copying every byte it keeps.
+// ParseSnapshotMeta decodes a SnapshotMeta, copying every byte it keeps:
+// version 1, or version 2 once its trailing CRC-32C holds. Another
+// version is VERSION_UNSUPPORTED, a version 2 whose sum fails
+// FRAME_INVALID.
 func ParseSnapshotMeta(b []byte, m *coreconsensus.SnapshotMetaValue) error {
-	r := reader{b: b}
-	if v := r.u8(); v != metaVersion1 {
-		if r.err != nil {
-			return r.err
-		}
-		return errs.Wrap(coreconsensus.VersionUnsupported, errs.WrapParams{},
-			errs.Int("snapshot_meta_version", int(v)))
+	body, err := metaFields(b)
+	if err != nil {
+		return err
 	}
+	r := reader{b: body}
 	var out coreconsensus.SnapshotMetaValue
 	out.ID = r.str()
 	out.Version = r.u8()
@@ -278,6 +288,34 @@ func ParseSnapshotMeta(b []byte, m *coreconsensus.SnapshotMetaValue) error {
 	}
 	*m = out
 	return nil
+}
+
+// metaFields returns the fields of an encoded SnapshotMeta, after its
+// version byte: those of version 1 as they are, those of version 2 once its
+// trailing CRC-32C holds. A version 2 read before its writer ships lets a
+// node run the release before the one that writes it, or roll back to it,
+// and still read every .meta and offer (#546). Another version is
+// VERSION_UNSUPPORTED, a version 2 whose sum fails FRAME_INVALID.
+func metaFields(b []byte) ([]byte, error) {
+	if len(b) == 0 {
+		return nil, frameInvalid("short field", 0)
+	}
+	switch b[0] {
+	case metaVersion1:
+		return b[1:], nil
+	case metaVersion2:
+		if len(b) < 1+metaSumLen {
+			return nil, frameInvalid("short field", len(b)-1)
+		}
+		end := len(b) - metaSumLen
+		if crc32.Checksum(b[:end], castagnoli) != binary.LittleEndian.Uint32(b[end:]) {
+			return nil, frameInvalid("snapshot meta checksum", len(b))
+		}
+		return b[1:end], nil
+	default:
+		return nil, errs.Wrap(coreconsensus.VersionUnsupported, errs.WrapParams{},
+			errs.Int("snapshot_meta_version", int(b[0])))
+	}
 }
 
 // AppendMembership appends the encoding of a membership, the payload of an
