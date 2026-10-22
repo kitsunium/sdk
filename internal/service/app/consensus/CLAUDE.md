@@ -288,6 +288,40 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   last voter a quorum needs: over TCP the entry then waited forever for the
   acknowledgement the transport refused (#530,
   `TestTCPDenyPinNeverCutsTheLastQuorum`; raft's `denyPin` and `admitted`).
+- Take a log record whose crc holds but whose version this build does not
+  write for a hole, or skip a record kind it does not know or a hard state
+  of another length: a newer build wrote them, synced, and a rollback
+  zeroed them as a torn tail — acknowledged entries and a cast vote lost.
+  `unknownVersionAt` and `applyRecord` refuse the open VERSION_UNSUPPORTED
+  and change nothing (D18, #511, `TestALogRecordOfANewerVersionStopsTheOpen`,
+  `TestALongerHardStateStopsTheOpen`, `TestAnUnknownRecordKindStopsTheOpen`).
+- Keep a receive spool once an offer of another id is accepted, or past a
+  reopen when it is not the newest, or read a spool whole to resume it: an
+  abandoned transfer left up to a whole snapshot on the data disk for good,
+  and a resume held the spool in memory on the event loop. `Create` sweeps
+  every spool no sink writes to and reads one chunk at a time
+  (`alignedOffsetAt`); a short stream releases its sink (#527,
+  `TestAnOrphanSpoolIsRemoved`, `TestAResumeReadsItsSpoolInBoundedMemory`).
+- Leave published a snapshot that failed to restore once an older one
+  restored, or answer held for a snapshot past the applied index: the
+  leader probed past it, the append was refused and the offer came again
+  for as long as it stayed the leader's newest (#528,
+  `TestASnapshotThatDidNotRestoreIsUnpublished`,
+  `TestAHeldSnapshotPastTheAppliedIndexIsReplaced`).
+- Forward a removal of the leader without moving leadership first: the
+  leader refuses to remove itself, and the call failed MEMBERSHIP_INVALID
+  on a follower only. `Remove` transfers to this node (or another voter),
+  then submits the removal again while the new leader's no-op is pending
+  (#529, `TestRemovingTheLeaderFromAFollowerTransfersFirst`).
+- Leave a peer's series at their last value once it is no longer published,
+  or keep a departed member's certificate in `peerExpiry`: a series is never
+  deleted, and "peer unreachable" and "certificate expiring" alerted for a
+  member that no longer existed. The gauges read as a quiet peer, a
+  departed certificate as never expiring (`departedCertExpiry`) (#532,
+  `TestADepartedPeersSeriesAreReset`, `TestAnExLeaderResetsItsPeersSeries`,
+  `TestTCPForgetsADepartedPeersCertificate`). The admission set is handed
+  to the transport only when it changes (#531,
+  `TestAnUnchangedMembershipIsNotRepublished`).
 - Bound an election in a test by a fixed number of split votes: a split
   is a draw, about one round in a hundred on the memory network, and a
   third round fails a two-round total every ten to twenty runs. Derive

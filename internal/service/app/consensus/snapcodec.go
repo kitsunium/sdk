@@ -205,27 +205,57 @@ func verifySnapshot(r io.Reader, meta coreconsensus.SnapshotMetaValue, codec cor
 	return nil
 }
 
-// alignedOffset is the largest chunk boundary of an encoded prefix. The
-// writer never emits an empty chunk, so a length of 0 ends the prefix: a
-// region of zeros (a spool never synced, an allocation a crash left
-// unwritten) reads as a run of empty chunks whose CRC of nothing is 0, and
-// a resume used to continue past it, to fail only on the final digest
-// (#422).
-func alignedOffset(prefix []byte) int64 {
+// maxEncodedChunk is the largest encoded chunk a stream of decoded chunks
+// of chunk bytes may hold, the bound chunkReader applies.
+func maxEncodedChunk(chunk int64) int64 {
+	chunk = max(chunk, 1)
+	return chunk + chunk/8 + 1024
+}
+
+// alignedOffsetAt is the largest chunk boundary of the encoded prefix of
+// size bytes r holds, each chunk at most maxChunk encoded bytes. The writer
+// never emits an empty chunk, so a length of 0 ends the prefix: a region of
+// zeros (a spool never synced, an allocation a crash left unwritten) reads
+// as a run of empty chunks whose CRC of nothing is 0, and a resume used to
+// continue past it, to fail only on the final digest (#422). The prefix is
+// read one chunk at a time into a buffer of one chunk at most: read whole,
+// the spool of a full snapshot was held in memory at once, on the event
+// loop, and the resume allocated more than its size (#527).
+func alignedOffsetAt(r io.ReaderAt, size, maxChunk int64) (int64, error) {
 	var off int64
-	for int64(len(prefix))-off >= chunkHeaderLen {
-		n := int64(binary.LittleEndian.Uint32(prefix[off:]))
-		if n == 0 {
-			break
+	buf := make([]byte, min(maxChunk, size))
+	for size-off >= chunkHeaderLen {
+		end, err := wholeChunkAt(r, off, size, buf)
+		if err != nil {
+			return 0, err
 		}
-		end := off + chunkHeaderLen + n
-		if end > int64(len(prefix)) {
-			break
-		}
-		if crc32.Checksum(prefix[off+chunkHeaderLen:end], castagnoli) != binary.LittleEndian.Uint32(prefix[off+8:]) {
+		if end < 0 {
 			break
 		}
 		off = end
 	}
-	return off
+	return off, nil
+}
+
+// wholeChunkAt is where the chunk at off of the size bytes r holds ends,
+// or -1 when no whole chunk starts there: an empty or oversized length, a
+// chunk past the end, or a checksum that fails. buf holds the largest chunk
+// accepted.
+func wholeChunkAt(r io.ReaderAt, off, size int64, buf []byte) (int64, error) {
+	var h [chunkHeaderLen]byte
+	if _, err := r.ReadAt(h[:], off); err != nil {
+		return 0, err
+	}
+	n := int64(binary.LittleEndian.Uint32(h[:]))
+	end := off + chunkHeaderLen + n
+	if n == 0 || n > int64(len(buf)) || end > size {
+		return -1, nil
+	}
+	if _, err := r.ReadAt(buf[:n], off+chunkHeaderLen); err != nil {
+		return 0, err
+	}
+	if crc32.Checksum(buf[:n], castagnoli) != binary.LittleEndian.Uint32(h[8:]) {
+		return -1, nil
+	}
+	return end, nil
 }

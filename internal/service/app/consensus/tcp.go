@@ -189,16 +189,19 @@ type TCPTransport struct {
 	slot    string
 	ln      net.Listener
 
-	mu          sync.Mutex
-	members     map[coreconsensus.GroupID][]coreconsensus.MemberValue
-	byID        map[coreconsensus.NodeID]coreconsensus.MemberValue
-	bySPKI      map[[32]byte]coreconsensus.MemberValue
-	out         map[outKey]*peerConn
-	in          map[net.Conn][32]byte
-	raw         map[net.Conn]struct{}
-	admission   *server.Admission
-	resvMu      sync.Mutex
-	resvSeq     atomic.Uint64
+	mu        sync.Mutex
+	members   map[coreconsensus.GroupID][]coreconsensus.MemberValue
+	byID      map[coreconsensus.NodeID]coreconsensus.MemberValue
+	bySPKI    map[[32]byte]coreconsensus.MemberValue
+	out       map[outKey]*peerConn
+	in        map[net.Conn][32]byte
+	raw       map[net.Conn]struct{}
+	admission *server.Admission
+	resvMu    sync.Mutex
+	resvSeq   atomic.Uint64
+	// resvAddrs is the sorted address list last reserved, under mu: an
+	// unchanged list is not reserved again (#531).
+	resvAddrs   []string
 	peerExpiry  map[coreconsensus.NodeID]time.Time
 	deliver     func(coreconsensus.AuthenticatedPeerValue, []byte)
 	offer       func(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue) coreconsensus.InstallAcceptValue
@@ -888,6 +891,14 @@ func (t *TCPTransport) SetMembership(group coreconsensus.GroupID, admitted []cor
 	byID, bySPKI := indexMembers(t.members)
 	t.byID, t.bySPKI = byID, bySPKI
 	t.reserveAddresses(byID)
+	for id := range t.peerExpiry {
+		if _, ok := byID[id]; !ok {
+			// A member that left has no certificate to expire here: its
+			// last one kept being published, crossed the alert threshold
+			// and went negative (#532).
+			delete(t.peerExpiry, id)
+		}
+	}
 	for c, spki := range t.in {
 		if _, ok := bySPKI[spki]; !ok {
 			// A member that left is cut (D4); its reader ends on the closed
@@ -938,6 +949,11 @@ func (t *TCPTransport) reserveAddresses(byID map[coreconsensus.NodeID]coreconsen
 			addrs = append(addrs, m.Address)
 		}
 	}
+	slices.Sort(addrs)
+	if t.resvAddrs != nil && slices.Equal(addrs, t.resvAddrs) {
+		return
+	}
+	t.resvAddrs = addrs
 	seq := t.resvSeq.Add(1)
 	t.wg.Add(1)
 	go func() {

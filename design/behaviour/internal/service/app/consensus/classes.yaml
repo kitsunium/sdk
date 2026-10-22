@@ -376,6 +376,15 @@ constants:
       - name: mReloadFailures
         value: "\"consensus_tls_reload_failures_total\""
     name: mRole
+  - doc: |-
+      departedCertExpiry is what consensus_tls_peer_cert_expiry_seconds reads
+      for a peer that left: a series cannot be deleted, and its last value,
+      left to stand, crossed the alert's threshold (#532). It never expires.
+    items:
+      - name: departedCertExpiry
+        type: float64
+        value: math.MaxFloat64
+    name: departedCertExpiry
   - grouped: true
     items:
       - doc: |-
@@ -657,7 +666,9 @@ files:
       - appendRecord
       - boolByte
       - sealRecord
+      - sealedBody
       - parseRecord
+      - unknownVersionAt
       - checkpoint
       - checkpoint.encode
       - decodeCheckpoint
@@ -680,6 +691,8 @@ files:
       - (*fileLog).replay
       - (*fileLog).applyCheckpoint
       - (*fileLog).applyRecord
+      - (*fileLog).applyHardState
+      - unknownLayout
       - (*fileLog).applyCompactRecord
       - (*fileLog).applyTruncate
       - decodeHS
@@ -740,9 +753,15 @@ files:
   - decls:
       - fileSnapshots
       - newFileSnapshots
+      - newestSpool
+      - (*fileSnapshots).sweepSpools
+      - (*fileSnapshots).orphanSpools
       - validID
       - fileSink
       - (*fileSnapshots).Create
+      - spoolFile
+      - resumeOffset
+      - (*fileSink).closed
       - (*fileSink).Write
       - (*fileSink).Commit
       - (*fileSnapshots).published
@@ -788,6 +807,8 @@ files:
       - (*Node).screenOffer
       - (*Node).answerFromHeld
       - (*Node).keepSpool
+      - releaseSink
+      - (*Node).dropOtherSpools
       - (*Node).install
       - (*Node).restoreFailed
       - (*Node).stillFresh
@@ -888,6 +909,7 @@ files:
       - (*Node).load
       - (*Node).durableIndex
       - (*Node).restoreLatest
+      - (*Node).unpublishNewer
       - (*Node).baseOrNoTable
       - (*Node).finishInstall
       - (*Node).readTail
@@ -954,7 +976,8 @@ files:
     name: node.go
   - decls:
       - mRole
-      - latencyBuckets
+      - departedCertExpiry
+      - peerGauges
       - obs
       - newObs
       - key
@@ -973,6 +996,8 @@ files:
       - (*Node).observeStatus
       - (*obs).observeRoleChange
       - (*Node).observePeers
+      - (*Node).observePeer
+      - (*obs).resetDeparted
       - (*Node).observeResources
     name: observe.go
   - decls:
@@ -1088,6 +1113,9 @@ files:
       - (*Node).AddLearner
       - (*Node).Promote
       - (*Node).Remove
+      - (*Node).successorOf
+      - (*Node).removeAfterTransfer
+      - (*Node).pause
       - (*Node).UpdateAddress
       - (*Node).DenyPin
       - (*Node).ProposeTimingContract
@@ -1126,7 +1154,9 @@ files:
       - (*chunkReader).Read
       - (*chunkReader).next
       - verifySnapshot
-      - alignedOffset
+      - maxEncodedChunk
+      - alignedOffsetAt
+      - wholeChunkAt
     name: snapcodec.go
   - decls:
       - cutRetryMin
@@ -1572,11 +1602,31 @@ functions:
     name: sealRecord
     params: b []byte
   - doc: |-
+      sealedBody is the body of the record at b[0:] when its length is in range
+      and its crc holds, whatever version it carries; nil otherwise.
+    name: sealedBody
+    params: b []byte
+    results: "[]byte"
+  - doc: |-
       parseRecord decodes the record at b[0:]; ok is false for a hole: a short
-      read, a zero header, a length out of range or a crc that fails.
+      read, a zero header, a length out of range or a crc that fails — and for
+      a sealed record of a version this build does not write, which recovery
+      tells apart with unknownVersionAt before it calls anything a hole (#511).
     name: parseRecord
     params: b []byte
     results: rec record, ok bool
+  - doc: |-
+      unknownVersionAt looks, at every record boundary from off to the end of
+      b, for a record whose crc holds but whose version this build does not
+      write. Such a record is no damage: a newer build wrote it, synced, and
+      may have acknowledged it — an entry, a vote. Taken for a hole, recovery
+      zeroed it as a torn tail after a rollback, and the node forgot what it
+      had acknowledged and the vote it had cast (#511). D18: unknown means
+      stop, never skip. It returns VERSION_UNSUPPORTED naming the first one, or
+      nil.
+    name: unknownVersionAt
+    params: b []byte, seg uint64, off int64
+    results: error
   - doc: |-
       decodeCheckpoint parses encode's payload; ok is false for any other
       length, which recovery reads as a damaged checkpoint.
@@ -1610,6 +1660,12 @@ functions:
     name: continuesBatch
     params: prev, r *record
     results: bool
+  - doc: |-
+      unknownLayout is the VERSION_UNSUPPORTED of record r of segment seg, a
+      layout this build does not read: field names what it is, v its value.
+    name: unknownLayout
+    params: seg uint64, r *record, field string, v int
+    results: error
   - doc: decodeHS parses encodeHS's payload; the caller checked its length.
     name: decodeHS
     params: b []byte
@@ -1695,11 +1751,19 @@ functions:
       newFileSnapshots opens the snapshot directory dir, creating it private
       to the owner, and removes every .snap that has no .meta: a crash between
       a snapshot's rename and its .meta leaves one, and it is neither a snapshot
-      nor resumable. A directory that cannot be created, listed or cleaned is a
+      nor resumable. Of the receive spools only the newest stays, the one a
+      resume may still continue (#527). A directory that cannot be created, listed or cleaned is a
       STORAGE_FAILED, so a store never opens over a state it could not read.
     name: newFileSnapshots
     params: dir string
     results: "*fileSnapshots, error"
+  - doc: |-
+      newestSpool is the id of the newest receive spool among ents, "" when
+      there is none. Snapshot ids are fixed-width (index, term), so the newest
+      sorts last.
+    name: newestSpool
+    params: ents []os.DirEntry
+    results: string
   - doc: |-
       validID reports whether id may name a snapshot's files: non-empty,
       bounded, and with no separator or dot, so an id a peer sent can never
@@ -1707,6 +1771,12 @@ functions:
     name: validID
     params: id string
     results: bool
+  - doc: |-
+      resumeOffset cuts the spool f back to its last whole chunk, of decoded
+      chunks of chunk bytes, and positions it there.
+    name: resumeOffset
+    params: f spoolFile, chunk int64
+    results: int64, error
   - doc: |-
       fsFree returns the bytes an unprivileged writer may still use on the
       filesystem holding dir, -1 when unknown.
@@ -1741,6 +1811,11 @@ functions:
     name: validSlot
     params: s string
     results: bool
+  - doc: |-
+      releaseSink closes a sink's handle and keeps its spool for a resume,
+      when the store's sink can; a sink that cannot keeps nothing open.
+    name: releaseSink
+    params: sink coreconsensus.SnapshotSink
   - name: NewMemoryLog
     results: "*MemoryLog"
   - doc: |-
@@ -2172,15 +2247,32 @@ functions:
     params: r io.Reader, meta coreconsensus.SnapshotMetaValue, codec coretransform.BoundedDecompressor, limit int64
     results: error
   - doc: |-
-      alignedOffset is the largest chunk boundary of an encoded prefix. The
-      writer never emits an empty chunk, so a length of 0 ends the prefix: a
-      region of zeros (a spool never synced, an allocation a crash left
-      unwritten) reads as a run of empty chunks whose CRC of nothing is 0, and
-      a resume used to continue past it, to fail only on the final digest
-      (#422).
-    name: alignedOffset
-    params: prefix []byte
+      maxEncodedChunk is the largest encoded chunk a stream of decoded chunks
+      of chunk bytes may hold, the bound chunkReader applies.
+    name: maxEncodedChunk
+    params: chunk int64
     results: int64
+  - doc: |-
+      alignedOffsetAt is the largest chunk boundary of the encoded prefix of
+      size bytes r holds, each chunk at most maxChunk encoded bytes. The writer
+      never emits an empty chunk, so a length of 0 ends the prefix: a region of
+      zeros (a spool never synced, an allocation a crash left unwritten) reads
+      as a run of empty chunks whose CRC of nothing is 0, and a resume used to
+      continue past it, to fail only on the final digest (#422). The prefix is
+      read one chunk at a time into a buffer of one chunk at most: read whole,
+      the spool of a full snapshot was held in memory at once, on the event
+      loop, and the resume allocated more than its size (#527).
+    name: alignedOffsetAt
+    params: r io.ReaderAt, size, maxChunk int64
+    results: int64, error
+  - doc: |-
+      wholeChunkAt is where the chunk at off of the size bytes r holds ends,
+      or -1 when no whole chunk starts there: an empty or oversized length, a
+      chunk past the end, or a checksum that fails. buf holds the largest chunk
+      accepted.
+    name: wholeChunkAt
+    params: r io.ReaderAt, off, size int64, buf []byte
+    results: int64, error
   - name: Latest
     params: s coreconsensus.SnapshotStore
     results: coreconsensus.SnapshotHandle, error
@@ -3182,9 +3274,18 @@ types:
         results: error
       - doc: |-
           applyRecord applies one record of segment seg to the log being rebuilt.
-          Only an entry out of sequence is refused; a record kind recovery does not
-          rebuild from changes nothing.
+          An entry out of sequence is quarantined; a record kind this build does
+          not know, or a hard state of another length, is a newer layout and stops
+          the open VERSION_UNSUPPORTED — skipped, it lost what a newer build wrote
+          there (D18, #511). A seal changes nothing.
         name: applyRecord
+        params: seg uint64, r *record
+        recv: l *fileLog
+        results: error
+      - doc: |-
+          applyHardState applies a hard-state record; one of another length is a
+          newer layout (#511).
+        name: applyHardState
         params: seg uint64, r *record
         recv: l *fileLog
         results: error
@@ -3568,11 +3669,36 @@ types:
         type: sync.Mutex
       - name: pins
         type: map[string]int
+      - doc: |-
+          writing counts the sinks open on each id's spool: a spool a sink
+          still writes to is never swept from under it.
+        name: writing
+        type: map[string]int
     kind: struct
     methods:
       - doc: |-
+          sweepSpools removes every receive spool but keep's and those a sink still
+          writes to. A transfer cut mid-stream keeps its spool so that the same
+          offer resumes; once another id is accepted, or the directory reopened, no
+          offer of the old id is awaited any more, and its spool — up to one whole
+          snapshot — stayed on the data disk for good, one more at every such cut
+          (#527).
+        name: sweepSpools
+        params: keep string
+        recv: s *fileSnapshots
+        results: error
+      - doc: |-
+          orphanSpools is the names of the spools among ents that are neither
+          keep's nor written to by a sink. The caller holds s.mu.
+        name: orphanSpools
+        params: ents []os.DirEntry, keep string
+        recv: s *fileSnapshots
+        results: "[]string"
+      - doc: |-
           Create implements SnapshotStore: an existing spool of that id resumes from
-          its last whole, checksummed chunk (R8-21).
+          its last whole, checksummed chunk (R8-21), found reading the spool one
+          chunk at a time. Every other spool no sink writes to is removed:
+          accepting this id abandons them (#527).
         name: Create
         params: id string, meta coreconsensus.SnapshotMetaValue
         recv: s *fileSnapshots
@@ -3615,8 +3741,13 @@ types:
         type: "*os.File"
       - name: meta
         type: coreconsensus.SnapshotMetaValue
+      - name: done
+        type: sync.Once
     kind: struct
     methods:
+      - doc: closed counts the sink's spool as no longer written to, once.
+        name: closed
+        recv: k *fileSink
       - doc: |-
           Write appends p to the spool file; nothing is durable until Commit syncs
           it.
@@ -3646,6 +3777,16 @@ types:
         recv: k *fileSink
         results: error
     name: fileSink
+  - doc: spoolFile is what a resume needs of a spool's file.
+    kind: named
+    name: spoolFile
+    underlying: |-
+      interface {
+      	io.ReaderAt
+      	io.Seeker
+      	Stat() (os.FileInfo, error)
+      	Truncate(size int64) error
+      }
   - fields:
       - name: ""
         role: embedded
@@ -4326,7 +4467,10 @@ types:
           answerFromHeld answers an offer for a snapshot id this node already
           stores, and reports whether it did: held, unless the node has no table,
           in which case its copy failed its checksums and the offer proceeds and
-          replaces it. The copy is not removed first: the commit of the replacement
+          replaces it, or the copy lies past what the node applied: published and
+          never restored, it is not the node's state, and answered held the leader
+          probed past it, the append was refused and the offer came again for as
+          long as it stayed the leader's newest (#528). The copy is not removed first: the commit of the replacement
           overwrites it, and until then it is what the node's members are read
           from. Removed, a replacement that then failed — a transfer cut short, a
           Restore refused — left the node no snapshot, and at its next start a log
@@ -4343,6 +4487,13 @@ types:
           #301, L4).
         name: keepSpool
         params: id string, sink coreconsensus.SnapshotSink
+        recv: n *Node
+      - doc: |-
+          dropOtherSpools aborts the sinks earlier offers of another id opened and
+          whose body never came: an offer of id supersedes them, and kept, each
+          held its spool on the data disk for good (#527).
+        name: dropOtherSpools
+        params: id string
         recv: n *Node
       - doc: |-
           install receives the stream of an accepted offer into its spool, commits
@@ -4488,6 +4639,18 @@ types:
         params: metas []coreconsensus.SnapshotMetaValue, durIdx uint64
         recv: n *Node
         results: coreconsensus.SnapshotMetaValue, error
+      - doc: |-
+          unpublishNewer removes the snapshots newer than the one restored, each of
+          which failed to restore. Left published, a node that started with a table
+          from its own older cut answered the leader's offer of such an id as held,
+          was probed past it, refused the append, and was offered it again, for as
+          long as it stayed the leader's newest (#528). When none restores they all
+          stay: a node with no table reads its members from them (#526). A removal
+          that fails is the disk's, and the start fails with it (D4).
+        name: unpublishNewer
+        params: failed []coreconsensus.SnapshotMetaValue
+        recv: n *Node
+        results: error
       - doc: |-
           baseOrNoTable keeps a restored base, or starts the node with no table
           when a snapshot was needed and none restored. None is needed while the
@@ -4875,6 +5038,10 @@ types:
           tolerance, at most every 100 ms, on the loop.
         name: observePeers
         recv: n *Node
+      - doc: observePeer publishes one peer's gauges.
+        name: observePeer
+        params: p *raft.PeerStatValue, now time.Time, last uint64, window time.Duration
+        recv: n *Node
       - doc: |-
           observeResources publishes the log, filesystem and certificate gauges and
           the counters the stores and the transport keep, at most every second, on
@@ -5038,6 +5205,30 @@ types:
         params: ctx context.Context, op coreconsensus.Operator, id coreconsensus.NodeID
         recv: n *Node
         results: error
+      - doc: |-
+          successorOf is the voter a removal of leader id hands leadership to: this
+          node when it votes, else the first other voter of the configuration.
+        name: successorOf
+        params: id coreconsensus.NodeID
+        recv: n *Node
+        results: coreconsensus.NodeID, bool
+      - doc: |-
+          removeAfterTransfer submits a removal right after leadership moved. The
+          new leader accepts no membership change before its term's no-op commits
+          (MEMBERSHIP_CHANGE_PENDING), an engine detail of the transfer the call
+          itself made, not the caller's: it is submitted again, each heartbeat, for
+          at most twice the maximum election timeout.
+        name: removeAfterTransfer
+        params: ctx context.Context, remove wire.AdminValue
+        recv: n *Node
+        results: error
+      - doc: |-
+          pause waits d on the node's clock and reports whether it did, false
+          when ctx ended first.
+        name: pause
+        params: ctx context.Context, d time.Duration
+        recv: n *Node
+        results: bool
       - name: UpdateAddress
         params: ctx context.Context, op coreconsensus.Operator, id coreconsensus.NodeID, addr string
         recv: n *Node
@@ -5443,6 +5634,18 @@ types:
       - name: lastRes
         type: time.Time
       - doc: |-
+          peersPub and certsPub are the peers whose series the last pass
+          published: a series is never deleted, so a peer that left is reset
+          rather than left at its last value (#532).
+        name: peersPub
+        type: map[coreconsensus.NodeID]bool
+      - doc: |-
+          peersPub and certsPub are the peers whose series the last pass
+          published: a series is never deleted, so a peer that left is reset
+          rather than left at its last value (#532).
+        name: certsPub
+        type: map[coreconsensus.NodeID]bool
+      - doc: |-
           seenTails and seenReloads are the running totals already added to
           their counters.
         name: seenTails
@@ -5498,6 +5701,15 @@ types:
           a stable leader logs nothing.
         name: observeRoleChange
         params: old, cur *coreconsensus.StatusValue
+        recv: o *obs
+      - doc: |-
+          resetDeparted resets once the gauges of every peer the last pass
+          published and this one, whose peers are seen, did not: a peer that left
+          the membership, or a node no longer leading, publishes nothing more of
+          it, its last value stood for good, and "peer unreachable" alerted for a
+          member that no longer existed (#532). Its series reads as a quiet peer.
+        name: resetDeparted
+        params: seen map[coreconsensus.NodeID]bool
         recv: o *obs
     name: obs
   - doc: |-
@@ -5881,6 +6093,11 @@ types:
         type: sync.Mutex
       - name: resvSeq
         type: atomic.Uint64
+      - doc: |-
+          resvAddrs is the sorted address list last reserved, under mu: an
+          unchanged list is not reserved again (#531).
+        name: resvAddrs
+        type: "[]string"
       - name: peerExpiry
         type: map[coreconsensus.NodeID]time.Time
       - name: deliver
@@ -6248,6 +6465,10 @@ vars:
       - name: _
         type: interface{ release() }
         value: (*fileSink)(nil)
+      - doc: A published snapshot's handle reads as a spool's file does.
+        name: _
+        type: spoolFile
+        value: (*fileHandle)(nil)
       - name: _
         type: |-
           interface {
@@ -6292,14 +6513,21 @@ vars:
           	coreconsensus.CodeNoSpace:                 coreconsensus.NoSpace,
           }
     name: sentinelByCode
-  - doc: |-
-      latencyBuckets are the histogram bounds, in seconds, of every latency
-      D13 records: half a millisecond to five seconds, dense below 100 ms where
-      a healthy commit lands, so a regression is visible before it is an outage.
+  - grouped: true
     items:
-      - name: latencyBuckets
+      - doc: |-
+          peerGauges are the leader's per-peer series, reset once a peer is no
+          longer published (#532).
+        name: peerGauges
+        value: "[]string{mPeerMatchLag, mPeerInflight, mPeerUnreachable, mPeerLastContact}"
+      - doc: |-
+          latencyBuckets are the histogram bounds, in seconds, of every latency
+          D13 records: half a millisecond to five seconds, dense below 100 ms
+          where a healthy commit lands, so a regression is visible before it is
+          an outage.
+        name: latencyBuckets
         value: "[]float64{0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5}"
-    name: latencyBuckets
+    name: peerGauges
   - doc: |-
       castagnoli is the CRC-32C table every checksum of the log, the stamp and
       the snapshot stream is computed with: built once, read concurrently.

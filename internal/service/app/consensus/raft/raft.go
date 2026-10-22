@@ -253,6 +253,9 @@ type Raft struct {
 
 	base  core.MembershipValue
 	confs []confAt
+	// admittedPub is the admission set last handed to the driver: it is
+	// handed again only when it changes (#531).
+	admittedPub []core.MemberValue
 
 	prs   map[core.NodeID]*progress
 	votes map[core.NodeID]bool
@@ -362,7 +365,8 @@ func NewRaft(cfg *Config, st *StartState) *Raft {
 		node.lastLeaderContact = time.Time{}
 	}
 	node.resetElection(st.Now)
-	node.rd.Membership = node.admitted()
+	node.admittedPub = node.admitted()
+	node.rd.Membership = node.admittedPub
 	return node
 }
 
@@ -786,7 +790,7 @@ func (r *Raft) noteAppended(e *core.EntryValue) {
 // set is republished, a leader tracks exactly the new members, and a
 // follower or learner takes the role the new configuration gives it.
 func (r *Raft) confChanged() {
-	r.rd.Membership = r.admitted()
+	r.publishAdmitted()
 	switch r.role {
 	case core.RoleLeader:
 		r.trackMembers()
@@ -1067,14 +1071,28 @@ func (r *Raft) commitClusterVersion(i uint64, admin *wire.AdminValue) bool {
 }
 
 // commitTo advances the commit to i, never back, applying the engine's own
-// effects of the entries it covers and republishing the admission set.
+// effects of the entries it covers and republishing the admission set when
+// the commit changed it.
 func (r *Raft) commitTo(i uint64) {
 	if i > r.log.committed {
 		old := r.log.committed
 		r.log.committed = i
 		r.applyCommitEffects(old+1, i)
-		r.rd.Membership = r.admitted()
+		r.publishAdmitted()
 	}
+}
+
+// publishAdmitted hands the driver the admission set when it differs from
+// the one last handed. Republished at every commit, it cost every node a
+// SetMembership, a resolution of every member's address and an Info line
+// per committed entry, though nothing had changed (#531).
+func (r *Raft) publishAdmitted() {
+	a := r.admitted()
+	if slices.Equal(a, r.admittedPub) && !r.mutated(mutMembershipEveryCommit) {
+		return
+	}
+	r.admittedPub = a
+	r.rd.Membership = a
 }
 
 // PeerStats returns the leader's view of every peer, in configuration

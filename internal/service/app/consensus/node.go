@@ -531,10 +531,10 @@ func (n *Node) durableIndex() (uint64, error) {
 // format this build does not know refuses the start instead: unknown means
 // stop, never skip (D18, #513).
 func (n *Node) restoreLatest(metas []coreconsensus.SnapshotMetaValue, durIdx uint64) (coreconsensus.SnapshotMetaValue, error) {
-	for _, m := range metas {
+	for i, m := range metas {
 		err := n.restoreFrom(m, durIdx)
 		if err == nil {
-			return m, nil
+			return m, n.unpublishNewer(metas[:i])
 		}
 		if errs.HasCode(err, coreconsensus.CodeVersionUnsupported) {
 			return coreconsensus.SnapshotMetaValue{}, err
@@ -542,6 +542,23 @@ func (n *Node) restoreLatest(metas []coreconsensus.SnapshotMetaValue, durIdx uin
 		n.obs.warn("consensus: a snapshot was not restored", lstr("id", m.ID), lstr("error", err.Error()))
 	}
 	return coreconsensus.SnapshotMetaValue{}, nil
+}
+
+// unpublishNewer removes the snapshots newer than the one restored, each of
+// which failed to restore. Left published, a node that started with a table
+// from its own older cut answered the leader's offer of such an id as held,
+// was probed past it, refused the append, and was offered it again, for as
+// long as it stayed the leader's newest (#528). When none restores they all
+// stay: a node with no table reads its members from them (#526). A removal
+// that fails is the disk's, and the start fails with it (D4).
+func (n *Node) unpublishNewer(failed []coreconsensus.SnapshotMetaValue) error {
+	for _, m := range failed {
+		if err := n.cfg.Snapshots.Remove(m.ID); err != nil {
+			return storageFailed("unpublish a snapshot that did not restore", err)
+		}
+		n.obs.warn("consensus: a snapshot that did not restore was unpublished", lstr("id", m.ID))
+	}
+	return nil
 }
 
 // baseOrNoTable keeps a restored base, or starts the node with no table
