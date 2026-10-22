@@ -1000,6 +1000,32 @@ come back (README bug 8). Its fix revokes the removed machine's key on every
 peer (`shard.js:796-803`, `transport.js:110-120`). Here a `NodeID` is never
 reused (D8), and a retired ID is refused even with a valid certificate.
 
+**A stale voter admits the leader a member vouches for, for replication
+only (amendment of 2026-10-23, #542, arbitrated by the owner on
+2026-10-22).** Admission from the local view alone left a voter that was
+down while a member was admitted, promoted and handed the leadership unable
+to hear that leader, for as long as it led: the members it knew were
+followers and sent it nothing. From protocol 2:
+- A follower that follows a live leader and receives a PreVote from a
+  member of its configuration whose last index is behind its commit answers
+  with `MsgLeaderRecord`: the leader's member record (ID, slot, SPKI,
+  address), read from its COMMITTED configuration. Only at cluster version 2.
+- The voter that receives it, knowing no live leader, takes it only from a
+  member of its own configuration, at a term at least its own, for a pinned
+  key, and for an ID it neither lists nor retired. It adds the record to its
+  admission set, so the transport admits that key at the handshake, which
+  still verifies the chain to the cluster CA.
+- From that leader it accepts appends, heartbeats and snapshot installs
+  only: a vote request, a transfer, a read or a forward is dropped. It never
+  sends that leader a vote request: elections use its own configuration.
+- The provisional admission ends when one of its configurations lists the
+  leader (it is then admitted as any member) or retires it, or after four
+  maximum election timeouts.
+- Threat model: an admitted member can vouch for another member's key to a
+  peer that has no leader, for replication only. Raft is crash-fault
+  tolerant here, a compromised member can already forge far more, and the
+  key must still be one the cluster CA signed.
+
 **Limits TLS does not set (R1-24, from raft-sql-poc).**
 - A frame's announced length is checked against `MaxFrameBytes` before
   anything is allocated.
@@ -3971,9 +3997,10 @@ completed:
     trusted by its index once its term can no longer be read; one in the
     adopted range above it is `LINEAGE_MISMATCH`, as phase 1 answered for
     the whole kept range (#509).
-- **Not in protocol 2.** The admission of a stale voter by a leader it does
-  not know (#542) changes D4's threat model and waits for its arbitration.
-  The fresh epoch in the stamp and D18's announced `PayloadMax` with
+- `MsgLeaderRecord`, the admission of a stale voter by a leader a member
+  vouches for (D4, #542, arbitrated on 2026-10-22): sent only at cluster
+  version 2.
+- **Not in protocol 2.** The fresh epoch in the stamp and D18's announced `PayloadMax` with
   `PAYLOAD_VERSION_REFUSED` (follow-ups of kodflow/forgejo-raft#65 and #50)
   have no issue yet. Each that changes a format will need protocol 3.
 
@@ -3989,7 +4016,7 @@ completed:
 | R8 | review run 3, round 2 (overall round 8), 2026-10-13 | **State: rewritten-unreviewed.** Log recovery as one procedure: explicit truncate records, the effective log, a torn tail only in the highest batch and only with a tear pattern, zeroing only after classification, no batch across a rotation, the `STORAGE_FAILED` marker keyed on `boot_id` (R8-01 to R8-06). Identity: the member's key pinned by SPKI, slots pinned on Nomad node ids and bound by `nomad_job_id` and `nomad_task`, a published JOIN surface with the product's `JoinAuthorizer`, `Init` offline with `Redraw`, the replacement marker's owner and exit, an executable key-compromise runbook, the renewer, Consul ACLs (R8-07 to R8-14). Nomad: reschedule and disconnect corrected, the slot on a replacement VPS, `max_kill_timeout`, offline subcommands outside Nomad, the rolling script of Q16 (R8-15 to R8-19). The Recover fence is a witness on the NAS that fails closed (Q17, R8-20). Snapshot ports completed and rotation with pinned anchors (R8-21, R8-22). The SQL event lifecycle, its cursor and its batches (R8-23 to R8-30). Infrastructure rows and stale making.codes facts (R8-31 to R8-34). Exit codes through `errs.WithExitCode`, API and editorial fixes, the dead-voter gate stated (R8-35 to R8-38) |
 | R9 | review run 3, round 3 (final, overall round 9), 2026-10-13 | **State: rewritten after the final round, not re-reviewed.** Batch sequences contiguous, stale recovery rules withdrawn, tears judged on the highest batch's end record per 512 B chunk (R9-01 to R9-03). SPKI required at every founding and recovery, break-glass certificates over the pinned key, `STORAGE_FAILED` markers in two places, a `join` callback off the event loop, the lane in the frame type's high bits (R9-04 to R9-07). The witness: signed receipts from both NAS, a check that blocks Forgejo only and fails closed, reached through a dated read-only matrix exception (Q18, Q19, Q20, R9-08 to R9-11). The job kept from generic submitters and rolled with a plan check, Vault roles bound by namespace with a claim per slot (R9-12, R9-13). The SQL boundary: backup cursor, step table, per-database dumps, predecessor events drained (R9-14 to R9-16, R9-19). Submission counter exhaustion, `DenyPin`, the image outside the forge, `require_cn` lab-gated (R9-17, R9-18, R9-20, R9-21) |
 | Accepted | the owner's decision, 2026-10-13 | Accepted on R9 as written; the SDK stays public. No text changed but the status |
-| S3 | Raft hunt lot S3, 2026-10-23 | protocol version 2 raised once: the announcement, the raise refused until every member speaks it, the checksummed snapshot meta, `Origin`, `AdoptedFrom` (amendment of 2026-10-23) |
+| S3 | Raft hunt lot S3, 2026-10-23 | protocol version 2 raised once: the announcement, the raise refused until every member speaks it, the checksummed snapshot meta, `Origin`, `AdoptedFrom`, the stale voter's admission of a vouched-for leader in D4 (amendment of 2026-10-23) |
 
 ## raft-sql-poc (owner's prior Raft)
 
