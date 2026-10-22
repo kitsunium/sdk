@@ -419,6 +419,37 @@ constants:
         name: defaultChunkSize
         value: 1 << 20
     name: chunkHeaderLen
+  - doc: The bounds of the wait after a cut that failed without stopping the node.
+    grouped: true
+    items:
+      - name: cutRetryMin
+        type: time.Duration
+        value: time.Second
+      - name: cutRetryMax
+        type: time.Duration
+        value: time.Minute
+    name: cutRetryMin
+  - grouped: true
+    items:
+      - doc: |-
+          spaceCheckEvery bounds how often the loop reads its filesystem's free
+          space, as the gauges do.
+        name: spaceCheckEvery
+        type: time.Duration
+        value: time.Second
+      - doc: |-
+          spaceRaiseEvery bounds how often the node proposes the alarm while it
+          is not committed: a node with no leader is refused at once.
+        name: spaceRaiseEvery
+        type: time.Duration
+        value: time.Second
+      - doc: |-
+          spaceOperator is the operator an alarm the engine raises is recorded
+          under (D8).
+        name: spaceOperator
+        type: coreconsensus.Operator
+        value: "\"engine:no-space\""
+    name: spaceCheckEvery
   - doc: |-
       The lane is the first byte a dialer writes after the handshake: it says
       what the connection carries, so control traffic never queues behind
@@ -660,6 +691,7 @@ files:
       - (*fileLog).quarantine
       - (*fileLog).createSegment
       - (*fileLog).segmentFile
+      - (*fileLog).zeroFill
       - abandonTmp
       - prepared
       - (*fileLog).prepare
@@ -697,6 +729,8 @@ files:
       - (*fileLog).WriteStamp
       - (*fileLog).Close
       - (*fileLog).logStats
+      - (*fileLog).logBytes
+      - (*fileLog).freeBytes
     name: filelog.go
   - decls:
       - fileSnapshots
@@ -750,6 +784,7 @@ files:
       - (*Node).answerFromHeld
       - (*Node).keepSpool
       - (*Node).install
+      - (*Node).restoreFailed
       - (*Node).stillFresh
       - (*Node).installed
     name: install.go
@@ -758,6 +793,7 @@ files:
       - (*Node).joinReason
       - (*Node).screenJoin
       - (*Node).joinRateLimited
+      - (*Node).alreadyJoined
       - (*Node).slotTaken
       - (*Node).addJoiner
     name: join.go
@@ -852,6 +888,7 @@ files:
       - (*Node).readTail
       - (*Node).startApplied
       - noTableBase
+      - isMembershipEntry
       - baseTerm
       - (*Node).deliver
       - (*Node).exec
@@ -964,9 +1001,13 @@ files:
       - receiptMessage
       - ReceiptMessage
       - Recover
+      - DataDir.interruptedInstall
+      - DataDir.finishInterruptedInstall
+      - DataDir.verifySnapshotFile
       - recoverIntent
       - recoverPlan
       - DataDir.planRecover
+      - DataDir.planKept
       - recoverAuditLine
       - DataDir.resumedKept
       - DataDir.writeRecover
@@ -987,6 +1028,7 @@ files:
       - extends
       - DataDir.appendForced
       - DataDir.chainAt
+      - snapshotAt
       - lastMembership
       - RestoreOptions
       - RestoreSnapshot
@@ -1076,8 +1118,11 @@ files:
       - alignedOffset
     name: snapcodec.go
   - decls:
+      - cutRetryMin
       - Latest
       - (*Node).restoreFrom
+      - (*Node).codecOf
+      - snapshotCodec
       - (*Node).maybeSnapshot
       - (*Node).cutFailed
       - (*Node).metaAt
@@ -1085,15 +1130,28 @@ files:
       - (*Node).cutPending
       - (*Node).writeSnapshot
       - (*Node).publishSnapshot
+      - payloadBytes
+      - snapshotLimit
       - (*Node).afterCut
       - (*Node).retain
       - (*Node).removeOld
+      - (*Node).streamEnded
+      - (*Node).sentCorrupt
+      - (*Node).verifyHeld
       - (*Node).requestCut
       - (*Node).SaveSnapshot
       - (*Node).save
       - (*Node).snapshotToSend
       - (*Node).sendSnapshot
     name: snapshot.go
+  - decls:
+      - spaceCheckEvery
+      - spaceGuard
+      - spaceReporter
+      - (*Node).guardSpace
+      - (*Node).spaceShort
+      - (*Node).raiseNoSpace
+    name: space.go
   - decls:
       - datasync
       - bootID
@@ -1568,11 +1626,15 @@ functions:
     params: f *os.File, off, size int64
     results: error
   - doc: |-
-      abandonTmp closes f, a segment .tmp a failure leaves unpublished, and
-      returns cause, the failure that stops the log. The .tmp is never renamed
-      and recovery deletes it, so what its Close says changes nothing.
+      abandonTmp closes f, the segment .tmp at path a failure leaves
+      unpublished, removes it, and returns cause, the failure that stops the
+      log. The .tmp is never renamed, so what its Close says changes nothing. It
+      is removed now, not at the next start: a zero-fill that failed on a full
+      disk wrote until the disk had no byte left, and the disk is shared with
+      what the product stores beside the log (#520). A removal that fails
+      leaves it to recovery, which deletes every .tmp.
     name: abandonTmp
-    params: f io.Closer, cause error
+    params: f io.Closer, path string, cause error
     results: error
   - doc: |-
       writeFileSync publishes data at path atomically and durably: written and
@@ -1762,6 +1824,10 @@ functions:
     name: noTableBase
     params: log coreconsensus.LogStore, metas []coreconsensus.SnapshotMetaValue, first uint64
     results: coreconsensus.SnapshotMetaValue, error
+  - doc: isMembershipEntry reports whether e is a configuration entry.
+    name: isMembershipEntry
+    params: e coreconsensus.EntryValue
+    results: bool
   - doc: |-
       baseTerm is the term of a no-table base at first-1: the log's, logTerm,
       or the term metaTerm of the snapshot metadata at that index when matched
@@ -1910,6 +1976,12 @@ functions:
     name: extends
     params: e *coreconsensus.EntryValue, end, term uint64, chain uint32
     results: bool
+  - doc: |-
+      snapshotAt is the snapshot of metas that ends at index: the newest is not
+      always the one, when it failed its checksums and the base is the older's.
+    name: snapshotAt
+    params: metas []coreconsensus.SnapshotMetaValue, index uint64
+    results: coreconsensus.SnapshotMetaValue, bool
   - doc: |-
       lastMembership is the configuration committed at index, from the log or
       the latest snapshot. A store that cannot answer fails it: a configuration
@@ -2080,6 +2152,27 @@ functions:
   - name: Latest
     params: s coreconsensus.SnapshotStore
     results: coreconsensus.SnapshotHandle, error
+  - doc: |-
+      snapshotCodec is codecOf for a node whose own codec is own; an offline
+      operation, which has none, passes nil and reads only the codecs this build
+      links.
+    name: snapshotCodec
+    params: m *coreconsensus.SnapshotMetaValue, own coretransform.BoundedDecompressor
+    results: coretransform.BoundedDecompressor, error
+  - doc: payloadBytes is the payload es carries, what SnapshotEveryBytes counts.
+    name: payloadBytes
+    params: es []coreconsensus.EntryValue
+    results: int64
+  - doc: |-
+      snapshotLimit is the largest snapshot a cut may write: this node's
+      MaxSnapshotBytes, or the smallest limit a member announces when lower. A
+      cut over it is refused and compacts nothing: published, no follower could
+      be installed from it, and every node, this one included, failed to restore
+      it at its next start and came up with no table — a rolling restart left
+      the cluster with no leader (#512).
+    name: snapshotLimit
+    params: own int64, conf *coreconsensus.MembershipValue
+    results: int64
   - doc: |-
       datasync makes a segment's written bytes durable with fdatasync(2): the
       segment is zero-filled at its full size, so there is no size to publish
@@ -2553,6 +2646,33 @@ types:
         recv: d DataDir
         results: error
       - doc: |-
+          interruptedInstall reports the install a crash interrupted after its
+          snapshot was published — the install's commit point (D7) — and before the
+          log was moved onto it: the newest snapshot that verifies, when it lies past
+          the log's end or does not match the log's term at its index. The next
+          start finishes it (finishInstall); Recover finishes it first and keeps it,
+          or its forced entry followed the short log, the start erased it, and the
+          node ran the snapshot's old voters and never led again (#506). It reads
+          and writes nothing else.
+        name: interruptedInstall
+        recv: d DataDir
+        results: coreconsensus.SnapshotMetaValue, bool, error
+      - doc: |-
+          finishInterruptedInstall moves the log onto the snapshot of an
+          interrupted install, durably, as finishInstall does at a start: the log is
+          replaced by that snapshot's base.
+        name: finishInterruptedInstall
+        params: m *coreconsensus.SnapshotMetaValue
+        recv: d DataDir
+        results: error
+      - doc: |-
+          verifySnapshotFile reads a published snapshot back offline and checks its
+          sizes and digest, with the codec its metadata names.
+        name: verifySnapshotFile
+        params: m coreconsensus.SnapshotMetaValue
+        recv: d DataDir
+        results: err error
+      - doc: |-
           planRecover decides what the new history keeps, checks the fence of every
           old voter left out against the configuration in force there, and audits
           the operation, before anything else is written. A first Recover keeps the
@@ -2563,6 +2683,16 @@ types:
         params: stamp *coreconsensus.StampValue, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RecoverOptions, intent *recoverIntent
         recv: d DataDir
         results: recoverPlan, error
+      - doc: |-
+          planKept decides the last index the new history keeps: the one a resumed
+          Recover's marker recorded; the index of the snapshot an interrupted
+          install published, which Recover finishes first (#506); else every entry
+          this survivor holds whose chain verifies, not only those up to its
+          persisted commit (issue #399).
+        name: planKept
+        params: p *recoverPlan, intent *recoverIntent
+        recv: d DataDir
+        results: error
       - doc: |-
           resumedKept is the index an interrupted Recover kept, refused when the log
           no longer holds it: the forced entry follows it, and nothing else may.
@@ -2888,6 +3018,11 @@ types:
         name: duringSync
         type: func()
       - doc: |-
+          fill replaces zeroFrom when a test sets it, to fail as a full disk
+          does; nil otherwise.
+        name: fill
+        type: func(f *os.File, off, size int64) error
+      - doc: |-
           wmu serialises the writers. A sync holds it, not mu, across its
           write and fdatasync, so readers do not wait for the disk (review of
           PR #301, L6).
@@ -3090,6 +3225,13 @@ types:
         params: n uint64, size int64, tmp string
         recv: l *fileLog
         results: "*os.File, error"
+      - doc: |-
+          zeroFill is the function that zero-fills a segment: zeroFrom, unless a
+          test set fill to fail as a full disk does. It is read on the writer's
+          path, before any goroutine it hands it to starts.
+        name: zeroFill
+        recv: l *fileLog
+        results: func(f *os.File, off, size int64) error
       - doc: |-
           prepare launches the background goroutine that zero-fills segment n off
           the writer's path. The goroutine ends on its own once the .tmp is zeroed
@@ -3300,6 +3442,18 @@ types:
         name: logStats
         recv: l *fileLog
         results: bytes, free, tails int64
+      - doc: |-
+          logBytes is the bytes the segments occupy, the next one being prepared
+          included once published: what the no-space alarm's quota counts (D17).
+        name: logBytes
+        recv: l *fileLog
+        results: int64
+      - doc: |-
+          freeBytes is the free space of the log's filesystem, -1 where it is not
+          read.
+        name: freeBytes
+        recv: l *fileLog
+        results: int64
       - doc: |-
           restartAt makes the empty log start after the restored snapshot, with a
           hard state one term past it, durably.
@@ -3993,6 +4147,9 @@ types:
         type: map[string]time.Time
       - name: joinRefused
         type: atomic.Int64
+      - doc: space is the no-space guard's state (#515).
+        name: space
+        type: spaceGuard
       - doc: crashAfterPublish is set by the package's own tests only.
         name: crashAfterPublish
         type: atomic.Bool
@@ -4131,8 +4288,13 @@ types:
       - doc: |-
           answerFromHeld answers an offer for a snapshot id this node already
           stores, and reports whether it did: held, unless the node has no table,
-          in which case its copy failed its checksums and is removed so the offer
-          proceeds and replaces it.
+          in which case its copy failed its checksums and the offer proceeds and
+          replaces it. The copy is not removed first: the commit of the replacement
+          overwrites it, and until then it is what the node's members are read
+          from. Removed, a replacement that then failed — a transfer cut short, a
+          Restore refused — left the node no snapshot, and at its next start a log
+          that begins past a compaction with nothing naming the members: it
+          admitted nobody, for good (#526).
         name: answerFromHeld
         params: o *coreconsensus.InstallOfferValue, acc *coreconsensus.InstallAcceptValue
         recv: n *Node
@@ -4154,6 +4316,17 @@ types:
           when HardClose returns, because install itself runs under the transport.
         name: install
         params: req coreconsensus.InstallParams
+        recv: n *Node
+        results: error
+      - doc: |-
+          restoreFailed is what an installed copy that did not restore does to the
+          node. It is unpublished, so a restart does not load it again, or the
+          failure to do so travels with it — unless the node has no table: its
+          configuration is read from its snapshots' metadata, and a node left none
+          starts with no member to admit (#526). The copy stays until another is
+          published over it, and a restart falls back to no table again.
+        name: restoreFailed
+        params: snapID string, err error
         recv: n *Node
         results: error
       - doc: |-
@@ -4207,6 +4380,16 @@ types:
         params: slot string
         recv: n *Node
         results: bool
+      - doc: |-
+          alreadyJoined reports whether the membership in force lists the
+          requester itself — its id, incarnation, slot and key all equal — and
+          answers with the position of that membership. Any other request on a held
+          slot is slotTaken's to refuse (R8-11): the guard is against another node
+          taking it, never against the member asking again.
+        name: alreadyJoined
+        params: r *coreconsensus.JoinRequestValue
+        recv: n *Node
+        results: coreconsensus.PositionValue, bool
       - doc: slotTaken reports whether a current member already holds slot.
         name: slotTaken
         params: slot string
@@ -4260,16 +4443,23 @@ types:
       - doc: |-
           restoreLatest restores from the newest snapshot that verifies, falling
           back to the older one when it does not (D7); none restores is the zero
-          base.
+          base. Each one discarded is logged with its reason: a node that starts
+          with no table otherwise says nothing of why (#512). One of a version or
+          format this build does not know refuses the start instead: unknown means
+          stop, never skip (D18, #513).
         name: restoreLatest
         params: metas []coreconsensus.SnapshotMetaValue, durIdx uint64
         recv: n *Node
-        results: coreconsensus.SnapshotMetaValue
+        results: coreconsensus.SnapshotMetaValue, error
       - doc: |-
           baseOrNoTable keeps a restored base, or starts the node with no table
-          when a snapshot was needed and none restored.
+          when a snapshot was needed and none restored. None is needed while the
+          log still holds every entry from index 1 through its commit: the node
+          replays it, as a node that never cut one does. It used to start with no
+          table as soon as a snapshot existed, and a cluster whose every snapshot
+          failed to restore lost every leader at a rolling restart (#512).
         name: baseOrNoTable
-        params: base coreconsensus.SnapshotMetaValue, metas []coreconsensus.SnapshotMetaValue, first uint64
+        params: base coreconsensus.SnapshotMetaValue, metas []coreconsensus.SnapshotMetaValue, first, last, commit uint64
         recv: n *Node
         results: coreconsensus.SnapshotMetaValue, error
       - doc: |-
@@ -4821,20 +5011,40 @@ types:
         recv: n *Node
         results: err error
       - doc: |-
-          maybeSnapshot cuts a snapshot after SnapshotEvery applied entries, on the
-          apply goroutine; the write runs off it unless the machine cannot cut
-          cheaply (D7). A trigger during a cut in flight is coalesced, not dropped:
-          the cut is made once that one is written (cutPending), or a node that
-          applies nothing more would keep the tail uncut and its log uncompacted.
+          codecOf is the codec a snapshot of metadata m is decoded with, refused
+          VERSION_UNSUPPORTED for a metadata version or a codec this build does
+          not know: unknown means stop, never skip (D18). The codec is the one the
+          metadata names (D18 "Compression"): the node's own, or another bounded
+          codec this build links. Read with the node's own, a snapshot written
+          before its codec was changed failed its checksums at the next start, and
+          every snapshot of every node at once (#512).
+        name: codecOf
+        params: m *coreconsensus.SnapshotMetaValue
+        recv: n *Node
+        results: coretransform.BoundedDecompressor, error
+      - doc: |-
+          maybeSnapshot cuts a snapshot after SnapshotEvery applied entries or
+          SnapshotEveryBytes of applied payload, whichever comes first, on the apply
+          goroutine; the write runs off it unless the machine cannot cut cheaply
+          (D7). applied is the payload of the batch just applied: the byte trigger
+          was validated and read nowhere, and a log of large entries grew to the
+          disk's end between two cuts (#515). A trigger during a cut in flight is
+          coalesced, not dropped: the cut is made once that one is written
+          (cutPending), or a node that applies nothing more would keep the tail
+          uncut and its log uncompacted.
         name: maybeSnapshot
+        params: applied int64
         recv: n *Node
       - doc: |-
           cutFailed is what a snapshot cut that published nothing does to the node.
           A STORAGE_FAILED stops it: a failed write or sync of a snapshot is a
           failed write or sync of this node's disk, and D4 never retries one, for
           the page cache may now lie about the log on the same disk as well. Any
-          other failure — the machine's Snapshot, its encoding — is logged, and the
-          next cut tries again.
+          other failure — the machine's Snapshot, its encoding, a full disk under
+          the spool, a state over MaxSnapshotBytes — is logged, and no automatic
+          cut starts again before a wait that doubles at each failure, from one
+          second to a minute: every applied batch used to start a full cut again,
+          on a disk the last one had just filled (#520).
         name: cutFailed
         params: err error
         recv: n *Node
@@ -4908,6 +5118,31 @@ types:
         name: removeOld
         params: old []coreconsensus.SnapshotMetaValue
         recv: n *Node
+      - doc: |-
+          streamEnded acts on a transfer's refusal, off the loop: a peer whose log
+          starts past the snapshot gets a newer cut, one that found it corrupt has
+          the sender read its own copy back, and one that cannot read its version
+          or codec is logged, as it stops.
+        name: streamEnded
+        params: meta coreconsensus.SnapshotMetaValue, to coreconsensus.NodeID, err error
+        recv: n *Node
+      - doc: |-
+          sentCorrupt is the sender's answer to a peer that refused a snapshot as
+          SNAPSHOT_CORRUPT: its own copy is read back. The transport is
+          authenticated and checksummed, so a copy that verifies leaves the fault
+          with the peer, which is logged. One that does not is removed, the cut
+          index lowered past it, and a cut asked for at the applied index: the next
+          probe sends that one, or the older copy left. It used to be streamed
+          again at every probe, never read back, and the peer stayed out until the
+          next cut, SnapshotEvery entries later (#525). It runs off the loop.
+        name: sentCorrupt
+        params: meta coreconsensus.SnapshotMetaValue, to coreconsensus.NodeID
+        recv: n *Node
+      - doc: verifyHeld reads a held snapshot back and checks its sizes and digest.
+        name: verifyHeld
+        params: m coreconsensus.SnapshotMetaValue
+        recv: n *Node
+        results: err error
       - doc: requestCut asks the apply goroutine for a cut, unless one is in flight.
         name: requestCut
         recv: n *Node
@@ -4939,6 +5174,27 @@ types:
         name: sendSnapshot
         params: to coreconsensus.NodeID
         recv: n *Node
+      - doc: |-
+          guardSpace proposes the no-space alarm when this node's disk runs short
+          and the alarm is not committed, at most every spaceRaiseEvery. It runs on
+          the loop; the proposal runs on a goroutine counted in n.wg, which ends
+          once it is answered, or once the node stops. A follower's is forwarded to
+          the leader, as any proposal (R3-24).
+        name: guardSpace
+        params: now time.Time
+        recv: n *Node
+      - doc: |-
+          spaceShort reports whether this node's disk is short, and why: the log
+          past its quota less the reserve, read at every call, or the filesystem's
+          free space under the reserve, read at most every spaceCheckEvery.
+        name: spaceShort
+        params: now time.Time
+        recv: n *Node
+        results: why string, short bool
+      - doc: raiseNoSpace proposes the alarm and logs why; admin logs its outcome.
+        name: raiseNoSpace
+        params: why string
+        recv: n *Node
     name: Node
   - doc: "snapState tracks the cuts: at most one in flight, coalesced (D7)."
     fields:
@@ -4955,6 +5211,19 @@ types:
         type: bool
       - name: spools
         type: map[string]coreconsensus.SnapshotSink
+      - doc: |-
+          backoff is the wait after the last cut that failed without stopping
+          the node, doubled at each failure and cleared by a cut that
+          publishes; no automatic cut starts before retryAt (#520).
+        name: backoff
+        type: time.Duration
+      - name: retryAt
+        type: time.Time
+      - doc: |-
+          sinceBytes is the payload applied since the last cut started, which
+          SnapshotEveryBytes bounds (D7, #515).
+        name: sinceBytes
+        type: int64
     kind: struct
     name: snapState
   - fields:
@@ -5168,7 +5437,11 @@ types:
         type: coreconsensus.HardState
       - name: First
         type: uint64
-      - name: Last
+      - doc: |-
+          Last is the last index the directory holds: the log's, or the
+          newest snapshot's when an install a crash interrupted published it
+          past the log's end.
+        name: Last
         type: uint64
       - name: Snapshots
         type: "[]coreconsensus.SnapshotMetaValue"
@@ -5219,6 +5492,11 @@ types:
         type: coreconsensus.MembershipValue
       - name: resumed
         type: bool
+      - doc: |-
+          install is the snapshot of an install a crash interrupted, which
+          Recover finishes before its marker and keeps (#506); nil when none.
+        name: install
+        type: "*coreconsensus.SnapshotMetaValue"
     kind: struct
     name: recoverPlan
   - fields:
@@ -5310,6 +5588,12 @@ types:
         type: int64
       - name: decoded
         type: int64
+      - doc: |-
+          limit, when not 0, bounds both the decoded and the encoded stream, as
+          a reader bounds them: a chunk that would pass it is refused
+          SNAPSHOT_TOO_LARGE before any of it is written.
+        name: limit
+        type: int64
     kind: struct
     methods:
       - doc: |-
@@ -5374,6 +5658,28 @@ types:
         recv: c *chunkReader
         results: error
     name: chunkReader
+  - doc: |-
+      spaceGuard is the guard's state. checkedAt and nextRaise belong to the
+      event loop; raising is set while a proposal of the alarm is in flight.
+    fields:
+      - name: checkedAt
+        type: time.Time
+      - name: nextRaise
+        type: time.Time
+      - name: raising
+        type: atomic.Bool
+    kind: struct
+    name: spaceGuard
+  - doc: |-
+      spaceReporter is what a log store tells the guard: the bytes its segments
+      occupy and its filesystem's free bytes, -1 where they are not read.
+    kind: named
+    name: spaceReporter
+    underlying: |-
+      interface {
+      	logBytes() int64
+      	freeBytes() int64
+      }
   - fields:
       - doc: |-
           Certificate is the node's certificate and key. It carries exactly one
@@ -5823,6 +6129,9 @@ vars:
           interface {
           		logStats() (bytes, free, tails int64)
           	}
+        value: (*fileLog)(nil)
+      - name: _
+        type: spaceReporter
         value: (*fileLog)(nil)
       - name: _
         type: |-

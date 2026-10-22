@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-22T12:00:00Z -->
+<!-- updated: 2026-10-22T18:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -50,6 +50,10 @@ under coverage before touching `shard_count`.
   one other grant while the leader was down, it overwrote the acknowledged
   entries it had truncated (#524, `mutSilentCampaigns`,
   `checkSilentNodeNeverCampaigns`).
+- Admit a command while the no-space alarm is committed, locally or
+  forwarded: `checkProposed` refuses it NO_SPACE and still admits the
+  engine entries, the alarm's clearing among them (D17, #515,
+  `mutNoSpaceAdmits`, `checkNoSpaceRefusesCommands`).
 - Append to a peer an entry at or below `Config.Log.KeptIndex`: the entries
   a Recover kept carry the predecessor's identity, which only a snapshot of
   this lineage tells the peer, so `sendAppend` sends one (#507,

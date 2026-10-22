@@ -112,9 +112,12 @@ func Redraw(d DataDir) (coreconsensus.NodeID, error) {
 // and bounds of the log, the complete snapshots, and the markers that would
 // refuse a start.
 type ReportValue struct {
-	Stamp      coreconsensus.StampValue
-	HardState  coreconsensus.HardState
-	First      uint64
+	Stamp     coreconsensus.StampValue
+	HardState coreconsensus.HardState
+	First     uint64
+	// Last is the last index the directory holds: the log's, or the
+	// newest snapshot's when an install a crash interrupted published it
+	// past the log's end.
 	Last       uint64
 	Snapshots  []coreconsensus.SnapshotMetaValue
 	Quarantine string
@@ -316,7 +319,10 @@ func ReceiptMessage(old, next coreconsensus.ClusterID, voter coreconsensus.NodeI
 // new cluster, which resumes from the index the first one kept; one to
 // another cluster is refused. A silence condition TruncateAndStaySilent
 // left is removed before the marker: the new history is closed to the
-// terms it guarded, and a silent node never campaigns.
+// terms it guarded, and a silent node never campaigns. An install a crash
+// interrupted after its snapshot was published is finished first, before
+// the marker: the new history keeps that snapshot's index, and the forced
+// entry follows it.
 func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RecoverOptions) error {
 	if err := d.offline(); err != nil {
 		return err

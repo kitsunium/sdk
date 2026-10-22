@@ -1373,7 +1373,7 @@ ReceiptMessage returns the bytes a witness signs to attest a fenced voter.
 func Recover(d DataDir, newCluster ClusterID, members []MemberValue, opt *RecoverOptions) error
 ```
 
-Recover starts a new history from this node's committed log and the contiguous entries past it whose body and chain checksums verify and whose term does not decrease, every old voter left out attested fenced by every witness. An interrupted Recover leaves the stop marker STOP-RECOVER, which refuses a start until Recover runs again to the same new cluster. It removes the silence condition TruncateAndStaySilent left.
+Recover starts a new history from this node's committed log and the contiguous entries past it whose body and chain checksums verify and whose term does not decrease, every old voter left out attested fenced by every witness. An interrupted Recover leaves the stop marker STOP-RECOVER, which refuses a start until Recover runs again to the same new cluster. It removes the silence condition TruncateAndStaySilent left, and first finishes an install a crash interrupted after its snapshot was published, so the forced entry follows that snapshot.
 
 <a name="Redraw"></a>
 ## func [Redraw](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
@@ -3425,6 +3425,9 @@ type ReportValue struct {
 	Stamp      coreconsensus.StampValue
 	HardState  coreconsensus.HardState
 	First      uint64
+	// Last is the last index the directory holds: the log's, or the
+	// newest snapshot's when an install a crash interrupted published it
+	// past the log's end.
 	Last       uint64
 	Snapshots  []coreconsensus.SnapshotMetaValue
 	Quarantine string
@@ -3772,7 +3775,11 @@ type StateMachine interface {
 	// to the Propose that created it on the node that created it.
 	Apply(e EntryValue) any
 	// Restore replaces the state with a snapshot's. It is serialised with
-	// Apply.
+	// Apply. An error coded VERSION_UNSUPPORTED says the snapshot is of a
+	// format this build does not read: the node stops, as for an entry
+	// kind it does not know, and a restart over that snapshot is refused
+	// (D18). Any other error refuses that one install, and the leader
+	// offers a snapshot again.
 	Restore(r io.Reader, meta SnapshotMetaValue) error
 	// Snapshot captures a point-in-time view of the state, cheaply: it is
 	// called on the apply goroutine.
@@ -3796,7 +3803,7 @@ Apply applies one committed command and returns its result, delivered to the Pro
 func (StateMachine) Restore(r io.Reader, meta SnapshotMetaValue) error
 ```
 
-Restore replaces the state with a snapshot's. It is serialised with Apply.
+Restore replaces the state with a snapshot's. It is serialised with Apply. An error coded VERSION\_UNSUPPORTED says the snapshot is of a format this build does not read: the node stops, as for an entry kind it does not know, and a restart over that snapshot is refused (D18). Any other error refuses that one install, and the leader offers a snapshot again.
 
 <a name="StateMachine.Snapshot"></a>
 ### func \(StateMachine\) [Snapshot](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
