@@ -5286,15 +5286,15 @@ sequences:
         kind: stdlib
       - id: snapshotCorrupt
         kind: internal
-      - id: n.stoppedErr
-        kind: internal
-      - id: abandon
-        kind: internal
-      - id: n.stop
+      - id: n.stillFresh
         kind: internal
       - id: sink.Commit
         kind: value
+      - id: n.stop
+        kind: internal
       - id: n.HardClose
+        kind: internal
+      - id: n.stoppedErr
         kind: internal
       - id: n.aq.push
         kind: internal
@@ -5329,39 +5329,14 @@ sequences:
             - return: snapshotCorrupt("stream ended early")
               to: snapshotCorrupt
           when: err != nil || k != want
-      - var:
-          name: code
-          type: errs.Code
-      - var:
-          name: adoptErr
-          type: error
       - opt:
           do:
-            - return: n.stoppedErr()
-              to: n.stoppedErr
-          when: |-
-            !n.exec(func() {
-            		if code = n.r.CheckOffer(req.From.ID, req.Offer, n.r.NoTable()); code == 0 {
-            			// The lineage the snapshot records is durable before the
-            			// restore, and so before any entry it covers is applied (#507).
-            			adoptErr = n.adoptLineage(meta.Log)
-            		}
-            	})
-      - opt:
-          do:
-            - eval: abandon(sink.Abort())
-              to: abandon
-            - eval: n.stop(adoptErr, true)
-              to: n.stop
-            - return: adoptErr
-          when: adoptErr != nil
-      - opt:
-          do:
-            - eval: abandon(sink.Abort())
-              to: abandon
-            - return: origin(coreconsensus.AdminPreconditionFailed, errs.String("why", "the offer is no longer fresh"))
-              to: origin
-          when: code != 0
+            - return: err
+          init:
+            bind: err
+            eval: n.stillFresh(&req, sink)
+            to: n.stillFresh
+          when: err != nil
       - opt:
           do:
             - opt:
@@ -5400,6 +5375,53 @@ sequences:
           when: err != nil
       - eval: n.installed(meta, req.From.ID)
         to: n.installed
+      - return: nil
+  - of: (*Node).stillFresh
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).stillFresh
+        kind: self
+      - id: n.stoppedErr
+        kind: internal
+      - id: abandon
+        kind: internal
+      - id: n.stop
+        kind: internal
+      - id: origin
+        kind: internal
+    steps:
+      - var:
+          name: code
+          type: errs.Code
+      - var:
+          name: adoptErr
+          type: error
+      - opt:
+          do:
+            - return: n.stoppedErr()
+              to: n.stoppedErr
+          when: |-
+            !n.exec(func() {
+            		if code = n.r.CheckOffer(req.From.ID, req.Offer, n.r.NoTable()); code == 0 {
+            			adoptErr = n.adoptLineage(req.Offer.Meta.Log)
+            		}
+            	})
+      - opt:
+          do:
+            - eval: abandon(sink.Abort())
+              to: abandon
+            - eval: n.stop(adoptErr, true)
+              to: n.stop
+            - return: adoptErr
+          when: adoptErr != nil
+      - opt:
+          do:
+            - eval: abandon(sink.Abort())
+              to: abandon
+            - return: origin(coreconsensus.AdminPreconditionFailed, errs.String("why", "the offer is no longer fresh"))
+              to: origin
+          when: code != 0
       - return: nil
   - of: (*Node).installed
     participants:
@@ -14158,20 +14180,44 @@ sequences:
       - send:
           chan: req.done
           value: saveRes{m, err}
+  - of: (*Node).snapshotToSend
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).snapshotToSend
+        kind: self
+      - id: n.cfg.Snapshots.List
+        kind: value
+      - id: n.lineage
+        kind: internal
+    steps:
+      - bind: metas, err
+        eval: n.cfg.Snapshots.List()
+        to: n.cfg.Snapshots.List
+      - opt:
+          do:
+            - return: coreconsensus.SnapshotMetaValue{}, false
+          when: err != nil || len(metas) == 0
+      - bind: l
+        eval: n.lineage()
+        to: n.lineage
+      - opt:
+          do:
+            - return: coreconsensus.SnapshotMetaValue{}, false
+          when: "!metas[0].Log.Same(l) || metas[0].Position.Index < l.KeptIndex"
+      - return: metas[0], true
   - of: (*Node).sendSnapshot
     participants:
       - id: caller
         kind: actor
       - id: (*Node).sendSnapshot
         kind: self
-      - id: n.cfg.Snapshots.List
-        kind: value
+      - id: n.snapshotToSend
+        kind: internal
       - id: n.requestCut
         kind: internal
       - id: n.r.SnapshotDone
         kind: value
-      - id: n.lineage
-        kind: internal
       - id: n.cfg.Snapshots.Open
         kind: value
       - id: n.wg.Add
@@ -14181,9 +14227,9 @@ sequences:
           do:
             - return: ""
           when: n.sending[to]
-      - bind: metas, err
-        eval: n.cfg.Snapshots.List()
-        to: n.cfg.Snapshots.List
+      - bind: meta, ok
+        eval: n.snapshotToSend()
+        to: n.snapshotToSend
       - opt:
           do:
             - eval: n.requestCut()
@@ -14191,21 +14237,7 @@ sequences:
             - eval: n.r.SnapshotDone(to, false)
               to: n.r.SnapshotDone
             - return: ""
-          when: err != nil || len(metas) == 0
-      - bind: meta
-        eval: metas[0]
-      - opt:
-          do:
-            - eval: n.requestCut()
-              to: n.requestCut
-            - eval: n.r.SnapshotDone(to, false)
-              to: n.r.SnapshotDone
-            - return: ""
-          init:
-            bind: l
-            eval: n.lineage()
-            to: n.lineage
-          when: "!meta.Log.Same(l) || meta.Position.Index < l.KeptIndex"
+          when: "!ok"
       - bind: h, err
         eval: n.cfg.Snapshots.Open(meta.ID)
         to: n.cfg.Snapshots.Open
@@ -14657,9 +14689,13 @@ sequences:
         kind: self
       - id: t.wg.Done
         kind: value
+      - id: time
+        kind: stdlib
+      - id: wait.Stop
+        kind: value
       - id: t.ln.Accept
         kind: value
-      - id: acceptBackoff
+      - id: t.acceptFailed
         kind: internal
       - id: t.mu.Lock
         kind: value
@@ -14679,6 +14715,13 @@ sequences:
       - var:
           name: delay
           type: time.Duration
+      - bind: wait
+        eval: time.NewTimer(acceptBackoffFirst)
+        to: time
+      - eval: wait.Stop()
+        to: wait.Stop
+      - defer: wait.Stop()
+        to: wait.Stop
       - loop:
           do:
             - bind: c, err
@@ -14686,19 +14729,18 @@ sequences:
               to: t.ln.Accept
             - opt:
                 do:
+                  - var:
+                      name: goOn
+                      type: bool
                   - opt:
                       do:
                         - return: ""
-                      when: errors.Is(err, net.ErrClosed)
-                  - set: delay
-                    to: acceptBackoff
-                    value: acceptBackoff(delay)
-                  - select:
-                      cases:
-                        - comm: <-t.done
-                          do:
-                            - return: ""
-                        - comm: <-time.After(delay)
+                      init:
+                        bind: delay, goOn
+                        eval: t.acceptFailed(err, delay, wait)
+                        op: =
+                        to: t.acceptFailed
+                      when: "!goOn"
                   - continue: true
                 when: err != nil
             - set: delay
@@ -14733,15 +14775,41 @@ sequences:
             - go: t.serve(c, release)
               to: t.serve
           forever: true
-  - of: acceptBackoff
+  - of: (*TCPTransport).acceptFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).acceptFailed
+        kind: self
+      - id: acceptBackoff
+        kind: internal
+      - id: wait.Reset
+        kind: value
     steps:
-      - leaf: a const or type declaration in a body
-        stmt: const first, ceiling = 5 * time.Millisecond, time.Second
       - opt:
           do:
-            - return: first
+            - return: delay, false
+          when: errors.Is(err, net.ErrClosed)
+      - set: delay
+        to: acceptBackoff
+        value: acceptBackoff(delay)
+      - eval: wait.Reset(delay)
+        to: wait.Reset
+      - select:
+          cases:
+            - comm: <-t.done
+              do:
+                - return: delay, false
+            - comm: <-wait.C
+              do:
+                - return: delay, true
+  - of: acceptBackoff
+    steps:
+      - opt:
+          do:
+            - return: acceptBackoffFirst
           when: prev == 0
-      - return: min(2*prev, ceiling)
+      - return: min(2*prev, acceptBackoffCeiling)
   - of: (*TCPTransport).serve
     participants:
       - id: caller

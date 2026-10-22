@@ -65,7 +65,16 @@ const (
 	redialBackoff time.Duration = 100 * time.Millisecond
 	// connBufferBytes sizes the buffered reader and writer of a connection.
 	connBufferBytes int = 64 << 10
+	// acceptBackoffFirst is the wait after the first of consecutive failed
+	// Accepts; each next one doubles it (#518).
+	acceptBackoffFirst time.Duration = 5 * time.Millisecond
+	// acceptBackoffCeiling bounds the wait after a failed Accept.
+	acceptBackoffCeiling time.Duration = time.Second
 )
+
+// listenTCP opens the transport's listener; a test replaces it to make
+// Accept fail the way an exhausted descriptor table does (#518).
+var listenTCP = net.Listen
 
 // TransportConfig builds the shipped mTLS transport (D4, D14). A zero bound
 // is clamped to its default; nil Roots, no certificate, a HandshakeTimeout
@@ -295,10 +304,6 @@ func newTCPTransport(cfg *TransportConfig, id *tlsid.Identity) (*TCPTransport, e
 	return t, nil
 }
 
-// listenTCP opens the transport's listener; a test replaces it to make
-// Accept fail the way an exhausted descriptor table does (#518).
-var listenTCP = net.Listen
-
 // Addr returns the bound address.
 func (t *TCPTransport) Addr() string { return t.ln.Addr().String() }
 
@@ -341,17 +346,15 @@ func (t *TCPTransport) checkPeer(pin *[32]byte) tlsid.Verify {
 func (t *TCPTransport) accept() {
 	defer t.wg.Done()
 	var delay time.Duration
+	wait := time.NewTimer(acceptBackoffFirst)
+	wait.Stop()
+	defer wait.Stop()
 	for {
 		c, err := t.ln.Accept()
 		if err != nil {
-			if errors.Is(err, net.ErrClosed) {
+			var goOn bool
+			if delay, goOn = t.acceptFailed(err, delay, wait); !goOn {
 				return
-			}
-			delay = acceptBackoff(delay)
-			select {
-			case <-t.done:
-				return
-			case <-time.After(delay):
 			}
 			continue
 		}
@@ -377,14 +380,32 @@ func (t *TCPTransport) accept() {
 	}
 }
 
-// acceptBackoff is the wait after a failed Accept that follows a wait of
-// prev: 5 ms first, doubled each time, at most a second.
-func acceptBackoff(prev time.Duration) time.Duration {
-	const first, ceiling = 5 * time.Millisecond, time.Second
-	if prev == 0 {
-		return first
+// acceptFailed answers a failed Accept that followed a wait of delay: the
+// end of the loop when the listener is closed, else the next wait, on the
+// loop's one timer, cut short by the transport's close. It returns that
+// wait, and whether the loop goes on.
+func (t *TCPTransport) acceptFailed(err error, delay time.Duration, wait *time.Timer) (time.Duration, bool) {
+	if errors.Is(err, net.ErrClosed) {
+		return delay, false
 	}
-	return min(2*prev, ceiling)
+	delay = acceptBackoff(delay)
+	wait.Reset(delay)
+	select {
+	case <-t.done:
+		return delay, false
+	case <-wait.C:
+		return delay, true
+	}
+}
+
+// acceptBackoff is the wait after a failed Accept that follows a wait of
+// prev: acceptBackoffFirst first, doubled each time, at most
+// acceptBackoffCeiling.
+func acceptBackoff(prev time.Duration) time.Duration {
+	if prev == 0 {
+		return acceptBackoffFirst
+	}
+	return min(2*prev, acceptBackoffCeiling)
 }
 
 // serve runs one inbound connection: the handshake under its deadline,

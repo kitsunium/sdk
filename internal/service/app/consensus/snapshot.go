@@ -362,6 +362,24 @@ func (n *Node) save(req *saveReq) {
 
 // ---- sending ----
 
+// snapshotToSend is the newest snapshot, when a peer may install it: none
+// when this leader never cut one, and none when the newest is of the
+// history before a Recover, or below the index it kept — the entries kept
+// after it would reach the peer by append and be applied there under the
+// new identity, not the predecessor's (#507). A cut of this lineage, at or
+// past the kept index, names both.
+func (n *Node) snapshotToSend() (coreconsensus.SnapshotMetaValue, bool) {
+	metas, err := n.cfg.Snapshots.List()
+	if err != nil || len(metas) == 0 {
+		return coreconsensus.SnapshotMetaValue{}, false
+	}
+	l := n.lineage()
+	if !metas[0].Log.Same(l) || metas[0].Position.Index < l.KeptIndex {
+		return coreconsensus.SnapshotMetaValue{}, false
+	}
+	return metas[0], true
+}
+
 // sendSnapshot streams the newest snapshot to a peer that needs one, at
 // most one transfer per peer, and asks for a cut when there is none to
 // send. It runs on the loop and launches the transfer on a background
@@ -372,21 +390,9 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 	if n.sending[to] {
 		return
 	}
-	metas, err := n.cfg.Snapshots.List()
-	if err != nil || len(metas) == 0 {
-		// A peer asks for a snapshot this leader never cut: cut one now,
-		// and the next probe sends it.
-		n.requestCut()
-		n.r.SnapshotDone(to, false)
-		return
-	}
-	meta := metas[0]
-	if l := n.lineage(); !meta.Log.Same(l) || meta.Position.Index < l.KeptIndex {
-		// The newest snapshot is of the history before a Recover, or below
-		// the index it kept: the entries kept after it would reach the
-		// peer by append, and be applied there under the new identity,
-		// not the predecessor's (#507). A cut of this lineage, at or past
-		// the kept index, is sent instead, and names both.
+	meta, ok := n.snapshotToSend()
+	if !ok {
+		// None to send: cut one now, and the next probe sends it.
 		n.requestCut()
 		n.r.SnapshotDone(to, false)
 		return

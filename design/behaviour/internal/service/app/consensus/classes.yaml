@@ -489,6 +489,16 @@ constants:
         name: connBufferBytes
         type: int
         value: 64 << 10
+      - doc: |-
+          acceptBackoffFirst is the wait after the first of consecutive failed
+          Accepts; each next one doubles it (#518).
+        name: acceptBackoffFirst
+        type: time.Duration
+        value: 5 * time.Millisecond
+      - doc: acceptBackoffCeiling bounds the wait after a failed Accept.
+        name: acceptBackoffCeiling
+        type: time.Duration
+        value: time.Second
     name: defaultUnauthenticatedPerIP
   - doc: |-
       tcpUserTimeout is TCP_USER_TIMEOUT of linux/tcp.h, which package syscall
@@ -740,6 +750,7 @@ files:
       - (*Node).answerFromHeld
       - (*Node).keepSpool
       - (*Node).install
+      - (*Node).stillFresh
       - (*Node).installed
     name: install.go
   - decls:
@@ -1080,6 +1091,7 @@ files:
       - (*Node).requestCut
       - (*Node).SaveSnapshot
       - (*Node).save
+      - (*Node).snapshotToSend
       - (*Node).sendSnapshot
     name: snapshot.go
   - decls:
@@ -1093,6 +1105,7 @@ files:
   - decls:
       - laneControl
       - defaultUnauthenticatedPerIP
+      - listenTCP
       - TransportConfig
       - transportMisconfigured
       - peerRejected
@@ -1108,12 +1121,12 @@ files:
       - clampDuration
       - NewTCPTransport
       - newTCPTransport
-      - listenTCP
       - (*TCPTransport).Addr
       - (*TCPTransport).Cluster
       - (*TCPTransport).Slot
       - (*TCPTransport).checkPeer
       - (*TCPTransport).accept
+      - (*TCPTransport).acceptFailed
       - acceptBackoff
       - (*TCPTransport).serve
       - (*TCPTransport).handshake
@@ -2140,7 +2153,8 @@ functions:
     results: "*TCPTransport, error"
   - doc: |-
       acceptBackoff is the wait after a failed Accept that follows a wait of
-      prev: 5 ms first, doubled each time, at most a second.
+      prev: acceptBackoffFirst first, doubled each time, at most
+      acceptBackoffCeiling.
     name: acceptBackoff
     params: prev time.Duration
     results: time.Duration
@@ -4138,6 +4152,18 @@ types:
         recv: n *Node
         results: error
       - doc: |-
+          stillFresh judges the offer again, on the event loop, right before the
+          install is accepted (D7): the receiver may have committed past the
+          snapshot through a new leader's appends while the body streamed (review
+          H3). A fresh one has the lineage it records adopted there, durably,
+          before the restore and so before any entry it covers is applied (#507).
+          A stale one, or a failed adoption, discards the spool; the second stops
+          the node, as every failed write of its disk.
+        name: stillFresh
+        params: req *coreconsensus.InstallParams, sink coreconsensus.SnapshotSink
+        recv: n *Node
+        results: error
+      - doc: |-
           installed moves raft onto a restored install and keeps the two newest
           snapshots: the installed one is the newest, and the oldest of the ones
           this node held goes, as after a cut.
@@ -4889,6 +4915,16 @@ types:
         params: req *saveReq
         recv: n *Node
       - doc: |-
+          snapshotToSend is the newest snapshot, when a peer may install it: none
+          when this leader never cut one, and none when the newest is of the
+          history before a Recover, or below the index it kept — the entries kept
+          after it would reach the peer by append and be applied there under the
+          new identity, not the predecessor's (#507). A cut of this lineage, at or
+          past the kept index, names both.
+        name: snapshotToSend
+        recv: n *Node
+        results: coreconsensus.SnapshotMetaValue, bool
+      - doc: |-
           sendSnapshot streams the newest snapshot to a peer that needs one, at
           most one transfer per peer, and asks for a cut when there is none to
           send. It runs on the loop and launches the transfer on a background
@@ -5482,6 +5518,15 @@ types:
           them: the node sent but never received again, until a restart (#518).
         name: accept
         recv: t *TCPTransport
+      - doc: |-
+          acceptFailed answers a failed Accept that followed a wait of delay: the
+          end of the loop when the listener is closed, else the next wait, on the
+          loop's one timer, cut short by the transport's close. It returns that
+          wait, and whether the loop goes on.
+        name: acceptFailed
+        params: err error, delay time.Duration, wait *time.Timer
+        recv: t *TCPTransport
+        results: time.Duration, bool
       - doc: |-
           serve runs one inbound connection: the handshake under its deadline,
           then the lane byte, then the lane itself. Only a member's pinned key on
