@@ -2767,7 +2767,9 @@ node, under the directory lock.
     told `ENTRY_SUPERSEDED`, or never answered — and it is applied in the new
     history. That is a duplicate, never a loss, and an owner rejects it by
     precondition (forgejo-raft through `ExpectRev`). The runbook picks the
-    survivor whose log reaches furthest (`Inspect`'s `Last`); a write no
+    survivor with the highest `(LastTerm, Last)` `Inspect` reports, compared
+    in that order (amended 2026-10-22, [issue
+    #534](https://github.com/kitsunium/sdk/issues/534)); a write no
     survivor received is one no choice of survivor can keep.
   - **An interrupted `Recover` never starts under the old cluster, and is
     completed by running it again ([issue
@@ -3823,6 +3825,45 @@ Added beside them: `ReadyValue.ChainRefusedBy`, which feeds
 `consensus_chain_refusals_total` — the counter D13 names and the engine never
 emitted. `Bootstrap` honours its context: a caller that gave up before the
 first durable write gets its cancellation back and nothing is written.
+
+## Amendment — the survivor's key in `Inspect`, and the snapshot limit announced at JOIN (2026-10-22)
+
+Two gaps between this ADR and the code, closed in `pkg/v1/app` as additions
+(a minor release, nothing renamed, nothing removed):
+
+- **`Inspect` reports `LastTerm` ([issue
+  #534](https://github.com/kitsunium/sdk/issues/534)).** D17 chooses the
+  survivor of a `Recover` by the highest `(lastLogTerm, lastLogIndex)`, but
+  `ReportValue` carried only `Last` and the hard state, whose `Term` is the
+  vote term, not the term of the last entry. Compared on what it showed,
+  an operator picked a longer log whose tail no majority ever held, and the
+  committed writes only the right survivor held were lost. `ReportValue.LastTerm`
+  is the term of the entry at `Last`, or of the snapshot that ends at `Last`
+  when an interrupted install published it past the log or at its last index
+  under another term: the start, and `Recover`, move the log onto it. The runbook
+  compares `(LastTerm, Last)`, in that order, never `Last` alone.
+- **A joiner announces its `MaxSnapshotBytes`, and `Health` warns before the
+  limit (R2-30, [issue #556](https://github.com/kitsunium/sdk/issues/556),
+  following [#512](https://github.com/kitsunium/sdk/issues/512)).** The
+  member's limit is `MemberValue.MaxSnapshotBytes`, already in the
+  membership's encoding; the chunk writer is bounded by the smallest a
+  member announces (#512). Nothing filled it but an operator's member list.
+  - **The JOIN carries it, versioned.** A joiner whose `JoinConfig` names
+    a limit sends its JOIN on a second pre-admission lane, `laneJoinV2`
+    (4): one version byte (`joinVersion2` = 2), the limit as a little-endian
+    `u64`, then the JOIN of lane 3 unchanged. The member records the limit
+    in the learner it proposes. An older member serves no unknown lane and
+    closes the connection without an answer; the joiner then sends the same
+    JOIN on lane 3, which announces nothing: the behaviour before this
+    amendment. A joiner whose `JoinConfig` names no limit uses lane 3 only.
+    No frame of the log, of a snapshot or of replication changes.
+  - **`Health` warns.** `HealthValue.SnapshotBytes` is the newest snapshot's
+    size (the larger of its encoded and decoded sizes, the two the writer
+    bounds), `SnapshotLimit` the limit a cut is held to now — this node's
+    `MaxSnapshotBytes`, or the smallest a member announces — and
+    `HealthSnapshotNearLimit` is set from 80 % of it. Readiness does not
+    depend on it: the node still serves; it says the next cuts are about to
+    be refused `SNAPSHOT_TOO_LARGE`.
 
 ## Revision history
 

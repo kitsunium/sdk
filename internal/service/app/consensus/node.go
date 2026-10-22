@@ -168,6 +168,9 @@ type snapState struct {
 	// sinceBytes is the payload applied since the last cut started, which
 	// SnapshotEveryBytes bounds (D7, #515).
 	sinceBytes int64
+	// newestBytes is the newest snapshot's size, the larger of its encoded
+	// and decoded sizes, which Health compares with the limit (R2-30, #556).
+	newestBytes int64
 }
 
 type applyResult struct {
@@ -478,6 +481,7 @@ func (n *Node) load() (raft.StartState, error) {
 		return raft.StartState{}, err
 	}
 	n.snapState.last = base.Position.Index
+	n.snapState.newestBytes = snapshotSize(&base)
 	hs, err := n.cfg.Log.HardState()
 	if err != nil {
 		return raft.StartState{}, origin(coreconsensus.HardStateCorrupt, errs.String("cause", err.Error()))

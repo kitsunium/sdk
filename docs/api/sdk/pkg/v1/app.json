@@ -1488,6 +1488,20 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.HealthSnapshotNearLimit",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "HealthSnapshotNearLimit",
+      "spelled": "svcconsensus.HealthFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.HealthFlags",
+      "value": "16",
+      "init": "go:github.com/kitsunium/sdk/internal/service/app/consensus.HealthSnapshotNearLimit",
+      "doc": "The answers a HealthValue carries, read with HealthFlags.Has.\n",
+      "file": "consensus/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.HealthStopped",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",

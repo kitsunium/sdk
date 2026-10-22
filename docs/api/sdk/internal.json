@@ -3938,8 +3938,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
       "name": "JoinConfig",
-      "spelled": "struct{Addresses []string; Stamp StampValue; Address string; Pins [][32]byte}",
-      "canonical": "struct{Addresses []string; Stamp github.com/kitsunium/sdk/internal/core/app/consensus.StampValue; Address string; Pins [][32]byte}",
+      "spelled": "struct{Addresses []string; Stamp StampValue; Address string; Pins [][32]byte; MaxSnapshotBytes int64}",
+      "canonical": "struct{Addresses []string; Stamp github.com/kitsunium/sdk/internal/core/app/consensus.StampValue; Address string; Pins [][32]byte; MaxSnapshotBytes int64}",
       "fields": [
         {
           "name": "Addresses",
@@ -3960,6 +3960,11 @@
           "name": "Pins",
           "type": "[][32]byte",
           "doc": "Pins are the SPKIs of the members the joiner trusts, from the\noperator. An answer counts only from a peer presenting one of them,\nand only when the membership it returns lists that peer under that\nkey; an empty list refuses the JOIN.\n"
+        },
+        {
+          "name": "MaxSnapshotBytes",
+          "type": "int64",
+          "doc": "MaxSnapshotBytes is the joiner's own MaxSnapshotBytes, announced in\nthe JOIN so the members hold their cuts to it (R2-30); 0 announces\nnothing, and the JOIN is the one a member that predates the\nannouncement reads.\n"
         }
       ],
       "doc": "JoinConfig is what a joining node needs to send its JOIN: where to reach the\nmembers, and the stamp Init wrote, whose id and incarnation the member it\nreaches proposes as a learner.\n",
@@ -4014,8 +4019,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
       "name": "JoinRequestValue",
-      "spelled": "struct{Cluster ClusterID; ID NodeID; Incarnation Incarnation; Slot string; SPKI [32]byte; Address string}",
-      "canonical": "struct{Cluster github.com/kitsunium/sdk/internal/core/app/consensus.ClusterID; ID github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Incarnation github.com/kitsunium/sdk/internal/core/app/consensus.Incarnation; Slot string; SPKI [32]byte; Address string}",
+      "spelled": "struct{Cluster ClusterID; ID NodeID; Incarnation Incarnation; Slot string; SPKI [32]byte; Address string; MaxSnapshotBytes int64}",
+      "canonical": "struct{Cluster github.com/kitsunium/sdk/internal/core/app/consensus.ClusterID; ID github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Incarnation github.com/kitsunium/sdk/internal/core/app/consensus.Incarnation; Slot string; SPKI [32]byte; Address string; MaxSnapshotBytes int64}",
       "fields": [
         {
           "name": "Cluster",
@@ -4046,6 +4051,11 @@
           "name": "Address",
           "type": "string",
           "doc": "Address is where it listens.\n"
+        },
+        {
+          "name": "MaxSnapshotBytes",
+          "type": "int64",
+          "doc": "MaxSnapshotBytes is the largest snapshot the joiner accepts, as it\nannounced it; 0 when it announced none, as a joiner that predates\nthe announcement does.\n"
         }
       ],
       "doc": "JoinRequestValue is a pre-admission JOIN as a member received it: the slot and\nthe key from TLS, the new node's id and incarnation from its frame.\n",
@@ -46301,6 +46311,19 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.HealthSnapshotNearLimit",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "HealthSnapshotNearLimit",
+      "spelled": "HealthFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.HealthFlags",
+      "value": "16",
+      "doc": "HealthSnapshotNearLimit is set when the newest snapshot has reached\nfour fifths of SnapshotLimit: the cuts are about to be refused\nSNAPSHOT_TOO_LARGE (R2-30). Readiness does not depend on it.\n",
+      "file": "service/app/consensus/health.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.HealthStopped",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
@@ -46318,8 +46341,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
       "name": "HealthValue",
-      "spelled": "struct{Status coreconsensus.StatusValue; Flags HealthFlags; FailureTolerance int; ApplyLagEntries uint64; Peers []PeerHealthValue; ChainRefusals int; ChainRefusalIndex uint64; ChainRefusalLeader coreconsensus.NodeID; StopReason coreconsensus.StopReasonValue; DroppedFrames int64; LongTurns int64; JoinsRateLimited int64}",
-      "canonical": "struct{Status github.com/kitsunium/sdk/internal/core/app/consensus.StatusValue; Flags github.com/kitsunium/sdk/internal/service/app/consensus.HealthFlags; FailureTolerance int; ApplyLagEntries uint64; Peers []github.com/kitsunium/sdk/internal/service/app/consensus.PeerHealthValue; ChainRefusals int; ChainRefusalIndex uint64; ChainRefusalLeader github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; StopReason github.com/kitsunium/sdk/internal/core/app/consensus.StopReasonValue; DroppedFrames int64; LongTurns int64; JoinsRateLimited int64}",
+      "spelled": "struct{Status coreconsensus.StatusValue; Flags HealthFlags; FailureTolerance int; ApplyLagEntries uint64; Peers []PeerHealthValue; ChainRefusals int; ChainRefusalIndex uint64; ChainRefusalLeader coreconsensus.NodeID; StopReason coreconsensus.StopReasonValue; DroppedFrames int64; LongTurns int64; JoinsRateLimited int64; SnapshotBytes int64; SnapshotLimit int64}",
+      "canonical": "struct{Status github.com/kitsunium/sdk/internal/core/app/consensus.StatusValue; Flags github.com/kitsunium/sdk/internal/service/app/consensus.HealthFlags; FailureTolerance int; ApplyLagEntries uint64; Peers []github.com/kitsunium/sdk/internal/service/app/consensus.PeerHealthValue; ChainRefusals int; ChainRefusalIndex uint64; ChainRefusalLeader github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; StopReason github.com/kitsunium/sdk/internal/core/app/consensus.StopReasonValue; DroppedFrames int64; LongTurns int64; JoinsRateLimited int64; SnapshotBytes int64; SnapshotLimit int64}",
       "fields": [
         {
           "name": "Status",
@@ -46329,7 +46352,7 @@
         {
           "name": "Flags",
           "type": "HealthFlags",
-          "doc": "Flags are the verdict's yes/no answers: HealthReady, HealthHasLeader,\nHealthQuorumReachable, HealthStopped.\n"
+          "doc": "Flags are the verdict's yes/no answers: HealthReady, HealthHasLeader,\nHealthQuorumReachable, HealthStopped, HealthSnapshotNearLimit.\n"
         },
         {
           "name": "FailureTolerance",
@@ -46378,6 +46401,16 @@
           "name": "JoinsRateLimited",
           "type": "int64",
           "doc": "JoinsRateLimited counts JOINs refused by the one-per-slot rate.\n"
+        },
+        {
+          "name": "SnapshotBytes",
+          "type": "int64",
+          "doc": "SnapshotBytes is the size of the newest snapshot this node holds,\nthe larger of its encoded and decoded sizes; 0 with none.\n"
+        },
+        {
+          "name": "SnapshotLimit",
+          "type": "int64",
+          "doc": "SnapshotLimit is the size a cut is held to now: this node's\nMaxSnapshotBytes, or the smallest a member announces when lower\n(R2-30).\n"
         }
       ],
       "doc": "HealthValue is a node's verdict for an orchestrator's probe (D13).\nHealthReady in Flags is the readiness answer; the other fields say why, and\nPeers is filled only on the leader.\n",
@@ -47567,7 +47600,7 @@
       "name": "Recover",
       "spelled": "func(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RecoverOptions) error",
       "canonical": "func(d github.com/kitsunium/sdk/internal/service/app/consensus.DataDir, newCluster github.com/kitsunium/sdk/internal/core/app/consensus.ClusterID, members []github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue, opt *github.com/kitsunium/sdk/internal/service/app/consensus.RecoverOptions) error",
-      "doc": "Recover starts a NEW history from this node's log: every entry up to its\npersisted commit, then the contiguous entries past it whose body and chain\nchecksums verify and whose term does not decrease, cut at the first that\nfails, so no write the old cluster acknowledged is lost;\na new cluster id that records its predecessor and the last index it kept;\nand a forced configuration. The audit file records how many entries past\nthe persisted commit were adopted. Every old voter left out must be\nattested fenced by every witness; without witness keys it fails closed.\nA stop marker, STOP-RECOVER, is durable before the forced entry and\nremoved once the new stamp is: a Recover interrupted between the two\nrefuses a start, and is completed by running Recover again to the same\nnew cluster, which resumes from the index the first one kept; one to\nanother cluster is refused. A silence condition TruncateAndStaySilent\nleft is removed before the marker: the new history is closed to the\nterms it guarded, and a silent node never campaigns. An install a crash\ninterrupted after its snapshot was published is finished first, before\nthe marker: the new history keeps that snapshot's index, and the forced\nentry follows it.\n",
+      "doc": "Recover starts a NEW history from this node's log — run it on the\nsurvivor whose report from Inspect holds the highest (LastTerm, Last):\nevery entry up to its\npersisted commit, then the contiguous entries past it whose body and chain\nchecksums verify and whose term does not decrease, cut at the first that\nfails, so no write the old cluster acknowledged is lost;\na new cluster id that records its predecessor and the last index it kept;\nand a forced configuration. The audit file records how many entries past\nthe persisted commit were adopted. Every old voter left out must be\nattested fenced by every witness; without witness keys it fails closed.\nA stop marker, STOP-RECOVER, is durable before the forced entry and\nremoved once the new stamp is: a Recover interrupted between the two\nrefuses a start, and is completed by running Recover again to the same\nnew cluster, which resumes from the index the first one kept; one to\nanother cluster is refused. A silence condition TruncateAndStaySilent\nleft is removed before the marker: the new history is closed to the\nterms it guarded, and a silent node never campaigns. An install a crash\ninterrupted after its snapshot was published is finished first, before\nthe marker: the new history keeps that snapshot's index, and the forced\nentry follows it.\n",
       "file": "service/app/consensus/offline.go",
       "layer": "service",
       "family": "app"
@@ -47635,8 +47668,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
       "name": "ReportValue",
-      "spelled": "struct{Stamp coreconsensus.StampValue; HardState coreconsensus.HardState; First uint64; Last uint64; Snapshots []coreconsensus.SnapshotMetaValue; Quarantine string; Markers []string}",
-      "canonical": "struct{Stamp github.com/kitsunium/sdk/internal/core/app/consensus.StampValue; HardState github.com/kitsunium/sdk/internal/core/app/consensus.HardState; First uint64; Last uint64; Snapshots []github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue; Quarantine string; Markers []string}",
+      "spelled": "struct{Stamp coreconsensus.StampValue; HardState coreconsensus.HardState; First uint64; Last uint64; LastTerm uint64; Snapshots []coreconsensus.SnapshotMetaValue; Quarantine string; Markers []string}",
+      "canonical": "struct{Stamp github.com/kitsunium/sdk/internal/core/app/consensus.StampValue; HardState github.com/kitsunium/sdk/internal/core/app/consensus.HardState; First uint64; Last uint64; LastTerm uint64; Snapshots []github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue; Quarantine string; Markers []string}",
       "fields": [
         {
           "name": "Stamp",
@@ -47654,6 +47687,11 @@
           "name": "Last",
           "type": "uint64",
           "doc": "Last is the last index the directory holds: the log's, or the\nnewest snapshot's when an install a crash interrupted published it\npast the log's end.\n"
+        },
+        {
+          "name": "LastTerm",
+          "type": "uint64",
+          "doc": "LastTerm is the term of the entry at Last, or of the snapshot that\nholds Last. With Last it is the key a Recover's survivor is chosen\nby: the highest (LastTerm, Last), compared in that order, never Last\nalone nor HardState.Term, the term of the last vote.\n"
         },
         {
           "name": "Snapshots",

@@ -361,6 +361,15 @@ The answers a HealthValue carries, read with HealthFlags.Has.
 
 Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.HealthReady`.
 
+<a name="HealthSnapshotNearLimit"></a>
+```go
+const HealthSnapshotNearLimit svcconsensus.HealthFlags = 16
+```
+
+The answers a HealthValue carries, read with HealthFlags.Has.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.HealthSnapshotNearLimit`.
+
 <a name="HealthStopped"></a>
 ```go
 const HealthStopped svcconsensus.HealthFlags = 8
@@ -1906,7 +1915,7 @@ type HealthValue struct {
 	// Status is the node's view after its last turn.
 	Status             coreconsensus.StatusValue
 	// Flags are the verdict's yes/no answers: HealthReady, HealthHasLeader,
-	// HealthQuorumReachable, HealthStopped.
+	// HealthQuorumReachable, HealthStopped, HealthSnapshotNearLimit.
 	Flags              HealthFlags
 	// FailureTolerance is how many voters can fail now with a majority
 	// left. Only the leader knows it: -1 elsewhere.
@@ -1931,6 +1940,13 @@ type HealthValue struct {
 	LongTurns          int64
 	// JoinsRateLimited counts JOINs refused by the one-per-slot rate.
 	JoinsRateLimited   int64
+	// SnapshotBytes is the size of the newest snapshot this node holds,
+	// the larger of its encoded and decoded sizes; 0 with none.
+	SnapshotBytes      int64
+	// SnapshotLimit is the size a cut is held to now: this node's
+	// MaxSnapshotBytes, or the smallest a member announces when lower
+	// (R2-30).
+	SnapshotLimit      int64
 }
 ```
 
@@ -2104,16 +2120,21 @@ JoinConfig is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.
 ```go
 type JoinConfig struct {
 	// Addresses are the members to try, in order.
-	Addresses []string
+	Addresses        []string
 	// Stamp is the joiner's stamp, from Init.
-	Stamp     StampValue
+	Stamp            StampValue
 	// Address is where the joiner listens.
-	Address   string
+	Address          string
 	// Pins are the SPKIs of the members the joiner trusts, from the
 	// operator. An answer counts only from a peer presenting one of them,
 	// and only when the membership it returns lists that peer under that
 	// key; an empty list refuses the JOIN.
-	Pins      [][32]byte
+	Pins             [][32]byte
+	// MaxSnapshotBytes is the joiner's own MaxSnapshotBytes, announced in
+	// the JOIN so the members hold their cuts to it (R2-30); 0 announces
+	// nothing, and the JOIN is the one a member that predates the
+	// announcement reads.
+	MaxSnapshotBytes int64
 }
 ```
 
@@ -2159,17 +2180,21 @@ JoinRequestValue is an alias of `github.com/kitsunium/sdk/internal/core/app/cons
 ```go
 type JoinRequestValue struct {
 	// Cluster is the cluster the joiner claims.
-	Cluster     ClusterID
+	Cluster          ClusterID
 	// ID is the joiner's new NodeID.
-	ID          NodeID
+	ID               NodeID
 	// Incarnation is the joiner's incarnation.
-	Incarnation Incarnation
+	Incarnation      Incarnation
 	// Slot is the slot its certificate names.
-	Slot        string
+	Slot             string
 	// SPKI is its key, from the handshake.
-	SPKI        [32]byte
+	SPKI             [32]byte
 	// Address is where it listens.
-	Address     string
+	Address          string
+	// MaxSnapshotBytes is the largest snapshot the joiner accepts, as it
+	// announced it; 0 when it announced none, as a joiner that predates
+	// the announcement does.
+	MaxSnapshotBytes int64
 }
 ```
 
@@ -3436,6 +3461,11 @@ type ReportValue struct {
 	// newest snapshot's when an install a crash interrupted published it
 	// past the log's end.
 	Last       uint64
+	// LastTerm is the term of the entry at Last, or of the snapshot that
+	// holds Last. With Last it is the key a Recover's survivor is chosen
+	// by: the highest (LastTerm, Last), compared in that order, never Last
+	// alone nor HardState.Term, the term of the last vote.
+	LastTerm   uint64
 	Snapshots  []coreconsensus.SnapshotMetaValue
 	Quarantine string
 	Markers    []string

@@ -1833,6 +1833,12 @@ packages:
             - doc: Address is where it listens.
               name: Address
               type: string
+            - doc: |-
+                MaxSnapshotBytes is the largest snapshot the joiner accepts, as it
+                announced it; 0 when it announced none, as a joiner that predates
+                the announcement does.
+              name: MaxSnapshotBytes
+              type: int64
       - doc: |-
           FencedAttestationValue is the operator's statement that an old voter was fenced
           before a Recover: the voter, the method that fenced it, and one signed
@@ -1904,6 +1910,13 @@ packages:
                 key; an empty list refuses the JOIN.
               name: Pins
               type: "[][32]byte"
+            - doc: |-
+                MaxSnapshotBytes is the joiner's own MaxSnapshotBytes, announced in
+                the JOIN so the members hold their cuts to it (R2-30); 0 announces
+                nothing, and the JOIN is the one a member that predates the
+                announcement reads.
+              name: MaxSnapshotBytes
+              type: int64
       - doc: Role is a node's part in its group.
         methods:
           - doc: String names the role.
@@ -2129,6 +2142,14 @@ packages:
         name: HealthStopped
         type: HealthFlags
         value: "8"
+      - blockDoc: The answers a HealthValue carries.
+        doc: |-
+          HealthSnapshotNearLimit is set when the newest snapshot has reached
+          four fifths of SnapshotLimit: the cuts are about to be refused
+          SNAPSHOT_TOO_LARGE (R2-30). Readiness does not depend on it.
+        name: HealthSnapshotNearLimit
+        type: HealthFlags
+        value: "16"
       - doc: |-
           WipeAndRejoin wipes the directory; the operator then Removes the old
           NodeID and Inits under a NEW one (R4-03). A voter's incarnation is
@@ -2355,7 +2376,9 @@ packages:
         out:
           - type: "[]byte"
       - doc: |-
-          Recover starts a NEW history from this node's log: every entry up to its
+          Recover starts a NEW history from this node's log — run it on the
+          survivor whose report from Inspect holds the highest (LastTerm, Last):
+          every entry up to its
           persisted commit, then the contiguous entries past it whose body and chain
           checksums verify and whose term does not decrease, cut at the first that
           fails, so no write the old cluster acknowledged is lost;
@@ -2762,7 +2785,7 @@ packages:
               type: coreconsensus.StatusValue
             - doc: |-
                 Flags are the verdict's yes/no answers: HealthReady, HealthHasLeader,
-                HealthQuorumReachable, HealthStopped.
+                HealthQuorumReachable, HealthStopped, HealthSnapshotNearLimit.
               name: Flags
               type: HealthFlags
             - doc: |-
@@ -2801,6 +2824,17 @@ packages:
               type: int64
             - doc: JoinsRateLimited counts JOINs refused by the one-per-slot rate.
               name: JoinsRateLimited
+              type: int64
+            - doc: |-
+                SnapshotBytes is the size of the newest snapshot this node holds,
+                the larger of its encoded and decoded sizes; 0 with none.
+              name: SnapshotBytes
+              type: int64
+            - doc: |-
+                SnapshotLimit is the size a cut is held to now: this node's
+                MaxSnapshotBytes, or the smallest a member announces when lower
+                (R2-30).
+              name: SnapshotLimit
               type: int64
       - doc: |-
           MemoryLog is the in-memory LogStore double (D2): every port contract
@@ -3338,6 +3372,13 @@ packages:
                 newest snapshot's when an install a crash interrupted published it
                 past the log's end.
               name: Last
+              type: uint64
+            - doc: |-
+                LastTerm is the term of the entry at Last, or of the snapshot that
+                holds Last. With Last it is the key a Recover's survivor is chosen
+                by: the highest (LastTerm, Last), compared in that order, never Last
+                alone nor HardState.Term, the term of the last vote.
+              name: LastTerm
               type: uint64
             - name: Snapshots
               type: "[]coreconsensus.SnapshotMetaValue"
@@ -4948,6 +4989,10 @@ packages:
             reexport: svcconsensus.HealthStopped
             type: svcconsensus.HealthFlags
             value: "8"
+          - name: HealthSnapshotNearLimit
+            reexport: svcconsensus.HealthSnapshotNearLimit
+            type: svcconsensus.HealthFlags
+            value: "16"
         doc: The answers a HealthValue carries, read with HealthFlags.Has.
       - const:
           - name: PeerVoter

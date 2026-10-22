@@ -5270,6 +5270,8 @@ sequences:
         kind: internal
       - id: n.exec
         kind: internal
+      - id: n.snapshotHealth
+        kind: internal
     steps:
       - bind: st
         eval: n.Status()
@@ -5305,10 +5307,39 @@ sequences:
             - eval: n.exec(func() { n.loopHealth(&h) })
               to: n.exec
           when: "!stopped"
+      - eval: n.snapshotHealth(&h)
+        to: n.snapshotHealth
       - set: h.Flags
         to: h.Flags.set
         value: h.Flags.set(HealthReady, isReady(&h, &st))
       - return: h
+  - of: (*Node).snapshotHealth
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).snapshotHealth
+        kind: self
+      - id: n.snapState.mu.Lock
+        kind: value
+      - id: n.snapState.mu.Unlock
+        kind: value
+      - id: h.Flags.set
+        kind: internal
+    steps:
+      - eval: n.snapState.mu.Lock()
+        to: n.snapState.mu.Lock
+      - set: h.SnapshotBytes
+        value: n.snapState.newestBytes
+      - eval: n.snapState.mu.Unlock()
+        to: n.snapState.mu.Unlock
+      - opt:
+          do:
+            - set: h.SnapshotLimit
+              value: n.cfg.MaxSnapshotBytes
+          when: h.SnapshotLimit == 0
+      - set: h.Flags
+        to: h.Flags.set
+        value: h.Flags.set(HealthSnapshotNearLimit, nearLimit(h.SnapshotBytes, h.SnapshotLimit))
   - of: isReady
     steps:
       - return: |-
@@ -5328,6 +5359,8 @@ sequences:
         kind: value
       - id: n.r.ChainRefusal
         kind: value
+      - id: snapshotLimit
+        kind: internal
     steps:
       - bind: now
         eval: n.clk.Now()
@@ -5341,6 +5374,11 @@ sequences:
       - set: h.ChainRefusalLeader, h.ChainRefusalIndex, h.ChainRefusals
         to: n.r.ChainRefusal
         value: n.r.ChainRefusal()
+      - bind: conf
+        eval: n.r.Status().Conf
+      - set: h.SnapshotLimit
+        to: snapshotLimit
+        value: snapshotLimit(n.cfg.MaxSnapshotBytes, &conf)
       - bind: last
         eval: n.r.Status().Last
       - bind: window
@@ -6173,7 +6211,11 @@ sequences:
         kind: value
     steps:
       - bind: m
-        eval: "coreconsensus.MemberValue{ID: r.ID, Incarnation: r.Incarnation, Slot: r.Slot, SPKI: r.SPKI, Address: r.Address, Joining: true}"
+        eval: |-
+          coreconsensus.MemberValue{
+          		ID: r.ID, Incarnation: r.Incarnation, Slot: r.Slot, SPKI: r.SPKI, Address: r.Address, Joining: true,
+          		MaxSnapshotBytes: max(r.MaxSnapshotBytes, 0),
+          	}
       - bind: a
         eval: |-
           new(wire.AdminValue{
@@ -6905,7 +6947,7 @@ sequences:
         eval: |-
           coreconsensus.JoinRequestValue{
           		Cluster: cfg.Stamp.Log.Cluster, ID: cfg.Stamp.ID, Incarnation: cfg.Stamp.Incarnation,
-          		Slot: cfg.Stamp.Slot, Address: cfg.Address,
+          		Slot: cfg.Stamp.Slot, Address: cfg.Address, MaxSnapshotBytes: max(cfg.MaxSnapshotBytes, 0),
           	}
       - bind: last
         eval: origin(coreconsensus.JoinRefused, errs.String("why", "no member"))
@@ -7468,6 +7510,8 @@ sequences:
         kind: internal
       - id: n.restoreLatest
         kind: internal
+      - id: snapshotSize
+        kind: internal
       - id: n.cfg.Log.HardState
         kind: value
       - id: n.cfg.Log.Bounds
@@ -7506,6 +7550,9 @@ sequences:
           when: err != nil
       - set: n.snapState.last
         value: base.Position.Index
+      - set: n.snapState.newestBytes
+        to: snapshotSize
+        value: snapshotSize(&base)
       - bind: hs, err
         eval: n.cfg.Log.HardState()
         to: n.cfg.Log.HardState
@@ -10832,6 +10879,8 @@ sequences:
         kind: internal
       - id: d.d.snaps.List
         kind: internal
+      - id: lastTermOf
+        kind: internal
       - id: stopMarkers
         kind: internal
     steps:
@@ -10884,6 +10933,12 @@ sequences:
           when: l.refuse == nil && len(r.Snapshots) > 0
       - opt:
           do:
+            - set: r.LastTerm
+              to: lastTermOf
+              value: lastTermOf(l, &r)
+          when: l.refuse == nil
+      - opt:
+          do:
             - return: ReportValue{}, err
           init:
             bind: r.Markers, err
@@ -10892,6 +10947,28 @@ sequences:
             to: stopMarkers
           when: err != nil
       - return: r, nil
+  - of: lastTermOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: lastTermOf
+        kind: self
+      - id: l.Term
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: r.Snapshots[0].Position.Term
+          when: len(r.Snapshots) > 0 && r.Snapshots[0].Position.Index == r.Last
+      - opt:
+          do:
+            - return: t
+          init:
+            bind: t, err
+            eval: l.Term(r.Last)
+            to: l.Term
+          when: err == nil
+      - return: "0"
   - of: readQuarantineMarker
     participants:
       - id: caller
@@ -15378,6 +15455,8 @@ sequences:
         kind: self
       - id: n.cfg.Snapshots.List
         kind: value
+      - id: n.noteNewest
+        kind: internal
       - id: n.removeOld
         kind: internal
     steps:
@@ -15388,9 +15467,57 @@ sequences:
           do:
             - return: nil
           when: err != nil
+      - opt:
+          do:
+            - eval: n.noteNewest(&metas[0])
+              to: n.noteNewest
+          when: len(metas) > 0
       - eval: n.removeOld(metas[min(2, len(metas)):])
         to: n.removeOld
       - return: metas
+  - of: snapshotSize
+    steps:
+      - return: max(m.EncodedSize, m.DecodedSize)
+  - of: nearLimit
+    steps:
+      - return: limit > 0 && size >= limit-limit/5
+  - of: (*Node).noteNewest
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).noteNewest
+        kind: self
+      - id: snapshotSize
+        kind: internal
+      - id: n.snapState.mu.Lock
+        kind: value
+      - id: n.snapState.mu.Unlock
+        kind: value
+      - id: snapshotLimit
+        kind: internal
+      - id: n.obs.warn
+        kind: internal
+    steps:
+      - bind: size
+        eval: snapshotSize(m)
+        to: snapshotSize
+      - eval: n.snapState.mu.Lock()
+        to: n.snapState.mu.Lock
+      - set: n.snapState.newestBytes
+        value: size
+      - eval: n.snapState.mu.Unlock()
+        to: n.snapState.mu.Unlock
+      - opt:
+          do:
+            - eval: |-
+                n.obs.warn("consensus: the newest snapshot nears the smallest limit a member announces",
+                			lattr("bytes", uint64(size)), lattr("limit", uint64(limit)))
+              to: n.obs.warn
+          init:
+            bind: limit
+            eval: snapshotLimit(n.cfg.MaxSnapshotBytes, &m.Membership)
+            to: snapshotLimit
+          when: nearLimit(size, limit)
   - of: (*Node).removeOld
     participants:
       - id: caller
@@ -16603,10 +16730,10 @@ sequences:
           	}()
       - opt:
           do:
-            - eval: "t.serveJoin(conn, coreconsensus.AuthenticatedPeerValue{Slot: slot, SPKI: spki})"
+            - eval: "t.serveJoin(conn, coreconsensus.AuthenticatedPeerValue{Slot: slot, SPKI: spki}, lane)"
               to: t.serveJoin
             - return: ""
-          when: lane == laneJoin
+          when: lane == laneJoin || (lane == laneJoinV2 && !t.predatesJoinV2.Load())
       - opt:
           do:
             - return: ""
@@ -17879,6 +18006,52 @@ sequences:
       - set: r.Address
         value: string(b[41+n:])
       - return: r, true
+  - of: encodeJoinV2
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeJoinV2
+        kind: self
+      - id: binary.LittleEndian.AppendUint64
+        kind: value
+    steps:
+      - bind: b
+        eval: binary.LittleEndian.AppendUint64([]byte{joinVersion2}, uint64(r.MaxSnapshotBytes))
+        to: binary.LittleEndian.AppendUint64
+      - return: append(b, encodeJoin(r)...)
+  - of: decodeJoinOn
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeJoinOn
+        kind: self
+      - id: decodeJoin
+        kind: internal
+      - id: binary.LittleEndian.Uint64
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: decodeJoin(b)
+              to: decodeJoin
+          when: lane != laneJoinV2
+      - opt:
+          do:
+            - return: coreconsensus.JoinRequestValue{}, false
+          when: len(b) < joinV2Prefix || b[0] != joinVersion2
+      - bind: limit
+        eval: binary.LittleEndian.Uint64(b[1:])
+        to: binary.LittleEndian.Uint64
+      - bind: r, ok
+        eval: decodeJoin(b[joinV2Prefix:])
+        to: decodeJoin
+      - opt:
+          do:
+            - return: coreconsensus.JoinRequestValue{}, false
+          when: "!ok || limit > math.MaxInt64"
+      - set: r.MaxSnapshotBytes
+        value: int64(limit)
+      - return: r, true
   - of: (*TCPTransport).serveJoin
     participants:
       - id: caller
@@ -17889,7 +18062,7 @@ sequences:
         kind: value
       - id: readChunk
         kind: internal
-      - id: decodeJoin
+      - id: decodeJoinOn
         kind: internal
       - id: binary.LittleEndian.AppendUint32
         kind: value
@@ -17919,15 +18092,15 @@ sequences:
             to: c.SetDeadline
           when: err != nil
       - bind: b, err
-        eval: readChunk(c, 512)
+        eval: readChunk(c, 512+joinV2Prefix)
         to: readChunk
       - opt:
           do:
             - return: ""
           when: err != nil
       - bind: req, ok
-        eval: decodeJoin(b)
-        to: decodeJoin
+        eval: decodeJoinOn(lane, b)
+        to: decodeJoinOn
       - bind: reply
         eval:
           closure:
@@ -18019,7 +18192,7 @@ sequences:
         eval: |-
           coreconsensus.JoinRequestValue{
           		Cluster: cfg.Stamp.Log.Cluster, ID: cfg.Stamp.ID, Incarnation: cfg.Stamp.Incarnation,
-          		Slot: t.slot, Address: cfg.Address,
+          		Slot: t.slot, Address: cfg.Address, MaxSnapshotBytes: max(cfg.MaxSnapshotBytes, 0),
           	}
       - opt:
           do:
@@ -18069,16 +18242,127 @@ sequences:
         kind: actor
       - id: (*TCPTransport).joinOne
         kind: self
+      - id: t.joinOnLane
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - bind: pos, refused, silent, err
+              eval: t.joinOnLane(ctx, addr, laneJoinV2, req, pins)
+              to: t.joinOnLane
+            - opt:
+                do:
+                  - return: pos, refused, err
+                when: "!silent"
+          when: req.MaxSnapshotBytes > 0
+      - set: pos, refused, _, err
+        to: t.joinOnLane
+        value: t.joinOnLane(ctx, addr, laneJoin, req, pins)
+      - return: pos, refused, err
+  - of: (*TCPTransport).joinOnLane
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).joinOnLane
+        kind: self
       - id: t.dialAny
         kind: internal
       - id: tlsid
         kind: package
       - id: c.SetDeadline
         kind: value
+      - id: encodeJoin
+        kind: internal
+      - id: encodeJoinV2
+        kind: internal
       - id: writeChunk
         kind: internal
       - id: readChunk
         kind: internal
+      - id: t.joinAnswered
+        kind: internal
+    steps:
+      - bind: c, derr
+        eval: t.dialAny(ctx, addr, lane, pins)
+        to: t.dialAny
+      - opt:
+          do:
+            - return: coreconsensus.PositionValue{}, false, false, derr
+          when: derr != nil
+      - defer: func() { abandon(c.Close()) }()
+      - bind: peer, verified
+        eval: tlsid.PeerOf(c.ConnectionState())
+        to: tlsid
+      - opt:
+          do:
+            - return: coreconsensus.PositionValue{}, false, false, peerRejected("no verified peer")
+          when: "!verified"
+      - opt:
+          do:
+            - return: coreconsensus.PositionValue{}, false, false, err
+          init:
+            bind: err
+            eval: c.SetDeadline(time.Now().Add(t.cfg.JoinTimeout))
+            to: c.SetDeadline
+          when: err != nil
+      - bind: body
+        eval: encodeJoin(req)
+        to: encodeJoin
+      - opt:
+          do:
+            - set: body
+              to: encodeJoinV2
+              value: encodeJoinV2(req)
+          when: lane == laneJoinV2
+      - opt:
+          do:
+            - return: coreconsensus.PositionValue{}, false, endedUnanswered(err), err
+          init:
+            bind: err
+            eval: writeChunk(c, body)
+            to: writeChunk
+          when: err != nil
+      - bind: b, rerr
+        eval: readChunk(c, t.cfg.MaxControlFrameBytes)
+        to: readChunk
+      - opt:
+          do:
+            - return: coreconsensus.PositionValue{}, false, true, origin(coreconsensus.FrameInvalid, errs.String("what", "join answer"))
+          when: b == nil && endedUnanswered(rerr)
+      - set: pos, refused, err
+        to: t.joinAnswered
+        value: t.joinAnswered(b, rerr, peer.SPKI)
+      - return: pos, refused, false, err
+  - of: endedUnanswered
+    participants:
+      - id: caller
+        kind: actor
+      - id: endedUnanswered
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: err == nil || errors.Is(err, io.ErrUnexpectedEOF)
+      - opt:
+          do:
+            - return: "false"
+          init:
+            bind: ne, ok
+            eval: errors.AsType[net.Error](err)
+          when: ok && ne.Timeout()
+      - bind: _, coded
+        eval: errs.CodeOf(err)
+        to: errs
+      - return: "!coded"
+  - of: (*TCPTransport).joinAnswered
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).joinAnswered
+        kind: self
       - id: errs
         kind: package
       - id: joinAnswerReason
@@ -18088,40 +18372,6 @@ sequences:
       - id: t.SetMembership
         kind: internal
     steps:
-      - bind: c, derr
-        eval: t.dialAny(ctx, addr, laneJoin, pins)
-        to: t.dialAny
-      - opt:
-          do:
-            - return: coreconsensus.PositionValue{}, false, derr
-          when: derr != nil
-      - defer: func() { abandon(c.Close()) }()
-      - bind: peer, verified
-        eval: tlsid.PeerOf(c.ConnectionState())
-        to: tlsid
-      - opt:
-          do:
-            - return: coreconsensus.PositionValue{}, false, peerRejected("no verified peer")
-          when: "!verified"
-      - opt:
-          do:
-            - return: coreconsensus.PositionValue{}, false, err
-          init:
-            bind: err
-            eval: c.SetDeadline(time.Now().Add(t.cfg.JoinTimeout))
-            to: c.SetDeadline
-          when: err != nil
-      - opt:
-          do:
-            - return: coreconsensus.PositionValue{}, false, err
-          init:
-            bind: err
-            eval: writeChunk(c, encodeJoin(req))
-            to: writeChunk
-          when: err != nil
-      - bind: b, rerr
-        eval: readChunk(c, t.cfg.MaxControlFrameBytes)
-        to: readChunk
       - opt:
           do:
             - return: coreconsensus.PositionValue{}, false, origin(coreconsensus.FrameInvalid, errs.String("what", "join answer"))
@@ -18147,7 +18397,7 @@ sequences:
       - opt:
           do:
             - return: coreconsensus.PositionValue{}, false, peerRejected("the answer does not list its own sender")
-          when: "!joinAnswerListsPeer(m, peer.SPKI)"
+          when: "!joinAnswerListsPeer(m, spki)"
       - eval: t.SetMembership(1, m.Members)
         to: t.SetMembership
       - return: "coreconsensus.PositionValue{Term: binary.LittleEndian.Uint64(b[4:]), Index: binary.LittleEndian.Uint64(b[12:])}, false, nil"

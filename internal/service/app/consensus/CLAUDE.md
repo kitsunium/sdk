@@ -131,6 +131,21 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   which one process does not exclude from itself (#422, ADR 0152).
 - Take a JOIN answer from an unpinned peer (`JoinConfig.Pins`, review M4),
   or admit a key two members share (review M5).
+- Extend the JOIN of `laneJoin` in place: a member that predates a field
+  reads it as part of the address. A joiner announcing its
+  `MaxSnapshotBytes` uses `laneJoinV2` (`joinVersion2`, the limit, then the
+  old JOIN) and, when the member ends that connection unanswered — closed
+  or reset, never a deadline — sends the same JOIN on `laneJoin`; one of
+  another version is refused, never read as one this build knows. The
+  learner records the limit, and `Health` reports `SnapshotBytes`,
+  `SnapshotLimit` and `HealthSnapshotNearLimit` from four fifths of it
+  (R2-30, #556, `TestTCPJoinAnnouncesItsSnapshotLimit`,
+  `TestTCPJoinFallsBackOnAMemberThatPredatesTheLane`,
+  `TestHealthWarnsBeforeTheSnapshotLimit`).
+- Leave the term of the last entry out of `Inspect`: the survivor of a
+  `Recover` is the highest `(LastTerm, Last)`, and a longer log or a higher
+  vote term chose one whose tail no majority held (#534,
+  `TestInspectReportsTheTermOfTheLastEntry`).
 - Cut `Recover`'s log back to the commit the survivor persisted: that commit
   lags the cluster's, and the entries past it may be writes the old cluster
   acknowledged. `adoptedEnd` keeps every entry whose `BodySum` and

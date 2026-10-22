@@ -127,7 +127,13 @@ func (n *Node) slotTaken(slot string) bool {
 // operator the authorizer named, and answers with the entry's position or
 // the code and reason of its failure.
 func (n *Node) addJoiner(ctx context.Context, op coreconsensus.Operator, r *coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code, string) {
-	m := coreconsensus.MemberValue{ID: r.ID, Incarnation: r.Incarnation, Slot: r.Slot, SPKI: r.SPKI, Address: r.Address, Joining: true}
+	// The limit the joiner announced travels with it: every member's cut
+	// is held to the smallest (R2-30, #556). 0, a joiner that announced
+	// nothing, leaves the cuts at the members' own limits.
+	m := coreconsensus.MemberValue{
+		ID: r.ID, Incarnation: r.Incarnation, Slot: r.Slot, SPKI: r.SPKI, Address: r.Address, Joining: true,
+		MaxSnapshotBytes: max(r.MaxSnapshotBytes, 0),
+	}
 	a := new(wire.AdminValue{
 		Operator: string(op), Change: wire.ChangeAddLearner, Target: m.ID,
 		Membership: coreconsensus.MembershipValue{Members: []coreconsensus.MemberValue{m}},
