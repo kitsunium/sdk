@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"io"
 	"maps"
 	"net"
@@ -64,7 +65,16 @@ const (
 	redialBackoff time.Duration = 100 * time.Millisecond
 	// connBufferBytes sizes the buffered reader and writer of a connection.
 	connBufferBytes int = 64 << 10
+	// acceptBackoffFirst is the wait after the first of consecutive failed
+	// Accepts; each next one doubles it (#518).
+	acceptBackoffFirst time.Duration = 5 * time.Millisecond
+	// acceptBackoffCeiling bounds the wait after a failed Accept.
+	acceptBackoffCeiling time.Duration = time.Second
 )
+
+// listenTCP opens the transport's listener; a test replaces it to make
+// Accept fail the way an exhausted descriptor table does (#518).
+var listenTCP = net.Listen
 
 // TransportConfig builds the shipped mTLS transport (D4, D14). A zero bound
 // is clamped to its default; nil Roots, no certificate, a HandshakeTimeout
@@ -284,7 +294,7 @@ func newTCPTransport(cfg *TransportConfig, id *tlsid.Identity) (*TCPTransport, e
 		bySPKI: map[[32]byte]coreconsensus.MemberValue{}, out: map[outKey]*peerConn{}, in: map[net.Conn][32]byte{}, raw: map[net.Conn]struct{}{}, admission: server.NewAdmission(server.AdmissionConfig{PerAddress: cfg.MaxUnauthenticatedPerIP, Reserved: cfg.ReservedMemberSlots}), peerExpiry: map[coreconsensus.NodeID]time.Time{},
 		done: make(chan struct{}),
 	}
-	ln, err := net.Listen("tcp", cfg.ListenAddress)
+	ln, err := listenTCP("tcp", cfg.ListenAddress)
 	if err != nil {
 		return nil, transportMisconfigured("ListenAddress", err.Error())
 	}
@@ -327,15 +337,28 @@ func (t *TCPTransport) checkPeer(pin *[32]byte) tlsid.Verify {
 // accept is the listener's background goroutine: it admits or refuses each
 // connection before any TLS byte is read, and launches one serve goroutine
 // per admitted connection, counted in t.wg, which ends with its connection
-// (Close closes every one still raw). accept ends when the listener fails,
-// which is how Close stops it.
+// (Close closes every one still raw). accept ends when the listener is
+// closed, which is how Close stops it, and only then: any other failure —
+// EMFILE or ENFILE when descriptors run out — is waited out on a growing
+// backoff, as net/http's Serve does. Ending on it left the listener open,
+// the kernel completing handshakes into its backlog, and nothing accepting
+// them: the node sent but never received again, until a restart (#518).
 func (t *TCPTransport) accept() {
 	defer t.wg.Done()
+	var delay time.Duration
+	wait := time.NewTimer(acceptBackoffFirst)
+	wait.Stop()
+	defer wait.Stop()
 	for {
 		c, err := t.ln.Accept()
 		if err != nil {
-			return
+			var goOn bool
+			if delay, goOn = t.acceptFailed(err, delay, wait); !goOn {
+				return
+			}
+			continue
 		}
+		delay = 0
 		t.mu.Lock()
 		if t.closed {
 			t.mu.Unlock()
@@ -355,6 +378,34 @@ func (t *TCPTransport) accept() {
 		t.mu.Unlock()
 		go t.serve(c, release)
 	}
+}
+
+// acceptFailed answers a failed Accept that followed a wait of delay: the
+// end of the loop when the listener is closed, else the next wait, on the
+// loop's one timer, cut short by the transport's close. It returns that
+// wait, and whether the loop goes on.
+func (t *TCPTransport) acceptFailed(err error, delay time.Duration, wait *time.Timer) (time.Duration, bool) {
+	if errors.Is(err, net.ErrClosed) {
+		return delay, false
+	}
+	delay = acceptBackoff(delay)
+	wait.Reset(delay)
+	select {
+	case <-t.done:
+		return delay, false
+	case <-wait.C:
+		return delay, true
+	}
+}
+
+// acceptBackoff is the wait after a failed Accept that follows a wait of
+// prev: acceptBackoffFirst first, doubled each time, at most
+// acceptBackoffCeiling.
+func acceptBackoff(prev time.Duration) time.Duration {
+	if prev == 0 {
+		return acceptBackoffFirst
+	}
+	return min(2*prev, acceptBackoffCeiling)
 }
 
 // serve runs one inbound connection: the handshake under its deadline,

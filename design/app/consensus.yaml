@@ -1401,6 +1401,9 @@ packages:
             - doc: |-
                 KeptIndex is the last index Recover kept from the predecessor. An
                 applied position of the predecessor at or below it is still trusted.
+                Every node of the history applies the entries at or below it under the
+                predecessor's token: one admitted after the Recover learns it from the
+                snapshot it installs, never from an append.
               name: KeptIndex
               type: uint64
       - doc: |-
@@ -2351,7 +2354,9 @@ packages:
           removed once the new stamp is: a Recover interrupted between the two
           refuses a start, and is completed by running Recover again to the same
           new cluster, which resumes from the index the first one kept; one to
-          another cluster is refused.
+          another cluster is refused. A silence condition TruncateAndStaySilent
+          left is removed before the marker: the new history is closed to the
+          terms it guarded, and a silent node never campaigns.
         in:
           - name: d
             type: DataDir
@@ -4739,7 +4744,8 @@ packages:
             contiguous entries past it whose body and chain checksums verify and whose
             term does not decrease, every old voter left out attested fenced by every
             witness. An interrupted Recover leaves the stop marker STOP-RECOVER, which
-            refuses a start until Recover runs again to the same new cluster.
+            refuses a start until Recover runs again to the same new cluster. It
+            removes the silence condition TruncateAndStaySilent left.
           forward: svcconsensus.Recover
           in:
             - name: d

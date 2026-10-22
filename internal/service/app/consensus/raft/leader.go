@@ -175,6 +175,15 @@ func (r *Raft) sendAppend(to core.NodeID, sendIfEmpty bool) {
 	if pr == nil || pr.paused(r.cfg.MaxInflight, r.cfg.MaxInflightBytes) {
 		return
 	}
+	if kept := r.cfg.Log.KeptIndex; pr.next <= kept && !r.mutated(mutKeptAppended) {
+		// The entries Recover kept carry the predecessor's identity, which
+		// only a snapshot of this lineage tells a peer: appended, they were
+		// applied there under the new one (#507). The driver sends one at or
+		// past the kept index.
+		pr.becomeSnapshot(max(r.log.snapIndex, kept))
+		r.rd.SendSnapshot = append(r.rd.SendSnapshot, to)
+		return
+	}
 	prev := pr.next - 1
 	prevTerm, ok := r.log.term(prev)
 	if !ok {

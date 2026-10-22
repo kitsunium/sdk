@@ -308,7 +308,9 @@ func ReceiptMessage(old, next coreconsensus.ClusterID, voter coreconsensus.NodeI
 // removed once the new stamp is: a Recover interrupted between the two
 // refuses a start, and is completed by running Recover again to the same
 // new cluster, which resumes from the index the first one kept; one to
-// another cluster is refused.
+// another cluster is refused. A silence condition TruncateAndStaySilent
+// left is removed before the marker: the new history is closed to the
+// terms it guarded, and a silent node never campaigns.
 func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RecoverOptions) error {
 	if err := d.offline(); err != nil {
 		return err
@@ -438,7 +440,23 @@ func (d DataDir) writeRecover(stamp *coreconsensus.StampValue, newCluster coreco
 	if err := d.d.log.WriteStamp(*stamp); err != nil {
 		return err
 	}
+	if err := d.endRecoveredSilence(); err != nil {
+		return err
+	}
 	return d.clearRecoverIntent()
+}
+
+// endRecoveredSilence removes, durably and before STOP-RECOVER goes, the
+// silence condition a TruncateAndStaySilent left: the new history is closed
+// to the old terms it guarded, and a silent node never campaigns, so a
+// survivor kept silent would be the one voter of its history and never be
+// elected (#524). A crash before it is completed by the rerun, which finds
+// the new stamp and goes through finishRecover.
+func (d DataDir) endRecoveredSilence() error {
+	if err := d.d.log.endSilence(); err != nil {
+		return storageFailed("silence condition", err)
+	}
+	return nil
 }
 
 // finishRecover completes a Recover interrupted after its new stamp, of
@@ -452,6 +470,9 @@ func (d DataDir) finishRecover(newCluster coreconsensus.ClusterID, opt *RecoverO
 		return recoverRefused("confirmation does not name the new cluster")
 	}
 	if err := d.audit(opt.Operator, fmt.Sprintf("recover %s completed", newCluster)); err != nil {
+		return err
+	}
+	if err := d.endRecoveredSilence(); err != nil {
 		return err
 	}
 	return d.clearRecoverIntent()

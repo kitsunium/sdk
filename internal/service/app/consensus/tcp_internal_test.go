@@ -15,7 +15,10 @@ import (
 	"math/big"
 	"net"
 	"net/url"
+	"os"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -611,6 +614,81 @@ func TestReadChunkRefusesALengthAboveTheLimit(t *testing.T) {
 		binary.LittleEndian.PutUint32(h[:], ln)
 		if _, err := readChunk(bytes.NewReader(h[:]), 512); !errors.Is(err, coreconsensus.FrameInvalid) {
 			t.Fatalf("length %#x: %v, want FRAME_INVALID", ln, err)
+		}
+	}
+}
+
+// failingListener fails its first fails Accepts the way an exhausted
+// descriptor table does, then accepts from the listener it wraps.
+type failingListener struct {
+	net.Listener
+	fails atomic.Int32
+}
+
+func (l *failingListener) Accept() (net.Conn, error) {
+	if l.fails.Add(-1) >= 0 {
+		return nil, &net.OpError{Op: "accept", Net: "tcp", Err: os.NewSyscallError("accept4", syscall.EMFILE)}
+	}
+	return l.Listener.Accept()
+}
+
+// #518: an Accept that fails without the listener being closed — EMFILE,
+// ENFILE — is waited out, never the end of the accept loop. It ended it,
+// and the node, its port still open, never received a frame again.
+func TestTCPAcceptSurvivesATransientFailure(t *testing.T) {
+	type tc struct {
+		name string
+		// fails is how many Accepts in a row fail before one succeeds.
+		fails int32
+	}
+	runCase := func(t *testing.T, c tc) {
+		listenTCP = func(network, addr string) (net.Listener, error) {
+			ln, err := net.Listen(network, addr)
+			if err != nil {
+				return nil, err
+			}
+			fl := &failingListener{Listener: ln}
+			fl.fails.Store(c.fails)
+			return fl, nil
+		}
+		t.Cleanup(func() { listenTCP = net.Listen })
+		acceptAfterFailures(t, c.fails)
+	}
+	for _, c := range []tc{{name: "one failure", fails: 1}, {name: "a run of failures", fails: 8}} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// acceptAfterFailures starts two transports, the receiver's listener
+// failing its first fails Accepts, and requires a frame to reach it.
+func acceptAfterFailures(t *testing.T, fails int32) {
+	t.Helper()
+	ca := newTestCA(t)
+	cid := coreconsensus.ClusterID{0xc0, 0xff, 0xee}
+	a, b := &tcpNode{id: 1, slot: "a"}, &tcpNode{id: 2, slot: "b"}
+	var members []coreconsensus.MemberValue
+	for _, tn := range []*tcpNode{a, b} {
+		tn.cert, tn.spki = ca.issue(t, SAN(cid, tn.slot), nil)
+		tn.listen(t, ca)
+		defer tn.tr.Close()
+		members = append(members, coreconsensus.MemberValue{ID: tn.id, Slot: tn.slot, SPKI: tn.spki, Address: tn.addr, Voter: true})
+	}
+	got := make(chan struct{}, 64)
+	if err := b.tr.Bind(1, func(coreconsensus.AuthenticatedPeerValue, []byte) { got <- struct{}{} }, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	a.tr.SetMembership(1, members)
+	b.tr.SetMembership(1, members)
+	frame := appendFrame(&coreconsensus.MessageValue{Version: 1, Group: 1, Kind: coreconsensus.MsgPreVote, From: a.id, To: b.id, Term: 2})
+	deadline := time.After(10 * time.Second)
+	for {
+		a.tr.Send(b.id, frame)
+		select {
+		case <-got:
+			return
+		case <-time.After(200 * time.Millisecond):
+		case <-deadline:
+			t.Fatalf("after %d failed Accepts the transport never received a frame again", fails)
 		}
 	}
 }

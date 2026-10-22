@@ -561,6 +561,87 @@ func TestACompactionPastTheEndRecordsTheTermItIsGiven(t *testing.T) {
 	}
 }
 
+// #516: a compaction past the log's end moves the log's start past it, and
+// the next index is appended after it — the state of a node that installed
+// a snapshot and caught up. Replay applies the compact record where it
+// stands: noted, and applied only once the whole replay was done, it left
+// the log starting below the appended entries, and the restart quarantined
+// a sound disk, "index out of sequence".
+func TestAnAppendAfterACompactionPastTheEndSurvivesARestart(t *testing.T) {
+	type tc struct {
+		name string
+		// truncated takes the install path: the suffix goes, then the
+		// compaction.
+		truncated bool
+	}
+	runCase := func(t *testing.T, c tc) {
+		dir, d := base(t)
+		l := d.d.log
+		if c.truncated {
+			if err := l.TruncateSuffix(1); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := l.compactPrefixAt(100, 5); err != nil {
+			t.Fatal(err)
+		}
+		mustSync(t, l)
+		if err := l.Append(ents(101, 103, 5), nil); err != nil {
+			t.Fatal(err)
+		}
+		mustSync(t, l)
+		nd := reopenExpect(t, dir, d, false)
+		defer nd.Close()
+		if f, la := nd.Log().Bounds(); f != 101 || la != 103 {
+			t.Fatalf("bounds %d %d, want 101 103", f, la)
+		}
+		checkEntries(t, nd.Log(), 101, 103, 5)
+		if tm, err := nd.Log().Term(100); err != nil || tm != 5 {
+			t.Fatalf("Term(100) = %d %v, want 5", tm, err)
+		}
+	}
+	for _, c := range []tc{{name: "compacted"}, {name: "truncated then compacted", truncated: true}} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// #516, across segments: the appends after a compaction past the end rotate
+// into later segments, whose checkpoints must continue the replayed log.
+func TestAppendsAfterACompactionPastTheEndRotateAndSurviveARestart(t *testing.T) {
+	dir := t.TempDir()
+	d := openDir(t, dir, 4096)
+	l := d.d.log
+	if err := l.Append(ents(1, 3, 1), nil); err != nil {
+		t.Fatal(err)
+	}
+	mustSync(t, l)
+	if err := l.compactPrefixAt(100, 5); err != nil {
+		t.Fatal(err)
+	}
+	mustSync(t, l)
+	for i := uint64(101); i <= 160; i++ {
+		if err := l.Append(ents(i, i, 5), nil); err != nil {
+			t.Fatal(err)
+		}
+		mustSync(t, l)
+	}
+	if segs := must(filepath.Glob(filepath.Join(dir, "log", "seg-????????????????")))(t); len(segs) < 2 {
+		t.Fatalf("setup: %d segment(s), want a rotation", len(segs))
+	}
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	nd := openDir(t, dir, 4096)
+	defer nd.Close()
+	if err := nd.d.log.checkMarkers(); err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	if f, la := nd.Log().Bounds(); f != 101 || la != 160 {
+		t.Fatalf("bounds %d %d, want 101 160", f, la)
+	}
+	checkEntries(t, nd.Log(), 101, 160, 5)
+}
+
 // A log compacted past its end before #415 answers a term of 0 at its base.
 // A node with no table takes the term of the snapshot metadata at that
 // index, which stays readable when the bytes do not, and refuses to start

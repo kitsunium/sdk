@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-19T12:00:00Z -->
+<!-- updated: 2026-10-22T12:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -34,6 +34,10 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
 | simulator soak | `CONSENSUS_SIM_SOAK=1 go test -run TestSimSoak ./raft/`; a seed replays with `CONSENSUS_SIM_SEED` |
 | fuzz | `go test -fuzz` on the targets of `wire/` and this package; nightly in CI |
 | dm-crypt | `testdata/dmcrypt/run.sh` (Docker, privileged): fsync latency and power cuts through LUKS; results in `testdata/dmcrypt/RESULTS.md` |
+
+Under Bazel `consensus_test` has 4 shards: under race and coverage the suite
+passed the 60 s cap per target once the disk scenarios of #507, #516 and
+#524 joined it.
 
 ## Do NOT
 
@@ -169,6 +173,35 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
   restart, which catches the node up by appends where the test meant an
   install. Isolate it before it stops (#374,
   `TestInstallResumesAfterACrashAtPublication`).
+- Note a compact record in replay and apply it only once the replay is
+  done: a compaction past the log's end moves its start past it, and the
+  entry appended next — the state of every node that caught up by an
+  install, a `RestoreSnapshot` that took a write — read as out of sequence
+  and quarantined a sound disk at the next restart. `applyCompactRecord`
+  applies it where it stands, as `compactPrefixAt` did (#516,
+  `TestAnAppendAfterACompactionPastTheEndSurvivesARestart`,
+  `TestAnInstalledNodeRestartsAfterAppending`).
+- Release from the apply lag only the head of a batch a
+  `BatchingStateMachine` applies: `queueApply` counts every entry, and the
+  bytes of entries 2..n stayed counted until every proposal was refused
+  OVERLOADED (#514, `TestBatchingMachineReleasesApplyLag`).
+- End the TCP accept loop on anything but its listener's close: one EMFILE
+  left the node sending and never receiving again. A failed Accept waits a
+  backoff from 5 ms to 1 s (#518, `TestTCPAcceptSurvivesATransientFailure`).
+- Ship a snapshot of another lineage, or below a Recover's kept index, or
+  install one that does not continue the node's own: the entries Recover
+  kept are applied under the predecessor's token on every node, and a node
+  admitted afterwards learns the kept index from the snapshot it installs
+  (`adoptLineage`, durable before the restore), never from an append —
+  raft sends a snapshot to a peer below the kept index. It applied them
+  under the new identity, and the state built on the token diverged (#507,
+  `TestTheEntriesRecoverKeepsHaveOneTokenOnEveryNode`,
+  `TestAnOfferOfAnotherLineageIsRefused`).
+- Keep the silence condition across `Recover`: a silent node never
+  campaigns (raft's `promotable`), and a survivor left silent would be the
+  one voter of its new history and never be elected (#524,
+  `TestRecoverEndsTheSilence`; the election side,
+  `TestASilentNodeIsNeverElected`).
 - Bound an election in a test by a fixed number of split votes: a split
   is a draw, about one round in a hundred on the memory network, and a
   third round fails a two-round total every ten to twenty runs. Derive

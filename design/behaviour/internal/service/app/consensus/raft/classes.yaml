@@ -124,6 +124,14 @@ constants:
           mutForwardNoDedupe proposes a forward each time it is delivered, the
           duplicate a transport resent included (#401).
         name: mutForwardNoDedupe
+      - doc: |-
+          mutSilentCampaigns lets a silent node campaign, on its election timer
+          or a TimeoutNow (#524).
+        name: mutSilentCampaigns
+      - doc: |-
+          mutKeptAppended appends the entries Recover kept to a peer instead
+          of sending a snapshot (#507).
+        name: mutKeptAppended
     name: mutAckBeforeSync
   - doc: The facts a PeerStatValue carries.
     grouped: true
@@ -1618,7 +1626,11 @@ types:
         results: int
       - doc: |-
           promotable reports whether this node may campaign: a voter of the current
-          configuration, whose directory may vote.
+          configuration, whose directory may vote, and which is not silent. A
+          candidacy is a vote for itself, and the silence grants none: a silent node
+          that campaigned was elected with one other grant once the leader was down,
+          and overwrote the acknowledged entries it had truncated (#524, R5-13).
+          Both the election timer and TimeoutNow go through here.
         name: promotable
         recv: r *Raft
         results: bool

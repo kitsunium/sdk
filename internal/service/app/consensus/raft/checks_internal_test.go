@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -481,6 +482,8 @@ var checks = map[string]func(mutation) error{
 	"lease from acking minimum":     checkLeaseFromAckingMinimum,
 	"chain verified":                checkChainVerified,
 	"forward deduplicated":          checkForwardDeduped,
+	"silent node never campaigns":   checkSilentNodeNeverCampaigns,
+	"kept entries never appended":   checkKeptEntriesNeverAppended,
 	"simulated safety":              checkSimSafety,
 	"simulated linearizability":     checkSimLinearizable,
 	"deposed leader read":           checkDeposedLeaderRead,
@@ -526,6 +529,8 @@ func TestMutationsAreCaught(t *testing.T) {
 		"lease from the leader's view":    mutLeaseLeaderView,
 		"read without a round":            mutReadNoRound,
 		"forward proposed twice":          mutForwardNoDedupe,
+		"silent node campaigns":           mutSilentCampaigns,
+		"kept entries appended":           mutKeptAppended,
 	}
 	for name, m := range muts {
 		caught := ""
@@ -555,6 +560,92 @@ func TestMutationsAreCaught(t *testing.T) {
 func TestSimulatorCatchesAckBeforeSync(t *testing.T) {
 	if checkSimSafety(mutAckBeforeSync|mutCommitOldTermByCount) == nil {
 		t.Fatal("the simulator's oracles found nothing with acks before sync and Figure 8")
+	}
+}
+
+// silentVoter is node 2 of members 1, 2, 3, left silent by
+// TruncateAndStaySilent at (SilentTerm 3, SilentIndex 3) with its log cut to
+// [1, 2] and, as a truncation that dropped the last HardState record can
+// leave it, a term below SilentTerm.
+func silentVoter(mut mutation) *Raft {
+	r := NewRaft(&Config{
+		ID: 2, Group: 1, Seed: 1, Timing: testTiming(), MaxInflight: 8, MaxInflightBytes: 1 << 20,
+		MaxBatchBytes: 1 << 16, MinVoters: 1, PromoteLag: 16, CanVote: true, SilentTerm: 3, SilentIndex: 3,
+	}, &StartState{
+		HardState: core.HardState{Term: 2, Vote: 1}, Snapshot: core.SnapshotMetaValue{Membership: testConf(1, 2, 3)},
+		Entries: chainEntries(0, 1, 1, 2), Now: t0,
+	})
+	r.mut = mut
+	r.Ready()
+	return r
+}
+
+// checkSilentNodeNeverCampaigns: a silent node's own candidacy is a vote
+// like any other, and the silence grants none (#524). Neither its election
+// timer nor a TimeoutNow from the leader of its term may make it campaign:
+// elected with one other grant, it overwrote the acknowledged entries it
+// had truncated.
+func checkSilentNodeNeverCampaigns(mut mutation) error {
+	campaigned := func(rd ReadyValue) bool {
+		for _, m := range append(rd.Messages, rd.AfterSync...) {
+			if m.Kind == core.MsgPreVote || m.Kind == core.MsgVote {
+				return true
+			}
+		}
+		return false
+	}
+	r := silentVoter(mut)
+	r.Tick(t0.Add(time.Hour))
+	if rd := r.Ready(); campaigned(rd) || r.role != core.RoleFollower {
+		return fmt.Errorf("a silent node campaigned on its election timer (role %v term %d vote %d)", r.role, r.term, r.vote)
+	}
+	r = silentVoter(mut)
+	r.Step(t0.Add(time.Second), msg(core.MsgHeartbeat, 1, 2, 2))
+	r.Ready()
+	r.Step(t0.Add(time.Second), msg(core.MsgTimeoutNow, 1, 2, 2))
+	if rd := r.Ready(); campaigned(rd) || r.role != core.RoleFollower {
+		return fmt.Errorf("a silent node campaigned on a TimeoutNow (role %v term %d vote %d)", r.role, r.term, r.vote)
+	}
+	return nil
+}
+
+// checkKeptEntriesNeverAppended: a leader whose log identity records a
+// Recover's kept index sends a snapshot, never an append, to a peer that
+// lacks an entry at or below it. The kept entries carry the predecessor's
+// identity, and a peer that received them by append applied them under the
+// new one (#507).
+func checkKeptEntriesNeverAppended(mut mutation) error {
+	r := leaderOf(2, 5, chainEntries(0, 1, 1, 1, 1, 1, 1), mut, false)
+	r.cfg.Log = core.LogIdentityValue{Cluster: core.ClusterID{2}, Epoch: 1, Predecessor: core.ClusterID{1}, PredecessorEpoch: 1, KeptIndex: 4}
+	rej := msg(core.MsgAppResp, 2, 1, 2)
+	// The answer to the outstanding probe: the peer holds nothing.
+	rej.Index, rej.Reject, rej.RejectHint = r.prs[2].next-1, true, 0
+	r.Step(r.now, rej)
+	rd := r.Ready()
+	for _, m := range append(rd.Messages, rd.AfterSync...) {
+		if m.Kind == core.MsgApp && m.To == 2 && len(m.Entries) > 0 && m.Entries[0].Position.Index <= 4 {
+			return fmt.Errorf("kept entry %d appended to a peer", m.Entries[0].Position.Index)
+		}
+	}
+	if !slices.Contains(rd.SendSnapshot, 2) {
+		return fmt.Errorf("setup: the peer was neither appended to nor sent a snapshot (next %d)", r.prs[2].next)
+	}
+	return nil
+}
+
+// #507: TestTheEntriesRecoverKeepsHaveOneTokenOnEveryNode is the driver's
+// half; this is raft's.
+func TestKeptEntriesAreNeverAppended(t *testing.T) {
+	if err := checkKeptEntriesNeverAppended(0); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// #524: TestSilentNodeStaysSilentUntilTheConditionHolds drove Step only;
+// the election timer is the path an outage takes.
+func TestSilentNodeNeverCampaigns(t *testing.T) {
+	if err := checkSilentNodeNeverCampaigns(0); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -35,7 +35,7 @@ type saveRes struct {
 // token builds an entry's lineage-scoped command identity: an entry kept by
 // Recover keeps its PREDECESSOR identity (D10, R7-09).
 func (n *Node) token(p coreconsensus.PositionValue) coreconsensus.TokenValue {
-	l := n.ident
+	l := n.lineage()
 	if l.Predecessor != (coreconsensus.ClusterID{}) && p.Index <= l.KeptIndex {
 		return coreconsensus.TokenValue{Cluster: l.Predecessor, Epoch: l.PredecessorEpoch, Term: p.Term, Index: p.Index}
 	}
@@ -145,6 +145,15 @@ func (n *Node) applyCommands(batcher coreconsensus.BatchingStateMachine, batchin
 		for j < len(es) && es[j].Kind == coreconsensus.EntryCommand {
 			j++
 		}
+	}
+	// applyEntries released es[i]'s bytes from the apply lag; the batch
+	// consumes the commands after it too, and the loop resumes past them,
+	// so their bytes are released here. Counted once per Ready and released
+	// only for the head of each batch, they stayed in the lag for good, and
+	// the leader refused every proposal OVERLOADED once it reached
+	// MaxApplyLagBytes (#514).
+	for k := i + 1; k < j; k++ {
+		n.applyLag.Add(-int64(len(es[k].Data)))
 	}
 	results := make([]any, j-i)
 	for k := i; k < j; k++ {

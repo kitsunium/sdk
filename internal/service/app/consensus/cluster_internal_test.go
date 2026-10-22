@@ -1070,6 +1070,123 @@ func TestApplyLagBackpressure(t *testing.T) {
 	}
 }
 
+// batchKV is a kv that applies a run of commands in one ApplyBatch.
+type batchKV struct{ *kv }
+
+func (b batchKV) ApplyBatch(es []coreconsensus.EntryValue, results []any) {
+	for i := range es {
+		results[i] = b.Apply(es[i])
+	}
+}
+
+// #507: a node refuses a snapshot offer of another history, LINEAGE_MISMATCH,
+// before a byte is spooled: the entries after it would be applied under an
+// identity it does not continue.
+func TestAnOfferOfAnotherLineageIsRefused(t *testing.T) {
+	c := newCluster(t, 3, 0)
+	l := c.settledLeader(5 * time.Second)
+	f := c.otherThan(l)
+	st := f.node.Status()
+	offerOf := func(log coreconsensus.LogIdentityValue) coreconsensus.InstallAcceptValue {
+		id := fmt.Sprintf("%020d-%020d", st.Commit+100, st.Term)
+		return f.node.offer(coreconsensus.AuthenticatedPeerValue{ID: l.id}, coreconsensus.InstallOfferValue{
+			Term: st.Term, SnapshotID: id,
+			Meta: coreconsensus.SnapshotMetaValue{
+				ID: id, Version: 1, Log: log,
+				Position: coreconsensus.PositionValue{Term: st.Term, Index: st.Commit + 100},
+			},
+		})
+	}
+	own := f.node.lineage()
+	belowKept := own
+	belowKept.Predecessor, belowKept.PredecessorEpoch, belowKept.KeptIndex = coreconsensus.ClusterID{9}, 1, st.Commit+200
+	type tc struct {
+		name    string
+		log     coreconsensus.LogIdentityValue
+		refused bool
+	}
+	runCase := func(t *testing.T, c tc) {
+		acc := offerOf(c.log)
+		if c.refused && acc.Refused != coreconsensus.CodeLineageMismatch {
+			t.Fatalf("offer of %+v: %+v, want LINEAGE_MISMATCH", c.log, acc)
+		}
+		if !c.refused && (acc.Refused != 0 || acc.Held) {
+			t.Fatalf("offer of %+v: %+v, want it accepted", c.log, acc)
+		}
+	}
+	for _, c := range []tc{
+		{name: "another cluster", log: coreconsensus.LogIdentityValue{Cluster: coreconsensus.ClusterID{9}, Epoch: 1}, refused: true},
+		{name: "own lineage below the kept index it records", log: belowKept, refused: true},
+		{name: "own lineage", log: own},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// proposeThroughLag proposes kv on the leader, again while the apply lag
+// refuses it: a lag that drains is back-pressure, one that never drains
+// fails the test once the deadline passes, with the leader's lag.
+func proposeThroughLag(t *testing.T, c *cluster, kv string) coreconsensus.TokenValue {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		l := c.leader(5 * time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		tok, _, err := l.node.Propose(ctx, []byte(kv))
+		cancel()
+		if err == nil {
+			return tok
+		}
+		if !errors.Is(err, coreconsensus.Overloaded) && !errors.Is(err, coreconsensus.NotLeader) {
+			t.Fatalf("propose %q: %v", kv, err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("propose %q still refused after 10 s: %v; leader applyLag %d", kv, err, l.node.applyLag.Load())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// #514: with a BatchingStateMachine, every entry of a batch releases its
+// bytes from the apply lag, not only the first one. Once everything is
+// applied the lag is zero on every node, and the leader accepts proposals.
+func TestBatchingMachineReleasesApplyLag(t *testing.T) {
+	c := newClusterWith(t, &cluster{
+		t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{1, 2, 3},
+		configure: func(tn *testNode, cfg *Config) {
+			cfg.Machine = batchKV{kv: tn.sm}
+			cfg.MaxApplyLagBytes = 64 << 10
+		},
+	})
+	l := c.leader(5 * time.Second)
+	payload := strings.Repeat("x", 1024)
+	var wg sync.WaitGroup
+	for w := range 16 {
+		wg.Go(func() {
+			for i := range 16 {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				// A refusal or a leadership change during the load is not
+				// the subject: the lag once everything is applied is.
+				_, _, _ = l.node.Propose(ctx, fmt.Appendf(nil, "k%d-%d=%s", w, i, payload))
+				cancel()
+			}
+		})
+	}
+	wg.Wait()
+	tok := proposeThroughLag(t, c, "last=1")
+	c.waitApplied(tok.Index, 10*time.Second)
+	for _, tn := range c.nodes {
+		if got := tn.node.applyLag.Load(); got != 0 {
+			t.Errorf("node %d: applyLag %d bytes after everything applied, want 0", tn.id, got)
+		}
+	}
+	// Bytes several times MaxApplyLagBytes went through: a leak would now
+	// refuse every proposal.
+	for i := range 20 {
+		proposeThroughLag(t, c, fmt.Sprintf("after%d=%s", i, payload))
+	}
+}
+
 // A crash right after an installed snapshot is published, before the
 // state machine is restored and the log moved onto it: the restart finishes
 // the install from the published snapshot (D7).
@@ -1394,7 +1511,7 @@ func TestTickFollowsTheCommittedContract(t *testing.T) {
 	next.HeartbeatInterval = 5 * time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	pre := coreconsensus.PreconditionSpec{Log: l.node.ident, Generation: st.Timing.Generation}
+	pre := coreconsensus.PreconditionSpec{Log: l.node.lineage(), Generation: st.Timing.Generation}
 	if err := l.node.ProposeTimingContract(ctx, "op:test", pre, next); err != nil {
 		t.Fatal(err)
 	}

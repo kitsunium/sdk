@@ -56,6 +56,13 @@ func (n *Node) screenOffer(from coreconsensus.NodeID, o *coreconsensus.InstallOf
 		acc.Refused = coreconsensus.CodeVersionUnsupported
 		return true
 	}
+	if !lineageAccepts(n.lineage(), o.Meta.Log, o.Meta.Position.Index) {
+		// A snapshot of another history: the entries after it would be
+		// applied under an identity it does not continue (#507). A leader
+		// never offers one; it cuts a snapshot of its own lineage instead.
+		acc.Refused = coreconsensus.CodeLineageMismatch
+		return true
+	}
 	if o.Meta.DecodedSize > n.cfg.MaxSnapshotBytes || o.Meta.EncodedSize > n.cfg.MaxSnapshotBytes {
 		acc.Refused = coreconsensus.CodeSnapshotTooLarge
 		return true
@@ -131,18 +138,8 @@ func (n *Node) install(req coreconsensus.InstallParams) error {
 		// The spool stays: the next offer resumes from its last chunk.
 		return snapshotCorrupt("stream ended early")
 	}
-	// Freshness again, on the event loop, right before the install is
-	// accepted (D7): the receiver may have committed past the snapshot
-	// through a new leader's appends while the body streamed (review H3).
-	var code errs.Code
-	if !n.exec(func() { code = n.r.CheckOffer(req.From.ID, req.Offer, n.r.NoTable()) }) {
-		return n.stoppedErr()
-	}
-	if code != 0 {
-		// The spool is discarded either way: the refusal is the answer the
-		// leader acts on, and nothing here could act on a failed Abort.
-		abandon(sink.Abort())
-		return origin(coreconsensus.AdminPreconditionFailed, errs.String("why", "the offer is no longer fresh"))
+	if err := n.stillFresh(&req, sink); err != nil {
+		return err
 	}
 	if err := sink.Commit(meta); err != nil {
 		if errs.HasCode(err, coreconsensus.CodeStorageFailed) {
@@ -171,6 +168,37 @@ func (n *Node) install(req coreconsensus.InstallParams) error {
 		return alsoFailed(err, "remove", n.cfg.Snapshots.Remove(snapID))
 	}
 	n.installed(meta, req.From.ID)
+	return nil
+}
+
+// stillFresh judges the offer again, on the event loop, right before the
+// install is accepted (D7): the receiver may have committed past the
+// snapshot through a new leader's appends while the body streamed (review
+// H3). A fresh one has the lineage it records adopted there, durably,
+// before the restore and so before any entry it covers is applied (#507).
+// A stale one, or a failed adoption, discards the spool; the second stops
+// the node, as every failed write of its disk.
+func (n *Node) stillFresh(req *coreconsensus.InstallParams, sink coreconsensus.SnapshotSink) error {
+	var code errs.Code
+	var adoptErr error
+	if !n.exec(func() {
+		if code = n.r.CheckOffer(req.From.ID, req.Offer, n.r.NoTable()); code == 0 {
+			adoptErr = n.adoptLineage(req.Offer.Meta.Log)
+		}
+	}) {
+		return n.stoppedErr()
+	}
+	if adoptErr != nil {
+		abandon(sink.Abort())
+		n.stop(adoptErr, true)
+		return adoptErr
+	}
+	if code != 0 {
+		// The spool is discarded either way: the refusal is the answer the
+		// leader acts on, and nothing here could act on a failed Abort.
+		abandon(sink.Abort())
+		return origin(coreconsensus.AdminPreconditionFailed, errs.String("why", "the offer is no longer fresh"))
+	}
 	return nil
 }
 

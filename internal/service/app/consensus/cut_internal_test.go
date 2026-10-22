@@ -328,7 +328,7 @@ func TestACutCarriesTheEngineStateAtItsIndex(t *testing.T) {
 	next.HeartbeatInterval = 7 * time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	pre := coreconsensus.PreconditionSpec{Log: l.node.ident, Generation: old.Generation}
+	pre := coreconsensus.PreconditionSpec{Log: l.node.lineage(), Generation: old.Generation}
 	if err := l.node.ProposeTimingContract(ctx, "op:test", pre, next); err != nil {
 		t.Fatal(err)
 	}

@@ -56,7 +56,7 @@ func (n *Node) screenJoin(from *coreconsensus.AuthenticatedPeerValue, r *corecon
 	switch {
 	case n.cfg.JoinAuthorizer == nil:
 		return "this cluster admits no JOIN"
-	case r.Cluster != n.ident.Cluster:
+	case r.Cluster != n.lineage().Cluster:
 		return "another cluster"
 	case r.Slot != from.Slot:
 		return "the slot differs from the certificate's"

@@ -240,9 +240,9 @@ sequences:
         kind: actor
       - id: (*Raft).sendAppend
         kind: self
-      - id: r.log.term
-        kind: internal
       - id: pr.becomeSnapshot
+        kind: internal
+      - id: r.log.term
         kind: internal
       - id: r.log.slice
         kind: internal
@@ -255,6 +255,17 @@ sequences:
           do:
             - return: ""
           when: pr == nil || pr.paused(r.cfg.MaxInflight, r.cfg.MaxInflightBytes)
+      - opt:
+          do:
+            - eval: pr.becomeSnapshot(max(r.log.snapIndex, kept))
+              to: pr.becomeSnapshot
+            - set: r.rd.SendSnapshot
+              value: append(r.rd.SendSnapshot, to)
+            - return: ""
+          init:
+            bind: kept
+            eval: r.cfg.Log.KeptIndex
+          when: pr.next <= kept && !r.mutated(mutKeptAppended)
       - bind: prev
         eval: pr.next - 1
       - bind: prevTerm, ok
@@ -2733,7 +2744,9 @@ sequences:
       - bind: m, ok
         eval: r.conf().Member(r.id)
         to: r.conf().Member
-      - return: ok && m.Voter && !m.Joining && r.cfg.CanVote && !r.cfg.NoTable
+      - return: |-
+          ok && m.Voter && !m.Joining && r.cfg.CanVote && !r.cfg.NoTable &&
+          		(r.cfg.SilentIndex == 0 || r.mutated(mutSilentCampaigns))
   - of: (*Raft).randomTimeout
     steps:
       - bind: lo, hi
