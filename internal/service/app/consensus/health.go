@@ -7,7 +7,6 @@ import (
 	"github.com/kitsunium/sdk/internal/service/app/consensus/raft"
 )
 
-// The facts a PeerHealthValue carries.
 // maxReadyLag is the apply lag, in entries, a caught-up node stays ready
 // through while what it applies keeps moving (#545).
 const maxReadyLag uint64 = 64

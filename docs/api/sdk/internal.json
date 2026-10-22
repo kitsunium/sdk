@@ -3656,6 +3656,19 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.FlagProtocol2",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
+      "name": "FlagProtocol2",
+      "spelled": "MessageFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/core/app/consensus.MessageFlags",
+      "value": "16",
+      "doc": "FlagProtocol2 marks a frame from a node that speaks protocol version\n2. It is the announcement D18 asks for: a node of protocol 1 tests\nthe bits it names only and ignores it, and a leader refuses to raise\nthe cluster version to 2 while a member's last frame of the term\nlacks it.\n",
+      "file": "core/app/consensus/message.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.FlagTransfer",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
@@ -4208,8 +4221,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
       "name": "LogIdentityValue",
-      "spelled": "struct{Cluster ClusterID; Epoch uint64; Predecessor ClusterID; PredecessorEpoch uint64; KeptIndex uint64}",
-      "canonical": "struct{Cluster github.com/kitsunium/sdk/internal/core/app/consensus.ClusterID; Epoch uint64; Predecessor github.com/kitsunium/sdk/internal/core/app/consensus.ClusterID; PredecessorEpoch uint64; KeptIndex uint64}",
+      "spelled": "struct{Cluster ClusterID; Epoch uint64; Predecessor ClusterID; PredecessorEpoch uint64; KeptIndex uint64; AdoptedFrom uint64}",
+      "canonical": "struct{Cluster github.com/kitsunium/sdk/internal/core/app/consensus.ClusterID; Epoch uint64; Predecessor github.com/kitsunium/sdk/internal/core/app/consensus.ClusterID; PredecessorEpoch uint64; KeptIndex uint64; AdoptedFrom uint64}",
       "fields": [
         {
           "name": "Cluster",
@@ -4235,6 +4248,11 @@
           "name": "KeptIndex",
           "type": "uint64",
           "doc": "KeptIndex is the last index Recover kept from the predecessor. An\napplied position of the predecessor at or below it is still trusted\nwhen its term is the one kept there: Recover adopts the verified\nsuffix past the commit the survivor persisted, which may hold\nanother term than the write the old cluster acknowledged.\nEvery node of the history applies the entries at or below it under the\npredecessor's token: one admitted after the Recover learns it from the\nsnapshot it installs, never from an append.\n"
+        },
+        {
+          "name": "AdoptedFrom",
+          "type": "uint64",
+          "doc": "AdoptedFrom is the last index of the kept range the predecessor had\ncommitted when Recover read it: the commit the survivor persisted,\nor the snapshot a restore started from. An entry at or below it is\nthe one every node of the predecessor holds (Log Matching), so a\npredecessor's token at or below it is trusted by its index once its\nterm can no longer be read; the adopted range above it, up to\nKeptIndex, is not. 0 records nothing, and nothing is trusted that\nway. It is recorded only in a cluster at protocol version 2, in the\nstamp of the node Recover or RestoreSnapshot ran on: a snapshot does\nnot carry it, so a node that learns the lineage from one trusts\nnothing that way (#509).\n"
         }
       ],
       "doc": "LogIdentityValue scopes positions: the ClusterID and a log epoch that Recover and\nRestoreSnapshot bump, and the predecessor this history descends from with the\nlast index it kept. A position or a token from another identity is not\ncomparable with this log's.\n",
@@ -48386,14 +48404,27 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.Protocol2",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "Protocol2",
+      "spelled": "uint32",
+      "canonical": "uint32",
+      "value": "2",
+      "doc": "Protocol2 is the protocol version whose formats a node writes once the\ncluster version is raised to it.\n",
+      "file": "service/app/consensus/raft/raft.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.ProtocolMax",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "ProtocolMax",
       "spelled": "uint32",
       "canonical": "uint32",
-      "value": "1",
-      "doc": "ProtocolMax is the highest protocol version this engine speaks: a cluster\nversion above it is refused, and stops a node that finds it committed.\n",
+      "value": "2",
+      "doc": "ProtocolMax is the highest protocol version this engine speaks: a cluster\nversion above it is refused, and stops a node that finds it committed.\nVersion 2 adds the snapshot metadata's checksum, the admin payload's\nOrigin and the log identity's AdoptedFrom, each written only once the\ncommitted cluster version is 2 (lot S3).\n",
       "file": "service/app/consensus/raft/raft.go",
       "layer": "service",
       "family": "app"
@@ -49175,8 +49206,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/wire",
       "name": "AdminValue",
-      "spelled": "struct{Operator string; Change uint8; Target coreconsensus.NodeID; Pre coreconsensus.PreconditionSpec; Membership coreconsensus.MembershipValue; Contract coreconsensus.TimingContractSpec; ClusterVersion uint32}",
-      "canonical": "struct{Operator string; Change uint8; Target github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Pre github.com/kitsunium/sdk/internal/core/app/consensus.PreconditionSpec; Membership github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue; Contract github.com/kitsunium/sdk/internal/core/app/consensus.TimingContractSpec; ClusterVersion uint32}",
+      "spelled": "struct{Operator string; Change uint8; Target coreconsensus.NodeID; Pre coreconsensus.PreconditionSpec; Membership coreconsensus.MembershipValue; Contract coreconsensus.TimingContractSpec; ClusterVersion uint32; Origin coreconsensus.NodeID}",
+      "canonical": "struct{Operator string; Change uint8; Target github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Pre github.com/kitsunium/sdk/internal/core/app/consensus.PreconditionSpec; Membership github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue; Contract github.com/kitsunium/sdk/internal/core/app/consensus.TimingContractSpec; ClusterVersion uint32; Origin github.com/kitsunium/sdk/internal/core/app/consensus.NodeID}",
       "fields": [
         {
           "name": "Operator",
@@ -49212,9 +49243,27 @@
           "name": "ClusterVersion",
           "type": "uint32",
           "doc": "ClusterVersion is the version an EntryClusterVersion raises to.\n"
+        },
+        {
+          "name": "Origin",
+          "type": "coreconsensus.NodeID",
+          "doc": "Origin is the authenticated node the leader received the operation\nfrom: the member that forwarded it, or the leader itself. The leader\nwrites it, overwriting whatever the proposer wrote, and only in an\nentry of payload version AdminVersion2 (ADR 0152 D8, #561).\n"
         }
       ],
       "doc": "AdminValue is the payload of every engine entry kind: who asked, what it expects\nto act on, and what it changes. Each kind reads the fields it needs.\n",
+      "file": "service/app/consensus/wire/admin.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/wire.AdminVersion2",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/wire",
+      "name": "AdminVersion2",
+      "spelled": "uint32",
+      "canonical": "uint32",
+      "value": "2",
+      "doc": "AdminVersion2 is the payload version of an engine entry whose admin\ncarries Origin. A leader writes it once the committed cluster version is\n2, never before: a node of protocol 1 reads version 0 only (D18, #561).\n",
       "file": "service/app/consensus/wire/admin.go",
       "layer": "service",
       "family": "app"
@@ -49226,7 +49275,19 @@
       "name": "AppendAdmin",
       "spelled": "func(dst []byte, a *AdminValue) []byte",
       "canonical": "func(dst []byte, a *github.com/kitsunium/sdk/internal/service/app/consensus/wire.AdminValue) []byte",
-      "doc": "AppendAdmin appends the encoding of an engine entry's payload.\n",
+      "doc": "AppendAdmin appends the encoding of an engine entry's payload of version\n0, which carries no Origin.\n",
+      "file": "service/app/consensus/wire/admin.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/wire.AppendAdminAt",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/wire",
+      "name": "AppendAdminAt",
+      "spelled": "func(dst []byte, v uint32, a *AdminValue) []byte",
+      "canonical": "func(dst []byte, v uint32, a *github.com/kitsunium/sdk/internal/service/app/consensus/wire.AdminValue) []byte",
+      "doc": "AppendAdminAt appends the encoding of an engine entry's payload of\nversion v: version 0's fields, then Origin from AdminVersion2. Another\nversion is not written: the encoding of version 0 is returned for it.\n",
       "file": "service/app/consensus/wire/admin.go",
       "layer": "service",
       "family": "app"
@@ -49262,7 +49323,7 @@
       "name": "AppendSnapshotMeta",
       "spelled": "func(dst []byte, m *coreconsensus.SnapshotMetaValue) []byte",
       "canonical": "func(dst []byte, m *github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue) []byte",
-      "doc": "AppendSnapshotMeta appends the versioned encoding of m, in version 1:\nthis release reads version 2 and never writes it.\n",
+      "doc": "AppendSnapshotMeta appends the versioned encoding of m. The version\nfollows the cluster version m carries: a meta of a cluster below protocol\nversion 2 is written in version 1, and one of a cluster at 2 or above in\nversion 2, checksummed, which the release before already reads (D18,\n#546). Only a cluster whose every member announced protocol 2 reaches\nthat version.\n",
       "file": "service/app/consensus/wire/codec.go",
       "layer": "service",
       "family": "app"
@@ -49425,7 +49486,19 @@
       "name": "ParseAdmin",
       "spelled": "func(b []byte) (AdminValue, error)",
       "canonical": "func(b []byte) (github.com/kitsunium/sdk/internal/service/app/consensus/wire.AdminValue, error)",
-      "doc": "ParseAdmin decodes an engine entry's payload.\n",
+      "doc": "ParseAdmin decodes an engine entry's payload of version 0.\n",
+      "file": "service/app/consensus/wire/admin.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/wire.ParseAdminAt",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/wire",
+      "name": "ParseAdminAt",
+      "spelled": "func(v uint32, b []byte) (AdminValue, error)",
+      "canonical": "func(v uint32, b []byte) (github.com/kitsunium/sdk/internal/service/app/consensus/wire.AdminValue, error)",
+      "doc": "ParseAdminAt decodes an engine entry's payload of version v, which the\nentry's Version names. A version this node does not know is\nVERSION_UNSUPPORTED, never read as another one.\n",
       "file": "service/app/consensus/wire/admin.go",
       "layer": "service",
       "family": "app"

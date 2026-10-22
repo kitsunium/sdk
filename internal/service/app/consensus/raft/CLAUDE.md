@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-22T23:00:00Z -->
+<!-- updated: 2026-10-23T02:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -83,3 +83,11 @@ under coverage before touching `shard_count`.
   every node paid a SetMembership, an address resolution and an Info line
   per committed entry (#531, `mutMembershipEveryCommit`,
   `checkMembershipPublishedOnChange`).
+- Raise the cluster version to 2 while a member of the latest
+  configuration was not heard in the term announcing it (FlagProtocol2), or
+  apply a raise above the version this node speaks: D18 refuses the raise
+  while any member does not speak it (lot S3, `mutRaiseUnannounced`).
+- Keep the origin a proposer wrote in an engine entry: at protocol 2 the
+  leader writes the authenticated sender, a forwarder or itself (#561,
+  `mutOriginAsWritten`). Skip an engine entry whose payload version this
+  node does not know: it stops the node (`TestAnUnknownAdminVersionStopsTheNode`).
