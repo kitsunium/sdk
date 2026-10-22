@@ -17,6 +17,14 @@ func (n *Node) offer(from coreconsensus.AuthenticatedPeerValue, o coreconsensus.
 	if !ok {
 		acc.Refused = coreconsensus.CodeNodeStopped
 	}
+	if acc.Refused == coreconsensus.CodeVersionUnsupported {
+		// A snapshot version this node does not know stops it (D18): only
+		// refused, it was offered again at every probe while the node
+		// stayed out of replication and reported ready (#513). The stop
+		// is off the loop, which never waits on the marker's write.
+		n.stop(origin(coreconsensus.VersionUnsupported, errs.Int("snapshot_version", int(o.Meta.Version)),
+			errs.String("snapshot_codec", o.Meta.Codec)), false)
+	}
 	return acc
 }
 
@@ -52,7 +60,13 @@ func (n *Node) screenOffer(from coreconsensus.NodeID, o *coreconsensus.InstallOf
 		acc.Refused = code
 		return true
 	}
-	if o.SnapshotID != o.Meta.ID || o.Meta.Version != 1 {
+	if o.SnapshotID != o.Meta.ID {
+		acc.Refused = coreconsensus.CodeFrameInvalid
+		return true
+	}
+	if _, err := n.codecOf(&o.Meta); err != nil {
+		// A metadata version or a codec this build does not know: offer
+		// stops the node on this refusal (D18, #513).
 		acc.Refused = coreconsensus.CodeVersionUnsupported
 		return true
 	}
@@ -72,8 +86,13 @@ func (n *Node) screenOffer(from coreconsensus.NodeID, o *coreconsensus.InstallOf
 
 // answerFromHeld answers an offer for a snapshot id this node already
 // stores, and reports whether it did: held, unless the node has no table,
-// in which case its copy failed its checksums and is removed so the offer
-// proceeds and replaces it.
+// in which case its copy failed its checksums and the offer proceeds and
+// replaces it. The copy is not removed first: the commit of the replacement
+// overwrites it, and until then it is what the node's members are read
+// from. Removed, a replacement that then failed — a transfer cut short, a
+// Restore refused — left the node no snapshot, and at its next start a log
+// that begins past a compaction with nothing naming the members: it
+// admitted nobody, for good (#526).
 func (n *Node) answerFromHeld(o *coreconsensus.InstallOfferValue, acc *coreconsensus.InstallAcceptValue) bool {
 	metas, err := n.cfg.Snapshots.List()
 	if err != nil {
@@ -81,17 +100,8 @@ func (n *Node) answerFromHeld(o *coreconsensus.InstallOfferValue, acc *coreconse
 		return true
 	}
 	for _, m := range metas {
-		if m.ID != o.SnapshotID {
-			continue
-		}
-		if !n.r.NoTable() {
+		if m.ID == o.SnapshotID && !n.r.NoTable() {
 			acc.Held = true
-			return true
-		}
-		// A node with no table holds that id only as a copy that failed
-		// its checksums: it is replaced, never answered as held.
-		if err := n.cfg.Snapshots.Remove(m.ID); err != nil {
-			acc.Refused = coreconsensus.CodeStorageFailed
 			return true
 		}
 	}
@@ -163,12 +173,36 @@ func (n *Node) install(req coreconsensus.InstallParams) error {
 		return n.stoppedErr()
 	}
 	if err != nil {
-		// The installed copy did not restore: unpublished, so a restart
-		// does not load it again, or the failure to do so travels with it.
-		return alsoFailed(err, "remove", n.cfg.Snapshots.Remove(snapID))
+		return n.restoreFailed(snapID, err)
 	}
 	n.installed(meta, req.From.ID)
 	return nil
+}
+
+// restoreFailed is what an installed copy that did not restore does to the
+// node. It is unpublished, so a restart does not load it again, or the
+// failure to do so travels with it — unless the node has no table: its
+// configuration is read from its snapshots' metadata, and a node left none
+// starts with no member to admit (#526). The copy stays until another is
+// published over it, and a restart falls back to no table again.
+func (n *Node) restoreFailed(snapID string, err error) error {
+	if errs.HasCode(err, coreconsensus.CodeVersionUnsupported) {
+		// A state this build cannot read: unknown means stop, never skip
+		// (D18). Removed and answered as a failure, it was streamed again
+		// at every probe and the node left the quorum while it reported
+		// ready (#513). The copy stays, and a restart refuses to open on it.
+		n.stop(err, false)
+		return err
+	}
+	noTable := false
+	if !n.exec(func() { noTable = n.r.NoTable() }) {
+		return err
+	}
+	if noTable {
+		n.obs.warn("consensus: an installed snapshot did not restore", lstr("id", snapID), lstr("error", err.Error()))
+		return err
+	}
+	return alsoFailed(err, "remove", n.cfg.Snapshots.Remove(snapID))
 }
 
 // stillFresh judges the offer again, on the event loop, right before the

@@ -112,9 +112,12 @@ func Redraw(d DataDir) (coreconsensus.NodeID, error) {
 // and bounds of the log, the complete snapshots, and the markers that would
 // refuse a start.
 type ReportValue struct {
-	Stamp      coreconsensus.StampValue
-	HardState  coreconsensus.HardState
-	First      uint64
+	Stamp     coreconsensus.StampValue
+	HardState coreconsensus.HardState
+	First     uint64
+	// Last is the last index the directory holds: the log's, or the
+	// newest snapshot's when an install a crash interrupted published it
+	// past the log's end.
 	Last       uint64
 	Snapshots  []coreconsensus.SnapshotMetaValue
 	Quarantine string
@@ -146,6 +149,12 @@ func Inspect(d DataDir) (ReportValue, error) {
 	// fails it rather than reading as "no snapshot" or "no stop marker".
 	if r.Snapshots, err = d.d.snaps.List(); err != nil {
 		return ReportValue{}, err
+	}
+	if l.refuse == nil && len(r.Snapshots) > 0 {
+		// An install a crash interrupted published its snapshot past the
+		// log's end: the directory holds the state through that index, and
+		// an operator comparing survivors must see it (#506).
+		r.Last = max(r.Last, r.Snapshots[0].Position.Index)
 	}
 	if r.Markers, err = stopMarkers(d.d.dir); err != nil {
 		return ReportValue{}, err
@@ -310,7 +319,10 @@ func ReceiptMessage(old, next coreconsensus.ClusterID, voter coreconsensus.NodeI
 // new cluster, which resumes from the index the first one kept; one to
 // another cluster is refused. A silence condition TruncateAndStaySilent
 // left is removed before the marker: the new history is closed to the
-// terms it guarded, and a silent node never campaigns.
+// terms it guarded, and a silent node never campaigns. An install a crash
+// interrupted after its snapshot was published is finished first, before
+// the marker: the new history keeps that snapshot's index, and the forced
+// entry follows it.
 func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RecoverOptions) error {
 	if err := d.offline(); err != nil {
 		return err
@@ -346,6 +358,77 @@ func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsen
 	return d.writeRecover(&stamp, newCluster, members, opt.Operator, &plan)
 }
 
+// interruptedInstall reports the install a crash interrupted after its
+// snapshot was published — the install's commit point (D7) — and before the
+// log was moved onto it: the newest snapshot that verifies, when it lies past
+// the log's end or does not match the log's term at its index. The next
+// start finishes it (finishInstall); Recover finishes it first and keeps it,
+// or its forced entry followed the short log, the start erased it, and the
+// node ran the snapshot's old voters and never led again (#506). It reads
+// and writes nothing else.
+func (d DataDir) interruptedInstall() (coreconsensus.SnapshotMetaValue, bool, error) {
+	metas, err := d.d.snaps.List()
+	if err != nil {
+		return coreconsensus.SnapshotMetaValue{}, false, err
+	}
+	flog := d.d.log
+	for _, m := range metas {
+		if d.verifySnapshotFile(m) != nil {
+			continue // a start falls back past it too (D7)
+		}
+		first, last := flog.Bounds()
+		idx := m.Position.Index
+		if idx < first {
+			return m, false, nil
+		}
+		if idx <= last {
+			if t, terr := flog.Term(idx); terr == nil && t == m.Position.Term {
+				return m, false, nil
+			}
+		}
+		return m, true, nil
+	}
+	return coreconsensus.SnapshotMetaValue{}, false, nil
+}
+
+// finishInterruptedInstall moves the log onto the snapshot of an
+// interrupted install, durably, as finishInstall does at a start: the log is
+// replaced by that snapshot's base.
+func (d DataDir) finishInterruptedInstall(m *coreconsensus.SnapshotMetaValue) error {
+	flog := d.d.log
+	first, _ := flog.Bounds()
+	if err := flog.TruncateSuffix(first); err != nil {
+		return storageFailed("truncate", err)
+	}
+	if err := compactLog(flog, m.Position.Index, m.Position.Term); err != nil {
+		return storageFailed("compact", err)
+	}
+	if err := flog.Sync(); err != nil {
+		return storageFailed("sync", err)
+	}
+	return nil
+}
+
+// verifySnapshotFile reads a published snapshot back offline and checks its
+// sizes and digest, with the codec its metadata names.
+func (d DataDir) verifySnapshotFile(m coreconsensus.SnapshotMetaValue) (err error) {
+	own, _ := defaultCodec()
+	codec, err := snapshotCodec(&m, own)
+	if err != nil {
+		return err
+	}
+	h, err := d.d.snaps.Open(m.ID)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := h.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
+	return verifySnapshot(io.NewSectionReader(h, 0, m.EncodedSize), m, codec, max(m.DecodedSize, m.EncodedSize))
+}
+
 // recoverIntent is what STOP-RECOVER records of the Recover that wrote it:
 // the new cluster, and the last index of the old history it keeps.
 type recoverIntent struct {
@@ -361,6 +444,9 @@ type recoverPlan struct {
 	kept    uint64
 	old     coreconsensus.MembershipValue
 	resumed bool
+	// install is the snapshot of an install a crash interrupted, which
+	// Recover finishes before its marker and keeps (#506); nil when none.
+	install *coreconsensus.SnapshotMetaValue
 }
 
 // planRecover decides what the new history keeps, checks the fence of every
@@ -376,26 +462,47 @@ func (d DataDir) planRecover(stamp *coreconsensus.StampValue, newCluster corecon
 		return p, err
 	}
 	p.hard, p.resumed = hard, intent != nil
-	if p.resumed {
-		p.kept, err = d.resumedKept(intent)
-	} else {
-		// The new history keeps every entry this survivor holds whose chain
-		// verifies, not only those up to its persisted commit (issue #399).
-		p.kept, err = d.adoptedEnd(hard.Commit)
-	}
-	if err != nil {
+	if err := d.planKept(&p, intent); err != nil {
 		return p, err
 	}
-	// The old configuration decides which voters must be attested fenced:
-	// one that could not be read fails Recover closed, never open. It is
-	// the configuration of the last entry kept: an adopted change counts.
-	if p.old, err = lastMembership(d.d.log, d.d.snaps, p.kept); err != nil {
+	if p.install != nil {
+		// The snapshot holds every entry kept; the log below it is
+		// replaced, and its configuration entries are older.
+		p.old = p.install.Membership
+	} else if p.old, err = lastMembership(d.d.log, d.d.snaps, p.kept); err != nil {
+		// The old configuration decides which voters must be attested
+		// fenced: one that could not be read fails Recover closed, never
+		// open. It is the configuration of the last entry kept: an adopted
+		// change counts.
 		return p, err
 	}
 	if err := checkFenced(p.old.Voters(), members, opt, stamp.Log.Cluster, newCluster); err != nil {
 		return p, err
 	}
 	return p, d.audit(opt.Operator, recoverAuditLine(newCluster, &p))
+}
+
+// planKept decides the last index the new history keeps: the one a resumed
+// Recover's marker recorded; the index of the snapshot an interrupted
+// install published, which Recover finishes first (#506); else every entry
+// this survivor holds whose chain verifies, not only those up to its
+// persisted commit (issue #399).
+func (d DataDir) planKept(p *recoverPlan, intent *recoverIntent) error {
+	var err error
+	if p.resumed {
+		p.kept, err = d.resumedKept(intent)
+		return err
+	}
+	m, interrupted, err := d.interruptedInstall()
+	if err != nil {
+		return err
+	}
+	if interrupted {
+		p.install, p.kept = &m, m.Position.Index
+		return nil
+	}
+	p.kept, err = d.adoptedEnd(p.hard.Commit)
+	return err
 }
 
 // recoverAuditLine is Recover's audit line: the index kept, the persisted
@@ -425,6 +532,13 @@ func (d DataDir) resumedKept(intent *recoverIntent) (uint64, error) {
 // would run it in the old cluster, beside voters only fenced for the new
 // one. The marker refuses that start (#405).
 func (d DataDir) writeRecover(stamp *coreconsensus.StampValue, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, op coreconsensus.Operator, p *recoverPlan) error {
+	if p.install != nil {
+		// Before the marker: a crash after it reruns as a first Recover,
+		// over a log whose base is the snapshot, and keeps the same index.
+		if err := d.finishInterruptedInstall(p.install); err != nil {
+			return err
+		}
+	}
 	if !p.resumed {
 		if err := d.writeRecoverIntent(&recoverIntent{cluster: newCluster, kept: p.kept}); err != nil {
 			return err
@@ -651,8 +765,8 @@ func (d DataDir) adoptedPastTheBase(first, last uint64) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if len(metas) > 0 && metas[0].Position.Index == first-1 {
-		return d.verifiedEnd(first-1, last, metas[0].Position.Term, metas[0].ChainTip)
+	if m, ok := snapshotAt(metas, first-1); ok {
+		return d.verifiedEnd(first-1, last, m.Position.Term, m.ChainTip)
 	}
 	if last < first {
 		return 0, recoverRefused("the log is compacted past its persisted commit, and nothing records the chain at its base")
@@ -745,10 +859,21 @@ func (d DataDir) chainAt(commit, first uint64) (uint32, uint64, error) {
 	if err != nil {
 		return 0, 0, err
 	}
-	if len(metas) > 0 && metas[0].Position.Index == commit {
-		return metas[0].ChainTip, metas[0].Position.Term, nil
+	if m, ok := snapshotAt(metas, commit); ok {
+		return m.ChainTip, m.Position.Term, nil
 	}
 	return 0, 0, nil
+}
+
+// snapshotAt is the snapshot of metas that ends at index: the newest is not
+// always the one, when it failed its checksums and the base is the older's.
+func snapshotAt(metas []coreconsensus.SnapshotMetaValue, index uint64) (coreconsensus.SnapshotMetaValue, bool) {
+	for _, m := range metas {
+		if m.Position.Index == index {
+			return m, true
+		}
+	}
+	return coreconsensus.SnapshotMetaValue{}, false
 }
 
 // lastMembership is the configuration committed at index, from the log or

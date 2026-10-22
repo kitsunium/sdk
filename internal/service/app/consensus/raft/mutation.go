@@ -67,6 +67,9 @@ const (
 	// mutKeptAppended appends the entries Recover kept to a peer instead
 	// of sending a snapshot (#507).
 	mutKeptAppended
+	// mutNoSpaceAdmits admits a command while the no-space alarm is
+	// committed (#515).
+	mutNoSpaceAdmits
 )
 
 // mutated reports whether a test switched mutation m on; it is false in every

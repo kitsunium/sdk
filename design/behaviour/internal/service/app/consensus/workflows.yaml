@@ -218,6 +218,18 @@ workflows:
           range: keys
           value: k
       - return: "true"
+  - of: snapshotAt
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: m, true
+                when: m.Position.Index == index
+          key: _
+          range: metas
+          value: m
+      - return: coreconsensus.SnapshotMetaValue{}, false
   - of: alignedOffset
     steps:
       - var:
@@ -245,3 +257,18 @@ workflows:
             - set: "off"
               value: end
       - return: "off"
+  - of: snapshotLimit
+    steps:
+      - bind: limit
+        eval: own
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: limit
+                    value: min(limit, m.MaxSnapshotBytes)
+                when: m.MaxSnapshotBytes > 0
+          key: _
+          range: conf.Members
+          value: m
+      - return: limit

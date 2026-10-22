@@ -5,9 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	coretransform "github.com/kitsunium/sdk/internal/core/data/transform"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+)
+
+// The bounds of the wait after a cut that failed without stopping the node.
+const (
+	cutRetryMin time.Duration = time.Second
+	cutRetryMax time.Duration = time.Minute
 )
 
 // Latest opens the newest complete snapshot of a store (R7-07).
@@ -36,11 +44,15 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64) (er
 			err = cerr
 		}
 	}()
-	if err := verifySnapshot(io.NewSectionReader(h, 0, m.EncodedSize), m, n.cfg.SnapshotCodec, n.cfg.MaxSnapshotBytes); err != nil {
+	codec, err := n.codecOf(&m)
+	if err != nil {
+		return err
+	}
+	if err := verifySnapshot(io.NewSectionReader(h, 0, m.EncodedSize), m, codec, n.cfg.MaxSnapshotBytes); err != nil {
 		return err
 	}
 	if durIdx < m.Position.Index {
-		cr := newChunkReader(io.NewSectionReader(h, 0, m.EncodedSize), n.cfg.SnapshotCodec, max(m.ChunkSize, 1), n.cfg.MaxSnapshotBytes)
+		cr := newChunkReader(io.NewSectionReader(h, 0, m.EncodedSize), codec, max(m.ChunkSize, 1), n.cfg.MaxSnapshotBytes)
 		if err := n.cfg.Machine.Restore(cr, m); err != nil {
 			return err
 		}
@@ -56,18 +68,53 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64) (er
 	return nil
 }
 
-// maybeSnapshot cuts a snapshot after SnapshotEvery applied entries, on the
-// apply goroutine; the write runs off it unless the machine cannot cut
-// cheaply (D7). A trigger during a cut in flight is coalesced, not dropped:
-// the cut is made once that one is written (cutPending), or a node that
-// applies nothing more would keep the tail uncut and its log uncompacted.
-func (n *Node) maybeSnapshot() {
+// codecOf is the codec a snapshot of metadata m is decoded with, refused
+// VERSION_UNSUPPORTED for a metadata version or a codec this build does
+// not know: unknown means stop, never skip (D18). The codec is the one the
+// metadata names (D18 "Compression"): the node's own, or another bounded
+// codec this build links. Read with the node's own, a snapshot written
+// before its codec was changed failed its checksums at the next start, and
+// every snapshot of every node at once (#512).
+func (n *Node) codecOf(m *coreconsensus.SnapshotMetaValue) (coretransform.BoundedDecompressor, error) {
+	return snapshotCodec(m, n.cfg.SnapshotCodec)
+}
+
+// snapshotCodec is codecOf for a node whose own codec is own; an offline
+// operation, which has none, passes nil and reads only the codecs this build
+// links.
+func snapshotCodec(m *coreconsensus.SnapshotMetaValue, own coretransform.BoundedDecompressor) (coretransform.BoundedDecompressor, error) {
+	if m.Version != 1 {
+		return nil, origin(coreconsensus.VersionUnsupported, errs.Int("snapshot_version", int(m.Version)))
+	}
+	if own != nil && (m.Codec == "" || coretransform.Algorithm(m.Codec) == own.Algorithm()) {
+		return own, nil
+	}
+	if c, ok := coretransform.Lookup(coretransform.Algorithm(m.Codec)); ok {
+		if b, ok := c.(coretransform.BoundedDecompressor); ok {
+			return b, nil
+		}
+	}
+	return nil, origin(coreconsensus.VersionUnsupported, errs.String("snapshot_codec", m.Codec))
+}
+
+// maybeSnapshot cuts a snapshot after SnapshotEvery applied entries or
+// SnapshotEveryBytes of applied payload, whichever comes first, on the apply
+// goroutine; the write runs off it unless the machine cannot cut cheaply
+// (D7). applied is the payload of the batch just applied: the byte trigger
+// was validated and read nowhere, and a log of large entries grew to the
+// disk's end between two cuts (#515). A trigger during a cut in flight is
+// coalesced, not dropped: the cut is made once that one is written
+// (cutPending), or a node that applies nothing more would keep the tail
+// uncut and its log uncompacted.
+func (n *Node) maybeSnapshot(applied int64) {
 	n.am.Lock()
 	idx, term := n.applied, n.appliedTerm
 	n.am.Unlock()
 	ss := &n.snapState
 	ss.mu.Lock()
-	if idx < ss.last+n.cfg.SnapshotEvery {
+	ss.sinceBytes += applied
+	due := idx >= ss.last+n.cfg.SnapshotEvery || (n.cfg.SnapshotEveryBytes > 0 && ss.sinceBytes >= n.cfg.SnapshotEveryBytes && idx > ss.last)
+	if !due || n.clk.Now().Before(ss.retryAt) {
 		ss.mu.Unlock()
 		return
 	}
@@ -90,14 +137,23 @@ func (n *Node) maybeSnapshot() {
 // A STORAGE_FAILED stops it: a failed write or sync of a snapshot is a
 // failed write or sync of this node's disk, and D4 never retries one, for
 // the page cache may now lie about the log on the same disk as well. Any
-// other failure — the machine's Snapshot, its encoding — is logged, and the
-// next cut tries again.
+// other failure — the machine's Snapshot, its encoding, a full disk under
+// the spool, a state over MaxSnapshotBytes — is logged, and no automatic
+// cut starts again before a wait that doubles at each failure, from one
+// second to a minute: every applied batch used to start a full cut again,
+// on a disk the last one had just filled (#520).
 func (n *Node) cutFailed(err error) {
 	if errs.HasCode(err, coreconsensus.CodeStorageFailed) {
 		n.stop(err, true)
 		return
 	}
-	n.obs.warn("consensus: snapshot cut failed", lstr("error", err.Error()))
+	ss := &n.snapState
+	ss.mu.Lock()
+	ss.backoff = min(max(2*ss.backoff, cutRetryMin), cutRetryMax)
+	ss.retryAt = n.clk.Now().Add(ss.backoff)
+	wait := ss.backoff
+	ss.mu.Unlock()
+	n.obs.warn("consensus: snapshot cut failed", lstr("error", err.Error()), lstr("retry_in", wait.String()))
 }
 
 // metaAt builds, on the event loop, the metadata of a snapshot at idx: the
@@ -130,6 +186,9 @@ func (n *Node) metaAt(idx, term uint64) (coreconsensus.SnapshotMetaValue, bool) 
 // background goroutine counted in n.wg, which ends when the write does, so
 // Close waits for it; its failure reaches cutFailed instead of the caller.
 func (n *Node) cut(idx, term uint64, w io.Writer) error {
+	n.snapState.mu.Lock()
+	n.snapState.sinceBytes = 0
+	n.snapState.mu.Unlock()
 	meta, ok := n.metaAt(idx, term)
 	if !ok {
 		return n.stoppedErr()
@@ -211,6 +270,7 @@ func (n *Node) publishSnapshot(snap coreconsensus.Snapshot, meta coreconsensus.S
 		out = io.MultiWriter(sink, extra)
 	}
 	cw := newChunkWriter(out, n.cfg.SnapshotCodec, defaultChunkSize)
+	cw.limit = snapshotLimit(n.cfg.MaxSnapshotBytes, &meta.Membership)
 	if _, err := snap.WriteTo(cw); err != nil {
 		return alsoFailed(err, "abort", sink.Abort())
 	}
@@ -227,9 +287,35 @@ func (n *Node) publishSnapshot(snap coreconsensus.Snapshot, meta coreconsensus.S
 	n.obs.info("consensus: snapshot cut", lattr("index", meta.Position.Index), lattr("bytes", uint64(meta.EncodedSize)))
 	state.mu.Lock()
 	state.last = max(state.last, meta.Position.Index)
+	state.backoff, state.retryAt = 0, time.Time{}
 	state.mu.Unlock()
 	n.afterCut()
 	return nil
+}
+
+// payloadBytes is the payload es carries, what SnapshotEveryBytes counts.
+func payloadBytes(es []coreconsensus.EntryValue) int64 {
+	var b int64
+	for i := range es {
+		b += int64(len(es[i].Data))
+	}
+	return b
+}
+
+// snapshotLimit is the largest snapshot a cut may write: this node's
+// MaxSnapshotBytes, or the smallest limit a member announces when lower. A
+// cut over it is refused and compacts nothing: published, no follower could
+// be installed from it, and every node, this one included, failed to restore
+// it at its next start and came up with no table — a rolling restart left
+// the cluster with no leader (#512).
+func snapshotLimit(own int64, conf *coreconsensus.MembershipValue) int64 {
+	limit := own
+	for _, m := range conf.Members {
+		if m.MaxSnapshotBytes > 0 {
+			limit = min(limit, m.MaxSnapshotBytes)
+		}
+	}
+	return limit
 }
 
 // afterCut keeps the two newest snapshots and compacts the log back to the
@@ -284,6 +370,81 @@ func (n *Node) removeOld(old []coreconsensus.SnapshotMetaValue) {
 		}
 		n.obs.info("consensus: an old snapshot is kept for now", lstr("id", m.ID), lstr("error", err.Error()))
 	}
+}
+
+// streamEnded acts on a transfer's refusal, off the loop: a peer whose log
+// starts past the snapshot gets a newer cut, one that found it corrupt has
+// the sender read its own copy back, and one that cannot read its version
+// or codec is logged, as it stops.
+func (n *Node) streamEnded(meta coreconsensus.SnapshotMetaValue, to coreconsensus.NodeID, err error) {
+	switch {
+	case errors.Is(err, coreconsensus.Compacted):
+		// The peer's log starts past this snapshot: cut a newer one,
+		// which the next probe sends.
+		n.requestCut()
+	case errs.HasCode(err, coreconsensus.CodeSnapshotCorrupt):
+		n.sentCorrupt(meta, to)
+	case errs.HasCode(err, coreconsensus.CodeVersionUnsupported):
+		n.obs.warn("consensus: a peer cannot read this snapshot's version or codec, and stops",
+			lstr("id", meta.ID), lattr("peer", uint64(to)))
+	}
+}
+
+// sentCorrupt is the sender's answer to a peer that refused a snapshot as
+// SNAPSHOT_CORRUPT: its own copy is read back. The transport is
+// authenticated and checksummed, so a copy that verifies leaves the fault
+// with the peer, which is logged. One that does not is removed, the cut
+// index lowered past it, and a cut asked for at the applied index: the next
+// probe sends that one, or the older copy left. It used to be streamed
+// again at every probe, never read back, and the peer stayed out until the
+// next cut, SnapshotEvery entries later (#525). It runs off the loop.
+func (n *Node) sentCorrupt(meta coreconsensus.SnapshotMetaValue, to coreconsensus.NodeID) {
+	verr := n.verifyHeld(meta)
+	if verr == nil {
+		n.obs.warn("consensus: a peer found a sound snapshot corrupt", lstr("id", meta.ID), lattr("peer", uint64(to)))
+		return
+	}
+	if !errs.HasCode(verr, coreconsensus.CodeSnapshotCorrupt) {
+		// Unreadable is not corrupt: the copy stays, and the next refusal
+		// reads it again.
+		n.obs.warn("consensus: a held snapshot could not be verified", lstr("id", meta.ID), lstr("error", verr.Error()))
+		return
+	}
+	n.obs.warn("consensus: a snapshot failed its checksums and is replaced", lstr("id", meta.ID), lstr("error", verr.Error()))
+	if err := n.cfg.Snapshots.Remove(meta.ID); err != nil {
+		if errs.HasCode(err, coreconsensus.CodeStorageFailed) {
+			n.cutFailed(err)
+		}
+		// Pinned by another transfer: the next refusal tries again.
+		return
+	}
+	var below uint64
+	if metas, err := n.cfg.Snapshots.List(); err == nil && len(metas) > 0 {
+		below = metas[0].Position.Index
+	}
+	ss := &n.snapState
+	ss.mu.Lock()
+	ss.last = min(ss.last, below)
+	ss.mu.Unlock()
+	n.requestCut()
+}
+
+// verifyHeld reads a held snapshot back and checks its sizes and digest.
+func (n *Node) verifyHeld(m coreconsensus.SnapshotMetaValue) (err error) {
+	codec, err := n.codecOf(&m)
+	if err != nil {
+		return err
+	}
+	h, err := n.cfg.Snapshots.Open(m.ID)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := h.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
+	return verifySnapshot(io.NewSectionReader(h, 0, m.EncodedSize), m, codec, n.cfg.MaxSnapshotBytes)
 }
 
 // requestCut asks the apply goroutine for a cut, unless one is in flight.
@@ -429,11 +590,7 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 			// it held is released either way.
 			n.obs.warn("consensus: snapshot handle close failed", lstr("id", meta.ID), lstr("error", cerr.Error()))
 		}
-		if errors.Is(err, coreconsensus.Compacted) {
-			// The peer's log starts past this snapshot: cut a newer one,
-			// which the next probe sends.
-			n.requestCut()
-		}
+		n.streamEnded(meta, to, err)
 		n.exec(func() {
 			delete(n.sending, to)
 			n.r.SnapshotDone(to, err == nil)

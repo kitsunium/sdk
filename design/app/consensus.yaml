@@ -565,7 +565,11 @@ packages:
               - type: error
           - doc: |-
               Restore replaces the state with a snapshot's. It is serialised with
-              Apply.
+              Apply. An error coded VERSION_UNSUPPORTED says the snapshot is of a
+              format this build does not read: the node stops, as for an entry
+              kind it does not know, and a restart over that snapshot is refused
+              (D18). Any other error refuses that one install, and the leader
+              offers a snapshot again.
             in:
               - name: r
                 type: io.Reader
@@ -2356,7 +2360,10 @@ packages:
           new cluster, which resumes from the index the first one kept; one to
           another cluster is refused. A silence condition TruncateAndStaySilent
           left is removed before the marker: the new history is closed to the
-          terms it guarded, and a silent node never campaigns.
+          terms it guarded, and a silent node never campaigns. An install a crash
+          interrupted after its snapshot was published is finished first, before
+          the marker: the new history keeps that snapshot's index, and the forced
+          entry follows it.
         in:
           - name: d
             type: DataDir
@@ -3309,7 +3316,11 @@ packages:
               type: coreconsensus.HardState
             - name: First
               type: uint64
-            - name: Last
+            - doc: |-
+                Last is the last index the directory holds: the log's, or the
+                newest snapshot's when an install a crash interrupted published it
+                past the log's end.
+              name: Last
               type: uint64
             - name: Snapshots
               type: "[]coreconsensus.SnapshotMetaValue"
@@ -4745,7 +4756,9 @@ packages:
             term does not decrease, every old voter left out attested fenced by every
             witness. An interrupted Recover leaves the stop marker STOP-RECOVER, which
             refuses a start until Recover runs again to the same new cluster. It
-            removes the silence condition TruncateAndStaySilent left.
+            removes the silence condition TruncateAndStaySilent left, and first
+            finishes an install a crash interrupted after its snapshot was
+            published, so the forced entry follows that snapshot.
           forward: svcconsensus.Recover
           in:
             - name: d

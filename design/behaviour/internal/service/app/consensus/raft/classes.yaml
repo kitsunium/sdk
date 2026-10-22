@@ -132,6 +132,10 @@ constants:
           mutKeptAppended appends the entries Recover kept to a peer instead
           of sending a snapshot (#507).
         name: mutKeptAppended
+      - doc: |-
+          mutNoSpaceAdmits admits a command while the no-space alarm is
+          committed (#515).
+        name: mutNoSpaceAdmits
     name: mutAckBeforeSync
   - doc: The facts a PeerStatValue carries.
     grouped: true
@@ -1254,9 +1258,14 @@ types:
         results: "[]core.PositionValue, errs.Code"
       - doc: |-
           checkProposed admits one proposed entry that would land at index: a
-          command as it is, a no-op or an unknown kind never, an engine entry once
-          validateAdmin accepts and rewrites it. It returns the target of a
-          transfer the entry asks for.
+          command as it is unless the no-space alarm is committed, a no-op or an
+          unknown kind never, an engine entry once validateAdmin accepts and
+          rewrites it. It returns the target of a transfer the entry asks for.
+
+          While the alarm stands every command is refused NO_SPACE, a forwarded one
+          too, and the engine entries — the alarm, its clearing, a membership
+          change, a transfer — are still admitted, so the cluster can be repaired
+          (D17, R2-29). It used to admit every command (#515).
         name: checkProposed
         params: e *core.EntryValue, index uint64
         recv: r *Raft

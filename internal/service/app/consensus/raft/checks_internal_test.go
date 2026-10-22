@@ -484,6 +484,7 @@ var checks = map[string]func(mutation) error{
 	"forward deduplicated":          checkForwardDeduped,
 	"silent node never campaigns":   checkSilentNodeNeverCampaigns,
 	"kept entries never appended":   checkKeptEntriesNeverAppended,
+	"no space refuses commands":     checkNoSpaceRefusesCommands,
 	"simulated safety":              checkSimSafety,
 	"simulated linearizability":     checkSimLinearizable,
 	"deposed leader read":           checkDeposedLeaderRead,
@@ -531,6 +532,7 @@ func TestMutationsAreCaught(t *testing.T) {
 		"forward proposed twice":          mutForwardNoDedupe,
 		"silent node campaigns":           mutSilentCampaigns,
 		"kept entries appended":           mutKeptAppended,
+		"command under no-space":          mutNoSpaceAdmits,
 	}
 	for name, m := range muts {
 		caught := ""
@@ -631,6 +633,37 @@ func checkKeptEntriesNeverAppended(mut mutation) error {
 		return fmt.Errorf("setup: the peer was neither appended to nor sent a snapshot (next %d)", r.prs[2].next)
 	}
 	return nil
+}
+
+// checkNoSpaceRefusesCommands: while the no-space alarm is committed, a
+// leader refuses every command NO_SPACE, local or forwarded, appending
+// nothing, and still admits the alarm's clearing (D17, R2-29, #515).
+func checkNoSpaceRefusesCommands(mut mutation) error {
+	r := leaderOf(2, 0, nil, mut, false)
+	r.noSpace = core.AlarmID(r.log.lastIndex())
+	last := r.log.lastIndex()
+	d := []byte("k=v")
+	if _, code := r.Propose(r.now, []core.EntryValue{{Kind: core.EntryCommand, BodySum: wire.BodySum(d), Data: d}}); code != core.CodeNoSpace {
+		return fmt.Errorf("a command proposed under the no-space alarm: code %v, want NO_SPACE", code)
+	}
+	r.Step(r.now, forwardCmd(2, 1, 10))
+	if a, ok := forwardAnswer(r, 1); !ok || !a.Reject || a.Code != core.CodeNoSpace {
+		return fmt.Errorf("a command forwarded under the no-space alarm: %+v", a)
+	}
+	if r.log.lastIndex() != last {
+		return errors.New("a command was appended under the no-space alarm")
+	}
+	clear := wire.AppendAdmin(nil, &wire.AdminValue{Operator: "op:clear", Pre: core.PreconditionSpec{Log: r.cfg.Log, Alarm: r.noSpace}})
+	if _, code := r.Propose(r.now, []core.EntryValue{{Kind: core.EntryNoSpaceClear, BodySum: wire.BodySum(clear), Data: clear}}); code != 0 {
+		return fmt.Errorf("the alarm's clearing was refused: %v", code)
+	}
+	return nil
+}
+
+func TestNoSpaceRefusesCommands(t *testing.T) {
+	if err := checkNoSpaceRefusesCommands(0); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // #507: TestTheEntriesRecoverKeepsHaveOneTokenOnEveryNode is the driver's

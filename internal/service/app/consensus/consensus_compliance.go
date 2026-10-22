@@ -36,6 +36,7 @@ var (
 	_ interface {
 		logStats() (bytes, free, tails int64)
 	} = (*fileLog)(nil)
+	_ spaceReporter = (*fileLog)(nil)
 	_ interface {
 		markStopEach(errs.Code, string) (dirErr, runErr error)
 	} = (*fileLog)(nil)

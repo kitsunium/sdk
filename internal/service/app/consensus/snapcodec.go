@@ -42,6 +42,10 @@ type chunkWriter struct {
 	sum     hash.Hash
 	encoded int64
 	decoded int64
+	// limit, when not 0, bounds both the decoded and the encoded stream, as
+	// a reader bounds them: a chunk that would pass it is refused
+	// SNAPSHOT_TOO_LARGE before any of it is written.
+	limit int64
 }
 
 // newChunkWriter returns a writer that encodes every chunk bytes of decoded
@@ -83,6 +87,10 @@ func (c *chunkWriter) flush() error {
 		return err
 	}
 	c.enc = enc
+	if c.limit > 0 && (c.decoded+int64(len(c.buf)) > c.limit || c.encoded+int64(chunkHeaderLen+len(enc)) > c.limit) {
+		return origin(coreconsensus.SnapshotTooLarge, errs.Int64("limit", c.limit),
+			errs.Int64("decoded", c.decoded+int64(len(c.buf))), errs.Int64("encoded", c.encoded+int64(chunkHeaderLen+len(enc))))
+	}
 	var h [chunkHeaderLen]byte
 	binary.LittleEndian.PutUint32(h[0:], uint32(len(enc)))
 	binary.LittleEndian.PutUint32(h[4:], uint32(len(c.buf)))

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-22T12:00:00Z -->
+<!-- updated: 2026-10-22T18:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -6,6 +6,7 @@
 The Raft engine of ADR 0152 and everything it ships: the event loop over the
 step function (`raft/`), the storage actor, the apply goroutine, snapshots
 in checksummed chunks, the segmented file log and its recovery procedure,
+the no-space guard over the log quota and the free space (`space.go`),
 the file snapshot store, the data directory with its lock, stamp and stop
 markers, the offline operations (`Init`, `Recover`, `RestoreSnapshot`,
 `Inspect`, `ClearQuarantine`), what a non-member observer reads and
@@ -35,9 +36,11 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
 | fuzz | `go test -fuzz` on the targets of `wire/` and this package; nightly in CI |
 | dm-crypt | `testdata/dmcrypt/run.sh` (Docker, privileged): fsync latency and power cuts through LUKS; results in `testdata/dmcrypt/RESULTS.md` |
 
-Under Bazel `consensus_test` has 4 shards: under race and coverage the suite
+Under Bazel `consensus_test` has 6 shards: under race and coverage the suite
 passed the 60 s cap per target once the disk scenarios of #507, #516 and
-#524 joined it.
+#524 joined it (4 shards), and the snapshot and disk scenarios of #506,
+#512, #513, #515, #520, #525, #526 and #533 brought the slowest of 4 to
+28 s on an 8-core machine, too close to the cap on a CI runner.
 
 ## Do NOT
 
@@ -202,6 +205,54 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   one voter of its new history and never be elected (#524,
   `TestRecoverEndsTheSilence`; the election side,
   `TestASilentNodeIsNeverElected`).
+- Refuse a JOIN on a held slot when the member holding it is the requester
+  itself — id, incarnation, slot and key all equal: a joiner restarted
+  before anything reached its log admits the members only from a JOIN
+  answer, and was locked out for good. `alreadyJoined` answers it and
+  proposes nothing (#533, `TestAJoinerRestartedBeforeItsFirstInstallRejoins`).
+- Remove the snapshot a node with no table holds before its replacement
+  is published, or an installed copy that did not restore on such a node:
+  its members are read from that metadata, and a node left none admitted
+  nobody at its next start. A start with nothing naming the members is
+  refused SNAPSHOT_CORRUPT (#526,
+  `TestANodeWithNoTableKeepsItsMembersThroughAFailedReplacement`,
+  `TestANodeWithNothingNamingItsMembersIsRefused`).
+- Skip a snapshot of a version or codec this build does not know: a
+  Restore refused VERSION_UNSUPPORTED, an offer of an unknown metadata
+  version or codec, stop the node (D18), and a start over one is refused.
+  A snapshot is decoded with the codec its metadata names (#513, #512,
+  `TestASnapshotOfAnUnknownFormatStopsTheNode`,
+  `TestASnapshotIsReadWithTheCodecItWasWrittenWith`).
+- Stream again a snapshot a peer refused SNAPSHOT_CORRUPT without reading
+  it back: `sentCorrupt` verifies the sender's copy and replaces one that
+  fails (#525, `TestALeaderReplacesASnapshotItsPeerFindsCorrupt`).
+- Plan `Recover` from the log's bounds alone: an install a crash
+  interrupted after its publication left the snapshot past the log, and
+  the forced entry written after the short log was erased at the next
+  start. `planKept` keeps the snapshot's index and `writeRecover` finishes
+  the install before STOP-RECOVER (#506,
+  `TestRecoverFinishesAnInterruptedInstall`).
+- Publish a cut over `MaxSnapshotBytes` (or the smallest a member
+  announces): no node could restore it, and a rolling restart left the
+  cluster with no table and no leader. The chunk writer refuses it
+  SNAPSHOT_TOO_LARGE, and a log still whole from index 1 is replayed when
+  no snapshot restores (#512, `TestNoSnapshotPastMaxSnapshotBytesIsPublished`,
+  `TestALogFromIndexOneIsReplayedWhenNoSnapshotRestores`).
+- Leave a `.tmp` a failed zero-fill wrote, or start a cut again right after
+  one that failed without a storage failure: on a full disk the first held
+  every free byte, the second filled the disk again at every applied batch.
+  `abandonTmp` removes it; `cutFailed` waits one second, doubling to a
+  minute (#520, `TestAFailedZeroFillLeavesNoPartialSegment`,
+  `TestAFailedCutWaitsBeforeTheNext`).
+- Let the log grow past `MaxLogBytes` less `LogReserveBytes`, or the
+  filesystem under `LogReserveBytes`, without the no-space alarm:
+  `guardSpace` proposes it at each tick and each completed write, the node
+  refuses its own commands NO_SPACE from the moment it finds its disk short
+  (`refuseShort`: on a slow runner the commands queued behind the alarm
+  took the log past `MaxLogBytes`), raft refuses every command NO_SPACE
+  while the alarm stands, and `SnapshotEveryBytes` cuts. A full disk used to stop every node
+  on STORAGE_FAILED at the same rotation (#515,
+  `TestALogPastItsQuotaRaisesNoSpaceAndRefusesWrites`).
 - Bound an election in a test by a fixed number of split votes: a split
   is a draw, about one round in a hundred on the memory network, and a
   third round fails a two-round total every ten to twenty runs. Derive

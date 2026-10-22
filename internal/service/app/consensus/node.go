@@ -143,6 +143,8 @@ type Node struct {
 	joinMu      sync.Mutex
 	lastJoin    map[string]time.Time
 	joinRefused atomic.Int64
+	// space is the no-space guard's state (#515).
+	space spaceGuard
 	// crashAfterPublish is set by the package's own tests only.
 	crashAfterPublish atomic.Bool
 }
@@ -156,6 +158,14 @@ type snapState struct {
 	// the cut made once that one is written (D7).
 	pending bool
 	spools  map[string]coreconsensus.SnapshotSink
+	// backoff is the wait after the last cut that failed without stopping
+	// the node, doubled at each failure and cleared by a cut that
+	// publishes; no automatic cut starts before retryAt (#520).
+	backoff time.Duration
+	retryAt time.Time
+	// sinceBytes is the payload applied since the last cut started, which
+	// SnapshotEveryBytes bounds (D7, #515).
+	sinceBytes int64
 }
 
 type applyResult struct {
@@ -461,14 +471,17 @@ func (n *Node) load() (raft.StartState, error) {
 	if err != nil {
 		return raft.StartState{}, err
 	}
-	base := n.restoreLatest(metas, durIdx)
+	base, err := n.restoreLatest(metas, durIdx)
+	if err != nil {
+		return raft.StartState{}, err
+	}
 	n.snapState.last = base.Position.Index
 	hs, err := n.cfg.Log.HardState()
 	if err != nil {
 		return raft.StartState{}, origin(coreconsensus.HardStateCorrupt, errs.String("cause", err.Error()))
 	}
 	first, last := n.cfg.Log.Bounds()
-	if base, err = n.baseOrNoTable(base, metas, first); err != nil {
+	if base, err = n.baseOrNoTable(base, metas, first, last, hs.Commit); err != nil {
 		return raft.StartState{}, err
 	}
 	snapIdx := base.Position.Index
@@ -478,6 +491,14 @@ func (n *Node) load() (raft.StartState, error) {
 	ents, err := n.readTail(first, last, snapIdx)
 	if err != nil {
 		return raft.StartState{}, err
+	}
+	if n.noTable && len(base.Membership.Members) == 0 && !slices.ContainsFunc(ents, isMembershipEntry) {
+		// Nothing names the members: no snapshot is left, and the log
+		// begins past a compaction with no configuration entry after it.
+		// Started, the node would admit nobody, never be installed again
+		// and say nothing; it is refused, and says why (#526).
+		return raft.StartState{}, origin(coreconsensus.SnapshotCorrupt,
+			errs.String("why", "no snapshot is left and the log holds no configuration: WipeAndRejoin"))
 	}
 	applied := n.startApplied(&base, durIdx)
 	return raft.StartState{HardState: hs, Snapshot: base, Entries: ents, Applied: applied, Now: n.clk.Now()}, nil
@@ -503,21 +524,32 @@ func (n *Node) durableIndex() (uint64, error) {
 
 // restoreLatest restores from the newest snapshot that verifies, falling
 // back to the older one when it does not (D7); none restores is the zero
-// base.
-func (n *Node) restoreLatest(metas []coreconsensus.SnapshotMetaValue, durIdx uint64) coreconsensus.SnapshotMetaValue {
+// base. Each one discarded is logged with its reason: a node that starts
+// with no table otherwise says nothing of why (#512). One of a version or
+// format this build does not know refuses the start instead: unknown means
+// stop, never skip (D18, #513).
+func (n *Node) restoreLatest(metas []coreconsensus.SnapshotMetaValue, durIdx uint64) (coreconsensus.SnapshotMetaValue, error) {
 	for _, m := range metas {
-		if err := n.restoreFrom(m, durIdx); err != nil {
-			continue // fall back to the older one (D7)
+		err := n.restoreFrom(m, durIdx)
+		if err == nil {
+			return m, nil
 		}
-		return m
+		if errs.HasCode(err, coreconsensus.CodeVersionUnsupported) {
+			return coreconsensus.SnapshotMetaValue{}, err
+		}
+		n.obs.warn("consensus: a snapshot was not restored", lstr("id", m.ID), lstr("error", err.Error()))
 	}
-	return coreconsensus.SnapshotMetaValue{}
+	return coreconsensus.SnapshotMetaValue{}, nil
 }
 
 // baseOrNoTable keeps a restored base, or starts the node with no table
-// when a snapshot was needed and none restored.
-func (n *Node) baseOrNoTable(base coreconsensus.SnapshotMetaValue, metas []coreconsensus.SnapshotMetaValue, first uint64) (coreconsensus.SnapshotMetaValue, error) {
-	if base.Position.Index != 0 || (len(metas) == 0 && first <= 1) {
+// when a snapshot was needed and none restored. None is needed while the
+// log still holds every entry from index 1 through its commit: the node
+// replays it, as a node that never cut one does. It used to start with no
+// table as soon as a snapshot existed, and a cluster whose every snapshot
+// failed to restore lost every leader at a rolling restart (#512).
+func (n *Node) baseOrNoTable(base coreconsensus.SnapshotMetaValue, metas []coreconsensus.SnapshotMetaValue, first, last, commit uint64) (coreconsensus.SnapshotMetaValue, error) {
+	if base.Position.Index != 0 || (first <= 1 && (len(metas) == 0 || commit <= last)) {
 		return base, nil
 	}
 	// Every snapshot fails its checksums, or none is left where the
@@ -635,6 +667,11 @@ func noTableBase(log coreconsensus.LogStore, metas []coreconsensus.SnapshotMetaV
 		return coreconsensus.SnapshotMetaValue{}, err
 	}
 	return b, nil
+}
+
+// isMembershipEntry reports whether e is a configuration entry.
+func isMembershipEntry(e coreconsensus.EntryValue) bool {
+	return e.Kind == coreconsensus.EntryMembership
 }
 
 // baseTerm is the term of a no-table base at first-1: the log's, logTerm,
@@ -776,6 +813,7 @@ func (n *Node) onTick(tick clock.Ticker, ok bool) (time.Time, bool) {
 	n.sweep()
 	n.observePeers()
 	n.observeResources()
+	n.guardSpace(turn)
 	return turn, true
 }
 
@@ -798,6 +836,7 @@ func (n *Node) onStored(d *storeDone, ok bool) (time.Time, bool) {
 	}
 	turn := n.clk.Now()
 	n.storageDone(d)
+	n.guardSpace(turn)
 	return turn, true
 }
 

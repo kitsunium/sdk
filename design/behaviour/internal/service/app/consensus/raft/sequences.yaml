@@ -758,6 +758,10 @@ sequences:
           cases:
             - case: e.Kind == core.EntryCommand
               do:
+                - opt:
+                    do:
+                      - return: 0, core.CodeNoSpace
+                    when: r.noSpace != 0 && !r.mutated(mutNoSpaceAdmits)
                 - return: 0, 0
             - case: e.Kind == core.EntryNoOp || !e.Kind.Known()
               do:

@@ -95,7 +95,7 @@ func (n *Node) applyItems(items []applyItem) bool {
 		if !n.applyEntries(it.entries) {
 			return false
 		}
-		n.maybeSnapshot()
+		n.maybeSnapshot(payloadBytes(it.entries))
 	}
 	return true
 }
@@ -184,7 +184,7 @@ func (n *Node) forceCut() {
 	n.am.Unlock()
 	ss := &n.snapState
 	ss.mu.Lock()
-	if ss.inFlight || idx == 0 || idx <= ss.last {
+	if ss.inFlight || idx == 0 || idx <= ss.last || n.clk.Now().Before(ss.retryAt) {
 		ss.mu.Unlock()
 		return
 	}

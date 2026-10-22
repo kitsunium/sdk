@@ -107,7 +107,7 @@ sequences:
                 do:
                   - return: "false"
                 when: "!n.applyEntries(it.entries)"
-            - eval: n.maybeSnapshot()
+            - eval: n.maybeSnapshot(payloadBytes(it.entries))
               to: n.maybeSnapshot
           key: _
           range: items
@@ -282,7 +282,7 @@ sequences:
             - eval: ss.mu.Unlock()
               to: ss.mu.Unlock
             - return: ""
-          when: ss.inFlight || idx == 0 || idx <= ss.last
+          when: ss.inFlight || idx == 0 || idx <= ss.last || n.clk.Now().Before(ss.retryAt)
       - set: ss.inFlight
         value: "true"
       - eval: ss.mu.Unlock()
@@ -2816,6 +2816,8 @@ sequences:
         kind: stdlib
       - id: storageFailed
         kind: internal
+      - id: l.occupied.Add
+        kind: value
     steps:
       - loop:
           do:
@@ -2829,6 +2831,8 @@ sequences:
                 when: err != nil
             - set: l.segs
               value: "append(l.segs, &segment{n: s.n, f: f, size: int64(len(s.data))})"
+            - eval: l.occupied.Add(int64(len(s.data)))
+              to: l.occupied.Add
           key: _
           range: segs
           value: s
@@ -3094,6 +3098,8 @@ sequences:
         kind: stdlib
       - id: syncDir
         kind: internal
+      - id: l.occupied.Add
+        kind: value
       - id: l.prepare
         kind: internal
     steps:
@@ -3114,7 +3120,7 @@ sequences:
           when: err != nil
       - opt:
           do:
-            - return: abandonTmp(f, storageFailed("checkpoint", err))
+            - return: abandonTmp(f, tmp, storageFailed("checkpoint", err))
               to: abandonTmp
           init:
             bind: _, err
@@ -3123,7 +3129,7 @@ sequences:
           when: err != nil
       - opt:
           do:
-            - return: abandonTmp(f, storageFailed("sync segment", err))
+            - return: abandonTmp(f, tmp, storageFailed("sync segment", err))
               to: abandonTmp
           init:
             bind: err
@@ -3170,6 +3176,8 @@ sequences:
           when: err != nil
       - set: l.segs
         value: "append(l.segs, &segment{n: n, f: f, size: size})"
+      - eval: l.occupied.Add(size)
+        to: l.occupied.Add
       - set: l.off
         value: int64(len(cpRec))
       - set: l.batch
@@ -3187,8 +3195,6 @@ sequences:
         kind: internal
       - id: os
         kind: stdlib
-      - id: zeroFrom
-        kind: internal
     steps:
       - opt:
           do:
@@ -3207,13 +3213,19 @@ sequences:
           when: err != nil
       - opt:
           do:
-            - return: nil, abandonTmp(f, storageFailed("zero-fill", err))
+            - return: nil, abandonTmp(f, tmp, storageFailed("zero-fill", err))
           init:
             bind: err
-            eval: zeroFrom(f, 0, size)
-            to: zeroFrom
+            eval: l.zeroFill()(f, 0, size)
           when: err != nil
       - return: f, nil
+  - of: (*fileLog).zeroFill
+    steps:
+      - opt:
+          do:
+            - return: l.fill
+          when: l.fill != nil
+      - return: zeroFrom
   - of: abandonTmp
     participants:
       - id: caller
@@ -3225,8 +3237,17 @@ sequences:
     steps:
       - eval: abandon(f.Close())
         to: abandon
+      - eval: abandon(os.Remove(path))
+        to: abandon
       - return: cause
   - of: (*fileLog).prepare
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLog).prepare
+        kind: self
+      - id: l.zeroFill
+        kind: internal
     steps:
       - bind: done
         eval: make(chan struct{})
@@ -3234,6 +3255,9 @@ sequences:
         eval: "&prepared{n: n, size: size, done: done}"
       - set: l.prep
         value: p
+      - bind: fill
+        eval: l.zeroFill()
+        to: l.zeroFill
       - go: |-
           func() {
           		defer close(done)
@@ -3243,12 +3267,12 @@ sequences:
           			p.err = err
           			return
           		}
-          		if err := zeroFrom(f, 0, size); err != nil {
+          		if err := fill(f, 0, size); err != nil {
           			// A half-zeroed .tmp is never published: takePrepared then
           			// builds the segment on the writer's path, where a failure
-          			// stops the node, and recovery deletes the .tmp.
-          			abandon(f.Close())
-          			p.err = err
+          			// stops the node. It goes now: on a full disk it holds every
+          			// byte the fill could write (#520).
+          			p.err = abandonTmp(f, tmp, err)
           			return
           		}
           		p.f = f
@@ -3275,7 +3299,7 @@ sequences:
           do:
             - opt:
                 do:
-                  - eval: abandon(p.f.Close())
+                  - eval: abandon(abandonTmp(p.f, filepath.Join(l.logDir(), segName(p.n)+".tmp"), nil))
                     to: abandon
                 when: p.f != nil
             - return: nil
@@ -4167,6 +4191,8 @@ sequences:
         kind: internal
       - id: os
         kind: stdlib
+      - id: l.occupied.Add
+        kind: value
     steps:
       - opt:
           do:
@@ -4186,6 +4212,8 @@ sequences:
             eval: os.Remove(filepath.Join(l.logDir(), segName(l.segs[0].n)))
             to: os
           when: err != nil
+      - eval: l.occupied.Add(-l.segs[0].size)
+        to: l.occupied.Add
       - set: l.segs
         value: l.segs[1:]
       - return: nil
@@ -4238,6 +4266,8 @@ sequences:
         kind: value
       - id: storageFailed
         kind: internal
+      - id: l.occupied.Store
+        kind: value
       - id: abandon
         kind: internal
     steps:
@@ -4265,6 +4295,8 @@ sequences:
           value: s
       - set: l.segs
         value: nil
+      - eval: l.occupied.Store(0)
+        to: l.occupied.Store
       - opt:
           do:
             - set: l.prep
@@ -4281,19 +4313,48 @@ sequences:
           when: p != nil
       - return: err
   - of: (*fileLog).logStats
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLog).logStats
+        kind: self
+      - id: l.mu.RLock
+        kind: value
+      - id: l.mu.RUnlock
+        kind: value
+      - id: l.logBytes
+        kind: internal
     steps:
-      - lock:
-          mutex: l.mu
-          read: true
-      - loop:
-          do:
-            - op: +=
-              set: bytes
-              value: s.size
-          key: _
-          range: l.segs
-          value: s
-      - return: bytes, fsFree(l.dir), l.tailsTruncated
+      - eval: l.mu.RLock()
+        to: l.mu.RLock
+      - set: tails
+        value: l.tailsTruncated
+      - eval: l.mu.RUnlock()
+        to: l.mu.RUnlock
+      - return: l.logBytes(), l.freeBytes(), tails
+        to: l.logBytes
+  - of: (*fileLog).logBytes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLog).logBytes
+        kind: self
+      - id: l.occupied.Load
+        kind: value
+    steps:
+      - return: l.occupied.Load()
+        to: l.occupied.Load
+  - of: (*fileLog).freeBytes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLog).freeBytes
+        kind: self
+      - id: fsFree
+        kind: internal
+    steps:
+      - return: fsFree(l.dir)
+        to: fsFree
   - of: newFileSnapshots
     participants:
       - id: caller
@@ -5109,6 +5170,8 @@ sequences:
         kind: self
       - id: n.exec
         kind: internal
+      - id: n.stop
+        kind: internal
     steps:
       - bind: acc
         eval: "coreconsensus.InstallAcceptValue{SnapshotID: o.SnapshotID}"
@@ -5120,6 +5183,13 @@ sequences:
             - set: acc.Refused
               value: coreconsensus.CodeNodeStopped
           when: "!ok"
+      - opt:
+          do:
+            - eval: |-
+                n.stop(origin(coreconsensus.VersionUnsupported, errs.Int("snapshot_version", int(o.Meta.Version)),
+                			errs.String("snapshot_codec", o.Meta.Codec)), false)
+              to: n.stop
+          when: acc.Refused == coreconsensus.CodeVersionUnsupported
       - return: acc
   - of: (*Node).judgeOffer
     participants:
@@ -5157,6 +5227,8 @@ sequences:
         kind: self
       - id: n.r.CheckOffer
         kind: value
+      - id: n.codecOf
+        kind: internal
     steps:
       - bind: code
         eval: n.r.CheckOffer(from, *o, n.r.NoTable())
@@ -5176,9 +5248,19 @@ sequences:
       - opt:
           do:
             - set: acc.Refused
+              value: coreconsensus.CodeFrameInvalid
+            - return: "true"
+          when: o.SnapshotID != o.Meta.ID
+      - opt:
+          do:
+            - set: acc.Refused
               value: coreconsensus.CodeVersionUnsupported
             - return: "true"
-          when: o.SnapshotID != o.Meta.ID || o.Meta.Version != 1
+          init:
+            bind: _, err
+            eval: n.codecOf(&o.Meta)
+            to: n.codecOf
+          when: err != nil
       - opt:
           do:
             - set: acc.Refused
@@ -5200,8 +5282,6 @@ sequences:
         kind: self
       - id: n.cfg.Snapshots.List
         kind: value
-      - id: n.cfg.Snapshots.Remove
-        kind: value
     steps:
       - bind: metas, err
         eval: n.cfg.Snapshots.List()
@@ -5216,24 +5296,10 @@ sequences:
           do:
             - opt:
                 do:
-                  - continue: true
-                when: m.ID != o.SnapshotID
-            - opt:
-                do:
                   - set: acc.Held
                     value: "true"
                   - return: "true"
-                when: "!n.r.NoTable()"
-            - opt:
-                do:
-                  - set: acc.Refused
-                    value: coreconsensus.CodeStorageFailed
-                  - return: "true"
-                init:
-                  bind: err
-                  eval: n.cfg.Snapshots.Remove(m.ID)
-                  to: n.cfg.Snapshots.Remove
-                when: err != nil
+                when: m.ID == o.SnapshotID && !n.r.NoTable()
           key: _
           range: metas
           value: m
@@ -5298,7 +5364,7 @@ sequences:
         kind: internal
       - id: n.aq.push
         kind: internal
-      - id: alsoFailed
+      - id: n.restoreFailed
         kind: internal
       - id: n.installed
         kind: internal
@@ -5370,12 +5436,45 @@ sequences:
                   to: n.stoppedErr
       - opt:
           do:
-            - return: alsoFailed(err, "remove", n.cfg.Snapshots.Remove(snapID))
-              to: alsoFailed
+            - return: n.restoreFailed(snapID, err)
+              to: n.restoreFailed
           when: err != nil
       - eval: n.installed(meta, req.From.ID)
         to: n.installed
       - return: nil
+  - of: (*Node).restoreFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).restoreFailed
+        kind: self
+      - id: n.stop
+        kind: internal
+      - id: n.obs.warn
+        kind: internal
+      - id: alsoFailed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: n.stop(err, false)
+              to: n.stop
+            - return: err
+          when: errs.HasCode(err, coreconsensus.CodeVersionUnsupported)
+      - bind: noTable
+        eval: "false"
+      - opt:
+          do:
+            - return: err
+          when: "!n.exec(func() { noTable = n.r.NoTable() })"
+      - opt:
+          do:
+            - eval: "n.obs.warn(\"consensus: an installed snapshot did not restore\", lstr(\"id\", snapID), lstr(\"error\", err.Error()))"
+              to: n.obs.warn
+            - return: err
+          when: noTable
+      - return: alsoFailed(err, "remove", n.cfg.Snapshots.Remove(snapID))
+        to: alsoFailed
   - of: (*Node).stillFresh
     participants:
       - id: caller
@@ -5471,6 +5570,8 @@ sequences:
         kind: self
       - id: n.screenJoin
         kind: internal
+      - id: n.alreadyJoined
+        kind: internal
       - id: n.cfg.JoinAuthorizer.Authorize
         kind: value
       - id: n.obs.warn
@@ -5495,6 +5596,14 @@ sequences:
           when: why != ""
       - set: r.SPKI
         value: from.SPKI
+      - opt:
+          do:
+            - return: pos, 0, ""
+          init:
+            bind: pos, ok
+            eval: n.alreadyJoined(&r)
+            to: n.alreadyJoined
+          when: ok
       - opt:
           do:
             - return: refuse("one JOIN per slot per election timeout")
@@ -5583,6 +5692,32 @@ sequences:
       - eval: n.joinMu.Unlock()
         to: n.joinMu.Unlock
       - return: "false"
+  - of: (*Node).alreadyJoined
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).alreadyJoined
+        kind: self
+      - id: n.exec
+        kind: internal
+    steps:
+      - var:
+          name: pos
+          type: coreconsensus.PositionValue
+      - bind: found
+        eval: "false"
+      - eval: |-
+          n.exec(func() {
+          		conf := n.r.Status().Conf
+          		m, ok := conf.Member(r.ID)
+          		if !ok || m.Incarnation != r.Incarnation || m.Slot != r.Slot || m.SPKI != r.SPKI {
+          			return
+          		}
+          		term, _ := n.r.TermAt(conf.Index)
+          		pos, found = coreconsensus.PositionValue{Term: term, Index: conf.Index}, true
+          	})
+        to: n.exec
+      - return: pos, found
   - of: (*Node).addJoiner
     participants:
       - id: caller
@@ -6904,9 +7039,13 @@ sequences:
           do:
             - return: raft.StartState{}, err
           when: err != nil
-      - bind: base
+      - bind: base, err
         eval: n.restoreLatest(metas, durIdx)
         to: n.restoreLatest
+      - opt:
+          do:
+            - return: raft.StartState{}, err
+          when: err != nil
       - set: n.snapState.last
         value: base.Position.Index
       - bind: hs, err
@@ -6924,7 +7063,7 @@ sequences:
             - return: raft.StartState{}, err
           init:
             bind: base, err
-            eval: n.baseOrNoTable(base, metas, first)
+            eval: n.baseOrNoTable(base, metas, first, last, hs.Commit)
             op: =
             to: n.baseOrNoTable
           when: err != nil
@@ -6946,6 +7085,12 @@ sequences:
           do:
             - return: raft.StartState{}, err
           when: err != nil
+      - opt:
+          do:
+            - return: |-
+                raft.StartState{}, origin(coreconsensus.SnapshotCorrupt,
+                			errs.String("why", "no snapshot is left and the log holds no configuration: WipeAndRejoin"))
+          when: n.noTable && len(base.Membership.Members) == 0 && !slices.ContainsFunc(ents, isMembershipEntry)
       - bind: applied
         eval: n.startApplied(&base, durIdx)
         to: n.startApplied
@@ -6991,22 +7136,28 @@ sequences:
         kind: self
       - id: n.restoreFrom
         kind: internal
+      - id: n.obs.warn
+        kind: internal
     steps:
       - loop:
           do:
+            - bind: err
+              eval: n.restoreFrom(m, durIdx)
+              to: n.restoreFrom
             - opt:
                 do:
-                  - continue: true
-                init:
-                  bind: err
-                  eval: n.restoreFrom(m, durIdx)
-                  to: n.restoreFrom
-                when: err != nil
-            - return: m
+                  - return: m, nil
+                when: err == nil
+            - opt:
+                do:
+                  - return: coreconsensus.SnapshotMetaValue{}, err
+                when: errs.HasCode(err, coreconsensus.CodeVersionUnsupported)
+            - eval: "n.obs.warn(\"consensus: a snapshot was not restored\", lstr(\"id\", m.ID), lstr(\"error\", err.Error()))"
+              to: n.obs.warn
           key: _
           range: metas
           value: m
-      - return: coreconsensus.SnapshotMetaValue{}
+      - return: coreconsensus.SnapshotMetaValue{}, nil
   - of: (*Node).baseOrNoTable
     participants:
       - id: caller
@@ -7019,7 +7170,7 @@ sequences:
       - opt:
           do:
             - return: base, nil
-          when: base.Position.Index != 0 || (len(metas) == 0 && first <= 1)
+          when: base.Position.Index != 0 || (first <= 1 && (len(metas) == 0 || commit <= last))
       - set: n.noTable
         value: "true"
       - bind: base, err
@@ -7201,6 +7352,9 @@ sequences:
             to: baseTerm
           when: err != nil
       - return: b, nil
+  - of: isMembershipEntry
+    steps:
+      - return: e.Kind == coreconsensus.EntryMembership
   - of: baseTerm
     steps:
       - bind: term
@@ -7422,6 +7576,8 @@ sequences:
         kind: internal
       - id: n.observeResources
         kind: internal
+      - id: n.guardSpace
+        kind: internal
     steps:
       - opt:
           do:
@@ -7449,6 +7605,8 @@ sequences:
         to: n.observePeers
       - eval: n.observeResources()
         to: n.observeResources
+      - eval: n.guardSpace(turn)
+        to: n.guardSpace
       - return: turn, true
   - of: (*Node).onMessage
     participants:
@@ -7485,6 +7643,8 @@ sequences:
         kind: value
       - id: n.storageDone
         kind: internal
+      - id: n.guardSpace
+        kind: internal
     steps:
       - opt:
           do:
@@ -7495,6 +7655,8 @@ sequences:
         to: n.clk.Now
       - eval: n.storageDone(d)
         to: n.storageDone
+      - eval: n.guardSpace(turn)
+        to: n.guardSpace
       - return: turn, true
   - of: (*Node).onProposal
     participants:
@@ -10146,6 +10308,11 @@ sequences:
           when: err != nil
       - opt:
           do:
+            - set: r.Last
+              value: max(r.Last, r.Snapshots[0].Position.Index)
+          when: l.refuse == nil && len(r.Snapshots) > 0
+      - opt:
+          do:
             - return: ReportValue{}, err
           init:
             bind: r.Markers, err
@@ -10515,6 +10682,149 @@ sequences:
           when: err != nil
       - return: d.writeRecover(&stamp, newCluster, members, opt.Operator, &plan)
         to: d.writeRecover
+  - of: DataDir.interruptedInstall
+    participants:
+      - id: caller
+        kind: actor
+      - id: DataDir.interruptedInstall
+        kind: self
+      - id: d.d.snaps.List
+        kind: internal
+      - id: flog.Bounds
+        kind: internal
+      - id: flog.Term
+        kind: internal
+    steps:
+      - bind: metas, err
+        eval: d.d.snaps.List()
+        to: d.d.snaps.List
+      - opt:
+          do:
+            - return: coreconsensus.SnapshotMetaValue{}, false, err
+          when: err != nil
+      - bind: flog
+        eval: d.d.log
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: d.verifySnapshotFile(m) != nil
+            - bind: first, last
+              eval: flog.Bounds()
+              to: flog.Bounds
+            - bind: idx
+              eval: m.Position.Index
+            - opt:
+                do:
+                  - return: m, false, nil
+                when: idx < first
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: m, false, nil
+                      init:
+                        bind: t, terr
+                        eval: flog.Term(idx)
+                        to: flog.Term
+                      when: terr == nil && t == m.Position.Term
+                when: idx <= last
+            - return: m, true, nil
+          key: _
+          range: metas
+          value: m
+      - return: coreconsensus.SnapshotMetaValue{}, false, nil
+  - of: DataDir.finishInterruptedInstall
+    participants:
+      - id: caller
+        kind: actor
+      - id: DataDir.finishInterruptedInstall
+        kind: self
+      - id: flog.Bounds
+        kind: internal
+      - id: flog.TruncateSuffix
+        kind: internal
+      - id: storageFailed
+        kind: internal
+      - id: compactLog
+        kind: internal
+      - id: flog.Sync
+        kind: internal
+    steps:
+      - bind: flog
+        eval: d.d.log
+      - bind: first, _
+        eval: flog.Bounds()
+        to: flog.Bounds
+      - opt:
+          do:
+            - return: storageFailed("truncate", err)
+              to: storageFailed
+          init:
+            bind: err
+            eval: flog.TruncateSuffix(first)
+            to: flog.TruncateSuffix
+          when: err != nil
+      - opt:
+          do:
+            - return: storageFailed("compact", err)
+              to: storageFailed
+          init:
+            bind: err
+            eval: compactLog(flog, m.Position.Index, m.Position.Term)
+            to: compactLog
+          when: err != nil
+      - opt:
+          do:
+            - return: storageFailed("sync", err)
+              to: storageFailed
+          init:
+            bind: err
+            eval: flog.Sync()
+            to: flog.Sync
+          when: err != nil
+      - return: nil
+  - of: DataDir.verifySnapshotFile
+    participants:
+      - id: caller
+        kind: actor
+      - id: DataDir.verifySnapshotFile
+        kind: self
+      - id: defaultCodec
+        kind: internal
+      - id: snapshotCodec
+        kind: internal
+      - id: d.d.snaps.Open
+        kind: internal
+      - id: verifySnapshot
+        kind: internal
+    steps:
+      - bind: own, _
+        eval: defaultCodec()
+        to: defaultCodec
+      - bind: codec, err
+        eval: snapshotCodec(&m, own)
+        to: snapshotCodec
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: h, err
+        eval: d.d.snaps.Open(m.ID)
+        to: d.d.snaps.Open
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - defer: |-
+          func() {
+          		if cerr := h.Close(); cerr != nil && err == nil {
+          			err = cerr
+          		}
+          	}()
+      - return: verifySnapshot(io.NewSectionReader(h, 0, m.EncodedSize), m, codec, max(m.DecodedSize, m.EncodedSize))
+        to: verifySnapshot
   - of: DataDir.planRecover
     participants:
       - id: caller
@@ -10523,9 +10833,7 @@ sequences:
         kind: self
       - id: d.d.log.HardState
         kind: internal
-      - id: d.resumedKept
-        kind: internal
-      - id: d.adoptedEnd
+      - id: d.planKept
         kind: internal
       - id: lastMembership
         kind: internal
@@ -10544,30 +10852,27 @@ sequences:
           when: err != nil
       - set: p.hard, p.resumed
         value: hard, intent != nil
-      - alt:
-          - do:
-              - set: p.kept, err
-                to: d.resumedKept
-                value: d.resumedKept(intent)
-            when: p.resumed
-          - do:
-              - set: p.kept, err
-                to: d.adoptedEnd
-                value: d.adoptedEnd(hard.Commit)
-            else: true
-      - opt:
-          do:
-            - return: p, err
-          when: err != nil
       - opt:
           do:
             - return: p, err
           init:
-            bind: p.old, err
-            eval: lastMembership(d.d.log, d.d.snaps, p.kept)
-            op: =
-            to: lastMembership
+            bind: err
+            eval: d.planKept(&p, intent)
+            to: d.planKept
           when: err != nil
+      - alt:
+          - do:
+              - set: p.old
+                value: p.install.Membership
+            when: p.install != nil
+          - do:
+              - return: p, err
+            init:
+              bind: p.old, err
+              eval: lastMembership(d.d.log, d.d.snaps, p.kept)
+              op: =
+              to: lastMembership
+            when: err != nil
       - opt:
           do:
             - return: p, err
@@ -10577,6 +10882,46 @@ sequences:
             to: checkFenced
           when: err != nil
       - return: p, d.audit(opt.Operator, recoverAuditLine(newCluster, &p))
+  - of: DataDir.planKept
+    participants:
+      - id: caller
+        kind: actor
+      - id: DataDir.planKept
+        kind: self
+      - id: d.resumedKept
+        kind: internal
+      - id: d.interruptedInstall
+        kind: internal
+      - id: d.adoptedEnd
+        kind: internal
+    steps:
+      - var:
+          name: err
+          type: error
+      - opt:
+          do:
+            - set: p.kept, err
+              to: d.resumedKept
+              value: d.resumedKept(intent)
+            - return: err
+          when: p.resumed
+      - bind: m, interrupted, err
+        eval: d.interruptedInstall()
+        to: d.interruptedInstall
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - opt:
+          do:
+            - set: p.install, p.kept
+              value: "&m, m.Position.Index"
+            - return: nil
+          when: interrupted
+      - set: p.kept, err
+        to: d.adoptedEnd
+        value: d.adoptedEnd(p.hard.Commit)
+      - return: err
   - of: recoverAuditLine
     participants:
       - id: caller
@@ -10617,6 +10962,8 @@ sequences:
         kind: actor
       - id: DataDir.writeRecover
         kind: self
+      - id: d.finishInterruptedInstall
+        kind: internal
       - id: d.writeRecoverIntent
         kind: internal
       - id: d.appendForced
@@ -10628,6 +10975,17 @@ sequences:
       - id: d.clearRecoverIntent
         kind: internal
     steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: d.finishInterruptedInstall(p.install)
+                  to: d.finishInterruptedInstall
+                when: err != nil
+          when: p.install != nil
       - opt:
           do:
             - opt:
@@ -11012,6 +11370,8 @@ sequences:
         kind: self
       - id: d.d.snaps.List
         kind: internal
+      - id: snapshotAt
+        kind: internal
       - id: d.verifiedEnd
         kind: internal
       - id: d.d.log.Entries
@@ -11026,9 +11386,13 @@ sequences:
           when: err != nil
       - opt:
           do:
-            - return: d.verifiedEnd(first-1, last, metas[0].Position.Term, metas[0].ChainTip)
+            - return: d.verifiedEnd(first-1, last, m.Position.Term, m.ChainTip)
               to: d.verifiedEnd
-          when: len(metas) > 0 && metas[0].Position.Index == first-1
+          init:
+            bind: m, ok
+            eval: snapshotAt(metas, first-1)
+            to: snapshotAt
+          when: ok
       - opt:
           do:
             - return: 0, recoverRefused("the log is compacted past its persisted commit, and nothing records the chain at its base")
@@ -11172,6 +11536,8 @@ sequences:
         kind: internal
       - id: d.d.snaps.List
         kind: internal
+      - id: snapshotAt
+        kind: internal
     steps:
       - opt:
           do:
@@ -11193,8 +11559,12 @@ sequences:
           when: err != nil
       - opt:
           do:
-            - return: metas[0].ChainTip, metas[0].Position.Term, nil
-          when: len(metas) > 0 && metas[0].Position.Index == commit
+            - return: m.ChainTip, m.Position.Term, nil
+          init:
+            bind: m, ok
+            eval: snapshotAt(metas, commit)
+            to: snapshotAt
+          when: ok
       - return: 0, 0, nil
   - of: lastMembership
     participants:
@@ -12395,7 +12765,7 @@ sequences:
             - opt:
                 do:
                   - continue: true
-                when: n.refuseOverload(p)
+                when: n.refuseOverload(p) || n.refuseShort(p)
             - opt:
                 do:
                   - eval: flush()
@@ -13254,6 +13624,8 @@ sequences:
         kind: value
       - id: c.codec.Compress
         kind: value
+      - id: origin
+        kind: internal
       - id: binary.LittleEndian.PutUint32
         kind: value
       - id: c.w.Write
@@ -13274,6 +13646,13 @@ sequences:
           when: err != nil
       - set: c.enc
         value: enc
+      - opt:
+          do:
+            - return: |-
+                origin(coreconsensus.SnapshotTooLarge, errs.Int64("limit", c.limit),
+                			errs.Int64("decoded", c.decoded+int64(len(c.buf))), errs.Int64("encoded", c.encoded+int64(chunkHeaderLen+len(enc))))
+              to: origin
+          when: c.limit > 0 && (c.decoded+int64(len(c.buf)) > c.limit || c.encoded+int64(chunkHeaderLen+len(enc)) > c.limit)
       - var:
           name: h
           type: "[chunkHeaderLen]byte"
@@ -13512,6 +13891,8 @@ sequences:
         kind: self
       - id: n.cfg.Snapshots.Open
         kind: value
+      - id: n.codecOf
+        kind: internal
       - id: verifySnapshot
         kind: internal
       - id: newChunkReader
@@ -13546,18 +13927,25 @@ sequences:
           			err = cerr
           		}
           	}()
+      - bind: codec, err
+        eval: n.codecOf(&m)
+        to: n.codecOf
+      - opt:
+          do:
+            - return: err
+          when: err != nil
       - opt:
           do:
             - return: err
           init:
             bind: err
-            eval: verifySnapshot(io.NewSectionReader(h, 0, m.EncodedSize), m, n.cfg.SnapshotCodec, n.cfg.MaxSnapshotBytes)
+            eval: verifySnapshot(io.NewSectionReader(h, 0, m.EncodedSize), m, codec, n.cfg.MaxSnapshotBytes)
             to: verifySnapshot
           when: err != nil
       - opt:
           do:
             - bind: cr
-              eval: newChunkReader(io.NewSectionReader(h, 0, m.EncodedSize), n.cfg.SnapshotCodec, max(m.ChunkSize, 1), n.cfg.MaxSnapshotBytes)
+              eval: newChunkReader(io.NewSectionReader(h, 0, m.EncodedSize), codec, max(m.ChunkSize, 1), n.cfg.MaxSnapshotBytes)
               to: newChunkReader
             - opt:
                 do:
@@ -13585,6 +13973,49 @@ sequences:
       - eval: n.snapState.mu.Unlock()
         to: n.snapState.mu.Unlock
       - return: nil
+  - of: (*Node).codecOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).codecOf
+        kind: self
+      - id: snapshotCodec
+        kind: internal
+    steps:
+      - return: snapshotCodec(m, n.cfg.SnapshotCodec)
+        to: snapshotCodec
+  - of: snapshotCodec
+    participants:
+      - id: caller
+        kind: actor
+      - id: snapshotCodec
+        kind: self
+      - id: coretransform
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil, origin(coreconsensus.VersionUnsupported, errs.Int("snapshot_version", int(m.Version)))
+          when: m.Version != 1
+      - opt:
+          do:
+            - return: own, nil
+          when: own != nil && (m.Codec == "" || coretransform.Algorithm(m.Codec) == own.Algorithm())
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: b, nil
+                init:
+                  bind: b, ok
+                  eval: c.(coretransform.BoundedDecompressor)
+                when: ok
+          init:
+            bind: c, ok
+            eval: coretransform.Lookup(coretransform.Algorithm(m.Codec))
+            to: coretransform
+          when: ok
+      - return: nil, origin(coreconsensus.VersionUnsupported, errs.String("snapshot_codec", m.Codec))
   - of: (*Node).maybeSnapshot
     participants:
       - id: caller
@@ -13614,12 +14045,17 @@ sequences:
         eval: "&n.snapState"
       - eval: ss.mu.Lock()
         to: ss.mu.Lock
+      - op: +=
+        set: ss.sinceBytes
+        value: applied
+      - bind: due
+        eval: idx >= ss.last+n.cfg.SnapshotEvery || (n.cfg.SnapshotEveryBytes > 0 && ss.sinceBytes >= n.cfg.SnapshotEveryBytes && idx > ss.last)
       - opt:
           do:
             - eval: ss.mu.Unlock()
               to: ss.mu.Unlock
             - return: ""
-          when: idx < ss.last+n.cfg.SnapshotEvery
+          when: "!due || n.clk.Now().Before(ss.retryAt)"
       - opt:
           do:
             - set: ss.pending
@@ -13655,6 +14091,12 @@ sequences:
         kind: self
       - id: n.stop
         kind: internal
+      - id: ss.mu.Lock
+        kind: value
+      - id: n.clk.Now().Add
+        kind: value
+      - id: ss.mu.Unlock
+        kind: value
       - id: n.obs.warn
         kind: internal
     steps:
@@ -13664,7 +14106,20 @@ sequences:
               to: n.stop
             - return: ""
           when: errs.HasCode(err, coreconsensus.CodeStorageFailed)
-      - eval: "n.obs.warn(\"consensus: snapshot cut failed\", lstr(\"error\", err.Error()))"
+      - bind: ss
+        eval: "&n.snapState"
+      - eval: ss.mu.Lock()
+        to: ss.mu.Lock
+      - set: ss.backoff
+        value: min(max(2*ss.backoff, cutRetryMin), cutRetryMax)
+      - set: ss.retryAt
+        to: n.clk.Now().Add
+        value: n.clk.Now().Add(ss.backoff)
+      - bind: wait
+        eval: ss.backoff
+      - eval: ss.mu.Unlock()
+        to: ss.mu.Unlock
+      - eval: "n.obs.warn(\"consensus: snapshot cut failed\", lstr(\"error\", err.Error()), lstr(\"retry_in\", wait.String()))"
         to: n.obs.warn
   - of: (*Node).metaAt
     participants:
@@ -13699,6 +14154,10 @@ sequences:
         kind: actor
       - id: (*Node).cut
         kind: self
+      - id: n.snapState.mu.Lock
+        kind: value
+      - id: n.snapState.mu.Unlock
+        kind: value
       - id: n.metaAt
         kind: internal
       - id: n.stoppedErr
@@ -13710,6 +14169,12 @@ sequences:
       - id: n.wg.Add
         kind: value
     steps:
+      - eval: n.snapState.mu.Lock()
+        to: n.snapState.mu.Lock
+      - set: n.snapState.sinceBytes
+        value: "0"
+      - eval: n.snapState.mu.Unlock()
+        to: n.snapState.mu.Unlock
       - bind: meta, ok
         eval: n.metaAt(idx, term)
         to: n.metaAt
@@ -13820,6 +14285,8 @@ sequences:
         kind: stdlib
       - id: newChunkWriter
         kind: internal
+      - id: snapshotLimit
+        kind: internal
       - id: snap.WriteTo
         kind: value
       - id: alsoFailed
@@ -13884,6 +14351,9 @@ sequences:
       - bind: cw
         eval: newChunkWriter(out, n.cfg.SnapshotCodec, defaultChunkSize)
         to: newChunkWriter
+      - set: cw.limit
+        to: snapshotLimit
+        value: snapshotLimit(n.cfg.MaxSnapshotBytes, &meta.Membership)
       - opt:
           do:
             - return: alsoFailed(err, "abort", sink.Abort())
@@ -13923,11 +14393,26 @@ sequences:
         to: state.mu.Lock
       - set: state.last
         value: max(state.last, meta.Position.Index)
+      - set: state.backoff, state.retryAt
+        value: 0, time.Time{}
       - eval: state.mu.Unlock()
         to: state.mu.Unlock
       - eval: n.afterCut()
         to: n.afterCut
       - return: nil
+  - of: payloadBytes
+    steps:
+      - var:
+          name: b
+          type: int64
+      - loop:
+          do:
+            - op: +=
+              set: b
+              value: int64(len(es[i].Data))
+          key: i
+          range: es
+      - return: b
   - of: (*Node).afterCut
     participants:
       - id: caller
@@ -14027,6 +14512,145 @@ sequences:
           key: _
           range: old
           value: m
+  - of: (*Node).streamEnded
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).streamEnded
+        kind: self
+      - id: n.requestCut
+        kind: internal
+      - id: n.sentCorrupt
+        kind: internal
+      - id: n.obs.warn
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: errors.Is(err, coreconsensus.Compacted)
+              do:
+                - eval: n.requestCut()
+                  to: n.requestCut
+            - case: errs.HasCode(err, coreconsensus.CodeSnapshotCorrupt)
+              do:
+                - eval: n.sentCorrupt(meta, to)
+                  to: n.sentCorrupt
+            - case: errs.HasCode(err, coreconsensus.CodeVersionUnsupported)
+              do:
+                - eval: |-
+                    n.obs.warn("consensus: a peer cannot read this snapshot's version or codec, and stops",
+                    			lstr("id", meta.ID), lattr("peer", uint64(to)))
+                  to: n.obs.warn
+  - of: (*Node).sentCorrupt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).sentCorrupt
+        kind: self
+      - id: n.verifyHeld
+        kind: internal
+      - id: n.obs.warn
+        kind: internal
+      - id: n.cfg.Snapshots.Remove
+        kind: value
+      - id: n.cutFailed
+        kind: internal
+      - id: n.cfg.Snapshots.List
+        kind: value
+      - id: ss.mu.Lock
+        kind: value
+      - id: ss.mu.Unlock
+        kind: value
+      - id: n.requestCut
+        kind: internal
+    steps:
+      - bind: verr
+        eval: n.verifyHeld(meta)
+        to: n.verifyHeld
+      - opt:
+          do:
+            - eval: "n.obs.warn(\"consensus: a peer found a sound snapshot corrupt\", lstr(\"id\", meta.ID), lattr(\"peer\", uint64(to)))"
+              to: n.obs.warn
+            - return: ""
+          when: verr == nil
+      - opt:
+          do:
+            - eval: "n.obs.warn(\"consensus: a held snapshot could not be verified\", lstr(\"id\", meta.ID), lstr(\"error\", verr.Error()))"
+              to: n.obs.warn
+            - return: ""
+          when: "!errs.HasCode(verr, coreconsensus.CodeSnapshotCorrupt)"
+      - eval: "n.obs.warn(\"consensus: a snapshot failed its checksums and is replaced\", lstr(\"id\", meta.ID), lstr(\"error\", verr.Error()))"
+        to: n.obs.warn
+      - opt:
+          do:
+            - opt:
+                do:
+                  - eval: n.cutFailed(err)
+                    to: n.cutFailed
+                when: errs.HasCode(err, coreconsensus.CodeStorageFailed)
+            - return: ""
+          init:
+            bind: err
+            eval: n.cfg.Snapshots.Remove(meta.ID)
+            to: n.cfg.Snapshots.Remove
+          when: err != nil
+      - var:
+          name: below
+          type: uint64
+      - opt:
+          do:
+            - set: below
+              value: metas[0].Position.Index
+          init:
+            bind: metas, err
+            eval: n.cfg.Snapshots.List()
+            to: n.cfg.Snapshots.List
+          when: err == nil && len(metas) > 0
+      - bind: ss
+        eval: "&n.snapState"
+      - eval: ss.mu.Lock()
+        to: ss.mu.Lock
+      - set: ss.last
+        value: min(ss.last, below)
+      - eval: ss.mu.Unlock()
+        to: ss.mu.Unlock
+      - eval: n.requestCut()
+        to: n.requestCut
+  - of: (*Node).verifyHeld
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).verifyHeld
+        kind: self
+      - id: n.codecOf
+        kind: internal
+      - id: n.cfg.Snapshots.Open
+        kind: value
+      - id: verifySnapshot
+        kind: internal
+    steps:
+      - bind: codec, err
+        eval: n.codecOf(&m)
+        to: n.codecOf
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: h, err
+        eval: n.cfg.Snapshots.Open(m.ID)
+        to: n.cfg.Snapshots.Open
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - defer: |-
+          func() {
+          		if cerr := h.Close(); cerr != nil && err == nil {
+          			err = cerr
+          		}
+          	}()
+      - return: verifySnapshot(io.NewSectionReader(h, 0, m.EncodedSize), m, codec, n.cfg.MaxSnapshotBytes)
+        to: verifySnapshot
   - of: (*Node).requestCut
     participants:
       - id: caller
@@ -14282,17 +14906,127 @@ sequences:
           			// it held is released either way.
           			n.obs.warn("consensus: snapshot handle close failed", lstr("id", meta.ID), lstr("error", cerr.Error()))
           		}
-          		if errors.Is(err, coreconsensus.Compacted) {
-          			// The peer's log starts past this snapshot: cut a newer one,
-          			// which the next probe sends.
-          			n.requestCut()
-          		}
+          		n.streamEnded(meta, to, err)
           		n.exec(func() {
           			delete(n.sending, to)
           			n.r.SnapshotDone(to, err == nil)
           			n.handleReady()
           		})
           	}()
+  - of: (*Node).guardSpace
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).guardSpace
+        kind: self
+      - id: n.spaceShort
+        kind: internal
+      - id: g.short.Store
+        kind: value
+      - id: now.Add
+        kind: value
+      - id: g.raising.Store
+        kind: value
+      - id: n.wg.Add
+        kind: value
+      - id: n.raiseNoSpace
+        kind: internal
+    steps:
+      - bind: g
+        eval: "&n.space"
+      - bind: why, short
+        eval: n.spaceShort(now)
+        to: n.spaceShort
+      - eval: g.short.Store(short)
+        to: g.short.Store
+      - opt:
+          do:
+            - return: ""
+          when: "!short || g.raising.Load() || now.Before(g.nextRaise) || n.r.Status().NoSpace != 0"
+      - set: g.nextRaise
+        to: now.Add
+        value: now.Add(spaceRaiseEvery)
+      - eval: g.raising.Store(true)
+        to: g.raising.Store
+      - eval: n.wg.Add(1)
+        to: n.wg.Add
+      - go: n.raiseNoSpace(why)
+        to: n.raiseNoSpace
+  - of: (*Node).spaceShort
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).spaceShort
+        kind: self
+      - id: sr.freeBytes
+        kind: internal
+    steps:
+      - bind: sr, ok
+        eval: n.cfg.Log.(spaceReporter)
+      - opt:
+          do:
+            - return: "\"\", false"
+          when: "!ok"
+      - opt:
+          do:
+            - return: "\"the log reached MaxLogBytes less LogReserveBytes\", true"
+          when: sr.logBytes()+n.cfg.LogReserveBytes >= n.cfg.MaxLogBytes
+      - bind: g
+        eval: "&n.space"
+      - opt:
+          do:
+            - set: g.checkedAt
+              value: now
+            - bind: free
+              eval: sr.freeBytes()
+              to: sr.freeBytes
+            - set: g.fsShort
+              value: free >= 0 && free < n.cfg.LogReserveBytes
+          when: now.Sub(g.checkedAt) >= spaceCheckEvery
+      - opt:
+          do:
+            - return: "\"the filesystem's free space fell under LogReserveBytes\", true"
+          when: g.fsShort
+      - return: "\"\", false"
+  - of: (*Node).refuseShort
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: p.admin || !n.space.short.Load()
+      - send:
+          chan: p.done
+          value: "propResult{err: origin(coreconsensus.NoSpace, errs.String(\"why\", \"this node's disk is short\"))}"
+      - return: "true"
+  - of: (*Node).raiseNoSpace
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).raiseNoSpace
+        kind: self
+      - id: n.wg.Done
+        kind: value
+      - id: n.space.raising.Store
+        kind: value
+      - id: n.obs.warn
+        kind: internal
+      - id: context
+        kind: stdlib
+      - id: abandon
+        kind: internal
+    steps:
+      - defer: n.wg.Done()
+        to: n.wg.Done
+      - defer: n.space.raising.Store(false)
+        to: n.space.raising.Store
+      - eval: "n.obs.warn(\"consensus: raising the no-space alarm\", lstr(\"why\", why))"
+        to: n.obs.warn
+      - bind: ctx, cancel
+        eval: context.WithTimeout(context.Background(), 2*n.Status().Timing.ElectionTimeoutMax+time.Second)
+        to: context
+      - defer: cancel()
+      - eval: "abandon(n.admin(ctx, coreconsensus.EntryNoSpaceRaise, wire.AdminValue{Operator: string(spaceOperator)}))"
+        to: abandon
   - of: datasync
     participants:
       - id: caller
