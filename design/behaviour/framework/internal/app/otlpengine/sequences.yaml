@@ -390,7 +390,13 @@ sequences:
           do:
             - set: e.batch, err
               to: trace
-              value: "trace.NewBatchSink(trace.BatchSinkConfig{Exporter: spans, Resource: resource, Scope: scope, Clock: clk, OnError: e.report})"
+              value: |-
+                trace.NewBatchSink(trace.BatchSinkConfig{
+                			Exporter: spans, Resource: resource, Scope: scope, Clock: clk, OnError: e.report,
+                			// Handing a batch to its queue is bounded as an attempt to send it
+                			// is: it waits under OTLPBlock, never on the network.
+                			ExportTimeout: cfg.SendTimeout,
+                		})
           when: err == nil
       - opt:
           do:

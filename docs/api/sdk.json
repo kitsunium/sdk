@@ -14420,7 +14420,7 @@
         {
           "name": "SendTimeout",
           "type": "time.Duration",
-          "doc": "SendTimeout bounds one attempt.\n"
+          "doc": "SendTimeout bounds one attempt, and the hand-over of the spans the\nbatch sink exports to their queue.\n"
         },
         {
           "name": "Interval",

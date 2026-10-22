@@ -873,7 +873,9 @@ types:
       - doc: MaxAge is how long after it was queued a batch may still be sent.
         name: MaxAge
         type: time.Duration
-      - doc: SendTimeout bounds one attempt.
+      - doc: |-
+          SendTimeout bounds one attempt, and the hand-over of the spans the
+          batch sink exports to their queue.
         name: SendTimeout
         type: time.Duration
       - doc: Interval is how often the metrics are collected and queued.

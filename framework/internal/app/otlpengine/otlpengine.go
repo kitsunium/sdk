@@ -66,7 +66,12 @@ func open(ctx context.Context, cfg *plug.OTLPConfig) (plug.OTLPExporter, error) 
 	scope := trace.Scope{Name: scopeName, Version: cfg.Version}
 	spans, err := forward.NewSpanExporter(spanExporterName, e.signals[0].forwarder)
 	if err == nil {
-		e.batch, err = trace.NewBatchSink(trace.BatchSinkConfig{Exporter: spans, Resource: resource, Scope: scope, Clock: clk, OnError: e.report})
+		e.batch, err = trace.NewBatchSink(trace.BatchSinkConfig{
+			Exporter: spans, Resource: resource, Scope: scope, Clock: clk, OnError: e.report,
+			// Handing a batch to its queue is bounded as an attempt to send it
+			// is: it waits under OTLPBlock, never on the network.
+			ExportTimeout: cfg.SendTimeout,
+		})
 	}
 	if err == nil {
 		e.snapshots, err = forward.NewMetricExporter(metricExporterName, e.signals[1].forwarder)

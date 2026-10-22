@@ -262,10 +262,9 @@ func (t *drivenTimer) Reset(d time.Duration) bool {
 // it is armed, until done holds, failing once twenty seconds passed on the
 // wall clock, which it never sleeps on. A wait below a second — a consumer's
 // idle poll — is never advanced: a batch queued in the process wakes its
-// consumer at once, and a clock moved by the polls would reach the batch
-// sink's export bound, thirty seconds, which is never advanced either, while
-// a slow machine is still queueing the batch; nor is an attempt's bound,
-// above ten minutes in these cases.
+// consumer at once. Nor is an attempt's bound — and with it the batch sink's
+// hand-over of a batch to its queue —, ten hours in these cases, which no
+// advance reaches however far the recurring waits move the clock.
 func (c *drivenClock) drive(t *testing.T, what string, done func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
@@ -275,7 +274,7 @@ func (c *drivenClock) drive(t *testing.T, what string, done func() bool) {
 		}
 		select {
 		case d := <-c.armed:
-			if d >= time.Second && d < 10*time.Minute && d != 30*time.Second {
+			if d >= time.Second && d < 10*time.Minute {
 				c.Advance(d)
 			}
 		default:

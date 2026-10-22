@@ -132,10 +132,14 @@ func TestBatchesSurviveARestart(t *testing.T) {
 		t.Fatalf("the first process holds nothing at its stop: %+v", st)
 	}
 	col.script(answer{status: http.StatusOK})
-	second := openExport(t, config(clk, col.URL, dir))
-	if st := second.stats(plug.OTLPTraces); st.Pending == 0 || st.PendingBytes == 0 {
-		t.Fatalf("the second process found no backlog: %+v", st)
-	}
+	// The backlog is read before the second process's loop sends anything.
+	second := openExport(t, config(clk, col.URL, dir), func(ex plug.OTLPExporter) {
+		for _, st := range ex.Stats() {
+			if st.Signal == plug.OTLPTraces && (st.Pending == 0 || st.PendingBytes == 0) {
+				t.Errorf("the second process found no backlog: %+v", st)
+			}
+		}
+	})
 	clk.drive(t, "the backlog sent by the second process", func() bool { return second.stats(plug.OTLPTraces).Sent >= 1 })
 	if posts := col.postsTo(tracesPath); !holds(posts[len(posts)-1:], "before-restart") {
 		t.Errorf("the second process sent %+v, want the span of the first", posts[len(posts)-1:])

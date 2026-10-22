@@ -17,18 +17,17 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/observe/trace"
 )
 
-// The numbers every case shares. An attempt, a lease and a settle are
-// bounded far beyond anything a case advances, so none ends inside one; the
-// driver advances the clock past every wait from floor to ceiling — the
-// backoff, a Retry-After and the batch sink's delay among them —, but for
-// the batch sink's export bound, exportBound, and never past an attempt's
-// bound, a lease's or a settle's. A consumer's idle poll, below floor, is
-// never advanced: a batch queued in the process wakes its consumer at once,
-// and a clock moved by the polls would reach the export bound while a slow
-// machine is still queueing the batch.
+// The numbers every case shares. An attempt — and with it the batch sink's
+// hand-over of a batch to its queue —, a lease and a settle are bounded far
+// beyond anything a case advances, so none ends inside one, however far the
+// batch sink's recurring delay moves the clock while a loaded machine is
+// still queueing a batch; the driver advances the clock past every wait from
+// floor to ceiling — the backoff, a Retry-After and the batch sink's delay
+// among them —, and never past an attempt's bound, a lease's or a settle's.
+// A consumer's idle poll, below floor, is never advanced: a batch queued in
+// the process wakes its consumer at once.
 const (
 	floor           time.Duration = time.Second
-	exportBound     time.Duration = 30 * time.Second
 	testSettle      time.Duration = time.Hour
 	testSendTimeout time.Duration = 10 * time.Hour
 	testMaxAge      time.Duration = 1000 * time.Hour
@@ -105,7 +104,7 @@ func (c *testClock) drive(t *testing.T, what string, done func() bool) {
 		}
 		select {
 		case d := <-c.armed:
-			if d >= floor && d < ceiling && d != exportBound {
+			if d >= floor && d < ceiling {
 				c.Advance(d)
 			}
 		default:
@@ -209,14 +208,18 @@ func config(clk *testClock, endpoint, dir string) *plug.OTLPConfig {
 	}
 }
 
-// openExport opens the export cfg describes through the plugged driver and
-// runs its loop until the case ends.
-func openExport(t *testing.T, cfg *plug.OTLPConfig) *exportFixture {
+// openExport opens the export cfg describes through the plugged driver,
+// hands it to each of before — what a case reads of the export before its
+// loop sends anything —, and runs its loop until the case ends.
+func openExport(t *testing.T, cfg *plug.OTLPConfig, before ...func(ex plug.OTLPExporter)) *exportFixture {
 	t.Helper()
 	otlpengine.Enable()
 	ex, err := plug.OTLP.Load().Open(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
+	}
+	for _, read := range before {
+		read(ex)
 	}
 	ctx, stop := context.WithCancel(context.Background())
 	fx := &exportFixture{ex: ex, cfg: cfg, stop: stop, done: make(chan error, 1)}
@@ -233,20 +236,25 @@ func (fx *exportFixture) close(t *testing.T) {
 	}
 	fx.stop()
 	fx.stop = nil
-	// The stop's flush waits on the clock for at most its settle: drive it.
-	clk, _ := fx.cfg.Clock.(*testClock)
-	var err error
-	finished := false
-	clk.drive(t, "the export's stop", func() bool {
+	// The stop needs no wait on the clock — its flush hands batches to their
+	// queues, the drain is zero, a settle and an attempt's bound lie beyond
+	// any case —, and the clock is not moved meanwhile: a retry's backoff
+	// advanced while a loaded machine still flushes would end the flush's
+	// settle. The wall clock bounds the wait; nothing sleeps.
+	deadline := time.Now().Add(waitBudget)
+	for {
 		select {
-		case err = <-fx.done:
-			finished = true
+		case err := <-fx.done:
+			if err != nil {
+				t.Errorf("Run: %v", err)
+			}
+			return
 		default:
 		}
-		return finished
-	})
-	if err != nil {
-		t.Errorf("Run: %v", err)
+		if time.Now().After(deadline) {
+			t.Fatalf("the export's stop: not reached within %v", waitBudget)
+		}
+		runtime.Gosched()
 	}
 }
 

@@ -2239,7 +2239,8 @@ type OTLPConfig struct {
 	MaxBatches    int
 	// MaxAge is how long after it was queued a batch may still be sent.
 	MaxAge        time.Duration
-	// SendTimeout bounds one attempt.
+	// SendTimeout bounds one attempt, and the hand-over of the spans the
+	// batch sink exports to their queue.
 	SendTimeout   time.Duration
 	// Interval is how often the metrics are collected and queued.
 	Interval      time.Duration
