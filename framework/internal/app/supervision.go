@@ -20,7 +20,9 @@ import (
 // and the product stops being live: one liveness check per component,
 // "supervised:<node>", answers the supervisor's Check, so a probe — an
 // orchestrator — restarts the process, the level above deciding what a loop
-// that cannot succeed does next.
+// that cannot succeed does next. A product nothing probes keeps running
+// without the component: its log, its problems, its loop in the Studio and
+// its telemetry say so.
 //
 // Liveness, not readiness: a supervision that gave up never runs its
 // function again in this process — nothing starts it again —, so a probe
@@ -150,8 +152,10 @@ func (g giveUpOption) routineConfigure(o *routineOptions) { g.set(&o.giveUp) }
 // loop ([Service.Loop]) whose run failed or panicked —: once it failed
 // more than restarts times within within, it is not restarted again, and
 // the product is no longer live — its liveness check
-// "supervised:<node>" fails, the problem names it — so that the process is
-// restarted rather than left running without it. It is Erlang's restart
+// "supervised:<node>" fails, the problem names it — so that whatever
+// watches its liveness — an orchestrator's probe — restarts the process; a
+// product nothing probes keeps running without it, and says so in its log,
+// its problems and its telemetry. It is Erlang's restart
 // intensity, the SDK's lifecycle supervisor's GiveUpAfter.
 //
 // The default is 10 within 10 minutes: with the restarts' backoff — one

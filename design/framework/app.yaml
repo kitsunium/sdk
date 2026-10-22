@@ -1906,8 +1906,10 @@ packages:
           loop ([Service.Loop]) whose run failed or panicked —: once it failed
           more than restarts times within within, it is not restarted again, and
           the product is no longer live — its liveness check
-          "supervised:<node>" fails, the problem names it — so that the process is
-          restarted rather than left running without it. It is Erlang's restart
+          "supervised:<node>" fails, the problem names it — so that whatever
+          watches its liveness — an orchestrator's probe — restarts the process; a
+          product nothing probes keeps running without it, and says so in its log,
+          its problems and its telemetry. It is Erlang's restart
           intensity, the SDK's lifecycle supervisor's GiveUpAfter.
 
           The default is 10 within 10 minutes: with the restarts' backoff — one
@@ -11744,8 +11746,10 @@ packages:
           loop ([Service].Loop) whose run failed or panicked —: once it failed
           more than restarts times within within, it is not restarted again, and
           the product is no longer live — its liveness check
-          "supervised:<node>" fails, the problem names it — so that the process is
-          restarted rather than left running without it. It is Erlang's restart
+          "supervised:<node>" fails, the problem names it — so that whatever
+          watches its liveness — an orchestrator's probe — restarts the process; a
+          product nothing probes keeps running without it, and says so in its log,
+          its problems and its telemetry. It is Erlang's restart
           intensity, the SDK's lifecycle supervisor's GiveUpAfter.
 
           The default is 10 within 10 minutes: with the restarts' backoff — one

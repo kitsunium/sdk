@@ -275,7 +275,7 @@
   "subscription.nil-topic": "subscription \"{name}\" has a nil topic",
   "subscription.own-stores": "subscription \"{name}\" is given app.OwnStores, which is a watch's: a topic has no stores to hear",
   "subsystem.missing": "{node} needs the framework's {subsystem} subsystem, which this program does not import: add import _ \"{package}\"",
-  "supervision.gave-up": "{node} failed more than {restarts} times within {within}: the framework stopped restarting it, and the product is no longer live — its liveness check {check} fails — so that the process is restarted; fix what fails it, or raise its give-up settings",
+  "supervision.gave-up": "{node} failed more than {restarts} times within {within}: the framework stopped restarting it, and the product is no longer live — its liveness check {check} fails — so that whatever watches it restarts the process (a product nothing probes keeps running without it); fix what fails it, or raise its give-up settings",
   "topic.once-nil": "topic {topic} is given a nil key by Once: a message published once needs a key",
   "topic.once-twice": "topic {topic} is given Once twice: a topic publishes once under one key",
   "transaction.effect":"{node}: what a transaction held until its commit could not leave after it — the commit stands: {detail}",

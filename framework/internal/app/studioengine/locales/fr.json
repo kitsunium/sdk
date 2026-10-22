@@ -275,7 +275,7 @@
   "subscription.nil-topic": "l’abonnement « {name} » a un topic nil",
   "subscription.own-stores": "l’abonnement « {name} » reçoit app.OwnStores, qui est une option de watch : un topic n’a pas de stores à entendre",
   "subsystem.missing": "{node} a besoin du sous-système {subsystem} du framework, que ce programme n’importe pas : ajoutez import _ \"{package}\"",
-  "supervision.gave-up": "{node} a échoué plus de {restarts} fois en {within} : le framework a cessé de le redémarrer, et le produit n’est plus vivant — son contrôle de vivacité {check} échoue — afin que le processus soit redémarré ; corrigez ce qui le fait échouer, ou relevez ses réglages d’abandon",
+  "supervision.gave-up": "{node} a échoué plus de {restarts} fois en {within} : le framework a cessé de le redémarrer, et le produit n’est plus vivant — son contrôle de vivacité {check} échoue — afin que ce qui le surveille redémarre le processus (un produit que rien ne sonde continue sans lui) ; corrigez ce qui le fait échouer, ou relevez ses réglages d’abandon",
   "topic.once-nil": "le topic {topic} reçoit une clé nil par Once : un message publié une fois a besoin d’une clé",
   "topic.once-twice": "le topic {topic} reçoit Once deux fois : un topic publie une fois sous une seule clé",
   "transaction.effect":"{node} : ce qu’une transaction retenait jusqu’à son commit n’a pas pu partir après — le commit tient : {detail}",
