@@ -479,6 +479,14 @@ func (n *Node) load() (raft.StartState, error) {
 	if err != nil {
 		return raft.StartState{}, err
 	}
+	if n.noTable && len(base.Membership.Members) == 0 && !slices.ContainsFunc(ents, isMembershipEntry) {
+		// Nothing names the members: no snapshot is left, and the log
+		// begins past a compaction with no configuration entry after it.
+		// Started, the node would admit nobody, never be installed again
+		// and say nothing; it is refused, and says why (#526).
+		return raft.StartState{}, origin(coreconsensus.SnapshotCorrupt,
+			errs.String("why", "no snapshot is left and the log holds no configuration: WipeAndRejoin"))
+	}
 	applied := n.startApplied(&base, durIdx)
 	return raft.StartState{HardState: hs, Snapshot: base, Entries: ents, Applied: applied, Now: n.clk.Now()}, nil
 }
@@ -635,6 +643,11 @@ func noTableBase(log coreconsensus.LogStore, metas []coreconsensus.SnapshotMetaV
 		return coreconsensus.SnapshotMetaValue{}, err
 	}
 	return b, nil
+}
+
+// isMembershipEntry reports whether e is a configuration entry.
+func isMembershipEntry(e coreconsensus.EntryValue) bool {
+	return e.Kind == coreconsensus.EntryMembership
 }
 
 // baseTerm is the term of a no-table base at first-1: the log's, logTerm,
