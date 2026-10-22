@@ -100,6 +100,14 @@ func (tn *tcpNode) listen(t *testing.T, ca *testCA) {
 		addr = "127.0.0.1:0"
 	}
 	tr, err := NewTCPTransport(&TransportConfig{Certificate: tn.cert, Roots: ca.pool, ListenAddress: addr})
+	// A restart binds the address its previous transport just closed: on
+	// illumos and Solaris the port is not free again at once, and the
+	// bind failed one run in a few (TRANSPORT_MISCONFIGURED). It is tried
+	// again for a while, as a restarted process would be.
+	for deadline := time.Now().Add(10 * time.Second); err != nil && tn.addr != "" && time.Now().Before(deadline); {
+		time.Sleep(50 * time.Millisecond)
+		tr, err = NewTCPTransport(&TransportConfig{Certificate: tn.cert, Roots: ca.pool, ListenAddress: addr})
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
