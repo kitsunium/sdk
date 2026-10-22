@@ -6843,7 +6843,7 @@
       "spelled": "svcqueue.SQLConfig",
       "canonical": "github.com/kitsunium/sdk/internal/service/data/queue.SQLConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/data/queue.SQLConfig",
-      "doc": "SQLConfig is the public alias for [NewSQL]'s configuration: Transactor,\nDialect and Table (required), Policy, and Clock.\n",
+      "doc": "SQLConfig is the public alias for [NewSQL]'s configuration: Transactor,\nDialect and Table (required), Policy, Clock, and Trail, which keeps a\ndead letter's trail once [SQLTrailMigration] has run.\n",
       "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"
@@ -6874,6 +6874,18 @@
         "public": "The SQL queue's configuration cannot be used"
       },
       "doc": "SQLQueueMisconfigured refuses an SQLConfig no SQL broker could run: no\ntransactor, one it cannot join a transaction of, a dialect it cannot\nspell, or a table name it cannot use.\n",
+      "file": "queue/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/queue.SQLTrailMigration",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/queue",
+      "name": "SQLTrailMigration",
+      "spelled": "func(dialect sql.Dialect, table string, version uint64) (sql.Migration, error)",
+      "canonical": "func(dialect github.com/kitsunium/sdk/pkg/v1/data/sql.Dialect, table string, version uint64) (github.com/kitsunium/sdk/pkg/v1/data/sql.Migration, error)",
+      "doc": "SQLTrailMigration returns the migration that adds the trail column a broker\nwith [SQLConfig].Trail writes to a table an earlier [SQLMigration] created,\nnumbered version for the caller's own version table. It does nothing when\nthe table has the column or does not exist; its Down drops the column.\n",
       "file": "queue/gen_facade.go",
       "layer": "public",
       "family": "data"

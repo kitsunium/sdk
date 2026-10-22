@@ -189,7 +189,7 @@ sequences:
       - return: |-
           w.PutDeadLetter(ctx, queue.DeadLetter{
           		FailedAt: dead.FailedAt, Reason: dead.Reason, Cause: dead.Cause, Message: sdkMessage(dead.Message),
-          		Code: dead.Code, Deliveries: dead.Deliveries,
+          		Code: dead.Code, Deliveries: dead.Deliveries, Trail: dead.Trail,
           	})
         to: w.PutDeadLetter
   - of: (*broker).Close
@@ -241,7 +241,7 @@ sequences:
       - return: |-
           plug.DeadLetterValue{
           		FailedAt: d.FailedAt, Reason: d.Reason, Cause: d.Cause, Message: pluggedMessage(d.Message),
-          		Code: d.Code, Deliveries: d.Deliveries,
+          		Code: d.Code, Deliveries: d.Deliveries, Trail: d.Trail,
           	}
   - of: pluggedStep
     steps:
@@ -607,7 +607,7 @@ sequences:
     steps:
       - eval: |-
           plug.Queues.Store(&plug.QueueDriverConfig{
-          		Open: open, TableMigration: tableMigration,
+          		Open: open, TableMigration: tableMigration, TrailMigration: trailMigration,
           		DoNotRetry: queue.DoNotRetry, NotRetryable: notRetryable,
           	})
         to: plug.Queues.Store
@@ -702,7 +702,7 @@ sequences:
                 nil, errs.Wrap(queue.SQLQueueMisconfigured, errs.WrapParams{},
                 			errs.String("queue", cfg.Name), errs.String("problem", "the queue's database was not opened by the store subsystem"))
           when: "!ok"
-      - return: "queue.NewSQL(queue.SQLConfig{Table: cfg.Table, Policy: policy, Clock: clk, Transactor: tm, Dialect: dialect})"
+      - return: "queue.NewSQL(queue.SQLConfig{Table: cfg.Table, Policy: policy, Clock: clk, Transactor: tm, Dialect: dialect, Trail: true})"
         to: queue
   - of: policyOf
     steps:
@@ -742,6 +742,32 @@ sequences:
           when: err != nil
       - bind: m, err
         eval: queue.SQLMigration(d, table, version)
+        to: queue
+      - opt:
+          do:
+            - return: plug.MigrationValue{}, err
+          when: err != nil
+      - return: "plug.MigrationValue{Version: m.Version, Name: m.Name, Up: pluggedStep(m.Up), Down: pluggedStep(m.Down)}, nil"
+  - of: trailMigration
+    participants:
+      - id: caller
+        kind: actor
+      - id: trailMigration
+        kind: self
+      - id: dialectOf
+        kind: internal
+      - id: queue
+        kind: package
+    steps:
+      - bind: d, err
+        eval: dialectOf(dialect)
+        to: dialectOf
+      - opt:
+          do:
+            - return: plug.MigrationValue{}, err
+          when: err != nil
+      - bind: m, err
+        eval: queue.SQLTrailMigration(d, table, version)
         to: queue
       - opt:
           do:

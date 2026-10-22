@@ -6997,6 +6997,44 @@ packages:
               name: Attempt
               type: int
       - doc: |-
+          MailDeadLetterValue is a mail an outbox gave up on, read back from its dead
+          letters: what the mailbox of a later run shows of it, why it was given up
+          included.
+        name: MailDeadLetterValue
+        struct:
+          fields:
+            - doc: Meta is what Annotate kept of the Send.
+              name: Meta
+              type: map[string]string
+            - doc: FailedAt is when its last attempt failed.
+              name: FailedAt
+              type: time.Time
+            - doc: QueuedAt is when the mail was put in the outbox.
+              name: QueuedAt
+              type: time.Time
+            - doc: Message is the mail.
+              name: Message
+              type: MailValue
+            - doc: |-
+                ID is the mail's outbox ID; empty when its record did not decode, and
+                QueueID then names it.
+              name: ID
+              type: string
+            - doc: QueueID is the outbox queue's identifier for its record.
+              name: QueueID
+              type: string
+            - doc: Cause is its last failure's public text, "" for none.
+              name: Cause
+              type: string
+            - doc: Attempts counts its delivery attempts.
+              name: Attempts
+              type: int
+            - doc: |-
+                GivenUp is why it was given up, read from its last failure's code and
+                trail as the outbox kept them.
+              name: GivenUp
+              type: MailGiveUp
+      - doc: |-
           MailEventValue is what a spool reports of a mail: its kind, the mail and
           its outbox ID, the attempt, when, the failure of a failed attempt, and why
           a dead letter was given up.
@@ -7065,8 +7103,8 @@ packages:
               out:
                 - type: error
             - doc: |-
-                DeadLetters counts up to maxLetters of the mails earlier runs gave up
-                on.
+                DeadLetters returns up to maxLetters of the mails earlier runs gave up
+                on, oldest first, each with why.
               in:
                 - name: ctx
                   type: context.Context
@@ -7074,7 +7112,7 @@ packages:
                   type: int
               name: DeadLetters
               out:
-                - type: int
+                - type: "[]MailDeadLetterValue"
                 - type: error
             - doc: Run hands each mail to the transport until ctx ends.
               in:
@@ -7186,8 +7224,9 @@ packages:
         name: HTTPServer
       - doc: |-
           QueueDriverConfig is what framework/app/queue plugs into kit: how a
-          consumer's queue opens, the migration that makes its table on a database,
-          and how a delivery's handler says that no retry can help.
+          consumer's queue opens, the migrations that make its table on a database
+          and add the column its dead letters' trails are kept in, and how a
+          delivery's handler says that no retry can help.
         name: QueueDriverConfig
         struct:
           fields:
@@ -7200,6 +7239,13 @@ packages:
                 TableMigration is the migration that makes the queue table on a
                 database of the dialect named, at version.
               name: TableMigration
+              type: func(dialect, table string, version uint64) (MigrationValue, error)
+            - doc: |-
+                TrailMigration is the migration that adds the column a dead letter's
+                trail is kept in to a queue table an earlier release made on a
+                database of the dialect named, at version; it does nothing on a table
+                that has it, or that is not there yet.
+              name: TrailMigration
               type: func(dialect, table string, version uint64) (MigrationValue, error)
             - doc: |-
                 DoNotRetry is err as a delivery's handler returns it when no retry
@@ -7396,6 +7442,11 @@ packages:
             - doc: Message is the message, unmodified.
               name: Message
               type: MessageValue
+            - doc: |-
+                Trail is the codes the failure gathered as it was wrapped, oldest
+                first, nil for none.
+              name: Trail
+              type: "[]uint32"
             - doc: Code is the failure's error code, 0 for none.
               name: Code
               type: uint32

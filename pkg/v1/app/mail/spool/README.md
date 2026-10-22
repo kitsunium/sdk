@@ -489,6 +489,12 @@ type DeadLetter struct {
 	Cause    string
 	// Message is the mail, as it was spooled.
 	Message  coremail.MessageValue
+	// Trail is the codes the last failure gathered as it was wrapped, oldest
+	// first, as the queue kept them: CodeMailRejected or CodeMailExpired
+	// when that is why the spool gave the mail up and the transport's
+	// failure, an SDK error, stayed the origin — Code then holds the
+	// transport's code. Nil when the queue kept none.
+	Trail    []uint32
 	// Attempts is how many deliveries it got.
 	Attempts int
 	// Code is the last failure's dotted-quad code, or 0.

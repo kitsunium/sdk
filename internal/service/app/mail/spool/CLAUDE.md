@@ -29,7 +29,7 @@ raises the core's.
 | `config.go` | `Config` (`Broker` and `Deferrer` since ADR 0178; `MaxAge` and `RetryPermanent` since ADR 0111's 2026-10-21 amendment, a negative `MaxAge` refused), `DefaultSendTimeout`, `DefaultRetryBase` / `DefaultRetryMax`, `DefaultMaxMessageBytes`, `DeliveredMemory`; the refusals (`validateBroker`: `Dir` or `MaxMessageBytes` beside a `Broker`, a `Deferrer` without one or that is not an `Aborter`) |
 | `deliver.go` | the queue handler: the record read back — one that does not decode is `MessageUndecodable` marked `corequeue.DoNotRetry`, dead-lettered at its first delivery where the queue can reject it, since no attempt can decode it (#489) —, a duplicate dropped, the attempt bounded on the spool's clock with its `AttemptValue` in the context, a transport panic recovered, a failure parked for `Backoff.Delay(attempt)` (`DelayedNacker.NackAfter` where the queue has it — ADR 0183 —, `LeaseExtender.Extend` otherwise) or — on the last attempt — nacked into the dead letter; `giveUp` first: a failure carrying a 5xx `*textproto.Error` (`permanentReply`) is marked `MailRejected` unless `RetryPermanent`, one at or past `MaxAge` `MailExpired` (`mark`, origin-wins like `DoNotRetry`), and returned `corequeue.DoNotRetry`, which `Consume` turns into the broker's `Reject` |
 | `ledger.go` | the delivered-ID ring (`DeliveredMemory` entries) |
-| `event.go` | `EventKind` (`queued`, `sent`, `retrying`, `dead-lettered`, `duplicate`), `EventValue`, `AttemptValue` + `AttemptFrom`, `DeadLetterValue` |
+| `event.go` | `EventKind` (`queued`, `sent`, `retrying`, `dead-lettered`, `duplicate`), `EventValue`, `AttemptValue` + `AttemptFrom`, `DeadLetterValue` (its `Trail`, the queue's, issue #500) |
 
 ## Why-this-shape
 
@@ -72,7 +72,12 @@ raises the core's.
   `MAIL_EXPIRED`) are added as `DoNotRetry` adds its own: the transport's
   SDK verdict stays the origin the dead letter records, the mark joins the
   trail for `errs.HasCode`, and a foreign failure takes the mark as origin
-  with itself as source, so `errors.As` still reaches the reply.
+  with itself as source, so `errors.As` still reaches the reply. The queue
+  keeps that trail with the dead letter (issue #500), and `DeadLetters` hands
+  it on as `DeadLetterValue.Trail`: a process that did not give the mail up
+  reads why from it — `CodeMailRejected` or `CodeMailExpired` in the trail, or
+  as the code of a foreign failure — where `Reason` and `Code` say only
+  `SEND_REFUSED` (`TestAMailGivenUpKeepsWhyAfterItsProcess`).
 - **The Message-ID is minted at Send, not by the composer.** The mail domain
   mints none (RFC 6409 §8.2 leaves it to the submission server) — and a
   server that adds one per submission gives every retry a new one, so a

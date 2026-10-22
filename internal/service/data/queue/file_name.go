@@ -67,6 +67,10 @@ const leaseEntropyBytes int = 4
 // invisible: an instant parsed at 32 bits would wrap in 2038.
 const int64Bits int = 64
 
+// uint32Bits is the width strconv parses a trail's code at: a dotted-quad
+// code is a uint32, and one wider is not a code this package wrote.
+const uint32Bits int = 32
+
 // The number of dot-separated fields each name carries.
 const (
 	readyFields    int = 4

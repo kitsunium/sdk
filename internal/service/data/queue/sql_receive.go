@@ -220,7 +220,7 @@ func (b *sqlBroker) pickDue(ctx context.Context, ex coresql.Executor, now int64,
 func (b *sqlBroker) buryLapsed(ctx context.Context, ex coresql.Executor, now int64, rows []sqlPicked) error {
 	//: the same instant and cause for every one of them.
 	for chunk := range slices.Chunk(rows, sqlRowsPerStatement) {
-		args := append(causeArgs(now, causeValue{reason: reasonLeaseExpired}), idArgs(chunk)...)
+		args := append(b.stmts.causeArgs(now, causeValue{reason: reasonLeaseExpired}), idArgs(chunk)...)
 		//: dead, and never delivered again.
 		if _, err := ex.ExecContext(ctx, b.stmts.buryRows(len(chunk)), args...); err != nil {
 			//: QueueBackendFailed.

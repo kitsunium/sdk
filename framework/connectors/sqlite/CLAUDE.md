@@ -94,7 +94,12 @@ opened, the kept letter delivered, nothing moved by a second start; a
 present name taken refuses the start and nothing moves; a renaming the
 database refuses half-way rolls the move back and the next start resumes;
 and the move is undone by renaming back — the procedure ADR 0180 gives —,
-which restores the fixture byte for byte.
+which restores the fixture byte for byte. "Byte for byte" leaves out what
+this release adds besides the move, and `trailMigrated` holds it apart: the
+queue table's `trail` column, which its trail migration adds
+(kitsunium/sdk#500), and that migration's rows in the history and the
+registry (`tablesOf`, `addedForTrails`); a renaming back keeps them, and the
+former release, whose broker never names the column, runs over them.
 `former_keys_test.go` declares the product `testdata/former-keys` was
 written by — the release before ADR 0180 step 5b, its secrets in the file
 store beside the data (kept in the fixture as `data/_secrets`, a name git

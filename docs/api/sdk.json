@@ -12663,8 +12663,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
       "name": "DeadLetterValue",
-      "spelled": "struct{FailedAt time.Time; Reason string; Cause string; Message MessageValue; Code uint32; Deliveries int}",
-      "canonical": "struct{FailedAt time.Time; Reason string; Cause string; Message github.com/kitsunium/sdk/framework/internal/app/plug.MessageValue; Code uint32; Deliveries int}",
+      "spelled": "struct{FailedAt time.Time; Reason string; Cause string; Message MessageValue; Trail []uint32; Code uint32; Deliveries int}",
+      "canonical": "struct{FailedAt time.Time; Reason string; Cause string; Message github.com/kitsunium/sdk/framework/internal/app/plug.MessageValue; Trail []uint32; Code uint32; Deliveries int}",
       "fields": [
         {
           "name": "FailedAt",
@@ -12685,6 +12685,11 @@
           "name": "Message",
           "type": "MessageValue",
           "doc": "Message is the message, unmodified.\n"
+        },
+        {
+          "name": "Trail",
+          "type": "[]uint32",
+          "doc": "Trail is the codes the failure gathered as it was wrapped, oldest\nfirst, nil for none.\n"
         },
         {
           "name": "Code",
@@ -13566,6 +13571,64 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.MailDeadLetterValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "MailDeadLetterValue",
+      "spelled": "struct{Meta map[string]string; FailedAt time.Time; QueuedAt time.Time; Message MailValue; ID string; QueueID string; Cause string; Attempts int; GivenUp MailGiveUp}",
+      "canonical": "struct{Meta map[string]string; FailedAt time.Time; QueuedAt time.Time; Message github.com/kitsunium/sdk/framework/internal/app/plug.MailValue; ID string; QueueID string; Cause string; Attempts int; GivenUp github.com/kitsunium/sdk/framework/internal/app/plug.MailGiveUp}",
+      "fields": [
+        {
+          "name": "Meta",
+          "type": "map[string]string",
+          "doc": "Meta is what Annotate kept of the Send.\n"
+        },
+        {
+          "name": "FailedAt",
+          "type": "time.Time",
+          "doc": "FailedAt is when its last attempt failed.\n"
+        },
+        {
+          "name": "QueuedAt",
+          "type": "time.Time",
+          "doc": "QueuedAt is when the mail was put in the outbox.\n"
+        },
+        {
+          "name": "Message",
+          "type": "MailValue",
+          "doc": "Message is the mail.\n"
+        },
+        {
+          "name": "ID",
+          "type": "string",
+          "doc": "ID is the mail's outbox ID; empty when its record did not decode, and\nQueueID then names it.\n"
+        },
+        {
+          "name": "QueueID",
+          "type": "string",
+          "doc": "QueueID is the outbox queue's identifier for its record.\n"
+        },
+        {
+          "name": "Cause",
+          "type": "string",
+          "doc": "Cause is its last failure's public text, \"\" for none.\n"
+        },
+        {
+          "name": "Attempts",
+          "type": "int",
+          "doc": "Attempts counts its delivery attempts.\n"
+        },
+        {
+          "name": "GivenUp",
+          "type": "MailGiveUp",
+          "doc": "GivenUp is why it was given up, read from its last failure's code and\ntrail as the outbox kept them.\n"
+        }
+      ],
+      "doc": "MailDeadLetterValue is a mail an outbox gave up on, read back from its dead\nletters: what the mailbox of a later run shows of it, why it was given up\nincluded.\n",
+      "file": "framework/internal/app/plug/mail.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.MailDriverConfig",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
@@ -13916,8 +13979,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
       "name": "MailSpool",
-      "spelled": "interface{Close() error; DeadLetters(ctx context.Context, maxLetters int) (int, error); Run(ctx context.Context) error; Send(ctx context.Context, msg MailValue) (string, error); SendWithID(ctx context.Context, id string, msg MailValue) error}",
-      "canonical": "interface{Close() error; DeadLetters(ctx context.Context, maxLetters int) (int, error); Run(ctx context.Context) error; Send(ctx context.Context, msg github.com/kitsunium/sdk/framework/internal/app/plug.MailValue) (string, error); SendWithID(ctx context.Context, id string, msg github.com/kitsunium/sdk/framework/internal/app/plug.MailValue) error}",
+      "spelled": "interface{Close() error; DeadLetters(ctx context.Context, maxLetters int) ([]MailDeadLetterValue, error); Run(ctx context.Context) error; Send(ctx context.Context, msg MailValue) (string, error); SendWithID(ctx context.Context, id string, msg MailValue) error}",
+      "canonical": "interface{Close() error; DeadLetters(ctx context.Context, maxLetters int) ([]github.com/kitsunium/sdk/framework/internal/app/plug.MailDeadLetterValue, error); Run(ctx context.Context) error; Send(ctx context.Context, msg github.com/kitsunium/sdk/framework/internal/app/plug.MailValue) (string, error); SendWithID(ctx context.Context, id string, msg github.com/kitsunium/sdk/framework/internal/app/plug.MailValue) error}",
       "doc": "MailSpool is one mailer's outbox as the framework's core uses it: a mail put in it\nat once or under an ID the framework minted, the loop that hands each mail to the\ntransport, and its dead letters.\n",
       "file": "framework/internal/app/plug/mail_interface.go",
       "layer": "framework"
@@ -13940,9 +14003,9 @@
       "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
       "name": "DeadLetters",
       "recv": "MailSpool",
-      "spelled": "func(ctx context.Context, maxLetters int) (int, error)",
-      "canonical": "func(ctx context.Context, maxLetters int) (int, error)",
-      "doc": "DeadLetters counts up to maxLetters of the mails earlier runs gave up\non.\n",
+      "spelled": "func(ctx context.Context, maxLetters int) ([]MailDeadLetterValue, error)",
+      "canonical": "func(ctx context.Context, maxLetters int) ([]github.com/kitsunium/sdk/framework/internal/app/plug.MailDeadLetterValue, error)",
+      "doc": "DeadLetters returns up to maxLetters of the mails earlier runs gave up\non, oldest first, each with why.\n",
       "file": "framework/internal/app/plug/mail_interface.go",
       "layer": "framework"
     },
@@ -14736,8 +14799,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
       "name": "QueueDriverConfig",
-      "spelled": "struct{Open func(cfg QueueConfig) (Broker, error); TableMigration func(dialect string, table string, version uint64) (MigrationValue, error); DoNotRetry func(err error) error; NotRetryable func(err error) bool}",
-      "canonical": "struct{Open func(cfg github.com/kitsunium/sdk/framework/internal/app/plug.QueueConfig) (github.com/kitsunium/sdk/framework/internal/app/plug.Broker, error); TableMigration func(dialect string, table string, version uint64) (github.com/kitsunium/sdk/framework/internal/app/plug.MigrationValue, error); DoNotRetry func(err error) error; NotRetryable func(err error) bool}",
+      "spelled": "struct{Open func(cfg QueueConfig) (Broker, error); TableMigration func(dialect string, table string, version uint64) (MigrationValue, error); TrailMigration func(dialect string, table string, version uint64) (MigrationValue, error); DoNotRetry func(err error) error; NotRetryable func(err error) bool}",
+      "canonical": "struct{Open func(cfg github.com/kitsunium/sdk/framework/internal/app/plug.QueueConfig) (github.com/kitsunium/sdk/framework/internal/app/plug.Broker, error); TableMigration func(dialect string, table string, version uint64) (github.com/kitsunium/sdk/framework/internal/app/plug.MigrationValue, error); TrailMigration func(dialect string, table string, version uint64) (github.com/kitsunium/sdk/framework/internal/app/plug.MigrationValue, error); DoNotRetry func(err error) error; NotRetryable func(err error) bool}",
       "fields": [
         {
           "name": "Open",
@@ -14750,6 +14813,11 @@
           "doc": "TableMigration is the migration that makes the queue table on a\ndatabase of the dialect named, at version.\n"
         },
         {
+          "name": "TrailMigration",
+          "type": "func(dialect string, table string, version uint64) (MigrationValue, error)",
+          "doc": "TrailMigration is the migration that adds the column a dead letter's\ntrail is kept in to a queue table an earlier release made on a\ndatabase of the dialect named, at version; it does nothing on a table\nthat has it, or that is not there yet.\n"
+        },
+        {
           "name": "DoNotRetry",
           "type": "func(err error) error",
           "doc": "DoNotRetry is err as a delivery's handler returns it when no retry\ncan help: its queue dead-letters the message at once.\n"
@@ -14760,7 +14828,7 @@
           "doc": "NotRetryable reports whether err, a delivery's handler's, says that no\nretry can help: what DoNotRetry returned, the product's own included.\n"
         }
       ],
-      "doc": "QueueDriverConfig is what framework/app/queue plugs into kit: how a\nconsumer's queue opens, the migration that makes its table on a database,\nand how a delivery's handler says that no retry can help.\n",
+      "doc": "QueueDriverConfig is what framework/app/queue plugs into kit: how a\nconsumer's queue opens, the migrations that make its table on a database\nand add the column its dead letters' trails are kept in, and how a\ndelivery's handler says that no retry can help.\n",
       "file": "framework/internal/app/plug/queue.go",
       "layer": "framework"
     },

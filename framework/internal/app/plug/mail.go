@@ -186,6 +186,32 @@ type MailAttemptValue struct {
 	Attempt int
 }
 
+// MailDeadLetterValue is a mail an outbox gave up on, read back from its dead
+// letters: what the mailbox of a later run shows of it, why it was given up
+// included.
+type MailDeadLetterValue struct {
+	// Meta is what Annotate kept of the Send.
+	Meta map[string]string
+	// FailedAt is when its last attempt failed.
+	FailedAt time.Time
+	// QueuedAt is when the mail was put in the outbox.
+	QueuedAt time.Time
+	// Message is the mail.
+	Message MailValue
+	// ID is the mail's outbox ID; empty when its record did not decode, and
+	// QueueID then names it.
+	ID string
+	// QueueID is the outbox queue's identifier for its record.
+	QueueID string
+	// Cause is its last failure's public text, "" for none.
+	Cause string
+	// Attempts counts its delivery attempts.
+	Attempts int
+	// GivenUp is why it was given up, read from its last failure's code and
+	// trail as the outbox kept them.
+	GivenUp MailGiveUp
+}
+
 // MailEventValue is what a spool reports of a mail: its kind, the mail and
 // its outbox ID, the attempt, when, the failure of a failed attempt, and why
 // a dead letter was given up.

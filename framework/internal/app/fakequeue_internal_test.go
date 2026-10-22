@@ -14,13 +14,25 @@ import (
 // transaction's copy like every other statement — what a rollback drops,
 // the messages a publication wrote in it included.
 
-// fakeMessage is one row of a queue table: NULL where lease, reason, cause
-// or code are nil.
+// fakeMessage is one row of a queue table: NULL where lease, reason, cause,
+// trail or code are nil.
 type fakeMessage struct {
-	id                              string
-	dead, due, enqueued, deliveries int64
-	lease, payload, reason, cause   []byte
-	code                            driver.Value
+	id                                   string
+	dead, due, enqueued, deliveries      int64
+	lease, payload, reason, cause, trail []byte
+	code                                 driver.Value
+}
+
+// fakeTrailColumns answers the SQL broker's read of a queue table's columns
+// (queue.SQLTrailMigration on SQLite and MySQL): none when the table is not
+// there, else every column, the trail among them — the fake's tables are
+// SQLMigration's, which has it.
+func fakeTrailColumns(d *fakeData, args []driver.NamedValue) driver.Rows {
+	columns, trails := int64(0), int64(0)
+	if _, ok := d.queues[string(bound(args[0].Value))]; ok {
+		columns, trails = 11, 1
+	}
+	return &fakeRows{cols: []string{"columns", "trails"}, rows: [][]driver.Value{{columns, trails}}}
 }
 
 // Messages are the payloads table holds, live and dead, oldest first.
@@ -46,6 +58,9 @@ func queueStatement(d *fakeData, query, table string, args []driver.NamedValue) 
 	case strings.HasPrefix(query, "DROP TABLE IF EXISTS "):
 		delete(d.queues, table)
 		return nil, 0, nil
+	case strings.HasPrefix(query, "ALTER TABLE IF EXISTS "):
+		// The trail column on PostgreSQL, which SQLMigration's table has.
+		return nil, 0, nil
 	}
 	q := d.queues[table]
 	if q == nil {
@@ -55,10 +70,14 @@ func queueStatement(d *fakeData, query, table string, args []driver.NamedValue) 
 	switch {
 	case strings.HasPrefix(query, "INSERT INTO ") && strings.Contains(query, "reason, cause, code"):
 		id := string(a.bytes(0))
-		q[id] = fakeMessage{
+		m := fakeMessage{
 			id: id, dead: 1, due: a.int(1), enqueued: a.int(2), deliveries: a.int(3), payload: a.bytes(4),
 			reason: a.bytes(5), cause: a.bytes(6), code: a.int(7),
 		}
+		if len(a) > 8 {
+			m.trail = a.bytes(8)
+		}
+		q[id] = m
 		return nil, 1, nil
 	case strings.HasPrefix(query, "INSERT INTO ") && len(a) == 5:
 		id := string(a.bytes(0))
@@ -77,7 +96,7 @@ func queueStatement(d *fakeData, query, table string, args []driver.NamedValue) 
 	case strings.HasPrefix(query, "SELECT id, enqueued_at, deliveries, due, lease, payload"):
 		return fakeQLive(q, string(a.bytes(0)), a.int(1)), 0, nil
 	case strings.HasPrefix(query, "SELECT id, enqueued_at, deliveries, due"):
-		return fakeQDeadLetters(q, a.int(0)), 0, nil
+		return fakeQDeadLetters(q, a.int(0), strings.Contains(query, "trail")), 0, nil
 	}
 	return queueWrite(q, query, a)
 }
@@ -89,18 +108,18 @@ func queueWrite(q map[string]fakeMessage, query string, a fakeArgs) (driver.Rows
 	case strings.Contains(query, "deliveries = deliveries + 1"):
 		return nil, fakeQBatch(q, a, 2, func(m *fakeMessage) { m.due, m.lease, m.deliveries = a.int(0), a.bytes(1), m.deliveries+1 }), nil
 	case strings.HasPrefix(query, "UPDATE ") && strings.Contains(query, "dead = 1") && strings.Contains(query, "id IN ("):
-		return nil, fakeQBatch(q, a, 4, func(m *fakeMessage) { fakeQBury(m, a) }), nil
+		return nil, fakeQBatch(q, a, fakeQCauseArgs(query), func(m *fakeMessage) { fakeQBury(m, a) }), nil
 	case strings.HasPrefix(query, "DELETE FROM ") && strings.Contains(query, "AND lease ="):
 		return nil, fakeQHeld(q, a, 0, func(m *fakeMessage) bool { return false }), nil
 	case strings.HasPrefix(query, "UPDATE ") && strings.Contains(query, "SET due = ") && strings.Contains(query, "lease = NULL WHERE id"):
 		return nil, fakeQHeld(q, a, 1, func(m *fakeMessage) bool { m.due, m.lease = a.int(0), nil; return true }), nil
 	case strings.HasPrefix(query, "UPDATE ") && strings.Contains(query, "SET dead = 1"):
-		return nil, fakeQHeld(q, a, 4, func(m *fakeMessage) bool { fakeQBury(m, a); return true }), nil
+		return nil, fakeQHeld(q, a, fakeQCauseArgs(query), func(m *fakeMessage) bool { fakeQBury(m, a); return true }), nil
 	case strings.HasPrefix(query, "UPDATE ") && strings.Contains(query, "SET due = ") && strings.Contains(query, ", lease = "):
 		return nil, fakeQHeld(q, a, 2, func(m *fakeMessage) bool { m.due, m.lease = a.int(0), a.bytes(1); return true }), nil
 	case strings.HasPrefix(query, "UPDATE ") && strings.Contains(query, "SET dead = 0"):
 		return nil, fakeQDeadOne(q, string(a.bytes(1)), func(m *fakeMessage) bool {
-			m.dead, m.due, m.deliveries, m.reason, m.cause, m.code = 0, a.int(0), 0, nil, nil, nil
+			m.dead, m.due, m.deliveries, m.reason, m.cause, m.code, m.trail = 0, a.int(0), 0, nil, nil, nil, nil
 			return true
 		}), nil
 	case strings.HasPrefix(query, "DELETE FROM "):
@@ -109,9 +128,23 @@ func queueWrite(q map[string]fakeMessage, query string, a fakeArgs) (driver.Rows
 	return nil, 0, fmt.Errorf("fake: a queue statement it does not know: %q", query)
 }
 
-// fakeQBury marks m dead with the cause a binds first.
+// fakeQBury marks m dead with the cause a binds first: the instant, the
+// reason, the cause, the code — and the trail, which the broker binds fifth
+// with SQLConfig.Trail.
 func fakeQBury(m *fakeMessage, a fakeArgs) {
 	m.dead, m.due, m.lease, m.reason, m.cause, m.code = 1, a.int(0), nil, a.bytes(1), a.bytes(2), a.int(3)
+	if len(a) > 4 {
+		m.trail = a.bytes(4)
+	}
+}
+
+// fakeQCauseArgs is how many values a burial binds before the ids or the
+// receipt: four, five when it names the trail column.
+func fakeQCauseArgs(query string) int {
+	if strings.Contains(query, "trail = ") {
+		return 5
+	}
+	return 4
 }
 
 // fakeQMinDue is MIN(due) over the live messages, those due after the bound when
@@ -158,14 +191,22 @@ func fakeQPickDue(q map[string]fakeMessage, now, limit int64) driver.Rows {
 	return out
 }
 
-// fakeQDeadLetters are the dead messages, at most limit of them.
-func fakeQDeadLetters(q map[string]fakeMessage, limit int64) driver.Rows {
+// fakeQDeadLetters are the dead messages, at most limit of them, their trail
+// before their payload when the read names it.
+func fakeQDeadLetters(q map[string]fakeMessage, limit int64, trail bool) driver.Rows {
 	out := &fakeRows{cols: []string{"id", "enqueued_at", "deliveries", "due", "reason", "cause", "code", "payload"}}
+	if trail {
+		out.cols = []string{"id", "enqueued_at", "deliveries", "due", "reason", "cause", "code", "trail", "payload"}
+	}
 	for _, m := range fakeQSortedMessages(q, func(m fakeMessage) bool { return m.dead == 1 }) {
 		if int64(len(out.rows)) == limit {
 			break
 		}
-		out.rows = append(out.rows, []driver.Value{[]byte(m.id), m.enqueued, m.deliveries, m.due, nilOr(m.reason), nilOr(m.cause), m.code, m.payload})
+		row := []driver.Value{[]byte(m.id), m.enqueued, m.deliveries, m.due, nilOr(m.reason), nilOr(m.cause), m.code}
+		if trail {
+			row = append(row, nilOr(m.trail))
+		}
+		out.rows = append(out.rows, append(row, m.payload))
 	}
 	return out
 }

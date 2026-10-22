@@ -524,7 +524,7 @@ func (s *Spool) DeadLetters(ctx context.Context, maxLetters int) ([]DeadLetterVa
 		out[i] = DeadLetterValue{
 			Meta: record.Meta, FailedAt: letter.FailedAt, QueuedAt: record.QueuedAt, ID: record.ID,
 			QueueID: letter.Message.ID, Reason: letter.Reason, Cause: letter.Cause,
-			Message: record.Message, Attempts: letter.Deliveries, Code: letter.Code,
+			Message: record.Message, Trail: letter.Trail, Attempts: letter.Deliveries, Code: letter.Code,
 		}
 	}
 	//: oldest first.

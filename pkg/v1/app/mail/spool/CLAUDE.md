@@ -24,7 +24,7 @@ maintainer's half.
 |---|---|---|
 | `Spool` | alias | the outbox: `Send`, `SendWithID`, `Run`, `DeadLetters`, `Close` — `SendWithID` reaches consumers through the alias, so the facade adds no function for it (ADR 0141) |
 | `Config` | alias | `Transport` and `MaxAttempts` required; `Dir` — or `Broker`, a caller's queue (`queue.NewSQL`), with `Deferrer`, its transaction manager, a `sql.Deferrer` that is also a `sql.Aborter` (ADR 0178) —, `Clock`, `From`, `Backoff`, `SendTimeout`, `MaxMessageBytes`, `PollInterval`, `MaxAge` (zero: no age), `RetryPermanent` (retry a 5xx), `Observe`, `Annotate`, `NewID` optional |
-| `Event`, `EventKind`, `Attempt`, `DeadLetter` | aliases | onto `EventValue`, `EventKind`, `AttemptValue`, `DeadLetterValue` |
+| `Event`, `EventKind`, `Attempt`, `DeadLetter` | aliases | onto `EventValue`, `EventKind`, `AttemptValue`, `DeadLetterValue` — a dead letter's `Trail` holds `CodeMailRejected` or `CodeMailExpired` when the transport's SDK error stayed its origin (issue #500) |
 | `EventQueued` … `EventDuplicate` | constants | the five event kinds |
 | `DefaultSendTimeout`, `DefaultRetryBase`, `DefaultRetryMax`, `DefaultMaxMessageBytes`, `DeliveredMemory` | constants | the spool's clamps |
 | `MaxIDBytes` | constant | the bound on a spooled mail's identifier, whoever minted it (ADR 0141) |

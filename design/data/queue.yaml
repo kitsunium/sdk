@@ -770,19 +770,22 @@ packages:
               PutDeadLetter writes dead into the dead-letter store and returns the
               identifier the broker minted for it. Everything else is kept as given:
               the payload, the enqueue instant, the failure instant, the delivery
-              count, the reason, the cause and the code — 0 included, the code of a
-              failure that carried none. What [DeadLetterReader.DeadLetters] then
-              returns of it equals dead but for the identifier, and
+              count, the reason, the cause, the code — 0 included, the code of a
+              failure that carried none — and the trail, which an SQL broker
+              without SQLConfig.Trail does not keep. What
+              [DeadLetterReader.DeadLetters] then returns of it equals dead but for
+              the identifier — an empty trail read back nil —, and
               [DeadLetterManager] acts on it as on any other dead letter.
 
               dead.Message.ID must be empty: the identifier is the broker's to mint,
               as [Broker.Publish] mints it, and one a caller set would not be kept.
               dead is refused with [InvalidDeadLetter] — the "field" field naming
               which — when its Deliveries is below one or above 2147483647, when an
-              instant lies outside what a durable broker records (1970 to 2262), or
+              instant lies outside what a durable broker records (1970 to 2262),
               when its Reason or Cause is longer than 120 runes or holds a line
-              break; a payload above [PolicyValue.MaxMessageBytes] is
-              [MessageTooLarge]. A refused dead letter writes nothing.
+              break, or when its Trail holds more than sixteen codes; a payload
+              above [PolicyValue.MaxMessageBytes] is [MessageTooLarge]. A refused
+              dead letter writes nothing.
 
               It is never delivered and wakes no consumer. A broker that joins the
               transaction ctx carries (ADR 0151) writes it in that transaction, so
@@ -1161,8 +1164,8 @@ packages:
               broker mints; a delivery count below one or above what a durable broker
               records; an enqueue or failure instant outside 1970 to 2262; a reason or
               cause longer than 120 runes or holding a line break, which every store
-              would otherwise cut. The "field" field names which value. Nothing was
-              written.
+              would otherwise cut; a trail of more than sixteen codes. The "field"
+              field names which value. Nothing was written.
 
               It refuses rather than corrects, because a copy that silently changed
               what it copies is the one outcome a copy must never have.
@@ -1331,6 +1334,19 @@ packages:
                 under.
               name: Message
               type: MessageValue
+            - doc: |-
+                Trail is the dotted-quad codes the last failure gathered as it was
+                wrapped, oldest first — errs.TrailOf of the cause, whose origin is
+                Code and not repeated here —, at most sixteen, the newest kept when
+                there were more. It is what tells a failure apart once its process
+                is gone: a mail spool's SEND_REFUSED is a rejected mail when the
+                spool added MAIL_REJECTED to its trail, and a dead letter keeps that
+                code where its Reason and Cause keep only the origin's. Nil when the
+                cause gathered none, for a dead letter written before the field
+                existed, and on an SQL broker whose SQLConfig.Trail is not set.
+                Like Code, each entry is a uint32: errs.Code(dl.Trail[i]) converts.
+              name: Trail
+              type: "[]uint32"
             - doc: |-
                 Code is the dotted-quad errs.Code of the last failure, or 0 when the
                 cause carried none. It is a uint32 rather than an errs.Code so that
@@ -2052,7 +2068,9 @@ packages:
           (ADR 0055 §D12), and only the consumer knows where the queue's table sits in
           its own history. Its one statement does nothing when the table already
           exists — or is already gone — so applying it over a table a previous
-          deployment made changes nothing (ADR 0151).
+          deployment made changes nothing (ADR 0151). The table it creates has the
+          trail column SQLConfig.Trail writes; one an earlier release created gets
+          it from [SQLTrailMigration].
         in:
           - name: dialect
             type: coresql.Dialect
@@ -2061,6 +2079,30 @@ packages:
           - name: version
             type: uint64
         name: SQLMigration
+        out:
+          - type: coresql.MigrationValue
+          - type: error
+      - doc: |-
+          SQLTrailMigration returns the migration that adds the nullable trail
+          column, where a broker with SQLConfig.Trail keeps a dead letter's trail,
+          to the table an SQL queue named table keeps on dialect, as a
+          core/data/sql MigrationValue numbered version, beside the one
+          [SQLMigration] returns. The rows already there keep their columns as
+          they are, and their dead letters read back with no trail.
+
+          It does nothing when the table has the column — SQLMigration creates it
+          with one — or when there is no table, so it may run before or after
+          SQLMigration and twice over one table. Its Down drops the column, and
+          every trail in it, when the table has one: unset SQLConfig.Trail before
+          running it. SQLite drops a column from version 3.35 on.
+        in:
+          - name: dialect
+            type: coresql.Dialect
+          - name: table
+            type: string
+          - name: version
+            type: uint64
+        name: SQLTrailMigration
         out:
           - type: coresql.MigrationValue
           - type: error
@@ -2340,6 +2382,15 @@ packages:
                 broker speaks to it.
               name: Dialect
               type: coresql.Dialect
+            - doc: |-
+                Trail makes the broker keep a dead letter's trail
+                (core/data/queue.DeadLetterValue.Trail) in the table's trail column,
+                which [SQLMigration] creates and [SQLTrailMigration] adds to a table an
+                earlier SQLMigration created: run that migration before setting it.
+                Unset, the broker sends the statements it sent before the column
+                existed, and a dead letter it buries or reads has no trail.
+              name: Trail
+              type: bool
   - doc: |-
       Package queue is the public facade for the SDK's ASYNCHRONOUS, DURABLE
       message queue: one process publishes work, another process picks it up
@@ -2898,7 +2949,8 @@ packages:
       - alias:
           - doc: |-
               SQLConfig is the public alias for [NewSQL]'s configuration: Transactor,
-              Dialect and Table (required), Policy, and Clock.
+              Dialect and Table (required), Policy, Clock, and Trail, which keeps a
+              dead letter's trail once [SQLTrailMigration] has run.
             name: SQLConfig
             target: svcqueue.SQLConfig
       - alias:
@@ -3075,6 +3127,24 @@ packages:
             - name: version
               type: uint64
           name: SQLMigration
+          out:
+            - type: sql.Migration
+            - type: error
+      - func:
+          doc: |-
+            SQLTrailMigration returns the migration that adds the trail column a broker
+            with [SQLConfig].Trail writes to a table an earlier [SQLMigration] created,
+            numbered version for the caller's own version table. It does nothing when
+            the table has the column or does not exist; its Down drops the column.
+          forward: svcqueue.SQLTrailMigration
+          in:
+            - name: dialect
+              type: sql.Dialect
+            - name: table
+              type: string
+            - name: version
+              type: uint64
+          name: SQLTrailMigration
           out:
             - type: sql.Migration
             - type: error

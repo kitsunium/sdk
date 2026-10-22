@@ -71,13 +71,22 @@ func makeSQL(dialect coresql.Dialect) func(*testing.T, clock.Clock, corequeue.Po
 	}
 }
 
-// newSQLFixture builds the SQL broker on dialect over a fresh fake engine.
+// newSQLFixture builds the SQL broker on dialect over a fresh fake engine,
+// keeping its dead letters' trails (SQLConfig.Trail), as every broker of the
+// suites does.
 func newSQLFixture(t *testing.T, dialect coresql.Dialect, clk clock.Clock, policy corequeue.PolicyValue) *sqlFixture {
 	t.Helper()
-	engine := newSQLEngine(dialect, jobsTable)
+	return newSQLFixtureTrail(t, dialect, clk, policy, true)
+}
+
+// newSQLFixtureTrail builds the SQL broker on dialect over a fresh fake
+// engine, with SQLConfig.Trail set to trail.
+func newSQLFixtureTrail(t *testing.T, dialect coresql.Dialect, clk clock.Clock, policy corequeue.PolicyValue, trail bool) *sqlFixture {
+	t.Helper()
+	engine := newSQLEngine(dialect, jobsTable, trail)
 	tm := newSQLTransactor(t, engine, dialect)
 	broker, err := svcqueue.NewSQL(svcqueue.SQLConfig{
-		Transactor: tm, Dialect: dialect, Table: jobsTable, Policy: policy, Clock: clk,
+		Transactor: tm, Dialect: dialect, Table: jobsTable, Policy: policy, Clock: clk, Trail: trail,
 	})
 	if err != nil {
 		t.Fatalf("NewSQL() = %v, want nil", err)
@@ -272,5 +281,5 @@ func newSQLTransactor(t *testing.T, engine *sqlEngine, dialect coresql.Dialect) 
 // a case that only needs NewSQL to get past its transactor.
 func sqlTransactor(t *testing.T, dialect coresql.Dialect) coresql.Transactor {
 	t.Helper()
-	return newSQLTransactor(t, newSQLEngine(dialect, jobsTable), dialect)
+	return newSQLTransactor(t, newSQLEngine(dialect, jobsTable, false), dialect)
 }

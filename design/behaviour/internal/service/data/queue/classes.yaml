@@ -229,6 +229,14 @@ constants:
         type: int
         value: "64"
     name: int64Bits
+  - doc: |-
+      uint32Bits is the width strconv parses a trail's code at: a dotted-quad
+      code is a uint32, and one wider is not a code this package wrote.
+    items:
+      - name: uint32Bits
+        type: int
+        value: "32"
+    name: uint32Bits
   - doc: The number of dot-separated fields each name carries.
     grouped: true
     items:
@@ -363,6 +371,25 @@ constants:
         value: math.MaxInt32
     name: maxDeadDeliveries
   - doc: |-
+      maxDeadTrail is the most trail codes a dead letter keeps: the kernel's own
+      bound on an error's trail (errs keeps sixteen, its origin's first wrap and
+      the newest), so a trail describeCause reads is never cut, and one
+      PutDeadLetter is handed longer is refused rather than cut, by every broker
+      alike.
+    items:
+      - name: maxDeadTrail
+        type: int
+        value: "16"
+    name: maxDeadTrail
+  - doc: |-
+      trailSeparator joins a trail's codes where a broker writes it as text: the
+      file broker's header line and the SQL broker's column.
+    items:
+      - name: trailSeparator
+        type: string
+        value: "\",\""
+    name: trailSeparator
+  - doc: |-
       sqlLeaseEntropyBytes is the entropy in a lease's random half. It is the
       proof a receipt holds the lease — the identifier is known to anyone who can
       read the queue — so it is as wide as a message's own entropy.
@@ -440,6 +467,28 @@ constants:
         value: "32"
     name: sqlLeaseColumnLen
   - doc: |-
+      sqlCauseArgs is how many arguments a burial's cause binds before the trail
+      and the identifiers: the instant, the reason, the cause and the code.
+    items:
+      - name: sqlCauseArgs
+        type: int
+        value: "4"
+    name: sqlCauseArgs
+  - doc: |-
+      sqlTrailColumnLen is the width of MySQL's trail column: maxDeadTrail codes
+      of at most ten decimal digits, and the commas between them.
+    items:
+      - name: sqlTrailColumnLen
+        type: int
+        value: maxDeadTrail*11 - 1
+    name: sqlTrailColumnLen
+  - doc: sqlTrailColumn is the column SQLConfig.Trail keeps a dead letter's trail in.
+    items:
+      - name: sqlTrailColumn
+        type: string
+        value: "\"trail\""
+    name: sqlTrailColumn
+  - doc: |-
       sqlCauseColumnLen is the width of MySQL's reason and cause columns. What a
       dead letter keeps of a failure is bounded to publicMaxRunes runes, at most
       four bytes each.
@@ -456,6 +505,15 @@ constants:
         type: string
         value: "\"queue \""
     name: sqlMigrationPrefix
+  - doc: |-
+      sqlTrailMigrationPrefix starts the name of every migration
+      SQLTrailMigration builds, beside SQLMigration's in the caller's version
+      table.
+    items:
+      - name: sqlTrailMigrationPrefix
+        type: string
+        value: "\"queue trail \""
+    name: sqlTrailMigrationPrefix
   - doc: |-
       sqlOnceSweepRows bounds how many passed reservations one PublishOnce
       removes besides its own key's: enough to outpace the reservations one call
@@ -578,6 +636,7 @@ files:
       - idEntropyBytes
       - leaseEntropyBytes
       - int64Bits
+      - uint32Bits
       - readyFields
       - posAt
       - posDeadEnqueued
@@ -699,13 +758,21 @@ files:
       - reasonLeaseExpired
       - reasonUnreported
       - maxDeadDeliveries
+      - maxDeadTrail
+      - trailSeparator
       - causeValue
       - describeCause
+      - trailCodes
+      - cloneTrail
+      - encodeTrail
+      - decodeTrail
       - checkBatch
       - randomHex
       - checkSize
       - deadLetterNotFound
       - checkDeadLetter
+      - messageField
+      - causeField
       - checkLiveMessage
       - nackDeadline
       - publishVisibleAt
@@ -744,7 +811,6 @@ files:
       - clockRefused
       - (*sqlBroker).failed
       - sqlReceipt.args
-      - causeArgs
       - sqlReceiptValue
       - parseSQLReceipt
       - rowsAffected
@@ -776,12 +842,18 @@ files:
       - sqlRowsPerStatement
       - sqlIDColumnLen
       - sqlLeaseColumnLen
+      - sqlCauseArgs
+      - sqlTrailColumnLen
+      - sqlTrailColumn
       - sqlCauseColumnLen
       - sqlStatements
       - renderSQLStatements
       - sqlHeldBy
       - (*sqlStatements).leaseRows
       - (*sqlStatements).buryRows
+      - (*sqlStatements).causeArgs
+      - (*sqlStatements).putDeadArgs
+      - trailArg
       - sqlOnceStatements
       - renderSQLOnceStatements
       - (*sqlStatements).onceSweepRows
@@ -792,7 +864,9 @@ files:
     name: sql_dialect.go
   - decls:
       - sqlMigrationPrefix
+      - sqlTrailMigrationPrefix
       - SQLMigration
+      - SQLTrailMigration
     name: sql_migration.go
   - decls:
       - sqlOnceSweepRows
@@ -816,6 +890,13 @@ files:
       - (*sqlBroker).finishRows
       - idArgs
     name: sql_receive.go
+  - decls:
+      - trailColumnStatements
+      - renderTrailColumnStatements
+      - trailProbe
+      - trailColumnStatements.step
+      - trailColumnType
+    name: sql_trail.go
   - decls:
       - wakeSignal
       - newWakeSignal
@@ -1058,7 +1139,10 @@ functions:
       dead-letter store is read by whoever is investigating, frequently not the
       process, the host or the trust domain that produced the failure, so it is
       the wrong place for the half of an error the SDK defines as log-only. The
-      message identifier is the join key back to the log line that has it.
+      message identifier is the join key back to the log line that has it. The
+      trail's codes, the dotted-quad halves of the wrappers the cause went
+      through, are public as the code is, and are written on a line of their own
+      only when there are some (issue #500).
     name: encodeDead
     params: name nameValue, cause causeValue, failedAt int64, payload []byte
     results: "[]byte"
@@ -1225,6 +1309,32 @@ functions:
     name: describeCause
     params: cause error
     results: causeValue
+  - doc: |-
+      trailCodes is what a dead letter keeps of an error's trail: its codes as
+      uint32, oldest first, the newest maxDeadTrail when there are more, and nil
+      for none — so a cause with no trail writes nothing a reader must skip.
+    name: trailCodes
+    params: trail []kerrs.Code
+    results: "[]uint32"
+  - doc: |-
+      cloneTrail is a copy of trail a caller cannot rewrite the store's through,
+      nil for an empty one, as every broker reads an empty trail back.
+    name: cloneTrail
+    params: trail []uint32
+    results: "[]uint32"
+  - doc: |-
+      encodeTrail renders a trail as a broker writes it as text: its codes in
+      decimal, oldest first, comma-separated; "" for none.
+    name: encodeTrail
+    params: trail []uint32
+    results: string
+  - doc: |-
+      decodeTrail reads back what encodeTrail wrote. A trail it cannot read
+      whole — a code that is not a uint32, more than maxDeadTrail of them — is
+      read as none: a corrupt field costs its own value and never the record.
+    name: decodeTrail
+    params: text string
+    results: "[]uint32"
   - doc: checkBatch refuses a non-positive batch size.
     name: checkBatch
     params: max int
@@ -1263,6 +1373,18 @@ functions:
     name: checkDeadLetter
     params: dead corequeue.DeadLetterValue, maxBytes int
     results: error
+  - doc: |-
+      messageField names the part of dead's message, its count or its instants
+      that no store keeps as it is given, and reports whether there is one.
+    name: messageField
+    params: dead corequeue.DeadLetterValue
+    results: field string, refused bool
+  - doc: |-
+      causeField names the part of dead's failure no store keeps as it is
+      given, and reports whether there is one.
+    name: causeField
+    params: dead corequeue.DeadLetterValue
+    results: field string, refused bool
   - doc: |-
       checkLiveMessage refuses a live message no broker keeps as it is given
       (core/data/queue.MessageWriter), so the three brokers refuse identical
@@ -1358,13 +1480,6 @@ functions:
     params: now time.Time
     results: error
   - doc: |-
-      causeArgs binds a burial's instant and cause: the instant, the reason, the
-      wire-safe Public half and the code, each bounded as the file broker bounds
-      its record's header.
-    name: causeArgs
-    params: now int64, cause causeValue
-    results: "[]any"
-  - doc: |-
       sqlReceiptValue renders a receipt: the identifier, the delivery count, the
       lease's random half.
     name: sqlReceiptValue
@@ -1390,15 +1505,20 @@ functions:
     name: sqlMisconfigured
     params: setting, problem string
     results: error
-  - doc: scanDeadLetter reads one dead letter's row.
+  - doc: |-
+      scanDeadLetter reads one dead letter's row: its trail too when the
+      statement names the column (SQLConfig.Trail).
     name: scanDeadLetter
-    params: rows scanner
+    params: rows scanner, withTrail bool
     results: corequeue.DeadLetterValue, error
   - doc: |-
       renderSQLStatements renders every fixed statement of the broker keeping its
-      queue in table, on dialect. The table name was validated at NewSQL.
+      queue in table, on dialect; with trail, the statements that write, read and
+      clear a dead letter's cause name the trail column too, and without it they
+      are the statements the broker sent before the column existed. The table
+      name was validated at NewSQL.
     name: renderSQLStatements
-    params: dialect coresql.Dialect, table string
+    params: dialect coresql.Dialect, table string, trail bool
     results: sqlStatements
   - doc: |-
       sqlHeldBy renders the condition that says a receipt still holds its lease:
@@ -1409,6 +1529,12 @@ functions:
     name: sqlHeldBy
     params: dialect coresql.Dialect, first int
     results: string
+  - doc: |-
+      trailArg binds a trail: its text, or NULL for none, as a dead letter buried
+      before the column existed holds.
+    name: trailArg
+    params: trail []uint32
+    results: "[]byte"
   - doc: |-
       renderSQLOnceStatements renders PublishOnce's fixed statements on dialect,
       over q, the queue's quoted table.
@@ -1457,10 +1583,32 @@ functions:
   - name: SQLMigration
     params: dialect coresql.Dialect, table string, version uint64
     results: coresql.MigrationValue, error
+  - name: SQLTrailMigration
+    params: dialect coresql.Dialect, table string, version uint64
+    results: coresql.MigrationValue, error
   - doc: idArgs binds the identifiers of rows.
     name: idArgs
     params: rows []sqlPicked
     results: "[]any"
+  - doc: |-
+      renderTrailColumnStatements renders SQLTrailMigration's statements over
+      table on dialect. The table name was validated by the caller.
+    name: renderTrailColumnStatements
+    params: dialect coresql.Dialect, table string
+    results: trailColumnStatements
+  - doc: |-
+      trailProbe renders the read of a table's columns from catalogue, whose
+      column nameColumn names each: how many there are, and how many of them
+      are the trail column.
+    name: trailProbe
+    params: nameColumn, catalogue string
+    results: string
+  - doc: |-
+      trailColumnType is the trail column's type on dialect: bytes, compared as
+      bytes, NULL for a dead letter with no trail.
+    name: trailColumnType
+    params: dialect coresql.Dialect
+    results: string
   - doc: newWakeSignal returns a signal with its first channel armed.
     name: newWakeSignal
     results: "*wakeSignal"
@@ -3055,8 +3203,9 @@ types:
     name: onceEnd
   - doc: |-
       causeValue is what a dead letter keeps of the failure that produced it:
-      the SCREAMING_SNAKE reason, the wire-safe Public half, and the dotted-quad
-      code.
+      the SCREAMING_SNAKE reason, the wire-safe Public half, the dotted-quad
+      code, and the codes its wraps added — the trail, where a sentinel a wrapper
+      added stays readable once the origin's code is all the rest says.
 
       It is deliberately NOT the error. An error cannot be written to a device
       and read back as itself, and the half of it that could be — the Private
@@ -3068,6 +3217,8 @@ types:
         type: string
       - name: public
         type: string
+      - name: trail
+        type: "[]uint32"
       - name: code
         type: uint32
     kind: struct
@@ -3551,6 +3702,15 @@ types:
           broker speaks to it.
         name: Dialect
         type: coresql.Dialect
+      - doc: |-
+          Trail makes the broker keep a dead letter's trail
+          (core/data/queue.DeadLetterValue.Trail) in the table's trail column,
+          which [SQLMigration] creates and [SQLTrailMigration] adds to a table an
+          earlier SQLMigration created: run that migration before setting it.
+          Unset, the broker sends the statements it sent before the column
+          existed, and a dead letter it buries or reads has no trail.
+        name: Trail
+        type: bool
     kind: struct
     methods:
       - doc: |-
@@ -3681,6 +3841,11 @@ types:
       - doc: dialect selects the placeholder grammar of the per-call ones.
         name: dialect
         type: coresql.Dialect
+      - doc: |-
+          trail is SQLConfig.Trail: every burial writes the trail column, the
+          dead-letter read returns it, a replay clears it.
+        name: trail
+        type: bool
     kind: struct
     methods:
       - doc: |-
@@ -3692,11 +3857,29 @@ types:
         results: string
       - doc: |-
           buryRows renders the burial of n rows whose leases lapsed with no attempt
-          left: dead, with the failure's instant and cause.
+          left: dead, with the failure's instant and cause — and its trail, with
+          SQLConfig.Trail, so no trail an earlier death left survives this one.
         name: buryRows
         params: n int
         recv: s *sqlStatements
         results: string
+      - doc: |-
+          causeArgs binds a burial's instant and cause: the instant, the reason, the
+          wire-safe Public half and the code, each bounded as the file broker bounds
+          its record's header, then — with SQLConfig.Trail — the trail, NULL for
+          none.
+        name: causeArgs
+        params: now int64, cause causeValue
+        recv: s *sqlStatements
+        results: "[]any"
+      - doc: |-
+          putDeadArgs binds PutDeadLetter's insertion of dead under id: the row's
+          identifier, instants, count and payload, then its cause, as given — with
+          SQLConfig.Trail, its trail last.
+        name: putDeadArgs
+        params: id string, dead corequeue.DeadLetterValue
+        recv: s *sqlStatements
+        results: "[]any"
       - doc: |-
           onceSweepRows renders the removal of n passed reservations, picked by
           oncePick: still reservations, and still passed at the instant bound first.
@@ -3782,6 +3965,39 @@ types:
       	// Close releases the rows.
       	Close() error
       }
+  - doc: |-
+      trailColumnStatements are the statements SQLTrailMigration sends to add
+      the trail column to a queue's table, or to drop it, on one dialect.
+
+      PostgreSQL says "only when it is (not) there" in the statement itself.
+      SQLite and MySQL have no IF EXISTS nor IF NOT EXISTS on a column, so the
+      migration reads the table's columns from the catalogue first — with the
+      table's name bound, never interpolated — and sends the ALTER only when it
+      changes something: a run that MySQL's implicit commit stopped after its ALTER, a
+      table SQLMigration created with the column, and a table not created yet
+      all leave nothing to do.
+    fields:
+      - doc: |-
+          probe counts the table's columns and, among them, the trail column:
+          (0, 0) for no table. Empty on PostgreSQL.
+        name: probe
+        type: string
+      - doc: add adds the column.
+        name: add
+        type: string
+      - doc: drop drops it.
+        name: drop
+        type: string
+    kind: struct
+    methods:
+      - doc: |-
+          step is SQLTrailMigration's Up — the column added — or, with drop, its
+          Down — the column dropped —, each only where it changes something.
+        name: step
+        params: table string, drop bool
+        recv: s trailColumnStatements
+        results: coresql.Step
+    name: trailColumnStatements
   - doc: |-
       wakeSignal is a broadcast: every consumer waiting on the channel wakes when
       it is closed, and a fresh channel is armed for the next wait. A channel

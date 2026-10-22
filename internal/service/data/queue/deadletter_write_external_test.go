@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -36,7 +37,8 @@ func writer(t *testing.T, broker corequeue.Broker) corequeue.DeadLetterWriter {
 
 // recordedElsewhere are dead letters as another broker recorded them: a death
 // by expired leases with no code, a cause that was no SDK error, an SDK
-// error's three halves, an empty payload, and bytes that are no text.
+// error's three halves and its trail, an empty payload, and bytes that are no
+// text with the longest trail a broker keeps (issue #500).
 func recordedElsewhere() []corequeue.DeadLetterValue {
 	enqueued := epoch.Add(-48 * time.Hour)
 	return []corequeue.DeadLetterValue{
@@ -52,7 +54,7 @@ func recordedElsewhere() []corequeue.DeadLetterValue {
 			Message:  corequeue.MessageValue{Payload: []byte(`{"order":42}`), EnqueuedAt: enqueued.Add(2 * time.Second)},
 			FailedAt: enqueued.Add(3 * time.Hour), Deliveries: 1,
 			Reason: "NOT_RETRYABLE", Cause: "The message cannot be processed and was dead-lettered without a retry",
-			Code: uint32(corequeue.CodeNotRetryable),
+			Code: uint32(corequeue.CodeNotRetryable), Trail: []uint32{0x00_05_01_03, uint32(corequeue.CodeNotRetryable)},
 		},
 		{
 			Message:  corequeue.MessageValue{EnqueuedAt: enqueued.Add(3 * time.Second)},
@@ -61,6 +63,7 @@ func recordedElsewhere() []corequeue.DeadLetterValue {
 		{
 			Message:  corequeue.MessageValue{Payload: []byte{0, 0xff, '\n', '\n', 0x80}, EnqueuedAt: enqueued.Add(4 * time.Second)},
 			FailedAt: enqueued.Add(5 * time.Hour), Deliveries: 7, Reason: "CUSTOM", Code: 0x00_05_01_02,
+			Trail: []uint32{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, math.MaxUint32},
 		},
 	}
 }
@@ -83,6 +86,8 @@ func sameDeadLetter(got, want corequeue.DeadLetterValue) string {
 		return "Cause"
 	case got.Code != want.Code:
 		return "Code"
+	case !slices.Equal(got.Trail, want.Trail) || (want.Trail == nil) != (got.Trail == nil):
+		return "Trail"
 	}
 	return ""
 }
@@ -191,6 +196,7 @@ func TestPutDeadLetterRefusesWhatNoStoreKeepsAsGiven(t *testing.T) {
 		{field: "Reason", change: func(d *corequeue.DeadLetterValue) { d.Reason = strings.Repeat("R", 121) }},
 		{field: "Cause", change: func(d *corequeue.DeadLetterValue) { d.Cause = "a carriage\rreturn" }},
 		{field: "Cause", change: func(d *corequeue.DeadLetterValue) { d.Cause = strings.Repeat("é", 121) }},
+		{field: "Trail", change: func(d *corequeue.DeadLetterValue) { d.Trail = make([]uint32, 17) }},
 	}
 	for _, factory := range everyBroker() {
 		t.Run(factory.name, func(t *testing.T) {

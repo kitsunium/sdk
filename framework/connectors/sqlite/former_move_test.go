@@ -58,6 +58,7 @@ func TestAFormerReleasesDataIsMovedAndReadAsItWas(t *testing.T) {
 					t.Fatalf("the moved tables: %v", slices.Sorted(maps.Keys(moved)))
 				}
 				sameTablesMoved(t, tables, moved)
+				trailMigrated(t, dir, "app_tables", "app_queue__atelier__post")
 				for _, name := range catalogueOf(t, dir) {
 					if strings.Contains(name, "kit") {
 						t.Errorf("the database still names %s", name)
@@ -217,6 +218,7 @@ func TestTheMoveIsUndoneByRenamingBack(t *testing.T) {
 	if err := os.Rename(filepath.Join(dir, "app.privacy"), filepath.Join(dir, "kit.privacy")); err != nil {
 		t.Fatal(err)
 	}
+	trailMigrated(t, dir, "kit_tables", "kit_queue__atelier__post")
 	if got := tablesOf(t, dir); !maps.EqualFunc(got, tables, slices.Equal) {
 		for _, table := range slices.Sorted(maps.Keys(tables)) {
 			if !slices.Equal(got[table], tables[table]) {
@@ -425,6 +427,11 @@ func openMain(t *testing.T, dir string) *sql.DB {
 
 // tablesOf is every table of the data directory's SQLite file, each row its
 // columns in hex, sorted; none without a file.
+//
+// What this release adds to a former release's tables beside the move is
+// left out, and held by trailMigrated: the trail column the queue's dead
+// letters keep their trails in (kitsunium/sdk#500) — its value, and its
+// migration's row in the history and the registry.
 func tablesOf(t *testing.T, dir string) map[string][]string {
 	t.Helper()
 	db := openMain(t, dir)
@@ -452,11 +459,15 @@ func tablesOf(t *testing.T, dir string) map[string][]string {
 			if err := rows.Scan(ptrs...); err != nil {
 				t.Fatal(err)
 			}
-			parts := make([]string, len(vals))
+			parts := make([]string, 0, len(vals))
 			for i, v := range vals {
-				parts[i] = hex.EncodeToString(asBytes(v))
+				if cols[i] != "trail" {
+					parts = append(parts, hex.EncodeToString(asBytes(v)))
+				}
 			}
-			out[table] = append(out[table], strings.Join(parts, "|"))
+			if !addedForTrails(parts) {
+				out[table] = append(out[table], strings.Join(parts, "|"))
+			}
 		}
 		if err := rows.Close(); err != nil {
 			t.Fatal(err)
@@ -464,6 +475,39 @@ func tablesOf(t *testing.T, dir string) map[string][]string {
 		slices.Sort(out[table])
 	}
 	return out
+}
+
+// addedForTrails reports whether a row of a table is the registry's or the
+// history's record of a queue's trail migration: its key ends with #trail, or
+// its name opens with "queue trail ".
+func addedForTrails(parts []string) bool {
+	for _, part := range parts[:min(2, len(parts))] {
+		b, err := hex.DecodeString(part)
+		if err == nil && (bytes.HasSuffix(b, []byte("#trail")) || bytes.HasPrefix(b, []byte(`"queue trail `))) {
+			return true
+		}
+	}
+	return false
+}
+
+// trailMigrated holds what tablesOf leaves out once this release migrated
+// dir's database: the queue table has the trail column, and the registry
+// records its migration under the table's name and #trail (kitsunium/sdk#500).
+func trailMigrated(t *testing.T, dir, registry, queue string) {
+	t.Helper()
+	db := openMain(t, dir)
+	defer db.Close()
+	var columns int
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = 'trail'`, queue).Scan(&columns); err != nil {
+		t.Fatal(err)
+	}
+	var records int
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM "`+registry+`" WHERE doc_key = ?`, []byte(queue+"#trail")).Scan(&records); err != nil {
+		t.Fatal(err)
+	}
+	if columns != 1 || records != 1 {
+		t.Errorf("%s: %d trail column(s), %d registry record(s) of its migration; want 1 and 1", queue, columns, records)
+	}
 }
 
 // asBytes is a column's value as bytes: a blob as it is, anything else as

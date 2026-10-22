@@ -22048,8 +22048,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/data/queue",
       "name": "DeadLetterValue",
-      "spelled": "struct{FailedAt time.Time; Reason string; Cause string; Message MessageValue; Code uint32; Deliveries int}",
-      "canonical": "struct{FailedAt time.Time; Reason string; Cause string; Message github.com/kitsunium/sdk/internal/core/data/queue.MessageValue; Code uint32; Deliveries int}",
+      "spelled": "struct{FailedAt time.Time; Reason string; Cause string; Message MessageValue; Trail []uint32; Code uint32; Deliveries int}",
+      "canonical": "struct{FailedAt time.Time; Reason string; Cause string; Message github.com/kitsunium/sdk/internal/core/data/queue.MessageValue; Trail []uint32; Code uint32; Deliveries int}",
       "fields": [
         {
           "name": "FailedAt",
@@ -22070,6 +22070,11 @@
           "name": "Message",
           "type": "MessageValue",
           "doc": "Message is the work, unmodified, with the identifier it was published\nunder.\n"
+        },
+        {
+          "name": "Trail",
+          "type": "[]uint32",
+          "doc": "Trail is the dotted-quad codes the last failure gathered as it was\nwrapped, oldest first — errs.TrailOf of the cause, whose origin is\nCode and not repeated here —, at most sixteen, the newest kept when\nthere were more. It is what tells a failure apart once its process\nis gone: a mail spool's SEND_REFUSED is a rejected mail when the\nspool added MAIL_REJECTED to its trail, and a dead letter keeps that\ncode where its Reason and Cause keep only the origin's. Nil when the\ncause gathered none, for a dead letter written before the field\nexisted, and on an SQL broker whose SQLConfig.Trail is not set.\nLike Code, each entry is a uint32: errs.Code(dl.Trail[i]) converts.\n"
         },
         {
           "name": "Code",
@@ -22107,7 +22112,7 @@
       "recv": "DeadLetterWriter",
       "spelled": "func(ctx context.Context, dead DeadLetterValue) (string, error)",
       "canonical": "func(ctx context.Context, dead github.com/kitsunium/sdk/internal/core/data/queue.DeadLetterValue) (string, error)",
-      "doc": "PutDeadLetter writes dead into the dead-letter store and returns the\nidentifier the broker minted for it. Everything else is kept as given:\nthe payload, the enqueue instant, the failure instant, the delivery\ncount, the reason, the cause and the code — 0 included, the code of a\nfailure that carried none. What [DeadLetterReader.DeadLetters] then\nreturns of it equals dead but for the identifier, and\n[DeadLetterManager] acts on it as on any other dead letter.\n\ndead.Message.ID must be empty: the identifier is the broker's to mint,\nas [Broker.Publish] mints it, and one a caller set would not be kept.\ndead is refused with [InvalidDeadLetter] — the \"field\" field naming\nwhich — when its Deliveries is below one or above 2147483647, when an\ninstant lies outside what a durable broker records (1970 to 2262), or\nwhen its Reason or Cause is longer than 120 runes or holds a line\nbreak; a payload above [PolicyValue.MaxMessageBytes] is\n[MessageTooLarge]. A refused dead letter writes nothing.\n\nIt is never delivered and wakes no consumer. A broker that joins the\ntransaction ctx carries (ADR 0151) writes it in that transaction, so\nit exists if and only if the transaction commits.\n",
+      "doc": "PutDeadLetter writes dead into the dead-letter store and returns the\nidentifier the broker minted for it. Everything else is kept as given:\nthe payload, the enqueue instant, the failure instant, the delivery\ncount, the reason, the cause, the code — 0 included, the code of a\nfailure that carried none — and the trail, which an SQL broker\nwithout SQLConfig.Trail does not keep. What\n[DeadLetterReader.DeadLetters] then returns of it equals dead but for\nthe identifier — an empty trail read back nil —, and\n[DeadLetterManager] acts on it as on any other dead letter.\n\ndead.Message.ID must be empty: the identifier is the broker's to mint,\nas [Broker.Publish] mints it, and one a caller set would not be kept.\ndead is refused with [InvalidDeadLetter] — the \"field\" field naming\nwhich — when its Deliveries is below one or above 2147483647, when an\ninstant lies outside what a durable broker records (1970 to 2262),\nwhen its Reason or Cause is longer than 120 runes or holds a line\nbreak, or when its Trail holds more than sixteen codes; a payload\nabove [PolicyValue.MaxMessageBytes] is [MessageTooLarge]. A refused\ndead letter writes nothing.\n\nIt is never delivered and wakes no consumer. A broker that joins the\ntransaction ctx carries (ADR 0151) writes it in that transaction, so\nit exists if and only if the transaction commits.\n",
       "file": "core/data/queue/gen_ports.go",
       "layer": "core",
       "family": "data"
@@ -22274,7 +22279,7 @@
         "reason": "INVALID_DEAD_LETTER",
         "public": "The dead letter cannot be written as it was given"
       },
-      "doc": "InvalidDeadLetter refuses a dead letter [DeadLetterWriter.PutDeadLetter]\ncannot write as it was given: an identifier set by the caller, which the\nbroker mints; a delivery count below one or above what a durable broker\nrecords; an enqueue or failure instant outside 1970 to 2262; a reason or\ncause longer than 120 runes or holding a line break, which every store\nwould otherwise cut. The \"field\" field names which value. Nothing was\nwritten.\n\nIt refuses rather than corrects, because a copy that silently changed\nwhat it copies is the one outcome a copy must never have.\n",
+      "doc": "InvalidDeadLetter refuses a dead letter [DeadLetterWriter.PutDeadLetter]\ncannot write as it was given: an identifier set by the caller, which the\nbroker mints; a delivery count below one or above what a durable broker\nrecords; an enqueue or failure instant outside 1970 to 2262; a reason or\ncause longer than 120 runes or holding a line break, which every store\nwould otherwise cut; a trail of more than sixteen codes. The \"field\"\nfield names which value. Nothing was written.\n\nIt refuses rather than corrects, because a copy that silently changed\nwhat it copies is the one outcome a copy must never have.\n",
       "file": "core/data/queue/gen_codes.go",
       "layer": "core",
       "family": "data"
@@ -51799,8 +51804,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/mail/spool",
       "name": "DeadLetterValue",
-      "spelled": "struct{Meta map[string]string; FailedAt time.Time; QueuedAt time.Time; ID string; QueueID string; Reason string; Cause string; Message coremail.MessageValue; Attempts int; Code uint32}",
-      "canonical": "struct{Meta map[string]string; FailedAt time.Time; QueuedAt time.Time; ID string; QueueID string; Reason string; Cause string; Message github.com/kitsunium/sdk/internal/core/app/mail.MessageValue; Attempts int; Code uint32}",
+      "spelled": "struct{Meta map[string]string; FailedAt time.Time; QueuedAt time.Time; ID string; QueueID string; Reason string; Cause string; Message coremail.MessageValue; Trail []uint32; Attempts int; Code uint32}",
+      "canonical": "struct{Meta map[string]string; FailedAt time.Time; QueuedAt time.Time; ID string; QueueID string; Reason string; Cause string; Message github.com/kitsunium/sdk/internal/core/app/mail.MessageValue; Trail []uint32; Attempts int; Code uint32}",
       "fields": [
         {
           "name": "Meta",
@@ -51841,6 +51846,11 @@
           "name": "Message",
           "type": "coremail.MessageValue",
           "doc": "Message is the mail, as it was spooled.\n"
+        },
+        {
+          "name": "Trail",
+          "type": "[]uint32",
+          "doc": "Trail is the codes the last failure gathered as it was wrapped, oldest\nfirst, as the queue kept them: CodeMailRejected or CodeMailExpired\nwhen that is why the spool gave the mail up and the transport's\nfailure, an SDK error, stayed the origin — Code then holds the\ntransport's code. Nil when the queue kept none.\n"
         },
         {
           "name": "Attempts",
@@ -58564,8 +58574,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/data/queue",
       "name": "SQLConfig",
-      "spelled": "struct{Transactor coresql.Transactor; Clock clock.Clock; Table string; Policy corequeue.PolicyValue; Dialect coresql.Dialect}",
-      "canonical": "struct{Transactor github.com/kitsunium/sdk/internal/core/data/sql.Transactor; Clock github.com/kitsunium/sdk/internal/kernel/clock.Clock; Table string; Policy github.com/kitsunium/sdk/internal/core/data/queue.PolicyValue; Dialect github.com/kitsunium/sdk/internal/core/data/sql.Dialect}",
+      "spelled": "struct{Transactor coresql.Transactor; Clock clock.Clock; Table string; Policy corequeue.PolicyValue; Dialect coresql.Dialect; Trail bool}",
+      "canonical": "struct{Transactor github.com/kitsunium/sdk/internal/core/data/sql.Transactor; Clock github.com/kitsunium/sdk/internal/kernel/clock.Clock; Table string; Policy github.com/kitsunium/sdk/internal/core/data/queue.PolicyValue; Dialect github.com/kitsunium/sdk/internal/core/data/sql.Dialect; Trail bool}",
       "fields": [
         {
           "name": "Transactor",
@@ -58591,6 +58601,11 @@
           "name": "Dialect",
           "type": "coresql.Dialect",
           "doc": "Dialect is the engine's, and must be the Transactor's own: the SQL the\nbroker speaks to it.\n"
+        },
+        {
+          "name": "Trail",
+          "type": "bool",
+          "doc": "Trail makes the broker keep a dead letter's trail\n(core/data/queue.DeadLetterValue.Trail) in the table's trail column,\nwhich [SQLMigration] creates and [SQLTrailMigration] adds to a table an\nearlier SQLMigration created: run that migration before setting it.\nUnset, the broker sends the statements it sent before the column\nexisted, and a dead letter it buries or reads has no trail.\n"
         }
       ],
       "doc": "SQLConfig configures [NewSQL]: the database the queue lives in, its table,\nwhich clock stamps its instants, and what delivery discipline it enforces.\nTransactor, Dialect and Table are required, and Policy's zero value is\nrefused as it is for every broker.\n",
@@ -58605,7 +58620,19 @@
       "name": "SQLMigration",
       "spelled": "func(dialect coresql.Dialect, table string, version uint64) (coresql.MigrationValue, error)",
       "canonical": "func(dialect github.com/kitsunium/sdk/internal/core/data/sql.Dialect, table string, version uint64) (github.com/kitsunium/sdk/internal/core/data/sql.MigrationValue, error)",
-      "doc": "SQLMigration returns the migration that creates the one table an SQL queue\nnamed table keeps on dialect, as a core/data/sql MigrationValue numbered version,\nfor the caller's Migrator to run under the caller's version table. Its Down\ndrops the table, and every message in it — queued, leased and dead.\n\nThe SDK numbers nothing: a migration is a value its consumer constructs\n(ADR 0055 §D12), and only the consumer knows where the queue's table sits in\nits own history. Its one statement does nothing when the table already\nexists — or is already gone — so applying it over a table a previous\ndeployment made changes nothing (ADR 0151).\n",
+      "doc": "SQLMigration returns the migration that creates the one table an SQL queue\nnamed table keeps on dialect, as a core/data/sql MigrationValue numbered version,\nfor the caller's Migrator to run under the caller's version table. Its Down\ndrops the table, and every message in it — queued, leased and dead.\n\nThe SDK numbers nothing: a migration is a value its consumer constructs\n(ADR 0055 §D12), and only the consumer knows where the queue's table sits in\nits own history. Its one statement does nothing when the table already\nexists — or is already gone — so applying it over a table a previous\ndeployment made changes nothing (ADR 0151). The table it creates has the\ntrail column SQLConfig.Trail writes; one an earlier release created gets\nit from [SQLTrailMigration].\n",
+      "file": "service/data/queue/sql_migration.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/queue.SQLTrailMigration",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/data/queue",
+      "name": "SQLTrailMigration",
+      "spelled": "func(dialect coresql.Dialect, table string, version uint64) (coresql.MigrationValue, error)",
+      "canonical": "func(dialect github.com/kitsunium/sdk/internal/core/data/sql.Dialect, table string, version uint64) (github.com/kitsunium/sdk/internal/core/data/sql.MigrationValue, error)",
+      "doc": "SQLTrailMigration returns the migration that adds the nullable trail\ncolumn, where a broker with SQLConfig.Trail keeps a dead letter's trail,\nto the table an SQL queue named table keeps on dialect, as a\ncore/data/sql MigrationValue numbered version, beside the one\n[SQLMigration] returns. The rows already there keep their columns as\nthey are, and their dead letters read back with no trail.\n\nIt does nothing when the table has the column — SQLMigration creates it\nwith one — or when there is no table, so it may run before or after\nSQLMigration and twice over one table. Its Down drops the column, and\nevery trail in it, when the table has one: unset SQLConfig.Trail before\nrunning it. SQLite drops a column from version 3.35 on.\n",
       "file": "service/data/queue/sql_migration.go",
       "layer": "service",
       "family": "data"
