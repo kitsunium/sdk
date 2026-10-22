@@ -965,8 +965,11 @@ files:
       - (*MemoryTransport).Stream
       - (*MemoryTransport).Bind
       - (*MemoryTransport).run
+      - (*MemoryTransport).deliverFrame
       - (*MemoryTransport).BindJoinReason
       - (*MemoryTransport).SetMembership
+      - (*MemoryTransport).releaseJoinAnswer
+      - (*MemoryNetwork).admitted
       - (*MemoryTransport).Join
       - (*MemoryNetwork).othersThan
       - memSPKI
@@ -4511,6 +4514,14 @@ types:
         type: map[coreconsensus.NodeID]*MemoryTransport
       - name: cut
         type: map[[2]coreconsensus.NodeID]bool
+      - doc: |-
+          admission, set by the package's own tests before any node starts,
+          models the TCP transport's: a frame or a snapshot is delivered only
+          between nodes each of which admits the other, under its own
+          configuration, by ID and pinned key (D4). Off, as the double has
+          always run, every node reaches every other (#542).
+        name: admission
+        type: bool
     kind: struct
     methods:
       - name: Cut
@@ -4526,6 +4537,13 @@ types:
         params: from, to coreconsensus.NodeID
         recv: n *MemoryNetwork
         results: "*MemoryTransport"
+      - doc: |-
+          admitted reports whether at admits peer: always without the admission
+          model, else when one of its admitted members is peer under peer's key.
+        name: admitted
+        params: at *MemoryTransport, peer coreconsensus.NodeID
+        recv: n *MemoryNetwork
+        results: bool
       - doc: othersThan is every transport of the network but self's, in map order.
         name: othersThan
         params: self coreconsensus.NodeID
@@ -4562,6 +4580,9 @@ types:
         type: chan memFrame
       - name: cur
         type: "*memRun"
+      - doc: groups are the admitted members per group, members their union.
+        name: groups
+        type: map[coreconsensus.GroupID][]coreconsensus.MemberValue
       - name: members
         type: "[]coreconsensus.MemberValue"
     kind: struct
@@ -4589,11 +4610,24 @@ types:
         name: run
         params: r *memRun
         recv: t *MemoryTransport
+      - doc: |-
+          deliverFrame hands one frame to the bound deliver callback, unless the
+          admission model is on and this node does not admit its sender: the TCP
+          transport closes the connection of a key it does not admit, and the
+          frame never reaches the node.
+        name: deliverFrame
+        params: f memFrame
+        recv: t *MemoryTransport
       - name: BindJoinReason
         params: _ coreconsensus.GroupID, join func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code, string)
         recv: t *MemoryTransport
       - name: SetMembership
-        params: _ coreconsensus.GroupID, admitted []coreconsensus.MemberValue
+        params: group coreconsensus.GroupID, admitted []coreconsensus.MemberValue
+        recv: t *MemoryTransport
+      - doc: |-
+          releaseJoinAnswer drops the JOIN answer's group once the node is
+          admitted, as the TCP transport does (#552).
+        name: releaseJoinAnswer
         recv: t *MemoryTransport
       - name: Join
         params: ctx context.Context, cfg coreconsensus.JoinConfig
@@ -7211,6 +7245,9 @@ vars:
       - name: _
         type: joinReleaser
         value: (*TCPTransport)(nil)
+      - name: _
+        type: joinReleaser
+        value: (*MemoryTransport)(nil)
       - name: _
         type: |-
           interface {

@@ -76,7 +76,7 @@ sequences:
       - return: FrameLane(k >> 6)
   - of: MessageKind.Known
     steps:
-      - return: (k >= MsgPreVote && k <= MsgForwardAdminResp) || (k >= MsgApp && k <= MsgForwardResp)
+      - return: (k >= MsgPreVote && k <= MsgLeaderRecord) || (k >= MsgApp && k <= MsgForwardResp)
   - of: Role.String
     steps:
       - switch:

@@ -114,6 +114,17 @@ constants:
         name: MsgForwardAdminResp
         type: MessageKind
         value: "0x0B"
+      - doc: |-
+          MsgLeaderRecord, of protocol version 2, tells a member that campaigns
+          behind the sender's commit the member record of the leader the sender
+          follows, read from the sender's committed configuration: a voter that
+          was down while that leader was admitted pins it provisionally, for
+          replication only, and learns its configuration from it (ADR 0152 D4,
+          #542). Its one entry's data is that record, as AppendMembership
+          encodes a configuration of one member.
+        name: MsgLeaderRecord
+        type: MessageKind
+        value: "0x0C"
       - doc: MsgApp appends entries after (LogTerm, Index).
         name: MsgApp
         type: MessageKind

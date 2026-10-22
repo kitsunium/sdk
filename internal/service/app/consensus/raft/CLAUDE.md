@@ -91,3 +91,7 @@ under coverage before touching `shard_count`.
   leader writes the authenticated sender, a forwarder or itself (#561,
   `mutOriginAsWritten`). Skip an engine entry whose payload version this
   node does not know: it stops the node (`TestAnUnknownAdminVersionStopsTheNode`).
+- Accept from a leader admitted by a `MsgLeaderRecord` alone anything but
+  its appends and heartbeats, or take a record from a non-member, at an
+  older term, for a known or retired ID, or while a leader is live (#542,
+  `mutHintAnyKind`, `TestALeaderRecordIsBoundedAndEnds`).

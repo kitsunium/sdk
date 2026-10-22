@@ -54,6 +54,14 @@ constants:
         type: errs.Code
         value: core.CodeConsensusMisconfigured
     name: maxFwdAnswers
+  - doc: |-
+      hintElectionTimeouts is how many maximum election timeouts a vouched-for
+      leader stays admitted with no configuration of this node listing it.
+    items:
+      - name: hintElectionTimeouts
+        type: time.Duration
+        value: "4"
+    name: hintElectionTimeouts
   - grouped: true
     items:
       - doc: |-
@@ -194,6 +202,10 @@ constants:
           mutOriginAsWritten keeps the admin payload the proposer wrote, with
           no origin the leader authenticated (#561).
         name: mutOriginAsWritten
+      - doc: |-
+          mutHintAnyKind accepts every kind of message from a leader admitted
+          by a leader record alone, a vote included (#542).
+        name: mutHintAnyKind
     name: mutAckBeforeSync
   - doc: The facts a PeerStatValue carries.
     grouped: true
@@ -359,6 +371,19 @@ files:
       - (*Raft).dropConfsThrough
       - ownCopy
     name: leader.go
+  - decls:
+      - hintElectionTimeouts
+      - (*Raft).stepLeaderRecord
+      - (*Raft).sendLeaderRecord
+      - (*Raft).takeLeaderRecord
+      - (*Raft).mayTakeRecord
+      - (*Raft).hearsLeader
+      - recordOf
+      - (*Raft).knows
+      - (*Raft).hintedOnly
+      - (*Raft).endHintOnConf
+      - (*Raft).endHintOnTimeout
+    name: leaderrecord.go
   - decls:
       - memLog
       - (*memLog).lastIndex
@@ -529,6 +554,13 @@ functions:
     name: ownCopy
     params: b []byte
     results: "[]byte"
+  - doc: |-
+      recordOf reads the one member record a MsgLeaderRecord carries, refused
+      when the entry's body does not match its checksum, when it is not one
+      record, or when the record has no ID or no pinned key.
+    name: recordOf
+    params: m *core.MessageValue
+    results: core.MemberValue, bool
   - doc: statFlag is x when on, else nothing.
     name: statFlag
     params: x PeerStatFlags, on bool
@@ -1040,6 +1072,11 @@ types:
         name: Membership
         type: "[]core.MemberValue"
       - doc: |-
+          LeaderHint is the leader a member vouched for in a MsgLeaderRecord,
+          admitted provisionally in Membership, for the driver to log (#542).
+        name: LeaderHint
+        type: core.MemberValue
+      - doc: |-
           Unsupported names an entry whose kind this version does not know:
           the driver stops the node with VERSION_UNSUPPORTED.
         name: Unsupported
@@ -1161,6 +1198,15 @@ types:
           handed again only when it changes (#531).
         name: admittedPub
         type: "[]core.MemberValue"
+      - doc: |-
+          hint is the leader a member vouched for in a MsgLeaderRecord while
+          this node knew no leader, admitted at the transport for replication
+          only until hintUntil, until a configuration of this node lists it, or
+          retires it (#542). Its ID is 0 when there is none.
+        name: hint
+        type: core.MemberValue
+      - name: hintUntil
+        type: time.Time
       - name: prs
         type: map[core.NodeID]*progress
       - name: votes
@@ -1684,6 +1730,83 @@ types:
           which the snapshot base now carries, keeping the slice's storage.
         name: dropConfsThrough
         params: index uint64
+        recv: r *Raft
+      - doc: |-
+          stepLeaderRecord runs the admission of a stale voter (ADR 0152 D4, #542)
+          before anything else reads m, and reports whether m was consumed.
+
+          A voter that was down while a member was admitted, promoted and handed
+          the leadership comes back with a configuration that does not list it:
+          its transport cut that leader's appends, the members it knows were
+          followers and sent it nothing, and it stayed pre-candidate for as long as
+          that leader led. A follower that hears its PreVote while it follows a
+          live leader now answers with that leader's record, and the voter admits
+          it for replication only.
+
+          A MsgLeaderRecord is consumed here and moves no term. A message from a
+          member admitted only by such a record is consumed, dropped, unless it is
+          an append or a heartbeat: the record vouches for replication, never for a
+          vote, a transfer, a read or a forward.
+        name: stepLeaderRecord
+        params: now time.Time, m core.MessageValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          sendLeaderRecord answers a PreVote from a member that campaigns behind
+          this node's commit, while this node follows a live leader, with that
+          leader's record read from the committed configuration. Only once the
+          cluster version is 2: a node of protocol 1 does not know the kind.
+        name: sendLeaderRecord
+        params: now time.Time, m core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          takeLeaderRecord admits the leader a member vouched for, provisionally:
+          only while this node knows no live leader, from a member of its own
+          configuration, at a term at least its own, for a key that is pinned and
+          an ID this node neither knows as a member nor retired. The transport
+          still checks at the handshake that the key is the cluster CA's.
+        name: takeLeaderRecord
+        params: now time.Time, m core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          mayTakeRecord reports whether this node takes a record now: it knows no
+          live leader and does not lead, and the record comes from a member of its
+          configuration at a term at least its own.
+        name: mayTakeRecord
+        params: now time.Time, m core.MessageValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          hearsLeader reports whether this node heard its leader within the
+          minimum election timeout.
+        name: hearsLeader
+        params: now time.Time
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          knows reports whether id is a member or a retired ID of the latest or the
+          committed configuration: a record never replaces what this node's own
+          log says of it.
+        name: knows
+        params: id core.NodeID
+        recv: r *Raft
+        results: bool
+      - doc: hintedOnly reports whether id is admitted by a leader record alone.
+        name: hintedOnly
+        params: id core.NodeID
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          endHintOnConf ends the provisional admission once a configuration of
+          this node lists the vouched-for leader, which admits it as any member, or
+          retires it.
+        name: endHintOnConf
+        recv: r *Raft
+      - doc: |-
+          endHintOnTimeout ends the provisional admission once its delay passed
+          with no configuration of this node listing the leader.
+        name: endHintOnTimeout
+        params: now time.Time
         recv: r *Raft
       - doc: |-
           mutated reports whether a test switched mutation m on; it is false in every

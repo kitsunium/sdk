@@ -1936,6 +1936,203 @@ sequences:
           when: len(b) == 0
       - return: slices.Clone(b)
         to: slices
+  - of: (*Raft).stepLeaderRecord
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).stepLeaderRecord
+        kind: self
+      - id: r.takeLeaderRecord
+        kind: internal
+      - id: r.sendLeaderRecord
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: m.Kind == core.MsgLeaderRecord
+              do:
+                - eval: r.takeLeaderRecord(now, m)
+                  to: r.takeLeaderRecord
+                - return: "true"
+            - case: m.Kind == core.MsgPreVote
+              do:
+                - eval: r.sendLeaderRecord(now, m)
+                  to: r.sendLeaderRecord
+                - return: "false"
+            - case: r.hintedOnly(m.From)
+              do:
+                - return: m.Kind != core.MsgApp && m.Kind != core.MsgHeartbeat && !r.mutated(mutHintAnyKind)
+            - default: true
+              do:
+                - return: "false"
+  - of: (*Raft).sendLeaderRecord
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).sendLeaderRecord
+        kind: self
+      - id: r.conf().Member
+        kind: value
+      - id: r.confAt(r.log.committed).Member
+        kind: value
+      - id: wire
+        kind: package
+      - id: r.send
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: |-
+            r.clusterVer < Protocol2 || r.role == core.RoleLeader || r.lead == 0 || r.lead == m.From ||
+            		r.lastLeaderContact.IsZero() || now.Sub(r.lastLeaderContact) >= r.voteWindow || m.Index >= r.log.committed
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: _, ok
+            eval: r.conf().Member(m.From)
+            to: r.conf().Member
+          when: "!ok"
+      - bind: rec, ok
+        eval: r.confAt(r.log.committed).Member(r.lead)
+        to: r.confAt(r.log.committed).Member
+      - opt:
+          do:
+            - return: ""
+          when: "!ok"
+      - bind: data
+        eval: "wire.AppendMembership(nil, &core.MembershipValue{Members: []core.MemberValue{rec}})"
+        to: wire
+      - eval: |-
+          r.send(core.MessageValue{
+          		Kind: core.MsgLeaderRecord, To: m.From, Index: r.log.committed,
+          		Entries: []core.EntryValue{{Kind: core.EntryMembership, BodySum: wire.BodySum(data), Data: data}},
+          	})
+        to: r.send
+  - of: (*Raft).takeLeaderRecord
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).takeLeaderRecord
+        kind: self
+      - id: recordOf
+        kind: internal
+      - id: r.publishAdmitted
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!r.mayTakeRecord(now, m)"
+      - bind: rec, ok
+        eval: recordOf(&m)
+        to: recordOf
+      - opt:
+          do:
+            - return: ""
+          when: "!ok || rec.ID == r.id || r.knows(rec.ID)"
+      - set: r.hint, r.hintUntil
+        value: rec, now.Add(hintElectionTimeouts*r.timing.ElectionTimeoutMax)
+      - set: r.rd.LeaderHint
+        value: rec
+      - eval: r.publishAdmitted()
+        to: r.publishAdmitted
+  - of: (*Raft).mayTakeRecord
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).mayTakeRecord
+        kind: self
+      - id: r.conf().Member
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: r.role == core.RoleLeader || m.Term < r.term || r.hearsLeader(now)
+      - bind: _, member
+        eval: r.conf().Member(m.From)
+        to: r.conf().Member
+      - return: member
+  - of: (*Raft).hearsLeader
+    steps:
+      - return: r.lead != 0 && !r.lastLeaderContact.IsZero() && now.Sub(r.lastLeaderContact) < r.timing.ElectionTimeoutMin
+  - of: recordOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: recordOf
+        kind: self
+      - id: wire
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: core.MemberValue{}, false
+          when: len(m.Entries) != 1 || wire.BodySum(m.Entries[0].Data) != m.Entries[0].BodySum
+      - bind: got, err
+        eval: wire.ParseMembership(m.Entries[0].Data)
+        to: wire
+      - opt:
+          do:
+            - return: core.MemberValue{}, false
+          when: err != nil || len(got.Members) != 1
+      - bind: rec
+        eval: got.Members[0]
+      - var:
+          name: unpinned
+          type: "[32]byte"
+      - return: rec, rec.ID != 0 && rec.SPKI != unpinned
+  - of: (*Raft).knows
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).knows
+        kind: self
+      - id: c.Member
+        kind: value
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                init:
+                  bind: _, ok
+                  eval: c.Member(id)
+                  to: c.Member
+                when: ok || slices.Contains(c.Retired, id)
+          key: _
+          range: "[]*core.MembershipValue{r.conf(), r.confAt(r.log.committed)}"
+          value: c
+      - return: "false"
+  - of: (*Raft).hintedOnly
+    steps:
+      - return: r.hint.ID != 0 && id == r.hint.ID && !r.knows(id)
+  - of: (*Raft).endHintOnConf
+    steps:
+      - opt:
+          do:
+            - set: r.hint
+              value: core.MemberValue{}
+          when: r.hint.ID != 0 && r.knows(r.hint.ID)
+  - of: (*Raft).endHintOnTimeout
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).endHintOnTimeout
+        kind: self
+      - id: r.publishAdmitted
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: r.hint
+              value: core.MemberValue{}
+            - eval: r.publishAdmitted()
+              to: r.publishAdmitted
+          when: r.hint.ID != 0 && !now.Before(r.hintUntil)
   - of: (*memLog).lastIndex
     steps:
       - return: l.snapIndex + uint64(len(l.ents))
@@ -2434,6 +2631,8 @@ sequences:
         kind: actor
       - id: (*Raft).Tick
         kind: self
+      - id: r.endHintOnTimeout
+        kind: internal
       - id: r.tickLeader
         kind: internal
       - id: r.resetElection
@@ -2443,6 +2642,8 @@ sequences:
     steps:
       - set: r.now
         value: now
+      - eval: r.endHintOnTimeout(now)
+        to: r.endHintOnTimeout
       - opt:
           do:
             - eval: r.tickLeader(now)
@@ -2915,6 +3116,11 @@ sequences:
           key: _
           range: r.confAt(r.log.committed).Members
           value: m
+      - opt:
+          do:
+            - set: out
+              value: append(out, r.hint)
+          when: r.hint.ID != 0 && !slices.ContainsFunc(out, func(x core.MemberValue) bool { return x.ID == r.hint.ID })
       - return: out
   - of: (*Raft).send
     steps:
@@ -3030,11 +3236,15 @@ sequences:
         kind: actor
       - id: (*Raft).confChanged
         kind: self
+      - id: r.endHintOnConf
+        kind: internal
       - id: r.publishAdmitted
         kind: internal
       - id: r.trackMembers
         kind: internal
     steps:
+      - eval: r.endHintOnConf()
+        to: r.endHintOnConf
       - eval: r.publishAdmitted()
         to: r.publishAdmitted
       - switch:
@@ -3500,7 +3710,7 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: m.Group != r.cfg.Group || !r.stepTerm(now, m) || r.stepAnyRole(now, m)
+          when: m.Group != r.cfg.Group || r.stepLeaderRecord(now, m) || !r.stepTerm(now, m) || r.stepAnyRole(now, m)
       - switch:
           cases:
             - case: core.RoleLeader

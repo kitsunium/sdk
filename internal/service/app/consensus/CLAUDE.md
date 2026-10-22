@@ -387,6 +387,17 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   append one as leader without a Warn naming its origin (#561,
   `TestAForwardedRemoveRecordsTheFollowerAsItsOrigin`, raft's
   `checkOriginAuthenticated`).
+- Admit a sender at the memory double that its receiver's configuration
+  does not list when the test turns the admission model on
+  (`MemoryNetwork.admission`): the suites never saw #542 because the double
+  admitted everyone (`TestTheMemoryAdmissionModelRefusesAnUnknownSender`).
+- Leave a voter that came back behind a leader its configuration does not
+  list with no way to hear it: a follower of a live leader answers its
+  PreVote with that leader's committed record, which it admits for
+  replication only until its configuration lists or retires it, or four
+  election timeouts pass (#542, `TestHuntR4ProveStaleVoterNewLeader`,
+  `TestHuntR4ProveStaleVoterReplacementThenFailure`, raft's
+  `checkLeaderRecordReplicationOnly`).
 - Trust a predecessor's token by its index above the identity's
   AdoptedFrom once its term can no longer be read: that part of the kept
   range is the suffix Recover adopted past the persisted commit (#509,

@@ -7032,7 +7032,7 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: dst == nil
+          when: dst == nil || !t.net.admitted(t, to)
       - bind: q
         eval: dst.data
       - opt:
@@ -7073,6 +7073,11 @@ sequences:
             - return: origin(coreconsensus.PeerRejected, errs.String("why", "unreachable"))
               to: origin
           when: dst == nil
+      - opt:
+          do:
+            - return: origin(coreconsensus.PeerRejected, errs.String("why", "not admitted"))
+              to: origin
+          when: "!t.net.admitted(t, to) || !t.net.admitted(dst, t.id)"
       - eval: dst.mu.Lock()
         to: dst.mu.Lock
       - bind: of, in
@@ -7143,10 +7148,8 @@ sequences:
         kind: self
       - id: r.doneOnce.Do
         kind: value
-      - id: t.mu.Lock
-        kind: value
-      - id: t.mu.Unlock
-        kind: value
+      - id: t.deliverFrame
+        kind: internal
     steps:
       - defer: r.doneOnce.Do(func() { close(r.done) })
         to: r.doneOnce.Do
@@ -7172,17 +7175,34 @@ sequences:
                                 - return: ""
                             - comm: f = <-t.ctrl
                             - comm: f = <-t.data
-            - eval: t.mu.Lock()
-              to: t.mu.Lock
-            - bind: d
-              eval: t.deliver
-            - eval: t.mu.Unlock()
-              to: t.mu.Unlock
-            - opt:
-                do:
-                  - eval: "d(coreconsensus.AuthenticatedPeerValue{ID: f.from}, f.frame)"
-                when: d != nil
+            - eval: t.deliverFrame(f)
+              to: t.deliverFrame
           forever: true
+  - of: (*MemoryTransport).deliverFrame
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*MemoryTransport).deliverFrame
+        kind: self
+      - id: t.mu.Lock
+        kind: value
+      - id: t.mu.Unlock
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!t.net.admitted(t, f.from)"
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - bind: d
+        eval: t.deliver
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
+      - opt:
+          do:
+            - eval: "d(coreconsensus.AuthenticatedPeerValue{ID: f.from}, f.frame)"
+          when: d != nil
   - of: (*MemoryTransport).BindJoinReason
     participants:
       - id: caller
@@ -7206,17 +7226,75 @@ sequences:
         kind: actor
       - id: (*MemoryTransport).SetMembership
         kind: self
-      - id: t.mu.Lock
-        kind: value
-      - id: t.mu.Unlock
-        kind: value
+      - id: slices
+        kind: stdlib
     steps:
-      - eval: t.mu.Lock()
-        to: t.mu.Lock
+      - lock:
+          mutex: t.mu
+      - opt:
+          do:
+            - set: t.groups
+              value: map[coreconsensus.GroupID][]coreconsensus.MemberValue{}
+          when: t.groups == nil
+      - alt:
+          - do:
+              - eval: delete(t.groups, group)
+            when: len(admitted) == 0
+          - do:
+              - set: t.groups[group]
+                to: slices
+                value: slices.Clone(admitted)
+            else: true
       - set: t.members
-        value: append(t.members[:0], admitted...)
-      - eval: t.mu.Unlock()
-        to: t.mu.Unlock
+        value: t.members[:0]
+      - loop:
+          do:
+            - set: t.members
+              value: append(t.members, t.groups[g]...)
+          key: _
+          range: slices.Sorted(maps.Keys(t.groups))
+          value: g
+  - of: (*MemoryTransport).releaseJoinAnswer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*MemoryTransport).releaseJoinAnswer
+        kind: self
+      - id: t.SetMembership
+        kind: internal
+    steps:
+      - eval: t.SetMembership(joinGroup, nil)
+        to: t.SetMembership
+  - of: (*MemoryNetwork).admitted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*MemoryNetwork).admitted
+        kind: self
+      - id: n.mu.Lock
+        kind: value
+      - id: n.mu.Unlock
+        kind: value
+      - id: slices
+        kind: stdlib
+    steps:
+      - eval: n.mu.Lock()
+        to: n.mu.Lock
+      - bind: "on"
+        eval: n.admission
+      - eval: n.mu.Unlock()
+        to: n.mu.Unlock
+      - opt:
+          do:
+            - return: "true"
+          when: "!on"
+      - lock:
+          mutex: at.mu
+      - return: |-
+          slices.ContainsFunc(at.members, func(m coreconsensus.MemberValue) bool {
+          		return m.ID == peer && m.SPKI == memSPKI(peer)
+          	})
+        to: slices
   - of: (*MemoryTransport).Join
     participants:
       - id: caller
@@ -7231,6 +7309,10 @@ sequences:
         kind: value
       - id: x.mu.Unlock
         kind: value
+      - id: slices
+        kind: stdlib
+      - id: t.SetMembership
+        kind: internal
       - id: joinRefused
         kind: internal
     steps:
@@ -7282,6 +7364,15 @@ sequences:
                   else: true
             - opt:
                 do:
+                  - eval: x.mu.Lock()
+                    to: x.mu.Lock
+                  - bind: answer
+                    eval: slices.Clone(x.members)
+                    to: slices
+                  - eval: x.mu.Unlock()
+                    to: x.mu.Unlock
+                  - eval: t.SetMembership(joinGroup, answer)
+                    to: t.SetMembership
                   - return: pos, nil
                 when: code == 0
             - set: last
@@ -8943,6 +9034,8 @@ sequences:
         kind: self
       - id: n.cfg.Transport.Send
         kind: value
+      - id: n.obs.warn
+        kind: internal
       - id: n.cfg.Transport.SetMembership
         kind: value
       - id: n.obs.info
@@ -8973,6 +9066,14 @@ sequences:
           key: _
           range: rd.Messages
           value: m
+      - opt:
+          do:
+            - eval: "n.obs.warn(\"consensus: leader admitted on a member's record\", lattr(\"leader\", uint64(h.ID)), lstr(\"slot\", h.Slot))"
+              to: n.obs.warn
+          init:
+            bind: h
+            eval: rd.LeaderHint
+          when: h.ID != 0
       - opt:
           do:
             - eval: n.cfg.Transport.SetMembership(n.cfg.Group, rd.Membership)
