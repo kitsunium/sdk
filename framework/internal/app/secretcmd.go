@@ -118,6 +118,9 @@ func (a *App) managedSecrets() []managedSecret {
 	if a.hasMailer() {
 		out = append(out, managedSecret{name: ownSecretPrefix + smtpSecret, stored: ownSecretPrefix + smtpSecret, env: st.frameworkEnv, envName: smtpSecret, variable: secretVariable(prefix, smtpSecret)})
 	}
+	if a.opts.otlp != nil {
+		out = append(out, managedSecret{name: ownSecretPrefix + otlpHeadersSecret, stored: ownSecretPrefix + otlpHeadersSecret, env: st.frameworkEnv, envName: otlpHeadersSecret, variable: secretVariable(prefix, otlpHeadersSecret)})
+	}
 	return out
 }
 

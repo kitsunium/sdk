@@ -105,7 +105,7 @@ const (
 // under one of them.
 var operatorStems = []string{
 	varAddr, varAllowedHosts, varDataDir, varDataKeyStem, varDataKeyStem + varFileSuffix, varEnv,
-	varIndexKeyStem, varIndexKeyStem + varFileSuffix, varLogLevel, varRetention, varSecrets,
+	varIndexKeyStem, varIndexKeyStem + varFileSuffix, varLogLevel, varOTLPHeaders, varOTLPHeaders + varFileSuffix, varRetention, varSecrets,
 	varSecretsKey, varSecretsKeyFile, varSMTPURL, varSMTPURLFile, varTelemetry, varTelemetryGIDs,
 	varTrustProxy,
 }

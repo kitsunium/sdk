@@ -135,6 +135,9 @@ type App struct {
 	// wired is what the start decided each port calls (port.go), while the
 	// services are mounted.
 	wired atomic.Pointer[wiring]
+	// otlpRun is the OTLP export while the app runs, nil otherwise
+	// (otlp_run.go).
+	otlpRun atomic.Pointer[otlpRunning]
 	// privacy is what the app keeps for personal data: kit's own service,
 	// the reference keys, the journal's chain (privacy.go).
 	privacy privacyRun
@@ -328,6 +331,9 @@ func (a *App) resolve() error {
 		Resource: trace.Resource{Attrs: []trace.Attr{metrics.String(trace.ServiceNameKey, a.name)}},
 		Scope:    trace.Scope{Name: "github.com/kitsunium/sdk/framework/internal/app", Version: frameworkVersion()},
 		Clock:    a.clock,
+		// Every span that ends goes to the OTLP export, when the app
+		// declares one (otlp_run.go); none records anything otherwise.
+		Sink: a.otlpSink(),
 	})
 	a.root, a.module = findModule(a.decl.file())
 	return a.settle()
@@ -415,7 +421,7 @@ func (a *App) declarationProblems() []model.Diagnostic {
 	if a.cfg.studio.on && a.serves() && studioMount.Load() == nil {
 		out = append(out, diagnosticOf("warning", "", nil, say("config.studio-missing", "package", studioPackage)))
 	}
-	return slices.Concat(out, a.moduleProblems(), a.appProblems(), a.serverProblems(), a.subsystemProblems(), a.portPolicyProblems())
+	return slices.Concat(out, a.moduleProblems(), a.appProblems(), a.serverProblems(), a.subsystemProblems(), a.portPolicyProblems(), a.otlpCodeProblems())
 }
 
 // serviceProblems are what the service declares wrong, and a second service
@@ -815,6 +821,9 @@ func (a *App) addComponents() error {
 		return a.startGroups(g.stores)
 	}
 	return firstError(
+		// The OTLP export before anything whose spans it forwards, so that
+		// it stops after them (otlp_enable.go).
+		a.addOTLPComponent,
 		func() error { return a.startGroups(g.stores, g.workflows, g.mailers, g.subs, g.commands) },
 		// What a former release sealed under its references, sealed again
 		// under the present ones, once the stores are open (renamed_refs.go).

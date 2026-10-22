@@ -55,6 +55,38 @@ constants:
           than the spool's MaxAge.
         name: MailGivenUpExpired
     name: MailGivenUpExhausted
+  - doc: The two signals an export forwards, as an OTLPBatchValue names them.
+    grouped: true
+    items:
+      - doc: |-
+          OTLPTraces names the trace signal: an OTLP/JSON
+          ExportTraceServiceRequest.
+        name: OTLPTraces
+        type: string
+        value: "\"traces\""
+      - doc: |-
+          OTLPMetrics names the metrics signal: an OTLP/JSON
+          ExportMetricsServiceRequest.
+        name: OTLPMetrics
+        type: string
+        value: "\"metrics\""
+    name: OTLPTraces
+  - doc: The full policies an export's queue applies, as the setting spells them.
+    grouped: true
+    items:
+      - doc: OTLPDropOldest takes the oldest batches out until the new one fits.
+        name: OTLPDropOldest
+        type: string
+        value: "\"drop-oldest\""
+      - doc: OTLPDropNewest refuses the new batch.
+        name: OTLPDropNewest
+        type: string
+        value: "\"drop-newest\""
+      - doc: OTLPBlock makes the producer wait for room, up to a bound.
+        name: OTLPBlock
+        type: string
+        value: "\"block\""
+    name: OTLPDropOldest
   - grouped: true
     items:
       - doc: LabelNode is the pprof label naming the node a goroutine works for.
@@ -295,6 +327,19 @@ files:
       - MailSink
       - MailCaptureSource
     name: mail_interface.go
+  - decls:
+      - OTLPTraces
+      - OTLPDropOldest
+      - OTLP
+      - OTLPDriverConfig
+      - OTLPConfig
+      - OTLPSinkValue
+      - OTLPBatchValue
+      - OTLPStatsValue
+    name: otlp.go
+  - decls:
+      - OTLPExporter
+    name: otlp_interface.go
   - decls:
       - LabelNode
       - NewHTTPServer
@@ -756,6 +801,192 @@ types:
       interface {
       	// Composed is the last message the transport composed, nil for none.
       	Composed() []byte
+      }
+  - fields:
+      - doc: |-
+          Open opens the export cfg describes: its two queues — read, the
+          backlog a previous process left counted —, its senders and its
+          meter. It sends nothing until OTLPExporter.Run.
+        name: Open
+        type: func(ctx context.Context, cfg *OTLPConfig) (OTLPExporter, error)
+    kind: struct
+    name: OTLPDriverConfig
+  - fields:
+      - doc: |-
+          Clock is the app's clock: the queues stamp and age a batch on it, the
+          retries and each attempt's bound wait on it, the metrics are
+          collected on it.
+        name: Clock
+        type: Clock
+      - doc: |-
+          Headers ride on every request to the collector — an Authorization, a
+          tenant —; they are the secret otlp-headers, never shown.
+        name: Headers
+        type: map[string]string
+      - doc: |-
+          Send, when set, ships a batch in place of the OTLP/HTTP exporters:
+          the product's own sender. Retryable then classifies its failures.
+        name: Send
+        type: func(ctx context.Context, batch OTLPBatchValue) error
+      - doc: |-
+          Retryable classifies a failure of Send: a later attempt may cure it.
+          Unused without Send: the OTLP/HTTP exporters classify their own.
+        name: Retryable
+        type: func(err error) bool
+      - doc: |-
+          OnError hears what the export could not keep — a batch of spans or a
+          snapshot its queue refused — and what it could not close; the core
+          logs it. The forwarder counts every batch it loses on its own.
+        name: OnError
+        type: func(err error)
+      - doc: |-
+          Service and Version name the producer: the resource's service.name
+          and the instrumentation scope's version.
+        name: Service
+        type: string
+      - doc: |-
+          Service and Version name the producer: the resource's service.name
+          and the instrumentation scope's version.
+        name: Version
+        type: string
+      - doc: |-
+          Endpoint is the collector's base URL, "http://collector:4318": each
+          signal's path is appended to it. Unused with Send.
+        name: Endpoint
+        type: string
+      - doc: |-
+          Dir is the directory the two queues lie in, one subdirectory per
+          signal; "" keeps them in memory, lost at a stop.
+        name: Dir
+        type: string
+      - doc: |-
+          WhenFull is what a full queue does with a new batch: OTLPDropOldest,
+          OTLPDropNewest or OTLPBlock.
+        name: WhenFull
+        type: string
+      - doc: MaxBytes bounds the bytes each queue holds.
+        name: MaxBytes
+        type: int64
+      - doc: MaxBatches bounds the batches each queue holds.
+        name: MaxBatches
+        type: int
+      - doc: MaxAge is how long after it was queued a batch may still be sent.
+        name: MaxAge
+        type: time.Duration
+      - doc: |-
+          SendTimeout bounds one attempt, and the hand-over of the spans the
+          batch sink exports to their queue.
+        name: SendTimeout
+        type: time.Duration
+      - doc: Interval is how often the metrics are collected and queued.
+        name: Interval
+        type: time.Duration
+      - doc: |-
+          DrainTimeout is how long the batch being sent at a stop may still
+          run; SettleTimeout bounds each acknowledgement once the stop began,
+          and the flush of what the export still holds in memory.
+        name: DrainTimeout
+        type: time.Duration
+      - doc: |-
+          DrainTimeout is how long the batch being sent at a stop may still
+          run; SettleTimeout bounds each acknowledgement once the stop began,
+          and the flush of what the export still holds in memory.
+        name: SettleTimeout
+        type: time.Duration
+    kind: struct
+    name: OTLPConfig
+  - fields:
+      - doc: Sink is the SDK's trace.SpanSink.
+        name: Sink
+        type: any
+    kind: struct
+    name: OTLPSinkValue
+  - fields:
+      - doc: Signal is OTLPTraces or OTLPMetrics.
+        name: Signal
+        type: string
+      - doc: Document is the OTLP/JSON export request.
+        name: Document
+        type: "[]byte"
+    kind: struct
+    name: OTLPBatchValue
+  - fields:
+      - doc: |-
+          LastRetryAfterAt is when the collector last imposed a delay; zero
+          when it never did.
+        name: LastRetryAfterAt
+        type: time.Time
+      - doc: Signal is OTLPTraces or OTLPMetrics.
+        name: Signal
+        type: string
+      - doc: PendingBytes and MaxBytes are the bytes the queue holds and may hold.
+        name: PendingBytes
+        type: int64
+      - doc: PendingBytes and MaxBytes are the bytes the queue holds and may hold.
+        name: MaxBytes
+        type: int64
+      - doc: LastRetryAfter is the last delay the collector imposed.
+        name: LastRetryAfter
+        type: time.Duration
+      - doc: Pending and MaxBatches are the batches the queue holds and may hold.
+        name: Pending
+        type: int
+      - doc: Pending and MaxBatches are the batches the queue holds and may hold.
+        name: MaxBatches
+        type: int
+      - doc: |-
+          Enqueued, Sent and Retries count the batches kept, sent and the
+          attempts made again.
+        name: Enqueued
+        type: uint64
+      - doc: |-
+          Enqueued, Sent and Retries count the batches kept, sent and the
+          attempts made again.
+        name: Sent
+        type: uint64
+      - doc: |-
+          Enqueued, Sent and Retries count the batches kept, sent and the
+          attempts made again.
+        name: Retries
+        type: uint64
+      - doc: |-
+          Dropped, Expired and DeadLettered count the batches lost to a bound,
+          to their age and to a permanent refusal.
+        name: Dropped
+        type: uint64
+      - doc: |-
+          Dropped, Expired and DeadLettered count the batches lost to a bound,
+          to their age and to a permanent refusal.
+        name: Expired
+        type: uint64
+      - doc: |-
+          Dropped, Expired and DeadLettered count the batches lost to a bound,
+          to their age and to a permanent refusal.
+        name: DeadLettered
+        type: uint64
+      - doc: |-
+          Durable reports whether the queue outlives the process: false in
+          memory — no directory, or a platform whose durable queue the SDK
+          refuses.
+        name: Durable
+        type: bool
+    kind: struct
+    name: OTLPStatsValue
+  - kind: named
+    name: OTLPExporter
+    underlying: |-
+      interface {
+      	// SpanSink is the sink the app's tracer ends its spans into.
+      	SpanSink() OTLPSinkValue
+      	// Record counts one unit of work the framework observed on node: its
+      	// operation, how long it took, and whether it failed.
+      	Record(node, op string, took time.Duration, failed bool)
+      	// Run sends the queued batches and collects the metrics until ctx ends;
+      	// then it flushes what it holds in memory into the queues, lets the
+      	// batch being sent finish within the drain, and closes the queues.
+      	Run(ctx context.Context) error
+      	// Stats is what each signal's queue holds, has sent and has lost.
+      	Stats() []OTLPStatsValue
       }
   - fields:
       - doc: Addr is where to listen, "host:port".
@@ -2078,6 +2309,14 @@ vars:
       - name: Mail
         type: atomic.Pointer[MailDriverConfig]
     name: Mail
+  - doc: |-
+      OTLP is the OTLP export subsystem; nil until framework/app/otlp is
+      imported. A product that declares app.OTLP without it is refused at the
+      start (ADR 0179 §6).
+    items:
+      - name: OTLP
+        type: atomic.Pointer[OTLPDriverConfig]
+    name: OTLP
   - grouped: true
     items:
       - doc: |-

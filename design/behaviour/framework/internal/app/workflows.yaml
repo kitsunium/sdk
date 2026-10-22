@@ -802,6 +802,63 @@ workflows:
           init: i := len(ids) - 1
           post: i--
       - return: out
+  - of: (*App).otlpSettings
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: a.opts.otlp == nil
+      - var:
+          name: out
+          type: "[]settingDecl"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, d)
+                init:
+                  bind: _, taken
+                  eval: byName[d.base().name]
+                when: "!taken"
+          key: _
+          range: a.opts.otlp.settingDecls()
+          value: d
+      - return: out
+  - of: (*App).otlpProblems
+    steps:
+      - bind: e
+        eval: a.opts.otlp
+      - opt:
+          do:
+            - return: nil
+          when: e == nil
+      - bind: taken
+        eval: map[string]bool{}
+      - loop:
+          do:
+            - set: taken[d.base().key()]
+              value: "true"
+          key: _
+          range: a.settingDecls()
+          value: d
+      - var:
+          name: out
+          type: "[]model.Diagnostic"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, diagnosticOf("error", otlpNode, a.source(&e.decl), say("otlp.setting-taken", "setting", name)))
+                init:
+                  bind: name
+                  eval: d.base().name
+                when: taken[name]
+          key: _
+          range: e.settingDecls()
+          value: d
+      - return: out
   - of: (*storeCore).policyOn
     steps:
       - loop:
@@ -1340,6 +1397,29 @@ workflows:
                 when: "!s.linked()"
           key: _
           range: subsystems
+          value: s
+      - return: out
+  - of: (*App).unlinkedApp
+    steps:
+      - var:
+          name: out
+          type: "[]unlinkedDecl"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: s.app == nil
+            - opt:
+                do:
+                  - set: out
+                    value: "append(out, unlinkedDecl{node: otlpNode, at: a.source(at), sub: s})"
+                init:
+                  bind: at
+                  eval: s.app(a)
+                when: at != nil
+          key: _
+          range: missing
           value: s
       - return: out
   - of: (*unit).held

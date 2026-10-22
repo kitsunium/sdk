@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-17T22:00:00Z -->
+<!-- updated: 2026-10-22T00:00:00Z -->
 # framework/internal/app/plug — where kit's opt-in subsystems plug in
 
 The hooks kit reads and a subsystem package sets as it is imported: the HTTP
@@ -8,11 +8,12 @@ kit's catalogues after English (`studioengine`, set by `framework/app/studio`) �
 (`storeengine`, set by `framework/app/store`), the queues (`queueengine`, set by
 `framework/app/queue`), the workflows (`workflowengine`, set by
 `framework/app/workflow`), the mailers (`mailengine`, set by
-`framework/app/mail`), the jobs (`jobengine`, set by `framework/app/jobs`). kit
+`framework/app/mail`), the jobs (`jobengine`, set by `framework/app/jobs`), the
+OTLP export (`otlpengine`, set by `framework/app/otlp`, issue #483). kit
 imports none of the SDK
 packages behind them — `pkg/v1/net/server`, `net/static`, `net/sse`,
 `profiling`, `proc/process` (and through it `runtime/metrics` and the spawn
-engine, ADR 0172), `data/docstore`, `data/sql`, `data/queue`, `app/statemachine`, `app/mail/spool`, `app/scheduler` and `app/i18n` (ADR 0179) —, so a product
+engine, ADR 0172), `data/docstore`, `data/sql`, `data/queue`, `app/statemachine`, `app/mail/spool`, `app/scheduler` and `app/i18n` (ADR 0179), `app/forward` (ADR 0185) —, so a product
 that does not import a subsystem neither links nor initialises them;
 `framework/app`'s initgraph tests hold the graph to it.
 
@@ -79,7 +80,16 @@ the Studio's routes: a serving app in dev hands `Mount` its mux and a
 `StudioHost`, the app as the routes read it, which the core implements
 (`studio_host.go`). The event stream and the profiler, behind hooks of
 their own until then (`OpenEventStream`, `StudioProfiler`), are
-`studioengine`'s own, under its routes.
+`studioengine`'s own, under its routes. The OTLP export's (`otlp.go`,
+`otlp_interface.go`) is written and implemented by `otlpengine` since issue
+#483: the core opens the export the app declares with an `OTLPConfig` — the
+app's `Clock`, the producer, the endpoint and its `Headers` or the product's
+own `Send` with its `Retryable`, the directory its two queues lie in, their
+bounds, their full policy, a batch's age, an attempt's bound, the metrics'
+interval, the stop's drain and settle — and holds an `OTLPExporter`: the
+SDK's span sink as `any` (the core names the SDK's trace type, plug does
+not), one `Record` per unit of work, the loop `Run`, and each signal's
+`OTLPStatsValue`.
 
 ## Contents
 
@@ -89,6 +99,8 @@ their own until then (`OpenEventStream`, `StudioProfiler`), are
 | `jobs_interface.go` | the jobs subsystem's interface: `JobScheduler` (`Add`, `Run`), which `jobengine` implements over the SDK's scheduler and the core's `idleScheduler` for an app that declares no job |
 | `mail.go` | the mail subsystem's contract (ADR 0179 step 6): the hook `Mail` (`MailDriverConfig`: `Open` a mailer's outbox, `Validate` a mail, `Capture`, `ParseSMTP`, `NewSMTP` — the transports —, `Refused` — the refusal of a kind); the enums `MailRefusal`, `MailEvent` and `MailGiveUp` (why a dead letter was given up: exhausted, rejected, expired — issue #489) and their values; `MailSpoolConfig` (its `MaxAge` and `RetryPermanent`, the mailer's settings), `MailValue`, `MailRelayValue`, `MailAttemptValue`, `MailEventValue` (its `Reply`, the SMTP reply as a `*textproto.Error`, and `GivenUp`) |
 | `mail_interface.go` | the mail subsystem's interfaces: `MailSpool` (`Send`, `SendWithID`, `DeadLetters`, `Run`, `Close`) and `MailSink` (`Send`) with its sibling `MailCaptureSource` (`Composed`: the capture transport's last message), which `mailengine` implements |
+| `otlp.go` | the OTLP export's contract (issue #483): the signals `OTLPTraces`, `OTLPMetrics`, the full policies `OTLPDropOldest`, `OTLPDropNewest`, `OTLPBlock` as the setting spells them; the hook `OTLP` (`OTLPDriverConfig`: `Open` the export); `OTLPConfig`, `OTLPBatchValue` (what the product's sender receives), `OTLPStatsValue` (pending batches and bytes and their bounds, sent, retries, dropped, expired, dead-lettered, the last `Retry-After` and when, whether the queue is durable) |
+| `otlp_interface.go` | the OTLP export's interface: `OTLPExporter` (`SpanSink`, `Record`, `Run`, `Stats`), which `otlpengine` implements over the SDK's `app/forward` |
 | `plug.go` | the hooks (`NewHTTPServer`, `NewStaticFiles`, `SampleProcess`), what they take and return (`HTTPConfig`, `HTTPState`, `HTTPServer`), the pprof labels kit and the profiler share (`LabelNode`, `LabelLoop`) |
 | `queue.go` | the queue subsystem's contract (ADR 0179 step 4): the hook `Queues` (`QueueDriverConfig`: `Open` a queue, `TableMigration` its table on a database, `DoNotRetry` and `NotRetryable` — the mark of a delivery no retry helps); `QueueConfig` (`Name`, `Dir`, `Database`, `Table`, `Policy`, `Clock`, a mailer's `Seal`, `Unseal` and `MaxPayload`, a test's `Wrap`), `QueuePolicyValue`, `ConsumeConfig` (with a consumer's `DrainTimeout`, `SettleTimeout`, `AutoExtend` and the `RetryIn` reader of a handler's own delay, issue #483 part 3), `MessageValue`, `DeliveryValue`, `LiveMessageValue`, `DeadLetterValue` |
 | `queue_interface.go` | the queue subsystem's interfaces: `Broker` (`Publish`, `Consume`, `DeadLetters`) and its siblings `MessageMover` (`Messages`, `PutMessage`, `PutDeadLetter`: what a data copy reads and writes as it lies) and `LaterPublisher` (`PublishAt`, `PublishOnce`: a message for later, once per key); `Clock`, `Timer`, `Ticker` — the app's clock in standard-library types, a test's manual clock included |

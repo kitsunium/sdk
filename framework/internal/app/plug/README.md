@@ -114,6 +114,16 @@ The package imports the standard library and the framework's model only, so that
   - [func \(Migrator\) Up\(ctx context.Context\) error](<#Migrator.Up>)
 - [type MigratorProvider](<#MigratorProvider>)
   - [func \(MigratorProvider\) Migrator\(table string, ms \[\]MigrationValue\) \(Migrator, error\)](<#MigratorProvider.Migrator>)
+- [type OTLPBatchValue](<#OTLPBatchValue>)
+- [type OTLPConfig](<#OTLPConfig>)
+- [type OTLPDriverConfig](<#OTLPDriverConfig>)
+- [type OTLPExporter](<#OTLPExporter>)
+  - [func \(OTLPExporter\) Record\(node string, op string, took time.Duration, failed bool\)](<#OTLPExporter.Record>)
+  - [func \(OTLPExporter\) Run\(ctx context.Context\) error](<#OTLPExporter.Run>)
+  - [func \(OTLPExporter\) SpanSink\(\) OTLPSinkValue](<#OTLPExporter.SpanSink>)
+  - [func \(OTLPExporter\) Stats\(\) \[\]OTLPStatsValue](<#OTLPExporter.Stats>)
+- [type OTLPSinkValue](<#OTLPSinkValue>)
+- [type OTLPStatsValue](<#OTLPStatsValue>)
 - [type QueueConfig](<#QueueConfig>)
 - [type QueueDriverConfig](<#QueueDriverConfig>)
 - [type QueuePolicyValue](<#QueuePolicyValue>)
@@ -346,6 +356,41 @@ const MailRefusalUnencodable MailRefusal = 2
 ```
 
 MailRefusalUnencodable is a mail the outbox cannot encode.
+
+<a name="OTLPBlock"></a>
+```go
+const OTLPBlock string = "block"
+```
+
+OTLPBlock makes the producer wait for room, up to a bound.
+
+<a name="OTLPDropNewest"></a>
+```go
+const OTLPDropNewest string = "drop-newest"
+```
+
+OTLPDropNewest refuses the new batch.
+
+<a name="OTLPDropOldest"></a>
+```go
+const OTLPDropOldest string = "drop-oldest"
+```
+
+OTLPDropOldest takes the oldest batches out until the new one fits.
+
+<a name="OTLPMetrics"></a>
+```go
+const OTLPMetrics string = "metrics"
+```
+
+OTLPMetrics names the metrics signal: an OTLP/JSON ExportMetricsServiceRequest.
+
+<a name="OTLPTraces"></a>
+```go
+const OTLPTraces string = "traces"
+```
+
+OTLPTraces names the trace signal: an OTLP/JSON ExportTraceServiceRequest.
 
 <a name="RefusalClosed"></a>
 ```go
@@ -761,6 +806,13 @@ var NewStaticFiles atomic.Pointer[func(fsys fs.FS, csp string) (http.Handler, er
 ```
 
 NewStaticFiles builds the file server of a frontend's tree; nil until framework/app/server is imported.
+
+<a name="OTLP"></a>
+```go
+var OTLP atomic.Pointer[OTLPDriverConfig]
+```
+
+OTLP is the OTLP export subsystem; nil until framework/app/otlp is imported. A product that declares app.OTLP without it is refused at the start (ADR 0179 §6).
 
 <a name="Queues"></a>
 ```go
@@ -2127,6 +2179,211 @@ func (MigratorProvider) Migrator(table string, ms []MigrationValue) (Migrator, e
 ```
 
 Migrator is the set ms, under the version table table.
+
+<a name="OTLPBatchValue"></a>
+## type [OTLPBatchValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/otlp.go>)
+
+OTLPBatchValue is one batch as the product's own sender receives it: its signal and its OTLP/JSON document, posted to a collector as it is.
+
+```go
+type OTLPBatchValue struct {
+	// Signal is OTLPTraces or OTLPMetrics.
+	Signal   string
+	// Document is the OTLP/JSON export request.
+	Document []byte
+}
+```
+
+<a name="OTLPConfig"></a>
+## type [OTLPConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/otlp.go>)
+
+OTLPConfig is what the framework asks of an export: who produces the telemetry, where it goes, where it waits, its bounds and the app's clock.
+
+```go
+type OTLPConfig struct {
+	// Clock is the app's clock: the queues stamp and age a batch on it, the
+	// retries and each attempt's bound wait on it, the metrics are
+	// collected on it.
+	Clock         Clock
+	// Headers ride on every request to the collector — an Authorization, a
+	// tenant —; they are the secret otlp-headers, never shown.
+	Headers       map[string]string
+	// Send, when set, ships a batch in place of the OTLP/HTTP exporters:
+	// the product's own sender. Retryable then classifies its failures.
+	Send          func(ctx context.Context, batch OTLPBatchValue) error
+	// Retryable classifies a failure of Send: a later attempt may cure it.
+	// Unused without Send: the OTLP/HTTP exporters classify their own.
+	Retryable     func(err error) bool
+	// OnError hears what the export could not keep — a batch of spans or a
+	// snapshot its queue refused — and what it could not close; the core
+	// logs it. The forwarder counts every batch it loses on its own.
+	OnError       func(err error)
+	// Service and Version name the producer: the resource's service.name
+	// and the instrumentation scope's version.
+	Service       string
+	// Service and Version name the producer: the resource's service.name
+	// and the instrumentation scope's version.
+	Version       string
+	// Endpoint is the collector's base URL, "http://collector:4318": each
+	// signal's path is appended to it. Unused with Send.
+	Endpoint      string
+	// Dir is the directory the two queues lie in, one subdirectory per
+	// signal; "" keeps them in memory, lost at a stop.
+	Dir           string
+	// WhenFull is what a full queue does with a new batch: OTLPDropOldest,
+	// OTLPDropNewest or OTLPBlock.
+	WhenFull      string
+	// MaxBytes bounds the bytes each queue holds.
+	MaxBytes      int64
+	// MaxBatches bounds the batches each queue holds.
+	MaxBatches    int
+	// MaxAge is how long after it was queued a batch may still be sent.
+	MaxAge        time.Duration
+	// SendTimeout bounds one attempt, and the hand-over of the spans the
+	// batch sink exports to their queue.
+	SendTimeout   time.Duration
+	// Interval is how often the metrics are collected and queued.
+	Interval      time.Duration
+	// DrainTimeout is how long the batch being sent at a stop may still
+	// run; SettleTimeout bounds each acknowledgement once the stop began,
+	// and the flush of what the export still holds in memory.
+	DrainTimeout  time.Duration
+	// DrainTimeout is how long the batch being sent at a stop may still
+	// run; SettleTimeout bounds each acknowledgement once the stop began,
+	// and the flush of what the export still holds in memory.
+	SettleTimeout time.Duration
+}
+```
+
+<a name="OTLPDriverConfig"></a>
+## type [OTLPDriverConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/otlp.go>)
+
+OTLPDriverConfig is what framework/app/otlp plugs into the framework: how an app's export opens.
+
+```go
+type OTLPDriverConfig struct {
+	// Open opens the export cfg describes: its two queues — read, the
+	// backlog a previous process left counted —, its senders and its
+	// meter. It sends nothing until OTLPExporter.Run.
+	Open func(ctx context.Context, cfg *OTLPConfig) (OTLPExporter, error)
+}
+```
+
+<a name="OTLPExporter"></a>
+## type [OTLPExporter](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/otlp_interface.go>)
+
+OTLPExporter is an app's export, open: where the tracer hands its spans, what the framework records of each unit of work, the loop that sends, and what it counts.
+
+```go
+type OTLPExporter interface {
+	// Record counts one unit of work the framework observed on node: its
+	// operation, how long it took, and whether it failed.
+	Record(node string, op string, took time.Duration, failed bool)
+	// Run sends the queued batches and collects the metrics until ctx ends;
+	// then it flushes what it holds in memory into the queues, lets the
+	// batch being sent finish within the drain, and closes the queues.
+	Run(ctx context.Context) error
+	// SpanSink is the sink the app's tracer ends its spans into.
+	SpanSink() OTLPSinkValue
+	// Stats is what each signal's queue holds, has sent and has lost.
+	Stats() []OTLPStatsValue
+}
+```
+
+<a name="OTLPExporter.Record"></a>
+### func \(OTLPExporter\) [Record](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/otlp_interface.go>)
+
+```go
+func (OTLPExporter) Record(node string, op string, took time.Duration, failed bool)
+```
+
+Record counts one unit of work the framework observed on node: its operation, how long it took, and whether it failed.
+
+<a name="OTLPExporter.Run"></a>
+### func \(OTLPExporter\) [Run](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/otlp_interface.go>)
+
+```go
+func (OTLPExporter) Run(ctx context.Context) error
+```
+
+Run sends the queued batches and collects the metrics until ctx ends; then it flushes what it holds in memory into the queues, lets the batch being sent finish within the drain, and closes the queues.
+
+<a name="OTLPExporter.SpanSink"></a>
+### func \(OTLPExporter\) [SpanSink](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/otlp_interface.go>)
+
+```go
+func (OTLPExporter) SpanSink() OTLPSinkValue
+```
+
+SpanSink is the sink the app's tracer ends its spans into.
+
+<a name="OTLPExporter.Stats"></a>
+### func \(OTLPExporter\) [Stats](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/otlp_interface.go>)
+
+```go
+func (OTLPExporter) Stats() []OTLPStatsValue
+```
+
+Stats is what each signal's queue holds, has sent and has lost.
+
+<a name="OTLPSinkValue"></a>
+## type [OTLPSinkValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/otlp.go>)
+
+OTLPSinkValue is the export's span sink: the SDK's trace.SpanSink held as any, as a MailValue holds a mail — plug names no SDK type, and the core, which names the SDK's trace, takes it back.
+
+```go
+type OTLPSinkValue struct {
+	// Sink is the SDK's trace.SpanSink.
+	Sink any
+}
+```
+
+<a name="OTLPStatsValue"></a>
+## type [OTLPStatsValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/otlp.go>)
+
+OTLPStatsValue is what one signal's queue holds, has sent and has lost, with its bounds.
+
+```go
+type OTLPStatsValue struct {
+	// LastRetryAfterAt is when the collector last imposed a delay; zero
+	// when it never did.
+	LastRetryAfterAt time.Time
+	// Signal is OTLPTraces or OTLPMetrics.
+	Signal           string
+	// PendingBytes and MaxBytes are the bytes the queue holds and may hold.
+	PendingBytes     int64
+	// PendingBytes and MaxBytes are the bytes the queue holds and may hold.
+	MaxBytes         int64
+	// LastRetryAfter is the last delay the collector imposed.
+	LastRetryAfter   time.Duration
+	// Pending and MaxBatches are the batches the queue holds and may hold.
+	Pending          int
+	// Pending and MaxBatches are the batches the queue holds and may hold.
+	MaxBatches       int
+	// Enqueued, Sent and Retries count the batches kept, sent and the
+	// attempts made again.
+	Enqueued         uint64
+	// Enqueued, Sent and Retries count the batches kept, sent and the
+	// attempts made again.
+	Sent             uint64
+	// Enqueued, Sent and Retries count the batches kept, sent and the
+	// attempts made again.
+	Retries          uint64
+	// Dropped, Expired and DeadLettered count the batches lost to a bound,
+	// to their age and to a permanent refusal.
+	Dropped          uint64
+	// Dropped, Expired and DeadLettered count the batches lost to a bound,
+	// to their age and to a permanent refusal.
+	Expired          uint64
+	// Dropped, Expired and DeadLettered count the batches lost to a bound,
+	// to their age and to a permanent refusal.
+	DeadLettered     uint64
+	// Durable reports whether the queue outlives the process: false in
+	// memory — no directory, or a platform whose durable queue the SDK
+	// refuses.
+	Durable          bool
+}
+```
 
 <a name="QueueConfig"></a>
 ## type [QueueConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/queue.go>)

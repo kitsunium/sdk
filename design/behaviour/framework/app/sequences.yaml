@@ -140,6 +140,20 @@ sequences:
     of: Prefix
   - forward: iapp.Only
     of: Only
+  - forward: iapp.OTLP
+    of: OTLP
+  - forward: iapp.OTLPEndpoint
+    of: OTLPEndpoint
+  - forward: iapp.OTLPBounds
+    of: OTLPBounds
+  - forward: iapp.OTLPWhenFull
+    of: OTLPWhenFull
+  - forward: iapp.OTLPMaxAge
+    of: OTLPMaxAge
+  - forward: iapp.OTLPSendTimeout
+    of: OTLPSendTimeout
+  - forward: iapp.OTLPSender
+    of: OTLPSender
   - forward: iapp.MinLength
     of: MinLength
   - forward: iapp.NotReused

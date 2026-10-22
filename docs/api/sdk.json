@@ -60,6 +60,13 @@
       "doc": "Package mail plugs kit's mailers in: the outbox a mailer keeps — the SDK's\nmail spool, sealed on the database that keeps the mailer's service, else in\nthe data directory or in memory — and the transports that empty it, the\nSDK's SMTP transport and its capture transport. A product that declares a\nmailer imports it:\n\n\timport _ \"github.com/kitsunium/sdk/framework/app/mail\"\n\nA product that declares none does not, and links none of that outbox; a\nprogram that declares one without it is refused at the start, the refusal\nnaming this import (CodeSubsystemMissing). It imports framework/app/store\nand framework/app/queue: a mailer's outbox on a database is the queue\nsubsystem's, joined to the transaction of the database the store subsystem\nopened, and sealed under kit's data keys, kept in a store of kit's own.\nframework/app does not import it (ADR 0179 step 10): kit gen writes the\nline for a designed product, and a hand-written one writes it.\n"
     },
     {
+      "path": "github.com/kitsunium/sdk/framework/app/otlp",
+      "name": "otlp",
+      "dir": "framework/app/otlp",
+      "layer": "framework",
+      "doc": "Package otlp plugs the framework's OTLP export in: the product's traces\nand the metrics the framework derives from them, each signal kept in a\ndurable queue of its own — the SDK's app/forward over its data/queue, in\nthe data directory — and forwarded to an OpenTelemetry collector over\nOTLP/HTTP, retried on a backoff, a Retry-After waited in full. A product\nthat declares app.OTLP imports it:\n\n\timport _ \"github.com/kitsunium/sdk/framework/app/otlp\"\n\nA product that declares no export does not, and links none of that\nforwarder, queue or exporter; a program that declares one without it is\nrefused at the start, the refusal naming this import\n(CodeSubsystemMissing). framework/app does not import it (ADR 0179 step\n10): kit gen writes the line for a designed product, and a hand-written\none writes it.\n"
+    },
+    {
       "path": "github.com/kitsunium/sdk/framework/app/queue",
       "name": "queue",
       "dir": "framework/app/queue",
@@ -142,6 +149,13 @@
       "dir": "framework/internal/app/mailengine",
       "layer": "framework",
       "doc": "Package mailengine is what framework/app/mail plugs into kit: the outbox\nthe framework's mailers keep — the SDK's mail spool, on the database that keeps the\nmailer's service in the queue subsystem's sealed broker, else in the data\ndirectory or in memory — and the transports that empty it, the SDK's SMTP\ntransport and its capture transport (ADR 0179 §1, step 6). The framework's core\nimports neither the SDK's spool nor a transport: it reaches them through\nplug, and a product that declares no mailer links none of them.\n\nPackage mailengine — the compile-time proof that the outbox is the framework's.\n"
+    },
+    {
+      "path": "github.com/kitsunium/sdk/framework/internal/app/otlpengine",
+      "name": "otlpengine",
+      "dir": "framework/internal/app/otlpengine",
+      "layer": "framework",
+      "doc": "Package otlpengine is what framework/app/otlp plugs into the framework:\nthe export app.OTLP declares — the product's spans and the metrics the\nframework derives from them, each signal kept in a durable queue of its\nown (the SDK's app/forward over its data/queue, in the data directory, else\nin memory) and forwarded to an OpenTelemetry collector over OTLP/HTTP, or\nto the product's own sender (issue #483, ADR 0185). The framework's core\nimports none of the SDK's forward, queue or OTLP exporters: it reaches them\nthrough plug, and a product that declares no export links none of them.\n\nPackage otlpengine — the compile-time proof that the export is the framework's.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/framework/internal/app/plug",
@@ -1247,6 +1261,22 @@
         "value": "0.4.2.53"
       },
       "doc": "CodeNothingToErase is CodeNothingToErase.\n",
+      "file": "framework/app/errors.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.CodeOTLPExport",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "CodeOTLPExport",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "262746",
+      "init": "go:github.com/kitsunium/sdk/framework/internal/app.CodeOTLPExport",
+      "code": {
+        "value": "0.4.2.90"
+      },
+      "doc": "CodeOTLPExport refuses a start whose OTLP export ([OTLP]) cannot be\nopened — its queue, its collector's endpoint, its headers —, and says\na stop that did not let it flush within its budget.\n",
       "file": "framework/app/errors.go",
       "layer": "framework"
     },
@@ -3253,6 +3283,184 @@
       "canonical": "func(ctx context.Context) time.Time",
       "doc": "Now returns the app's time: the system clock, or the clock a test gave\nwith [Clock]. Product code that compares with a deadline reads it rather\nthan time.Now, so that a test's manual clock reaches it.\n",
       "file": "framework/app/request.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.OTLP",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "OTLP",
+      "spelled": "func(opts ...OTLPOption) AppOption",
+      "canonical": "func(opts ...github.com/kitsunium/sdk/framework/app.OTLPOption) github.com/kitsunium/sdk/framework/app.AppOption",
+      "doc": "OTLP declares that the app forwards its traces and the metrics the\nframework derives from them to an OpenTelemetry collector over OTLP/HTTP:\nevery span the framework starts, and per node and operation its runs,\nfailures and durations (app.node.runs, app.node.failures,\napp.node.duration), with what the export itself holds and lost\n(app.otlp.*). The export is on once its endpoint is set — the setting\notlp-endpoint, [OTLPEndpoint] its default — or once [OTLPSender] replaces\nthe network; a CLI command never exports. A program that declares it\nimports framework/app/otlp, or its start is refused, naming the import:\n\n\timport _ \"github.com/kitsunium/sdk/framework/app/otlp\"\n\n\tvar App = app.NewApp(\"shop\", catalog.Service).With(\n\t\tapp.OTLP(app.OTLPEndpoint(\"http://collector:4318\")),\n\t)\n\nEvery value given here is the default of the setting that tunes it, which\nconfig/<env>.* and <PRODUCT>_OTLP_<KNOB> override. Given twice, the last\nwins.\n",
+      "file": "framework/app/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.OTLPBatch",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "OTLPBatch",
+      "spelled": "iapp.OTLPBatchValue",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/app.OTLPBatchValue",
+      "owner": "go:github.com/kitsunium/sdk/framework/internal/app.OTLPBatchValue",
+      "doc": "OTLPBatch is one batch as the product's own sender receives it\n([OTLPSender]): its signal, [OTLPTraces] or [OTLPMetrics], and its\nOTLP/JSON document, which a collector takes as it is.\n",
+      "file": "framework/app/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.OTLPBlock",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "OTLPBlock",
+      "spelled": "OTLPFullPolicy",
+      "canonical": "github.com/kitsunium/sdk/framework/app.OTLPFullPolicy",
+      "value": "\"block\"",
+      "init": "go:github.com/kitsunium/sdk/framework/internal/app.OTLPBlock",
+      "doc": "OTLPBlock: the span or the snapshot waits for room a few seconds, then\nis refused, counted dropped.\n",
+      "file": "framework/app/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.OTLPBounds",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "OTLPBounds",
+      "spelled": "func(maxBatches int, maxBytes int) OTLPOption",
+      "canonical": "func(maxBatches int, maxBytes int) github.com/kitsunium/sdk/framework/app.OTLPOption",
+      "doc": "OTLPBounds bounds each signal's queue: at most maxBatches batches and\nmaxBytes bytes — the defaults of the settings otlp-max-batches (10000)\nand otlp-max-bytes (256 MiB). A batch larger than maxBytes on its own is\ndropped.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/app/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.OTLPDropNewest",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "OTLPDropNewest",
+      "spelled": "OTLPFullPolicy",
+      "canonical": "github.com/kitsunium/sdk/framework/app.OTLPFullPolicy",
+      "value": "\"drop-newest\"",
+      "init": "go:github.com/kitsunium/sdk/framework/internal/app.OTLPDropNewest",
+      "doc": "OTLPDropNewest: the new batch is refused, counted dropped.\n",
+      "file": "framework/app/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.OTLPDropOldest",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "OTLPDropOldest",
+      "spelled": "OTLPFullPolicy",
+      "canonical": "github.com/kitsunium/sdk/framework/app.OTLPFullPolicy",
+      "value": "\"drop-oldest\"",
+      "init": "go:github.com/kitsunium/sdk/framework/internal/app.OTLPDropOldest",
+      "doc": "OTLPDropOldest, the default: the oldest batches not being sent are\ntaken out, counted dropped, until the new one fits.\n",
+      "file": "framework/app/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.OTLPEndpoint",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "OTLPEndpoint",
+      "spelled": "func(url string) OTLPOption",
+      "canonical": "func(url string) github.com/kitsunium/sdk/framework/app.OTLPOption",
+      "doc": "OTLPEndpoint is the collector's base URL — \"http://collector:4318\" —, each\nsignal's path (/v1/traces, /v1/metrics) appended to it: the default of\nthe setting otlp-endpoint. An absolute http or https URL with a host; the\nempty default leaves the export off.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/app/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.OTLPFullPolicy",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "OTLPFullPolicy",
+      "spelled": "iapp.OTLPFullPolicy",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/app.OTLPFullPolicy",
+      "owner": "go:github.com/kitsunium/sdk/framework/internal/app.OTLPFullPolicy",
+      "doc": "OTLPFullPolicy is what an export's full queue does with a new batch.\n",
+      "file": "framework/app/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.OTLPMaxAge",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "OTLPMaxAge",
+      "spelled": "func(d time.Duration) OTLPOption",
+      "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/app.OTLPOption",
+      "doc": "OTLPMaxAge is how long after it was queued a batch may still be sent — the\ndefault of the setting otlp-max-age (24h): one older is dropped unsent,\ncounted expired. A collector's Retry-After is waited in full, but never\npast it.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/app/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.OTLPMetrics",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "OTLPMetrics",
+      "spelled": "string",
+      "canonical": "string",
+      "value": "\"metrics\"",
+      "init": "go:github.com/kitsunium/sdk/framework/internal/app.OTLPMetrics",
+      "doc": "OTLPMetrics names the metrics signal: an OTLP/JSON\nExportMetricsServiceRequest.\n",
+      "file": "framework/app/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.OTLPOption",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "OTLPOption",
+      "spelled": "iapp.OpenTelemetryConfigurer",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/app.OpenTelemetryConfigurer",
+      "owner": "go:github.com/kitsunium/sdk/framework/internal/app.OpenTelemetryConfigurer",
+      "doc": "OTLPOption configures the app's export: [OTLPEndpoint], [OTLPBounds],\n[OTLPWhenFull], [OTLPMaxAge], [OTLPSendTimeout], [OTLPSender].\n",
+      "file": "framework/app/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.OTLPSendTimeout",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "OTLPSendTimeout",
+      "spelled": "func(d time.Duration) OTLPOption",
+      "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/app.OTLPOption",
+      "doc": "OTLPSendTimeout bounds one attempt to send a batch — the default of the\nsetting otlp-send-timeout (10s, OTEL_EXPORTER_OTLP_TIMEOUT's).\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/app/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.OTLPSender",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "OTLPSender",
+      "spelled": "func(send func(ctx context.Context, batch OTLPBatch) error) OTLPOption",
+      "canonical": "func(send func(ctx context.Context, batch github.com/kitsunium/sdk/framework/app.OTLPBatch) error) github.com/kitsunium/sdk/framework/app.OTLPOption",
+      "doc": "OTLPSender replaces the network: each batch is handed to send instead of\nbeing posted to a collector — the product's own sender, a bridge to\nanother transport. The queue, its bounds, its age and its retries stay\nthe framework's. A failure send returns is tried again on the backoff —\nafter the delay it carries when it is a resilience.RetryAfter's —, but for\na refusal the caller must fix, an [Error] of a 4xx other than 408 and 429,\nwhich dead-letters the batch. The export is then on whatever otlp-endpoint\nsays. A nil send keeps the network.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/app/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.OTLPTraces",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "OTLPTraces",
+      "spelled": "string",
+      "canonical": "string",
+      "value": "\"traces\"",
+      "init": "go:github.com/kitsunium/sdk/framework/internal/app.OTLPTraces",
+      "doc": "OTLPTraces names the trace signal: an OTLP/JSON\nExportTraceServiceRequest.\n",
+      "file": "framework/app/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.OTLPWhenFull",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "OTLPWhenFull",
+      "spelled": "func(p OTLPFullPolicy) OTLPOption",
+      "canonical": "func(p github.com/kitsunium/sdk/framework/app.OTLPFullPolicy) github.com/kitsunium/sdk/framework/app.OTLPOption",
+      "doc": "OTLPWhenFull is what a full queue does with a new batch — the default of\nthe setting otlp-when-full: [OTLPDropOldest] (the default),\n[OTLPDropNewest] or [OTLPBlock].\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/app/otlp.go",
       "layer": "framework"
     },
     {
@@ -6948,6 +7156,21 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.CodeOTLPExport",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "CodeOTLPExport",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "262746",
+      "code": {
+        "value": "0.4.2.90"
+      },
+      "doc": "CodeOTLPExport refuses a start whose OTLP export ([OTLP]) cannot be\nopened — its queue, its collector's endpoint, its headers —, and says\na stop that did not let it flush within its budget.\n",
+      "file": "framework/internal/app/gen_codes.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app.CodePasswordHash",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/internal/app",
@@ -8149,6 +8372,17 @@
       "canonical": "struct{}",
       "doc": "EmptyValue is the request or the response of an endpoint that has none. An\nendpoint answering EmptyValue replies 204 No Content.\n",
       "file": "framework/internal/app/endpoint.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.EnableOTLP",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "EnableOTLP",
+      "spelled": "func()",
+      "canonical": "func()",
+      "doc": "EnableOTLP makes the framework's own export code reachable: the settings,\nthe component, the readiness and the stop of the OTLP export a product\ndeclares. framework/app/otlp calls it as it is imported; a product never\ndoes.\n",
+      "file": "framework/internal/app/otlp_enable.go",
       "layer": "framework"
     },
     {
@@ -9512,6 +9746,179 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.OTLP",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "OTLP",
+      "spelled": "func(opts ...OpenTelemetryConfigurer) AppConfigurer",
+      "canonical": "func(opts ...github.com/kitsunium/sdk/framework/internal/app.OpenTelemetryConfigurer) github.com/kitsunium/sdk/framework/internal/app.AppConfigurer",
+      "doc": "OTLP declares that the app forwards its traces and the metrics the\nframework derives from them to an OpenTelemetry collector over OTLP/HTTP:\nevery span the framework starts, and per node and operation its runs,\nfailures and durations (app.node.runs, app.node.failures,\napp.node.duration), with what the export itself holds and lost\n(app.otlp.*). The export is on once its endpoint is set — the setting\notlp-endpoint, [OTLPEndpoint] its default — or once [OTLPSender] replaces\nthe network; a CLI command never exports. A program that declares it\nimports framework/app/otlp, or its start is refused, naming the import:\n\n\timport _ \"github.com/kitsunium/sdk/framework/app/otlp\"\n\n\tvar App = app.NewApp(\"shop\", catalog.Service).With(\n\t\tapp.OTLP(app.OTLPEndpoint(\"http://collector:4318\")),\n\t)\n\nEvery value given here is the default of the setting that tunes it, which\nconfig/<env>.* and <PRODUCT>_OTLP_<KNOB> override. Given twice, the last\nwins.\n",
+      "file": "framework/internal/app/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.OTLPBatchValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "OTLPBatchValue",
+      "spelled": "struct{Signal string; Document []byte}",
+      "canonical": "struct{Signal string; Document []byte}",
+      "fields": [
+        {
+          "name": "Signal",
+          "type": "string",
+          "doc": "Signal is OTLPTraces or OTLPMetrics.\n"
+        },
+        {
+          "name": "Document",
+          "type": "[]byte",
+          "doc": "Document is the OTLP/JSON export request.\n"
+        }
+      ],
+      "doc": "OTLPBatchValue is one batch as the product's own sender receives it\n([OTLPSender]): its signal, [OTLPTraces] or [OTLPMetrics], and its\nOTLP/JSON document, which a collector takes as it is.\n",
+      "file": "framework/internal/app/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.OTLPBlock",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "OTLPBlock",
+      "spelled": "OTLPFullPolicy",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/app.OTLPFullPolicy",
+      "value": "\"block\"",
+      "doc": "OTLPBlock: the span or the snapshot waits for room a few seconds, then\nis refused, counted dropped.\n",
+      "file": "framework/internal/app/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.OTLPBounds",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "OTLPBounds",
+      "spelled": "func(maxBatches int, maxBytes int) OpenTelemetryConfigurer",
+      "canonical": "func(maxBatches int, maxBytes int) github.com/kitsunium/sdk/framework/internal/app.OpenTelemetryConfigurer",
+      "doc": "OTLPBounds bounds each signal's queue: at most maxBatches batches and\nmaxBytes bytes — the defaults of the settings otlp-max-batches (10000)\nand otlp-max-bytes (256 MiB). A batch larger than maxBytes on its own is\ndropped.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.OTLPDropNewest",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "OTLPDropNewest",
+      "spelled": "OTLPFullPolicy",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/app.OTLPFullPolicy",
+      "value": "\"drop-newest\"",
+      "doc": "OTLPDropNewest: the new batch is refused, counted dropped.\n",
+      "file": "framework/internal/app/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.OTLPDropOldest",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "OTLPDropOldest",
+      "spelled": "OTLPFullPolicy",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/app.OTLPFullPolicy",
+      "value": "\"drop-oldest\"",
+      "doc": "OTLPDropOldest, the default: the oldest batches not being sent are\ntaken out, counted dropped, until the new one fits.\n",
+      "file": "framework/internal/app/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.OTLPEndpoint",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "OTLPEndpoint",
+      "spelled": "func(url string) OpenTelemetryConfigurer",
+      "canonical": "func(url string) github.com/kitsunium/sdk/framework/internal/app.OpenTelemetryConfigurer",
+      "doc": "OTLPEndpoint is the collector's base URL — \"http://collector:4318\" —, each\nsignal's path (/v1/traces, /v1/metrics) appended to it: the default of\nthe setting otlp-endpoint. An absolute http or https URL with a host; the\nempty default leaves the export off.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.OTLPFullPolicy",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "OTLPFullPolicy",
+      "spelled": "string",
+      "canonical": "string",
+      "doc": "OTLPFullPolicy is what an export's full queue does with a new batch.\n",
+      "file": "framework/internal/app/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.OTLPMaxAge",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "OTLPMaxAge",
+      "spelled": "func(d time.Duration) OpenTelemetryConfigurer",
+      "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/internal/app.OpenTelemetryConfigurer",
+      "doc": "OTLPMaxAge is how long after it was queued a batch may still be sent — the\ndefault of the setting otlp-max-age (24h): one older is dropped unsent,\ncounted expired. A collector's Retry-After is waited in full, but never\npast it.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.OTLPMetrics",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "OTLPMetrics",
+      "spelled": "string",
+      "canonical": "string",
+      "value": "\"metrics\"",
+      "init": "go:github.com/kitsunium/sdk/framework/internal/app/plug.OTLPMetrics",
+      "doc": "OTLPMetrics names the metrics signal: an OTLP/JSON\nExportMetricsServiceRequest.\n",
+      "file": "framework/internal/app/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.OTLPSendTimeout",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "OTLPSendTimeout",
+      "spelled": "func(d time.Duration) OpenTelemetryConfigurer",
+      "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/internal/app.OpenTelemetryConfigurer",
+      "doc": "OTLPSendTimeout bounds one attempt to send a batch — the default of the\nsetting otlp-send-timeout (10s, OTEL_EXPORTER_OTLP_TIMEOUT's).\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.OTLPSender",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "OTLPSender",
+      "spelled": "func(send func(ctx context.Context, batch OTLPBatchValue) error) OpenTelemetryConfigurer",
+      "canonical": "func(send func(ctx context.Context, batch github.com/kitsunium/sdk/framework/internal/app.OTLPBatchValue) error) github.com/kitsunium/sdk/framework/internal/app.OpenTelemetryConfigurer",
+      "doc": "OTLPSender replaces the network: each batch is handed to send instead of\nbeing posted to a collector — the product's own sender, a bridge to\nanother transport. The queue, its bounds, its age and its retries stay\nthe framework's. A failure send returns is tried again on the backoff —\nafter the delay it carries when it is a resilience.RetryAfter's —, but for\na refusal the caller must fix, an [Error] of a 4xx other than 408 and 429,\nwhich dead-letters the batch. The export is then on whatever otlp-endpoint\nsays. A nil send keeps the network.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.OTLPTraces",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "OTLPTraces",
+      "spelled": "string",
+      "canonical": "string",
+      "value": "\"traces\"",
+      "init": "go:github.com/kitsunium/sdk/framework/internal/app/plug.OTLPTraces",
+      "doc": "OTLPTraces names the trace signal: an OTLP/JSON\nExportTraceServiceRequest.\n",
+      "file": "framework/internal/app/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.OTLPWhenFull",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "OTLPWhenFull",
+      "spelled": "func(p OTLPFullPolicy) OpenTelemetryConfigurer",
+      "canonical": "func(p github.com/kitsunium/sdk/framework/internal/app.OTLPFullPolicy) github.com/kitsunium/sdk/framework/internal/app.OpenTelemetryConfigurer",
+      "doc": "OTLPWhenFull is what a full queue does with a new batch — the default of\nthe setting otlp-when-full: [OTLPDropOldest] (the default),\n[OTLPDropNewest] or [OTLPBlock].\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/otlp.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app.OnBounce",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/internal/app",
@@ -9542,6 +9949,17 @@
       "canonical": "func(maxOpen time.Duration) github.com/kitsunium/sdk/framework/internal/app.BreakerConfigurer",
       "doc": "OpenBackoff lengthens the open time of a [Breaker] that opens again\nwithout having closed: it doubles at each opening, from the breaker's open\ntime up to max. It is the default of the port's setting\n<service>-port-<name>-breaker-open-max, 0 — the same open time every\ntime — without it; a negative one stops the start.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
       "file": "framework/internal/app/port_breaker.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.OpenTelemetryConfigurer",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "OpenTelemetryConfigurer",
+      "spelled": "interface{openTelemetryConfigure(o *otlpOptions)}",
+      "canonical": "interface{openTelemetryConfigure(o *github.com/kitsunium/sdk/framework/internal/app.otlpOptions)}",
+      "doc": "OpenTelemetryConfigurer configures the app's OTLP export: [OTLPEndpoint],\n[OTLPBounds], [OTLPWhenFull], [OTLPMaxAge], [OTLPSendTimeout],\n[OTLPSender].\n",
+      "file": "framework/internal/app/otlp_interface.go",
       "layer": "framework"
     },
     {
@@ -11907,6 +12325,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/otlpengine.Enable",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/otlpengine",
+      "name": "Enable",
+      "spelled": "func()",
+      "canonical": "func()",
+      "doc": "Enable plugs the OTLP export into the framework.\n",
+      "file": "framework/internal/app/otlpengine/otlpengine.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.Broker",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
@@ -13867,6 +14296,376 @@
       "canonical": "sync/atomic.Pointer[func(fsys io/fs.FS, csp string) (net/http.Handler, error)]",
       "doc": "NewStaticFiles builds the file server of a frontend's tree; nil until\nframework/app/server is imported.\n",
       "file": "framework/internal/app/plug/plug.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.OTLP",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "OTLP",
+      "spelled": "atomic.Pointer[OTLPDriverConfig]",
+      "canonical": "sync/atomic.Pointer[github.com/kitsunium/sdk/framework/internal/app/plug.OTLPDriverConfig]",
+      "doc": "OTLP is the OTLP export subsystem; nil until framework/app/otlp is\nimported. A product that declares app.OTLP without it is refused at the\nstart (ADR 0179 §6).\n",
+      "file": "framework/internal/app/plug/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.OTLPBatchValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "OTLPBatchValue",
+      "spelled": "struct{Signal string; Document []byte}",
+      "canonical": "struct{Signal string; Document []byte}",
+      "fields": [
+        {
+          "name": "Signal",
+          "type": "string",
+          "doc": "Signal is OTLPTraces or OTLPMetrics.\n"
+        },
+        {
+          "name": "Document",
+          "type": "[]byte",
+          "doc": "Document is the OTLP/JSON export request.\n"
+        }
+      ],
+      "doc": "OTLPBatchValue is one batch as the product's own sender receives it: its\nsignal and its OTLP/JSON document, posted to a collector as it is.\n",
+      "file": "framework/internal/app/plug/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.OTLPBlock",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "OTLPBlock",
+      "spelled": "string",
+      "canonical": "string",
+      "value": "\"block\"",
+      "doc": "OTLPBlock makes the producer wait for room, up to a bound.\n",
+      "file": "framework/internal/app/plug/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.OTLPConfig",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "OTLPConfig",
+      "spelled": "struct{Clock Clock; Headers map[string]string; Send func(ctx context.Context, batch OTLPBatchValue) error; Retryable func(err error) bool; OnError func(err error); Service string; Version string; Endpoint string; Dir string; WhenFull string; MaxBytes int64; MaxBatches int; MaxAge time.Duration; SendTimeout time.Duration; Interval time.Duration; DrainTimeout time.Duration; SettleTimeout time.Duration}",
+      "canonical": "struct{Clock github.com/kitsunium/sdk/framework/internal/app/plug.Clock; Headers map[string]string; Send func(ctx context.Context, batch github.com/kitsunium/sdk/framework/internal/app/plug.OTLPBatchValue) error; Retryable func(err error) bool; OnError func(err error); Service string; Version string; Endpoint string; Dir string; WhenFull string; MaxBytes int64; MaxBatches int; MaxAge time.Duration; SendTimeout time.Duration; Interval time.Duration; DrainTimeout time.Duration; SettleTimeout time.Duration}",
+      "fields": [
+        {
+          "name": "Clock",
+          "type": "Clock",
+          "doc": "Clock is the app's clock: the queues stamp and age a batch on it, the\nretries and each attempt's bound wait on it, the metrics are\ncollected on it.\n"
+        },
+        {
+          "name": "Headers",
+          "type": "map[string]string",
+          "doc": "Headers ride on every request to the collector — an Authorization, a\ntenant —; they are the secret otlp-headers, never shown.\n"
+        },
+        {
+          "name": "Send",
+          "type": "func(ctx context.Context, batch OTLPBatchValue) error",
+          "doc": "Send, when set, ships a batch in place of the OTLP/HTTP exporters:\nthe product's own sender. Retryable then classifies its failures.\n"
+        },
+        {
+          "name": "Retryable",
+          "type": "func(err error) bool",
+          "doc": "Retryable classifies a failure of Send: a later attempt may cure it.\nUnused without Send: the OTLP/HTTP exporters classify their own.\n"
+        },
+        {
+          "name": "OnError",
+          "type": "func(err error)",
+          "doc": "OnError hears what the export could not keep — a batch of spans or a\nsnapshot its queue refused — and what it could not close; the core\nlogs it. The forwarder counts every batch it loses on its own.\n"
+        },
+        {
+          "name": "Service",
+          "type": "string",
+          "doc": "Service and Version name the producer: the resource's service.name\nand the instrumentation scope's version.\n"
+        },
+        {
+          "name": "Version",
+          "type": "string",
+          "doc": "Service and Version name the producer: the resource's service.name\nand the instrumentation scope's version.\n"
+        },
+        {
+          "name": "Endpoint",
+          "type": "string",
+          "doc": "Endpoint is the collector's base URL, \"http://collector:4318\": each\nsignal's path is appended to it. Unused with Send.\n"
+        },
+        {
+          "name": "Dir",
+          "type": "string",
+          "doc": "Dir is the directory the two queues lie in, one subdirectory per\nsignal; \"\" keeps them in memory, lost at a stop.\n"
+        },
+        {
+          "name": "WhenFull",
+          "type": "string",
+          "doc": "WhenFull is what a full queue does with a new batch: OTLPDropOldest,\nOTLPDropNewest or OTLPBlock.\n"
+        },
+        {
+          "name": "MaxBytes",
+          "type": "int64",
+          "doc": "MaxBytes bounds the bytes each queue holds.\n"
+        },
+        {
+          "name": "MaxBatches",
+          "type": "int",
+          "doc": "MaxBatches bounds the batches each queue holds.\n"
+        },
+        {
+          "name": "MaxAge",
+          "type": "time.Duration",
+          "doc": "MaxAge is how long after it was queued a batch may still be sent.\n"
+        },
+        {
+          "name": "SendTimeout",
+          "type": "time.Duration",
+          "doc": "SendTimeout bounds one attempt, and the hand-over of the spans the\nbatch sink exports to their queue.\n"
+        },
+        {
+          "name": "Interval",
+          "type": "time.Duration",
+          "doc": "Interval is how often the metrics are collected and queued.\n"
+        },
+        {
+          "name": "DrainTimeout",
+          "type": "time.Duration",
+          "doc": "DrainTimeout is how long the batch being sent at a stop may still\nrun; SettleTimeout bounds each acknowledgement once the stop began,\nand the flush of what the export still holds in memory.\n"
+        },
+        {
+          "name": "SettleTimeout",
+          "type": "time.Duration",
+          "doc": "DrainTimeout is how long the batch being sent at a stop may still\nrun; SettleTimeout bounds each acknowledgement once the stop began,\nand the flush of what the export still holds in memory.\n"
+        }
+      ],
+      "doc": "OTLPConfig is what the framework asks of an export: who produces the\ntelemetry, where it goes, where it waits, its bounds and the app's clock.\n",
+      "file": "framework/internal/app/plug/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.OTLPDriverConfig",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "OTLPDriverConfig",
+      "spelled": "struct{Open func(ctx context.Context, cfg *OTLPConfig) (OTLPExporter, error)}",
+      "canonical": "struct{Open func(ctx context.Context, cfg *github.com/kitsunium/sdk/framework/internal/app/plug.OTLPConfig) (github.com/kitsunium/sdk/framework/internal/app/plug.OTLPExporter, error)}",
+      "fields": [
+        {
+          "name": "Open",
+          "type": "func(ctx context.Context, cfg *OTLPConfig) (OTLPExporter, error)",
+          "doc": "Open opens the export cfg describes: its two queues — read, the\nbacklog a previous process left counted —, its senders and its\nmeter. It sends nothing until OTLPExporter.Run.\n"
+        }
+      ],
+      "doc": "OTLPDriverConfig is what framework/app/otlp plugs into the framework: how\nan app's export opens.\n",
+      "file": "framework/internal/app/plug/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.OTLPDropNewest",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "OTLPDropNewest",
+      "spelled": "string",
+      "canonical": "string",
+      "value": "\"drop-newest\"",
+      "doc": "OTLPDropNewest refuses the new batch.\n",
+      "file": "framework/internal/app/plug/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.OTLPDropOldest",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "OTLPDropOldest",
+      "spelled": "string",
+      "canonical": "string",
+      "value": "\"drop-oldest\"",
+      "doc": "OTLPDropOldest takes the oldest batches out until the new one fits.\n",
+      "file": "framework/internal/app/plug/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.OTLPExporter",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "OTLPExporter",
+      "spelled": "interface{Record(node string, op string, took time.Duration, failed bool); Run(ctx context.Context) error; SpanSink() OTLPSinkValue; Stats() []OTLPStatsValue}",
+      "canonical": "interface{Record(node string, op string, took time.Duration, failed bool); Run(ctx context.Context) error; SpanSink() github.com/kitsunium/sdk/framework/internal/app/plug.OTLPSinkValue; Stats() []github.com/kitsunium/sdk/framework/internal/app/plug.OTLPStatsValue}",
+      "doc": "OTLPExporter is an app's export, open: where the tracer hands its spans,\nwhat the framework records of each unit of work, the loop that sends, and\nwhat it counts.\n",
+      "file": "framework/internal/app/plug/otlp_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.OTLPExporter.Record",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "Record",
+      "recv": "OTLPExporter",
+      "spelled": "func(node string, op string, took time.Duration, failed bool)",
+      "canonical": "func(node string, op string, took time.Duration, failed bool)",
+      "doc": "Record counts one unit of work the framework observed on node: its\noperation, how long it took, and whether it failed.\n",
+      "file": "framework/internal/app/plug/otlp_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.OTLPExporter.Run",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "Run",
+      "recv": "OTLPExporter",
+      "spelled": "func(ctx context.Context) error",
+      "canonical": "func(ctx context.Context) error",
+      "doc": "Run sends the queued batches and collects the metrics until ctx ends;\nthen it flushes what it holds in memory into the queues, lets the\nbatch being sent finish within the drain, and closes the queues.\n",
+      "file": "framework/internal/app/plug/otlp_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.OTLPExporter.SpanSink",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "SpanSink",
+      "recv": "OTLPExporter",
+      "spelled": "func() OTLPSinkValue",
+      "canonical": "func() github.com/kitsunium/sdk/framework/internal/app/plug.OTLPSinkValue",
+      "doc": "SpanSink is the sink the app's tracer ends its spans into.\n",
+      "file": "framework/internal/app/plug/otlp_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.OTLPExporter.Stats",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "Stats",
+      "recv": "OTLPExporter",
+      "spelled": "func() []OTLPStatsValue",
+      "canonical": "func() []github.com/kitsunium/sdk/framework/internal/app/plug.OTLPStatsValue",
+      "doc": "Stats is what each signal's queue holds, has sent and has lost.\n",
+      "file": "framework/internal/app/plug/otlp_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.OTLPMetrics",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "OTLPMetrics",
+      "spelled": "string",
+      "canonical": "string",
+      "value": "\"metrics\"",
+      "doc": "OTLPMetrics names the metrics signal: an OTLP/JSON\nExportMetricsServiceRequest.\n",
+      "file": "framework/internal/app/plug/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.OTLPSinkValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "OTLPSinkValue",
+      "spelled": "struct{Sink any}",
+      "canonical": "struct{Sink any}",
+      "fields": [
+        {
+          "name": "Sink",
+          "type": "any",
+          "doc": "Sink is the SDK's trace.SpanSink.\n"
+        }
+      ],
+      "doc": "OTLPSinkValue is the export's span sink: the SDK's trace.SpanSink held\nas any, as a MailValue holds a mail — plug names no SDK type, and the core,\nwhich names the SDK's trace, takes it back.\n",
+      "file": "framework/internal/app/plug/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.OTLPStatsValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "OTLPStatsValue",
+      "spelled": "struct{LastRetryAfterAt time.Time; Signal string; PendingBytes int64; MaxBytes int64; LastRetryAfter time.Duration; Pending int; MaxBatches int; Enqueued uint64; Sent uint64; Retries uint64; Dropped uint64; Expired uint64; DeadLettered uint64; Durable bool}",
+      "canonical": "struct{LastRetryAfterAt time.Time; Signal string; PendingBytes int64; MaxBytes int64; LastRetryAfter time.Duration; Pending int; MaxBatches int; Enqueued uint64; Sent uint64; Retries uint64; Dropped uint64; Expired uint64; DeadLettered uint64; Durable bool}",
+      "fields": [
+        {
+          "name": "LastRetryAfterAt",
+          "type": "time.Time",
+          "doc": "LastRetryAfterAt is when the collector last imposed a delay; zero\nwhen it never did.\n"
+        },
+        {
+          "name": "Signal",
+          "type": "string",
+          "doc": "Signal is OTLPTraces or OTLPMetrics.\n"
+        },
+        {
+          "name": "PendingBytes",
+          "type": "int64",
+          "doc": "PendingBytes and MaxBytes are the bytes the queue holds and may hold.\n"
+        },
+        {
+          "name": "MaxBytes",
+          "type": "int64",
+          "doc": "PendingBytes and MaxBytes are the bytes the queue holds and may hold.\n"
+        },
+        {
+          "name": "LastRetryAfter",
+          "type": "time.Duration",
+          "doc": "LastRetryAfter is the last delay the collector imposed.\n"
+        },
+        {
+          "name": "Pending",
+          "type": "int",
+          "doc": "Pending and MaxBatches are the batches the queue holds and may hold.\n"
+        },
+        {
+          "name": "MaxBatches",
+          "type": "int",
+          "doc": "Pending and MaxBatches are the batches the queue holds and may hold.\n"
+        },
+        {
+          "name": "Enqueued",
+          "type": "uint64",
+          "doc": "Enqueued, Sent and Retries count the batches kept, sent and the\nattempts made again.\n"
+        },
+        {
+          "name": "Sent",
+          "type": "uint64",
+          "doc": "Enqueued, Sent and Retries count the batches kept, sent and the\nattempts made again.\n"
+        },
+        {
+          "name": "Retries",
+          "type": "uint64",
+          "doc": "Enqueued, Sent and Retries count the batches kept, sent and the\nattempts made again.\n"
+        },
+        {
+          "name": "Dropped",
+          "type": "uint64",
+          "doc": "Dropped, Expired and DeadLettered count the batches lost to a bound,\nto their age and to a permanent refusal.\n"
+        },
+        {
+          "name": "Expired",
+          "type": "uint64",
+          "doc": "Dropped, Expired and DeadLettered count the batches lost to a bound,\nto their age and to a permanent refusal.\n"
+        },
+        {
+          "name": "DeadLettered",
+          "type": "uint64",
+          "doc": "Dropped, Expired and DeadLettered count the batches lost to a bound,\nto their age and to a permanent refusal.\n"
+        },
+        {
+          "name": "Durable",
+          "type": "bool",
+          "doc": "Durable reports whether the queue outlives the process: false in\nmemory — no directory, or a platform whose durable queue the SDK\nrefuses.\n"
+        }
+      ],
+      "doc": "OTLPStatsValue is what one signal's queue holds, has sent and has lost,\nwith its bounds.\n",
+      "file": "framework/internal/app/plug/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.OTLPTraces",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "OTLPTraces",
+      "spelled": "string",
+      "canonical": "string",
+      "value": "\"traces\"",
+      "doc": "OTLPTraces names the trace signal: an OTLP/JSON\nExportTraceServiceRequest.\n",
+      "file": "framework/internal/app/plug/otlp.go",
       "layer": "framework"
     },
     {

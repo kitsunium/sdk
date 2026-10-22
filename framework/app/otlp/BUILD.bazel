@@ -1,0 +1,20 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "otlp",
+    srcs = ["otlp.go"],
+    importpath = "github.com/kitsunium/sdk/framework/app/otlp",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//framework/internal/app",
+        "//framework/internal/app/otlpengine",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":otlp",
+    visibility = ["//visibility:public"],
+)

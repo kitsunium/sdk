@@ -330,13 +330,15 @@ framework/         the layer above pkg/v1, packages of the root module — ADR 0
                      ADR 0179 step 8 —, store — the stores and databases, ADR
                      0179 —, queue — the queues, step 4 —, workflow
                      — the workflows, step 5 —, mail — the mailers,
-                     step 6 — and jobs — the jobs, step 7 —,
-                     storetest, the stores' conformance suite, and
+                     step 6 —, jobs — the jobs, step 7 — and otlp —
+                     the product's OTLP export over app/forward, issue
+                     #483 —, storetest, the stores' conformance suite, and
                      apptest, a product's tests on disk — ADR 0175;
                      its engine internal/app, + plug, serverengine,
                      studioengine, storeengine, queueengine, workflowengine,
-                     mailengine, jobengine), telemetry (the telemetry port + exporter
-                     — ADR 0149),
+                     mailengine, jobengine, otlpengine), telemetry (the
+                     telemetry port + exporter — ADR 0149, the tool's
+                     channel, apart from the OTLP export),
                    entitlement, selfupdate, gate, git (the distribution
                      mechanisms the SDK library shipped until ADR 0158:
                      signed roster -> grant; signature THEN digest THEN

@@ -760,6 +760,10 @@ func (a *App) declaredSettings(problem func(node string, at *pos, key string, ar
 		byName[d.base().name] = d
 		decls = append(decls, d)
 	}
+	for _, d := range a.otlpCodeSettings(byName) {
+		byName[d.base().name] = d
+		decls = append(decls, d)
+	}
 	return decls, byName
 }
 

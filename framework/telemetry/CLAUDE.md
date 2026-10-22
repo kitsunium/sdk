@@ -8,6 +8,12 @@ private socket (`pkg/v1/proc/ipc`, ADR 0148). The framework's `App` reports ever
 span, phase change, port retry, breaker change, supervised restart and giving up on it when `<PRODUCT>_TELEMETRY` names a socket at the start
 (`framework/app/telemetry.go`).
 
+It is the tool's channel. The product's own export to an OpenTelemetry
+collector — `app.OTLP`, the subsystem `framework/app/otlp` (issue #483, ADR
+0185) — is a channel apart: it forwards the SDK spans and the framework's
+metrics over OTLP/HTTP, from queues of its own, and neither reads this port
+nor changes it; an app that declares both runs both.
+
 ## Contents
 
 | File | Role |

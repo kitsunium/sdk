@@ -1,0 +1,360 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      The instruments the framework records of each unit of work it observed,
+      and those it reports of its own export (issue #483). A node and an
+      operation are the graph's, bounded by what the product declares.
+    grouped: true
+    items:
+      - name: runsMetric
+        value: "\"app.node.runs\""
+      - name: failuresMetric
+        value: "\"app.node.failures\""
+      - name: durationMetric
+        value: "\"app.node.duration\""
+      - name: pendingMetric
+        value: "\"app.otlp.pending\""
+      - name: pendingBytesMetric
+        value: "\"app.otlp.pending_bytes\""
+      - name: sentMetric
+        value: "\"app.otlp.sent\""
+      - name: retriesMetric
+        value: "\"app.otlp.retries\""
+      - name: droppedMetric
+        value: "\"app.otlp.dropped\""
+      - name: expiredMetric
+        value: "\"app.otlp.expired\""
+      - name: deadLetteredMetric
+        value: "\"app.otlp.dead_lettered\""
+      - name: lastRetryAfterMetric
+        value: "\"app.otlp.last_retry_after\""
+    name: runsMetric
+  - doc: The attributes of the instruments.
+    grouped: true
+    items:
+      - name: nodeAttr
+        value: "\"app.node\""
+      - name: opAttr
+        value: "\"app.op\""
+      - name: signalAttr
+        value: "\"app.otlp.signal\""
+    name: nodeAttr
+  - doc: |-
+      The queue every signal's batches wait in: a lease the forwarder renews
+      for as long as an attempt and its retries take, a margin above two
+      attempts, and deliveries no outage reaches — a batch's budget is its age
+      (ADR 0185) —; one batch at most maxQueueMessage bytes, below the export's
+      own byte bound.
+    grouped: true
+    items:
+      - name: leaseMargin
+        type: time.Duration
+        value: 30 * time.Second
+      - name: maxDeliveries
+        type: int
+        value: 1 << 30
+      - name: maxQueueMessage
+        type: int64
+        value: 64 << 20
+    name: leaseMargin
+  - doc: The exporters' names, as an SDK refusal names them.
+    grouped: true
+    items:
+      - name: spanExporterName
+        type: trace.ExporterName
+        value: "\"app-otlp-traces\""
+      - name: metricExporterName
+        type: metrics.ExporterName
+        value: "\"app-otlp-metrics\""
+    name: spanExporterName
+  - doc: |-
+      scopeName is the instrumentation that produces the export: the
+      framework's core, as its tracer says.
+    items:
+      - name: scopeName
+        value: "\"github.com/kitsunium/sdk/framework/internal/app\""
+    name: scopeName
+files:
+  - decls:
+      - sdkClock
+      - clockOf
+      - sdkClock.NewTimer
+      - sdkClock.NewTicker
+    name: clock.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - runsMetric
+      - nodeAttr
+      - durationBuckets
+      - export
+      - signal
+      - nodeInstruments
+      - (*export).SpanSink
+      - (*export).Record
+      - (*export).Stats
+      - (*export).Run
+      - (*export).collect
+      - (*export).report
+      - (*export).flush
+      - (*export).bounded
+      - (*export).close
+      - (*export).observeStats
+    name: export.go
+  - decls:
+      - leaseMargin
+      - spanExporterName
+      - scopeName
+      - Enable
+      - open
+      - openSignal
+      - openQueue
+      - senderOf
+      - lacks
+      - fullPolicyOf
+      - closeQueue
+    name: otlpengine.go
+  - decls:
+      - _
+    name: otlpengine_compliance.go
+functions:
+  - doc: clockOf is c as the SDK takes it, the system's for none.
+    name: clockOf
+    params: c plug.Clock
+    results: clock.Timed
+  - name: Enable
+  - doc: |-
+      open opens the export cfg describes: a queue and a forwarder per signal —
+      in cfg.Dir, one subdirectory each, else in memory, and in memory too where
+      the SDK's durable queue refuses the platform —, the trace batch sink in
+      front of the trace forwarder, and the meter the metrics are collected
+      from. Nothing is sent before Run.
+
+      IFACE-PLUGIN: the framework reaches the export through plug.OTLPExporter;
+      this is its implementation.
+    name: open
+    params: ctx context.Context, cfg *plug.OTLPConfig
+    results: plug.OTLPExporter, error
+  - doc: |-
+      openSignal opens one signal's queue and its forwarder, the backlog a
+      previous process left counted.
+    name: openSignal
+    params: ctx context.Context, cfg *plug.OTLPConfig, clk clock.Timed, name string
+    results: "*signal, error"
+  - doc: |-
+      openQueue opens one signal's queue: the SDK's durable queue in its
+      subdirectory of cfg.Dir, and whether it is durable; a memory queue without
+      a directory, and where the durable queue refuses the platform — an export
+      never stops the product it observes.
+    name: openQueue
+    params: cfg *plug.OTLPConfig, clk clock.Timed, name string
+    results: queue.Broker, bool, error
+  - doc: |-
+      senderOf is how one signal's batches are shipped, and how a failure is
+      classified: the product's own sender when it gave one, else the signal's
+      OTLP/HTTP exporter at the endpoint, the signal's path appended, whose
+      ExportDocument posts a stored document as it is.
+    name: senderOf
+    params: cfg *plug.OTLPConfig, name string
+    results: forward.Sender, func(error) bool, error
+  - doc: |-
+      lacks is the refusal of an OTLP/HTTP exporter that cannot post a stored
+      document.
+    name: lacks
+    params: name string
+    results: error
+  - doc: |-
+      fullPolicyOf is the setting's spelling as the forwarder's policy; the
+      setting's check refused any other.
+    name: fullPolicyOf
+    params: name string
+    results: forward.FullPolicy
+  - doc: |-
+      closeQueue releases what a queue holds — a durable queue's directory —;
+      nothing for one that holds none.
+    name: closeQueue
+    params: b queue.Broker
+    results: error
+imports:
+  clock: github.com/kitsunium/sdk/pkg/v1/clock
+  context: context
+  errors: errors
+  errs: github.com/kitsunium/sdk/pkg/v1/errs
+  filepath: path/filepath
+  forward: github.com/kitsunium/sdk/pkg/v1/app/forward
+  group: github.com/kitsunium/sdk/pkg/v1/concur/group
+  metrics: github.com/kitsunium/sdk/pkg/v1/observe/metrics
+  os: os
+  plug: github.com/kitsunium/sdk/framework/internal/app/plug
+  proc: github.com/kitsunium/sdk/pkg/v1/proc
+  queue: github.com/kitsunium/sdk/pkg/v1/data/queue
+  strings: strings
+  sync: sync
+  time: time
+  trace: github.com/kitsunium/sdk/pkg/v1/observe/trace
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/framework/internal/app/otlpengine
+  name: otlpengine
+  purpose: "Package otlpengine is what framework/app/otlp plugs into the framework: the export app.OTLP declares — the product's spans and the metrics the framework derives from them, each signal kept in a durable queue of its own (the SDK's app/forward over its data/queue, in the data directory, else in memory) and forwarded to an OpenTelemetry collector over OTLP/HTTP, or to the product's own sender (issue #483, ADR 0185)."
+types:
+  - doc: |-
+      sdkClock is the app's clock, as the framework's core hands it
+      (plug.Clock), as the SDK's queue, forwarder and batch sink stamp and wait
+      on it: the same instants and the same timers, a test's manual clock
+      included.
+    fields:
+      - name: ""
+        role: embedded
+        type: plug.Clock
+    kind: struct
+    methods:
+      - doc: NewTimer is the clock's timer, as the SDK's.
+        name: NewTimer
+        params: d time.Duration
+        recv: c sdkClock
+        results: clock.Timer
+      - doc: NewTicker is the clock's ticker, as the SDK's.
+        name: NewTicker
+        params: d time.Duration
+        recv: c sdkClock
+        results: clock.Ticker
+    name: sdkClock
+  - doc: |-
+      export is an app's export, open: a queue and a forwarder per signal, the
+      trace batch sink in front of the trace forwarder, the meter the metrics
+      are collected from, and the instruments of each node and operation.
+    fields:
+      - name: clock
+        type: clock.Timed
+      - name: signals
+        type: "[]*signal"
+      - name: batch
+        type: "*trace.BatchSink"
+      - name: snapshots
+        type: metrics.ContextExporter
+      - name: meter
+        type: metrics.FullMeter
+      - name: interval
+        type: time.Duration
+      - name: settle
+        type: time.Duration
+      - name: onError
+        type: func(err error)
+      - doc: |-
+          instruments are the instruments of each node and operation, made at
+          their first unit of work.
+        name: instruments
+        type: sync.Map
+    kind: struct
+    methods:
+      - doc: SpanSink is the trace batch sink's, as the app's tracer takes it.
+        name: SpanSink
+        recv: e *export
+        results: plug.OTLPSinkValue
+      - doc: |-
+          Record counts one unit of work on node: one run, one failure when it
+          failed, and how long it took.
+        name: Record
+        params: node, op string, took time.Duration, failed bool
+        recv: e *export
+      - doc: Stats is what each signal's queue holds, has sent and has lost.
+        name: Stats
+        recv: e *export
+        results: "[]plug.OTLPStatsValue"
+      - doc: |-
+          Run sends each signal's queued batches and queues the metrics every
+          interval until ctx ends. Then it flushes the spans the batch sink holds
+          and one last snapshot into the queues — each bounded by the settle —,
+          stops the forwarders, which let the batch being sent finish within their
+          drain, and closes the queues: what is still queued is the next process's.
+
+          Goroutine lifecycle: one per forwarder and one collecting the metrics, in
+          one group; Run waits for all of them before it returns.
+        name: Run
+        params: ctx context.Context
+        recv: e *export
+        results: error
+      - doc: |-
+          collect queues a snapshot of the meter every interval, on the app's
+          clock, until ctx ends; a snapshot its queue refused is reported.
+        name: collect
+        params: ctx context.Context
+        recv: e *export
+      - doc: report hands err to the core, which logs it.
+        name: report
+        params: err error
+        recv: e *export
+      - doc: |-
+          flush hands what the export holds in memory to the queues: the spans the
+          batch sink holds, then one last snapshot, each within the settle on the
+          app's clock.
+        name: flush
+        recv: e *export
+        results: error
+      - doc: |-
+          bounded is a context that ends once the settle passed on the app's clock.
+
+          Goroutine lifecycle: one, which ends when the timer fires or the returned
+          cancel is called.
+        name: bounded
+        recv: e *export
+        results: context.Context, context.CancelFunc
+      - doc: close releases every queue the export opened.
+        name: close
+        recv: e *export
+        results: error
+      - doc: |-
+          observeStats reports the export's own counts, per signal, at each
+          collection: what it holds, has sent and has lost, and the last delay a
+          collector imposed.
+        name: observeStats
+        recv: e *export
+    name: export
+  - doc: signal is one signal's queue and its forwarder, and the bounds it holds.
+    fields:
+      - name: name
+        type: string
+      - name: broker
+        type: queue.Broker
+      - name: forwarder
+        type: "*forward.Forwarder"
+      - name: maxBytes
+        type: int64
+      - name: maxBatches
+        type: int
+      - name: durable
+        type: bool
+    kind: struct
+    name: signal
+  - doc: nodeInstruments are the instruments of one node and operation.
+    fields:
+      - name: runs
+        type: metrics.Counter
+      - name: failures
+        type: metrics.Counter
+      - name: duration
+        type: metrics.Histogram
+    kind: struct
+    name: nodeInstruments
+vars:
+  - doc: |-
+      durationBuckets are the duration histogram's bounds, in seconds: the
+      OpenTelemetry semantic conventions' advice for http.server.request.duration.
+    items:
+      - name: durationBuckets
+        value: "[]float64{0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10}"
+    name: durationBuckets
+  - doc: |-
+      : Asserts at compile time that the export is what plug describes, and
+      that the app's clock is the SDK's.
+    grouped: true
+    items:
+      - name: _
+        type: plug.OTLPExporter
+        value: (*export)(nil)
+      - name: _
+        type: clock.Timed
+        value: sdkClock{}
+    name: _

@@ -1,0 +1,33 @@
+// Package otlp plugs the framework's OTLP export in: the product's traces
+// and the metrics the framework derives from them, each signal kept in a
+// durable queue of its own — the SDK's app/forward over its data/queue, in
+// the data directory — and forwarded to an OpenTelemetry collector over
+// OTLP/HTTP, retried on a backoff, a Retry-After waited in full. A product
+// that declares app.OTLP imports it:
+//
+//	import _ "github.com/kitsunium/sdk/framework/app/otlp"
+//
+// A product that declares no export does not, and links none of that
+// forwarder, queue or exporter; a program that declares one without it is
+// refused at the start, the refusal naming this import
+// (CodeSubsystemMissing). framework/app does not import it (ADR 0179 step
+// 10): kit gen writes the line for a designed product, and a hand-written
+// one writes it.
+package otlp
+
+import (
+	iapp "github.com/kitsunium/sdk/framework/internal/app"
+	"github.com/kitsunium/sdk/framework/internal/app/otlpengine"
+)
+
+// Importing the package plugs the export in: a blank package-level value
+// rather than an init, the SDK's convention.
+var _ = enable()
+
+// enable plugs the OTLP export into every app: the framework's own export
+// code, and the engine under it.
+func enable() bool {
+	iapp.EnableOTLP()
+	otlpengine.Enable()
+	return true
+}

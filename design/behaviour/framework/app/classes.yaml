@@ -473,6 +473,13 @@ constants:
         type: errs.Code
         value: iapp.CodeGaveUp
       - doc: |-
+          CodeOTLPExport refuses a start whose OTLP export ([OTLP]) cannot be
+          opened — its queue, its collector's endpoint, its headers —, and says
+          a stop that did not let it flush within its budget.
+        name: CodeOTLPExport
+        type: errs.Code
+        value: iapp.CodeOTLPExport
+      - doc: |-
           The signals the framework ends one of its own steps with and catches itself — a
           caller never receives one —, typed when the SDK made rule 2 a gate.
         name: CodeSealErased
@@ -519,6 +526,44 @@ constants:
         type: OverlapPolicy
         value: iapp.OverlapReplace
     name: OverlapSkip
+  - doc: The two signals an export forwards, as an [OTLPBatch] names them.
+    grouped: true
+    items:
+      - doc: |-
+          OTLPTraces names the trace signal: an OTLP/JSON
+          ExportTraceServiceRequest.
+        name: OTLPTraces
+        type: string
+        value: iapp.OTLPTraces
+      - doc: |-
+          OTLPMetrics names the metrics signal: an OTLP/JSON
+          ExportMetricsServiceRequest.
+        name: OTLPMetrics
+        type: string
+        value: iapp.OTLPMetrics
+    name: OTLPTraces
+  - doc: |-
+      What an export's full queue does with a new batch: the setting
+      otlp-when-full spells it.
+    grouped: true
+    items:
+      - doc: |-
+          OTLPDropOldest, the default: the oldest batches not being sent are
+          taken out, counted dropped, until the new one fits.
+        name: OTLPDropOldest
+        type: OTLPFullPolicy
+        value: iapp.OTLPDropOldest
+      - doc: "OTLPDropNewest: the new batch is refused, counted dropped."
+        name: OTLPDropNewest
+        type: OTLPFullPolicy
+        value: iapp.OTLPDropNewest
+      - doc: |-
+          OTLPBlock: the span or the snapshot waits for room a few seconds, then
+          is refused, counted dropped.
+        name: OTLPBlock
+        type: OTLPFullPolicy
+        value: iapp.OTLPBlock
+    name: OTLPDropOldest
   - doc: |-
       CodeProfileRead reports a profile of the process that could not be written
       or read back. It is in the framework's 0.4.2.* range.
@@ -731,6 +776,20 @@ files:
   - decls:
       - Operation
     name: operation.go
+  - decls:
+      - OTLPTraces
+      - OTLPDropOldest
+      - OTLPFullPolicy
+      - OTLPBatch
+      - OTLPOption
+      - OTLP
+      - OTLPEndpoint
+      - OTLPBounds
+      - OTLPWhenFull
+      - OTLPMaxAge
+      - OTLPSendTimeout
+      - OTLPSender
+    name: otlp.go
   - decls:
       - PasswordPolicy
       - PasswordOption
@@ -1110,6 +1169,27 @@ functions:
   - name: Only
     params: envs ...string
     results: MountOption
+  - name: OTLP
+    params: opts ...OTLPOption
+    results: AppOption
+  - name: OTLPEndpoint
+    params: url string
+    results: OTLPOption
+  - name: OTLPBounds
+    params: maxBatches, maxBytes int
+    results: OTLPOption
+  - name: OTLPWhenFull
+    params: p OTLPFullPolicy
+    results: OTLPOption
+  - name: OTLPMaxAge
+    params: d time.Duration
+    results: OTLPOption
+  - name: OTLPSendTimeout
+    params: d time.Duration
+    results: OTLPOption
+  - name: OTLPSender
+    params: send func(ctx context.Context, batch OTLPBatch) error
+    results: OTLPOption
   - name: MinLength
     params: n int
     results: PasswordOption
@@ -1774,6 +1854,26 @@ types:
     name: Operation
     typeParams: Req, Resp any
     underlying: iapp.Operation[Req, Resp]
+  - alias: true
+    doc: OTLPFullPolicy is what an export's full queue does with a new batch.
+    kind: alias
+    name: OTLPFullPolicy
+    underlying: iapp.OTLPFullPolicy
+  - alias: true
+    doc: |-
+      OTLPBatch is one batch as the product's own sender receives it
+      ([OTLPSender]): its signal, [OTLPTraces] or [OTLPMetrics], and its
+      OTLP/JSON document, which a collector takes as it is.
+    kind: alias
+    name: OTLPBatch
+    underlying: iapp.OTLPBatchValue
+  - alias: true
+    doc: |-
+      OTLPOption configures the app's export: [OTLPEndpoint], [OTLPBounds],
+      [OTLPWhenFull], [OTLPMaxAge], [OTLPSendTimeout], [OTLPSender].
+    kind: alias
+    name: OTLPOption
+    underlying: iapp.OpenTelemetryConfigurer
   - alias: true
     doc: |-
       PasswordPolicy is the policy of one secret field that holds a password's

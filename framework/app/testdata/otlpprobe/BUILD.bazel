@@ -1,0 +1,20 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "otlpprobe_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/kitsunium/sdk/framework/app/testdata/otlpprobe",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//framework/app/otlp",
+        "//framework/internal/app",
+    ],
+)
+
+go_binary(
+    name = "otlpprobe",
+    embed = [":otlpprobe_lib"],
+    visibility = ["//visibility:public"],
+)

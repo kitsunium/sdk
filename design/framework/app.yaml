@@ -415,6 +415,13 @@ packages:
               code — lifecycle's SupervisorGaveUp — their liveness check answers.
             name: CodeGaveUp
             value: "0x00_04_02_59"
+          - comment: 0.4.2.90 — the OTLP export could not be opened, or did not stop within its budget
+            doc: |-
+              CodeOTLPExport refuses a start whose OTLP export ([OTLP]) cannot be
+              opened — its queue, its collector's endpoint, its headers —, and says
+              a stop that did not let it flush within its budget.
+            name: CodeOTLPExport
+            value: "0x00_04_02_5A"
         type: errs.Code
     constants:
       - blockDoc: The environments.
@@ -575,6 +582,45 @@ packages:
         name: OverlapReplace
         type: OverlapPolicy
         value: "\"replace\""
+      - blockDoc: The two signals an export forwards, as an [OTLPBatchValue] names them.
+        doc: |-
+          OTLPTraces names the trace signal: an OTLP/JSON
+          ExportTraceServiceRequest.
+        name: OTLPTraces
+        type: string
+        value: "\"traces\""
+      - blockDoc: The two signals an export forwards, as an [OTLPBatchValue] names them.
+        doc: |-
+          OTLPMetrics names the metrics signal: an OTLP/JSON
+          ExportMetricsServiceRequest.
+        name: OTLPMetrics
+        type: string
+        value: "\"metrics\""
+      - blockDoc: |-
+          What an export's full queue does with a new batch: the setting
+          otlp-when-full spells it.
+        doc: |-
+          OTLPDropOldest, the default: the oldest batches not being sent are
+          taken out, counted dropped, until the new one fits.
+        name: OTLPDropOldest
+        type: OTLPFullPolicy
+        value: "\"drop-oldest\""
+      - blockDoc: |-
+          What an export's full queue does with a new batch: the setting
+          otlp-when-full spells it.
+        doc: "OTLPDropNewest: the new batch is refused, counted dropped."
+        name: OTLPDropNewest
+        type: OTLPFullPolicy
+        value: "\"drop-newest\""
+      - blockDoc: |-
+          What an export's full queue does with a new batch: the setting
+          otlp-when-full spells it.
+        doc: |-
+          OTLPBlock: the span or the snapshot waits for room a few seconds, then
+          is refused, counted dropped.
+        name: OTLPBlock
+        type: OTLPFullPolicy
+        value: "\"block\""
     doc: |-
       Package app — who may call an operation: the principal, the rules and their
       checks.
@@ -915,6 +961,12 @@ packages:
           and answers for the stores and databases a product declares.
           framework/app/store calls it as it is imported; a product never does.
         name: EnableStores
+      - doc: |-
+          EnableOTLP makes the framework's own export code reachable: the settings,
+          the component, the readiness and the stop of the OTLP export a product
+          declares. framework/app/otlp calls it as it is imported; a product never
+          does.
+        name: EnableOTLP
       - doc: |-
           Analyzer runs fn in the background once the product serves, in dev and when
           KIT_ANALYZE allows it. Without one, the graph is the runtime's alone.
@@ -3060,6 +3112,119 @@ packages:
             name: E
           - constraint: comparable
             name: S
+      - doc: |-
+          OTLP declares that the app forwards its traces and the metrics the
+          framework derives from them to an OpenTelemetry collector over OTLP/HTTP:
+          every span the framework starts, and per node and operation its runs,
+          failures and durations (app.node.runs, app.node.failures,
+          app.node.duration), with what the export itself holds and lost
+          (app.otlp.*). The export is on once its endpoint is set — the setting
+          otlp-endpoint, [OTLPEndpoint] its default — or once [OTLPSender] replaces
+          the network; a CLI command never exports. A program that declares it
+          imports framework/app/otlp, or its start is refused, naming the import:
+
+          	import _ "github.com/kitsunium/sdk/framework/app/otlp"
+
+          	var App = app.NewApp("shop", catalog.Service).With(
+          		app.OTLP(app.OTLPEndpoint("http://collector:4318")),
+          	)
+
+          Every value given here is the default of the setting that tunes it, which
+          config/<env>.* and <PRODUCT>_OTLP_<KNOB> override. Given twice, the last
+          wins.
+        in:
+          - name: opts
+            type: OpenTelemetryConfigurer
+        name: OTLP
+        out:
+          - type: AppConfigurer
+        variadic: true
+      - doc: |-
+          OTLPEndpoint is the collector's base URL — "http://collector:4318" —, each
+          signal's path (/v1/traces, /v1/metrics) appended to it: the default of
+          the setting otlp-endpoint. An absolute http or https URL with a host; the
+          empty default leaves the export off.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: url
+            type: string
+        name: OTLPEndpoint
+        out:
+          - type: OpenTelemetryConfigurer
+      - doc: |-
+          OTLPBounds bounds each signal's queue: at most maxBatches batches and
+          maxBytes bytes — the defaults of the settings otlp-max-batches (10000)
+          and otlp-max-bytes (256 MiB). A batch larger than maxBytes on its own is
+          dropped.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: maxBatches
+          - name: maxBytes
+            type: int
+        name: OTLPBounds
+        out:
+          - type: OpenTelemetryConfigurer
+      - doc: |-
+          OTLPWhenFull is what a full queue does with a new batch — the default of
+          the setting otlp-when-full: [OTLPDropOldest] (the default),
+          [OTLPDropNewest] or [OTLPBlock].
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: p
+            type: OTLPFullPolicy
+        name: OTLPWhenFull
+        out:
+          - type: OpenTelemetryConfigurer
+      - doc: |-
+          OTLPMaxAge is how long after it was queued a batch may still be sent — the
+          default of the setting otlp-max-age (24h): one older is dropped unsent,
+          counted expired. A collector's Retry-After is waited in full, but never
+          past it.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: d
+            type: time.Duration
+        name: OTLPMaxAge
+        out:
+          - type: OpenTelemetryConfigurer
+      - doc: |-
+          OTLPSendTimeout bounds one attempt to send a batch — the default of the
+          setting otlp-send-timeout (10s, OTEL_EXPORTER_OTLP_TIMEOUT's).
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: d
+            type: time.Duration
+        name: OTLPSendTimeout
+        out:
+          - type: OpenTelemetryConfigurer
+      - doc: |-
+          OTLPSender replaces the network: each batch is handed to send instead of
+          being posted to a collector — the product's own sender, a bridge to
+          another transport. The queue, its bounds, its age and its retries stay
+          the framework's. A failure send returns is tried again on the backoff —
+          after the delay it carries when it is a resilience.RetryAfter's —, but for
+          a refusal the caller must fix, an [Error] of a 4xx other than 408 and 429,
+          which dead-letters the batch. The export is then on whatever otlp-endpoint
+          says. A nil send keeps the network.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: send
+            type: func(ctx context.Context, batch OTLPBatchValue) error
+        name: OTLPSender
+        out:
+          - type: OpenTelemetryConfigurer
     imports:
       authz: github.com/kitsunium/sdk/pkg/v1/security/authz
       clock: github.com/kitsunium/sdk/pkg/v1/clock
@@ -5939,6 +6104,29 @@ packages:
             name: E
           - constraint: comparable
             name: S
+      - doc: OTLPFullPolicy is what an export's full queue does with a new batch.
+        name: OTLPFullPolicy
+        underlying: string
+      - doc: |-
+          OTLPBatchValue is one batch as the product's own sender receives it
+          ([OTLPSender]): its signal, [OTLPTraces] or [OTLPMetrics], and its
+          OTLP/JSON document, which a collector takes as it is.
+        name: OTLPBatchValue
+        struct:
+          fields:
+            - doc: Signal is OTLPTraces or OTLPMetrics.
+              name: Signal
+              type: string
+            - doc: Document is the OTLP/JSON export request.
+              name: Document
+              type: "[]byte"
+      - doc: |-
+          OpenTelemetryConfigurer configures the app's OTLP export: [OTLPEndpoint],
+          [OTLPBounds], [OTLPWhenFull], [OTLPMaxAge], [OTLPSendTimeout],
+          [OTLPSender].
+        interface:
+          unexported: true
+        name: OpenTelemetryConfigurer
     variables:
       - doc: |-
           Privacy is the framework's own service: the data keys, the legal holds and the
@@ -5996,6 +6184,21 @@ packages:
       - doc: Enable plugs the mailers' outbox and their transports into the framework.
         name: Enable
     path: github.com/kitsunium/sdk/framework/internal/app/mailengine
+  - doc: |-
+      Package otlpengine is what framework/app/otlp plugs into the framework:
+      the export app.OTLP declares — the product's spans and the metrics the
+      framework derives from them, each signal kept in a durable queue of its
+      own (the SDK's app/forward over its data/queue, in the data directory, else
+      in memory) and forwarded to an OpenTelemetry collector over OTLP/HTTP, or
+      to the product's own sender (issue #483, ADR 0185). The framework's core
+      imports none of the SDK's forward, queue or OTLP exporters: it reaches them
+      through plug, and a product that declares no export links none of them.
+
+      Package otlpengine — the compile-time proof that the export is the framework's.
+    functions:
+      - doc: Enable plugs the OTLP export into the framework.
+        name: Enable
+    path: github.com/kitsunium/sdk/framework/internal/app/otlpengine
   - constants:
       - blockDoc: The spool's refusals the framework tells apart, which it words for the product.
         doc: MailRefusalNone is no refusal the framework words.
@@ -6403,6 +6606,35 @@ packages:
         name: WorkflowWaitAbandoned
         type: WorkflowFailure
         value: "14"
+      - blockDoc: The two signals an export forwards, as an OTLPBatchValue names them.
+        doc: |-
+          OTLPTraces names the trace signal: an OTLP/JSON
+          ExportTraceServiceRequest.
+        name: OTLPTraces
+        type: string
+        value: "\"traces\""
+      - blockDoc: The two signals an export forwards, as an OTLPBatchValue names them.
+        doc: |-
+          OTLPMetrics names the metrics signal: an OTLP/JSON
+          ExportMetricsServiceRequest.
+        name: OTLPMetrics
+        type: string
+        value: "\"metrics\""
+      - blockDoc: The full policies an export's queue applies, as the setting spells them.
+        doc: OTLPDropOldest takes the oldest batches out until the new one fits.
+        name: OTLPDropOldest
+        type: string
+        value: "\"drop-oldest\""
+      - blockDoc: The full policies an export's queue applies, as the setting spells them.
+        doc: OTLPDropNewest refuses the new batch.
+        name: OTLPDropNewest
+        type: string
+        value: "\"drop-newest\""
+      - blockDoc: The full policies an export's queue applies, as the setting spells them.
+        doc: OTLPBlock makes the producer wait for room, up to a bound.
+        name: OTLPBlock
+        type: string
+        value: "\"block\""
     doc: |-
       Package plug is where the framework's opt-in subsystems plug in: the HTTP engine, the
       frontends' file server and the process sampler of the runtime graph
@@ -9153,6 +9385,221 @@ packages:
                 - type: string
                 - type: error
         name: Translator
+      - doc: |-
+          OTLPDriverConfig is what framework/app/otlp plugs into the framework: how
+          an app's export opens.
+        name: OTLPDriverConfig
+        struct:
+          fields:
+            - doc: |-
+                Open opens the export cfg describes: its two queues — read, the
+                backlog a previous process left counted —, its senders and its
+                meter. It sends nothing until OTLPExporter.Run.
+              name: Open
+              type: func(ctx context.Context, cfg *OTLPConfig) (OTLPExporter, error)
+      - doc: |-
+          OTLPConfig is what the framework asks of an export: who produces the
+          telemetry, where it goes, where it waits, its bounds and the app's clock.
+        name: OTLPConfig
+        struct:
+          fields:
+            - doc: |-
+                Clock is the app's clock: the queues stamp and age a batch on it, the
+                retries and each attempt's bound wait on it, the metrics are
+                collected on it.
+              name: Clock
+              type: Clock
+            - doc: |-
+                Headers ride on every request to the collector — an Authorization, a
+                tenant —; they are the secret otlp-headers, never shown.
+              name: Headers
+              type: map[string]string
+            - doc: |-
+                Send, when set, ships a batch in place of the OTLP/HTTP exporters:
+                the product's own sender. Retryable then classifies its failures.
+              name: Send
+              type: func(ctx context.Context, batch OTLPBatchValue) error
+            - doc: |-
+                Retryable classifies a failure of Send: a later attempt may cure it.
+                Unused without Send: the OTLP/HTTP exporters classify their own.
+              name: Retryable
+              type: func(err error) bool
+            - doc: |-
+                OnError hears what the export could not keep — a batch of spans or a
+                snapshot its queue refused — and what it could not close; the core
+                logs it. The forwarder counts every batch it loses on its own.
+              name: OnError
+              type: func(err error)
+            - doc: |-
+                Service and Version name the producer: the resource's service.name
+                and the instrumentation scope's version.
+              name: Service
+            - doc: |-
+                Service and Version name the producer: the resource's service.name
+                and the instrumentation scope's version.
+              name: Version
+              type: string
+            - doc: |-
+                Endpoint is the collector's base URL, "http://collector:4318": each
+                signal's path is appended to it. Unused with Send.
+              name: Endpoint
+              type: string
+            - doc: |-
+                Dir is the directory the two queues lie in, one subdirectory per
+                signal; "" keeps them in memory, lost at a stop.
+              name: Dir
+              type: string
+            - doc: |-
+                WhenFull is what a full queue does with a new batch: OTLPDropOldest,
+                OTLPDropNewest or OTLPBlock.
+              name: WhenFull
+              type: string
+            - doc: MaxBytes bounds the bytes each queue holds.
+              name: MaxBytes
+              type: int64
+            - doc: MaxBatches bounds the batches each queue holds.
+              name: MaxBatches
+              type: int
+            - doc: MaxAge is how long after it was queued a batch may still be sent.
+              name: MaxAge
+              type: time.Duration
+            - doc: |-
+                SendTimeout bounds one attempt, and the hand-over of the spans the
+                batch sink exports to their queue.
+              name: SendTimeout
+              type: time.Duration
+            - doc: Interval is how often the metrics are collected and queued.
+              name: Interval
+              type: time.Duration
+            - doc: |-
+                DrainTimeout is how long the batch being sent at a stop may still
+                run; SettleTimeout bounds each acknowledgement once the stop began,
+                and the flush of what the export still holds in memory.
+              name: DrainTimeout
+            - doc: |-
+                DrainTimeout is how long the batch being sent at a stop may still
+                run; SettleTimeout bounds each acknowledgement once the stop began,
+                and the flush of what the export still holds in memory.
+              name: SettleTimeout
+              type: time.Duration
+      - doc: |-
+          OTLPSinkValue is the export's span sink: the SDK's trace.SpanSink held
+          as any, as a MailValue holds a mail — plug names no SDK type, and the core,
+          which names the SDK's trace, takes it back.
+        name: OTLPSinkValue
+        struct:
+          fields:
+            - doc: Sink is the SDK's trace.SpanSink.
+              name: Sink
+              type: any
+      - doc: |-
+          OTLPBatchValue is one batch as the product's own sender receives it: its
+          signal and its OTLP/JSON document, posted to a collector as it is.
+        name: OTLPBatchValue
+        struct:
+          fields:
+            - doc: Signal is OTLPTraces or OTLPMetrics.
+              name: Signal
+              type: string
+            - doc: Document is the OTLP/JSON export request.
+              name: Document
+              type: "[]byte"
+      - doc: |-
+          OTLPStatsValue is what one signal's queue holds, has sent and has lost,
+          with its bounds.
+        name: OTLPStatsValue
+        struct:
+          fields:
+            - doc: |-
+                LastRetryAfterAt is when the collector last imposed a delay; zero
+                when it never did.
+              name: LastRetryAfterAt
+              type: time.Time
+            - doc: Signal is OTLPTraces or OTLPMetrics.
+              name: Signal
+              type: string
+            - doc: PendingBytes and MaxBytes are the bytes the queue holds and may hold.
+              name: PendingBytes
+            - doc: PendingBytes and MaxBytes are the bytes the queue holds and may hold.
+              name: MaxBytes
+              type: int64
+            - doc: LastRetryAfter is the last delay the collector imposed.
+              name: LastRetryAfter
+              type: time.Duration
+            - doc: Pending and MaxBatches are the batches the queue holds and may hold.
+              name: Pending
+            - doc: Pending and MaxBatches are the batches the queue holds and may hold.
+              name: MaxBatches
+              type: int
+            - doc: |-
+                Enqueued, Sent and Retries count the batches kept, sent and the
+                attempts made again.
+              name: Enqueued
+            - doc: |-
+                Enqueued, Sent and Retries count the batches kept, sent and the
+                attempts made again.
+              name: Sent
+            - doc: |-
+                Enqueued, Sent and Retries count the batches kept, sent and the
+                attempts made again.
+              name: Retries
+              type: uint64
+            - doc: |-
+                Dropped, Expired and DeadLettered count the batches lost to a bound,
+                to their age and to a permanent refusal.
+              name: Dropped
+            - doc: |-
+                Dropped, Expired and DeadLettered count the batches lost to a bound,
+                to their age and to a permanent refusal.
+              name: Expired
+            - doc: |-
+                Dropped, Expired and DeadLettered count the batches lost to a bound,
+                to their age and to a permanent refusal.
+              name: DeadLettered
+              type: uint64
+            - doc: |-
+                Durable reports whether the queue outlives the process: false in
+                memory — no directory, or a platform whose durable queue the SDK
+                refuses.
+              name: Durable
+              type: bool
+      - doc: |-
+          OTLPExporter is an app's export, open: where the tracer hands its spans,
+          what the framework records of each unit of work, the loop that sends, and
+          what it counts.
+        interface:
+          methods:
+            - doc: SpanSink is the sink the app's tracer ends its spans into.
+              name: SpanSink
+              out:
+                - type: OTLPSinkValue
+            - doc: |-
+                Record counts one unit of work the framework observed on node: its
+                operation, how long it took, and whether it failed.
+              in:
+                - name: node
+                - name: op
+                  type: string
+                - name: took
+                  type: time.Duration
+                - name: failed
+                  type: bool
+              name: Record
+            - doc: |-
+                Run sends the queued batches and collects the metrics until ctx ends;
+                then it flushes what it holds in memory into the queues, lets the
+                batch being sent finish within the drain, and closes the queues.
+              in:
+                - name: ctx
+                  type: context.Context
+              name: Run
+              out:
+                - type: error
+            - doc: Stats is what each signal's queue holds, has sent and has lost.
+              name: Stats
+              out:
+                - type: "[]OTLPStatsValue"
+        name: OTLPExporter
     variables:
       - doc: |-
           Jobs is the jobs subsystem: the schedules of the framework's jobs and the scheduler
@@ -9219,6 +9666,12 @@ packages:
           imports (ADR 0179 Q6).
         name: Words
         type: atomic.Pointer[WordsConfig]
+      - doc: |-
+          OTLP is the OTLP export subsystem; nil until framework/app/otlp is
+          imported. A product that declares app.OTLP without it is refused at the
+          start (ADR 0179 §6).
+        name: OTLP
+        type: atomic.Pointer[OTLPDriverConfig]
   - doc: |-
       Package queueengine is what framework/app/queue plugs into kit: the brokers
       the framework's consumers' queues run on — the SDK's queue in memory, in the data
@@ -10011,6 +10464,20 @@ packages:
             name: E
           - constraint: comparable
             name: S
+      - doc: OTLPFullPolicy is what an export's full queue does with a new batch.
+        name: OTLPFullPolicy
+        target: iapp.OTLPFullPolicy
+      - doc: |-
+          OTLPBatch is one batch as the product's own sender receives it
+          ([OTLPSender]): its signal, [OTLPTraces] or [OTLPMetrics], and its
+          OTLP/JSON document, which a collector takes as it is.
+        name: OTLPBatch
+        target: iapp.OTLPBatchValue
+      - doc: |-
+          OTLPOption configures the app's export: [OTLPEndpoint], [OTLPBounds],
+          [OTLPWhenFull], [OTLPMaxAge], [OTLPSendTimeout], [OTLPSender].
+        name: OTLPOption
+        target: iapp.OpenTelemetryConfigurer
     constants:
       - doc: |-
           CodeSingletonHeld reports a start refused because another process of the
@@ -10544,6 +11011,52 @@ packages:
         name: CodeGaveUp
         type: errs.Code
         value: "0x00_04_02_59"
+      - doc: |-
+          CodeOTLPExport refuses a start whose OTLP export ([OTLP]) cannot be
+          opened — its queue, its collector's endpoint, its headers —, and says
+          a stop that did not let it flush within its budget.
+        name: CodeOTLPExport
+        type: errs.Code
+        value: "0x00_04_02_5A"
+      - blockDoc: The two signals an export forwards, as an [OTLPBatch] names them.
+        doc: |-
+          OTLPTraces names the trace signal: an OTLP/JSON
+          ExportTraceServiceRequest.
+        name: OTLPTraces
+        type: string
+        value: "\"traces\""
+      - blockDoc: The two signals an export forwards, as an [OTLPBatch] names them.
+        doc: |-
+          OTLPMetrics names the metrics signal: an OTLP/JSON
+          ExportMetricsServiceRequest.
+        name: OTLPMetrics
+        type: string
+        value: "\"metrics\""
+      - blockDoc: |-
+          What an export's full queue does with a new batch: the setting
+          otlp-when-full spells it.
+        doc: |-
+          OTLPDropOldest, the default: the oldest batches not being sent are
+          taken out, counted dropped, until the new one fits.
+        name: OTLPDropOldest
+        type: OTLPFullPolicy
+        value: "\"drop-oldest\""
+      - blockDoc: |-
+          What an export's full queue does with a new batch: the setting
+          otlp-when-full spells it.
+        doc: "OTLPDropNewest: the new batch is refused, counted dropped."
+        name: OTLPDropNewest
+        type: OTLPFullPolicy
+        value: "\"drop-newest\""
+      - blockDoc: |-
+          What an export's full queue does with a new batch: the setting
+          otlp-when-full spells it.
+        doc: |-
+          OTLPBlock: the span or the snapshot waits for room a few seconds, then
+          is refused, counted dropped.
+        name: OTLPBlock
+        type: OTLPFullPolicy
+        value: "\"block\""
     doc: |-
       Package app — who may call an operation: the principal, the rules and their
       checks.
@@ -12780,6 +13293,119 @@ packages:
         name: Transact
         out:
           - type: error
+      - doc: |-
+          OTLP declares that the app forwards its traces and the metrics the
+          framework derives from them to an OpenTelemetry collector over OTLP/HTTP:
+          every span the framework starts, and per node and operation its runs,
+          failures and durations (app.node.runs, app.node.failures,
+          app.node.duration), with what the export itself holds and lost
+          (app.otlp.*). The export is on once its endpoint is set — the setting
+          otlp-endpoint, [OTLPEndpoint] its default — or once [OTLPSender] replaces
+          the network; a CLI command never exports. A program that declares it
+          imports framework/app/otlp, or its start is refused, naming the import:
+
+          	import _ "github.com/kitsunium/sdk/framework/app/otlp"
+
+          	var App = app.NewApp("shop", catalog.Service).With(
+          		app.OTLP(app.OTLPEndpoint("http://collector:4318")),
+          	)
+
+          Every value given here is the default of the setting that tunes it, which
+          config/<env>.* and <PRODUCT>_OTLP_<KNOB> override. Given twice, the last
+          wins.
+        in:
+          - name: opts
+            type: OTLPOption
+        name: OTLP
+        out:
+          - type: AppOption
+        variadic: true
+      - doc: |-
+          OTLPEndpoint is the collector's base URL — "http://collector:4318" —, each
+          signal's path (/v1/traces, /v1/metrics) appended to it: the default of
+          the setting otlp-endpoint. An absolute http or https URL with a host; the
+          empty default leaves the export off.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: url
+            type: string
+        name: OTLPEndpoint
+        out:
+          - type: OTLPOption
+      - doc: |-
+          OTLPBounds bounds each signal's queue: at most maxBatches batches and
+          maxBytes bytes — the defaults of the settings otlp-max-batches (10000)
+          and otlp-max-bytes (256 MiB). A batch larger than maxBytes on its own is
+          dropped.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: maxBatches
+          - name: maxBytes
+            type: int
+        name: OTLPBounds
+        out:
+          - type: OTLPOption
+      - doc: |-
+          OTLPWhenFull is what a full queue does with a new batch — the default of
+          the setting otlp-when-full: [OTLPDropOldest] (the default),
+          [OTLPDropNewest] or [OTLPBlock].
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: p
+            type: OTLPFullPolicy
+        name: OTLPWhenFull
+        out:
+          - type: OTLPOption
+      - doc: |-
+          OTLPMaxAge is how long after it was queued a batch may still be sent — the
+          default of the setting otlp-max-age (24h): one older is dropped unsent,
+          counted expired. A collector's Retry-After is waited in full, but never
+          past it.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: d
+            type: time.Duration
+        name: OTLPMaxAge
+        out:
+          - type: OTLPOption
+      - doc: |-
+          OTLPSendTimeout bounds one attempt to send a batch — the default of the
+          setting otlp-send-timeout (10s, OTEL_EXPORTER_OTLP_TIMEOUT's).
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: d
+            type: time.Duration
+        name: OTLPSendTimeout
+        out:
+          - type: OTLPOption
+      - doc: |-
+          OTLPSender replaces the network: each batch is handed to send instead of
+          being posted to a collector — the product's own sender, a bridge to
+          another transport. The queue, its bounds, its age and its retries stay
+          the framework's. A failure send returns is tried again on the backoff —
+          after the delay it carries when it is a resilience.RetryAfter's —, but for
+          a refusal the caller must fix, an [Error] of a 4xx other than 408 and 429,
+          which dead-letters the batch. The export is then on whatever otlp-endpoint
+          says. A nil send keeps the network.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: send
+            type: func(ctx context.Context, batch OTLPBatch) error
+        name: OTLPSender
+        out:
+          - type: OTLPOption
     imports:
       clock: github.com/kitsunium/sdk/pkg/v1/clock
       errs: github.com/kitsunium/sdk/pkg/v1/errs
