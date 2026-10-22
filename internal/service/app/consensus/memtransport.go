@@ -240,7 +240,7 @@ func (t *MemoryTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig
 	targets := t.net.othersThan(t.id)
 	req := coreconsensus.JoinRequestValue{
 		Cluster: cfg.Stamp.Log.Cluster, ID: cfg.Stamp.ID, Incarnation: cfg.Stamp.Incarnation,
-		Slot: cfg.Stamp.Slot, Address: cfg.Address,
+		Slot: cfg.Stamp.Slot, Address: cfg.Address, MaxSnapshotBytes: max(cfg.MaxSnapshotBytes, 0),
 	}
 	last := origin(coreconsensus.JoinRefused, errs.String("why", "no member"))
 	for _, x := range targets {

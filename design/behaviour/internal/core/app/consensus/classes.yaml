@@ -736,6 +736,12 @@ types:
       - doc: Address is where it listens.
         name: Address
         type: string
+      - doc: |-
+          MaxSnapshotBytes is the largest snapshot the joiner accepts, as it
+          announced it; 0 when it announced none, as a joiner that predates
+          the announcement does.
+        name: MaxSnapshotBytes
+        type: int64
     kind: struct
     name: JoinRequestValue
   - fields:
@@ -795,6 +801,13 @@ types:
           key; an empty list refuses the JOIN.
         name: Pins
         type: "[][32]byte"
+      - doc: |-
+          MaxSnapshotBytes is the joiner's own MaxSnapshotBytes, announced in
+          the JOIN so the members hold their cuts to it (R2-30); 0 announces
+          nothing, and the JOIN is the one a member that predates the
+          announcement reads.
+        name: MaxSnapshotBytes
+        type: int64
     kind: struct
     name: JoinConfig
   - kind: named

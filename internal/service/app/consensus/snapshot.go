@@ -350,8 +350,36 @@ func (n *Node) retain() []coreconsensus.SnapshotMetaValue {
 	if err != nil {
 		return nil
 	}
+	if len(metas) > 0 {
+		n.noteNewest(&metas[0])
+	}
 	n.removeOld(metas[min(2, len(metas)):])
 	return metas
+}
+
+// snapshotSize is the size m's limit bounds: the larger of its encoded and
+// decoded sizes, the two the chunk writer holds to it.
+func snapshotSize(m *coreconsensus.SnapshotMetaValue) int64 {
+	return max(m.EncodedSize, m.DecodedSize)
+}
+
+// nearLimit reports whether size has reached four fifths of limit, where
+// Health warns that the cuts are about to be refused SNAPSHOT_TOO_LARGE.
+func nearLimit(size, limit int64) bool {
+	return limit > 0 && size >= limit-limit/5
+}
+
+// noteNewest records the newest snapshot's size for Health, and says so at
+// Warn when it nears the limit the members announce (R2-30, #556).
+func (n *Node) noteNewest(m *coreconsensus.SnapshotMetaValue) {
+	size := snapshotSize(m)
+	n.snapState.mu.Lock()
+	n.snapState.newestBytes = size
+	n.snapState.mu.Unlock()
+	if limit := snapshotLimit(n.cfg.MaxSnapshotBytes, &m.Membership); nearLimit(size, limit) {
+		n.obs.warn("consensus: the newest snapshot nears the smallest limit a member announces",
+			lattr("bytes", uint64(size)), lattr("limit", uint64(limit)))
+	}
 }
 
 // removeOld removes the snapshots retain no longer keeps. One refused while

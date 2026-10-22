@@ -210,6 +210,11 @@ constants:
         name: HealthQuorumReachable
       - doc: HealthStopped is set once the node stopped itself or was closed.
         name: HealthStopped
+      - doc: |-
+          HealthSnapshotNearLimit is set when the newest snapshot has reached
+          four fifths of SnapshotLimit: the cuts are about to be refused
+          SNAPSHOT_TOO_LARGE (R2-30). Readiness does not depend on it.
+        name: HealthSnapshotNearLimit
     name: HealthReady
   - doc: |-
       maxSlotLen bounds a slot name, which the stamp stores behind a one-byte
@@ -478,6 +483,24 @@ constants:
         name: laneJoin
         type: byte
         value: "3"
+      - doc: |-
+          laneJoinV2 carries one versioned JOIN: joinVersion2, the joiner's
+          MaxSnapshotBytes, then laneJoin's JOIN (R2-30, #556). A member that
+          predates it serves no unknown lane and ends the connection without an
+          answer, and the joiner sends the same JOIN on laneJoin.
+        name: laneJoinV2
+        type: byte
+        value: "4"
+      - doc: joinVersion2 is the first byte of a JOIN on laneJoinV2.
+        name: joinVersion2
+        type: byte
+        value: "2"
+      - doc: |-
+          joinV2Prefix is a versioned JOIN's bytes before laneJoin's: the
+          version and the little-endian u64 limit.
+        name: joinV2Prefix
+        type: int
+        value: 1 + 8
       - doc: sanScheme is the URI scheme of a node certificate's one URI SAN.
         name: sanScheme
         value: "\"kitsunium-consensus\""
@@ -769,6 +792,7 @@ files:
       - HealthFlags.set
       - HealthValue
       - (*Node).Health
+      - (*Node).snapshotHealth
       - isReady
       - (*Node).loopHealth
       - (*Node).peerHealth
@@ -995,6 +1019,7 @@ files:
       - Redraw
       - ReportValue
       - Inspect
+      - lastTermOf
       - readQuarantineMarker
       - stopMarkers
       - QuarantineExit
@@ -1145,6 +1170,9 @@ files:
       - snapshotLimit
       - (*Node).afterCut
       - (*Node).retain
+      - snapshotSize
+      - nearLimit
+      - (*Node).noteNewest
       - (*Node).removeOld
       - (*Node).streamEnded
       - (*Node).sentCorrupt
@@ -1236,9 +1264,14 @@ files:
       - (*TCPTransport).serveSnapshot
       - encodeJoin
       - decodeJoin
+      - encodeJoinV2
+      - decodeJoinOn
       - (*TCPTransport).serveJoin
       - (*TCPTransport).Join
       - (*TCPTransport).joinOne
+      - (*TCPTransport).joinOnLane
+      - endedUnanswered
+      - (*TCPTransport).joinAnswered
       - joinAnswerListsPeer
       - joinAnswerReason
       - (*TCPTransport).BindJoinReason
@@ -1926,6 +1959,16 @@ functions:
     params: d DataDir
     results: ReportValue, error
   - doc: |-
+      lastTermOf is the term of the entry at r.Last: the log's, or the newest
+      snapshot's when that snapshot lies past the log. It is the half of the
+      survivor's key Inspect did not report: two survivors may show the same
+      Last and the same HardState.Term, the term of a vote, and only the term of
+      their last entries tells which one holds the writes a majority committed
+      (D17, #534). A log with no entry and no snapshot reports 0.
+    name: lastTermOf
+    params: l *fileLog, r *ReportValue
+    results: uint64
+  - doc: |-
       readQuarantineMarker is the quarantine marker of dir, trimmed, or "" when
       there is none. A marker that could not be read is a STORAGE_FAILED: a
       report must not read as a directory with no quarantine.
@@ -2206,6 +2249,18 @@ functions:
     params: own int64, conf *coreconsensus.MembershipValue
     results: int64
   - doc: |-
+      snapshotSize is the size m's limit bounds: the larger of its encoded and
+      decoded sizes, the two the chunk writer holds to it.
+    name: snapshotSize
+    params: m *coreconsensus.SnapshotMetaValue
+    results: int64
+  - doc: |-
+      nearLimit reports whether size has reached four fifths of limit, where
+      Health warns that the cuts are about to be refused SNAPSHOT_TOO_LARGE.
+    name: nearLimit
+    params: size, limit int64
+    results: bool
+  - doc: |-
       datasync makes a segment's written bytes durable with fdatasync(2): the
       segment is zero-filled at its full size, so there is no size to publish
       (D4, R1-09).
@@ -2364,6 +2419,28 @@ functions:
     name: decodeJoin
     params: b []byte
     results: coreconsensus.JoinRequestValue, bool
+  - doc: |-
+      encodeJoinV2 is the wire form of a JOIN on laneJoinV2: joinVersion2, the
+      joiner's MaxSnapshotBytes as a little-endian u64, then encodeJoin's.
+    name: encodeJoinV2
+    params: r coreconsensus.JoinRequestValue
+    results: "[]byte"
+  - doc: |-
+      decodeJoinOn parses a JOIN read on lane. One on laneJoinV2 of another
+      version, or announcing a limit an int64 cannot hold, is refused: a
+      version this build does not know is never read as one it knows (D18).
+    name: decodeJoinOn
+    params: lane byte, b []byte
+    results: coreconsensus.JoinRequestValue, bool
+  - doc: |-
+      endedUnanswered reports whether err is a connection the peer ended: a
+      close, or the reset of one closed over the JOIN it never read, as a member
+      that serves no such lane does. A deadline is not: the peer may be
+      answering, and a second JOIN would meet the slot's rate limit; nor is an
+      answer cut short, nor one this transport refused, which are answers.
+    name: endedUnanswered
+    params: err error
+    results: bool
   - doc: |-
       joinAnswerListsPeer reports whether a JOIN answer's membership lists the
       peer that sent it under the key it presented: an answer that does not is
@@ -3721,7 +3798,7 @@ types:
         type: coreconsensus.StatusValue
       - doc: |-
           Flags are the verdict's yes/no answers: HealthReady, HealthHasLeader,
-          HealthQuorumReachable, HealthStopped.
+          HealthQuorumReachable, HealthStopped, HealthSnapshotNearLimit.
         name: Flags
         type: HealthFlags
       - doc: |-
@@ -3760,6 +3837,17 @@ types:
         type: int64
       - doc: JoinsRateLimited counts JOINs refused by the one-per-slot rate.
         name: JoinsRateLimited
+        type: int64
+      - doc: |-
+          SnapshotBytes is the size of the newest snapshot this node holds,
+          the larger of its encoded and decoded sizes; 0 with none.
+        name: SnapshotBytes
+        type: int64
+      - doc: |-
+          SnapshotLimit is the size a cut is held to now: this node's
+          MaxSnapshotBytes, or the smallest a member announces when lower
+          (R2-30).
+        name: SnapshotLimit
         type: int64
     kind: struct
     name: HealthValue
@@ -4275,6 +4363,15 @@ types:
       - name: Health
         recv: n *Node
         results: HealthValue
+      - doc: |-
+          snapshotHealth fills the snapshot's size and the limit a cut is held to,
+          and warns from four fifths of it: a state that outgrows the smallest
+          limit a member announces is cut no more, and the log grows until it is
+          (R2-30, #556). The limit is the configuration's in force, read by
+          loopHealth; a stopped node reports its own.
+        name: snapshotHealth
+        params: h *HealthValue
+        recv: n *Node
       - doc: |-
           loopHealth fills the part of a verdict only the event loop can read: the
           quorum, the failure tolerance, the chain refusal and, on a leader, every
@@ -5201,6 +5298,12 @@ types:
         recv: n *Node
         results: "[]coreconsensus.SnapshotMetaValue"
       - doc: |-
+          noteNewest records the newest snapshot's size for Health, and says so at
+          Warn when it nears the limit the members announce (R2-30, #556).
+        name: noteNewest
+        params: m *coreconsensus.SnapshotMetaValue
+        recv: n *Node
+      - doc: |-
           removeOld removes the snapshots retain no longer keeps. One refused while
           a transfer reads it is kept until the next cut or install, which tries
           again: worth a line, never a stop. A failed unlink or directory sync is
@@ -5324,6 +5427,11 @@ types:
           sinceBytes is the payload applied since the last cut started, which
           SnapshotEveryBytes bounds (D7, #515).
         name: sinceBytes
+        type: int64
+      - doc: |-
+          newestBytes is the newest snapshot's size, the larger of its encoded
+          and decoded sizes, which Health compares with the limit (R2-30, #556).
+        name: newestBytes
         type: int64
     kind: struct
     name: snapState
@@ -5543,6 +5651,13 @@ types:
           newest snapshot's when an install a crash interrupted published it
           past the log's end.
         name: Last
+        type: uint64
+      - doc: |-
+          LastTerm is the term of the entry at Last, or of the snapshot that
+          holds Last. With Last it is the key a Recover's survivor is chosen
+          by: the highest (LastTerm, Last), compared in that order, never Last
+          alone nor HardState.Term, the term of the last vote.
+        name: LastTerm
         type: uint64
       - name: Snapshots
         type: "[]coreconsensus.SnapshotMetaValue"
@@ -5904,6 +6019,11 @@ types:
       - doc: doneOnce closes done; Close reaches it once, under mu and behind closed.
         name: doneOnce
         type: sync.Once
+      - doc: |-
+          predatesJoinV2 serves laneJoinV2 as a member built before it does:
+          the connection ends unanswered. Set by the package's own tests only.
+        name: predatesJoinV2
+        type: atomic.Bool
     kind: struct
     methods:
       - name: Addr
@@ -6104,9 +6224,10 @@ types:
       - doc: |-
           serveJoin answers the one frame a non-member may send. The slot comes
           from the certificate, the SPKI from the handshake; join runs off the event
-          loop under a deadline (R9-06).
+          loop under a deadline (R9-06). On laneJoinV2 the JOIN also announces the
+          joiner's MaxSnapshotBytes (#556).
         name: serveJoin
-        params: c net.Conn, peer coreconsensus.AuthenticatedPeerValue
+        params: c net.Conn, peer coreconsensus.AuthenticatedPeerValue, lane byte
         recv: t *TCPTransport
       - name: Join
         params: ctx context.Context, cfg coreconsensus.JoinConfig
@@ -6116,8 +6237,25 @@ types:
           joinOne sends the JOIN to one address, to a peer presenting one of pins,
           and installs the membership it answers once that membership lists the
           peer under its key. refused is set when the peer answered with a refusal.
+          A JOIN that announces a limit goes on laneJoinV2 first; a peer that ends
+          that connection without a word predates the lane, and the JOIN goes again
+          on laneJoin, announcing nothing, as it did before (#556).
         name: joinOne
         params: ctx context.Context, addr string, req coreconsensus.JoinRequestValue, pins [][32]byte
+        recv: t *TCPTransport
+        results: pos coreconsensus.PositionValue, refused bool, err error
+      - doc: |-
+          joinOnLane is one JOIN on lane. silent is set when the peer, verified,
+          ended the connection before any byte of an answer.
+        name: joinOnLane
+        params: ctx context.Context, addr string, lane byte, req coreconsensus.JoinRequestValue, pins [][32]byte
+        recv: t *TCPTransport
+        results: pos coreconsensus.PositionValue, refused, silent bool, err error
+      - doc: |-
+          joinAnswered reads a JOIN's answer b, or the failure rerr to read it, from
+          the peer that presented spki, and installs the membership it carries.
+        name: joinAnswered
+        params: b []byte, rerr error, spki [32]byte
         recv: t *TCPTransport
         results: pos coreconsensus.PositionValue, refused bool, err error
       - name: BindJoinReason

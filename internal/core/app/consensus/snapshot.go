@@ -120,6 +120,10 @@ type JoinRequestValue struct {
 	SPKI [32]byte
 	// Address is where it listens.
 	Address string
+	// MaxSnapshotBytes is the largest snapshot the joiner accepts, as it
+	// announced it; 0 when it announced none, as a joiner that predates
+	// the announcement does.
+	MaxSnapshotBytes int64
 }
 
 // FencedAttestationValue is the operator's statement that an old voter was fenced

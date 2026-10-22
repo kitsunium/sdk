@@ -49,4 +49,9 @@ type JoinConfig struct {
 	// and only when the membership it returns lists that peer under that
 	// key; an empty list refuses the JOIN.
 	Pins [][32]byte
+	// MaxSnapshotBytes is the joiner's own MaxSnapshotBytes, announced in
+	// the JOIN so the members hold their cuts to it (R2-30); 0 announces
+	// nothing, and the JOIN is the one a member that predates the
+	// announcement reads.
+	MaxSnapshotBytes int64
 }

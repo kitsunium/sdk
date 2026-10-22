@@ -32,6 +32,10 @@ const (
 	HealthQuorumReachable
 	// HealthStopped is set once the node stopped itself or was closed.
 	HealthStopped
+	// HealthSnapshotNearLimit is set when the newest snapshot has reached
+	// four fifths of SnapshotLimit: the cuts are about to be refused
+	// SNAPSHOT_TOO_LARGE (R2-30). Readiness does not depend on it.
+	HealthSnapshotNearLimit
 )
 
 // PeerHealthValue is the leader's view of one peer (D13), one line of
@@ -82,7 +86,7 @@ type HealthValue struct {
 	// Status is the node's view after its last turn.
 	Status coreconsensus.StatusValue
 	// Flags are the verdict's yes/no answers: HealthReady, HealthHasLeader,
-	// HealthQuorumReachable, HealthStopped.
+	// HealthQuorumReachable, HealthStopped, HealthSnapshotNearLimit.
 	Flags HealthFlags
 	// FailureTolerance is how many voters can fail now with a majority
 	// left. Only the leader knows it: -1 elsewhere.
@@ -107,6 +111,13 @@ type HealthValue struct {
 	LongTurns int64
 	// JoinsRateLimited counts JOINs refused by the one-per-slot rate.
 	JoinsRateLimited int64
+	// SnapshotBytes is the size of the newest snapshot this node holds,
+	// the larger of its encoded and decoded sizes; 0 with none.
+	SnapshotBytes int64
+	// SnapshotLimit is the size a cut is held to now: this node's
+	// MaxSnapshotBytes, or the smallest a member announces when lower
+	// (R2-30).
+	SnapshotLimit int64
 }
 
 // Health returns the node's verdict, computed on the event loop.
@@ -127,8 +138,24 @@ func (n *Node) Health() HealthValue {
 	if !stopped {
 		n.exec(func() { n.loopHealth(&h) })
 	}
+	n.snapshotHealth(&h)
 	h.Flags = h.Flags.set(HealthReady, isReady(&h, &st))
 	return h
+}
+
+// snapshotHealth fills the snapshot's size and the limit a cut is held to,
+// and warns from four fifths of it: a state that outgrows the smallest
+// limit a member announces is cut no more, and the log grows until it is
+// (R2-30, #556). The limit is the configuration's in force, read by
+// loopHealth; a stopped node reports its own.
+func (n *Node) snapshotHealth(h *HealthValue) {
+	n.snapState.mu.Lock()
+	h.SnapshotBytes = n.snapState.newestBytes
+	n.snapState.mu.Unlock()
+	if h.SnapshotLimit == 0 {
+		h.SnapshotLimit = n.cfg.MaxSnapshotBytes
+	}
+	h.Flags = h.Flags.set(HealthSnapshotNearLimit, nearLimit(h.SnapshotBytes, h.SnapshotLimit))
 }
 
 // isReady is the verdict's Ready: running, a leader known, everything known
@@ -146,6 +173,8 @@ func (n *Node) loopHealth(h *HealthValue) {
 	h.Flags = h.Flags.set(HealthQuorumReachable, n.r.QuorumActive(now))
 	h.FailureTolerance = n.r.FailureTolerance(now)
 	h.ChainRefusalLeader, h.ChainRefusalIndex, h.ChainRefusals = n.r.ChainRefusal()
+	conf := n.r.Status().Conf
+	h.SnapshotLimit = snapshotLimit(n.cfg.MaxSnapshotBytes, &conf)
 	last := n.r.Status().Last
 	window := n.r.Status().Timing.ElectionTimeoutMin
 	for _, p := range n.r.PeerStats() {

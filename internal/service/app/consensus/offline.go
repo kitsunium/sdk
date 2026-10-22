@@ -118,7 +118,12 @@ type ReportValue struct {
 	// Last is the last index the directory holds: the log's, or the
 	// newest snapshot's when an install a crash interrupted published it
 	// past the log's end.
-	Last       uint64
+	Last uint64
+	// LastTerm is the term of the entry at Last, or of the snapshot that
+	// holds Last. With Last it is the key a Recover's survivor is chosen
+	// by: the highest (LastTerm, Last), compared in that order, never Last
+	// alone nor HardState.Term, the term of the last vote.
+	LastTerm   uint64
 	Snapshots  []coreconsensus.SnapshotMetaValue
 	Quarantine string
 	Markers    []string
@@ -156,10 +161,29 @@ func Inspect(d DataDir) (ReportValue, error) {
 		// an operator comparing survivors must see it (#506).
 		r.Last = max(r.Last, r.Snapshots[0].Position.Index)
 	}
+	if l.refuse == nil {
+		r.LastTerm = lastTermOf(l, &r)
+	}
 	if r.Markers, err = stopMarkers(d.d.dir); err != nil {
 		return ReportValue{}, err
 	}
 	return r, nil
+}
+
+// lastTermOf is the term of the entry at r.Last: the log's, or the newest
+// snapshot's when that snapshot lies past the log. It is the half of the
+// survivor's key Inspect did not report: two survivors may show the same
+// Last and the same HardState.Term, the term of a vote, and only the term of
+// their last entries tells which one holds the writes a majority committed
+// (D17, #534). A log with no entry and no snapshot reports 0.
+func lastTermOf(l *fileLog, r *ReportValue) uint64 {
+	if _, last := l.Bounds(); r.Last > last && len(r.Snapshots) > 0 {
+		return r.Snapshots[0].Position.Term
+	}
+	if t, err := l.Term(r.Last); err == nil {
+		return t
+	}
+	return 0
 }
 
 // readQuarantineMarker is the quarantine marker of dir, trimmed, or "" when
@@ -305,7 +329,9 @@ func ReceiptMessage(old, next coreconsensus.ClusterID, voter coreconsensus.NodeI
 	return receiptMessage(old, next, voter)
 }
 
-// Recover starts a NEW history from this node's log: every entry up to its
+// Recover starts a NEW history from this node's log — run it on the
+// survivor whose report from Inspect holds the highest (LastTerm, Last):
+// every entry up to its
 // persisted commit, then the contiguous entries past it whose body and chain
 // checksums verify and whose term does not decrease, cut at the first that
 // fails, so no write the old cluster acknowledged is lost;

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"io"
 	"maps"
+	"math"
 	"net"
 	"net/url"
 	"slices"
@@ -39,6 +40,16 @@ const (
 	laneSnapshot byte = 2
 	// laneJoin carries one JOIN from a node that is not a member yet.
 	laneJoin byte = 3
+	// laneJoinV2 carries one versioned JOIN: joinVersion2, the joiner's
+	// MaxSnapshotBytes, then laneJoin's JOIN (R2-30, #556). A member that
+	// predates it serves no unknown lane and ends the connection without an
+	// answer, and the joiner sends the same JOIN on laneJoin.
+	laneJoinV2 byte = 4
+	// joinVersion2 is the first byte of a JOIN on laneJoinV2.
+	joinVersion2 byte = 2
+	// joinV2Prefix is a versioned JOIN's bytes before laneJoin's: the
+	// version and the little-endian u64 limit.
+	joinV2Prefix int = 1 + 8
 
 	// sanScheme is the URI scheme of a node certificate's one URI SAN.
 	sanScheme = "kitsunium-consensus"
@@ -211,6 +222,9 @@ type TCPTransport struct {
 	done        chan struct{}
 	// doneOnce closes done; Close reaches it once, under mu and behind closed.
 	doneOnce sync.Once
+	// predatesJoinV2 serves laneJoinV2 as a member built before it does:
+	// the connection ends unanswered. Set by the package's own tests only.
+	predatesJoinV2 atomic.Bool
 }
 
 type outKey struct {
@@ -480,8 +494,8 @@ func (t *TCPTransport) serveAuthenticated(conn *tls.Conn, pid *tlsid.PeerIdentit
 		delete(t.in, conn)
 		t.mu.Unlock()
 	}()
-	if lane == laneJoin {
-		t.serveJoin(conn, coreconsensus.AuthenticatedPeerValue{Slot: slot, SPKI: spki})
+	if lane == laneJoin || (lane == laneJoinV2 && !t.predatesJoinV2.Load()) {
+		t.serveJoin(conn, coreconsensus.AuthenticatedPeerValue{Slot: slot, SPKI: spki}, lane)
 		return
 	}
 	if !member || m.Slot != slot {
@@ -1173,19 +1187,46 @@ func decodeJoin(b []byte) (coreconsensus.JoinRequestValue, bool) {
 	return r, true
 }
 
+// encodeJoinV2 is the wire form of a JOIN on laneJoinV2: joinVersion2, the
+// joiner's MaxSnapshotBytes as a little-endian u64, then encodeJoin's.
+func encodeJoinV2(r coreconsensus.JoinRequestValue) []byte {
+	b := binary.LittleEndian.AppendUint64([]byte{joinVersion2}, uint64(r.MaxSnapshotBytes))
+	return append(b, encodeJoin(r)...)
+}
+
+// decodeJoinOn parses a JOIN read on lane. One on laneJoinV2 of another
+// version, or announcing a limit an int64 cannot hold, is refused: a
+// version this build does not know is never read as one it knows (D18).
+func decodeJoinOn(lane byte, b []byte) (coreconsensus.JoinRequestValue, bool) {
+	if lane != laneJoinV2 {
+		return decodeJoin(b)
+	}
+	if len(b) < joinV2Prefix || b[0] != joinVersion2 {
+		return coreconsensus.JoinRequestValue{}, false
+	}
+	limit := binary.LittleEndian.Uint64(b[1:])
+	r, ok := decodeJoin(b[joinV2Prefix:])
+	if !ok || limit > math.MaxInt64 {
+		return coreconsensus.JoinRequestValue{}, false
+	}
+	r.MaxSnapshotBytes = int64(limit)
+	return r, true
+}
+
 // serveJoin answers the one frame a non-member may send. The slot comes
 // from the certificate, the SPKI from the handshake; join runs off the event
-// loop under a deadline (R9-06).
-func (t *TCPTransport) serveJoin(c net.Conn, peer coreconsensus.AuthenticatedPeerValue) {
+// loop under a deadline (R9-06). On laneJoinV2 the JOIN also announces the
+// joiner's MaxSnapshotBytes (#556).
+func (t *TCPTransport) serveJoin(c net.Conn, peer coreconsensus.AuthenticatedPeerValue, lane byte) {
 	// A JOIN is answered under its deadline or not at all (R9-06).
 	if err := c.SetDeadline(time.Now().Add(t.cfg.JoinTimeout)); err != nil {
 		return
 	}
-	b, err := readChunk(c, 512)
+	b, err := readChunk(c, 512+joinV2Prefix)
 	if err != nil {
 		return
 	}
-	req, ok := decodeJoin(b)
+	req, ok := decodeJoinOn(lane, b)
 	reply := func(code errs.Code, pos coreconsensus.PositionValue, reason string) {
 		out := binary.LittleEndian.AppendUint32(nil, uint32(code))
 		out = binary.LittleEndian.AppendUint64(out, pos.Term)
@@ -1241,7 +1282,7 @@ func (t *TCPTransport) serveJoin(c net.Conn, peer coreconsensus.AuthenticatedPee
 func (t *TCPTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (coreconsensus.PositionValue, error) {
 	req := coreconsensus.JoinRequestValue{
 		Cluster: cfg.Stamp.Log.Cluster, ID: cfg.Stamp.ID, Incarnation: cfg.Stamp.Incarnation,
-		Slot: t.slot, Address: cfg.Address,
+		Slot: t.slot, Address: cfg.Address, MaxSnapshotBytes: max(cfg.MaxSnapshotBytes, 0),
 	}
 	if req.Cluster != t.cluster {
 		return coreconsensus.PositionValue{}, origin(coreconsensus.ClusterMismatch)
@@ -1275,25 +1316,71 @@ func (t *TCPTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (
 // joinOne sends the JOIN to one address, to a peer presenting one of pins,
 // and installs the membership it answers once that membership lists the
 // peer under its key. refused is set when the peer answered with a refusal.
+// A JOIN that announces a limit goes on laneJoinV2 first; a peer that ends
+// that connection without a word predates the lane, and the JOIN goes again
+// on laneJoin, announcing nothing, as it did before (#556).
 func (t *TCPTransport) joinOne(ctx context.Context, addr string, req coreconsensus.JoinRequestValue, pins [][32]byte) (pos coreconsensus.PositionValue, refused bool, err error) {
-	c, derr := t.dialAny(ctx, addr, laneJoin, pins)
+	if req.MaxSnapshotBytes > 0 {
+		pos, refused, silent, err := t.joinOnLane(ctx, addr, laneJoinV2, req, pins)
+		if !silent {
+			return pos, refused, err
+		}
+	}
+	pos, refused, _, err = t.joinOnLane(ctx, addr, laneJoin, req, pins)
+	return pos, refused, err
+}
+
+// joinOnLane is one JOIN on lane. silent is set when the peer, verified,
+// ended the connection before any byte of an answer.
+func (t *TCPTransport) joinOnLane(ctx context.Context, addr string, lane byte, req coreconsensus.JoinRequestValue, pins [][32]byte) (pos coreconsensus.PositionValue, refused, silent bool, err error) {
+	c, derr := t.dialAny(ctx, addr, lane, pins)
 	if derr != nil {
-		return coreconsensus.PositionValue{}, false, derr
+		return coreconsensus.PositionValue{}, false, false, derr
 	}
 	// The answer is read, or its failure is: the socket has served.
 	defer func() { abandon(c.Close()) }()
 	peer, verified := tlsid.PeerOf(c.ConnectionState())
 	if !verified {
-		return coreconsensus.PositionValue{}, false, peerRejected("no verified peer")
+		return coreconsensus.PositionValue{}, false, false, peerRejected("no verified peer")
 	}
 	// A JOIN is answered under its deadline or not at all (R9-06).
 	if err := c.SetDeadline(time.Now().Add(t.cfg.JoinTimeout)); err != nil {
-		return coreconsensus.PositionValue{}, false, err
+		return coreconsensus.PositionValue{}, false, false, err
 	}
-	if err := writeChunk(c, encodeJoin(req)); err != nil {
-		return coreconsensus.PositionValue{}, false, err
+	body := encodeJoin(req)
+	if lane == laneJoinV2 {
+		body = encodeJoinV2(req)
+	}
+	if err := writeChunk(c, body); err != nil {
+		return coreconsensus.PositionValue{}, false, endedUnanswered(err), err
 	}
 	b, rerr := readChunk(c, t.cfg.MaxControlFrameBytes)
+	if b == nil && endedUnanswered(rerr) {
+		return coreconsensus.PositionValue{}, false, true, origin(coreconsensus.FrameInvalid, errs.String("what", "join answer"))
+	}
+	pos, refused, err = t.joinAnswered(b, rerr, peer.SPKI)
+	return pos, refused, false, err
+}
+
+// endedUnanswered reports whether err is a connection the peer ended: a
+// close, or the reset of one closed over the JOIN it never read, as a member
+// that serves no such lane does. A deadline is not: the peer may be
+// answering, and a second JOIN would meet the slot's rate limit; nor is an
+// answer cut short, nor one this transport refused, which are answers.
+func endedUnanswered(err error) bool {
+	if err == nil || errors.Is(err, io.ErrUnexpectedEOF) {
+		return false
+	}
+	if ne, ok := errors.AsType[net.Error](err); ok && ne.Timeout() {
+		return false
+	}
+	_, coded := errs.CodeOf(err)
+	return !coded
+}
+
+// joinAnswered reads a JOIN's answer b, or the failure rerr to read it, from
+// the peer that presented spki, and installs the membership it carries.
+func (t *TCPTransport) joinAnswered(b []byte, rerr error, spki [32]byte) (pos coreconsensus.PositionValue, refused bool, err error) {
 	if rerr != nil || len(b) < 20 {
 		return coreconsensus.PositionValue{}, false, origin(coreconsensus.FrameInvalid, errs.String("what", "join answer"))
 	}
@@ -1305,7 +1392,7 @@ func (t *TCPTransport) joinOne(ctx context.Context, addr string, req coreconsens
 	if perr != nil {
 		return coreconsensus.PositionValue{}, false, perr
 	}
-	if !joinAnswerListsPeer(m, peer.SPKI) {
+	if !joinAnswerListsPeer(m, spki) {
 		return coreconsensus.PositionValue{}, false, peerRejected("the answer does not list its own sender")
 	}
 	t.SetMembership(1, m.Members)
