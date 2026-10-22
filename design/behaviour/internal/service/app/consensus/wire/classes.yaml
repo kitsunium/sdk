@@ -44,10 +44,25 @@ constants:
         name: tokenLen
         type: int
         value: "41"
-      - doc: metaVersion1 is the leading byte of an encoded SnapshotMeta.
+      - doc: |-
+          metaVersion1 is the leading byte of an encoded SnapshotMeta, the only
+          version this node writes.
         name: metaVersion1
         type: byte
         value: "1"
+      - doc: |-
+          metaVersion2 is the leading byte of a SnapshotMeta checksummed: the
+          fields of version 1, then the CRC-32C of every byte before it. This
+          node reads it and never writes it: the writer comes with the cluster
+          version that admits it, one release after every member reads it
+          (#546, ADR 0152 amendment of 2026-10-22).
+        name: metaVersion2
+        type: byte
+        value: "2"
+      - doc: metaSumLen is the length of version 2's trailing CRC-32C.
+        name: metaSumLen
+        type: int
+        value: "4"
       - doc: |-
           entryFixedLen is an entry's header before its data: term, index,
           kind, version, body sum, chain sum and data length.
@@ -81,6 +96,7 @@ files:
       - ParseToken
       - AppendSnapshotMeta
       - ParseSnapshotMeta
+      - metaFields
       - AppendMembership
       - ParseMembership
       - AppendTimingContract
@@ -146,6 +162,16 @@ functions:
   - name: ParseSnapshotMeta
     params: b []byte, m *coreconsensus.SnapshotMetaValue
     results: error
+  - doc: |-
+      metaFields returns the fields of an encoded SnapshotMeta, after its
+      version byte: those of version 1 as they are, those of version 2 once its
+      trailing CRC-32C holds. A version 2 read before its writer ships lets a
+      node run the release before the one that writes it, or roll back to it,
+      and still read every .meta and offer (#546). Another version is
+      VERSION_UNSUPPORTED, a version 2 whose sum fails FRAME_INVALID.
+    name: metaFields
+    params: b []byte
+    results: "[]byte, error"
   - name: AppendMembership
     params: dst []byte, m *coreconsensus.MembershipValue
     results: "[]byte"

@@ -32,12 +32,14 @@ alias(
 go_test(
     name = "wire_test",
     srcs = [
+        "export_test.go",
         "fuzz_external_test.go",
         "gen_api_test.go",
+        "metav2_external_test.go",
     ],
     data = glob(["testdata/**"]),
+    embed = [":wire"],
     deps = [
-        ":wire",
         "//internal/core/app/consensus",
     ],
 )

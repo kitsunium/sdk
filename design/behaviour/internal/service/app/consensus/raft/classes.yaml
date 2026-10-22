@@ -182,6 +182,10 @@ constants:
           mutMembershipEveryCommit hands the driver the admission set at every
           commit, changed or not (#531).
         name: mutMembershipEveryCommit
+      - doc: |-
+          mutMatchPastLastIndex takes an acknowledgement past the leader's last
+          index as the follower's match (#546).
+        name: mutMatchPastLastIndex
     name: mutAckBeforeSync
   - doc: The facts a PeerStatValue carries.
     grouped: true

@@ -2625,7 +2625,7 @@
       "name": "ParseSnapshotMeta",
       "spelled": "func(b []byte, m *SnapshotMetaValue) error",
       "canonical": "func(b []byte, m *github.com/kitsunium/sdk/pkg/v1/app/consensus.SnapshotMetaValue) error",
-      "doc": "ParseSnapshotMeta decodes a SnapshotMeta.\n",
+      "doc": "ParseSnapshotMeta decodes a SnapshotMeta: version 1, or version 2\nonce its trailing CRC-32C holds.\n",
       "file": "consensus/gen_facade.go",
       "layer": "public",
       "family": "app"

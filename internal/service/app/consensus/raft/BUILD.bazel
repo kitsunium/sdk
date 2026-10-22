@@ -44,6 +44,7 @@ go_test(
         "denypin_internal_test.go",
         "gen_api_test.go",
         "lincheck_internal_test.go",
+        "matchbound_internal_test.go",
         "membershippub_internal_test.go",
         "readresp_internal_test.go",
         "sim_internal_test.go",

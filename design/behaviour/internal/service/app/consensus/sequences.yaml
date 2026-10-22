@@ -4976,7 +4976,7 @@ sequences:
       - opt:
           do:
             - return: m, false, nil
-          when: wire.ParseSnapshotMeta(b, &m) != nil || m.ID != id
+          when: wire.ParseSnapshotMeta(b, &m) != nil || m.ID != id || !idNamesPosition(&m)
       - opt:
           do:
             - opt:
@@ -5664,7 +5664,7 @@ sequences:
             - set: acc.Refused
               value: coreconsensus.CodeFrameInvalid
             - return: "true"
-          when: o.SnapshotID != o.Meta.ID
+          when: o.SnapshotID != o.Meta.ID || termless(&o.Meta) || !idNamesPosition(&o.Meta)
       - opt:
           do:
             - set: acc.Refused
@@ -7506,7 +7506,7 @@ sequences:
         kind: self
       - id: n.cfg.Snapshots.List
         kind: value
-      - id: n.durableIndex
+      - id: n.durablePosition
         kind: internal
       - id: n.restoreLatest
         kind: internal
@@ -7534,13 +7534,15 @@ sequences:
           do:
             - return: raft.StartState{}, storageFailed("snapshots", err)
           when: err != nil
-      - bind: durIdx, err
-        eval: n.durableIndex()
-        to: n.durableIndex
+      - bind: dur, err
+        eval: n.durablePosition()
+        to: n.durablePosition
       - opt:
           do:
             - return: raft.StartState{}, err
           when: err != nil
+      - bind: durIdx
+        eval: dur.Index
       - bind: base, failed, err
         eval: n.restoreLatest(metas, durIdx)
         to: n.restoreLatest
@@ -7604,15 +7606,22 @@ sequences:
                 raft.StartState{}, origin(coreconsensus.SnapshotCorrupt,
                 			errs.String("why", "no snapshot is left and the log holds no configuration: WipeAndRejoin"))
           when: n.noTable && len(base.Membership.Members) == 0 && !slices.ContainsFunc(ents, isMembershipEntry)
-      - bind: applied
-        eval: n.startApplied(&base, durIdx)
+      - bind: applied, err
+        eval: n.startApplied(&base, dur)
         to: n.startApplied
+      - opt:
+          do:
+            - return: raft.StartState{}, err
+          when: err != nil
       - return: "raft.StartState{HardState: hs, Snapshot: base, Entries: ents, Applied: applied, Now: n.clk.Now()}, nil"
-  - of: (*Node).durableIndex
+  - of: termless
+    steps:
+      - return: m.Position.Index > 0 && m.Position.Term == 0
+  - of: (*Node).durablePosition
     participants:
       - id: caller
         kind: actor
-      - id: (*Node).durableIndex
+      - id: (*Node).durablePosition
         kind: self
       - id: d.AppliedPosition
         kind: value
@@ -7623,37 +7632,45 @@ sequences:
         eval: n.cfg.Machine.(coreconsensus.DurableStateMachine)
       - opt:
           do:
-            - return: 0, nil
+            - return: coreconsensus.PositionValue{}, nil
           when: "!ok"
       - bind: li, pos, err
         eval: d.AppliedPosition()
         to: d.AppliedPosition
       - opt:
           do:
-            - return: 0, err
+            - return: coreconsensus.PositionValue{}, err
           when: err != nil
       - opt:
           do:
-            - return: pos.Index, nil
+            - return: pos, nil
           init:
             bind: l
             eval: n.lineage()
             to: n.lineage
           when: li.Same(l) || (pos.Index <= l.KeptIndex && li.Cluster == l.Predecessor)
-      - return: 0, nil
+      - return: coreconsensus.PositionValue{}, nil
   - of: (*Node).restoreLatest
     participants:
       - id: caller
         kind: actor
       - id: (*Node).restoreLatest
         kind: self
-      - id: n.restoreFrom
-        kind: internal
       - id: n.obs.warn
+        kind: internal
+      - id: n.restoreFrom
         kind: internal
     steps:
       - loop:
           do:
+            - opt:
+                do:
+                  - eval: "n.obs.warn(\"consensus: a snapshot was not restored\", lstr(\"id\", m.ID), lstr(\"error\", \"recorded at term 0\"))"
+                    to: n.obs.warn
+                  - set: failed
+                    value: append(failed, m)
+                  - continue: true
+                when: termless(&m)
             - bind: rerr
               eval: n.restoreFrom(m, durIdx)
               to: n.restoreFrom
@@ -7835,24 +7852,65 @@ sequences:
           range: ents
       - return: ents, nil
   - of: (*Node).startApplied
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).startApplied
+        kind: self
+      - id: n.durableTerm
+        kind: internal
     steps:
       - bind: snapIdx
         eval: base.Position.Index
       - bind: applied
-        eval: max(snapIdx, durIdx)
+        eval: max(snapIdx, dur.Index)
       - set: n.applied
         value: applied
-      - opt:
-          do:
-            - set: n.appliedTerm
-              value: base.Position.Term
-          when: applied == snapIdx
+      - alt:
+          - do:
+              - set: n.appliedTerm
+                value: base.Position.Term
+            when: applied == snapIdx
+          - do:
+              - bind: term, err
+                eval: n.durableTerm(dur)
+                to: n.durableTerm
+              - opt:
+                  do:
+                    - return: 0, err
+                  when: err != nil
+              - set: n.appliedTerm
+                value: term
+            else: true
       - opt:
           do:
             - set: n.applied, n.appliedTerm
               value: 0, 0
-          when: n.noTable && durIdx < snapIdx
-      - return: applied
+          when: n.noTable && dur.Index < snapIdx
+      - return: applied, nil
+  - of: (*Node).durableTerm
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).durableTerm
+        kind: self
+      - id: n.cfg.Log.Term
+        kind: value
+    steps:
+      - bind: t, err
+        eval: n.cfg.Log.Term(dur.Index)
+        to: n.cfg.Log.Term
+      - opt:
+          do:
+            - return: dur.Term, nil
+          when: err != nil
+      - opt:
+          do:
+            - return: |-
+                0, origin(coreconsensus.LogCorrupt, errs.String("why", "the durable machine applied another term than the log holds"),
+                			errs.String("index", u64s(dur.Index)), errs.String("machine_term", u64s(dur.Term)), errs.String("log_term", u64s(t)))
+          when: dur.Term != 0 && dur.Term != t
+      - return: t, nil
   - of: noTableBase
     participants:
       - id: caller
@@ -7879,7 +7937,7 @@ sequences:
                       do:
                         - set: b, matched
                           value: m, true
-                      when: m.Position.Index == first-1
+                      when: m.Position.Index == first-1 && !termless(&m)
                 key: _
                 range: metas
                 value: m
@@ -12421,6 +12479,8 @@ sequences:
         kind: actor
       - id: restoreCodec
         kind: self
+      - id: linkedCodec
+        kind: internal
       - id: defaultRestoreCodec
         kind: internal
     steps:
@@ -12428,6 +12488,11 @@ sequences:
           do:
             - return: opt.Codec, nil
           when: opt.Codec != nil
+      - opt:
+          do:
+            - return: linkedCodec(opt.Expected.Codec)
+              to: linkedCodec
+          when: opt.Expected.Codec != ""
       - return: defaultRestoreCodec()
         to: defaultRestoreCodec
   - of: defaultRestoreCodec
@@ -14880,6 +14945,8 @@ sequences:
         kind: self
       - id: n.cfg.Snapshots.Open
         kind: value
+      - id: origin
+        kind: internal
       - id: n.codecOf
         kind: internal
       - id: verifySnapshot
@@ -14916,6 +14983,11 @@ sequences:
           			err = cerr
           		}
           	}()
+      - opt:
+          do:
+            - return: origin(coreconsensus.SnapshotCorrupt, errs.String("why", "the metadata's id does not name its position"), errs.String("id", m.ID))
+              to: origin
+          when: "!idNamesPosition(&m)"
       - bind: codec, err
         eval: n.codecOf(&m)
         to: n.codecOf
@@ -14962,6 +15034,30 @@ sequences:
       - eval: n.snapState.mu.Unlock()
         to: n.snapState.mu.Unlock
       - return: nil
+  - of: idNamesPosition
+    participants:
+      - id: caller
+        kind: actor
+      - id: idNamesPosition
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: len(m.ID) != 41 || m.ID[20] != '-'
+      - bind: idx, ierr
+        eval: strconv.ParseUint(m.ID[:20], 10, 64)
+        to: strconv
+      - bind: term, terr
+        eval: strconv.ParseUint(m.ID[21:], 10, 64)
+        to: strconv
+      - opt:
+          do:
+            - return: "true"
+          when: ierr != nil || terr != nil
+      - return: idx == m.Position.Index && term == m.Position.Term
   - of: (*Node).codecOf
     participants:
       - id: caller
@@ -14979,8 +15075,8 @@ sequences:
         kind: actor
       - id: snapshotCodec
         kind: self
-      - id: coretransform
-        kind: package
+      - id: linkedCodec
+        kind: internal
     steps:
       - opt:
           do:
@@ -14990,6 +15086,17 @@ sequences:
           do:
             - return: own, nil
           when: own != nil && (m.Codec == "" || coretransform.Algorithm(m.Codec) == own.Algorithm())
+      - return: linkedCodec(m.Codec)
+        to: linkedCodec
+  - of: linkedCodec
+    participants:
+      - id: caller
+        kind: actor
+      - id: linkedCodec
+        kind: self
+      - id: coretransform
+        kind: package
+    steps:
       - opt:
           do:
             - opt:
@@ -15001,10 +15108,10 @@ sequences:
                 when: ok
           init:
             bind: c, ok
-            eval: coretransform.Lookup(coretransform.Algorithm(m.Codec))
+            eval: coretransform.Lookup(coretransform.Algorithm(name))
             to: coretransform
           when: ok
-      - return: nil, origin(coreconsensus.VersionUnsupported, errs.String("snapshot_codec", m.Codec))
+      - return: nil, origin(coreconsensus.VersionUnsupported, errs.String("snapshot_codec", name))
   - of: (*Node).maybeSnapshot
     participants:
       - id: caller
@@ -15143,6 +15250,8 @@ sequences:
         kind: actor
       - id: (*Node).cut
         kind: self
+      - id: origin
+        kind: internal
       - id: n.snapState.mu.Lock
         kind: value
       - id: n.snapState.mu.Unlock
@@ -15158,6 +15267,11 @@ sequences:
       - id: n.wg.Add
         kind: value
     steps:
+      - opt:
+          do:
+            - return: origin(coreconsensus.SnapshotCorrupt, errs.String("why", "a cut at term 0"), errs.String("index", u64s(idx)))
+              to: origin
+          when: idx > 0 && term == 0
       - eval: n.snapState.mu.Lock()
         to: n.snapState.mu.Lock
       - set: n.snapState.sinceBytes
@@ -15871,7 +15985,7 @@ sequences:
       - opt:
           do:
             - return: coreconsensus.SnapshotMetaValue{}, false
-          when: "!metas[0].Log.Same(l) || metas[0].Position.Index < l.KeptIndex"
+          when: "!metas[0].Log.Same(l) || metas[0].Position.Index < l.KeptIndex || termless(&metas[0])"
       - return: metas[0], true
   - of: (*Node).sendSnapshot
     participants:
