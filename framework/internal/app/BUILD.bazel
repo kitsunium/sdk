@@ -179,6 +179,7 @@ go_library(
         "studio_host.go",
         "subsystem.go",
         "supervision.go",
+        "supervision_compliance.go",
         "supervision_interface.go",
         "telemetry.go",
         "topic.go",
