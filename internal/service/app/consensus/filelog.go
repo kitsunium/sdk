@@ -1482,9 +1482,10 @@ func (l *fileLog) logStats() (bytes, free, tails int64) {
 
 // logBytes is the bytes the segments occupy, the next one being prepared
 // included once published: what the no-space alarm's quota counts (D17).
-func (l *fileLog) logBytes() (bytes int64) {
+func (l *fileLog) logBytes() int64 {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
+	var bytes int64
 	for _, s := range l.segs {
 		bytes += s.size
 	}

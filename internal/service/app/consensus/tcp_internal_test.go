@@ -347,8 +347,7 @@ func TestTCPJoinAddsALearner(t *testing.T) {
 // (#533).
 func TestAJoinerRestartedBeforeItsFirstInstallRejoins(t *testing.T) {
 	ca, cid, ns := newTCPCluster(t)
-	l := tcpLeader(t, ns)
-	propose(t, l.node, "a=1")
+	proposeOnTCPLeader(t, ns, "a=1")
 	j := &tcpNode{slot: "site-new", log: NewMemoryLog(), snaps: NewMemorySnapshots()}
 	j.cert, j.spki = ca.issue(t, SAN(cid, j.slot), nil)
 	j.listen(t, ca)
@@ -358,10 +357,17 @@ func TestAJoinerRestartedBeforeItsFirstInstallRejoins(t *testing.T) {
 	}
 	j.id = id
 	st := must(j.log.Stamp())(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	join := func() error {
-		_, err := j.tr.Join(ctx, coreconsensus.JoinConfig{Addresses: []string{ns[0].addr, ns[1].addr, ns[2].addr}, Stamp: st, Address: j.addr, Pins: pinsOf(ns)})
+	// A JOIN that met an election is tried again past the slot's rate
+	// limit; the refusal of the member's own JOIN never went away.
+	join := func() (err error) {
+		for range 20 {
+			if _, err = j.tr.Join(ctx, coreconsensus.JoinConfig{Addresses: []string{ns[0].addr, ns[1].addr, ns[2].addr}, Stamp: st, Address: j.addr, Pins: pinsOf(ns)}); err == nil {
+				return nil
+			}
+			time.Sleep(150 * time.Millisecond)
+		}
 		return err
 	}
 	// The JOIN is acknowledged before the joiner's node runs: nothing the
@@ -369,7 +375,7 @@ func TestAJoinerRestartedBeforeItsFirstInstallRejoins(t *testing.T) {
 	if err := join(); err != nil {
 		t.Fatalf("first join: %v", err)
 	}
-	if _, ok := l.node.Membership().Member(id); !ok {
+	if _, ok := tcpLeader(t, ns).node.Membership().Member(id); !ok {
 		t.Fatal("the learner is not listed")
 	}
 	if err := j.tr.Close(); err != nil {
@@ -381,7 +387,7 @@ func TestAJoinerRestartedBeforeItsFirstInstallRejoins(t *testing.T) {
 	if err := join(); err != nil {
 		t.Fatalf("the restarted joiner's JOIN: %v", err)
 	}
-	propose(t, l.node, "b=2")
+	proposeOnTCPLeader(t, ns, "b=2")
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		if v, _ := j.sm.get("b"); v == "2" {
@@ -390,6 +396,28 @@ func TestAJoinerRestartedBeforeItsFirstInstallRejoins(t *testing.T) {
 		if time.Now().After(deadline) {
 			first, last := j.log.Bounds()
 			t.Fatalf("the restarted joiner was never fed: %+v, log [%d,%d]", j.node.Status(), first, last)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// proposeOnTCPLeader proposes kv to whichever member leads now, again on a
+// new leader when the one asked lost its leadership before answering: for a
+// set the test may write twice, as proposeOnLeader's.
+func proposeOnTCPLeader(t *testing.T, ns []*tcpNode, kv string) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_, _, err := tcpLeader(t, ns).node.Propose(ctx, []byte(kv))
+		cancel()
+		if err == nil {
+			return
+		}
+		retry := errors.Is(err, coreconsensus.NotLeader) ||
+			errs.HasCode(err, coreconsensus.CodeOutcomeUnknown) || errs.HasCode(err, coreconsensus.CodeEntrySuperseded)
+		if !retry || time.Now().After(deadline) {
+			t.Fatalf("propose %q: %v", kv, err)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

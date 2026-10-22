@@ -21,10 +21,10 @@ import (
 const (
 	// spaceCheckEvery bounds how often the loop reads its filesystem's free
 	// space, as the gauges do.
-	spaceCheckEvery = time.Second
+	spaceCheckEvery time.Duration = time.Second
 	// spaceRaiseEvery bounds how often the node proposes the alarm while it
 	// is not committed: a node with no leader is refused at once.
-	spaceRaiseEvery = time.Second
+	spaceRaiseEvery time.Duration = time.Second
 	// spaceOperator is the operator an alarm the engine raises is recorded
 	// under (D8).
 	spaceOperator coreconsensus.Operator = "engine:no-space"
@@ -55,8 +55,8 @@ func (n *Node) guardSpace(now time.Time) {
 	if g.raising.Load() || now.Before(g.nextRaise) {
 		return
 	}
-	why := n.spaceShort(now)
-	if why == "" || n.r.Status().NoSpace != 0 {
+	why, short := n.spaceShort(now)
+	if !short || n.r.Status().NoSpace != 0 {
 		return
 	}
 	g.nextRaise = now.Add(spaceRaiseEvery)
@@ -65,26 +65,25 @@ func (n *Node) guardSpace(now time.Time) {
 	go n.raiseNoSpace(why)
 }
 
-// spaceShort says why this node's disk is short, or "" when it is not: the
-// log past its quota less the reserve, read at every call, or the
-// filesystem's free space under the reserve, read at most every
-// spaceCheckEvery.
-func (n *Node) spaceShort(now time.Time) string {
+// spaceShort reports whether this node's disk is short, and why: the log
+// past its quota less the reserve, read at every call, or the filesystem's
+// free space under the reserve, read at most every spaceCheckEvery.
+func (n *Node) spaceShort(now time.Time) (why string, short bool) {
 	sr, ok := n.cfg.Log.(spaceReporter)
 	if !ok {
-		return ""
+		return "", false
 	}
 	if sr.logBytes()+n.cfg.LogReserveBytes >= n.cfg.MaxLogBytes {
-		return "the log reached MaxLogBytes less LogReserveBytes"
+		return "the log reached MaxLogBytes less LogReserveBytes", true
 	}
 	if now.Sub(n.space.checkedAt) < spaceCheckEvery {
-		return ""
+		return "", false
 	}
 	n.space.checkedAt = now
 	if free := sr.freeBytes(); free >= 0 && free < n.cfg.LogReserveBytes {
-		return "the filesystem's free space fell under LogReserveBytes"
+		return "the filesystem's free space fell under LogReserveBytes", true
 	}
-	return ""
+	return "", false
 }
 
 // raiseNoSpace proposes the alarm and logs why; admin logs its outcome.

@@ -12,6 +12,12 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
+// The bounds of the wait after a cut that failed without stopping the node.
+const (
+	cutRetryMin time.Duration = time.Second
+	cutRetryMax time.Duration = time.Minute
+)
+
 // Latest opens the newest complete snapshot of a store (R7-07).
 func Latest(s coreconsensus.SnapshotStore) (coreconsensus.SnapshotHandle, error) {
 	metas, err := s.List()
@@ -126,12 +132,6 @@ func (n *Node) maybeSnapshot(applied int64) {
 		n.cutFailed(err)
 	}
 }
-
-// The bounds of the wait after a cut that failed without stopping the node.
-const (
-	cutRetryMin = time.Second
-	cutRetryMax = time.Minute
-)
 
 // cutFailed is what a snapshot cut that published nothing does to the node.
 // A STORAGE_FAILED stops it: a failed write or sync of a snapshot is a
@@ -372,6 +372,24 @@ func (n *Node) removeOld(old []coreconsensus.SnapshotMetaValue) {
 	}
 }
 
+// streamEnded acts on a transfer's refusal, off the loop: a peer whose log
+// starts past the snapshot gets a newer cut, one that found it corrupt has
+// the sender read its own copy back, and one that cannot read its version
+// or codec is logged, as it stops.
+func (n *Node) streamEnded(meta coreconsensus.SnapshotMetaValue, to coreconsensus.NodeID, err error) {
+	switch {
+	case errors.Is(err, coreconsensus.Compacted):
+		// The peer's log starts past this snapshot: cut a newer one,
+		// which the next probe sends.
+		n.requestCut()
+	case errs.HasCode(err, coreconsensus.CodeSnapshotCorrupt):
+		n.sentCorrupt(meta, to)
+	case errs.HasCode(err, coreconsensus.CodeVersionUnsupported):
+		n.obs.warn("consensus: a peer cannot read this snapshot's version or codec, and stops",
+			lstr("id", meta.ID), lattr("peer", uint64(to)))
+	}
+}
+
 // sentCorrupt is the sender's answer to a peer that refused a snapshot as
 // SNAPSHOT_CORRUPT: its own copy is read back. The transport is
 // authenticated and checksummed, so a copy that verifies leaves the fault
@@ -566,17 +584,7 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 			// it held is released either way.
 			n.obs.warn("consensus: snapshot handle close failed", lstr("id", meta.ID), lstr("error", cerr.Error()))
 		}
-		switch {
-		case errors.Is(err, coreconsensus.Compacted):
-			// The peer's log starts past this snapshot: cut a newer one,
-			// which the next probe sends.
-			n.requestCut()
-		case errs.HasCode(err, coreconsensus.CodeSnapshotCorrupt):
-			n.sentCorrupt(meta, to)
-		case errs.HasCode(err, coreconsensus.CodeVersionUnsupported):
-			n.obs.warn("consensus: a peer cannot read this snapshot's version or codec, and stops",
-				lstr("id", meta.ID), lattr("peer", uint64(to)))
-		}
+		n.streamEnded(meta, to, err)
 		n.exec(func() {
 			delete(n.sending, to)
 			n.r.SnapshotDone(to, err == nil)
