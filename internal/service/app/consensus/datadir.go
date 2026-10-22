@@ -33,6 +33,11 @@ const (
 	// stampVersion is the first byte of an encoded stamp; a stamp of another
 	// version is unreadable, never guessed at.
 	stampVersion byte = 1
+	// stampVersion2 is the first byte of a stamp whose log identity records
+	// AdoptedFrom, which only Recover or RestoreSnapshot sets, in a history
+	// at protocol version 2: version 1's fields with AdoptedFrom after the
+	// kept index. A node of protocol 1 refuses to open it (#509).
+	stampVersion2 byte = 2
 	// stampFixed is the stamp's length before its slot and its CRC: version
 	// 1, cluster 16, epoch 8, predecessor 16, predecessor epoch 8, kept
 	// index 8, id 8, incarnation 16, state 1, founding 32, slot length 1.
@@ -202,14 +207,23 @@ func (l *fileLog) release() {
 // ---- stamp ----
 
 // encodeStamp is the stamp's on-disk form: the fixed fields, the slot
-// prefixed by its length, and a CRC-32C of everything before it.
+// prefixed by its length, and a CRC-32C of everything before it. A stamp
+// whose log identity records AdoptedFrom is written in version 2, any
+// other in version 1, so a value has one encoding.
 func encodeStamp(s coreconsensus.StampValue) []byte {
+	v2 := s.Log.AdoptedFrom != 0
 	b := []byte{stampVersion}
+	if v2 {
+		b[0] = stampVersion2
+	}
 	b = append(b, s.Log.Cluster[:]...)
 	b = binary.LittleEndian.AppendUint64(b, s.Log.Epoch)
 	b = append(b, s.Log.Predecessor[:]...)
 	b = binary.LittleEndian.AppendUint64(b, s.Log.PredecessorEpoch)
 	b = binary.LittleEndian.AppendUint64(b, s.Log.KeptIndex)
+	if v2 {
+		b = binary.LittleEndian.AppendUint64(b, s.Log.AdoptedFrom)
+	}
 	b = binary.LittleEndian.AppendUint64(b, uint64(s.ID))
 	b = append(b, s.Incarnation[:]...)
 	b = append(b, byte(s.State))
@@ -220,11 +234,20 @@ func encodeStamp(s coreconsensus.StampValue) []byte {
 }
 
 // decodeStamp parses encodeStamp's form; ok is false for another version, a
-// short stamp, a CRC that fails, a state this version does not define, or a
-// slot length that disagrees with the bytes left.
+// short stamp, a CRC that fails, a state this version does not define, a
+// slot length that disagrees with the bytes left, or a version 2 stamp
+// that records no AdoptedFrom.
 func decodeStamp(b []byte) (coreconsensus.StampValue, bool) {
 	var s coreconsensus.StampValue
-	if len(b) < stampFixed+4 || b[0] != stampVersion {
+	if len(b) == 0 || (b[0] != stampVersion && b[0] != stampVersion2) {
+		return s, false
+	}
+	v2 := b[0] == stampVersion2
+	fixed := stampFixed
+	if v2 {
+		fixed += u64Bytes
+	}
+	if len(b) < fixed+4 {
 		return s, false
 	}
 	body := b[:len(b)-4]
@@ -242,6 +265,12 @@ func decodeStamp(b []byte) (coreconsensus.StampValue, bool) {
 	p += u64Bytes
 	s.Log.KeptIndex = binary.LittleEndian.Uint64(body[p:])
 	p += u64Bytes
+	if v2 {
+		if s.Log.AdoptedFrom = binary.LittleEndian.Uint64(body[p:]); s.Log.AdoptedFrom == 0 {
+			return coreconsensus.StampValue{}, false
+		}
+		p += u64Bytes
+	}
 	s.ID = coreconsensus.NodeID(binary.LittleEndian.Uint64(body[p:]))
 	p += u64Bytes
 	copy(s.Incarnation[:], body[p:])

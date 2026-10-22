@@ -72,6 +72,18 @@ type LogIdentityValue struct {
 	// predecessor's token: one admitted after the Recover learns it from the
 	// snapshot it installs, never from an append.
 	KeptIndex uint64
+	// AdoptedFrom is the last index of the kept range the predecessor had
+	// committed when Recover read it: the commit the survivor persisted,
+	// or the snapshot a restore started from. An entry at or below it is
+	// the one every node of the predecessor holds (Log Matching), so a
+	// predecessor's token at or below it is trusted by its index once its
+	// term can no longer be read; the adopted range above it, up to
+	// KeptIndex, is not. 0 records nothing, and nothing is trusted that
+	// way. It is recorded only in a cluster at protocol version 2, in the
+	// stamp of the node Recover or RestoreSnapshot ran on: a snapshot does
+	// not carry it, so a node that learns the lineage from one trusts
+	// nothing that way (#509).
+	AdoptedFrom uint64
 }
 
 // Same reports whether two identities name the same history (cluster and

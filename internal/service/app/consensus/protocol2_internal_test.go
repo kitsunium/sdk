@@ -22,12 +22,28 @@ import (
 // node applied the raise.
 func raiseToProtocol2(t *testing.T, c *cluster) {
 	t.Helper()
+	var nodes []*Node
+	for _, tn := range c.nodes {
+		if tn.node != nil {
+			nodes = append(nodes, tn.node)
+		}
+	}
+	raiseNodes(t, nodes)
+}
+
+// raiseNodes raises the cluster of nodes to protocol version 2 through
+// whichever of them leads, and waits until every one applied the raise.
+func raiseNodes(t *testing.T, nodes []*Node) {
+	t.Helper()
 	var err error
 	for wait := time.Now().Add(5 * time.Second); time.Now().Before(wait); time.Sleep(20 * time.Millisecond) {
-		l := c.leader(time.Second)
-		st := l.node.Status()
+		i := slices.IndexFunc(nodes, func(n *Node) bool { return n.Status().Role == coreconsensus.RoleLeader })
+		if i < 0 {
+			continue
+		}
+		st := nodes[i].Status()
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		err = l.node.RaiseClusterVersion(ctx, "op:raise", coreconsensus.PreconditionSpec{Log: st.Log, Generation: st.Versions.ClusterGeneration}, raft.Protocol2)
+		err = nodes[i].RaiseClusterVersion(ctx, "op:raise", coreconsensus.PreconditionSpec{Log: st.Log, Generation: st.Versions.ClusterGeneration}, raft.Protocol2)
 		cancel()
 		if err == nil {
 			break
@@ -37,13 +53,7 @@ func raiseToProtocol2(t *testing.T, c *cluster) {
 		t.Fatalf("raise to protocol 2: %v", err)
 	}
 	for wait := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		raised := true
-		for _, tn := range c.nodes {
-			if tn.node != nil && tn.node.Status().Versions.Cluster != raft.Protocol2 {
-				raised = false
-			}
-		}
-		if raised {
+		if !slices.ContainsFunc(nodes, func(n *Node) bool { return n.Status().Versions.Cluster != raft.Protocol2 }) {
 			return
 		}
 		if time.Now().After(wait) {

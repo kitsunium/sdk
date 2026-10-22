@@ -87,6 +87,7 @@ alias(
 go_test(
     name = "consensus_test",
     srcs = [
+        "adoptedfrom_internal_test.go",
         "cancel_internal_test.go",
         "cluster_internal_test.go",
         "codec_offline_internal_test.go",

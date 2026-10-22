@@ -15,6 +15,7 @@ import (
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	coretransform "github.com/kitsunium/sdk/internal/core/data/transform"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/app/consensus/raft"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
 
@@ -479,8 +480,11 @@ type recoverIntent struct {
 // hard state to force from, the last index kept, the configuration in force
 // there, and whether the marker is already durable.
 type recoverPlan struct {
-	hard    coreconsensus.HardState
-	kept    uint64
+	hard coreconsensus.HardState
+	kept uint64
+	// adopted is the last kept index the old history had committed, the
+	// new identity's AdoptedFrom; 0 records none (#509).
+	adopted uint64
 	old     coreconsensus.MembershipValue
 	resumed bool
 	// install is the snapshot of an install a crash interrupted, which
@@ -518,7 +522,41 @@ func (d DataDir) planRecover(stamp *coreconsensus.StampValue, newCluster corecon
 	if err := checkFenced(p.old.Voters(), members, opt, stamp.Log.Cluster, newCluster); err != nil {
 		return p, err
 	}
+	if err := d.planAdopted(&p); err != nil {
+		return p, err
+	}
 	return p, d.audit(opt.Operator, recoverAuditLine(newCluster, &p))
+}
+
+// planAdopted decides the new identity's AdoptedFrom: the index up to
+// which the kept entries were committed in the old history, the persisted
+// commit or the base of a compacted log, all of the snapshot an
+// interrupted install published. A resumed Recover's marker does not
+// record it, and records none. It is recorded only when the history kept
+// is at protocol version 2: the stamp that carries it is one a node of
+// protocol 1 refuses to open (#509, D18).
+func (d DataDir) planAdopted(p *recoverPlan) error {
+	var cluster uint32
+	switch {
+	case p.resumed:
+		return nil
+	case p.install != nil:
+		p.adopted, cluster = p.kept, p.install.ClusterVersion
+	default:
+		committed := p.hard.Commit
+		if first, _ := d.d.log.Bounds(); first > 0 && first-1 > committed {
+			committed = first - 1
+		}
+		p.adopted = min(p.kept, committed)
+		var err error
+		if cluster, err = clusterVersionThrough(d.d.log, d.d.snaps, p.kept); err != nil {
+			return err
+		}
+	}
+	if cluster < raft.Protocol2 {
+		p.adopted = 0
+	}
+	return nil
 }
 
 // planKept decides the last index the new history keeps: the one a resumed
@@ -588,7 +626,7 @@ func (d DataDir) writeRecover(stamp *coreconsensus.StampValue, newCluster coreco
 	}
 	stamp.Log = coreconsensus.LogIdentityValue{
 		Cluster: newCluster, Epoch: 1, Predecessor: stamp.Log.Cluster,
-		PredecessorEpoch: stamp.Log.Epoch, KeptIndex: p.kept,
+		PredecessorEpoch: stamp.Log.Epoch, KeptIndex: p.kept, AdoptedFrom: p.adopted,
 	}
 	if err := d.d.log.WriteStamp(*stamp); err != nil {
 		return err
@@ -945,6 +983,40 @@ func lastMembership(l *fileLog, snaps *fileSnapshots, index uint64) (coreconsens
 	return m, nil
 }
 
+// clusterVersionThrough is the cluster version the committed entries
+// through index leave, from the latest snapshot and the raises in the log
+// after it, applied as the engine applies them at commit. A store that
+// cannot answer fails it.
+func clusterVersionThrough(l *fileLog, snaps *fileSnapshots, index uint64) (uint32, error) {
+	metas, err := snaps.List()
+	if err != nil {
+		return 0, err
+	}
+	var ver uint32
+	var gen, base uint64
+	if len(metas) > 0 {
+		ver, gen, base = metas[0].ClusterVersion, metas[0].ClusterGeneration, metas[0].Position.Index
+	}
+	first, last := l.Bounds()
+	lo := max(first, base+1)
+	if last < lo || index < lo {
+		return ver, nil
+	}
+	es, err := l.Entries(lo, min(last, index)+1, int(^uint(0)>>1), nil)
+	if err != nil {
+		return 0, err
+	}
+	for _, e := range es {
+		if e.Kind != coreconsensus.EntryClusterVersion {
+			continue
+		}
+		if a, err := wire.ParseAdminAt(e.Version, e.Data); err == nil && a.Pre.Generation == gen && a.ClusterVersion > ver {
+			ver, gen = a.ClusterVersion, gen+1
+		}
+	}
+	return ver, nil
+}
+
 // RestoreOptions are RestoreSnapshot's preconditions (R3-15). Expected and
 // both bounds are required; the stream is refused when its size or digest
 // differs from Expected.
@@ -1098,12 +1170,17 @@ func checkRestoreMembers(stamp *coreconsensus.StampValue, members []coreconsensu
 // restoredMeta is the metadata the restored snapshot is published under:
 // the expected one, in a new history that records the old cluster as its
 // predecessor and the snapshot's index as the last it kept, with the new
-// members.
+// members. Every entry a snapshot covers was committed: at protocol version
+// 2 the identity records the whole kept range as adopted from a commit, in
+// the stamp the restore writes; the meta does not carry it (#509).
 func restoredMeta(exp *coreconsensus.SnapshotMetaValue, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue) coreconsensus.SnapshotMetaValue {
 	meta := *exp
 	meta.Log = coreconsensus.LogIdentityValue{
 		Cluster: newCluster, Epoch: 1, Predecessor: exp.Log.Cluster,
 		PredecessorEpoch: exp.Log.Epoch, KeptIndex: exp.Position.Index,
+	}
+	if exp.ClusterVersion >= raft.Protocol2 {
+		meta.Log.AdoptedFrom = exp.Position.Index
 	}
 	meta.Membership = coreconsensus.MembershipValue{Index: exp.Position.Index, Members: slices.Clone(members), Retired: exp.Membership.Retired}
 	return meta
