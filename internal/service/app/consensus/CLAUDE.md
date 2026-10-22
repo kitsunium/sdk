@@ -246,8 +246,11 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   `TestAFailedCutWaitsBeforeTheNext`).
 - Let the log grow past `MaxLogBytes` less `LogReserveBytes`, or the
   filesystem under `LogReserveBytes`, without the no-space alarm:
-  `guardSpace` proposes it, raft refuses every command NO_SPACE while it
-  stands, and `SnapshotEveryBytes` cuts. A full disk used to stop every node
+  `guardSpace` proposes it at each tick and each completed write, the node
+  refuses its own commands NO_SPACE from the moment it finds its disk short
+  (`refuseShort`: on a slow runner the commands queued behind the alarm
+  took the log past `MaxLogBytes`), raft refuses every command NO_SPACE
+  while the alarm stands, and `SnapshotEveryBytes` cuts. A full disk used to stop every node
   on STORAGE_FAILED at the same rotation (#515,
   `TestALogPastItsQuotaRaisesNoSpaceAndRefusesWrites`).
 - Bound an election in a test by a fixed number of split votes: a split

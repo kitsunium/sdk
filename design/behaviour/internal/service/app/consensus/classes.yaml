@@ -1150,6 +1150,7 @@ files:
       - spaceReporter
       - (*Node).guardSpace
       - (*Node).spaceShort
+      - (*Node).refuseShort
       - (*Node).raiseNoSpace
     name: space.go
   - decls:
@@ -5177,9 +5178,10 @@ types:
       - doc: |-
           guardSpace proposes the no-space alarm when this node's disk runs short
           and the alarm is not committed, at most every spaceRaiseEvery. It runs on
-          the loop; the proposal runs on a goroutine counted in n.wg, which ends
-          once it is answered, or once the node stops. A follower's is forwarded to
-          the leader, as any proposal (R3-24).
+          the loop, at each tick and each completed write; the proposal runs on a
+          goroutine counted in n.wg, which ends once it is answered, or once the
+          node stops. A follower's is forwarded to the leader, as any proposal
+          (R3-24).
         name: guardSpace
         params: now time.Time
         recv: n *Node
@@ -5191,6 +5193,16 @@ types:
         params: now time.Time
         recv: n *Node
         results: why string, short bool
+      - doc: |-
+          refuseShort answers an ordinary proposal NO_SPACE, before anything is
+          appended, while this node's own disk is short and the alarm it proposed
+          is not committed yet, and reports whether it did: the reserve is what the
+          repair writes, and the commands queued behind the alarm used to fill it
+          on a slow disk.
+        name: refuseShort
+        params: p *proposal
+        recv: n *Node
+        results: bool
       - doc: raiseNoSpace proposes the alarm and logs why; admin logs its outcome.
         name: raiseNoSpace
         params: why string
@@ -5659,14 +5671,19 @@ types:
         results: error
     name: chunkReader
   - doc: |-
-      spaceGuard is the guard's state. checkedAt and nextRaise belong to the
-      event loop; raising is set while a proposal of the alarm is in flight.
+      spaceGuard is the guard's state. checkedAt, nextRaise and fsShort belong
+      to the event loop; raising is set while a proposal of the alarm is in
+      flight, and short while the last check found the disk short.
     fields:
       - name: checkedAt
         type: time.Time
       - name: nextRaise
         type: time.Time
+      - name: fsShort
+        type: bool
       - name: raising
+        type: atomic.Bool
+      - name: short
         type: atomic.Bool
     kind: struct
     name: spaceGuard

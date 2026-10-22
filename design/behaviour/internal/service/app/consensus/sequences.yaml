@@ -7633,6 +7633,8 @@ sequences:
         kind: value
       - id: n.storageDone
         kind: internal
+      - id: n.guardSpace
+        kind: internal
     steps:
       - opt:
           do:
@@ -7643,6 +7645,8 @@ sequences:
         to: n.clk.Now
       - eval: n.storageDone(d)
         to: n.storageDone
+      - eval: n.guardSpace(turn)
+        to: n.guardSpace
       - return: turn, true
   - of: (*Node).onProposal
     participants:
@@ -12751,7 +12755,7 @@ sequences:
             - opt:
                 do:
                   - continue: true
-                when: n.refuseOverload(p)
+                when: n.refuseOverload(p) || n.refuseShort(p)
             - opt:
                 do:
                   - eval: flush()
@@ -14901,6 +14905,8 @@ sequences:
         kind: self
       - id: n.spaceShort
         kind: internal
+      - id: g.short.Store
+        kind: value
       - id: now.Add
         kind: value
       - id: g.raising.Store
@@ -14912,17 +14918,15 @@ sequences:
     steps:
       - bind: g
         eval: "&n.space"
-      - opt:
-          do:
-            - return: ""
-          when: g.raising.Load() || now.Before(g.nextRaise)
       - bind: why, short
         eval: n.spaceShort(now)
         to: n.spaceShort
+      - eval: g.short.Store(short)
+        to: g.short.Store
       - opt:
           do:
             - return: ""
-          when: "!short || n.r.Status().NoSpace != 0"
+          when: "!short || g.raising.Load() || now.Before(g.nextRaise) || n.r.Status().NoSpace != 0"
       - set: g.nextRaise
         to: now.Add
         value: now.Add(spaceRaiseEvery)
@@ -14951,21 +14955,33 @@ sequences:
           do:
             - return: "\"the log reached MaxLogBytes less LogReserveBytes\", true"
           when: sr.logBytes()+n.cfg.LogReserveBytes >= n.cfg.MaxLogBytes
+      - bind: g
+        eval: "&n.space"
       - opt:
           do:
-            - return: "\"\", false"
-          when: now.Sub(n.space.checkedAt) < spaceCheckEvery
-      - set: n.space.checkedAt
-        value: now
+            - set: g.checkedAt
+              value: now
+            - bind: free
+              eval: sr.freeBytes()
+              to: sr.freeBytes
+            - set: g.fsShort
+              value: free >= 0 && free < n.cfg.LogReserveBytes
+          when: now.Sub(g.checkedAt) >= spaceCheckEvery
       - opt:
           do:
             - return: "\"the filesystem's free space fell under LogReserveBytes\", true"
-          init:
-            bind: free
-            eval: sr.freeBytes()
-            to: sr.freeBytes
-          when: free >= 0 && free < n.cfg.LogReserveBytes
+          when: g.fsShort
       - return: "\"\", false"
+  - of: (*Node).refuseShort
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: p.admin || !n.space.short.Load()
+      - send:
+          chan: p.done
+          value: "propResult{err: origin(coreconsensus.NoSpace, errs.String(\"why\", \"this node's disk is short\"))}"
+      - return: "true"
   - of: (*Node).raiseNoSpace
     participants:
       - id: caller

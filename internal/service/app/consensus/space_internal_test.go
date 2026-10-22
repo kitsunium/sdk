@@ -62,8 +62,11 @@ func TestALogPastItsQuotaRaisesNoSpaceAndRefusesWrites(t *testing.T) {
 	if refused == nil {
 		t.Fatal("4 MiB written past a 1 MiB quota and no write was refused NO_SPACE")
 	}
-	if n.Status().NoSpace == 0 {
-		t.Fatal("a write was refused NO_SPACE with no alarm committed")
+	// The node refuses its writes as soon as it finds its disk short; the
+	// alarm it proposed then commits.
+	waitFor(t, "the no-space alarm", func() bool { return n.Status().NoSpace != 0 })
+	if _, _, err := n.Propose(context.Background(), []byte("after=1")); !errors.Is(err, coreconsensus.NoSpace) {
+		t.Fatalf("a write under the committed alarm: %v", err)
 	}
 	if b := dn.dd.d.log.logBytes(); b > quota {
 		t.Fatalf("the log holds %d bytes, past MaxLogBytes %d", b, quota)

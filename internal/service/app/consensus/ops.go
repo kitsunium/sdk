@@ -116,7 +116,7 @@ func (n *Node) handleProposals(ps []*proposal) {
 		batch, ents = batch[:0], ents[:0]
 	}
 	for _, p := range ps {
-		if n.refuseOverload(p) {
+		if n.refuseOverload(p) || n.refuseShort(p) {
 			continue
 		}
 		if p.admin {

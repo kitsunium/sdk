@@ -836,6 +836,7 @@ func (n *Node) onStored(d *storeDone, ok bool) (time.Time, bool) {
 	}
 	turn := n.clk.Now()
 	n.storageDone(d)
+	n.guardSpace(turn)
 	return turn, true
 }
 

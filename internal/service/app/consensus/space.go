@@ -6,6 +6,7 @@ import (
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
 
@@ -30,12 +31,15 @@ const (
 	spaceOperator coreconsensus.Operator = "engine:no-space"
 )
 
-// spaceGuard is the guard's state. checkedAt and nextRaise belong to the
-// event loop; raising is set while a proposal of the alarm is in flight.
+// spaceGuard is the guard's state. checkedAt, nextRaise and fsShort belong
+// to the event loop; raising is set while a proposal of the alarm is in
+// flight, and short while the last check found the disk short.
 type spaceGuard struct {
 	checkedAt time.Time
 	nextRaise time.Time
+	fsShort   bool
 	raising   atomic.Bool
+	short     atomic.Bool
 }
 
 // spaceReporter is what a log store tells the guard: the bytes its segments
@@ -47,16 +51,15 @@ type spaceReporter interface {
 
 // guardSpace proposes the no-space alarm when this node's disk runs short
 // and the alarm is not committed, at most every spaceRaiseEvery. It runs on
-// the loop; the proposal runs on a goroutine counted in n.wg, which ends
-// once it is answered, or once the node stops. A follower's is forwarded to
-// the leader, as any proposal (R3-24).
+// the loop, at each tick and each completed write; the proposal runs on a
+// goroutine counted in n.wg, which ends once it is answered, or once the
+// node stops. A follower's is forwarded to the leader, as any proposal
+// (R3-24).
 func (n *Node) guardSpace(now time.Time) {
 	g := &n.space
-	if g.raising.Load() || now.Before(g.nextRaise) {
-		return
-	}
 	why, short := n.spaceShort(now)
-	if !short || n.r.Status().NoSpace != 0 {
+	g.short.Store(short)
+	if !short || g.raising.Load() || now.Before(g.nextRaise) || n.r.Status().NoSpace != 0 {
 		return
 	}
 	g.nextRaise = now.Add(spaceRaiseEvery)
@@ -76,14 +79,29 @@ func (n *Node) spaceShort(now time.Time) (why string, short bool) {
 	if sr.logBytes()+n.cfg.LogReserveBytes >= n.cfg.MaxLogBytes {
 		return "the log reached MaxLogBytes less LogReserveBytes", true
 	}
-	if now.Sub(n.space.checkedAt) < spaceCheckEvery {
-		return "", false
+	g := &n.space
+	if now.Sub(g.checkedAt) >= spaceCheckEvery {
+		g.checkedAt = now
+		free := sr.freeBytes()
+		g.fsShort = free >= 0 && free < n.cfg.LogReserveBytes
 	}
-	n.space.checkedAt = now
-	if free := sr.freeBytes(); free >= 0 && free < n.cfg.LogReserveBytes {
+	if g.fsShort {
 		return "the filesystem's free space fell under LogReserveBytes", true
 	}
 	return "", false
+}
+
+// refuseShort answers an ordinary proposal NO_SPACE, before anything is
+// appended, while this node's own disk is short and the alarm it proposed
+// is not committed yet, and reports whether it did: the reserve is what the
+// repair writes, and the commands queued behind the alarm used to fill it
+// on a slow disk.
+func (n *Node) refuseShort(p *proposal) bool {
+	if p.admin || !n.space.short.Load() {
+		return false
+	}
+	p.done <- propResult{err: origin(coreconsensus.NoSpace, errs.String("why", "this node's disk is short"))}
+	return true
 }
 
 // raiseNoSpace proposes the alarm and logs why; admin logs its outcome.
