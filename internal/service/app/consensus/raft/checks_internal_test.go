@@ -501,6 +501,7 @@ var checks = map[string]func(mutation) error{
 	"simulated safety":               checkSimSafety,
 	"simulated linearizability":      checkSimLinearizable,
 	"deposed leader read":            checkDeposedLeaderRead,
+	"match bounded by last index":    checkMatchBoundedByLastIndex,
 }
 
 func TestChecksPassUnmutated(t *testing.T) {
@@ -557,6 +558,7 @@ func TestMutationsAreCaught(t *testing.T) {
 		"founding contract as written":    mutFoundingAsWritten,
 		"read answered by any peer":       mutReadRespAnyPeer,
 		"membership every commit":         mutMembershipEveryCommit,
+		"match past the last index":       mutMatchPastLastIndex,
 	}
 	for name, m := range muts {
 		caught := ""

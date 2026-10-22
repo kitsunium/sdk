@@ -105,6 +105,9 @@ const (
 	// mutMembershipEveryCommit hands the driver the admission set at every
 	// commit, changed or not (#531).
 	mutMembershipEveryCommit
+	// mutMatchPastLastIndex takes an acknowledgement past the leader's last
+	// index as the follower's match (#546).
+	mutMatchPastLastIndex
 )
 
 // mutated reports whether a test switched mutation m on; it is false in every

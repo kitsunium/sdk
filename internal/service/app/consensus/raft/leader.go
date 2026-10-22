@@ -372,6 +372,13 @@ func (r *Raft) handleAppResp(pr *progress, m core.MessageValue) {
 		r.handleAppReject(pr, m)
 		return
 	}
+	if m.Index > r.log.lastIndex() && !r.mutated(mutMatchPastLastIndex) {
+		// No honest follower holds past this leader's log (Leader
+		// Completeness): taken as match, the index of a follower whose
+		// snapshot metadata rotted made every write committed on the
+		// leader's disk alone (#546). Ignored.
+		return
+	}
 	if pr.maybeUpdate(m.Index) {
 		switch {
 		case pr.state == stateProbe:

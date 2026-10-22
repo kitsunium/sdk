@@ -241,9 +241,10 @@ func (k *fileSink) Commit(final coreconsensus.SnapshotMetaValue) error {
 
 // published reads the snapshot a directory entry named name publishes. ok
 // is false for anything that is not a complete snapshot: another file, a
-// .meta that does not parse or names another id, or one whose .snap is
-// missing. Such an entry is skipped: it is a publication a crash
-// interrupted, not a snapshot that failed. A .meta or a .snap that is there
+// .meta that does not parse, names another id or a position its id does
+// not name (#546), or one whose .snap is missing. Such an entry is
+// skipped: it is a publication a crash interrupted or a .meta that rotted,
+// not a snapshot to restore from. A .meta or a .snap that is there
 // but cannot be read is neither: it is an I/O failure, and it is reported,
 // so that a listing never reads a failing disk as "no snapshot".
 func (s *fileSnapshots) published(name string) (coreconsensus.SnapshotMetaValue, bool, error) {
@@ -259,7 +260,7 @@ func (s *fileSnapshots) published(name string) (coreconsensus.SnapshotMetaValue,
 	if err != nil {
 		return m, false, storageFailed("read snapshot meta", err)
 	}
-	if wire.ParseSnapshotMeta(b, &m) != nil || m.ID != id {
+	if wire.ParseSnapshotMeta(b, &m) != nil || m.ID != id || !idNamesPosition(&m) {
 		return m, false, nil
 	}
 	if _, err := os.Stat(filepath.Join(s.dir, id+".snap")); err != nil {

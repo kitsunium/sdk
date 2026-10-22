@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
@@ -44,6 +45,9 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64) (er
 			err = cerr
 		}
 	}()
+	if !idNamesPosition(&m) {
+		return origin(coreconsensus.SnapshotCorrupt, errs.String("why", "the metadata's id does not name its position"), errs.String("id", m.ID))
+	}
 	codec, err := n.codecOf(&m)
 	if err != nil {
 		return err
@@ -66,6 +70,24 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64) (er
 	n.snapState.last = max(n.snapState.last, m.Position.Index)
 	n.snapState.mu.Unlock()
 	return nil
+}
+
+// idNamesPosition reports whether a snapshot id of the form a cut writes,
+// index then term on 20 digits each, names m's position. The .meta carries
+// no checksum: a bit flipped in Position.Index was read as is, and the node
+// erased its log, answered reads it had not applied and acknowledged past
+// the leader's log (#546). An id of another form names no position and is
+// not checked: a bit flipped in it already fails the file name.
+func idNamesPosition(m *coreconsensus.SnapshotMetaValue) bool {
+	if len(m.ID) != 41 || m.ID[20] != '-' {
+		return true
+	}
+	idx, ierr := strconv.ParseUint(m.ID[:20], 10, 64)
+	term, terr := strconv.ParseUint(m.ID[21:], 10, 64)
+	if ierr != nil || terr != nil {
+		return true
+	}
+	return idx == m.Position.Index && term == m.Position.Term
 }
 
 // codecOf is the codec a snapshot of metadata m is decoded with, refused
