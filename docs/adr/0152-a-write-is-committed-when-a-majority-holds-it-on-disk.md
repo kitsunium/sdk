@@ -2063,6 +2063,16 @@ thresholds, provisional like D16's numbers:
 | loop turn | p99 of `consensus_loop_turn_seconds` above the drift budget for 5 min |
 | snapshot pin | `consensus_snapshot_pins` held longer than the pin TTL of D19 |
 
+**A leader that makes no progress steps aside
+([#554](https://github.com/kitsunium/sdk/issues/554)).** CheckQuorum
+measures contact, not progress: a leader whose fdatasync never returns, or
+whose `Apply` blocks, kept heartbeating and leading while every write and
+read entering at it waited. At every tick the leader watches its durable
+index against its log and its applied index against its commit; when
+either has trailed without moving for `ElectionTimeoutMax`, it transfers
+leadership to the voter with the highest acknowledged index (D8). A slow
+fdatasync that moves within the bound changes nothing.
+
 `Node.Health()` returns a structured verdict an orchestrator can poll: role,
 leader known — on a node that does not lead, a leader that answered one of
 its reads within `ElectionTimeoutMax`, a probe read sent every half minimum

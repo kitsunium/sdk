@@ -126,6 +126,7 @@ type Node struct {
 	snapState     snapState
 	contact       leaderContact
 	progress      applyProgress
+	watch         progressWatch
 
 	watchMu  sync.Mutex
 	watchers map[chan coreconsensus.StatusValue]struct{}
@@ -897,6 +898,7 @@ func (n *Node) onTick(tick clock.Ticker, ok bool) (time.Time, bool) {
 	turn := n.clk.Now()
 	n.r.Tick(n.clk.Now())
 	n.probeLeader(turn)
+	n.watchProgress(turn)
 	if d := n.tickInterval(); d != time.Duration(n.tickEvery.Load()) {
 		// A committed contract changed the heartbeat (review of PR
 		// #301, L5).
