@@ -1235,16 +1235,16 @@ func (n *Node) checkAdmission() {
 		n.stamp = s
 		n.canVote = true
 		n.r.SetCanVote(true)
-		if j, ok := n.cfg.Transport.(joinAnswerHolder); ok {
+		if j, ok := n.cfg.Transport.(joinReleaser); ok {
 			j.releaseJoinAnswer()
 		}
 	}
 }
 
-// joinAnswerHolder is a transport that keeps a JOIN answer's members
-// admitted apart from the engine's configuration until the joiner is
-// admitted (#552).
-type joinAnswerHolder interface {
+// joinReleaser is a transport that keeps a JOIN answer's members admitted
+// apart from the engine's configuration until the joiner is admitted
+// (#552).
+type joinReleaser interface {
 	releaseJoinAnswer()
 }
 

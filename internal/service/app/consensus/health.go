@@ -8,6 +8,11 @@ import (
 )
 
 // The facts a PeerHealthValue carries.
+// maxReadyLag is the apply lag, in entries, a caught-up node stays ready
+// through while what it applies keeps moving (#545).
+const maxReadyLag uint64 = 64
+
+// The facts a PeerHealthValue carries.
 const (
 	// PeerVoter is set for a voter, clear for a learner.
 	PeerVoter PeerFlags = 1 << iota
@@ -174,10 +179,6 @@ func isReady(h *HealthValue, st *coreconsensus.StatusValue, applyOK bool) bool {
 	return !h.Flags.Has(HealthStopped) && h.Flags.Has(HealthHasLeader) && (st.Applied >= st.Commit || applyOK) &&
 		(h.ChainRefusals == 0 || h.ChainRefusalLeader != st.Leader)
 }
-
-// maxReadyLag is the apply lag, in entries, a caught-up node stays ready
-// through while what it applies keeps moving.
-const maxReadyLag = 64
 
 // applyProgress is what readiness knows of the apply goroutine's progress,
 // loop-owned and updated at every publication: whether the node caught up

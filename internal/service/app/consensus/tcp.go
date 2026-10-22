@@ -81,6 +81,15 @@ const (
 	acceptBackoffFirst time.Duration = 5 * time.Millisecond
 	// acceptBackoffCeiling bounds the wait after a failed Accept.
 	acceptBackoffCeiling time.Duration = time.Second
+	// joinGroup is the admission group the JOIN answer is installed in, apart
+	// from the engine's (Config.Group clamps 0 to 1, so it is never 0). In the
+	// engine's group, the first configuration a joiner replayed — an older
+	// snapshot, the first batch of a log fed from index 1 — replaced the
+	// answer, and a leader admitted after that configuration was cut and
+	// refused for as long as it led (#552). The answer stays until the
+	// joiner's own committed configuration lists it: every member admitted
+	// before its AddLearner is in its log by then.
+	joinGroup coreconsensus.GroupID = 0
 )
 
 // listenTCP opens the transport's listener; a test replaces it to make
@@ -794,17 +803,7 @@ func queuedFrame(pc *peerConn) ([]byte, bool) {
 // it under the user timeout (boundUnacknowledged) — and the batch, an
 // election's vote among others, would otherwise wait for Raft's next round.
 func (t *TCPTransport) sendBatch(k outKey, link *senderLink, batch [][]byte) {
-	if link.conn != nil && time.Since(link.created) > t.cfg.MaxConnectionAge {
-		// Retired by age, every frame of it flushed: the next batch
-		// dials a fresh one.
-		link.close()
-	}
-	if link.conn != nil && !t.stillAdmitted(k.to, link) {
-		// The key it was dialled to is no longer the member's — denied,
-		// replaced or gone — or its certificate expired: nothing more is
-		// written on it, and the redial checks the current pin (#551).
-		link.close()
-	}
+	t.retire(k, link)
 	reused := link.conn != nil
 	if !reused && !t.redial(k, link) {
 		return
@@ -822,6 +821,20 @@ func (t *TCPTransport) sendBatch(k outKey, link *senderLink, batch [][]byte) {
 		// itself is beyond use.
 		link.close()
 		t.reportUnreachable(k.to)
+	}
+}
+
+// retire closes the link's connection when it may carry no more frames:
+// retired by age, every frame of it flushed, so the next batch dials a
+// fresh one; or its key is no longer the member's — denied, replaced or
+// gone — or its certificate expired, so nothing more is written on it and
+// the redial checks the current pin (#551).
+func (t *TCPTransport) retire(k outKey, link *senderLink) {
+	if link.conn == nil {
+		return
+	}
+	if time.Since(link.created) > t.cfg.MaxConnectionAge || !t.stillAdmitted(k.to, link) {
+		link.close()
 	}
 }
 
@@ -849,7 +862,8 @@ func (t *TCPTransport) writeBatch(link *senderLink, batch [][]byte) error {
 // the peer unreachable. It reports whether the link is connected. Bytes
 // left unacknowledged on the new connection for WriteTimeout abort it, as
 // a write that blocks that long does; a connection that refuses the bound
-// fails like a failed dial.
+// fails like a failed dial. A connected link gets watchLink, the background
+// goroutine counted in t.wg that reads it and ends when the connection does.
 func (t *TCPTransport) redial(k outKey, link *senderLink) bool {
 	if time.Now().Before(link.backoff) {
 		return false // dropped: Raft retransmits what matters
@@ -881,6 +895,13 @@ func (t *TCPTransport) redial(k outKey, link *senderLink) bool {
 	return true
 }
 
+// connNetter is what watchLink needs of a link's connection: to read it,
+// and its socket to close.
+type connNetter interface {
+	io.Reader
+	NetConn() net.Conn
+}
+
 // watchLink reads an outbound connection until it ends, then closes its
 // socket. The receiver writes nothing on a member's lane, so a read only
 // returns once the peer closed its end or the sender closed the link: a
@@ -890,7 +911,7 @@ func (t *TCPTransport) redial(k outKey, link *senderLink) bool {
 // background goroutine redial launches per connection, counted in wg, and
 // ends when the connection does; TLS's post-handshake messages are read
 // and discarded on the way.
-func watchLink(wg *sync.WaitGroup, c *tls.Conn) {
+func watchLink(wg *sync.WaitGroup, c connNetter) {
 	defer wg.Done()
 	// Whatever the read returned, the link is over: nothing reads this
 	// result, and the socket is closed so that no write lands in it.
@@ -1459,16 +1480,6 @@ func (t *TCPTransport) joinAnswered(b []byte, rerr error, spki [32]byte) (pos co
 	t.SetMembership(joinGroup, m.Members)
 	return coreconsensus.PositionValue{Term: binary.LittleEndian.Uint64(b[4:]), Index: binary.LittleEndian.Uint64(b[12:])}, false, nil
 }
-
-// joinGroup is the admission group the JOIN answer is installed in, apart
-// from the engine's (Config.Group clamps 0 to 1, so it is never 0). In the
-// engine's group, the first configuration a joiner replayed — an older
-// snapshot, the first batch of a log fed from index 1 — replaced the
-// answer, and a leader admitted after that configuration was cut and
-// refused for as long as it led (#552). The answer stays until the
-// joiner's own committed configuration lists it: every member admitted
-// before its AddLearner is in its log by then.
-const joinGroup coreconsensus.GroupID = 0
 
 // releaseJoinAnswer drops the JOIN answer's admission group once the node
 // is admitted: from then on the engine's configuration alone admits.
