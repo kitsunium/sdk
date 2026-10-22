@@ -405,7 +405,7 @@ func (n *Node) adoptLineage(l coreconsensus.LogIdentityValue) error {
 // lineageAccepts reports whether a snapshot of identity l, at index, belongs
 // to this node's history: of its own lineage at or past the index Recover
 // kept, which it records, or of the predecessor's at or below that index,
-// as durableIndex counts a machine's position. One of its own lineage below
+// as durablePosition counts a machine's position. One of its own lineage below
 // the kept index is refused: the kept entries after it would reach this
 // node by append, which a leader never sends, and a node that adopted the
 // lineage from it would hold no entry at or below the index to append to
@@ -472,10 +472,11 @@ func (n *Node) load() (raft.StartState, error) {
 	if err != nil {
 		return raft.StartState{}, storageFailed("snapshots", err)
 	}
-	durIdx, err := n.durableIndex()
+	dur, err := n.durablePosition()
 	if err != nil {
 		return raft.StartState{}, err
 	}
+	durIdx := dur.Index
 	base, failed, err := n.restoreLatest(metas, durIdx)
 	if err != nil {
 		return raft.StartState{}, err
@@ -512,26 +513,39 @@ func (n *Node) load() (raft.StartState, error) {
 		return raft.StartState{}, origin(coreconsensus.SnapshotCorrupt,
 			errs.String("why", "no snapshot is left and the log holds no configuration: WipeAndRejoin"))
 	}
-	applied := n.startApplied(&base, durIdx)
+	applied, err := n.startApplied(&base, dur)
+	if err != nil {
+		return raft.StartState{}, err
+	}
 	return raft.StartState{HardState: hs, Snapshot: base, Entries: ents, Applied: applied, Now: n.clk.Now()}, nil
 }
 
-// durableIndex is the index a DurableStateMachine already holds applied,
-// counted only when it was applied in this log's lineage, or in the
-// predecessor's below the kept index; any other machine answers 0.
-func (n *Node) durableIndex() (uint64, error) {
+// termless reports whether m names an index above 0 at term 0, which no
+// committed entry has.
+func termless(m *coreconsensus.SnapshotMetaValue) bool {
+	return m.Position.Index > 0 && m.Position.Term == 0
+}
+
+// durablePosition is the position a DurableStateMachine already holds
+// applied, counted only when it was applied in this log's lineage, or in the
+// predecessor's below the kept index; any other machine answers the zero
+// position. The term is kept with the index: dropped, a node restarted past
+// its snapshot resumed with an applied term of 0, and its next cut
+// published a snapshot at term 0 that stopped it at every later start and
+// every peer that installed it (#544).
+func (n *Node) durablePosition() (coreconsensus.PositionValue, error) {
 	d, ok := n.cfg.Machine.(coreconsensus.DurableStateMachine)
 	if !ok {
-		return 0, nil
+		return coreconsensus.PositionValue{}, nil
 	}
 	li, pos, err := d.AppliedPosition()
 	if err != nil {
-		return 0, err
+		return coreconsensus.PositionValue{}, err
 	}
 	if l := n.lineage(); li.Same(l) || (pos.Index <= l.KeptIndex && li.Cluster == l.Predecessor) {
-		return pos.Index, nil
+		return pos, nil
 	}
-	return 0, nil
+	return coreconsensus.PositionValue{}, nil
 }
 
 // restoreLatest restores from the newest snapshot that verifies, falling
@@ -544,6 +558,15 @@ func (n *Node) durableIndex() (uint64, error) {
 // is known to continue the log.
 func (n *Node) restoreLatest(metas []coreconsensus.SnapshotMetaValue, durIdx uint64) (base coreconsensus.SnapshotMetaValue, failed []coreconsensus.SnapshotMetaValue, err error) {
 	for _, m := range metas {
+		if termless(&m) {
+			// Published at term 0 by a cut before #544: restored, it made
+			// the start truncate the log, then refuse to compact it with no
+			// term, at every later start. Set aside as unreadable, a fault of
+			// its own.
+			n.obs.warn("consensus: a snapshot was not restored", lstr("id", m.ID), lstr("error", "recorded at term 0"))
+			failed = append(failed, m)
+			continue
+		}
 		rerr := n.restoreFrom(m, durIdx)
 		if rerr == nil {
 			return m, failed, nil
@@ -664,19 +687,43 @@ func (n *Node) readTail(first, last, snapIdx uint64) ([]coreconsensus.EntryValue
 }
 
 // startApplied sets where apply resumes: past the base, or past what a
-// durable machine already holds. It returns the applied index raft starts
-// from; a node with no table records nothing applied until an install.
-func (n *Node) startApplied(base *coreconsensus.SnapshotMetaValue, durIdx uint64) uint64 {
+// durable machine already holds, with the term of that position. It returns
+// the applied index raft starts from; a node with no table records nothing
+// applied until an install.
+func (n *Node) startApplied(base *coreconsensus.SnapshotMetaValue, dur coreconsensus.PositionValue) (uint64, error) {
 	snapIdx := base.Position.Index
-	applied := max(snapIdx, durIdx)
+	applied := max(snapIdx, dur.Index)
 	n.applied = applied
 	if applied == snapIdx {
 		n.appliedTerm = base.Position.Term
+	} else {
+		term, err := n.durableTerm(dur)
+		if err != nil {
+			return 0, err
+		}
+		n.appliedTerm = term
 	}
-	if n.noTable && durIdx < snapIdx {
+	if n.noTable && dur.Index < snapIdx {
 		n.applied, n.appliedTerm = 0, 0 // nothing is applied until an install
 	}
-	return applied
+	return applied, nil
+}
+
+// durableTerm is the term of the position a durable machine holds applied
+// past the base: the log's term there, which the machine's must equal when
+// it reports one, or the machine's when the log no longer holds the index.
+// A machine that applied another entry at that index than the log holds
+// diverged from it, and the start is refused (#544).
+func (n *Node) durableTerm(dur coreconsensus.PositionValue) (uint64, error) {
+	t, err := n.cfg.Log.Term(dur.Index)
+	if err != nil {
+		return dur.Term, nil
+	}
+	if dur.Term != 0 && dur.Term != t {
+		return 0, origin(coreconsensus.LogCorrupt, errs.String("why", "the durable machine applied another term than the log holds"),
+			errs.String("index", u64s(dur.Index)), errs.String("machine_term", u64s(dur.Term)), errs.String("log_term", u64s(t)))
+	}
+	return t, nil
 }
 
 // noTableBase is the base a node with no usable snapshot starts from: the
@@ -696,7 +743,7 @@ func noTableBase(log coreconsensus.LogStore, metas []coreconsensus.SnapshotMetaV
 	if len(metas) > 0 {
 		b = metas[0]
 		for _, m := range metas {
-			if m.Position.Index == first-1 {
+			if m.Position.Index == first-1 && !termless(&m) {
 				b, matched = m, true
 			}
 		}

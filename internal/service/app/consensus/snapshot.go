@@ -192,6 +192,12 @@ func (n *Node) metaAt(idx, term uint64) (coreconsensus.SnapshotMetaValue, bool) 
 // background goroutine counted in n.wg, which ends when the write does, so
 // Close waits for it; its failure reaches cutFailed instead of the caller.
 func (n *Node) cut(idx, term uint64, w io.Writer) error {
+	if idx > 0 && term == 0 {
+		// No committed entry has term 0: such a snapshot stopped at its
+		// next start the node that cut it and every peer that installed it
+		// (#544).
+		return origin(coreconsensus.SnapshotCorrupt, errs.String("why", "a cut at term 0"), errs.String("index", u64s(idx)))
+	}
 	n.snapState.mu.Lock()
 	n.snapState.sinceBytes = 0
 	n.snapState.mu.Unlock()
@@ -562,14 +568,15 @@ func (n *Node) save(req *saveReq) {
 // history before a Recover, or below the index it kept — the entries kept
 // after it would reach the peer by append and be applied there under the
 // new identity, not the predecessor's (#507). A cut of this lineage, at or
-// past the kept index, names both.
+// past the kept index, names both. One recorded at term 0 is never sent
+// either: the peer would stop installing it (#544).
 func (n *Node) snapshotToSend() (coreconsensus.SnapshotMetaValue, bool) {
 	metas, err := n.cfg.Snapshots.List()
 	if err != nil || len(metas) == 0 {
 		return coreconsensus.SnapshotMetaValue{}, false
 	}
 	l := n.lineage()
-	if !metas[0].Log.Same(l) || metas[0].Position.Index < l.KeptIndex {
+	if !metas[0].Log.Same(l) || metas[0].Position.Index < l.KeptIndex || termless(&metas[0]) {
 		return coreconsensus.SnapshotMetaValue{}, false
 	}
 	return metas[0], true
