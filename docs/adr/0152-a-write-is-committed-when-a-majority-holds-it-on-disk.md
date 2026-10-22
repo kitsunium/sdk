@@ -1751,6 +1751,11 @@ The POC measured 10 ms for a transfer, against at least one election timeout
 for an election. `PreferredLeaders` in the configuration names the nodes a
 leader transfers to after an election when it is not one of them — here FRA
 and RBX, 9.6 ms apart, so a commit costs ~10 ms of network instead of ~23.
+The leader judges them at every tick, not only when it is elected: at that
+moment no peer has acknowledged anything yet, so a check made only then never
+transferred (#559). It hands over to the first preferred voter that holds the
+commit, and does not try again before `ElectionTimeoutMax` after a transfer it
+started.
 
 ### D9 — Reads: ReadIndex by default, a lease kept with every correction (Q2, R1-19)
 

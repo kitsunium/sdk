@@ -132,6 +132,9 @@ type Node struct {
 	contact       leaderContact
 	progress      applyProgress
 	watch         progressWatch
+	// preferAt is the earliest tick at which this leader tries
+	// PreferredLeaders again after a transfer it started (#559).
+	preferAt time.Time
 
 	watchMu  sync.Mutex
 	watchers map[chan coreconsensus.StatusValue]struct{}
@@ -905,6 +908,7 @@ func (n *Node) onTick(tick clock.Ticker, ok bool) (time.Time, bool) {
 	n.probeLeader(turn)
 	n.watchProgress(turn)
 	n.watchPins(turn)
+	n.watchPreferred(turn)
 	if d := n.tickInterval(); d != time.Duration(n.tickEvery.Load()) {
 		// A committed contract changed the heartbeat (review of PR
 		// #301, L5).
@@ -1299,9 +1303,9 @@ func (n *Node) leadershipChanged() {
 		delete(n.reads, ctx)
 		w.done <- readResult{code: coreconsensus.CodeNotLeader}
 	}
-	if st.Role == coreconsensus.RoleLeader && len(n.cfg.PreferredLeaders) > 0 {
-		n.preferLeader(st)
-	}
+	// The preferred nodes are judged from the next tick: becomeLeader has
+	// just reset every match to 0 (#559).
+	n.preferAt = time.Time{}
 }
 
 // startGrace starts the grace period of every unresolved proposal.
@@ -1326,20 +1330,40 @@ func (n *Node) startGrace(commit uint64) {
 	n.am.Unlock()
 }
 
-// preferLeader transfers to a preferred node after an election when this
-// one is not preferred (D8).
-func (n *Node) preferLeader(st raft.StatusValue) {
-	if slices.Contains(n.cfg.PreferredLeaders, n.stamp.ID) {
+// watchPreferred hands the leadership to a preferred node once one holds
+// the commit, while this leader is not preferred (D8). It runs on the loop,
+// at every tick: on the Ready where a node becomes leader every match is
+// still 0, so a check made only then never transferred (#559). A transfer
+// it started, done or not, is not tried again before the maximum election
+// timeout, so a lagging preferred node causes no churn.
+func (n *Node) watchPreferred(now time.Time) {
+	if len(n.cfg.PreferredLeaders) == 0 || now.Before(n.preferAt) {
 		return
+	}
+	st := n.r.Status()
+	if st.Role != coreconsensus.RoleLeader || st.Transfer != 0 {
+		return
+	}
+	if n.preferLeader(now, &st) {
+		n.preferAt = now.Add(st.Timing.ElectionTimeoutMax)
+	}
+}
+
+// preferLeader starts a transfer to the first preferred voter that holds
+// the commit, and reports whether it did; a preferred node never hands
+// over.
+func (n *Node) preferLeader(now time.Time, st *raft.StatusValue) bool {
+	if slices.Contains(n.cfg.PreferredLeaders, n.stamp.ID) {
+		return false
 	}
 	for _, id := range n.cfg.PreferredLeaders {
 		if m, ok := st.Conf.Member(id); ok && m.Voter {
 			if match, _, ok := n.r.Progress(id); ok && match >= st.Commit {
-				n.r.TransferLeadership(n.clk.Now(), id)
-				return
+				return n.r.TransferLeadership(now, id) == 0
 			}
 		}
 	}
+	return false
 }
 
 // publish stores the status a turn produced and wakes every watcher with
