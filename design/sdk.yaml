@@ -130,7 +130,7 @@ layers:
 # observe and security hold one domain per directory (its FAMILIES).
 families:
   - in: [kernel]
-    root: [backoff, clock, errs, plugin, semver]
+    root: [backoff, clock, errs, plugin, semver, swar]
     names: [collections, concur, fs]
   - in: [core]
     names: [app, crypto, data, net, observe, proc, security]
@@ -540,6 +540,28 @@ budgets:
   - fn: go:github.com/kitsunium/sdk/internal/kernel/semver.PseudoVersionTime
     allocs: 0
     fixture: PseudoVersionTime
+  # swar: every search reads its slice and allocates nothing, none of them
+  # lets the slice escape, and each entry point inlines (cost 63 to 67 of 80):
+  # the loops sit behind it, in the dispatcher the build chooses.
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/swar.IndexByte2
+    inline: true
+    escapes: []
+    allocs: 0
+    fixture: IndexByte2
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/swar.IndexLess
+    inline: true
+    escapes: []
+    allocs: 0
+    fixture: IndexLess
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/swar.NewSet
+    inline: true
+    allocs: 0
+    fixture: NewSet
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/swar.Set.Index
+    inline: true
+    escapes: []
+    allocs: 0
+    fixture: SetIndex
   # A recycler's warm round trip (ADR 0010) and a snapshot's three verbs
   # (ADR 0011) allocate nothing.
   - fn: go:github.com/kitsunium/sdk/internal/kernel/concur/recycler.(*Pool[...]).Get

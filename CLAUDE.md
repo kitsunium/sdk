@@ -57,7 +57,7 @@ Go SDK providing a normed, performant toolbox for downstream applications: the m
 ```
 internal/
 ├── kernel/        stdlib-only AND generic primitives, by family (ADR 0155)
-│                  backoff, clock, errs, plugin, semver,
+│                  backoff, clock, errs, plugin, semver, swar,
 │                  concur/{batcher, buffer, group, recycler, singleflight,
 │                          snapshot, worker},
 │                  collections/{cache, heap, ring},

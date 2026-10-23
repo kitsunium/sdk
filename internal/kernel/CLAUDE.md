@@ -15,7 +15,7 @@ directory holds no Go code — it is a prefix, not a package — and carries a
 
 ```
 internal/kernel/
-├── errs/  clock/  backoff/  semver/  plugin/     the root: no family describes them
+├── errs/  clock/  backoff/  semver/  plugin/  swar/     the root: no family describes them
 ├── concur/        batcher, buffer, group, recycler, singleflight, snapshot, worker
 ├── collections/   cache, heap, ring
 └── fs/            flock, pathchain, winacl
@@ -30,6 +30,7 @@ internal/kernel/
 | `backoff/` | `Value{BaseDelay, MaxDelay, Multiplier, Jitter}.Delay(attempt)` — the SDK's one exponential backoff curve, never negative (ADR 0103), plus its two halves `Grow` (pure) and `Widen` (jitter); `pkg/v1/app/resilience.Backoff` and `service/app/resilience.BackoffValue` alias it (ADR 0074) | (none — every input is normalised, nothing is refused) |
 | `semver/` | SemVer 2.0.0 precedence with Go's leading `v`, and Go pseudo-versions: `IsValid` / `Compare` / `Prerelease` and `IsPseudoVersion` / `PseudoVersionRev` / `PseudoVersionTime` — the six functions the SDK called on `golang.org/x/mod`, which it replaces (ADR 0156 §4); one pass, no allocation, published as `pkg/v1/data/semver` | (none — answers with values and `bool`s; an invalid string orders below every version) |
 | `plugin/` | `Unusable(v)` — the one question every process-wide registry asks before publishing: a typed nil and a non-comparable value both satisfy a port and neither can serve (ADR 0071) — and `Registry[K, V]`, the name-keyed copy-on-write table the entry is then published into, which reports a conflict (`Publish`) or the holder of a taken name (`Claim`) rather than building an error — every process-wide registry of the core is an instance (the metrics and trace exporters, codec, writer, crypto, transform, id, view) | (none — returns a reason string, and a conflict bool or a holder, the registrar puts behind its own code) |
+| `swar/` | first-match byte search a word at a time: `IndexByte2` (either of two bytes), `IndexLess` (a byte below a bound) and `Set.Index` (two bytes, a bound, and optionally the upper half of the alphabet) over `[]byte`, with exact lane tests, bounds-checked loads only and an AVX2 form behind `GOEXPERIMENT=simd` on amd64; the HTTP/1 codec's line ends and the JSON encoder's escapes, without a word of either in a signature. Not published (ADR 0186 §D10, which amends ADR 0159) | (none — an index or `-1`) |
 
 ### `concur/` — concurrency: goroutines run, joined and deduplicated, work coalesced, values shared or reused across goroutines (see `concur/CLAUDE.md`)
 
@@ -136,6 +137,18 @@ As of the 2026-04-19 audit (extended by ADR 0006 to admit `ring`):
   exists for exactly that reason (ADR 0159 §4). Written from the
   specifications, not from x/mod's source; x/mod's test vectors are what the
   suite borrows, so the two are shown to agree.
+- `swar` admitted on rule 1: stdlib-only, and its signatures name a slice, two
+  bytes and a bound — no header, no escape, no token. It ships with no consumer
+  in the tree yet, which is stated rather than dressed up: the HTTP/1 codec
+  and the JSON string encoder (the net path's plan, S3 and S5) are the two
+  loops it was written for, and ADR 0025 admitted `cache` the same way. Not
+  published (ADR 0186 §D10, which amends ADR 0159): a program searches bytes through the domain that
+  parses them. Written from the exact lane tests (the non-borrowing mask), not
+  from the classic `haszero` macro, whose false hits above a true match are the
+  fault the suite's pair test exists for; and it keeps only the searches that
+  beat the standard library's — a one-byte search lost to `bytes.IndexByte` on
+  the M1 at every length but one and was dropped, its benchmark kept to re-ask
+  on x86-64, where it was not measured.
 - `group` and `heap` admitted on **rule 1 alone**, which is the only
   admission criterion there has ever been: stdlib-only AND generic. Each is
   domain-neutral down to its signatures — `Go`/`Wait`/`Collect` with no `Job` or
@@ -191,6 +204,7 @@ The root:
 - `backoff/` — see `internal/kernel/backoff/CLAUDE.md` (the one backoff curve — why it is two halves, and the float-to-duration conversion it refuses to make first, ADR 0103)
 - `semver/` — see `internal/kernel/semver/CLAUDE.md` (version precedence and pseudo-versions without `x/mod` — why the surface is six functions, and the oracles the suite holds it to)
 - `plugin/` — see `internal/kernel/plugin/CLAUDE.md` (the registry entry guard and the table behind it — why both answer the registrar rather than refusing for it)
+- `swar/` — see `internal/kernel/swar/CLAUDE.md` (first-match byte search — why the lane tests are exact, why there is no one-byte search, and what the AVX2 form owes the SWAR one)
 
 `concur/` — see `internal/kernel/concur/CLAUDE.md` (the family: what makes a primitive concurrent, and why `buffer` sits beside `recycler`):
 

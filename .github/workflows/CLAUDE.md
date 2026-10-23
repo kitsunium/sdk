@@ -34,9 +34,9 @@ What each piece does on a `merge_group` run (there is no `github.event.pull_requ
 
 ## bazel-ci.yml (the SDK lane)
 
-Seven jobs: `bazel` (the gate), `shell-gates` (the checks that need neither Bazel
+Eight jobs: `bazel` (the gate), `shell-gates` (the checks that need neither Bazel
 nor Go), `lint-ktn` (ktn-linter, the one job holding an id-token), `cross-build` (every module COMPILES, tests included, on every supported GOOS/GOARCH),
-`test-386` (the 32-bit RUNTIME), `docs-site` (the docs portal, held to
+`test-386` (the 32-bit RUNTIME), `test-simd` (`internal/kernel/swar`'s AVX2 forms, built with `GOEXPERIMENT=simd`, the one lane that sets it), `docs-site` (the docs portal, held to
 `docs/api`) and `models` (the behaviour models, held to the code by the
 pinned kit). The last two run raw `go` rather than
 Bazel, for the reason stated under Do NOT below: Bazel here builds for the host
@@ -220,6 +220,7 @@ Which tests run where, module × package × platform. 29 modules in the census, 
 | linux/amd64 | `bazel`: alloc lane | the `//go:build !race` files of the targets in `tools/alloc-lane-targets.txt` | race off |
 | linux/amd64 | `bazel`: `make test-framework` | `./framework/...` and the four connector modules — the gate of the `manual` `//framework/internal/app:app_test` | `go test -race` |
 | linux/386 | `test-386` | every package of every module of the census, `e2e` included | race off |
+| linux/amd64, `GOEXPERIMENT=simd` | `test-simd` | `internal/kernel/swar`: the AVX2 forms and the SWAR forms against one oracle; fails closed on a runner without AVX2 | race on, then race off (the allocation budgets) |
 | linux/amd64 | `e2e-cross` `native` (linux) | the kernel-sensitive list (`KERNEL_PKGS` … `FRAMEWORK_PKGS`, 21 packages) + conformance | full |
 | linux, root, real init | `e2e-cross` `linux-init` (7 legs: runner systemd, Debian/Fedora systemd and Alpine OpenRC containers, Debian/Fedora/Alpine kernels under KVM) | the same kernel-sensitive list + conformance | full; a pass on a retry fails, as flaky |
 | darwin/arm64 | `e2e-cross` `native` (macos-15, shards `internal`, `root`, `rest`) | every package of every module | full |

@@ -1,0 +1,47 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/kernel:kernel_consumers"])
+
+go_library(
+    name = "swar",
+    srcs = [
+        "doc.go",
+        "gen_decls.go",
+        "simd_amd64.go",
+        "simd_other.go",
+        "swar.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/kernel/swar",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":swar",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+)
+
+go_test(
+    name = "swar_test",
+    size = "small",
+    srcs = [
+        "dropped_bench_test.go",
+        "dropped_simd_amd64_bench_test.go",
+        "forms_other_test.go",
+        "forms_simd_amd64_test.go",
+        "gen_api_test.go",
+        "gen_perf_test.go",
+        "oracle_internal_test.go",
+        "perf_fixtures_test.go",
+        "swar_bench_test.go",
+        "swar_external_test.go",
+        "swar_internal_test.go",
+    ],
+    embed = [":swar"],
+)

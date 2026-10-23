@@ -8,7 +8,7 @@ The SDK's private layer. Everything here is blocked from external import by Go's
 ```
 kernel/    stdlib-only, generic primitives (no domain vocabulary), by family:
            concur/, collections/, fs/, and a root for errs, clock, backoff,
-           semver and plugin (ADR 0155)
+           semver, plugin and swar (ADR 0155)
 core/      domain interfaces, domain values and every error code, by family:
            app/, crypto/, data/, net/, observe/, proc/, security/ (ADR 0155,
            ADR 0160)
