@@ -474,8 +474,10 @@ constants:
         value: iapp.CodeGaveUp
       - doc: |-
           CodeOTLPExport refuses a start whose OTLP export ([OTLP]) cannot be
-          opened — its queue, its collector's endpoint, its headers —, and says
-          a stop that did not let it flush within its budget.
+          opened — its queue, its collector's endpoint, its headers —, says a
+          stop that did not let it flush within its budget, marks a batch the
+          product's own sender refused for good, and refuses the otlp command
+          a queue it cannot read or a dead letter it does not hold.
         name: CodeOTLPExport
         type: errs.Code
         value: iapp.CodeOTLPExport

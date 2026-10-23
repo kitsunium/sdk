@@ -418,8 +418,10 @@ packages:
           - comment: 0.4.2.90 — the OTLP export could not be opened, or did not stop within its budget
             doc: |-
               CodeOTLPExport refuses a start whose OTLP export ([OTLP]) cannot be
-              opened — its queue, its collector's endpoint, its headers —, and says
-              a stop that did not let it flush within its budget.
+              opened — its queue, its collector's endpoint, its headers —, says a
+              stop that did not let it flush within its budget, marks a batch the
+              product's own sender refused for good, and refuses the otlp command
+              a queue it cannot read or a dead letter it does not hold.
             name: CodeOTLPExport
             value: "0x00_04_02_5A"
         type: errs.Code
@@ -3428,6 +3430,10 @@ packages:
               An app whose port declares a [Breaker] understands breaker too: list the
               breakers, isolate PORT — open its breaker until it is reset — and reset
               PORT, kept in the data directory for every start and a running product.
+              An app that declares an [OTLP] export understands otlp: dead-letters
+              lists the batches its collector refused for good, never their payload,
+              and replay puts them back into the live queue, or with --drop deletes
+              them.
 
               A product's CLI command runs when the first argument names it. A command
               declared with DefaultCommand runs when the first argument names no command
@@ -9509,6 +9515,46 @@ packages:
                 meter. It sends nothing until OTLPExporter.Run.
               name: Open
               type: func(ctx context.Context, cfg *OTLPConfig) (OTLPExporter, error)
+            - doc: |-
+                Queue opens one signal's queue as Open keeps it — the same directory
+                or table, the same policy — for the product's CLI, which lists and
+                replays its dead letters (issue #536); it is refused when the queue
+                would be in memory, where no dead letter outlives its process.
+              name: Queue
+              type: func(ctx context.Context, cfg *OTLPConfig, signal string) (OTLPQueue, error)
+      - doc: |-
+          OTLPDeadLetterValue is one batch a signal's queue gave up on — the
+          collector refused it for good —, as the product's CLI lists it: never its
+          payload.
+        name: OTLPDeadLetterValue
+        struct:
+          fields:
+            - doc: FailedAt is when its last attempt failed.
+              name: FailedAt
+              type: time.Time
+            - doc: "ID identifies it in its queue: what replay and drop take."
+              name: ID
+              type: string
+            - doc: Reason is the failure's identifier.
+              name: Reason
+              type: string
+            - doc: Cause is the failure's public text, "" for none.
+              name: Cause
+              type: string
+            - doc: |-
+                Trail is the codes the failure gathered as it was wrapped, oldest
+                first, nil for none.
+              name: Trail
+              type: "[]uint32"
+            - doc: Code is the failure's error code, 0 for none.
+              name: Code
+              type: uint32
+            - doc: Deliveries counts its attempts.
+              name: Deliveries
+              type: int
+            - doc: Size is its payload's bytes.
+              name: Size
+              type: int
       - doc: |-
           OTLPConfig is what the framework asks of an export: who produces the
           telemetry, where it goes, where it waits, its bounds and the app's clock.
@@ -9737,6 +9783,58 @@ packages:
               out:
                 - type: "[]OTLPStatsValue"
         name: OTLPExporter
+      - doc: |-
+          OTLPQueue is one signal's queue of the export as the product's CLI opens
+          it (issue #536): its dead letters read, replayed into the live queue, or
+          dropped.
+        interface:
+          methods:
+            - doc: |-
+                DeadLetters are at most max of the batches the queue gave up on,
+                oldest first.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: max
+                  type: int
+              name: DeadLetters
+              out:
+                - type: "[]OTLPDeadLetterValue"
+                - type: error
+            - doc: |-
+                Replay moves the dead letter id back into the live queue, its
+                attempts counted afresh: the export sends it again. found is false
+                when the queue holds no dead letter id.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: id
+                  type: string
+              name: Replay
+              out:
+                - name: found
+                  type: bool
+                - name: err
+                  type: error
+            - doc: |-
+                Drop deletes the dead letter id for good. found is false when the
+                queue holds no dead letter id.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: id
+                  type: string
+              name: Drop
+              out:
+                - name: found
+                  type: bool
+                - name: err
+                  type: error
+            - doc: Close releases what the queue holds.
+              name: Close
+              out:
+                - type: error
+        name: OTLPQueue
     variables:
       - doc: |-
           Jobs is the jobs subsystem: the schedules of the framework's jobs and the scheduler
@@ -11151,8 +11249,10 @@ packages:
         value: "0x00_04_02_59"
       - doc: |-
           CodeOTLPExport refuses a start whose OTLP export ([OTLP]) cannot be
-          opened — its queue, its collector's endpoint, its headers —, and says
-          a stop that did not let it flush within its budget.
+          opened — its queue, its collector's endpoint, its headers —, says a
+          stop that did not let it flush within its budget, marks a batch the
+          product's own sender refused for good, and refuses the otlp command
+          a queue it cannot read or a dead letter it does not hold.
         name: CodeOTLPExport
         type: errs.Code
         value: "0x00_04_02_5A"

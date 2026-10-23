@@ -41,7 +41,7 @@ const scopeName = "github.com/kitsunium/sdk/framework/internal/app"
 
 // Enable plugs the OTLP export into the framework.
 func Enable() {
-	plug.OTLP.Store(&plug.OTLPDriverConfig{Open: open})
+	plug.OTLP.Store(&plug.OTLPDriverConfig{Open: open, Queue: openDeadLetters})
 }
 
 // open opens the export cfg describes: a queue and a forwarder per signal —

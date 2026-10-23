@@ -999,6 +999,32 @@ constants:
         type: OTLPFullPolicy
         value: "\"block\""
     name: OTLPDropOldest
+  - doc: otlpUsageText is `otlp`'s usage; %[1]s is the product's name.
+    items:
+      - name: otlpUsageText
+        type: string
+        value: |-
+          `usage:
+            %[1]s otlp dead-letters [traces|metrics]
+                the batches the collector refused for good, by signal: their ID, when
+                the last attempt failed, the failure's code, reason and public text,
+                their attempts and their size — never their payload
+            %[1]s otlp replay [traces|metrics] [--drop] [ID...]
+                move the dead letters named — every one when none is — back into the
+                live queue, their attempts counted afresh: the export sends them
+                again, a running product as soon as it next polls; --drop deletes them
+                for good instead
+          The queues are read where the export keeps them: under the data directory,
+          or on the database otlp-database names. An export that keeps them in memory
+          has none to read.
+          `
+    name: otlpUsageText
+  - doc: otlpMaxDeadLetters bounds the dead letters the command reads per signal.
+    items:
+      - name: otlpMaxDeadLetters
+        type: int
+        value: "1000"
+    name: otlpMaxDeadLetters
   - doc: The policy's bounds.
     grouped: true
     items:
@@ -3594,6 +3620,7 @@ files:
       - otlpHooks
       - otlpCode
       - EnableOTLP
+      - (*App).otlpCLI
       - (*App).otlpCodeTables
       - (*App).addOTLPComponent
       - (*App).otlpCodeSettings
@@ -3649,6 +3676,26 @@ files:
       - (*App).otlpReady
       - backlogged
     name: otlp_run.go
+  - decls:
+      - otlpUsageText
+      - otlpMaxDeadLetters
+      - otlpArgs
+      - otlpCommandOf
+      - (*App).otlpCommand
+      - parseOTLPArgs
+      - (*otlpArgs).take
+      - (*App).otlpSettingsRefused
+      - (*App).withOTLPQueues
+      - (*App).onOTLPDatabase
+      - otlpInMemory
+      - withOTLPQueue
+      - (*App).listOTLPDeadLetters
+      - otlpDeadLetterLine
+      - (*App).replayOTLPDeadLetters
+      - otlpActOn
+      - otlpIDs
+      - otlpAct
+    name: otlpcmd.go
   - decls:
       - defaultMinLength
       - PasswordPolicyService
@@ -4047,6 +4094,7 @@ files:
       - (*App).onData
       - (*App).withData
       - (*App).openDatabases
+      - (*App).openDatabasesForCommand
       - closeRuns
       - (*App).dataReady
       - (*App).startStores
@@ -7706,6 +7754,50 @@ functions:
     name: backlogged
     params: st *plug.OTLPStatsValue
     results: bool
+  - doc: otlpCommandOf is Main's `otlp` command of app a.
+    name: otlpCommandOf
+    params: a *App
+    results: func(ctx context.Context, args []string) int
+  - doc: |-
+      parseOTLPArgs reads `otlp`'s arguments: dead-letters and a signal at most,
+      or replay, a signal, --drop and the IDs in any order; ok is false for any
+      other.
+    name: parseOTLPArgs
+    params: args []string
+    results: otlpArgs, bool
+  - doc: otlpInMemory is the refusal of a command on queues kept in memory.
+    name: otlpInMemory
+    results: error
+  - doc: |-
+      withOTLPQueue runs fn on signal's queue, opened for the command and
+      closed after it.
+    name: withOTLPQueue
+    params: ctx context.Context, cfg *plug.OTLPConfig, signal string, fn func(q plug.OTLPQueue) error
+    results: err error
+  - doc: |-
+      otlpDeadLetterLine is one dead letter as the command lists it: its signal,
+      its ID, when it failed, its code, reason and attempts, its size, the
+      failure's public text, and the codes it gathered as it was wrapped (#500).
+    name: otlpDeadLetterLine
+    params: signal string, d *plug.OTLPDeadLetterValue
+    results: string
+  - doc: |-
+      otlpActOn replays, or drops, in q the dead letters p names that are not
+      done yet — every one q holds when p names none —, marks each one done,
+      and returns how many it acted on.
+    name: otlpActOn
+    params: ctx context.Context, q plug.OTLPQueue, p *otlpArgs, done map[string]bool
+    results: int, error
+  - doc: |-
+      otlpIDs are the dead letters to act on in q: those named and not done
+      yet, or every one q holds when none is named.
+    name: otlpIDs
+    params: ctx context.Context, q plug.OTLPQueue, named []string, done map[string]bool
+    results: "[]string, error"
+  - doc: otlpAct replays the dead letter id of q, or drops it.
+    name: otlpAct
+    params: ctx context.Context, q plug.OTLPQueue, id string, drop bool
+    results: bool, error
   - name: MinLength
     params: n int
     results: PasswordConfigurer
@@ -11834,7 +11926,9 @@ types:
         name: breakerCLI
         recv: a *App
         results: func(ctx context.Context, args []string) int
-      - doc: usageBreaker says the `breaker` command, when the app has one.
+      - doc: |-
+          usageBreaker says the `breaker` command, when the app has one, and the
+          `otlp` command, when the app has one.
         name: usageBreaker
         params: w io.Writer
         recv: a *App
@@ -12103,6 +12197,13 @@ types:
         recv: a *App
         results: "[]model.Diagnostic"
       - doc: |-
+          otlpCLI is Main's `otlp` command, nil when the app declares no export or
+          the program does not import framework/app/otlp, which then links none of
+          it.
+        name: otlpCLI
+        recv: a *App
+        results: func(ctx context.Context, args []string) int
+      - doc: |-
           otlpCodeTables are the export's tables on d, none without
           framework/app/otlp.
         name: otlpCodeTables
@@ -12250,6 +12351,50 @@ types:
           80% of either bound, or since it last answered a batch was lost.
         name: otlpReady
         params: _ context.Context
+        recv: a *App
+        results: error
+      - doc: otlpCommand runs `otlp …`.
+        name: otlpCommand
+        params: ctx context.Context, args []string, stdout, stderr io.Writer
+        recv: a *App
+        results: int
+      - doc: |-
+          otlpSettingsRefused resolves the settings — the export's among them — and
+          says every error the start would refuse them for.
+        name: otlpSettingsRefused
+        params: stderr io.Writer
+        recv: a *App
+        results: bool
+      - doc: |-
+          withOTLPQueues runs fn with the export's queues placed as its start
+          places them: on the database otlp-database names, opened for the
+          command, else under the data directory; refused when they would be in
+          memory.
+        name: withOTLPQueues
+        params: ctx context.Context, fn func(cfg *plug.OTLPConfig) error
+        recv: a *App
+        results: error
+      - doc: |-
+          onOTLPDatabase runs fn with the export's queues on the database
+          otlp-database names, open; refused when it is not.
+        name: onOTLPDatabase
+        params: ctx context.Context, cfg *plug.OTLPConfig, fn func(cfg *plug.OTLPConfig) error
+        recv: a *App
+        results: error
+      - doc: |-
+          listOTLPDeadLetters writes the dead letters of signals on stdout, one a
+          line, never a payload.
+        name: listOTLPDeadLetters
+        params: ctx context.Context, cfg *plug.OTLPConfig, signals []string, stdout io.Writer
+        recv: a *App
+        results: error
+      - doc: |-
+          replayOTLPDeadLetters replays, or drops, the dead letters p names — every
+          one of its signals' when it names none —, and says how many on stdout; a
+          named one no queue holds is said on stderr and fails the command once the
+          others are done.
+        name: replayOTLPDeadLetters
+        params: ctx context.Context, cfg *plug.OTLPConfig, p *otlpArgs, stdout, stderr io.Writer
         recv: a *App
         results: error
       - doc: |-
@@ -12595,6 +12740,14 @@ types:
         params: ctx context.Context, runs []*databaseRun
         recv: a *App
         results: error
+      - doc: |-
+          openDatabasesForCommand opens the app's secrets and its databases as the
+          start does, for a command of another subsystem (storeHooks.openDatabases),
+          and returns what closes them.
+        name: openDatabasesForCommand
+        params: ctx context.Context
+        recv: a *App
+        results: func() error, error
       - doc: |-
           dataReady refuses what the command must not open: data kept in memory, a
           data directory that holds nothing yet, a product that answers on its
@@ -19215,6 +19368,9 @@ types:
       - doc: "tables are the export's tables on a database (issue #537)."
         name: tables
         type: func(a *App, d *database) []frameworkTable
+      - doc: "command is Main's `otlp` command (issue #536)."
+        name: command
+        type: func(a *App) func(ctx context.Context, args []string) int
     kind: struct
     name: otlpHooks
   - kind: named
@@ -19341,6 +19497,28 @@ types:
         type: map[string]uint64
     kind: struct
     name: otlpRunning
+  - doc: |-
+      otlpArgs are `otlp`'s arguments, read: the verb, the signals it acts on,
+      whether a replay drops, and the dead letters it names.
+    fields:
+      - name: verb
+        type: string
+      - name: signals
+        type: "[]string"
+      - name: drop
+        type: bool
+      - name: ids
+        type: "[]string"
+    kind: struct
+    methods:
+      - doc: |-
+          take reads one of replay's arguments after its signal: --drop, or an ID;
+          false for any other flag.
+        name: take
+        params: arg string
+        recv: p *otlpArgs
+        results: bool
+    name: otlpArgs
   - fields:
       - doc: |-
           passwordRule is the policy without its entity type, which the store's
@@ -25400,6 +25578,13 @@ types:
           revisions, data — and watch, whose replay reads a watched store.
         name: commands
         type: map[string]storeCmd
+      - doc: |-
+          openDatabases opens the app's databases as the start does, their
+          migrations applied, for a command of another subsystem — the OTLP
+          export's otlp, whose queues one of them keeps (issue #536) —, and
+          returns what closes them.
+        name: openDatabases
+        type: func(a *App, ctx context.Context) (closeAll func() error, err error)
     kind: struct
     name: storeHooks
   - doc: storeCmd is one of Main's commands on the stores.
@@ -28475,15 +28660,16 @@ vars:
     name: personalNames
   - doc: |-
       reservedCommands are Main's own: a product's CLI command may not take one
-      — breaker included, which is Main's only in an app whose port declares a
-      breaker, so that adding one never hides it behind the product's command.
+      — breaker and otlp included, which are Main's only in an app whose port
+      declares a breaker and in one that declares an OTLP export, so that adding
+      one never hides it behind the product's command.
     items:
       - name: reservedCommands
         value: |-
           map[string]bool{
           	"serve": true, "graph": true, "healthcheck": true, "config": true, "secrets": true,
           	"migrate": true, "privacy": true, "revisions": true, "watch": true, "data": true, "help": true,
-          	"breaker": true,
+          	"breaker": true, "otlp": true,
           }
     name: reservedCommands
   - grouped: true

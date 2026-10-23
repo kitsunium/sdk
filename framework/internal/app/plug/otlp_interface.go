@@ -28,3 +28,21 @@ type OTLPExporter interface {
 	// Stats is what each signal's queue holds, has sent and has lost.
 	Stats() []OTLPStatsValue
 }
+
+// OTLPQueue is one signal's queue of the export as the product's CLI opens
+// it (issue #536): its dead letters read, replayed into the live queue, or
+// dropped.
+type OTLPQueue interface {
+	// DeadLetters are at most max of the batches the queue gave up on,
+	// oldest first.
+	DeadLetters(ctx context.Context, max int) ([]OTLPDeadLetterValue, error)
+	// Replay moves the dead letter id back into the live queue, its
+	// attempts counted afresh: the export sends it again. found is false
+	// when the queue holds no dead letter id.
+	Replay(ctx context.Context, id string) (found bool, err error)
+	// Drop deletes the dead letter id for good. found is false when the
+	// queue holds no dead letter id.
+	Drop(ctx context.Context, id string) (found bool, err error)
+	// Close releases what the queue holds.
+	Close() error
+}

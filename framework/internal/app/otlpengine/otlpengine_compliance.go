@@ -9,6 +9,7 @@ import (
 // that the app's clock is the SDK's.
 var (
 	_ plug.OTLPExporter = (*export)(nil)
+	_ plug.OTLPQueue    = (*deadLetters)(nil)
 
 	_ clock.Timed = sdkClock{}
 )

@@ -34,6 +34,8 @@ type otlpHooks struct {
 	headerSettings func(a *App, ctx context.Context) []model.Setting
 	// tables are the export's tables on a database (issue #537).
 	tables func(a *App, d *database) []frameworkTable
+	// command is Main's `otlp` command (issue #536).
+	command func(a *App) func(ctx context.Context, args []string) int
 }
 
 // otlpCode is the framework's own export code, nil until framework/app/otlp
@@ -52,7 +54,21 @@ func EnableOTLP() {
 		stopTakes:      (*App).otlpStopBudget,
 		headerSettings: (*App).otlpHeaderSettings,
 		tables:         (*App).otlpTables,
+		command:        otlpCommandOf,
 	})
+}
+
+// otlpCLI is Main's `otlp` command, nil when the app declares no export or
+// the program does not import framework/app/otlp, which then links none of
+// it.
+func (a *App) otlpCLI() func(ctx context.Context, args []string) int {
+	if a.opts.otlp == nil {
+		return nil
+	}
+	if h := otlpCode.Load(); h != nil {
+		return h.command(a)
+	}
+	return nil
 }
 
 // otlpCodeTables are the export's tables on d, none without

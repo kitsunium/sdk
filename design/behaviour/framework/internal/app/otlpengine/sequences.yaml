@@ -30,6 +30,132 @@ sequences:
     steps:
       - return: c.Clock.NewTicker(d)
         to: c.Clock.NewTicker
+  - of: openDeadLetters
+    participants:
+      - id: caller
+        kind: actor
+      - id: openDeadLetters
+        kind: self
+      - id: openQueue
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, errs.Wrap(forward.Misconfigured, errs.WrapParams{}, errs.String("signal", signal), errs.String("problem", "no such signal"))
+          when: signal != plug.OTLPTraces && signal != plug.OTLPMetrics
+      - bind: b, durable, err
+        eval: openQueue(cfg, clockOf(cfg.Clock), signal)
+        to: openQueue
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - opt:
+          do:
+            - return: |-
+                nil, errors.Join(errs.Wrap(forward.Misconfigured, errs.WrapParams{},
+                			errs.String("signal", signal), errs.String("problem", "the queue is in memory")), closeQueue(b))
+          when: "!durable"
+      - return: "&deadLetters{broker: b}, nil"
+  - of: (*deadLetters).DeadLetters
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*deadLetters).DeadLetters
+        kind: self
+      - id: reader.DeadLetters
+        kind: value
+    steps:
+      - bind: reader, ok
+        eval: q.broker.(queue.DeadLetterReader)
+      - opt:
+          do:
+            - return: nil, lacksDeadLetters()
+          when: "!ok"
+      - bind: dead, err
+        eval: reader.DeadLetters(ctx, max)
+        to: reader.DeadLetters
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: out
+        eval: make([]plug.OTLPDeadLetterValue, 0, len(dead))
+      - loop:
+          do:
+            - set: out
+              value: |-
+                append(out, plug.OTLPDeadLetterValue{
+                			FailedAt: d.FailedAt, ID: d.Message.ID, Reason: d.Reason, Cause: d.Cause, Trail: d.Trail,
+                			Code: d.Code, Deliveries: d.Deliveries, Size: len(d.Message.Payload),
+                		})
+          key: _
+          range: dead
+          value: d
+      - return: out, nil
+  - of: (*deadLetters).Replay
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*deadLetters).Replay
+        kind: self
+      - id: found
+        kind: internal
+    steps:
+      - bind: manager, ok
+        eval: q.broker.(queue.DeadLetterManager)
+      - opt:
+          do:
+            - return: false, lacksDeadLetters()
+          when: "!ok"
+      - return: found(manager.ReplayDeadLetter(ctx, id))
+        to: found
+  - of: (*deadLetters).Drop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*deadLetters).Drop
+        kind: self
+      - id: found
+        kind: internal
+    steps:
+      - bind: manager, ok
+        eval: q.broker.(queue.DeadLetterManager)
+      - opt:
+          do:
+            - return: false, lacksDeadLetters()
+          when: "!ok"
+      - return: found(manager.DeleteDeadLetter(ctx, id))
+        to: found
+  - of: (*deadLetters).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*deadLetters).Close
+        kind: self
+      - id: closeQueue
+        kind: internal
+    steps:
+      - return: closeQueue(q.broker)
+        to: closeQueue
+  - of: found
+    steps:
+      - opt:
+          do:
+            - return: false, nil
+          when: errors.Is(err, queue.DeadLetterNotFound)
+      - return: err == nil, err
+  - of: lacksDeadLetters
+    participants:
+      - id: caller
+        kind: actor
+      - id: lacksDeadLetters
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(forward.Misconfigured, errs.WrapParams{}, errs.String("problem", "the queue keeps no dead letter"))
+        to: errs
   - of: (*export).SpanSink
     steps:
       - return: "plug.OTLPSinkValue{Sink: e.batch.Sink()}"
@@ -371,7 +497,7 @@ sequences:
       - id: plug.OTLP.Store
         kind: value
     steps:
-      - eval: "plug.OTLP.Store(&plug.OTLPDriverConfig{Open: open})"
+      - eval: "plug.OTLP.Store(&plug.OTLPDriverConfig{Open: open, Queue: openDeadLetters})"
         to: plug.OTLP.Store
   - of: open
     participants:

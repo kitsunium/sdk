@@ -825,6 +825,35 @@ workflows:
           range: a.opts.otlp.settingDecls()
           value: d
       - return: out
+  - of: parseOTLPArgs
+    steps:
+      - opt:
+          do:
+            - return: otlpArgs{}, false
+          when: len(args) == 0 || !slices.Contains([]string{"dead-letters", "replay"}, args[0])
+      - bind: out
+        eval: "otlpArgs{verb: args[0], signals: []string{OTLPTraces, OTLPMetrics}}"
+      - bind: rest
+        eval: args[1:]
+      - opt:
+          do:
+            - set: out.signals, rest
+              value: rest[:1], rest[1:]
+          when: len(rest) > 0 && (rest[0] == OTLPTraces || rest[0] == OTLPMetrics)
+      - opt:
+          do:
+            - return: otlpArgs{}, false
+          when: out.verb == "dead-letters" && len(rest) > 0
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: otlpArgs{}, false
+                when: "!out.take(arg)"
+          key: _
+          range: rest
+          value: arg
+      - return: out, true
   - of: (*storeCore).policyOn
     steps:
       - loop:

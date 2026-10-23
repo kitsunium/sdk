@@ -1276,7 +1276,7 @@
       "code": {
         "value": "0.4.2.90"
       },
-      "doc": "CodeOTLPExport refuses a start whose OTLP export ([OTLP]) cannot be\nopened — its queue, its collector's endpoint, its headers —, and says\na stop that did not let it flush within its budget.\n",
+      "doc": "CodeOTLPExport refuses a start whose OTLP export ([OTLP]) cannot be\nopened — its queue, its collector's endpoint, its headers —, says a\nstop that did not let it flush within its budget, marks a batch the\nproduct's own sender refused for good, and refuses the otlp command\na queue it cannot read or a dead letter it does not hold.\n",
       "file": "framework/app/errors.go",
       "layer": "framework"
     },
@@ -6145,7 +6145,7 @@
       "recv": "App",
       "spelled": "func(ctx context.Context, args []string) int",
       "canonical": "func(ctx context.Context, args []string) int",
-      "doc": "Main is the whole main function of a product:\n\n\tfunc main() { os.Exit(App.Main(context.Background(), os.Args[1:])) }\n\nIt understands ten commands, so every binary of the framework can describe itself, be\nprobed, say its configuration, manage its secrets, migrate its databases,\nanswer for the personal data it keeps, replay what its watches hear and\ncopy its data directory into a database without a shell or another tool in\nits image:\n\n\tserve        run the product (the default)\n\tgraph        print the product graph: -format json|mermaid\n\thealthcheck  exit 0 when the product running on <PRODUCT>_ADDR is ready\n\tconfig       every setting: its value, never a secret's, and its origin\n\tsecrets      list the secrets, set one from standard input, rotate one\n\tmigrate      the databases' migrations: status, up, down SET VERSION\n\tprivacy      the register of processing, a person's export and erasure,\n\t             the legal holds, the privacy journal, the retention\n\trevisions    a record's version restored\n\twatch        replay WATCH: one notice per record of each store that feeds it\n\tdata         the data directory copied into a database: data copy --to NAME,\n\t             verified by fingerprints\n\nAn app whose port declares a [Breaker] understands breaker too: list the\nbreakers, isolate PORT — open its breaker until it is reset — and reset\nPORT, kept in the data directory for every start and a running product.\n\nA product's CLI command runs when the first argument names it. A command\ndeclared with DefaultCommand runs when the first argument names no command\nat all — with every argument —, and when there is none, in serve's place:\nMain then never answers a usage error.\n\nIt returns the process exit status rather than exiting, so that deferred\nwork runs and a test can call it.\n",
+      "doc": "Main is the whole main function of a product:\n\n\tfunc main() { os.Exit(App.Main(context.Background(), os.Args[1:])) }\n\nIt understands ten commands, so every binary of the framework can describe itself, be\nprobed, say its configuration, manage its secrets, migrate its databases,\nanswer for the personal data it keeps, replay what its watches hear and\ncopy its data directory into a database without a shell or another tool in\nits image:\n\n\tserve        run the product (the default)\n\tgraph        print the product graph: -format json|mermaid\n\thealthcheck  exit 0 when the product running on <PRODUCT>_ADDR is ready\n\tconfig       every setting: its value, never a secret's, and its origin\n\tsecrets      list the secrets, set one from standard input, rotate one\n\tmigrate      the databases' migrations: status, up, down SET VERSION\n\tprivacy      the register of processing, a person's export and erasure,\n\t             the legal holds, the privacy journal, the retention\n\trevisions    a record's version restored\n\twatch        replay WATCH: one notice per record of each store that feeds it\n\tdata         the data directory copied into a database: data copy --to NAME,\n\t             verified by fingerprints\n\nAn app whose port declares a [Breaker] understands breaker too: list the\nbreakers, isolate PORT — open its breaker until it is reset — and reset\nPORT, kept in the data directory for every start and a running product.\nAn app that declares an [OTLP] export understands otlp: dead-letters\nlists the batches its collector refused for good, never their payload,\nand replay puts them back into the live queue, or with --drop deletes\nthem.\n\nA product's CLI command runs when the first argument names it. A command\ndeclared with DefaultCommand runs when the first argument names no command\nat all — with every argument —, and when there is none, in serve's place:\nMain then never answers a usage error.\n\nIt returns the process exit status rather than exiting, so that deferred\nwork runs and a test can call it.\n",
       "file": "framework/internal/app/main.go",
       "layer": "framework"
     },
@@ -7199,7 +7199,7 @@
       "code": {
         "value": "0.4.2.90"
       },
-      "doc": "CodeOTLPExport refuses a start whose OTLP export ([OTLP]) cannot be\nopened — its queue, its collector's endpoint, its headers —, and says\na stop that did not let it flush within its budget.\n",
+      "doc": "CodeOTLPExport refuses a start whose OTLP export ([OTLP]) cannot be\nopened — its queue, its collector's endpoint, its headers —, says a\nstop that did not let it flush within its budget, marks a batch the\nproduct's own sender refused for good, and refuses the otlp command\na queue it cannot read or a dead letter it does not hold.\n",
       "file": "framework/internal/app/gen_codes.go",
       "layer": "framework"
     },
@@ -14582,17 +14582,75 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.OTLPDeadLetterValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "OTLPDeadLetterValue",
+      "spelled": "struct{FailedAt time.Time; ID string; Reason string; Cause string; Trail []uint32; Code uint32; Deliveries int; Size int}",
+      "canonical": "struct{FailedAt time.Time; ID string; Reason string; Cause string; Trail []uint32; Code uint32; Deliveries int; Size int}",
+      "fields": [
+        {
+          "name": "FailedAt",
+          "type": "time.Time",
+          "doc": "FailedAt is when its last attempt failed.\n"
+        },
+        {
+          "name": "ID",
+          "type": "string",
+          "doc": "ID identifies it in its queue: what replay and drop take.\n"
+        },
+        {
+          "name": "Reason",
+          "type": "string",
+          "doc": "Reason is the failure's identifier.\n"
+        },
+        {
+          "name": "Cause",
+          "type": "string",
+          "doc": "Cause is the failure's public text, \"\" for none.\n"
+        },
+        {
+          "name": "Trail",
+          "type": "[]uint32",
+          "doc": "Trail is the codes the failure gathered as it was wrapped, oldest\nfirst, nil for none.\n"
+        },
+        {
+          "name": "Code",
+          "type": "uint32",
+          "doc": "Code is the failure's error code, 0 for none.\n"
+        },
+        {
+          "name": "Deliveries",
+          "type": "int",
+          "doc": "Deliveries counts its attempts.\n"
+        },
+        {
+          "name": "Size",
+          "type": "int",
+          "doc": "Size is its payload's bytes.\n"
+        }
+      ],
+      "doc": "OTLPDeadLetterValue is one batch a signal's queue gave up on — the\ncollector refused it for good —, as the product's CLI lists it: never its\npayload.\n",
+      "file": "framework/internal/app/plug/otlp.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.OTLPDriverConfig",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
       "name": "OTLPDriverConfig",
-      "spelled": "struct{Open func(ctx context.Context, cfg *OTLPConfig) (OTLPExporter, error)}",
-      "canonical": "struct{Open func(ctx context.Context, cfg *github.com/kitsunium/sdk/framework/internal/app/plug.OTLPConfig) (github.com/kitsunium/sdk/framework/internal/app/plug.OTLPExporter, error)}",
+      "spelled": "struct{Open func(ctx context.Context, cfg *OTLPConfig) (OTLPExporter, error); Queue func(ctx context.Context, cfg *OTLPConfig, signal string) (OTLPQueue, error)}",
+      "canonical": "struct{Open func(ctx context.Context, cfg *github.com/kitsunium/sdk/framework/internal/app/plug.OTLPConfig) (github.com/kitsunium/sdk/framework/internal/app/plug.OTLPExporter, error); Queue func(ctx context.Context, cfg *github.com/kitsunium/sdk/framework/internal/app/plug.OTLPConfig, signal string) (github.com/kitsunium/sdk/framework/internal/app/plug.OTLPQueue, error)}",
       "fields": [
         {
           "name": "Open",
           "type": "func(ctx context.Context, cfg *OTLPConfig) (OTLPExporter, error)",
           "doc": "Open opens the export cfg describes: its two queues — read, the\nbacklog a previous process left counted —, its senders and its\nmeter. It sends nothing until OTLPExporter.Run.\n"
+        },
+        {
+          "name": "Queue",
+          "type": "func(ctx context.Context, cfg *OTLPConfig, signal string) (OTLPQueue, error)",
+          "doc": "Queue opens one signal's queue as Open keeps it — the same directory\nor table, the same policy — for the product's CLI, which lists and\nreplays its dead letters (issue #536); it is refused when the queue\nwould be in memory, where no dead letter outlives its process.\n"
         }
       ],
       "doc": "OTLPDriverConfig is what framework/app/otlp plugs into the framework: how\nan app's export opens.\n",
@@ -14722,6 +14780,65 @@
       "value": "\"metrics\"",
       "doc": "OTLPMetrics names the metrics signal: an OTLP/JSON\nExportMetricsServiceRequest.\n",
       "file": "framework/internal/app/plug/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.OTLPQueue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "OTLPQueue",
+      "spelled": "interface{Close() error; DeadLetters(ctx context.Context, max int) ([]OTLPDeadLetterValue, error); Drop(ctx context.Context, id string) (found bool, err error); Replay(ctx context.Context, id string) (found bool, err error)}",
+      "canonical": "interface{Close() error; DeadLetters(ctx context.Context, max int) ([]github.com/kitsunium/sdk/framework/internal/app/plug.OTLPDeadLetterValue, error); Drop(ctx context.Context, id string) (found bool, err error); Replay(ctx context.Context, id string) (found bool, err error)}",
+      "doc": "OTLPQueue is one signal's queue of the export as the product's CLI opens\nit (issue #536): its dead letters read, replayed into the live queue, or\ndropped.\n",
+      "file": "framework/internal/app/plug/otlp_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.OTLPQueue.Close",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "Close",
+      "recv": "OTLPQueue",
+      "spelled": "func() error",
+      "canonical": "func() error",
+      "doc": "Close releases what the queue holds.\n",
+      "file": "framework/internal/app/plug/otlp_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.OTLPQueue.DeadLetters",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "DeadLetters",
+      "recv": "OTLPQueue",
+      "spelled": "func(ctx context.Context, max int) ([]OTLPDeadLetterValue, error)",
+      "canonical": "func(ctx context.Context, max int) ([]github.com/kitsunium/sdk/framework/internal/app/plug.OTLPDeadLetterValue, error)",
+      "doc": "DeadLetters are at most max of the batches the queue gave up on,\noldest first.\n",
+      "file": "framework/internal/app/plug/otlp_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.OTLPQueue.Drop",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "Drop",
+      "recv": "OTLPQueue",
+      "spelled": "func(ctx context.Context, id string) (found bool, err error)",
+      "canonical": "func(ctx context.Context, id string) (found bool, err error)",
+      "doc": "Drop deletes the dead letter id for good. found is false when the\nqueue holds no dead letter id.\n",
+      "file": "framework/internal/app/plug/otlp_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.OTLPQueue.Replay",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "Replay",
+      "recv": "OTLPQueue",
+      "spelled": "func(ctx context.Context, id string) (found bool, err error)",
+      "canonical": "func(ctx context.Context, id string) (found bool, err error)",
+      "doc": "Replay moves the dead letter id back into the live queue, its\nattempts counted afresh: the export sends it again. found is false\nwhen the queue holds no dead letter id.\n",
+      "file": "framework/internal/app/plug/otlp_interface.go",
       "layer": "framework"
     },
     {

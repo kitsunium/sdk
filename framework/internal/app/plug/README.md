@@ -117,6 +117,7 @@ The package imports the standard library and the framework's model only, so that
   - [func \(MigratorProvider\) Migrator\(table string, ms \[\]MigrationValue\) \(Migrator, error\)](<#MigratorProvider.Migrator>)
 - [type OTLPBatchValue](<#OTLPBatchValue>)
 - [type OTLPConfig](<#OTLPConfig>)
+- [type OTLPDeadLetterValue](<#OTLPDeadLetterValue>)
 - [type OTLPDriverConfig](<#OTLPDriverConfig>)
 - [type OTLPExporter](<#OTLPExporter>)
   - [func \(OTLPExporter\) Meter\(\) OTLPMeterValue](<#OTLPExporter.Meter>)
@@ -125,6 +126,11 @@ The package imports the standard library and the framework's model only, so that
   - [func \(OTLPExporter\) SpanSink\(\) OTLPSinkValue](<#OTLPExporter.SpanSink>)
   - [func \(OTLPExporter\) Stats\(\) \[\]OTLPStatsValue](<#OTLPExporter.Stats>)
 - [type OTLPMeterValue](<#OTLPMeterValue>)
+- [type OTLPQueue](<#OTLPQueue>)
+  - [func \(OTLPQueue\) Close\(\) error](<#OTLPQueue.Close>)
+  - [func \(OTLPQueue\) DeadLetters\(ctx context.Context, max int\) \(\[\]OTLPDeadLetterValue, error\)](<#OTLPQueue.DeadLetters>)
+  - [func \(OTLPQueue\) Drop\(ctx context.Context, id string\) \(found bool, err error\)](<#OTLPQueue.Drop>)
+  - [func \(OTLPQueue\) Replay\(ctx context.Context, id string\) \(found bool, err error\)](<#OTLPQueue.Replay>)
 - [type OTLPSinkValue](<#OTLPSinkValue>)
 - [type OTLPStatsValue](<#OTLPStatsValue>)
 - [type QueueConfig](<#QueueConfig>)
@@ -2297,6 +2303,33 @@ type OTLPConfig struct {
 }
 ```
 
+<a name="OTLPDeadLetterValue"></a>
+## type [OTLPDeadLetterValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/otlp.go>)
+
+OTLPDeadLetterValue is one batch a signal's queue gave up on — the collector refused it for good —, as the product's CLI lists it: never its payload.
+
+```go
+type OTLPDeadLetterValue struct {
+	// FailedAt is when its last attempt failed.
+	FailedAt   time.Time
+	// ID identifies it in its queue: what replay and drop take.
+	ID         string
+	// Reason is the failure's identifier.
+	Reason     string
+	// Cause is the failure's public text, "" for none.
+	Cause      string
+	// Trail is the codes the failure gathered as it was wrapped, oldest
+	// first, nil for none.
+	Trail      []uint32
+	// Code is the failure's error code, 0 for none.
+	Code       uint32
+	// Deliveries counts its attempts.
+	Deliveries int
+	// Size is its payload's bytes.
+	Size       int
+}
+```
+
 <a name="OTLPDriverConfig"></a>
 ## type [OTLPDriverConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/otlp.go>)
 
@@ -2307,7 +2340,12 @@ type OTLPDriverConfig struct {
 	// Open opens the export cfg describes: its two queues — read, the
 	// backlog a previous process left counted —, its senders and its
 	// meter. It sends nothing until OTLPExporter.Run.
-	Open func(ctx context.Context, cfg *OTLPConfig) (OTLPExporter, error)
+	Open  func(ctx context.Context, cfg *OTLPConfig) (OTLPExporter, error)
+	// Queue opens one signal's queue as Open keeps it — the same directory
+	// or table, the same policy — for the product's CLI, which lists and
+	// replays its dead letters (issue #536); it is refused when the queue
+	// would be in memory, where no dead letter outlives its process.
+	Queue func(ctx context.Context, cfg *OTLPConfig, signal string) (OTLPQueue, error)
 }
 ```
 
@@ -2392,6 +2430,64 @@ type OTLPMeterValue struct {
 	Meter any
 }
 ```
+
+<a name="OTLPQueue"></a>
+## type [OTLPQueue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/otlp_interface.go>)
+
+OTLPQueue is one signal's queue of the export as the product's CLI opens it (issue #536): its dead letters read, replayed into the live queue, or dropped.
+
+```go
+type OTLPQueue interface {
+	// Close releases what the queue holds.
+	Close() error
+	// DeadLetters are at most max of the batches the queue gave up on,
+	// oldest first.
+	DeadLetters(ctx context.Context, max int) ([]OTLPDeadLetterValue, error)
+	// Drop deletes the dead letter id for good. found is false when the
+	// queue holds no dead letter id.
+	Drop(ctx context.Context, id string) (found bool, err error)
+	// Replay moves the dead letter id back into the live queue, its
+	// attempts counted afresh: the export sends it again. found is false
+	// when the queue holds no dead letter id.
+	Replay(ctx context.Context, id string) (found bool, err error)
+}
+```
+
+<a name="OTLPQueue.Close"></a>
+### func \(OTLPQueue\) [Close](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/otlp_interface.go>)
+
+```go
+func (OTLPQueue) Close() error
+```
+
+Close releases what the queue holds.
+
+<a name="OTLPQueue.DeadLetters"></a>
+### func \(OTLPQueue\) [DeadLetters](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/otlp_interface.go>)
+
+```go
+func (OTLPQueue) DeadLetters(ctx context.Context, max int) ([]OTLPDeadLetterValue, error)
+```
+
+DeadLetters are at most max of the batches the queue gave up on, oldest first.
+
+<a name="OTLPQueue.Drop"></a>
+### func \(OTLPQueue\) [Drop](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/otlp_interface.go>)
+
+```go
+func (OTLPQueue) Drop(ctx context.Context, id string) (found bool, err error)
+```
+
+Drop deletes the dead letter id for good. found is false when the queue holds no dead letter id.
+
+<a name="OTLPQueue.Replay"></a>
+### func \(OTLPQueue\) [Replay](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/otlp_interface.go>)
+
+```go
+func (OTLPQueue) Replay(ctx context.Context, id string) (found bool, err error)
+```
+
+Replay moves the dead letter id back into the live queue, its attempts counted afresh: the export sends it again. found is false when the queue holds no dead letter id.
 
 <a name="OTLPSinkValue"></a>
 ## type [OTLPSinkValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/otlp.go>)

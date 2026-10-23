@@ -252,7 +252,14 @@ func (a *App) otlpConfig(ctx context.Context) (*plug.OTLPConfig, error) {
 	}
 	if send := e.send; send != nil {
 		cfg.Send = func(ctx context.Context, b plug.OTLPBatchValue) error {
-			return send(ctx, OTLPBatchValue{Signal: b.Signal, Document: b.Document})
+			err := send(ctx, OTLPBatchValue{Signal: b.Signal, Document: b.Document})
+			if err != nil && !otlpRetryable(err) {
+				// A refusal for good is dead-lettered with this code and
+				// sentence, which `otlp dead-letters` shows (issue #536);
+				// the product's own error stays its cause.
+				return failure(CodeOTLPExport, "OTLP_REFUSED", "the product's OTLP sender refused the batch for good", err)
+			}
+			return err
 		}
 		cfg.Retryable = otlpRetryable
 	}

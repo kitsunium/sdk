@@ -101,6 +101,10 @@ Usage:
 // An app whose port declares a [Breaker] understands breaker too: list the
 // breakers, isolate PORT — open its breaker until it is reset — and reset
 // PORT, kept in the data directory for every start and a running product.
+// An app that declares an [OTLP] export understands otlp: dead-letters
+// lists the batches its collector refused for good, never their payload,
+// and replay puts them back into the live queue, or with --drop deletes
+// them.
 //
 // A product's CLI command runs when the first argument names it. A command
 // declared with DefaultCommand runs when the first argument names no command
@@ -158,6 +162,9 @@ func (a *App) mainCommands() map[string]func(ctx context.Context, args []string)
 	if run := a.breakerCLI(); run != nil {
 		cmds["breaker"] = run
 	}
+	if run := a.otlpCLI(); run != nil {
+		cmds["otlp"] = run
+	}
 	return cmds
 }
 
@@ -171,10 +178,14 @@ func (a *App) breakerCLI() func(ctx context.Context, args []string) int {
 	return nil
 }
 
-// usageBreaker says the `breaker` command, when the app has one.
+// usageBreaker says the `breaker` command, when the app has one, and the
+// `otlp` command, when the app has one.
 func (a *App) usageBreaker(w io.Writer) {
 	if len(a.breakers()) > 0 {
 		fmt.Fprintf(w, "  %[1]s breaker [list]|isolate PORT|reset PORT\n%[2]s a port's breaker, opened by an operator until reset\n", a.name, strings.Repeat(" ", 37))
+	}
+	if a.otlpCLI() != nil {
+		fmt.Fprintf(w, "  %[1]s otlp dead-letters|replay [traces|metrics] [--drop] [ID...]\n%[2]s the OTLP export's dead letters, listed, replayed or dropped\n", a.name, strings.Repeat(" ", 37))
 	}
 }
 

@@ -6,6 +6,7 @@ go_library(
     name = "otlpengine",
     srcs = [
         "clock.go",
+        "deadletters.go",
         "doc.go",
         "export.go",
         "otlpengine.go",

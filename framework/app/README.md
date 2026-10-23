@@ -956,7 +956,7 @@ Code `0.4.2.53`
 const CodeOTLPExport errs.Code = 262746
 ```
 
-CodeOTLPExport refuses a start whose OTLP export ([OTLP](#OTLP)) cannot be opened — its queue, its collector's endpoint, its headers —, and says a stop that did not let it flush within its budget.
+CodeOTLPExport refuses a start whose OTLP export ([OTLP](#OTLP)) cannot be opened — its queue, its collector's endpoint, its headers —, says a stop that did not let it flush within its budget, marks a batch the product's own sender refused for good, and refuses the otlp command a queue it cannot read or a dead letter it does not hold.
 
 Initialised with `github.com/kitsunium/sdk/framework/internal/app.CodeOTLPExport`.
 
@@ -3523,7 +3523,7 @@ data         the data directory copied into a database: data copy --to NAME,
              verified by fingerprints
 ```
 
-An app whose port declares a [Breaker](#Breaker) understands breaker too: list the breakers, isolate PORT — open its breaker until it is reset — and reset PORT, kept in the data directory for every start and a running product.
+An app whose port declares a [Breaker](#Breaker) understands breaker too: list the breakers, isolate PORT — open its breaker until it is reset — and reset PORT, kept in the data directory for every start and a running product. An app that declares an [OTLP](#OTLP) export understands otlp: dead-letters lists the batches its collector refused for good, never their payload, and replay puts them back into the live queue, or with --drop deletes them.
 
 A product's CLI command runs when the first argument names it. A command declared with DefaultCommand runs when the first argument names no command at all — with every argument —, and when there is none, in serve's place: Main then never answers a usage error.
 
