@@ -496,3 +496,72 @@ func TestRegister_ConflictPanicNamesTheKey(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
+
+// TestRegister_RefusesAnEmptyKey pins KEY_EMPTY (0.2.2.6): an empty Name, or a
+// MIME type or extension that is empty once normalised the way its Lookup*
+// normalises it, is refused before anything is published.
+//
+// It is the regression of supervizio/agent#305. Codecs whose alias tables were
+// read before their initialisers ran all handed Register an empty MIME type,
+// and the SECOND died on a DUPLICATE_REGISTRATION naming the first, a
+// collision that blamed the wrong codec. Now the first one is refused, under
+// its own name, with the reason that says what is wrong.
+func TestRegister_RefusesAnEmptyKey(t *testing.T) {
+	codec.ResetForTest()
+	type tc struct {
+		name    string
+		mc      *mockCodec
+		mention string
+	}
+	tests := []tc{
+		{"empty Name", &mockCodec{name: "", mime: []string{"application/x-key-empty-0"}, ext: []string{".ke0"}}, "empty Name"},
+		{"empty MIME type", &mockCodec{name: "key-empty-1", mime: []string{"application/x-key-empty-1", ""}, ext: []string{".ke1"}}, `codec "key-empty-1" declares an empty MIME type at index 1`},
+		{"blank MIME type", &mockCodec{name: "key-empty-2", mime: []string{"  "}, ext: []string{".ke2"}}, `empty MIME type at index 0 ("  ")`},
+		{"parameters without a media type", &mockCodec{name: "key-empty-3", mime: []string{"; charset=utf-8"}, ext: []string{".ke3"}}, "empty MIME type at index 0"},
+		{"empty extension", &mockCodec{name: "key-empty-4", mime: []string{"application/x-key-empty-4"}, ext: []string{""}}, `codec "key-empty-4" declares an empty extension at index 0`},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		msg := recoverPanicMessage(t, func() { codec.Register(c.mc) })
+		if msg == "" {
+			t.Fatalf("Register(%s) did not panic", c.name)
+		}
+		for _, want := range []string{"[" + codec.CodeKeyEmpty.String() + " KEY_EMPTY]", c.mention} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("panic %q does not contain %q", msg, want)
+			}
+		}
+		if strings.Contains(msg, "DUPLICATE_REGISTRATION") {
+			t.Errorf("an empty key reported as a collision: %q", msg)
+		}
+		//: refused before publishing: neither the Name nor a valid alias was claimed.
+		if _, ok := codec.Lookup(codec.Format(c.mc.name)); ok && c.mc.name != "" {
+			t.Errorf("Lookup(%q) hits after a refused Register", c.mc.name)
+		}
+		if _, ok := codec.LookupMIME(c.mc.mime[0]); ok {
+			t.Errorf("LookupMIME(%q) hits after a refused Register", c.mc.mime[0])
+		}
+	}
+	for _, c := range tests {
+		//: sequential — Register mutates the process-wide registry.
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// TestRegister_TwoCodecsWithUnsetTablesNameTheFirst replays the #305 boot: two
+// codecs whose tables were still zero when Register read them. The first is
+// refused under its own name; it is no longer the second that dies, on a
+// collision over "".
+func TestRegister_TwoCodecsWithUnsetTablesNameTheFirst(t *testing.T) {
+	codec.ResetForTest()
+	first := &mockCodec{name: "unset-first", mime: make([]string, 2), ext: make([]string, 2)}
+	msg := recoverPanicMessage(t, func() { codec.Register(first) })
+	if !strings.Contains(msg, "KEY_EMPTY") || !strings.Contains(msg, `"unset-first"`) {
+		t.Fatalf("first codec with unset tables: panic %q, want KEY_EMPTY naming unset-first", msg)
+	}
+	second := &mockCodec{name: "unset-second", mime: make([]string, 2), ext: make([]string, 2)}
+	msg = recoverPanicMessage(t, func() { codec.Register(second) })
+	if !strings.Contains(msg, "KEY_EMPTY") || !strings.Contains(msg, `"unset-second"`) || strings.Contains(msg, "unset-first") {
+		t.Fatalf("second codec with unset tables: panic %q, want KEY_EMPTY naming only unset-second", msg)
+	}
+}

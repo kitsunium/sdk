@@ -73,6 +73,10 @@ codes:
     const: CodeCodecNil
     hex: "0x00_02_02_05"
     package: internal/core/data/codec
+  - code: "0.2.2.6"
+    const: CodeKeyEmpty
+    hex: "0x00_02_02_06"
+    package: internal/core/data/codec
   - code: "0.2.3.1"
     const: CodeDuplicateRegistration
     hex: "0x00_02_03_01"

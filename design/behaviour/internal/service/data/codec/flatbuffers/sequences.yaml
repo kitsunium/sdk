@@ -8,27 +8,11 @@ sequences:
     steps:
       - return: "\"flatbuffers\""
   - of: (*flatbuffersCodec).MIMETypes
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*flatbuffersCodec).MIMETypes
-        kind: self
-      - id: slices
-        kind: stdlib
     steps:
-      - return: slices.Clone(mimeTypes)
-        to: slices
+      - return: "[]string{\"application/x-flatbuffers\", \"application/octet-stream+flatbuffers\"}"
   - of: (*flatbuffersCodec).Extensions
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*flatbuffersCodec).Extensions
-        kind: self
-      - id: slices
-        kind: stdlib
     steps:
-      - return: slices.Clone(extensions)
-        to: slices
+      - return: "[]string{\".fbs\", \".bin\"}"
   - of: (*flatbuffersCodec).Marshal
     participants:
       - id: caller

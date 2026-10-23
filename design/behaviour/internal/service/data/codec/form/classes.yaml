@@ -232,22 +232,14 @@ types:
     name: formCodec
 vars:
   - doc: |-
-      Package-level state: the codec singleton plus the hoisted MIME /
-      extension tables.
+      The registered singleton. Its aliases are literals in MIMETypes and
+      Extensions, not package tables: Register reads them through the Codec
+      interface, which orders no table before this initialiser (see
+      core/data/codec.Register).
     grouped: true
     items:
       - doc: ": register the singleton and expose it as a typed package var."
         name: Codec
         type: codec.Codec
         value: codec.Register(&formCodec{})
-      - doc: ": the one IANA-registered media type for this encoding."
-        name: mimeTypes
-        value: "[]string{\"application/x-www-form-urlencoded\"}"
-      - doc: |-
-          : NEITHER extension is standardised — urlencoded is a wire encoding
-          : for HTTP bodies and query strings, not a file format. They are
-          : registered only so codec.LookupExt has a deterministic answer for
-          : callers who persist a captured body to disk.
-        name: extensions
-        value: "[]string{\".form\", \".urlencoded\"}"
     name: Codec

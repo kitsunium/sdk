@@ -210,18 +210,14 @@ types:
     name: ndjsonCodec
 vars:
   - doc: |-
-      Package-level state: the codec singleton plus the hoisted MIME /
-      extension tables (hoisted).
+      The registered singleton. Its aliases are literals in MIMETypes and
+      Extensions, not package tables: Register reads them through the Codec
+      interface, which orders no table before this initialiser (see
+      core/data/codec.Register).
     grouped: true
     items:
       - doc: ": register the singleton and expose it as a typed package var."
         name: Codec
         type: codec.Codec
         value: codec.Register(&ndjsonCodec{})
-      - doc: ": MIME table hoisted."
-        name: mimeTypes
-        value: "[]string{\"application/x-ndjson\", \"application/jsonl\"}"
-      - doc: ": extension table hoisted for the same reason."
-        name: extensions
-        value: "[]string{\".ndjson\", \".jsonl\"}"
     name: Codec

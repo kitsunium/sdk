@@ -15,6 +15,8 @@ files:
       - registry
       - Register
       - publishCodec
+      - refuseEmptyKeys
+      - refuseEmptyAliases
       - indexAliases
       - normalizeMIME
       - publishAlias
@@ -46,10 +48,26 @@ functions:
     params: name Format, c Codec
     results: error
   - doc: |-
+      refuseEmptyKeys panics with KEY_EMPTY when c's Name, or one of its MIME
+      types or extensions once normalised the way the matching Lookup* normalises
+      it, is empty. An empty key is no key at all — LookupMIME and LookupExt miss
+      on "" — and it is exactly what a package variable holds when Register reads
+      it before its initialiser ran: two codecs in that state both hold "", and
+      the second used to die on a DUPLICATE_REGISTRATION naming the FIRST, a
+      collision that blamed the wrong codec and hid the cause (supervizio/agent#305).
+    name: refuseEmptyKeys
+    params: c Codec, name Format, mimes, exts []string
+  - doc: |-
+      refuseEmptyAliases panics with KEY_EMPTY on the first alias of kind that
+      normalize reduces to "", naming the codec, the slot and the raw value.
+    name: refuseEmptyAliases
+    params: aliases []string, name Format, kind string, normalize func(string) string
+  - doc: |-
       indexAliases stores every alias (MIME or extension) in dst, panicking
       when a distinct codec already claims the same key. normalize reduces each
       raw alias to its index key — strings.ToLower for extensions, normalizeMIME
       for MIME types so registration and LookupMIME agree on the key (issue #36).
+      Empty keys never reach it: refuseEmptyKeys ran first.
     name: indexAliases
     params: dst *plugin.Registry[string, Format], aliases []string, name Format, kind string, normalize func(string) string
   - doc: |-

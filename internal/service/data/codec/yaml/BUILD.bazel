@@ -70,3 +70,13 @@ go_test(
         "//internal/kernel/errs",
     ],
 )
+
+# audit_srcs ships this package's .go files to //internal/core/data/codec's
+# registration-order audit (supervizio/agent#305). The package declares no error
+# code; it is listed because that test reads its sources at runtime, and under
+# Bazel they reach it only as those runfiles.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

@@ -17296,6 +17296,22 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/codec.CodeKeyEmpty",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/data/codec",
+      "name": "CodeKeyEmpty",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "131590",
+      "code": {
+        "value": "0.2.2.6"
+      },
+      "doc": "CodeKeyEmpty identifies a Register call whose codec declares an empty\nName, MIME type or extension — one that is empty once normalised the way\nits Lookup normalises it. Such a key is what a package variable read\nbefore its initialiser ran holds, so refusing it names the codec at boot\ninstead of letting two of them collide on \"\". Surfaced via panic (see\nregistry.go), like CodeCodecNil.\n",
+      "file": "core/data/codec/gen_codes.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/data/codec.CodeTargetInvalid",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/core/data/codec",
@@ -17569,7 +17585,7 @@
       "name": "Register",
       "spelled": "func(c Codec) Codec",
       "canonical": "func(c github.com/kitsunium/sdk/internal/core/data/codec.Codec) github.com/kitsunium/sdk/internal/core/data/codec.Codec",
-      "doc": "Register inserts c into the registry and returns it so callers can bind\nthe singleton to a typed package-level variable like\n`var Codec codec.Codec = codec.Register(&jsonCodec{})`. Panics on nil\nargument or duplicate Name / MIME / extension.\n\nIFACE-PLUGIN: the registry hands plug-in codec instances back to callers\nso each domain can keep its concrete codec type unexported; the only\nstable contract is the Codec interface itself.\n\n\"Nil\" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a\nplug-in whose type is not comparable both satisfy the port and neither can\nserve one call (see internal/kernel/plugin).\n",
+      "doc": "Register inserts c into the registry and returns it so callers can bind\nthe singleton to a typed package-level variable like\n`var Codec codec.Codec = codec.Register(&jsonCodec{})`. Panics on nil\nargument, on an empty Name / MIME / extension (KEY_EMPTY), or on a\nduplicate Name / MIME / extension.\n\nRegister reads c.Name, c.MIMETypes and c.Extensions through the Codec\ninterface, so the initialiser of the calling package variable does NOT\ndepend, in the sense of the Go specification's package initialization\nrules, on any package variable those methods read: a dependency is only\nrecorded for a method referenced through a non-interface type. A codec\nwhose methods read package variables must therefore make that dependency\nvisible in the initialiser itself — or, as the SDK's codecs do, return\nfresh literals from the methods — otherwise those variables may still be\nunset when Register runs (the gc compiler hides this by initialising\nconstant composite literals statically; garble -literals does not).\n\nIFACE-PLUGIN: the registry hands plug-in codec instances back to callers\nso each domain can keep its concrete codec type unexported; the only\nstable contract is the Codec interface itself.\n\n\"Nil\" here means UNUSABLE, not only an untyped nil: a typed nil pointer and a\nplug-in whose type is not comparable both satisfy the port and neither can\nserve one call (see internal/kernel/plugin).\n",
       "file": "core/data/codec/registry.go",
       "layer": "core",
       "family": "data"

@@ -8,27 +8,11 @@ sequences:
     steps:
       - return: "\"xml\""
   - of: (*xmlCodec).MIMETypes
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*xmlCodec).MIMETypes
-        kind: self
-      - id: slices
-        kind: stdlib
     steps:
-      - return: slices.Clone(mimeTypes)
-        to: slices
+      - return: "[]string{\"application/xml\", \"text/xml\"}"
   - of: (*xmlCodec).Extensions
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*xmlCodec).Extensions
-        kind: self
-      - id: slices
-        kind: stdlib
     steps:
-      - return: slices.Clone(extensions)
-        to: slices
+      - return: "[]string{\".xml\"}"
   - of: (*xmlCodec).Marshal
     participants:
       - id: caller

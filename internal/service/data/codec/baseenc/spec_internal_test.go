@@ -36,3 +36,19 @@ func Test_baseencCodec_spec(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
 	}
 }
+
+// Test_variantSpecs_indexIsTheVariant pins the table's index rule: row i
+// describes variant i. newVariant builds each registered singleton from its
+// row's variant, so a row out of place would register one variant under
+// another's Name.
+func Test_variantSpecs_indexIsTheVariant(t *testing.T) {
+	t.Parallel()
+	for i := range variantSpecs {
+		if got := variantSpecs[i].variant; got != variant(i) {
+			t.Errorf("variantSpecs[%d].variant = %d, want %d", i, got, i)
+		}
+		if got := newVariant(variant(i)).variant; got != variant(i) {
+			t.Errorf("newVariant(%d).variant = %d, want %d", i, got, i)
+		}
+	}
+}

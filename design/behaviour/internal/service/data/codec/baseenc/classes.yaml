@@ -267,6 +267,7 @@ files:
   - decls:
       - variantSpec
       - variantSpecs
+      - newVariant
       - (*baseencCodec).spec
     name: spec.go
 functions:
@@ -442,6 +443,24 @@ functions:
     name: streamDecodeLimit
     params: v variant
     results: int
+  - doc: |-
+      newVariant returns the codec for v, for a registered singleton's
+      initialiser.
+
+      Reading variantSpecs here is load-bearing. Register reads Name, MIMETypes
+      and Extensions through the codec.Codec interface, and the Go specification
+      (Package initialization) records no dependency through an interface method
+      call: with a bare &baseencCodec{variant: v} the singletons in codec.go —
+      a file presented before this one — would be initialised BEFORE
+      variantSpecs, and only the compiler's static initialisation of constant
+      composite literals made that work. A build that turns those literals into
+      code (garble -literals) left every Name and alias empty at Register time.
+      Taking the variant from its own row makes each singleton's initialiser
+      depend on the table, so variantSpecs is initialised first whatever the file
+      order or the build.
+    name: newVariant
+    params: v variant
+    results: "*baseencCodec"
 imports:
   ascii85: encoding/ascii85
   base32: encoding/base32
@@ -713,6 +732,8 @@ types:
       Extensions. Hoisted into a package-level array so each method call is a
       pointer dereference rather than a string allocation.
     fields:
+      - name: variant
+        type: variant
       - name: name
         type: string
       - name: mimeTypes
@@ -752,39 +773,39 @@ vars:
       - doc: Base64 is the RFC 4648 standard base64 codec.
         name: Base64
         type: codec.Codec
-        value: "codec.Register(&baseencCodec{variant: variantBase64})"
+        value: codec.Register(newVariant(variantBase64))
       - doc: Base64URL is the RFC 4648 URL-safe base64 codec.
         name: Base64URL
         type: codec.Codec
-        value: "codec.Register(&baseencCodec{variant: variantBase64URL})"
+        value: codec.Register(newVariant(variantBase64URL))
       - doc: Base32 is the RFC 4648 standard base32 codec.
         name: Base32
         type: codec.Codec
-        value: "codec.Register(&baseencCodec{variant: variantBase32})"
+        value: codec.Register(newVariant(variantBase32))
       - doc: Base16 is the uppercase hex codec.
         name: Base16
         type: codec.Codec
-        value: "codec.Register(&baseencCodec{variant: variantBase16})"
+        value: codec.Register(newVariant(variantBase16))
       - doc: Hex is the lowercase hex codec.
         name: Hex
         type: codec.Codec
-        value: "codec.Register(&baseencCodec{variant: variantHex})"
+        value: codec.Register(newVariant(variantHex))
       - doc: ASCII85 is the Adobe Ascii85 codec.
         name: ASCII85
         type: codec.Codec
-        value: "codec.Register(&baseencCodec{variant: variantASCII85})"
+        value: codec.Register(newVariant(variantASCII85))
       - doc: Base45 is the RFC 9285 Base45 codec (QR-code alphanumeric safe).
         name: Base45
         type: codec.Codec
-        value: "codec.Register(&baseencCodec{variant: variantBase45})"
+        value: codec.Register(newVariant(variantBase45))
       - doc: Base58 is the Bitcoin Base58 codec (base-conversion; short inputs only).
         name: Base58
         type: codec.Codec
-        value: "codec.Register(&baseencCodec{variant: variantBase58})"
+        value: codec.Register(newVariant(variantBase58))
       - doc: Base62 is the Base62 codec (base-conversion; short inputs only).
         name: Base62
         type: codec.Codec
-        value: "codec.Register(&baseencCodec{variant: variantBase62})"
+        value: codec.Register(newVariant(variantBase62))
     name: Base64
   - doc: |-
       variantSpecs is the source-of-truth table. Index equals the variant
@@ -797,6 +818,7 @@ vars:
           [...]variantSpec{
           	//: variantBase64 — standard base64.
           	{
+          		variant:    variantBase64,
           		name:       "base64",
           		mimeTypes:  []string{"application/base64", "text/base64"},
           		extensions: []string{".b64", ".base64"},
@@ -808,48 +830,56 @@ vars:
           	//: collided with base64 once registration normalises params symmetrically
           	//: (issue #36). base64url stays routable by name and the .b64url extension.
           	{
+          		variant:    variantBase64URL,
           		name:       "base64url",
           		mimeTypes:  []string{"application/base64url"},
           		extensions: []string{".b64url"},
           	},
           	//: variantBase32 — standard base32.
           	{
+          		variant:    variantBase32,
           		name:       "base32",
           		mimeTypes:  []string{"application/base32"},
           		extensions: []string{".b32"},
           	},
           	//: variantBase16 — uppercase hex.
           	{
+          		variant:    variantBase16,
           		name:       "base16",
           		mimeTypes:  []string{"application/base16"},
           		extensions: []string{".b16"},
           	},
           	//: variantHex — lowercase hex.
           	{
+          		variant:    variantHex,
           		name:       "hex",
           		mimeTypes:  []string{"application/hex"},
           		extensions: []string{".hex"},
           	},
           	//: variantASCII85 — Adobe Ascii85.
           	{
+          		variant:    variantASCII85,
           		name:       "ascii85",
           		mimeTypes:  []string{"application/ascii85"},
           		extensions: []string{".a85"},
           	},
           	//: variantBase45 — RFC 9285 Base45 (QR-code alphanumeric safe).
           	{
+          		variant:    variantBase45,
           		name:       "base45",
           		mimeTypes:  []string{"application/base45"},
           		extensions: []string{".b45"},
           	},
           	//: variantBase58 — Bitcoin Base58 (base-conversion, short inputs).
           	{
+          		variant:    variantBase58,
           		name:       "base58",
           		mimeTypes:  []string{"application/base58"},
           		extensions: []string{".b58"},
           	},
           	//: variantBase62 — Base62 (base-conversion, short inputs).
           	{
+          		variant:    variantBase62,
           		name:       "base62",
           		mimeTypes:  []string{"application/base62"},
           		extensions: []string{".b62"},

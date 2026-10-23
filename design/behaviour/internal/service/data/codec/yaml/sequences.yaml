@@ -810,19 +810,11 @@ sequences:
       - id: slices
         kind: stdlib
     steps:
-      - return: slices.Clone(mimeTypes)
+      - return: slices.Clone(c.mimeTypes)
         to: slices
   - of: (*yamlCodec).Extensions
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*yamlCodec).Extensions
-        kind: self
-      - id: slices
-        kind: stdlib
     steps:
-      - return: slices.Clone(extensions)
-        to: slices
+      - return: "[]string{\".yaml\", \".yml\"}"
   - of: (*yamlCodec).Marshal
     participants:
       - id: caller

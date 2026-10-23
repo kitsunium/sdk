@@ -1544,6 +1544,12 @@ package:
   purpose: "Package yaml — the block structure: mappings, sequences, keys and values."
 types:
   - doc: yamlCodec is the concrete Codec implementation for YAML.
+    fields:
+      - doc: |-
+          mimeTypes is the MIME table this instance reports — the package table
+          for the registered singleton, which is built with it.
+        name: mimeTypes
+        type: "[]string"
     kind: struct
     methods:
       - doc: Name implements codec.Codec.
@@ -1552,7 +1558,7 @@ types:
         results: string
       - doc: MIMETypes lists every MIME alias.
         name: MIMETypes
-        recv: "*yamlCodec"
+        recv: c *yamlCodec
         results: "[]string"
       - doc: Extensions lists every file extension.
         name: Extensions
@@ -3426,20 +3432,22 @@ vars:
           }
     name: nodeIndicatorRefusals
   - doc: |-
-      Package-level state: the codec singleton plus the hoisted MIME and
-      extension tables.
+      Package-level state: the codec singleton, built with its hoisted MIME
+      table — the initialiser names the table, which is what orders it before
+      Register reads it (see core/data/codec.Register).
     grouped: true
     items:
       - doc: Codec is the registered YAML singleton.
         name: Codec
         type: codec.Codec
-        value: codec.Register(&yamlCodec{})
-      - doc: mimeTypes is hoisted so MIMETypes does not allocate the literal per call.
+        value: "codec.Register(&yamlCodec{mimeTypes: mimeTypes})"
+      - doc: |-
+          : the MIME table, hoisted (KTN-VAR-CONSTSLICE) and handed to the
+          : singleton by Codec's own initialiser: that reference is what orders it
+          : before Register reads it, whatever the declaration order (see
+          : core/data/codec.Register).
         name: mimeTypes
         value: "[]string{\"application/yaml\", \"text/yaml\", \"application/x-yaml\"}"
-      - doc: extensions is hoisted for the same reason.
-        name: extensions
-        value: "[]string{\".yaml\", \".yml\"}"
     name: Codec
   - doc: |-
       The hook interfaces as reflected types, the types the codec treats as

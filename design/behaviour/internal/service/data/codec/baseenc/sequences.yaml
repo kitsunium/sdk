@@ -1129,6 +1129,9 @@ sequences:
   - of: nopWriteCloser.Close
     steps:
       - return: nil
+  - of: newVariant
+    steps:
+      - return: "&baseencCodec{variant: variantSpecs[v].variant}"
   - of: (*baseencCodec).spec
     steps:
       - return: "&variantSpecs[c.variant]"

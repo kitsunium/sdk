@@ -235,16 +235,8 @@ sequences:
     steps:
       - return: "\"multipart\""
   - of: (*multipartCodec).MIMETypes
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*multipartCodec).MIMETypes
-        kind: self
-      - id: slices
-        kind: stdlib
     steps:
-      - return: slices.Clone(mimeTypes)
-        to: slices
+      - return: "[]string{mimeFormData}"
   - of: (*multipartCodec).Extensions
     steps:
       - return: nil

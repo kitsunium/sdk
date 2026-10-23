@@ -37,6 +37,17 @@ packages:
             name: CodeCodecNil
             value: "0x00_02_02_05"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeKeyEmpty identifies a Register call whose codec declares an empty
+              Name, MIME type or extension — one that is empty once normalised the way
+              its Lookup normalises it. Such a key is what a package variable read
+              before its initialiser ran holds, so refusing it names the codec at boot
+              instead of letting two of them collide on "". Surfaced via panic (see
+              registry.go), like CodeCodecNil.
+            name: CodeKeyEmpty
+            value: "0x00_02_02_06"
+        type: errs.Code
     doc: |-
       Package codec — declares the optional Appender extension that
       hot-path encoders (NDJSON, JSON, text) implement so callers can write into
@@ -71,7 +82,19 @@ packages:
           Register inserts c into the registry and returns it so callers can bind
           the singleton to a typed package-level variable like
           `var Codec codec.Codec = codec.Register(&jsonCodec{})`. Panics on nil
-          argument or duplicate Name / MIME / extension.
+          argument, on an empty Name / MIME / extension (KEY_EMPTY), or on a
+          duplicate Name / MIME / extension.
+
+          Register reads c.Name, c.MIMETypes and c.Extensions through the Codec
+          interface, so the initialiser of the calling package variable does NOT
+          depend, in the sense of the Go specification's package initialization
+          rules, on any package variable those methods read: a dependency is only
+          recorded for a method referenced through a non-interface type. A codec
+          whose methods read package variables must therefore make that dependency
+          visible in the initialiser itself — or, as the SDK's codecs do, return
+          fresh literals from the methods — otherwise those variables may still be
+          unset when Register runs (the gc compiler hides this by initialising
+          constant composite literals statically; garble -literals does not).
 
           IFACE-PLUGIN: the registry hands plug-in codec instances back to callers
           so each domain can keep its concrete codec type unexported; the only

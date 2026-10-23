@@ -24,16 +24,18 @@ const (
 	promotionLineLength int = 64
 )
 
-// Package-level state: the codec singleton, MIME/extension tables, the
-// cached promotion fast-path markers, and the Marshal-buffer pool.
+// Package-level state: the codec singleton, built with its hoisted extension
+// table — the initialiser names the table, which is what orders it before
+// Register reads it (see core/data/codec.Register) —, the cached promotion
+// fast-path markers, and the Marshal-buffer pool.
 var (
 	//: register the singleton and expose it as a typed package var.
-	Codec codec.Codec = codec.Register(&pemCodec{})
-
-	//: no official IANA type exists; the de facto value is application/x-pem-file.
-	mimeTypes = []string{"application/x-pem-file"}
+	Codec codec.Codec = codec.Register(&pemCodec{extensions: extensions})
 
 	//: .pem is the canonical extension; .crt and .key are historical aliases.
+	//: Hoisted (KTN-VAR-CONSTSLICE) and handed to the singleton by Codec's own
+	//: initialiser: that reference is what orders the table before Register
+	//: reads it, whatever the declaration order (see core/data/codec.Register).
 	extensions = []string{".pem", ".crt", ".key"}
 
 	//: pemJSONBegin is the BEGIN marker for a "JSON"-typed PEM block.
@@ -45,7 +47,11 @@ var (
 )
 
 // pemCodec is the concrete Codec implementation for PEM.
-type pemCodec struct{}
+type pemCodec struct {
+	// extensions is the extension table this instance reports — the package
+	// table for the registered singleton, which is built with it.
+	extensions []string
+}
 
 // Block re-exports encoding/pem.Block so consumers do not need to import
 // the stdlib package directly.
@@ -65,14 +71,15 @@ func (*pemCodec) Name() string {
 
 // MIMETypes lists every MIME alias.
 func (*pemCodec) MIMETypes() []string {
-	//: hand back the package-level slice.
-	return slices.Clone(mimeTypes)
+	//: no official IANA type exists; the de facto value is application/x-pem-file.
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{"application/x-pem-file"}
 }
 
 // Extensions lists every file extension.
-func (*pemCodec) Extensions() []string {
-	//: hand back the package-level slice.
-	return slices.Clone(extensions)
+func (c *pemCodec) Extensions() []string {
+	//: a copy the caller owns; the table itself came through the initialiser.
+	return slices.Clone(c.extensions)
 }
 
 // Marshal encodes a *pem.Block into PEM bytes.

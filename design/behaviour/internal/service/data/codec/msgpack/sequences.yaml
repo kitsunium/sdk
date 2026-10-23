@@ -8,27 +8,11 @@ sequences:
     steps:
       - return: "\"msgpack\""
   - of: (*msgpackCodec).MIMETypes
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*msgpackCodec).MIMETypes
-        kind: self
-      - id: slices
-        kind: stdlib
     steps:
-      - return: slices.Clone(mimeTypes)
-        to: slices
+      - return: "[]string{\"application/msgpack\", \"application/x-msgpack\"}"
   - of: (*msgpackCodec).Extensions
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*msgpackCodec).Extensions
-        kind: self
-      - id: slices
-        kind: stdlib
     steps:
-      - return: slices.Clone(extensions)
-        to: slices
+      - return: "[]string{\".msgpack\", \".mpk\"}"
   - of: (*msgpackCodec).Marshal
     participants:
       - id: caller

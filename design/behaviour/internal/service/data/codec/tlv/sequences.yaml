@@ -8,27 +8,11 @@ sequences:
     steps:
       - return: "\"tlv\""
   - of: (*tlvCodec).MIMETypes
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*tlvCodec).MIMETypes
-        kind: self
-      - id: slices
-        kind: stdlib
     steps:
-      - return: slices.Clone(mimeTypes)
-        to: slices
+      - return: "[]string{\"application/x-tlv\", \"application/vnd.tlv\"}"
   - of: (*tlvCodec).Extensions
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*tlvCodec).Extensions
-        kind: self
-      - id: slices
-        kind: stdlib
     steps:
-      - return: slices.Clone(extensions)
-        to: slices
+      - return: "[]string{\".tlv\"}"
   - of: (*tlvCodec).Marshal
     participants:
       - id: caller

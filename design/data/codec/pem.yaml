@@ -82,8 +82,10 @@ packages:
     path: github.com/kitsunium/sdk/internal/service/data/codec/pem
     variables:
       - blockDoc: |-
-          Package-level state: the codec singleton, MIME/extension tables, the
-          cached promotion fast-path markers, and the Marshal-buffer pool.
+          Package-level state: the codec singleton, built with its hoisted extension
+          table — the initialiser names the table, which is what orders it before
+          Register reads it (see core/data/codec.Register) —, the cached promotion
+          fast-path markers, and the Marshal-buffer pool.
         doc: ": register the singleton and expose it as a typed package var."
         name: Codec
         type: codec.Codec

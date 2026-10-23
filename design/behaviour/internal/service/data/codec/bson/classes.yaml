@@ -2633,18 +2633,11 @@ types:
         results: int, *validationError
     name: validator
 vars:
-  - grouped: true
+  - doc: Codec is the registered BSON singleton.
     items:
-      - doc: Codec is the registered BSON singleton.
-        name: Codec
+      - name: Codec
         type: codec.Codec
         value: codec.Register(&bsonCodec{})
-      - doc: mimeTypes hoisted so MIMETypes does not allocate the literal per call.
-        name: mimeTypes
-        value: "[]string{\"application/bson\"}"
-      - doc: extensions hoisted for the same reason.
-        name: extensions
-        value: "[]string{\".bson\"}"
     name: Codec
   - doc: valueTypeBytes maps each value type to the BSON type it is read from.
     items:

@@ -1,8 +1,6 @@
 package protobuf
 
 import (
-	"slices"
-
 	"google.golang.org/protobuf/proto"
 
 	"github.com/kitsunium/sdk/internal/core/data/codec"
@@ -15,16 +13,8 @@ import (
 // library-backed codecs.
 const maxProtobufBytes int = 10 << 20
 
-var (
-	// Codec is the registered Protobuf singleton.
-	Codec codec.Codec = codec.Register(&protobufCodec{})
-
-	// mimeTypes is hoisted so MIMETypes does not allocate the literal per call.
-	mimeTypes = []string{"application/protobuf", "application/x-protobuf"}
-
-	// extensions is hoisted for the same reason.
-	extensions = []string{".pb"}
-)
+// Codec is the registered Protobuf singleton.
+var Codec codec.Codec = codec.Register(&protobufCodec{})
 
 // protobufCodec is the concrete Codec implementation for Protobuf. Stateless.
 type protobufCodec struct{}
@@ -43,14 +33,14 @@ func (*protobufCodec) Name() string {
 
 // MIMETypes returns a defensive copy of the MIME alias list.
 func (*protobufCodec) MIMETypes() []string {
-	//: callers must not mutate the package-level table.
-	return slices.Clone(mimeTypes)
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{"application/protobuf", "application/x-protobuf"}
 }
 
 // Extensions returns a defensive copy of the file-extension list.
 func (*protobufCodec) Extensions() []string {
-	//: callers must not mutate the package-level table.
-	return slices.Clone(extensions)
+	//: a fresh literal the caller owns; no package variable is read when Register calls this.
+	return []string{".pb"}
 }
 
 // Marshal encodes v as Protobuf wire bytes. v must satisfy proto.Message;

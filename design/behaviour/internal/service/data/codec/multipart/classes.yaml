@@ -479,7 +479,6 @@ imports:
   mime: mime
   reflect: reflect
   scratch: github.com/kitsunium/sdk/internal/core/data/codec/scratch
-  slices: slices
   stdjson: encoding/json
   stdmp: mime/multipart
   strings: strings
@@ -846,7 +845,11 @@ types:
         results: knob string, found bool
     name: LimitsConfig
 vars:
-  - doc: "Package-level state: the codec singleton plus the hoisted MIME table."
+  - doc: |-
+      The registered singleton. Its aliases are literals in MIMETypes and
+      Extensions, not package tables: Register reads them through the Codec
+      interface, which orders no table before this initialiser (see
+      core/data/codec.Register).
     grouped: true
     items:
       - doc: |-
@@ -856,11 +859,6 @@ vars:
         name: Codec
         type: codec.Codec
         value: "codec.Register(&multipartCodec{limits: defaultLimits()})"
-      - doc: |-
-          : MIME table hoisted. Registration normalises the key, so a header
-          : carrying the boundary parameter still resolves through FromMIME.
-        name: mimeTypes
-        value: "[]string{mimeFormData}"
     name: Codec
   - doc: |-
       quoteEscaper escapes the two characters that can end or bend a quoted header

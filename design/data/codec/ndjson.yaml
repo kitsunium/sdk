@@ -80,8 +80,10 @@ packages:
     path: github.com/kitsunium/sdk/internal/service/data/codec/ndjson
     variables:
       - blockDoc: |-
-          Package-level state: the codec singleton plus the hoisted MIME /
-          extension tables (hoisted).
+          The registered singleton. Its aliases are literals in MIMETypes and
+          Extensions, not package tables: Register reads them through the Codec
+          interface, which orders no table before this initialiser (see
+          core/data/codec.Register).
         doc: ": register the singleton and expose it as a typed package var."
         name: Codec
         type: codec.Codec

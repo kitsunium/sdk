@@ -83,7 +83,6 @@ imports:
   codec: github.com/kitsunium/sdk/internal/core/data/codec
   coreflatbuffers: github.com/kitsunium/sdk/internal/core/data/codec/flatbuffers
   errs: github.com/kitsunium/sdk/internal/kernel/errs
-  slices: slices
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/service/data/codec/flatbuffers
@@ -147,20 +146,14 @@ types:
       }
 vars:
   - doc: |-
-      Package-level state: the codec singleton plus the hoisted MIME /
-      extension tables.
+      The registered singleton. Its aliases are literals in MIMETypes and
+      Extensions, not package tables: Register reads them through the Codec
+      interface, which orders no table before this initialiser (see
+      core/data/codec.Register).
     grouped: true
     items:
       - doc: ": register the singleton and expose it as a typed package var."
         name: Codec
         type: codec.Codec
         value: codec.Register(&flatbuffersCodec{})
-      - doc: |-
-          : MIME table hoisted; the second alias documents the passthrough
-          : nature for consumers that resolve via Content-Type.
-        name: mimeTypes
-        value: "[]string{\"application/x-flatbuffers\", \"application/octet-stream+flatbuffers\"}"
-      - doc: ": extension table hoisted. \".bin\" is ambiguous on disk — see CLAUDE.md."
-        name: extensions
-        value: "[]string{\".fbs\", \".bin\"}"
     name: Codec
