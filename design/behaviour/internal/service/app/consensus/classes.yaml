@@ -1357,6 +1357,7 @@ files:
       - spkiOf
       - SPKIOf
       - peerConn
+      - (*peerConn).halt
       - TCPTransport
       - outKey
       - (*TransportConfig).validate
@@ -6900,7 +6901,18 @@ types:
         type: int64
       - name: mu
         type: sync.Mutex
+      - doc: |-
+          stop is closed, once, when the peer leaves the admitted set: its
+          sender closes its link and returns (#592).
+        name: stop
+        type: chan struct{}
+      - name: stopOnce
+        type: sync.Once
     kind: struct
+    methods:
+      - doc: halt stops the peer's sender; a second call does nothing.
+        name: halt
+        recv: pc *peerConn
     name: peerConn
   - fields:
       - name: cfg
@@ -7086,7 +7098,8 @@ types:
           write that misses its deadline closes the connection and reports the
           peer unreachable (D4, R2-06). It is the background goroutine Send
           launches per peer and lane, counted in t.wg, and ends when Close closes
-          done; its connection is closed on the way out.
+          done or SetMembership closes the peer's stop; its connection is closed on
+          the way out.
         name: sender
         params: k outKey, pc *peerConn
         recv: t *TCPTransport

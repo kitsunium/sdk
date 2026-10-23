@@ -17678,6 +17678,17 @@ sequences:
     steps:
       - return: spkiOf(c)
         to: spkiOf
+  - of: (*peerConn).halt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*peerConn).halt
+        kind: self
+      - id: pc.stopOnce.Do
+        kind: value
+    steps:
+      - eval: pc.stopOnce.Do(func() { close(pc.stop) })
+        to: pc.stopOnce.Do
   - of: (*TransportConfig).validate
     participants:
       - id: caller
@@ -18510,7 +18521,7 @@ sequences:
       - opt:
           do:
             - set: pc
-              value: "&peerConn{queue: make(chan []byte, senderQueueFrames)}"
+              value: "&peerConn{queue: make(chan []byte, senderQueueFrames), stop: make(chan struct{})}"
             - set: t.out[k]
               value: pc
             - eval: t.wg.Add(1)
@@ -18578,6 +18589,9 @@ sequences:
             - select:
                 cases:
                   - comm: <-t.done
+                    do:
+                      - return: ""
+                  - comm: <-pc.stop
                     do:
                       - return: ""
                   - comm: f = <-pc.queue
@@ -18930,6 +18944,8 @@ sequences:
         kind: internal
       - id: abandon
         kind: internal
+      - id: pc.halt
+        kind: internal
     steps:
       - lock:
           mutex: t.mu
@@ -18967,6 +18983,20 @@ sequences:
           key: c
           range: t.in
           value: spki
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: pc.halt()
+                    to: pc.halt
+                  - eval: delete(t.out, k)
+                init:
+                  bind: _, ok
+                  eval: byID[k.to]
+                when: "!ok"
+          key: k
+          range: t.out
+          value: pc
   - of: indexMembers
     steps:
       - var:

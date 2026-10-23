@@ -197,6 +197,15 @@ type peerConn struct {
 	queue chan []byte
 	bytes int64
 	mu    sync.Mutex
+	// stop is closed, once, when the peer leaves the admitted set: its
+	// sender closes its link and returns (#592).
+	stop     chan struct{}
+	stopOnce sync.Once
+}
+
+// halt stops the peer's sender; a second call does nothing.
+func (pc *peerConn) halt() {
+	pc.stopOnce.Do(func() { close(pc.stop) })
 }
 
 // TCPTransport is the shipped transport: TLS 1.3 with mutual
@@ -694,7 +703,9 @@ func (t *TCPTransport) Send(to coreconsensus.NodeID, frame []byte) {
 	}
 	pc := t.out[k]
 	if pc == nil {
-		pc = &peerConn{queue: make(chan []byte, senderQueueFrames)}
+		// The sender also ends when SetMembership no longer admits the
+		// peer (#592).
+		pc = &peerConn{queue: make(chan []byte, senderQueueFrames), stop: make(chan struct{})}
 		t.out[k] = pc
 		t.wg.Add(1)
 		go t.sender(k, pc)
@@ -720,7 +731,8 @@ func (t *TCPTransport) Send(to coreconsensus.NodeID, frame []byte) {
 // write that misses its deadline closes the connection and reports the
 // peer unreachable (D4, R2-06). It is the background goroutine Send
 // launches per peer and lane, counted in t.wg, and ends when Close closes
-// done; its connection is closed on the way out.
+// done or SetMembership closes the peer's stop; its connection is closed on
+// the way out.
 func (t *TCPTransport) sender(k outKey, pc *peerConn) {
 	defer t.wg.Done()
 	var link senderLink
@@ -730,6 +742,8 @@ func (t *TCPTransport) sender(k outKey, pc *peerConn) {
 		var f []byte
 		select {
 		case <-t.done:
+			return
+		case <-pc.stop:
 			return
 		case f = <-pc.queue:
 		}
@@ -984,6 +998,17 @@ func (t *TCPTransport) SetMembership(group coreconsensus.GroupID, admitted []cor
 			// A member that left is cut (D4); its reader ends on the closed
 			// socket, which is all this Close is for.
 			abandon(c.Close())
+		}
+	}
+	for k, pc := range t.out {
+		if _, ok := byID[k.to]; !ok {
+			// A peer that is no longer admitted cannot be dialled
+			// (address), so its lanes carry nothing more. Kept, each left
+			// two senders, their queues and an open outbound link behind it
+			// for the life of the transport (#592). A later Send to it
+			// starts a fresh sender.
+			pc.halt()
+			delete(t.out, k)
 		}
 	}
 }
