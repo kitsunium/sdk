@@ -13,8 +13,9 @@ here only say where the time goes.
 | Program | What it measures | Notes |
 |---|---|---|
 | `hmac_bench evp` | HMAC-SHA256 of a ~200 B JWT signing input, OpenSSL 3 `EVP_MAC` | the MAC is fetched once, a keyed template `EVP_MAC_CTX` is built once, and each message does `EVP_MAC_CTX_dup` + update + final |
-| `hmac_bench mid` | the same, from precomputed ipad / opad SHA-256 midstates | per message: copy the two `SHA256_CTX`, update, final, twice. Uses the low-level `SHA256_*` API (deprecated in OpenSSL 3, still shipped) because a midstate copy has no allocation-free EVP form. **Keep the faster of the two** as the C figure |
-| `hmac_bench selftest` | RFC 4231 case 2, and `evp` == `mid` for every length 0..300 | run by `make test` |
+| `hmac_bench reinit` | the same, one keyed ctx reused | per message `EVP_MAC_init(ctx, NULL, 0, NULL)` resets it to the keyed state, then update + final: no allocation |
+| `hmac_bench mid` | the same, from precomputed ipad / opad SHA-256 midstates | per message: copy the two `SHA256_CTX`, update, final, twice. Uses the low-level `SHA256_*` API (deprecated in OpenSSL 3, still shipped) because a midstate copy has no allocation-free EVP form. **Keep the fastest of the three** as the C figure |
+| `hmac_bench selftest` | RFC 4231 case 2 for all three forms, and their agreement for every length 0..300 | run by `make test` |
 | `parse_test` | the parser corpus: accepted shapes and framing, every refusal, smuggling vectors, every strict prefix of a valid request | run by `make test` and `make sanitize` |
 | `parse_bench own` | `src/http_parse.c`, a C parser with exactly the S5 scope and refusals | see the header of `http_parse.h` for the list; the size limits are this reference's choices and must be aligned with the Go codec's constants |
 | `parse_bench pico` | picohttpparser, informational | it implements none of the S5 refusals, so it does strictly less checking; the bench makes it also find Host, Authorization, Content-Length and compute `consumed`. Pinned to commit `465a7ff0`, files checked by sha256 in the Makefile; compiled `-O3 -march=native`, and `src/pico_guard.c` is a `#error` without `__SSE4_2__` |
@@ -51,7 +52,7 @@ The VM must be otherwise idle: stop the submission under test, and check
 Six pairs per comparison, the order alternating (A,B then B,A, ...) so drift
 does not favour a side:
 
-- HMAC: `evp` (A) against `mid` (B), `ns_per_op`, `cpu_us_per_op`, user and system split;
+- HMAC: `evp` (A) against `mid` (B), then `reinit` (A) against `mid` (B), `ns_per_op`, `cpu_us_per_op`, user and system split;
 - parser: ours (A) against picohttpparser (B).
 
 ### Echo baseline (needs another host)

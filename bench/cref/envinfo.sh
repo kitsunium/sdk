@@ -20,7 +20,7 @@ echo "clocksource=$(cat /sys/devices/system/clocksource/clocksource0/current_clo
 echo "clocksource_available=$(cat /sys/devices/system/clocksource/clocksource0/available_clocksource 2>/dev/null || echo unknown)"
 echo "governor=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo none)"
 echo "ulimit_nofile=$(ulimit -n)"
-echo "gcc=$(gcc --version 2>/dev/null | head -1 || echo none)"
+if command -v gcc >/dev/null 2>&1; then echo "gcc=$(gcc --version | head -1)"; else echo "gcc=none"; fi
 echo "openssl=$(openssl version 2>/dev/null || echo none)"
 echo "liburing=$(pkg-config --modversion liburing 2>/dev/null || dpkg-query -W -f='${Version}' liburing-dev 2>/dev/null || echo none)"
 # The Go side compiles for a GOAMD64 level; record it when a toolchain is here.

@@ -87,13 +87,17 @@ compare() {
 	for ((i = 0; i < PAIRS; i++)); do
 		first="$(pair_order "$i" | cut -d' ' -f1)"
 		if [ "$first" = A ]; then
-			line_a="$($run_a)"
-			line_b="$($run_b)"
+			line_a="$($run_a)" || exit 1
+			line_b="$($run_b)" || exit 1
 		else
-			line_b="$($run_b)"
-			line_a="$($run_a)"
+			line_b="$($run_b)" || exit 1
+			line_a="$($run_a)" || exit 1
 		fi
 		for m in "${metrics[@]}"; do
+			if [ -z "$(kv "$line_a" "$m")" ] || [ -z "$(kv "$line_b" "$m")" ]; then
+				echo "run.sh: pair $i has no value for $m (A: '$line_a' B: '$line_b')" >&2
+				exit 1
+			fi
 			printf '%d\t%s\t%s\t%s\n' "$i" "$([ "$first" = A ] && echo AB || echo BA)" \
 				"$(kv "$line_a" "$m")" "$(kv "$line_b" "$m")" >>"$OUT/$name.$m.tsv"
 		done
@@ -113,6 +117,9 @@ micro() {
 	"$BUILD/hmac_bench" selftest
 	compare hmac "$BUILD/hmac_bench evp -n $HMAC_N" "$BUILD/hmac_bench mid -n $HMAC_N" \
 		ns_per_op cpu_us_per_op utime_us_per_op stime_us_per_op
+	echo "== hmac: A=reinit (EVP_MAC_init(ctx,NULL,..) reuse) B=midstate =="
+	compare hmac_reinit "$BUILD/hmac_bench reinit -n $HMAC_N" "$BUILD/hmac_bench mid -n $HMAC_N" \
+		ns_per_op cpu_us_per_op
 	echo "== parse: A=ours (S5 scope) B=picohttpparser (informational) =="
 	compare parse "$BUILD/parse_bench own -n $PARSE_N" "$BUILD/parse_bench pico -n $PARSE_N" \
 		ns_per_op cpu_us_per_op
@@ -140,28 +147,55 @@ echo_install_client() {
 # echo_run SERVER: one measured run; prints the server line merged with the
 # client's rps and the host CPU split.
 echo_run() {
-	local server="$1" spid cpu0 cpu1 cl srv f0
+	local server="$1" spid cpu0 cpu1 cl srv f0 rc=0 i reqs
 	"$BUILD/$server" -p "$PORT" >"$OUT/$server.out" 2>&1 &
 	spid=$!
 	sleep 0.5
-	kill -0 "$spid" || { cat "$OUT/$server.out" >&2; return 1; }
+	kill -0 "$spid" 2>/dev/null || {
+		cat "$OUT/$server.out" >&2
+		return 1
+	}
 	f0="$OUT/.stat0"
 	(
 		sleep "$WARM"
 		read_stat >"$f0"
-		kill -USR1 "$spid"
+		kill -USR1 "$spid" 2>/dev/null || true
 	) &
 	# shellcheck disable=SC2086
-	cl="$($GEN_SSH "$GEN_DIR/echo_client -h $SUT_ADDR -p $PORT -c $CONNS -s $MSG -t $SECS -w $WARM")" || {
-		kill -TERM "$spid" 2>/dev/null
-		echo "echo_client failed: $cl" >&2
+	cl="$($GEN_SSH "$GEN_DIR/echo_client -h $SUT_ADDR -p $PORT -c $CONNS -s $MSG -t $SECS -w $WARM")" || rc=$?
+	cpu1="$(read_stat)"
+	cpu0="$(cat "$f0" 2>/dev/null || true)"
+	# The server wakes every 100 ms, so TERM is seen within a tick; if it is
+	# not, KILL it after 5 s rather than hang the bench.
+	kill -0 "$spid" 2>/dev/null || {
+		echo "run.sh: $server died during the run" >&2
 		return 1
 	}
-	cpu1="$(read_stat)"
-	cpu0="$(cat "$f0")"
 	kill -TERM "$spid"
-	wait "$spid"
+	for ((i = 0; i < 50; i++)); do
+		kill -0 "$spid" 2>/dev/null || break
+		sleep 0.1
+	done
+	if kill -0 "$spid" 2>/dev/null; then
+		echo "run.sh: $server ignored SIGTERM for 5 s, killing it" >&2
+		kill -KILL "$spid"
+		wait "$spid" 2>/dev/null || true
+		return 1
+	fi
+	wait "$spid" || {
+		echo "run.sh: $server exited non-zero" >&2
+		return 1
+	}
+	if [ "$rc" -ne 0 ]; then
+		echo "echo_client failed (exit $rc): $cl" >&2
+		return 1
+	fi
 	srv="$(cat "$OUT/$server.out")"
+	reqs="$(kv "$srv" requests)"
+	if [ -z "$reqs" ] || [ "$reqs" -le 0 ] || [ -z "$cpu0" ]; then
+		echo "run.sh: $server reported no requests in the window: '$srv'" >&2
+		return 1
+	fi
 	echo "$srv $(busy_pct "$cpu0" "$cpu1") client_rps=$(kv "$cl" rps) client_mean_latency_us=$(kv "$cl" mean_latency_us) client_mismatches=$(kv "$cl" mismatches)"
 	echo "$server $srv | $cl" >>"$OUT/echo-lines.txt"
 }

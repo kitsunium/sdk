@@ -40,7 +40,18 @@ int main(void)
 	size_t n = 0;
 	double a, b;
 
-	while (n < MAX_PAIRS && scanf("%lf %lf", &a, &b) == 2) {
+	char line[256];
+	size_t lineno = 0;
+
+	// One pair per line, exactly two numbers: a missing or extra field would
+	// shift every later pair, so it is an error, not a silent re-pairing.
+	while (fgets(line, sizeof line, stdin) != nullptr) {
+		char extra;
+		lineno++;
+		if (n == MAX_PAIRS || sscanf(line, " %lf %lf %c", &a, &b, &extra) != 2) {
+			fprintf(stderr, "pairstat: line %zu is not exactly two numbers\n", lineno);
+			return 1;
+		}
 		if (!(a > 0) || !(b > 0)) {
 			fputs("pairstat: values must be positive\n", stderr);
 			return 1;

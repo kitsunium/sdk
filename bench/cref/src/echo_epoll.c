@@ -56,8 +56,17 @@ static void die(const char *what)
 	exit(1);
 }
 
+static int g_ep = -1;
+static int g_lfd = -1;
+static bool g_listener_off;
+
 static void close_conn(int fd)
 {
+	if (g_listener_off) { // a descriptor is free again: listen once more
+		struct epoll_event le = {.events = EPOLLIN, .data.fd = g_lfd};
+		epoll_ctl(g_ep, EPOLL_CTL_MOD, g_lfd, &le);
+		g_listener_off = false;
+	}
 	if ((size_t)fd < g_pending_cap) {
 		free(g_pending[fd]);
 		g_pending[fd] = nullptr;
@@ -108,6 +117,8 @@ int main(int argc, char **argv)
 	struct epoll_event ev = {.events = EPOLLIN, .data.fd = lfd};
 	if (epoll_ctl(ep, EPOLL_CTL_ADD, lfd, &ev) != 0)
 		die("epoll_ctl");
+	g_ep = ep;
+	g_lfd = lfd;
 
 	uint64_t requests = 0, conns = 0, errors = 0;
 	uint64_t base_requests = 0;
@@ -123,7 +134,9 @@ int main(int argc, char **argv)
 			base_cpu = cref_cpu_now();
 			base_ns = cref_now_ns();
 		}
-		int n = epoll_wait(ep, evs, MAX_EVENTS, -1);
+		// 100 ms, not -1: a SIGTERM landing between the g_stop test and the wait
+		// is then seen within a tick instead of never.
+		int n = epoll_wait(ep, evs, MAX_EVENTS, 100);
 		if (n < 0) {
 			if (errno == EINTR)
 				continue;
@@ -136,8 +149,14 @@ int main(int argc, char **argv)
 				for (int a = 0; a < ACCEPT_BATCH; a++) {
 					int c = accept4(lfd, nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);
 					if (c < 0) {
-						if (errno != EAGAIN && errno != EINTR && errno != ECONNABORTED)
-							errors++; // EMFILE and friends: counted, not fatal
+						if (errno == EMFILE || errno == ENFILE) {
+							// Level-triggered: leave the set until a close frees a fd.
+							struct epoll_event off = {.events = 0, .data.fd = lfd};
+							epoll_ctl(ep, EPOLL_CTL_MOD, lfd, &off);
+							g_listener_off = true;
+							errors++;
+						} else if (errno != EAGAIN && errno != EINTR && errno != ECONNABORTED)
+							errors++;
 						break;
 					}
 					if ((size_t)c >= g_pending_cap) {

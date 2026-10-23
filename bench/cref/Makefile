@@ -29,7 +29,7 @@ $(BUILD) $(VENDOR) $(SAN):
 
 # sha256 of a file, portable between GNU coreutils and BSD.
 define sha256_of
-$$(sha256sum $(1) 2>/dev/null | cut -d' ' -f1 || shasum -a 256 $(1) | cut -d' ' -f1)
+$$(if command -v sha256sum >/dev/null 2>&1; then sha256sum $(1) | cut -d' ' -f1; else shasum -a 256 $(1) | cut -d' ' -f1; fi)
 endef
 
 $(VENDOR)/picohttpparser.c: | $(VENDOR)

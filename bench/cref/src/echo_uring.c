@@ -8,9 +8,16 @@
 // SIGUSR1 starts the measured window, SIGTERM or SIGINT stops and prints one
 // result line. A "request" is one recv completion that carried bytes.
 //
-// user_data layout: op:8 | gen:8 | bid:16 | fd:32. gen is bumped on every
-// accept so a completion that outlives its connection and meets a reused fd
-// number is recognised and ignored.
+// user_data layout: op:8 | gen:20 | bid:16 | fd:20. gen is bumped on every
+// accept and every close so a completion that outlives its connection and
+// meets a reused fd number is recognised and ignored (fd < MAXFD = 2^20).
+//
+// Invariant that keeps the echo stream ordered: every message must fit one
+// buffer (BUFSZ) and the client keeps one message in flight, so there is never
+// more than one send per fd outstanding. echo_client refuses -s above 1024.
+//
+// The loop waits at most 100 ms, so a SIGTERM that lands between the g_stop
+// test and the wait is seen within a tick.
 #include <errno.h>
 #include <liburing.h>
 #include <netinet/in.h>
@@ -33,15 +40,18 @@ constexpr size_t MAXFD = 1u << 20;
 
 enum : unsigned { OP_ACCEPT = 1, OP_RECV = 2, OP_SEND = 3 };
 
-static inline uint64_t ud_pack(unsigned op, unsigned gen, unsigned bid, int fd)
+constexpr unsigned FD_BITS = 20;
+constexpr uint32_t GEN_MASK = (1u << 20) - 1;
+
+static inline uint64_t ud_pack(unsigned op, uint32_t gen, unsigned bid, int fd)
 {
-	return ((uint64_t)op << 56) | ((uint64_t)(gen & 0xffu) << 48) | ((uint64_t)(bid & 0xffffu) << 32) |
-	       (uint32_t)fd;
+	return ((uint64_t)op << 56) | ((uint64_t)(gen & GEN_MASK) << 36) | ((uint64_t)(bid & 0xffffu) << FD_BITS) |
+	       ((uint64_t)fd & ((1u << FD_BITS) - 1));
 }
 static inline unsigned ud_op(uint64_t u) { return (unsigned)(u >> 56); }
-static inline unsigned ud_gen(uint64_t u) { return (unsigned)((u >> 48) & 0xffu); }
-static inline unsigned ud_bid(uint64_t u) { return (unsigned)((u >> 32) & 0xffffu); }
-static inline int ud_fd(uint64_t u) { return (int)(uint32_t)u; }
+static inline uint32_t ud_gen(uint64_t u) { return (uint32_t)((u >> 36) & GEN_MASK); }
+static inline unsigned ud_bid(uint64_t u) { return (unsigned)((u >> FD_BITS) & 0xffffu); }
+static inline int ud_fd(uint64_t u) { return (int)(u & ((1u << FD_BITS) - 1)); }
 
 static volatile sig_atomic_t g_stop;
 static volatile sig_atomic_t g_reset;
@@ -67,12 +77,18 @@ static void die(const char *what, int err)
 static struct io_uring g_ring;
 static struct io_uring_buf_ring *g_br;
 static char *g_bufs;
-static uint8_t *g_gen;     // by fd: generation of the live connection
+static uint32_t *g_gen;    // by fd: generation of the live connection (20 bits used)
 static uint32_t *g_remain; // by bid: bytes of the buffer still to send
 static uint32_t *g_sent;   // by bid: bytes of the buffer already sent
 static int g_lfd;
 static bool g_accept_armed;
 static uint64_t g_requests, g_conns, g_errors, g_enobufs;
+
+// Connections whose multishot recv ended on ENOBUFS wait here, as packed recv
+// user_data, until a buffer comes back; recycle() re-arms them one per buffer.
+constexpr size_t WAITQ = 8192;
+static uint64_t g_waitq[WAITQ];
+static size_t g_wait_head, g_wait_n;
 
 static struct io_uring_sqe *get_sqe(void)
 {
@@ -115,6 +131,16 @@ static void recycle(unsigned bid)
 	io_uring_buf_ring_add(g_br, g_bufs + (size_t)bid * BUFSZ, BUFSZ, (unsigned short)bid,
 			      io_uring_buf_ring_mask(NBUFS), 0);
 	io_uring_buf_ring_advance(g_br, 1);
+	// A buffer is back: wake one connection that ran dry, skipping dead ones.
+	while (g_wait_n > 0) {
+		uint64_t w = g_waitq[g_wait_head];
+		g_wait_head = (g_wait_head + 1) % WAITQ;
+		g_wait_n--;
+		if (ud_gen(w) == g_gen[ud_fd(w)]) {
+			arm_recv(ud_fd(w));
+			break;
+		}
+	}
 }
 
 static void handle_accept(const struct io_uring_cqe *cqe)
@@ -164,13 +190,21 @@ static void handle_recv(const struct io_uring_cqe *cqe)
 	}
 	if (cqe->res == -ENOBUFS) {
 		g_enobufs++;
-		arm_recv(fd);
+		if (g_wait_n == WAITQ) {
+			g_errors++; // cannot park it: drop the connection
+			shutdown(fd, SHUT_RDWR);
+			return;
+		}
+		g_waitq[(g_wait_head + g_wait_n++) % WAITQ] = ud_pack(OP_RECV, g_gen[fd], 0, fd);
 		return;
 	}
 	// res == 0 (peer closed) or a fatal error: the recv is finished, so closing
 	// cannot race with it. Sends still in flight fail on the closed fd.
 	if (more)
 		return;
+	// A send prepared earlier in this pass may still sit in the SQ: submit it
+	// before the fd goes away, or the last echo is lost (or goes to a reused fd).
+	io_uring_submit(&g_ring);
 	close(fd);
 	g_gen[fd]++;
 	if (!g_accept_armed)
@@ -263,9 +297,11 @@ int main(int argc, char **argv)
 			base_cpu = cref_cpu_now();
 			base_ns = cref_now_ns();
 		}
-		rc = io_uring_submit_and_wait(&g_ring, 1);
-		if (rc < 0 && rc != -EINTR && rc != -EAGAIN && rc != -EBUSY)
-			die("io_uring_submit_and_wait", -rc);
+		struct io_uring_cqe *wait_cqe;
+		struct __kernel_timespec tick = {.tv_sec = 0, .tv_nsec = 100000000};
+		rc = io_uring_submit_and_wait_timeout(&g_ring, &wait_cqe, 1, &tick, nullptr);
+		if (rc < 0 && rc != -EINTR && rc != -EAGAIN && rc != -EBUSY && rc != -ETIME)
+			die("io_uring_submit_and_wait_timeout", -rc);
 
 		struct io_uring_cqe *cqe;
 		unsigned head, seen = 0;

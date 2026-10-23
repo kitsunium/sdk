@@ -4,11 +4,13 @@
 //
 //   evp : OpenSSL 3 EVP_MAC fetched once, one keyed template EVP_MAC_CTX, and
 //         per message EVP_MAC_CTX_dup + update + final.
+//   reinit : one keyed EVP_MAC_CTX reused; per message EVP_MAC_init(ctx, NULL, 0,
+//         NULL) resets it to the keyed state, then update + final.
 //   mid : the ipad and opad blocks are hashed once into two SHA-256
 //         midstates; per message a struct copy, update, final, twice.
 //
 // usage: hmac_bench selftest
-//        hmac_bench evp|mid [-n iterations] [-l message_length]
+//        hmac_bench evp|reinit|mid [-n iterations] [-l message_length]
 //
 // The midstate form uses the low-level SHA256_* API, deprecated since
 // OpenSSL 3.0 but still shipped: a midstate cannot be copied through EVP
@@ -46,6 +48,9 @@ struct mid_state {
 	SHA256_CTX out;
 };
 
+static void evp_free(struct evp_state *st);
+
+// evp_init leaves st releasable with evp_free whatever it returns.
 static int evp_init(struct evp_state *st, const uint8_t *key, size_t key_len)
 {
 	char digest[] = "SHA256";
@@ -54,6 +59,8 @@ static int evp_init(struct evp_state *st, const uint8_t *key, size_t key_len)
 		OSSL_PARAM_construct_end(),
 	};
 
+	st->mac = nullptr;
+	st->tmpl = nullptr;
 	st->mac = EVP_MAC_fetch(nullptr, "HMAC", nullptr);
 	if (st->mac == nullptr)
 		return -1;
@@ -67,6 +74,21 @@ static void evp_free(struct evp_state *st)
 {
 	EVP_MAC_CTX_free(st->tmpl);
 	EVP_MAC_free(st->mac);
+	st->tmpl = nullptr;
+	st->mac = nullptr;
+}
+
+// reinit_mac reuses the keyed template itself: EVP_MAC_init with no key resets
+// the context to the keyed state, with no allocation. The state is mutated, so
+// this form is single-threaded by construction, like the rest of the bench.
+static int reinit_mac(const struct evp_state *st, const uint8_t *msg, size_t len, uint8_t out[MAC_LEN])
+{
+	size_t outl = 0;
+
+	return EVP_MAC_init(st->tmpl, nullptr, 0, nullptr) == 1 && EVP_MAC_update(st->tmpl, msg, len) == 1 &&
+			       EVP_MAC_final(st->tmpl, out, &outl, MAC_LEN) == 1 && outl == MAC_LEN
+		       ? 0
+		       : -1;
 }
 
 static int evp_mac(const struct evp_state *st, const uint8_t *msg, size_t len, uint8_t out[MAC_LEN])
@@ -86,22 +108,23 @@ static int mid_init(struct mid_state *st, const uint8_t *key, size_t key_len)
 {
 	uint8_t ipad[BLOCK] = {0};
 	uint8_t opad[BLOCK] = {0};
+	int rc = -1;
 
 	if (key_len > BLOCK)
-		return -1; // a key over one block would be hashed first; the SDK never has one
+		goto out; // a key over one block would be hashed first; the SDK never has one
 	memcpy(ipad, key, key_len);
 	memcpy(opad, key, key_len);
 	for (size_t i = 0; i < BLOCK; i++) {
-		ipad[i] ^= 0x36;
-		opad[i] ^= 0x5c;
+		ipad[i] ^= 0x36u;
+		opad[i] ^= 0x5cu;
 	}
-	if (SHA256_Init(&st->in) != 1 || SHA256_Update(&st->in, ipad, BLOCK) != 1)
-		return -1;
-	if (SHA256_Init(&st->out) != 1 || SHA256_Update(&st->out, opad, BLOCK) != 1)
-		return -1;
+	if (SHA256_Init(&st->in) == 1 && SHA256_Update(&st->in, ipad, BLOCK) == 1 && SHA256_Init(&st->out) == 1 &&
+	    SHA256_Update(&st->out, opad, BLOCK) == 1)
+		rc = 0;
+out:
 	OPENSSL_cleanse(ipad, sizeof ipad);
 	OPENSSL_cleanse(opad, sizeof opad);
-	return 0;
+	return rc;
 }
 
 static int mid_mac(const struct mid_state *st, const uint8_t *msg, size_t len, uint8_t out[MAC_LEN])
@@ -143,6 +166,21 @@ static void make_jwt_input(uint8_t *buf, size_t len)
 		buf[i] = (uint8_t)alpha[(i * 7u + 3u) % 64u];
 }
 
+enum form { FORM_EVP, FORM_REINIT, FORM_MID };
+
+static const char *const FORM_NAME[] = {"hmac_evp", "hmac_reinit", "hmac_mid"};
+
+static int mac_by(enum form f, const struct evp_state *ev, const struct evp_state *rv, const struct mid_state *mi, const uint8_t *msg,
+		  size_t len, uint8_t out[MAC_LEN])
+{
+	switch (f) {
+	case FORM_EVP: return evp_mac(ev, msg, len, out);
+	case FORM_REINIT: return reinit_mac(rv, msg, len, out); // its own ctx: final() leaves it unfit to dup
+	case FORM_MID: return mid_mac(mi, msg, len, out);
+	}
+	return -1;
+}
+
 static int selftest(void)
 {
 	// RFC 4231 test case 2: key "Jefe", data "what do ya want for nothing?".
@@ -150,60 +188,77 @@ static int selftest(void)
 	const uint8_t key[] = {'J', 'e', 'f', 'e'};
 	const char *data = "what do ya want for nothing?";
 	uint8_t want[MAC_LEN], got[MAC_LEN];
-	struct evp_state ev = {0};
+	struct evp_state ev = {0}, rv = {0};
 	struct mid_state mi;
+	int rc = 1;
 
 	if (hex2bin(want_hex, want, MAC_LEN) != 0)
 		return 1;
-	if (evp_init(&ev, key, sizeof key) != 0 || mid_init(&mi, key, sizeof key) != 0) {
+	if (evp_init(&ev, key, sizeof key) != 0 || evp_init(&rv, key, sizeof key) != 0 ||
+	    mid_init(&mi, key, sizeof key) != 0) {
 		fputs("selftest: init failed\n", stderr);
-		return 1;
+		goto out;
 	}
-	if (evp_mac(&ev, (const uint8_t *)data, strlen(data), got) != 0 ||
-	    CRYPTO_memcmp(got, want, MAC_LEN) != 0) {
-		fputs("selftest: evp does not match RFC 4231 case 2\n", stderr);
-		return 1;
-	}
-	if (mid_mac(&mi, (const uint8_t *)data, strlen(data), got) != 0 ||
-	    CRYPTO_memcmp(got, want, MAC_LEN) != 0) {
-		fputs("selftest: midstate does not match RFC 4231 case 2\n", stderr);
-		return 1;
-	}
-	evp_free(&ev);
-
-	// The two forms must agree on a 32-byte key and every length 0..300.
-	uint8_t key32[KEY_LEN], msg[300], a[MAC_LEN], b[MAC_LEN];
-	for (size_t i = 0; i < KEY_LEN; i++)
-		key32[i] = (uint8_t)(i * 31u + 5u);
-	if (evp_init(&ev, key32, KEY_LEN) != 0 || mid_init(&mi, key32, KEY_LEN) != 0)
-		return 1;
-	for (size_t len = 0; len <= sizeof msg; len++) {
-		for (size_t i = 0; i < len; i++)
-			msg[i] = (uint8_t)(i * 13u + len);
-		if (evp_mac(&ev, msg, len, a) != 0 || mid_mac(&mi, msg, len, b) != 0 ||
-		    CRYPTO_memcmp(a, b, MAC_LEN) != 0) {
-			fprintf(stderr, "selftest: evp and midstate differ at length %zu\n", len);
-			return 1;
+	for (int f = FORM_EVP; f <= FORM_MID; f++) {
+		// Twice, so the reused context of the reinit form is shown to reset.
+		for (int rep = 0; rep < 2; rep++) {
+			if (mac_by((enum form)f, &ev, &rv, &mi, (const uint8_t *)data, strlen(data), got) != 0 ||
+			    CRYPTO_memcmp(got, want, MAC_LEN) != 0) {
+				fprintf(stderr, "selftest: %s does not match RFC 4231 case 2\n", FORM_NAME[f]);
+				goto out;
+			}
 		}
 	}
 	evp_free(&ev);
+	evp_free(&rv);
+	OPENSSL_cleanse(&mi, sizeof mi);
+
+	// The three forms must agree on a 32-byte key and every length 0..300.
+	uint8_t key32[KEY_LEN], msg[300], a[MAC_LEN], b[MAC_LEN];
+	for (size_t i = 0; i < KEY_LEN; i++)
+		key32[i] = (uint8_t)(i * 31u + 5u);
+	if (evp_init(&ev, key32, KEY_LEN) != 0 || evp_init(&rv, key32, KEY_LEN) != 0 ||
+	    mid_init(&mi, key32, KEY_LEN) != 0) {
+		fputs("selftest: init failed for the 32-byte key\n", stderr);
+		goto out;
+	}
+	for (size_t len = 0; len <= sizeof msg; len++) {
+		for (size_t i = 0; i < len; i++)
+			msg[i] = (uint8_t)(i * 13u + len);
+		if (mac_by(FORM_EVP, &ev, &rv, &mi, msg, len, a) != 0) {
+			fprintf(stderr, "selftest: evp failed at length %zu\n", len);
+			goto out;
+		}
+		for (int f = FORM_REINIT; f <= FORM_MID; f++) {
+			if (mac_by((enum form)f, &ev, &rv, &mi, msg, len, b) != 0 || CRYPTO_memcmp(a, b, MAC_LEN) != 0) {
+				fprintf(stderr, "selftest: evp and %s differ at length %zu\n", FORM_NAME[f], len);
+				goto out;
+			}
+		}
+	}
 	puts("selftest=ok");
-	return 0;
+	rc = 0;
+out:
+	evp_free(&ev);
+	evp_free(&rv);
+	OPENSSL_cleanse(&mi, sizeof mi);
+	return rc;
 }
 
-static int run(bool use_evp, uint64_t iters, size_t msg_len)
+static int run(enum form f, uint64_t iters, size_t msg_len)
 {
 	uint8_t key[KEY_LEN], msg[MAX_MSG], out[MAC_LEN];
 	struct evp_state ev = {0};
 	struct mid_state mi;
 	uint8_t sink = 0;
+	int rc = 1;
 
 	for (size_t i = 0; i < KEY_LEN; i++)
 		key[i] = (uint8_t)(i * 31u + 5u);
 	make_jwt_input(msg, msg_len);
-	if ((use_evp ? evp_init(&ev, key, KEY_LEN) : mid_init(&mi, key, KEY_LEN)) != 0) {
+	if ((f == FORM_MID ? mid_init(&mi, key, KEY_LEN) : evp_init(&ev, key, KEY_LEN)) != 0) {
 		fputs("init failed\n", stderr);
-		return 1;
+		goto out;
 	}
 
 	// The counter is written into the message every round so no call can be
@@ -211,8 +266,6 @@ static int run(bool use_evp, uint64_t iters, size_t msg_len)
 	uint64_t warm = iters / 10 + 1;
 	uint64_t t0 = 0;
 	struct cref_cpu c0 = {0};
-	uint64_t t1 = 0;
-	struct cref_cpu c1 = {0};
 
 	for (uint64_t i = 0; i < warm + iters; i++) {
 		if (i == warm) {
@@ -221,35 +274,45 @@ static int run(bool use_evp, uint64_t iters, size_t msg_len)
 		}
 		if (msg_len >= 8)
 			memcpy(msg + msg_len - 8, &i, 8);
-		if ((use_evp ? evp_mac(&ev, msg, msg_len, out) : mid_mac(&mi, msg, msg_len, out)) != 0) {
+		if (mac_by(f, &ev, &ev, &mi, msg, msg_len, out) != 0) {
 			fputs("mac failed\n", stderr);
-			return 1;
+			goto out;
 		}
 		sink ^= out[0];
 	}
-	t1 = cref_now_ns();
-	c1 = cref_cpu_now();
-	cref_report(use_evp ? "hmac_evp" : "hmac_mid", iters, t1 - t0, c0, c1);
-	if (use_evp)
-		evp_free(&ev);
+	uint64_t t1 = cref_now_ns();
+	struct cref_cpu c1 = cref_cpu_now();
+	cref_report(FORM_NAME[f], iters, t1 - t0, c0, c1);
 	g_sink = sink;
-	return 0;
+	rc = 0;
+out:
+	if (f != FORM_MID)
+		evp_free(&ev);
+	else
+		OPENSSL_cleanse(&mi, sizeof mi);
+	return rc;
 }
 
 int main(int argc, char **argv)
 {
 	uint64_t iters = 2000000;
 	size_t msg_len = 200;
+	enum form f = FORM_EVP;
 
 	if (argc < 2) {
-		fputs("usage: hmac_bench selftest | evp|mid [-n iters] [-l len]\n", stderr);
+		fputs("usage: hmac_bench selftest | evp|reinit|mid [-n iters] [-l len]\n", stderr);
 		return 2;
 	}
 	if (strcmp(argv[1], "selftest") == 0)
 		return selftest();
-	bool use_evp = strcmp(argv[1], "evp") == 0;
-	if (!use_evp && strcmp(argv[1], "mid") != 0) {
-		fputs("form must be evp or mid\n", stderr);
+	if (strcmp(argv[1], "evp") == 0)
+		f = FORM_EVP;
+	else if (strcmp(argv[1], "reinit") == 0)
+		f = FORM_REINIT;
+	else if (strcmp(argv[1], "mid") == 0)
+		f = FORM_MID;
+	else {
+		fputs("form must be evp, reinit or mid\n", stderr);
 		return 2;
 	}
 	for (int i = 2; i + 1 < argc; i += 2) {
@@ -266,5 +329,5 @@ int main(int argc, char **argv)
 		fputs("bad -n or -l\n", stderr);
 		return 2;
 	}
-	return run(use_evp, iters, msg_len);
+	return run(f, iters, msg_len);
 }
