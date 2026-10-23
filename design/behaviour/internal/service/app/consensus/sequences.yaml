@@ -10584,7 +10584,7 @@ sequences:
           do:
             - set: w.applied, w.appliedAt
               value: applied, now
-          when: applied != w.applied || applied >= st.Commit
+          when: applied != w.applied || applied >= st.Commit || n.cutting.Load()
       - bind: limit
         eval: st.Timing.ElectionTimeoutMax
       - bind: stuckSync, stuckApply
@@ -16330,6 +16330,8 @@ sequences:
         kind: value
       - id: n.snapState.mu.Unlock
         kind: value
+      - id: n.cutting.Store
+        kind: value
       - id: n.metaAt
         kind: internal
       - id: n.stoppedErr
@@ -16352,6 +16354,10 @@ sequences:
         value: "0"
       - eval: n.snapState.mu.Unlock()
         to: n.snapState.mu.Unlock
+      - eval: n.cutting.Store(true)
+        to: n.cutting.Store
+      - defer: n.cutting.Store(false)
+        to: n.cutting.Store
       - bind: meta, ok
         eval: n.metaAt(idx, term)
         to: n.metaAt

@@ -21,7 +21,8 @@ type progressWatch struct {
 // watchProgress hands the leadership to the most up-to-date voter once
 // this leader's durable index has trailed its log, or its applied index
 // its commit, without moving for the maximum election timeout. A
-// legitimately slow fdatasync moves within that bound; a transfer already
+// legitimately slow fdatasync moves within that bound, and the time the
+// apply goroutine spends cutting a snapshot is not counted; a transfer already
 // under way is left alone, and the clocks restart after each hand-off.
 // It runs on the loop, at every tick.
 func (n *Node) watchProgress(now time.Time) {
@@ -37,7 +38,13 @@ func (n *Node) watchProgress(now time.Time) {
 	if st.Stable != w.stable || st.Stable >= st.Last {
 		w.stable, w.stableAt = st.Stable, now
 	}
-	if applied != w.applied || applied >= st.Commit {
+	if applied != w.applied || applied >= st.Commit || n.cutting.Load() {
+		// A cut on the apply goroutine, SnapshotPausesApply or a capture,
+		// applies nothing while it writes, and is no stuck apply. Every
+		// node cuts at the same threshold, so a leader that handed over
+		// for it made its successor cut and hand over in turn, one change
+		// per cut for as long as writes came (#593). The clock restarts
+		// when the cut ends.
 		w.applied, w.appliedAt = applied, now
 	}
 	limit := st.Timing.ElectionTimeoutMax

@@ -4821,6 +4821,11 @@ types:
       - name: watch
         type: progressWatch
       - doc: |-
+          cutting is set while the apply goroutine captures and writes a
+          snapshot itself, applying nothing meanwhile (#593).
+        name: cutting
+        type: atomic.Bool
+      - doc: |-
           preferAt is the earliest tick at which this leader tries
           PreferredLeaders again after a transfer it started (#559).
         name: preferAt
@@ -5701,7 +5706,8 @@ types:
           watchProgress hands the leadership to the most up-to-date voter once
           this leader's durable index has trailed its log, or its applied index
           its commit, without moving for the maximum election timeout. A
-          legitimately slow fdatasync moves within that bound; a transfer already
+          legitimately slow fdatasync moves within that bound, and the time the
+          apply goroutine spends cutting a snapshot is not counted; a transfer already
           under way is left alone, and the clocks restart after each hand-off.
           It runs on the loop, at every tick.
         name: watchProgress

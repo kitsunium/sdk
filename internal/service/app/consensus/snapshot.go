@@ -223,6 +223,10 @@ func (n *Node) cut(idx, term uint64, w io.Writer) error {
 	n.snapState.mu.Lock()
 	n.snapState.sinceBytes = 0
 	n.snapState.mu.Unlock()
+	// The capture, and the write when it pauses apply, hold the apply
+	// goroutine: watchProgress does not take that for a stuck apply (#593).
+	n.cutting.Store(true)
+	defer n.cutting.Store(false)
 	meta, ok := n.metaAt(idx, term)
 	if !ok {
 		return n.stoppedErr()

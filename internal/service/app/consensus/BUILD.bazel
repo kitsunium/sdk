@@ -120,6 +120,7 @@ go_test(
         "observe_internal_test.go",
         "observed_internal_test.go",
         "offline_internal_test.go",
+        "pausedcut_internal_test.go",
         "peerseries_internal_test.go",
         "pendingbounds_internal_test.go",
         "preferredleader_internal_test.go",
