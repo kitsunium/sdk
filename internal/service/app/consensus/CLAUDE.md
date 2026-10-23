@@ -340,6 +340,13 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   and a log compacted to it starts from nothing else
   (`TestASnapshotOverALoweredLimitStaysPublished`,
   `TestNoSnapshotIsUnpublishedBeforeItsFallbackContinuesTheLog`).
+- Refuse a start LOG_CORRUPT when the log continues from a newer snapshot
+  that did not restore for this node's reason, its disk or a lowered
+  `MaxSnapshotBytes`: an install compacts the log to the snapshot it
+  installs, the older fallback leaves a gap, and the start answers that
+  snapshot's own error instead, which a raised limit cures where
+  LOG_CORRUPT calls for a wipe (#574,
+  `TestAStartOverALoweredLimitAfterAnInstallSaysSo`).
 - Forward a removal of the leader without moving leadership first: the
   leader refuses to remove itself, and the call failed MEMBERSHIP_INVALID
   on a follower only. `Remove` transfers to this node (or another voter),

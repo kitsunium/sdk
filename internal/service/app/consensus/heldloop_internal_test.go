@@ -2,6 +2,7 @@ package consensus
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"testing"
@@ -84,31 +85,73 @@ func TestASnapshotThatDidNotRestoreIsUnpublished(t *testing.T) {
 	caughtUp(t, c, l, f, x)
 }
 
+// loweredLimitCluster is a three-node cluster that cuts at every applied
+// byte, under a MaxSnapshotBytes the test can lower before a restart.
+func loweredLimitCluster(t *testing.T, limit *atomic.Int64) *cluster {
+	t.Helper()
+	limit.Store(1 << 30)
+	return newClusterWith(t, &cluster{
+		t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{5, 2, 8}, every: 20,
+		configure: func(_ *testNode, cfg *Config) { cfg.MaxSnapshotBytes, cfg.SnapshotEveryBytes = limit.Load(), 1 },
+	})
+}
+
+// writeInStep writes n values of 200 bytes, each applied by f before the
+// next is proposed. The leader cuts at every write and compacts its log to
+// SnapshotTrailing entries before its older snapshot: a follower further
+// behind than that was caught up by an install, which compacts its log to
+// the snapshot installed, and its own older snapshot no longer continued
+// the log (#574).
+func writeInStep(t *testing.T, c *cluster, f *testNode, from, n int) {
+	t.Helper()
+	for i := from; i < from+n; i++ {
+		tok := proposeOnLeader(t, c, fmt.Sprintf("k%d=%s", i, bytes.Repeat([]byte("v"), 200)))
+		waitAppliedOn(t, f, tok.Index)
+	}
+}
+
+// waitAppliedOn waits until tn applied index.
+func waitAppliedOn(t *testing.T, tn *testNode, index uint64) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); tn.node.Status().Applied < index; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("node %d applied %d < %d", tn.id, tn.node.Status().Applied, index)
+		}
+	}
+}
+
 // A snapshot that did not restore for a reason of this node's — a disk
 // failure, a MaxSnapshotBytes lowered since — stays published: it may
 // restore at the next start, and the log may have been compacted to it.
 func TestASnapshotOverALoweredLimitStaysPublished(t *testing.T) {
 	var limit atomic.Int64
-	limit.Store(1 << 30)
-	c := newClusterWith(t, &cluster{
-		t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{5, 2, 8}, every: 20,
-		configure: func(_ *testNode, cfg *Config) { cfg.MaxSnapshotBytes, cfg.SnapshotEveryBytes = limit.Load(), 1 },
-	})
+	c := loweredLimitCluster(t, &limit)
 	l := c.settledLeader(5 * time.Second)
 	f := c.otherThan(l)
-	var tok coreconsensus.TokenValue
-	for i := range 60 {
-		tok = proposeOnLeader(t, c, fmt.Sprintf("k%d=%s", i, bytes.Repeat([]byte("v"), 200)))
+	writeInStep(t, c, f, 0, 60)
+	// The follower is cut off before its snapshots are read: an election's
+	// entry reaching it after, then its cut, would remove the older one.
+	// The two newest hold the same state when such an entry came after the
+	// last write: one more write, and they differ again.
+	var metas []coreconsensus.SnapshotMetaValue
+	for i := 60; ; i++ {
+		c.net.Isolate(f.id, true)
+		cutsSettled(t, f)
+		metas = must(f.snaps.List())(t)
+		if len(metas) >= 2 && snapshotSize(&metas[0]) > snapshotSize(&metas[1]) {
+			break
+		}
+		if i == 70 {
+			t.Fatalf("setup: the follower holds no older, smaller snapshot: %+v", metas)
+		}
+		c.net.Isolate(f.id, false)
+		writeInStep(t, c, f, i, 1)
 	}
-	c.waitApplied(tok.Index, 10*time.Second)
-	cutsSettled(t, f)
-	metas := must(f.snaps.List())(t)
-	if len(metas) < 2 || max(metas[0].EncodedSize, metas[0].DecodedSize) <= max(metas[1].EncodedSize, metas[1].DecodedSize) {
-		t.Fatalf("setup: the follower holds no older, smaller snapshot: %+v", metas)
+	if first, _ := f.log.Bounds(); first > metas[1].Position.Index+1 {
+		t.Fatalf("setup: the follower's log starts at %d, past its older snapshot %s", first, metas[1].ID)
 	}
-	c.net.Isolate(f.id, true)
 	c.kill(f)
-	limit.Store((max(metas[0].EncodedSize, metas[0].DecodedSize) + max(metas[1].EncodedSize, metas[1].DecodedSize)) / 2)
+	limit.Store((snapshotSize(&metas[0]) + snapshotSize(&metas[1])) / 2)
 	c.start(f)
 	if f.node.r.NoTable() {
 		t.Fatal("setup: the follower started with no table")
@@ -119,6 +162,95 @@ func TestASnapshotOverALoweredLimitStaysPublished(t *testing.T) {
 	}
 	if !held {
 		t.Fatalf("the snapshot over the lowered limit %d was unpublished", limit.Load())
+	}
+}
+
+// installedPastItsOwn catches f up by an install, then cuts it off, and
+// returns its snapshots: the installed one, newest, larger than f's own
+// older one, and f's log continuing from the installed one alone. A cut
+// slower than the writes may leave a live node's log uncompacted past f,
+// and an entry of an election after the install makes f cut a snapshot of
+// its own past it: both are tried again.
+func installedPastItsOwn(t *testing.T, c *cluster, f *testNode) []coreconsensus.SnapshotMetaValue {
+	t.Helper()
+	for i, try := 10, 0; ; try++ {
+		c.net.Isolate(f.id, true)
+		cutsSettled(t, f)
+		_, fLast := f.log.Bounds()
+		var tok coreconsensus.TokenValue
+		for range 30 {
+			tok = proposeOnLeader(t, c, fmt.Sprintf("k%d=%s", i, bytes.Repeat([]byte("v"), 200)))
+			i++
+		}
+		for !othersCompactedPast(t, c, f, tok.Index, fLast+1) {
+			if i > 400 {
+				t.Fatalf("setup: the live nodes never compacted past %d", fLast+1)
+			}
+			tok = proposeOnLeader(t, c, fmt.Sprintf("k%d=%s", i, bytes.Repeat([]byte("v"), 200)))
+			i++
+		}
+		c.net.Isolate(f.id, false)
+		waitAppliedOn(t, f, tok.Index)
+		c.net.Isolate(f.id, true)
+		cutsSettled(t, f)
+		metas := must(f.snaps.List())(t)
+		first, _ := f.log.Bounds()
+		if len(metas) >= 2 && first > metas[1].Position.Index+1 && first <= metas[0].Position.Index+1 &&
+			snapshotSize(&metas[0]) > snapshotSize(&metas[1]) {
+			return metas
+		}
+		if try == 5 {
+			t.Fatalf("setup: the follower's log [%d, ...] never continued from an installed snapshot alone: %+v", first, metas)
+		}
+	}
+}
+
+// othersCompactedPast reports, once every node but f applied index and
+// settled its cuts, whether each one's log starts past past.
+func othersCompactedPast(t *testing.T, c *cluster, f *testNode, index, past uint64) bool {
+	t.Helper()
+	for _, tn := range c.nodes {
+		if tn == f {
+			continue
+		}
+		waitAppliedOn(t, tn, index)
+		cutsSettled(t, tn)
+		if first, _ := tn.log.Bounds(); first <= past {
+			return false
+		}
+	}
+	return true
+}
+
+// A start whose log continues only from a snapshot over a lowered
+// MaxSnapshotBytes is refused SNAPSHOT_TOO_LARGE, and the snapshot stays
+// published. An install compacts the log to the snapshot it installs, past
+// the node's own older one; the start fell back to that one and was refused
+// LOG_CORRUPT, which names a damage the log does not have and calls for a
+// wipe, where raising the limit back was enough (#574).
+func TestAStartOverALoweredLimitAfterAnInstallSaysSo(t *testing.T) {
+	var limit atomic.Int64
+	c := loweredLimitCluster(t, &limit)
+	l := c.settledLeader(5 * time.Second)
+	f := c.otherThan(l)
+	writeInStep(t, c, f, 0, 10)
+	metas := installedPastItsOwn(t, c, f)
+	c.kill(f)
+	limit.Store((snapshotSize(&metas[0]) + snapshotSize(&metas[1])) / 2)
+	f.sm = newKV()
+	n, err := NewNode(c.config(f))
+	if err == nil {
+		_ = n.HardClose()
+	}
+	if !errors.Is(err, coreconsensus.SnapshotTooLarge) {
+		t.Fatalf("a start whose log continues from a snapshot over the lowered limit: %v", err)
+	}
+	held := false
+	for _, m := range must(f.snaps.List())(t) {
+		held = held || m.ID == metas[0].ID
+	}
+	if !held {
+		t.Fatal("the installed snapshot over the lowered limit was unpublished")
 	}
 }
 

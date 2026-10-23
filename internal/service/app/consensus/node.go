@@ -504,7 +504,7 @@ func (n *Node) load() (raft.StartState, error) {
 		return raft.StartState{}, err
 	}
 	durIdx := dur.Index
-	base, failed, err := n.restoreLatest(metas, durIdx)
+	base, set, err := n.restoreLatest(metas, durIdx)
 	if err != nil {
 		return raft.StartState{}, err
 	}
@@ -519,13 +519,16 @@ func (n *Node) load() (raft.StartState, error) {
 		return raft.StartState{}, err
 	}
 	snapIdx := base.Position.Index
+	if err := set.heldReason(snapIdx, first); err != nil {
+		return raft.StartState{}, err
+	}
 	if first, last, err = n.finishInstall(&base, first, last); err != nil {
 		return raft.StartState{}, err
 	}
 	// Only now that the older base is known to continue the log: unpublished
 	// before, a newer snapshot the log had been compacted to was gone when
 	// the fallback then failed with a gap, and every start failed after.
-	if err := n.unpublishNewer(failed); err != nil {
+	if err := n.unpublishNewer(set.failed); err != nil {
 		return raft.StartState{}, err
 	}
 	ents, err := n.readTail(first, last, snapIdx)
@@ -580,10 +583,9 @@ func (n *Node) durablePosition() (coreconsensus.PositionValue, error) {
 // base. Each one discarded is logged with its reason: a node that starts
 // with no table otherwise says nothing of why (#512). One of a version or
 // format this build does not know refuses the start instead: unknown means
-// stop, never skip (D18, #513). failed is the newer snapshots that did not
-// restore for a reason of their own, which load unpublishes once the base
-// is known to continue the log.
-func (n *Node) restoreLatest(metas []coreconsensus.SnapshotMetaValue, durIdx uint64) (base coreconsensus.SnapshotMetaValue, failed []coreconsensus.SnapshotMetaValue, err error) {
+// stop, never skip (D18, #513). set holds the newer snapshots that did not
+// restore, as unrestored says.
+func (n *Node) restoreLatest(metas []coreconsensus.SnapshotMetaValue, durIdx uint64) (base coreconsensus.SnapshotMetaValue, set unrestored, err error) {
 	for _, m := range metas {
 		if termless(&m) {
 			// Published at term 0 by a cut before #544: restored, it made
@@ -591,22 +593,51 @@ func (n *Node) restoreLatest(metas []coreconsensus.SnapshotMetaValue, durIdx uin
 			// term, at every later start. Set aside as unreadable, a fault of
 			// its own.
 			n.obs.warn("consensus: a snapshot was not restored", lstr("id", m.ID), lstr("error", "recorded at term 0"))
-			failed = append(failed, m)
+			set.failed = append(set.failed, m)
 			continue
 		}
 		rerr := n.restoreFrom(m, durIdx)
 		if rerr == nil {
-			return m, failed, nil
+			return m, set, nil
 		}
 		if errs.HasCode(rerr, coreconsensus.CodeVersionUnsupported) {
-			return coreconsensus.SnapshotMetaValue{}, nil, rerr
+			return coreconsensus.SnapshotMetaValue{}, unrestored{}, rerr
 		}
 		n.obs.warn("consensus: a snapshot was not restored", lstr("id", m.ID), lstr("error", rerr.Error()))
-		if ownFailure(rerr) {
-			failed = append(failed, m)
+		switch {
+		case ownFailure(rerr):
+			set.failed = append(set.failed, m)
+		case set.heldErr == nil:
+			set.held, set.heldErr = m, rerr
 		}
 	}
-	return coreconsensus.SnapshotMetaValue{}, nil, nil
+	return coreconsensus.SnapshotMetaValue{}, unrestored{}, nil
+}
+
+// unrestored is what restoreLatest set aside above the base it restored:
+// failed, the snapshots that did not restore for a reason of their own,
+// which load unpublishes once the base is known to continue the log, and
+// held, the newest one that did not for a reason of this node's — its
+// disk, a MaxSnapshotBytes lowered since — with heldErr, that reason.
+type unrestored struct {
+	failed  []coreconsensus.SnapshotMetaValue
+	held    coreconsensus.SnapshotMetaValue
+	heldErr error
+}
+
+// heldReason is heldErr when the log, which starts at first, continues from
+// the held snapshot but not from the base at snapIdx: the reason the held
+// one did not restore is what stops the start then, and it is answered
+// instead of the gap. An install compacts the log to the snapshot it
+// installs, past the node's own older one: with MaxSnapshotBytes lowered
+// below the installed one, the start fell back to the older one and failed
+// LOG_CORRUPT, which names a damage the log does not have and calls for a
+// wipe, where raising the limit back was enough (#574).
+func (u *unrestored) heldReason(snapIdx, first uint64) error {
+	if u.heldErr == nil || first <= snapIdx+1 || first > u.held.Position.Index+1 {
+		return nil
+	}
+	return u.heldErr
 }
 
 // ownFailure reports whether a snapshot failed to restore for a reason of
