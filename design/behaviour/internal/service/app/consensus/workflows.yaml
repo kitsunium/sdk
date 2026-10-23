@@ -246,3 +246,18 @@ workflows:
           range: conf.Members
           value: m
       - return: limit
+  - of: cutLimit
+    steps:
+      - bind: voters
+        eval: own
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: voters
+                    value: min(voters, m.MaxSnapshotBytes)
+                when: m.Voter && m.MaxSnapshotBytes > 0
+          key: _
+          range: conf.Members
+          value: m
+      - return: voters

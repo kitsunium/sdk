@@ -121,6 +121,9 @@ type Node struct {
 	// sendStop cancels the snapshot stream in flight to each peer: a
 	// leader that lost its leadership or its term stops streaming (#547).
 	sendStop map[coreconsensus.NodeID]context.CancelFunc
+	// tooLarge is, per learner, the newest snapshot it was found too small
+	// to install, so that it is said once per snapshot (#591).
+	tooLarge map[coreconsensus.NodeID]string
 	// unreachableAt is when the transport last failed to reach a peer.
 	unreachableAt map[coreconsensus.NodeID]time.Time
 	lastTerm      uint64
@@ -132,6 +135,10 @@ type Node struct {
 	contact       leaderContact
 	progress      applyProgress
 	watch         progressWatch
+	// cuttingSince is when the apply goroutine started capturing and
+	// writing a snapshot itself, applying nothing meanwhile, in Unix
+	// nanoseconds of n.clk; 0 when it is not cutting (#593).
+	cuttingSince atomic.Int64
 	// preferAt is the earliest tick at which this leader tries
 	// PreferredLeaders again after a transfer it started (#559).
 	preferAt time.Time
@@ -199,6 +206,10 @@ type proposal struct {
 	// changedAt is when leadership changed while it was unresolved; only
 	// the loop and, for waiters, holders of am touch it.
 	changedAt time.Time
+	// sentAt is when the loop forwarded it to the leader; loop-owned.
+	sentAt time.Time
+	// gone is set by a caller that stopped waiting for a forward's answer.
+	gone atomic.Bool
 }
 
 type propResult struct {
@@ -209,6 +220,11 @@ type propResult struct {
 
 type readWait struct {
 	done chan readResult
+	// sentAt is when the read was first asked, and askedAt when it was last
+	// sent to the leader; both loop-owned.
+	sentAt, askedAt time.Time
+	// gone is set by a caller that stopped waiting for the answer.
+	gone atomic.Bool
 }
 
 type readResult struct {
@@ -378,7 +394,7 @@ func newNode(cfg *Config, stamp *coreconsensus.StampValue) *Node {
 		propc: make(chan *proposal, inboxDepth), execc: make(chan func(), loopBacklog), storec: make(chan storeDone, loopBacklog),
 		stopc: make(chan struct{}), sq: newFifo[storeReq](), fetchq: newFifo[raft.FetchSpec](), fetchc: make(chan fetchDone, fetchBacklog), aq: newFifo[applyItem](),
 		waiters: map[uint64]*proposal{}, results: map[uint64]applyResult{},
-		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]sendPin{}, sendStop: map[coreconsensus.NodeID]context.CancelFunc{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
+		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]sendPin{}, sendStop: map[coreconsensus.NodeID]context.CancelFunc{}, tooLarge: map[coreconsensus.NodeID]string{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
 		watchers: map[chan coreconsensus.StatusValue]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
 	}
 	n.acond = sync.NewCond(&n.am)
@@ -1054,16 +1070,59 @@ func (n *Node) checkTurn(turn time.Time) {
 // sweep answers OUTCOME_UNKNOWN to proposals whose leader changed more than
 // two maximum election timeouts ago and that are still not resolved: the
 // answer was lost, the entry may still commit.
+//
+// The transport may lose a forward, a read or their answer with no change
+// of leader at all: a full queue, a dial backoff, a closed connection. Only
+// a change started the grace, so the caller waited for its own deadline,
+// forever with none, and the entry stayed until the next change, a forward
+// holding its payload and the retained Apply results (#590). A forward
+// unanswered two maximum election timeouts after it was sent is answered
+// OUTCOME_UNKNOWN: the leader may have appended it, and a resend is only
+// deduplicated while the leader still remembers the first. What a caller
+// gave up on is dropped. Reads are swept by sweepReads.
 func (n *Node) sweep() {
 	grace := 2 * n.r.Status().Timing.ElectionTimeoutMax
 	now := n.clk.Now()
 	for ctx, p := range n.forwards {
-		if !p.changedAt.IsZero() && now.Sub(p.changedAt) > grace {
+		switch {
+		case p.gone.Load():
+			n.dropForward(ctx)
+		case !p.changedAt.IsZero() && now.Sub(p.changedAt) > grace:
 			n.dropForward(ctx)
 			p.done <- propResult{err: outcomeUnknown("leader changed before the answer")}
+		case !p.sentAt.IsZero() && now.Sub(p.sentAt) > grace:
+			n.dropForward(ctx)
+			p.done <- propResult{err: outcomeUnknown("the leader did not answer the forward in time")}
 		}
 	}
+	n.sweepReads(now)
 	n.sweepWaiters(now, grace)
+}
+
+// sweepReads resends a follower's read the leader has not answered within
+// the maximum election timeout, and answers LEADERSHIP_UNCONFIRMED to one
+// still unanswered two maximum election timeouts after it was asked (#590).
+// A resend under the same context is idempotent: the leader confirms it
+// again at a later commit index, still past every write committed before
+// the call, and the node takes the first answer and drops the other. A read
+// this node holds as the leader is not sent, so it is not resent; losing
+// the quorum deposes the leader and leadershipChanged answers it. A read
+// its caller gave up on is dropped.
+func (n *Node) sweepReads(now time.Time) {
+	etMax := n.r.Status().Timing.ElectionTimeoutMax
+	for ctx, w := range n.reads {
+		switch {
+		case w.gone.Load():
+			delete(n.reads, ctx)
+		case n.lastRole == coreconsensus.RoleLeader:
+		case now.Sub(w.sentAt) > 2*etMax:
+			delete(n.reads, ctx)
+			w.done <- readResult{code: coreconsensus.CodeLeadershipUnconfirmed}
+		case now.Sub(w.askedAt) > etMax:
+			w.askedAt = now
+			n.r.ReadIndex(now, ctx, n.cfg.Reads != ReadLease)
+		}
+	}
 }
 
 // sweepWaiters is sweep's half for appended proposals: one still above the

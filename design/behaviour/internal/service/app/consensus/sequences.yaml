@@ -7759,7 +7759,7 @@ sequences:
           		propc: make(chan *proposal, inboxDepth), execc: make(chan func(), loopBacklog), storec: make(chan storeDone, loopBacklog),
           		stopc: make(chan struct{}), sq: newFifo[storeReq](), fetchq: newFifo[raft.FetchSpec](), fetchc: make(chan fetchDone, fetchBacklog), aq: newFifo[applyItem](),
           		waiters: map[uint64]*proposal{}, results: map[uint64]applyResult{},
-          		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]sendPin{}, sendStop: map[coreconsensus.NodeID]context.CancelFunc{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
+          		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]sendPin{}, sendStop: map[coreconsensus.NodeID]context.CancelFunc{}, tooLarge: map[coreconsensus.NodeID]string{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
           		watchers: map[chan coreconsensus.StatusValue]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
           	}
       - set: n.acond
@@ -8894,6 +8894,8 @@ sequences:
         kind: value
       - id: n.dropForward
         kind: internal
+      - id: n.sweepReads
+        kind: internal
       - id: n.sweepWaiters
         kind: internal
     steps:
@@ -8904,19 +8906,67 @@ sequences:
         to: n.clk.Now
       - loop:
           do:
-            - opt:
-                do:
-                  - eval: n.dropForward(ctx)
-                    to: n.dropForward
-                  - send:
-                      chan: p.done
-                      value: "propResult{err: outcomeUnknown(\"leader changed before the answer\")}"
-                when: "!p.changedAt.IsZero() && now.Sub(p.changedAt) > grace"
+            - switch:
+                cases:
+                  - case: p.gone.Load()
+                    do:
+                      - eval: n.dropForward(ctx)
+                        to: n.dropForward
+                  - case: "!p.changedAt.IsZero() && now.Sub(p.changedAt) > grace"
+                    do:
+                      - eval: n.dropForward(ctx)
+                        to: n.dropForward
+                      - send:
+                          chan: p.done
+                          value: "propResult{err: outcomeUnknown(\"leader changed before the answer\")}"
+                  - case: "!p.sentAt.IsZero() && now.Sub(p.sentAt) > grace"
+                    do:
+                      - eval: n.dropForward(ctx)
+                        to: n.dropForward
+                      - send:
+                          chan: p.done
+                          value: "propResult{err: outcomeUnknown(\"the leader did not answer the forward in time\")}"
           key: ctx
           range: n.forwards
           value: p
+      - eval: n.sweepReads(now)
+        to: n.sweepReads
       - eval: n.sweepWaiters(now, grace)
         to: n.sweepWaiters
+  - of: (*Node).sweepReads
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).sweepReads
+        kind: self
+      - id: n.r.ReadIndex
+        kind: value
+    steps:
+      - bind: etMax
+        eval: n.r.Status().Timing.ElectionTimeoutMax
+      - loop:
+          do:
+            - switch:
+                cases:
+                  - case: w.gone.Load()
+                    do:
+                      - eval: delete(n.reads, ctx)
+                  - case: n.lastRole == coreconsensus.RoleLeader
+                  - case: now.Sub(w.sentAt) > 2*etMax
+                    do:
+                      - eval: delete(n.reads, ctx)
+                      - send:
+                          chan: w.done
+                          value: "readResult{code: coreconsensus.CodeLeadershipUnconfirmed}"
+                  - case: now.Sub(w.askedAt) > etMax
+                    do:
+                      - set: w.askedAt
+                        value: now
+                      - eval: n.r.ReadIndex(now, ctx, n.cfg.Reads != ReadLease)
+                        to: n.r.ReadIndex
+          key: ctx
+          range: n.reads
+          value: w
   - of: (*Node).sweepWaiters
     participants:
       - id: caller
@@ -10534,7 +10584,7 @@ sequences:
           do:
             - set: w.applied, w.appliedAt
               value: applied, now
-          when: applied != w.applied || applied >= st.Commit
+          when: applied != w.applied || applied >= st.Commit || n.cutExempt(now, st.Timing.ElectionTimeoutMax)
       - bind: limit
         eval: st.Timing.ElectionTimeoutMax
       - bind: stuckSync, stuckApply
@@ -10593,6 +10643,19 @@ sequences:
           range: st.Conf.Members
           value: m
       - return: to
+  - of: (*Node).cutExempt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).cutExempt
+        kind: self
+      - id: n.cuttingSince.Load
+        kind: value
+    steps:
+      - bind: since
+        eval: n.cuttingSince.Load()
+        to: n.cuttingSince.Load
+      - return: since != 0 && now.Sub(time.Unix(0, since)) < cutAllowance*etMax
   - of: (*Node).pinAt
     participants:
       - id: caller
@@ -14378,6 +14441,13 @@ sequences:
                 - return: "finish(propResult{err: n.stoppedErr()})"
       - return: finish(n.awaitProposal(ctx, p))
   - of: (*Node).awaitProposal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).awaitProposal
+        kind: self
+      - id: p.gone.Store
+        kind: value
     steps:
       - select:
           cases:
@@ -14403,6 +14473,8 @@ sequences:
                     do:
                       - return: "propResult{err: ctx.Err()}"
                     when: p.stage.CompareAndSwap(stageUnsent, stageAbandoned)
+                - eval: p.gone.Store(true)
+                  to: p.gone.Store
                 - return: |-
                     propResult{err: origin(coreconsensus.OutcomeUnknown,
                     			errs.String("why", "context ended after the append"), errs.String("cause", ctx.Err().Error()))}
@@ -14669,6 +14741,8 @@ sequences:
         kind: self
       - id: n.nextID
         kind: internal
+      - id: n.clk.Now
+        kind: value
       - id: n.am.Lock
         kind: value
       - id: n.am.Unlock
@@ -14701,6 +14775,9 @@ sequences:
           		Version: 1, Group: n.cfg.Group, Kind: kind, From: n.stamp.ID, To: st.Lead,
           		Term: st.Term, Context: ctx, Entries: []coreconsensus.EntryValue{p.entry},
           	}
+      - set: p.sentAt
+        to: n.clk.Now
+        value: n.clk.Now()
       - set: n.forwards[ctx]
         value: p
       - eval: n.am.Lock()
@@ -14789,6 +14866,8 @@ sequences:
         kind: self
       - id: n.clk.Now
         kind: value
+      - id: w.gone.Store
+        kind: value
       - id: n.am.Lock
         kind: value
       - id: n.token
@@ -14821,8 +14900,10 @@ sequences:
           when: |-
             !n.exec(func() {
             		ctx := n.nextID()
+            		w.sentAt = n.clk.Now()
+            		w.askedAt = w.sentAt
             		n.reads[ctx] = w
-            		n.r.ReadIndex(n.clk.Now(), ctx, noLease)
+            		n.r.ReadIndex(w.sentAt, ctx, noLease)
             		n.handleReady()
             	})
       - var:
@@ -14833,6 +14914,8 @@ sequences:
             - comm: res = <-w.done
             - comm: <-ctx.Done()
               do:
+                - eval: w.gone.Store(true)
+                  to: w.gone.Store
                 - return: coreconsensus.TokenValue{}, origin(coreconsensus.LeadershipUnconfirmed, errs.String("cause", ctx.Err().Error()))
       - switch:
           cases:
@@ -15042,9 +15125,37 @@ sequences:
         kind: actor
       - id: (*Node).Promote
         kind: self
+      - id: n.Membership().Member
+        kind: value
+      - id: n.snapState.mu.Lock
+        kind: value
+      - id: n.snapState.mu.Unlock
+        kind: value
+      - id: origin
+        kind: internal
       - id: n.admin
         kind: internal
     steps:
+      - opt:
+          do:
+            - eval: n.snapState.mu.Lock()
+              to: n.snapState.mu.Lock
+            - bind: newest
+              eval: n.snapState.newestBytes
+            - eval: n.snapState.mu.Unlock()
+              to: n.snapState.mu.Unlock
+            - opt:
+                do:
+                  - return: |-
+                      origin(coreconsensus.MembershipInvalid, errs.String("why", "the learner's snapshot limit is below the newest snapshot"),
+                      				errs.Int64("limit", m.MaxSnapshotBytes), errs.Int64("bytes", newest))
+                    to: origin
+                when: newest > m.MaxSnapshotBytes
+          init:
+            bind: m, ok
+            eval: n.Membership().Member(id)
+            to: n.Membership().Member
+          when: ok && m.MaxSnapshotBytes > 0
       - return: "n.admin(ctx, coreconsensus.EntryMembership, wire.AdminValue{Operator: string(op), Change: wire.ChangePromote, Target: id})"
         to: n.admin
   - of: (*Node).Remove
@@ -16232,6 +16343,8 @@ sequences:
         kind: value
       - id: n.snapState.mu.Unlock
         kind: value
+      - id: n.cuttingSince.Store
+        kind: value
       - id: n.metaAt
         kind: internal
       - id: n.stoppedErr
@@ -16254,6 +16367,10 @@ sequences:
         value: "0"
       - eval: n.snapState.mu.Unlock()
         to: n.snapState.mu.Unlock
+      - eval: n.cuttingSince.Store(n.clk.Now().UnixNano())
+        to: n.cuttingSince.Store
+      - defer: n.cuttingSince.Store(0)
+        to: n.cuttingSince.Store
       - bind: meta, ok
         eval: n.metaAt(idx, term)
         to: n.metaAt
@@ -16364,7 +16481,7 @@ sequences:
         kind: stdlib
       - id: newChunkWriter
         kind: internal
-      - id: snapshotLimit
+      - id: cutLimit
         kind: internal
       - id: snap.WriteTo
         kind: value
@@ -16431,8 +16548,8 @@ sequences:
         eval: newChunkWriter(out, n.cfg.SnapshotCodec, defaultChunkSize)
         to: newChunkWriter
       - set: cw.limit
-        to: snapshotLimit
-        value: snapshotLimit(n.cfg.MaxSnapshotBytes, &meta.Membership)
+        to: cutLimit
+        value: cutLimit(n.cfg.MaxSnapshotBytes, &meta.Membership)
       - opt:
           do:
             - return: alsoFailed(err, "abort", sink.Abort())
@@ -16492,6 +16609,54 @@ sequences:
           key: i
           range: es
       - return: b
+  - of: tooLargeFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: tooLargeFor
+        kind: self
+      - id: conf.Member
+        kind: value
+    steps:
+      - bind: m, ok
+        eval: conf.Member(to)
+        to: conf.Member
+      - opt:
+          do:
+            - return: 0, false
+          when: "!ok || m.MaxSnapshotBytes <= 0"
+      - return: m.MaxSnapshotBytes, meta.EncodedSize > m.MaxSnapshotBytes || meta.DecodedSize > m.MaxSnapshotBytes
+  - of: (*Node).withheld
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).withheld
+        kind: self
+      - id: tooLargeFor
+        kind: internal
+      - id: n.obs.warn
+        kind: internal
+    steps:
+      - bind: conf
+        eval: n.r.Status().Conf
+      - bind: limit, over
+        eval: tooLargeFor(&conf, to, meta)
+        to: tooLargeFor
+      - opt:
+          do:
+            - eval: delete(n.tooLarge, to)
+            - return: "false"
+          when: "!over"
+      - opt:
+          do:
+            - set: n.tooLarge[to]
+              value: meta.ID
+            - eval: |-
+                n.obs.warn("consensus: a member announced a snapshot limit the state no longer fits in, and cannot be installed",
+                			lattr("peer", uint64(to)), lattr("bytes", uint64(snapshotSize(meta))), lattr("limit", uint64(limit)))
+              to: n.obs.warn
+          when: n.tooLarge[to] != meta.ID
+      - return: "true"
   - of: (*Node).afterCut
     participants:
       - id: caller
@@ -17022,6 +17187,12 @@ sequences:
               to: n.r.SnapshotDone
             - return: ""
           when: "!ok"
+      - opt:
+          do:
+            - eval: n.r.SnapshotDone(to, 0, false)
+              to: n.r.SnapshotDone
+            - return: ""
+          when: n.withheld(to, &meta)
       - bind: h, err
         eval: n.cfg.Snapshots.Open(meta.ID)
         to: n.cfg.Snapshots.Open
@@ -17526,6 +17697,44 @@ sequences:
     steps:
       - return: spkiOf(c)
         to: spkiOf
+  - of: (*peerConn).halt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*peerConn).halt
+        kind: self
+      - id: pc.stopOnce.Do
+        kind: value
+    steps:
+      - eval: |-
+          pc.stopOnce.Do(func() {
+          		pc.mu.Lock()
+          		pc.halted = true
+          		c := pc.conn
+          		pc.conn = nil
+          		pc.mu.Unlock()
+          		close(pc.stop)
+          		if c != nil {
+          			abandon(c.Close())
+          		}
+          	})
+        to: pc.stopOnce.Do
+  - of: (*peerConn).track
+    steps:
+      - lock:
+          mutex: pc.mu
+      - opt:
+          do:
+            - return: "false"
+          when: pc.halted
+      - set: pc.conn
+        value: nil
+      - opt:
+          do:
+            - set: pc.conn
+              value: link.conn
+          when: link.conn != nil
+      - return: "true"
   - of: (*TransportConfig).validate
     participants:
       - id: caller
@@ -18357,8 +18566,17 @@ sequences:
         eval: t.out[k]
       - opt:
           do:
+            - opt:
+                do:
+                  - eval: t.mu.Unlock()
+                    to: t.mu.Unlock
+                  - return: ""
+                init:
+                  bind: _, ok
+                  eval: t.byID[to]
+                when: "!ok"
             - set: pc
-              value: "&peerConn{queue: make(chan []byte, senderQueueFrames)}"
+              value: "&peerConn{queue: make(chan []byte, senderQueueFrames), stop: make(chan struct{})}"
             - set: t.out[k]
               value: pc
             - eval: t.wg.Add(1)
@@ -18428,6 +18646,9 @@ sequences:
                   - comm: <-t.done
                     do:
                       - return: ""
+                  - comm: <-pc.stop
+                    do:
+                      - return: ""
                   - comm: f = <-pc.queue
             - set: batch
               to: takeBatch
@@ -18435,6 +18656,10 @@ sequences:
             - eval: t.sendBatch(k, &link, batch)
               to: t.sendBatch
             - eval: clear(batch)
+            - opt:
+                do:
+                  - return: ""
+                when: "!pc.track(&link)"
           forever: true
   - of: (*senderLink).close
     participants:
@@ -18778,6 +19003,8 @@ sequences:
         kind: internal
       - id: abandon
         kind: internal
+      - id: pc.halt
+        kind: internal
     steps:
       - lock:
           mutex: t.mu
@@ -18815,6 +19042,20 @@ sequences:
           key: c
           range: t.in
           value: spki
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: pc.halt()
+                    to: pc.halt
+                  - eval: delete(t.out, k)
+                init:
+                  bind: _, ok
+                  eval: byID[k.to]
+                when: "!ok"
+          key: k
+          range: t.out
+          value: pc
   - of: indexMembers
     steps:
       - var:
@@ -19069,6 +19310,8 @@ sequences:
         kind: internal
       - id: context
         kind: stdlib
+      - id: boundUnacknowledged
+        kind: internal
       - id: writeChunk
         kind: internal
       - id: readChunk
@@ -19107,7 +19350,17 @@ sequences:
             - return: err
           init:
             bind: err
-            eval: writeChunk(c, encodeOffer(offer))
+            eval: boundUnacknowledged(c.NetConn(), t.cfg.WriteTimeout)
+            to: boundUnacknowledged
+          when: err != nil
+      - bind: w
+        eval: "boundedWriter{conn: c, half: c, d: t.cfg.WriteTimeout}"
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: writeChunk(w, encodeOffer(offer))
             to: writeChunk
           when: err != nil
       - bind: acc, err
@@ -19137,7 +19390,7 @@ sequences:
             - return: err
           init:
             bind: err
-            eval: streamFrom(c, open, off)
+            eval: streamFrom(w, open, off)
             to: streamFrom
           when: err != nil
       - return: installResult(c)
@@ -19179,6 +19432,62 @@ sequences:
           when: err != nil
       - return: c.CloseWrite()
         to: c.CloseWrite
+  - of: boundedWriter.Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: boundedWriter.Write
+        kind: self
+      - id: w.conn.SetWriteDeadline
+        kind: value
+      - id: w.conn.Write
+        kind: value
+    steps:
+      - bind: "n"
+        eval: "0"
+      - loop:
+          cond: n < len(p)
+          do:
+            - opt:
+                do:
+                  - return: n, err
+                init:
+                  bind: err
+                  eval: w.conn.SetWriteDeadline(time.Now().Add(w.d))
+                  to: w.conn.SetWriteDeadline
+                when: err != nil
+            - bind: k, err
+              eval: w.conn.Write(p[n:min(len(p), n+boundedWriteBytes)])
+              to: w.conn.Write
+            - op: +=
+              set: "n"
+              value: k
+            - opt:
+                do:
+                  - return: n, err
+                when: err != nil
+      - return: n, nil
+  - of: boundedWriter.CloseWrite
+    participants:
+      - id: caller
+        kind: actor
+      - id: boundedWriter.CloseWrite
+        kind: self
+      - id: w.conn.SetWriteDeadline
+        kind: value
+      - id: w.half.CloseWrite
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: w.conn.SetWriteDeadline(time.Now().Add(w.d))
+            to: w.conn.SetWriteDeadline
+          when: err != nil
+      - return: w.half.CloseWrite()
+        to: w.half.CloseWrite
   - of: installResult
     participants:
       - id: caller
