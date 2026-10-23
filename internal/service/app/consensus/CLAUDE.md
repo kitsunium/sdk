@@ -193,7 +193,9 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   flight is written. Dropped, a node that applied nothing more kept its tail
   uncut and its log uncompacted (#375, `TestACoalescedCutIsMade`). A write
   that fails clears the coalesced trigger with the in-flight flag
-  (`TestAFailedCutClearsTheCoalescedTrigger`).
+  (`TestAFailedCutClearsTheCoalescedTrigger`), and a `SaveSnapshot` asks
+  for the one coalesced while it waited for the apply goroutine (#604,
+  `TestATriggerCoalescedDuringASaveIsAsked`).
 - Let a stopped node of a memory-network test hear what the cluster sent
   while it was down: the network keeps those frames and delivers them at the
   restart, which catches the node up by appends where the test meant an

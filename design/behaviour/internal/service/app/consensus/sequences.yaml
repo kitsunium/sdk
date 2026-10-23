@@ -17234,6 +17234,8 @@ sequences:
         kind: internal
       - id: n.obs.info
         kind: internal
+      - id: n.cutPending
+        kind: internal
       - id: req.answer
         kind: internal
     steps:
@@ -17269,8 +17271,8 @@ sequences:
           - do:
               - eval: n.snapState.mu.Lock()
                 to: n.snapState.mu.Lock
-              - set: n.snapState.inFlight
-                value: "false"
+              - set: n.snapState.inFlight, n.snapState.pending
+                value: false, false
               - eval: n.snapState.mu.Unlock()
                 to: n.snapState.mu.Unlock
               - eval: n.cutFailed(err)
@@ -17280,6 +17282,8 @@ sequences:
           do:
             - eval: "n.obs.info(\"consensus: snapshot saved\", lstr(\"operator\", string(req.op)), lattr(\"index\", idx))"
               to: n.obs.info
+            - eval: n.cutPending()
+              to: n.cutPending
           when: err == nil
       - eval: "req.answer(&saveRes{meta: m, h: h, err: err})"
         to: req.answer
