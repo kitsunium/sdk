@@ -365,6 +365,24 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   (`hearOnlyTheLeader`, #588). A setup on disk proposes to whichever node
   leads (`proposeOnDisk`): a leader whose own fdatasync stalls past the
   maximum election timeout hands its leadership over (#554, #587).
+- Hand a held snapshot stream its release with a bare channel send: the
+  stream waits for it only while its context lives, and a leader that lost
+  its leadership stops its streams (#547), so the send had no taker and the
+  test blocked until the binary's timeout —
+  `TestATransferInFlightPinsCompaction`, on `testTimingFast` and with the
+  restarted node granting any PreVote, once in a few hundred `-race` runs
+  (#598). `releaseHeld` bounds the send and says why nobody took it; that
+  test runs on `steadyTiming` behind `hearOnlyTheLeader`, as its siblings.
+- Run a timing contract whose `ElectionTimeoutMin` is not well above the
+  disk's fdatasync latency: a campaign is a durable term and vote on the
+  candidate and on each voter, a voter's queued behind the sync its storage
+  actor is in, so a round costs up to two syncs, and a candidate whose
+  timer fires first starts another term. Measured on three nodes over the
+  shipped data directory, each sync 200–700 ms, a leader crashed eight
+  times: 500 ms–1 s elections stayed leaderless up to 31 s, through 41
+  terms; the default 1–2 s at most 4.8 s, and 11.4 s with syncs of
+  500 ms–1 s (#598). Keep `ElectionTimeoutMin` above three times the p99
+  of `consensus_fsync_latency_seconds`.
 - Forward a removal of the leader without moving leadership first: the
   leader refuses to remove itself, and the call failed MEMBERSHIP_INVALID
   on a follower only. `Remove` transfers to this node (or another voter),

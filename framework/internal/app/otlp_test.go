@@ -208,15 +208,19 @@ func TestAnOTLPSettingAProductDeclaresIsRefused(t *testing.T) {
 }
 
 // collected is an OTLP/HTTP collector that answers 200 and keeps what it
-// received, by path.
+// received, by path, each answer delay after the request on the wall clock.
 type collected struct {
 	mu    sync.Mutex
 	posts map[string][]string
+	delay time.Duration
 }
 
 // serve keeps the request's body under its path.
 func (c *collected) serve(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
+	// A slow round trip, as a loaded runner's loopback can be: the wall
+	// time the export waits on, which no driven clock may turn into hours.
+	time.Sleep(c.delay)
 	c.mu.Lock()
 	c.posts[r.URL.Path] = append(c.posts[r.URL.Path], string(body))
 	c.mu.Unlock()
@@ -246,11 +250,27 @@ func (c *collected) holds(path string, words ...string) bool {
 type drivenClock struct {
 	*clock.ManualClock
 	armed chan time.Duration
+	// horizon is the instant drive never advances the clock past: its
+	// start plus driveHorizon.
+	horizon time.Time
 }
+
+// driveHorizon is how far drive ever moves a drivenClock from its start.
+// The batch sink re-arms its five-second delay each time it fires, so a
+// drive without a horizon advanced the clock five seconds per turn of its
+// loop for as long as a send took on the wall clock — thousands of turns a
+// second —, past an attempt's bound (10h here) and a batch's age (24h)
+// within one slow loopback round trip: the batches were counted expired and
+// the readiness said degraded, as a Windows runner showed (issue #598). An
+// hour holds every wait a case needs — the sink's delay, the metrics'
+// interval, a hundred backoffs of the default curve — and stays far below
+// every bound a case does not test.
+const driveHorizon = time.Hour
 
 // newDrivenClock is a drivenClock at a fixed instant.
 func newDrivenClock() *drivenClock {
-	return &drivenClock{ManualClock: clock.NewManualClock(time.Date(2026, 10, 22, 9, 0, 0, 0, time.UTC)), armed: make(chan time.Duration, 1<<16)}
+	start := time.Date(2026, 10, 22, 9, 0, 0, 0, time.UTC)
+	return &drivenClock{ManualClock: clock.NewManualClock(start), armed: make(chan time.Duration, 1<<16), horizon: start.Add(driveHorizon)}
 }
 
 // report says a wait of d was armed.
@@ -299,19 +319,21 @@ func (t *drivenTimer) Reset(d time.Duration) bool {
 // it is armed, until done holds, failing once twenty seconds passed on the
 // wall clock, which it never sleeps on. A wait below a second — a consumer's
 // idle poll — is never advanced: a batch queued in the process wakes its
-// consumer at once. Nor is an attempt's bound — and with it the batch sink's
-// hand-over of a batch to its queue —, ten hours in these cases, which no
-// advance reaches however far the recurring waits move the clock.
+// consumer at once. Nor is a wait that would take the clock past its
+// horizon (driveHorizon): past it drive only waits for done, so an attempt's
+// bound — and with it the batch sink's hand-over of a batch to its queue —,
+// ten hours in these cases, and a batch's age are never reached, however
+// long a send takes on the wall clock.
 func (c *drivenClock) drive(t *testing.T, what string, done func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for !done() {
 		if time.Now().After(deadline) {
-			t.Fatalf("%s: not reached", what)
+			t.Fatalf("%s: not reached (the clock at %s, its horizon at %s)", what, c.Now().Format(time.TimeOnly), c.horizon.Format(time.TimeOnly))
 		}
 		select {
 		case d := <-c.armed:
-			if d >= time.Second && d < 10*time.Minute {
+			if d >= time.Second && d < 10*time.Minute && !c.Now().Add(d).After(c.horizon) {
 				c.Advance(d)
 			}
 		default:
@@ -323,27 +345,36 @@ func (c *drivenClock) drive(t *testing.T, what string, done func() bool) {
 // A request's span reaches the collector on the trace signal's path, and
 // the framework's metrics of it on the metrics', each an OTLP/JSON request
 // naming the product: the export runs as a component of the app, on its
-// clock, and a CLI command exports nothing.
+// clock, and a CLI command exports nothing. A collector that answers slowly
+// loses nothing either: while the export waits on the wall clock, the
+// app's clock stays below every bound (issue #598).
 func TestAnAppsSpansAndMetricsReachTheCollector(t *testing.T) {
-	col := &collected{posts: map[string][]string{}}
-	srv := httptest.NewServer(http.HandlerFunc(col.serve))
-	t.Cleanup(srv.Close)
-	clk := newDrivenClock()
-	a, err := startPolicies(t, []*app.Service{pingService()}, app.Clock(clk),
-		app.OTLP(app.OTLPEndpoint(srv.URL), app.OTLPSendTimeout(10*time.Hour)),
-		app.Set("otlp-drain", time.Duration(0)), app.Set("otlp-interval", 7*time.Second))
-	if err != nil {
-		t.Fatal(err)
-	}
-	expectAnswer(t, call(t, a, "GET /orders/ping", noBody), http.StatusNoContent, "")
-	clk.drive(t, "the span and the metrics sent", func() bool {
-		return col.holds("/v1/traces", `"shop"`, "ping") && col.holds("/v1/metrics", "app.node.runs", "orders/endpoint/ping")
-	})
-	if r := readiness(t, a); !strings.Contains(string(r.body), `"name":"otlp","status":"healthy"`) {
-		t.Errorf("the readiness: %s", r.body)
-	}
-	if c := componentNamed(a, "otlp"); c == nil || c.State != model.ComponentUp {
-		t.Errorf("the export's component: %+v", c)
+	for _, tc := range []struct {
+		name  string
+		delay time.Duration
+	}{{"at once", 0}, {"slowly", 200 * time.Millisecond}} {
+		t.Run(tc.name, func(t *testing.T) {
+			col := &collected{posts: map[string][]string{}, delay: tc.delay}
+			srv := httptest.NewServer(http.HandlerFunc(col.serve))
+			t.Cleanup(srv.Close)
+			clk := newDrivenClock()
+			a, err := startPolicies(t, []*app.Service{pingService()}, app.Clock(clk),
+				app.OTLP(app.OTLPEndpoint(srv.URL), app.OTLPSendTimeout(10*time.Hour)),
+				app.Set("otlp-drain", time.Duration(0)), app.Set("otlp-interval", 7*time.Second))
+			if err != nil {
+				t.Fatal(err)
+			}
+			expectAnswer(t, call(t, a, "GET /orders/ping", noBody), http.StatusNoContent, "")
+			clk.drive(t, "the span and the metrics sent", func() bool {
+				return col.holds("/v1/traces", `"shop"`, "ping") && col.holds("/v1/metrics", "app.node.runs", "orders/endpoint/ping")
+			})
+			if r := readiness(t, a); !strings.Contains(string(r.body), `"name":"otlp","status":"healthy"`) {
+				t.Errorf("the readiness: %s", r.body)
+			}
+			if c := componentNamed(a, "otlp"); c == nil || c.State != model.ComponentUp {
+				t.Errorf("the export's component: %+v", c)
+			}
+		})
 	}
 }
 

@@ -97,6 +97,21 @@ func hearOnlyTheLeader(c *cluster, l, lag *testNode) {
 	}
 }
 
+// releaseHeld lets the stream the leader holds go on. The stream waits for
+// its release only while its context lives: a leader that lost its
+// leadership stops its streams (#547), and an unbounded send then blocked
+// the test for good — an iteration in about 270 under load hung there
+// until the binary's timeout (#598). The send is bounded, and its failure
+// says why nothing took it.
+func releaseHeld(t *testing.T, lt *holdTransport, l *testNode) {
+	t.Helper()
+	select {
+	case lt.release <- struct{}{}:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the held snapshot stream no longer waits for its release: %d held streams cancelled, the leader's status %+v", lt.cancelled.Load(), l.node.Status())
+	}
+}
+
 // steadyTiming is testTimingFast with election timeouts of 500 ms to 1 s,
 // for a test whose leader must keep its leadership throughout.
 func steadyTiming() coreconsensus.TimingContractSpec {
@@ -111,6 +126,11 @@ func steadyTiming() coreconsensus.TimingContractSpec {
 // it was gone, the leader offered its newest snapshot again, and under a
 // sustained write rate the follower installed snapshot after snapshot and
 // never caught up.
+//
+// The leader must keep its leadership throughout: one that lost it stopped
+// the stream the test held (#547), and the release the test sent then had
+// no taker (#598). The case runs on steadyTiming and hears the restarted
+// node only from the leader, as its siblings do since #588.
 func TestATransferInFlightPinsCompaction(t *testing.T) {
 	trs := map[coreconsensus.NodeID]*holdTransport{}
 	var mu sync.Mutex
@@ -128,6 +148,7 @@ func TestATransferInFlightPinsCompaction(t *testing.T) {
 		}
 		trs[tn.id] = ht
 		cfg.Transport = ht
+		cfg.InitialTiming = steadyTiming()
 	}
 	newClusterWith(t, c)
 	l := c.settledLeader(5 * time.Second)
@@ -141,42 +162,36 @@ func TestATransferInFlightPinsCompaction(t *testing.T) {
 	lt := trs[l.id]
 	mu.Unlock()
 	lt.holding.Store(true)
+	hearOnlyTheLeader(c, l, lag)
 	c.start(lag)
-	n := 0
-	for round := range 4 {
+	select {
+	case <-lt.started:
+	case <-time.After(10 * time.Second):
+		f, _ := l.log.Bounds()
+		t.Fatalf("no snapshot offered to the lagging node: lag applied %d leader first %d lag snaps %d streams %d lagfirst %v", lag.node.Status().Applied, f, len(must(lag.snaps.List())(t)), lt.streams.Load(), func() uint64 { a, _ := lag.log.Bounds(); return a }())
+	}
+	// Two cuts' worth of writes while the transfer is held.
+	for i := range 45 {
+		propose(t, l.node, fmt.Sprintf("r0-%d=v", i))
+	}
+	// The offer that follows the first transfer, if any, is held again: it
+	// is the defect. The node catches up by appends, or is offered that
+	// second snapshot, whichever comes first.
+	releaseHeld(t, lt, l)
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if v, _ := lag.sm.get("r0-44"); v == "v" {
+			lt.holding.Store(false)
+			return
+		}
 		select {
 		case <-lt.started:
-		case <-time.After(10 * time.Second):
-			f, _ := l.log.Bounds()
-			t.Fatalf("round %d: no snapshot offered to the lagging node: lag applied %d leader first %d lag snaps %d streams %d lagfirst %v", round, lag.node.Status().Applied, f, len(must(lag.snaps.List())(t)), lt.streams.Load(), func() uint64 { a, _ := lag.log.Bounds(); return a }())
+			t.Fatalf("the lagging node needed another snapshot after the first transfer: streams completed %d, its status %+v, the leader's log starts at %d",
+				lt.streams.Load(), lag.node.Status(), func() uint64 { f, _ := l.log.Bounds(); return f }())
+		default:
 		}
-		// Two cuts' worth of writes while the transfer is held.
-		for i := range 45 {
-			propose(t, l.node, fmt.Sprintf("r%d-%d=v", round, i))
-			n++
+		if time.Now().After(deadline) {
+			t.Fatalf("the lagging node never caught up after the first transfer: streams completed %d, its status %+v", lt.streams.Load(), lag.node.Status())
 		}
-		if round > 0 {
-			lt.holding.Store(false)
-		}
-		lt.release <- struct{}{}
-		if round == 0 {
-			// The offer that follows the first transfer, if any, is held
-			// again: it is the defect.
-			ok := false
-			for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
-				if v, _ := lag.sm.get("r0-44"); v == "v" {
-					ok = true
-					break
-				}
-			}
-			if ok {
-				lt.holding.Store(false)
-				return
-			}
-			continue
-		}
-		t.Fatalf("the lagging node needed another snapshot after the first transfer: offers held %d, streams completed %d, its status %+v, the leader's log starts at %d",
-			round+1, lt.streams.Load(), lag.node.Status(), func() uint64 { f, _ := l.log.Bounds(); return f }())
 	}
 }
 
@@ -238,7 +253,7 @@ func TestAStreamedSnapshotPinsCompactionUntilThePeerCatchesUp(t *testing.T) {
 	// install and the cut-off would have caught it up, and its pin ended
 	// with every check below passing for that reason alone.
 	c.net.Cut(lag.id, l.id, true)
-	lt.release <- struct{}{}
+	releaseHeld(t, lt, l)
 	select {
 	case <-ended:
 	case <-time.After(10 * time.Second):
@@ -340,7 +355,7 @@ func TestAPinThatEndsCompactsTheLogWithoutAWrite(t *testing.T) {
 		t.Fatal("no snapshot offered to the lagging node")
 	}
 	lt.holding.Store(false)
-	lt.release <- struct{}{}
+	releaseHeld(t, lt, l)
 	for i := range 45 {
 		propose(t, l.node, fmt.Sprintf("c%d=v", i))
 	}
