@@ -36,8 +36,9 @@ the excess into a single aggregated overflow series.
 | `gauge.go` | `memGauge` (atomic float64 bits, CAS) |
 | `histogram.go` | `memHistogram` (sorted bounds + atomic counts/sum, delta-consuming snapshot) |
 | `exporter_text.go` / `metric_header.go` | `textExporter` + default **stderr** `Text` + `NewTextExporter`; `metricHeader`, what one `# metric` line says about a name |
-| `exporter_otlpjson.go` | `EncodeOTLPJSON` (the ENCODER — snapshot to bytes, no I/O) + the two refusals + `otlpJSONExporter` over the shared `otlp.Stream` + default **stderr** `OTLPJSON` + `NewOTLPJSONExporter`; the two `EXPORT_FAILED` wraps the shared marshal and stream leave under |
+| `exporter_otlpjson.go` | `EncodeOTLPJSON` (the ENCODER — snapshot to bytes, no I/O) + the two refusals + `otlpJSONExporter` over the shared `otlp.Stream` + default **stderr** `OTLPJSON` + `NewOTLPJSONExporter`; the `EXPORT_FAILED` wrap the shared stream leaves under (rendering cannot fail, so it has none) |
 | `otlp_request.go` | the OTLP payload TREE — a Go mirror of `collector/metrics` and `metrics/v1`, in schema field-number order, restricted to the fields this SDK produces; the `common`/`resource` messages and the proto3-JSON scalars it embeds are the shared package's |
+| `otlp_append.go` | the tree's `appendJSON` methods and `otlpDocCapacity`: the document written into one buffer with the shared appenders, byte for byte what `otlp.Marshal` renders — `otlp_append_internal_test.go` holds it to that on 2 000 random trees; §The OTLP/JSON encoder |
 | `exporter_otlphttp.go` | the EMITTER: `NewOTLPHTTPExporter` + `OTLPRetryable` + `OTLPMetricsPath` + `DefaultOTLPTimeout`/`DefaultOTLPMaxResponseBytes` + `otlpSignal`, this signal's `otlp.SignalSpec` — its codes and wording for every verdict the shared sender reaches |
 | `otlphttp_config.go` | `OTLPHTTPConfig`, a DEFINED type over the shared `otlp.HTTPConfig` (endpoint, client, headers, timeout, response cap — documented there once) |
 | `otlp_export_response.go` | `ExportMetricsPartialSuccess` reduced to `rejectedDataPoints` + `decodeRejected`, the one member of the answer that is this signal's own |
@@ -467,7 +468,21 @@ valid JSON number — including the exponent notation `1e+21`.
 defence for JSON inside `<script>`); an OTLP body never is, and URL attributes
 (`url.full`, `http.route`) carry `&`. Only `json.Encoder` can turn it off, and it
 appends a newline a single-document body must not carry — hence the shared
-`otlp.Marshal`.
+`otlp.Marshal`, which is the REFERENCE rendering.
+
+**The tree is rendered by appenders, held to `otlp.Marshal` byte for byte.**
+`EncodeOTLPJSON` builds the tree exactly as before (every refusal happens there),
+then writes it with `otlp_append.go`'s `appendJSON` methods and the shared
+appenders into one buffer sized by `otlpDocCapacity`, instead of handing it to
+`encoding/json`. Reflection and a fresh `[]byte` per scalar `MarshalJSON` — which
+`encoding/json` then re-validates — were the cost: 1 000 counter points went from
+~4.1 ms / 9 058 allocations to ~0.9 ms / 5 042, 1 000 histogram points from
+~12.7 ms / 42 992 to ~3.3 ms / 7 042 (BENCH.md §OTLP/JSON encoding). The
+remaining allocations are the tree's. `otlp_append_internal_test.go` compares the
+two renderings on 2 000 random trees — nil, empty and populated lists, every
+oneof case, non-finite and extreme numbers, every string escape class — and a
+field added to the tree must be added to its `appendJSON` in the same change, or
+that test fails.
 
 **An unset `time.Time` encodes as 0.** `UnixNano` is *undefined* out of range:
 the zero `Time` returns `-6795364578871345152`, which as a `uint64` timestamp
@@ -682,7 +697,9 @@ cloned at construction so a later caller mutation cannot change the wire.
   the histogram `sum` or `isMonotonic` at their zero; skip a non-finite bound the
   way the Prometheus connector does (it breaks
   `len(bucketCounts) == len(explicitBounds) + 1`); turn HTML escaping back on, or
-  reach for `json.Marshal` instead of the configured `json.Encoder`.
+  reach for `json.Marshal` instead of the configured `json.Encoder`; add a field
+  to the tree without writing it in its `appendJSON`, or let the appenders drift
+  from `otlp.Marshal` — `TestOTLPAppendJSONIsMarshalsRendering` is the gate.
 - Loosen the OTLP/HTTP emitter (§The OTLP/HTTP emitter): register it or give it
   a default endpoint; build its default client without a `Transport` of its own
   (a nil one is `http.DefaultTransport`, which any code in the process can

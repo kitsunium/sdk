@@ -35,8 +35,9 @@ func NewStream(dst io.Writer, failure *errs.WrapParams) *Stream {
 
 // Emit writes doc followed by DocumentTerminator in ONE write, so a refusal
 // upstream leaves the destination untouched and the only error surface left is
-// the write itself. doc must be a document Marshal returned; it is extended in
-// place by one byte, which its spare capacity usually absorbs.
+// the write itself. doc must be one whole document — Marshal's, or a signal's
+// appender's; it is extended in place by one byte, which its spare capacity
+// usually absorbs.
 func (s *Stream) Emit(doc []byte) error {
 	//: terminate the document so consecutive exports do not run together.
 	doc = append(doc, DocumentTerminator)

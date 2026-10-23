@@ -85,3 +85,38 @@ workflows:
           key: i
           range: len(value)
       - return: buf
+  - of: otlpDocCapacity
+    steps:
+      - bind: size
+        eval: otlpDocEnvelopeBytes
+      - loop:
+          do:
+            - switch:
+                cases:
+                  - case: metric.Gauge != nil
+                    do:
+                      - op: +=
+                        set: size
+                        value: len(metric.Gauge.DataPoints) * otlpDocPointBytes
+                  - case: metric.Sum != nil
+                    do:
+                      - op: +=
+                        set: size
+                        value: len(metric.Sum.DataPoints) * otlpDocPointBytes
+                  - case: metric.Histogram != nil
+                    do:
+                      - loop:
+                          do:
+                            - bind: point
+                              eval: "&metric.Histogram.DataPoints[j]"
+                            - op: +=
+                              set: size
+                              value: otlpDocPointBytes + (len(point.BucketCounts)+len(point.ExplicitBounds))*otlpDocBucketBytes
+                          key: j
+                          range: metric.Histogram.DataPoints
+                init:
+                  bind: metric
+                  eval: "&list[i]"
+          key: i
+          range: list
+      - return: size

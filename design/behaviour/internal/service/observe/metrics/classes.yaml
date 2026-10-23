@@ -222,6 +222,26 @@ constants:
         name: groupHistogram
     name: groupSum
   - doc: |-
+      The capacity an OTLP/JSON document starts with, so the appends below grow it
+      a few times rather than from nothing: the envelope, plus an estimate per data
+      point and per histogram bucket. An estimate, never a bound — append grows the
+      buffer past it.
+    grouped: true
+    items:
+      - name: otlpDocEnvelopeBytes
+        type: int
+        value: "256"
+      - name: otlpDocPointBytes
+        type: int
+        value: "320"
+      - name: otlpDocBucketBytes
+        type: int
+        value: "8"
+      - name: otlpDocDecimalBase
+        type: int
+        value: "10"
+    name: otlpDocEnvelopeBytes
+  - doc: |-
       maxStackAttrs is how many attributes the lookup path sorts without touching
       the heap. Eight is already an unusual number of dimensions on one metric;
       beyond it the sort falls back to a heap clone, which is correct and merely
@@ -270,7 +290,7 @@ files:
   - decls:
       - otlpJSONExporterName
       - otlpTemporalityUnspecified
-      - otlpEncodeFailure
+      - otlpWriteFailure
       - otlpJSONExporter
       - EncodeOTLPJSON
       - otlpMetricList
@@ -407,6 +427,21 @@ files:
       - (*nameState).overflowSeries
       - (*memMeter).bindName
     name: name_state.go
+  - decls:
+      - otlpDocEnvelopeBytes
+      - (*otlpRequest).appendJSON
+      - (*otlpResourceMetrics).appendJSON
+      - (*otlpScopeMetrics).appendJSON
+      - (*otlpMetric).appendJSON
+      - (*otlpSum).appendJSON
+      - (*otlpHistogram).appendJSON
+      - appendNumberPoints
+      - (*otlpNumberDataPoint).appendJSON
+      - (*otlpHistogramDataPoint).appendJSON
+      - appendBucketCounts
+      - appendExplicitBounds
+      - otlpDocCapacity
+    name: otlp_append.go
   - decls:
       - otlpPartialSuccess
       - (*otlpPartialSuccess).RejectedCount
@@ -987,6 +1022,30 @@ functions:
     name: observableBuilder
     params: kind instrumentKind
     results: func() *memSum
+  - doc: |-
+      appendNumberPoints appends the dataPoints member of a Gauge or a Sum, or
+      nothing when there are none — the member is omitted when empty.
+    name: appendNumberPoints
+    params: dst []byte, points []otlpNumberDataPoint
+    results: "[]byte"
+  - doc: |-
+      appendBucketCounts appends the bucketCounts member — decimal strings — or
+      nothing when the ladder is empty, the member being omitted then.
+    name: appendBucketCounts
+    params: dst []byte, counts []otlp.Uint64
+    results: "[]byte"
+  - doc: |-
+      appendExplicitBounds appends the explicitBounds member — numbers — or
+      nothing when there are no bounds, the member being omitted then.
+    name: appendExplicitBounds
+    params: dst []byte, bounds []otlp.Double
+    results: "[]byte"
+  - doc: |-
+      otlpDocCapacity estimates the size of the document list renders into, so the
+      buffer starts near it.
+    name: otlpDocCapacity
+    params: list []otlpMetric
+    results: int
   - doc: |-
       decodeRejected reads a 2xx body's rejected count through this signal's own
       partial-success message — the SignalSpec.DecodeRejected the shared sender
@@ -1780,6 +1839,15 @@ types:
       - name: ResourceMetrics
         type: "[]otlpResourceMetrics"
     kind: struct
+    methods:
+      - doc: |-
+          appendJSON appends the request to dst, byte for byte what otlp.Marshal
+          renders for it — member order, omissions, a nil slice that is not omitted
+          spelled null — without reflection and without a slice per scalar.
+        name: appendJSON
+        params: dst []byte
+        recv: r *otlpRequest
+        results: "[]byte"
     name: otlpRequest
   - doc: |-
       otlpResourceMetrics is ResourceMetrics: resource (1) + scopeMetrics (2).
@@ -1792,6 +1860,12 @@ types:
       - name: ScopeMetrics
         type: "[]otlpScopeMetrics"
     kind: struct
+    methods:
+      - doc: appendJSON appends one ResourceMetrics.
+        name: appendJSON
+        params: dst []byte
+        recv: r *otlpResourceMetrics
+        results: "[]byte"
     name: otlpResourceMetrics
   - doc: |-
       otlpScopeMetrics is ScopeMetrics: scope (1) + metrics (2), with the same
@@ -1802,6 +1876,12 @@ types:
       - name: Metrics
         type: "[]otlpMetric"
     kind: struct
+    methods:
+      - doc: appendJSON appends one ScopeMetrics, its metrics omitted when empty.
+        name: appendJSON
+        params: dst []byte
+        recv: s *otlpScopeMetrics
+        results: "[]byte"
     name: otlpScopeMetrics
   - doc: |-
       otlpMetric is Metric: name (1) + description (2), plus the data oneof —
@@ -1832,6 +1912,14 @@ types:
       - name: Histogram
         type: "*otlpHistogram"
     kind: struct
+    methods:
+      - doc: |-
+          appendJSON appends one Metric: its name, its description when it has one,
+          and the one data case that is set.
+        name: appendJSON
+        params: dst []byte
+        recv: m *otlpMetric
+        results: "[]byte"
     name: otlpMetric
   - doc: |-
       otlpGauge is Gauge: dataPoints (1) and nothing else. There is no
@@ -1858,6 +1946,12 @@ types:
       - name: IsMonotonic
         type: bool
     kind: struct
+    methods:
+      - doc: appendJSON appends one Sum; isMonotonic is always emitted.
+        name: appendJSON
+        params: dst []byte
+        recv: s *otlpSum
+        results: "[]byte"
     name: otlpSum
   - doc: |-
       otlpHistogram is Histogram: dataPoints (1) + aggregationTemporality (2).
@@ -1869,6 +1963,12 @@ types:
       - name: AggregationTemporality
         type: int
     kind: struct
+    methods:
+      - doc: appendJSON appends one Histogram.
+        name: appendJSON
+        params: dst []byte
+        recv: h *otlpHistogram
+        results: "[]byte"
     name: otlpHistogram
   - doc: |-
       otlpNumberDataPoint is NumberDataPoint — the point shape a Sum and a Gauge
@@ -1894,6 +1994,12 @@ types:
       - name: Attributes
         type: "[]otlp.KeyValue"
     kind: struct
+    methods:
+      - doc: appendJSON appends one NumberDataPoint, in field-number order.
+        name: appendJSON
+        params: dst []byte
+        recv: p *otlpNumberDataPoint
+        results: "[]byte"
     name: otlpNumberDataPoint
   - doc: |-
       otlpHistogramDataPoint is HistogramDataPoint, again in field-number order:
@@ -1925,6 +2031,14 @@ types:
       - name: Attributes
         type: "[]otlp.KeyValue"
     kind: struct
+    methods:
+      - doc: |-
+          appendJSON appends one HistogramDataPoint, in field-number order; sum is
+          never omitted, and a nil one is null.
+        name: appendJSON
+        params: dst []byte
+        recv: p *otlpHistogramDataPoint
+        results: "[]byte"
     name: otlpHistogramDataPoint
   - kind: named
     name: OTLPHTTPConfig
@@ -2169,19 +2283,6 @@ vars:
   - grouped: true
     items:
       - doc: |-
-          otlpEncodeFailure is the wrap a rendering fault in the shared marshal leaves
-          under: this signal's EXPORT_FAILED, in its own words. Near-impossible — every
-          field of the tree is a Go primitive or one of the shared Marshalers — and
-          still typed rather than swallowed.
-        name: otlpEncodeFailure
-        value: |-
-          errs.WrapParams{
-          		Code:    coremetrics.CodeExportFailed,
-          		Reason:  "EXPORT_FAILED",
-          		Public:  "The metrics exporter failed to ship the snapshot",
-          		Private: "service/observe/metrics: the OTLP/JSON encoder could not render the payload",
-          	}
-      - doc: |-
           otlpWriteFailure is the wrap a writer fault leaves under when the
           writer-bound exporter emits a document: this signal's EXPORT_FAILED.
         name: otlpWriteFailure
@@ -2205,7 +2306,7 @@ vars:
           client on import would be strictly worse than arming a writer.
         name: OTLPJSON
         value: coremetrics.RegisterExporter(newOTLPJSONExporter(otlpJSONExporterName, os.Stderr))
-    name: otlpEncodeFailure
+    name: otlpWriteFailure
   - doc: |-
       Prometheus is the default Prometheus connector, registered to write snapshots
       to stderr. Use NewPrometheusExporter for the writer a scrape actually needs.

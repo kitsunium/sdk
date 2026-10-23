@@ -33,17 +33,6 @@ const (
 )
 
 var (
-	// otlpEncodeFailure is the wrap a rendering fault in the shared marshal leaves
-	// under: this signal's EXPORT_FAILED, in its own words. Near-impossible — every
-	// field of the tree is a Go primitive or one of the shared Marshalers — and
-	// still typed rather than swallowed.
-	otlpEncodeFailure = errs.WrapParams{
-		Code:    coretrace.CodeExportFailed,
-		Reason:  "EXPORT_FAILED",
-		Public:  "The trace exporter failed to ship the spans",
-		Private: "service/observe/trace: the OTLP/JSON encoder could not render the payload",
-	}
-
 	// otlpWriteFailure is the wrap a writer fault leaves under when the
 	// writer-bound exporter emits a document: this signal's EXPORT_FAILED.
 	otlpWriteFailure = errs.WrapParams{
@@ -124,8 +113,12 @@ func EncodeOTLPJSON(spans coretrace.SpansValue) (doc []byte, err error) {
 		Resource:   otlp.ResourceOf(spans.Resource),
 		ScopeSpans: []otlpScopeSpans{scope},
 	}
-	//: marshal the tree with HTML escaping off — see otlp.Marshal.
-	return otlp.Marshal(otlpRequest{ResourceSpans: []otlpResourceSpans{resource}}, &otlpEncodeFailure)
+	request := otlpRequest{ResourceSpans: []otlpResourceSpans{resource}}
+	//: render the tree straight into one buffer sized near the document — the
+	//: bytes otlp.Marshal would produce for it, with HTML escaping off, but
+	//: without reflection and without a slice per scalar. Rendering cannot
+	//: fail: every refusal happened while the tree was built.
+	return request.appendJSON(make([]byte, 0, otlpDocCapacity(rendered))), nil
 }
 
 // otlpSpans renders a batch, validating each span before any of them is encoded.

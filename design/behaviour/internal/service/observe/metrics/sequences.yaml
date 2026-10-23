@@ -113,8 +113,8 @@ sequences:
         kind: self
       - id: otlpMetricList
         kind: internal
-      - id: otlp
-        kind: package
+      - id: request.appendJSON
+        kind: internal
     steps:
       - bind: list, buildErr
         eval: otlpMetricList(snap)
@@ -135,8 +135,10 @@ sequences:
           		Resource:     otlp.ResourceOf(snap.Resource),
           		ScopeMetrics: []otlpScopeMetrics{scope},
           	}
-      - return: "otlp.Marshal(otlpRequest{ResourceMetrics: []otlpResourceMetrics{resource}}, &otlpEncodeFailure)"
-        to: otlp
+      - bind: request
+        eval: "otlpRequest{ResourceMetrics: []otlpResourceMetrics{resource}}"
+      - return: request.appendJSON(make([]byte, 0, otlpDocCapacity(list))), nil
+        to: request.appendJSON
   - of: otlpMetricList
     participants:
       - id: caller
@@ -2366,6 +2368,502 @@ sequences:
             - panic: coremetrics.InstrumentKindConflict.Error()
           when: state.kind != want
       - return: state
+  - of: (*otlpRequest).appendJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpRequest).appendJSON
+        kind: self
+      - id: otlp
+        kind: package
+      - id: r.ResourceMetrics[i].appendJSON
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, '{')
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "resourceMetrics")
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendNull(dst)
+            - return: append(dst, '}')
+          when: r.ResourceMetrics == nil
+      - set: dst
+        value: append(dst, '[')
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: dst
+                    value: append(dst, ',')
+                when: i > 0
+            - set: dst
+              to: r.ResourceMetrics[i].appendJSON
+              value: r.ResourceMetrics[i].appendJSON(dst)
+          key: i
+          range: r.ResourceMetrics
+      - return: append(dst, ']', '}')
+  - of: (*otlpResourceMetrics).appendJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpResourceMetrics).appendJSON
+        kind: self
+      - id: otlp
+        kind: package
+      - id: r.Resource.AppendJSON
+        kind: value
+      - id: r.ScopeMetrics[i].appendJSON
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, '{')
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "resource")
+      - set: dst
+        to: r.Resource.AppendJSON
+        value: r.Resource.AppendJSON(dst)
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "scopeMetrics")
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendNull(dst)
+            - return: append(dst, '}')
+          when: r.ScopeMetrics == nil
+      - set: dst
+        value: append(dst, '[')
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: dst
+                    value: append(dst, ',')
+                when: i > 0
+            - set: dst
+              to: r.ScopeMetrics[i].appendJSON
+              value: r.ScopeMetrics[i].appendJSON(dst)
+          key: i
+          range: r.ScopeMetrics
+      - return: append(dst, ']', '}')
+  - of: (*otlpScopeMetrics).appendJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpScopeMetrics).appendJSON
+        kind: self
+      - id: otlp
+        kind: package
+      - id: s.Scope.AppendJSON
+        kind: value
+      - id: s.Metrics[i].appendJSON
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, '{')
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "scope")
+      - set: dst
+        to: s.Scope.AppendJSON
+        value: s.Scope.AppendJSON(dst)
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "metrics")
+            - set: dst
+              value: append(dst, '[')
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - set: dst
+                          value: append(dst, ',')
+                      when: i > 0
+                  - set: dst
+                    to: s.Metrics[i].appendJSON
+                    value: s.Metrics[i].appendJSON(dst)
+                key: i
+                range: s.Metrics
+            - set: dst
+              value: append(dst, ']')
+          when: len(s.Metrics) > 0
+      - return: append(dst, '}')
+  - of: (*otlpMetric).appendJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpMetric).appendJSON
+        kind: self
+      - id: otlp
+        kind: package
+      - id: appendNumberPoints
+        kind: internal
+      - id: m.Sum.appendJSON
+        kind: internal
+      - id: m.Histogram.appendJSON
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, '{')
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "name")
+      - set: dst
+        to: otlp
+        value: otlp.AppendString(dst, m.Name)
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "description")
+            - set: dst
+              to: otlp
+              value: otlp.AppendString(dst, m.Description)
+          when: m.Description != ""
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "gauge")
+            - set: dst
+              value: append(dst, '{')
+            - set: dst
+              to: appendNumberPoints
+              value: appendNumberPoints(dst, m.Gauge.DataPoints)
+            - set: dst
+              value: append(dst, '}')
+          when: m.Gauge != nil
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "sum")
+            - set: dst
+              to: m.Sum.appendJSON
+              value: m.Sum.appendJSON(dst)
+          when: m.Sum != nil
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "histogram")
+            - set: dst
+              to: m.Histogram.appendJSON
+              value: m.Histogram.appendJSON(dst)
+          when: m.Histogram != nil
+      - return: append(dst, '}')
+  - of: (*otlpSum).appendJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpSum).appendJSON
+        kind: self
+      - id: appendNumberPoints
+        kind: internal
+      - id: otlp
+        kind: package
+      - id: strconv
+        kind: stdlib
+    steps:
+      - set: dst
+        value: append(dst, '{')
+      - set: dst
+        to: appendNumberPoints
+        value: appendNumberPoints(dst, s.DataPoints)
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "aggregationTemporality")
+      - set: dst
+        to: strconv
+        value: strconv.AppendInt(dst, int64(s.AggregationTemporality), otlpDocDecimalBase)
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "isMonotonic")
+      - set: dst
+        to: otlp
+        value: otlp.AppendBool(dst, s.IsMonotonic)
+      - return: append(dst, '}')
+  - of: (*otlpHistogram).appendJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpHistogram).appendJSON
+        kind: self
+      - id: otlp
+        kind: package
+      - id: h.DataPoints[i].appendJSON
+        kind: internal
+      - id: strconv
+        kind: stdlib
+    steps:
+      - set: dst
+        value: append(dst, '{')
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "dataPoints")
+            - set: dst
+              value: append(dst, '[')
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - set: dst
+                          value: append(dst, ',')
+                      when: i > 0
+                  - set: dst
+                    to: h.DataPoints[i].appendJSON
+                    value: h.DataPoints[i].appendJSON(dst)
+                key: i
+                range: h.DataPoints
+            - set: dst
+              value: append(dst, ']')
+          when: len(h.DataPoints) > 0
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "aggregationTemporality")
+      - set: dst
+        to: strconv
+        value: strconv.AppendInt(dst, int64(h.AggregationTemporality), otlpDocDecimalBase)
+      - return: append(dst, '}')
+  - of: appendNumberPoints
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendNumberPoints
+        kind: self
+      - id: otlp
+        kind: package
+      - id: points[i].appendJSON
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: dst
+          when: len(points) == 0
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "dataPoints")
+      - set: dst
+        value: append(dst, '[')
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: dst
+                    value: append(dst, ',')
+                when: i > 0
+            - set: dst
+              to: points[i].appendJSON
+              value: points[i].appendJSON(dst)
+          key: i
+          range: points
+      - return: append(dst, ']')
+  - of: (*otlpNumberDataPoint).appendJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpNumberDataPoint).appendJSON
+        kind: self
+      - id: otlp
+        kind: package
+      - id: p.StartTimeUnixNano.AppendJSON
+        kind: value
+      - id: p.TimeUnixNano.AppendJSON
+        kind: value
+      - id: p.AsDouble.AppendJSON
+        kind: value
+      - id: p.AsInt.AppendJSON
+        kind: value
+    steps:
+      - set: dst
+        value: append(dst, '{')
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "startTimeUnixNano")
+      - set: dst
+        to: p.StartTimeUnixNano.AppendJSON
+        value: p.StartTimeUnixNano.AppendJSON(dst)
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "timeUnixNano")
+      - set: dst
+        to: p.TimeUnixNano.AppendJSON
+        value: p.TimeUnixNano.AppendJSON(dst)
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "asDouble")
+            - set: dst
+              to: p.AsDouble.AppendJSON
+              value: p.AsDouble.AppendJSON(dst)
+          when: p.AsDouble != nil
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "asInt")
+            - set: dst
+              to: p.AsInt.AppendJSON
+              value: p.AsInt.AppendJSON(dst)
+          when: p.AsInt != nil
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "attributes")
+            - set: dst
+              to: otlp
+              value: otlp.AppendKeyValues(dst, p.Attributes)
+          when: len(p.Attributes) > 0
+      - return: append(dst, '}')
+  - of: (*otlpHistogramDataPoint).appendJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpHistogramDataPoint).appendJSON
+        kind: self
+      - id: otlp
+        kind: package
+      - id: p.StartTimeUnixNano.AppendJSON
+        kind: value
+      - id: p.TimeUnixNano.AppendJSON
+        kind: value
+      - id: p.Count.AppendJSON
+        kind: value
+      - id: p.Sum.AppendJSON
+        kind: value
+      - id: appendBucketCounts
+        kind: internal
+      - id: appendExplicitBounds
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, '{')
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "startTimeUnixNano")
+      - set: dst
+        to: p.StartTimeUnixNano.AppendJSON
+        value: p.StartTimeUnixNano.AppendJSON(dst)
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "timeUnixNano")
+      - set: dst
+        to: p.TimeUnixNano.AppendJSON
+        value: p.TimeUnixNano.AppendJSON(dst)
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "count")
+      - set: dst
+        to: p.Count.AppendJSON
+        value: p.Count.AppendJSON(dst)
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "sum")
+      - alt:
+          - do:
+              - set: dst
+                to: otlp
+                value: otlp.AppendNull(dst)
+            when: p.Sum == nil
+          - do:
+              - set: dst
+                to: p.Sum.AppendJSON
+                value: p.Sum.AppendJSON(dst)
+            else: true
+      - set: dst
+        to: appendBucketCounts
+        value: appendBucketCounts(dst, p.BucketCounts)
+      - set: dst
+        to: appendExplicitBounds
+        value: appendExplicitBounds(dst, p.ExplicitBounds)
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "attributes")
+            - set: dst
+              to: otlp
+              value: otlp.AppendKeyValues(dst, p.Attributes)
+          when: len(p.Attributes) > 0
+      - return: append(dst, '}')
+  - of: appendBucketCounts
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendBucketCounts
+        kind: self
+      - id: otlp
+        kind: package
+      - id: counts[i].AppendJSON
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: dst
+          when: len(counts) == 0
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "bucketCounts")
+      - set: dst
+        value: append(dst, '[')
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: dst
+                    value: append(dst, ',')
+                when: i > 0
+            - set: dst
+              to: counts[i].AppendJSON
+              value: counts[i].AppendJSON(dst)
+          key: i
+          range: counts
+      - return: append(dst, ']')
+  - of: appendExplicitBounds
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendExplicitBounds
+        kind: self
+      - id: otlp
+        kind: package
+      - id: bounds[i].AppendJSON
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: dst
+          when: len(bounds) == 0
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "explicitBounds")
+      - set: dst
+        value: append(dst, '[')
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: dst
+                    value: append(dst, ',')
+                when: i > 0
+            - set: dst
+              to: bounds[i].AppendJSON
+              value: bounds[i].AppendJSON(dst)
+          key: i
+          range: bounds
+      - return: append(dst, ']')
   - of: (*otlpPartialSuccess).RejectedCount
     steps:
       - return: int64(p.RejectedDataPoints)

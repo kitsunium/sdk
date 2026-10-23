@@ -213,6 +213,22 @@ constants:
         value: "-1"
     name: floatBitSize
   - doc: |-
+      The capacity an OTLP/JSON document starts with, so the appends below grow it
+      a few times rather than from nothing: the envelope, plus an estimate per
+      span. An estimate, never a bound — append grows the buffer past it.
+    grouped: true
+    items:
+      - name: otlpDocEnvelopeBytes
+        type: int
+        value: "256"
+      - name: otlpDocSpanBytes
+        type: int
+        value: "640"
+      - name: otlpDocDecimalBase
+        type: int
+        value: "10"
+    name: otlpDocEnvelopeBytes
+  - doc: |-
       DefaultMaxSpans is the bound a Recorder uses when RecorderConfig leaves the
       knob unset. 2048 finished spans is roughly one busy second of a single
       service: high enough that a normal collection interval never reaches it, low
@@ -417,7 +433,7 @@ files:
   - decls:
       - otlpJSONExporterName
       - spanFlagsTraceFlagsMask
-      - otlpEncodeFailure
+      - otlpWriteFailure
       - otlpJSONExporter
       - EncodeOTLPJSON
       - otlpSpans
@@ -471,6 +487,17 @@ files:
       - floatBitSize
       - formatFloat
     name: numeric.go
+  - decls:
+      - otlpDocEnvelopeBytes
+      - (*otlpRequest).appendJSON
+      - (*otlpResourceSpans).appendJSON
+      - (*otlpScopeSpans).appendJSON
+      - (*otlpSpan).appendJSON
+      - appendEvents
+      - appendLinks
+      - (*otlpStatus).appendJSON
+      - otlpDocCapacity
+    name: otlp_append.go
   - decls:
       - otlpPartialSuccess
       - (*otlpPartialSuccess).RejectedCount
@@ -688,6 +715,20 @@ functions:
     name: formatFloat
     params: value float64
     results: string
+  - doc: appendEvents appends a span's events as a JSON array.
+    name: appendEvents
+    params: dst []byte, events []otlpEvent
+    results: "[]byte"
+  - doc: appendLinks appends a span's links as a JSON array.
+    name: appendLinks
+    params: dst []byte, links []otlpLink
+    results: "[]byte"
+  - doc: |-
+      otlpDocCapacity estimates the size of the document spans render into, so
+      the buffer starts near it.
+    name: otlpDocCapacity
+    params: spans []otlpSpan
+    results: int
   - doc: |-
       decodeRejected reads a 2xx body's rejected count through this signal's own
       partial-success message — the SignalSpec.DecodeRejected the shared sender
@@ -1345,6 +1386,15 @@ types:
       - name: ResourceSpans
         type: "[]otlpResourceSpans"
     kind: struct
+    methods:
+      - doc: |-
+          appendJSON appends the request to dst, byte for byte what otlp.Marshal
+          renders for it — member order, omissions, a nil slice that is not omitted
+          spelled null — without reflection and without a slice per scalar.
+        name: appendJSON
+        params: dst []byte
+        recv: r *otlpRequest
+        results: "[]byte"
     name: otlpRequest
   - doc: |-
       otlpResourceSpans is ResourceSpans: resource (1) + scopeSpans (2). schemaUrl
@@ -1356,6 +1406,12 @@ types:
       - name: ScopeSpans
         type: "[]otlpScopeSpans"
     kind: struct
+    methods:
+      - doc: appendJSON appends one ResourceSpans.
+        name: appendJSON
+        params: dst []byte
+        recv: r *otlpResourceSpans
+        results: "[]byte"
     name: otlpResourceSpans
   - doc: |-
       otlpScopeSpans is ScopeSpans: scope (1) + spans (2), with the same schemaUrl
@@ -1366,6 +1422,12 @@ types:
       - name: Spans
         type: "[]otlpSpan"
     kind: struct
+    methods:
+      - doc: appendJSON appends one ScopeSpans, its spans omitted when empty.
+        name: appendJSON
+        params: dst []byte
+        recv: s *otlpScopeSpans
+        results: "[]byte"
     name: otlpScopeSpans
   - doc: |-
       otlpSpan is Span, in field-number order: traceId (1), spanId (2), traceState
@@ -1423,6 +1485,12 @@ types:
       - name: Flags
         type: uint32
     kind: struct
+    methods:
+      - doc: appendJSON appends one Span, in field-number order.
+        name: appendJSON
+        params: dst []byte
+        recv: s *otlpSpan
+        results: "[]byte"
     name: otlpSpan
   - doc: |-
       otlpEvent is Span.Event: timeUnixNano (1), name (2), attributes (3).
@@ -1470,6 +1538,12 @@ types:
       - name: Code
         type: int32
     kind: struct
+    methods:
+      - doc: "appendJSON appends one Status: its message when set, then its code."
+        name: appendJSON
+        params: dst []byte
+        recv: s *otlpStatus
+        results: "[]byte"
     name: otlpStatus
   - kind: named
     name: OTLPHTTPConfig
@@ -1732,19 +1806,6 @@ vars:
   - grouped: true
     items:
       - doc: |-
-          otlpEncodeFailure is the wrap a rendering fault in the shared marshal leaves
-          under: this signal's EXPORT_FAILED, in its own words. Near-impossible — every
-          field of the tree is a Go primitive or one of the shared Marshalers — and
-          still typed rather than swallowed.
-        name: otlpEncodeFailure
-        value: |-
-          errs.WrapParams{
-          		Code:    coretrace.CodeExportFailed,
-          		Reason:  "EXPORT_FAILED",
-          		Public:  "The trace exporter failed to ship the spans",
-          		Private: "service/observe/trace: the OTLP/JSON encoder could not render the payload",
-          	}
-      - doc: |-
           otlpWriteFailure is the wrap a writer fault leaves under when the
           writer-bound exporter emits a document: this signal's EXPORT_FAILED.
         name: otlpWriteFailure
@@ -1768,4 +1829,4 @@ vars:
           on import would be strictly worse than arming a writer.
         name: OTLPJSON
         value: coretrace.RegisterExporter(newOTLPJSONExporter(otlpJSONExporterName, os.Stderr))
-    name: otlpEncodeFailure
+    name: otlpWriteFailure

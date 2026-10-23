@@ -32,17 +32,6 @@ const (
 )
 
 var (
-	// otlpEncodeFailure is the wrap a rendering fault in the shared marshal leaves
-	// under: this signal's EXPORT_FAILED, in its own words. Near-impossible — every
-	// field of the tree is a Go primitive or one of the shared Marshalers — and
-	// still typed rather than swallowed.
-	otlpEncodeFailure = errs.WrapParams{
-		Code:    coremetrics.CodeExportFailed,
-		Reason:  "EXPORT_FAILED",
-		Public:  "The metrics exporter failed to ship the snapshot",
-		Private: "service/observe/metrics: the OTLP/JSON encoder could not render the payload",
-	}
-
 	// otlpWriteFailure is the wrap a writer fault leaves under when the
 	// writer-bound exporter emits a document: this signal's EXPORT_FAILED.
 	otlpWriteFailure = errs.WrapParams{
@@ -137,8 +126,12 @@ func EncodeOTLPJSON(snap coremetrics.SnapshotValue) (doc []byte, err error) {
 		Resource:     otlp.ResourceOf(snap.Resource),
 		ScopeMetrics: []otlpScopeMetrics{scope},
 	}
-	//: marshal the tree with HTML escaping off — see otlp.Marshal.
-	return otlp.Marshal(otlpRequest{ResourceMetrics: []otlpResourceMetrics{resource}}, &otlpEncodeFailure)
+	request := otlpRequest{ResourceMetrics: []otlpResourceMetrics{resource}}
+	//: render the tree straight into one buffer sized near the document — the
+	//: bytes otlp.Marshal would produce for it, with HTML escaping off, but
+	//: without reflection and without a slice per scalar. Rendering cannot
+	//: fail: every refusal happened while the tree was built.
+	return request.appendJSON(make([]byte, 0, otlpDocCapacity(list))), nil
 }
 
 // otlpMetricList flattens the snapshot's three name-keyed maps into the single

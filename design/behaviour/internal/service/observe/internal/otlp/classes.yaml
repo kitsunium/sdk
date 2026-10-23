@@ -1,6 +1,46 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 constants:
+  - doc: hexDigits spells the low nibble of an escaped byte or line separator.
+    items:
+      - name: hexDigits
+        type: string
+        value: "\"0123456789abcdef\""
+    name: hexDigits
+  - doc: |-
+      The JSON literals an appender writes for a bool; null is jsonNull, the
+      literal the response decoder reads.
+    grouped: true
+    items:
+      - name: jsonTrue
+        type: string
+        value: "\"true\""
+      - name: jsonFalse
+        type: string
+        value: "\"false\""
+    name: jsonTrue
+  - doc: |-
+      The byte ranges AppendString treats specially: below spaceByte a byte is a
+      control character JSON requires escaped; lineSeparator and paragraphSeparator
+      are escaped unconditionally, as encoding/json does.
+    grouped: true
+    items:
+      - name: spaceByte
+        type: byte
+        value: "0x20"
+      - name: lineSeparator
+        type: rune
+        value: "0x2028"
+      - name: paragraphSeparator
+        type: rune
+        value: "0x2029"
+      - name: nibbleShift
+        type: int
+        value: "4"
+      - name: nibbleMask
+        type: byte
+        value: "0x0f"
+    name: spaceByte
   - doc: |-
       DefaultTimeout bounds one export round trip when an HTTPConfig leaves Timeout
       unset. Ten seconds is the value the OpenTelemetry protocol exporter
@@ -167,6 +207,25 @@ files:
   - decls:
       - AnyValue
     name: any_value.go
+  - decls:
+      - hexDigits
+      - jsonTrue
+      - spaceByte
+      - AppendString
+      - appendMultiByte
+      - appendEscapedByte
+      - AppendKey
+      - AppendBool
+      - AppendNull
+      - Int64.AppendJSON
+      - Uint64.AppendJSON
+      - Double.AppendJSON
+      - AnyValue.AppendJSON
+      - KeyValue.AppendJSON
+      - AppendKeyValues
+      - ResourceMessage.AppendJSON
+      - ScopeMessage.AppendJSON
+    name: append.go
   - decls: []
     name: doc.go
   - decls:
@@ -208,6 +267,9 @@ files:
       - Int64.MarshalJSON
       - Uint64.MarshalJSON
       - Double.MarshalJSON
+      - appendInt
+      - appendUint
+      - appendDouble
     name: scalar.go
   - decls:
       - ScopeMessage
@@ -243,6 +305,36 @@ files:
       - (*Stream).Emit
     name: stream.go
 functions:
+  - name: AppendString
+    params: dst []byte, s string
+    results: "[]byte"
+  - doc: |-
+      appendMultiByte handles the sequence that starts at s[i], a byte at or above
+      utf8.RuneSelf, for AppendString: it returns dst, the sequence's size and the
+      start of the run still to copy. A valid rune stays in the run; an invalid
+      byte and the two separators JSONP cannot carry flush the run first, as
+      encoding/json does — the byte replaced by U+FFFD, the separators escaped.
+    name: appendMultiByte
+    params: dst []byte, s string, i, start int
+    results: rendered []byte, size, runStart int
+  - doc: |-
+      appendEscapedByte appends the escape of one ASCII byte AppendString does not
+      keep as it is.
+    name: appendEscapedByte
+    params: dst []byte, b byte
+    results: "[]byte"
+  - name: AppendKey
+    params: dst []byte, key string
+    results: "[]byte"
+  - name: AppendBool
+    params: dst []byte, v bool
+    results: "[]byte"
+  - name: AppendNull
+    params: dst []byte
+    results: "[]byte"
+  - name: AppendKeyValues
+    params: dst []byte, attrs []KeyValue
+    results: "[]byte"
   - name: Attrs
     params: attrs []coreotel.AttrValue
     results: "[]KeyValue"
@@ -262,6 +354,20 @@ functions:
   - name: DecodeRejected
     params: payload []byte, into RejectedCounter
     results: int64
+  - doc: appendInt appends a signed decimal, unquoted.
+    name: appendInt
+    params: dst []byte, v int64
+    results: "[]byte"
+  - doc: appendUint appends an unsigned decimal, unquoted.
+    name: appendUint
+    params: dst []byte, v uint64
+    results: "[]byte"
+  - doc: |-
+      appendDouble appends value as Double's MarshalJSON renders it: shortest
+      round-trip, or its quoted name when it is not finite.
+    name: appendDouble
+    params: dst []byte, value float64
+    results: "[]byte"
   - name: ScopeOf
     params: scope coreotel.ScopeValue
     results: ScopeMessage
@@ -402,11 +508,12 @@ imports:
   sync: sync
   time: time
   url: net/url
+  utf8: unicode/utf8
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/service/observe/internal/otlp
   name: otlp
-  purpose: Package otlp — common.v1.AnyValue, restricted to the cases the shared attribute model has.
+  purpose: "Package otlp — the appenders: one OTLP/JSON document written into one buffer, byte for byte what Marshal renders, without reflection and without a slice per scalar."
 types:
   - fields:
       - name: StringValue
@@ -418,6 +525,11 @@ types:
       - name: DoubleValue
         type: "*Double"
     kind: struct
+    methods:
+      - name: AppendJSON
+        params: dst []byte
+        recv: v AnyValue
+        results: "[]byte"
     name: AnyValue
   - fields:
       - doc: |-
@@ -486,11 +598,21 @@ types:
       - name: Value
         type: AnyValue
     kind: struct
+    methods:
+      - name: AppendJSON
+        params: dst []byte
+        recv: kv KeyValue
+        results: "[]byte"
     name: KeyValue
   - fields:
       - name: Attributes
         type: "[]KeyValue"
     kind: struct
+    methods:
+      - name: AppendJSON
+        params: dst []byte
+        recv: m ResourceMessage
+        results: "[]byte"
     name: ResourceMessage
   - kind: named
     name: RejectedCounter
@@ -519,6 +641,10 @@ types:
     name: exportResponse
   - kind: named
     methods:
+      - name: AppendJSON
+        params: dst []byte
+        recv: v Int64
+        results: "[]byte"
       - name: MarshalJSON
         recv: v Int64
         results: encoded []byte, err error
@@ -526,6 +652,10 @@ types:
     underlying: int64
   - kind: named
     methods:
+      - name: AppendJSON
+        params: dst []byte
+        recv: v Uint64
+        results: "[]byte"
       - name: MarshalJSON
         recv: v Uint64
         results: encoded []byte, err error
@@ -533,6 +663,10 @@ types:
     underlying: uint64
   - kind: named
     methods:
+      - name: AppendJSON
+        params: dst []byte
+        recv: v Double
+        results: "[]byte"
       - name: MarshalJSON
         recv: v Double
         results: encoded []byte, err error
@@ -544,6 +678,11 @@ types:
       - name: Version
         type: string
     kind: struct
+    methods:
+      - name: AppendJSON
+        params: dst []byte
+        recv: m ScopeMessage
+        results: "[]byte"
     name: ScopeMessage
   - fields:
       - doc: endpoint is the validated full URL.

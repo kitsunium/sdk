@@ -142,3 +142,75 @@ func BenchmarkBuildAndMarshal_1000(b *testing.B) {
 		docSink = doc
 	}
 }
+
+// appended renders the bench tree the way both signals now render theirs:
+// the appenders, into one buffer sized near the document.
+func appended(request benchRequest) ([]byte, error) {
+	dst := make([]byte, 0, 256+448*len(request.Points))
+	dst = append(dst, '{')
+	dst = otlp.AppendKey(dst, "resource")
+	dst = request.Resource.AppendJSON(dst)
+	dst = otlp.AppendKey(dst, "scope")
+	dst = request.Scope.AppendJSON(dst)
+	dst = otlp.AppendKey(dst, "dataPoints")
+	if request.Points == nil {
+		dst = otlp.AppendNull(dst)
+		return append(dst, '}'), nil
+	}
+	dst = append(dst, '[')
+	for i := range request.Points {
+		if i > 0 {
+			dst = append(dst, ',')
+		}
+		point := &request.Points[i]
+		dst = append(dst, '{')
+		dst = otlp.AppendKey(dst, "startTimeUnixNano")
+		dst = point.Start.AppendJSON(dst)
+		dst = otlp.AppendKey(dst, "timeUnixNano")
+		dst = point.End.AppendJSON(dst)
+		if point.AsInt != nil {
+			dst = otlp.AppendKey(dst, "asInt")
+			dst = point.AsInt.AppendJSON(dst)
+		}
+		if len(point.Attributes) > 0 {
+			dst = otlp.AppendKey(dst, "attributes")
+			dst = otlp.AppendKeyValues(dst, point.Attributes)
+		}
+		dst = append(dst, '}')
+	}
+	return append(dst, ']', '}'), nil
+}
+
+// TestBenchAppendIsMarshal keeps the two benchmarked renderings the same
+// document, so their numbers price the same bytes.
+func TestBenchAppendIsMarshal(t *testing.T) {
+	for _, n := range []int{0, smallPayload, largePayload} {
+		tree := benchTree(n)
+		want, err := shared(tree)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := appended(tree); !bytes.Equal(got, want) {
+			t.Fatalf("%d points: append and Marshal differ:\n%s\n%s", n, got, want)
+		}
+	}
+}
+
+// BenchmarkAppend_10 and _1000 price the appenders on the trees
+// BenchmarkMarshal_10 and _1000 marshal: the same document, written without
+// reflection and without a slice per scalar.
+func BenchmarkAppend_10(b *testing.B)   { runMarshal(b, smallPayload, appended) }
+func BenchmarkAppend_1000(b *testing.B) { runMarshal(b, largePayload, appended) }
+
+// BenchmarkBuildAndAppend_1000 is BenchmarkBuildAndMarshal_1000 through the
+// appenders: what an export pays now.
+func BenchmarkBuildAndAppend_1000(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		doc, err := appended(benchTree(largePayload))
+		if err != nil {
+			b.Fatal(err)
+		}
+		docSink = doc
+	}
+}

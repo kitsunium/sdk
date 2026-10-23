@@ -35,6 +35,10 @@ packages:
         type: byte
         value: "'\\n'"
     doc: |-
+      Package otlp — the appenders: one OTLP/JSON document written into one
+      buffer, byte for byte what Marshal renders, without reflection and without
+      a slice per scalar.
+
       Package otlp — common.v1.AnyValue, restricted to the cases the shared
       attribute model has.
 
@@ -95,6 +99,64 @@ packages:
       exporter emits.
     functions:
       - doc: |-
+          AppendString appends s to dst as a JSON string, byte for byte what Marshal
+          renders for it: '"' and '\\' escaped, the five short control escapes (\b,
+          \f, \n, \r, \t), every other byte below 0x20 as \u00xx, an invalid UTF-8
+          byte replaced by U+FFFD written as it is, U+2028 and U+2029 written as their
+          six-character escapes — and, because Marshal disables HTML escaping, '<', '>'
+          and '&' left as they are.
+        in:
+          - name: dst
+            type: "[]byte"
+          - name: s
+            type: string
+        name: AppendString
+        out:
+          - type: "[]byte"
+      - doc: |-
+          AppendKey appends the member name key and its colon to dst, preceded by a
+          comma unless the member is the first of its object — which an appender
+          knows by the '{' it just wrote. key is a schema name: written as it is, with
+          no escaping, so it must be one.
+        in:
+          - name: dst
+            type: "[]byte"
+          - name: key
+            type: string
+        name: AppendKey
+        out:
+          - type: "[]byte"
+      - doc: AppendBool appends v as the JSON literal true or false.
+        in:
+          - name: dst
+            type: "[]byte"
+          - name: v
+            type: bool
+        name: AppendBool
+        out:
+          - type: "[]byte"
+      - doc: |-
+          AppendNull appends the JSON literal null — what Marshal writes for a nil
+          slice or a nil pointer its member does not omit.
+        in:
+          - name: dst
+            type: "[]byte"
+        name: AppendNull
+        out:
+          - type: "[]byte"
+      - doc: |-
+          AppendKeyValues appends attrs to dst as a JSON array — [] when it is empty,
+          for a caller whose member is not omitted; an omitted member is the caller's
+          to skip.
+        in:
+          - name: dst
+            type: "[]byte"
+          - name: attrs
+            type: "[]KeyValue"
+        name: AppendKeyValues
+        out:
+          - type: "[]byte"
+      - doc: |-
           Attrs renders an attribute set as the repeated KeyValue every OTLP message
           spells its dimensions with. An empty set stays nil, which encoding/json
           omits — the proto3 rule for an empty repeated field.
@@ -135,6 +197,12 @@ packages:
           signal's EXPORT_FAILED code and wording. The fault is near-impossible —
           every field of a payload tree is a Go primitive or one of the Marshalers in
           this package — and it is still typed rather than swallowed.
+
+          The two signals no longer export through it: each renders its tree with the
+          appenders (AppendString, AppendKey, the AppendJSON methods), which write
+          these same bytes into one buffer without reflection. Marshal stays the
+          reference — encoding/json's own rendering — that every appender is tested
+          against, byte for byte.
         in:
           - name: request
             type: R
@@ -249,6 +317,17 @@ packages:
           attributes are deferred with a measured reason (ADR 0044 §Decision 2).
           Exactly one pointer is non-nil, and it is emitted even at its zero value,
           because a oneof member has explicit presence.
+        methods:
+          - doc: |-
+              AppendJSON appends the oneof to dst: the one case that is set, emitted even
+              at its zero, or {} when none is.
+            in:
+              - name: dst
+                type: "[]byte"
+            name: AppendJSON
+            out:
+              - type: "[]byte"
+            recv: value
         name: AnyValue
         struct:
           fields:
@@ -343,6 +422,15 @@ packages:
           declared, and deriving the order from the document is what makes the
           expected bytes in each signal's tests checkable against the .proto field by
           field.
+        methods:
+          - doc: AppendJSON appends the attribute to dst as {"key":…,"value":{…}}.
+            in:
+              - name: dst
+                type: "[]byte"
+            name: AppendJSON
+            out:
+              - type: "[]byte"
+            recv: value
         name: KeyValue
         struct:
           fields:
@@ -359,6 +447,17 @@ packages:
           attribute. What each signal does drop is a different thing, counted where it
           happens: the meter folds excess SERIES into an overflow series, and a
           Recorder drops whole SPANS when it is full.
+        methods:
+          - doc: |-
+              AppendJSON appends the resource to dst, its attributes omitted when there
+              are none.
+            in:
+              - name: dst
+                type: "[]byte"
+            name: AppendJSON
+            out:
+              - type: "[]byte"
+            recv: value
         name: ResourceMessage
         struct:
           fields:
@@ -409,6 +508,16 @@ packages:
           range, not taste: a JSON number is a double in most parsers, so an int64
           past 2^53 loses its low bits on the way through.
         methods:
+          - doc: |-
+              AppendJSON appends the integer to dst as a quoted decimal string — what its
+              MarshalJSON returns, without the slice.
+            in:
+              - name: dst
+                type: "[]byte"
+            name: AppendJSON
+            out:
+              - type: "[]byte"
+            recv: value
           - doc: MarshalJSON renders the integer as a quoted decimal string.
             name: MarshalJSON
             out:
@@ -424,6 +533,16 @@ packages:
           same reason Int64 is: fixed64 and uint64 both map to a string. Every
           timestamp in an OTLP payload uses it, and every one of them is past 2^53.
         methods:
+          - doc: |-
+              AppendJSON appends the integer to dst as a quoted decimal string — what its
+              MarshalJSON returns, without the slice.
+            in:
+              - name: dst
+                type: "[]byte"
+            name: AppendJSON
+            out:
+              - type: "[]byte"
+            recv: value
           - doc: MarshalJSON renders the integer as a quoted decimal string.
             name: MarshalJSON
             out:
@@ -443,6 +562,16 @@ packages:
           the value — a gauge is whatever was sampled — and the specification says how
           to spell it, so the encoder spells it.
         methods:
+          - doc: |-
+              AppendJSON appends the double to dst shortest-round-trip, or its quoted name
+              when it is not finite — what its MarshalJSON returns, without the slice.
+            in:
+              - name: dst
+                type: "[]byte"
+            name: AppendJSON
+            out:
+              - type: "[]byte"
+            recv: value
           - doc: |-
               MarshalJSON renders the double shortest-round-trip, or names it when it is
               not finite.
@@ -464,6 +593,15 @@ packages:
           attributes (3) and droppedAttributesCount (4) are absent: nothing in this SDK
           produces a scope attribute (ADR 0044 §Deferred), and an always-empty field
           is a placeholder (rule 5).
+        methods:
+          - doc: AppendJSON appends the scope to dst, each field omitted when it is empty.
+            in:
+              - name: dst
+                type: "[]byte"
+            name: AppendJSON
+            out:
+              - type: "[]byte"
+            recv: value
         name: ScopeMessage
         struct:
           fields:
@@ -603,8 +741,9 @@ packages:
           - doc: |-
               Emit writes doc followed by DocumentTerminator in ONE write, so a refusal
               upstream leaves the destination untouched and the only error surface left is
-              the write itself. doc must be a document Marshal returned; it is extended in
-              place by one byte, which its spare capacity usually absorbs.
+              the write itself. doc must be one whole document — Marshal's, or a signal's
+              appender's; it is extended in place by one byte, which its spare capacity
+              usually absorbs.
             in:
               - name: doc
                 type: "[]byte"

@@ -24,6 +24,12 @@ import (
 // signal's EXPORT_FAILED code and wording. The fault is near-impossible —
 // every field of a payload tree is a Go primitive or one of the Marshalers in
 // this package — and it is still typed rather than swallowed.
+//
+// The two signals no longer export through it: each renders its tree with the
+// appenders (AppendString, AppendKey, the AppendJSON methods), which write
+// these same bytes into one buffer without reflection. Marshal stays the
+// reference — encoding/json's own rendering — that every appender is tested
+// against, byte for byte.
 func Marshal[R any](request R, failure *errs.WrapParams) (doc []byte, err error) {
 	//: encode into a local buffer so the escaping switch is available.
 	var buf bytes.Buffer

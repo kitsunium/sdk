@@ -1,3 +1,7 @@
+// Package otlp — the appenders: one OTLP/JSON document written into one
+// buffer, byte for byte what Marshal renders, without reflection and without
+// a slice per scalar.
+//
 // Package otlp — common.v1.AnyValue, restricted to the cases the shared
 // attribute model has.
 //

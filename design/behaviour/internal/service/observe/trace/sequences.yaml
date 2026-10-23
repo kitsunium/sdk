@@ -570,8 +570,8 @@ sequences:
         kind: self
       - id: otlpSpans
         kind: internal
-      - id: otlp
-        kind: package
+      - id: request.appendJSON
+        kind: internal
     steps:
       - bind: rendered, buildErr
         eval: otlpSpans(spans.Spans)
@@ -592,8 +592,10 @@ sequences:
           		Resource:   otlp.ResourceOf(spans.Resource),
           		ScopeSpans: []otlpScopeSpans{scope},
           	}
-      - return: "otlp.Marshal(otlpRequest{ResourceSpans: []otlpResourceSpans{resource}}, &otlpEncodeFailure)"
-        to: otlp
+      - bind: request
+        eval: "otlpRequest{ResourceSpans: []otlpResourceSpans{resource}}"
+      - return: request.appendJSON(make([]byte, 0, otlpDocCapacity(rendered))), nil
+        to: request.appendJSON
   - of: otlpSpans
     participants:
       - id: caller
@@ -1117,6 +1119,401 @@ sequences:
     steps:
       - return: strconv.FormatFloat(value, floatFmt, floatPrec, floatBitSize)
         to: strconv
+  - of: (*otlpRequest).appendJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpRequest).appendJSON
+        kind: self
+      - id: otlp
+        kind: package
+      - id: r.ResourceSpans[i].appendJSON
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, '{')
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "resourceSpans")
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendNull(dst)
+            - return: append(dst, '}')
+          when: r.ResourceSpans == nil
+      - set: dst
+        value: append(dst, '[')
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: dst
+                    value: append(dst, ',')
+                when: i > 0
+            - set: dst
+              to: r.ResourceSpans[i].appendJSON
+              value: r.ResourceSpans[i].appendJSON(dst)
+          key: i
+          range: r.ResourceSpans
+      - return: append(dst, ']', '}')
+  - of: (*otlpResourceSpans).appendJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpResourceSpans).appendJSON
+        kind: self
+      - id: otlp
+        kind: package
+      - id: r.Resource.AppendJSON
+        kind: value
+      - id: r.ScopeSpans[i].appendJSON
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, '{')
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "resource")
+      - set: dst
+        to: r.Resource.AppendJSON
+        value: r.Resource.AppendJSON(dst)
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "scopeSpans")
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendNull(dst)
+            - return: append(dst, '}')
+          when: r.ScopeSpans == nil
+      - set: dst
+        value: append(dst, '[')
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: dst
+                    value: append(dst, ',')
+                when: i > 0
+            - set: dst
+              to: r.ScopeSpans[i].appendJSON
+              value: r.ScopeSpans[i].appendJSON(dst)
+          key: i
+          range: r.ScopeSpans
+      - return: append(dst, ']', '}')
+  - of: (*otlpScopeSpans).appendJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpScopeSpans).appendJSON
+        kind: self
+      - id: otlp
+        kind: package
+      - id: s.Scope.AppendJSON
+        kind: value
+      - id: s.Spans[i].appendJSON
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, '{')
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "scope")
+      - set: dst
+        to: s.Scope.AppendJSON
+        value: s.Scope.AppendJSON(dst)
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "spans")
+            - set: dst
+              value: append(dst, '[')
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - set: dst
+                          value: append(dst, ',')
+                      when: i > 0
+                  - set: dst
+                    to: s.Spans[i].appendJSON
+                    value: s.Spans[i].appendJSON(dst)
+                key: i
+                range: s.Spans
+            - set: dst
+              value: append(dst, ']')
+          when: len(s.Spans) > 0
+      - return: append(dst, '}')
+  - of: (*otlpSpan).appendJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpSpan).appendJSON
+        kind: self
+      - id: otlp
+        kind: package
+      - id: strconv
+        kind: stdlib
+      - id: s.StartTimeUnixNano.AppendJSON
+        kind: value
+      - id: s.EndTimeUnixNano.AppendJSON
+        kind: value
+      - id: appendEvents
+        kind: internal
+      - id: appendLinks
+        kind: internal
+      - id: s.Status.appendJSON
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, '{')
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "traceId")
+      - set: dst
+        to: otlp
+        value: otlp.AppendString(dst, s.TraceID)
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "spanId")
+      - set: dst
+        to: otlp
+        value: otlp.AppendString(dst, s.SpanID)
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "traceState")
+            - set: dst
+              to: otlp
+              value: otlp.AppendString(dst, s.TraceState)
+          when: s.TraceState != ""
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "parentSpanId")
+            - set: dst
+              to: otlp
+              value: otlp.AppendString(dst, s.ParentSpanID)
+          when: s.ParentSpanID != ""
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "name")
+      - set: dst
+        to: otlp
+        value: otlp.AppendString(dst, s.Name)
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "kind")
+      - set: dst
+        to: strconv
+        value: strconv.AppendInt(dst, int64(s.Kind), otlpDocDecimalBase)
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "startTimeUnixNano")
+      - set: dst
+        to: s.StartTimeUnixNano.AppendJSON
+        value: s.StartTimeUnixNano.AppendJSON(dst)
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "endTimeUnixNano")
+      - set: dst
+        to: s.EndTimeUnixNano.AppendJSON
+        value: s.EndTimeUnixNano.AppendJSON(dst)
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "attributes")
+            - set: dst
+              to: otlp
+              value: otlp.AppendKeyValues(dst, s.Attributes)
+          when: len(s.Attributes) > 0
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "events")
+            - set: dst
+              to: appendEvents
+              value: appendEvents(dst, s.Events)
+          when: len(s.Events) > 0
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "links")
+            - set: dst
+              to: appendLinks
+              value: appendLinks(dst, s.Links)
+          when: len(s.Links) > 0
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "status")
+            - set: dst
+              to: s.Status.appendJSON
+              value: s.Status.appendJSON(dst)
+          when: s.Status != nil
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "flags")
+      - set: dst
+        to: strconv
+        value: strconv.AppendUint(dst, uint64(s.Flags), otlpDocDecimalBase)
+      - return: append(dst, '}')
+  - of: appendEvents
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendEvents
+        kind: self
+      - id: otlp
+        kind: package
+      - id: event.TimeUnixNano.AppendJSON
+        kind: value
+    steps:
+      - set: dst
+        value: append(dst, '[')
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: dst
+                    value: append(dst, ',')
+                when: i > 0
+            - bind: event
+              eval: "&events[i]"
+            - set: dst
+              value: append(dst, '{')
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "timeUnixNano")
+            - set: dst
+              to: event.TimeUnixNano.AppendJSON
+              value: event.TimeUnixNano.AppendJSON(dst)
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "name")
+            - set: dst
+              to: otlp
+              value: otlp.AppendString(dst, event.Name)
+            - opt:
+                do:
+                  - set: dst
+                    to: otlp
+                    value: otlp.AppendKey(dst, "attributes")
+                  - set: dst
+                    to: otlp
+                    value: otlp.AppendKeyValues(dst, event.Attributes)
+                when: len(event.Attributes) > 0
+            - set: dst
+              value: append(dst, '}')
+          key: i
+          range: events
+      - return: append(dst, ']')
+  - of: appendLinks
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendLinks
+        kind: self
+      - id: otlp
+        kind: package
+      - id: strconv
+        kind: stdlib
+    steps:
+      - set: dst
+        value: append(dst, '[')
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: dst
+                    value: append(dst, ',')
+                when: i > 0
+            - bind: link
+              eval: "&links[i]"
+            - set: dst
+              value: append(dst, '{')
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "traceId")
+            - set: dst
+              to: otlp
+              value: otlp.AppendString(dst, link.TraceID)
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "spanId")
+            - set: dst
+              to: otlp
+              value: otlp.AppendString(dst, link.SpanID)
+            - opt:
+                do:
+                  - set: dst
+                    to: otlp
+                    value: otlp.AppendKey(dst, "traceState")
+                  - set: dst
+                    to: otlp
+                    value: otlp.AppendString(dst, link.TraceState)
+                when: link.TraceState != ""
+            - opt:
+                do:
+                  - set: dst
+                    to: otlp
+                    value: otlp.AppendKey(dst, "attributes")
+                  - set: dst
+                    to: otlp
+                    value: otlp.AppendKeyValues(dst, link.Attributes)
+                when: len(link.Attributes) > 0
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "flags")
+            - set: dst
+              to: strconv
+              value: strconv.AppendUint(dst, uint64(link.Flags), otlpDocDecimalBase)
+            - set: dst
+              value: append(dst, '}')
+          key: i
+          range: links
+      - return: append(dst, ']')
+  - of: (*otlpStatus).appendJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*otlpStatus).appendJSON
+        kind: self
+      - id: otlp
+        kind: package
+      - id: strconv
+        kind: stdlib
+    steps:
+      - set: dst
+        value: append(dst, '{')
+      - opt:
+          do:
+            - set: dst
+              to: otlp
+              value: otlp.AppendKey(dst, "message")
+            - set: dst
+              to: otlp
+              value: otlp.AppendString(dst, s.Message)
+          when: s.Message != ""
+      - set: dst
+        to: otlp
+        value: otlp.AppendKey(dst, "code")
+      - set: dst
+        to: strconv
+        value: strconv.AppendInt(dst, int64(s.Code), otlpDocDecimalBase)
+      - return: append(dst, '}')
+  - of: otlpDocCapacity
+    steps:
+      - return: otlpDocEnvelopeBytes + len(spans)*otlpDocSpanBytes
   - of: (*otlpPartialSuccess).RejectedCount
     steps:
       - return: int64(p.RejectedSpans)
