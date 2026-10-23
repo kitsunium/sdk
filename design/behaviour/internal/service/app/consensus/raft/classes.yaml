@@ -206,6 +206,10 @@ constants:
           mutHintAnyKind accepts every kind of message from a leader admitted
           by a leader record alone, a vote included (#542).
         name: mutHintAnyKind
+      - doc: |-
+          mutRemoveStrands removes an answering member even when a voter may
+          then know no one left to vouch for this leader (#603).
+        name: mutRemoveStrands
     name: mutAckBeforeSync
   - doc: The facts a PeerStatValue carries.
     grouped: true
@@ -338,6 +342,12 @@ files:
       - (*Raft).addLearner
       - (*Raft).promote
       - (*Raft).removeMember
+      - (*Raft).answering
+      - (*Raft).strands
+      - (*Raft).reachedBy
+      - (*Raft).vouchedInRetained
+      - listedBefore
+      - vouched
       - (*Raft).updateAddress
       - (*Raft).denyPin
       - (*Raft).activeMajority
@@ -549,6 +559,20 @@ files:
       - (*Raft).maybeEndSilence
     name: step.go
 functions:
+  - doc: |-
+      listedBefore reports whether first comes before then in next's members,
+      the order members were added in.
+    name: listedBefore
+    params: next *core.MembershipValue, first, then core.NodeID
+    results: bool
+  - doc: |-
+      vouched reports whether a voter v holding known still finds in next the
+      leader, as any member, or another voter of known, which answers its
+      PreVote with the leader's record (#542). A known that does not list v is
+      not one v holds, and is passed.
+    name: vouched
+    params: next, known *core.MembershipValue, v, leader core.NodeID
+    results: bool
   - doc: |-
       ownCopy returns a copy of b the step function owns, out of a frame the
       transport reuses. An empty b yields nil, exactly as the append([]byte(nil),
@@ -1557,6 +1581,49 @@ types:
         params: cur *core.MembershipValue, target core.NodeID, idx int
         recv: r *Raft
         results: errs.Code
+      - doc: answering reports whether peer id answered within the vote window.
+        name: answering
+        params: id core.NodeID
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          strands reports whether next leaves a voter unable to hear this leader
+          once it comes back: a voter admits on its own configuration, and when
+          every voter it knows has left, no member of it can vouch for this leader
+          (#542) and its transport refuses this leader's key. A voter of {A, B, C}
+          down while B and C were replaced by D and E came back as a voter of
+          {A, D, E} that heard nobody, and after one more failure A and D, two
+          running voters of three, never committed again (#603).
+
+          The guard admits no one: it only refuses a removal, of a member that
+          answers, which would take away the last voter such a voter knows. A
+          member that does not answer cannot vouch for anyone now, and its removal
+          is never refused here, so a dead voter can always be removed.
+        name: strands
+        params: next *core.MembershipValue
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          reachedBy reports whether voter v, whatever configuration of its past it
+          holds, still knows in next this leader or a voter that would vouch for
+          it. A voter this leader heard at a match its log still resolves holds
+          that configuration or a later one: every member of next it lists there
+          it lists in every later one, since an id is never added back once
+          removed. For any other voter every retained configuration that lists it
+          is a candidate, and when it was a member before the log's start the
+          oldest it may hold is unknown: only this leader listed before it, so
+          added before it, is then known to it for sure.
+        name: reachedBy
+        params: next *core.MembershipValue, v core.NodeID
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          vouchedInRetained reports whether v is vouched for in every retained
+          configuration, the snapshot base's included.
+        name: vouchedInRetained
+        params: next *core.MembershipValue, v core.NodeID
+        recv: r *Raft
+        results: bool
       - doc: |-
           updateAddress changes the address of the member at idx to the one admin
           carries, while a majority answers.

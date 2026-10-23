@@ -1026,6 +1026,21 @@ followers and sent it nothing. From protocol 2:
   tolerant here, a compromised member can already forge far more, and the
   key must still be one the cluster CA signed.
 
+**A removal never leaves a voter with no known member to vouch for the
+leader (amendment of 2026-10-23, #603).** The record above needs a member of
+the stale voter's own configuration. A voter down while every member it
+knew was replaced came back hearing no one, and the cluster lost a vote for
+good. No admission is widened for this: the leader refuses
+`MEMBERSHIP_INVALID` the removal of a member that answers when a voter of
+the new configuration might then list neither the leader nor any voter that
+stays. A voter the leader heard at an index its log resolves holds that
+configuration or a later one; for any other voter every retained
+configuration that lists it is a candidate, and when its configuration may
+predate the log's start only the leader listed before it, so added before
+it, is known to it for sure. A member that does not answer is never
+refused on this ground: it vouches for no one, and a dead voter stays
+removable. The operator brings the stale voter back, or removes it, first.
+
 **Limits TLS does not set (R1-24, from raft-sql-poc).**
 - A frame's announced length is checked against `MaxFrameBytes` before
   anything is allocated.

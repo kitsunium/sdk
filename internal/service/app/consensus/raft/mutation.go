@@ -117,6 +117,9 @@ const (
 	// mutHintAnyKind accepts every kind of message from a leader admitted
 	// by a leader record alone, a vote included (#542).
 	mutHintAnyKind
+	// mutRemoveStrands removes an answering member even when a voter may
+	// then know no one left to vouch for this leader (#603).
+	mutRemoveStrands
 )
 
 // mutated reports whether a test switched mutation m on; it is false in every

@@ -490,3 +490,8 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   leader's compaction for good (#602, `pinAt`, `dropPin`,
   `TestAFollowerStuckInItsInstallDoesNotPinCompaction`,
   `TestTCPStreamWhoseReceiverNeverAnswersEndsWithItsContext`).
+- Remove an answering member that may be the last voter a silent voter
+  knows: that voter comes back hearing no one and the cluster loses its vote
+  for good (#603, `strands`, `TestAStaleVoterIsNotLeftWithNoKnownPeer`,
+  `TestARemovalThatMayStrandAStaleVoterIsRefused`). Never widen admission
+  for it: a key is admitted only on a member's word or a configuration.
