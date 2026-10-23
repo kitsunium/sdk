@@ -39,7 +39,11 @@ func (n *Node) pinAt(to coreconsensus.NodeID, pin sendPin, now time.Time) (uint6
 // longer hold: their peer caught up with the log, left, or until passed.
 // Compaction only runs after a cut, so the log is compacted again at once:
 // a pin that ended once the writes stopped held it back until the next
-// write.
+// write. Caught up is the peer's match at the last index, never the pin's
+// own index: a snapshot cut at the last index — an idle leader's, or one
+// cut on request — counted as caught up at the first tick after its
+// stream, before the peer answered anything, and the cuts of the writes
+// that followed compacted past the entry it needed next (#588).
 func (n *Node) watchPins(now time.Time) {
 	last := n.r.Status().Last
 	ended := false
@@ -47,7 +51,8 @@ func (n *Node) watchPins(now time.Time) {
 		if pin.until.IsZero() {
 			continue
 		}
-		if at, held := n.pinAt(to, pin, now); !held || at >= last {
+		match, _, _ := n.r.Progress(to)
+		if _, held := n.pinAt(to, pin, now); !held || match >= last {
 			delete(n.sending, to)
 			ended = true
 		}
