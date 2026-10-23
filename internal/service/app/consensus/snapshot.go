@@ -592,8 +592,9 @@ func (n *Node) requestCut() {
 }
 
 // SaveSnapshot cuts a snapshot now and copies its encoded stream to w, on a
-// goroutine of its own: once ctx is done it returns, and a write to w
-// already blocked keeps that goroutine, and the snapshot pinned, until w
+// goroutine of its own: once ctx is done it returns, the copy stops at its
+// next read, and only a write to w already begun may end after the return;
+// one that blocks keeps that goroutine, and the snapshot pinned, until w
 // returns.
 func (n *Node) SaveSnapshot(ctx context.Context, op coreconsensus.Operator, w io.Writer) (coreconsensus.SnapshotMetaValue, error) {
 	// The cut is published on the apply goroutine and copied to w from the
@@ -634,11 +635,14 @@ func (n *Node) SaveSnapshot(ctx context.Context, op coreconsensus.Operator, w io
 }
 
 // copySaved copies the encoded stream h holds to w, then closes h, on a
-// goroutine of its own, and returns once it is copied or ctx is done.
+// goroutine of its own, and returns once it is copied or ctx is done. The
+// copy reads through ctx: it went on to the end after the caller left, and
+// a caller that reused or read w once SaveSnapshot returned raced with it
+// (#612).
 func copySaved(ctx context.Context, h coreconsensus.SnapshotHandle, w io.Writer) error {
 	copied := make(chan error, 1)
 	go func() {
-		_, err := io.Copy(w, io.NewSectionReader(h, 0, h.Meta().EncodedSize))
+		_, err := io.Copy(w, ctxReader{ctx: ctx, r: io.NewSectionReader(h, 0, h.Meta().EncodedSize)})
 		if cerr := h.Close(); err == nil {
 			err = cerr
 		} else {
@@ -652,6 +656,20 @@ func copySaved(ctx context.Context, h coreconsensus.SnapshotHandle, w io.Writer)
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// ctxReader reads r until ctx is done, then answers ctx's error.
+type ctxReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+// Read reads r, unless ctx is done.
+func (c ctxReader) Read(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.r.Read(p)
 }
 
 // save runs a SaveSnapshot on the apply goroutine.

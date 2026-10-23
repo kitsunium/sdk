@@ -3,8 +3,11 @@ package consensus
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -87,5 +90,44 @@ func TestSaveSnapshotCopiesThePublishedSnapshot(t *testing.T) {
 	}
 	if hm := h.Meta(); meta.ID != hm.ID || meta.SHA256 != hm.SHA256 || !bytes.Equal(buf.Bytes(), want) {
 		t.Errorf("SaveSnapshot copied %d bytes under %+v, the store holds %d under %+v", buf.Len(), meta.Position, len(want), h.Meta().Position)
+	}
+}
+
+// slowWriter takes 50 ms per write, and counts its writes and bytes.
+type slowWriter struct{ writes, bytes atomic.Int64 }
+
+func (w *slowWriter) Write(p []byte) (int, error) {
+	time.Sleep(50 * time.Millisecond)
+	w.writes.Add(1)
+	w.bytes.Add(int64(len(p)))
+	return len(p), nil
+}
+
+// SaveSnapshot returned ctx.Err() at its deadline while its copy went on
+// writing to the caller's writer, chunk after chunk, to the end: a caller
+// that reused, removed or read w after the call raced with the engine
+// (#612). The copy now stops at its next read once ctx is done; only the
+// write already begun may end after the return.
+func TestSaveSnapshotStopsWritingOnceTheCallerLeft(t *testing.T) {
+	c := newCluster(t, 3, 100000)
+	l := c.settledLeader(5 * time.Second)
+	for i := range 8 {
+		b := make([]byte, 32<<10)
+		_, _ = rand.Read(b)
+		propose(t, l.node, fmt.Sprintf("k%d=%s", i, hex.EncodeToString(b)))
+	}
+	w := &slowWriter{}
+	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Millisecond)
+	_, err := l.node.SaveSnapshot(ctx, "operator:backup", w)
+	cancel()
+	if err == nil {
+		t.Fatal("setup: the copy ended before the deadline")
+	}
+	at, atBytes := w.writes.Load(), w.bytes.Load()
+	time.Sleep(time.Second)
+	after, afterBytes := w.writes.Load(), w.bytes.Load()
+	t.Logf("SaveSnapshot returned %v after %d writes (%d bytes); 1 s later %d writes (%d bytes)", err, at, atBytes, after, afterBytes)
+	if after > at+1 {
+		t.Errorf("the engine went on writing to the caller's writer after SaveSnapshot returned: %d more writes, %d bytes", after-at, afterBytes-atBytes)
 	}
 }
