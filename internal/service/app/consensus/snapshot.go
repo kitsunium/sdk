@@ -153,7 +153,7 @@ func (n *Node) maybeSnapshot(applied int64) {
 	}
 	ss.inFlight = true
 	ss.mu.Unlock()
-	if err := n.cut(idx, term, nil); err != nil {
+	if err := n.cut(idx, term, false); err != nil {
 		ss.mu.Lock()
 		ss.inFlight, ss.pending = false, false
 		ss.mu.Unlock()
@@ -199,7 +199,7 @@ func (n *Node) metaAt(idx, term uint64) (coreconsensus.SnapshotMetaValue, bool) 
 		conf := n.r.ConfAt(idx)
 		conf.Index = idx
 		meta = coreconsensus.SnapshotMetaValue{
-			ID: fmt.Sprintf("%020d-%020d", idx, term), Version: 1,
+			ID: snapshotID(idx, term), Version: 1,
 			Position: coreconsensus.PositionValue{Term: term, Index: idx}, Log: n.lineage(), Membership: conf,
 			ChainTip: n.r.ChainAt(idx), Codec: string(n.cfg.SnapshotCodec.Algorithm()), ChunkSize: defaultChunkSize,
 			Timing: eng.Timing, ClusterVersion: eng.Cluster, ClusterGeneration: eng.ClusterG, NoSpace: eng.NoSpace,
@@ -208,12 +208,18 @@ func (n *Node) metaAt(idx, term uint64) (coreconsensus.SnapshotMetaValue, bool) 
 	return meta, ok
 }
 
-// cut captures the state machine at the applied index and writes it. When w
-// is not nil, the encoded stream is copied to it too (SaveSnapshot). Unless
-// the machine pauses apply to cut, or w is set, the write runs on a
-// background goroutine counted in n.wg, which ends when the write does, so
-// Close waits for it; its failure reaches cutFailed instead of the caller.
-func (n *Node) cut(idx, term uint64, w io.Writer) error {
+// snapshotID is the identifier of the snapshot cut at idx in term.
+func snapshotID(idx, term uint64) string {
+	return fmt.Sprintf("%020d-%020d", idx, term)
+}
+
+// cut captures the state machine at the applied index and writes it. Unless
+// the machine pauses apply to cut, or wait is set (SaveSnapshot), the write
+// runs on a background goroutine counted in n.wg, which ends when the write
+// does, so Close waits for it; its failure reaches cutFailed instead of the
+// caller. No writer of a caller is written here: SaveSnapshot copies the
+// published snapshot on its own goroutine (#601).
+func (n *Node) cut(idx, term uint64, wait bool) error {
 	if idx > 0 && term == 0 {
 		// No committed entry has term 0: such a snapshot stopped at its
 		// next start the node that cut it and every peer that installed it
@@ -235,13 +241,13 @@ func (n *Node) cut(idx, term uint64, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if n.cfg.SnapshotPausesApply || w != nil {
-		return n.writeSnapshot(snap, meta, w)
+	if n.cfg.SnapshotPausesApply || wait {
+		return n.writeSnapshot(snap, meta)
 	}
 	n.wg.Add(1)
 	go func() {
 		defer n.wg.Done()
-		if err := n.writeSnapshot(snap, meta, nil); err != nil {
+		if err := n.writeSnapshot(snap, meta); err != nil {
 			n.cutFailed(err)
 			return
 		}
@@ -271,9 +277,9 @@ func (n *Node) cutPending() {
 // the coalesced trigger with it, under the same lock: the next trigger tries
 // again (cutFailed), and only one that falls after the flag is cleared
 // survives.
-func (n *Node) writeSnapshot(snap coreconsensus.Snapshot, meta coreconsensus.SnapshotMetaValue, extra io.Writer) error {
+func (n *Node) writeSnapshot(snap coreconsensus.Snapshot, meta coreconsensus.SnapshotMetaValue) error {
 	defer snap.Release()
-	err := n.publishSnapshot(snap, meta, extra)
+	err := n.publishSnapshot(snap, meta)
 	state := &n.snapState
 	state.mu.Lock()
 	state.inFlight = false
@@ -286,7 +292,7 @@ func (n *Node) writeSnapshot(snap coreconsensus.Snapshot, meta coreconsensus.Sna
 
 // publishSnapshot is writeSnapshot's write: the sink, the encoded stream,
 // the commit, then retention and compaction (afterCut).
-func (n *Node) publishSnapshot(snap coreconsensus.Snapshot, meta coreconsensus.SnapshotMetaValue, extra io.Writer) error {
+func (n *Node) publishSnapshot(snap coreconsensus.Snapshot, meta coreconsensus.SnapshotMetaValue) error {
 	state := &n.snapState
 	sink, spooled, err := n.cfg.Snapshots.Create(meta.ID, meta)
 	if err != nil {
@@ -303,11 +309,7 @@ func (n *Node) publishSnapshot(snap coreconsensus.Snapshot, meta coreconsensus.S
 		}
 	}
 	cutStart := n.clk.Now()
-	var out io.Writer = sink
-	if extra != nil {
-		out = io.MultiWriter(sink, extra)
-	}
-	cw := newChunkWriter(out, n.cfg.SnapshotCodec, defaultChunkSize)
+	cw := newChunkWriter(sink, n.cfg.SnapshotCodec, defaultChunkSize)
 	cw.limit = cutLimit(n.cfg.MaxSnapshotBytes, &meta.Membership)
 	if _, err := snap.WriteTo(cw); err != nil {
 		return alsoFailed(err, "abort", sink.Abort())
@@ -588,8 +590,15 @@ func (n *Node) requestCut() {
 	}
 }
 
-// SaveSnapshot cuts a snapshot now and copies its encoded stream to w.
+// SaveSnapshot cuts a snapshot now and copies its encoded stream to w, on a
+// goroutine of its own: once ctx is done it returns, and a write to w
+// already blocked keeps that goroutine, and the snapshot pinned, until w
+// returns.
 func (n *Node) SaveSnapshot(ctx context.Context, op coreconsensus.Operator, w io.Writer) (coreconsensus.SnapshotMetaValue, error) {
+	// The cut is published on the apply goroutine and copied to w from the
+	// handle it opened: the apply goroutine used to write to w itself, and a
+	// writer that stopped reading held it for good, the node applied
+	// nothing more and Close never returned (#601).
 	if !op.Valid() {
 		return coreconsensus.SnapshotMetaValue{}, origin(coreconsensus.MembershipInvalid, errs.String("why", "operator"))
 	}
@@ -606,15 +615,41 @@ func (n *Node) SaveSnapshot(ctx context.Context, op coreconsensus.Operator, w io
 	ss.mu.Unlock()
 	// The cut runs on the apply goroutine, serialised with Apply.
 	// done has one slot, so the apply goroutine never blocks on a caller that left.
-	req := &saveReq{w: w, op: op, done: make(chan saveRes, 1)}
+	req := &saveReq{op: op, done: make(chan saveRes, 1)}
 	n.aq.push(applyItem{save: req})
 	select {
 	case r := <-req.done:
-		return r.meta, r.err
+		if r.err != nil {
+			return r.meta, r.err
+		}
+		return r.meta, copySaved(ctx, r.h, w)
 	case <-ctx.Done():
+		req.leave()
 		return coreconsensus.SnapshotMetaValue{}, ctx.Err()
 	case <-n.loopDone:
+		req.leave()
 		return coreconsensus.SnapshotMetaValue{}, n.stoppedErr()
+	}
+}
+
+// copySaved copies the encoded stream h holds to w, then closes h, on a
+// goroutine of its own, and returns once it is copied or ctx is done.
+func copySaved(ctx context.Context, h coreconsensus.SnapshotHandle, w io.Writer) error {
+	copied := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(w, io.NewSectionReader(h, 0, h.Meta().EncodedSize))
+		if cerr := h.Close(); err == nil {
+			err = cerr
+		} else {
+			err = alsoFailed(err, "close", cerr)
+		}
+		copied <- err
+	}()
+	select {
+	case err := <-copied:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -623,18 +658,15 @@ func (n *Node) save(req *saveReq) {
 	n.am.Lock()
 	idx, term := n.applied, n.appliedTerm
 	n.am.Unlock()
-	err := n.cut(idx, term, req.w)
+	err := n.cut(idx, term, true)
 	var m coreconsensus.SnapshotMetaValue
+	var h coreconsensus.SnapshotHandle
 	if err == nil {
-		// The caller keeps this metadata to restore from later: a list that
-		// could not be read fails the save rather than answer a zero one.
-		var metas []coreconsensus.SnapshotMetaValue
-		if metas, err = n.cfg.Snapshots.List(); err == nil {
-			for _, x := range metas {
-				if x.Position.Index == idx {
-					m = x
-				}
-			}
+		// The caller keeps this metadata to restore from later, and the
+		// handle pins the snapshot until it is copied: no retention removes
+		// it meanwhile.
+		if h, err = n.cfg.Snapshots.Open(snapshotID(idx, term)); err == nil {
+			m = h.Meta()
 		}
 	} else {
 		n.snapState.mu.Lock()
@@ -649,7 +681,7 @@ func (n *Node) save(req *saveReq) {
 		// the offline ones are in the audit file (D17).
 		n.obs.info("consensus: snapshot saved", lstr("operator", string(req.op)), lattr("index", idx))
 	}
-	req.done <- saveRes{m, err}
+	req.answer(&saveRes{meta: m, h: h, err: err})
 }
 
 // ---- sending ----

@@ -2,7 +2,7 @@ package consensus
 
 import (
 	"fmt"
-	"io"
+	"sync"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -23,15 +23,53 @@ type restoreReq struct {
 }
 
 type saveReq struct {
-	w io.Writer
 	// op is the operator the save is recorded under.
 	op   coreconsensus.Operator
 	done chan saveRes
+	// mu orders the answer with the caller leaving: gone is set once the
+	// caller left, and a handle answered after that is closed, not leaked.
+	mu   sync.Mutex
+	gone bool
 }
 
 type saveRes struct {
 	meta coreconsensus.SnapshotMetaValue
-	err  error
+	// h pins the saved snapshot until the caller copied it; nil on error.
+	h   coreconsensus.SnapshotHandle
+	err error
+}
+
+// answer hands res to the caller, or closes its handle when the caller
+// already left. done has one slot and is answered once, so it never blocks
+// the apply goroutine.
+func (r *saveReq) answer(res *saveRes) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.gone {
+		closeSaved(res)
+		return
+	}
+	r.done <- *res
+}
+
+// leave records that the caller left, and closes the handle of an answer
+// already given.
+func (r *saveReq) leave() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.gone = true
+	select {
+	case res := <-r.done:
+		closeSaved(&res)
+	default:
+	}
+}
+
+// closeSaved closes the handle of an answer no caller copies.
+func closeSaved(res *saveRes) {
+	if res.h != nil {
+		abandon(res.h.Close())
+	}
 }
 
 // token builds an entry's lineage-scoped command identity: an entry kept by
@@ -196,7 +234,7 @@ func (n *Node) forceCut() {
 	}
 	ss.inFlight = true
 	ss.mu.Unlock()
-	if err := n.cut(idx, term, nil); err != nil {
+	if err := n.cut(idx, term, false); err != nil {
 		ss.mu.Lock()
 		ss.inFlight, ss.pending = false, false
 		ss.mu.Unlock()
