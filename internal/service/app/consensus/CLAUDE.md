@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-23T02:00:00Z -->
+<!-- updated: 2026-10-23T20:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -460,3 +460,15 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   `probeLeader`). Keep a leader whose sync or apply has not moved for
   `ElectionTimeoutMax` (#554, `watchProgress`), or compact past a snapshot
   in flight (#550, `n.sending`).
+- Let a learner raise the cluster-wide no-space alarm: its own cuts are held
+  to the limit it announced, and once the state outgrew it its log reached
+  its quota and the alarm refused every write of the cluster (#600,
+  `guardSpace`, `TestALearnerTheStateOutgrewDoesNotRaiseTheClusterNoSpace`).
+- Write a caller's writer on the apply goroutine: an abandoned
+  `SaveSnapshot` into a writer that stopped reading froze the node (#601,
+  `copySaved`, `TestASaveSnapshotWriterThatStopsReadingDoesNotFreezeApply`).
+- Hold a stream's pin past `pinAfterStream` maximum election timeouts after
+  its last byte: a receiver that never answers its verdict pinned the
+  leader's compaction for good (#602, `pinAt`, `dropPin`,
+  `TestAFollowerStuckInItsInstallDoesNotPinCompaction`,
+  `TestTCPStreamWhoseReceiverNeverAnswersEndsWithItsContext`).
