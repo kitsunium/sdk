@@ -6410,12 +6410,16 @@ types:
           the loop, at each tick and each completed write; the proposal runs on a
           goroutine counted in n.wg, which ends once it is answered, or once the
           node stops. A follower's is forwarded to the leader, as any proposal
-          (R3-24). A learner raises nothing: it refuses its own proposals
-          (refuseShort) and says so. The cluster needs no learner to commit, and a
+          (R3-24). Only a voter of the current configuration raises it: a learner,
+          or a node the configuration does not name, refuses its own proposals
+          (refuseShort) and says so. The cluster needs neither to commit. A
           learner whose state outgrew the MaxSnapshotBytes it announced cannot cut
           any more while the leader keeps feeding it the log: its log reached its
           quota, its alarm committed, and every write of the cluster was refused
-          NO_SPACE until it was removed (#600).
+          NO_SPACE until it was removed (#600). A joining node is named by no
+          configuration it holds until the one that adds it reaches it, which one
+          offered no snapshot never does (#613): it heard its leader, took the
+          voter's path, and its alarm refused every write of the cluster (#619).
         name: guardSpace
         params: now time.Time
         recv: n *Node
@@ -7102,7 +7106,7 @@ types:
     name: ctxReader
   - doc: |-
       spaceGuard is the guard's state. checkedAt, nextRaise, fsShort and
-      learnerShort belong to the event loop; raising is set while a proposal of
+      nonVoterShort belong to the event loop; raising is set while a proposal of
       the alarm is in flight, and short while the last check found the disk
       short.
     fields:
@@ -7113,9 +7117,10 @@ types:
       - name: fsShort
         type: bool
       - doc: |-
-          learnerShort is set once a learner's short disk was logged, until the
-          disk is no longer short or the node votes.
-        name: learnerShort
+          nonVoterShort is set once the short disk of a node that is no voter of
+          the current configuration was logged, until the disk is no longer
+          short or the node votes.
+        name: nonVoterShort
         type: bool
       - name: raising
         type: atomic.Bool

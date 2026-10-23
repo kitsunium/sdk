@@ -17658,7 +17658,7 @@ sequences:
         to: g.short.Store
       - opt:
           do:
-            - set: g.learnerShort
+            - set: g.nonVoterShort
               value: "false"
             - return: ""
           when: "!short"
@@ -17677,18 +17677,27 @@ sequences:
           do:
             - opt:
                 do:
-                  - set: g.learnerShort
+                  - set: g.nonVoterShort
                     value: "true"
-                  - eval: "n.obs.warn(\"consensus: this learner's disk is short; it refuses its own proposals and raises no alarm for the cluster\", lstr(\"why\", why))"
+                  - bind: role
+                    eval: "\"learner\""
+                  - opt:
+                      do:
+                        - set: role
+                          value: "\"node the configuration does not name\""
+                      when: "!ok"
+                  - eval: |-
+                      n.obs.warn("consensus: this node's disk is short and it votes in no configuration; it refuses its own proposals and raises no alarm for the cluster",
+                      				lstr("why", why), lstr("member", role))
                     to: n.obs.warn
-                when: "!g.learnerShort"
+                when: "!g.nonVoterShort"
             - return: ""
           init:
             bind: m, ok
             eval: st.Conf.Member(n.stamp.ID)
             to: st.Conf.Member
-          when: ok && !m.Voter
-      - set: g.learnerShort
+          when: "!ok || !m.Voter"
+      - set: g.nonVoterShort
         value: "false"
       - set: g.nextRaise
         to: now.Add

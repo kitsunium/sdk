@@ -143,3 +143,70 @@ func TestALearnerTheStateOutgrewIsNotFedTheLogPastItsQuota(t *testing.T) {
 		t.Errorf("the learner's log holds %d KiB, past its quota less its reserve", b>>10)
 	}
 }
+
+// A node joining on a short disk is a member of no configuration it knows
+// until the one that adds it reaches it. One that announced a
+// MaxSnapshotBytes the state outgrew is offered no snapshot and fed no
+// entries (#613): it hears its leader's heartbeats and stays outside every
+// configuration it holds, and its alarm, proposed as a voter's, refused
+// every write of the cluster NO_SPACE (#619). Only a voter of the current
+// configuration raises the alarm: the joiner refuses its own proposals
+// only, and the cluster keeps committing.
+func TestAJoiningNodeOnAShortDiskDoesNotRaiseTheClusterNoSpace(t *testing.T) {
+	var joinerID coreconsensus.NodeID
+	free := new(atomic.Int64)
+	free.Store(1)
+	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{6, 1, 9}, every: 20, size: 3}
+	c.configure = func(tn *testNode, cfg *Config) {
+		if joinerID != 0 && tn.id == joinerID {
+			cfg.Log = quotaLog{MemoryLog: tn.log, free: free}
+		}
+	}
+	newClusterWith(t, c)
+	l := c.settledLeader(5 * time.Second)
+	for i := range 60 {
+		propose(t, l.node, fmt.Sprintf("k%03d=v", i))
+	}
+	tn := &testNode{log: NewMemoryLog(), snaps: NewMemorySnapshots(), sm: newKV()}
+	id, _, err := InitLog(tn.log, c.cid, "slot-joiner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tn.id, joinerID = id, id
+	c.nodes = append(c.nodes, tn)
+	c.start(tn)
+	waitFor(t, "the joiner's disk short", tn.node.space.short.Load)
+	st := must(tn.log.Stamp())(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for {
+		_, err := NewMemoryTransport(c.net, id).Join(ctx, coreconsensus.JoinConfig{Stamp: st, Address: "mem", MaxSnapshotBytes: 64})
+		if err == nil {
+			break
+		}
+		if ctx.Err() != nil {
+			t.Fatalf("join: %v", err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	waitFor(t, "the joiner hears its leader", func() bool { return tn.node.Status().Leader != 0 })
+	if _, ok := tn.node.Membership().Member(id); ok {
+		t.Fatal("setup: the joiner holds a configuration that names it")
+	}
+	time.Sleep(3 * spaceRaiseEvery)
+	for i := range 20 {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		lead := c.leader(5 * time.Second)
+		_, _, err := lead.node.Propose(ctx, fmt.Appendf(nil, "after%03d=v", i))
+		cancel()
+		if err != nil {
+			t.Fatalf("write %d after a joiner on a short disk joined: %v", i, err)
+		}
+	}
+	if ns := c.leader(5 * time.Second).node.Status().NoSpace; ns != 0 {
+		t.Errorf("a joining node whose disk is short committed the cluster-wide no-space alarm at %d", ns)
+	}
+	if !tn.node.space.short.Load() {
+		t.Error("the joiner's disk was never short: the scenario did not run")
+	}
+}
