@@ -51,7 +51,11 @@ func deadLetterTrace(t *testing.T, db *app.FakeDB, clk *drivenClock) {
 		t.Fatal(err)
 	}
 	expectAnswer(t, call(t, a, "GET /orders/ping", noBody), http.StatusNoContent, "")
-	clk.drive(t, "the span's batch refused for good", func() bool { return refused.Load() > 0 })
+	// The runtime state counts it (issue #535) once its queue buried it.
+	clk.drive(t, "the span's batch dead-lettered", func() bool {
+		ex := a.Graph().Runtime.Export
+		return refused.Load() > 0 && ex != nil && len(ex.Signals) > 0 && ex.Signals[0].DeadLettered == 1
+	})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := a.Stop(ctx); err != nil {

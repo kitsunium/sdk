@@ -553,6 +553,17 @@ packages:
         name: Database
         target: core.DatabaseMessage
       - doc: |-
+          Export is the product's OTLP export (app.OTLP), as the running
+          process found it: what each signal's queue holds against its bounds, has
+          sent and has lost. Its endpoint and headers are never shown.
+        name: Export
+        target: core.ExportMessage
+      - doc: |-
+          ExportSignal is one signal's queue of the OTLP export, sampled when
+          the runtime state is read; its counters never move a revision.
+        name: ExportSignal
+        target: core.ExportSignalMessage
+      - doc: |-
           Pool is a database's connection pool, as database/sql counts it.
           It is sampled when the runtime state is read; its counters never move a
           revision.
@@ -1805,6 +1816,25 @@ packages:
         name: DatabaseClosed
         type: string
         value: "\"closed\""
+      - blockDoc: OTLP export states.
+        doc: |-
+          ExportOff: the export sends nothing — no endpoint and no sender of the
+          product's, a CLI command, or a process not started.
+        name: ExportOff
+        type: string
+        value: "\"off\""
+      - blockDoc: OTLP export states.
+        doc: "ExportRunning: the export's loop sends."
+        name: ExportRunning
+        type: string
+        value: "\"running\""
+      - blockDoc: OTLP export states.
+        doc: |-
+          ExportStopped: its loop ended while the process runs — a queue's
+          storage failed —: nothing is sent until the next start.
+        name: ExportStopped
+        type: string
+        value: "\"stopped\""
       - blockDoc: Where a setting's value comes from.
         name: SettingEnv
         type: string
@@ -3503,6 +3533,22 @@ packages:
         doc: "DatabaseClosed: not opened yet, or closed by the stop."
         name: DatabaseClosed
         value: "\"closed\""
+      - blockDoc: OTLP export states.
+        doc: |-
+          ExportOff: the export sends nothing — no endpoint and no sender of the
+          product's, a CLI command, or a process not started.
+        name: ExportOff
+        value: "\"off\""
+      - blockDoc: OTLP export states.
+        doc: "ExportRunning: the export's loop sends."
+        name: ExportRunning
+        value: "\"running\""
+      - blockDoc: OTLP export states.
+        doc: |-
+          ExportStopped: its loop ended while the process runs — a queue's
+          storage failed —: nothing is sent until the next start.
+        name: ExportStopped
+        value: "\"stopped\""
       - blockDoc: Where a setting's value comes from.
         name: SettingEnv
         value: "\"env\""
@@ -7171,6 +7217,103 @@ packages:
               name: Databases
               tag: json:"databases,omitempty"
               type: "[]DatabaseMessage"
+            - doc: |-
+                Export is the product's OTLP export (app.OTLP), as this run found it:
+                its state and each signal's queue; nil when the app declares none.
+              name: Export
+              tag: json:"export,omitempty"
+              type: "*ExportMessage"
+      - doc: |-
+          ExportMessage is the product's OTLP export (app.OTLP), as the running
+          process found it: what each signal's queue holds against its bounds, has
+          sent and has lost. Its endpoint and headers are never shown.
+        name: ExportMessage
+        struct:
+          fields:
+            - doc: State is one of the Export constants.
+              name: State
+              tag: json:"state"
+              type: string
+            - doc: |-
+                Problem says why it is not healthy, when it is not: its loop ended, or
+                a queue holds more than 80% of either bound.
+              name: Problem
+              tag: json:"problem,omitempty"
+              type: string
+            - doc: Signals are its two queues, traces then metrics; none while it is off.
+              name: Signals
+              tag: json:"signals,omitempty"
+              type: "[]ExportSignalMessage"
+      - doc: |-
+          ExportSignalMessage is one signal's queue of the OTLP export, sampled when
+          the runtime state is read; its counters never move a revision.
+        name: ExportSignalMessage
+        struct:
+          fields:
+            - doc: |-
+                LastRetryAfterAt is when the collector last imposed a delay; nil when
+                it never did.
+              name: LastRetryAfterAt
+              tag: json:"lastRetryAfterAt,omitempty"
+              type: "*time.Time"
+            - doc: Signal is "traces" or "metrics".
+              name: Signal
+              tag: json:"signal"
+              type: string
+            - doc: |-
+                Store is where the queue lies: "memory", "directory" — under the data
+                directory — or "database:<name>".
+              name: Store
+              tag: json:"store"
+              type: string
+            - doc: PendingBytes is the bytes the queue holds.
+              name: PendingBytes
+              tag: json:"pendingBytes"
+              type: int64
+            - doc: MaxBytes bounds the bytes it holds.
+              name: MaxBytes
+              tag: json:"maxBytes"
+              type: int64
+            - doc: |-
+                LastRetryAfterMs is the last delay the collector imposed, in
+                milliseconds.
+              name: LastRetryAfterMs
+              tag: json:"lastRetryAfterMs,omitempty"
+              type: int64
+            - doc: Pending is the batches the queue holds.
+              name: Pending
+              tag: json:"pending"
+              type: int
+            - doc: MaxBatches bounds the batches it holds.
+              name: MaxBatches
+              tag: json:"maxBatches"
+              type: int
+            - doc: Sent counts the batches sent since the process started.
+              name: Sent
+              tag: json:"sent"
+              type: uint64
+            - doc: Retries counts the attempts made again.
+              name: Retries
+              tag: json:"retries"
+              type: uint64
+            - doc: Dropped counts the batches lost to a bound.
+              name: Dropped
+              tag: json:"dropped"
+              type: uint64
+            - doc: Expired counts the batches lost to their age.
+              name: Expired
+              tag: json:"expired"
+              type: uint64
+            - doc: |-
+                DeadLettered counts the batches the collector refused for good, which
+                `<product> otlp dead-letters` lists.
+              name: DeadLettered
+              tag: json:"deadLettered"
+              type: uint64
+            - doc: Durable reports whether the queue outlives the process.
+              name: Durable
+              tag: json:"durable"
+              type: bool
       - doc: |-
           DatabaseMessage is one database the app declares (app.Database), as the running
           process found it. Its URL is never shown: where it was found, the engine,

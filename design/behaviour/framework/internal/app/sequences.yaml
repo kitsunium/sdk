@@ -8706,6 +8706,8 @@ sequences:
         kind: internal
       - id: a.describeDatabases
         kind: internal
+      - id: a.otlpCodeDescribe
+        kind: internal
       - id: a.mockList
         kind: internal
     steps:
@@ -8731,6 +8733,9 @@ sequences:
       - set: rt.Databases
         to: a.describeDatabases
         value: a.describeDatabases()
+      - set: rt.Export
+        to: a.otlpCodeDescribe
+        value: a.otlpCodeDescribe()
       - opt:
           do:
             - set: rt.Mocks
@@ -27826,8 +27831,27 @@ sequences:
           		headerSettings: (*App).otlpHeaderSettings,
           		tables:         (*App).otlpTables,
           		command:        otlpCommandOf,
+          		describe:       (*App).describeOTLP,
           	})
         to: otlpCode.Store
+  - of: (*App).otlpCodeDescribe
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).otlpCodeDescribe
+        kind: self
+      - id: otlpCode.Load
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: h.describe(a)
+          init:
+            bind: h
+            eval: otlpCode.Load()
+            to: otlpCode.Load
+          when: h != nil
+      - return: nil
   - of: (*App).otlpCLI
     participants:
       - id: caller
@@ -28206,7 +28230,7 @@ sequences:
       - bind: r
         eval: |-
           &otlpRunning{
-          		ex: ex, sink: sink, sample: otlpRootSampler(resolvedSetting(a, a.opts.otlp.sampleRatio)), meter: meter,
+          		ex: ex, sink: sink, sample: otlpRootSampler(resolvedSetting(a, a.opts.otlp.sampleRatio)), meter: meter, store: otlpStoreOf(a, cfg),
           		cancel: cancel, done: make(chan struct{}), lost: map[string]uint64{},
           	}
       - loop:
@@ -28626,6 +28650,102 @@ sequences:
           when: len(problems) == 0
       - return: "Unavailable(\"the OTLP export is behind: \" + strings.Join(problems, \"; \"))"
         to: Unavailable
+  - of: otlpStoreOf
+    steps:
+      - switch:
+          cases:
+            - case: cfg.Database != nil
+              do:
+                - return: otlpStoreDatabase + resolvedSetting(a, a.opts.otlp.database)
+            - case: cfg.Dir != ""
+              do:
+                - return: otlpStoreDirectory
+      - return: otlpStoreMemory
+  - of: (*App).describeOTLP
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).describeOTLP
+        kind: self
+      - id: a.otlpRun.Load
+        kind: value
+      - id: r.mu.Lock
+        kind: value
+      - id: r.mu.Unlock
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: a.opts.otlp == nil
+      - bind: r
+        eval: a.otlpRun.Load()
+        to: a.otlpRun.Load
+      - opt:
+          do:
+            - return: "&model.Export{State: model.ExportOff}"
+          when: r == nil
+      - bind: out
+        eval: "&model.Export{State: model.ExportRunning}"
+      - var:
+          name: backlog
+          type: "[]string"
+      - loop:
+          do:
+            - set: out.Signals
+              value: append(out.Signals, exportSignal(r.store, &st))
+            - opt:
+                do:
+                  - set: backlog
+                    value: "append(backlog, st.Signal+\": \"+strconv.Itoa(st.Pending)+\" batches, \"+strconv.FormatInt(st.PendingBytes, 10)+\" bytes waiting\")"
+                when: backlogged(&st)
+          key: _
+          range: r.ex.Stats()
+          value: st
+      - opt:
+          do:
+            - set: out.Problem
+              value: "\"the OTLP export is behind: \" + strings.Join(backlog, \"; \")"
+          when: len(backlog) > 0
+      - select:
+          cases:
+            - comm: <-r.done
+              do:
+                - set: out.State, out.Problem
+                  value: model.ExportStopped, "the OTLP export stopped sending until the next start"
+                - eval: r.mu.Lock()
+                  to: r.mu.Lock
+                - opt:
+                    do:
+                      - op: +=
+                        set: out.Problem
+                        value: "\": \" + errs.PublicOf(r.err)"
+                    when: r.err != nil
+                - eval: r.mu.Unlock()
+                  to: r.mu.Unlock
+            - default: true
+      - return: out
+  - of: exportSignal
+    steps:
+      - opt:
+          do:
+            - set: store
+              value: otlpStoreMemory
+          when: "!st.Durable"
+      - bind: out
+        eval: |-
+          model.ExportSignal{
+          		Signal: st.Signal, Store: store, Durable: st.Durable,
+          		Pending: st.Pending, PendingBytes: st.PendingBytes, MaxBatches: st.MaxBatches, MaxBytes: st.MaxBytes,
+          		Sent: st.Sent, Retries: st.Retries, Dropped: st.Dropped, Expired: st.Expired, DeadLettered: st.DeadLettered,
+          		LastRetryAfterMs: st.LastRetryAfter.Milliseconds(),
+          	}
+      - opt:
+          do:
+            - set: out.LastRetryAfterAt
+              value: new(st.LastRetryAfterAt.UTC())
+          when: "!st.LastRetryAfterAt.IsZero()"
+      - return: out
   - of: backlogged
     steps:
       - return: |-
