@@ -3110,7 +3110,7 @@ Remove removes a member and retires its id; removing the leader first transfers 
 func (*Node) SaveSnapshot(ctx context.Context, op coreconsensus.Operator, w io.Writer) (coreconsensus.SnapshotMetaValue, error)
 ```
 
-SaveSnapshot cuts a snapshot now and copies its encoded stream to w.
+SaveSnapshot cuts a snapshot now and copies its encoded stream to w, on a goroutine of its own: once ctx is done it returns, and a write to w already blocked keeps that goroutine, and the snapshot pinned, until w returns.
 
 <a name="Node.Status"></a>
 ### func \(Node\) [Status](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/node.go>)

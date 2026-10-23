@@ -47304,7 +47304,7 @@
       "recv": "Node",
       "spelled": "func(ctx context.Context, op coreconsensus.Operator, w io.Writer) (coreconsensus.SnapshotMetaValue, error)",
       "canonical": "func(ctx context.Context, op github.com/kitsunium/sdk/internal/core/app/consensus.Operator, w io.Writer) (github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue, error)",
-      "doc": "SaveSnapshot cuts a snapshot now and copies its encoded stream to w.\n",
+      "doc": "SaveSnapshot cuts a snapshot now and copies its encoded stream to w, on a\ngoroutine of its own: once ctx is done it returns, and a write to w\nalready blocked keeps that goroutine, and the snapshot pinned, until w\nreturns.\n",
       "file": "service/app/consensus/snapshot.go",
       "layer": "service",
       "family": "app"
