@@ -51,6 +51,19 @@ func (t *holdTransport) Stream(ctx context.Context, to coreconsensus.NodeID, off
 	return err
 }
 
+// compactedPastTheEnd waits until every live node compacted past the entry
+// that follows the stopped node's log, so that only an install catches it
+// up. How far past is not waited for: a cut slower than the writes
+// coalesces the triggers that fell meanwhile, the next cut leaves the two
+// newest snapshots far apart, say at 20 and 200, and the log is compacted
+// back to the older one (D7) with no write left to cut again. Waiting for
+// the log to start past index 100 failed then (#588).
+func compactedPastTheEnd(t *testing.T, c *cluster, stopped *testNode) {
+	t.Helper()
+	_, last := stopped.log.Bounds()
+	compactedPast(t, c, last+1)
+}
+
 // #550: a transfer in flight pins compaction (ADR 0152 D7, R6-01). A
 // leader that cut twice while a snapshot streamed compacted past the
 // snapshot it was sending: once the follower installed it, the entry after
@@ -82,14 +95,7 @@ func TestATransferInFlightPinsCompaction(t *testing.T) {
 	for i := range 200 {
 		propose(t, l.node, fmt.Sprintf("a%d=v", i))
 	}
-	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		if first, _ := l.log.Bounds(); first > 100 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("setup: the leader never compacted")
-		}
-	}
+	compactedPastTheEnd(t, c, lag)
 	mu.Lock()
 	lt := trs[l.id]
 	mu.Unlock()
@@ -163,14 +169,7 @@ func TestAStreamedSnapshotPinsCompactionUntilThePeerCatchesUp(t *testing.T) {
 	for i := range 200 {
 		propose(t, l.node, fmt.Sprintf("a%d=v", i))
 	}
-	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		if first, _ := l.log.Bounds(); first > 100 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("setup: the leader never compacted")
-		}
-	}
+	compactedPastTheEnd(t, c, lag)
 	mu.Lock()
 	lt := trs[l.id]
 	mu.Unlock()
@@ -248,14 +247,7 @@ func TestAPinThatEndsCompactsTheLogWithoutAWrite(t *testing.T) {
 	for i := range 200 {
 		propose(t, l.node, fmt.Sprintf("a%d=v", i))
 	}
-	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		if first, _ := l.log.Bounds(); first > 100 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("setup: the leader never compacted")
-		}
-	}
+	compactedPastTheEnd(t, c, lag)
 	mu.Lock()
 	lt := trs[l.id]
 	mu.Unlock()
@@ -315,14 +307,7 @@ func TestALeaderThatLosesItsLeadershipStopsItsSnapshotStream(t *testing.T) {
 	for i := range 200 {
 		propose(t, l.node, fmt.Sprintf("a%d=v", i))
 	}
-	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		if first, _ := l.log.Bounds(); first > 100 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("setup: the leader never compacted")
-		}
-	}
+	compactedPastTheEnd(t, c, lag)
 	mu.Lock()
 	lt := trs[l.id]
 	mu.Unlock()
