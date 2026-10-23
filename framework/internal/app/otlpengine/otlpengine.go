@@ -41,7 +41,20 @@ const scopeName = "github.com/kitsunium/sdk/framework/internal/app"
 
 // Enable plugs the OTLP export into the framework.
 func Enable() {
-	plug.OTLP.Store(&plug.OTLPDriverConfig{Open: open, Queue: openDeadLetters})
+	plug.OTLP.Store(&plug.OTLPDriverConfig{Open: open, Queue: openDeadLetters, Policy: policyOf})
+}
+
+// policyOf is the policy every signal's queue opens under for cfg: a lease
+// above two attempts, deliveries no outage reaches, one batch at most the
+// export's byte bound, up to maxQueueMessage. The product's CLI reads it
+// through plug.OTLPDriverConfig.Policy, so that otlp migrate opens the same
+// queues with no copy of these bounds of its own.
+func policyOf(cfg *plug.OTLPConfig) plug.QueuePolicyValue {
+	return plug.QueuePolicyValue{
+		VisibilityTimeout: 2*cfg.SendTimeout + leaseMargin,
+		MaxDeliveries:     maxDeliveries,
+		MaxMessageBytes:   int(min(cfg.MaxBytes, maxQueueMessage)),
+	}
 }
 
 // open opens the export cfg describes: a queue and a forwarder per signal —
@@ -115,13 +128,10 @@ func openSignal(ctx context.Context, cfg *plug.OTLPConfig, clk clock.Timed, name
 // a directory, and where the durable queue refuses the platform — an export
 // never stops the product it observes.
 func openQueue(cfg *plug.OTLPConfig, clk clock.Timed, name string) (queue.Broker, bool, error) {
-	policy := queue.Policy{
-		VisibilityTimeout: 2*cfg.SendTimeout + leaseMargin,
-		MaxDeliveries:     maxDeliveries,
-		MaxMessageBytes:   int(min(cfg.MaxBytes, maxQueueMessage)),
-	}
+	p := policyOf(cfg)
+	policy := queue.Policy{VisibilityTimeout: p.VisibilityTimeout, MaxDeliveries: p.MaxDeliveries, MaxMessageBytes: p.MaxMessageBytes}
 	if cfg.Database != nil {
-		b, err := openTable(cfg, policy, name)
+		b, err := openTable(cfg, p, name)
 		return b, err == nil, err
 	}
 	if cfg.Dir != "" {
@@ -142,16 +152,13 @@ func openQueue(cfg *plug.OTLPConfig, clk clock.Timed, name string) (queue.Broker
 // store subsystem opened (plug.QueueDriverConfig.OpenSDK) — durable
 // wherever the database is, the platforms whose file queue the SDK refuses
 // included (issue #537).
-func openTable(cfg *plug.OTLPConfig, policy queue.Policy, name string) (queue.Broker, error) {
+func openTable(cfg *plug.OTLPConfig, policy plug.QueuePolicyValue, name string) (queue.Broker, error) {
 	queues := plug.Queues.Load()
 	if queues == nil || queues.OpenSDK == nil {
 		return nil, errs.Wrap(forward.Misconfigured, errs.WrapParams{}, errs.String("signal", name), errs.String("problem", "no queue subsystem"))
 	}
 	opened, err := queues.OpenSDK(plug.QueueConfig{
-		Name: "otlp/" + name, Database: cfg.Database, Table: cfg.Tables[name], Clock: cfg.Clock,
-		Policy: plug.QueuePolicyValue{
-			VisibilityTimeout: policy.VisibilityTimeout, MaxDeliveries: policy.MaxDeliveries, MaxMessageBytes: policy.MaxMessageBytes,
-		},
+		Name: "otlp/" + name, Database: cfg.Database, Table: cfg.Tables[name], Clock: cfg.Clock, Policy: policy,
 	})
 	if err != nil {
 		return nil, err
