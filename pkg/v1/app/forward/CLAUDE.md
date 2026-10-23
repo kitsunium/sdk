@@ -17,11 +17,11 @@ maintainer's half.
 | Symbol | Kind | Notes |
 |---|---|---|
 | `Forwarder` | alias | `Enqueue`, `Run`, `Stats` |
-| `Config` | alias | `Broker`, `Send` and `Retryable` required; `Clock`, `MaxBatches`, `MaxBytes`, `WhenFull`, `BlockTimeout`, `SendTimeout`, `MaxAge`, `Backoff`, `Parallelism`, `PollInterval`, `DrainTimeout`, `SettleTimeout` optional |
+| `Config` | alias | `Broker`, `Send` and `Retryable` required; `Clock`, `MaxBatches`, `MaxBytes`, `WhenFull`, `BlockTimeout`, `SendTimeout`, `MaxAge`, `Backoff`, `Parallelism`, `PollInterval`, `DrainTimeout`, `SettleTimeout`, `RecountInterval` (how stale the counts of a backlog another process changed may grow, #580) optional |
 | `FullPolicy`, `DropOldest` (the zero), `DropNewest`, `Block` | alias, constants | what `Enqueue` does at the bound |
 | `Stats` | alias | onto `StatsValue`: pending, sent, retries, dropped, expired, dead-lettered, the last `Retry-After` |
 | `Sender` | alias | `func(ctx, batch []byte) error` — a `DocumentExporter`'s `ExportDocument` |
-| `DefaultMaxBatches`, `DefaultMaxBytes`, `DefaultBlockTimeout`, `DefaultSendTimeout`, `DefaultMaxAge`, `DefaultRetryBase`, `DefaultRetryMax` | constants | the clamps of a zero field |
+| `DefaultMaxBatches`, `DefaultMaxBytes`, `DefaultBlockTimeout`, `DefaultSendTimeout`, `DefaultMaxAge`, `DefaultRetryBase`, `DefaultRetryMax`, `DefaultRecountInterval` | constants | the clamps of a zero field |
 | `Misconfigured`, `Full`, `BatchTooLarge` | vars | the sentinels (`0.3.93.*`), aliased from the core |
 | `New`, `NewSpanExporter`, `NewMetricExporter` | funcs | the constructor and the two producer adapters |
 

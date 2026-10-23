@@ -49,10 +49,15 @@ constants:
         name: DefaultRetryMax
         type: time.Duration
         value: 30 * time.Second
+      - doc: |-
+          DefaultRecountInterval is how long the counts may go without the queue
+          being counted again when Config.RecountInterval is zero: a backlog
+          another process changed is said within a minute of a read.
+        name: DefaultRecountInterval
+        type: time.Duration
+        value: time.Minute
     name: DefaultMaxBatches
-  - doc: |-
-      countPage is how many live messages New reads per call when it counts the
-      backlog a previous process left.
+  - doc: countPage is how many live messages a count of the queue reads per call.
     items:
       - name: countPage
         type: int
@@ -118,8 +123,8 @@ files:
   - decls:
       - Forwarder
       - New
-      - (*Forwarder).countBacklog
       - (*Forwarder).Enqueue
+      - (*Forwarder).publishCounted
       - (*Forwarder).Stats
       - (*Forwarder).Run
       - (*Forwarder).makeRoom
@@ -128,11 +133,23 @@ files:
       - (*Forwarder).fits
       - (*Forwarder).holds
       - (*Forwarder).full
-      - (*Forwarder).reserve
-      - (*Forwarder).unreserve
+      - (*Forwarder).hold
+      - (*Forwarder).release
       - (*Forwarder).settle
       - (*Forwarder).leave
+      - (*Forwarder).forget
     name: forwarder.go
+  - decls:
+      - listedBatch
+      - (*Forwarder).list
+      - (*Forwarder).recountLoop
+      - (*Forwarder).recountOnce
+      - (*Forwarder).forgetGone
+      - (*Forwarder).countListed
+      - (*Forwarder).uncountGone
+      - (*Forwarder).dueRecount
+      - (*Forwarder).askRecount
+    name: recount.go
   - decls:
       - spanExporter
       - metricExporter
@@ -294,6 +311,18 @@ types:
           context has ended. Zero is the queue's own default.
         name: SettleTimeout
         type: time.Duration
+      - doc: |-
+          RecountInterval is how long the counts go before the queue is counted
+          again, over a broker that lists its messages: a read of Stats, or a
+          batch leaving the queue, once it has passed has Run list the queue and
+          count what another process changed in it — a dead letter replayed into
+          it, a batch another consumer took. The delivery of a batch the
+          forwarder did not count has it counted at once. A count reads every
+          live batch, its payload included, on Run's goroutine and never on
+          Enqueue's: it costs what the backlog weighs. Zero means
+          DefaultRecountInterval; negative is refused.
+        name: RecountInterval
+        type: time.Duration
     kind: struct
     methods:
       - doc: validate refuses a configuration no forwarder can run under.
@@ -320,6 +349,41 @@ types:
           signal nobody waited for only makes the next wait look again.
         name: room
         type: chan struct{}
+      - doc: |-
+          recount holds one request for Run to count the queue again; a request
+          already pending makes another one nothing.
+        name: recount
+        type: chan struct{}
+      - doc: |-
+          reader lists the queue without leasing it; nil when the broker cannot,
+          and then the counts are this process's alone.
+        name: reader
+        type: corequeue.MessageReader
+      - doc: |-
+          held is every batch counted, by identifier: its size. Pending is its
+          length and PendingBytes the sum of its sizes.
+        name: held
+        type: map[string]int64
+      - doc: |-
+          leaving is every batch settled — sent, expired, dead-lettered or
+          dropped — that a count may still list, because the consumer settles a
+          batch before the broker forgets it: the count it was settled before,
+          by generation. A count forgets those it no longer lists. Nil when the
+          broker cannot list its messages.
+        name: leaving
+        type: map[string]uint64
+      - doc: |-
+          recorded is every batch Enqueue kept while a count lists the queue,
+          nil outside one: the listing may have missed it.
+        name: recorded
+        type: map[string]struct{}
+      - doc: |-
+          counted is when the queue was last counted, generation how many
+          counts Run started.
+        name: counted
+        type: time.Time
+      - name: generation
+        type: uint64
       - doc: cfg is the normalized configuration.
         name: cfg
         type: Config
@@ -331,7 +395,14 @@ types:
           one slot.
         name: admit
         type: sync.Mutex
-      - doc: mu guards stats.
+      - doc: |-
+          publish is held from a publication until its batch is counted, so a
+          batch that leaves the queue before Enqueue counted it, and a count that
+          lists it first, wait for that and never take it for another
+          process's. It is taken before mu, never after.
+        name: publish
+        type: sync.Mutex
+      - doc: mu guards stats, held, leaving, recorded, counted and generation.
         name: mu
         type: sync.Mutex
     kind: struct
@@ -371,12 +442,15 @@ types:
         params: ctx context.Context, payload []byte
         recv: f *Forwarder
         results: error
-      - doc: countBacklog adds every live message of reader to Pending and PendingBytes.
-        name: countBacklog
-        params: ctx context.Context, reader corequeue.MessageReader
+      - name: Enqueue
+        params: ctx context.Context, batch []byte
         recv: f *Forwarder
         results: error
-      - name: Enqueue
+      - doc: |-
+          publishCounted publishes batch and counts it, under publish: a batch that
+          leaves the queue before it is counted, and a count that lists it first,
+          wait for it.
+        name: publishCounted
         params: ctx context.Context, batch []byte
         recv: f *Forwarder
         results: error
@@ -420,29 +494,98 @@ types:
         recv: f *Forwarder
         results: error
       - doc: |-
-          reserve counts a batch held before it is published, so a consumer that
-          acknowledges it at once never takes the count below zero.
-        name: reserve
-        params: size int64
-        recv: f *Forwarder
-      - doc: unreserve takes back a reservation whose publication failed.
-        name: unreserve
-        params: size int64
+          hold counts the batch id of size, with mu held or before the forwarder is
+          shared.
+        name: hold
+        params: id string, size int64
         recv: f *Forwarder
       - doc: |-
-          settle records a batch of size leaving the queue under counter — size 0
-          for one that never entered it — and wakes a producer waiting for room.
+          release takes the counted batch id out of the counts, with mu held, and
+          wakes a producer waiting for room.
+        name: release
+        params: id string
+        recv: f *Forwarder
+      - doc: |-
+          settle records the batch id leaving the queue under counter — "" for one
+          that never entered it. A batch the forwarder does not count may be one
+          whose publication it has not counted yet: settle waits for that
+          publication. One it still does not count is another process's, which
+          takes nothing from the counts, and Run counts the queue again at once.
         name: settle
-        params: size int64, counter *uint64
+        params: id string, counter *uint64
         recv: f *Forwarder
       - doc: |-
-          leave takes a held batch of size out of the counts, never below zero — a
-          batch another process queued is not counted — and wakes a waiting
-          producer.
+          leave takes the batch id, which left the queue, out of the counts, with mu
+          held: nothing for "", which never entered it.
         name: leave
-        params: size int64
+        params: id string
+        recv: f *Forwarder
+      - doc: |-
+          forget records that the batch id was settled, with mu held: the broker
+          forgets it once the consumer acknowledges it, after the settle, and a count
+          that lists it before must not count it again.
+        name: forget
+        params: id string
+        recv: f *Forwarder
+      - doc: |-
+          list reads every live message of the queue, queued or leased, by
+          identifier.
+        name: list
+        params: ctx context.Context
+        recv: f *Forwarder
+        results: map[string]listedBatch, error
+      - doc: |-
+          recountLoop counts the queue each time it is asked, until ctx ends; a
+          forwarder whose broker cannot list its messages is never asked.
+        name: recountLoop
+        params: ctx context.Context
+        recv: f *Forwarder
+      - doc: |-
+          recountOnce lists the queue and makes the counts what it holds. A listing
+          that fails leaves the counts as they were, until the next request.
+        name: recountOnce
+        params: ctx context.Context
+        recv: f *Forwarder
+      - doc: |-
+          forgetGone forgets, with mu held, the settled batches the broker no longer
+          holds as the consumer left them: gone from a listing that began after they
+          were settled, or listed unleased — back in the queue.
+        name: forgetGone
+        params: listed map[string]listedBatch, generation uint64
+        recv: f *Forwarder
+      - doc: |-
+          countListed counts, with mu held, every listed batch the forwarder does not
+          count and did not settle.
+        name: countListed
+        params: listed map[string]listedBatch
+        recv: f *Forwarder
+      - doc: |-
+          uncountGone stops counting, with mu held, every counted batch the listing
+          does not hold but one Enqueue kept while the queue was listed.
+        name: uncountGone
+        params: listed map[string]listedBatch
+        recv: f *Forwarder
+      - doc: |-
+          dueRecount asks Run to count the queue again once Config.RecountInterval
+          has passed since the last count, with mu held.
+        name: dueRecount
+        recv: f *Forwarder
+      - doc: |-
+          askRecount asks Run to count the queue again, without ever blocking; a
+          request already pending is the same request.
+        name: askRecount
         recv: f *Forwarder
     name: Forwarder
+  - doc: listedBatch is one live message as a count lists it.
+    fields:
+      - doc: size is its payload's length.
+        name: size
+        type: int64
+      - doc: leased reports that a consumer holds it.
+        name: leased
+        type: bool
+    kind: struct
+    name: listedBatch
   - doc: |-
       spanExporter is the producer half for the trace signal: each batch
       encoded once, as the OTLP/HTTP exporter would post it, and kept.

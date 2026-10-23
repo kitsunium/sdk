@@ -9,6 +9,7 @@ go_library(
         "deliver.go",
         "doc.go",
         "forwarder.go",
+        "recount.go",
         "signal.go",
         "stats.go",
     ],
@@ -49,6 +50,7 @@ go_test(
         "forward_external_test.go",
         "gen_api_test.go",
         "harness_external_test.go",
+        "recount_external_test.go",
         "signal_external_test.go",
     ],
     deps = [

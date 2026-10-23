@@ -109,6 +109,46 @@ func TestAnOTLPDeadLetterIsListedThenReplayed(t *testing.T) {
 	})
 }
 
+// tracesPending is the traces' pending batches as the runtime state of a
+// says them (issue #535), -1 while it says none.
+func tracesPending(a *app.App) int {
+	ex := a.Graph().Runtime.Export
+	if ex == nil || len(ex.Signals) == 0 || ex.Signals[0].Signal != app.OTLPTraces {
+		return -1
+	}
+	return ex.Signals[0].Pending
+}
+
+// A dead letter `otlp replay` puts back while the product runs is counted
+// pending by the running export (issue #580) — its runtime state, and the
+// readiness and bounds that read the same counts — while its collector is
+// still down and the batch before it is retried: the forwarder counts its
+// queue again once its interval passed, not at the next start.
+func TestAnOTLPReplayWhileTheProductRunsIsCounted(t *testing.T) {
+	db := app.NewFakeDB(sql.DialectPostgres)
+	clk := newDrivenClock()
+	deadLetterTrace(t, db, clk)
+	var refused atomic.Int64
+	down := func(_ context.Context, b app.OTLPBatchValue) error {
+		if b.Signal == app.OTLPTraces {
+			refused.Add(1)
+		}
+		return app.NewError(http.StatusServiceUnavailable, app.WireUnavailable, "down")
+	}
+	running := otlpDatabaseApp(t, db, clk, down, app.OTLPDatabase("database"))
+	if err := running.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	stopOnCleanup(t, running)
+	expectAnswer(t, call(t, running, "GET /orders/ping", noBody), http.StatusNoContent, "")
+	clk.drive(t, "the ping's batch retried", func() bool { return refused.Load() > 1 && tracesPending(running) == 1 })
+	cli := otlpDatabaseApp(t, db, clk, newSent().send, app.OTLPDatabase("database"))
+	if status, out, errOut := otlpRun(t, cli, "replay", "traces"); status != 0 || !strings.Contains(out, "replayed 1 dead letter(s) of traces") {
+		t.Fatalf("replay while the product runs: %d\n%s%s", status, out, errOut)
+	}
+	clk.drive(t, "the replayed batch counted pending", func() bool { return tracesPending(running) == 2 })
+}
+
 // `otlp replay --drop` deletes every dead letter for good: none is listed
 // after it, and none is sent by the next process.
 func TestAnOTLPDeadLetterIsDropped(t *testing.T) {

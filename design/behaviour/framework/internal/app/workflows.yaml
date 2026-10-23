@@ -830,7 +830,7 @@ workflows:
       - opt:
           do:
             - return: otlpArgs{}, false
-          when: len(args) == 0 || !slices.Contains([]string{"dead-letters", "replay"}, args[0])
+          when: len(args) == 0 || !slices.Contains([]string{"dead-letters", "replay", "migrate"}, args[0])
       - bind: out
         eval: "otlpArgs{verb: args[0], signals: []string{OTLPTraces, OTLPMetrics}}"
       - bind: rest
@@ -843,7 +843,7 @@ workflows:
       - opt:
           do:
             - return: otlpArgs{}, false
-          when: out.verb == "dead-letters" && len(rest) > 0
+          when: out.verb != "replay" && len(rest) > 0
       - loop:
           do:
             - opt:

@@ -167,6 +167,7 @@ func (a *App) startOTLP(ctx context.Context) error {
 	if err != nil || cfg == nil {
 		return err
 	}
+	a.warnOTLPFileQueuesLeft(cfg)
 	driver := plug.OTLP.Load()
 	if driver == nil {
 		return errs.New(CodeSubsystemMissing, "SUBSYSTEM_NOT_IMPORTED", subsystemPublic,
@@ -305,6 +306,29 @@ func (a *App) otlpOnDatabase(ctx context.Context, cfg *plug.OTLPConfig) error {
 	cfg.Dir, cfg.Database = "", r.database()
 	cfg.Tables = map[string]string{OTLPTraces: otlpTable(OTLPTraces), OTLPMetrics: otlpTable(OTLPMetrics)}
 	return nil
+}
+
+// warnOTLPFileQueuesLeft says, at the start, that the export's queues moved
+// from the data directory onto a database and left batches behind (issue
+// #580): they wait in the file queues under <data>/.otlp, which nothing
+// sends now, until `otlp migrate` moves them — logged and shown as a
+// problem, as a consumer's queue left behind is (consumer.file-queue-left).
+func (a *App) warnOTLPFileQueuesLeft(cfg *plug.OTLPConfig) {
+	if cfg.Database == nil || a.dataDir == "" || a.opts.memory {
+		return
+	}
+	database := resolvedSetting(a, a.opts.otlp.database)
+	for _, signal := range []string{OTLPTraces, OTLPMetrics} {
+		if fileQueueHolds(otlpFileQueue(a.dataDir, signal)) {
+			a.problem(otlpNode, say("otlp.file-queue-left", "signal", signal, "database", database, "product", a.name))
+		}
+	}
+}
+
+// otlpFileQueue is the directory of signal's file queue under the data
+// directory data, where the export keeps it without otlp-database.
+func otlpFileQueue(data, signal string) string {
+	return filepath.Join(data, otlpDataDir, signal)
 }
 
 // otlpDatabase is the database otlp-database names, nil when it names none

@@ -344,6 +344,8 @@ var otlpCode = []string{
 	"(*App).otlpTables",
 	"(*App).otlpCommand",
 	"(*App).describeOTLP",
+	"(*App).warnOTLPFileQueuesLeft",
+	"(*App).migrateOTLP",
 }
 
 // sdkMeter is a function of the SDK's in-memory meter — the framework's

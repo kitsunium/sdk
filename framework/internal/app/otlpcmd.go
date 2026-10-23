@@ -27,6 +27,11 @@ const otlpUsageText string = `usage:
       live queue, their attempts counted afresh: the export sends them
       again, a running product as soon as it next polls; --drop deletes them
       for good instead
+  %[1]s otlp migrate [traces|metrics]
+      move the batches the export left under the data directory, waiting and
+      dead, onto the database otlp-database names, where it now keeps its
+      queues: in one transaction, verified by fingerprints, the file queues
+      then moved aside under <data>/.data-copy/
 The queues are read where the export keeps them: under the data directory,
 or on the database otlp-database names. An export that keeps them in memory
 has none to read.
@@ -41,8 +46,10 @@ has none to read.
 // Queue), so a product that does not import framework/app/otlp, or declares
 // no export, has no such command and links none of it. A queue is shared
 // by processes as the SDK's queues are, without a lock: a replay while the
-// product runs is sent by its export at its next poll, which counts it
-// pending again from its next start.
+// product runs is sent by its export at its next poll, and counted pending
+// by it within the forwarder's recount interval (issue #580). `otlp
+// migrate` (otlp_migrate.go) moves the batches a switch to otlp-database
+// left under the data directory onto the database.
 
 // otlpMaxDeadLetters bounds the dead letters the command reads per signal.
 const otlpMaxDeadLetters int = 1000
@@ -75,12 +82,7 @@ func (a *App) otlpCommand(ctx context.Context, args []string, stdout, stderr io.
 	if a.otlpSettingsRefused(stderr) {
 		return exitConfig
 	}
-	err := a.withOTLPQueues(ctx, func(cfg *plug.OTLPConfig) error {
-		if parsed.verb == "dead-letters" {
-			return a.listOTLPDeadLetters(ctx, cfg, parsed.signals, stdout)
-		}
-		return a.replayOTLPDeadLetters(ctx, cfg, &parsed, stdout, stderr)
-	})
+	err := a.runOTLPVerb(ctx, &parsed, stdout, stderr)
 	switch {
 	case err == nil:
 		return 0
@@ -92,11 +94,25 @@ func (a *App) otlpCommand(ctx context.Context, args []string, stdout, stderr io.
 	return 1
 }
 
-// parseOTLPArgs reads `otlp`'s arguments: dead-letters and a signal at most,
-// or replay, a signal, --drop and the IDs in any order; ok is false for any
-// other.
+// runOTLPVerb runs the verb p names on the export's queues, placed as its
+// start places them.
+func (a *App) runOTLPVerb(ctx context.Context, p *otlpArgs, stdout, stderr io.Writer) error {
+	if p.verb == "migrate" {
+		return a.migrateOTLP(ctx, p.signals, stdout)
+	}
+	return a.withOTLPQueues(ctx, func(cfg *plug.OTLPConfig) error {
+		if p.verb == "dead-letters" {
+			return a.listOTLPDeadLetters(ctx, cfg, p.signals, stdout)
+		}
+		return a.replayOTLPDeadLetters(ctx, cfg, p, stdout, stderr)
+	})
+}
+
+// parseOTLPArgs reads `otlp`'s arguments: dead-letters or migrate and a
+// signal at most, or replay, a signal, --drop and the IDs in any order; ok
+// is false for any other.
 func parseOTLPArgs(args []string) (otlpArgs, bool) {
-	if len(args) == 0 || !slices.Contains([]string{"dead-letters", "replay"}, args[0]) {
+	if len(args) == 0 || !slices.Contains([]string{"dead-letters", "replay", "migrate"}, args[0]) {
 		return otlpArgs{}, false
 	}
 	out := otlpArgs{verb: args[0], signals: []string{OTLPTraces, OTLPMetrics}}
@@ -104,7 +120,7 @@ func parseOTLPArgs(args []string) (otlpArgs, bool) {
 	if len(rest) > 0 && (rest[0] == OTLPTraces || rest[0] == OTLPMetrics) {
 		out.signals, rest = rest[:1], rest[1:]
 	}
-	if out.verb == "dead-letters" && len(rest) > 0 {
+	if out.verb != "replay" && len(rest) > 0 {
 		return otlpArgs{}, false
 	}
 	for _, arg := range rest {

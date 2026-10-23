@@ -82,6 +82,10 @@ sequences:
               do:
                 - return: misconfigured("MaxAge", "negative")
                   to: misconfigured
+            - case: c.RecountInterval < 0
+              do:
+                - return: misconfigured("RecountInterval", "negative")
+                  to: misconfigured
             - default: true
               do:
                 - return: nil
@@ -116,6 +120,9 @@ sequences:
       - set: n.MaxAge
         to: orDefault
         value: orDefault(n.MaxAge, DefaultMaxAge)
+      - set: n.RecountInterval
+        to: orDefault
+        value: orDefault(n.RecountInterval, DefaultRecountInterval)
       - set: n.Parallelism
         value: max(n.Parallelism, 1)
       - opt:
@@ -166,14 +173,14 @@ sequences:
     steps:
       - bind: payload
         eval: delivery.Message.Payload
-      - bind: size
-        eval: int64(len(payload))
+      - bind: id
+        eval: delivery.Message.ID
       - bind: expiry
         eval: delivery.Message.EnqueuedAt.Add(f.cfg.MaxAge)
         to: delivery.Message.EnqueuedAt.Add
       - opt:
           do:
-            - eval: f.settle(size, &f.stats.Expired)
+            - eval: f.settle(id, &f.stats.Expired)
               to: f.settle
             - return: nil
           when: "!f.cfg.Clock.Now().Before(expiry)"
@@ -188,7 +195,7 @@ sequences:
           cases:
             - case: err == nil
               do:
-                - eval: f.settle(size, &f.stats.Sent)
+                - eval: f.settle(id, &f.stats.Sent)
                   to: f.settle
                 - return: nil
             - case: ctx.Err() != nil
@@ -196,13 +203,13 @@ sequences:
                 - return: err
             - case: "!f.cfg.Retryable(err)"
               do:
-                - eval: f.settle(size, &f.stats.DeadLettered)
+                - eval: f.settle(id, &f.stats.DeadLettered)
                   to: f.settle
                 - return: corequeue.DoNotRetry(err)
                   to: corequeue
             - default: true
               do:
-                - eval: f.settle(size, &f.stats.Expired)
+                - eval: f.settle(id, &f.stats.Expired)
                   to: f.settle
                 - return: nil
   - of: (*Forwarder).retry
@@ -313,7 +320,11 @@ sequences:
         kind: self
       - id: cfg.validate
         kind: internal
-      - id: forwarder.countBacklog
+      - id: cfg.normalized
+        kind: internal
+      - id: forwarder.list
+        kind: internal
+      - id: forwarder.hold
         kind: internal
     steps:
       - opt:
@@ -324,60 +335,38 @@ sequences:
             eval: cfg.validate()
             to: cfg.validate
           when: err != nil
+      - bind: "n"
+        eval: cfg.normalized()
+        to: cfg.normalized
       - bind: forwarder
-        eval: "&Forwarder{cfg: cfg.normalized(), room: make(chan struct{}, 1)}"
+        eval: |-
+          &Forwarder{
+          		cfg: n, room: make(chan struct{}, 1), recount: make(chan struct{}, 1),
+          		held: make(map[string]int64), counted: n.Clock.Now(),
+          	}
       - opt:
           do:
+            - set: forwarder.reader, forwarder.leaving
+              value: reader, make(map[string]uint64)
+            - bind: listed, err
+              eval: forwarder.list(ctx)
+              to: forwarder.list
             - opt:
                 do:
                   - return: nil, err
-                init:
-                  bind: err
-                  eval: forwarder.countBacklog(ctx, reader)
-                  to: forwarder.countBacklog
                 when: err != nil
+            - loop:
+                do:
+                  - eval: forwarder.hold(id, batch.size)
+                    to: forwarder.hold
+                key: id
+                range: listed
+                value: batch
           init:
             bind: reader, ok
             eval: cfg.Broker.(corequeue.MessageReader)
           when: ok
       - return: forwarder, nil
-  - of: (*Forwarder).countBacklog
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*Forwarder).countBacklog
-        kind: self
-      - id: reader.Messages
-        kind: value
-    steps:
-      - bind: after
-        eval: "\"\""
-      - loop:
-          do:
-            - bind: page, err
-              eval: reader.Messages(ctx, after, countPage)
-              to: reader.Messages
-            - opt:
-                do:
-                  - return: err
-                when: err != nil
-            - loop:
-                do:
-                  - op: ++
-                    set: f.stats.Pending
-                  - op: +=
-                    set: f.stats.PendingBytes
-                    value: int64(len(live.Message.Payload))
-                  - set: after
-                    value: live.Message.ID
-                key: _
-                range: page
-                value: live
-            - opt:
-                do:
-                  - return: nil
-                when: len(page) < countPage
-          forever: true
   - of: (*Forwarder).Enqueue
     participants:
       - id: caller
@@ -390,16 +379,8 @@ sequences:
         kind: package
       - id: f.makeRoom
         kind: internal
-      - id: f.reserve
+      - id: f.publishCounted
         kind: internal
-      - id: f.cfg.Broker.Publish
-        kind: value
-      - id: f.unreserve
-        kind: internal
-      - id: f.mu.Lock
-        kind: value
-      - id: f.mu.Unlock
-        kind: value
     steps:
       - bind: size
         eval: int64(len(batch))
@@ -409,7 +390,7 @@ sequences:
           when: size == 0
       - opt:
           do:
-            - eval: f.settle(0, &f.stats.Dropped)
+            - eval: f.settle("", &f.stats.Dropped)
               to: f.settle
             - return: |-
                 kerrs.Wrap(coreforward.BatchTooLarge, kerrs.WrapParams{},
@@ -426,29 +407,53 @@ sequences:
             eval: f.makeRoom(ctx, size)
             to: f.makeRoom
           when: err != nil
-      - eval: f.reserve(size)
-        to: f.reserve
+      - return: f.publishCounted(ctx, batch)
+        to: f.publishCounted
+  - of: (*Forwarder).publishCounted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Forwarder).publishCounted
+        kind: self
+      - id: f.cfg.Broker.Publish
+        kind: value
+      - id: f.hold
+        kind: internal
+    steps:
+      - lock:
+          mutex: f.publish
+      - bind: message, err
+        eval: f.cfg.Broker.Publish(ctx, batch)
+        to: f.cfg.Broker.Publish
       - opt:
           do:
-            - eval: f.unreserve(size)
-              to: f.unreserve
             - return: err
-          init:
-            bind: _, err
-            eval: f.cfg.Broker.Publish(ctx, batch)
-            to: f.cfg.Broker.Publish
           when: err != nil
-      - eval: f.mu.Lock()
-        to: f.mu.Lock
+      - lock:
+          mutex: f.mu
       - op: ++
         set: f.stats.Enqueued
-      - eval: f.mu.Unlock()
-        to: f.mu.Unlock
+      - eval: f.hold(message.ID, int64(len(batch)))
+        to: f.hold
+      - opt:
+          do:
+            - set: f.recorded[message.ID]
+              value: struct{}{}
+          when: f.recorded != nil
       - return: nil
   - of: (*Forwarder).Stats
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Forwarder).Stats
+        kind: self
+      - id: f.dueRecount
+        kind: internal
     steps:
       - lock:
           mutex: f.mu
+      - eval: f.dueRecount()
+        to: f.dueRecount
       - return: f.stats
   - of: (*Forwarder).Run
     participants:
@@ -456,10 +461,23 @@ sequences:
         kind: actor
       - id: (*Forwarder).Run
         kind: self
+      - id: context
+        kind: stdlib
       - id: svcqueue
         kind: package
     steps:
-      - return: |-
+      - bind: counting, stop
+        eval: context.WithCancel(ctx)
+        to: context
+      - bind: done
+        eval: make(chan struct{})
+      - go: |-
+          func() {
+          		defer close(done)
+          		f.recountLoop(counting)
+          	}()
+      - bind: err
+        eval: |-
           svcqueue.Consume(ctx, f.cfg.Broker, svcqueue.ConsumerConfig{
           		Handler:       f.deliver,
           		Clock:         f.cfg.Clock,
@@ -476,6 +494,9 @@ sequences:
           		HandlerIsIdempotent: true,
           	})
         to: svcqueue
+      - eval: stop()
+      - eval: <-done
+      - return: err
   - of: (*Forwarder).makeRoom
     participants:
       - id: caller
@@ -548,7 +569,7 @@ sequences:
                   eval: f.cfg.Broker.Ack(ctx, oldest.Lease.Receipt)
                   to: f.cfg.Broker.Ack
                 when: ackErr != nil
-            - eval: f.settle(int64(len(oldest.Message.Payload)), &f.stats.Dropped)
+            - eval: f.settle(oldest.Message.ID, &f.stats.Dropped)
               to: f.settle
       - return: nil
   - of: (*Forwarder).block
@@ -589,7 +610,7 @@ sequences:
                         to: f.full
                   - comm: <-ctx.Done()
                     do:
-                      - eval: f.settle(0, &f.stats.Dropped)
+                      - eval: f.settle("", &f.stats.Dropped)
                         to: f.settle
                       - return: ctx.Err()
                         to: ctx.Err
@@ -621,61 +642,293 @@ sequences:
       - id: kerrs
         kind: package
     steps:
-      - eval: f.settle(0, &f.stats.Dropped)
+      - eval: f.settle("", &f.stats.Dropped)
         to: f.settle
       - return: |-
           kerrs.Wrap(coreforward.ForwardFull, kerrs.WrapParams{},
           		kerrs.String("policy", f.cfg.WhenFull.String()))
         to: kerrs
-  - of: (*Forwarder).reserve
+  - of: (*Forwarder).hold
     steps:
-      - lock:
-          mutex: f.mu
-      - op: ++
-        set: f.stats.Pending
+      - set: f.held[id]
+        value: size
+      - set: f.stats.Pending
+        value: len(f.held)
       - op: +=
         set: f.stats.PendingBytes
         value: size
-  - of: (*Forwarder).unreserve
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*Forwarder).unreserve
-        kind: self
-      - id: f.leave
-        kind: internal
+  - of: (*Forwarder).release
     steps:
-      - lock:
-          mutex: f.mu
-      - eval: f.leave(size)
-        to: f.leave
+      - op: "-="
+        set: f.stats.PendingBytes
+        value: f.held[id]
+      - eval: delete(f.held, id)
+      - set: f.stats.Pending
+        value: len(f.held)
+      - select:
+          cases:
+            - comm: f.room <- struct{}{}
+            - default: true
   - of: (*Forwarder).settle
     participants:
       - id: caller
         kind: actor
       - id: (*Forwarder).settle
         kind: self
+      - id: f.mu.Lock
+        kind: value
       - id: f.leave
         kind: internal
+      - id: f.mu.Unlock
+        kind: value
+      - id: f.forget
+        kind: internal
+      - id: f.askRecount
+        kind: internal
     steps:
-      - lock:
-          mutex: f.mu
+      - eval: f.mu.Lock()
+        to: f.mu.Lock
       - op: ++
         set: "*counter"
+      - bind: _, held
+        eval: f.held[id]
       - opt:
           do:
-            - eval: f.leave(size)
+            - eval: f.leave(id)
               to: f.leave
-          when: size > 0
+            - eval: f.mu.Unlock()
+              to: f.mu.Unlock
+            - return: ""
+          when: id == "" || held
+      - eval: f.mu.Unlock()
+        to: f.mu.Unlock
+      - lock:
+          mutex: f.publish
+      - lock:
+          mutex: f.mu
+      - opt:
+          do:
+            - eval: f.leave(id)
+              to: f.leave
+            - return: ""
+          init:
+            bind: _, held
+            eval: f.held[id]
+            op: =
+          when: held
+      - eval: f.forget(id)
+        to: f.forget
+      - eval: f.askRecount()
+        to: f.askRecount
   - of: (*Forwarder).leave
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Forwarder).leave
+        kind: self
+      - id: f.release
+        kind: internal
+      - id: f.forget
+        kind: internal
+      - id: f.dueRecount
+        kind: internal
     steps:
-      - set: f.stats.Pending
-        value: max(f.stats.Pending-1, 0)
-      - set: f.stats.PendingBytes
-        value: max(f.stats.PendingBytes-size, 0)
+      - opt:
+          do:
+            - return: ""
+          when: id == ""
+      - eval: f.release(id)
+        to: f.release
+      - eval: f.forget(id)
+        to: f.forget
+      - eval: f.dueRecount()
+        to: f.dueRecount
+  - of: (*Forwarder).forget
+    steps:
+      - opt:
+          do:
+            - set: f.leaving[id]
+              value: f.generation
+          when: f.leaving != nil
+  - of: (*Forwarder).list
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Forwarder).list
+        kind: self
+      - id: f.reader.Messages
+        kind: value
+    steps:
+      - bind: listed
+        eval: make(map[string]listedBatch)
+      - bind: after
+        eval: "\"\""
+      - loop:
+          do:
+            - bind: page, err
+              eval: f.reader.Messages(ctx, after, countPage)
+              to: f.reader.Messages
+            - opt:
+                do:
+                  - return: nil, err
+                when: err != nil
+            - loop:
+                do:
+                  - set: listed[live.Message.ID]
+                    value: "listedBatch{size: int64(len(live.Message.Payload)), leased: live.Leased}"
+                  - set: after
+                    value: live.Message.ID
+                key: _
+                range: page
+                value: live
+            - opt:
+                do:
+                  - return: listed, nil
+                when: len(page) < countPage
+          forever: true
+  - of: (*Forwarder).recountLoop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Forwarder).recountLoop
+        kind: self
+      - id: f.recountOnce
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - select:
+                cases:
+                  - comm: <-ctx.Done()
+                    do:
+                      - return: ""
+                  - comm: <-f.recount
+                    do:
+                      - eval: f.recountOnce(ctx)
+                        to: f.recountOnce
+          forever: true
+  - of: (*Forwarder).recountOnce
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Forwarder).recountOnce
+        kind: self
+      - id: f.mu.Lock
+        kind: value
+      - id: f.cfg.Clock.Now
+        kind: value
+      - id: f.mu.Unlock
+        kind: value
+      - id: f.list
+        kind: internal
+      - id: f.forgetGone
+        kind: internal
+      - id: f.countListed
+        kind: internal
+      - id: f.uncountGone
+        kind: internal
+    steps:
+      - eval: f.mu.Lock()
+        to: f.mu.Lock
+      - set: f.counted
+        to: f.cfg.Clock.Now
+        value: f.cfg.Clock.Now()
+      - op: ++
+        set: f.generation
+      - bind: generation
+        eval: f.generation
+      - set: f.recorded
+        value: make(map[string]struct{})
+      - eval: f.mu.Unlock()
+        to: f.mu.Unlock
+      - bind: listed, err
+        eval: f.list(ctx)
+        to: f.list
+      - lock:
+          mutex: f.publish
+      - lock:
+          mutex: f.mu
+      - opt:
+          do:
+            - eval: f.forgetGone(listed, generation)
+              to: f.forgetGone
+            - eval: f.countListed(listed)
+              to: f.countListed
+            - eval: f.uncountGone(listed)
+              to: f.uncountGone
+          when: err == nil
+      - set: f.recorded
+        value: nil
+  - of: (*Forwarder).countListed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Forwarder).countListed
+        kind: self
+      - id: f.hold
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: _, held
+              eval: f.held[id]
+            - bind: _, settled
+              eval: f.leaving[id]
+            - opt:
+                do:
+                  - continue: true
+                when: held || settled
+            - eval: f.hold(id, batch.size)
+              to: f.hold
+          key: id
+          range: listed
+          value: batch
+  - of: (*Forwarder).uncountGone
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Forwarder).uncountGone
+        kind: self
+      - id: f.release
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: _, present
+              eval: listed[id]
+            - bind: _, recorded
+              eval: f.recorded[id]
+            - opt:
+                do:
+                  - continue: true
+                when: present || recorded
+            - eval: f.release(id)
+              to: f.release
+          key: id
+          range: f.held
+  - of: (*Forwarder).dueRecount
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Forwarder).dueRecount
+        kind: self
+      - id: f.askRecount
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: f.askRecount()
+              to: f.askRecount
+          when: f.reader != nil && f.cfg.Clock.Now().Sub(f.counted) >= f.cfg.RecountInterval
+  - of: (*Forwarder).askRecount
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: f.reader == nil
       - select:
           cases:
-            - comm: f.room <- struct{}{}
+            - comm: f.recount <- struct{}{}
             - default: true
   - of: NewSpanExporter
     steps:

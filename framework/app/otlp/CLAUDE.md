@@ -26,7 +26,15 @@ Importing it also gives `App.Main` the `otlp` command of a product that
 declares an export (issue #536): `otlp dead-letters` lists the batches the
 collector refused for good, never their payload, and `otlp replay` puts them
 back into the live queue, or with `--drop` deletes them — never a route
-(D13). A product that does not import it has no such command. `framework/app` does not import this package (ADR 0179
+(D13); a replay while the product runs is sent at its next poll and counted
+pending by the running export within the forwarder's recount interval
+(issue #580). Switching to `otlp-database` with batches left under
+`<data>/.otlp` is said at the start (`otlp.file-queue-left`, logged and a
+problem), and `otlp migrate [traces|metrics]` moves them — waiting and dead
+— onto the database, in one transaction verified by fingerprints, the file
+queues then moved aside under `<data>/.data-copy/` (issue #580); letting
+the release before the switch send them is the other way. A product that
+does not import it has no such command. `framework/app` does not import this package (ADR 0179
 step 10): a product that declares an export imports it, and `kit gen` writes
 the line for a designed product (§5).
 

@@ -4,7 +4,9 @@ import "time"
 
 // StatsValue is what a forwarder holds, has done and has lost, read at once
 // by [Forwarder.Stats]. The counters count since New; Pending and
-// PendingBytes start from the backlog New found in the queue.
+// PendingBytes start from the backlog New found in the queue, and follow
+// it: what the forwarder keeps and settles at once, what another process
+// changed in it at the next count (Config.RecountInterval).
 type StatsValue struct {
 	// LastRetryAfterAt is when a collector last imposed a delay; zero when
 	// none has.
