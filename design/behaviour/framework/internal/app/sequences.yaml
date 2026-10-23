@@ -7806,6 +7806,8 @@ sequences:
         kind: internal
       - id: a.resolveSettings
         kind: internal
+      - id: a.settingValues.Store
+        kind: value
       - id: a.mu.Lock
         kind: value
       - id: a.mu.Unlock
@@ -7852,6 +7854,8 @@ sequences:
       - bind: resolved
         eval: a.resolveSettings()
         to: a.resolveSettings
+      - eval: a.settingValues.Store(&resolved.values)
+        to: a.settingValues.Store
       - eval: a.mu.Lock()
         to: a.mu.Lock
       - set: a.settingProblems

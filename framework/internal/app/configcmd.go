@@ -34,6 +34,9 @@ func (a *App) configCommand(ctx context.Context, args []string, stdout, stderr i
 	}
 	defer a.closeSecrets()
 	resolved := a.resolveSettings()
+	// The problems below judge the values shown, as the start judges them:
+	// an otlp-database a variable overrides among them.
+	a.settingValues.Store(&resolved.values)
 	a.mu.Lock()
 	a.settingProblems = resolved.problems
 	a.mu.Unlock()

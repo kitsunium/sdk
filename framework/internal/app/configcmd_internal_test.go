@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 )
 
 // The product's binary says its configuration: every setting, its value —
@@ -65,5 +67,28 @@ func TestTheConfigCommand(t *testing.T) {
 	errOut.Reset()
 	if code := app.configCommand(t.Context(), nil, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "secret notify/secret/api-token is not set") {
 		t.Errorf("an unset secret: %d %q", code, errOut.String())
+	}
+}
+
+// config judges the configuration it shows, as the start does: an
+// otlp-database the code names wrong but the variable overrides with a
+// database the app declares is accepted, and one the variable names wrong
+// is refused.
+func TestTheConfigCommandJudgesTheResolvedSettings(t *testing.T) {
+	t.Setenv("SHOP_SECRETS", "memory")
+	t.Setenv("SHOP_SMTP_URL", "")
+	product := func() *App {
+		return NewApp("shop", NewService("shop", "Sells.")).With(InMemory(), Logs(io.Discard),
+			Database("events", NewFakeDB(sql.DialectPostgres).Engine()), OTLP(OTLPDatabase("old")))
+	}
+	t.Setenv("SHOP_OTLP_DATABASE", "events")
+	var out, errOut bytes.Buffer
+	if code := product().configCommand(t.Context(), nil, &out, &errOut); code != 0 || strings.Contains(errOut.String(), "otlp-database") {
+		t.Errorf("an otlp-database the variable overrides with a declared database: %d %q", code, errOut.String())
+	}
+	t.Setenv("SHOP_OTLP_DATABASE", "nowhere")
+	errOut.Reset()
+	if code := product().configCommand(t.Context(), nil, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "names nowhere") {
+		t.Errorf("an otlp-database the variable names wrong: %d %q", code, errOut.String())
 	}
 }

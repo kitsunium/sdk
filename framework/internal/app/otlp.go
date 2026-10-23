@@ -40,8 +40,8 @@ import (
 //	otlp-drain         how long the batch being sent at a stop may finish (5s)
 //	otlp-settle        each acknowledgement's and the stop's flush's bound (5s)
 //	otlp-sample-ratio  the share of the traces started here that are kept (1)
-//	otlp-database      the database the queues are kept on ("": the data
-//	                   directory, else memory)
+//	otlp-database      the database the queues are kept on ("", or one not
+//	                   open: the data directory, else memory)
 //
 // and the headers every request carries — a collector's Authorization — are
 // the framework's secret otlp-headers, <PRODUCT>_OTLP_HEADERS or its _FILE
@@ -284,7 +284,8 @@ func OTLPSampleRatio(ratio float64) OpenTelemetryConfigurer {
 // SDK refuses. It needs framework/app/queue, which the start names when the
 // program does not import it; a name the app does not declare stops the
 // start. The empty default keeps the queues in the data directory, else in
-// memory.
+// memory, and so does a declared database that is not open — the app in
+// memory, or in dev without its URL —, which the log says.
 //
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
 // only hands it to the declaration it configures.
