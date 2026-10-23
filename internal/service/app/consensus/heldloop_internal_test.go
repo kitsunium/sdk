@@ -8,6 +8,7 @@ import (
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // laggingWithOwnSnapshots is a three-node cluster cutting every 20 entries
@@ -87,12 +88,21 @@ func TestASnapshotThatDidNotRestoreIsUnpublished(t *testing.T) {
 // A snapshot that did not restore for a reason of this node's — a disk
 // failure, a MaxSnapshotBytes lowered since — stays published: it may
 // restore at the next start, and the log may have been compacted to it.
+//
+// No node compacts here, so the follower's two snapshots are cuts of its
+// own and its log continues the older one. With the leader compacting four
+// entries behind its cuts, a follower slow enough to fall behind them — a
+// NetBSD runner — was installed the leader's newest, whose log continues no
+// older snapshot: that start is TestAnInstallOverALoweredLimitIsTheRefusal's
+// (#574).
 func TestASnapshotOverALoweredLimitStaysPublished(t *testing.T) {
 	var limit atomic.Int64
 	limit.Store(1 << 30)
 	c := newClusterWith(t, &cluster{
 		t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{5, 2, 8}, every: 20,
-		configure: func(_ *testNode, cfg *Config) { cfg.MaxSnapshotBytes, cfg.SnapshotEveryBytes = limit.Load(), 1 },
+		configure: func(_ *testNode, cfg *Config) {
+			cfg.MaxSnapshotBytes, cfg.SnapshotEveryBytes, cfg.SnapshotTrailing = limit.Load(), 1, 1<<20
+		},
 	})
 	l := c.settledLeader(5 * time.Second)
 	f := c.otherThan(l)
@@ -120,6 +130,71 @@ func TestASnapshotOverALoweredLimitStaysPublished(t *testing.T) {
 	if !held {
 		t.Fatalf("the snapshot over the lowered limit %d was unpublished", limit.Load())
 	}
+}
+
+// A node whose newest snapshot is an install, over a MaxSnapshotBytes
+// lowered since, refuses to start with that limit as the reason, and keeps
+// the snapshot for the start that follows the limit raised again. The
+// install compacted its log to it, so the older snapshot it falls back to
+// continues no log: the start refused with LOG_CORRUPT, which sends an
+// operator to rebuild a log that holds nothing wrong (#574).
+func TestAnInstallOverALoweredLimitIsTheRefusal(t *testing.T) {
+	var limit atomic.Int64
+	limit.Store(1 << 30)
+	c := newClusterWith(t, &cluster{
+		t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{5, 2, 9}, every: 20,
+		configure: func(_ *testNode, cfg *Config) { cfg.MaxSnapshotBytes, cfg.SnapshotEveryBytes = limit.Load(), 1 },
+	})
+	l := c.settledLeader(5 * time.Second)
+	f := c.otherThan(l)
+	big := bytes.Repeat([]byte("v"), 200)
+	var tok coreconsensus.TokenValue
+	for i := range 30 {
+		tok = proposeOnLeader(t, c, fmt.Sprintf("k%d=%s", i, big))
+	}
+	c.waitApplied(tok.Index, 10*time.Second)
+	cutsSettled(t, f)
+	c.net.Isolate(f.id, true)
+	for i := 30; i < 60; i++ {
+		tok = proposeOnLeader(t, c, fmt.Sprintf("k%d=%s", i, big))
+	}
+	// A cut in flight when the next fell due coalesces them, and the older
+	// of the two kept, where the log is compacted to, may be any of them:
+	// once the cuts settle the newest is at the end of the writes, and one
+	// more write makes it the older.
+	cutsSettled(t, l)
+	tok = proposeOnLeader(t, c, "k60="+string(big))
+	waitFor(t, "the leader compacted past the follower", func() bool {
+		first, _ := l.log.Bounds()
+		return first > f.node.Status().Applied+1
+	})
+	cutsSettled(t, l)
+	c.net.Isolate(f.id, false)
+	c.waitApplied(tok.Index, 10*time.Second)
+	cutsSettled(t, f)
+	metas := must(f.snaps.List())(t)
+	if first, _ := f.log.Bounds(); len(metas) < 2 || first != metas[0].Position.Index+1 || snapshotSize(&metas[0]) <= snapshotSize(&metas[1]) {
+		t.Fatalf("setup: the follower's newest is not an install its log was compacted to, over a smaller older one: log from %d, %+v", first, metas)
+	}
+	c.net.Isolate(f.id, true)
+	c.kill(f)
+	limit.Store((snapshotSize(&metas[0]) + snapshotSize(&metas[1])) / 2)
+	f.sm = newKV()
+	_, err := NewNode(c.config(f))
+	if !errs.HasCode(err, coreconsensus.CodeSnapshotTooLarge) {
+		t.Fatalf("a start under the lowered limit = %v, want SNAPSHOT_TOO_LARGE", err)
+	}
+	held := false
+	for _, m := range must(f.snaps.List())(t) {
+		held = held || m.ID == metas[0].ID
+	}
+	if !held {
+		t.Fatal("the install over the lowered limit was unpublished")
+	}
+	limit.Store(1 << 30)
+	c.start(f)
+	c.net.Isolate(f.id, false)
+	c.waitApplied(tok.Index, 10*time.Second)
 }
 
 // A snapshot that did not restore is unpublished only once the older one
@@ -150,8 +225,10 @@ func TestNoSnapshotIsUnpublishedBeforeItsFallbackContinuesTheLog(t *testing.T) {
 	f.snaps.done[metas[0].ID].data[len(f.snaps.done[metas[0].ID].data)/2] ^= 0xff
 	f.snaps.mu.Unlock()
 	f.sm = newKV()
-	if _, err := NewNode(c.config(f)); err == nil {
-		t.Fatal("setup: a node started from a snapshot its log does not continue")
+	// Refused for the newer snapshot's checksums, the reason the older one
+	// was restored in its place (#574).
+	if _, err := NewNode(c.config(f)); !errs.HasCode(err, coreconsensus.CodeSnapshotCorrupt) {
+		t.Fatalf("a start from a snapshot its log does not continue = %v, want SNAPSHOT_CORRUPT", err)
 	}
 	held := false
 	for _, m := range must(f.snaps.List())(t) {

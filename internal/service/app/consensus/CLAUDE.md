@@ -340,6 +340,31 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   and a log compacted to it starts from nothing else
   (`TestASnapshotOverALoweredLimitStaysPublished`,
   `TestNoSnapshotIsUnpublishedBeforeItsFallbackContinuesTheLog`).
+- Refuse with LOG_CORRUPT a start whose fallback base does not continue the
+  log: the gap is the newest snapshot's failure to restore, and a log
+  compacted to an install has no older snapshot to fall back on. The start
+  refuses with the newest's reason — SNAPSHOT_TOO_LARGE under a limit
+  lowered since, STORAGE_FAILED, SNAPSHOT_CORRUPT — and LOG_CORRUPT sent an
+  operator to rebuild a sound log (#574, `fallbackGap`,
+  `TestAnInstallOverALoweredLimitIsTheRefusal`).
+- End a streamed snapshot's pin on its own index: caught up is the peer's
+  match at the last index. A snapshot cut at the last index — an idle
+  leader's, one cut on request — ended its pin at the first tick after its
+  stream, before the peer answered, and the cuts of the writes that
+  followed compacted past the entry it needed next (#588, `watchPins`,
+  `TestAStreamedSnapshotPinsCompactionUntilThePeerCatchesUp`).
+- Write a test whose setup needs a node to be offered a snapshot as a
+  wait for the leader's log to pass a fixed index: a cut in flight when the
+  next fell due coalesces them, the two snapshots kept can lie far apart and
+  the log, compacted to the older, stops short of it with the writes done.
+  Wait for the log to start past the stopped node's end
+  (`compactedPastItsEnd`, #588). A test whose leader must keep its
+  leadership cuts the restarted node off from the other followers, which it
+  would grant a PreVote, and runs on `steadyTiming`: testTimingFast's
+  100 ms CheckQuorum window stepped a leader down on a loaded run
+  (`hearOnlyTheLeader`, #588). A setup on disk proposes to whichever node
+  leads (`proposeOnDisk`): a leader whose own fdatasync stalls past the
+  maximum election timeout hands its leadership over (#554, #587).
 - Forward a removal of the leader without moving leadership first: the
   leader refuses to remove itself, and the call failed MEMBERSHIP_INVALID
   on a follower only. `Remove` transfers to this node (or another voter),

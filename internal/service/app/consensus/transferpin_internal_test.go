@@ -51,6 +51,60 @@ func (t *holdTransport) Stream(ctx context.Context, to coreconsensus.NodeID, off
 	return err
 }
 
+// compactedPastItsEnd waits until the leader's log starts past the end of
+// the stopped node's, so that node, restarted, is offered a snapshot. It
+// used to wait for the log to start past index 100, which the leader may
+// not reach with its writes done: a cut still in flight when more fell due
+// is made once, at the index applied when it ends, and the two snapshots
+// kept — the older one, less SnapshotTrailing, is where the log starts —
+// can then lie far apart, the older below 100, with nothing left to cut. A
+// slow runner (macOS, Solaris) cut that way, and the setup failed (#588).
+// The leader's cuts are let settle too, so the snapshot it offers is the
+// one at the end of its writes, whatever the pace of its cuts.
+func compactedPastItsEnd(t *testing.T, l, lag *testNode) {
+	t.Helper()
+	_, end := lag.log.Bounds()
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if first, _ := l.log.Bounds(); first > end+1 {
+			cutsSettled(t, l)
+			return
+		}
+		if time.Now().After(deadline) {
+			first, _ := l.log.Bounds()
+			t.Fatalf("setup: the leader's log still starts at %d, not past the stopped node's end %d", first, end)
+		}
+	}
+}
+
+// hearOnlyTheLeader cuts the stopped node off from every member but the
+// leader, both ways, before it restarts. Restarted, it knows no leader and
+// grants any PreVote: a follower whose election timer fired under a loaded
+// -race run then won an election with it, and the leader whose stream the
+// test holds lost its leadership before it offered one — one run in a few
+// hundred (#588). Cut off, that follower's PreVote reaches only the leader,
+// which refuses it.
+//
+// The leader itself must not step down either: with testTimingFast's
+// CheckQuorum window of 100 ms, a loop the loaded runner did not schedule
+// for 130 ms heard from no peer and stepped down (traced under -race
+// -cpu=4). These tests run on steadyTiming, whose window is 500 ms.
+func hearOnlyTheLeader(c *cluster, l, lag *testNode) {
+	for _, tn := range c.nodes {
+		if tn != l && tn != lag {
+			c.net.Cut(lag.id, tn.id, true)
+			c.net.Cut(tn.id, lag.id, true)
+		}
+	}
+}
+
+// steadyTiming is testTimingFast with election timeouts of 500 ms to 1 s,
+// for a test whose leader must keep its leadership throughout.
+func steadyTiming() coreconsensus.TimingContractSpec {
+	tc := testTimingFast()
+	tc.ElectionTimeoutMin, tc.ElectionTimeoutMax = 500*time.Millisecond, time.Second
+	return tc
+}
+
 // #550: a transfer in flight pins compaction (ADR 0152 D7, R6-01). A
 // leader that cut twice while a snapshot streamed compacted past the
 // snapshot it was sending: once the follower installed it, the entry after
@@ -82,14 +136,7 @@ func TestATransferInFlightPinsCompaction(t *testing.T) {
 	for i := range 200 {
 		propose(t, l.node, fmt.Sprintf("a%d=v", i))
 	}
-	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		if first, _ := l.log.Bounds(); first > 100 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("setup: the leader never compacted")
-		}
-	}
+	compactedPastItsEnd(t, l, lag)
 	mu.Lock()
 	lt := trs[l.id]
 	mu.Unlock()
@@ -163,13 +210,11 @@ func TestAStreamedSnapshotPinsCompactionUntilThePeerCatchesUp(t *testing.T) {
 	for i := range 200 {
 		propose(t, l.node, fmt.Sprintf("a%d=v", i))
 	}
-	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		if first, _ := l.log.Bounds(); first > 100 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("setup: the leader never compacted")
-		}
+	compactedPastItsEnd(t, l, lag)
+	// A cut on request, at the last index: the snapshot the node is
+	// offered next.
+	if _, err := l.node.SaveSnapshot(context.Background(), "op:test", io.Discard); err != nil {
+		t.Fatal(err)
 	}
 	mu.Lock()
 	lt := trs[l.id]
@@ -189,11 +234,39 @@ func TestAStreamedSnapshotPinsCompactionUntilThePeerCatchesUp(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("no snapshot offered to the lagging node")
 	}
+	// Silent from the install on: an answer it sent the leader between the
+	// install and the cut-off would have caught it up, and its pin ended
+	// with every check below passing for that reason alone.
+	c.net.Cut(lag.id, l.id, true)
 	lt.release <- struct{}{}
 	select {
 	case <-ended:
 	case <-time.After(10 * time.Second):
 		t.Fatal("the snapshot stream never ended")
+	}
+	// The snapshot streamed is at the leader's last index: its cuts settled
+	// before the offer, with nothing written since. Its pin used to count
+	// as caught up at once — the pin's index, not the node's match, reached
+	// the last index — and the first tick ended it: the cuts of the writes
+	// below compacted past the entry after it, and the node was offered a
+	// second snapshot (#588).
+	var pin sendPin
+	waitFor(t, "the streamed snapshot's pin", func() bool {
+		l.node.exec(func() { pin = l.node.sending[lag.id] })
+		return !pin.until.IsZero()
+	})
+	var last uint64
+	pinned := false
+	l.node.exec(func() {
+		last = l.node.r.Status().Last
+		l.node.watchPins(l.node.clk.Now())
+		_, pinned = l.node.sending[lag.id]
+	})
+	if pin.index != last {
+		t.Fatalf("setup: the snapshot streamed is at %d, not at the leader's last index %d", pin.index, last)
+	}
+	if !pinned {
+		t.Fatal("the pin of a snapshot at the leader's last index ended before the node answered")
 	}
 	var tok coreconsensus.TokenValue
 	for i := range 45 {
@@ -240,6 +313,7 @@ func TestAPinThatEndsCompactsTheLogWithoutAWrite(t *testing.T) {
 			started:         make(chan coreconsensus.InstallOfferValue), release: make(chan struct{}),
 		}
 		cfg.Transport = trs[tn.id]
+		cfg.InitialTiming = steadyTiming()
 	}
 	newClusterWith(t, c)
 	l := c.settledLeader(5 * time.Second)
@@ -248,14 +322,7 @@ func TestAPinThatEndsCompactsTheLogWithoutAWrite(t *testing.T) {
 	for i := range 200 {
 		propose(t, l.node, fmt.Sprintf("a%d=v", i))
 	}
-	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		if first, _ := l.log.Bounds(); first > 100 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("setup: the leader never compacted")
-		}
-	}
+	compactedPastItsEnd(t, l, lag)
 	mu.Lock()
 	lt := trs[l.id]
 	mu.Unlock()
@@ -264,6 +331,7 @@ func TestAPinThatEndsCompactsTheLogWithoutAWrite(t *testing.T) {
 	cutOff := func() { c.net.Isolate(lag.id, true) }
 	lt.streamed.Store(&cutOff)
 	lt.holding.Store(true)
+	hearOnlyTheLeader(c, l, lag)
 	c.start(lag)
 	var offer coreconsensus.InstallOfferValue
 	select {
@@ -277,9 +345,9 @@ func TestAPinThatEndsCompactsTheLogWithoutAWrite(t *testing.T) {
 		propose(t, l.node, fmt.Sprintf("c%d=v", i))
 	}
 	// No write from here on. The pin lasts ten maximum election timeouts,
-	// two seconds here.
+	// ten seconds here.
 	held := offer.Meta.Position.Index
-	for deadline := time.Now().Add(6 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+	for deadline := time.Now().Add(15 * time.Second); ; time.Sleep(10 * time.Millisecond) {
 		if first, _ := l.log.Bounds(); first > held {
 			return
 		}
@@ -307,6 +375,7 @@ func TestALeaderThatLosesItsLeadershipStopsItsSnapshotStream(t *testing.T) {
 			started:         make(chan coreconsensus.InstallOfferValue, 8), release: make(chan struct{}),
 		}
 		cfg.Transport = trs[tn.id]
+		cfg.InitialTiming = steadyTiming()
 	}
 	newClusterWith(t, c)
 	l := c.settledLeader(5 * time.Second)
@@ -315,18 +384,12 @@ func TestALeaderThatLosesItsLeadershipStopsItsSnapshotStream(t *testing.T) {
 	for i := range 200 {
 		propose(t, l.node, fmt.Sprintf("a%d=v", i))
 	}
-	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		if first, _ := l.log.Bounds(); first > 100 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("setup: the leader never compacted")
-		}
-	}
+	compactedPastItsEnd(t, l, lag)
 	mu.Lock()
 	lt := trs[l.id]
 	mu.Unlock()
 	lt.holding.Store(true)
+	hearOnlyTheLeader(c, l, lag)
 	c.start(lag)
 	select {
 	case <-lt.started:

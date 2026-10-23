@@ -1024,6 +1024,7 @@ files:
       - termless
       - (*Node).durablePosition
       - (*Node).restoreLatest
+      - (*Node).fallbackGap
       - ownFailure
       - (*Node).unpublishNewer
       - (*Node).baseOrNoTable
@@ -5235,11 +5236,26 @@ types:
           format this build does not know refuses the start instead: unknown means
           stop, never skip (D18, #513). failed is the newer snapshots that did not
           restore for a reason of their own, which load unpublishes once the base
-          is known to continue the log.
+          is known to continue the log. newest is why the newest snapshot did not
+          restore, nil when it did: the reason a start refuses with when the older
+          base restored in its place does not continue the log.
         name: restoreLatest
         params: metas []coreconsensus.SnapshotMetaValue, durIdx uint64
         recv: n *Node
-        results: base coreconsensus.SnapshotMetaValue, failed []coreconsensus.SnapshotMetaValue, err error
+        results: base coreconsensus.SnapshotMetaValue, failed []coreconsensus.SnapshotMetaValue, newest, err error
+      - doc: |-
+          fallbackGap is the refusal of a start whose base does not continue the
+          log. When that base is an older snapshot restored because the newest did
+          not restore, the gap is the newest's doing, not damage to the log: a node
+          whose newest snapshot is an install has its log compacted to it, and with
+          that snapshot over a MaxSnapshotBytes lowered since, or unread for its
+          disk, it refused to start with LOG_CORRUPT, which sends an operator to
+          rebuild a log that holds nothing wrong (#574). The newest's reason is
+          returned instead, and the snapshot stays published for the next start.
+        name: fallbackGap
+        params: err, newest error
+        recv: n *Node
+        results: error
       - doc: |-
           unpublishNewer removes the snapshots newer than the one restored that
           failed to restore for a reason of their own. Left published, a node that
@@ -5765,7 +5781,11 @@ types:
           longer hold: their peer caught up with the log, left, or until passed.
           Compaction only runs after a cut, so the log is compacted again at once:
           a pin that ended once the writes stopped held it back until the next
-          write.
+          write. Caught up is the peer's match at the last index, never the pin's
+          own index: a snapshot cut at the last index — an idle leader's, or one
+          cut on request — counted as caught up at the first tick after its
+          stream, before the peer answered anything, and the cuts of the writes
+          that followed compacted past the entry it needed next (#588).
         name: watchPins
         params: now time.Time
         recv: n *Node

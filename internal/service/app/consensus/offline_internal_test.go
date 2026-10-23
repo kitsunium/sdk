@@ -25,9 +25,26 @@ func threeOnDisk(t *testing.T, n int) (*cluster, []*diskNode) {
 	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{5}}
 	var nodes []*diskNode
 	var members []coreconsensus.MemberValue
+	// The directories setup holds open without a node over them.
+	bare := map[*diskNode]bool{}
 	for i := range 3 {
 		dn := &diskNode{dir: t.TempDir()}
 		dn.dd = openDir(t, dn.dir, 16<<10)
+		bare[dn] = true
+		// Registered after the TempDir, so it runs before the directory is
+		// removed, which Windows refuses while a LOCK in it is held: a node
+		// the test has not crashed when it fails is crashed, a directory
+		// setup left open is closed.
+		t.Cleanup(func() {
+			switch {
+			case dn.node != nil:
+				dn.crash(t, c)
+			case bare[dn]:
+				if err := dn.dd.Close(); err != nil {
+					t.Errorf("close data directory %d: %v", dn.id, err)
+				}
+			}
+		})
 		slot := fmt.Sprintf("r%d", i)
 		id, inc, err := Init(dn.dd, c.cid, slot)
 		if err != nil {
@@ -45,24 +62,17 @@ func threeOnDisk(t *testing.T, n int) (*cluster, []*diskNode) {
 		if err := dn.dd.Close(); err != nil {
 			t.Fatal(err)
 		}
+		delete(bare, dn)
 		dn.open(t, c)
 	}
-	var l *diskNode
-	deadline := time.Now().Add(5 * time.Second)
-	for l == nil && time.Now().Before(deadline) {
-		for _, dn := range nodes {
-			if dn.node.Status().Role == coreconsensus.RoleLeader {
-				l = dn
-			}
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	if l == nil {
-		t.Fatal("no leader")
-	}
+	// Each key is proposed to whichever node leads: a leader whose own
+	// fdatasync stalls past the maximum election timeout hands its
+	// leadership over (#554), and a proposal it held then answers
+	// OUTCOME_UNKNOWN. A loaded Windows runner had one sync take that long,
+	// and the setup, bound to the first leader, failed (#587).
 	var tok coreconsensus.TokenValue
 	for i := range n {
-		tok = propose(t, l.node, fmt.Sprintf("k%d=v%d", i, i))
+		tok = proposeOnDisk(t, nodes, fmt.Sprintf("k%d=v%d", i, i))
 	}
 	c.waitAppliedDisk(nodes, tok.Index)
 	return c, nodes
@@ -523,7 +533,23 @@ func proposeOnDisk(t *testing.T, live []*diskNode, kv string) coreconsensus.Toke
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for {
-		l := leaderOf(t, live)
+		// A leader is looked for until the write's own deadline: an
+		// election on a disk whose fdatasync takes most of an election
+		// timeout can need several rounds, and a leader lookup that gave
+		// up after five seconds failed a write that had fifteen left
+		// (#587).
+		var l *diskNode
+		for l == nil {
+			for _, dn := range live {
+				if dn.node.Status().Role == coreconsensus.RoleLeader {
+					l = dn
+				}
+			}
+			if l == nil && time.Now().After(deadline) {
+				t.Fatalf("propose %q: no leader", kv)
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		tok, _, err := l.node.Propose(ctx, []byte(kv))
 		cancel()
