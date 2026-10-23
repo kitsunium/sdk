@@ -488,7 +488,7 @@ func (n *Node) load() (raft.StartState, error) {
 		return raft.StartState{}, err
 	}
 	durIdx := dur.Index
-	base, failed, err := n.restoreLatest(metas, durIdx)
+	base, failed, newest, err := n.restoreLatest(metas, durIdx)
 	if err != nil {
 		return raft.StartState{}, err
 	}
@@ -504,7 +504,7 @@ func (n *Node) load() (raft.StartState, error) {
 	}
 	snapIdx := base.Position.Index
 	if first, last, err = n.finishInstall(&base, first, last); err != nil {
-		return raft.StartState{}, err
+		return raft.StartState{}, n.fallbackGap(err, newest)
 	}
 	// Only now that the older base is known to continue the log: unpublished
 	// before, a newer snapshot the log had been compacted to was gone when
@@ -566,8 +566,10 @@ func (n *Node) durablePosition() (coreconsensus.PositionValue, error) {
 // format this build does not know refuses the start instead: unknown means
 // stop, never skip (D18, #513). failed is the newer snapshots that did not
 // restore for a reason of their own, which load unpublishes once the base
-// is known to continue the log.
-func (n *Node) restoreLatest(metas []coreconsensus.SnapshotMetaValue, durIdx uint64) (base coreconsensus.SnapshotMetaValue, failed []coreconsensus.SnapshotMetaValue, err error) {
+// is known to continue the log. newest is why the newest snapshot did not
+// restore, nil when it did: the reason a start refuses with when the older
+// base restored in its place does not continue the log.
+func (n *Node) restoreLatest(metas []coreconsensus.SnapshotMetaValue, durIdx uint64) (base coreconsensus.SnapshotMetaValue, failed []coreconsensus.SnapshotMetaValue, newest, err error) {
 	for _, m := range metas {
 		if termless(&m) {
 			// Published at term 0 by a cut before #544: restored, it made
@@ -576,21 +578,42 @@ func (n *Node) restoreLatest(metas []coreconsensus.SnapshotMetaValue, durIdx uin
 			// its own.
 			n.obs.warn("consensus: a snapshot was not restored", lstr("id", m.ID), lstr("error", "recorded at term 0"))
 			failed = append(failed, m)
+			if newest == nil {
+				newest = origin(coreconsensus.SnapshotCorrupt, errs.String("why", "recorded at term 0"), errs.String("id", m.ID))
+			}
 			continue
 		}
 		rerr := n.restoreFrom(m, durIdx)
 		if rerr == nil {
-			return m, failed, nil
+			return m, failed, newest, nil
 		}
 		if errs.HasCode(rerr, coreconsensus.CodeVersionUnsupported) {
-			return coreconsensus.SnapshotMetaValue{}, nil, rerr
+			return coreconsensus.SnapshotMetaValue{}, nil, nil, rerr
 		}
 		n.obs.warn("consensus: a snapshot was not restored", lstr("id", m.ID), lstr("error", rerr.Error()))
+		if newest == nil {
+			newest = rerr
+		}
 		if ownFailure(rerr) {
 			failed = append(failed, m)
 		}
 	}
-	return coreconsensus.SnapshotMetaValue{}, nil, nil
+	return coreconsensus.SnapshotMetaValue{}, nil, newest, nil
+}
+
+// fallbackGap is the refusal of a start whose base does not continue the
+// log. When that base is an older snapshot restored because the newest did
+// not restore, the gap is the newest's doing, not damage to the log: a node
+// whose newest snapshot is an install has its log compacted to it, and with
+// that snapshot over a MaxSnapshotBytes lowered since, or unread for its
+// disk, it refused to start with LOG_CORRUPT, which sends an operator to
+// rebuild a log that holds nothing wrong (#574). The newest's reason is
+// returned instead, and the snapshot stays published for the next start.
+func (n *Node) fallbackGap(err, newest error) error {
+	if newest != nil && !n.noTable && errs.HasCode(err, coreconsensus.CodeLogCorrupt) {
+		return newest
+	}
+	return err
 }
 
 // ownFailure reports whether a snapshot failed to restore for a reason of
