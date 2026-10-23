@@ -1,0 +1,15 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: scalarIndexLess
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: i
+                when: c < n
+          key: i
+          range: b
+          value: c
+      - return: "-1"

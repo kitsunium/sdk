@@ -1,0 +1,265 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: IndexLess
+    participants:
+      - id: caller
+        kind: actor
+      - id: IndexLess
+        kind: self
+      - id: indexLess
+        kind: internal
+    steps:
+      - return: indexLess(b, n)
+        to: indexLess
+  - of: indexByte2
+    participants:
+      - id: caller
+        kind: actor
+      - id: indexByte2
+        kind: self
+      - id: twoScanIndexByte2
+        kind: internal
+      - id: swarIndexByte2
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: twoScanIndexByte2(b, c1, c2)
+              to: twoScanIndexByte2
+          when: len(b) >= twoScanMin
+      - return: swarIndexByte2(b, c1, c2)
+        to: swarIndexByte2
+  - of: indexLess
+    participants:
+      - id: caller
+        kind: actor
+      - id: indexLess
+        kind: self
+      - id: swarIndexLess
+        kind: internal
+    steps:
+      - return: swarIndexLess(b, n)
+        to: swarIndexLess
+  - of: indexSet
+    participants:
+      - id: caller
+        kind: actor
+      - id: indexSet
+        kind: self
+      - id: swarIndexSet
+        kind: internal
+    steps:
+      - return: swarIndexSet(b, s)
+        to: swarIndexSet
+  - of: zeroLanes
+    steps:
+      - return: ^(((v & low7) + low7) | v | low7)
+  - of: lessLanes
+    steps:
+      - return: ^(((v & low7) + add) | v) & high
+  - of: lessAdd
+    steps:
+      - return: uint64(upperHalf-n) * ones
+  - of: firstLane
+    steps:
+      - return: bits.TrailingZeros64(m) >> 3
+  - of: load
+    participants:
+      - id: caller
+        kind: actor
+      - id: load
+        kind: self
+      - id: binary.LittleEndian.Uint64
+        kind: value
+    steps:
+      - return: "binary.LittleEndian.Uint64(b[i : i+wordSize])"
+        to: binary.LittleEndian.Uint64
+  - of: IndexByte2
+    participants:
+      - id: caller
+        kind: actor
+      - id: IndexByte2
+        kind: self
+      - id: indexByte2
+        kind: internal
+    steps:
+      - return: indexByte2(b, c1, c2)
+        to: indexByte2
+  - of: swarIndexByte2
+    participants:
+      - id: caller
+        kind: actor
+      - id: swarIndexByte2
+        kind: self
+      - id: load
+        kind: internal
+    steps:
+      - bind: pat1, pat2
+        eval: uint64(c1)*ones, uint64(c2)*ones
+      - bind: i
+        eval: "0"
+      - loop:
+          cond: i+wordSize <= len(b)
+          do:
+            - bind: v
+              eval: load(b, i)
+              to: load
+            - opt:
+                do:
+                  - return: i + firstLane(m)
+                init:
+                  bind: m
+                  eval: zeroLanes(v^pat1) | zeroLanes(v^pat2)
+                when: m != 0
+          post: i += wordSize
+      - loop:
+          cond: i < len(b)
+          do:
+            - opt:
+                do:
+                  - return: i
+                when: b[i] == c1 || b[i] == c2
+          post: i++
+      - return: "-1"
+  - of: twoScanIndexByte2
+    participants:
+      - id: caller
+        kind: actor
+      - id: twoScanIndexByte2
+        kind: self
+      - id: bytes
+        kind: stdlib
+    steps:
+      - bind: i
+        eval: bytes.IndexByte(b, c1)
+        to: bytes
+      - opt:
+          do:
+            - return: bytes.IndexByte(b, c2)
+              to: bytes
+          when: i < 0
+      - opt:
+          do:
+            - return: j
+          init:
+            bind: j
+            eval: bytes.IndexByte(b[:i], c2)
+            to: bytes
+          when: j >= 0
+      - return: i
+  - of: swarIndexLess
+    participants:
+      - id: caller
+        kind: actor
+      - id: swarIndexLess
+        kind: self
+      - id: scalarIndexLess
+        kind: internal
+      - id: lessAdd
+        kind: internal
+      - id: lessLanes
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: scalarIndexLess(b, n)
+              to: scalarIndexLess
+          when: n > exactBound
+      - bind: add
+        eval: lessAdd(n)
+        to: lessAdd
+      - bind: i
+        eval: "0"
+      - loop:
+          cond: i+wordSize <= len(b)
+          do:
+            - opt:
+                do:
+                  - return: i + firstLane(m)
+                init:
+                  bind: m
+                  eval: lessLanes(load(b, i), add)
+                  to: lessLanes
+                when: m != 0
+          post: i += wordSize
+      - loop:
+          cond: i < len(b)
+          do:
+            - opt:
+                do:
+                  - return: i
+                when: b[i] < n
+          post: i++
+      - return: "-1"
+  - of: NewSet
+    steps:
+      - bind: s
+        eval: |-
+          Set{
+          		a:      uint64(first) * ones,
+          		b:      uint64(second) * ones,
+          		first:  first,
+          		second: second,
+          		below:  below,
+          		upper:  upper,
+          		wide:   below > exactBound,
+          	}
+      - opt:
+          do:
+            - set: s.hi
+              value: high
+          when: upper
+      - return: s
+  - of: Set.Index
+    participants:
+      - id: caller
+        kind: actor
+      - id: Set.Index
+        kind: self
+      - id: indexSet
+        kind: internal
+    steps:
+      - return: indexSet(b, s)
+        to: indexSet
+  - of: Set.has
+    steps:
+      - return: c == s.first || c == s.second || c < s.below || (s.upper && c >= upperHalf)
+  - of: swarIndexSet
+    participants:
+      - id: caller
+        kind: actor
+      - id: swarIndexSet
+        kind: self
+      - id: lessAdd
+        kind: internal
+      - id: load
+        kind: internal
+    steps:
+      - bind: add
+        eval: lessAdd(s.below)
+        to: lessAdd
+      - bind: i
+        eval: "0"
+      - loop:
+          cond: "!s.wide && i+wordSize <= len(b)"
+          do:
+            - bind: v
+              eval: load(b, i)
+              to: load
+            - bind: m
+              eval: zeroLanes(v^s.a) | zeroLanes(v^s.b) | lessLanes(v, add) | v&s.hi
+            - opt:
+                do:
+                  - return: i + firstLane(m)
+                when: m != 0
+          post: i += wordSize
+      - loop:
+          cond: i < len(b)
+          do:
+            - opt:
+                do:
+                  - return: i
+                when: s.has(b[i])
+          post: i++
+      - return: "-1"

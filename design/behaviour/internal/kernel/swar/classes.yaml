@@ -1,0 +1,216 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      hasVector reports whether this build carries a vector form that the CPU
+      runs: never, here.
+    items:
+      - name: hasVector
+        value: "false"
+    name: hasVector
+  - doc: |-
+      The lane constants: a uint64 is read as eight byte lanes, lane 0 the lowest
+      byte, which is the first of the eight bytes under binary.LittleEndian.
+    grouped: true
+    items:
+      - doc: "ones is 0x01 in every lane: a byte multiplied by it fills the lanes."
+        name: ones
+        type: uint64
+        value: "0x0101010101010101"
+      - doc: low7 is the low seven bits of every lane.
+        name: low7
+        type: uint64
+        value: "0x7F7F7F7F7F7F7F7F"
+      - doc: "high is the high bit of every lane: where a lane test reports a hit."
+        name: high
+        type: uint64
+        value: "0x8080808080808080"
+      - doc: wordSize is the bytes one word covers.
+        name: wordSize
+        type: int
+        value: "8"
+      - doc: |-
+          twoScanMin is the length from which IndexByte2 prefers two scans of the
+          standard library's bytes.IndexByte to the word loop, where it has no
+          vector form: measured, the two cost the same near 64 bytes (BENCH.md).
+        name: twoScanMin
+        type: int
+        value: "64"
+      - doc: exactBound is the largest bound a lane comparison is exact for.
+        name: exactBound
+        type: byte
+        value: "128"
+      - doc: |-
+          upperHalf is the first byte of the upper half of the alphabet: the
+          bytes whose high bit is set.
+        name: upperHalf
+        type: byte
+        value: "0x80"
+    name: ones
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - IndexLess
+    name: gen_decls.go
+  - decls:
+      - hasVector
+      - indexByte2
+      - indexLess
+      - indexSet
+    name: simd_other.go
+  - decls:
+      - ones
+      - zeroLanes
+      - lessLanes
+      - lessAdd
+      - firstLane
+      - load
+      - IndexByte2
+      - swarIndexByte2
+      - twoScanIndexByte2
+      - swarIndexLess
+      - scalarIndexLess
+      - Set
+      - NewSet
+      - Set.Index
+      - Set.has
+      - swarIndexSet
+    name: swar.go
+functions:
+  - name: IndexLess
+    params: b []byte, n byte
+    results: int
+  - doc: |-
+      indexByte2 is IndexByte2's body: the word loop for a short slice, two
+      scans of bytes.IndexByte for a long one.
+    name: indexByte2
+    params: b []byte, c1, c2 byte
+    results: int
+  - doc: indexLess is IndexLess's body.
+    name: indexLess
+    params: b []byte, n byte
+    results: int
+  - doc: indexSet is Set.Index's body.
+    name: indexSet
+    params: b []byte, s Set
+    results: int
+  - doc: |-
+      zeroLanes returns 0x80 in each lane of v that is zero and 0 in every
+      other lane. It is the EXACT form: (v&low7)+low7 cannot carry out of a lane
+      (at most 0xFE), so no lane's answer depends on its neighbour's — unlike the
+      classic (v-ones)&^v&high, which borrows across a lane and reports a false
+      hit above a true one. Every set bit is therefore a real match, and the
+      lowest is the first.
+    name: zeroLanes
+    params: v uint64
+    results: uint64
+  - doc: |-
+      lessLanes returns 0x80 in each lane of v whose byte is below n and 0 in
+      every other lane, where add is lessAdd(n). Exact for n up to 128: a lane
+      below 0x80 is below n exactly when (lane + 0x80 - n) keeps its high bit
+      clear, that sum is at most 0xFF so it never carries, and a lane with its
+      high bit set is at least 0x80, never below n.
+    name: lessLanes
+    params: v, add uint64
+    results: uint64
+  - doc: lessAdd is the addend lessLanes reads for the bound n, n at most 128.
+    name: lessAdd
+    params: n byte
+    results: uint64
+  - doc: |-
+      firstLane returns the index, within the word, of the lowest lane a mask of
+      0x80 flags marks. m is not zero.
+    name: firstLane
+    params: m uint64
+    results: int
+  - doc: |-
+      load reads the eight bytes b[i:i+8], which the caller has checked to lie
+      within len(b): the only way this package reads memory, so none of it reads
+      past the length, whatever the capacity holds.
+    name: load
+    params: b []byte, i int
+    results: uint64
+  - name: IndexByte2
+    params: b []byte, c1, c2 byte
+    results: int
+  - doc: swarIndexByte2 is IndexByte2's SWAR form.
+    name: swarIndexByte2
+    params: b []byte, c1, c2 byte
+    results: int
+  - doc: |-
+      twoScanIndexByte2 is IndexByte2 as two assembly scans: the standard
+      library's search for c1 over all of b, then for c2 over the part of b before
+      the first c1. Past twoScanMin bytes it beats the word loop, which reads
+      eight bytes where the assembly reads thirty-two.
+    name: twoScanIndexByte2
+    params: b []byte, c1, c2 byte
+    results: int
+  - doc: |-
+      swarIndexLess is IndexLess's SWAR form. A bound above 128 has no exact lane
+      test, and takes the byte loop.
+    name: swarIndexLess
+    params: b []byte, n byte
+    results: int
+  - doc: |-
+      scalarIndexLess is IndexLess for a bound above 128, which no lane test is
+      exact for: one byte at a time.
+    name: scalarIndexLess
+    params: b []byte, n byte
+    results: int
+  - name: NewSet
+    params: first, second, below byte, upper bool
+    results: Set
+  - doc: swarIndexSet is Set.Index's SWAR form.
+    name: swarIndexSet
+    params: b []byte, s Set
+    results: int
+imports:
+  binary: encoding/binary
+  bits: math/bits
+  bytes: bytes
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/kernel/swar
+  name: swar
+  purpose: "Package swar finds the first byte of a slice that belongs to a set, a word at a time: SIMD within a register (SWAR), on the standard library alone."
+types:
+  - fields:
+      - doc: a and b are the two bytes, each broadcast to every lane.
+        name: a
+        type: uint64
+      - doc: a and b are the two bytes, each broadcast to every lane.
+        name: b
+        type: uint64
+      - doc: hi is high when the set holds the bytes from 0x80 up, 0 when not.
+        name: hi
+        type: uint64
+      - doc: first and second are the two bytes themselves.
+        name: first
+        type: byte
+      - doc: first and second are the two bytes themselves.
+        name: second
+        type: byte
+      - doc: "below is the bound: a byte under it is in the set."
+        name: below
+        type: byte
+      - doc: upper is whether the bytes from 0x80 up are in the set.
+        name: upper
+        type: bool
+      - doc: |-
+          wide is whether below exceeds 128, which no lane test is exact for:
+          the scan then takes one byte at a time.
+        name: wide
+        type: bool
+    kind: struct
+    methods:
+      - name: Index
+        params: b []byte
+        recv: s Set
+        results: int
+      - doc: has reports whether the byte c is in the set.
+        name: has
+        params: c byte
+        recv: s Set
+        results: bool
+    name: Set
