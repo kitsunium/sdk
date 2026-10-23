@@ -658,6 +658,24 @@ func copySaved(ctx context.Context, h coreconsensus.SnapshotHandle, w io.Writer)
 	}
 }
 
+// publishedAt opens the snapshot of idx in term when it is published
+// already: an idle node's applied index is that of its last cut, or of a
+// previous SaveSnapshot. Cut again, it was committed over the published
+// file, which an abandoned copy of a previous save or a stream to a peer
+// may hold open; on Windows that rename fails, and the STORAGE_FAILED it
+// answers stopped the node (#611). The id names one state, so the
+// published snapshot is the one a cut would write.
+func (n *Node) publishedAt(idx, term uint64) (coreconsensus.SnapshotHandle, bool) {
+	if idx == 0 {
+		return nil, false
+	}
+	h, err := n.cfg.Snapshots.Open(snapshotID(idx, term))
+	if err != nil {
+		return nil, false
+	}
+	return h, true
+}
+
 // ctxReader reads r until ctx is done, then answers ctx's error.
 type ctxReader struct {
 	ctx context.Context
@@ -677,6 +695,15 @@ func (n *Node) save(req *saveReq) {
 	n.am.Lock()
 	idx, term := n.applied, n.appliedTerm
 	n.am.Unlock()
+	if h, ok := n.publishedAt(idx, term); ok {
+		n.snapState.mu.Lock()
+		n.snapState.inFlight = false
+		n.snapState.mu.Unlock()
+		n.obs.info("consensus: snapshot saved", lstr("operator", string(req.op)), lattr("index", idx))
+		n.cutPending()
+		req.answer(&saveRes{meta: h.Meta(), h: h})
+		return
+	}
 	err := n.cut(idx, term, true)
 	var m coreconsensus.SnapshotMetaValue
 	var h coreconsensus.SnapshotHandle
