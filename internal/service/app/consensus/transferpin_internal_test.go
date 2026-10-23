@@ -429,3 +429,59 @@ func TestALeaderThatLosesItsLeadershipStopsItsSnapshotStream(t *testing.T) {
 	}
 	lt.holding.Store(false)
 }
+
+// slowRestoreKV is kv whose Restore takes delay, and counts its restores.
+type slowRestoreKV struct {
+	*kv
+	delay    time.Duration
+	restores *atomic.Int32
+}
+
+func (s slowRestoreKV) Restore(r io.Reader, m coreconsensus.SnapshotMetaValue) error {
+	s.restores.Add(1)
+	time.Sleep(s.delay)
+	return s.kv.Restore(r, m)
+}
+
+// The #602 bound ended a stream's pin pinAfterStream maximum election
+// timeouts after its last byte, whether the receiver was stuck or only slow
+// to restore. A follower whose Restore took longer than that, under a
+// steady write rate, was compacted past while it restored, and was sent
+// snapshot after snapshot without ever catching up (#610, the #550 defect
+// again). A receiver still answering when its pin falls due is given a
+// bound twice as long at its next transfer, and catches up; a stuck one
+// still does not hold compaction for good (TestAFollowerStuckInItsInstallDoesNotPinCompaction).
+func TestAFollowerSlowerToRestoreThanThePinBoundCatchesUp(t *testing.T) {
+	restores := new(atomic.Int32)
+	var fid coreconsensus.NodeID
+	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{1, 2, 3}, every: 20, size: 3}
+	c.configure = func(tn *testNode, cfg *Config) {
+		if fid != 0 && tn.id == fid {
+			// 3 s, past pinAfterStream x ElectionTimeoutMax = 2 s.
+			cfg.Machine = slowRestoreKV{kv: tn.sm, delay: 3 * time.Second, restores: restores}
+		}
+	}
+	newClusterWith(t, c)
+	l := c.settledLeader(5 * time.Second)
+	f := c.otherThan(l)
+	c.kill(f)
+	for i := range 100 {
+		propose(t, l.node, fmt.Sprintf("a%03d=v", i))
+	}
+	compactedPastItsEnd(t, l, f)
+	fid = f.id
+	c.start(f)
+	// Steady writes, about a hundred a second, for at most 20 s.
+	caught := false
+	i := 0
+	for stop := time.Now().Add(20 * time.Second); time.Now().Before(stop) && !caught; i++ {
+		propose(t, l.node, fmt.Sprintf("b%05d=v", i))
+		time.Sleep(10 * time.Millisecond)
+		caught = restores.Load() > 0 && f.node.Status().Applied+5 >= l.node.Status().Commit
+	}
+	t.Logf("restores on the follower %d, caught up during the writes: %v, follower applied %d, leader commit %d",
+		restores.Load(), caught, f.node.Status().Applied, l.node.Status().Commit)
+	if !caught {
+		t.Errorf("a follower whose Restore takes 3 s, past the 2 s pin bound, never caught up under writes: %d restores in 20 s", restores.Load())
+	}
+}

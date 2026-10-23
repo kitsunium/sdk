@@ -121,6 +121,10 @@ type Node struct {
 	// sendStop cancels the snapshot stream in flight to each peer: a
 	// leader that lost its leadership or its term stops streaming (#547).
 	sendStop map[coreconsensus.NodeID]context.CancelFunc
+	// pinScale is, per peer, how many times its pin bound doubled: a
+	// receiver still answering when its stream's pin fell due was slow to
+	// install, not stuck (#610).
+	pinScale map[coreconsensus.NodeID]uint8
 	// tooLarge is, per learner, the newest snapshot it was found too small
 	// to install, so that it is said once per snapshot (#591).
 	tooLarge map[coreconsensus.NodeID]string
@@ -193,6 +197,9 @@ type snapState struct {
 	// newestBytes is the newest snapshot's size, the larger of its encoded
 	// and decoded sizes, which Health compares with the limit (R2-30, #556).
 	newestBytes int64
+	// restoring counts, per id, the installs of that snapshot committed
+	// and waiting for or under their restore (#610).
+	restoring map[string]int
 }
 
 type applyResult struct {
@@ -398,7 +405,7 @@ func newNode(cfg *Config, stamp *coreconsensus.StampValue) *Node {
 		propc: make(chan *proposal, inboxDepth), execc: make(chan func(), loopBacklog), storec: make(chan storeDone, loopBacklog),
 		stopc: make(chan struct{}), sq: newFifo[storeReq](), fetchq: newFifo[raft.FetchSpec](), fetchc: make(chan fetchDone, fetchBacklog), aq: newFifo[applyItem](),
 		waiters: map[uint64]*proposal{}, results: map[uint64]applyResult{},
-		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]sendPin{}, sendStop: map[coreconsensus.NodeID]context.CancelFunc{}, tooLarge: map[coreconsensus.NodeID]string{}, unfed: map[coreconsensus.NodeID]bool{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
+		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]sendPin{}, sendStop: map[coreconsensus.NodeID]context.CancelFunc{}, pinScale: map[coreconsensus.NodeID]uint8{}, tooLarge: map[coreconsensus.NodeID]string{}, unfed: map[coreconsensus.NodeID]bool{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
 		watchers: map[chan coreconsensus.StatusValue]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
 	}
 	n.acond = sync.NewCond(&n.am)

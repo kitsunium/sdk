@@ -31,7 +31,7 @@ func (n *Node) offer(from coreconsensus.AuthenticatedPeerValue, o coreconsensus.
 // judgeOffer is offer's verdict, on the loop: screened first, then answered
 // from a copy already held, else a sink is opened and kept for install.
 func (n *Node) judgeOffer(from coreconsensus.NodeID, o *coreconsensus.InstallOfferValue, acc *coreconsensus.InstallAcceptValue) {
-	if n.screenOffer(from, o, acc) || n.answerFromHeld(o, acc) {
+	if n.screenOffer(from, o, acc) || n.answerFromHeld(o, acc) || n.answerRestoring(o, acc) {
 		return
 	}
 	n.dropOtherSpools(o.SnapshotID)
@@ -118,6 +118,39 @@ func (n *Node) answerFromHeld(o *coreconsensus.InstallOfferValue, acc *coreconse
 		}
 	}
 	return false
+}
+
+// answerRestoring refuses OVERLOADED an offer of a snapshot this node
+// committed and is restoring, and reports whether it did. A leader whose
+// pin on a slow receiver fell due offers the same snapshot again:
+// accepted, a spool was opened over the published id, the whole snapshot
+// was streamed a second time, committed over the file the restore in
+// progress reads — a rename Windows refuses — and restored once more
+// (#610). Refused, the leader probes again, and finds the receiver at the
+// snapshot once restored.
+func (n *Node) answerRestoring(o *coreconsensus.InstallOfferValue, acc *coreconsensus.InstallAcceptValue) bool {
+	n.snapState.mu.Lock()
+	restoring := n.snapState.restoring[o.SnapshotID] > 0
+	n.snapState.mu.Unlock()
+	if !restoring {
+		return false
+	}
+	acc.Refused = coreconsensus.CodeOverloaded
+	return true
+}
+
+// markRestoring counts one more, or one less, install of id waiting for
+// or under its restore.
+func (n *Node) markRestoring(id string, d int) {
+	n.snapState.mu.Lock()
+	defer n.snapState.mu.Unlock()
+	if n.snapState.restoring == nil {
+		n.snapState.restoring = map[string]int{}
+	}
+	n.snapState.restoring[id] += d
+	if n.snapState.restoring[id] <= 0 {
+		delete(n.snapState.restoring, id)
+	}
 }
 
 // keepSpool holds the sink an accepted offer opened until its body
@@ -220,6 +253,8 @@ func (n *Node) install(req coreconsensus.InstallParams) error {
 		go n.HardClose()
 		return n.stoppedErr()
 	}
+	n.markRestoring(snapID, 1)
+	defer n.markRestoring(snapID, -1)
 	done := make(chan error, 1)
 	n.aq.push(applyItem{restore: &restoreReq{meta: meta, done: done}})
 	select {

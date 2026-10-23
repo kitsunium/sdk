@@ -823,7 +823,7 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 		n.streamEnded(meta, to, err)
 		n.exec(func() {
 			if err == nil {
-				until := n.clk.Now().Add(time.Duration(pinAfterStream) * n.r.Status().Timing.ElectionTimeoutMax)
+				until := n.clk.Now().Add(n.pinBound(to))
 				n.sending[to] = sendPin{index: meta.Position.Index, until: until}
 			} else {
 				delete(n.sending, to)
