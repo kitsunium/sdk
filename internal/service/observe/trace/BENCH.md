@@ -722,3 +722,39 @@ the batch size, and a span end never waits on the exporter's network.
 
 Reproduce with
 `cd internal && GOWORK=off go test -run NONE -bench BatchSink -benchmem -count=5 ./service/observe/trace/`.
+
+## 8. OTLP/JSON encoding
+
+`EncodeOTLPJSON` used to hand its tree to `encoding/json` (`otlp.Marshal`):
+reflection over every field, and a fresh `[]byte` from every timestamp's and
+attribute value's `MarshalJSON`, validated again by `encoding/json`. It now
+writes the same tree with `otlp_append.go` and the shared appenders into one
+buffer sized near the document (`otlpDocCapacity`);
+`otlp_append_internal_test.go` holds the two renderings byte-identical on 2 000
+random trees, and both refusals still happen while the tree is built.
+
+`exporter_otlpjson_bench_test.go`: one full default batch — 512 server spans
+with a remote parent and four attributes, one in ten with an error status and
+an exception event — built once. A/B against the base binary (the same
+benchmark source compiled on `d91642be`), the two run alternately ten times,
+`benchstat`:
+
+```
+                          │    base     │                new                 │
+                          │   sec/op    │   sec/op     vs base               │
+EncodeOTLPJSON_512Spans-8   3321.3µ ± 2%   911.2µ ± 5%  -72.57% (p=0.000 n=10)
+
+                          │     B/op     │     B/op      vs base               │
+EncodeOTLPJSON_512Spans-8   769.6Ki ± 5%   583.0Ki ± 0%  -24.25% (p=0.000 n=10)
+
+                          │  allocs/op  │  allocs/op   vs base                │
+EncodeOTLPJSON_512Spans-8   6.423k ± 0%   4.308k ± 0%  -32.93% (p=0.000 n=10)
+```
+
+The 4 308 allocations left build the tree — the four hex identifiers, the
+attribute slices, the events and the status of each span; the document is one.
+
+Measured on: AMD EPYC 7351P 16-Core, 8 vCPU visible, 11 GiB RAM, Linux
+6.12.101+deb13-amd64 (Debian 13), go1.27.3 linux/amd64, base d91642be, branch
+`perf/otlp-json`, 2026-10-23, benchtime 1s. Reproduce with
+`cd internal && GOWORK=off go test -run '^$' -bench EncodeOTLPJSON -benchmem -count=10 ./service/observe/trace/`.

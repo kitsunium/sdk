@@ -235,3 +235,43 @@ Each benchmark creates the series it measures BEFORE the timed loop, so what is
 timed is resolution, not creation — except `CounterLookup_Overflow`, where a
 never-before-seen attribute set on every observation is the whole point, and
 `Collect_100Observables`, where running the callbacks is the measurement.
+
+## OTLP/JSON encoding
+
+`EncodeOTLPJSON` used to hand its tree to `encoding/json` (`otlp.Marshal`):
+reflection over every field, and a fresh `[]byte` from every scalar's
+`MarshalJSON` — two timestamps per point, the value, each bucket count and
+bound — which `encoding/json` then validated again. It now writes the same tree
+with `otlp_append.go` and the shared appenders into one buffer sized near the
+document (`otlpDocCapacity`); `otlp_append_internal_test.go` holds the two
+renderings byte-identical on 2 000 random trees. The tree itself is unchanged,
+and so is every refusal.
+
+`exporter_otlpjson_bench_test.go`: ten names of a hundred series, three
+attributes each; the snapshot is built once. A/B against the base binary (the
+same benchmark source compiled on `d91642be`), the two run alternately ten
+times, `benchstat`:
+
+```
+                                │    base     │                new                 │
+                                │   sec/op    │   sec/op     vs base               │
+EncodeOTLPJSON_1000Sums-8         4095.3µ ± 4%   914.2µ ± 8%  -77.68% (p=0.000 n=10)
+EncodeOTLPJSON_1000Histograms-8   12.661m ± 4%   3.271m ± 7%  -74.16% (p=0.000 n=10)
+
+                                │     B/op     │     B/op      vs base               │
+EncodeOTLPJSON_1000Sums-8         946.8Ki ± 10%  570.5Ki ± 0%  -39.74% (p=0.000 n=10)
+EncodeOTLPJSON_1000Histograms-8   2.264Mi ± 11%  1.050Mi ± 0%  -53.64% (p=0.000 n=10)
+
+                                │  allocs/op   │  allocs/op   vs base               │
+EncodeOTLPJSON_1000Sums-8          9.058k ± 0%   5.042k ± 0%  -44.34% (p=0.000 n=10)
+EncodeOTLPJSON_1000Histograms-8   42.992k ± 0%   7.042k ± 0%  -83.62% (p=0.000 n=10)
+```
+
+A histogram point carried 2 + 15 + 14 scalar slices, which is why it gains the
+most. The ~5 000 allocations left at 1 000 points build the tree (a `KeyValue`
+slice per point, a pointer per oneof value); the document is one.
+
+Measured on: AMD EPYC 7351P 16-Core, 8 vCPU visible, 11 GiB RAM, Linux
+6.12.101+deb13-amd64 (Debian 13), go1.27.3 linux/amd64, base d91642be, branch
+`perf/otlp-json`, 2026-10-23, benchtime 1s. Reproduce with
+`cd internal && GOWORK=off go test -run '^$' -bench EncodeOTLPJSON -benchmem -count=10 ./service/observe/metrics/`.

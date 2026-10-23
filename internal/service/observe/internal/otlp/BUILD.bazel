@@ -6,6 +6,7 @@ go_library(
     name = "otlp",
     srcs = [
         "any_value.go",
+        "append.go",
         "doc.go",
         "http_config.go",
         "key_value.go",
@@ -42,6 +43,7 @@ alias(
 go_test(
     name = "otlp_test",
     srcs = [
+        "append_external_test.go",
         "gen_api_test.go",
         "marshal_bench_test.go",
         "sender_external_test.go",

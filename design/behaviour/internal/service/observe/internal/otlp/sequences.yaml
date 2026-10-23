@@ -1,6 +1,337 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 sequences:
+  - of: AppendString
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendString
+        kind: self
+      - id: appendEscapedByte
+        kind: internal
+      - id: appendMultiByte
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, '"')
+      - bind: start
+        eval: "0"
+      - loop:
+          cond: i < len(s)
+          do:
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - op: ++
+                          set: i
+                        - continue: true
+                      when: b >= spaceByte && b != '"' && b != '\\'
+                  - set: dst
+                    value: append(dst, s[start:i]...)
+                  - set: dst
+                    to: appendEscapedByte
+                    value: appendEscapedByte(dst, b)
+                  - op: ++
+                    set: i
+                  - set: start
+                    value: i
+                  - continue: true
+                init:
+                  bind: b
+                  eval: s[i]
+                when: b < utf8.RuneSelf
+            - var:
+                name: size
+                type: int
+            - set: dst, size, start
+              to: appendMultiByte
+              value: appendMultiByte(dst, s, i, start)
+            - op: +=
+              set: i
+              value: size
+          init: i := 0
+      - set: dst
+        value: append(dst, s[start:]...)
+      - return: append(dst, '"')
+  - of: appendMultiByte
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendMultiByte
+        kind: self
+      - id: utf8
+        kind: stdlib
+    steps:
+      - bind: c, size
+        eval: utf8.DecodeRuneInString(s[i:])
+        to: utf8
+      - opt:
+          do:
+            - set: dst
+              value: append(dst, s[start:i]...)
+            - return: utf8.AppendRune(dst, utf8.RuneError), size, i + size
+              to: utf8
+          when: c == utf8.RuneError && size == 1
+      - opt:
+          do:
+            - set: dst
+              value: append(dst, s[start:i]...)
+            - return: append(dst, '\\', 'u', '2', '0', '2', hexDigits[c&rune(nibbleMask)]), size, i + size
+          when: c == lineSeparator || c == paragraphSeparator
+      - return: dst, size, start
+  - of: appendEscapedByte
+    steps:
+      - switch:
+          cases:
+            - case: "'\\\\', '\"'"
+              do:
+                - return: append(dst, '\\', b)
+            - case: "'\\b'"
+              do:
+                - return: append(dst, '\\', 'b')
+            - case: "'\\f'"
+              do:
+                - return: append(dst, '\\', 'f')
+            - case: "'\\n'"
+              do:
+                - return: append(dst, '\\', 'n')
+            - case: "'\\r'"
+              do:
+                - return: append(dst, '\\', 'r')
+            - case: "'\\t'"
+              do:
+                - return: append(dst, '\\', 't')
+            - default: true
+              do:
+                - return: append(dst, '\\', 'u', '0', '0', hexDigits[b>>nibbleShift], hexDigits[b&nibbleMask])
+          "on": b
+  - of: AppendKey
+    steps:
+      - opt:
+          do:
+            - set: dst
+              value: append(dst, ',')
+          when: len(dst) > 0 && dst[len(dst)-1] != '{'
+      - set: dst
+        value: append(dst, '"')
+      - set: dst
+        value: append(dst, key...)
+      - return: append(dst, '"', ':')
+  - of: AppendBool
+    steps:
+      - opt:
+          do:
+            - return: append(dst, jsonTrue...)
+          when: v
+      - return: append(dst, jsonFalse...)
+  - of: AppendNull
+    steps:
+      - return: append(dst, jsonNull...)
+  - of: Int64.AppendJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: Int64.AppendJSON
+        kind: self
+      - id: appendInt
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, '"')
+      - set: dst
+        to: appendInt
+        value: appendInt(dst, int64(v))
+      - return: append(dst, '"')
+  - of: Uint64.AppendJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: Uint64.AppendJSON
+        kind: self
+      - id: appendUint
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, '"')
+      - set: dst
+        to: appendUint
+        value: appendUint(dst, uint64(v))
+      - return: append(dst, '"')
+  - of: Double.AppendJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: Double.AppendJSON
+        kind: self
+      - id: appendDouble
+        kind: internal
+    steps:
+      - return: appendDouble(dst, float64(v))
+        to: appendDouble
+  - of: AnyValue.AppendJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: AnyValue.AppendJSON
+        kind: self
+      - id: AppendKey
+        kind: internal
+      - id: AppendString
+        kind: internal
+      - id: AppendBool
+        kind: internal
+      - id: v.IntValue.AppendJSON
+        kind: internal
+      - id: v.DoubleValue.AppendJSON
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, '{')
+      - opt:
+          do:
+            - set: dst
+              to: AppendKey
+              value: AppendKey(dst, "stringValue")
+            - set: dst
+              to: AppendString
+              value: AppendString(dst, *v.StringValue)
+          when: v.StringValue != nil
+      - opt:
+          do:
+            - set: dst
+              to: AppendKey
+              value: AppendKey(dst, "boolValue")
+            - set: dst
+              to: AppendBool
+              value: AppendBool(dst, *v.BoolValue)
+          when: v.BoolValue != nil
+      - opt:
+          do:
+            - set: dst
+              to: AppendKey
+              value: AppendKey(dst, "intValue")
+            - set: dst
+              to: v.IntValue.AppendJSON
+              value: v.IntValue.AppendJSON(dst)
+          when: v.IntValue != nil
+      - opt:
+          do:
+            - set: dst
+              to: AppendKey
+              value: AppendKey(dst, "doubleValue")
+            - set: dst
+              to: v.DoubleValue.AppendJSON
+              value: v.DoubleValue.AppendJSON(dst)
+          when: v.DoubleValue != nil
+      - return: append(dst, '}')
+  - of: KeyValue.AppendJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: KeyValue.AppendJSON
+        kind: self
+      - id: AppendKey
+        kind: internal
+      - id: AppendString
+        kind: internal
+      - id: kv.Value.AppendJSON
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, '{')
+      - set: dst
+        to: AppendKey
+        value: AppendKey(dst, "key")
+      - set: dst
+        to: AppendString
+        value: AppendString(dst, kv.Key)
+      - set: dst
+        to: AppendKey
+        value: AppendKey(dst, "value")
+      - set: dst
+        to: kv.Value.AppendJSON
+        value: kv.Value.AppendJSON(dst)
+      - return: append(dst, '}')
+  - of: AppendKeyValues
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendKeyValues
+        kind: self
+      - id: attrs[i].AppendJSON
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, '[')
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: dst
+                    value: append(dst, ',')
+                when: i > 0
+            - set: dst
+              to: attrs[i].AppendJSON
+              value: attrs[i].AppendJSON(dst)
+          key: i
+          range: attrs
+      - return: append(dst, ']')
+  - of: ResourceMessage.AppendJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: ResourceMessage.AppendJSON
+        kind: self
+      - id: AppendKey
+        kind: internal
+      - id: AppendKeyValues
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, '{')
+      - opt:
+          do:
+            - set: dst
+              to: AppendKey
+              value: AppendKey(dst, "attributes")
+            - set: dst
+              to: AppendKeyValues
+              value: AppendKeyValues(dst, m.Attributes)
+          when: len(m.Attributes) > 0
+      - return: append(dst, '}')
+  - of: ScopeMessage.AppendJSON
+    participants:
+      - id: caller
+        kind: actor
+      - id: ScopeMessage.AppendJSON
+        kind: self
+      - id: AppendKey
+        kind: internal
+      - id: AppendString
+        kind: internal
+    steps:
+      - set: dst
+        value: append(dst, '{')
+      - opt:
+          do:
+            - set: dst
+              to: AppendKey
+              value: AppendKey(dst, "name")
+            - set: dst
+              to: AppendString
+              value: AppendString(dst, m.Name)
+          when: m.Name != ""
+      - opt:
+          do:
+            - set: dst
+              to: AppendKey
+              value: AppendKey(dst, "version")
+            - set: dst
+              to: AppendString
+              value: AppendString(dst, m.Version)
+          when: m.Version != ""
+      - return: append(dst, '}')
   - of: Attrs
     participants:
       - id: caller
@@ -209,6 +540,51 @@ sequences:
             - return: "[]byte(jsonNegInfinity), nil"
           when: math.IsInf(value, -1)
       - return: strconv.AppendFloat(nil, value, floatFmt, floatPrec, floatBitSize), nil
+        to: strconv
+  - of: appendInt
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendInt
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - return: strconv.AppendInt(dst, v, decimalBase)
+        to: strconv
+  - of: appendUint
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendUint
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - return: strconv.AppendUint(dst, v, decimalBase)
+        to: strconv
+  - of: appendDouble
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendDouble
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: append(dst, jsonNaN...)
+          when: math.IsNaN(value)
+      - opt:
+          do:
+            - return: append(dst, jsonPosInfinity...)
+          when: math.IsInf(value, 1)
+      - opt:
+          do:
+            - return: append(dst, jsonNegInfinity...)
+          when: math.IsInf(value, -1)
+      - return: strconv.AppendFloat(dst, value, floatFmt, floatPrec, floatBitSize)
         to: strconv
   - of: ScopeOf
     steps:

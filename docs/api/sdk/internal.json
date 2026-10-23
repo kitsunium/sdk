@@ -1271,7 +1271,7 @@
       "dir": "service/observe/internal/otlp",
       "layer": "service",
       "family": "observe",
-      "doc": "Package otlp — common.v1.AnyValue, restricted to the cases the shared\nattribute model has.\n\nPackage otlp — the OTLP/HTTP sender's configuration, which each signal\npublishes under its own name.\n\nPackage otlp — common.v1.KeyValue, the repeated message every OTLP payload\nspells its dimensions with, and its rendering from the shared attribute\nmodel.\n\nPackage otlp — one OTLP/JSON document, and the timestamp every message in it\ncarries.\n\nPackage otlp is the OTLP machinery the metrics and trace signals share: the\nproto3-JSON scalar encodings and the common/resource messages every OTLP\npayload carries, the single-document marshal, the newline-terminated stream\na writer-bound exporter emits, and the OTLP/HTTP sender — endpoint\nrefusal, the default client and its own connection pool, the bounded body\nreads, and the classification of a collector's answer into three verdicts.\n\nIt was written twice, once per signal (ADR 0048 for metrics, ADR 0051 for\ntrace), and the two copies differed in nothing but the error codes, the\nwording of their refusals and the name of the field a partial success counts.\nThose three are exactly what this package does NOT own: a signal hands it a\nSignalSpec value carrying its sentinels, its wrap parameters and its field names,\nso every error leaves here under the calling signal's dotted-quad code and in\nits words, byte for byte what that signal returned before the transport was\nshared. This package declares no code.\n\nWhat stays in each signal is what is genuinely its own: the payload tree\n(ResourceMetrics or ResourceSpans and everything below them), the encoder\nthat builds it and the refusals only that encoder can raise, the signal's\npath constant, and the exported names a caller types — OTLPHTTPConfig,\nNewOTLPHTTPExporter, OTLPRetryable.\n\nIt is internal to internal/service on purpose: nothing above the service\nlayer may reach it, and nothing but the two signals needs to.\n\nPackage otlp — resource.v1.Resource, carried once per payload by every\nsignal.\n\nPackage otlp — the collector's answer to an OTLP/HTTP export, and the\nlenient 64-bit decoder the specification asks for.\n\nPackage otlp — the three proto3-JSON scalar encodings OTLP inherits and\nencoding/json does not produce on its own.\n\nPackage otlp — common.v1.InstrumentationScope, carried once per payload by\nevery signal.\n\nPackage otlp — the OTLP/HTTP sender: the only file of this package, and of\nthe two signals that use it, that opens an outbound socket.\n\nPackage otlp — SignalSpec: everything the shared OTLP/HTTP transport needs to\nknow about the signal it is carrying, and nothing it owns itself.\n\nPackage otlp — the newline-delimited stream a writer-bound OTLP/JSON\nexporter emits.\n"
+      "doc": "Package otlp — the appenders: one OTLP/JSON document written into one\nbuffer, byte for byte what Marshal renders, without reflection and without\na slice per scalar.\n\nPackage otlp — common.v1.AnyValue, restricted to the cases the shared\nattribute model has.\n\nPackage otlp — the OTLP/HTTP sender's configuration, which each signal\npublishes under its own name.\n\nPackage otlp — common.v1.KeyValue, the repeated message every OTLP payload\nspells its dimensions with, and its rendering from the shared attribute\nmodel.\n\nPackage otlp — one OTLP/JSON document, and the timestamp every message in it\ncarries.\n\nPackage otlp is the OTLP machinery the metrics and trace signals share: the\nproto3-JSON scalar encodings and the common/resource messages every OTLP\npayload carries, the single-document marshal, the newline-terminated stream\na writer-bound exporter emits, and the OTLP/HTTP sender — endpoint\nrefusal, the default client and its own connection pool, the bounded body\nreads, and the classification of a collector's answer into three verdicts.\n\nIt was written twice, once per signal (ADR 0048 for metrics, ADR 0051 for\ntrace), and the two copies differed in nothing but the error codes, the\nwording of their refusals and the name of the field a partial success counts.\nThose three are exactly what this package does NOT own: a signal hands it a\nSignalSpec value carrying its sentinels, its wrap parameters and its field names,\nso every error leaves here under the calling signal's dotted-quad code and in\nits words, byte for byte what that signal returned before the transport was\nshared. This package declares no code.\n\nWhat stays in each signal is what is genuinely its own: the payload tree\n(ResourceMetrics or ResourceSpans and everything below them), the encoder\nthat builds it and the refusals only that encoder can raise, the signal's\npath constant, and the exported names a caller types — OTLPHTTPConfig,\nNewOTLPHTTPExporter, OTLPRetryable.\n\nIt is internal to internal/service on purpose: nothing above the service\nlayer may reach it, and nothing but the two signals needs to.\n\nPackage otlp — resource.v1.Resource, carried once per payload by every\nsignal.\n\nPackage otlp — the collector's answer to an OTLP/HTTP export, and the\nlenient 64-bit decoder the specification asks for.\n\nPackage otlp — the three proto3-JSON scalar encodings OTLP inherits and\nencoding/json does not produce on its own.\n\nPackage otlp — common.v1.InstrumentationScope, carried once per payload by\nevery signal.\n\nPackage otlp — the OTLP/HTTP sender: the only file of this package, and of\nthe two signals that use it, that opens an outbound socket.\n\nPackage otlp — SignalSpec: everything the shared OTLP/HTTP transport needs to\nknow about the signal it is carrying, and nothing it owns itself.\n\nPackage otlp — the newline-delimited stream a writer-bound OTLP/JSON\nexporter emits.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/service/observe/logger",
@@ -60821,6 +60821,79 @@
       "family": "observe"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/internal/otlp.AnyValue.AppendJSON",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/internal/otlp",
+      "name": "AppendJSON",
+      "recv": "AnyValue",
+      "spelled": "func(dst []byte) []byte",
+      "canonical": "func(dst []byte) []byte",
+      "doc": "AppendJSON appends the oneof to dst: the one case that is set, emitted even\nat its zero, or {} when none is.\n",
+      "file": "service/observe/internal/otlp/append.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/internal/otlp.AppendBool",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/internal/otlp",
+      "name": "AppendBool",
+      "spelled": "func(dst []byte, v bool) []byte",
+      "canonical": "func(dst []byte, v bool) []byte",
+      "doc": "AppendBool appends v as the JSON literal true or false.\n",
+      "file": "service/observe/internal/otlp/append.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/internal/otlp.AppendKey",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/internal/otlp",
+      "name": "AppendKey",
+      "spelled": "func(dst []byte, key string) []byte",
+      "canonical": "func(dst []byte, key string) []byte",
+      "doc": "AppendKey appends the member name key and its colon to dst, preceded by a\ncomma unless the member is the first of its object — which an appender\nknows by the '{' it just wrote. key is a schema name: written as it is, with\nno escaping, so it must be one.\n",
+      "file": "service/observe/internal/otlp/append.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/internal/otlp.AppendKeyValues",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/internal/otlp",
+      "name": "AppendKeyValues",
+      "spelled": "func(dst []byte, attrs []KeyValue) []byte",
+      "canonical": "func(dst []byte, attrs []github.com/kitsunium/sdk/internal/service/observe/internal/otlp.KeyValue) []byte",
+      "doc": "AppendKeyValues appends attrs to dst as a JSON array — [] when it is empty,\nfor a caller whose member is not omitted; an omitted member is the caller's\nto skip.\n",
+      "file": "service/observe/internal/otlp/append.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/internal/otlp.AppendNull",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/internal/otlp",
+      "name": "AppendNull",
+      "spelled": "func(dst []byte) []byte",
+      "canonical": "func(dst []byte) []byte",
+      "doc": "AppendNull appends the JSON literal null — what Marshal writes for a nil\nslice or a nil pointer its member does not omit.\n",
+      "file": "service/observe/internal/otlp/append.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/internal/otlp.AppendString",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/internal/otlp",
+      "name": "AppendString",
+      "spelled": "func(dst []byte, s string) []byte",
+      "canonical": "func(dst []byte, s string) []byte",
+      "doc": "AppendString appends s to dst as a JSON string, byte for byte what Marshal\nrenders for it: '\"' and '\\\\' escaped, the five short control escapes (\\b,\n\\f, \\n, \\r, \\t), every other byte below 0x20 as \\u00xx, an invalid UTF-8\nbyte replaced by U+FFFD written as it is, U+2028 and U+2029 written as their\nsix-character escapes — and, because Marshal disables HTML escaping, '<', '>'\nand '&' left as they are.\n",
+      "file": "service/observe/internal/otlp/append.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/observe/internal/otlp.Attrs",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/observe/internal/otlp",
@@ -60896,6 +60969,19 @@
       "family": "observe"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/internal/otlp.Double.AppendJSON",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/internal/otlp",
+      "name": "AppendJSON",
+      "recv": "Double",
+      "spelled": "func(dst []byte) []byte",
+      "canonical": "func(dst []byte) []byte",
+      "doc": "AppendJSON appends the double to dst shortest-round-trip, or its quoted name\nwhen it is not finite — what its MarshalJSON returns, without the slice.\n",
+      "file": "service/observe/internal/otlp/append.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/observe/internal/otlp.Double.MarshalJSON",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/service/observe/internal/otlp",
@@ -60960,6 +61046,19 @@
       "family": "observe"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/internal/otlp.Int64.AppendJSON",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/internal/otlp",
+      "name": "AppendJSON",
+      "recv": "Int64",
+      "spelled": "func(dst []byte) []byte",
+      "canonical": "func(dst []byte) []byte",
+      "doc": "AppendJSON appends the integer to dst as a quoted decimal string — what its\nMarshalJSON returns, without the slice.\n",
+      "file": "service/observe/internal/otlp/append.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/observe/internal/otlp.Int64.MarshalJSON",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/service/observe/internal/otlp",
@@ -60993,6 +61092,19 @@
       ],
       "doc": "KeyValue is common.v1.KeyValue: key (1) + value (2). One attribute of a\nresource, a data point, a span, an event or a link.\n\nField ORDER inside every message of this package is the schema's\nFIELD-NUMBER order, not a reading order: encoding/json emits struct fields as\ndeclared, and deriving the order from the document is what makes the\nexpected bytes in each signal's tests checkable against the .proto field by\nfield.\n",
       "file": "service/observe/internal/otlp/key_value.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/internal/otlp.KeyValue.AppendJSON",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/internal/otlp",
+      "name": "AppendJSON",
+      "recv": "KeyValue",
+      "spelled": "func(dst []byte) []byte",
+      "canonical": "func(dst []byte) []byte",
+      "doc": "AppendJSON appends the attribute to dst as {\"key\":…,\"value\":{…}}.\n",
+      "file": "service/observe/internal/otlp/append.go",
       "layer": "service",
       "family": "observe"
     },
@@ -61040,7 +61152,7 @@
       "name": "Marshal",
       "spelled": "func[R any](request R, failure *errs.WrapParams) (doc []byte, err error)",
       "canonical": "func[R any](request R, failure *github.com/kitsunium/sdk/internal/kernel/errs.WrapParams) (doc []byte, err error)",
-      "doc": "Marshal renders request — a signal's whole payload tree — as ONE OTLP/JSON\ndocument: HTML escaping DISABLED and no trailing newline, exactly the bytes\nthat go in the body of a POST.\n\nencoding/json escapes '<', '>' and '&' into their \\u00xx forms by default, a\ndefence for JSON embedded in a <script> element. An OTLP body never is, and\nOTel-conventional attributes carry URLs (url.full, http.route) whose query\nseparator is exactly '&' — so the default turns a readable payload into an\nunreadable one for no gain, and makes this SDK's bytes differ from every\nother OTLP producer's for identical input. json.Encoder is the only way to\nturn it off, and it appends a newline a single-document body must not carry.\n\nfailure is the CALLER'S: the wrap a rendering fault leaves under, with the\nsignal's EXPORT_FAILED code and wording. The fault is near-impossible —\nevery field of a payload tree is a Go primitive or one of the Marshalers in\nthis package — and it is still typed rather than swallowed.\n",
+      "doc": "Marshal renders request — a signal's whole payload tree — as ONE OTLP/JSON\ndocument: HTML escaping DISABLED and no trailing newline, exactly the bytes\nthat go in the body of a POST.\n\nencoding/json escapes '<', '>' and '&' into their \\u00xx forms by default, a\ndefence for JSON embedded in a <script> element. An OTLP body never is, and\nOTel-conventional attributes carry URLs (url.full, http.route) whose query\nseparator is exactly '&' — so the default turns a readable payload into an\nunreadable one for no gain, and makes this SDK's bytes differ from every\nother OTLP producer's for identical input. json.Encoder is the only way to\nturn it off, and it appends a newline a single-document body must not carry.\n\nfailure is the CALLER'S: the wrap a rendering fault leaves under, with the\nsignal's EXPORT_FAILED code and wording. The fault is near-impossible —\nevery field of a payload tree is a Go primitive or one of the Marshalers in\nthis package — and it is still typed rather than swallowed.\n\nThe two signals no longer export through it: each renders its tree with the\nappenders (AppendString, AppendKey, the AppendJSON methods), which write\nthese same bytes into one buffer without reflection. Marshal stays the\nreference — encoding/json's own rendering — that every appender is tested\nagainst, byte for byte.\n",
       "file": "service/observe/internal/otlp/marshal.go",
       "layer": "service",
       "family": "observe"
@@ -61113,6 +61225,19 @@
       "family": "observe"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/internal/otlp.ResourceMessage.AppendJSON",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/internal/otlp",
+      "name": "AppendJSON",
+      "recv": "ResourceMessage",
+      "spelled": "func(dst []byte) []byte",
+      "canonical": "func(dst []byte) []byte",
+      "doc": "AppendJSON appends the resource to dst, its attributes omitted when there\nare none.\n",
+      "file": "service/observe/internal/otlp/append.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/observe/internal/otlp.ResourceOf",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/observe/internal/otlp",
@@ -61145,6 +61270,19 @@
       ],
       "doc": "ScopeMessage is common.v1.InstrumentationScope: name (1) + version (2). A Meter and\na Tracer both normalise Name, so it is always present; Version is optional in\nthe specification and omitted when the caller has none rather than emitted\nblank.\n\nattributes (3) and droppedAttributesCount (4) are absent: nothing in this SDK\nproduces a scope attribute (ADR 0044 §Deferred), and an always-empty field\nis a placeholder (rule 5).\n",
       "file": "service/observe/internal/otlp/scope_message.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/internal/otlp.ScopeMessage.AppendJSON",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/internal/otlp",
+      "name": "AppendJSON",
+      "recv": "ScopeMessage",
+      "spelled": "func(dst []byte) []byte",
+      "canonical": "func(dst []byte) []byte",
+      "doc": "AppendJSON appends the scope to dst, each field omitted when it is empty.\n",
+      "file": "service/observe/internal/otlp/append.go",
       "layer": "service",
       "family": "observe"
     },
@@ -61277,7 +61415,7 @@
       "recv": "Stream",
       "spelled": "func(doc []byte) error",
       "canonical": "func(doc []byte) error",
-      "doc": "Emit writes doc followed by DocumentTerminator in ONE write, so a refusal\nupstream leaves the destination untouched and the only error surface left is\nthe write itself. doc must be a document Marshal returned; it is extended in\nplace by one byte, which its spare capacity usually absorbs.\n",
+      "doc": "Emit writes doc followed by DocumentTerminator in ONE write, so a refusal\nupstream leaves the destination untouched and the only error surface left is\nthe write itself. doc must be one whole document — Marshal's, or a signal's\nappender's; it is extended in place by one byte, which its spare capacity\nusually absorbs.\n",
       "file": "service/observe/internal/otlp/stream.go",
       "layer": "service",
       "family": "observe"
@@ -61291,6 +61429,19 @@
       "canonical": "uint64",
       "doc": "Uint64 is an unsigned 64-bit integer rendered as a decimal string, for the\nsame reason Int64 is: fixed64 and uint64 both map to a string. Every\ntimestamp in an OTLP payload uses it, and every one of them is past 2^53.\n",
       "file": "service/observe/internal/otlp/scalar.go",
+      "layer": "service",
+      "family": "observe"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/observe/internal/otlp.Uint64.AppendJSON",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/observe/internal/otlp",
+      "name": "AppendJSON",
+      "recv": "Uint64",
+      "spelled": "func(dst []byte) []byte",
+      "canonical": "func(dst []byte) []byte",
+      "doc": "AppendJSON appends the integer to dst as a quoted decimal string — what its\nMarshalJSON returns, without the slice.\n",
+      "file": "service/observe/internal/otlp/append.go",
       "layer": "service",
       "family": "observe"
     },

@@ -34,7 +34,8 @@ sentinels as `coretrace.X` and declares none.
 | `batch_sink.go` / `batch_sink_config.go` | `BatchSink` — the specification's batching span processor, as a `SpanSink` (#479) — + `NewBatchSink` / `Sink` / `Resource` / `ForceFlush` / `Shutdown` / `Dropped` / `Failed` / `Len`; `BatchSinkConfig` and its four `DefaultBatch*` constants, the specification's own; see §The batch sink |
 | `record_error.go` | `RecordError` — the conventional `exception` event |
 | `otlp_request.go` | the Go mirror of `collector/trace` and `trace.proto`, in FIELD-NUMBER order; the `common.proto` / `resource.proto` messages and the proto3-JSON scalars are the shared package's |
-| `exporter_otlpjson.go` | `EncodeOTLPJSON` + the writer-bound exporter over the shared `otlp.Stream` + `OTLPJSON` (registered, stderr) + the two `EXPORT_FAILED` wraps the shared marshal and stream leave under |
+| `exporter_otlpjson.go` | `EncodeOTLPJSON` + the writer-bound exporter over the shared `otlp.Stream` + `OTLPJSON` (registered, stderr) + the `EXPORT_FAILED` wrap the shared stream leaves under (rendering cannot fail, so it has none) |
+| `otlp_append.go` | the tree's `appendJSON` methods and `otlpDocCapacity`: the document written into one buffer with the shared appenders, byte for byte what `otlp.Marshal` renders — `otlp_append_internal_test.go` holds it to that on 2 000 random trees. A 512-span batch encodes in ~0.9 ms with 4 308 allocations, against ~3.3 ms and 6 423 through `encoding/json` (BENCH.md §8) |
 | `exporter_otlphttp.go` | `NewOTLPHTTPExporter` — a `coretrace.ContextSpanExporter`: `ExportContext` carries the caller's context into the POST, a done context ending it with the transient `OTLP_EXPORT_UNAVAILABLE`, and `Export` is `ExportContext` under `context.Background()` (#479); `ExportDocument` (`coretrace.DocumentExporter`, ADR 0185) posts a document `EncodeOTLPJSON` wrote earlier — a store-and-forward queue's — through the same sender, an empty one posting nothing — + `OTLPRetryable` + `OTLPTracesPath` + `otlpSignal`, this signal's `otlp.SignalSpec` — its codes and wording for every verdict the shared sender reaches |
 | `otlphttp_config.go` | `OTLPHTTPConfig`, a DEFINED type over the shared `otlp.HTTPConfig` |
 | `otlp_export_response.go` | `ExportTracePartialSuccess` reduced to `rejectedSpans` + `decodeRejected` — the one member of the answer that is this signal's own |
@@ -201,6 +202,14 @@ files, with the field numbers in comments beside each fragment. A test that
 decoded the encoder's own output would prove self-consistency — exactly the
 property a wrong field name or a base64 identifier preserves.
 
+**The tree is rendered by appenders, held to `otlp.Marshal` byte for byte.**
+`EncodeOTLPJSON` builds the tree as before — both refusals happen there — then
+writes it with `otlp_append.go`'s `appendJSON` methods and the shared appenders
+into one buffer sized by `otlpDocCapacity`, instead of `encoding/json`'s
+reflection and a fresh `[]byte` per timestamp. `otlp_append_internal_test.go`
+compares the two renderings on 2 000 random trees; a field added to the tree is
+added to its `appendJSON` in the same change, or that test fails.
+
 ## The OTLP/HTTP emitter is NOT registered
 
 `otlpjson` self-registers on **stderr** (ADR 0030). `NewOTLPHTTPExporter` is
@@ -344,6 +353,7 @@ Four decisions:
 | `bazel test //internal/service/observe/trace:trace_test` | green |
 | `TestEncodeOTLPJSONMatchesTheHandWrittenSchemaDocument` | byte-for-byte against the hand-written `.proto` document |
 | `TestEncodeOTLPJSONIdentifiersAreHexNotBase64` | the fifth protobuf-JSON rule |
+| `TestOTLPAppendJSONIsMarshalsRendering` | the appenders write exactly `otlp.Marshal`'s bytes on 2 000 random trees |
 | `TestSamplerIsConsultedOnceAtTheRoot` | exactly one call across a three-level trace |
 | `TestAnUnsampledTraceStillPropagates` | zero spans recorded, a valid unsampled context propagated |
 | `TestRatioRefusesZeroBecauseZeroIsAmbiguous` | the ADR 0031 answer |

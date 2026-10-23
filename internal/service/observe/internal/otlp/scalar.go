@@ -95,3 +95,37 @@ func (v Double) MarshalJSON() (encoded []byte, err error) {
 	//: number in every form strconv produces (123, 1.5, 1e+21, -1.5e-08).
 	return strconv.AppendFloat(nil, value, floatFmt, floatPrec, floatBitSize), nil
 }
+
+// appendInt appends a signed decimal, unquoted.
+func appendInt(dst []byte, v int64) []byte {
+	//: base ten.
+	return strconv.AppendInt(dst, v, decimalBase)
+}
+
+// appendUint appends an unsigned decimal, unquoted.
+func appendUint(dst []byte, v uint64) []byte {
+	//: base ten.
+	return strconv.AppendUint(dst, v, decimalBase)
+}
+
+// appendDouble appends value as Double's MarshalJSON renders it: shortest
+// round-trip, or its quoted name when it is not finite.
+func appendDouble(dst []byte, value float64) []byte {
+	//: NaN first — it fails every ordered comparison below.
+	if math.IsNaN(value) {
+		//: the schema's spelling, quoted.
+		return append(dst, jsonNaN...)
+	}
+	//: +Inf.
+	if math.IsInf(value, 1) {
+		//: the schema's spelling, quoted.
+		return append(dst, jsonPosInfinity...)
+	}
+	//: -Inf.
+	if math.IsInf(value, -1) {
+		//: the schema's spelling, quoted.
+		return append(dst, jsonNegInfinity...)
+	}
+	//: finite: the same strconv rendering MarshalJSON returns.
+	return strconv.AppendFloat(dst, value, floatFmt, floatPrec, floatBitSize)
+}

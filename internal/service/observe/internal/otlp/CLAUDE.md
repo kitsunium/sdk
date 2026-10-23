@@ -47,12 +47,13 @@ public names a caller types — `OTLPHTTPConfig`, `NewOTLPHTTPExporter`,
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
 | `otlp.go` | `DefaultTimeout` / `DefaultMaxResponseBytes` / `DocumentTerminator` |
-| `scalar.go` | `Int64` / `Uint64` (decimal strings) and `Double` (a number, or `"NaN"` / `"Infinity"` / `"-Infinity"`) with their `MarshalJSON` |
+| `scalar.go` | `Int64` / `Uint64` (decimal strings) and `Double` (a number, or `"NaN"` / `"Infinity"` / `"-Infinity"`) with their `MarshalJSON`, and the unexported renderings their `AppendJSON` share |
+| `append.go` | the appenders both signals render their trees with: `AppendString` (encoding/json's string escaping with HTML escaping off), `AppendKey` (a member name, its comma decided by the `{` before it), `AppendBool`, `AppendNull`, `AppendKeyValues`, and `AppendJSON` on `Int64` / `Uint64` / `Double` / `AnyValue` / `KeyValue` / `ResourceMessage` / `ScopeMessage` — `Marshal`'s bytes, without reflection and without a slice per scalar |
 | `key_value.go` | `KeyValue` + `Attrs` + `KeyValueOf` — the shared attribute model (`internal/core/observe/otel`) as `common.v1.KeyValue` |
 | `any_value.go` | `AnyValue` — the four scalar cases of the oneof, presence kept at the zero |
 | `resource_message.go` | `ResourceMessage` + `ResourceOf` |
 | `scope_message.go` | `ScopeMessage` + `ScopeOf` |
-| `marshal.go` | `Marshal` (one document, HTML escaping off, no trailing newline, a rendering fault under the caller's wrap) + `UnixNano` (the unset instant is 0) |
+| `marshal.go` | `Marshal` (one document, HTML escaping off, no trailing newline, a rendering fault under the caller's wrap) — the REFERENCE the appenders are tested against, no signal exports through it any more — + `UnixNano` (the unset instant is 0) |
 | `stream.go` | `Stream` + `NewStream` + `Emit` — one terminated document per write, a writer fault under the caller's wrap |
 | `signal_spec.go` | `SignalSpec` — the per-signal vocabulary: four sentinels, three wraps of a foreign cause, the rejected field key, the response decoder |
 | `http_config.go` | `HTTPConfig` — each field documented once; each signal publishes it as a DEFINED type of its own |
@@ -60,7 +61,8 @@ public names a caller types — `OTLPHTTPConfig`, `NewOTLPHTTPExporter`,
 | `response.go` | `LenientInt64` (number OR decimal string) + `RejectedCounter` + `DecodeRejected` |
 | `wire_external_test.go` | scalars, attributes, messages, the marshal, the caller's code on a fault, the unset instant, the stream under concurrency |
 | `sender_external_test.go` | the three verdicts for two stand-in signals, every success shape, every endpoint refusal, the transport fault, header precedence, the defaults |
-| `marshal_bench_test.go` / `BENCH.md` | the cost of one document, and a pooled-buffer CONTROL kept beside it — measured not to pay |
+| `append_external_test.go` | the appenders against `Marshal`, encoding/json the oracle: every string escape class (and a fuzz target seeded with them), the scalars at their extremes, every message and omission, the member comma |
+| `marshal_bench_test.go` / `BENCH.md` | the cost of one document through `Marshal` and through the appenders, and a pooled-buffer CONTROL kept beside them — measured not to pay |
 
 ## Why each signal still keeps four small things
 
@@ -113,9 +115,22 @@ public names a caller types — `OTLPHTTPConfig`, `NewOTLPHTTPExporter`,
   `bytes.Buffer` costs one exact-size allocation that IS the returned
   document; a pool saves two header allocations at small sizes and costs
   5–9 % more bytes at 1 000 points, because the returned document must be
-  copied out. The cost of an export is the tree and the scalars' own
-  `MarshalJSON` — ~9 000 allocations at 1 000 points, of which the buffer is
-  one. The `_PooledControl` benchmarks keep the question re-askable.
+  copied out. The cost of an export through `Marshal` was the tree and the
+  scalars' own `MarshalJSON` — ~9 000 allocations at 1 000 points, of which the
+  buffer is one. The `_PooledControl` benchmarks keep the question re-askable.
+  The signals now render with the appenders into one buffer sized near the
+  document: the 4 000 scalar slices are gone and the document is ONE allocation
+  (`BenchmarkAppend_1000`); what remains is the tree's.
+- **Let an appender drift from `Marshal`.** `encoding/json` is the oracle:
+  `AppendString` copies its escaping (with HTML escaping off) — a raw U+FFFD for
+  an invalid byte, U+2028 and U+2029 escaped, the five short escapes — and
+  `append_external_test.go` plus each signal's `otlp_append_internal_test.go`
+  hold every appender to it. A rule changed in one place and not the other
+  ships a payload a collector parses differently from every other producer's.
+- **Use `encoding/json/v2` (`MarshalJSONTo`) instead.** It is still behind
+  `GOEXPERIMENT=jsonv2` in Go 1.27.3 (`encoding/json/v2` carries
+  `//go:build goexperiment.jsonv2`), which no build of the SDK sets, and its
+  output details (omission, escaping) differ from v1's.
 - **Move a signal's payload tree here.** What is shared is what both signals
   emit identically; a metric point and a span are not that.
 - **Register anything.** The OTLP/HTTP exporter is never registered (ADR 0030,

@@ -10,6 +10,45 @@ the suite as a CONTROL (`_PooledControl`), the way `internal/service/observe/tra
 keeps its `RWMutex` control, so the answer can be re-asked by running one
 command.
 
+## The appenders — what the signals pay now
+
+The "next win" named at the end of the headline below was taken, without
+`encoding/json/v2` (still behind `GOEXPERIMENT=jsonv2` in Go 1.27.3): `append.go`
+writes the document into ONE buffer — `AppendString` with encoding/json's own
+escaping, `AppendKey`, and an `AppendJSON` on each scalar and shared message —
+and each signal renders its tree with them. `Marshal` stays, as the reference
+the appenders are tested against byte for byte (`append_external_test.go`, and
+each signal's `otlp_append_internal_test.go` on 2 000 random trees).
+`BenchmarkAppend_*` renders the very trees `BenchmarkMarshal_*` marshals —
+`TestBenchAppendIsMarshal` keeps the two documents identical — so the rows
+below price the same bytes:
+
+| one binary, `-count=10` | ns/op | B/op | allocs/op |
+|---|---:|---:|---:|
+| `Marshal`, 10 points | 34.3 µs ± 1 % | 4 483 | 45 |
+| appenders, 10 points | **4.6 µs ± 1 %** | 4 864 | **1** |
+| `Marshal`, 1 000 points | 3.21 ms ± 1 % | 416 KB | 4 005 |
+| appenders, 1 000 points | **0.44 ms ± 2 %** | 451 KB | **1** |
+| build the tree + `Marshal`, 1 000 points | 3.79 ms ± 2 % | 939 KB | 9 015 |
+| build the tree + appenders, 1 000 points | **0.91 ms ± 1 %** | 692 KB | **5 004** |
+
+−86 % on the marshal and 4 004 allocations fewer per 1 000 points: the
+document is the one allocation left, sized from an estimate (a little over in
+B/op, never a second buffer); the 5 000 that remain in an export are the tree's.
+In the signals, A/B against the base binary, interleaved, `-count=10`, every
+delta p=0.000: `metrics` 1 000 counter points −78 % time / −44 % allocations,
+1 000 histogram points −74 % / −84 %; `trace` 512 spans −73 % / −33 % (metrics
+BENCH.md §OTLP/JSON encoding, trace BENCH.md §8).
+
+`Marshal`'s own rows read +4 % in the interleaved A/B against the base binary,
+on unchanged code. It is the test binary's layout: rebuilt without
+`append_external_test.go` (the library change kept), the same A/B reads
+−0.1 % (p=0.88 to 1.00). No signal calls `Marshal` any more.
+
+Measured on: AMD EPYC 7351P 16-Core, 8 vCPU visible, 11 GiB RAM, Linux
+6.12.101+deb13-amd64 (Debian 13), go1.27.3 linux/amd64, base d91642be, branch
+`perf/otlp-json`, 2026-10-23, benchtime 1s.
+
 ## The headline: the buffer is one allocation in nine thousand
 
 | | ns/op (5 runs) | B/op | allocs/op |
