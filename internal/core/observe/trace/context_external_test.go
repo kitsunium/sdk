@@ -19,34 +19,49 @@ func (s *stubSpan) End()                                    {}
 
 // TestContextWithSpanReadsBackTheSpansContext pins ContextWithSpan's promise:
 // SpanContextFromContext reads back exactly what ContextWithSpanContext would
-// have stored for span.SpanContext(), and the two writers shadow each other in
-// either order — one slot, two spellings of what goes in it.
+// have stored for span.SpanContext(); the two writers shadow each other in
+// either order — one slot, two spellings of what goes in it; and a nil span is
+// the deliberate absence of a trace, read back as the invalid zero value and
+// shadowing an outer context as ContextWithSpanContext's invalid one does.
 func TestContextWithSpanReadsBackTheSpansContext(t *testing.T) {
 	outer := specContext(t)
-	span := &stubSpan{context: outer}
-	ctx := coretrace.ContextWithSpan(context.Background(), span)
-	if got := coretrace.SpanContextFromContext(ctx); got.TraceID != outer.TraceID || got.SpanID != outer.SpanID || got.Flags != outer.Flags {
-		t.Fatalf("SpanContextFromContext = %+v, want the span's %+v", got, outer)
+	inner := coretrace.SpanContextValue{TraceID: outer.TraceID, SpanID: coretrace.SpanID{9, 9, 9, 9, 9, 9, 9, 9}, Flags: outer.Flags}
+	background := context.Background()
+	type tc struct {
+		name string
+		ctx  context.Context
+		want coretrace.SpanContextValue
 	}
-	//: a value written over a span shadows it.
-	shadowed := coretrace.ContextWithSpanContext(ctx, coretrace.SpanContextValue{})
-	if coretrace.SpanContextFromContext(shadowed).IsValid() {
-		t.Error("an invalid context written over a span must shadow it")
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		got := coretrace.SpanContextFromContext(c.ctx)
+		if got.TraceID != c.want.TraceID || got.SpanID != c.want.SpanID || got.Flags != c.want.Flags || got.IsValid() != c.want.IsValid() {
+			t.Errorf("%s: SpanContextFromContext = %+v, want %+v", c.name, got, c.want)
+		}
 	}
-	//: a span written over a value shadows it.
-	inner := &stubSpan{context: coretrace.SpanContextValue{TraceID: outer.TraceID, SpanID: coretrace.SpanID{9, 9, 9, 9, 9, 9, 9, 9}, Flags: outer.Flags}}
-	overValue := coretrace.ContextWithSpan(coretrace.ContextWithSpanContext(context.Background(), outer), inner)
-	if got := coretrace.SpanContextFromContext(overValue); got.SpanID != inner.context.SpanID {
-		t.Errorf("SpanContextFromContext = %v, want the inner span's %v", got.SpanID, inner.context.SpanID)
+	cases := []tc{
+		{
+			name: "a span, read back through it",
+			ctx:  coretrace.ContextWithSpan(background, &stubSpan{context: outer}),
+			want: outer,
+		},
+		{
+			name: "an invalid value written over a span shadows it",
+			ctx:  coretrace.ContextWithSpanContext(coretrace.ContextWithSpan(background, &stubSpan{context: outer}), coretrace.SpanContextValue{}),
+			want: coretrace.SpanContextValue{},
+		},
+		{
+			name: "a span written over a value shadows it",
+			ctx:  coretrace.ContextWithSpan(coretrace.ContextWithSpanContext(background, outer), &stubSpan{context: inner}),
+			want: inner,
+		},
+		{
+			name: "a nil span shadows the outer context",
+			ctx:  coretrace.ContextWithSpan(coretrace.ContextWithSpanContext(background, outer), nil),
+			want: coretrace.SpanContextValue{},
+		},
 	}
-}
-
-// TestContextWithANilSpanShadowsTheOuterContext pins the nil case: no span is
-// the deliberate absence of a trace, read back as the invalid zero value and
-// shadowing an outer context, as ContextWithSpanContext's invalid one does.
-func TestContextWithANilSpanShadowsTheOuterContext(t *testing.T) {
-	ctx := coretrace.ContextWithSpanContext(context.Background(), specContext(t))
-	if coretrace.SpanContextFromContext(coretrace.ContextWithSpan(ctx, nil)).IsValid() {
-		t.Error("a nil span must read back as the invalid zero context, shadowing the outer one")
+	for _, c := range cases {
+		runCase(t, c)
 	}
 }
