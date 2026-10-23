@@ -76,6 +76,10 @@ const (
 	redialBackoff time.Duration = 100 * time.Millisecond
 	// connBufferBytes sizes the buffered reader and writer of a connection.
 	connBufferBytes int = 64 << 10
+	// boundedWriteBytes is the most one deadline of a boundedWriter covers:
+	// a source that writes itself out in one call (io.WriterTo) is still
+	// cut into writes that each move or fail (#594).
+	boundedWriteBytes int = 32 << 10
 	// acceptBackoffFirst is the wait after the first of consecutive failed
 	// Accepts; each next one doubles it (#518).
 	acceptBackoffFirst time.Duration = 5 * time.Millisecond
@@ -193,10 +197,50 @@ func spkiOf(c *x509.Certificate) [32]byte { return sha256.Sum256(c.RawSubjectPub
 func SPKIOf(c *x509.Certificate) [32]byte { return spkiOf(c) }
 
 type peerConn struct {
+	// conn is the sender's open link, under mu, which halt closes.
 	conn  net.Conn
 	queue chan []byte
 	bytes int64
 	mu    sync.Mutex
+	// stop is closed, once, when the peer leaves the admitted set: its
+	// sender closes its link and returns (#592). halted says so under mu.
+	stop     chan struct{}
+	stopOnce sync.Once
+	halted   bool
+}
+
+// halt stops the peer's sender and closes its open link at once, so a
+// write in progress ends now rather than at its deadline; a second call
+// does nothing. No new link is dialled: a peer no longer admitted has no
+// address.
+func (pc *peerConn) halt() {
+	pc.stopOnce.Do(func() {
+		pc.mu.Lock()
+		pc.halted = true
+		c := pc.conn
+		pc.conn = nil
+		pc.mu.Unlock()
+		close(pc.stop)
+		if c != nil {
+			abandon(c.Close())
+		}
+	})
+}
+
+// track records the link the sender holds after a batch, for halt to
+// close. It reports false once the peer is halted: the sender closes the
+// link it may have dialled meanwhile and returns.
+func (pc *peerConn) track(link *senderLink) bool {
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	if pc.halted {
+		return false
+	}
+	pc.conn = nil
+	if link.conn != nil {
+		pc.conn = link.conn
+	}
+	return true
 }
 
 // TCPTransport is the shipped transport: TLS 1.3 with mutual
@@ -694,7 +738,14 @@ func (t *TCPTransport) Send(to coreconsensus.NodeID, frame []byte) {
 	}
 	pc := t.out[k]
 	if pc == nil {
-		pc = &peerConn{queue: make(chan []byte, senderQueueFrames)}
+		// The sender also ends when SetMembership no longer admits the
+		// peer (#592), and none is started for a peer it does not admit:
+		// it could not be dialled, and the sender would outlive it.
+		if _, ok := t.byID[to]; !ok {
+			t.mu.Unlock()
+			return
+		}
+		pc = &peerConn{queue: make(chan []byte, senderQueueFrames), stop: make(chan struct{})}
 		t.out[k] = pc
 		t.wg.Add(1)
 		go t.sender(k, pc)
@@ -720,7 +771,8 @@ func (t *TCPTransport) Send(to coreconsensus.NodeID, frame []byte) {
 // write that misses its deadline closes the connection and reports the
 // peer unreachable (D4, R2-06). It is the background goroutine Send
 // launches per peer and lane, counted in t.wg, and ends when Close closes
-// done; its connection is closed on the way out.
+// done or SetMembership closes the peer's stop; its connection is closed on
+// the way out.
 func (t *TCPTransport) sender(k outKey, pc *peerConn) {
 	defer t.wg.Done()
 	var link senderLink
@@ -731,6 +783,8 @@ func (t *TCPTransport) sender(k outKey, pc *peerConn) {
 		select {
 		case <-t.done:
 			return
+		case <-pc.stop:
+			return
 		case f = <-pc.queue:
 		}
 		batch = takeBatch(append(batch[:0], f), pc)
@@ -738,6 +792,9 @@ func (t *TCPTransport) sender(k outKey, pc *peerConn) {
 		// The frames are written or dropped: the reused batch keeps no
 		// reference to them.
 		clear(batch)
+		if !pc.track(&link) {
+			return
+		}
 	}
 }
 
@@ -986,6 +1043,17 @@ func (t *TCPTransport) SetMembership(group coreconsensus.GroupID, admitted []cor
 			abandon(c.Close())
 		}
 	}
+	for k, pc := range t.out {
+		if _, ok := byID[k.to]; !ok {
+			// A peer that is no longer admitted cannot be dialled
+			// (address), so its lanes carry nothing more. Kept, each left
+			// two senders, their queues and an open outbound link behind it
+			// for the life of the transport (#592). A later Send to it
+			// starts a fresh sender.
+			pc.halt()
+			delete(t.out, k)
+		}
+	}
 }
 
 // indexMembers is the union of every group's admitted members, by id and
@@ -1135,7 +1203,19 @@ func (t *TCPTransport) Stream(ctx context.Context, to coreconsensus.NodeID, offe
 	defer func() { abandon(c.Close()) }()
 	stop := context.AfterFunc(ctx, func() { abandon(c.Close()) })
 	defer stop()
-	if err := writeChunk(c, encodeOffer(offer)); err != nil {
+	// The dial clears every deadline, and only a change of leader or the
+	// node's stop cancelled ctx: a receiver that vanished mid-stream held
+	// the write on a full window until the kernel gave up, about 15 min on
+	// Linux, and its verdict's read until keepalive did, while the peer
+	// could get no other snapshot and the transfer pinned compaction
+	// (#594). Bytes left unacknowledged, and every write, are bounded as on
+	// the message lanes; the receiver resumes a broken stream from its
+	// spool.
+	if err := boundUnacknowledged(c.NetConn(), t.cfg.WriteTimeout); err != nil {
+		return err
+	}
+	w := boundedWriter{conn: c, half: c, d: t.cfg.WriteTimeout}
+	if err := writeChunk(w, encodeOffer(offer)); err != nil {
 		return err
 	}
 	acc, err := readChunk(c, 64)
@@ -1150,7 +1230,7 @@ func (t *TCPTransport) Stream(ctx context.Context, to coreconsensus.NodeID, offe
 	if code != 0 {
 		return origin(sentinelOf(code))
 	}
-	if err := streamFrom(c, open, off); err != nil {
+	if err := streamFrom(w, open, off); err != nil {
 		return err
 	}
 	return installResult(c)
@@ -1179,6 +1259,41 @@ func streamFrom(c closeWriter, open func(int64) (io.ReadCloser, error), off int6
 type closeWriter interface {
 	io.Writer
 	CloseWrite() error
+}
+
+// boundedWriter gives every write to conn, and the half-close of half, its
+// own deadline d from the moment it starts: a receiver that stops reading
+// fails the stream within d, and a slow one that keeps reading does not
+// (#594). half is conn's half-closing face.
+type boundedWriter struct {
+	conn net.Conn
+	half closeWriter
+	d    time.Duration
+}
+
+// Write writes p in pieces of at most boundedWriteBytes, each under a
+// deadline d from its start.
+func (w boundedWriter) Write(p []byte) (int, error) {
+	n := 0
+	for n < len(p) {
+		if err := w.conn.SetWriteDeadline(time.Now().Add(w.d)); err != nil {
+			return n, err
+		}
+		k, err := w.conn.Write(p[n:min(len(p), n+boundedWriteBytes)])
+		n += k
+		if err != nil {
+			return n, err
+		}
+	}
+	return n, nil
+}
+
+// CloseWrite half-closes the stream under a deadline d from now.
+func (w boundedWriter) CloseWrite() error {
+	if err := w.conn.SetWriteDeadline(time.Now().Add(w.d)); err != nil {
+		return err
+	}
+	return w.half.CloseWrite()
 }
 
 // installResult reads the receiver's verdict on the install, the last
