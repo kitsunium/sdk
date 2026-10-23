@@ -35,6 +35,7 @@ func (n *Node) judgeOffer(from coreconsensus.NodeID, o *coreconsensus.InstallOff
 		return
 	}
 	n.dropOtherSpools(o.SnapshotID)
+	n.releaseKept(o.SnapshotID)
 	sink, off, err := n.cfg.Snapshots.Create(o.SnapshotID, o.Meta)
 	if err != nil {
 		acc.Refused = coreconsensus.CodeStorageFailed
@@ -133,6 +134,20 @@ func (n *Node) keepSpool(id string, sink coreconsensus.SnapshotSink) {
 		releaseSink(old)
 	}
 	n.snapState.spools[id] = sink
+}
+
+// releaseKept releases the sink an earlier offer of id opened and whose
+// body never came, before the store opens that spool again: still open, it
+// would count as an install writing the spool, which the store supersedes
+// instead of resuming (#547).
+func (n *Node) releaseKept(id string) {
+	n.snapState.mu.Lock()
+	old := n.snapState.spools[id]
+	delete(n.snapState.spools, id)
+	n.snapState.mu.Unlock()
+	if old != nil {
+		releaseSink(old)
+	}
 }
 
 // releaseSink closes a sink's handle and keeps its spool for a resume,

@@ -2,15 +2,18 @@ package consensus
 
 import (
 	"encoding/binary"
+	"errors"
 	"hash/crc32"
 	"math"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"sync/atomic"
 	"testing"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // spools is the ids of every receive spool in dir, sorted.
@@ -154,5 +157,121 @@ func TestAResumeReadsItsSpoolInBoundedMemory(t *testing.T) {
 	}
 	if got := int64(after.TotalAlloc - before.TotalAlloc); got > size/4 {
 		t.Fatalf("a resume over a %d-byte spool allocated %d bytes, want it bounded", size, got)
+	}
+}
+
+// Two installs of one snapshot id, a stale leader's and the current one's,
+// never share a spool: the later one supersedes the earlier, which writes
+// nothing more and whose Abort leaves the spool. Sharing one, its Abort
+// unlinked the file the current install wrote, whose Commit then failed
+// STORAGE_FAILED and stopped a node with a healthy disk; and a stale install
+// that reached its commit is a snapshot of its own refused, never this
+// node's disk (#547).
+func TestAStaleInstallLeavesTheCurrentInstallOfTheSameIDIntact(t *testing.T) {
+	dir := t.TempDir()
+	s := must(newFileSnapshots(dir))(t)
+	id := "00000000000000000040-00000000000000000002"
+	body := chunk([]byte("the snapshot " + id))
+	meta := coreconsensus.SnapshotMetaValue{ID: id, EncodedSize: int64(len(body))}
+	stale, _ := must2(s.Create(id, meta))(t)
+	if _, err := stale.Write(body[:len(body)/2]); err != nil {
+		t.Fatal(err)
+	}
+	fresh, off := must2(s.Create(id, meta))(t)
+	if off != 0 {
+		t.Fatalf("the current install resumed at %d the spool a stale install writes, want 0", off)
+	}
+	if _, err := fresh.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stale.Write(body[len(body)/2:]); !errs.HasCode(err, coreconsensus.CodeSnapshotCorrupt) {
+		t.Fatalf("a superseded install's write: %v, want SNAPSHOT_CORRUPT", err)
+	}
+	if err := stale.Abort(); err != nil {
+		t.Fatal(err)
+	}
+	if got := spools(t, dir); !slices.Equal(got, []string{id + ".spool"}) {
+		t.Fatalf("spools after the stale install's Abort %v, want the current one's kept", got)
+	}
+	if err := fresh.Commit(meta); err != nil {
+		t.Fatalf("the current install's Commit after a stale Abort: %v", err)
+	}
+	if got := must(os.ReadFile(filepath.Join(dir, id+".snap")))(t); !slices.Equal(got, body) {
+		t.Fatalf("published %q, want %q", got, body)
+	}
+
+	id = "00000000000000000080-00000000000000000003"
+	body = chunk([]byte("the snapshot " + id))
+	meta = coreconsensus.SnapshotMetaValue{ID: id, EncodedSize: int64(len(body))}
+	stale, _ = must2(s.Create(id, meta))(t)
+	fresh, _ = must2(s.Create(id, meta))(t)
+	err := stale.Commit(meta)
+	if !errs.HasCode(err, coreconsensus.CodeSnapshotCorrupt) {
+		t.Fatalf("a superseded install's Commit: %v, want SNAPSHOT_CORRUPT", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, id+".snap")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a superseded install published its spool: %v", err)
+	}
+	if _, err := fresh.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := fresh.Commit(meta); err != nil {
+		t.Fatalf("the current install's Commit after a superseded one: %v", err)
+	}
+}
+
+// A Create of an id that another Create of the same id supersedes before
+// it has opened its spool leaks no handle and races on none: the later one
+// waits for the earlier one's spool to be positioned, then closes it. The
+// later one closed a handle that was not there yet, the earlier one then
+// set it with no lock held, and that descriptor stayed open for good
+// (#582).
+func TestACreateSupersededBeforeItsSpoolIsOpenLeaksNoHandle(t *testing.T) {
+	dir := t.TempDir()
+	s := must(newFileSnapshots(dir))(t)
+	id := "00000000000000000120-00000000000000000004"
+	body := chunk([]byte("the snapshot " + id))
+	meta := coreconsensus.SnapshotMetaValue{ID: id, EncodedSize: int64(len(body))}
+	earlierIn, laterIn := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	s.afterPublish = func(string) {
+		if calls.Add(1) == 1 {
+			close(earlierIn)
+			<-laterIn
+			return
+		}
+		close(laterIn)
+	}
+	type created struct {
+		sink coreconsensus.SnapshotSink
+		err  error
+	}
+	earlier := make(chan created, 1)
+	go func() {
+		sink, _, err := s.Create(id, meta)
+		earlier <- created{sink, err}
+	}()
+	<-earlierIn
+	fresh, off := must2(s.Create(id, meta))(t)
+	if off != 0 {
+		t.Fatalf("the later install resumed at %d, want 0", off)
+	}
+	stale := <-earlier
+	if stale.err == nil {
+		if _, err := stale.sink.Write(body); !errs.HasCode(err, coreconsensus.CodeSnapshotCorrupt) {
+			t.Fatalf("a superseded install's write: %v, want SNAPSHOT_CORRUPT", err)
+		}
+		// A second Close is ErrClosed on every platform; Stat's error on a
+		// closed handle is not.
+		if err := stale.sink.(*fileSink).f.Close(); !errors.Is(err, os.ErrClosed) {
+			t.Fatalf("a superseded install's spool handle is still open: %v", err)
+		}
+		abandon(stale.sink.Abort())
+	}
+	if _, err := fresh.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := fresh.Commit(meta); err != nil {
+		t.Fatalf("the later install's Commit: %v", err)
 	}
 }

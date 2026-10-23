@@ -83,14 +83,20 @@ type tcpNode struct {
 	snaps *MemorySnapshots
 	sm    *kv
 	node  *Node
+	// tweak, when set, changes the node's configuration before it starts.
+	tweak func(*Config)
 }
 
 func tcpConfig(cid coreconsensus.ClusterID, tn *tcpNode) Config {
-	return Config{
+	c := Config{
 		Cluster: cid, Machine: tn.sm, Durability: DurabilityVolatile, Log: tn.log, Snapshots: tn.snaps,
 		Transport: tn.tr, InitialTiming: testTimingFast(), MaxSnapshotBytes: 1 << 30, MaxLogBytes: 1 << 30,
 		MinVoters: 3, JoinAuthorizer: tn.authorizer(),
 	}
+	if tn.tweak != nil {
+		tn.tweak(&c)
+	}
+	return c
 }
 
 func (tn *tcpNode) listen(t *testing.T, ca *testCA) {
@@ -172,12 +178,18 @@ func tcpLeader(t *testing.T, ns []*tcpNode) *tcpNode {
 }
 
 func newTCPCluster(t *testing.T) (*testCA, coreconsensus.ClusterID, []*tcpNode) {
+	return newTCPClusterWith(t, nil)
+}
+
+// newTCPClusterWith is newTCPCluster with tweak applied to every founder's
+// configuration.
+func newTCPClusterWith(t *testing.T, tweak func(*Config)) (*testCA, coreconsensus.ClusterID, []*tcpNode) {
 	ca := newTestCA(t)
 	cid := coreconsensus.ClusterID{0xc0, 0xff, 0xee}
 	var ns []*tcpNode
 	var members []coreconsensus.MemberValue
 	for i := range 3 {
-		tn := &tcpNode{slot: fmt.Sprintf("site-%d", i), log: NewMemoryLog(), snaps: NewMemorySnapshots()}
+		tn := &tcpNode{slot: fmt.Sprintf("site-%d", i), log: NewMemoryLog(), snaps: NewMemorySnapshots(), tweak: tweak}
 		tn.cert, tn.spki = ca.issue(t, SAN(cid, tn.slot), nil)
 		tn.listen(t, ca)
 		id, inc, err := InitLog(tn.log, cid, tn.slot)

@@ -1384,8 +1384,11 @@ is refused with `OVERLOADED`. Nothing is appended in either case.
   - **a node whose two snapshots both fail** starts with no table. It keeps
     its term, vote and commit index, votes and stores the log (R6-13), and
     applies nothing until an install. **It asks for one (R7-18):** it answers
-    the leader's next append with an explicit "need snapshot" rejection, so
-    the leader moves it to the snapshot path at once. It is exempt from the
+    the leader's next append, and every heartbeat, with an explicit "need
+    snapshot" rejection, so the leader moves it to the snapshot path at
+    once: a leader with nothing to append to it sends only heartbeats, and
+    the node held no state for as long as the cluster stayed quiet
+    ([#549](https://github.com/kitsunium/sdk/issues/549)). It is exempt from the
     install's freshness rule up to the leader's snapshot index, so an install
     at or below its own commit index is accepted. Its may-campaign gate is
     closed while it holds no table, so it can vote but never lead. A test
@@ -2060,8 +2063,31 @@ thresholds, provisional like D16's numbers:
 | loop turn | p99 of `consensus_loop_turn_seconds` above the drift budget for 5 min |
 | snapshot pin | `consensus_snapshot_pins` held longer than the pin TTL of D19 |
 
+**A leader that makes no progress steps aside
+([#554](https://github.com/kitsunium/sdk/issues/554)).** CheckQuorum
+measures contact, not progress: a leader whose fdatasync never returns, or
+whose `Apply` blocks, kept heartbeating and leading while every write and
+read entering at it waited. At every tick the leader watches its durable
+index against its log and its applied index against its commit; when
+either has trailed without moving for `ElectionTimeoutMax`, it transfers
+leadership to the voter with the highest acknowledged index (D8). A slow
+fdatasync that moves within the bound changes nothing.
+
 `Node.Health()` returns a structured verdict an orchestrator can poll: role,
-leader known, quorum reachable, apply lag over its bound, every current alarm
+leader known — on a node that does not lead, a leader that answered one of
+its reads within `ElectionTimeoutMax`, a probe read sent every half minimum
+election timeout keeping it fresh in a quiet cluster; a heartbeat only says
+the leader reaches the node, not that it hears it, and a follower whose
+answers were lost, or a learner cut off from the voters, kept its leader
+and reported ready on a frozen commit
+([#541](https://github.com/kitsunium/sdk/issues/541),
+[#540](https://github.com/kitsunium/sdk/issues/540)) — quorum reachable,
+applied up to the commit (once caught up, a lag of at most 64 entries
+counts as caught up while the applied index moved within
+`ElectionTimeoutMin`: a published status pairs a new commit with the
+applied index of the turn before, and the strict comparison flapped a
+healthy node under load,
+[#545](https://github.com/kitsunium/sdk/issues/545)), apply lag over its bound, every current alarm
 with its `AlarmID` and the nodes it names (R5-09), the current timing
 contract and cluster version, so the product can fill an operation's
 preconditions, certificate expiry under its threshold, the smallest peer

@@ -947,26 +947,44 @@ func TestLongLoopTurnDropsTheLease(t *testing.T) {
 		}
 		tn.node = n
 	}
-	l := c.leader(5 * time.Second)
-	propose(t, l.node, "a=1")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if _, err := l.node.Barrier(ctx); err != nil {
-		t.Fatal(err)
-	}
-	valid := false
-	deadline := time.Now().Add(5 * time.Second)
-	for !valid && time.Now().Before(deadline) {
-		l.node.exec(func() { valid = l.node.r.LeaseValid(l.node.clk.Now()) })
-		time.Sleep(5 * time.Millisecond)
-	}
-	if !valid {
-		t.Fatal("setup: no lease")
-	}
+	l := leasedLeader(t, c)
+	before := l.node.Health().LongTurns
+	valid := true
 	l.node.exec(func() { time.Sleep(200 * time.Millisecond) })
 	l.node.exec(func() { valid = l.node.r.LeaseValid(l.node.clk.Now()) })
-	if valid || l.node.Health().LongTurns == 0 {
-		t.Fatalf("the lease survived a long turn (long turns %d)", l.node.Health().LongTurns)
+	if valid || l.node.Health().LongTurns == before {
+		t.Fatalf("the lease survived a long turn (long turns %d, before %d)", l.node.Health().LongTurns, before)
+	}
+}
+
+// leasedLeader returns a leader that holds a lease. One ordinary turn of a
+// slow host (a NetBSD VM, a Bazel shard, both under -race) can pass the
+// 50 ms budget and drop the lease for the whole term: the leader then
+// hands leadership over, and the next term starts with no lease dropped.
+func leasedLeader(t *testing.T, c *cluster) *testNode {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		l := c.leader(5 * time.Second)
+		propose(t, l.node, "a=1")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_, err := l.node.Barrier(ctx)
+		cancel()
+		valid := false
+		until := time.Now().Add(2 * time.Second)
+		for err == nil && !valid && time.Now().Before(until) {
+			l.node.exec(func() { valid = l.node.r.LeaseValid(l.node.clk.Now()) })
+			time.Sleep(5 * time.Millisecond)
+		}
+		if valid {
+			return l
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("setup: no lease (barrier %v, long turns %d, status %+v)", err, l.node.Health().LongTurns, l.node.Status())
+		}
+		ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+		_ = l.node.TransferLeadership(ctx, "op:test", c.otherThan(l).id)
+		cancel()
 	}
 }
 

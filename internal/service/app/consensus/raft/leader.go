@@ -380,24 +380,37 @@ func (r *Raft) handleAppResp(pr *progress, m core.MessageValue) {
 		return
 	}
 	if pr.maybeUpdate(m.Index) {
-		switch {
-		case pr.state == stateProbe:
-			pr.becomeReplicate()
-		case pr.state == stateSnapshot && pr.match >= pr.pendingSnapshot:
-			pr.becomeProbe()
-			pr.becomeReplicate()
-		}
-		pr.freeTo(m.Index)
-		if r.maybeCommit() {
-			r.broadcastAppend(true)
-		}
-		r.maybeSendTimeoutNow()
+		r.ackMoved(pr, m.Index)
 	} else {
 		pr.freeTo(m.Index)
 	}
 	if pr.match < r.log.lastIndex() {
 		r.sendAppend(m.From, false)
 	}
+}
+
+// ackMoved moves a peer whose match an answer raised through index: out of
+// a probe the answer settles, or out of a snapshot it covers, then commits
+// what a quorum now holds.
+func (r *Raft) ackMoved(pr *progress, index uint64) {
+	switch {
+	case pr.state == stateProbe && index+1 >= pr.next:
+		pr.becomeReplicate()
+	case pr.state == stateProbe:
+		// An answer to an append sent before a snapshot transfer, late: it
+		// does not answer the probe after the snapshot, and taken as one it
+		// moved the peer back before the snapshot's index, which the log no
+		// longer holds, and the leader sent another snapshot (#550). The
+		// probe goes on from where it was.
+	case pr.state == stateSnapshot && pr.match >= pr.pendingSnapshot:
+		pr.becomeProbe()
+		pr.becomeReplicate()
+	}
+	pr.freeTo(index)
+	if r.maybeCommit() {
+		r.broadcastAppend(true)
+	}
+	r.maybeSendTimeoutNow()
 }
 
 // handleAppReject backs a peer off after a refused append: to a snapshot it

@@ -69,6 +69,8 @@ sequences:
         kind: internal
       - id: n.forceCut
         kind: internal
+      - id: n.afterCut
+        kind: internal
       - id: n.maybeSnapshot
         kind: internal
     steps:
@@ -103,6 +105,12 @@ sequences:
                     to: n.forceCut
                   - continue: true
                 when: it.cut
+            - opt:
+                do:
+                  - eval: n.afterCut()
+                    to: n.afterCut
+                  - continue: true
+                when: it.compact
             - opt:
                 do:
                   - return: "false"
@@ -4635,7 +4643,7 @@ sequences:
           range: ents
           value: e
       - bind: s
-        eval: "&fileSnapshots{dir: dir, pins: map[string]int{}, writing: map[string]int{}}"
+        eval: "&fileSnapshots{dir: dir, pins: map[string]int{}, writing: map[string]int{}, owners: map[string]*fileSink{}}"
       - opt:
           do:
             - return: nil, err
@@ -4779,9 +4787,21 @@ sequences:
         kind: internal
       - id: sink.closed
         kind: internal
+      - id: sink.mu.Lock
+        kind: value
+      - id: s.claim
+        kind: internal
+      - id: old.supersede
+        kind: internal
       - id: os
         kind: stdlib
+      - id: sink.mu.Unlock
+        kind: value
+      - id: f.Truncate
+        kind: value
       - id: resumeOffset
+        kind: internal
+      - id: alsoFailed
         kind: internal
     steps:
       - opt:
@@ -4806,27 +4826,95 @@ sequences:
             eval: s.sweepSpools(id)
             to: s.sweepSpools
           when: err != nil
+      - eval: sink.mu.Lock()
+        to: sink.mu.Lock
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - bind: old
+        eval: s.claim(sink)
+        to: s.claim
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - opt:
+          do:
+            - eval: s.afterPublish(id)
+          when: s.afterPublish != nil
+      - opt:
+          do:
+            - eval: old.supersede()
+              to: old.supersede
+          when: old != nil
       - bind: f, err
         eval: os.OpenFile(filepath.Join(s.dir, id+".spool"), os.O_RDWR|os.O_CREATE, 0o600)
         to: os
       - opt:
           do:
+            - eval: sink.mu.Unlock()
+              to: sink.mu.Unlock
             - eval: sink.closed()
               to: sink.closed
             - return: nil, 0, storageFailed("spool", err)
           when: err != nil
       - set: sink.f
         value: f
-      - bind: off, err
-        eval: resumeOffset(f, meta.ChunkSize)
-        to: resumeOffset
+      - var:
+          name: "off"
+          type: int64
+      - alt:
+          - do:
+              - set: err
+                to: f.Truncate
+                value: f.Truncate(0)
+            when: old != nil
+          - do:
+              - set: off, err
+                to: resumeOffset
+                value: resumeOffset(f, meta.ChunkSize)
+            else: true
       - opt:
           do:
+            - set: err
+              to: alsoFailed
+              value: alsoFailed(storageFailed("spool", err), "close", f.Close())
+            - set: sink.f
+              value: nil
+            - eval: sink.mu.Unlock()
+              to: sink.mu.Unlock
             - eval: sink.closed()
               to: sink.closed
-            - return: nil, 0, alsoFailed(storageFailed("spool", err), "close", f.Close())
+            - return: nil, 0, err
           when: err != nil
+      - eval: sink.mu.Unlock()
+        to: sink.mu.Unlock
       - return: sink, off, nil
+  - of: (*fileSnapshots).claim
+    steps:
+      - bind: old
+        eval: s.owners[sink.id]
+      - set: s.owners[sink.id]
+        value: sink
+      - return: old
+  - of: (*fileSink).supersede
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileSink).supersede
+        kind: self
+      - id: abandon
+        kind: internal
+    steps:
+      - lock:
+          mutex: k.mu
+      - opt:
+          do:
+            - set: k.superseded
+              value: "true"
+            - opt:
+                do:
+                  - eval: abandon(k.f.Close())
+                    to: abandon
+                when: k.f != nil
+          when: "!k.superseded"
   - of: resumeOffset
     participants:
       - id: caller
@@ -4883,6 +4971,9 @@ sequences:
           		if k.s.writing[k.id]--; k.s.writing[k.id] <= 0 {
           			delete(k.s.writing, k.id)
           		}
+          		if k.s.owners[k.id] == k {
+          			delete(k.s.owners, k.id)
+          		}
           		k.s.mu.Unlock()
           	})
         to: k.done.Do
@@ -4895,6 +4986,12 @@ sequences:
       - id: k.f.Write
         kind: value
     steps:
+      - lock:
+          mutex: k.mu
+      - opt:
+          do:
+            - return: 0, snapshotCorrupt(supersededWhy)
+          when: k.superseded
       - return: k.f.Write(p)
         to: k.f.Write
   - of: (*fileSink).Commit
@@ -4904,6 +5001,8 @@ sequences:
       - id: (*fileSink).Commit
         kind: self
       - id: k.closed
+        kind: internal
+      - id: snapshotCorrupt
         kind: internal
       - id: k.f.Seek
         kind: value
@@ -4915,8 +5014,6 @@ sequences:
         kind: value
       - id: storageFailed
         kind: internal
-      - id: filepath
-        kind: stdlib
       - id: os
         kind: stdlib
       - id: writeFileSync
@@ -4924,6 +5021,13 @@ sequences:
     steps:
       - defer: k.closed()
         to: k.closed
+      - lock:
+          mutex: k.mu
+      - opt:
+          do:
+            - return: snapshotCorrupt(supersededWhy)
+              to: snapshotCorrupt
+          when: k.superseded
       - set: final.ID
         value: k.id
       - bind: size, err
@@ -4957,16 +5061,18 @@ sequences:
             eval: k.f.Close()
             to: k.f.Close
           when: err != nil
-      - bind: snap
-        eval: filepath.Join(k.s.dir, k.id+".snap")
-        to: filepath
       - opt:
           do:
+            - opt:
+                do:
+                  - return: snapshotCorrupt("spool gone before its commit")
+                    to: snapshotCorrupt
+                when: errors.Is(err, os.ErrNotExist)
             - return: storageFailed("publish snapshot", err)
               to: storageFailed
           init:
             bind: err
-            eval: os.Rename(filepath.Join(k.s.dir, k.id+".spool"), snap)
+            eval: os.Rename(filepath.Join(k.s.dir, k.id+".spool"), filepath.Join(k.s.dir, k.id+".snap"))
             to: os
           when: err != nil
       - opt:
@@ -5041,8 +5147,13 @@ sequences:
     steps:
       - defer: k.closed()
         to: k.closed
-      - eval: abandon(k.f.Close())
-        to: abandon
+      - lock:
+          mutex: k.mu
+      - opt:
+          do:
+            - eval: abandon(k.f.Close())
+              to: abandon
+          when: "!k.superseded"
   - of: (*fileSink).Abort
     participants:
       - id: caller
@@ -5060,6 +5171,12 @@ sequences:
     steps:
       - defer: k.closed()
         to: k.closed
+      - lock:
+          mutex: k.mu
+      - opt:
+          do:
+            - return: nil
+          when: k.superseded
       - eval: abandon(k.f.Close())
         to: abandon
       - opt:
@@ -5304,11 +5421,11 @@ sequences:
         kind: internal
       - id: h.Flags.Has
         kind: internal
-      - id: h.Flags.set
-        kind: internal
       - id: n.exec
         kind: internal
       - id: n.snapshotHealth
+        kind: internal
+      - id: h.Flags.set
         kind: internal
     steps:
       - bind: st
@@ -5337,19 +5454,27 @@ sequences:
       - bind: stopped
         eval: h.Flags.Has(HealthStopped)
         to: h.Flags.Has
-      - set: h.Flags
-        to: h.Flags.set
-        value: h.Flags.set(HealthHasLeader, st.Leader != 0 && !stopped)
+      - bind: confirmed, applyOK
+        eval: false, false
       - opt:
           do:
-            - eval: n.exec(func() { n.loopHealth(&h) })
+            - eval: |-
+                n.exec(func() {
+                			n.loopHealth(&h)
+                			now := n.clk.Now()
+                			confirmed = n.leaderConfirmed(now)
+                			applyOK = n.applyReady(&st, now)
+                		})
               to: n.exec
           when: "!stopped"
       - eval: n.snapshotHealth(&h)
         to: n.snapshotHealth
       - set: h.Flags
         to: h.Flags.set
-        value: h.Flags.set(HealthReady, isReady(&h, &st))
+        value: h.Flags.set(HealthHasLeader, st.Leader != 0 && !stopped && confirmed)
+      - set: h.Flags
+        to: h.Flags.set
+        value: h.Flags.set(HealthReady, isReady(&h, &st, applyOK))
       - return: h
   - of: (*Node).snapshotHealth
     participants:
@@ -5381,8 +5506,47 @@ sequences:
   - of: isReady
     steps:
       - return: |-
-          !h.Flags.Has(HealthStopped) && h.Flags.Has(HealthHasLeader) && st.Applied >= st.Commit &&
+          !h.Flags.Has(HealthStopped) && h.Flags.Has(HealthHasLeader) && (st.Applied >= st.Commit || applyOK) &&
           		(h.ChainRefusals == 0 || h.ChainRefusalLeader != st.Leader)
+  - of: (*applyProgress).noteApplied
+    steps:
+      - opt:
+          do:
+            - set: p.applied, p.movedAt
+              value: applied, now
+          when: applied != p.applied || applied >= commit
+      - opt:
+          do:
+            - set: p.caughtUp
+              value: "true"
+          when: applied >= commit
+  - of: (*Node).applyReady
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).applyReady
+        kind: self
+      - id: applyReady
+        kind: internal
+    steps:
+      - bind: p
+        eval: "&n.progress"
+      - bind: ok
+        eval: applyReady(p.caughtUp, st.Commit, st.Applied, now.Sub(p.movedAt), n.r.Status().Timing.ElectionTimeoutMin)
+        to: applyReady
+      - opt:
+          do:
+            - set: p.caughtUp
+              value: "false"
+          when: "!ok && st.Applied < st.Commit"
+      - return: ok
+  - of: applyReady
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: applied >= commit
+      - return: caughtUp && commit-applied <= maxReadyLag && moved <= window
   - of: (*Node).loopHealth
     participants:
       - id: caller
@@ -5647,6 +5811,8 @@ sequences:
         kind: self
       - id: n.dropOtherSpools
         kind: internal
+      - id: n.releaseKept
+        kind: internal
       - id: n.cfg.Snapshots.Create
         kind: value
       - id: n.keepSpool
@@ -5658,6 +5824,8 @@ sequences:
           when: n.screenOffer(from, o, acc) || n.answerFromHeld(o, acc)
       - eval: n.dropOtherSpools(o.SnapshotID)
         to: n.dropOtherSpools
+      - eval: n.releaseKept(o.SnapshotID)
+        to: n.releaseKept
       - bind: sink, off, err
         eval: n.cfg.Snapshots.Create(o.SnapshotID, o.Meta)
         to: n.cfg.Snapshots.Create
@@ -5792,6 +5960,31 @@ sequences:
           when: old != nil
       - set: n.snapState.spools[id]
         value: sink
+  - of: (*Node).releaseKept
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).releaseKept
+        kind: self
+      - id: n.snapState.mu.Lock
+        kind: value
+      - id: n.snapState.mu.Unlock
+        kind: value
+      - id: releaseSink
+        kind: internal
+    steps:
+      - eval: n.snapState.mu.Lock()
+        to: n.snapState.mu.Lock
+      - bind: old
+        eval: n.snapState.spools[id]
+      - eval: delete(n.snapState.spools, id)
+      - eval: n.snapState.mu.Unlock()
+        to: n.snapState.mu.Unlock
+      - opt:
+          do:
+            - eval: releaseSink(old)
+              to: releaseSink
+          when: old != nil
   - of: releaseSink
     participants:
       - id: caller
@@ -7386,7 +7579,7 @@ sequences:
           		propc: make(chan *proposal, inboxDepth), execc: make(chan func(), loopBacklog), storec: make(chan storeDone, loopBacklog),
           		stopc: make(chan struct{}), sq: newFifo[storeReq](), fetchq: newFifo[raft.FetchSpec](), fetchc: make(chan fetchDone, fetchBacklog), aq: newFifo[applyItem](),
           		waiters: map[uint64]*proposal{}, results: map[uint64]applyResult{},
-          		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]bool{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
+          		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]sendPin{}, sendStop: map[coreconsensus.NodeID]context.CancelFunc{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
           		watchers: map[chan coreconsensus.StatusValue]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
           	}
       - set: n.acond
@@ -8211,6 +8404,12 @@ sequences:
         kind: value
       - id: n.r.Tick
         kind: value
+      - id: n.probeLeader
+        kind: internal
+      - id: n.watchProgress
+        kind: internal
+      - id: n.watchPins
+        kind: internal
       - id: n.tickInterval
         kind: internal
       - id: n.tickEvery.Store
@@ -8235,6 +8434,12 @@ sequences:
         to: n.clk.Now
       - eval: n.r.Tick(n.clk.Now())
         to: n.r.Tick
+      - eval: n.probeLeader(turn)
+        to: n.probeLeader
+      - eval: n.watchProgress(turn)
+        to: n.watchProgress
+      - eval: n.watchPins(turn)
+        to: n.watchPins
       - opt:
           do:
             - eval: n.tickEvery.Store(int64(d))
@@ -8804,11 +9009,20 @@ sequences:
         kind: actor
       - id: (*Node).answerReady
         kind: self
+      - id: n.clk.Now
+        kind: value
       - id: n.forwardAnswered
         kind: internal
     steps:
+      - bind: now
+        eval: n.clk.Now()
+        to: n.clk.Now
       - loop:
           do:
+            - opt:
+                do:
+                  - continue: true
+                when: n.readAnswered(rs.Context, rs.Code, now)
             - opt:
                 do:
                   - eval: delete(n.reads, rs.Context)
@@ -8860,6 +9074,8 @@ sequences:
         kind: internal
       - id: n.r.SetCanVote
         kind: value
+      - id: j.releaseJoinAnswer
+        kind: internal
     steps:
       - opt:
           do:
@@ -8890,6 +9106,14 @@ sequences:
               value: "true"
             - eval: n.r.SetCanVote(true)
               to: n.r.SetCanVote
+            - opt:
+                do:
+                  - eval: j.releaseJoinAnswer()
+                    to: j.releaseJoinAnswer
+                init:
+                  bind: j, ok
+                  eval: n.cfg.Transport.(joinReleaser)
+                when: ok
           init:
             bind: m, ok
             eval: st.Committed.Member(n.stamp.ID)
@@ -8917,6 +9141,14 @@ sequences:
           when: st.Term == n.lastTerm && st.Lead == n.lastLead && st.Role == n.lastRole
       - set: n.lastTerm, n.lastLead, n.lastRole
         value: st.Term, st.Lead, st.Role
+      - loop:
+          do:
+            - eval: stop()
+          key: _
+          range: n.sendStop
+          value: stop
+      - set: n.contact.probeCtx, n.contact.probeAt
+        value: 0, time.Time{}
       - eval: n.startGrace(st.Commit)
         to: n.startGrace
       - loop:
@@ -9024,6 +9256,8 @@ sequences:
         kind: value
       - id: n.am.Unlock
         kind: value
+      - id: n.progress.noteApplied
+        kind: internal
       - id: n.status.Load
         kind: value
       - id: n.status.Store
@@ -9051,6 +9285,8 @@ sequences:
           		Log: n.lineage(), Timing: st.Timing, NoSpace: st.NoSpace,
           		Versions: coreconsensus.VersionsValue{ProtocolMin: 1, ProtocolMax: raft.ProtocolMax, Cluster: st.Cluster, ClusterGeneration: st.ClusterG},
           	}
+      - eval: n.progress.noteApplied(s.Commit, s.Applied, n.clk.Now())
+        to: n.progress.noteApplied
       - bind: old
         eval: n.status.Load()
         to: n.status.Load
@@ -9881,6 +10117,223 @@ sequences:
             - return: coreconsensus.MembershipValue{}
           when: "!n.exec(func() { m = n.r.Status().Conf })"
       - return: m
+  - of: (*Node).probeLeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).probeLeader
+        kind: self
+      - id: n.nextID
+        kind: internal
+      - id: n.r.ReadIndex
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: n.lastRole == coreconsensus.RoleLeader || n.lastLead == 0
+      - bind: every
+        eval: n.r.Status().Timing.ElectionTimeoutMin / 2
+      - opt:
+          do:
+            - return: ""
+          when: "!n.contact.probeAt.IsZero() && now.Sub(n.contact.probeAt) < every"
+      - bind: ctx
+        eval: n.nextID()
+        to: n.nextID
+      - set: n.contact.probeCtx, n.contact.probeAt
+        value: ctx, now
+      - eval: n.r.ReadIndex(now, ctx, false)
+        to: n.r.ReadIndex
+  - of: (*Node).readAnswered
+    steps:
+      - opt:
+          do:
+            - set: n.contact.heard, n.contact.from
+              value: now, n.lastLead
+          when: code == 0 && n.lastRole != coreconsensus.RoleLeader && n.lastLead != 0
+      - opt:
+          do:
+            - set: n.contact.probeCtx
+              value: "0"
+            - return: "true"
+          when: ctx != 0 && ctx == n.contact.probeCtx
+      - return: "false"
+  - of: (*Node).leaderConfirmed
+    steps:
+      - switch:
+          cases:
+            - case: n.lastLead == 0
+              do:
+                - return: "false"
+            - case: n.lastRole == coreconsensus.RoleLeader
+              do:
+                - return: "true"
+      - return: n.contact.from == n.lastLead && now.Sub(n.contact.heard) <= n.r.Status().Timing.ElectionTimeoutMax
+  - of: (*Node).watchProgress
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).watchProgress
+        kind: self
+      - id: n.r.Status
+        kind: value
+      - id: n.am.Lock
+        kind: value
+      - id: n.am.Unlock
+        kind: value
+      - id: n.mostCaughtUpVoter
+        kind: internal
+      - id: n.obs.warn
+        kind: internal
+      - id: n.r.TransferLeadership
+        kind: value
+    steps:
+      - bind: st
+        eval: n.r.Status()
+        to: n.r.Status
+      - bind: w
+        eval: "&n.watch"
+      - eval: n.am.Lock()
+        to: n.am.Lock
+      - bind: applied
+        eval: n.applied
+      - eval: n.am.Unlock()
+        to: n.am.Unlock
+      - opt:
+          do:
+            - set: "*w"
+              value: "progressWatch{stable: st.Stable, applied: applied, stableAt: now, appliedAt: now}"
+            - return: ""
+          when: st.Role != coreconsensus.RoleLeader
+      - opt:
+          do:
+            - set: w.stable, w.stableAt
+              value: st.Stable, now
+          when: st.Stable != w.stable || st.Stable >= st.Last
+      - opt:
+          do:
+            - set: w.applied, w.appliedAt
+              value: applied, now
+          when: applied != w.applied || applied >= st.Commit
+      - bind: limit
+        eval: st.Timing.ElectionTimeoutMax
+      - bind: stuckSync, stuckApply
+        eval: now.Sub(w.stableAt) > limit, now.Sub(w.appliedAt) > limit
+      - opt:
+          do:
+            - return: ""
+          when: (!stuckSync && !stuckApply) || st.Transfer != 0
+      - bind: to
+        eval: n.mostCaughtUpVoter(&st)
+        to: n.mostCaughtUpVoter
+      - opt:
+          do:
+            - return: ""
+          when: to == 0
+      - eval: |-
+          n.obs.warn("consensus: the leader makes no progress, handing leadership over",
+          		lattr("to", uint64(to)), lattr("stable", st.Stable), lattr("last", st.Last),
+          		lattr("applied", applied), lattr("commit", st.Commit))
+        to: n.obs.warn
+      - eval: n.r.TransferLeadership(now, to)
+        to: n.r.TransferLeadership
+      - set: w.stableAt, w.appliedAt
+        value: now, now
+  - of: (*Node).mostCaughtUpVoter
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).mostCaughtUpVoter
+        kind: self
+      - id: n.r.Progress
+        kind: value
+    steps:
+      - var:
+          name: to
+          type: coreconsensus.NodeID
+      - var:
+          name: best
+          type: uint64
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: "!m.Voter || m.ID == n.stamp.ID"
+            - opt:
+                do:
+                  - set: to, best
+                    value: m.ID, match
+                init:
+                  bind: match, _, ok
+                  eval: n.r.Progress(m.ID)
+                  to: n.r.Progress
+                when: ok && (to == 0 || match > best)
+          key: _
+          range: st.Conf.Members
+          value: m
+      - return: to
+  - of: (*Node).pinAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).pinAt
+        kind: self
+      - id: n.r.Progress
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: pin.index, true
+          when: pin.until.IsZero()
+      - bind: match, _, ok
+        eval: n.r.Progress(to)
+        to: n.r.Progress
+      - opt:
+          do:
+            - return: 0, false
+          when: "!ok || now.After(pin.until)"
+      - return: max(pin.index, match), true
+  - of: (*Node).watchPins
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).watchPins
+        kind: self
+      - id: n.pinAt
+        kind: internal
+      - id: n.aq.push
+        kind: internal
+    steps:
+      - bind: last
+        eval: n.r.Status().Last
+      - bind: ended
+        eval: "false"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: pin.until.IsZero()
+            - opt:
+                do:
+                  - eval: delete(n.sending, to)
+                  - set: ended
+                    value: "true"
+                init:
+                  bind: at, held
+                  eval: n.pinAt(to, pin, now)
+                  to: n.pinAt
+                when: "!held || at >= last"
+          key: to
+          range: n.sending
+          value: pin
+      - opt:
+          do:
+            - eval: "n.aq.push(applyItem{compact: true})"
+              to: n.aq.push
+          when: ended
   - of: newObs
     steps:
       - return: |-
@@ -15623,6 +16076,18 @@ sequences:
         value: n.cfg.SnapshotTrailing
       - eval: |-
           n.exec(func() {
+          		now := n.clk.Now()
+          		for to, pin := range n.sending {
+          			at, held := n.pinAt(to, pin, now)
+          			if !held {
+          				delete(n.sending, to)
+          				continue
+          			}
+          			if at <= n.cfg.SnapshotTrailing {
+          				return
+          			}
+          			through = min(through, at-n.cfg.SnapshotTrailing)
+          		}
           		n.r.Compact(through)
           		n.handleReady()
           	})
@@ -16037,6 +16502,8 @@ sequences:
         kind: value
       - id: n.lineage
         kind: internal
+      - id: metas[0].Membership.Member
+        kind: value
     steps:
       - bind: metas, err
         eval: n.cfg.Snapshots.List()
@@ -16052,6 +16519,14 @@ sequences:
           do:
             - return: coreconsensus.SnapshotMetaValue{}, false
           when: "!metas[0].Log.Same(l) || metas[0].Position.Index < l.KeptIndex || termless(&metas[0])"
+      - opt:
+          do:
+            - return: coreconsensus.SnapshotMetaValue{}, false
+          init:
+            bind: _, listed
+            eval: metas[0].Membership.Member(n.stamp.ID)
+            to: metas[0].Membership.Member
+          when: "!listed"
       - return: metas[0], true
   - of: (*Node).sendSnapshot
     participants:
@@ -16067,13 +16542,18 @@ sequences:
         kind: value
       - id: n.cfg.Snapshots.Open
         kind: value
+      - id: context
+        kind: stdlib
       - id: n.wg.Add
         kind: value
     steps:
       - opt:
           do:
             - return: ""
-          when: n.sending[to]
+          init:
+            bind: _, busy
+            eval: n.sendStop[to]
+          when: busy
       - bind: meta, ok
         eval: n.snapshotToSend()
         to: n.snapshotToSend
@@ -16081,7 +16561,7 @@ sequences:
           do:
             - eval: n.requestCut()
               to: n.requestCut
-            - eval: n.r.SnapshotDone(to, false)
+            - eval: n.r.SnapshotDone(to, 0, false)
               to: n.r.SnapshotDone
             - return: ""
           when: "!ok"
@@ -16090,20 +16570,24 @@ sequences:
         to: n.cfg.Snapshots.Open
       - opt:
           do:
-            - eval: n.r.SnapshotDone(to, false)
+            - eval: n.r.SnapshotDone(to, 0, false)
               to: n.r.SnapshotDone
             - return: ""
           when: err != nil
       - set: n.sending[to]
-        value: "true"
+        value: "sendPin{index: meta.Position.Index}"
       - bind: offer
         eval: "coreconsensus.InstallOfferValue{Term: n.r.Status().Term, SnapshotID: meta.ID, Meta: meta}"
+      - bind: ctx, cancel
+        eval: context.WithCancel(context.Background())
+        to: context
+      - set: n.sendStop[to]
+        value: cancel
       - eval: n.wg.Add(1)
         to: n.wg.Add
       - go: |-
           func() {
           		defer n.wg.Done()
-          		ctx, cancel := context.WithCancel(context.Background())
           		go func() {
           			select {
           			case <-n.stopc:
@@ -16127,8 +16611,15 @@ sequences:
           		}
           		n.streamEnded(meta, to, err)
           		n.exec(func() {
-          			delete(n.sending, to)
-          			n.r.SnapshotDone(to, err == nil)
+          			if err == nil {
+          				until := n.clk.Now().Add(time.Duration(pinAfterStream) * n.r.Status().Timing.ElectionTimeoutMax)
+          				n.sending[to] = sendPin{index: meta.Position.Index, until: until}
+          			} else {
+          				delete(n.sending, to)
+          				n.aq.push(applyItem{compact: true})
+          			}
+          			delete(n.sendStop, to)
+          			n.r.SnapshotDone(to, meta.Position.Index, err == nil)
           			n.handleReady()
           		})
           	}()
@@ -17563,18 +18054,17 @@ sequences:
         kind: actor
       - id: (*TCPTransport).sendBatch
         kind: self
-      - id: link.close
+      - id: t.retire
         kind: internal
       - id: t.writeBatch
+        kind: internal
+      - id: link.close
         kind: internal
       - id: t.reportUnreachable
         kind: internal
     steps:
-      - opt:
-          do:
-            - eval: link.close()
-              to: link.close
-          when: link.conn != nil && time.Since(link.created) > t.cfg.MaxConnectionAge
+      - eval: t.retire(k, link)
+        to: t.retire
       - bind: reused
         eval: link.conn != nil
       - opt:
@@ -17603,6 +18093,24 @@ sequences:
             - eval: t.reportUnreachable(k.to)
               to: t.reportUnreachable
           when: err != nil
+  - of: (*TCPTransport).retire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).retire
+        kind: self
+      - id: link.close
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: link.conn == nil
+      - opt:
+          do:
+            - eval: link.close()
+              to: link.close
+          when: time.Since(link.created) > t.cfg.MaxConnectionAge || !t.stillAdmitted(k.to, link)
   - of: (*TCPTransport).writeBatch
     participants:
       - id: caller
@@ -17657,6 +18165,10 @@ sequences:
         kind: value
       - id: t.reportUnreachable
         kind: internal
+      - id: t.wg.Add
+        kind: value
+      - id: watchLink
+        kind: internal
     steps:
       - opt:
           do:
@@ -17700,7 +18212,56 @@ sequences:
           when: err != nil
       - set: link.conn, link.w, link.created
         value: c, bufio.NewWriterSize(c, connBufferBytes), time.Now()
+      - set: link.pin, link.notAfter
+        value: pin, time.Time{}
+      - opt:
+          do:
+            - set: link.notAfter
+              value: certs[0].NotAfter
+          init:
+            bind: certs
+            eval: c.ConnectionState().PeerCertificates
+          when: len(certs) > 0
+      - eval: t.wg.Add(1)
+        to: t.wg.Add
+      - go: watchLink(&t.wg, c)
+        to: watchLink
       - return: "true"
+  - of: watchLink
+    participants:
+      - id: caller
+        kind: actor
+      - id: watchLink
+        kind: self
+      - id: wg.Done
+        kind: value
+      - id: io
+        kind: stdlib
+      - id: abandon
+        kind: internal
+    steps:
+      - defer: wg.Done()
+        to: wg.Done
+      - bind: _, err
+        eval: io.Copy(io.Discard, c)
+        to: io
+      - eval: abandon(err)
+        to: abandon
+      - eval: abandon(c.NetConn().Close())
+        to: abandon
+  - of: (*TCPTransport).stillAdmitted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).stillAdmitted
+        kind: self
+      - id: t.address
+        kind: internal
+    steps:
+      - bind: _, pin, ok
+        eval: t.address(to)
+        to: t.address
+      - return: ok && pin == link.pin && time.Now().Before(link.notAfter)
   - of: (*TCPTransport).reportUnreachable
     participants:
       - id: caller
@@ -18735,9 +19296,38 @@ sequences:
           do:
             - return: coreconsensus.PositionValue{}, false, peerRejected("the answer does not list its own sender")
           when: "!joinAnswerListsPeer(m, spki)"
-      - eval: t.SetMembership(1, m.Members)
+      - eval: t.SetMembership(joinGroup, m.Members)
         to: t.SetMembership
       - return: "coreconsensus.PositionValue{Term: binary.LittleEndian.Uint64(b[4:]), Index: binary.LittleEndian.Uint64(b[12:])}, false, nil"
+  - of: (*TCPTransport).releaseJoinAnswer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).releaseJoinAnswer
+        kind: self
+      - id: t.mu.Lock
+        kind: value
+      - id: t.mu.Unlock
+        kind: value
+      - id: t.SetMembership
+        kind: internal
+    steps:
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - bind: _, held
+        eval: t.members[joinGroup]
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
+      - opt:
+          do:
+            - eval: t.SetMembership(joinGroup, nil)
+              to: t.SetMembership
+            - eval: t.mu.Lock()
+              to: t.mu.Lock
+            - eval: delete(t.members, joinGroup)
+            - eval: t.mu.Unlock()
+              to: t.mu.Unlock
+          when: held
   - of: joinAnswerListsPeer
     participants:
       - id: caller

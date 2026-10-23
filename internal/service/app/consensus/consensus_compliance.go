@@ -47,6 +47,7 @@ var (
 		Cluster() coreconsensus.ClusterID
 	} = (*TCPTransport)(nil)
 	_ interface{ maxFrameBytes() int } = (*TCPTransport)(nil)
+	_ joinReleaser                     = (*TCPTransport)(nil)
 	_ interface {
 		CertExpiry() time.Time
 		PeerCertExpiry() map[coreconsensus.NodeID]time.Time

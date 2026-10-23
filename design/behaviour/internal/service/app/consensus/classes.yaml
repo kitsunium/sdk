@@ -177,6 +177,22 @@ constants:
         type: int64
         value: 64 << 20
     name: recHeader
+  - doc: |-
+      supersededWhy is the SNAPSHOT_CORRUPT of a sink another install of the
+      same id superseded: the leader answers it with a new offer.
+    items:
+      - name: supersededWhy
+        value: "\"spool superseded by another install of the same id\""
+    name: supersededWhy
+  - doc: |-
+      The facts a PeerHealthValue carries.
+      maxReadyLag is the apply lag, in entries, a caught-up node stays ready
+      through while what it applies keeps moving (#545).
+    items:
+      - name: maxReadyLag
+        type: uint64
+        value: "64"
+    name: maxReadyLag
   - doc: The facts a PeerHealthValue carries.
     grouped: true
     items:
@@ -299,6 +315,15 @@ constants:
         type: int
         value: "256"
     name: inboxDepth
+  - doc: |-
+      pinAfterStream bounds the pin of a streamed snapshot, in maximum
+      election timeouts: a peer that stopped after its install no longer holds
+      the log back once it passes.
+    items:
+      - name: pinAfterStream
+        type: int64
+        value: "10"
+    name: pinAfterStream
   - doc: |-
       The metric names are part of the contract (D13): spelled as Prometheus
       exposes them, underscores, _total on counters, units in the name.
@@ -566,6 +591,18 @@ constants:
         name: acceptBackoffCeiling
         type: time.Duration
         value: time.Second
+      - doc: |-
+          joinGroup is the admission group the JOIN answer is installed in, apart
+          from the engine's (Config.Group clamps 0 to 1, so it is never 0). In the
+          engine's group, the first configuration a joiner replayed — an older
+          snapshot, the first batch of a log fed from index 1 — replaced the
+          answer, and a leader admitted after that configuration was cut and
+          refused for as long as it led (#552). The answer stays until the
+          joiner's own committed configuration lists it: every member admitted
+          before its AddLearner is in its log by then.
+        name: joinGroup
+        type: coreconsensus.GroupID
+        value: "0"
     name: defaultUnauthenticatedPerIP
   - doc: |-
       tcpUserTimeout is TCP_USER_TIMEOUT of linux/tcp.h, which package syscall
@@ -778,6 +815,7 @@ files:
       - (*fileLog).freeBytes
     name: filelog.go
   - decls:
+      - supersededWhy
       - fileSnapshots
       - newFileSnapshots
       - newestSpool
@@ -786,6 +824,8 @@ files:
       - validID
       - fileSink
       - (*fileSnapshots).Create
+      - (*fileSnapshots).claim
+      - (*fileSink).supersede
       - spoolFile
       - resumeOffset
       - (*fileSink).closed
@@ -805,6 +845,7 @@ files:
       - fsFree
     name: fsfree_unix.go
   - decls:
+      - maxReadyLag
       - PeerVoter
       - HealthReady
       - PeerHealthValue
@@ -817,6 +858,10 @@ files:
       - (*Node).Health
       - (*Node).snapshotHealth
       - isReady
+      - applyProgress
+      - (*applyProgress).noteApplied
+      - (*Node).applyReady
+      - applyReady
       - (*Node).loopHealth
       - (*Node).peerHealth
       - (*Node).peerUnreachable
@@ -835,6 +880,7 @@ files:
       - (*Node).screenOffer
       - (*Node).answerFromHeld
       - (*Node).keepSpool
+      - (*Node).releaseKept
       - releaseSink
       - (*Node).dropOtherSpools
       - (*Node).install
@@ -976,6 +1022,7 @@ files:
       - (*Node).queueApply
       - (*Node).answerReady
       - (*Node).checkAdmission
+      - joinReleaser
       - (*Node).leadershipChanged
       - (*Node).startGrace
       - (*Node).preferLeader
@@ -1005,6 +1052,23 @@ files:
       - (*Node).Watch
       - (*Node).Membership
     name: node.go
+  - decls:
+      - leaderContact
+      - (*Node).probeLeader
+      - (*Node).readAnswered
+      - (*Node).leaderConfirmed
+    name: node_leadercontact.go
+  - decls:
+      - progressWatch
+      - (*Node).watchProgress
+      - (*Node).mostCaughtUpVoter
+    name: node_progresswatch.go
+  - decls:
+      - pinAfterStream
+      - sendPin
+      - (*Node).pinAt
+      - (*Node).watchPins
+    name: node_sendpin.go
   - decls:
       - mRole
       - departedCertExpiry
@@ -1291,8 +1355,12 @@ files:
       - takeBatch
       - queuedFrame
       - (*TCPTransport).sendBatch
+      - (*TCPTransport).retire
       - (*TCPTransport).writeBatch
       - (*TCPTransport).redial
+      - connNetter
+      - watchLink
+      - (*TCPTransport).stillAdmitted
       - (*TCPTransport).reportUnreachable
       - (*TCPTransport).Unreachable
       - (*TCPTransport).Bind
@@ -1319,6 +1387,7 @@ files:
       - (*TCPTransport).joinOnLane
       - endedUnanswered
       - (*TCPTransport).joinAnswered
+      - (*TCPTransport).releaseJoinAnswer
       - joinAnswerListsPeer
       - joinAnswerReason
       - (*TCPTransport).BindJoinReason
@@ -1849,9 +1918,16 @@ functions:
     results: int64
   - doc: |-
       isReady is the verdict's Ready: running, a leader known, everything known
-      committed applied, and not refusing the current leader's chain (D4).
+      committed applied — or, once caught up, a lag that keeps moving within
+      its bound (applyOK) — and not refusing the current leader's chain (D4).
     name: isReady
-    params: h *HealthValue, st *coreconsensus.StatusValue
+    params: h *HealthValue, st *coreconsensus.StatusValue, applyOK bool
+    results: bool
+  - doc: |-
+      applyReady is applyReady's rule over plain values: moved is how long ago
+      applied last moved, window the stall bound.
+    name: applyReady
+    params: caughtUp bool, commit, applied uint64, moved, window time.Duration
     results: bool
   - doc: drawID draws a random NodeID, never 0.
     name: drawID
@@ -2534,6 +2610,18 @@ functions:
     params: pc *peerConn
     results: "[]byte, bool"
   - doc: |-
+      watchLink reads an outbound connection until it ends, then closes its
+      socket. The receiver writes nothing on a member's lane, so a read only
+      returns once the peer closed its end or the sender closed the link: a
+      write into a link the peer closed cleanly (a FIN) succeeded and its
+      batch was lost to the peer's reset, while a closed socket fails the next
+      write, which sendBatch dials again and resends (#553). It is the
+      background goroutine redial launches per connection, counted in wg, and
+      ends when the connection does; TLS's post-handshake messages are read
+      and discarded on the way.
+    name: watchLink
+    params: wg *sync.WaitGroup, c connNetter
+  - doc: |-
       indexMembers is the union of every group's admitted members, by id and
       by pinned key; a member without a pin is reachable by id only, so it can
       be dialled for nothing and admitted on nothing, and a key two members
@@ -2698,6 +2786,9 @@ types:
       - name: save
         type: "*saveReq"
       - name: cut
+        type: bool
+      - doc: compact compacts the log again once a pin on it ended (sendPin).
+        name: compact
         type: bool
     kind: struct
     name: applyItem
@@ -3881,6 +3972,15 @@ types:
           still writes to is never swept from under it.
         name: writing
         type: map[string]int
+      - doc: owners is the one sink each id's spool belongs to (#547).
+        name: owners
+        type: map[string]*fileSink
+      - doc: |-
+          afterPublish, when set by a test, runs in Create once its sink owns
+          the id's spool and before the sink it took the spool from is
+          superseded (#582).
+        name: afterPublish
+        type: func(id string)
     kind: struct
     methods:
       - doc: |-
@@ -3910,6 +4010,20 @@ types:
         params: id string, meta coreconsensus.SnapshotMetaValue
         recv: s *fileSnapshots
         results: coreconsensus.SnapshotSink, int64, error
+      - doc: |-
+          claim makes sink the owner of its id's spool and returns the sink it took
+          the spool from, if any. A spool another sink still writes to is never
+          shared: Create supersedes that sink, its handle closed, before it opens
+          the spool, and writes it from offset 0. Shared, a stale install's Abort
+          unlinked the spool the current leader's install of the same id wrote,
+          whose Commit then failed STORAGE_FAILED and stopped a node with a
+          healthy disk (#547). A sink whose open then fails owns nothing once
+          closed. The caller holds s.mu, never the old sink's mu: supersede waits
+          for that one outside s.mu (#582).
+        name: claim
+        params: sink *fileSink
+        recv: s *fileSnapshots
+        results: "*fileSink"
       - doc: |-
           published reads the snapshot a directory entry named name publishes. ok
           is false for anything that is not a complete snapshot: another file, a
@@ -3951,14 +4065,33 @@ types:
         type: coreconsensus.SnapshotMetaValue
       - name: done
         type: sync.Once
+      - doc: |-
+          mu orders the sink's writes, Commit, Abort and release against a
+          Create of the same id that supersedes it.
+        name: mu
+        type: sync.Mutex
+      - doc: |-
+          superseded is set once another sink owns the id's spool: this sink's
+          handle is closed then, and it never touches the spool again (#547).
+        name: superseded
+        type: bool
     kind: struct
     methods:
-      - doc: closed counts the sink's spool as no longer written to, once.
+      - doc: |-
+          supersede closes the sink's handle and marks it superseded; it waits for
+          a write, Commit, Abort or Create in progress. A sink whose Create failed
+          before its open has no handle. The caller holds no lock but its own
+          sink's mu.
+        name: supersede
+        recv: k *fileSink
+      - doc: |-
+          closed counts the sink's spool as no longer written to, and the sink as
+          no longer its owner, once.
         name: closed
         recv: k *fileSink
       - doc: |-
           Write appends p to the spool file; nothing is durable until Commit syncs
-          it.
+          it. A superseded sink writes nothing.
         name: Write
         params: p []byte
         recv: k *fileSink
@@ -3967,7 +4100,10 @@ types:
           Commit publishes the spool in ADR 0056's order: the encoded size is
           checked, the spool synced and closed, renamed to <id>.snap, and the
           <id>.meta written atomically LAST, so a crash at any step leaves no
-          published snapshot without its bytes.
+          published snapshot without its bytes. A superseded sink, or a spool gone
+          from under its sink, is a SNAPSHOT_CORRUPT the leader answers with a new
+          offer, never this node's disk failing (#547). A Create of the same id
+          waits for a Commit in progress.
         name: Commit
         params: final coreconsensus.SnapshotMetaValue
         recv: k *fileSink
@@ -3980,7 +4116,8 @@ types:
         recv: k *fileSink
       - doc: |-
           Abort closes and deletes the spool; a spool already gone is not a
-          failure, any other removal failure is a STORAGE_FAILED.
+          failure, any other removal failure is a STORAGE_FAILED. A spool another
+          sink superseded is that sink's and stays (#547).
         name: Abort
         recv: k *fileSink
         results: error
@@ -4123,6 +4260,25 @@ types:
         type: int64
     kind: struct
     name: HealthValue
+  - doc: |-
+      applyProgress is what readiness knows of the apply goroutine's progress,
+      loop-owned and updated at every publication: whether the node caught up
+      once, the applied index last published and when applied last moved or
+      reached the commit.
+    fields:
+      - name: caughtUp
+        type: bool
+      - name: applied
+        type: uint64
+      - name: movedAt
+        type: time.Time
+    kind: struct
+    methods:
+      - doc: noteApplied records a publication's commit and applied index.
+        name: noteApplied
+        params: commit, applied uint64, now time.Time
+        recv: p *applyProgress
+    name: applyProgress
   - fields:
       - name: mu
         type: sync.RWMutex
@@ -4492,8 +4648,16 @@ types:
         type: uint64
       - name: subCount
         type: uint32
-      - name: sending
-        type: map[coreconsensus.NodeID]bool
+      - doc: |-
+          sending is the snapshot that pins compaction for each peer: in
+          flight, then streamed until the peer catches up (R6-01, #550).
+        name: sending
+        type: map[coreconsensus.NodeID]sendPin
+      - doc: |-
+          sendStop cancels the snapshot stream in flight to each peer: a
+          leader that lost its leadership or its term stops streaming (#547).
+        name: sendStop
+        type: map[coreconsensus.NodeID]context.CancelFunc
       - doc: unreachableAt is when the transport last failed to reach a peer.
         name: unreachableAt
         type: map[coreconsensus.NodeID]time.Time
@@ -4509,6 +4673,12 @@ types:
         type: bool
       - name: snapState
         type: snapState
+      - name: contact
+        type: leaderContact
+      - name: progress
+        type: applyProgress
+      - name: watch
+        type: progressWatch
       - name: watchMu
         type: sync.Mutex
       - name: watchers
@@ -4645,6 +4815,19 @@ types:
         params: h *HealthValue
         recv: n *Node
       - doc: |-
+          applyReady is the apply half of the verdict for st: caught up, or
+          caught up once and lagging by at most maxReadyLag entries with applied
+          moving within the minimum election timeout. Under a steady write load a
+          published status pairs a new commit with the applied index of the turn
+          before, and a strict comparison reported a healthy node not ready at
+          random (#545); the stall bound keeps a stuck apply from looking ready. A
+          node that fails it is caught up no longer, until it is again. It runs on
+          the loop.
+        name: applyReady
+        params: st *coreconsensus.StatusValue, now time.Time
+        recv: n *Node
+        results: bool
+      - doc: |-
           loopHealth fills the part of a verdict only the event loop can read: the
           quorum, the failure tolerance, the chain refusal and, on a leader, every
           peer's view. It runs on the loop, through exec.
@@ -4715,6 +4898,14 @@ types:
           #301, L4).
         name: keepSpool
         params: id string, sink coreconsensus.SnapshotSink
+        recv: n *Node
+      - doc: |-
+          releaseKept releases the sink an earlier offer of id opened and whose
+          body never came, before the store opens that spool again: still open, it
+          would count as an install writing the spool, which the store supersedes
+          instead of resuming (#547).
+        name: releaseKept
+        params: id string
         recv: n *Node
       - doc: |-
           dropOtherSpools aborts the sinks earlier offers of another id opened and
@@ -5274,6 +5465,65 @@ types:
         recv: n *Node
         results: coreconsensus.MembershipValue
       - doc: |-
+          probeLeader sends a read to the leader at most every half minimum
+          election timeout while this node follows one, so that its answer keeps
+          the contact fresh in a quiet cluster. A lease lets the leader answer at
+          once; without one the answer waits for the leader's next round.
+        name: probeLeader
+        params: now time.Time
+        recv: n *Node
+      - doc: |-
+          readAnswered notes a read the leader answered: raft takes a read's
+          answer only from the leader it asked (#510), so a success proves that
+          leader hears this node. It reports whether the answer was a probe's,
+          which has no waiter.
+        name: readAnswered
+        params: ctx uint64, code errs.Code, now time.Time
+        recv: n *Node
+        results: bool
+      - doc: |-
+          leaderConfirmed reports whether the leader this node names is one it
+          knows hears it: itself, or a leader that answered one of its reads within
+          the maximum election timeout. It runs on the loop.
+        name: leaderConfirmed
+        params: now time.Time
+        recv: n *Node
+        results: bool
+      - doc: |-
+          watchProgress hands the leadership to the most up-to-date voter once
+          this leader's durable index has trailed its log, or its applied index
+          its commit, without moving for the maximum election timeout. A
+          legitimately slow fdatasync moves within that bound; a transfer already
+          under way is left alone, and the clocks restart after each hand-off.
+          It runs on the loop, at every tick.
+        name: watchProgress
+        params: now time.Time
+        recv: n *Node
+      - doc: |-
+          mostCaughtUpVoter is the voter other than this node with the highest
+          acknowledged index, 0 when there is none.
+        name: mostCaughtUpVoter
+        params: st *raft.StatusValue
+        recv: n *Node
+        results: coreconsensus.NodeID
+      - doc: |-
+          pinAt is the index pin holds compaction back to at now, and false once
+          it no longer holds: a streamed snapshot's pin ends when this node no
+          longer leads the peer, or when until passed. It runs on the loop.
+        name: pinAt
+        params: to coreconsensus.NodeID, pin sendPin, now time.Time
+        recv: n *Node
+        results: uint64, bool
+      - doc: |-
+          watchPins ends, at each tick, the pins of streamed snapshots that no
+          longer hold: their peer caught up with the log, left, or until passed.
+          Compaction only runs after a cut, so the log is compacted again at once:
+          a pin that ended once the writes stopped held it back until the next
+          write.
+        name: watchPins
+        params: now time.Time
+        recv: n *Node
+      - doc: |-
           observeStatus publishes the gauges a status turn changes, and logs role
           and term changes (D13).
         name: observeStatus
@@ -5625,7 +5875,12 @@ types:
         results: error
       - doc: |-
           afterCut keeps the two newest snapshots and compacts the log back to the
-          older one, less SnapshotTrailing, with saturating arithmetic (D7).
+          older one, less SnapshotTrailing, with saturating arithmetic (D7). A
+          snapshot in flight to a peer, then streamed until the peer catches up
+          (sendPin), pins compaction back to it, less SnapshotTrailing (R6-01): a leader that cut twice during one transfer
+          compacted past the snapshot it was sending, the entry after it was gone
+          once the peer installed it, and under a sustained write rate the peer
+          installed snapshot after snapshot and never caught up (#550).
         name: afterCut
         recv: n *Node
       - doc: |-
@@ -5704,7 +5959,8 @@ types:
           send. It runs on the loop and launches the transfer on a background
           goroutine counted in n.wg, which ends when Stream returns, and a watcher
           goroutine that cancels the stream when the node stops and ends with it;
-          the outcome goes back to raft on the loop.
+          a change of leadership or term cancels it too (#547). The outcome goes
+          back to raft on the loop.
         name: sendSnapshot
         params: to coreconsensus.NodeID
         recv: n *Node
@@ -5858,6 +6114,16 @@ types:
       	acquire() error
       	release()
       }
+  - doc: |-
+      joinReleaser is a transport that keeps a JOIN answer's members admitted
+      apart from the engine's configuration until the joiner is admitted
+      (#552).
+    kind: named
+    name: joinReleaser
+    underlying: |-
+      interface {
+      	releaseJoinAnswer()
+      }
   - fields:
       - name: req
         type: raft.FetchSpec
@@ -5867,6 +6133,62 @@ types:
         type: bool
     kind: struct
     name: fetchDone
+  - doc: |-
+      leaderContact is what a node that does not lead knows of whether its
+      leader hears it: a heartbeat only says the leader reaches this node, and
+      a follower whose answers were lost kept that leader, its commit frozen,
+      and reported ready (#541); a learner cut off from every voter never
+      campaigns and kept its last leader forever (#540). A read answered by the
+      leader — a probe, or any read of the node's own — is the proof, with no
+      wire change. It is loop-owned.
+    fields:
+      - doc: |-
+          heard is when the leader named by from last answered a read of this
+          node.
+        name: heard
+        type: time.Time
+      - name: from
+        type: coreconsensus.NodeID
+      - doc: |-
+          probeCtx is the context of the probe in flight, 0 for none, and
+          probeAt when it was sent.
+        name: probeCtx
+        type: uint64
+      - name: probeAt
+        type: time.Time
+    kind: struct
+    name: leaderContact
+  - doc: |-
+      progressWatch is the leader's watch over its own storage and machine,
+      loop-owned: the durable index and the applied index last seen moving,
+      and when. A leader whose fdatasync never returns, or whose Apply blocks,
+      kept heartbeating, so CheckQuorum held and the followers never
+      campaigned, while every write and read entering at it waited for a local
+      sync or apply that never came (#554).
+    fields:
+      - name: stable
+        type: uint64
+      - name: applied
+        type: uint64
+      - name: stableAt
+        type: time.Time
+      - name: appliedAt
+        type: time.Time
+    kind: struct
+    name: progressWatch
+  - doc: |-
+      sendPin is a snapshot that pins compaction for a peer. While it streams,
+      until is zero. Once streamed, the pin follows the peer's match until the
+      peer catches up or until passes: the leader only probes the peer after an
+      install, and a cut that landed in that window compacted past the entries
+      the peer needed next, so it was offered snapshot after snapshot (#550).
+    fields:
+      - name: index
+        type: uint64
+      - name: until
+        type: time.Time
+    kind: struct
+    name: sendPin
   - doc: |-
       obs holds a node's instruments. Every method is safe on a nil Meter,
       Tracer or Logger: observability is optional and never changes a decision.
@@ -6529,6 +6851,15 @@ types:
         params: k outKey, link *senderLink, batch [][]byte
         recv: t *TCPTransport
       - doc: |-
+          retire closes the link's connection when it may carry no more frames:
+          retired by age, every frame of it flushed, so the next batch dials a
+          fresh one; or its key is no longer the member's — denied, replaced or
+          gone — or its certificate expired, so nothing more is written on it and
+          the redial checks the current pin (#551).
+        name: retire
+        params: k outKey, link *senderLink
+        recv: t *TCPTransport
+      - doc: |-
           writeBatch writes the batch on the link's connection and flushes it,
           under one write deadline.
         name: writeBatch
@@ -6541,9 +6872,20 @@ types:
           the peer unreachable. It reports whether the link is connected. Bytes
           left unacknowledged on the new connection for WriteTimeout abort it, as
           a write that blocks that long does; a connection that refuses the bound
-          fails like a failed dial.
+          fails like a failed dial. A connected link gets watchLink, the background
+          goroutine counted in t.wg that reads it and ends when the connection does.
         name: redial
         params: k outKey, link *senderLink
+        recv: t *TCPTransport
+        results: bool
+      - doc: |-
+          stillAdmitted reports whether a link may still carry frames: its peer is
+          a member pinned to the key the link was dialled to, and the certificate
+          the peer presented has not expired. DenyPin and SetMembership closed
+          only the inbound connections of a member that lost its key, and the
+          leader kept replicating to it on the lanes it had dialled (#551).
+        name: stillAdmitted
+        params: to coreconsensus.NodeID, link *senderLink
         recv: t *TCPTransport
         results: bool
       - doc: |-
@@ -6627,6 +6969,11 @@ types:
         params: b []byte, rerr error, spki [32]byte
         recv: t *TCPTransport
         results: pos coreconsensus.PositionValue, refused bool, err error
+      - doc: |-
+          releaseJoinAnswer drops the JOIN answer's admission group once the node
+          is admitted: from then on the engine's configuration alone admits.
+        name: releaseJoinAnswer
+        recv: t *TCPTransport
       - name: BindJoinReason
         params: _ coreconsensus.GroupID, join func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code, string)
         recv: t *TCPTransport
@@ -6658,7 +7005,8 @@ types:
     name: outKey
   - doc: |-
       senderLink is a sender's connection to its peer and lane, with what it
-      needs to retire it by age and to pace redials after a failure.
+      needs to retire it by age, by the key it was dialled to and by that
+      key's certificate, and to pace redials after a failure.
     fields:
       - name: conn
         type: "*tls.Conn"
@@ -6668,6 +7016,13 @@ types:
         type: time.Time
       - name: backoff
         type: time.Time
+      - doc: |-
+          pin is the key the peer was pinned to when the link was dialled,
+          and notAfter the end of the certificate it presented.
+        name: pin
+        type: "[32]byte"
+      - name: notAfter
+        type: time.Time
     kind: struct
     methods:
       - doc: |-
@@ -6676,6 +7031,16 @@ types:
         name: close
         recv: l *senderLink
     name: senderLink
+  - doc: |-
+      connNetter is what watchLink needs of a link's connection: to read it,
+      and its socket to close.
+    kind: named
+    name: connNetter
+    underlying: |-
+      interface {
+      	io.Reader
+      	NetConn() net.Conn
+      }
   - doc: |-
       closeWriter is the end of a snapshot stream the sender writes and then
       half-closes, so the receiver sees the stream end and can still answer.
@@ -6767,6 +7132,9 @@ vars:
         value: (*TCPTransport)(nil)
       - name: _
         type: interface{ maxFrameBytes() int }
+        value: (*TCPTransport)(nil)
+      - name: _
+        type: joinReleaser
         value: (*TCPTransport)(nil)
       - name: _
         type: |-

@@ -20,6 +20,11 @@ func TestRemovingTheLeaderFromAFollowerTransfersFirst(t *testing.T) {
 	})
 	l := c.settledLeader(5 * time.Second)
 	f := c.otherThan(l)
+	// The leader commits with three of the four nodes: f may not have heard
+	// of it yet, and a follower that knows no leader answers NOT_LEADER.
+	waitFor(t, "the follower knows the leader", func() bool {
+		return f.node.Status().Leader == l.id
+	})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	err := f.node.Remove(ctx, "op:test", l.id)

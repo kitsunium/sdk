@@ -4128,10 +4128,14 @@ packages:
                 type: core.NodeID
             name: ReportUnreachable
             recv: pointer
-          - doc: SnapshotDone ends a snapshot transfer to a peer.
+          - doc: |-
+              SnapshotDone ends a snapshot transfer to a peer; index is the snapshot
+              the driver sent.
             in:
               - name: to
                 type: core.NodeID
+              - name: index
+                type: uint64
               - name: ok
                 type: bool
             name: SnapshotDone

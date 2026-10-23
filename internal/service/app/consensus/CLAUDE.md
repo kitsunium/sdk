@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-22T23:59:00Z -->
+<!-- updated: 2026-10-22T23:59:30Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -386,3 +386,18 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   wrote no marker refuses any later open in the process (#562,
   `TestAnUnwritableRuntimeDirIsRefusedAtOpen`,
   `TestAStorageStopRefusesTheSameBootRestart`).
+- Write on an outbound lane without a reader on it, or after its key left
+  the admission: a write into a link the peer closed cleanly succeeds and
+  is lost to the peer's reset (#553, `watchLink`), and a fenced key kept
+  receiving entries on lanes dialled before `DenyPin` (#551,
+  `stillAdmitted`; `TestTCPFrameAfterACleanCloseByTheReceiverIsDelivered`,
+  `TestTCPNothingIsSentOnAnOldLaneToAKeyNoLongerAdmitted`).
+- Install a JOIN answer in the engine's admission group, or send a snapshot
+  whose configuration does not list the leader: the joiner's first older
+  configuration cut its leader (#552, `joinGroup`,
+  `TestAJoinerKeepsALeaderNewerThanTheConfigurationItReplays`).
+- Report a leader known from heartbeats alone: a leader answered one of the
+  node's reads within `ElectionTimeoutMax`, or the node leads (#541, #540,
+  `probeLeader`). Keep a leader whose sync or apply has not moved for
+  `ElectionTimeoutMax` (#554, `watchProgress`), or compact past a snapshot
+  in flight (#550, `n.sending`).

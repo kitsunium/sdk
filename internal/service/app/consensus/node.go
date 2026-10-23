@@ -115,7 +115,12 @@ type Node struct {
 	transfers []chan errs.Code
 	subEpoch  uint64
 	subCount  uint32
-	sending   map[coreconsensus.NodeID]bool
+	// sending is the snapshot that pins compaction for each peer: in
+	// flight, then streamed until the peer catches up (R6-01, #550).
+	sending map[coreconsensus.NodeID]sendPin
+	// sendStop cancels the snapshot stream in flight to each peer: a
+	// leader that lost its leadership or its term stops streaming (#547).
+	sendStop map[coreconsensus.NodeID]context.CancelFunc
 	// unreachableAt is when the transport last failed to reach a peer.
 	unreachableAt map[coreconsensus.NodeID]time.Time
 	lastTerm      uint64
@@ -124,6 +129,9 @@ type Node struct {
 	canVote       bool
 	noTable       bool
 	snapState     snapState
+	contact       leaderContact
+	progress      applyProgress
+	watch         progressWatch
 
 	watchMu  sync.Mutex
 	watchers map[chan coreconsensus.StatusValue]struct{}
@@ -367,7 +375,7 @@ func newNode(cfg *Config, stamp *coreconsensus.StampValue) *Node {
 		propc: make(chan *proposal, inboxDepth), execc: make(chan func(), loopBacklog), storec: make(chan storeDone, loopBacklog),
 		stopc: make(chan struct{}), sq: newFifo[storeReq](), fetchq: newFifo[raft.FetchSpec](), fetchc: make(chan fetchDone, fetchBacklog), aq: newFifo[applyItem](),
 		waiters: map[uint64]*proposal{}, results: map[uint64]applyResult{},
-		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]bool{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
+		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]sendPin{}, sendStop: map[coreconsensus.NodeID]context.CancelFunc{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
 		watchers: map[chan coreconsensus.StatusValue]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
 	}
 	n.acond = sync.NewCond(&n.am)
@@ -894,6 +902,9 @@ func (n *Node) onTick(tick clock.Ticker, ok bool) (time.Time, bool) {
 	}
 	turn := n.clk.Now()
 	n.r.Tick(n.clk.Now())
+	n.probeLeader(turn)
+	n.watchProgress(turn)
+	n.watchPins(turn)
 	if d := n.tickInterval(); d != time.Duration(n.tickEvery.Load()) {
 		// A committed contract changed the heartbeat (review of PR
 		// #301, L5).
@@ -1187,7 +1198,11 @@ func (n *Node) queueApply(entries []coreconsensus.EntryValue) {
 
 // answerReady answers the reads, forwards and transfers a Ready resolved.
 func (n *Node) answerReady(rd *raft.ReadyValue) {
+	now := n.clk.Now()
 	for _, rs := range rd.ReadStates {
+		if n.readAnswered(rs.Context, rs.Code, now) {
+			continue
+		}
 		if w, ok := n.reads[rs.Context]; ok {
 			delete(n.reads, rs.Context)
 			w.done <- readResult{index: rs.Index, code: rs.Code}
@@ -1221,7 +1236,17 @@ func (n *Node) checkAdmission() {
 		n.stamp = s
 		n.canVote = true
 		n.r.SetCanVote(true)
+		if j, ok := n.cfg.Transport.(joinReleaser); ok {
+			j.releaseJoinAnswer()
+		}
 	}
+}
+
+// joinReleaser is a transport that keeps a JOIN answer's members admitted
+// apart from the engine's configuration until the joiner is admitted
+// (#552).
+type joinReleaser interface {
+	releaseJoinAnswer()
 }
 
 // leadershipChanged answers what a change of leader or term made unknown.
@@ -1231,6 +1256,15 @@ func (n *Node) leadershipChanged() {
 		return
 	}
 	n.lastTerm, n.lastLead, n.lastRole = st.Term, st.Lead, st.Role
+	for _, stop := range n.sendStop {
+		// An offer of a past term is refused at its end anyway, and its
+		// abort could unlink the spool the new leader's install of the
+		// same snapshot writes to on the receiver (#547).
+		stop()
+	}
+	// A new leader is probed at the next tick: until it answers, this
+	// node does not know it hears it (#541).
+	n.contact.probeCtx, n.contact.probeAt = 0, time.Time{}
 	n.startGrace(st.Commit)
 	for ctx, w := range n.reads {
 		delete(n.reads, ctx)
@@ -1292,6 +1326,7 @@ func (n *Node) publish() {
 		Log: n.lineage(), Timing: st.Timing, NoSpace: st.NoSpace,
 		Versions: coreconsensus.VersionsValue{ProtocolMin: 1, ProtocolMax: raft.ProtocolMax, Cluster: st.Cluster, ClusterGeneration: st.ClusterG},
 	}
+	n.progress.noteApplied(s.Commit, s.Applied, n.clk.Now())
 	old := n.status.Load()
 	if old != nil && *old == *s {
 		return

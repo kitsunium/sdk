@@ -14,6 +14,10 @@ import (
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
 
+// supersededWhy is the SNAPSHOT_CORRUPT of a sink another install of the
+// same id superseded: the leader answers it with a new offer.
+const supersededWhy = "spool superseded by another install of the same id"
+
 // fileSnapshots is the shipped SnapshotStore: ADR 0056's publication rules
 // applied to a stream (D4). A snapshot is spooled to <id>.spool, synced,
 // renamed to <id>.snap, and published by its <id>.meta, written atomically
@@ -25,6 +29,12 @@ type fileSnapshots struct {
 	// writing counts the sinks open on each id's spool: a spool a sink
 	// still writes to is never swept from under it.
 	writing map[string]int
+	// owners is the one sink each id's spool belongs to (#547).
+	owners map[string]*fileSink
+	// afterPublish, when set by a test, runs in Create once its sink owns
+	// the id's spool and before the sink it took the spool from is
+	// superseded (#582).
+	afterPublish func(id string)
 }
 
 // newFileSnapshots opens the snapshot directory dir, creating it private
@@ -54,7 +64,7 @@ func newFileSnapshots(dir string) (*fileSnapshots, error) {
 			}
 		}
 	}
-	s := &fileSnapshots{dir: dir, pins: map[string]int{}, writing: map[string]int{}}
+	s := &fileSnapshots{dir: dir, pins: map[string]int{}, writing: map[string]int{}, owners: map[string]*fileSink{}}
 	if err := s.sweepSpools(newestSpool(ents)); err != nil {
 		return nil, err
 	}
@@ -134,6 +144,12 @@ type fileSink struct {
 	f    *os.File
 	meta coreconsensus.SnapshotMetaValue
 	done sync.Once
+	// mu orders the sink's writes, Commit, Abort and release against a
+	// Create of the same id that supersedes it.
+	mu sync.Mutex
+	// superseded is set once another sink owns the id's spool: this sink's
+	// handle is closed then, and it never touches the spool again (#547).
+	superseded bool
 }
 
 // Create implements SnapshotStore: an existing spool of that id resumes from
@@ -152,18 +168,74 @@ func (s *fileSnapshots) Create(id string, meta coreconsensus.SnapshotMetaValue) 
 		sink.closed()
 		return nil, 0, err
 	}
+	// The sink is held until its spool is positioned: a Create of the same
+	// id that supersedes it in the meantime waits, then closes the handle
+	// this one opened (#582).
+	sink.mu.Lock()
+	s.mu.Lock()
+	old := s.claim(sink)
+	s.mu.Unlock()
+	if s.afterPublish != nil {
+		s.afterPublish(id)
+	}
+	if old != nil {
+		// Locks go from the younger sink to the older one, never back.
+		old.supersede()
+	}
 	f, err := os.OpenFile(filepath.Join(s.dir, id+".spool"), os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
+		sink.mu.Unlock()
 		sink.closed()
 		return nil, 0, storageFailed("spool", err)
 	}
 	sink.f = f
-	off, err := resumeOffset(f, meta.ChunkSize)
-	if err != nil {
-		sink.closed()
-		return nil, 0, alsoFailed(storageFailed("spool", err), "close", f.Close())
+	var off int64
+	if old != nil {
+		// What another install wrote there is not resumed from.
+		err = f.Truncate(0)
+	} else {
+		off, err = resumeOffset(f, meta.ChunkSize)
 	}
+	if err != nil {
+		err = alsoFailed(storageFailed("spool", err), "close", f.Close())
+		sink.f = nil
+		sink.mu.Unlock()
+		sink.closed()
+		return nil, 0, err
+	}
+	sink.mu.Unlock()
 	return sink, off, nil
+}
+
+// claim makes sink the owner of its id's spool and returns the sink it took
+// the spool from, if any. A spool another sink still writes to is never
+// shared: Create supersedes that sink, its handle closed, before it opens
+// the spool, and writes it from offset 0. Shared, a stale install's Abort
+// unlinked the spool the current leader's install of the same id wrote,
+// whose Commit then failed STORAGE_FAILED and stopped a node with a
+// healthy disk (#547). A sink whose open then fails owns nothing once
+// closed. The caller holds s.mu, never the old sink's mu: supersede waits
+// for that one outside s.mu (#582).
+func (s *fileSnapshots) claim(sink *fileSink) *fileSink {
+	old := s.owners[sink.id]
+	s.owners[sink.id] = sink
+	return old
+}
+
+// supersede closes the sink's handle and marks it superseded; it waits for
+// a write, Commit, Abort or Create in progress. A sink whose Create failed
+// before its open has no handle. The caller holds no lock but its own
+// sink's mu.
+func (k *fileSink) supersede() {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if !k.superseded {
+		k.superseded = true
+		if k.f != nil {
+			// Nothing reads what this sink wrote again.
+			abandon(k.f.Close())
+		}
+	}
 }
 
 // spoolFile is what a resume needs of a spool's file.
@@ -192,27 +264,46 @@ func resumeOffset(f spoolFile, chunk int64) (int64, error) {
 	return off, err
 }
 
-// closed counts the sink's spool as no longer written to, once.
+// closed counts the sink's spool as no longer written to, and the sink as
+// no longer its owner, once.
 func (k *fileSink) closed() {
 	k.done.Do(func() {
 		k.s.mu.Lock()
 		if k.s.writing[k.id]--; k.s.writing[k.id] <= 0 {
 			delete(k.s.writing, k.id)
 		}
+		if k.s.owners[k.id] == k {
+			delete(k.s.owners, k.id)
+		}
 		k.s.mu.Unlock()
 	})
 }
 
 // Write appends p to the spool file; nothing is durable until Commit syncs
-// it.
-func (k *fileSink) Write(p []byte) (int, error) { return k.f.Write(p) }
+// it. A superseded sink writes nothing.
+func (k *fileSink) Write(p []byte) (int, error) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.superseded {
+		return 0, snapshotCorrupt(supersededWhy)
+	}
+	return k.f.Write(p)
+}
 
 // Commit publishes the spool in ADR 0056's order: the encoded size is
 // checked, the spool synced and closed, renamed to <id>.snap, and the
 // <id>.meta written atomically LAST, so a crash at any step leaves no
-// published snapshot without its bytes.
+// published snapshot without its bytes. A superseded sink, or a spool gone
+// from under its sink, is a SNAPSHOT_CORRUPT the leader answers with a new
+// offer, never this node's disk failing (#547). A Create of the same id
+// waits for a Commit in progress.
 func (k *fileSink) Commit(final coreconsensus.SnapshotMetaValue) error {
 	defer k.closed()
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.superseded {
+		return snapshotCorrupt(supersededWhy)
+	}
 	final.ID = k.id
 	size, err := k.f.Seek(0, io.SeekCurrent)
 	if err != nil {
@@ -229,8 +320,10 @@ func (k *fileSink) Commit(final coreconsensus.SnapshotMetaValue) error {
 	if err := k.f.Close(); err != nil {
 		return storageFailed("close snapshot", err)
 	}
-	snap := filepath.Join(k.s.dir, k.id+".snap")
-	if err := os.Rename(filepath.Join(k.s.dir, k.id+".spool"), snap); err != nil {
+	if err := os.Rename(filepath.Join(k.s.dir, k.id+".spool"), filepath.Join(k.s.dir, k.id+".snap")); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return snapshotCorrupt("spool gone before its commit")
+		}
 		return storageFailed("publish snapshot", err)
 	}
 	if err := writeFileSync(filepath.Join(k.s.dir, k.id+".meta"), wire.AppendSnapshotMeta(nil, &final)); err != nil {
@@ -277,13 +370,23 @@ func (s *fileSnapshots) published(name string) (coreconsensus.SnapshotMetaValue,
 // checksums hold, so nothing it could say changes what is kept.
 func (k *fileSink) release() {
 	defer k.closed()
-	abandon(k.f.Close())
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if !k.superseded {
+		abandon(k.f.Close())
+	}
 }
 
 // Abort closes and deletes the spool; a spool already gone is not a
-// failure, any other removal failure is a STORAGE_FAILED.
+// failure, any other removal failure is a STORAGE_FAILED. A spool another
+// sink superseded is that sink's and stays (#547).
 func (k *fileSink) Abort() error {
 	defer k.closed()
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.superseded {
+		return nil
+	}
 	// The spool is being discarded: what its descriptor's Close could say
 	// about bytes no one will read changes nothing. The removal is what
 	// Abort promises, and its failure is reported.
