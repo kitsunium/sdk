@@ -7954,7 +7954,7 @@ sequences:
           when: err != nil
       - bind: durIdx
         eval: dur.Index
-      - bind: base, failed, err
+      - bind: base, failed, newest, err
         eval: n.restoreLatest(metas, durIdx)
         to: n.restoreLatest
       - opt:
@@ -7989,7 +7989,7 @@ sequences:
         eval: base.Position.Index
       - opt:
           do:
-            - return: raft.StartState{}, err
+            - return: raft.StartState{}, n.fallbackGap(err, newest)
           init:
             bind: first, last, err
             eval: n.finishInstall(&base, first, last)
@@ -8069,6 +8069,8 @@ sequences:
         kind: self
       - id: n.obs.warn
         kind: internal
+      - id: origin
+        kind: internal
       - id: n.restoreFrom
         kind: internal
     steps:
@@ -8080,6 +8082,12 @@ sequences:
                     to: n.obs.warn
                   - set: failed
                     value: append(failed, m)
+                  - opt:
+                      do:
+                        - set: newest
+                          to: origin
+                          value: origin(coreconsensus.SnapshotCorrupt, errs.String("why", "recorded at term 0"), errs.String("id", m.ID))
+                      when: newest == nil
                   - continue: true
                 when: termless(&m)
             - bind: rerr
@@ -8087,14 +8095,19 @@ sequences:
               to: n.restoreFrom
             - opt:
                 do:
-                  - return: m, failed, nil
+                  - return: m, failed, newest, nil
                 when: rerr == nil
             - opt:
                 do:
-                  - return: coreconsensus.SnapshotMetaValue{}, nil, rerr
+                  - return: coreconsensus.SnapshotMetaValue{}, nil, nil, rerr
                 when: errs.HasCode(rerr, coreconsensus.CodeVersionUnsupported)
             - eval: "n.obs.warn(\"consensus: a snapshot was not restored\", lstr(\"id\", m.ID), lstr(\"error\", rerr.Error()))"
               to: n.obs.warn
+            - opt:
+                do:
+                  - set: newest
+                    value: rerr
+                when: newest == nil
             - opt:
                 do:
                   - set: failed
@@ -8103,7 +8116,14 @@ sequences:
           key: _
           range: metas
           value: m
-      - return: coreconsensus.SnapshotMetaValue{}, nil, nil
+      - return: coreconsensus.SnapshotMetaValue{}, nil, newest, nil
+  - of: (*Node).fallbackGap
+    steps:
+      - opt:
+          do:
+            - return: newest
+          when: newest != nil && !n.noTable && errs.HasCode(err, coreconsensus.CodeLogCorrupt)
+      - return: err
   - of: ownFailure
     steps:
       - return: "!errs.HasCode(err, coreconsensus.CodeStorageFailed) && !errs.HasCode(err, coreconsensus.CodeSnapshotTooLarge)"
@@ -10620,6 +10640,8 @@ sequences:
         kind: actor
       - id: (*Node).watchPins
         kind: self
+      - id: n.r.Progress
+        kind: value
       - id: n.pinAt
         kind: internal
       - id: n.aq.push
@@ -10635,16 +10657,19 @@ sequences:
                 do:
                   - continue: true
                 when: pin.until.IsZero()
+            - bind: match, _, _
+              eval: n.r.Progress(to)
+              to: n.r.Progress
             - opt:
                 do:
                   - eval: delete(n.sending, to)
                   - set: ended
                     value: "true"
                 init:
-                  bind: at, held
+                  bind: _, held
                   eval: n.pinAt(to, pin, now)
                   to: n.pinAt
-                when: "!held || at >= last"
+                when: "!held || match >= last"
           key: to
           range: n.sending
           value: pin
