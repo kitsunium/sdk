@@ -1330,6 +1330,20 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.FlagProtocol2",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "FlagProtocol2",
+      "spelled": "coreconsensus.MessageFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/core/app/consensus.MessageFlags",
+      "value": "16",
+      "init": "go:github.com/kitsunium/sdk/internal/core/app/consensus.FlagProtocol2",
+      "doc": "The read modes and durabilities.\n",
+      "file": "consensus/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.FlagTransfer",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
@@ -2211,6 +2225,20 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/app/consensus.MessageKind",
       "value": "6",
       "init": "go:github.com/kitsunium/sdk/internal/core/app/consensus.MsgHeartbeatResp",
+      "doc": "The read modes and durabilities.\n",
+      "file": "consensus/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.MsgLeaderRecord",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "MsgLeaderRecord",
+      "spelled": "coreconsensus.MessageKind",
+      "canonical": "github.com/kitsunium/sdk/internal/core/app/consensus.MessageKind",
+      "value": "12",
+      "init": "go:github.com/kitsunium/sdk/internal/core/app/consensus.MsgLeaderRecord",
       "doc": "The read modes and durabilities.\n",
       "file": "consensus/gen_facade.go",
       "layer": "public",

@@ -24,15 +24,18 @@ const (
 	tokenVersion1 byte = 1
 	// tokenLen is a token's whole length: version, ClusterID, three uint64.
 	tokenLen int = 41
-	// metaVersion1 is the leading byte of an encoded SnapshotMeta, the only
-	// version this node writes.
+	// metaVersion1 is the leading byte of a SnapshotMeta of a cluster below
+	// protocol version 2.
 	metaVersion1 byte = 1
 	// metaVersion2 is the leading byte of a SnapshotMeta checksummed: the
-	// fields of version 1, then the CRC-32C of every byte before it. This
-	// node reads it and never writes it: the writer comes with the cluster
-	// version that admits it, one release after every member reads it
-	// (#546, ADR 0152 amendment of 2026-10-22).
+	// fields of version 1, then the CRC-32C of every byte before it. The
+	// release before read it without writing it; this one writes it for a
+	// cluster at protocol version 2 (#546 phase 2, ADR 0152 amendments of
+	// 2026-10-22 and 2026-10-23).
 	metaVersion2 byte = 2
+	// metaProtocol2 is the cluster version from which a SnapshotMeta is
+	// written in version 2.
+	metaProtocol2 uint32 = 2
 	// metaSumLen is the length of version 2's trailing CRC-32C.
 	metaSumLen int = 4
 	// entryFixedLen is an entry's header before its data: term, index,
@@ -225,10 +228,24 @@ func ParseToken(b []byte) (coreconsensus.TokenValue, error) {
 	return t, nil
 }
 
-// AppendSnapshotMeta appends the versioned encoding of m, in version 1:
-// this release reads version 2 and never writes it.
+// AppendSnapshotMeta appends the versioned encoding of m. The version
+// follows the cluster version m carries: a meta of a cluster below protocol
+// version 2 is written in version 1, and one of a cluster at 2 or above in
+// version 2, checksummed, which the release before already reads (D18,
+// #546). Only a cluster whose every member announced protocol 2 reaches
+// that version.
 func AppendSnapshotMeta(dst []byte, m *coreconsensus.SnapshotMetaValue) []byte {
-	dst = append(dst, metaVersion1)
+	if m.ClusterVersion < metaProtocol2 {
+		return appendMeta(dst, metaVersion1, m)
+	}
+	return appendMeta(dst, metaVersion2, m)
+}
+
+// appendMeta appends m in version v: the version byte, the fields of
+// version 1, then for version 2 the CRC-32C of every byte before it.
+func appendMeta(dst []byte, v byte, m *coreconsensus.SnapshotMetaValue) []byte {
+	start := len(dst)
+	dst = append(dst, v)
 	dst = appendString(dst, m.ID)
 	dst = append(dst, m.Version)
 	dst = binary.LittleEndian.AppendUint64(dst, m.Position.Term)
@@ -245,7 +262,11 @@ func AppendSnapshotMeta(dst []byte, m *coreconsensus.SnapshotMetaValue) []byte {
 	dst = binary.LittleEndian.AppendUint32(dst, m.ClusterVersion)
 	dst = binary.LittleEndian.AppendUint64(dst, m.ClusterGeneration)
 	dst = binary.LittleEndian.AppendUint64(dst, uint64(m.NoSpace))
-	return appendBytes(dst, m.Reserved)
+	dst = appendBytes(dst, m.Reserved)
+	if v == metaVersion2 {
+		dst = binary.LittleEndian.AppendUint32(dst, crc32.Checksum(dst[start:], castagnoli))
+	}
+	return dst
 }
 
 // ParseSnapshotMeta decodes a SnapshotMeta, copying every byte it keeps:

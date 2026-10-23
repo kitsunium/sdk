@@ -162,7 +162,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
   - [func \(\*MemoryTransport\) Close\(\) error](<#MemoryTransport.Close>)
   - [func \(\*MemoryTransport\) Join\(ctx context.Context, cfg coreconsensus.JoinConfig\) \(coreconsensus.PositionValue, error\)](<#MemoryTransport.Join>)
   - [func \(\*MemoryTransport\) Send\(to coreconsensus.NodeID, frame \[\]byte\)](<#MemoryTransport.Send>)
-  - [func \(\*MemoryTransport\) SetMembership\(\_ coreconsensus.GroupID, admitted \[\]coreconsensus.MemberValue\)](<#MemoryTransport.SetMembership>)
+  - [func \(\*MemoryTransport\) SetMembership\(group coreconsensus.GroupID, admitted \[\]coreconsensus.MemberValue\)](<#MemoryTransport.SetMembership>)
   - [func \(\*MemoryTransport\) Stream\(ctx context.Context, to coreconsensus.NodeID, offer coreconsensus.InstallOfferValue, open func\(int64\) \(io.ReadCloser, error\)\) error](<#MemoryTransport.Stream>)
 - [type MessageKind](<#MessageKind>)
   - [func \(MessageKind\) Known\(\) bool](<#MessageKind.Known>)
@@ -315,6 +315,15 @@ const FlagNoLease coreconsensus.MessageFlags = 4
 The read modes and durabilities.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.FlagNoLease`.
+
+<a name="FlagProtocol2"></a>
+```go
+const FlagProtocol2 coreconsensus.MessageFlags = 16
+```
+
+The read modes and durabilities.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.FlagProtocol2`.
 
 <a name="FlagTransfer"></a>
 ```go
@@ -486,6 +495,15 @@ const MsgHeartbeatResp coreconsensus.MessageKind = 6
 The read modes and durabilities.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.MsgHeartbeatResp`.
+
+<a name="MsgLeaderRecord"></a>
+```go
+const MsgLeaderRecord coreconsensus.MessageKind = 12
+```
+
+The read modes and durabilities.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.MsgLeaderRecord`.
 
 <a name="MsgPreVote"></a>
 ```go
@@ -2294,6 +2312,18 @@ type LogIdentityValue struct {
 	// predecessor's token: one admitted after the Recover learns it from the
 	// snapshot it installs, never from an append.
 	KeptIndex        uint64
+	// AdoptedFrom is the last index of the kept range the predecessor had
+	// committed when Recover read it: the commit the survivor persisted,
+	// or the snapshot a restore started from. An entry at or below it is
+	// the one every node of the predecessor holds (Log Matching), so a
+	// predecessor's token at or below it is trusted by its index once its
+	// term can no longer be read; the adopted range above it, up to
+	// KeptIndex, is not. 0 records nothing, and nothing is trusted that
+	// way. It is recorded only in a cluster at protocol version 2, in the
+	// stamp of the node Recover or RestoreSnapshot ran on: a snapshot does
+	// not carry it, so a node that learns the lineage from one trusts
+	// nothing that way (#509).
+	AdoptedFrom      uint64
 }
 ```
 
@@ -2829,10 +2859,10 @@ Send implements Transport: it never blocks and drops when the queue is full.
 ### func \(MemoryTransport\) [SetMembership](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/memtransport.go>)
 
 ```go
-func (*MemoryTransport) SetMembership(_ coreconsensus.GroupID, admitted []coreconsensus.MemberValue)
+func (*MemoryTransport) SetMembership(group coreconsensus.GroupID, admitted []coreconsensus.MemberValue)
 ```
 
-SetMembership implements Transport.
+SetMembership implements Transport: the admitted members are the union over the groups, as the TCP transport computes them.
 
 <a name="MemoryTransport.Stream"></a>
 ### func \(MemoryTransport\) [Stream](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/memtransport.go>)
@@ -2865,7 +2895,7 @@ type MessageKind uint8
 func (MessageKind) Known() bool
 ```
 
-Known reports whether protocol version 1 defines the kind.
+Known reports whether protocol version 1 or 2 defines the kind.
 
 <a name="MessageKind.Lane"></a>
 ### func \(MessageKind\) [Lane](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/message.go>)

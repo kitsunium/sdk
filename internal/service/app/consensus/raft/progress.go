@@ -12,6 +12,9 @@ const (
 	// peerFetching pauses the peer while the driver reads entries the step
 	// function evicted.
 	peerFetching
+	// peerProtocol2 is set while the peer's last message of the term
+	// carried FlagProtocol2.
+	peerProtocol2
 )
 
 // peerFacts are a peer's yes/no state in the leader's progress, one bit each.

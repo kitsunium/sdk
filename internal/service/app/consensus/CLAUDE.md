@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-22T23:59:30Z -->
+<!-- updated: 2026-10-23T02:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -376,6 +376,32 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   beside, or is rolled back under, the release that writes it; the writer
   ships with the cluster version that admits it (#546 phase 2, batch S3 of
   #564; `TestASnapshotMetaOfVersion2IsRestored`).
+- Write a format of protocol version 2 before the committed cluster
+  version is 2: the version 2 snapshot meta (CRC-32C, #546), the admin
+  payload with Origin (#561) and the stamp with AdoptedFrom (#509, the
+  meta never carries it) are chosen by the cluster version, and a node of protocol 1 stops on the
+  raise instead of meeting them (`TestAVersion2MetaThatRottedIsNotRestored`,
+  `TestRecoverBelowProtocol2RecordsNoAdoptedRange`, raft's
+  `checkRaiseAnnounced`).
+- Commit an administrative entry with an origin the forwarder wrote, or
+  append one as leader without a Warn naming its origin (#561,
+  `TestAForwardedRemoveRecordsTheFollowerAsItsOrigin`, raft's
+  `checkOriginAuthenticated`).
+- Admit a sender at the memory double that its receiver's configuration
+  does not list when the test turns the admission model on
+  (`MemoryNetwork.admission`): the suites never saw #542 because the double
+  admitted everyone (`TestTheMemoryAdmissionModelRefusesAnUnknownSender`).
+- Leave a voter that came back behind a leader its configuration does not
+  list with no way to hear it: a follower of a live leader answers its
+  PreVote with that leader's committed record, which it admits for
+  replication only until its configuration lists or retires it, or four
+  election timeouts pass (#542, `TestHuntR4ProveStaleVoterNewLeader`,
+  `TestHuntR4ProveStaleVoterReplacementThenFailure`, raft's
+  `checkLeaderRecordReplicationOnly`).
+- Trust a predecessor's token by its index above the identity's
+  AdoptedFrom once its term can no longer be read: that part of the kept
+  range is the suffix Recover adopted past the persisted commit (#509,
+  `TestRecoverRecordsWhereTheAdoptedRangeStarts`).
 - Write anything, open included, before the STORAGE_FAILED markers of the
   current boot are read: recovery, Recover, Init and
   TruncateAndStaySilent wrote past pages the disk did not hold (#563,

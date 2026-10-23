@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"errors"
 	"math/rand/v2"
 	"slices"
 	"time"
@@ -29,7 +30,14 @@ const (
 
 // ProtocolMax is the highest protocol version this engine speaks: a cluster
 // version above it is refused, and stops a node that finds it committed.
-const ProtocolMax uint32 = 1
+// Version 2 adds the snapshot metadata's checksum, the admin payload's
+// Origin and the log identity's AdoptedFrom, each written only once the
+// committed cluster version is 2 (lot S3).
+const ProtocolMax uint32 = 2
+
+// Protocol2 is the protocol version whose formats a node writes once the
+// cluster version is raised to it.
+const Protocol2 uint32 = 2
 
 // raftFacts are the step function's own yes/no state, one bit each.
 type raftFacts uint8
@@ -84,6 +92,10 @@ type Config struct {
 	MaxForwardBytes int64
 	// mut is set by the package's own tests only.
 	mut mutation
+	// speaks, when not 0, is the protocol version this node speaks in place
+	// of ProtocolMax: the package's own tests run a node of the previous
+	// release with it.
+	speaks uint32
 }
 
 // fwdEntry is one forwarded command a leader appended.
@@ -174,6 +186,9 @@ type ReadyValue struct {
 	Fetch []FetchSpec
 	// Membership is set when the admitted set changed.
 	Membership []core.MemberValue
+	// LeaderHint is the leader a member vouched for in a MsgLeaderRecord,
+	// admitted provisionally in Membership, for the driver to log (#542).
+	LeaderHint core.MemberValue
 	// Unsupported names an entry whose kind this version does not know:
 	// the driver stops the node with VERSION_UNSUPPORTED.
 	Unsupported UnsupportedEntryValue
@@ -256,6 +271,12 @@ type Raft struct {
 	// admittedPub is the admission set last handed to the driver: it is
 	// handed again only when it changes (#531).
 	admittedPub []core.MemberValue
+	// hint is the leader a member vouched for in a MsgLeaderRecord while
+	// this node knew no leader, admitted at the transport for replication
+	// only until hintUntil, until a configuration of this node lists it, or
+	// retires it (#542). Its ID is 0 when there is none.
+	hint      core.MemberValue
+	hintUntil time.Time
 
 	prs   map[core.NodeID]*progress
 	votes map[core.NodeID]bool
@@ -375,6 +396,7 @@ func NewRaft(cfg *Config, st *StartState) *Raft {
 // Tick advances the timers to now.
 func (r *Raft) Tick(now time.Time) {
 	r.now = now
+	r.endHintOnTimeout(now)
 	if r.role == core.RoleLeader {
 		r.tickLeader(now)
 		return
@@ -723,6 +745,9 @@ func (r *Raft) admitted() []core.MemberValue {
 			out[k].SPKI = m.SPKI
 		}
 	}
+	if r.hint.ID != 0 && !slices.ContainsFunc(out, func(x core.MemberValue) bool { return x.ID == r.hint.ID }) {
+		out = append(out, r.hint)
+	}
 	return out
 }
 
@@ -733,6 +758,9 @@ func (r *Raft) send(m core.MessageValue) {
 	m.Version = 1
 	m.Group = r.cfg.Group
 	m.From = r.id
+	if r.speaks() >= Protocol2 {
+		m.Flags |= core.FlagProtocol2
+	}
 	if m.Term == 0 && m.Kind != core.MsgPreVote && m.Kind != core.MsgPreVoteResp {
 		m.Term = r.term
 	}
@@ -762,7 +790,7 @@ func (r *Raft) waitsForSync(kind core.MessageKind) bool {
 func (r *Raft) noteAppended(e *core.EntryValue) {
 	switch e.Kind {
 	case core.EntryMembership:
-		a, err := wire.ParseAdmin(e.Data)
+		a, err := wire.ParseAdminAt(e.Version, e.Data)
 		if err != nil {
 			return
 		}
@@ -780,7 +808,7 @@ func (r *Raft) noteAppended(e *core.EntryValue) {
 			}
 		}
 	case core.EntryTimingContract:
-		if a, err := wire.ParseAdmin(e.Data); err == nil {
+		if a, err := wire.ParseAdminAt(e.Version, e.Data); err == nil {
 			c := a.Contract
 			c.Generation = a.Pre.Generation + 1
 			r.contracts[c.Generation] = c
@@ -797,6 +825,7 @@ func (r *Raft) noteAppended(e *core.EntryValue) {
 // set is republished, a leader tracks exactly the new members, and a
 // follower or learner takes the role the new configuration gives it.
 func (r *Raft) confChanged() {
+	r.endHintOnConf()
 	r.publishAdmitted()
 	switch r.role {
 	case core.RoleLeader:
@@ -885,7 +914,14 @@ func (r *Raft) applyCommitEffect(i uint64, e *core.EntryValue) bool {
 	if !actsAtCommit(e.Kind) {
 		return false
 	}
-	admin, err := wire.ParseAdmin(e.Data)
+	admin, err := wire.ParseAdminAt(e.Version, e.Data)
+	if errors.Is(err, core.VersionUnsupported) {
+		// An admin payload version this node does not know stops it
+		// there, as an unknown kind does: skipped, the entry would leave
+		// its engine state behind every other node's (D18).
+		r.rd.Unsupported = UnsupportedEntryValue{Index: i, Kind: e.Kind}
+		return true
+	}
 	if err != nil {
 		return false
 	}
@@ -1066,7 +1102,7 @@ func (r *Raft) commitTimingContract(admin *wire.AdminValue) {
 // version above ProtocolMax is not applied: it is named in the Ready for the
 // driver to stop the node, and true stops the walk there.
 func (r *Raft) commitClusterVersion(i uint64, admin *wire.AdminValue) bool {
-	if admin.ClusterVersion > ProtocolMax {
+	if admin.ClusterVersion > r.speaks() {
 		// Unknown means stop (D18, review M3).
 		r.rd.Unsupported = UnsupportedEntryValue{Index: i, Kind: core.EntryClusterVersion}
 		return true
@@ -1075,6 +1111,15 @@ func (r *Raft) commitClusterVersion(i uint64, admin *wire.AdminValue) bool {
 		r.clusterVer, r.clusterGen = admin.ClusterVersion, r.clusterGen+1
 	}
 	return false
+}
+
+// speaks is the highest protocol version this node speaks: ProtocolMax,
+// unless a test runs it as a node of the previous release.
+func (r *Raft) speaks() uint32 {
+	if r.cfg.speaks != 0 {
+		return r.cfg.speaks
+	}
+	return ProtocolMax
 }
 
 // commitTo advances the commit to i, never back, applying the engine's own

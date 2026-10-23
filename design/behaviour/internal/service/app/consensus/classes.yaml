@@ -55,6 +55,12 @@ constants:
           following it: a start is refused while one applies (D4, R9-05).
         name: markerStopPrefix
         value: "\"STOP-\""
+    name: fileLock
+  - doc: |-
+      The stamp's encoding: the node's identity and its log's lineage, in the
+      data directory's STAMP file.
+    grouped: true
+    items:
       - doc: |-
           stampVersion is the first byte of an encoded stamp; a stamp of another
           version is unreadable, never guessed at.
@@ -62,13 +68,21 @@ constants:
         type: byte
         value: "1"
       - doc: |-
+          stampVersion2 is the first byte of a stamp whose log identity records
+          AdoptedFrom, which only Recover or RestoreSnapshot sets, in a history
+          at protocol version 2: version 1's fields with AdoptedFrom after the
+          kept index. A node of protocol 1 refuses to open it (#509).
+        name: stampVersion2
+        type: byte
+        value: "2"
+      - doc: |-
           stampFixed is the stamp's length before its slot and its CRC: version
           1, cluster 16, epoch 8, predecessor 16, predecessor epoch 8, kept
           index 8, id 8, incarnation 16, state 1, founding 32, slot length 1.
         name: stampFixed
         type: int
         value: 1 + 16 + 8 + 16 + 8 + 8 + 8 + 16 + 1 + 32 + 1
-    name: fileLock
+    name: stampVersion
   - grouped: true
     items:
       - doc: errImpossible is the cause of an answer a store must never give.
@@ -185,7 +199,6 @@ constants:
         value: "\"spool superseded by another install of the same id\""
     name: supersededWhy
   - doc: |-
-      The facts a PeerHealthValue carries.
       maxReadyLag is the apply lag, in entries, a caught-up node stays ready
       through while what it applies keeps moving (#545).
     items:
@@ -684,10 +697,6 @@ files:
       - DataDir.Close
       - (*fileLog).acquire
       - (*fileLog).release
-      - encodeStamp
-      - decodeStamp
-      - readStamp
-      - writeStamp
       - (*fileLog).runtimeMarker
       - (*fileLog).markStopEach
       - reasonOf
@@ -695,6 +704,15 @@ files:
       - stopMarkerPresent
       - (*fileLog).markerPaths
     name: datadir.go
+  - decls:
+      - stampVersion
+      - encodeStamp
+      - decodeStamp
+      - stampBody
+      - decodeStampLog
+      - readStamp
+      - writeStamp
+    name: datadir_stamp.go
   - decls: []
     name: doc.go
   - decls:
@@ -947,8 +965,11 @@ files:
       - (*MemoryTransport).Stream
       - (*MemoryTransport).Bind
       - (*MemoryTransport).run
+      - (*MemoryTransport).deliverFrame
       - (*MemoryTransport).BindJoinReason
       - (*MemoryTransport).SetMembership
+      - (*MemoryTransport).releaseJoinAnswer
+      - (*MemoryNetwork).admitted
       - (*MemoryTransport).Join
       - (*MemoryNetwork).othersThan
       - memSPKI
@@ -1015,6 +1036,7 @@ files:
       - (*Node).dropForward
       - (*Node).tickInterval
       - (*Node).handleReady
+      - (*Node).auditAppended
       - (*Node).stopOnUnsupported
       - (*Node).handleOne
       - (*Node).reportNotices
@@ -1133,6 +1155,7 @@ files:
       - recoverIntent
       - recoverPlan
       - DataDir.planRecover
+      - DataDir.planAdopted
       - DataDir.planKept
       - recoverAuditLine
       - DataDir.resumedKept
@@ -1156,6 +1179,7 @@ files:
       - DataDir.chainAt
       - snapshotAt
       - lastMembership
+      - clusterVersionThrough
       - RestoreOptions
       - RestoreSnapshot
       - restoreRefused
@@ -1573,19 +1597,45 @@ functions:
   - name: NewDataDirWith
     params: dir string, opts DataDirOptions
     results: DataDir, error
+  - doc: reasonOf is the reason a stop marker's name carries for code.
+    name: reasonOf
+    params: code errs.Code
+    results: string
+  - doc: |-
+      stopMarkerPresent is the STOP_MARKER_PRESENT of the marker at path, its
+      trimmed content as the detail an operator reads before clearing it.
+    name: stopMarkerPresent
+    params: path string, content []byte
+    results: error
   - doc: |-
       encodeStamp is the stamp's on-disk form: the fixed fields, the slot
-      prefixed by its length, and a CRC-32C of everything before it.
+      prefixed by its length, and a CRC-32C of everything before it. A stamp
+      whose log identity records AdoptedFrom is written in version 2, any
+      other in version 1, so a value has one encoding.
     name: encodeStamp
     params: s coreconsensus.StampValue
     results: "[]byte"
   - doc: |-
       decodeStamp parses encodeStamp's form; ok is false for another version, a
-      short stamp, a CRC that fails, a state this version does not define, or a
-      slot length that disagrees with the bytes left.
+      short stamp, a CRC that fails, a state this version does not define, a
+      slot length that disagrees with the bytes left, or a version 2 stamp
+      that records no AdoptedFrom.
     name: decodeStamp
     params: b []byte
     results: coreconsensus.StampValue, bool
+  - doc: |-
+      stampBody checks a stamp's version, length and CRC, and returns the bytes
+      the CRC covers and whether it is of version 2.
+    name: stampBody
+    params: b []byte
+    results: body []byte, v2, ok bool
+  - doc: |-
+      decodeStampLog reads the log identity at the head of a stamp's body into
+      l and returns the offset after it; ok is false for a version 2 stamp that
+      records no AdoptedFrom, which encodeStamp writes in version 1.
+    name: decodeStampLog
+    params: body []byte, v2 bool, l *coreconsensus.LogIdentityValue
+    results: int, bool
   - doc: |-
       readStamp reads the stamp of dir: none yet is the zero stamp, a read that
       fails is a STORAGE_FAILED, and a stamp that cannot be decoded is
@@ -1596,16 +1646,6 @@ functions:
   - doc: writeStamp replaces the stamp of dir atomically and durably.
     name: writeStamp
     params: dir string, s coreconsensus.StampValue
-    results: error
-  - doc: reasonOf is the reason a stop marker's name carries for code.
-    name: reasonOf
-    params: code errs.Code
-    results: string
-  - doc: |-
-      stopMarkerPresent is the STOP_MARKER_PRESENT of the marker at path, its
-      trimmed content as the detail an operator reads before clearing it.
-    name: stopMarkerPresent
-    params: path string, content []byte
     results: error
   - doc: |-
       u64s renders v in decimal: the spelling every index field of an error
@@ -2256,6 +2296,14 @@ functions:
     name: lastMembership
     params: l *fileLog, snaps *fileSnapshots, index uint64
     results: coreconsensus.MembershipValue, error
+  - doc: |-
+      clusterVersionThrough is the cluster version the committed entries
+      through index leave, from the latest snapshot and the raises in the log
+      after it, applied as the engine applies them at commit. A store that
+      cannot answer fails it.
+    name: clusterVersionThrough
+    params: l *fileLog, snaps *fileSnapshots, index uint64
+    results: uint32, error
   - name: RestoreSnapshot
     params: d DataDir, r io.Reader, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RestoreOptions
     results: coreconsensus.SnapshotMetaValue, error
@@ -2308,7 +2356,9 @@ functions:
       restoredMeta is the metadata the restored snapshot is published under:
       the expected one, in a new history that records the old cluster as its
       predecessor and the snapshot's index as the last it kept, with the new
-      members.
+      members. Every entry a snapshot covers was committed: at protocol version
+      2 the identity records the whole kept range as adopted from a commit, in
+      the stamp the restore writes; the meta does not carry it (#509).
     name: restoredMeta
     params: exp *coreconsensus.SnapshotMetaValue, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue
     results: coreconsensus.SnapshotMetaValue
@@ -3065,6 +3115,18 @@ types:
         params: stamp *coreconsensus.StampValue, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RecoverOptions, intent *recoverIntent
         recv: d DataDir
         results: recoverPlan, error
+      - doc: |-
+          planAdopted decides the new identity's AdoptedFrom: the index up to
+          which the kept entries were committed in the old history, the persisted
+          commit or the base of a compacted log, all of the snapshot an
+          interrupted install published. A resumed Recover's marker does not
+          record it, and records none. It is recorded only when the history kept
+          is at protocol version 2: the stamp that carries it is one a node of
+          protocol 1 refuses to open (#509, D18).
+        name: planAdopted
+        params: p *recoverPlan
+        recv: d DataDir
+        results: error
       - doc: |-
           planKept decides the last index the new history keeps: the one a resumed
           Recover's marker recorded; the index of the snapshot an interrupted
@@ -4452,6 +4514,14 @@ types:
         type: map[coreconsensus.NodeID]*MemoryTransport
       - name: cut
         type: map[[2]coreconsensus.NodeID]bool
+      - doc: |-
+          admission, set by the package's own tests before any node starts,
+          models the TCP transport's: a frame or a snapshot is delivered only
+          between nodes each of which admits the other, under its own
+          configuration, by ID and pinned key (D4). Off, as the double has
+          always run, every node reaches every other (#542).
+        name: admission
+        type: bool
     kind: struct
     methods:
       - name: Cut
@@ -4467,6 +4537,13 @@ types:
         params: from, to coreconsensus.NodeID
         recv: n *MemoryNetwork
         results: "*MemoryTransport"
+      - doc: |-
+          admitted reports whether at admits peer: always without the admission
+          model, else when one of its admitted members is peer under peer's key.
+        name: admitted
+        params: at *MemoryTransport, peer coreconsensus.NodeID
+        recv: n *MemoryNetwork
+        results: bool
       - doc: othersThan is every transport of the network but self's, in map order.
         name: othersThan
         params: self coreconsensus.NodeID
@@ -4503,6 +4580,9 @@ types:
         type: chan memFrame
       - name: cur
         type: "*memRun"
+      - doc: groups are the admitted members per group, members their union.
+        name: groups
+        type: map[coreconsensus.GroupID][]coreconsensus.MemberValue
       - name: members
         type: "[]coreconsensus.MemberValue"
     kind: struct
@@ -4530,11 +4610,24 @@ types:
         name: run
         params: r *memRun
         recv: t *MemoryTransport
+      - doc: |-
+          deliverFrame hands one frame to the bound deliver callback, unless the
+          admission model is on and this node does not admit its sender: the TCP
+          transport closes the connection of a key it does not admit, and the
+          frame never reaches the node.
+        name: deliverFrame
+        params: f memFrame
+        recv: t *MemoryTransport
       - name: BindJoinReason
         params: _ coreconsensus.GroupID, join func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code, string)
         recv: t *MemoryTransport
       - name: SetMembership
-        params: _ coreconsensus.GroupID, admitted []coreconsensus.MemberValue
+        params: group coreconsensus.GroupID, admitted []coreconsensus.MemberValue
+        recv: t *MemoryTransport
+      - doc: |-
+          releaseJoinAnswer drops the JOIN answer's group once the node is
+          admitted, as the TCP transport does (#552).
+        name: releaseJoinAnswer
         recv: t *MemoryTransport
       - name: Join
         params: ctx context.Context, cfg coreconsensus.JoinConfig
@@ -5263,6 +5356,15 @@ types:
         name: handleReady
         recv: n *Node
       - doc: |-
+          auditAppended logs at Warn every engine entry this node appends as
+          leader, with the origin the leader recorded in it: the operation is
+          traced on the node that decided it, whichever member submitted it (ADR
+          0152 D8). Before the cluster version is 2 the entry carries no origin,
+          and the line names 0 (#561).
+        name: auditAppended
+        params: rd *raft.ReadyValue
+        recv: n *Node
+      - doc: |-
           stopOnUnsupported stops the node with VERSION_UNSUPPORTED when a Ready
           names an entry whose kind this version does not know, and reports whether
           it did; that Ready is then not carried out at all, and handleReady
@@ -5665,8 +5767,10 @@ types:
           kept there may be of another term than the write the old cluster
           committed and acknowledged at that index. That write is lost, and
           WaitApplied reported it applied (#509). Where the term cannot be read any
-          more, a token of the current history is trusted by Log Matching, one of
-          the predecessor's is not: the kept range may hold such a suffix.
+          more, a token of the current history is trusted by Log Matching, and so
+          is one of the predecessor's at or below the index the predecessor had
+          committed there (AdoptedFrom, #509 phase 2); one in the adopted range
+          above it is not: that range may hold such a suffix.
         name: appliedAs
         params: t coreconsensus.TokenValue
         recv: n *Node
@@ -6387,6 +6491,11 @@ types:
       - name: hard
         type: coreconsensus.HardState
       - name: kept
+        type: uint64
+      - doc: |-
+          adopted is the last kept index the old history had committed, the
+          new identity's AdoptedFrom; 0 records none (#509).
+        name: adopted
         type: uint64
       - name: old
         type: coreconsensus.MembershipValue
@@ -7136,6 +7245,9 @@ vars:
       - name: _
         type: joinReleaser
         value: (*TCPTransport)(nil)
+      - name: _
+        type: joinReleaser
+        value: (*MemoryTransport)(nil)
       - name: _
         type: |-
           interface {

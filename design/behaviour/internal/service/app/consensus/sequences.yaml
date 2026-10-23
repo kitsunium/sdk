@@ -1437,174 +1437,6 @@ sequences:
         value: "false"
       - eval: l.dd.mu.Unlock()
         to: l.dd.mu.Unlock
-  - of: encodeStamp
-    participants:
-      - id: caller
-        kind: actor
-      - id: encodeStamp
-        kind: self
-      - id: binary.LittleEndian.AppendUint64
-        kind: value
-      - id: binary.LittleEndian.AppendUint32
-        kind: value
-    steps:
-      - bind: b
-        eval: "[]byte{stampVersion}"
-      - set: b
-        value: append(b, s.Log.Cluster[:]...)
-      - set: b
-        to: binary.LittleEndian.AppendUint64
-        value: binary.LittleEndian.AppendUint64(b, s.Log.Epoch)
-      - set: b
-        value: append(b, s.Log.Predecessor[:]...)
-      - set: b
-        to: binary.LittleEndian.AppendUint64
-        value: binary.LittleEndian.AppendUint64(b, s.Log.PredecessorEpoch)
-      - set: b
-        to: binary.LittleEndian.AppendUint64
-        value: binary.LittleEndian.AppendUint64(b, s.Log.KeptIndex)
-      - set: b
-        to: binary.LittleEndian.AppendUint64
-        value: binary.LittleEndian.AppendUint64(b, uint64(s.ID))
-      - set: b
-        value: append(b, s.Incarnation[:]...)
-      - set: b
-        value: append(b, byte(s.State))
-      - set: b
-        value: append(b, s.Founding[:]...)
-      - set: b
-        value: append(b, byte(len(s.Slot)))
-      - set: b
-        value: append(b, s.Slot...)
-      - return: binary.LittleEndian.AppendUint32(b, crc32.Checksum(b, castagnoli))
-        to: binary.LittleEndian.AppendUint32
-  - of: decodeStamp
-    participants:
-      - id: caller
-        kind: actor
-      - id: decodeStamp
-        kind: self
-      - id: binary.LittleEndian.Uint64
-        kind: value
-      - id: coreconsensus
-        kind: package
-    steps:
-      - var:
-          name: s
-          type: coreconsensus.StampValue
-      - opt:
-          do:
-            - return: s, false
-          when: len(b) < stampFixed+4 || b[0] != stampVersion
-      - bind: body
-        eval: b[:len(b)-4]
-      - opt:
-          do:
-            - return: s, false
-          when: crc32.Checksum(body, castagnoli) != binary.LittleEndian.Uint32(b[len(b)-4:])
-      - bind: p
-        eval: "1"
-      - eval: copy(s.Log.Cluster[:], body[p:])
-      - op: +=
-        set: p
-        value: len(s.Log.Cluster)
-      - set: s.Log.Epoch
-        to: binary.LittleEndian.Uint64
-        value: binary.LittleEndian.Uint64(body[p:])
-      - op: +=
-        set: p
-        value: u64Bytes
-      - eval: copy(s.Log.Predecessor[:], body[p:])
-      - op: +=
-        set: p
-        value: len(s.Log.Predecessor)
-      - set: s.Log.PredecessorEpoch
-        to: binary.LittleEndian.Uint64
-        value: binary.LittleEndian.Uint64(body[p:])
-      - op: +=
-        set: p
-        value: u64Bytes
-      - set: s.Log.KeptIndex
-        to: binary.LittleEndian.Uint64
-        value: binary.LittleEndian.Uint64(body[p:])
-      - op: +=
-        set: p
-        value: u64Bytes
-      - set: s.ID
-        to: coreconsensus
-        value: coreconsensus.NodeID(binary.LittleEndian.Uint64(body[p:]))
-      - op: +=
-        set: p
-        value: u64Bytes
-      - eval: copy(s.Incarnation[:], body[p:])
-      - op: +=
-        set: p
-        value: len(s.Incarnation)
-      - set: s.State
-        to: coreconsensus
-        value: coreconsensus.StampState(body[p])
-      - opt:
-          do:
-            - return: coreconsensus.StampValue{}, false
-          when: s.State < coreconsensus.StampJoining || s.State > coreconsensus.StampMember
-      - op: ++
-        set: p
-      - eval: copy(s.Founding[:], body[p:])
-      - op: +=
-        set: p
-        value: len(s.Founding)
-      - bind: "n"
-        eval: int(body[p])
-      - op: ++
-        set: p
-      - opt:
-          do:
-            - return: s, false
-          when: p+n != len(body)
-      - set: s.Slot
-        value: string(body[p:])
-      - return: s, true
-  - of: readStamp
-    participants:
-      - id: caller
-        kind: actor
-      - id: readStamp
-        kind: self
-      - id: os
-        kind: stdlib
-      - id: decodeStamp
-        kind: internal
-    steps:
-      - bind: b, err
-        eval: os.ReadFile(filepath.Join(dir, fileStamp))
-        to: os
-      - opt:
-          do:
-            - return: coreconsensus.StampValue{}, nil
-          when: errors.Is(err, os.ErrNotExist)
-      - opt:
-          do:
-            - return: coreconsensus.StampValue{}, storageFailed("stamp", err)
-          when: err != nil
-      - bind: s, ok
-        eval: decodeStamp(b)
-        to: decodeStamp
-      - opt:
-          do:
-            - return: coreconsensus.StampValue{}, origin(coreconsensus.DataDirMismatch, errs.String("why", "unreadable stamp"))
-          when: "!ok"
-      - return: s, nil
-  - of: writeStamp
-    participants:
-      - id: caller
-        kind: actor
-      - id: writeStamp
-        kind: self
-      - id: writeFileSync
-        kind: internal
-    steps:
-      - return: writeFileSync(filepath.Join(dir, fileStamp), encodeStamp(s))
-        to: writeFileSync
   - of: (*fileLog).runtimeMarker
     participants:
       - id: caller
@@ -1706,6 +1538,237 @@ sequences:
           origin(coreconsensus.StopMarkerPresent, errs.String("marker", filepath.Base(path)),
           		errs.String("detail", strings.TrimSpace(string(content))))
         to: origin
+  - of: encodeStamp
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeStamp
+        kind: self
+      - id: binary.LittleEndian.AppendUint64
+        kind: value
+      - id: binary.LittleEndian.AppendUint32
+        kind: value
+    steps:
+      - bind: v2
+        eval: s.Log.AdoptedFrom != 0
+      - bind: b
+        eval: "[]byte{stampVersion}"
+      - opt:
+          do:
+            - set: b[0]
+              value: stampVersion2
+          when: v2
+      - set: b
+        value: append(b, s.Log.Cluster[:]...)
+      - set: b
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(b, s.Log.Epoch)
+      - set: b
+        value: append(b, s.Log.Predecessor[:]...)
+      - set: b
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(b, s.Log.PredecessorEpoch)
+      - set: b
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(b, s.Log.KeptIndex)
+      - opt:
+          do:
+            - set: b
+              to: binary.LittleEndian.AppendUint64
+              value: binary.LittleEndian.AppendUint64(b, s.Log.AdoptedFrom)
+          when: v2
+      - set: b
+        to: binary.LittleEndian.AppendUint64
+        value: binary.LittleEndian.AppendUint64(b, uint64(s.ID))
+      - set: b
+        value: append(b, s.Incarnation[:]...)
+      - set: b
+        value: append(b, byte(s.State))
+      - set: b
+        value: append(b, s.Founding[:]...)
+      - set: b
+        value: append(b, byte(len(s.Slot)))
+      - set: b
+        value: append(b, s.Slot...)
+      - return: binary.LittleEndian.AppendUint32(b, crc32.Checksum(b, castagnoli))
+        to: binary.LittleEndian.AppendUint32
+  - of: decodeStamp
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeStamp
+        kind: self
+      - id: stampBody
+        kind: internal
+      - id: decodeStampLog
+        kind: internal
+      - id: coreconsensus
+        kind: package
+    steps:
+      - bind: body, v2, ok
+        eval: stampBody(b)
+        to: stampBody
+      - opt:
+          do:
+            - return: coreconsensus.StampValue{}, false
+          when: "!ok"
+      - var:
+          name: stamp
+          type: coreconsensus.StampValue
+      - bind: p, ok
+        eval: decodeStampLog(body, v2, &stamp.Log)
+        to: decodeStampLog
+      - opt:
+          do:
+            - return: coreconsensus.StampValue{}, false
+          when: "!ok"
+      - set: stamp.ID
+        to: coreconsensus
+        value: coreconsensus.NodeID(binary.LittleEndian.Uint64(body[p:]))
+      - op: +=
+        set: p
+        value: u64Bytes
+      - eval: copy(stamp.Incarnation[:], body[p:])
+      - op: +=
+        set: p
+        value: len(stamp.Incarnation)
+      - set: stamp.State
+        to: coreconsensus
+        value: coreconsensus.StampState(body[p])
+      - opt:
+          do:
+            - return: coreconsensus.StampValue{}, false
+          when: stamp.State < coreconsensus.StampJoining || stamp.State > coreconsensus.StampMember
+      - op: ++
+        set: p
+      - eval: copy(stamp.Founding[:], body[p:])
+      - op: +=
+        set: p
+        value: len(stamp.Founding)
+      - bind: "n"
+        eval: int(body[p])
+      - op: ++
+        set: p
+      - opt:
+          do:
+            - return: stamp, false
+          when: p+n != len(body)
+      - set: stamp.Slot
+        value: string(body[p:])
+      - return: stamp, true
+  - of: stampBody
+    steps:
+      - opt:
+          do:
+            - return: nil, false, false
+          when: len(b) == 0 || (b[0] != stampVersion && b[0] != stampVersion2)
+      - set: v2
+        value: b[0] == stampVersion2
+      - bind: fixed
+        eval: stampFixed
+      - opt:
+          do:
+            - op: +=
+              set: fixed
+              value: u64Bytes
+          when: v2
+      - opt:
+          do:
+            - return: nil, false, false
+          when: len(b) < fixed+4
+      - set: body
+        value: b[:len(b)-4]
+      - opt:
+          do:
+            - return: nil, false, false
+          when: crc32.Checksum(body, castagnoli) != binary.LittleEndian.Uint32(b[len(b)-4:])
+      - return: body, v2, true
+  - of: decodeStampLog
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeStampLog
+        kind: self
+      - id: binary.LittleEndian.Uint64
+        kind: value
+    steps:
+      - bind: p
+        eval: "1"
+      - eval: copy(l.Cluster[:], body[p:])
+      - op: +=
+        set: p
+        value: len(l.Cluster)
+      - set: l.Epoch
+        to: binary.LittleEndian.Uint64
+        value: binary.LittleEndian.Uint64(body[p:])
+      - op: +=
+        set: p
+        value: u64Bytes
+      - eval: copy(l.Predecessor[:], body[p:])
+      - op: +=
+        set: p
+        value: len(l.Predecessor)
+      - set: l.PredecessorEpoch
+        to: binary.LittleEndian.Uint64
+        value: binary.LittleEndian.Uint64(body[p:])
+      - op: +=
+        set: p
+        value: u64Bytes
+      - set: l.KeptIndex
+        to: binary.LittleEndian.Uint64
+        value: binary.LittleEndian.Uint64(body[p:])
+      - op: +=
+        set: p
+        value: u64Bytes
+      - opt:
+          do:
+            - return: p, true
+          when: "!v2"
+      - set: l.AdoptedFrom
+        to: binary.LittleEndian.Uint64
+        value: binary.LittleEndian.Uint64(body[p:])
+      - return: p + u64Bytes, l.AdoptedFrom != 0
+  - of: readStamp
+    participants:
+      - id: caller
+        kind: actor
+      - id: readStamp
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: decodeStamp
+        kind: internal
+    steps:
+      - bind: b, err
+        eval: os.ReadFile(filepath.Join(dir, fileStamp))
+        to: os
+      - opt:
+          do:
+            - return: coreconsensus.StampValue{}, nil
+          when: errors.Is(err, os.ErrNotExist)
+      - opt:
+          do:
+            - return: coreconsensus.StampValue{}, storageFailed("stamp", err)
+          when: err != nil
+      - bind: s, ok
+        eval: decodeStamp(b)
+        to: decodeStamp
+      - opt:
+          do:
+            - return: coreconsensus.StampValue{}, origin(coreconsensus.DataDirMismatch, errs.String("why", "unreadable stamp"))
+          when: "!ok"
+      - return: s, nil
+  - of: writeStamp
+    participants:
+      - id: caller
+        kind: actor
+      - id: writeStamp
+        kind: self
+      - id: writeFileSync
+        kind: internal
+    steps:
+      - return: writeFileSync(filepath.Join(dir, fileStamp), encodeStamp(s))
+        to: writeFileSync
   - of: cause.Error
     steps:
       - return: string(c)
@@ -6969,7 +7032,7 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: dst == nil
+          when: dst == nil || !t.net.admitted(t, to)
       - bind: q
         eval: dst.data
       - opt:
@@ -7010,6 +7073,11 @@ sequences:
             - return: origin(coreconsensus.PeerRejected, errs.String("why", "unreachable"))
               to: origin
           when: dst == nil
+      - opt:
+          do:
+            - return: origin(coreconsensus.PeerRejected, errs.String("why", "not admitted"))
+              to: origin
+          when: "!t.net.admitted(t, to) || !t.net.admitted(dst, t.id)"
       - eval: dst.mu.Lock()
         to: dst.mu.Lock
       - bind: of, in
@@ -7080,10 +7148,8 @@ sequences:
         kind: self
       - id: r.doneOnce.Do
         kind: value
-      - id: t.mu.Lock
-        kind: value
-      - id: t.mu.Unlock
-        kind: value
+      - id: t.deliverFrame
+        kind: internal
     steps:
       - defer: r.doneOnce.Do(func() { close(r.done) })
         to: r.doneOnce.Do
@@ -7109,17 +7175,34 @@ sequences:
                                 - return: ""
                             - comm: f = <-t.ctrl
                             - comm: f = <-t.data
-            - eval: t.mu.Lock()
-              to: t.mu.Lock
-            - bind: d
-              eval: t.deliver
-            - eval: t.mu.Unlock()
-              to: t.mu.Unlock
-            - opt:
-                do:
-                  - eval: "d(coreconsensus.AuthenticatedPeerValue{ID: f.from}, f.frame)"
-                when: d != nil
+            - eval: t.deliverFrame(f)
+              to: t.deliverFrame
           forever: true
+  - of: (*MemoryTransport).deliverFrame
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*MemoryTransport).deliverFrame
+        kind: self
+      - id: t.mu.Lock
+        kind: value
+      - id: t.mu.Unlock
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!t.net.admitted(t, f.from)"
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - bind: d
+        eval: t.deliver
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
+      - opt:
+          do:
+            - eval: "d(coreconsensus.AuthenticatedPeerValue{ID: f.from}, f.frame)"
+          when: d != nil
   - of: (*MemoryTransport).BindJoinReason
     participants:
       - id: caller
@@ -7143,17 +7226,75 @@ sequences:
         kind: actor
       - id: (*MemoryTransport).SetMembership
         kind: self
-      - id: t.mu.Lock
-        kind: value
-      - id: t.mu.Unlock
-        kind: value
+      - id: slices
+        kind: stdlib
     steps:
-      - eval: t.mu.Lock()
-        to: t.mu.Lock
+      - lock:
+          mutex: t.mu
+      - opt:
+          do:
+            - set: t.groups
+              value: map[coreconsensus.GroupID][]coreconsensus.MemberValue{}
+          when: t.groups == nil
+      - alt:
+          - do:
+              - eval: delete(t.groups, group)
+            when: len(admitted) == 0
+          - do:
+              - set: t.groups[group]
+                to: slices
+                value: slices.Clone(admitted)
+            else: true
       - set: t.members
-        value: append(t.members[:0], admitted...)
-      - eval: t.mu.Unlock()
-        to: t.mu.Unlock
+        value: t.members[:0]
+      - loop:
+          do:
+            - set: t.members
+              value: append(t.members, t.groups[g]...)
+          key: _
+          range: slices.Sorted(maps.Keys(t.groups))
+          value: g
+  - of: (*MemoryTransport).releaseJoinAnswer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*MemoryTransport).releaseJoinAnswer
+        kind: self
+      - id: t.SetMembership
+        kind: internal
+    steps:
+      - eval: t.SetMembership(joinGroup, nil)
+        to: t.SetMembership
+  - of: (*MemoryNetwork).admitted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*MemoryNetwork).admitted
+        kind: self
+      - id: n.mu.Lock
+        kind: value
+      - id: n.mu.Unlock
+        kind: value
+      - id: slices
+        kind: stdlib
+    steps:
+      - eval: n.mu.Lock()
+        to: n.mu.Lock
+      - bind: "on"
+        eval: n.admission
+      - eval: n.mu.Unlock()
+        to: n.mu.Unlock
+      - opt:
+          do:
+            - return: "true"
+          when: "!on"
+      - lock:
+          mutex: at.mu
+      - return: |-
+          slices.ContainsFunc(at.members, func(m coreconsensus.MemberValue) bool {
+          		return m.ID == peer && m.SPKI == memSPKI(peer)
+          	})
+        to: slices
   - of: (*MemoryTransport).Join
     participants:
       - id: caller
@@ -7168,6 +7309,10 @@ sequences:
         kind: value
       - id: x.mu.Unlock
         kind: value
+      - id: slices
+        kind: stdlib
+      - id: t.SetMembership
+        kind: internal
       - id: joinRefused
         kind: internal
     steps:
@@ -7219,6 +7364,15 @@ sequences:
                   else: true
             - opt:
                 do:
+                  - eval: x.mu.Lock()
+                    to: x.mu.Lock
+                  - bind: answer
+                    eval: slices.Clone(x.members)
+                    to: slices
+                  - eval: x.mu.Unlock()
+                    to: x.mu.Unlock
+                  - eval: t.SetMembership(joinGroup, answer)
+                    to: t.SetMembership
                   - return: pos, nil
                 when: code == 0
             - set: last
@@ -8818,6 +8972,42 @@ sequences:
         to: n.leadershipChanged
       - eval: n.publish()
         to: n.publish
+  - of: (*Node).auditAppended
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).auditAppended
+        kind: self
+      - id: wire
+        kind: package
+      - id: n.obs.warn
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: e
+              eval: "&rd.Entries[i]"
+            - opt:
+                do:
+                  - continue: true
+                when: e.Kind == coreconsensus.EntryCommand || e.Kind == coreconsensus.EntryNoOp || !e.Kind.Known()
+            - opt:
+                do:
+                  - return: ""
+                when: n.r.Status().Role != coreconsensus.RoleLeader
+            - bind: a, err
+              eval: wire.ParseAdminAt(e.Version, e.Data)
+              to: wire
+            - opt:
+                do:
+                  - continue: true
+                when: err != nil
+            - eval: |-
+                n.obs.warn("consensus: administrative entry appended", lattr("index", e.Position.Index), lattr("kind", uint64(e.Kind)),
+                			lstr("operator", a.Operator), lattr("origin", uint64(a.Origin)), lattr("change", uint64(a.Change)), lattr("target", uint64(a.Target)))
+              to: n.obs.warn
+          key: i
+          range: rd.Entries
   - of: (*Node).stopOnUnsupported
     participants:
       - id: caller
@@ -8844,11 +9034,15 @@ sequences:
         kind: self
       - id: n.cfg.Transport.Send
         kind: value
+      - id: n.obs.warn
+        kind: internal
       - id: n.cfg.Transport.SetMembership
         kind: value
       - id: n.obs.info
         kind: internal
       - id: n.reportNotices
+        kind: internal
+      - id: n.auditAppended
         kind: internal
       - id: n.r.TermAt
         kind: value
@@ -8874,6 +9068,14 @@ sequences:
           value: m
       - opt:
           do:
+            - eval: "n.obs.warn(\"consensus: leader admitted on a member's record\", lattr(\"leader\", uint64(h.ID)), lstr(\"slot\", h.Slot))"
+              to: n.obs.warn
+          init:
+            bind: h
+            eval: rd.LeaderHint
+          when: h.ID != 0
+      - opt:
+          do:
             - eval: n.cfg.Transport.SetMembership(n.cfg.Group, rd.Membership)
               to: n.cfg.Transport.SetMembership
             - eval: "n.obs.info(\"consensus: admitted members changed\", lattr(\"members\", uint64(len(rd.Membership))))"
@@ -8881,6 +9083,8 @@ sequences:
           when: len(rd.Membership) > 0
       - eval: n.reportNotices(rd)
         to: n.reportNotices
+      - eval: n.auditAppended(rd)
+        to: n.auditAppended
       - opt:
           do:
             - bind: q
@@ -12060,6 +12264,8 @@ sequences:
         kind: internal
       - id: checkFenced
         kind: internal
+      - id: d.planAdopted
+        kind: internal
     steps:
       - var:
           name: p
@@ -12102,7 +12308,71 @@ sequences:
             eval: checkFenced(p.old.Voters(), members, opt, stamp.Log.Cluster, newCluster)
             to: checkFenced
           when: err != nil
+      - opt:
+          do:
+            - return: p, err
+          init:
+            bind: err
+            eval: d.planAdopted(&p)
+            to: d.planAdopted
+          when: err != nil
       - return: p, d.audit(opt.Operator, recoverAuditLine(newCluster, &p))
+  - of: DataDir.planAdopted
+    participants:
+      - id: caller
+        kind: actor
+      - id: DataDir.planAdopted
+        kind: self
+      - id: d.d.log.Bounds
+        kind: internal
+      - id: clusterVersionThrough
+        kind: internal
+    steps:
+      - var:
+          name: cluster
+          type: uint32
+      - switch:
+          cases:
+            - case: p.resumed
+              do:
+                - return: nil
+            - case: p.install != nil
+              do:
+                - set: p.adopted, cluster
+                  value: p.kept, p.install.ClusterVersion
+            - default: true
+              do:
+                - bind: committed
+                  eval: p.hard.Commit
+                - opt:
+                    do:
+                      - set: committed
+                        value: first - 1
+                    init:
+                      bind: first, _
+                      eval: d.d.log.Bounds()
+                      to: d.d.log.Bounds
+                    when: first > 0 && first-1 > committed
+                - set: p.adopted
+                  value: min(p.kept, committed)
+                - var:
+                    name: err
+                    type: error
+                - opt:
+                    do:
+                      - return: err
+                    init:
+                      bind: cluster, err
+                      eval: clusterVersionThrough(d.d.log, d.d.snaps, p.kept)
+                      op: =
+                      to: clusterVersionThrough
+                    when: err != nil
+      - opt:
+          do:
+            - set: p.adopted
+              value: "0"
+          when: cluster < raft.Protocol2
+      - return: nil
   - of: DataDir.planKept
     participants:
       - id: caller
@@ -12230,7 +12500,7 @@ sequences:
         value: |-
           coreconsensus.LogIdentityValue{
           		Cluster: newCluster, Epoch: 1, Predecessor: stamp.Log.Cluster,
-          		PredecessorEpoch: stamp.Log.Epoch, KeptIndex: p.kept,
+          		PredecessorEpoch: stamp.Log.Epoch, KeptIndex: p.kept, AdoptedFrom: p.adopted,
           	}
       - opt:
           do:
@@ -12839,7 +13109,7 @@ sequences:
                                 value: a.Membership
                             init:
                               bind: a, err
-                              eval: wire.ParseAdmin(e.Data)
+                              eval: wire.ParseAdminAt(e.Version, e.Data)
                               to: wire
                             when: err == nil
                       when: e.Kind == coreconsensus.EntryMembership
@@ -12848,6 +13118,73 @@ sequences:
                 value: e
           when: last >= first
       - return: m, nil
+  - of: clusterVersionThrough
+    participants:
+      - id: caller
+        kind: actor
+      - id: clusterVersionThrough
+        kind: self
+      - id: snaps.List
+        kind: internal
+      - id: l.Bounds
+        kind: internal
+      - id: l.Entries
+        kind: internal
+      - id: wire
+        kind: package
+    steps:
+      - bind: metas, err
+        eval: snaps.List()
+        to: snaps.List
+      - opt:
+          do:
+            - return: 0, err
+          when: err != nil
+      - var:
+          name: ver
+          type: uint32
+      - leaf: a var of several names, or of no type
+        stmt: var gen, base uint64
+      - opt:
+          do:
+            - set: ver, gen, base
+              value: metas[0].ClusterVersion, metas[0].ClusterGeneration, metas[0].Position.Index
+          when: len(metas) > 0
+      - bind: first, last
+        eval: l.Bounds()
+        to: l.Bounds
+      - bind: lo
+        eval: max(first, base+1)
+      - opt:
+          do:
+            - return: ver, nil
+          when: last < lo || index < lo
+      - bind: es, err
+        eval: l.Entries(lo, min(last, index)+1, int(^uint(0)>>1), nil)
+        to: l.Entries
+      - opt:
+          do:
+            - return: 0, err
+          when: err != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: e.Kind != coreconsensus.EntryClusterVersion
+            - opt:
+                do:
+                  - set: ver, gen
+                    value: a.ClusterVersion, gen+1
+                init:
+                  bind: a, err
+                  eval: wire.ParseAdminAt(e.Version, e.Data)
+                  to: wire
+                when: err == nil && a.Pre.Generation == gen && a.ClusterVersion > ver
+          key: _
+          range: es
+          value: e
+      - return: ver, nil
   - of: RestoreSnapshot
     participants:
       - id: caller
@@ -13132,6 +13469,11 @@ sequences:
           		Cluster: newCluster, Epoch: 1, Predecessor: exp.Log.Cluster,
           		PredecessorEpoch: exp.Log.Epoch, KeptIndex: exp.Position.Index,
           	}
+      - opt:
+          do:
+            - set: meta.Log.AdoptedFrom
+              value: exp.Position.Index
+          when: exp.ClusterVersion >= raft.Protocol2
       - set: meta.Membership
         value: "coreconsensus.MembershipValue{Index: exp.Position.Index, Members: slices.Clone(members), Retired: exp.Membership.Retired}"
       - return: meta
@@ -14469,7 +14811,7 @@ sequences:
         eval: n.lineage()
         to: n.lineage
       - bind: kept
-        eval: l.Predecessor != (coreconsensus.ClusterID{}) && t.Index <= l.KeptIndex
+        eval: l.Predecessor != (coreconsensus.ClusterID{}) && t.Index <= l.KeptIndex && t.Index > l.AdoptedFrom
       - switch:
           cases:
             - case: known && term == t.Term, !known && !kept

@@ -2,11 +2,8 @@ package consensus
 
 import (
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
-	"errors"
 	"fmt"
-	"hash/crc32"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,14 +26,6 @@ const (
 	// markerStopPrefix starts the name of every stop marker, the reason
 	// following it: a start is refused while one applies (D4, R9-05).
 	markerStopPrefix = "STOP-"
-
-	// stampVersion is the first byte of an encoded stamp; a stamp of another
-	// version is unreadable, never guessed at.
-	stampVersion byte = 1
-	// stampFixed is the stamp's length before its slot and its CRC: version
-	// 1, cluster 16, epoch 8, predecessor 16, predecessor epoch 8, kept
-	// index 8, id 8, incarnation 16, state 1, founding 32, slot length 1.
-	stampFixed int = 1 + 16 + 8 + 16 + 8 + 8 + 8 + 16 + 1 + 32 + 1
 )
 
 // DataDirOptions tunes NewDataDirWith: the size of a log segment and the
@@ -197,94 +186,6 @@ func (l *fileLog) release() {
 	l.dd.mu.Lock()
 	l.dd.inUse = false
 	l.dd.mu.Unlock()
-}
-
-// ---- stamp ----
-
-// encodeStamp is the stamp's on-disk form: the fixed fields, the slot
-// prefixed by its length, and a CRC-32C of everything before it.
-func encodeStamp(s coreconsensus.StampValue) []byte {
-	b := []byte{stampVersion}
-	b = append(b, s.Log.Cluster[:]...)
-	b = binary.LittleEndian.AppendUint64(b, s.Log.Epoch)
-	b = append(b, s.Log.Predecessor[:]...)
-	b = binary.LittleEndian.AppendUint64(b, s.Log.PredecessorEpoch)
-	b = binary.LittleEndian.AppendUint64(b, s.Log.KeptIndex)
-	b = binary.LittleEndian.AppendUint64(b, uint64(s.ID))
-	b = append(b, s.Incarnation[:]...)
-	b = append(b, byte(s.State))
-	b = append(b, s.Founding[:]...)
-	b = append(b, byte(len(s.Slot)))
-	b = append(b, s.Slot...)
-	return binary.LittleEndian.AppendUint32(b, crc32.Checksum(b, castagnoli))
-}
-
-// decodeStamp parses encodeStamp's form; ok is false for another version, a
-// short stamp, a CRC that fails, a state this version does not define, or a
-// slot length that disagrees with the bytes left.
-func decodeStamp(b []byte) (coreconsensus.StampValue, bool) {
-	var s coreconsensus.StampValue
-	if len(b) < stampFixed+4 || b[0] != stampVersion {
-		return s, false
-	}
-	body := b[:len(b)-4]
-	if crc32.Checksum(body, castagnoli) != binary.LittleEndian.Uint32(b[len(b)-4:]) {
-		return s, false
-	}
-	p := 1
-	copy(s.Log.Cluster[:], body[p:])
-	p += len(s.Log.Cluster)
-	s.Log.Epoch = binary.LittleEndian.Uint64(body[p:])
-	p += u64Bytes
-	copy(s.Log.Predecessor[:], body[p:])
-	p += len(s.Log.Predecessor)
-	s.Log.PredecessorEpoch = binary.LittleEndian.Uint64(body[p:])
-	p += u64Bytes
-	s.Log.KeptIndex = binary.LittleEndian.Uint64(body[p:])
-	p += u64Bytes
-	s.ID = coreconsensus.NodeID(binary.LittleEndian.Uint64(body[p:]))
-	p += u64Bytes
-	copy(s.Incarnation[:], body[p:])
-	p += len(s.Incarnation)
-	s.State = coreconsensus.StampState(body[p])
-	if s.State < coreconsensus.StampJoining || s.State > coreconsensus.StampMember {
-		// A state this version does not define is a corrupt or a newer
-		// stamp: unreadable, never a directory Bootstrap may found.
-		return coreconsensus.StampValue{}, false
-	}
-	p++
-	copy(s.Founding[:], body[p:])
-	p += len(s.Founding)
-	n := int(body[p])
-	p++
-	if p+n != len(body) {
-		return s, false
-	}
-	s.Slot = string(body[p:])
-	return s, true
-}
-
-// readStamp reads the stamp of dir: none yet is the zero stamp, a read that
-// fails is a STORAGE_FAILED, and a stamp that cannot be decoded is
-// DATA_DIR_MISMATCH, since nothing in it can be trusted to name this node.
-func readStamp(dir string) (coreconsensus.StampValue, error) {
-	b, err := os.ReadFile(filepath.Join(dir, fileStamp))
-	if errors.Is(err, os.ErrNotExist) {
-		return coreconsensus.StampValue{}, nil
-	}
-	if err != nil {
-		return coreconsensus.StampValue{}, storageFailed("stamp", err)
-	}
-	s, ok := decodeStamp(b)
-	if !ok {
-		return coreconsensus.StampValue{}, origin(coreconsensus.DataDirMismatch, errs.String("why", "unreadable stamp"))
-	}
-	return s, nil
-}
-
-// writeStamp replaces the stamp of dir atomically and durably.
-func writeStamp(dir string, s coreconsensus.StampValue) error {
-	return writeFileSync(filepath.Join(dir, fileStamp), encodeStamp(s))
 }
 
 // ---- stop markers (D4, R7-14, R8-05, R9-05) ----

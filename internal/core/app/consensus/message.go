@@ -33,6 +33,14 @@ const (
 	MsgForwardAdmin MessageKind = 0x0A
 	// MsgForwardAdminResp answers a MsgForwardAdmin.
 	MsgForwardAdminResp MessageKind = 0x0B
+	// MsgLeaderRecord, of protocol version 2, tells a member that campaigns
+	// behind the sender's commit the member record of the leader the sender
+	// follows, read from the sender's committed configuration: a voter that
+	// was down while that leader was admitted pins it provisionally, for
+	// replication only, and learns its configuration from it (ADR 0152 D4,
+	// #542). Its one entry's data is that record, as AppendMembership
+	// encodes a configuration of one member.
+	MsgLeaderRecord MessageKind = 0x0C
 	// MsgApp appends entries after (LogTerm, Index).
 	MsgApp MessageKind = 0x41
 	// MsgAppResp acknowledges, or refuses, a MsgApp.
@@ -61,14 +69,20 @@ const (
 	// acknowledged entries through TruncateAndStaySilent: the leader lowers
 	// its match to the node's log, the one exception to "match only grows".
 	FlagTruncated
+	// FlagProtocol2 marks a frame from a node that speaks protocol version
+	// 2. It is the announcement D18 asks for: a node of protocol 1 tests
+	// the bits it names only and ignores it, and a leader refuses to raise
+	// the cluster version to 2 while a member's last frame of the term
+	// lacks it.
+	FlagProtocol2
 )
 
 // Lane returns the connection the kind belongs on.
 func (k MessageKind) Lane() FrameLane { return FrameLane(k >> 6) }
 
-// Known reports whether protocol version 1 defines the kind.
+// Known reports whether protocol version 1 or 2 defines the kind.
 func (k MessageKind) Known() bool {
-	return (k >= MsgPreVote && k <= MsgForwardAdminResp) || (k >= MsgApp && k <= MsgForwardResp)
+	return (k >= MsgPreVote && k <= MsgLeaderRecord) || (k >= MsgApp && k <= MsgForwardResp)
 }
 
 // GroupID names a consensus group. v1 runs exactly one group, 1, and every

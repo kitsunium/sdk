@@ -26,6 +26,12 @@ type MemoryNetwork struct {
 	mu    sync.Mutex
 	nodes map[coreconsensus.NodeID]*MemoryTransport
 	cut   map[[2]coreconsensus.NodeID]bool
+	// admission, set by the package's own tests before any node starts,
+	// models the TCP transport's: a frame or a snapshot is delivered only
+	// between nodes each of which admits the other, under its own
+	// configuration, by ID and pinned key (D4). Off, as the double has
+	// always run, every node reaches every other (#542).
+	admission bool
 }
 
 // NewMemoryNetwork returns an empty network.
@@ -105,6 +111,8 @@ type MemoryTransport struct {
 	ctrl    chan memFrame
 	data    chan memFrame
 	cur     *memRun
+	// groups are the admitted members per group, members their union.
+	groups  map[coreconsensus.GroupID][]coreconsensus.MemberValue
 	members []coreconsensus.MemberValue
 }
 
@@ -126,7 +134,7 @@ func (r *memRun) end() { r.once.Do(func() { close(r.stop) }) }
 // full.
 func (t *MemoryTransport) Send(to coreconsensus.NodeID, frame []byte) {
 	dst := t.net.route(t.id, to)
-	if dst == nil {
+	if dst == nil || !t.net.admitted(t, to) {
 		return
 	}
 	q := dst.data
@@ -145,6 +153,9 @@ func (t *MemoryTransport) Stream(ctx context.Context, to coreconsensus.NodeID, o
 	dst := t.net.route(t.id, to)
 	if dst == nil {
 		return origin(coreconsensus.PeerRejected, errs.String("why", "unreachable"))
+	}
+	if !t.net.admitted(t, to) || !t.net.admitted(dst, t.id) {
+		return origin(coreconsensus.PeerRejected, errs.String("why", "not admitted"))
 	}
 	dst.mu.Lock()
 	of, in := dst.offer, dst.install
@@ -212,12 +223,23 @@ func (t *MemoryTransport) run(r *memRun) {
 			case f = <-t.data:
 			}
 		}
-		t.mu.Lock()
-		d := t.deliver
-		t.mu.Unlock()
-		if d != nil {
-			d(coreconsensus.AuthenticatedPeerValue{ID: f.from}, f.frame)
-		}
+		t.deliverFrame(f)
+	}
+}
+
+// deliverFrame hands one frame to the bound deliver callback, unless the
+// admission model is on and this node does not admit its sender: the TCP
+// transport closes the connection of a key it does not admit, and the
+// frame never reaches the node.
+func (t *MemoryTransport) deliverFrame(f memFrame) {
+	if !t.net.admitted(t, f.from) {
+		return
+	}
+	t.mu.Lock()
+	d := t.deliver
+	t.mu.Unlock()
+	if d != nil {
+		d(coreconsensus.AuthenticatedPeerValue{ID: f.from}, f.frame)
 	}
 }
 
@@ -228,11 +250,45 @@ func (t *MemoryTransport) BindJoinReason(_ coreconsensus.GroupID, join func(cont
 	t.mu.Unlock()
 }
 
-// SetMembership implements Transport.
-func (t *MemoryTransport) SetMembership(_ coreconsensus.GroupID, admitted []coreconsensus.MemberValue) {
+// SetMembership implements Transport: the admitted members are the union
+// over the groups, as the TCP transport computes them.
+func (t *MemoryTransport) SetMembership(group coreconsensus.GroupID, admitted []coreconsensus.MemberValue) {
 	t.mu.Lock()
-	t.members = append(t.members[:0], admitted...)
-	t.mu.Unlock()
+	defer t.mu.Unlock()
+	if t.groups == nil {
+		t.groups = map[coreconsensus.GroupID][]coreconsensus.MemberValue{}
+	}
+	if len(admitted) == 0 {
+		delete(t.groups, group)
+	} else {
+		t.groups[group] = slices.Clone(admitted)
+	}
+	t.members = t.members[:0]
+	for _, g := range slices.Sorted(maps.Keys(t.groups)) {
+		t.members = append(t.members, t.groups[g]...)
+	}
+}
+
+// releaseJoinAnswer drops the JOIN answer's group once the node is
+// admitted, as the TCP transport does (#552).
+func (t *MemoryTransport) releaseJoinAnswer() {
+	t.SetMembership(joinGroup, nil)
+}
+
+// admitted reports whether at admits peer: always without the admission
+// model, else when one of its admitted members is peer under peer's key.
+func (n *MemoryNetwork) admitted(at *MemoryTransport, peer coreconsensus.NodeID) bool {
+	n.mu.Lock()
+	on := n.admission
+	n.mu.Unlock()
+	if !on {
+		return true
+	}
+	at.mu.Lock()
+	defer at.mu.Unlock()
+	return slices.ContainsFunc(at.members, func(m coreconsensus.MemberValue) bool {
+		return m.ID == peer && m.SPKI == memSPKI(peer)
+	})
 }
 
 // Join implements Joiner over the network, as the TCP transport does.
@@ -261,6 +317,13 @@ func (t *MemoryTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig
 			pos, code = j(ctx, peer, req)
 		}
 		if code == 0 {
+			// The JOIN answer carries the members the target admits, the
+			// target included, and the joiner admits them apart from its
+			// engine's configuration until it is admitted itself (#552).
+			x.mu.Lock()
+			answer := slices.Clone(x.members)
+			x.mu.Unlock()
+			t.SetMembership(joinGroup, answer)
 			return pos, nil
 		}
 		last = joinRefused(code, reason)

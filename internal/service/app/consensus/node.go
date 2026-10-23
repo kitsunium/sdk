@@ -1111,6 +1111,29 @@ func (n *Node) handleReady() {
 	n.publish()
 }
 
+// auditAppended logs at Warn every engine entry this node appends as
+// leader, with the origin the leader recorded in it: the operation is
+// traced on the node that decided it, whichever member submitted it (ADR
+// 0152 D8). Before the cluster version is 2 the entry carries no origin,
+// and the line names 0 (#561).
+func (n *Node) auditAppended(rd *raft.ReadyValue) {
+	for i := range rd.Entries {
+		e := &rd.Entries[i]
+		if e.Kind == coreconsensus.EntryCommand || e.Kind == coreconsensus.EntryNoOp || !e.Kind.Known() {
+			continue
+		}
+		if n.r.Status().Role != coreconsensus.RoleLeader {
+			return
+		}
+		a, err := wire.ParseAdminAt(e.Version, e.Data)
+		if err != nil {
+			continue
+		}
+		n.obs.warn("consensus: administrative entry appended", lattr("index", e.Position.Index), lattr("kind", uint64(e.Kind)),
+			lstr("operator", a.Operator), lattr("origin", uint64(a.Origin)), lattr("change", uint64(a.Change)), lattr("target", uint64(a.Target)))
+	}
+}
+
 // stopOnUnsupported stops the node with VERSION_UNSUPPORTED when a Ready
 // names an entry whose kind this version does not know, and reports whether
 // it did; that Ready is then not carried out at all, and handleReady
@@ -1131,11 +1154,17 @@ func (n *Node) handleOne(rd *raft.ReadyValue) {
 	for _, m := range rd.Messages {
 		n.cfg.Transport.Send(m.To, wire.AppendMessage(nil, &m))
 	}
+	if h := rd.LeaderHint; h.ID != 0 {
+		// A member vouched for a leader this node's configuration does not
+		// list: admitted for its appends and heartbeats only (D4, #542).
+		n.obs.warn("consensus: leader admitted on a member's record", lattr("leader", uint64(h.ID)), lstr("slot", h.Slot))
+	}
 	if len(rd.Membership) > 0 {
 		n.cfg.Transport.SetMembership(n.cfg.Group, rd.Membership)
 		n.obs.info("consensus: admitted members changed", lattr("members", uint64(len(rd.Membership))))
 	}
 	n.reportNotices(rd)
+	n.auditAppended(rd)
 	if rd.NeedsWrite() {
 		q := storeReq{rd: *rd}
 		if rd.Compact != 0 {

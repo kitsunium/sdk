@@ -411,15 +411,17 @@ func (n *Node) WaitApplied(ctx context.Context, t coreconsensus.TokenValue) erro
 // kept there may be of another term than the write the old cluster
 // committed and acknowledged at that index. That write is lost, and
 // WaitApplied reported it applied (#509). Where the term cannot be read any
-// more, a token of the current history is trusted by Log Matching, one of
-// the predecessor's is not: the kept range may hold such a suffix.
+// more, a token of the current history is trusted by Log Matching, and so
+// is one of the predecessor's at or below the index the predecessor had
+// committed there (AdoptedFrom, #509 phase 2); one in the adopted range
+// above it is not: that range may hold such a suffix.
 func (n *Node) appliedAs(t coreconsensus.TokenValue) error {
 	term, known, ok := n.appliedTermAt(t.Index)
 	if !ok {
 		return n.stoppedErr()
 	}
 	l := n.lineage()
-	kept := l.Predecessor != (coreconsensus.ClusterID{}) && t.Index <= l.KeptIndex
+	kept := l.Predecessor != (coreconsensus.ClusterID{}) && t.Index <= l.KeptIndex && t.Index > l.AdoptedFrom
 	switch {
 	case known && term == t.Term, !known && !kept:
 		return nil

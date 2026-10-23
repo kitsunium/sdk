@@ -108,6 +108,15 @@ const (
 	// mutMatchPastLastIndex takes an acknowledgement past the leader's last
 	// index as the follower's match (#546).
 	mutMatchPastLastIndex
+	// mutRaiseUnannounced raises the cluster version while a member does not
+	// announce it (D18, lot S3).
+	mutRaiseUnannounced
+	// mutOriginAsWritten keeps the admin payload the proposer wrote, with
+	// no origin the leader authenticated (#561).
+	mutOriginAsWritten
+	// mutHintAnyKind accepts every kind of message from a leader admitted
+	// by a leader record alone, a vote included (#542).
+	mutHintAnyKind
 )
 
 // mutated reports whether a test switched mutation m on; it is false in every

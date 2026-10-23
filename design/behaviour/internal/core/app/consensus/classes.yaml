@@ -114,6 +114,17 @@ constants:
         name: MsgForwardAdminResp
         type: MessageKind
         value: "0x0B"
+      - doc: |-
+          MsgLeaderRecord, of protocol version 2, tells a member that campaigns
+          behind the sender's commit the member record of the leader the sender
+          follows, read from the sender's committed configuration: a voter that
+          was down while that leader was admitted pins it provisionally, for
+          replication only, and learns its configuration from it (ADR 0152 D4,
+          #542). Its one entry's data is that record, as AppendMembership
+          encodes a configuration of one member.
+        name: MsgLeaderRecord
+        type: MessageKind
+        value: "0x0C"
       - doc: MsgApp appends entries after (LogTerm, Index).
         name: MsgApp
         type: MessageKind
@@ -153,6 +164,13 @@ constants:
           acknowledged entries through TruncateAndStaySilent: the leader lowers
           its match to the node's log, the one exception to "match only grows".
         name: FlagTruncated
+      - doc: |-
+          FlagProtocol2 marks a frame from a node that speaks protocol version
+          2. It is the announcement D18 asks for: a node of protocol 1 tests
+          the bits it names only and ignores it, and a leader refuses to raise
+          the cluster version to 2 while a member's last frame of the term
+          lacks it.
+        name: FlagProtocol2
     name: FlagTransfer
   - doc: The states of a stamp.
     grouped: true
@@ -398,6 +416,20 @@ types:
           predecessor's token: one admitted after the Recover learns it from the
           snapshot it installs, never from an append.
         name: KeptIndex
+        type: uint64
+      - doc: |-
+          AdoptedFrom is the last index of the kept range the predecessor had
+          committed when Recover read it: the commit the survivor persisted,
+          or the snapshot a restore started from. An entry at or below it is
+          the one every node of the predecessor holds (Log Matching), so a
+          predecessor's token at or below it is trusted by its index once its
+          term can no longer be read; the adopted range above it, up to
+          KeptIndex, is not. 0 records nothing, and nothing is trusted that
+          way. It is recorded only in a cluster at protocol version 2, in the
+          stamp of the node Recover or RestoreSnapshot ran on: a snapshot does
+          not carry it, so a node that learns the lineage from one trusts
+          nothing that way (#509).
+        name: AdoptedFrom
         type: uint64
     kind: struct
     methods:

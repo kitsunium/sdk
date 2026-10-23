@@ -30,8 +30,7 @@ func FuzzParseMessage(f *testing.F) {
 
 // FuzzParseSnapshotMeta: the snapshot metadata decoder never panics and
 // round-trips what it accepts, in the version it was written in: one value
-// has one encoding per version, and version 2, read and not yet written,
-// is the encoding the release that writes it produces (#546).
+// has one encoding per version (#546).
 func FuzzParseSnapshotMeta(f *testing.F) {
 	m := &coreconsensus.SnapshotMetaValue{ID: "1-2", Version: 1, Position: coreconsensus.PositionValue{Term: 2, Index: 1}, Codec: "flate"}
 	f.Add(wire.AppendSnapshotMeta(nil, m))
@@ -41,7 +40,7 @@ func FuzzParseSnapshotMeta(f *testing.F) {
 		if err := wire.ParseSnapshotMeta(b, &out); err != nil {
 			return
 		}
-		again := wire.AppendSnapshotMeta(nil, &out)
+		again := wire.AppendSnapshotMetaV1ForTest(nil, &out)
 		if b[0] == 2 {
 			again = wire.AppendSnapshotMetaV2ForTest(nil, &out)
 		}
@@ -51,14 +50,18 @@ func FuzzParseSnapshotMeta(f *testing.F) {
 	})
 }
 
-// FuzzParseAdmin: the admin payload decoder never panics. A refusal is the
-// expected outcome for most inputs and carries nothing to assert; the
-// property under test is that the call returns at all.
+// FuzzParseAdmin: the admin payload decoder never panics, in either
+// payload version. A refusal is the expected outcome for most inputs and
+// carries nothing to assert; the property under test is that the call
+// returns at all.
 func FuzzParseAdmin(f *testing.F) {
 	f.Add(wire.AppendAdmin(nil, &wire.AdminValue{Operator: "op", Change: wire.ChangeRemove, Target: 9}))
+	f.Add(wire.AppendAdminAt(nil, wire.AdminVersion2, &wire.AdminValue{Operator: "op", Change: wire.ChangeRemove, Target: 9, Origin: 4}))
 	f.Fuzz(func(_ *testing.T, b []byte) {
-		if _, err := wire.ParseAdmin(b); err != nil {
-			return
+		for _, v := range []uint32{0, wire.AdminVersion2} {
+			if _, err := wire.ParseAdminAt(v, b); err != nil {
+				continue
+			}
 		}
 	})
 }

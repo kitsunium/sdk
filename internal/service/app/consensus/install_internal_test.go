@@ -183,6 +183,12 @@ func TestAnOfferOfAnUnknownSnapshotVersionStopsTheNode(t *testing.T) {
 	c := newCluster(t, 3, 0)
 	l := c.settledLeader(5 * time.Second)
 	f := c.otherThan(l)
+	// The leader commits with two of the three nodes: f may not have heard
+	// of it yet, and a node refuses NOT_LEADER an offer from another node
+	// than the leader it knows.
+	waitFor(t, "the follower knows the leader", func() bool {
+		return f.node.Status().Leader == l.id
+	})
 	st := f.node.Status()
 	id := fmt.Sprintf("%020d-%020d", st.Commit+100, st.Term)
 	acc := f.node.offer(coreconsensus.AuthenticatedPeerValue{ID: l.id}, coreconsensus.InstallOfferValue{

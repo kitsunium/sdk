@@ -351,6 +351,18 @@ packages:
         type: MessageKind
         value: "0x0B"
       - blockDoc: The message kinds of protocol version 1.
+        doc: |-
+          MsgLeaderRecord, of protocol version 2, tells a member that campaigns
+          behind the sender's commit the member record of the leader the sender
+          follows, read from the sender's committed configuration: a voter that
+          was down while that leader was admitted pins it provisionally, for
+          replication only, and learns its configuration from it (ADR 0152 D4,
+          #542). Its one entry's data is that record, as AppendMembership
+          encodes a configuration of one member.
+        name: MsgLeaderRecord
+        type: MessageKind
+        value: "0x0C"
+      - blockDoc: The message kinds of protocol version 1.
         doc: MsgApp appends entries after (LogTerm, Index).
         name: MsgApp
         type: MessageKind
@@ -399,6 +411,16 @@ packages:
         name: FlagTruncated
         type: MessageFlags
         value: "8"
+      - blockDoc: The flags.
+        doc: |-
+          FlagProtocol2 marks a frame from a node that speaks protocol version
+          2. It is the announcement D18 asks for: a node of protocol 1 tests
+          the bits it names only and ignores it, and a leader refuses to raise
+          the cluster version to 2 while a member's last frame of the term
+          lacks it.
+        name: FlagProtocol2
+        type: MessageFlags
+        value: "16"
       - blockDoc: The states of a stamp.
         doc: |-
           StampJoining is a directory Init prepared: it may join as an empty
@@ -1417,6 +1439,20 @@ packages:
                 snapshot it installs, never from an append.
               name: KeptIndex
               type: uint64
+            - doc: |-
+                AdoptedFrom is the last index of the kept range the predecessor had
+                committed when Recover read it: the commit the survivor persisted,
+                or the snapshot a restore started from. An entry at or below it is
+                the one every node of the predecessor holds (Log Matching), so a
+                predecessor's token at or below it is trusted by its index once its
+                term can no longer be read; the adopted range above it, up to
+                KeptIndex, is not. 0 records nothing, and nothing is trusted that
+                way. It is recorded only in a cluster at protocol version 2, in the
+                stamp of the node Recover or RestoreSnapshot ran on: a snapshot does
+                not carry it, so a node that learns the lineage from one trusts
+                nothing that way (#509).
+              name: AdoptedFrom
+              type: uint64
       - doc: |-
           TokenValue is a lineage-scoped position: the cluster, the log epoch, the term and
           the index. It is comparable, and its encoding is fixed at 41 bytes: a version
@@ -1571,7 +1607,7 @@ packages:
             out:
               - type: FrameLane
             recv: value
-          - doc: Known reports whether protocol version 1 defines the kind.
+          - doc: Known reports whether protocol version 1 or 2 defines the kind.
             name: Known
             out:
               - type: bool
@@ -3080,9 +3116,11 @@ packages:
                 type: func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code, string)
             name: BindJoinReason
             recv: pointer
-          - doc: SetMembership implements Transport.
+          - doc: |-
+              SetMembership implements Transport: the admitted members are the union
+              over the groups, as the TCP transport computes them.
             in:
-              - name: _
+              - name: group
                 type: coreconsensus.GroupID
               - name: admitted
                 type: "[]coreconsensus.MemberValue"
@@ -3715,9 +3753,18 @@ packages:
       - doc: |-
           ProtocolMax is the highest protocol version this engine speaks: a cluster
           version above it is refused, and stops a node that finds it committed.
+          Version 2 adds the snapshot metadata's checksum, the admin payload's
+          Origin and the log identity's AdoptedFrom, each written only once the
+          committed cluster version is 2 (lot S3).
         name: ProtocolMax
         type: uint32
-        value: "1"
+        value: "2"
+      - doc: |-
+          Protocol2 is the protocol version whose formats a node writes once the
+          cluster version is raised to it.
+        name: Protocol2
+        type: uint32
+        value: "2"
     doc: |-
       Package raft is the consensus engine's step function (ADR 0152 D15): a
       value with no goroutine, no I/O and no clock. Every decision of the
@@ -3981,6 +4028,11 @@ packages:
             - doc: Membership is set when the admitted set changed.
               name: Membership
               type: "[]core.MemberValue"
+            - doc: |-
+                LeaderHint is the leader a member vouched for in a MsgLeaderRecord,
+                admitted provisionally in Membership, for the driver to log (#542).
+              name: LeaderHint
+              type: core.MemberValue
             - doc: |-
                 Unsupported names an entry whose kind this version does not know:
                 the driver stops the node with VERSION_UNSUPPORTED.
@@ -4385,6 +4437,13 @@ packages:
         name: ChangeForced
         type: uint8
         value: "7"
+      - doc: |-
+          AdminVersion2 is the payload version of an engine entry whose admin
+          carries Origin. A leader writes it once the committed cluster version is
+          2, never before: a node of protocol 1 reads version 0 only (D18, #561).
+        name: AdminVersion2
+        type: uint32
+        value: "2"
     doc: |-
       Package wire holds the consensus domain's hand-written fixed layouts: the
       frame of a Message, the 41-byte Token, SnapshotMeta, Membership and the
@@ -4393,7 +4452,9 @@ packages:
       different format strings would write different bytes for one entry, which
       is a fork.
     functions:
-      - doc: AppendAdmin appends the encoding of an engine entry's payload.
+      - doc: |-
+          AppendAdmin appends the encoding of an engine entry's payload of version
+          0, which carries no Origin.
         in:
           - name: dst
             type: "[]byte"
@@ -4402,11 +4463,38 @@ packages:
         name: AppendAdmin
         out:
           - type: "[]byte"
-      - doc: ParseAdmin decodes an engine entry's payload.
+      - doc: |-
+          AppendAdminAt appends the encoding of an engine entry's payload of
+          version v: version 0's fields, then Origin from AdminVersion2. Another
+          version is not written: the encoding of version 0 is returned for it.
+        in:
+          - name: dst
+            type: "[]byte"
+          - name: v
+            type: uint32
+          - name: a
+            type: "*AdminValue"
+        name: AppendAdminAt
+        out:
+          - type: "[]byte"
+      - doc: ParseAdmin decodes an engine entry's payload of version 0.
         in:
           - name: b
             type: "[]byte"
         name: ParseAdmin
+        out:
+          - type: AdminValue
+          - type: error
+      - doc: |-
+          ParseAdminAt decodes an engine entry's payload of version v, which the
+          entry's Version names. A version this node does not know is
+          VERSION_UNSUPPORTED, never read as another one.
+        in:
+          - name: v
+            type: uint32
+          - name: b
+            type: "[]byte"
+        name: ParseAdminAt
         out:
           - type: AdminValue
           - type: error
@@ -4483,8 +4571,12 @@ packages:
           - type: coreconsensus.TokenValue
           - type: error
       - doc: |-
-          AppendSnapshotMeta appends the versioned encoding of m, in version 1:
-          this release reads version 2 and never writes it.
+          AppendSnapshotMeta appends the versioned encoding of m. The version
+          follows the cluster version m carries: a meta of a cluster below protocol
+          version 2 is written in version 1, and one of a cluster at 2 or above in
+          version 2, checksummed, which the release before already reads (D18,
+          #546). Only a cluster whose every member announced protocol 2 reaches
+          that version.
         in:
           - name: dst
             type: "[]byte"
@@ -4573,6 +4665,13 @@ packages:
             - doc: ClusterVersion is the version an EntryClusterVersion raises to.
               name: ClusterVersion
               type: uint32
+            - doc: |-
+                Origin is the authenticated node the leader received the operation
+                from: the member that forwarded it, or the leader itself. The leader
+                writes it, overwriting whatever the proposer wrote, and only in an
+                entry of payload version AdminVersion2 (ADR 0152 D8, #561).
+              name: Origin
+              type: coreconsensus.NodeID
   - doc: |-
       Package consensus is the public facade of the SDK's consensus domain
       (ADR 0152): agreement of several machines on the order of their writes.
@@ -5095,6 +5194,10 @@ packages:
             reexport: coreconsensus.FlagTruncated
             type: coreconsensus.MessageFlags
             value: "8"
+          - name: FlagProtocol2
+            reexport: coreconsensus.FlagProtocol2
+            type: coreconsensus.MessageFlags
+            value: "16"
           - name: MsgForward
             reexport: coreconsensus.MsgForward
             type: coreconsensus.MessageKind
@@ -5155,6 +5258,10 @@ packages:
             reexport: coreconsensus.MsgForwardAdminResp
             type: coreconsensus.MessageKind
             value: "0x0B"
+          - name: MsgLeaderRecord
+            reexport: coreconsensus.MsgLeaderRecord
+            type: coreconsensus.MessageKind
+            value: "0x0C"
         doc: The read modes and durabilities.
       - func:
           doc: |-

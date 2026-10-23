@@ -45,11 +45,43 @@ sequences:
         value: AppendTimingContract(dst, a.Contract)
       - return: binary.LittleEndian.AppendUint32(dst, a.ClusterVersion)
         to: binary.LittleEndian.AppendUint32
+  - of: AppendAdminAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendAdminAt
+        kind: self
+      - id: AppendAdmin
+        kind: internal
+      - id: binary.LittleEndian.AppendUint64
+        kind: value
+    steps:
+      - set: dst
+        to: AppendAdmin
+        value: AppendAdmin(dst, a)
+      - opt:
+          do:
+            - set: dst
+              to: binary.LittleEndian.AppendUint64
+              value: binary.LittleEndian.AppendUint64(dst, uint64(a.Origin))
+          when: v == AdminVersion2
+      - return: dst
   - of: ParseAdmin
     participants:
       - id: caller
         kind: actor
       - id: ParseAdmin
+        kind: self
+      - id: ParseAdminAt
+        kind: internal
+    steps:
+      - return: ParseAdminAt(0, b)
+        to: ParseAdminAt
+  - of: ParseAdminAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: ParseAdminAt
         kind: self
       - id: r.str
         kind: internal
@@ -70,6 +102,12 @@ sequences:
       - id: frameInvalid
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: |-
+                AdminValue{}, errs.Wrap(coreconsensus.VersionUnsupported, errs.WrapParams{},
+                			errs.Int("admin_version", int(v)))
+          when: v != 0 && v != AdminVersion2
       - bind: r
         eval: "reader{b: b}"
       - var:
@@ -102,6 +140,12 @@ sequences:
       - set: a.ClusterVersion
         to: r.u32
         value: r.u32()
+      - opt:
+          do:
+            - set: a.Origin
+              to: coreconsensus
+              value: coreconsensus.NodeID(r.u64())
+          when: v == AdminVersion2
       - opt:
           do:
             - set: r.err
@@ -493,6 +537,22 @@ sequences:
         kind: actor
       - id: AppendSnapshotMeta
         kind: self
+      - id: appendMeta
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: appendMeta(dst, metaVersion1, m)
+              to: appendMeta
+          when: m.ClusterVersion < metaProtocol2
+      - return: appendMeta(dst, metaVersion2, m)
+        to: appendMeta
+  - of: appendMeta
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendMeta
+        kind: self
       - id: appendString
         kind: internal
       - id: binary.LittleEndian.AppendUint64
@@ -508,8 +568,10 @@ sequences:
       - id: appendBytes
         kind: internal
     steps:
+      - bind: start
+        eval: len(dst)
       - set: dst
-        value: append(dst, metaVersion1)
+        value: append(dst, v)
       - set: dst
         to: appendString
         value: appendString(dst, m.ID)
@@ -556,8 +618,16 @@ sequences:
       - set: dst
         to: binary.LittleEndian.AppendUint64
         value: binary.LittleEndian.AppendUint64(dst, uint64(m.NoSpace))
-      - return: appendBytes(dst, m.Reserved)
+      - set: dst
         to: appendBytes
+        value: appendBytes(dst, m.Reserved)
+      - opt:
+          do:
+            - set: dst
+              to: binary.LittleEndian.AppendUint32
+              value: binary.LittleEndian.AppendUint32(dst, crc32.Checksum(dst[start:], castagnoli))
+          when: v == metaVersion2
+      - return: dst
   - of: ParseSnapshotMeta
     participants:
       - id: caller
