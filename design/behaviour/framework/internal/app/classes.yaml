@@ -999,22 +999,6 @@ constants:
         type: OTLPFullPolicy
         value: "\"block\""
     name: OTLPDropOldest
-  - doc: |-
-      The export's queue policy, as otlpengine.openQueue opens its queues: a
-      lease above two attempts, deliveries no outage reaches, a batch at most
-      the export's byte bound, up to 64 MiB.
-    grouped: true
-    items:
-      - name: otlpLeaseMargin
-        type: time.Duration
-        value: 30 * time.Second
-      - name: otlpMaxDeliveries
-        type: int
-        value: 1 << 30
-      - name: otlpMaxQueueMessage
-        type: int64
-        value: 64 << 20
-    name: otlpLeaseMargin
   - doc: The places a queue of the export lies in, as the runtime state says them.
     grouped: true
     items:
@@ -3686,7 +3670,6 @@ files:
       - discardHistogram.RecordDuration
     name: otlp_meter.go
   - decls:
-      - otlpLeaseMargin
       - otlpQueuePolicy
       - (*App).migrateOTLP
       - (*App).migrateOTLPSignal
@@ -6488,11 +6471,17 @@ functions:
     params: sup *lifecycle.Supervisor
     results: error
   - doc: |-
-      stoppedBy reports whether err, a delivery's handler's, is its context
-      ending because its consumer stops — the drain over, the app stopping —:
-      the message is handed back uncounted, and it is no failure.
+      stoppedBy reports whether err, a delivery's handler's failure, ended it
+      while its app stops: the SDK's consumer hands back uncounted whatever
+      failed once it heard the stop — not only the drain's end, but a key's
+      lease the stop outlasted, or any other refusal —, so it is no failure. A
+      refusal no retry can help is the one exception: the consumer dead-letters
+      it even then. The app's stop is told before any consumer is, so no
+      failure the consumer hands back is taken for its message's (issue #586:
+      a key's lease lost before the drain ended was, and the key of a dispatch
+      still in its queue given back).
     name: stoppedBy
-    params: ctx context.Context, a *App, err error
+    params: a *App, err error
     results: bool
   - name: RetryIn
     params: d time.Duration, cause error
@@ -7768,7 +7757,11 @@ functions:
   - name: Meter
     params: ctx context.Context
     results: metrics.FullMeter
-  - doc: otlpQueuePolicy is the policy the export opens its queues under.
+  - doc: |-
+      otlpQueuePolicy is the policy the export opens its queues under, as the
+      export's subsystem states it (plug.OTLPDriverConfig.Policy): the core
+      keeps no copy of its bounds. The command runs only where the subsystem is
+      linked — an app that declares the export without it does not start.
     name: otlpQueuePolicy
     params: cfg *plug.OTLPConfig
     results: plug.QueuePolicyValue
@@ -14108,10 +14101,10 @@ types:
         recv: l *loopState
       - doc: |-
           ended ends a delivery's span sp, begun at started, and reports the run to
-          the loop: a handler the stop's drain cut short is no failure — its span
-          says it was handed back, and the loop counts no error (stoppedBy).
+          the loop: a handler the stop cut short is no failure — its span says it
+          was handed back, and the loop counts no error (stoppedBy).
         name: ended
-        params: ctx context.Context, a *App, sp *span, started time.Time, err error
+        params: a *App, sp *span, started time.Time, err error
         recv: l *loopState
       - doc: |-
           begin marks a run of the loop as started, for wake — interval, topic,
@@ -15144,12 +15137,13 @@ types:
           settled reports whether a handling that ended with err, on its
           deliveries-th delivery, leaves its dispatch out of the queue — handled,
           refused for good, or out of attempts —, so that its key can be given
-          back. A handling the app's stop cut short leaves it in, whatever its
-          delivery: its queue hands it back uncounted (stoppedBy), and it is
-          handled again at the next start — its key given back then would let a
-          dispatch with the same key be queued beside it.
+          back. A handling that failed once the app began to stop leaves it in,
+          whatever its delivery and whatever failed — the drain's end, or the key's
+          lease lost before it —: its queue hands it back uncounted (stoppedBy), and
+          it is handled again at the next start — its key given back then would let
+          a dispatch with the same key be queued beside it.
         name: settled
-        params: ctx context.Context, a *App, deliveries int, err error
+        params: a *App, deliveries int, err error
         recv: c *Command[C, R]
         results: bool
       - doc: |-

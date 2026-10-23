@@ -8205,7 +8205,7 @@ sequences:
           			err = failure(CodeHandlerPanic, "HANDLER_PANICKED", "the subscription's handler panicked", nil,
           				errs.String("subscription", c.node), errs.String("panic", fmt.Sprint(p)))
           		}
-          		c.loop.ended(ctx, a, sp, started, err)
+          		c.loop.ended(a, sp, started, err)
           	}()
       - return: handle(ctx, sp)
   - of: (*consumer).supervise
@@ -8532,12 +8532,10 @@ sequences:
       - return: nil
   - of: stoppedBy
     steps:
-      - bind: cancelled
-        eval: errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
       - opt:
           do:
             - return: "false"
-          when: ctx.Err() == nil || !cancelled
+          when: err == nil || notRetryable(err)
       - lock:
           mutex: a.mu
       - return: a.stopping
@@ -8562,7 +8560,7 @@ sequences:
               value: nil
             - eval: sp.attr("handed-back", "stop")
               to: sp.attr
-          when: stoppedBy(ctx, a, err)
+          when: stoppedBy(a, err)
       - eval: sp.end(failed)
         to: sp.end
       - eval: l.ran(a, started, a.clock.Now(), failed)
@@ -28038,12 +28036,7 @@ sequences:
   - of: discardHistogram.RecordDuration
   - of: otlpQueuePolicy
     steps:
-      - return: |-
-          plug.QueuePolicyValue{
-          		VisibilityTimeout: 2*cfg.SendTimeout + otlpLeaseMargin,
-          		MaxDeliveries:     otlpMaxDeliveries,
-          		MaxMessageBytes:   int(min(cfg.MaxBytes, otlpMaxQueueMessage)),
-          	}
+      - return: plug.OTLP.Load().Policy(cfg)
   - of: (*App).migrateOTLP
     participants:
       - id: caller
@@ -36992,8 +36985,8 @@ sequences:
                   			if p := recover(); p != nil {
                   				err = panicked(ctx, a, c.id, "handler panicked", p)
                   			}
-                  			loop.ended(ctx, a, sp, started, err)
-                  			if c.settled(ctx, a, d.Deliveries, err) {
+                  			loop.ended(a, sp, started, err)
+                  			if c.settled(a, d.Deliveries, err) {
                   				q.release(env.Key)
                   			}
                   		}()
@@ -37017,7 +37010,7 @@ sequences:
             - case: err == nil
               do:
                 - return: "true"
-            - case: stoppedBy(ctx, a, err)
+            - case: stoppedBy(a, err)
               do:
                 - return: "false"
       - return: deliveries >= c.opts.deliveries.maxDeliveries || notRetryable(err)

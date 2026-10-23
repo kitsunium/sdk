@@ -14639,8 +14639,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
       "name": "OTLPDriverConfig",
-      "spelled": "struct{Open func(ctx context.Context, cfg *OTLPConfig) (OTLPExporter, error); Queue func(ctx context.Context, cfg *OTLPConfig, signal string) (OTLPQueue, error)}",
-      "canonical": "struct{Open func(ctx context.Context, cfg *github.com/kitsunium/sdk/framework/internal/app/plug.OTLPConfig) (github.com/kitsunium/sdk/framework/internal/app/plug.OTLPExporter, error); Queue func(ctx context.Context, cfg *github.com/kitsunium/sdk/framework/internal/app/plug.OTLPConfig, signal string) (github.com/kitsunium/sdk/framework/internal/app/plug.OTLPQueue, error)}",
+      "spelled": "struct{Open func(ctx context.Context, cfg *OTLPConfig) (OTLPExporter, error); Queue func(ctx context.Context, cfg *OTLPConfig, signal string) (OTLPQueue, error); Policy func(cfg *OTLPConfig) QueuePolicyValue}",
+      "canonical": "struct{Open func(ctx context.Context, cfg *github.com/kitsunium/sdk/framework/internal/app/plug.OTLPConfig) (github.com/kitsunium/sdk/framework/internal/app/plug.OTLPExporter, error); Queue func(ctx context.Context, cfg *github.com/kitsunium/sdk/framework/internal/app/plug.OTLPConfig, signal string) (github.com/kitsunium/sdk/framework/internal/app/plug.OTLPQueue, error); Policy func(cfg *github.com/kitsunium/sdk/framework/internal/app/plug.OTLPConfig) github.com/kitsunium/sdk/framework/internal/app/plug.QueuePolicyValue}",
       "fields": [
         {
           "name": "Open",
@@ -14651,6 +14651,11 @@
           "name": "Queue",
           "type": "func(ctx context.Context, cfg *OTLPConfig, signal string) (OTLPQueue, error)",
           "doc": "Queue opens one signal's queue as Open keeps it — the same directory\nor table, the same policy — for the product's CLI, which lists and\nreplays its dead letters (issue #536); it is refused when the queue\nwould be in memory, where no dead letter outlives its process.\n"
+        },
+        {
+          "name": "Policy",
+          "type": "func(cfg *OTLPConfig) QueuePolicyValue",
+          "doc": "Policy is the policy Open and Queue open each signal's queue under\nfor cfg — its lease, its deliveries, its largest message —, for\nthe product's CLI, which opens the same queues through the queue\nsubsystem to move them onto a database (otlp migrate, issue #586).\n"
         }
       ],
       "doc": "OTLPDriverConfig is what framework/app/otlp plugs into the framework: how\nan app's export opens.\n",

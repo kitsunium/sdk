@@ -2340,12 +2340,17 @@ type OTLPDriverConfig struct {
 	// Open opens the export cfg describes: its two queues — read, the
 	// backlog a previous process left counted —, its senders and its
 	// meter. It sends nothing until OTLPExporter.Run.
-	Open  func(ctx context.Context, cfg *OTLPConfig) (OTLPExporter, error)
+	Open   func(ctx context.Context, cfg *OTLPConfig) (OTLPExporter, error)
 	// Queue opens one signal's queue as Open keeps it — the same directory
 	// or table, the same policy — for the product's CLI, which lists and
 	// replays its dead letters (issue #536); it is refused when the queue
 	// would be in memory, where no dead letter outlives its process.
-	Queue func(ctx context.Context, cfg *OTLPConfig, signal string) (OTLPQueue, error)
+	Queue  func(ctx context.Context, cfg *OTLPConfig, signal string) (OTLPQueue, error)
+	// Policy is the policy Open and Queue open each signal's queue under
+	// for cfg — its lease, its deliveries, its largest message —, for
+	// the product's CLI, which opens the same queues through the queue
+	// subsystem to move them onto a database (otlp migrate, issue #586).
+	Policy func(cfg *OTLPConfig) QueuePolicyValue
 }
 ```
 
