@@ -230,7 +230,7 @@ func (c *consumer) deliver(ctx context.Context, d *plug.DeliveryValue, from orig
 			err = failure(CodeHandlerPanic, "HANDLER_PANICKED", "the subscription's handler panicked", nil,
 				errs.String("subscription", c.node), errs.String("panic", fmt.Sprint(p)))
 		}
-		c.loop.ended(ctx, a, sp, started, err)
+		c.loop.ended(a, sp, started, err)
 	}()
 	return handle(ctx, sp)
 }

@@ -30,7 +30,12 @@ const (
 // otlpDatabaseApp is the ping service in production with no data
 // directory — a container with no volume —, its secrets in memory, the
 // fake database db declared as "database", and an export to send whose
-// queues otlp-database places.
+// queues otlp-database places. A batch's age is bounded far past what the
+// driven clock reaches before drive gives up: drive advances it by every
+// recurring wait as fast as they are armed — tens of thousands of five
+// seconds a second —, so a consumer descheduled for a second would
+// otherwise find the batch it was handed past the default 24h, and drop it
+// unsent (issue #586).
 func otlpDatabaseApp(t *testing.T, db *app.FakeDB, clk *drivenClock, send func(context.Context, app.OTLPBatchValue) error, opts ...app.OpenTelemetryConfigurer) *app.App {
 	t.Helper()
 	t.Setenv("SHOP_SECRETS", "memory")
@@ -39,7 +44,7 @@ func otlpDatabaseApp(t *testing.T, db *app.FakeDB, clk *drivenClock, send func(c
 	return app.NewApp("shop", pingService()).With(
 		app.Listen("127.0.0.1:0"), app.Env(app.EnvProduction), app.Analyze(false), app.Logs(io.Discard), app.Clock(clk),
 		app.Database("database", db.Engine()),
-		app.OTLP(append([]app.OpenTelemetryConfigurer{app.OTLPSender(send), app.OTLPSendTimeout(10 * time.Hour)}, opts...)...),
+		app.OTLP(append([]app.OpenTelemetryConfigurer{app.OTLPSender(send), app.OTLPSendTimeout(10 * time.Hour), app.OTLPMaxAge(100_000 * time.Hour)}, opts...)...),
 		app.Set("otlp-drain", time.Duration(0)), app.Set("otlp-interval", 100*time.Hour),
 	)
 }
@@ -108,6 +113,12 @@ func TestTheOTLPQueuesLieOnTheDatabase(t *testing.T) {
 			defer cancel()
 			if err := first.Stop(stopCtx); err != nil {
 				t.Fatal(err)
+			}
+			// The stop handed the batch it was retrying back, receivable at
+			// once: the second process sends it without waiting out the
+			// first's lease (issue #586).
+			if leased := db.Leased(otlpTracesTable); len(leased) != 0 {
+				t.Fatalf("the first process's stop left its batch leased in %s: %q", otlpTracesTable, leased)
 			}
 			send := newSent()
 			second := otlpDatabaseApp(t, db, clk, send.send, tc.opts...)

@@ -195,8 +195,8 @@ func (c *Command[C, R]) handler(a *App, q *commandQueue, loop *loopState) delive
 			if p := recover(); p != nil {
 				err = panicked(ctx, a, c.id, "handler panicked", p)
 			}
-			loop.ended(ctx, a, sp, started, err)
-			if c.settled(ctx, a, d.Deliveries, err) {
+			loop.ended(a, sp, started, err)
+			if c.settled(a, d.Deliveries, err) {
 				q.release(env.Key)
 			}
 		}()
@@ -214,15 +214,16 @@ func (c *Command[C, R]) handler(a *App, q *commandQueue, loop *loopState) delive
 // settled reports whether a handling that ended with err, on its
 // deliveries-th delivery, leaves its dispatch out of the queue — handled,
 // refused for good, or out of attempts —, so that its key can be given
-// back. A handling the app's stop cut short leaves it in, whatever its
-// delivery: its queue hands it back uncounted (stoppedBy), and it is
-// handled again at the next start — its key given back then would let a
-// dispatch with the same key be queued beside it.
-func (c *Command[C, R]) settled(ctx context.Context, a *App, deliveries int, err error) bool {
+// back. A handling that failed once the app began to stop leaves it in,
+// whatever its delivery and whatever failed — the drain's end, or the key's
+// lease lost before it —: its queue hands it back uncounted (stoppedBy), and
+// it is handled again at the next start — its key given back then would let
+// a dispatch with the same key be queued beside it.
+func (c *Command[C, R]) settled(a *App, deliveries int, err error) bool {
 	switch {
 	case err == nil:
 		return true
-	case stoppedBy(ctx, a, err):
+	case stoppedBy(a, err):
 		return false
 	}
 	return deliveries >= c.opts.deliveries.maxDeliveries || notRetryable(err)

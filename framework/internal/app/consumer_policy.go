@@ -214,12 +214,17 @@ func beginStop(sup *lifecycle.Supervisor) error {
 	return nil
 }
 
-// stoppedBy reports whether err, a delivery's handler's, is its context
-// ending because its consumer stops — the drain over, the app stopping —:
-// the message is handed back uncounted, and it is no failure.
-func stoppedBy(ctx context.Context, a *App, err error) bool {
-	cancelled := errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
-	if ctx.Err() == nil || !cancelled {
+// stoppedBy reports whether err, a delivery's handler's failure, ended it
+// while its app stops: the SDK's consumer hands back uncounted whatever
+// failed once it heard the stop — not only the drain's end, but a key's
+// lease the stop outlasted, or any other refusal —, so it is no failure. A
+// refusal no retry can help is the one exception: the consumer dead-letters
+// it even then. The app's stop is told before any consumer is, so no
+// failure the consumer hands back is taken for its message's (issue #586:
+// a key's lease lost before the drain ended was, and the key of a dispatch
+// still in its queue given back).
+func stoppedBy(a *App, err error) bool {
+	if err == nil || notRetryable(err) {
 		return false
 	}
 	a.mu.Lock()
@@ -228,11 +233,11 @@ func stoppedBy(ctx context.Context, a *App, err error) bool {
 }
 
 // ended ends a delivery's span sp, begun at started, and reports the run to
-// the loop: a handler the stop's drain cut short is no failure — its span
-// says it was handed back, and the loop counts no error (stoppedBy).
-func (l *loopState) ended(ctx context.Context, a *App, sp *span, started time.Time, err error) {
+// the loop: a handler the stop cut short is no failure — its span says it
+// was handed back, and the loop counts no error (stoppedBy).
+func (l *loopState) ended(a *App, sp *span, started time.Time, err error) {
 	failed := err
-	if stoppedBy(ctx, a, err) {
+	if stoppedBy(a, err) {
 		failed = nil
 		sp.attr("handed-back", "stop")
 	}

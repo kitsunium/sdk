@@ -342,10 +342,16 @@ type keyedRun struct {
 	Key string `json:"key"`
 }
 
-// A queued dispatch the stop's drain cuts short on its last delivery keeps
-// its key: its message is handed back uncounted and waits for the next
-// start, so a dispatch with the same key is deduplicated, not queued a
-// second time beside it.
+// A queued dispatch the stop cuts short on its last delivery keeps its key:
+// its message is handed back uncounted and waits for the next start, so a
+// dispatch with the same key is deduplicated, not queued a second time
+// beside it. With no drain the stop cuts it short as soon as its consumer
+// hears it, and the clock never moves: moved a second at a time until the
+// cut, as it was, it could pass the key's lease (keyTTL) while the goroutine
+// that renews it was not scheduled — and then, the consumer not told of the
+// stop yet, the message was dead-lettered, or, told, its key given back
+// (issue #586). TestAFailureOnceTheAppStopsKeepsTheKey judges the key a
+// failure other than the stop's own leaves.
 func TestADispatchTheStopCutsShortOnItsLastDeliveryKeepsItsKey(t *testing.T) {
 	clk := manualAt()
 	started := make(chan struct{}, 1)
@@ -356,31 +362,21 @@ func TestADispatchTheStopCutsShortOnItsLastDeliveryKeepsItsKey(t *testing.T) {
 		started <- struct{}{}
 		<-ctx.Done()
 		return EmptyValue{}, ctx.Err()
-	}, Queued(), MaxDeliveries(1), Settle(time.Hour), Lease(2*time.Hour)).Key(func(in keyedRun) string { return in.Key })
-	cut := func() bool {
-		ctx := handlerCtx.Load()
-		return ctx != nil && (*ctx).Err() != nil
-	}
+	}, Queued(), MaxDeliveries(1), Drain(0), Settle(time.Hour), Lease(2*time.Hour)).Key(func(in keyedRun) string { return in.Key })
 	a := startConsumers(t, svc, clk)
 	q := cmd.queue.Load()
 	must(t, cmd.accept(t.Context(), a, "", keyedRun{Key: "k"}, time.Time{}))
 	<-started
 	began := clk.Now()
 	stopped := stopInBackground(a)
-	stopping(t, a)
-	for !cut() {
-		if clk.Since(began) > 50*time.Minute {
-			t.Fatal("the drain never ended")
-		}
-		clk.Advance(time.Second)
-		for range 64 {
-			if cut() {
-				break
-			}
-			runtime.Gosched()
-		}
-	}
+	until(t, "the handler cut short by the stop", func() bool {
+		ctx := handlerCtx.Load()
+		return ctx != nil && (*ctx).Err() != nil
+	})
 	must(t, <-stopped)
+	if moved := clk.Since(began); moved != 0 {
+		t.Errorf("the clock moved %v during the stop", moved)
+	}
 	if live := liveOf(t, q.broker); len(live) != 1 || live[0].Deliveries != 0 {
 		t.Fatalf("the dispatch cut short: %+v; want it waiting, its delivery uncounted", live)
 	}
@@ -394,4 +390,43 @@ func TestADispatchTheStopCutsShortOnItsLastDeliveryKeepsItsKey(t *testing.T) {
 	if live := liveOf(t, q.broker); len(live) != 1 {
 		t.Errorf("a dispatch with the same key was queued beside the one cut short: %d messages", len(live))
 	}
+}
+
+// Once the app began to stop, a handler's failure on its last delivery
+// keeps its key whatever failed — the drain's end, its key's lease lost
+// before it, any refusal —: the SDK's consumer, which heard the stop, hands
+// each back uncounted. A refusal no retry can help gives it back, the
+// consumer dead-lettering it even then; and outside a stop, the last
+// delivery's failure gives it back (issue #586).
+func TestAFailureOnceTheAppStopsKeepsTheKey(t *testing.T) {
+	svc := NewService("failkey", "A queued command.")
+	cmd := svc.Command("run", func(context.Context, keyedRun) (EmptyValue, error) { return EmptyValue{}, nil },
+		Queued(), MaxDeliveries(1)).Key(func(in keyedRun) string { return in.Key })
+	a := startConsumers(t, svc, manualAt())
+	stopAtCleanup(t, a)
+	lost := failure(CodeCommandKey, "COMMAND_KEY", "the command's key could not be held", context.Canceled)
+	for _, tc := range []struct {
+		err      error
+		name     string
+		stopping bool
+		settled  bool
+	}{
+		{name: "handled while it stops", stopping: true, settled: true},
+		{name: "its key's lease lost while it stops", err: lost, stopping: true},
+		{name: "its drain over", err: context.Canceled, stopping: true},
+		{name: "refused for good while it stops", err: doNotRetry(lost), stopping: true, settled: true},
+		{name: "its key's lease lost while it runs", err: lost, settled: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a.mu.Lock()
+			a.stopping = tc.stopping
+			a.mu.Unlock()
+			if got := cmd.settled(a, 1, tc.err); got != tc.settled {
+				t.Errorf("settled: %v, want %v", got, tc.settled)
+			}
+		})
+	}
+	a.mu.Lock()
+	a.stopping = false
+	a.mu.Unlock()
 }
