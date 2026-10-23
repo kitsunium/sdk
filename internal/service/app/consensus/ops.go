@@ -104,6 +104,9 @@ func (n *Node) awaitProposal(ctx context.Context, p *proposal) propResult {
 			// (#519).
 			return propResult{err: ctx.Err()}
 		}
+		// A forward the leader never answers is dropped at the next
+		// sweep rather than kept until the next leader change (#590).
+		p.gone.Store(true)
 		return propResult{err: origin(coreconsensus.OutcomeUnknown,
 			errs.String("why", "context ended after the append"), errs.String("cause", ctx.Err().Error()))}
 	}
@@ -279,6 +282,7 @@ func (n *Node) forward(p *proposal, st raft.StatusValue) {
 		Version: 1, Group: n.cfg.Group, Kind: kind, From: n.stamp.ID, To: st.Lead,
 		Term: st.Term, Context: ctx, Entries: []coreconsensus.EntryValue{p.entry},
 	}
+	p.sentAt = n.clk.Now()
 	n.forwards[ctx] = p
 	n.am.Lock()
 	n.keepResults++
@@ -354,8 +358,10 @@ func (n *Node) Barrier(ctx context.Context) (coreconsensus.TokenValue, error) {
 	defer func() { n.obs.record(mBarrierLatency, n.clk.Since(start).Seconds(), coreotel.String("mode", mode)) }()
 	if !n.exec(func() {
 		ctx := n.nextID()
+		w.sentAt = n.clk.Now()
+		w.askedAt = w.sentAt
 		n.reads[ctx] = w
-		n.r.ReadIndex(n.clk.Now(), ctx, noLease)
+		n.r.ReadIndex(w.sentAt, ctx, noLease)
 		n.handleReady()
 	}) {
 		return coreconsensus.TokenValue{}, n.stoppedErr()
@@ -364,6 +370,7 @@ func (n *Node) Barrier(ctx context.Context) (coreconsensus.TokenValue, error) {
 	select {
 	case res = <-w.done:
 	case <-ctx.Done():
+		w.gone.Store(true)
 		return coreconsensus.TokenValue{}, origin(coreconsensus.LeadershipUnconfirmed, errs.String("cause", ctx.Err().Error()))
 	}
 	switch res.code {

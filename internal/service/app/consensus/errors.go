@@ -54,6 +54,7 @@ var sentinelByCode = map[errs.Code]*errs.Error{
 	coreconsensus.CodeSnapshotTooLarge:        coreconsensus.SnapshotTooLarge,
 	coreconsensus.CodeJoinRefused:             coreconsensus.JoinRefused,
 	coreconsensus.CodeNoSpace:                 coreconsensus.NoSpace,
+	coreconsensus.CodeLeadershipUnconfirmed:   coreconsensus.LeadershipUnconfirmed,
 }
 
 // cause is the text of a storage failure's cause. It never travels as an

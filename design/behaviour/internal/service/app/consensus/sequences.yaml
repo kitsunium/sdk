@@ -8894,6 +8894,8 @@ sequences:
         kind: value
       - id: n.dropForward
         kind: internal
+      - id: n.sweepReads
+        kind: internal
       - id: n.sweepWaiters
         kind: internal
     steps:
@@ -8904,19 +8906,67 @@ sequences:
         to: n.clk.Now
       - loop:
           do:
-            - opt:
-                do:
-                  - eval: n.dropForward(ctx)
-                    to: n.dropForward
-                  - send:
-                      chan: p.done
-                      value: "propResult{err: outcomeUnknown(\"leader changed before the answer\")}"
-                when: "!p.changedAt.IsZero() && now.Sub(p.changedAt) > grace"
+            - switch:
+                cases:
+                  - case: p.gone.Load()
+                    do:
+                      - eval: n.dropForward(ctx)
+                        to: n.dropForward
+                  - case: "!p.changedAt.IsZero() && now.Sub(p.changedAt) > grace"
+                    do:
+                      - eval: n.dropForward(ctx)
+                        to: n.dropForward
+                      - send:
+                          chan: p.done
+                          value: "propResult{err: outcomeUnknown(\"leader changed before the answer\")}"
+                  - case: "!p.sentAt.IsZero() && now.Sub(p.sentAt) > grace"
+                    do:
+                      - eval: n.dropForward(ctx)
+                        to: n.dropForward
+                      - send:
+                          chan: p.done
+                          value: "propResult{err: outcomeUnknown(\"the leader did not answer the forward in time\")}"
           key: ctx
           range: n.forwards
           value: p
+      - eval: n.sweepReads(now)
+        to: n.sweepReads
       - eval: n.sweepWaiters(now, grace)
         to: n.sweepWaiters
+  - of: (*Node).sweepReads
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).sweepReads
+        kind: self
+      - id: n.r.ReadIndex
+        kind: value
+    steps:
+      - bind: etMax
+        eval: n.r.Status().Timing.ElectionTimeoutMax
+      - loop:
+          do:
+            - switch:
+                cases:
+                  - case: w.gone.Load()
+                    do:
+                      - eval: delete(n.reads, ctx)
+                  - case: n.lastRole == coreconsensus.RoleLeader
+                  - case: now.Sub(w.sentAt) > 2*etMax
+                    do:
+                      - eval: delete(n.reads, ctx)
+                      - send:
+                          chan: w.done
+                          value: "readResult{code: coreconsensus.CodeLeadershipUnconfirmed}"
+                  - case: now.Sub(w.askedAt) > etMax
+                    do:
+                      - set: w.askedAt
+                        value: now
+                      - eval: n.r.ReadIndex(now, ctx, n.cfg.Reads != ReadLease)
+                        to: n.r.ReadIndex
+          key: ctx
+          range: n.reads
+          value: w
   - of: (*Node).sweepWaiters
     participants:
       - id: caller
@@ -14378,6 +14428,13 @@ sequences:
                 - return: "finish(propResult{err: n.stoppedErr()})"
       - return: finish(n.awaitProposal(ctx, p))
   - of: (*Node).awaitProposal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).awaitProposal
+        kind: self
+      - id: p.gone.Store
+        kind: value
     steps:
       - select:
           cases:
@@ -14403,6 +14460,8 @@ sequences:
                     do:
                       - return: "propResult{err: ctx.Err()}"
                     when: p.stage.CompareAndSwap(stageUnsent, stageAbandoned)
+                - eval: p.gone.Store(true)
+                  to: p.gone.Store
                 - return: |-
                     propResult{err: origin(coreconsensus.OutcomeUnknown,
                     			errs.String("why", "context ended after the append"), errs.String("cause", ctx.Err().Error()))}
@@ -14669,6 +14728,8 @@ sequences:
         kind: self
       - id: n.nextID
         kind: internal
+      - id: n.clk.Now
+        kind: value
       - id: n.am.Lock
         kind: value
       - id: n.am.Unlock
@@ -14701,6 +14762,9 @@ sequences:
           		Version: 1, Group: n.cfg.Group, Kind: kind, From: n.stamp.ID, To: st.Lead,
           		Term: st.Term, Context: ctx, Entries: []coreconsensus.EntryValue{p.entry},
           	}
+      - set: p.sentAt
+        to: n.clk.Now
+        value: n.clk.Now()
       - set: n.forwards[ctx]
         value: p
       - eval: n.am.Lock()
@@ -14789,6 +14853,8 @@ sequences:
         kind: self
       - id: n.clk.Now
         kind: value
+      - id: w.gone.Store
+        kind: value
       - id: n.am.Lock
         kind: value
       - id: n.token
@@ -14821,8 +14887,10 @@ sequences:
           when: |-
             !n.exec(func() {
             		ctx := n.nextID()
+            		w.sentAt = n.clk.Now()
+            		w.askedAt = w.sentAt
             		n.reads[ctx] = w
-            		n.r.ReadIndex(n.clk.Now(), ctx, noLease)
+            		n.r.ReadIndex(w.sentAt, ctx, noLease)
             		n.handleReady()
             	})
       - var:
@@ -14833,6 +14901,8 @@ sequences:
             - comm: res = <-w.done
             - comm: <-ctx.Done()
               do:
+                - eval: w.gone.Store(true)
+                  to: w.gone.Store
                 - return: coreconsensus.TokenValue{}, origin(coreconsensus.LeadershipUnconfirmed, errs.String("cause", ctx.Err().Error()))
       - switch:
           cases:

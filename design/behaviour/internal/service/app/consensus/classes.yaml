@@ -1033,6 +1033,7 @@ files:
       - (*Node).queuedControl
       - (*Node).checkTurn
       - (*Node).sweep
+      - (*Node).sweepReads
       - (*Node).sweepWaiters
       - (*Node).dropForward
       - (*Node).tickInterval
@@ -5349,7 +5350,30 @@ types:
           sweep answers OUTCOME_UNKNOWN to proposals whose leader changed more than
           two maximum election timeouts ago and that are still not resolved: the
           answer was lost, the entry may still commit.
+
+          The transport may lose a forward, a read or their answer with no change
+          of leader at all: a full queue, a dial backoff, a closed connection. Only
+          a change started the grace, so the caller waited for its own deadline,
+          forever with none, and the entry stayed until the next change, a forward
+          holding its payload and the retained Apply results (#590). A forward
+          unanswered two maximum election timeouts after it was sent is answered
+          OUTCOME_UNKNOWN: the leader may have appended it, and a resend is only
+          deduplicated while the leader still remembers the first. What a caller
+          gave up on is dropped. Reads are swept by sweepReads.
         name: sweep
+        recv: n *Node
+      - doc: |-
+          sweepReads resends a follower's read the leader has not answered within
+          the maximum election timeout, and answers LEADERSHIP_UNCONFIRMED to one
+          still unanswered two maximum election timeouts after it was asked (#590).
+          A resend under the same context is idempotent: the leader confirms it
+          again at a later commit index, still past every write committed before
+          the call, and the node takes the first answer and drops the other. A read
+          this node holds as the leader is not sent, so it is not resent; losing
+          the quorum deposes the leader and leadershipChanged answers it. A read
+          its caller gave up on is dropped.
+        name: sweepReads
+        params: now time.Time
         recv: n *Node
       - doc: |-
           sweepWaiters is sweep's half for appended proposals: one still above the
@@ -6213,6 +6237,12 @@ types:
           the loop and, for waiters, holders of am touch it.
         name: changedAt
         type: time.Time
+      - doc: sentAt is when the loop forwarded it to the leader; loop-owned.
+        name: sentAt
+        type: time.Time
+      - doc: gone is set by a caller that stopped waiting for a forward's answer.
+        name: gone
+        type: atomic.Bool
     kind: struct
     name: proposal
   - fields:
@@ -6227,6 +6257,19 @@ types:
   - fields:
       - name: done
         type: chan readResult
+      - doc: |-
+          sentAt is when the read was first asked, and askedAt when it was last
+          sent to the leader; both loop-owned.
+        name: sentAt
+        type: time.Time
+      - doc: |-
+          sentAt is when the read was first asked, and askedAt when it was last
+          sent to the leader; both loop-owned.
+        name: askedAt
+        type: time.Time
+      - doc: gone is set by a caller that stopped waiting for the answer.
+        name: gone
+        type: atomic.Bool
     kind: struct
     name: readWait
   - fields:
@@ -7344,6 +7387,7 @@ vars:
           	coreconsensus.CodeSnapshotTooLarge:        coreconsensus.SnapshotTooLarge,
           	coreconsensus.CodeJoinRefused:             coreconsensus.JoinRefused,
           	coreconsensus.CodeNoSpace:                 coreconsensus.NoSpace,
+          	coreconsensus.CodeLeadershipUnconfirmed:   coreconsensus.LeadershipUnconfirmed,
           }
     name: sentinelByCode
   - grouped: true

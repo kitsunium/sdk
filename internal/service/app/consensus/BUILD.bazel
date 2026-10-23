@@ -112,6 +112,7 @@ go_test(
         "inspectterm_internal_test.go",
         "install_internal_test.go",
         "joinlimit_internal_test.go",
+        "lostframe_internal_test.go",
         "metabitflip_internal_test.go",
         "metav2_internal_test.go",
         "newerlog_internal_test.go",
