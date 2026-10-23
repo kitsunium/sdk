@@ -14,8 +14,10 @@ import (
 // the line coverage is the same 100% either way. The race suite, the alloc
 // lane and a plain `go test` run all 256; this is the one place that does not.
 var coverageValues = func() []int {
-	edges := map[int]bool{0: true, 1: true, 0x0A: true, 0x0D: true, 0x1F: true, 0x20: true, 0x21: true,
-		0x22: true, 0x5C: true, 0x7E: true, 0x7F: true, 0x80: true, 0x81: true, 0xFE: true, 0xFF: true}
+	edges := map[int]bool{
+		0: true, 1: true, 0x0A: true, 0x0D: true, 0x1F: true, 0x20: true, 0x21: true,
+		0x22: true, 0x5C: true, 0x7E: true, 0x7F: true, 0x80: true, 0x81: true, 0xFE: true, 0xFF: true,
+	}
 	var vs []int
 	for v := range 256 {
 		if edges[v] || v%7 == 0 {
