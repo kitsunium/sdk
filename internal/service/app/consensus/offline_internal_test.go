@@ -25,9 +25,26 @@ func threeOnDisk(t *testing.T, n int) (*cluster, []*diskNode) {
 	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{5}}
 	var nodes []*diskNode
 	var members []coreconsensus.MemberValue
+	// The directories setup holds open without a node over them.
+	bare := map[*diskNode]bool{}
 	for i := range 3 {
 		dn := &diskNode{dir: t.TempDir()}
 		dn.dd = openDir(t, dn.dir, 16<<10)
+		bare[dn] = true
+		// Registered after the TempDir, so it runs before the directory is
+		// removed, which Windows refuses while a LOCK in it is held: a node
+		// the test has not crashed when it fails is crashed, a directory
+		// setup left open is closed.
+		t.Cleanup(func() {
+			switch {
+			case dn.node != nil:
+				dn.crash(t, c)
+			case bare[dn]:
+				if err := dn.dd.Close(); err != nil {
+					t.Errorf("close data directory %d: %v", dn.id, err)
+				}
+			}
+		})
 		slot := fmt.Sprintf("r%d", i)
 		id, inc, err := Init(dn.dd, c.cid, slot)
 		if err != nil {
@@ -45,17 +62,9 @@ func threeOnDisk(t *testing.T, n int) (*cluster, []*diskNode) {
 		if err := dn.dd.Close(); err != nil {
 			t.Fatal(err)
 		}
+		delete(bare, dn)
 		dn.open(t, c)
 	}
-	// A node the test has not crashed when it fails is crashed here, before
-	// its directory is removed: Windows refuses to remove a held LOCK.
-	t.Cleanup(func() {
-		for _, dn := range nodes {
-			if dn.node != nil {
-				dn.crash(t, c)
-			}
-		}
-	})
 	// Each key is proposed to whichever node leads: a leader whose own
 	// fdatasync stalls past the maximum election timeout hands its
 	// leadership over (#554), and a proposal it held then answers
