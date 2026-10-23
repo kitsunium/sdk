@@ -21,6 +21,13 @@ import (
 
 // threeOnDisk founds three nodes on data directories, writes n keys, and
 // stops them all.
+//
+// The keys go to whichever node leads: the leadership may change during
+// the writes, by an election or by a leader whose log does not become
+// durable within the maximum election timeout handing it over (#554), and a
+// proposal bound to the first leader failed OUTCOME_UNKNOWN then (#587). A node the test leaves running, a
+// failed setup's included, is stopped at the end: its data directory stayed
+// open, and on Windows the temporary directory could not be removed.
 func threeOnDisk(t *testing.T, n int) (*cluster, []*diskNode) {
 	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{5}}
 	var nodes []*diskNode
@@ -37,6 +44,13 @@ func threeOnDisk(t *testing.T, n int) (*cluster, []*diskNode) {
 		nodes = append(nodes, dn)
 		members = append(members, coreconsensus.MemberValue{ID: id, Incarnation: inc, Slot: slot, SPKI: MemorySPKI(id), Voter: true})
 	}
+	t.Cleanup(func() {
+		for _, dn := range nodes {
+			if dn.node != nil {
+				dn.crash(t, c)
+			}
+		}
+	})
 	for _, dn := range nodes {
 		dn.sm = newKV()
 		if err := Bootstrap(context.Background(), new(diskConfig(c, dn)), members); err != nil {
@@ -47,22 +61,9 @@ func threeOnDisk(t *testing.T, n int) (*cluster, []*diskNode) {
 		}
 		dn.open(t, c)
 	}
-	var l *diskNode
-	deadline := time.Now().Add(5 * time.Second)
-	for l == nil && time.Now().Before(deadline) {
-		for _, dn := range nodes {
-			if dn.node.Status().Role == coreconsensus.RoleLeader {
-				l = dn
-			}
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	if l == nil {
-		t.Fatal("no leader")
-	}
 	var tok coreconsensus.TokenValue
 	for i := range n {
-		tok = propose(t, l.node, fmt.Sprintf("k%d=v%d", i, i))
+		tok = proposeOnDisk(t, nodes, fmt.Sprintf("k%d=v%d", i, i))
 	}
 	c.waitAppliedDisk(nodes, tok.Index)
 	return c, nodes

@@ -26,6 +26,13 @@ func leaderOf(t *testing.T, nodes []*diskNode) *diskNode {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
+	// Each node's view, so that a run with no leader says why (#587).
+	for _, dn := range nodes {
+		var dump string
+		dn.node.exec(func() { dump = dn.node.r.Debug() })
+		hs, err := dn.dd.Log().HardState()
+		t.Logf("node %d status %+v hard state %+v (%v) raft %s", dn.id, dn.node.Status(), hs, err, dump)
+	}
 	t.Fatal("no leader")
 	return nil
 }
