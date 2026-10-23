@@ -981,6 +981,16 @@ record, a field that loses its class; `seal_bench_internal_test.go`
 tools' bench (secrets in and out, logs, a CPU burner, a memory hoarder, a gate
 to wait on, a declared and a hand-written loop); `startBench` runs it beside
 the shop, and `subscribe`/`awaitEvent` read the live stream.
+The OTLP cases run on `drivenClock` (`otlp_test.go`), which reports every
+wait armed on it; `drive` advances each one of a second to ten minutes until
+the case's condition holds, and never past the clock's horizon,
+`driveHorizon`, an hour from its start. The batch sink re-arms its
+five-second delay each time it fires, so a drive without a horizon moved the
+clock for as long as a send took on the wall clock: a 200 ms loopback round
+trip took it thirty-odd hours ahead, past an attempt's bound and a batch's
+age, the batches counted expired and the readiness degraded — on a Windows
+runner, and 9 runs in 10 here (issue #598). `TestAnAppsSpansAndMetricsReachTheCollector`
+runs its collector at once and slowly (`collected.delay`) to hold that.
 
 ## Learned conventions
 
