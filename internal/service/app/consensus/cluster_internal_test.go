@@ -257,19 +257,28 @@ func (c *cluster) leader(timeout time.Duration) *testNode {
 // settledLeader returns a leader whose term already has a committed entry,
 // so its term's no-op is behind it: the state a membership change requires.
 // Its own proof is an entry proposed and committed in the term it still
-// leads; a leadership that moved meanwhile is looked for again.
+// leads; a leadership that moved meanwhile is looked for again, the proof's
+// refusal included: under load a leader lost its term between the choice
+// and the proposal, which failed ENTRY_SUPERSEDED or OUTCOME_UNKNOWN and
+// the test with it. Writing the proof twice is harmless.
 func (c *cluster) settledLeader(timeout time.Duration) *testNode {
 	c.t.Helper()
 	deadline := time.Now().Add(timeout)
 	for {
 		l := c.leader(timeout)
-		tok := propose(c.t, l.node, "settle=1")
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		tok, _, err := l.node.Propose(ctx, []byte("settle=1"))
+		cancel()
 		st := l.node.Status()
-		if st.Role == coreconsensus.RoleLeader && st.Term == tok.Term && st.Commit >= tok.Index {
+		if err == nil && st.Role == coreconsensus.RoleLeader && st.Term == tok.Term && st.Commit >= tok.Index {
 			return l
 		}
+		if err != nil && !errors.Is(err, coreconsensus.NotLeader) &&
+			!errs.HasCode(err, coreconsensus.CodeOutcomeUnknown) && !errs.HasCode(err, coreconsensus.CodeEntrySuperseded) {
+			c.t.Fatalf("propose the settling entry on %d: %v", l.id, err)
+		}
 		if time.Now().After(deadline) {
-			c.t.Fatalf("no leader committed an entry of its own term (last %d: %+v, token %v)", l.id, st, tok)
+			c.t.Fatalf("no leader committed an entry of its own term (last %d: %+v, token %v, error %v)", l.id, st, tok, err)
 		}
 		time.Sleep(5 * time.Millisecond)
 	}

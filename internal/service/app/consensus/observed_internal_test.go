@@ -26,8 +26,32 @@ func leaderOf(t *testing.T, nodes []*diskNode) *diskNode {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
+	// Each node's view, so that a run with no leader says why: none of
+	// the Windows runs that failed "no leader" did (#587).
+	for _, dn := range nodes {
+		t.Logf("node %d status %+v %s", dn.id, dn.node.Status(), diskNodeView(dn))
+	}
 	t.Fatal("no leader")
 	return nil
+}
+
+// diskNodeView is dn's hard state and raft view, or what did not answer
+// within a second: a node with no leader may have its loop or its log
+// stuck in a sync, and the report must not wait for it.
+func diskNodeView(dn *diskNode) string {
+	view := make(chan string, 1)
+	go func() {
+		dump := "(the loop stopped)"
+		dn.node.exec(func() { dump = dn.node.r.Debug() })
+		hs, err := dn.dd.Log().HardState()
+		view <- fmt.Sprintf("hard state %+v (%v) raft %s", hs, err, dump)
+	}()
+	select {
+	case v := <-view:
+		return v
+	case <-time.After(time.Second):
+		return "(its loop or its log did not answer within a second)"
+	}
 }
 
 // ReadCommitted returns the committed log, consecutive from the index asked,
