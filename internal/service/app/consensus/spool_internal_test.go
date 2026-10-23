@@ -261,7 +261,9 @@ func TestACreateSupersededBeforeItsSpoolIsOpenLeaksNoHandle(t *testing.T) {
 		if _, err := stale.sink.Write(body); !errs.HasCode(err, coreconsensus.CodeSnapshotCorrupt) {
 			t.Fatalf("a superseded install's write: %v, want SNAPSHOT_CORRUPT", err)
 		}
-		if _, err := stale.sink.(*fileSink).f.Stat(); !errors.Is(err, os.ErrClosed) {
+		// A second Close is ErrClosed on every platform; Stat's error on a
+		// closed handle is not.
+		if err := stale.sink.(*fileSink).f.Close(); !errors.Is(err, os.ErrClosed) {
 			t.Fatalf("a superseded install's spool handle is still open: %v", err)
 		}
 		abandon(stale.sink.Abort())
