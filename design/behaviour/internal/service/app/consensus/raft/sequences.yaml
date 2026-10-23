@@ -584,15 +584,9 @@ sequences:
         kind: self
       - id: r.handleAppReject
         kind: internal
-      - id: pr.becomeReplicate
-        kind: internal
-      - id: pr.becomeProbe
+      - id: r.ackMoved
         kind: internal
       - id: pr.freeTo
-        kind: internal
-      - id: r.broadcastAppend
-        kind: internal
-      - id: r.maybeSendTimeoutNow
         kind: internal
       - id: r.sendAppend
         kind: internal
@@ -609,27 +603,8 @@ sequences:
           when: m.Index > r.log.lastIndex() && !r.mutated(mutMatchPastLastIndex)
       - alt:
           - do:
-              - switch:
-                  cases:
-                    - case: pr.state == stateProbe
-                      do:
-                        - eval: pr.becomeReplicate()
-                          to: pr.becomeReplicate
-                    - case: pr.state == stateSnapshot && pr.match >= pr.pendingSnapshot
-                      do:
-                        - eval: pr.becomeProbe()
-                          to: pr.becomeProbe
-                        - eval: pr.becomeReplicate()
-                          to: pr.becomeReplicate
-              - eval: pr.freeTo(m.Index)
-                to: pr.freeTo
-              - opt:
-                  do:
-                    - eval: r.broadcastAppend(true)
-                      to: r.broadcastAppend
-                  when: r.maybeCommit()
-              - eval: r.maybeSendTimeoutNow()
-                to: r.maybeSendTimeoutNow
+              - eval: r.ackMoved(pr, m.Index)
+                to: r.ackMoved
             when: pr.maybeUpdate(m.Index)
           - do:
               - eval: pr.freeTo(m.Index)
@@ -640,6 +615,45 @@ sequences:
             - eval: r.sendAppend(m.From, false)
               to: r.sendAppend
           when: pr.match < r.log.lastIndex()
+  - of: (*Raft).ackMoved
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).ackMoved
+        kind: self
+      - id: pr.becomeReplicate
+        kind: internal
+      - id: pr.becomeProbe
+        kind: internal
+      - id: pr.freeTo
+        kind: internal
+      - id: r.broadcastAppend
+        kind: internal
+      - id: r.maybeSendTimeoutNow
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: pr.state == stateProbe && index+1 >= pr.next
+              do:
+                - eval: pr.becomeReplicate()
+                  to: pr.becomeReplicate
+            - case: pr.state == stateProbe
+            - case: pr.state == stateSnapshot && pr.match >= pr.pendingSnapshot
+              do:
+                - eval: pr.becomeProbe()
+                  to: pr.becomeProbe
+                - eval: pr.becomeReplicate()
+                  to: pr.becomeReplicate
+      - eval: pr.freeTo(index)
+        to: pr.freeTo
+      - opt:
+          do:
+            - eval: r.broadcastAppend(true)
+              to: r.broadcastAppend
+          when: r.maybeCommit()
+      - eval: r.maybeSendTimeoutNow()
+        to: r.maybeSendTimeoutNow
   - of: (*Raft).handleAppReject
     participants:
       - id: caller
@@ -2495,11 +2509,15 @@ sequences:
           do:
             - return: ""
           when: r.role != core.RoleLeader || pr == nil || pr.state != stateSnapshot
-      - opt:
-          do:
-            - set: pr.pendingSnapshot
-              value: "0"
-          when: "!ok"
+      - alt:
+          - do:
+              - set: pr.pendingSnapshot
+                value: max(pr.pendingSnapshot, index)
+            when: ok
+          - do:
+              - set: pr.pendingSnapshot
+                value: "0"
+            else: true
       - eval: pr.becomeProbe()
         to: pr.becomeProbe
       - op: "|="

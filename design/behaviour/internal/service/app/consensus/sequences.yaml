@@ -7550,7 +7550,7 @@ sequences:
           		propc: make(chan *proposal, inboxDepth), execc: make(chan func(), loopBacklog), storec: make(chan storeDone, loopBacklog),
           		stopc: make(chan struct{}), sq: newFifo[storeReq](), fetchq: newFifo[raft.FetchSpec](), fetchc: make(chan fetchDone, fetchBacklog), aq: newFifo[applyItem](),
           		waiters: map[uint64]*proposal{}, results: map[uint64]applyResult{},
-          		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]uint64{}, sendStop: map[coreconsensus.NodeID]context.CancelFunc{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
+          		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]sendPin{}, sendStop: map[coreconsensus.NodeID]context.CancelFunc{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
           		watchers: map[chan coreconsensus.StatusValue]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
           	}
       - set: n.acond
@@ -10241,6 +10241,27 @@ sequences:
           range: st.Conf.Members
           value: m
       - return: to
+  - of: (*Node).pinAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).pinAt
+        kind: self
+      - id: n.r.Progress
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: pin.index, true
+          when: pin.until.IsZero()
+      - bind: match, _, ok
+        eval: n.r.Progress(to)
+        to: n.r.Progress
+      - opt:
+          do:
+            - return: 0, false
+          when: "!ok || now.After(pin.until)"
+      - return: max(pin.index, match), true
   - of: newObs
     steps:
       - return: |-
@@ -15983,11 +16004,17 @@ sequences:
         value: n.cfg.SnapshotTrailing
       - eval: |-
           n.exec(func() {
-          		for _, sent := range n.sending {
-          			if sent <= n.cfg.SnapshotTrailing {
+          		now := n.clk.Now()
+          		for to, pin := range n.sending {
+          			at, held := n.pinAt(to, pin, now)
+          			if !held {
+          				delete(n.sending, to)
+          				continue
+          			}
+          			if at <= n.cfg.SnapshotTrailing {
           				return
           			}
-          			through = min(through, sent-n.cfg.SnapshotTrailing)
+          			through = min(through, at-n.cfg.SnapshotTrailing)
           		}
           		n.r.Compact(through)
           		n.handleReady()
@@ -16453,7 +16480,7 @@ sequences:
             - return: ""
           init:
             bind: _, busy
-            eval: n.sending[to]
+            eval: n.sendStop[to]
           when: busy
       - bind: meta, ok
         eval: n.snapshotToSend()
@@ -16462,7 +16489,7 @@ sequences:
           do:
             - eval: n.requestCut()
               to: n.requestCut
-            - eval: n.r.SnapshotDone(to, false)
+            - eval: n.r.SnapshotDone(to, 0, false)
               to: n.r.SnapshotDone
             - return: ""
           when: "!ok"
@@ -16471,12 +16498,12 @@ sequences:
         to: n.cfg.Snapshots.Open
       - opt:
           do:
-            - eval: n.r.SnapshotDone(to, false)
+            - eval: n.r.SnapshotDone(to, 0, false)
               to: n.r.SnapshotDone
             - return: ""
           when: err != nil
       - set: n.sending[to]
-        value: meta.Position.Index
+        value: "sendPin{index: meta.Position.Index}"
       - bind: offer
         eval: "coreconsensus.InstallOfferValue{Term: n.r.Status().Term, SnapshotID: meta.ID, Meta: meta}"
       - bind: ctx, cancel
@@ -16512,9 +16539,14 @@ sequences:
           		}
           		n.streamEnded(meta, to, err)
           		n.exec(func() {
-          			delete(n.sending, to)
+          			if err == nil {
+          				until := n.clk.Now().Add(time.Duration(pinAfterStream) * n.r.Status().Timing.ElectionTimeoutMax)
+          				n.sending[to] = sendPin{index: meta.Position.Index, until: until}
+          			} else {
+          				delete(n.sending, to)
+          			}
           			delete(n.sendStop, to)
-          			n.r.SnapshotDone(to, err == nil)
+          			n.r.SnapshotDone(to, meta.Position.Index, err == nil)
           			n.handleReady()
           		})
           	}()

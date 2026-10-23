@@ -497,7 +497,7 @@ func (s *sim) run(until time.Time, load bool) {
 			s.install(n, e)
 		case evSnapDone:
 			if n.alive {
-				n.r.SnapshotDone(e.msg.From, e.ok)
+				n.r.SnapshotDone(e.msg.From, e.meta.Position.Index, e.ok)
 				s.process(n)
 			}
 		case evTick:
@@ -604,7 +604,7 @@ func (s *sim) sendSnapshot(n *simNode, to core.NodeID) {
 		// A peer asks for a snapshot this leader never cut: cut one now,
 		// and the next probe sends it, as the driver does.
 		s.cutSnapshot(n, true)
-		n.r.SnapshotDone(to, false)
+		n.r.SnapshotDone(to, 0, false)
 		return
 	}
 	m := core.MessageValue{From: n.id, To: to, Term: n.r.Status().Term}
@@ -620,7 +620,7 @@ func (s *sim) sendSnapshot(n *simNode, to core.NodeID) {
 func (s *sim) install(n *simNode, e *event) {
 	ok := false
 	defer func() {
-		s.push(&event{at: s.now.Add(rtt(n.id, e.msg.From) / 2), kind: evSnapDone, node: e.msg.From, msg: core.MessageValue{From: n.id}, ok: ok})
+		s.push(&event{at: s.now.Add(rtt(n.id, e.msg.From) / 2), kind: evSnapDone, node: e.msg.From, msg: core.MessageValue{From: n.id}, meta: e.meta, ok: ok})
 	}()
 	if !n.alive {
 		return

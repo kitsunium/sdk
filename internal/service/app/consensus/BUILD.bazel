@@ -31,6 +31,7 @@ go_library(
         "node.go",
         "node_leadercontact.go",
         "node_progresswatch.go",
+        "node_sendpin.go",
         "observe.go",
         "observed.go",
         "offline.go",

@@ -354,8 +354,8 @@ func snapshotLimit(own int64, conf *coreconsensus.MembershipValue) int64 {
 
 // afterCut keeps the two newest snapshots and compacts the log back to the
 // older one, less SnapshotTrailing, with saturating arithmetic (D7). A
-// snapshot in flight to a peer pins compaction back to it, less
-// SnapshotTrailing (R6-01): a leader that cut twice during one transfer
+// snapshot in flight to a peer, then streamed until the peer catches up
+// (sendPin), pins compaction back to it, less SnapshotTrailing (R6-01): a leader that cut twice during one transfer
 // compacted past the snapshot it was sending, the entry after it was gone
 // once the peer installed it, and under a sustained write rate the peer
 // installed snapshot after snapshot and never caught up (#550).
@@ -374,11 +374,17 @@ func (n *Node) afterCut() {
 	}
 	through -= n.cfg.SnapshotTrailing
 	n.exec(func() {
-		for _, sent := range n.sending {
-			if sent <= n.cfg.SnapshotTrailing {
+		now := n.clk.Now()
+		for to, pin := range n.sending {
+			at, held := n.pinAt(to, pin, now)
+			if !held {
+				delete(n.sending, to)
+				continue
+			}
+			if at <= n.cfg.SnapshotTrailing {
 				return
 			}
-			through = min(through, sent-n.cfg.SnapshotTrailing)
+			through = min(through, at-n.cfg.SnapshotTrailing)
 		}
 		n.r.Compact(through)
 		n.handleReady()
@@ -630,22 +636,22 @@ func (n *Node) snapshotToSend() (coreconsensus.SnapshotMetaValue, bool) {
 // a change of leadership or term cancels it too (#547). The outcome goes
 // back to raft on the loop.
 func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
-	if _, busy := n.sending[to]; busy {
+	if _, busy := n.sendStop[to]; busy {
 		return
 	}
 	meta, ok := n.snapshotToSend()
 	if !ok {
 		// None to send: cut one now, and the next probe sends it.
 		n.requestCut()
-		n.r.SnapshotDone(to, false)
+		n.r.SnapshotDone(to, 0, false)
 		return
 	}
 	h, err := n.cfg.Snapshots.Open(meta.ID)
 	if err != nil {
-		n.r.SnapshotDone(to, false)
+		n.r.SnapshotDone(to, 0, false)
 		return
 	}
-	n.sending[to] = meta.Position.Index
+	n.sending[to] = sendPin{index: meta.Position.Index}
 	offer := coreconsensus.InstallOfferValue{Term: n.r.Status().Term, SnapshotID: meta.ID, Meta: meta}
 	ctx, cancel := context.WithCancel(context.Background())
 	n.sendStop[to] = cancel
@@ -675,9 +681,14 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 		}
 		n.streamEnded(meta, to, err)
 		n.exec(func() {
-			delete(n.sending, to)
+			if err == nil {
+				until := n.clk.Now().Add(time.Duration(pinAfterStream) * n.r.Status().Timing.ElectionTimeoutMax)
+				n.sending[to] = sendPin{index: meta.Position.Index, until: until}
+			} else {
+				delete(n.sending, to)
+			}
 			delete(n.sendStop, to)
-			n.r.SnapshotDone(to, err == nil)
+			n.r.SnapshotDone(to, meta.Position.Index, err == nil)
 			n.handleReady()
 		})
 	}()

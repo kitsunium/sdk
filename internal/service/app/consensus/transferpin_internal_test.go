@@ -22,6 +22,9 @@ type holdTransport struct {
 	streams atomic.Int32
 	// cancelled counts the held streams whose context ended first.
 	cancelled atomic.Int32
+	// streamed, when set, runs after a stream that succeeded, before
+	// Stream returns.
+	streamed atomic.Pointer[func()]
 }
 
 func (t *holdTransport) Stream(ctx context.Context, to coreconsensus.NodeID, offer coreconsensus.InstallOfferValue, open func(int64) (io.ReadCloser, error)) error {
@@ -41,6 +44,9 @@ func (t *holdTransport) Stream(ctx context.Context, to coreconsensus.NodeID, off
 	err := t.MemoryTransport.Stream(ctx, to, offer, open)
 	if err == nil {
 		t.streams.Add(1)
+		if f := t.streamed.Load(); f != nil {
+			(*f)()
+		}
 	}
 	return err
 }
@@ -124,6 +130,97 @@ func TestATransferInFlightPinsCompaction(t *testing.T) {
 		}
 		t.Fatalf("the lagging node needed another snapshot after the first transfer: offers held %d, streams completed %d, its status %+v, the leader's log starts at %d",
 			round+1, lt.streams.Load(), lag.node.Status(), func() uint64 { f, _ := l.log.Bounds(); return f }())
+	}
+}
+
+// #550, the window after the stream: once a snapshot streamed, the leader
+// only probes the node, and sends it entries after the node answers. A cut
+// in that window compacted past the entry after the snapshot, and the node
+// was offered another snapshot. The node is cut off from the leader as its
+// stream ends, two cuts' worth of entries are written, then the link heals:
+// the node must catch up by appends.
+func TestAStreamedSnapshotPinsCompactionUntilThePeerCatchesUp(t *testing.T) {
+	trs := map[coreconsensus.NodeID]*holdTransport{}
+	var mu sync.Mutex
+	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{1, 2, 4}, every: 20, size: 3}
+	c.configure = func(tn *testNode, cfg *Config) {
+		mu.Lock()
+		defer mu.Unlock()
+		trs[tn.id] = &holdTransport{
+			MemoryTransport: cfg.Transport.(*MemoryTransport),
+			started:         make(chan coreconsensus.InstallOfferValue), release: make(chan struct{}),
+		}
+		cfg.Transport = trs[tn.id]
+		// A pin outlives the stream by ten maximum election timeouts: ten
+		// seconds here, well past what the cut-off below lasts.
+		cfg.InitialTiming = testTimingFast()
+		cfg.InitialTiming.ElectionTimeoutMin, cfg.InitialTiming.ElectionTimeoutMax = 500*time.Millisecond, time.Second
+	}
+	newClusterWith(t, c)
+	l := c.settledLeader(10 * time.Second)
+	lag := c.otherThan(l)
+	c.kill(lag)
+	for i := range 200 {
+		propose(t, l.node, fmt.Sprintf("a%d=v", i))
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if first, _ := l.log.Bounds(); first > 100 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("setup: the leader never compacted")
+		}
+	}
+	mu.Lock()
+	lt := trs[l.id]
+	mu.Unlock()
+	link := func(cut bool) {
+		c.net.Cut(l.id, lag.id, cut)
+		c.net.Cut(lag.id, l.id, cut)
+	}
+	ended := make(chan struct{})
+	var once sync.Once
+	cutOff := func() { once.Do(func() { link(true); close(ended) }) }
+	lt.streamed.Store(&cutOff)
+	lt.holding.Store(true)
+	c.start(lag)
+	select {
+	case <-lt.started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("no snapshot offered to the lagging node")
+	}
+	lt.release <- struct{}{}
+	select {
+	case <-ended:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the snapshot stream never ended")
+	}
+	var tok coreconsensus.TokenValue
+	for i := range 45 {
+		tok = propose(t, l.node, fmt.Sprintf("c%d=v", i))
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if metas := must(l.snaps.List())(t); len(metas) > 0 && metas[0].Position.Index+20 > tok.Index {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("setup: the leader never cut after the stream")
+		}
+	}
+	link(false)
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		select {
+		case <-lt.started:
+			f, _ := l.log.Bounds()
+			t.Fatalf("the node was offered a second snapshot: its status %+v, the leader's log starts at %d", lag.node.Status(), f)
+		default:
+		}
+		if v, _ := lag.sm.get("c44"); v == "v" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the node never caught up: %+v", lag.node.Status())
+		}
 	}
 }
 

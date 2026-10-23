@@ -316,6 +316,15 @@ constants:
         value: "256"
     name: inboxDepth
   - doc: |-
+      pinAfterStream bounds the pin of a streamed snapshot, in maximum
+      election timeouts: a peer that stopped after its install no longer holds
+      the log back once it passes.
+    items:
+      - name: pinAfterStream
+        type: int64
+        value: "10"
+    name: pinAfterStream
+  - doc: |-
       The metric names are part of the contract (D13): spelled as Prometheus
       exposes them, underscores, _total on counters, units in the name.
     grouped: true
@@ -1054,6 +1063,11 @@ files:
       - (*Node).watchProgress
       - (*Node).mostCaughtUpVoter
     name: node_progresswatch.go
+  - decls:
+      - pinAfterStream
+      - sendPin
+      - (*Node).pinAt
+    name: node_sendpin.go
   - decls:
       - mRole
       - departedCertExpiry
@@ -4622,10 +4636,10 @@ types:
       - name: subCount
         type: uint32
       - doc: |-
-          sending is the index of the snapshot in flight to each peer: it pins
-          compaction (R6-01, #550).
+          sending is the snapshot that pins compaction for each peer: in
+          flight, then streamed until the peer catches up (R6-01, #550).
         name: sending
-        type: map[coreconsensus.NodeID]uint64
+        type: map[coreconsensus.NodeID]sendPin
       - doc: |-
           sendStop cancels the snapshot stream in flight to each peer: a
           leader that lost its leadership or its term stops streaming (#547).
@@ -5480,6 +5494,14 @@ types:
         recv: n *Node
         results: coreconsensus.NodeID
       - doc: |-
+          pinAt is the index pin holds compaction back to at now, and false once
+          it no longer holds: a streamed snapshot's pin ends when this node no
+          longer leads the peer, or when until passed. It runs on the loop.
+        name: pinAt
+        params: to coreconsensus.NodeID, pin sendPin, now time.Time
+        recv: n *Node
+        results: uint64, bool
+      - doc: |-
           observeStatus publishes the gauges a status turn changes, and logs role
           and term changes (D13).
         name: observeStatus
@@ -5832,8 +5854,8 @@ types:
       - doc: |-
           afterCut keeps the two newest snapshots and compacts the log back to the
           older one, less SnapshotTrailing, with saturating arithmetic (D7). A
-          snapshot in flight to a peer pins compaction back to it, less
-          SnapshotTrailing (R6-01): a leader that cut twice during one transfer
+          snapshot in flight to a peer, then streamed until the peer catches up
+          (sendPin), pins compaction back to it, less SnapshotTrailing (R6-01): a leader that cut twice during one transfer
           compacted past the snapshot it was sending, the entry after it was gone
           once the peer installed it, and under a sustained write rate the peer
           installed snapshot after snapshot and never caught up (#550).
@@ -6132,6 +6154,19 @@ types:
         type: time.Time
     kind: struct
     name: progressWatch
+  - doc: |-
+      sendPin is a snapshot that pins compaction for a peer. While it streams,
+      until is zero. Once streamed, the pin follows the peer's match until the
+      peer catches up or until passes: the leader only probes the peer after an
+      install, and a cut that landed in that window compacted past the entries
+      the peer needed next, so it was offered snapshot after snapshot (#550).
+    fields:
+      - name: index
+        type: uint64
+      - name: until
+        type: time.Time
+    kind: struct
+    name: sendPin
   - doc: |-
       obs holds a node's instruments. Every method is safe on a nil Meter,
       Tracer or Logger: observability is optional and never changes a decision.

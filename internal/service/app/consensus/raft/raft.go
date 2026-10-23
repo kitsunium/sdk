@@ -438,13 +438,20 @@ func (r *Raft) ReportUnreachable(id core.NodeID) {
 	}
 }
 
-// SnapshotDone ends a snapshot transfer to a peer.
-func (r *Raft) SnapshotDone(to core.NodeID, ok bool) {
+// SnapshotDone ends a snapshot transfer to a peer; index is the snapshot
+// the driver sent.
+func (r *Raft) SnapshotDone(to core.NodeID, index uint64, ok bool) {
 	pr := r.prs[to]
 	if r.role != core.RoleLeader || pr == nil || pr.state != stateSnapshot {
 		return
 	}
-	if !ok {
+	if ok {
+		// The driver sends its newest snapshot, which may be past the base
+		// the transfer was asked at: the peer's log now starts after the
+		// one it installed. Resumed after the older base, the leader found
+		// that entry compacted and sent another snapshot (#550).
+		pr.pendingSnapshot = max(pr.pendingSnapshot, index)
+	} else {
 		pr.pendingSnapshot = 0
 	}
 	pr.becomeProbe()

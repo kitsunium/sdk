@@ -285,6 +285,7 @@ files:
       - (*Raft).handleHeartbeatResp
       - (*Raft).ackRounds
       - (*Raft).handleAppResp
+      - (*Raft).ackMoved
       - (*Raft).handleAppReject
       - (*Raft).Propose
       - (*Raft).checkProposed
@@ -1319,6 +1320,13 @@ types:
         params: pr *progress, m core.MessageValue
         recv: r *Raft
       - doc: |-
+          ackMoved moves a peer whose match an answer raised through index: out of
+          a probe the answer settles, or out of a snapshot it covers, then commits
+          what a quorum now holds.
+        name: ackMoved
+        params: pr *progress, index uint64
+        recv: r *Raft
+      - doc: |-
           handleAppReject backs a peer off after a refused append: to a snapshot it
           asked for, to the truncation it reports, or to the hint of a rejection
           that still answers an outstanding append; any other rejection is stale and
@@ -1658,7 +1666,7 @@ types:
         params: id core.NodeID
         recv: r *Raft
       - name: SnapshotDone
-        params: to core.NodeID, ok bool
+        params: to core.NodeID, index uint64, ok bool
         recv: r *Raft
       - name: Compact
         params: index uint64

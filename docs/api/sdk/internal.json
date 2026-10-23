@@ -48716,9 +48716,9 @@
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "SnapshotDone",
       "recv": "Raft",
-      "spelled": "func(to core.NodeID, ok bool)",
-      "canonical": "func(to github.com/kitsunium/sdk/internal/core/app/consensus.NodeID, ok bool)",
-      "doc": "SnapshotDone ends a snapshot transfer to a peer.\n",
+      "spelled": "func(to core.NodeID, index uint64, ok bool)",
+      "canonical": "func(to github.com/kitsunium/sdk/internal/core/app/consensus.NodeID, index uint64, ok bool)",
+      "doc": "SnapshotDone ends a snapshot transfer to a peer; index is the snapshot\nthe driver sent.\n",
       "file": "service/app/consensus/raft/raft.go",
       "layer": "service",
       "family": "app"
