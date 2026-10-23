@@ -82,6 +82,16 @@ files:
       - sdkClock.NewTimer
       - sdkClock.NewTicker
     name: clock.go
+  - decls:
+      - deadLetters
+      - openDeadLetters
+      - (*deadLetters).DeadLetters
+      - (*deadLetters).Replay
+      - (*deadLetters).Drop
+      - (*deadLetters).Close
+      - found
+      - lacksDeadLetters
+    name: deadletters.go
   - decls: []
     name: doc.go
   - decls:
@@ -126,6 +136,24 @@ functions:
     name: clockOf
     params: c plug.Clock
     results: clock.Timed
+  - doc: |-
+      openDeadLetters opens signal's queue as the export keeps it; a queue
+      that would be in memory is refused: no dead letter outlives its process.
+
+      IFACE-PLUGIN: the framework reaches the queue through plug.OTLPQueue;
+      this is its implementation.
+    name: openDeadLetters
+    params: _ context.Context, cfg *plug.OTLPConfig, signal string
+    results: plug.OTLPQueue, error
+  - doc: |-
+      found is err as the CLI reads it: a dead letter the queue does not hold
+      is not found, and no failure.
+    name: found
+    params: err error
+    results: bool, error
+  - doc: lacksDeadLetters is the refusal of a queue that keeps no dead letter.
+    name: lacksDeadLetters
+    results: error
   - name: Enable
   - doc: |-
       open opens the export cfg describes: a queue and a forwarder per signal —
@@ -233,6 +261,34 @@ types:
         recv: c sdkClock
         results: clock.Ticker
     name: sdkClock
+  - doc: deadLetters is one signal's queue, open for its dead letters.
+    fields:
+      - name: broker
+        type: queue.Broker
+    kind: struct
+    methods:
+      - doc: |-
+          DeadLetters are at most max of the queue's dead letters, oldest first,
+          their payload's size in place of the payload.
+        name: DeadLetters
+        params: ctx context.Context, max int
+        recv: q *deadLetters
+        results: "[]plug.OTLPDeadLetterValue, error"
+      - doc: Replay moves the dead letter id back into the live queue.
+        name: Replay
+        params: ctx context.Context, id string
+        recv: q *deadLetters
+        results: bool, error
+      - doc: Drop deletes the dead letter id for good.
+        name: Drop
+        params: ctx context.Context, id string
+        recv: q *deadLetters
+        results: bool, error
+      - doc: Close releases what the queue holds.
+        name: Close
+        recv: q *deadLetters
+        results: error
+    name: deadLetters
   - doc: |-
       export is an app's export, open: a queue and a forwarder per signal, the
       trace batch sink in front of the trace forwarder, the meter the metrics
@@ -383,6 +439,9 @@ vars:
       - name: _
         type: plug.OTLPExporter
         value: (*export)(nil)
+      - name: _
+        type: plug.OTLPQueue
+        value: (*deadLetters)(nil)
       - name: _
         type: clock.Timed
         value: sdkClock{}

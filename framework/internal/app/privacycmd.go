@@ -256,6 +256,24 @@ func (a *App) openDatabases(ctx context.Context, runs []*databaseRun) error {
 	return nil
 }
 
+// openDatabasesForCommand opens the app's secrets and its databases as the
+// start does, for a command of another subsystem (storeHooks.openDatabases),
+// and returns what closes them.
+func (a *App) openDatabasesForCommand(ctx context.Context) (func() error, error) {
+	if err := a.openSecrets(ctx); err != nil {
+		return nil, err
+	}
+	runs := a.newDatabaseRuns()
+	closeAll := func() error {
+		defer a.closeSecrets()
+		return closeRuns(runs)
+	}
+	if err := a.openDatabases(ctx, runs); err != nil {
+		return nil, errors.Join(err, closeAll())
+	}
+	return closeAll, nil
+}
+
 // closeRuns closes every run of runs.
 func closeRuns(runs []*databaseRun) error {
 	var err error

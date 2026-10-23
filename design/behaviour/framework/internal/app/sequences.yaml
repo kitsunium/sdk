@@ -23940,6 +23940,8 @@ sequences:
         kind: internal
       - id: a.breakerCLI
         kind: internal
+      - id: a.otlpCLI
+        kind: internal
     steps:
       - bind: help
         eval:
@@ -23979,6 +23981,15 @@ sequences:
             eval: a.breakerCLI()
             to: a.breakerCLI
           when: run != nil
+      - opt:
+          do:
+            - set: cmds["otlp"]
+              value: run
+          init:
+            bind: run
+            eval: a.otlpCLI()
+            to: a.otlpCLI
+          when: run != nil
       - return: cmds
   - of: (*App).breakerCLI
     participants:
@@ -24015,6 +24026,11 @@ sequences:
             - eval: fmt.Fprintf(w, "  %[1]s breaker [list]|isolate PORT|reset PORT\n%[2]s a port's breaker, opened by an operator until reset\n", a.name, strings.Repeat(" ", 37))
               to: fmt
           when: len(a.breakers()) > 0
+      - opt:
+          do:
+            - eval: fmt.Fprintf(w, "  %[1]s otlp dead-letters|replay [traces|metrics] [--drop] [ID...]\n%[2]s the OTLP export's dead letters, listed, replayed or dropped\n", a.name, strings.Repeat(" ", 37))
+              to: fmt
+          when: a.otlpCLI() != nil
   - of: (*App).onStores
     participants:
       - id: caller
@@ -27809,8 +27825,31 @@ sequences:
           		stopTakes:      (*App).otlpStopBudget,
           		headerSettings: (*App).otlpHeaderSettings,
           		tables:         (*App).otlpTables,
+          		command:        otlpCommandOf,
           	})
         to: otlpCode.Store
+  - of: (*App).otlpCLI
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).otlpCLI
+        kind: self
+      - id: otlpCode.Load
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: a.opts.otlp == nil
+      - opt:
+          do:
+            - return: h.command(a)
+          init:
+            bind: h
+            eval: otlpCode.Load()
+            to: otlpCode.Load
+          when: h != nil
+      - return: nil
   - of: (*App).otlpCodeTables
     participants:
       - id: caller
@@ -28266,6 +28305,8 @@ sequences:
         kind: stdlib
       - id: a.otlpOnDatabase
         kind: internal
+      - id: failure
+        kind: internal
     steps:
       - bind: e
         eval: a.opts.otlp
@@ -28320,7 +28361,14 @@ sequences:
                   params: ctx context.Context, b plug.OTLPBatchValue
                   results: error
                   steps:
-                    - return: "send(ctx, OTLPBatchValue{Signal: b.Signal, Document: b.Document})"
+                    - bind: err
+                      eval: "send(ctx, OTLPBatchValue{Signal: b.Signal, Document: b.Document})"
+                    - opt:
+                        do:
+                          - return: failure(CodeOTLPExport, "OTLP_REFUSED", "the product's OTLP sender refused the batch for good", err)
+                            to: failure
+                        when: err != nil && !otlpRetryable(err)
+                    - return: err
             - set: cfg.Retryable
               value: otlpRetryable
           init:
@@ -28583,6 +28631,491 @@ sequences:
       - return: |-
           st.MaxBatches > 0 && float64(st.Pending) > otlpReadinessBacklog*float64(st.MaxBatches) ||
           		st.MaxBytes > 0 && float64(st.PendingBytes) > otlpReadinessBacklog*float64(st.MaxBytes)
+  - of: otlpCommandOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: otlpCommandOf
+        kind: self
+      - id: a.otlpCommand
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: ctx context.Context, args []string
+            results: int
+            steps:
+              - return: a.otlpCommand(ctx, args, os.Stdout, os.Stderr)
+                to: a.otlpCommand
+  - of: (*App).otlpCommand
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).otlpCommand
+        kind: self
+      - id: parseOTLPArgs
+        kind: internal
+      - id: fmt
+        kind: stdlib
+      - id: a.resolve
+        kind: internal
+      - id: a.withOTLPQueues
+        kind: internal
+    steps:
+      - bind: parsed, ok
+        eval: parseOTLPArgs(args)
+        to: parseOTLPArgs
+      - opt:
+          do:
+            - eval: fmt.Fprintf(stderr, otlpUsageText, a.name)
+              to: fmt
+            - return: "2"
+          when: "!ok || a.opts.otlp == nil"
+      - opt:
+          do:
+            - eval: fmt.Fprintln(stderr, err)
+              to: fmt
+            - return: "1"
+          init:
+            bind: err
+            eval: a.resolve()
+            to: a.resolve
+          when: err != nil
+      - opt:
+          do:
+            - return: exitConfig
+          when: a.otlpSettingsRefused(stderr)
+      - bind: err
+        eval: |-
+          a.withOTLPQueues(ctx, func(cfg *plug.OTLPConfig) error {
+          		if parsed.verb == "dead-letters" {
+          			return a.listOTLPDeadLetters(ctx, cfg, parsed.signals, stdout)
+          		}
+          		return a.replayOTLPDeadLetters(ctx, cfg, &parsed, stdout, stderr)
+          	})
+        to: a.withOTLPQueues
+      - switch:
+          cases:
+            - case: err == nil
+              do:
+                - return: "0"
+            - case: errs.PublicOf(err) != ""
+              do:
+                - eval: fmt.Fprintln(stderr, errs.PublicOf(err))
+                  to: fmt
+            - default: true
+              do:
+                - eval: fmt.Fprintln(stderr, describeText(err))
+                  to: fmt
+      - return: "1"
+  - of: (*otlpArgs).take
+    steps:
+      - switch:
+          cases:
+            - case: arg == "--drop"
+              do:
+                - set: p.drop
+                  value: "true"
+            - case: arg != "" && !strings.HasPrefix(arg, "-")
+              do:
+                - set: p.ids
+                  value: append(p.ids, arg)
+            - default: true
+              do:
+                - return: "false"
+      - return: "true"
+  - of: (*App).otlpSettingsRefused
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).otlpSettingsRefused
+        kind: self
+      - id: a.resolveSettings
+        kind: internal
+      - id: a.settingValues.Store
+        kind: value
+      - id: fmt
+        kind: stdlib
+    steps:
+      - bind: resolved
+        eval: a.resolveSettings()
+        to: a.resolveSettings
+      - eval: a.settingValues.Store(&resolved.values)
+        to: a.settingValues.Store
+      - bind: refused
+        eval: "false"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: "fmt.Fprintf(stderr, \"error: %s\\n\", d.Message)"
+                    to: fmt
+                  - set: refused
+                    value: "true"
+                when: d.Severity == "error"
+          key: _
+          range: slices.Concat(resolved.problems, a.otlpProblems())
+          value: d
+      - return: refused
+  - of: (*App).withOTLPQueues
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).withOTLPQueues
+        kind: self
+      - id: otlpInMemory
+        kind: internal
+      - id: stores
+        kind: internal
+      - id: storesMissing
+        kind: internal
+      - id: errors
+        kind: stdlib
+      - id: filepath
+        kind: stdlib
+    steps:
+      - bind: e
+        eval: a.opts.otlp
+      - bind: cfg
+        eval: |-
+          &plug.OTLPConfig{
+          		Clock: pluggedClock{Timed: a.clock}, Service: a.name, Version: frameworkVersion(),
+          		WhenFull: resolvedSetting(a, e.whenFull), MaxBytes: int64(resolvedSetting(a, e.maxBytes)),
+          		MaxBatches: resolvedSetting(a, e.maxBatches), MaxAge: resolvedSetting(a, e.maxAge),
+          		SendTimeout: resolvedSetting(a, e.sendTimeout), Interval: resolvedSetting(a, e.interval),
+          		DrainTimeout: resolvedSetting(a, e.drain), SettleTimeout: resolvedSetting(a, e.settle),
+          	}
+      - opt:
+          do:
+            - return: otlpInMemory()
+              to: otlpInMemory
+          when: a.opts.memory
+      - opt:
+          do:
+            - bind: h
+              eval: stores()
+              to: stores
+            - opt:
+                do:
+                  - return: storesMissing()
+                    to: storesMissing
+                when: h == nil
+            - bind: closeAll, err
+              eval: h.openDatabases(a, ctx)
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - return: errors.Join(a.onOTLPDatabase(ctx, cfg, fn), closeAll())
+              to: errors
+          when: resolvedSetting(a, e.database) != ""
+      - opt:
+          do:
+            - return: otlpInMemory()
+              to: otlpInMemory
+          when: a.dataDir == ""
+      - set: cfg.Dir
+        to: filepath
+        value: filepath.Join(a.dataDir, otlpDataDir)
+      - return: fn(cfg)
+  - of: (*App).onOTLPDatabase
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).onOTLPDatabase
+        kind: self
+      - id: a.otlpOnDatabase
+        kind: internal
+      - id: otlpInMemory
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: a.otlpOnDatabase(ctx, cfg)
+            to: a.otlpOnDatabase
+          when: err != nil
+      - opt:
+          do:
+            - return: otlpInMemory()
+              to: otlpInMemory
+          when: cfg.Database == nil
+      - return: fn(cfg)
+  - of: otlpInMemory
+    participants:
+      - id: caller
+        kind: actor
+      - id: otlpInMemory
+        kind: self
+      - id: failure
+        kind: internal
+    steps:
+      - return: |-
+          failure(CodeOTLPExport, "OTLP_IN_MEMORY",
+          		"the OTLP export keeps its queues in memory: no dead letter outlives its process; set <PRODUCT>_DATA_DIR or otlp-database", nil)
+        to: failure
+  - of: withOTLPQueue
+    participants:
+      - id: caller
+        kind: actor
+      - id: withOTLPQueue
+        kind: self
+      - id: failure
+        kind: internal
+    steps:
+      - bind: q, err
+        eval: plug.OTLP.Load().Queue(ctx, cfg, signal)
+      - opt:
+          do:
+            - return: failure(CodeOTLPExport, "OTLP_QUEUE", "the OTLP export's queue cannot be opened", err, errs.String("signal", signal))
+              to: failure
+          when: err != nil
+      - defer: func() { err = errors.Join(err, q.Close()) }()
+      - return: fn(q)
+  - of: (*App).listOTLPDeadLetters
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).listOTLPDeadLetters
+        kind: self
+      - id: withOTLPQueue
+        kind: internal
+      - id: fmt
+        kind: stdlib
+    steps:
+      - bind: "n"
+        eval: "0"
+      - loop:
+          do:
+            - bind: err
+              eval: |-
+                withOTLPQueue(ctx, cfg, signal, func(q plug.OTLPQueue) error {
+                			dead, err := q.DeadLetters(ctx, otlpMaxDeadLetters)
+                			for _, d := range dead {
+                				fmt.Fprintln(stdout, otlpDeadLetterLine(signal, &d))
+                			}
+                			n += len(dead)
+                			return err
+                		})
+              to: withOTLPQueue
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+          key: _
+          range: signals
+          value: signal
+      - opt:
+          do:
+            - eval: "fmt.Fprintln(stdout, \"no dead letter in the OTLP export's queues: \"+strings.Join(signals, \", \"))"
+              to: fmt
+          when: n == 0
+      - return: nil
+  - of: otlpDeadLetterLine
+    participants:
+      - id: caller
+        kind: actor
+      - id: otlpDeadLetterLine
+        kind: self
+      - id: errs.Code(d.Code).String
+        kind: value
+    steps:
+      - bind: code
+        eval: "\"-\""
+      - opt:
+          do:
+            - set: code
+              to: errs.Code(d.Code).String
+              value: errs.Code(d.Code).String()
+          when: d.Code != 0
+      - bind: line
+        eval: |-
+          signal + "\t" + d.ID + "\t" + d.FailedAt.UTC().Format(time.RFC3339) + "\t" + code + "\t" + d.Reason +
+          		"\t" + strconv.Itoa(d.Deliveries) + " attempts\t" + strconv.Itoa(d.Size) + " bytes"
+      - opt:
+          do:
+            - op: +=
+              set: line
+              value: "\"\\t\" + d.Cause"
+          when: d.Cause != ""
+      - opt:
+          do:
+            - bind: trail
+              eval: make([]string, 0, len(d.Trail))
+            - loop:
+                do:
+                  - set: trail
+                    value: append(trail, errs.Code(c).String())
+                key: _
+                range: d.Trail
+                value: c
+            - op: +=
+              set: line
+              value: "\"\\ttrail \" + strings.Join(trail, \" <- \")"
+          when: len(d.Trail) > 0
+      - return: line
+  - of: (*App).replayOTLPDeadLetters
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).replayOTLPDeadLetters
+        kind: self
+      - id: withOTLPQueue
+        kind: internal
+      - id: fmt
+        kind: stdlib
+      - id: failure
+        kind: internal
+    steps:
+      - bind: done
+        eval: map[string]bool{}
+      - bind: verb
+        eval: "\"replayed\""
+      - opt:
+          do:
+            - set: verb
+              value: "\"dropped\""
+          when: p.drop
+      - loop:
+          do:
+            - bind: "n"
+              eval: "0"
+            - bind: err
+              eval: |-
+                withOTLPQueue(ctx, cfg, signal, func(q plug.OTLPQueue) (err error) {
+                			n, err = otlpActOn(ctx, q, p, done)
+                			return err
+                		})
+              to: withOTLPQueue
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - eval: fmt.Fprintf(stdout, "%s %d dead letter(s) of %s\n", verb, n, signal)
+              to: fmt
+          key: _
+          range: p.signals
+          value: signal
+      - var:
+          name: missing
+          type: "[]string"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: fmt.Fprintln(stderr, "no dead letter "+clip(id)+" in the OTLP export's queues")
+                    to: fmt
+                  - set: missing
+                    value: append(missing, clip(id))
+                when: "!done[id]"
+          key: _
+          range: p.ids
+          value: id
+      - opt:
+          do:
+            - return: failure(CodeOTLPExport, "OTLP_DEAD_LETTER_UNKNOWN", "no such dead letter", nil, errs.String("ids", strings.Join(missing, ",")))
+              to: failure
+          when: len(missing) > 0
+      - return: nil
+  - of: otlpActOn
+    participants:
+      - id: caller
+        kind: actor
+      - id: otlpActOn
+        kind: self
+      - id: otlpIDs
+        kind: internal
+      - id: otlpAct
+        kind: internal
+    steps:
+      - bind: ids, err
+        eval: otlpIDs(ctx, q, p.ids, done)
+        to: otlpIDs
+      - opt:
+          do:
+            - return: 0, err
+          when: err != nil
+      - bind: "n"
+        eval: "0"
+      - loop:
+          do:
+            - bind: found, err
+              eval: otlpAct(ctx, q, id, p.drop)
+              to: otlpAct
+            - opt:
+                do:
+                  - return: n, err
+                when: err != nil
+            - opt:
+                do:
+                  - set: done[id]
+                    value: "true"
+                  - op: ++
+                    set: "n"
+                when: found
+          key: _
+          range: ids
+          value: id
+      - return: n, nil
+  - of: otlpIDs
+    participants:
+      - id: caller
+        kind: actor
+      - id: otlpIDs
+        kind: self
+      - id: q.DeadLetters
+        kind: value
+    steps:
+      - opt:
+          do:
+            - var:
+                name: out
+                type: "[]string"
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - set: out
+                          value: append(out, id)
+                      when: "!done[id]"
+                key: _
+                range: named
+                value: id
+            - return: out, nil
+          when: len(named) > 0
+      - bind: dead, err
+        eval: q.DeadLetters(ctx, otlpMaxDeadLetters)
+        to: q.DeadLetters
+      - bind: out
+        eval: make([]string, 0, len(dead))
+      - loop:
+          do:
+            - set: out
+              value: append(out, d.ID)
+          key: _
+          range: dead
+          value: d
+      - return: out, err
+  - of: otlpAct
+    participants:
+      - id: caller
+        kind: actor
+      - id: otlpAct
+        kind: self
+      - id: q.Drop
+        kind: value
+      - id: q.Replay
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: q.Drop(ctx, id)
+              to: q.Drop
+          when: drop
+      - return: q.Replay(ctx, id)
+        to: q.Replay
   - of: passwordOption.passwordConfigure
     steps:
       - eval: f(o)
@@ -34445,6 +34978,52 @@ sequences:
           range: runs
           value: r
       - return: nil
+  - of: (*App).openDatabasesForCommand
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).openDatabasesForCommand
+        kind: self
+      - id: a.openSecrets
+        kind: internal
+      - id: a.newDatabaseRuns
+        kind: internal
+      - id: a.closeSecrets
+        kind: internal
+      - id: closeRuns
+        kind: internal
+      - id: a.openDatabases
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: a.openSecrets(ctx)
+            to: a.openSecrets
+          when: err != nil
+      - bind: runs
+        eval: a.newDatabaseRuns()
+        to: a.newDatabaseRuns
+      - bind: closeAll
+        eval:
+          closure:
+            results: error
+            steps:
+              - defer: a.closeSecrets()
+                to: a.closeSecrets
+              - return: closeRuns(runs)
+                to: closeRuns
+      - opt:
+          do:
+            - return: nil, errors.Join(err, closeAll())
+          init:
+            bind: err
+            eval: a.openDatabases(ctx, runs)
+            to: a.openDatabases
+          when: err != nil
+      - return: closeAll, nil
   - of: closeRuns
     participants:
       - id: caller
@@ -54755,6 +55334,7 @@ sequences:
           			"data":      (*App).dataCommand,
           			"watch":     (*App).watchCommand,
           		},
+          		openDatabases: (*App).openDatabasesForCommand,
           	})
         to: storeCode.Store
   - of: stores

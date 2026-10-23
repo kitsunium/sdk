@@ -315,8 +315,10 @@ const (
 	CodeGaveUp errs.Code = iapp.CodeGaveUp
 
 	// CodeOTLPExport refuses a start whose OTLP export ([OTLP]) cannot be
-	// opened — its queue, its collector's endpoint, its headers —, and says
-	// a stop that did not let it flush within its budget.
+	// opened — its queue, its collector's endpoint, its headers —, says a
+	// stop that did not let it flush within its budget, marks a batch the
+	// product's own sender refused for good, and refuses the otlp command
+	// a queue it cannot read or a dead letter it does not hold.
 	CodeOTLPExport errs.Code = iapp.CodeOTLPExport
 
 	// The signals the framework ends one of its own steps with and catches itself — a

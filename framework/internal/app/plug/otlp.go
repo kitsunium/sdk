@@ -48,6 +48,34 @@ type OTLPDriverConfig struct {
 	// backlog a previous process left counted —, its senders and its
 	// meter. It sends nothing until OTLPExporter.Run.
 	Open func(ctx context.Context, cfg *OTLPConfig) (OTLPExporter, error)
+	// Queue opens one signal's queue as Open keeps it — the same directory
+	// or table, the same policy — for the product's CLI, which lists and
+	// replays its dead letters (issue #536); it is refused when the queue
+	// would be in memory, where no dead letter outlives its process.
+	Queue func(ctx context.Context, cfg *OTLPConfig, signal string) (OTLPQueue, error)
+}
+
+// OTLPDeadLetterValue is one batch a signal's queue gave up on — the
+// collector refused it for good —, as the product's CLI lists it: never its
+// payload.
+type OTLPDeadLetterValue struct {
+	// FailedAt is when its last attempt failed.
+	FailedAt time.Time
+	// ID identifies it in its queue: what replay and drop take.
+	ID string
+	// Reason is the failure's identifier.
+	Reason string
+	// Cause is the failure's public text, "" for none.
+	Cause string
+	// Trail is the codes the failure gathered as it was wrapped, oldest
+	// first, nil for none.
+	Trail []uint32
+	// Code is the failure's error code, 0 for none.
+	Code uint32
+	// Deliveries counts its attempts.
+	Deliveries int
+	// Size is its payload's bytes.
+	Size int
 }
 
 // OTLPConfig is what the framework asks of an export: who produces the

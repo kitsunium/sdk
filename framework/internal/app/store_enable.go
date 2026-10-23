@@ -42,6 +42,11 @@ type storeHooks struct {
 	// commands are Main's commands on the stores: migrate, privacy,
 	// revisions, data — and watch, whose replay reads a watched store.
 	commands map[string]storeCmd
+	// openDatabases opens the app's databases as the start does, their
+	// migrations applied, for a command of another subsystem — the OTLP
+	// export's otlp, whose queues one of them keeps (issue #536) —, and
+	// returns what closes them.
+	openDatabases func(a *App, ctx context.Context) (closeAll func() error, err error)
 }
 
 // storeCmd is one of Main's commands on the stores.
@@ -71,6 +76,7 @@ func EnableStores() {
 			"data":      (*App).dataCommand,
 			"watch":     (*App).watchCommand,
 		},
+		openDatabases: (*App).openDatabasesForCommand,
 	})
 }
 

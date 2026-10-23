@@ -333,6 +333,7 @@ files:
       - OTLPDropOldest
       - OTLP
       - OTLPDriverConfig
+      - OTLPDeadLetterValue
       - OTLPConfig
       - OTLPSinkValue
       - OTLPMeterValue
@@ -341,6 +342,7 @@ files:
     name: otlp.go
   - decls:
       - OTLPExporter
+      - OTLPQueue
     name: otlp_interface.go
   - decls:
       - LabelNode
@@ -845,8 +847,44 @@ types:
           meter. It sends nothing until OTLPExporter.Run.
         name: Open
         type: func(ctx context.Context, cfg *OTLPConfig) (OTLPExporter, error)
+      - doc: |-
+          Queue opens one signal's queue as Open keeps it — the same directory
+          or table, the same policy — for the product's CLI, which lists and
+          replays its dead letters (issue #536); it is refused when the queue
+          would be in memory, where no dead letter outlives its process.
+        name: Queue
+        type: func(ctx context.Context, cfg *OTLPConfig, signal string) (OTLPQueue, error)
     kind: struct
     name: OTLPDriverConfig
+  - fields:
+      - doc: FailedAt is when its last attempt failed.
+        name: FailedAt
+        type: time.Time
+      - doc: "ID identifies it in its queue: what replay and drop take."
+        name: ID
+        type: string
+      - doc: Reason is the failure's identifier.
+        name: Reason
+        type: string
+      - doc: Cause is the failure's public text, "" for none.
+        name: Cause
+        type: string
+      - doc: |-
+          Trail is the codes the failure gathered as it was wrapped, oldest
+          first, nil for none.
+        name: Trail
+        type: "[]uint32"
+      - doc: Code is the failure's error code, 0 for none.
+        name: Code
+        type: uint32
+      - doc: Deliveries counts its attempts.
+        name: Deliveries
+        type: int
+      - doc: Size is its payload's bytes.
+        name: Size
+        type: int
+    kind: struct
+    name: OTLPDeadLetterValue
   - fields:
       - doc: |-
           Clock is the app's clock: the queues stamp and age a batch on it, the
@@ -1042,6 +1080,23 @@ types:
       	Run(ctx context.Context) error
       	// Stats is what each signal's queue holds, has sent and has lost.
       	Stats() []OTLPStatsValue
+      }
+  - kind: named
+    name: OTLPQueue
+    underlying: |-
+      interface {
+      	// DeadLetters are at most max of the batches the queue gave up on,
+      	// oldest first.
+      	DeadLetters(ctx context.Context, max int) ([]OTLPDeadLetterValue, error)
+      	// Replay moves the dead letter id back into the live queue, its
+      	// attempts counted afresh: the export sends it again. found is false
+      	// when the queue holds no dead letter id.
+      	Replay(ctx context.Context, id string) (found bool, err error)
+      	// Drop deletes the dead letter id for good. found is false when the
+      	// queue holds no dead letter id.
+      	Drop(ctx context.Context, id string) (found bool, err error)
+      	// Close releases what the queue holds.
+      	Close() error
       }
   - fields:
       - doc: Addr is where to listen, "host:port".

@@ -20,7 +20,13 @@ subsystem opens and on which the queue subsystem's SQL broker keeps them
 (`plug.QueueDriverConfig.OpenSDK`): the product then imports
 `framework/app/queue`, and the start refuses it otherwise, naming the import
 (`CodeSubsystemMissing`). A product that keeps its export off a database
-links none of the queue subsystem. `framework/app` does not import this package (ADR 0179
+links none of the queue subsystem.
+
+Importing it also gives `App.Main` the `otlp` command of a product that
+declares an export (issue #536): `otlp dead-letters` lists the batches the
+collector refused for good, never their payload, and `otlp replay` puts them
+back into the live queue, or with `--drop` deletes them — never a route
+(D13). A product that does not import it has no such command. `framework/app` does not import this package (ADR 0179
 step 10): a product that declares an export imports it, and `kit gen` writes
 the line for a designed product (§5).
 
