@@ -121,6 +121,9 @@ type Node struct {
 	// sendStop cancels the snapshot stream in flight to each peer: a
 	// leader that lost its leadership or its term stops streaming (#547).
 	sendStop map[coreconsensus.NodeID]context.CancelFunc
+	// tooLarge is, per learner, the newest snapshot it was found too small
+	// to install, so that it is said once per snapshot (#591).
+	tooLarge map[coreconsensus.NodeID]string
 	// unreachableAt is when the transport last failed to reach a peer.
 	unreachableAt map[coreconsensus.NodeID]time.Time
 	lastTerm      uint64
@@ -387,7 +390,7 @@ func newNode(cfg *Config, stamp *coreconsensus.StampValue) *Node {
 		propc: make(chan *proposal, inboxDepth), execc: make(chan func(), loopBacklog), storec: make(chan storeDone, loopBacklog),
 		stopc: make(chan struct{}), sq: newFifo[storeReq](), fetchq: newFifo[raft.FetchSpec](), fetchc: make(chan fetchDone, fetchBacklog), aq: newFifo[applyItem](),
 		waiters: map[uint64]*proposal{}, results: map[uint64]applyResult{},
-		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]sendPin{}, sendStop: map[coreconsensus.NodeID]context.CancelFunc{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
+		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]sendPin{}, sendStop: map[coreconsensus.NodeID]context.CancelFunc{}, tooLarge: map[coreconsensus.NodeID]string{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
 		watchers: map[chan coreconsensus.StatusValue]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
 	}
 	n.acond = sync.NewCond(&n.am)

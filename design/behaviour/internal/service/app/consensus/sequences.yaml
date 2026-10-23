@@ -7759,7 +7759,7 @@ sequences:
           		propc: make(chan *proposal, inboxDepth), execc: make(chan func(), loopBacklog), storec: make(chan storeDone, loopBacklog),
           		stopc: make(chan struct{}), sq: newFifo[storeReq](), fetchq: newFifo[raft.FetchSpec](), fetchc: make(chan fetchDone, fetchBacklog), aq: newFifo[applyItem](),
           		waiters: map[uint64]*proposal{}, results: map[uint64]applyResult{},
-          		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]sendPin{}, sendStop: map[coreconsensus.NodeID]context.CancelFunc{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
+          		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]sendPin{}, sendStop: map[coreconsensus.NodeID]context.CancelFunc{}, tooLarge: map[coreconsensus.NodeID]string{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
           		watchers: map[chan coreconsensus.StatusValue]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
           	}
       - set: n.acond
@@ -15112,9 +15112,37 @@ sequences:
         kind: actor
       - id: (*Node).Promote
         kind: self
+      - id: n.Membership().Member
+        kind: value
+      - id: n.snapState.mu.Lock
+        kind: value
+      - id: n.snapState.mu.Unlock
+        kind: value
+      - id: origin
+        kind: internal
       - id: n.admin
         kind: internal
     steps:
+      - opt:
+          do:
+            - eval: n.snapState.mu.Lock()
+              to: n.snapState.mu.Lock
+            - bind: newest
+              eval: n.snapState.newestBytes
+            - eval: n.snapState.mu.Unlock()
+              to: n.snapState.mu.Unlock
+            - opt:
+                do:
+                  - return: |-
+                      origin(coreconsensus.MembershipInvalid, errs.String("why", "the learner's snapshot limit is below the newest snapshot"),
+                      				errs.Int64("limit", m.MaxSnapshotBytes), errs.Int64("bytes", newest))
+                    to: origin
+                when: newest > m.MaxSnapshotBytes
+          init:
+            bind: m, ok
+            eval: n.Membership().Member(id)
+            to: n.Membership().Member
+          when: ok && m.MaxSnapshotBytes > 0
       - return: "n.admin(ctx, coreconsensus.EntryMembership, wire.AdminValue{Operator: string(op), Change: wire.ChangePromote, Target: id})"
         to: n.admin
   - of: (*Node).Remove
@@ -16434,7 +16462,7 @@ sequences:
         kind: stdlib
       - id: newChunkWriter
         kind: internal
-      - id: snapshotLimit
+      - id: cutLimit
         kind: internal
       - id: snap.WriteTo
         kind: value
@@ -16501,8 +16529,8 @@ sequences:
         eval: newChunkWriter(out, n.cfg.SnapshotCodec, defaultChunkSize)
         to: newChunkWriter
       - set: cw.limit
-        to: snapshotLimit
-        value: snapshotLimit(n.cfg.MaxSnapshotBytes, &meta.Membership)
+        to: cutLimit
+        value: cutLimit(n.cfg.MaxSnapshotBytes, &meta.Membership)
       - opt:
           do:
             - return: alsoFailed(err, "abort", sink.Abort())
@@ -16562,6 +16590,54 @@ sequences:
           key: i
           range: es
       - return: b
+  - of: tooLargeFor
+    participants:
+      - id: caller
+        kind: actor
+      - id: tooLargeFor
+        kind: self
+      - id: conf.Member
+        kind: value
+    steps:
+      - bind: m, ok
+        eval: conf.Member(to)
+        to: conf.Member
+      - opt:
+          do:
+            - return: 0, false
+          when: "!ok || m.MaxSnapshotBytes <= 0"
+      - return: m.MaxSnapshotBytes, meta.EncodedSize > m.MaxSnapshotBytes || meta.DecodedSize > m.MaxSnapshotBytes
+  - of: (*Node).withheld
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).withheld
+        kind: self
+      - id: tooLargeFor
+        kind: internal
+      - id: n.obs.warn
+        kind: internal
+    steps:
+      - bind: conf
+        eval: n.r.Status().Conf
+      - bind: limit, over
+        eval: tooLargeFor(&conf, to, meta)
+        to: tooLargeFor
+      - opt:
+          do:
+            - eval: delete(n.tooLarge, to)
+            - return: "false"
+          when: "!over"
+      - opt:
+          do:
+            - set: n.tooLarge[to]
+              value: meta.ID
+            - eval: |-
+                n.obs.warn("consensus: a member announced a snapshot limit the state no longer fits in, and cannot be installed",
+                			lattr("peer", uint64(to)), lattr("bytes", uint64(snapshotSize(meta))), lattr("limit", uint64(limit)))
+              to: n.obs.warn
+          when: n.tooLarge[to] != meta.ID
+      - return: "true"
   - of: (*Node).afterCut
     participants:
       - id: caller
@@ -17092,6 +17168,12 @@ sequences:
               to: n.r.SnapshotDone
             - return: ""
           when: "!ok"
+      - opt:
+          do:
+            - eval: n.r.SnapshotDone(to, 0, false)
+              to: n.r.SnapshotDone
+            - return: ""
+          when: n.withheld(to, &meta)
       - bind: h, err
         eval: n.cfg.Snapshots.Open(meta.ID)
         to: n.cfg.Snapshots.Open

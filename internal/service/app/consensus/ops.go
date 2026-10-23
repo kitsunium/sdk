@@ -497,6 +497,19 @@ func (n *Node) AddLearner(ctx context.Context, op coreconsensus.Operator, m core
 
 // Promote makes a caught-up learner a voter (D8).
 func (n *Node) Promote(ctx context.Context, op coreconsensus.Operator, id coreconsensus.NodeID) error {
+	// A learner that announced a snapshot limit below this node's newest
+	// snapshot is refused MEMBERSHIP_INVALID: a voter's limit bounds every
+	// cut, and every cut would fail SNAPSHOT_TOO_LARGE until it is removed
+	// (#591).
+	if m, ok := n.Membership().Member(id); ok && m.MaxSnapshotBytes > 0 {
+		n.snapState.mu.Lock()
+		newest := n.snapState.newestBytes
+		n.snapState.mu.Unlock()
+		if newest > m.MaxSnapshotBytes {
+			return origin(coreconsensus.MembershipInvalid, errs.String("why", "the learner's snapshot limit is below the newest snapshot"),
+				errs.Int64("limit", m.MaxSnapshotBytes), errs.Int64("bytes", newest))
+		}
+	}
 	return n.admin(ctx, coreconsensus.EntryMembership, wire.AdminValue{Operator: string(op), Change: wire.ChangePromote, Target: id})
 }
 

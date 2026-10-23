@@ -304,7 +304,7 @@ func (n *Node) publishSnapshot(snap coreconsensus.Snapshot, meta coreconsensus.S
 		out = io.MultiWriter(sink, extra)
 	}
 	cw := newChunkWriter(out, n.cfg.SnapshotCodec, defaultChunkSize)
-	cw.limit = snapshotLimit(n.cfg.MaxSnapshotBytes, &meta.Membership)
+	cw.limit = cutLimit(n.cfg.MaxSnapshotBytes, &meta.Membership)
 	if _, err := snap.WriteTo(cw); err != nil {
 		return alsoFailed(err, "abort", sink.Abort())
 	}
@@ -350,6 +350,54 @@ func snapshotLimit(own int64, conf *coreconsensus.MembershipValue) int64 {
 		}
 	}
 	return limit
+}
+
+// cutLimit is the bound a cut is written under: this node's
+// MaxSnapshotBytes, or the smallest limit a voter announces when lower.
+// snapshotLimit, which counts the learners too, is what Health reports and
+// warns against. A learner's limit used to bound every cut of every
+// member: one admitted with a limit below the state, by a JOIN or by
+// AddLearner, made every cut fail SNAPSHOT_TOO_LARGE, the log was never
+// compacted again, and it grew to the NO_SPACE alarm, which refused every
+// command until the learner was removed (#591). A learner cannot install a
+// snapshot past its limit: sendSnapshot does not offer it one, and says
+// so, and Promote refuses to make it a voter.
+func cutLimit(own int64, conf *coreconsensus.MembershipValue) int64 {
+	voters := own
+	for _, m := range conf.Members {
+		if m.Voter && m.MaxSnapshotBytes > 0 {
+			voters = min(voters, m.MaxSnapshotBytes)
+		}
+	}
+	return voters
+}
+
+// tooLargeFor reports whether peer to announced a limit meta does not fit
+// in: it would refuse the offer SNAPSHOT_TOO_LARGE after the leader opened
+// a stream for nothing (#591).
+func tooLargeFor(conf *coreconsensus.MembershipValue, to coreconsensus.NodeID, meta *coreconsensus.SnapshotMetaValue) (int64, bool) {
+	m, ok := conf.Member(to)
+	if !ok || m.MaxSnapshotBytes <= 0 {
+		return 0, false
+	}
+	return m.MaxSnapshotBytes, meta.EncodedSize > m.MaxSnapshotBytes || meta.DecodedSize > m.MaxSnapshotBytes
+}
+
+// withheld reports whether meta is too large for the limit peer to
+// announced, and says so once per snapshot. It runs on the loop (#591).
+func (n *Node) withheld(to coreconsensus.NodeID, meta *coreconsensus.SnapshotMetaValue) bool {
+	conf := n.r.Status().Conf
+	limit, over := tooLargeFor(&conf, to, meta)
+	if !over {
+		delete(n.tooLarge, to)
+		return false
+	}
+	if n.tooLarge[to] != meta.ID {
+		n.tooLarge[to] = meta.ID
+		n.obs.warn("consensus: a member announced a snapshot limit the state no longer fits in, and cannot be installed",
+			lattr("peer", uint64(to)), lattr("bytes", uint64(snapshotSize(meta))), lattr("limit", uint64(limit)))
+	}
+	return true
 }
 
 // afterCut keeps the two newest snapshots and compacts the log back to the
@@ -643,6 +691,10 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 	if !ok {
 		// None to send: cut one now, and the next probe sends it.
 		n.requestCut()
+		n.r.SnapshotDone(to, 0, false)
+		return
+	}
+	if n.withheld(to, &meta) {
 		n.r.SnapshotDone(to, 0, false)
 		return
 	}
