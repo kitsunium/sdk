@@ -49,6 +49,7 @@ go_test(
         ":otlpengine",
         "//framework/internal/app/plug",
         "//pkg/v1/clock",
+        "//pkg/v1/observe/metrics",
         "//pkg/v1/observe/trace",
     ],
 )

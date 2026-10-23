@@ -334,6 +334,9 @@ func (a *App) resolve() error {
 		// Every span that ends goes to the OTLP export, when the app
 		// declares one (otlp_run.go); none records anything otherwise.
 		Sink: a.otlpSink(),
+		// The traces this process starts are kept as otlp-sample-ratio says,
+		// a parent's decision honoured; the SDK's default without an export.
+		Sampler: a.otlpSampler(),
 	})
 	a.root, a.module = findModule(a.decl.file())
 	return a.settle()

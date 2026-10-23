@@ -33,6 +33,7 @@ go_library(
         "mount.go",
         "operation.go",
         "otlp.go",
+        "otlp_meter.go",
         "passwords.go",
         "policy.go",
         "policy_interface.go",
@@ -72,6 +73,7 @@ go_library(
         "//pkg/v1/clock",
         "//pkg/v1/errs",
         "//pkg/v1/observe/logger",
+        "//pkg/v1/observe/metrics",
         "//pkg/v1/security/secret",
     ],
 )
@@ -102,6 +104,7 @@ go_test(
         "//pkg/v1/clock",
         "//pkg/v1/errs",
         "//pkg/v1/observe/logger",
+        "//pkg/v1/observe/metrics",
         "//pkg/v1/security/secret",
     ],
 )

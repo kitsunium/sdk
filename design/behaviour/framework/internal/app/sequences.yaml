@@ -537,6 +537,9 @@ sequences:
           		// Every span that ends goes to the OTLP export, when the app
           		// declares one (otlp_run.go); none records anything otherwise.
           		Sink: a.otlpSink(),
+          		// The traces this process starts are kept as otlp-sample-ratio says,
+          		// a parent's decision honoured; the SDK's default without an export.
+          		Sampler: a.otlpSampler(),
           	})
       - set: a.root, a.module
         to: findModule
@@ -27536,7 +27539,7 @@ sequences:
         eval: |-
           otlpOptions{
           		whenFull: OTLPDropOldest, maxBatches: otlpDefaultBatches, maxBytes: otlpDefaultBytes,
-          		maxAge: otlpDefaultMaxAge, sendTimeout: otlpDefaultTimeout,
+          		maxAge: otlpDefaultMaxAge, sendTimeout: otlpDefaultTimeout, sampleRatio: otlpDefaultRatio,
           	}
       - loop:
           do:
@@ -27571,6 +27574,9 @@ sequences:
   - of: OTLPSender
     steps:
       - return: otlpOption(func(o *otlpOptions) { o.send = send })
+  - of: OTLPSampleRatio
+    steps:
+      - return: otlpOption(func(o *otlpOptions) { o.sampleRatio = ratio })
   - of: (*otlpExport).declareSettings
     participants:
       - id: caller
@@ -27607,6 +27613,9 @@ sequences:
       - set: e.settle
         to: otlpSetting
         value: otlpSetting(e, knobOTLPSettle, otlpDefaultSettle, checkPositive())
+      - set: e.sampleRatio
+        to: otlpSetting
+        value: otlpSetting(e, knobOTLPSampleRatio, o.sampleRatio, checkOTLPSampleRatio())
   - of: otlpSetting
     participants:
       - id: caller
@@ -27626,7 +27635,7 @@ sequences:
       - return: s
   - of: (*otlpExport).settingDecls
     steps:
-      - return: "[]settingDecl{e.endpoint, e.maxBatches, e.maxBytes, e.whenFull, e.maxAge, e.sendTimeout, e.interval, e.drain, e.settle}"
+      - return: "[]settingDecl{e.endpoint, e.maxBatches, e.maxBytes, e.whenFull, e.maxAge, e.sendTimeout, e.interval, e.drain, e.settle, e.sampleRatio}"
   - of: (*App).otlpStopBudget
     steps:
       - bind: e
@@ -27671,6 +27680,17 @@ sequences:
           		}
           		return false
           	}, func() phrase { return say("otlp.when-full") })
+        to: judged
+  - of: checkOTLPSampleRatio
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkOTLPSampleRatio
+        kind: self
+      - id: judged
+        kind: internal
+    steps:
+      - return: judged(func(r float64) bool { return r >= 0 && r <= 1 }, func() phrase { return say("otlp.sample-ratio") })
         to: judged
   - of: parseOTLPHeaders
     participants:
@@ -27820,6 +27840,58 @@ sequences:
             to: otlpCode.Load
           when: h != nil
       - return: nil
+  - of: Meter
+    participants:
+      - id: caller
+        kind: actor
+      - id: Meter
+        kind: self
+      - id: appOf
+        kind: internal
+      - id: a.otlpRun.Load
+        kind: value
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: r.meter
+                init:
+                  bind: r
+                  eval: a.otlpRun.Load()
+                  to: a.otlpRun.Load
+                when: r != nil && r.meter != nil
+          init:
+            bind: a
+            eval: appOf(ctx)
+            to: appOf
+          when: a != nil
+      - return: discardMeter{}
+  - of: discardMeter.Counter
+    steps:
+      - return: discardCount{}
+  - of: discardMeter.Gauge
+    steps:
+      - return: discardGauge{}
+  - of: discardMeter.Histogram
+    steps:
+      - return: discardHistogram{}
+  - of: discardMeter.UpDownCounter
+    steps:
+      - return: discardCount{}
+  - of: discardMeter.ObservableCounter
+  - of: discardMeter.ObservableUpDownCounter
+  - of: discardMeter.ObservableGauge
+  - of: discardMeter.Collect
+    steps:
+      - return: metrics.Snapshot{}
+  - of: discardCount.Add
+  - of: discardCount.Inc
+  - of: discardCount.Dec
+  - of: discardGauge.Set
+  - of: discardGauge.Add
+  - of: discardHistogram.Record
+  - of: discardHistogram.RecordDuration
   - of: otlpLinked
     steps:
       - return: plug.OTLP.Load() != nil
@@ -27855,6 +27927,64 @@ sequences:
                     eval: a.otlpRun.Load()
                     to: a.otlpRun.Load
                   when: r != nil && r.sink != nil
+  - of: (*App).otlpSampler
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).otlpSampler
+        kind: self
+      - id: trace
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: a.opts.otlp == nil
+      - return: trace.ParentBased(a.otlpSampleRoot)
+        to: trace
+  - of: (*App).otlpSampleRoot
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).otlpSampleRoot
+        kind: self
+      - id: a.otlpRun.Load
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: r.sample(p)
+          init:
+            bind: r
+            eval: a.otlpRun.Load()
+            to: a.otlpRun.Load
+          when: r != nil && r.sample != nil
+      - return: "true"
+  - of: otlpRootSampler
+    participants:
+      - id: caller
+        kind: actor
+      - id: otlpRootSampler
+        kind: self
+      - id: trace
+        kind: package
+    steps:
+      - switch:
+          cases:
+            - case: ratio >= 1
+              do:
+                - return: nil
+            - case: ratio <= 0
+              do:
+                - return: trace.NeverSample
+      - bind: s, err
+        eval: trace.Ratio(ratio)
+        to: trace
+      - opt:
+          do:
+            - return: nil
+          when: err != nil
+      - return: s
   - of: (*App).otlpRecord
     participants:
       - id: caller
@@ -27953,8 +28083,14 @@ sequences:
       - bind: runCtx, cancel
         eval: context.WithCancel(context.WithoutCancel(ctx))
         to: context
+      - bind: meter, _
+        eval: ex.Meter().Meter.(metrics.FullMeter)
       - bind: r
-        eval: "&otlpRunning{ex: ex, sink: sink, cancel: cancel, done: make(chan struct{}), lost: map[string]uint64{}}"
+        eval: |-
+          &otlpRunning{
+          		ex: ex, sink: sink, sample: otlpRootSampler(resolvedSetting(a, a.opts.otlp.sampleRatio)), meter: meter,
+          		cancel: cancel, done: make(chan struct{}), lost: map[string]uint64{},
+          	}
       - loop:
           do:
             - opt:

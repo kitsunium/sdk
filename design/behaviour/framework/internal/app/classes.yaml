@@ -909,6 +909,8 @@ constants:
         value: "\"drain\""
       - name: knobOTLPSettle
         value: "\"settle\""
+      - name: knobOTLPSampleRatio
+        value: "\"sample-ratio\""
       - name: otlpHeadersSecret
         value: "\"otlp-headers\""
       - name: varOTLPHeaders
@@ -948,6 +950,9 @@ constants:
       - name: otlpDefaultSettle
         type: time.Duration
         value: 5 * time.Second
+      - name: otlpDefaultRatio
+        type: float64
+        value: "1"
       - name: otlpReadinessBacklog
         type: float64
         value: "0.8"
@@ -3568,6 +3573,7 @@ files:
       - OTLPMaxAge
       - OTLPSendTimeout
       - OTLPSender
+      - OTLPSampleRatio
       - (*otlpExport).declareSettings
       - otlpSetting
       - (*otlpExport).settingDecls
@@ -3576,6 +3582,7 @@ files:
       - (*App).otlpProblems
       - checkOTLPEndpoint
       - checkOTLPWhenFull
+      - checkOTLPSampleRatio
       - parseOTLPHeaders
     name: otlp.go
   - decls:
@@ -3592,10 +3599,35 @@ files:
       - OpenTelemetryConfigurer
     name: otlp_interface.go
   - decls:
+      - Meter
+      - discardMeter
+      - discardCount
+      - discardGauge
+      - discardHistogram
+      - discardMeter.Counter
+      - discardMeter.Gauge
+      - discardMeter.Histogram
+      - discardMeter.UpDownCounter
+      - discardMeter.ObservableCounter
+      - discardMeter.ObservableUpDownCounter
+      - discardMeter.ObservableGauge
+      - discardMeter.Collect
+      - discardCount.Add
+      - discardCount.Inc
+      - discardCount.Dec
+      - discardGauge.Set
+      - discardGauge.Add
+      - discardHistogram.Record
+      - discardHistogram.RecordDuration
+    name: otlp_meter.go
+  - decls:
       - otlpRunning
       - otlpLinked
       - otlpDeclared
       - (*App).otlpSink
+      - (*App).otlpSampler
+      - (*App).otlpSampleRoot
+      - otlpRootSampler
       - (*App).otlpRecord
       - (*App).addOTLP
       - (*App).startOTLP
@@ -7594,6 +7626,9 @@ functions:
   - name: OTLPSender
     params: send func(ctx context.Context, batch OTLPBatchValue) error
     results: OpenTelemetryConfigurer
+  - name: OTLPSampleRatio
+    params: ratio float64
+    results: OpenTelemetryConfigurer
   - doc: "otlpSetting declares one setting of the export: otlp-<knob>."
     name: otlpSetting
     params: e *otlpExport, knob string, def T, check func(any) phrase
@@ -7608,6 +7643,9 @@ functions:
   - doc: checkOTLPWhenFull refuses a full policy the export does not know.
     name: checkOTLPWhenFull
     results: func(v any) phrase
+  - doc: checkOTLPSampleRatio refuses a ratio outside [0, 1], NaN included.
+    name: checkOTLPSampleRatio
+    results: func(v any) phrase
   - doc: |-
       parseOTLPHeaders reads the secret otlp-headers: "key=value" pairs joined
       by commas, each value percent-decoded, as OTEL_EXPORTER_OTLP_HEADERS
@@ -7616,6 +7654,9 @@ functions:
     params: raw string
     results: map[string]string, bool
   - name: EnableOTLP
+  - name: Meter
+    params: ctx context.Context
+    results: metrics.FullMeter
   - doc: otlpLinked reports whether the program imports framework/app/otlp.
     name: otlpLinked
     results: bool
@@ -7625,6 +7666,13 @@ functions:
     name: otlpDeclared
     params: a *App
     results: "*pos"
+  - doc: |-
+      otlpRootSampler is the sampler of the traces this process starts for
+      ratio, which the setting's check holds in [0, 1]: nil — every one — at 1,
+      none at 0, the SDK's ratio on the trace's identifier between.
+    name: otlpRootSampler
+    params: ratio float64
+    results: trace.Sampler
   - doc: |-
       otlpRetryable reports whether a failure of the product's own sender may
       be cured by a later attempt: all but a refusal the caller must fix, a 4xx
@@ -12065,6 +12113,23 @@ types:
         name: otlpSink
         recv: a *App
         results: trace.SpanSink
+      - doc: |-
+          otlpSampler is the tracer's sampler when the app declares an export: a
+          parent's decision honoured, and a trace this process starts kept as the
+          running export's ratio says — every one while none runs, which records
+          nothing. nil for an app that declares none: the SDK's default, whose
+          spans no sink receives.
+        name: otlpSampler
+        recv: a *App
+        results: trace.Sampler
+      - doc: |-
+          otlpSampleRoot decides whether a trace this process starts is kept: the
+          running export's ratio, every one without it. Without an export it costs
+          one atomic load.
+        name: otlpSampleRoot
+        params: p trace.SamplingParams
+        recv: a *App
+        results: bool
       - doc: |-
           otlpRecord counts a unit of work that ended for the export's metrics.
           Without an export it costs one atomic load.
@@ -19015,6 +19080,8 @@ types:
         type: "*SettingService[time.Duration]"
       - name: settle
         type: "*SettingService[time.Duration]"
+      - name: sampleRatio
+        type: "*SettingService[float64]"
     kind: struct
     methods:
       - doc: |-
@@ -19044,6 +19111,8 @@ types:
         type: time.Duration
       - name: sendTimeout
         type: time.Duration
+      - name: sampleRatio
+        type: float64
     kind: struct
     name: otlpOptions
   - doc: otlpOption configures an export.
@@ -19084,6 +19153,86 @@ types:
       	openTelemetryConfigure(o *otlpOptions)
       }
   - doc: |-
+      discardMeter is the meter of a product no export collects: every
+      instrument it makes keeps nothing, and a collection is empty.
+    kind: struct
+    methods:
+      - doc: Counter is an instrument that keeps nothing.
+        name: Counter
+        params: _ string, _ ...metrics.Attr
+        recv: discardMeter
+        results: metrics.Counter
+      - doc: Gauge is an instrument that keeps nothing.
+        name: Gauge
+        params: _ string, _ ...metrics.Attr
+        recv: discardMeter
+        results: metrics.Gauge
+      - doc: Histogram is an instrument that keeps nothing.
+        name: Histogram
+        params: _ string, _ []float64, _ ...metrics.Attr
+        recv: discardMeter
+        results: metrics.Histogram
+      - doc: UpDownCounter is an instrument that keeps nothing.
+        name: UpDownCounter
+        params: _ string, _ ...metrics.Attr
+        recv: discardMeter
+        results: metrics.UpDownCounter
+      - doc: "ObservableCounter registers nothing: no collection calls it."
+        name: ObservableCounter
+        params: _ string, _ metrics.Int64Callback
+        recv: discardMeter
+      - doc: "ObservableUpDownCounter registers nothing: no collection calls it."
+        name: ObservableUpDownCounter
+        params: _ string, _ metrics.Int64Callback
+        recv: discardMeter
+      - doc: "ObservableGauge registers nothing: no collection calls it."
+        name: ObservableGauge
+        params: _ string, _ metrics.Float64Callback
+        recv: discardMeter
+      - doc: Collect is an empty snapshot.
+        name: Collect
+        recv: discardMeter
+        results: metrics.Snapshot
+    name: discardMeter
+  - doc: discardCount is the counter and the up-down counter a discardMeter makes.
+    kind: struct
+    methods:
+      - doc: Add keeps nothing.
+        name: Add
+        params: _ int64
+        recv: discardCount
+      - doc: Inc keeps nothing.
+        name: Inc
+        recv: discardCount
+      - doc: Dec keeps nothing.
+        name: Dec
+        recv: discardCount
+    name: discardCount
+  - doc: discardGauge is the gauge a discardMeter makes.
+    kind: struct
+    methods:
+      - doc: Set keeps nothing.
+        name: Set
+        params: _ float64
+        recv: discardGauge
+      - doc: Add keeps nothing.
+        name: Add
+        params: _ float64
+        recv: discardGauge
+    name: discardGauge
+  - doc: discardHistogram is the histogram a discardMeter makes.
+    kind: struct
+    methods:
+      - doc: Record keeps nothing.
+        name: Record
+        params: _ float64
+        recv: discardHistogram
+      - doc: RecordDuration keeps nothing.
+        name: RecordDuration
+        params: _ time.Duration
+        recv: discardHistogram
+    name: discardHistogram
+  - doc: |-
       otlpRunning is the export of a running app: the subsystem's export, the
       tracer's sink into it, and the loop that sends.
     fields:
@@ -19091,6 +19240,16 @@ types:
         type: plug.OTLPExporter
       - name: sink
         type: trace.SpanSink
+      - doc: |-
+          sample decides whether a trace this process starts is kept, as the
+          setting otlp-sample-ratio says; nil keeps every one.
+        name: sample
+        type: trace.Sampler
+      - doc: |-
+          meter is the product's own meter (Meter), collected into the same
+          metrics stream; nil when the export hands none.
+        name: meter
+        type: metrics.FullMeter
       - doc: |-
           cancel ends the loop; done is closed once it returned, err — written
           under mu before done closes — what it returned.

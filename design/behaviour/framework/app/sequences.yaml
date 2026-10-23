@@ -152,8 +152,12 @@ sequences:
     of: OTLPMaxAge
   - forward: iapp.OTLPSendTimeout
     of: OTLPSendTimeout
+  - forward: iapp.OTLPSampleRatio
+    of: OTLPSampleRatio
   - forward: iapp.OTLPSender
     of: OTLPSender
+  - forward: iapp.Meter
+    of: Meter
   - forward: iapp.MinLength
     of: MinLength
   - forward: iapp.NotReused

@@ -3025,6 +3025,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/app.Meter",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "Meter",
+      "spelled": "func(ctx context.Context) metrics.FullMeter",
+      "canonical": "func(ctx context.Context) github.com/kitsunium/sdk/pkg/v1/observe/metrics.FullMeter",
+      "doc": "Meter is the product's own meter, for the app ctx runs inside: the\ncounters, gauges and histograms it makes land in the OTLP export's\nmetrics stream, under the app's resource and an instrumentation scope\nnamed after the app, collected every otlp-interval beside the framework's\nown. Without a running export — none declared, the export off, a CLI\ncommand, or outside an app — it is a meter that keeps nothing. An\ninstrument is found again by its name and attributes, so a handler may\nask for it at each call; its Collect is the export's.\n",
+      "file": "framework/app/otlp_meter.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/app.Migration",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/framework/app",
@@ -3292,7 +3303,7 @@
       "name": "OTLP",
       "spelled": "func(opts ...OTLPOption) AppOption",
       "canonical": "func(opts ...github.com/kitsunium/sdk/framework/app.OTLPOption) github.com/kitsunium/sdk/framework/app.AppOption",
-      "doc": "OTLP declares that the app forwards its traces and the metrics the\nframework derives from them to an OpenTelemetry collector over OTLP/HTTP:\nevery span the framework starts, and per node and operation its runs,\nfailures and durations (app.node.runs, app.node.failures,\napp.node.duration), with what the export itself holds and lost\n(app.otlp.*). The export is on once its endpoint is set — the setting\notlp-endpoint, [OTLPEndpoint] its default — or once [OTLPSender] replaces\nthe network; a CLI command never exports. A program that declares it\nimports framework/app/otlp, or its start is refused, naming the import:\n\n\timport _ \"github.com/kitsunium/sdk/framework/app/otlp\"\n\n\tvar App = app.NewApp(\"shop\", catalog.Service).With(\n\t\tapp.OTLP(app.OTLPEndpoint(\"http://collector:4318\")),\n\t)\n\nEvery value given here is the default of the setting that tunes it, which\nconfig/<env>.* and <PRODUCT>_OTLP_<KNOB> override. Given twice, the last\nwins.\n",
+      "doc": "OTLP declares that the app forwards its traces and the metrics the\nframework derives from them to an OpenTelemetry collector over OTLP/HTTP:\nthe spans the framework starts — the share otlp-sample-ratio keeps —, and\nper node and operation its runs, failures and durations (app.node.runs,\napp.node.failures, app.node.duration), with what the export itself holds\nand lost (app.otlp.*) and the product's own instruments ([Meter]). The\nexport is on once its endpoint is set — the setting\notlp-endpoint, [OTLPEndpoint] its default — or once [OTLPSender] replaces\nthe network; a CLI command never exports. A program that declares it\nimports framework/app/otlp, or its start is refused, naming the import:\n\n\timport _ \"github.com/kitsunium/sdk/framework/app/otlp\"\n\n\tvar App = app.NewApp(\"shop\", catalog.Service).With(\n\t\tapp.OTLP(app.OTLPEndpoint(\"http://collector:4318\")),\n\t)\n\nEvery value given here is the default of the setting that tunes it, which\nconfig/<env>.* and <PRODUCT>_OTLP_<KNOB> override. Given twice, the last\nwins.\n",
       "file": "framework/app/otlp.go",
       "layer": "framework"
     },
@@ -3413,7 +3424,18 @@
       "spelled": "iapp.OpenTelemetryConfigurer",
       "canonical": "github.com/kitsunium/sdk/framework/internal/app.OpenTelemetryConfigurer",
       "owner": "go:github.com/kitsunium/sdk/framework/internal/app.OpenTelemetryConfigurer",
-      "doc": "OTLPOption configures the app's export: [OTLPEndpoint], [OTLPBounds],\n[OTLPWhenFull], [OTLPMaxAge], [OTLPSendTimeout], [OTLPSender].\n",
+      "doc": "OTLPOption configures the app's export: [OTLPEndpoint], [OTLPBounds],\n[OTLPWhenFull], [OTLPMaxAge], [OTLPSendTimeout], [OTLPSampleRatio],\n[OTLPSender].\n",
+      "file": "framework/app/otlp.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.OTLPSampleRatio",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "OTLPSampleRatio",
+      "spelled": "func(ratio float64) OTLPOption",
+      "canonical": "func(ratio float64) github.com/kitsunium/sdk/framework/app.OTLPOption",
+      "doc": "OTLPSampleRatio is the share of the traces the app starts that the export\nkeeps — the default of the setting otlp-sample-ratio (1, every one): from\n0, none, to 1, every one, decided on the trace's identifier, so every\nservice that sees the same trace decides alike. A trace another process\nstarted is kept or not as that process decided, whatever the ratio: a span\nis never cut off from its parent. The metrics the framework derives count\nevery unit of work, kept or not.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
       "file": "framework/app/otlp.go",
       "layer": "framework"
     },
@@ -9256,6 +9278,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.Meter",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "Meter",
+      "spelled": "func(ctx context.Context) metrics.FullMeter",
+      "canonical": "func(ctx context.Context) github.com/kitsunium/sdk/pkg/v1/observe/metrics.FullMeter",
+      "doc": "Meter is the product's own meter, for the app ctx runs inside: the\ncounters, gauges and histograms it makes land in the OTLP export's\nmetrics stream, under the app's resource and an instrumentation scope\nnamed after the app, collected every otlp-interval beside the framework's\nown. Without a running export — none declared, the export off, a CLI\ncommand, or outside an app — it is a meter that keeps nothing. An\ninstrument is found again by its name and attributes, so a handler may\nask for it at each call; its Collect is the export's.\n",
+      "file": "framework/internal/app/otlp_meter.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app.MigrationExecutor",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/app",
@@ -9752,7 +9785,7 @@
       "name": "OTLP",
       "spelled": "func(opts ...OpenTelemetryConfigurer) AppConfigurer",
       "canonical": "func(opts ...github.com/kitsunium/sdk/framework/internal/app.OpenTelemetryConfigurer) github.com/kitsunium/sdk/framework/internal/app.AppConfigurer",
-      "doc": "OTLP declares that the app forwards its traces and the metrics the\nframework derives from them to an OpenTelemetry collector over OTLP/HTTP:\nevery span the framework starts, and per node and operation its runs,\nfailures and durations (app.node.runs, app.node.failures,\napp.node.duration), with what the export itself holds and lost\n(app.otlp.*). The export is on once its endpoint is set — the setting\notlp-endpoint, [OTLPEndpoint] its default — or once [OTLPSender] replaces\nthe network; a CLI command never exports. A program that declares it\nimports framework/app/otlp, or its start is refused, naming the import:\n\n\timport _ \"github.com/kitsunium/sdk/framework/app/otlp\"\n\n\tvar App = app.NewApp(\"shop\", catalog.Service).With(\n\t\tapp.OTLP(app.OTLPEndpoint(\"http://collector:4318\")),\n\t)\n\nEvery value given here is the default of the setting that tunes it, which\nconfig/<env>.* and <PRODUCT>_OTLP_<KNOB> override. Given twice, the last\nwins.\n",
+      "doc": "OTLP declares that the app forwards its traces and the metrics the\nframework derives from them to an OpenTelemetry collector over OTLP/HTTP:\nthe spans the framework starts — the share otlp-sample-ratio keeps —, and\nper node and operation its runs, failures and durations (app.node.runs,\napp.node.failures, app.node.duration), with what the export itself holds\nand lost (app.otlp.*) and the product's own instruments ([Meter]). The\nexport is on once its endpoint is set — the setting\notlp-endpoint, [OTLPEndpoint] its default — or once [OTLPSender] replaces\nthe network; a CLI command never exports. A program that declares it\nimports framework/app/otlp, or its start is refused, naming the import:\n\n\timport _ \"github.com/kitsunium/sdk/framework/app/otlp\"\n\n\tvar App = app.NewApp(\"shop\", catalog.Service).With(\n\t\tapp.OTLP(app.OTLPEndpoint(\"http://collector:4318\")),\n\t)\n\nEvery value given here is the default of the setting that tunes it, which\nconfig/<env>.* and <PRODUCT>_OTLP_<KNOB> override. Given twice, the last\nwins.\n",
       "file": "framework/internal/app/otlp.go",
       "layer": "framework"
     },
@@ -9873,6 +9906,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.OTLPSampleRatio",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "OTLPSampleRatio",
+      "spelled": "func(ratio float64) OpenTelemetryConfigurer",
+      "canonical": "func(ratio float64) github.com/kitsunium/sdk/framework/internal/app.OpenTelemetryConfigurer",
+      "doc": "OTLPSampleRatio is the share of the traces the app starts that the export\nkeeps — the default of the setting otlp-sample-ratio (1, every one): from\n0, none, to 1, every one, decided on the trace's identifier, so every\nservice that sees the same trace decides alike. A trace another process\nstarted is kept or not as that process decided, whatever the ratio: a span\nis never cut off from its parent. The metrics the framework derives count\nevery unit of work, kept or not.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/otlp.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app.OTLPSendTimeout",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/internal/app",
@@ -9958,7 +10002,7 @@
       "name": "OpenTelemetryConfigurer",
       "spelled": "interface{openTelemetryConfigure(o *otlpOptions)}",
       "canonical": "interface{openTelemetryConfigure(o *github.com/kitsunium/sdk/framework/internal/app.otlpOptions)}",
-      "doc": "OpenTelemetryConfigurer configures the app's OTLP export: [OTLPEndpoint],\n[OTLPBounds], [OTLPWhenFull], [OTLPMaxAge], [OTLPSendTimeout],\n[OTLPSender].\n",
+      "doc": "OpenTelemetryConfigurer configures the app's OTLP export: [OTLPEndpoint],\n[OTLPBounds], [OTLPWhenFull], [OTLPMaxAge], [OTLPSendTimeout],\n[OTLPSampleRatio], [OTLPSender].\n",
       "file": "framework/internal/app/otlp_interface.go",
       "layer": "framework"
     },
@@ -14552,9 +14596,21 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
       "name": "OTLPExporter",
-      "spelled": "interface{Record(node string, op string, took time.Duration, failed bool); Run(ctx context.Context) error; SpanSink() OTLPSinkValue; Stats() []OTLPStatsValue}",
-      "canonical": "interface{Record(node string, op string, took time.Duration, failed bool); Run(ctx context.Context) error; SpanSink() github.com/kitsunium/sdk/framework/internal/app/plug.OTLPSinkValue; Stats() []github.com/kitsunium/sdk/framework/internal/app/plug.OTLPStatsValue}",
+      "spelled": "interface{Meter() OTLPMeterValue; Record(node string, op string, took time.Duration, failed bool); Run(ctx context.Context) error; SpanSink() OTLPSinkValue; Stats() []OTLPStatsValue}",
+      "canonical": "interface{Meter() github.com/kitsunium/sdk/framework/internal/app/plug.OTLPMeterValue; Record(node string, op string, took time.Duration, failed bool); Run(ctx context.Context) error; SpanSink() github.com/kitsunium/sdk/framework/internal/app/plug.OTLPSinkValue; Stats() []github.com/kitsunium/sdk/framework/internal/app/plug.OTLPStatsValue}",
       "doc": "OTLPExporter is an app's export, open: where the tracer hands its spans,\nwhat the framework records of each unit of work, the loop that sends, and\nwhat it counts.\n",
+      "file": "framework/internal/app/plug/otlp_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.OTLPExporter.Meter",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "Meter",
+      "recv": "OTLPExporter",
+      "spelled": "func() OTLPMeterValue",
+      "canonical": "func() github.com/kitsunium/sdk/framework/internal/app/plug.OTLPMeterValue",
+      "doc": "Meter is the product's own meter, collected at each interval beside\nthe framework's, into the same metrics queue, under the same resource\nand a scope named after the product.\n",
       "file": "framework/internal/app/plug/otlp_interface.go",
       "layer": "framework"
     },
@@ -14604,6 +14660,24 @@
       "canonical": "func() []github.com/kitsunium/sdk/framework/internal/app/plug.OTLPStatsValue",
       "doc": "Stats is what each signal's queue holds, has sent and has lost.\n",
       "file": "framework/internal/app/plug/otlp_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.OTLPMeterValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "OTLPMeterValue",
+      "spelled": "struct{Meter any}",
+      "canonical": "struct{Meter any}",
+      "fields": [
+        {
+          "name": "Meter",
+          "type": "any",
+          "doc": "Meter is the SDK's metrics.FullMeter.\n"
+        }
+      ],
+      "doc": "OTLPMeterValue is the product's own meter on the export: the SDK's\nmetrics.FullMeter held as any, as OTLPSinkValue holds the span sink.\n",
+      "file": "framework/internal/app/plug/otlp.go",
       "layer": "framework"
     },
     {

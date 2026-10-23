@@ -3115,10 +3115,11 @@ packages:
       - doc: |-
           OTLP declares that the app forwards its traces and the metrics the
           framework derives from them to an OpenTelemetry collector over OTLP/HTTP:
-          every span the framework starts, and per node and operation its runs,
-          failures and durations (app.node.runs, app.node.failures,
-          app.node.duration), with what the export itself holds and lost
-          (app.otlp.*). The export is on once its endpoint is set — the setting
+          the spans the framework starts — the share otlp-sample-ratio keeps —, and
+          per node and operation its runs, failures and durations (app.node.runs,
+          app.node.failures, app.node.duration), with what the export itself holds
+          and lost (app.otlp.*) and the product's own instruments ([Meter]). The
+          export is on once its endpoint is set — the setting
           otlp-endpoint, [OTLPEndpoint] its default — or once [OTLPSender] replaces
           the network; a CLI command never exports. A program that declares it
           imports framework/app/otlp, or its start is refused, naming the import:
@@ -3225,6 +3226,38 @@ packages:
         name: OTLPSender
         out:
           - type: OpenTelemetryConfigurer
+      - doc: |-
+          OTLPSampleRatio is the share of the traces the app starts that the export
+          keeps — the default of the setting otlp-sample-ratio (1, every one): from
+          0, none, to 1, every one, decided on the trace's identifier, so every
+          service that sees the same trace decides alike. A trace another process
+          started is kept or not as that process decided, whatever the ratio: a span
+          is never cut off from its parent. The metrics the framework derives count
+          every unit of work, kept or not.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: ratio
+            type: float64
+        name: OTLPSampleRatio
+        out:
+          - type: OpenTelemetryConfigurer
+      - doc: |-
+          Meter is the product's own meter, for the app ctx runs inside: the
+          counters, gauges and histograms it makes land in the OTLP export's
+          metrics stream, under the app's resource and an instrumentation scope
+          named after the app, collected every otlp-interval beside the framework's
+          own. Without a running export — none declared, the export off, a CLI
+          command, or outside an app — it is a meter that keeps nothing. An
+          instrument is found again by its name and attributes, so a handler may
+          ask for it at each call; its Collect is the export's.
+        in:
+          - name: ctx
+            type: context.Context
+        name: Meter
+        out:
+          - type: metrics.FullMeter
     imports:
       authz: github.com/kitsunium/sdk/pkg/v1/security/authz
       clock: github.com/kitsunium/sdk/pkg/v1/clock
@@ -3235,6 +3268,7 @@ packages:
       json: encoding/json
       logger: github.com/kitsunium/sdk/pkg/v1/observe/logger
       mail: github.com/kitsunium/sdk/pkg/v1/app/mail
+      metrics: github.com/kitsunium/sdk/pkg/v1/observe/metrics
       model: github.com/kitsunium/sdk/framework/model
       secret: github.com/kitsunium/sdk/pkg/v1/security/secret
       stdsql: database/sql
@@ -6123,7 +6157,7 @@ packages:
       - doc: |-
           OpenTelemetryConfigurer configures the app's OTLP export: [OTLPEndpoint],
           [OTLPBounds], [OTLPWhenFull], [OTLPMaxAge], [OTLPSendTimeout],
-          [OTLPSender].
+          [OTLPSampleRatio], [OTLPSender].
         interface:
           unexported: true
         name: OpenTelemetryConfigurer
@@ -9544,6 +9578,15 @@ packages:
               name: Sink
               type: any
       - doc: |-
+          OTLPMeterValue is the product's own meter on the export: the SDK's
+          metrics.FullMeter held as any, as OTLPSinkValue holds the span sink.
+        name: OTLPMeterValue
+        struct:
+          fields:
+            - doc: Meter is the SDK's metrics.FullMeter.
+              name: Meter
+              type: any
+      - doc: |-
           OTLPBatchValue is one batch as the product's own sender receives it: its
           signal and its OTLP/JSON document, posted to a collector as it is.
         name: OTLPBatchValue
@@ -9624,6 +9667,13 @@ packages:
               name: SpanSink
               out:
                 - type: OTLPSinkValue
+            - doc: |-
+                Meter is the product's own meter, collected at each interval beside
+                the framework's, into the same metrics queue, under the same resource
+                and a scope named after the product.
+              name: Meter
+              out:
+                - type: OTLPMeterValue
             - doc: |-
                 Record counts one unit of work the framework observed on node: its
                 operation, how long it took, and whether it failed.
@@ -10526,7 +10576,8 @@ packages:
         target: iapp.OTLPBatchValue
       - doc: |-
           OTLPOption configures the app's export: [OTLPEndpoint], [OTLPBounds],
-          [OTLPWhenFull], [OTLPMaxAge], [OTLPSendTimeout], [OTLPSender].
+          [OTLPWhenFull], [OTLPMaxAge], [OTLPSendTimeout], [OTLPSampleRatio],
+          [OTLPSender].
         name: OTLPOption
         target: iapp.OpenTelemetryConfigurer
     constants:
@@ -13347,10 +13398,11 @@ packages:
       - doc: |-
           OTLP declares that the app forwards its traces and the metrics the
           framework derives from them to an OpenTelemetry collector over OTLP/HTTP:
-          every span the framework starts, and per node and operation its runs,
-          failures and durations (app.node.runs, app.node.failures,
-          app.node.duration), with what the export itself holds and lost
-          (app.otlp.*). The export is on once its endpoint is set — the setting
+          the spans the framework starts — the share otlp-sample-ratio keeps —, and
+          per node and operation its runs, failures and durations (app.node.runs,
+          app.node.failures, app.node.duration), with what the export itself holds
+          and lost (app.otlp.*) and the product's own instruments ([Meter]). The
+          export is on once its endpoint is set — the setting
           otlp-endpoint, [OTLPEndpoint] its default — or once [OTLPSender] replaces
           the network; a CLI command never exports. A program that declares it
           imports framework/app/otlp, or its start is refused, naming the import:
@@ -13457,6 +13509,38 @@ packages:
         name: OTLPSender
         out:
           - type: OTLPOption
+      - doc: |-
+          OTLPSampleRatio is the share of the traces the app starts that the export
+          keeps — the default of the setting otlp-sample-ratio (1, every one): from
+          0, none, to 1, every one, decided on the trace's identifier, so every
+          service that sees the same trace decides alike. A trace another process
+          started is kept or not as that process decided, whatever the ratio: a span
+          is never cut off from its parent. The metrics the framework derives count
+          every unit of work, kept or not.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: ratio
+            type: float64
+        name: OTLPSampleRatio
+        out:
+          - type: OTLPOption
+      - doc: |-
+          Meter is the product's own meter, for the app ctx runs inside: the
+          counters, gauges and histograms it makes land in the OTLP export's
+          metrics stream, under the app's resource and an instrumentation scope
+          named after the app, collected every otlp-interval beside the framework's
+          own. Without a running export — none declared, the export off, a CLI
+          command, or outside an app — it is a meter that keeps nothing. An
+          instrument is found again by its name and attributes, so a handler may
+          ask for it at each call; its Collect is the export's.
+        in:
+          - name: ctx
+            type: context.Context
+        name: Meter
+        out:
+          - type: metrics.FullMeter
     imports:
       clock: github.com/kitsunium/sdk/pkg/v1/clock
       errs: github.com/kitsunium/sdk/pkg/v1/errs
@@ -13464,6 +13548,7 @@ packages:
       http: net/http
       iapp: github.com/kitsunium/sdk/framework/internal/app
       logger: github.com/kitsunium/sdk/pkg/v1/observe/logger
+      metrics: github.com/kitsunium/sdk/pkg/v1/observe/metrics
       model: github.com/kitsunium/sdk/framework/model
       secret: github.com/kitsunium/sdk/pkg/v1/security/secret
     path: github.com/kitsunium/sdk/framework/app

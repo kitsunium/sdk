@@ -14,6 +14,10 @@ import (
 type OTLPExporter interface {
 	// SpanSink is the sink the app's tracer ends its spans into.
 	SpanSink() OTLPSinkValue
+	// Meter is the product's own meter, collected at each interval beside
+	// the framework's, into the same metrics queue, under the same resource
+	// and a scope named after the product.
+	Meter() OTLPMeterValue
 	// Record counts one unit of work the framework observed on node: its
 	// operation, how long it took, and whether it failed.
 	Record(node, op string, took time.Duration, failed bool)

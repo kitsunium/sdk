@@ -146,6 +146,7 @@
   "operation.validate": "{node} : les balises validate de {type} ne sont pas valides : {detail}",
   "otlp.endpoint": "il doit être vide — l’export est éteint — ou une URL http ou https absolue avec un hôte, sans identifiants, requête ni fragment : l’URL de base du collecteur, à laquelle s’ajoute le chemin de chaque signal",
   "otlp.memory": "l’export OTLP garde ses {signal} en mémoire : la file durable du SDK refuse cette plateforme, et un lot en attente à l’arrêt est perdu",
+  "otlp.sample-ratio": "il doit être un nombre de 0, aucune trace gardée, à 1, toutes les traces gardées",
   "otlp.setting-taken": "le réglage {setting} de l’export OTLP est déjà déclaré par un service du produit : renommez celui du produit",
   "otlp.when-full": "il doit valoir drop-oldest, drop-newest ou block",
   "passwords.history-short": "champ {field} : app:\"history={history}\" garde moins de valeurs précédentes que NotReused({n}) n’en refuse : portez-le à {n}, ou retirez history — NotReused garde ce qu’il lit",
