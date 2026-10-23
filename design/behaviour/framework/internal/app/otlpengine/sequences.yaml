@@ -497,8 +497,16 @@ sequences:
       - id: plug.OTLP.Store
         kind: value
     steps:
-      - eval: "plug.OTLP.Store(&plug.OTLPDriverConfig{Open: open, Queue: openDeadLetters})"
+      - eval: "plug.OTLP.Store(&plug.OTLPDriverConfig{Open: open, Queue: openDeadLetters, Policy: policyOf})"
         to: plug.OTLP.Store
+  - of: policyOf
+    steps:
+      - return: |-
+          plug.QueuePolicyValue{
+          		VisibilityTimeout: 2*cfg.SendTimeout + leaseMargin,
+          		MaxDeliveries:     maxDeliveries,
+          		MaxMessageBytes:   int(min(cfg.MaxBytes, maxQueueMessage)),
+          	}
   - of: open
     participants:
       - id: caller
@@ -622,6 +630,8 @@ sequences:
         kind: actor
       - id: openQueue
         kind: self
+      - id: policyOf
+        kind: internal
       - id: openTable
         kind: internal
       - id: os
@@ -629,17 +639,15 @@ sequences:
       - id: queue
         kind: package
     steps:
+      - bind: p
+        eval: policyOf(cfg)
+        to: policyOf
       - bind: policy
-        eval: |-
-          queue.Policy{
-          		VisibilityTimeout: 2*cfg.SendTimeout + leaseMargin,
-          		MaxDeliveries:     maxDeliveries,
-          		MaxMessageBytes:   int(min(cfg.MaxBytes, maxQueueMessage)),
-          	}
+        eval: "queue.Policy{VisibilityTimeout: p.VisibilityTimeout, MaxDeliveries: p.MaxDeliveries, MaxMessageBytes: p.MaxMessageBytes}"
       - opt:
           do:
             - bind: b, err
-              eval: openTable(cfg, policy, name)
+              eval: openTable(cfg, p, name)
               to: openTable
             - return: b, err == nil, err
           when: cfg.Database != nil
@@ -684,10 +692,7 @@ sequences:
       - bind: opened, err
         eval: |-
           queues.OpenSDK(plug.QueueConfig{
-          		Name: "otlp/" + name, Database: cfg.Database, Table: cfg.Tables[name], Clock: cfg.Clock,
-          		Policy: plug.QueuePolicyValue{
-          			VisibilityTimeout: policy.VisibilityTimeout, MaxDeliveries: policy.MaxDeliveries, MaxMessageBytes: policy.MaxMessageBytes,
-          		},
+          		Name: "otlp/" + name, Database: cfg.Database, Table: cfg.Tables[name], Clock: cfg.Clock, Policy: policy,
           	})
       - opt:
           do:

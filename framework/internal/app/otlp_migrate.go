@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/kitsunium/sdk/framework/internal/app/plug"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
@@ -31,22 +30,12 @@ import (
 // sent by the running export at its next poll, and counted pending by it
 // (the forwarder's recount). Never a route (D13).
 
-// The export's queue policy, as otlpengine.openQueue opens its queues: a
-// lease above two attempts, deliveries no outage reaches, a batch at most
-// the export's byte bound, up to 64 MiB.
-const (
-	otlpLeaseMargin     time.Duration = 30 * time.Second
-	otlpMaxDeliveries   int           = 1 << 30
-	otlpMaxQueueMessage int64         = 64 << 20
-)
-
-// otlpQueuePolicy is the policy the export opens its queues under.
+// otlpQueuePolicy is the policy the export opens its queues under, as the
+// export's subsystem states it (plug.OTLPDriverConfig.Policy): the core
+// keeps no copy of its bounds. The command runs only where the subsystem is
+// linked — an app that declares the export without it does not start.
 func otlpQueuePolicy(cfg *plug.OTLPConfig) plug.QueuePolicyValue {
-	return plug.QueuePolicyValue{
-		VisibilityTimeout: 2*cfg.SendTimeout + otlpLeaseMargin,
-		MaxDeliveries:     otlpMaxDeliveries,
-		MaxMessageBytes:   int(min(cfg.MaxBytes, otlpMaxQueueMessage)),
-	}
+	return plug.OTLP.Load().Policy(cfg)
 }
 
 // migrateOTLP moves the batches of signals the export left under the data

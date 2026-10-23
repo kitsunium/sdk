@@ -54,6 +54,21 @@ func (f *FakeDB) Messages(table string) []string {
 	return out
 }
 
+// Leased are the payloads of table's live messages a lease holds, oldest
+// first: none once every consumer handed back what it held.
+func (f *FakeDB) Leased(table string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	rows := slices.SortedFunc(maps.Values(f.data.queues[table]), func(a, b fakeMessage) int { return strings.Compare(a.id, b.id) })
+	out := make([]string, 0, len(rows))
+	for _, m := range rows {
+		if m.dead == 0 && m.lease != nil {
+			out = append(out, string(m.payload))
+		}
+	}
+	return out
+}
+
 // queueStatement runs one of the SQL broker's statements on its table.
 func queueStatement(d *fakeData, query, table string, args []driver.NamedValue) (driver.Rows, int64, error) {
 	switch {
@@ -118,6 +133,13 @@ func queueWrite(q map[string]fakeMessage, query string, a fakeArgs) (driver.Rows
 		return nil, fakeQBatch(q, a, fakeQCauseArgs(query), func(m *fakeMessage) { fakeQBury(m, a) }), nil
 	case strings.HasPrefix(query, "DELETE FROM ") && strings.Contains(query, "AND lease ="):
 		return nil, fakeQHeld(q, a, 0, func(m *fakeMessage) bool { return false }), nil
+	case strings.HasPrefix(query, "UPDATE ") && strings.Contains(query, "lease = NULL, deliveries = deliveries - 1 WHERE id"):
+		// A release (queue.Releaser): receivable at once, its delivery given
+		// back. Read before the extension below, whose ", lease = " it also
+		// holds: taken for one, its receipt was read from the wrong
+		// arguments, nothing matched, and the batch a stop handed back stayed
+		// leased until its lease lapsed (issue #586).
+		return nil, fakeQHeld(q, a, 1, func(m *fakeMessage) bool { m.due, m.lease, m.deliveries = a.int(0), nil, m.deliveries-1; return true }), nil
 	case strings.HasPrefix(query, "UPDATE ") && strings.Contains(query, "SET due = ") && strings.Contains(query, "lease = NULL WHERE id"):
 		return nil, fakeQHeld(q, a, 1, func(m *fakeMessage) bool { m.due, m.lease = a.int(0), nil; return true }), nil
 	case strings.HasPrefix(query, "UPDATE ") && strings.Contains(query, "SET dead = 1"):

@@ -53,6 +53,11 @@ type OTLPDriverConfig struct {
 	// replays its dead letters (issue #536); it is refused when the queue
 	// would be in memory, where no dead letter outlives its process.
 	Queue func(ctx context.Context, cfg *OTLPConfig, signal string) (OTLPQueue, error)
+	// Policy is the policy Open and Queue open each signal's queue under
+	// for cfg — its lease, its deliveries, its largest message —, for
+	// the product's CLI, which opens the same queues through the queue
+	// subsystem to move them onto a database (otlp migrate, issue #586).
+	Policy func(cfg *OTLPConfig) QueuePolicyValue
 }
 
 // OTLPDeadLetterValue is one batch a signal's queue gave up on — the

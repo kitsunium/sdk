@@ -854,6 +854,13 @@ types:
           would be in memory, where no dead letter outlives its process.
         name: Queue
         type: func(ctx context.Context, cfg *OTLPConfig, signal string) (OTLPQueue, error)
+      - doc: |-
+          Policy is the policy Open and Queue open each signal's queue under
+          for cfg — its lease, its deliveries, its largest message —, for
+          the product's CLI, which opens the same queues through the queue
+          subsystem to move them onto a database (otlp migrate, issue #586).
+        name: Policy
+        type: func(cfg *OTLPConfig) QueuePolicyValue
     kind: struct
     name: OTLPDriverConfig
   - fields:

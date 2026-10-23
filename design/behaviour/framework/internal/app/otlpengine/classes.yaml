@@ -119,6 +119,7 @@ files:
       - spanExporterName
       - scopeName
       - Enable
+      - policyOf
       - open
       - openSignal
       - openQueue
@@ -156,6 +157,15 @@ functions:
     results: error
   - name: Enable
   - doc: |-
+      policyOf is the policy every signal's queue opens under for cfg: a lease
+      above two attempts, deliveries no outage reaches, one batch at most the
+      export's byte bound, up to maxQueueMessage. The product's CLI reads it
+      through plug.OTLPDriverConfig.Policy, so that otlp migrate opens the same
+      queues with no copy of these bounds of its own.
+    name: policyOf
+    params: cfg *plug.OTLPConfig
+    results: plug.QueuePolicyValue
+  - doc: |-
       open opens the export cfg describes: a queue and a forwarder per signal —
       in cfg.Dir, one subdirectory each, else in memory, and in memory too where
       the SDK's durable queue refuses the platform —, the trace batch sink in
@@ -188,7 +198,7 @@ functions:
       wherever the database is, the platforms whose file queue the SDK refuses
       included (issue #537).
     name: openTable
-    params: cfg *plug.OTLPConfig, policy queue.Policy, name string
+    params: cfg *plug.OTLPConfig, policy plug.QueuePolicyValue, name string
     results: queue.Broker, error
   - doc: |-
       senderOf is how one signal's batches are shipped, and how a failure is
