@@ -3371,8 +3371,9 @@ packages:
             recv: pointer
           - doc: |-
               SaveSnapshot cuts a snapshot now and copies its encoded stream to w, on a
-              goroutine of its own: once ctx is done it returns, and a write to w
-              already blocked keeps that goroutine, and the snapshot pinned, until w
+              goroutine of its own: once ctx is done it returns, the copy stops at its
+              next read, and only a write to w already begun may end after the return;
+              one that blocks keeps that goroutine, and the snapshot pinned, until w
               returns.
             in:
               - name: ctx
