@@ -78,15 +78,19 @@ func (t *Tracer) Start(ctx context.Context, name string, params coretrace.SpanPa
 	parent := coretrace.SpanContextFromContext(ctx)
 	//: mint the identity.
 	spanContext := t.mint(parent, name, params)
-	//: an unsampled span records nothing and costs nothing.
+	//: an unsampled span records nothing; its one allocation is shared.
 	if !spanContext.IsSampled() {
-		//: the context still travels, so the decision propagates downstream.
-		return coretrace.ContextWithSpanContext(ctx, spanContext), noopSpan{context: spanContext}
+		//: the context still travels, so the decision propagates downstream —
+		//: the context holds the span itself, whose identity is immutable, so
+		//: the span and the context share one allocation instead of two.
+		unsampled := &noopSpan{context: spanContext}
+		return coretrace.ContextWithSpan(ctx, unsampled), unsampled
 	}
 	//: a recording span owns its own state and its own mutex.
 	recording := newSpan(t, spanContext, parent, name, params)
-	//: children of this scope become children of this span.
-	return coretrace.ContextWithSpanContext(ctx, spanContext), recording
+	//: children of this scope become children of this span, read through it:
+	//: its identity is immutable, so nothing is boxed for the context.
+	return coretrace.ContextWithSpan(ctx, recording), recording
 }
 
 // mint builds the new span's context: the trace id, a fresh span id, the

@@ -236,6 +236,7 @@ files:
       - spanContextKey
       - ContextWithSpanContext
       - contextWithValue
+      - ContextWithSpan
       - SpanContextFromContext
     name: context.go
   - decls: []
@@ -364,10 +365,13 @@ functions:
     params: parent context.Context, context SpanContextValue
     results: context.Context
   - doc: |-
-      contextWithValue is the single WithValue call site, kept apart so the shadowed
-      parameter name above never reaches context.WithValue.
+      contextWithValue is the single WithValue call site of a span context, kept
+      apart so the shadowed parameter name above never reaches context.WithValue.
     name: contextWithValue
     params: parent context.Context, value SpanContextValue
+    results: context.Context
+  - name: ContextWithSpan
+    params: parent context.Context, span Span
     results: context.Context
   - name: SpanContextFromContext
     params: ctx context.Context
@@ -501,8 +505,9 @@ types:
   - doc: |-
       contextKeyType is the unexported key type for the context value. Unexported so
       nothing outside this package can write the slot, which is what keeps
-      SpanContextFromContext's answer trustworthy: the only writer is
-      ContextWithSpanContext, which takes a typed value.
+      SpanContextFromContext's answer trustworthy: the only writers are
+      ContextWithSpanContext, which stores a typed value, and ContextWithSpan, which
+      stores the Span whose SpanContext is read back.
     kind: struct
     name: contextKeyType
   - fields:

@@ -47,7 +47,7 @@ the package comment is `doc.go`'s alone, written by kit from the design (ADR 016
 | `state_value.go` | `StateValue` — the `tracestate` list, ordered and immutable; `Get` / `Insert` / `Delete` / `Len` / `String` + the member grammar + the three grammar limits (`MaxTraceStateMembers` / `MaxTraceStateKeyLen` / `MaxTraceStateValueLen`) |
 | `state_builder.go` | `StateBuilder` + `NewStateBuilder` — a list assembled leftmost first under `Insert`'s checks, the engine's header parser's way in (ADR 0160 §4) |
 | `trace_state_entry.go` | `traceStateEntry` — one list member, unexported |
-| `context.go` | `ContextWithSpanContext` / `SpanContextFromContext` |
+| `context.go` | `ContextWithSpanContext` / `ContextWithSpan` / `SpanContextFromContext` — one unexported slot, two writers: a boxed `SpanContextValue`, or the `Span` itself, read back through its immutable `SpanContext()` so a pointer-shaped span costs the context no allocation |
 | `span_kind.go` | `SpanKind` + the five values + `Resolved` |
 | `status_value.go` | `StatusValue` + `StatusCode` (`StatusUnset`/`StatusOK`/`StatusError`) + `Resolved` / `IsUnset` |
 | `event_value.go` | `EventValue` + the `exception.*` convention constants |
@@ -172,6 +172,11 @@ absorbed by the next hop and silently change the value.
   producer to zero them and §3.2.4 a receiver to assume nothing about them:
   `TraceFlags` keeps the byte whole and `Sanitized` masks it, and only the
   engine's `FormatTraceParent` calls it.
+- **Do NOT hand `ContextWithSpan` a span whose `SpanContext()` can change.** The
+  context reads the identity through the span every time it is asked, so a span
+  that re-minted or mutated its context would re-parent the children of a scope
+  after the fact. Both engine spans fix theirs at `Start`; a span that cannot
+  promise that goes through `ContextWithSpanContext`, which copies.
 
 ## Verification
 

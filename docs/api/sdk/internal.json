@@ -34298,6 +34298,18 @@
       "family": "observe"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/observe/trace.ContextWithSpan",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/core/observe/trace",
+      "name": "ContextWithSpan",
+      "spelled": "func(parent context.Context, span Span) context.Context",
+      "canonical": "func(parent context.Context, span github.com/kitsunium/sdk/internal/core/observe/trace.Span) context.Context",
+      "doc": "ContextWithSpan returns a copy of parent carrying span's context, exactly as\nContextWithSpanContext(parent, span.SpanContext()) would — SpanContextFromContext\nreads the same value back — without copying that value onto the heap.\n\nThe context stores the span itself and asks it for its context when the\ncontext is read. A span the tracer returns is a pointer, so storing it costs\nno allocation, where boxing the span context does: an unsampled Start pays\ntwo allocations instead of three. The price is the contract it states: span's\nSpanContext must return the same value for as long as the context lives,\nwhich every span Start returns guarantees — its identity is immutable once\nminted. A nil span reads back as the invalid zero context, and shadows any\nouter one as ContextWithSpanContext's invalid context does.\n",
+      "file": "core/observe/trace/context.go",
+      "layer": "core",
+      "family": "observe"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/observe/trace.ContextWithSpanContext",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/core/observe/trace",

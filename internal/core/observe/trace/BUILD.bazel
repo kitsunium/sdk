@@ -58,6 +58,7 @@ go_test(
     name = "trace_test",
     srcs = [
         "carrier_external_test.go",
+        "context_external_test.go",
         "export_context_external_test.go",
         "gen_api_test.go",
         "model_external_test.go",

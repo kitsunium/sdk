@@ -24,10 +24,10 @@ sentinels as `coretrace.X` and declares none.
 | File | Surface |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
-| `tracer.go` | `Tracer` + `NewTracer` + `Start` (the mint/sample/inherit sequence) |
+| `tracer.go` | `Tracer` + `NewTracer` + `Start` (the mint/sample/inherit sequence; the span stored on the context with `coretrace.ContextWithSpan`, §The span context Start stores) |
 | `config.go` | `TracerConfig` + every clamp, applied once in `resolved()` |
 | `span.go` | the recording `span`: mutex-guarded attrs/events/status, idempotent `End`; `finish` TRANSFERS its slices to the exported value rather than cloning them, and `sortedIncoming` skips the clone `SortAttrs` makes when there is one attribute to merge — both in §Cost |
-| `noop_span.go` | the span an unsampled trace gets — and why it still carries a context |
+| `noop_span.go` | the span an unsampled trace gets — and why it still carries a context; handed out as `*noopSpan`, the one allocation the context shares |
 | `sampler.go` | `AlwaysSample` / `NeverSample` / `ParentBased` / `Ratio` |
 | `idgen.go` | `NewTraceID` / `NewSpanID` over `drawTraceID` / `drawSpanID`, which read `crypto/rand` directly: since Go 1.24 it never returns an error (a failing source crashes the program), so the published error is always nil, the tracer's mint cannot fail, and `EntropyFailed` stays declared and published but is returned by nothing. A root span's two ids come from ONE 24-byte read (`drawRootIDs`): a read is a getrandom call whose fixed cost dwarfs its bytes (crypto/rand was 39 % of an unsampled root's `Start`), so the second read bought only overhead — unsampled root `Start`+`End` −8 %, `Sampler_Ratio` −7 %; each half is still checked and redrawn on its own; a child still draws its span id alone |
 | `recorder.go` / `recorder_config.go` | `Recorder` + `Sink` / `Collect` / `Len` / `Dropped`; `RecorderConfig` |
@@ -366,7 +366,7 @@ Four decisions:
 | `TestExtractRestartsTheTraceOnAMalformedParent` / `…KeepsAValidParentDespiteAnUnreadableTraceState` | both halves of §4.3 |
 | `TestParseTraceStateRefusals` / `…EnforcesTheThirtyTwoMemberCap` | the whole header refused, never salvaged |
 | `TestClientMiddlewareInjectsAndClonesTheRequest` | the caller's `*http.Request` is untouched |
-| `TestServerMiddlewareStaysWithinItsPerRequestAllocationBudget` | 12 allocations sampled, 10 unsampled — the §Cost argument, guarded (`!race` lane) |
+| `TestServerMiddlewareStaysWithinItsPerRequestAllocationBudget` | 11 allocations sampled, 9 unsampled — the §Cost argument, guarded (`!race` lane) |
 | `TestRecordingAtCapacityAllocatesNothing` | refusing a span costs less than keeping it (`!race` lane) |
 | `TestRecorderTakesAnExclusiveLockOnEveryPath` | `Recorder.mu` is a `sync.Mutex`; see §Cost |
 | `TestBatchSink*` (`batch_sink_external_test.go`) | the batching processor on a `ManualClock`: the fill and the delay triggers, the queue clamp, a drop counted, an export cut at `ExportTimeout`, `ForceFlush`/`Shutdown` bounded by their context — no sleep |
@@ -383,10 +383,14 @@ both produced a change.
 | | ns/op | B/op | allocs/op |
 |---|---:|---:|---:|
 | the same handler, no middleware | 5.1 | 0 | 0 |
-| root (no inbound header), sampled | 2 098 | 1 720 | **12** |
-| root, unsampled | 1 154 | 888 | **10** |
-| child (valid `traceparent`), sampled | 2 346 | 1 736 | **13** |
-| child, unsampled | 1 391 | 904 | **11** |
+| root (no inbound header), sampled | 2 098 | 1 720 | **12** → **11** |
+| root, unsampled | 1 154 | 888 | **10** → **9** |
+| child (valid `traceparent`), sampled | 2 346 | 1 736 | **13** → **12** |
+| child, unsampled | 1 391 | 904 | **11** → **10** |
+
+The arrows are §The span context Start stores: the context holds the span
+itself rather than a boxed copy of its identity, one allocation fewer on every
+row (BENCH.md §The span context Start stores). The other columns are the original measurement.
 
 Against a full SDK HTTP request measured on the **same box**
 (`//internal/service/net/server`'s `BenchmarkHTTP_Adapter`, 162 900 ns /
@@ -400,8 +404,21 @@ belongs in a **default** middleware stack, and
 
 It also prices a sampling ratio honestly: an unsampled request is 55 % of a
 sampled one in TIME and 83 % of it in ALLOCATIONS, because ten of the twelve are
-paid before anything is recorded. Turning the rate down buys much less than the
-latency figures suggest.
+paid before anything is recorded (nine of eleven since §The span context Start
+stores). Turning the rate down buys much less than the latency figures suggest.
+
+### The span context Start stores
+
+`Start` puts the new span on the context with `coretrace.ContextWithSpan`, which
+stores the SPAN — a pointer — where `ContextWithSpanContext` boxed a copy of its
+`SpanContextValue`, too wide for an interface word. `SpanContextFromContext`
+reads it back through `SpanContext()`, which is lock-free and immutable on both
+span types. An unsampled span is now `*noopSpan`, so the span and the context
+share its one allocation: `Start`+`End` unsampled 3 → 2 allocations and −17 %
+time, sampled 3 → 2 and −9 % (`pkg/v1/observe/trace` BENCH.md §The shared span
+context). The context keeps the span reachable for as long as it lives; `finish`
+already hands the span's attributes and events to the exported value and nils
+them, so what a context retains is the span's fixed fields and its links.
 
 ### `Recorder.record` — the lock was the wrong one
 
@@ -439,9 +456,11 @@ it would weaken a stated property — the full argument is in `BENCH.md` §4:
   The local workaround is a `Carrier` adapter, which is exactly the thing
   `serveTraced`'s comment says this middleware deliberately does not have.
 - **The doubled span context**, 4 of the 12 allocations and the largest group in
-  the profile. It is the price of having exactly ONE inheritance path; removing
-  it either changes which span parents a request that carries no `traceparent`,
-  or reopens the hand-passed parent `Start`'s doc refuses by name.
+  the profile — 3 of 11 since `Start`'s half stopped boxing (§The span context
+  Start stores); the extracted parent's half is still a boxed value. It is the
+  price of having exactly ONE inheritance path; removing it either changes which
+  span parents a request that carries no `traceparent`, or reopens the
+  hand-passed parent `Start`'s doc refuses by name.
 - **Pooling `&statusRecorder{}`**, 1 allocation. It is handed to a
   caller-supplied handler, and this type is the one ADR 0051 records as the
   place ADR 0047's defect came back one layer up. A pool adds use-after-return

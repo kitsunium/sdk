@@ -515,6 +515,63 @@ and there is no measurement here that supports it. Left alone; **1 allocation
 and 384 B** — five attributes at 48 B land in an eight-slot array — which is the
 largest single entry in the alloc-space profile at 22.13 % of the bytes.
 
+## The span context Start stores — one allocation fewer per span
+
+§1.3's sites 3-4 are two `SpanContextValue` boxes, one per
+`ContextWithSpanContext`: the span context is too wide for an interface word,
+so storing it in a context copies it to the heap. `Start`'s half no longer does:
+it stores the span itself with `coretrace.ContextWithSpan`, a pointer that boxes
+for free, and `SpanContextFromContext` reads the identity back through
+`SpanContext()` — lock-free and immutable on both span types. The unsampled
+span became a `*noopSpan`, so that span and its context share one allocation
+where the `noopSpan` value used to be boxed into the returned `Span` as well.
+The extracted parent's half (`serveTraced`'s `ContextWithSpanContext`, §4.2) is
+unchanged: a header-borne context has no span to point at.
+
+A/B against the base binary (the same benchmark source on `d91642be`), the two
+run alternately ten times, `benchstat`:
+
+```
+                                 │    base     │                new                │
+                                 │   sec/op    │   sec/op     vs base              │
+ServeHTTP_Untraced-8               5.583n ± 12%   5.348n ± 3%  -4.21% (p=0.004 n=10)
+ServeHTTP_TracedRootSampled-8      2.073µ ±  3%   2.009µ ± 2%  -3.11% (p=0.005 n=10)
+ServeHTTP_TracedRootUnsampled-8    1.087µ ±  6%   1.016µ ± 3%  -6.58% (p=0.000 n=10)
+ServeHTTP_TracedChildSampled-8     2.428µ ±  4%   2.320µ ± 3%  -4.47% (p=0.002 n=10)
+ServeHTTP_TracedChildUnsampled-8   1.437µ ± 17%   1.335µ ± 3%  -7.13% (p=0.000 n=10)
+
+                                 │    B/op     │     B/op      vs base              │
+ServeHTTP_TracedRootSampled-8      1.680Ki ± 0%   1.617Ki ± 0%  -3.72% (p=0.000 n=10)
+ServeHTTP_TracedRootUnsampled-8      888.0 ± 0%     824.0 ± 0%  -7.21% (p=0.000 n=10)
+ServeHTTP_TracedChildSampled-8     1.695Ki ± 0%   1.633Ki ± 0%  -3.69% (p=0.000 n=10)
+ServeHTTP_TracedChildUnsampled-8     904.0 ± 0%     840.0 ± 0%  -7.08% (p=0.000 n=10)
+
+                                 │  allocs/op  │  allocs/op    vs base              │
+ServeHTTP_TracedRootSampled-8        12.00 ± 0%     11.00 ± 0%  -8.33% (p=0.000 n=10)
+ServeHTTP_TracedRootUnsampled-8     10.000 ± 0%     9.000 ± 0% -10.00% (p=0.000 n=10)
+ServeHTTP_TracedChildSampled-8       13.00 ± 0%     12.00 ± 0%  -7.69% (p=0.000 n=10)
+ServeHTTP_TracedChildUnsampled-8     11.00 ± 0%     10.00 ± 0%  -9.09% (p=0.000 n=10)
+```
+
+`TestServerMiddlewareStaysWithinItsPerRequestAllocationBudget`'s ceilings went
+down with it: 11 sampled, 9 unsampled.
+
+**Two rows read slower on code this change does not touch.** In the same A/B,
+`Extract` reads +6.7 % and `Inject` +6.7 % (re-run at `-count=15`: +5.3 %,
++7.0 %). Neither calls a changed function: they take and return a
+`SpanContextValue` and never touch a context. Their machine code is identical
+in both binaries, at the same sizes; it sits 192 bytes further on, because
+`SpanContextFromContext` grew. A control settles where the change comes from.
+The base source plus a function that is linked but never called (a copy of the
+new `SpanContextFromContext`, kept alive by an `init`) moves the same two rows by
++4.2 % and +11.3 % (p=0.000). The cause is the binary's layout, and this
+change's code has no part in it. `Extract_WithState`, `Extract_Absent` and
+`Inject_Invalid` do not move.
+
+Measured on: AMD EPYC 7351P 16-Core, 8 vCPU visible, 11 GiB RAM, Linux
+6.12.101+deb13-amd64 (Debian 13), go1.27.3 linux/amd64, base d91642be, branch
+`perf/trace-span-context`, 2026-10-23, benchtime 1s.
+
 ## 5. Method
 
 - Each benchmark function is run in **its own `go test` invocation**, three to
