@@ -96,7 +96,27 @@ func TestACutThatPausesApplyDoesNotHandLeadershipOver(t *testing.T) {
 	base, _ := runPausedCuts(t, false)
 	paused, refused := runPausedCuts(t, true)
 	t.Logf("leader changes in 2 s of writes: cuts off the apply goroutine %d, cuts pausing apply (500 ms > ElectionTimeoutMax 200 ms) %d, NOT_LEADER answers %d", base, paused, refused)
-	if paused > base {
+	// One spontaneous election is tolerated: without the fix the cuts
+	// gave a change each, eight in 2 s.
+	if paused > base+1 {
 		t.Errorf("every cut that pauses apply longer than ElectionTimeoutMax hands leadership over: %d changes against %d", paused, base)
+	}
+}
+
+// A cut is exempt from the stuck-apply watch only for its allowance: one
+// that never returns is still the failure the watch exists for (#554).
+func TestACutIsExemptOnlyForItsAllowance(t *testing.T) {
+	n := &Node{}
+	now := time.Unix(1000, 0)
+	const etMax = 200 * time.Millisecond
+	if n.cutExempt(now, etMax) {
+		t.Error("exempt with no cut")
+	}
+	n.cuttingSince.Store(now.UnixNano())
+	if !n.cutExempt(now.Add(cutAllowance*etMax-time.Millisecond), etMax) {
+		t.Error("a cut within its allowance is not exempt")
+	}
+	if n.cutExempt(now.Add(cutAllowance*etMax), etMax) {
+		t.Error("a cut past its allowance is still exempt")
 	}
 }

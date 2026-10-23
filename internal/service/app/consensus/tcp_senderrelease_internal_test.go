@@ -1,6 +1,7 @@
 package consensus
 
 import (
+	"net"
 	"runtime"
 	"testing"
 	"time"
@@ -53,5 +54,40 @@ func TestTheSendersOfPeersThatLeftAreReleased(t *testing.T) {
 	}
 	if after := runtime.NumGoroutine(); after > before+10 {
 		t.Errorf("%d goroutines more than before 100 members came and left", after-before)
+	}
+}
+
+// A Send to a peer the membership does not admit starts no sender: it
+// could not be dialled, and the sender would outlive the peer.
+func TestASendToAPeerNotAdmittedStartsNoSender(t *testing.T) {
+	ca := newTestCA(t)
+	tn := &tcpNode{slot: "site-0"}
+	tn.cert, tn.spki = ca.issue(t, SAN(coreconsensus.ClusterID{0xa4}, tn.slot), nil)
+	tn.listen(t, ca)
+	t.Cleanup(func() { _ = tn.tr.Close() })
+	tn.tr.Send(4242, wire.AppendMessage(nil, &coreconsensus.MessageValue{Version: 1, Group: 1, Kind: coreconsensus.MsgHeartbeat, From: 1, To: 4242, Term: 1}))
+	tn.tr.mu.Lock()
+	out := len(tn.tr.out)
+	tn.tr.mu.Unlock()
+	if out != 0 {
+		t.Errorf("a Send to a peer never admitted left %d sender queue(s)", out)
+	}
+}
+
+// halt closes the link its sender holds at once, so a write in progress to
+// a removed peer ends now rather than at its deadline, and a link the
+// sender reports afterwards is refused.
+func TestHaltClosesTheSendersOpenLink(t *testing.T) {
+	local, remote := net.Pipe()
+	defer func() { _ = remote.Close() }()
+	pc := &peerConn{queue: make(chan []byte, 1), stop: make(chan struct{})}
+	pc.conn = local
+	pc.halt()
+	pc.halt()
+	if _, err := local.Write([]byte{1}); err == nil {
+		t.Error("the sender's link still writes after halt")
+	}
+	if pc.track(&senderLink{}) {
+		t.Error("a halted peer's sender was told to keep going")
 	}
 }

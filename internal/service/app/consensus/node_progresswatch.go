@@ -7,6 +7,13 @@ import (
 	"github.com/kitsunium/sdk/internal/service/app/consensus/raft"
 )
 
+// cutAllowance is how many maximum election timeouts a cut on the apply
+// goroutine may hold it before watchProgress counts it as a stuck apply: a
+// capture or a write that never returns is the failure the watch exists
+// for (#554), and a state written slower than that is handed over at most
+// once per cut (#593).
+const cutAllowance time.Duration = 30
+
 // progressWatch is the leader's watch over its own storage and machine,
 // loop-owned: the durable index and the applied index last seen moving,
 // and when. A leader whose fdatasync never returns, or whose Apply blocks,
@@ -38,13 +45,13 @@ func (n *Node) watchProgress(now time.Time) {
 	if st.Stable != w.stable || st.Stable >= st.Last {
 		w.stable, w.stableAt = st.Stable, now
 	}
-	if applied != w.applied || applied >= st.Commit || n.cutting.Load() {
+	if applied != w.applied || applied >= st.Commit || n.cutExempt(now, st.Timing.ElectionTimeoutMax) {
 		// A cut on the apply goroutine, SnapshotPausesApply or a capture,
 		// applies nothing while it writes, and is no stuck apply. Every
 		// node cuts at the same threshold, so a leader that handed over
 		// for it made its successor cut and hand over in turn, one change
 		// per cut for as long as writes came (#593). The clock restarts
-		// when the cut ends.
+		// when the cut ends, or when its allowance does.
 		w.applied, w.appliedAt = applied, now
 	}
 	limit := st.Timing.ElectionTimeoutMax
@@ -77,4 +84,11 @@ func (n *Node) mostCaughtUpVoter(st *raft.StatusValue) coreconsensus.NodeID {
 		}
 	}
 	return to
+}
+
+// cutExempt reports whether the apply goroutine is cutting, and has been
+// for less than cutAllowance maximum election timeouts.
+func (n *Node) cutExempt(now time.Time, etMax time.Duration) bool {
+	since := n.cuttingSince.Load()
+	return since != 0 && now.Sub(time.Unix(0, since)) < cutAllowance*etMax
 }

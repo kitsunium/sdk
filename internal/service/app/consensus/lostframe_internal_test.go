@@ -50,7 +50,13 @@ func TestALostReadIndexOrForwardIsAnsweredWithoutALeaderChange(t *testing.T) {
 		_, _, err := f.node.Propose(ctx, []byte("lost=1"))
 		propErr <- err
 	}()
-	time.Sleep(30 * time.Millisecond)
+	// Both are registered when the loop sends them, and the memory
+	// network drops a frame on a cut link at the send: once both are
+	// held, both were lost.
+	waitFor(t, "the read and the forward sent on the cut link", func() bool {
+		reads, fwds := pendingOf(f)
+		return reads == 1 && fwds == 1
+	})
 	c.net.Cut(f.id, l.id, false)
 	termBefore := l.node.Status().Term
 	// The cluster is healthy: a write through the follower succeeds.

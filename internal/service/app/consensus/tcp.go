@@ -197,19 +197,50 @@ func spkiOf(c *x509.Certificate) [32]byte { return sha256.Sum256(c.RawSubjectPub
 func SPKIOf(c *x509.Certificate) [32]byte { return spkiOf(c) }
 
 type peerConn struct {
+	// conn is the sender's open link, under mu, which halt closes.
 	conn  net.Conn
 	queue chan []byte
 	bytes int64
 	mu    sync.Mutex
 	// stop is closed, once, when the peer leaves the admitted set: its
-	// sender closes its link and returns (#592).
+	// sender closes its link and returns (#592). halted says so under mu.
 	stop     chan struct{}
 	stopOnce sync.Once
+	halted   bool
 }
 
-// halt stops the peer's sender; a second call does nothing.
+// halt stops the peer's sender and closes its open link at once, so a
+// write in progress ends now rather than at its deadline; a second call
+// does nothing. No new link is dialled: a peer no longer admitted has no
+// address.
 func (pc *peerConn) halt() {
-	pc.stopOnce.Do(func() { close(pc.stop) })
+	pc.stopOnce.Do(func() {
+		pc.mu.Lock()
+		pc.halted = true
+		c := pc.conn
+		pc.conn = nil
+		pc.mu.Unlock()
+		close(pc.stop)
+		if c != nil {
+			abandon(c.Close())
+		}
+	})
+}
+
+// track records the link the sender holds after a batch, for halt to
+// close. It reports false once the peer is halted: the sender closes the
+// link it may have dialled meanwhile and returns.
+func (pc *peerConn) track(link *senderLink) bool {
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	if pc.halted {
+		return false
+	}
+	pc.conn = nil
+	if link.conn != nil {
+		pc.conn = link.conn
+	}
+	return true
 }
 
 // TCPTransport is the shipped transport: TLS 1.3 with mutual
@@ -708,7 +739,12 @@ func (t *TCPTransport) Send(to coreconsensus.NodeID, frame []byte) {
 	pc := t.out[k]
 	if pc == nil {
 		// The sender also ends when SetMembership no longer admits the
-		// peer (#592).
+		// peer (#592), and none is started for a peer it does not admit:
+		// it could not be dialled, and the sender would outlive it.
+		if _, ok := t.byID[to]; !ok {
+			t.mu.Unlock()
+			return
+		}
 		pc = &peerConn{queue: make(chan []byte, senderQueueFrames), stop: make(chan struct{})}
 		t.out[k] = pc
 		t.wg.Add(1)
@@ -756,6 +792,9 @@ func (t *TCPTransport) sender(k outKey, pc *peerConn) {
 		// The frames are written or dropped: the reused batch keeps no
 		// reference to them.
 		clear(batch)
+		if !pc.track(&link) {
+			return
+		}
 	}
 }
 

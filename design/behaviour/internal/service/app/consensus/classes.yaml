@@ -329,6 +329,17 @@ constants:
         value: "256"
     name: inboxDepth
   - doc: |-
+      cutAllowance is how many maximum election timeouts a cut on the apply
+      goroutine may hold it before watchProgress counts it as a stuck apply: a
+      capture or a write that never returns is the failure the watch exists
+      for (#554), and a state written slower than that is handed over at most
+      once per cut (#593).
+    items:
+      - name: cutAllowance
+        type: time.Duration
+        value: "30"
+    name: cutAllowance
+  - doc: |-
       pinAfterStream bounds the pin of a streamed snapshot, in maximum
       election timeouts: a peer that stopped after its install no longer holds
       the log back once it passes.
@@ -1094,9 +1105,11 @@ files:
       - (*Node).leaderConfirmed
     name: node_leadercontact.go
   - decls:
+      - cutAllowance
       - progressWatch
       - (*Node).watchProgress
       - (*Node).mostCaughtUpVoter
+      - (*Node).cutExempt
     name: node_progresswatch.go
   - decls:
       - pinAfterStream
@@ -1365,6 +1378,7 @@ files:
       - SPKIOf
       - peerConn
       - (*peerConn).halt
+      - (*peerConn).track
       - TCPTransport
       - outKey
       - (*TransportConfig).validate
@@ -4831,10 +4845,11 @@ types:
       - name: watch
         type: progressWatch
       - doc: |-
-          cutting is set while the apply goroutine captures and writes a
-          snapshot itself, applying nothing meanwhile (#593).
-        name: cutting
-        type: atomic.Bool
+          cuttingSince is when the apply goroutine started capturing and
+          writing a snapshot itself, applying nothing meanwhile, in Unix
+          nanoseconds of n.clk; 0 when it is not cutting (#593).
+        name: cuttingSince
+        type: atomic.Int64
       - doc: |-
           preferAt is the earliest tick at which this leader tries
           PreferredLeaders again after a transfer it started (#559).
@@ -5730,6 +5745,13 @@ types:
         params: st *raft.StatusValue
         recv: n *Node
         results: coreconsensus.NodeID
+      - doc: |-
+          cutExempt reports whether the apply goroutine is cutting, and has been
+          for less than cutAllowance maximum election timeouts.
+        name: cutExempt
+        params: now time.Time, etMax time.Duration
+        recv: n *Node
+        results: bool
       - doc: |-
           pinAt is the index pin holds compaction back to at now, and false once
           it no longer holds: a streamed snapshot's pin ends when this node no
@@ -6909,7 +6931,8 @@ types:
         results: error
     name: TransportConfig
   - fields:
-      - name: conn
+      - doc: conn is the sender's open link, under mu, which halt closes.
+        name: conn
         type: net.Conn
       - name: queue
         type: chan []byte
@@ -6919,16 +6942,30 @@ types:
         type: sync.Mutex
       - doc: |-
           stop is closed, once, when the peer leaves the admitted set: its
-          sender closes its link and returns (#592).
+          sender closes its link and returns (#592). halted says so under mu.
         name: stop
         type: chan struct{}
       - name: stopOnce
         type: sync.Once
+      - name: halted
+        type: bool
     kind: struct
     methods:
-      - doc: halt stops the peer's sender; a second call does nothing.
+      - doc: |-
+          halt stops the peer's sender and closes its open link at once, so a
+          write in progress ends now rather than at its deadline; a second call
+          does nothing. No new link is dialled: a peer no longer admitted has no
+          address.
         name: halt
         recv: pc *peerConn
+      - doc: |-
+          track records the link the sender holds after a batch, for halt to
+          close. It reports false once the peer is halted: the sender closes the
+          link it may have dialled meanwhile and returns.
+        name: track
+        params: link *senderLink
+        recv: pc *peerConn
+        results: bool
     name: peerConn
   - fields:
       - name: cfg

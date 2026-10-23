@@ -135,9 +135,10 @@ type Node struct {
 	contact       leaderContact
 	progress      applyProgress
 	watch         progressWatch
-	// cutting is set while the apply goroutine captures and writes a
-	// snapshot itself, applying nothing meanwhile (#593).
-	cutting atomic.Bool
+	// cuttingSince is when the apply goroutine started capturing and
+	// writing a snapshot itself, applying nothing meanwhile, in Unix
+	// nanoseconds of n.clk; 0 when it is not cutting (#593).
+	cuttingSince atomic.Int64
 	// preferAt is the earliest tick at which this leader tries
 	// PreferredLeaders again after a transfer it started (#559).
 	preferAt time.Time

@@ -10584,7 +10584,7 @@ sequences:
           do:
             - set: w.applied, w.appliedAt
               value: applied, now
-          when: applied != w.applied || applied >= st.Commit || n.cutting.Load()
+          when: applied != w.applied || applied >= st.Commit || n.cutExempt(now, st.Timing.ElectionTimeoutMax)
       - bind: limit
         eval: st.Timing.ElectionTimeoutMax
       - bind: stuckSync, stuckApply
@@ -10643,6 +10643,19 @@ sequences:
           range: st.Conf.Members
           value: m
       - return: to
+  - of: (*Node).cutExempt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).cutExempt
+        kind: self
+      - id: n.cuttingSince.Load
+        kind: value
+    steps:
+      - bind: since
+        eval: n.cuttingSince.Load()
+        to: n.cuttingSince.Load
+      - return: since != 0 && now.Sub(time.Unix(0, since)) < cutAllowance*etMax
   - of: (*Node).pinAt
     participants:
       - id: caller
@@ -16330,7 +16343,7 @@ sequences:
         kind: value
       - id: n.snapState.mu.Unlock
         kind: value
-      - id: n.cutting.Store
+      - id: n.cuttingSince.Store
         kind: value
       - id: n.metaAt
         kind: internal
@@ -16354,10 +16367,10 @@ sequences:
         value: "0"
       - eval: n.snapState.mu.Unlock()
         to: n.snapState.mu.Unlock
-      - eval: n.cutting.Store(true)
-        to: n.cutting.Store
-      - defer: n.cutting.Store(false)
-        to: n.cutting.Store
+      - eval: n.cuttingSince.Store(n.clk.Now().UnixNano())
+        to: n.cuttingSince.Store
+      - defer: n.cuttingSince.Store(0)
+        to: n.cuttingSince.Store
       - bind: meta, ok
         eval: n.metaAt(idx, term)
         to: n.metaAt
@@ -17693,8 +17706,35 @@ sequences:
       - id: pc.stopOnce.Do
         kind: value
     steps:
-      - eval: pc.stopOnce.Do(func() { close(pc.stop) })
+      - eval: |-
+          pc.stopOnce.Do(func() {
+          		pc.mu.Lock()
+          		pc.halted = true
+          		c := pc.conn
+          		pc.conn = nil
+          		pc.mu.Unlock()
+          		close(pc.stop)
+          		if c != nil {
+          			abandon(c.Close())
+          		}
+          	})
         to: pc.stopOnce.Do
+  - of: (*peerConn).track
+    steps:
+      - lock:
+          mutex: pc.mu
+      - opt:
+          do:
+            - return: "false"
+          when: pc.halted
+      - set: pc.conn
+        value: nil
+      - opt:
+          do:
+            - set: pc.conn
+              value: link.conn
+          when: link.conn != nil
+      - return: "true"
   - of: (*TransportConfig).validate
     participants:
       - id: caller
@@ -18526,6 +18566,15 @@ sequences:
         eval: t.out[k]
       - opt:
           do:
+            - opt:
+                do:
+                  - eval: t.mu.Unlock()
+                    to: t.mu.Unlock
+                  - return: ""
+                init:
+                  bind: _, ok
+                  eval: t.byID[to]
+                when: "!ok"
             - set: pc
               value: "&peerConn{queue: make(chan []byte, senderQueueFrames), stop: make(chan struct{})}"
             - set: t.out[k]
@@ -18607,6 +18656,10 @@ sequences:
             - eval: t.sendBatch(k, &link, batch)
               to: t.sendBatch
             - eval: clear(batch)
+            - opt:
+                do:
+                  - return: ""
+                when: "!pc.track(&link)"
           forever: true
   - of: (*senderLink).close
     participants:
