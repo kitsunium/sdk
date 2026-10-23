@@ -74,10 +74,34 @@ func (g *StreamGroup) HandleLoop(h corenet.LoopHandler) *StreamGroup
 
 published, as every method of the group, through the alias `server.Group`
 (ADR 0029 D1). A group served by `HandleLoop` is configured by one more group
-option, `Loop(v corenet.LoopValue)`; a group served by `Handle`,
-`HandleFunc` or `HandleHTTP` refuses that option, and a loop group refuses
-`Use` (there is no `ConnHandler` to decorate) and every option it cannot honour,
-each with `LoopOptionUnsupported`. Nothing changes for a group that does not
+option, `Loop(v corenet.LoopValue)`.
+
+**A group declares one handler, once.** `Handle`, `HandleFunc`, `HandleHTTP`
+and `HandleLoop` each declare the group's handler. A second declaration on the
+same group, of any of the four and in any order, does not replace the first:
+it records a declaration error, `HandlerAlreadySet`, naming the group, and
+`Start` returns it — the `declErr` path every declaration mistake already takes
+(`Group` returns the group, `Start` reports the first recorded error). Today
+`Handle` documents "replacing any previous one", and `HandleHTTP` followed by
+`Handle` leaves the HTTP adapter installed beside the new handler, so the
+group serves neither cleanly; a loop group would make that mix worse, and the
+rule closes it for every group (§Breaking changes).
+
+**Options are judged at `Start`, never at the call.** Options are applied when
+the group is declared, and the handler may be declared after them, so a
+refusal that depends on the handler cannot be decided earlier. At `Start`,
+once the group's handler is known:
+
+- `Loop(v)` on a group served by `Handle`, `HandleFunc` or `HandleHTTP`, or on
+  a group with no handler, is refused with `LoopOptionUnsupported` — whether
+  `Loop(v)` came before or after the handler's declaration;
+- a loop group refuses `Use` (there is no `ConnHandler` to decorate) and every
+  option it cannot honour, with `LoopOptionUnsupported`;
+- a group with no handler at all keeps `HandlerMissing`, and a second handler
+  declaration `HandlerAlreadySet`, which win over an option's refusal because
+  they explain it.
+
+Apart from the one-handler rule, nothing changes for a group that does not
 call `HandleLoop`.
 
 ### D2 — Plaintext only; one goroutine per connection stays the default
@@ -112,8 +136,13 @@ the bytes, so D2's third reason is honoured by scope rather than broken.
 ### D4 — The contract, declared in `design/net.yaml` before any code
 
 The ports and values are declared in `internal/core/net` through
-`design/net.yaml` (ADR 0163), and every sentinel is in the `0.2.11.*` block
-(ADR 0029 D8, ADR 0160 §2). What a second implementation must honour:
+`design/net.yaml` (ADR 0163). Every sentinel this record adds to the network
+domain is declared there, in the `0.2.11.*` block (ADR 0029 D8, ADR 0160 §2).
+The loop also returns sentinels it does not own: `ConnLimitReached` and
+`HandlerMissing` from the same block, and the SDK's shared
+`UnsupportedPlatform` (`0.2.6.1`, declared in `internal/core/proc`, ADR 0018
+§(a)), which it wraps and never redeclares (§D5). What a second implementation
+must honour:
 
 - **`LoopConnRef`**, a comparable value with no behaviour, naming a
   connection by ring, slot and generation. An operation on a stale generation
@@ -181,7 +210,12 @@ chosen by the consumer), `Rings` (descriptor shards inside one loop), and the
 batch, spill, output, soft-connection and idle-eviction bounds. `Rings` has one
 source: the explicit value, otherwise ⌈max(`MaxConns`, `SoftConns`) /
 min(`RLIMIT_NOFILE`, `IORING_MAX_FIXED_FILES`)⌉, and 1 when both are zero or
-less. The SDK calls neither `setrlimit` (the Go runtime already raises the soft
+less. `RLIMIT_NOFILE` here is the effective soft limit read at `Start`, and it
+is checked **before** that division: a limit of zero, or one `getrlimit` cannot
+read, leaves no descriptor for a ring's table or for any connection, so the
+loop group is refused at `Start` with `LoopNoDescriptors`, whatever `Rings`
+says and whatever the backend — never a division by zero, never a ring that
+can accept nothing. The SDK calls neither `setrlimit` (the Go runtime already raises the soft
 limit to the hard one) nor `GOMAXPROCS`, which is the consumer's policy;
 `State()` reports both values, and where `Rings` came from.
 
@@ -217,10 +251,11 @@ already judges.
 
 ADR 0029 D4 reuses `recycler.Pool` for per-connection objects and
 `kernel/buffer` for scratch, and gives each connection a goroutine. The loop
-engine does not, and why is part of the decision:
+engine's native backends, io_uring and epoll, do not, and why is part of the
+decision; the portable backend is the last bullet:
 
-- Everything the kernel reads or writes — rings, provided buffers, payloads —
-  comes from `syscall.Mmap`, never from the Go heap: the collector may move
+- On the native backends, everything the kernel reads or writes — rings,
+  provided buffers, payloads — comes from `syscall.Mmap`, never from the Go heap: the collector may move
   nothing the kernel holds and must scan nothing it does not need to.
 - The connection table holds no pointers; the identifier the kernel echoes is
   an integer. Control state (lengths, heads, tails, states) stays in
@@ -232,9 +267,18 @@ engine does not, and why is part of the decision:
 - An idle connection has a budget, in Go heap, mapped and kernel memory,
   fixed in the design and held by a hand-written test in a dedicated lane
   without the race detector.
-- A loop is one goroutine locked to its OS thread, which creates and owns its
-  rings. It is started and stopped by `server`'s lifecycle; no connection has
-  a goroutine of its own.
+- On the native backends, io_uring and epoll, a loop is one goroutine locked
+  to its OS thread, which creates and owns its rings (or its epoll instance).
+  It is started and stopped by `server`'s lifecycle; no connection has a
+  goroutine of its own. The mmap, slab and pointer-free rules above are
+  theirs too.
+- The portable backend keeps the default engine's rules instead (§D3): its
+  accept path, a `net.Conn` and a goroutine per connection on the netpoller,
+  with every handler callback serialised onto one handler goroutine so the
+  `LoopHandler` contract — one thread calls it, `buf` valid until
+  `OnBatchEnd` — holds unchanged. It locks no OS thread, owns no ring, and
+  takes its buffers from the Go heap; its idle-connection budget is its own,
+  measured, never the native one. That is the cost of running everywhere.
 
 ### D8 — Observability
 
@@ -277,8 +321,10 @@ codes are in its own `0.2.13.*` block.
 
 New `0.2.11.*` sentinels, values allocated by the design change that declares
 them, from `0.2.11.35` on: `LoopTLSUnsupported`, `LoopOptionUnsupported`,
-`LoopBackendUnavailable`, `LoopStaleRef`, `LoopOutputFull`, `LoopSpillFull`,
-`LoopPostQueueFull`, `LoopWrongThread`, and the `http1` profile's refusals.
+`LoopBackendUnavailable`, `LoopNoDescriptors`, `LoopStaleRef`,
+`LoopOutputFull`, `LoopSpillFull`, `LoopPostQueueFull`, `LoopWrongThread`,
+`HandlerAlreadySet` (§D1, for every stream group), and the `http1` profile's
+refusals.
 
 ### D10 — Two kernel rows for ADR 0159 §4
 
@@ -318,13 +364,25 @@ replaces invalid UTF-8 with U+FFFD and does no HTML escaping, and says so.
 - io_uring brings in-tree ABI layouts that must follow the kernel's uapi by
   hand, frozen by `Sizeof` and `Offsetof` tests — the cost of the `x/sys` ban,
   accepted by ADR 0018.
-- A loop handler runs on a locked OS thread and must not block it: a blocking
-  call stalls every connection of that loop. That is the price of the model,
+- On a native backend a loop handler runs on a locked OS thread and must not
+  block it: a blocking call stalls every connection of that loop. On the
+  portable backend it stalls the one handler goroutine, so every connection of
+  the group, which is the same rule. That is the price of the model,
   and its documentation says it first.
 
 ## Breaking changes
 
-None. Every symbol is an addition; `LimitsValue`, `TimeoutsValue` and every
+One, deliberate and allowed while v0 (ADR 0040): **a second handler
+declaration on a stream group is an error** (§D1). `Handle` documents today
+that it replaces any previous handler; from the change that declares
+`HandlerAlreadySet`, a second `Handle`, `HandleFunc`, `HandleHTTP` or
+`HandleLoop` on the same group makes `Start` fail with it instead. A program
+that declares each group's handler once sees no difference; the change that
+lands the rule finds and fixes any test of the tree that re-declares; one that re-declares learns at `Start` rather than
+serving a handler mixed with a stale HTTP adapter. That change updates
+`Handle`'s doc comment in the design and the server's `CLAUDE.md`.
+
+Everything else is an addition; `LimitsValue`, `TimeoutsValue` and every
 published option keep their meanings, and `Verifier` keeps its concurrent
 contract.
 
