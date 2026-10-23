@@ -97,21 +97,28 @@ func TestSaveSnapshotCopiesThePublishedSnapshot(t *testing.T) {
 	}
 }
 
-// slowWriter takes 50 ms per write, and counts its writes and bytes.
-type slowWriter struct{ writes, bytes atomic.Int64 }
+// leavingWriter takes 50 ms per write, counts its writes and bytes, and
+// calls leave during its second write: the caller gives up mid-copy.
+type leavingWriter struct {
+	writes, bytes atomic.Int64
+	leave         func()
+}
 
-func (w *slowWriter) Write(p []byte) (int, error) {
+func (w *leavingWriter) Write(p []byte) (int, error) {
+	if w.writes.Load() == 1 {
+		w.leave()
+	}
 	time.Sleep(50 * time.Millisecond)
 	w.writes.Add(1)
 	w.bytes.Add(int64(len(p)))
 	return len(p), nil
 }
 
-// SaveSnapshot returned ctx.Err() at its deadline while its copy went on
-// writing to the caller's writer, chunk after chunk, to the end: a caller
-// that reused, removed or read w after the call raced with the engine
-// (#612). The copy now stops at its next read once ctx is done; only the
-// write already begun may end after the return.
+// SaveSnapshot returned ctx.Err() once its caller left while its copy
+// went on writing to the caller's writer, chunk after chunk, to the end: a
+// caller that reused, removed or read w after the call raced with the
+// engine (#612). The copy now stops at its next read once ctx is done;
+// only the write already begun may end after the return.
 func TestSaveSnapshotStopsWritingOnceTheCallerLeft(t *testing.T) {
 	c := newCluster(t, 3, 100000)
 	l := c.settledLeader(5 * time.Second)
@@ -120,12 +127,12 @@ func TestSaveSnapshotStopsWritingOnceTheCallerLeft(t *testing.T) {
 		_, _ = rand.Read(b)
 		propose(t, l.node, fmt.Sprintf("k%d=%s", i, hex.EncodeToString(b)))
 	}
-	w := &slowWriter{}
-	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Millisecond)
-	_, err := l.node.SaveSnapshot(ctx, "operator:backup", w)
-	cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	w := &leavingWriter{leave: cancel}
+	meta, err := l.node.SaveSnapshot(ctx, "operator:backup", w)
 	if err == nil {
-		t.Fatal("setup: the copy ended before the deadline")
+		t.Fatalf("setup: the copy of a %d-byte snapshot ended before the caller left", meta.EncodedSize)
 	}
 	at, atBytes := w.writes.Load(), w.bytes.Load()
 	time.Sleep(time.Second)
