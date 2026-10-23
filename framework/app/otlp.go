@@ -39,15 +39,17 @@ type OTLPFullPolicy = iapp.OTLPFullPolicy
 type OTLPBatch = iapp.OTLPBatchValue
 
 // OTLPOption configures the app's export: [OTLPEndpoint], [OTLPBounds],
-// [OTLPWhenFull], [OTLPMaxAge], [OTLPSendTimeout], [OTLPSender].
+// [OTLPWhenFull], [OTLPMaxAge], [OTLPSendTimeout], [OTLPSampleRatio],
+// [OTLPSender].
 type OTLPOption = iapp.OpenTelemetryConfigurer
 
 // OTLP declares that the app forwards its traces and the metrics the
 // framework derives from them to an OpenTelemetry collector over OTLP/HTTP:
-// every span the framework starts, and per node and operation its runs,
-// failures and durations (app.node.runs, app.node.failures,
-// app.node.duration), with what the export itself holds and lost
-// (app.otlp.*). The export is on once its endpoint is set — the setting
+// the spans the framework starts — the share otlp-sample-ratio keeps —, and
+// per node and operation its runs, failures and durations (app.node.runs,
+// app.node.failures, app.node.duration), with what the export itself holds
+// and lost (app.otlp.*) and the product's own instruments ([Meter]). The
+// export is on once its endpoint is set — the setting
 // otlp-endpoint, [OTLPEndpoint] its default — or once [OTLPSender] replaces
 // the network; a CLI command never exports. A program that declares it
 // imports framework/app/otlp, or its start is refused, naming the import:
@@ -123,6 +125,21 @@ func OTLPMaxAge(d time.Duration) OTLPOption {
 func OTLPSendTimeout(d time.Duration) OTLPOption {
 	//: the implementation is framework/internal/app's; this facade only forwards.
 	return iapp.OTLPSendTimeout(d)
+}
+
+// OTLPSampleRatio is the share of the traces the app starts that the export
+// keeps — the default of the setting otlp-sample-ratio (1, every one): from
+// 0, none, to 1, every one, decided on the trace's identifier, so every
+// service that sees the same trace decides alike. A trace another process
+// started is kept or not as that process decided, whatever the ratio: a span
+// is never cut off from its parent. The metrics the framework derives count
+// every unit of work, kept or not.
+//
+// IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+// only hands it to the declaration it configures.
+func OTLPSampleRatio(ratio float64) OTLPOption {
+	//: the implementation is framework/internal/app's; this facade only forwards.
+	return iapp.OTLPSampleRatio(ratio)
 }
 
 // OTLPSender replaces the network: each batch is handed to send instead of

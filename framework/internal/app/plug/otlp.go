@@ -107,6 +107,13 @@ type OTLPSinkValue struct {
 	Sink any
 }
 
+// OTLPMeterValue is the product's own meter on the export: the SDK's
+// metrics.FullMeter held as any, as OTLPSinkValue holds the span sink.
+type OTLPMeterValue struct {
+	// Meter is the SDK's metrics.FullMeter.
+	Meter any
+}
+
 // OTLPBatchValue is one batch as the product's own sender receives it: its
 // signal and its OTLP/JSON document, posted to a collector as it is.
 type OTLPBatchValue struct {

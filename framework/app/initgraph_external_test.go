@@ -342,6 +342,12 @@ var otlpCode = []string{
 	"(*App).otlpStopBudget",
 }
 
+// sdkMeter is a function of the SDK's in-memory meter — the framework's
+// instruments and the product's own (app.Meter, issue #538) are the export
+// subsystem's: a product that does not import framework/app/otlp links none
+// of it, its app.Meter a meter that keeps nothing; one that does links it.
+const sdkMeter = sdk + "internal/service/observe/metrics.(*memMeter).Collect"
+
 // studioCode is the Studio's code ADR 0180's step 1 took out of kit's core
 // into framework/internal/app/studioengine — its routes, their guard and their
 // handlers, the event stream, the source endpoint, the mailbox, and the
@@ -455,6 +461,9 @@ func linksNoSubsystem(t *testing.T, goTool, dir string) {
 		if syms[kitStoreSymbol(fn)] {
 			t.Errorf("a product that does not import framework/app/otlp links the framework's own export code: %s", fn)
 		}
+	}
+	if syms[sdkMeter] {
+		t.Errorf("a product that does not import framework/app/otlp links the SDK's meter: %s", sdkMeter)
 	}
 	linksNoStudio(t, "framework/app", syms, image)
 	// The core names the SDK's mail types — Mailer.Send takes a mail.Message
@@ -817,6 +826,9 @@ func TestAProductThatImportsTheOTLPExportLinksIt(t *testing.T) {
 		if !syms[kitStoreSymbol(fn)] {
 			t.Errorf("a product that imports framework/app/otlp does not link the framework's own export code: %s", fn)
 		}
+	}
+	if !syms[sdkMeter] {
+		t.Errorf("a product that imports framework/app/otlp does not link the SDK's meter: %s", sdkMeter)
 	}
 	linksNoWords(t, "framework/app/otlp", image, linked)
 	linksNoStudio(t, "framework/app/otlp", syms, image)

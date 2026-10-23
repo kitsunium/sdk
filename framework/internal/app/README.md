@@ -349,6 +349,7 @@ Package app — the ports the workflow engine reaches a store through.
 - [func MaxBody\(bytes int64\) EndpointConfigurer](<#MaxBody>)
 - [func MaxDeliveries\(n int\) DeliveryOption](<#MaxDeliveries>)
 - [func MaxWait\(d time.Duration\) WaitConfigurer](<#MaxWait>)
+- [func Meter\(ctx context.Context\) metrics.FullMeter](<#Meter>)
 - [func Migrations\(m ...MigrationValue\) interface{DatabaseConfigurer; ModuleConfigurer}](<#Migrations>)
 - [func MinLength\(n int\) PasswordConfigurer](<#MinLength>)
 - [func Mount\(m \*Module, opts ...MountConfigurer\) AppConfigurer](<#Mount>)
@@ -383,6 +384,7 @@ Package app — the ports the workflow engine reaches a store through.
 - [func OTLPBounds\(maxBatches int, maxBytes int\) OpenTelemetryConfigurer](<#OTLPBounds>)
 - [func OTLPEndpoint\(url string\) OpenTelemetryConfigurer](<#OTLPEndpoint>)
 - [func OTLPMaxAge\(d time.Duration\) OpenTelemetryConfigurer](<#OTLPMaxAge>)
+- [func OTLPSampleRatio\(ratio float64\) OpenTelemetryConfigurer](<#OTLPSampleRatio>)
 - [func OTLPSendTimeout\(d time.Duration\) OpenTelemetryConfigurer](<#OTLPSendTimeout>)
 - [func OTLPSender\(send func\(ctx context.Context, batch OTLPBatchValue\) error\) OpenTelemetryConfigurer](<#OTLPSender>)
 - [func OTLPWhenFull\(p OTLPFullPolicy\) OpenTelemetryConfigurer](<#OTLPWhenFull>)
@@ -2433,6 +2435,15 @@ MaxWait lets a call wait, at most d on the app's clock, instead of being refused
 
 IFACE-OPAQUE: the option is sealed — its methods are unexported — so a caller only hands it to the declaration it configures.
 
+<a name="Meter"></a>
+## func [Meter](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/otlp_meter.go>)
+
+```go
+func Meter(ctx context.Context) metrics.FullMeter
+```
+
+Meter is the product's own meter, for the app ctx runs inside: the counters, gauges and histograms it makes land in the OTLP export's metrics stream, under the app's resource and an instrumentation scope named after the app, collected every otlp-interval beside the framework's own. Without a running export — none declared, the export off, a CLI command, or outside an app — it is a meter that keeps nothing. An instrument is found again by its name and attributes, so a handler may ask for it at each call; its Collect is the export's.
+
 <a name="Migrations"></a>
 ## func [Migrations](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/database.go>)
 
@@ -2735,7 +2746,7 @@ Now returns the app's time: the system clock, or the clock a test gave with [Clo
 func OTLP(opts ...OpenTelemetryConfigurer) AppConfigurer
 ```
 
-OTLP declares that the app forwards its traces and the metrics the framework derives from them to an OpenTelemetry collector over OTLP/HTTP: every span the framework starts, and per node and operation its runs, failures and durations (app.node.runs, app.node.failures, app.node.duration), with what the export itself holds and lost (app.otlp.\*). The export is on once its endpoint is set — the setting otlp-endpoint, [OTLPEndpoint](#OTLPEndpoint) its default — or once [OTLPSender](#OTLPSender) replaces the network; a CLI command never exports. A program that declares it imports framework/app/otlp, or its start is refused, naming the import:
+OTLP declares that the app forwards its traces and the metrics the framework derives from them to an OpenTelemetry collector over OTLP/HTTP: the spans the framework starts — the share otlp-sample-ratio keeps —, and per node and operation its runs, failures and durations (app.node.runs, app.node.failures, app.node.duration), with what the export itself holds and lost (app.otlp.\*) and the product's own instruments ([Meter](#Meter)). The export is on once its endpoint is set — the setting otlp-endpoint, [OTLPEndpoint](#OTLPEndpoint) its default — or once [OTLPSender](#OTLPSender) replaces the network; a CLI command never exports. A program that declares it imports framework/app/otlp, or its start is refused, naming the import:
 
 ```
 import _ "github.com/kitsunium/sdk/framework/app/otlp"
@@ -2777,6 +2788,17 @@ func OTLPMaxAge(d time.Duration) OpenTelemetryConfigurer
 ```
 
 OTLPMaxAge is how long after it was queued a batch may still be sent — the default of the setting otlp-max-age (24h): one older is dropped unsent, counted expired. A collector's Retry-After is waited in full, but never past it.
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
+
+<a name="OTLPSampleRatio"></a>
+## func [OTLPSampleRatio](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/otlp.go>)
+
+```go
+func OTLPSampleRatio(ratio float64) OpenTelemetryConfigurer
+```
+
+OTLPSampleRatio is the share of the traces the app starts that the export keeps — the default of the setting otlp-sample-ratio (1, every one): from 0, none, to 1, every one, decided on the trace's identifier, so every service that sees the same trace decides alike. A trace another process started is kept or not as that process decided, whatever the ratio: a span is never cut off from its parent. The metrics the framework derives count every unit of work, kept or not.
 
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
@@ -4579,7 +4601,7 @@ type OTLPFullPolicy string
 <a name="OpenTelemetryConfigurer"></a>
 ## type [OpenTelemetryConfigurer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/otlp_interface.go>)
 
-OpenTelemetryConfigurer configures the app's OTLP export: [OTLPEndpoint](#OTLPEndpoint), [OTLPBounds](#OTLPBounds), [OTLPWhenFull](#OTLPWhenFull), [OTLPMaxAge](#OTLPMaxAge), [OTLPSendTimeout](#OTLPSendTimeout), [OTLPSender](#OTLPSender).
+OpenTelemetryConfigurer configures the app's OTLP export: [OTLPEndpoint](#OTLPEndpoint), [OTLPBounds](#OTLPBounds), [OTLPWhenFull](#OTLPWhenFull), [OTLPMaxAge](#OTLPMaxAge), [OTLPSendTimeout](#OTLPSendTimeout), [OTLPSampleRatio](#OTLPSampleRatio), [OTLPSender](#OTLPSender).
 
 ```go
 type OpenTelemetryConfigurer interface {

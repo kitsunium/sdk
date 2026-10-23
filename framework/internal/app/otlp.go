@@ -39,6 +39,7 @@ import (
 //	otlp-interval      how often the metrics are collected (1m)
 //	otlp-drain         how long the batch being sent at a stop may finish (5s)
 //	otlp-settle        each acknowledgement's and the stop's flush's bound (5s)
+//	otlp-sample-ratio  the share of the traces started here that are kept (1)
 //
 // and the headers every request carries — a collector's Authorization — are
 // the framework's secret otlp-headers, <PRODUCT>_OTLP_HEADERS or its _FILE
@@ -56,6 +57,7 @@ const (
 	knobOTLPInterval    = "interval"
 	knobOTLPDrain       = "drain"
 	knobOTLPSettle      = "settle"
+	knobOTLPSampleRatio = "sample-ratio"
 	otlpHeadersSecret   = "otlp-headers"
 	varOTLPHeaders      = "OTLP_HEADERS"
 	otlpPackage         = "github.com/kitsunium/sdk/framework/app/otlp"
@@ -74,6 +76,7 @@ const (
 	otlpDefaultInterval  time.Duration = time.Minute
 	otlpDefaultDrain     time.Duration = 5 * time.Second
 	otlpDefaultSettle    time.Duration = 5 * time.Second
+	otlpDefaultRatio     float64       = 1
 	otlpReadinessBacklog float64       = 0.8
 )
 
@@ -128,6 +131,7 @@ type otlpExport struct {
 	interval    *SettingService[time.Duration]
 	drain       *SettingService[time.Duration]
 	settle      *SettingService[time.Duration]
+	sampleRatio *SettingService[float64]
 }
 
 // otlpOptions are an export's code values, the settings' defaults.
@@ -139,6 +143,7 @@ type otlpOptions struct {
 	maxBatches  int
 	maxAge      time.Duration
 	sendTimeout time.Duration
+	sampleRatio float64
 }
 
 // otlpOption configures an export.
@@ -149,10 +154,11 @@ func (f otlpOption) openTelemetryConfigure(o *otlpOptions) { f(o) }
 
 // OTLP declares that the app forwards its traces and the metrics the
 // framework derives from them to an OpenTelemetry collector over OTLP/HTTP:
-// every span the framework starts, and per node and operation its runs,
-// failures and durations (app.node.runs, app.node.failures,
-// app.node.duration), with what the export itself holds and lost
-// (app.otlp.*). The export is on once its endpoint is set — the setting
+// the spans the framework starts — the share otlp-sample-ratio keeps —, and
+// per node and operation its runs, failures and durations (app.node.runs,
+// app.node.failures, app.node.duration), with what the export itself holds
+// and lost (app.otlp.*) and the product's own instruments ([Meter]). The
+// export is on once its endpoint is set — the setting
 // otlp-endpoint, [OTLPEndpoint] its default — or once [OTLPSender] replaces
 // the network; a CLI command never exports. A program that declares it
 // imports framework/app/otlp, or its start is refused, naming the import:
@@ -171,7 +177,7 @@ func (f otlpOption) openTelemetryConfigure(o *otlpOptions) { f(o) }
 func OTLP(opts ...OpenTelemetryConfigurer) AppConfigurer {
 	o := otlpOptions{
 		whenFull: OTLPDropOldest, maxBatches: otlpDefaultBatches, maxBytes: otlpDefaultBytes,
-		maxAge: otlpDefaultMaxAge, sendTimeout: otlpDefaultTimeout,
+		maxAge: otlpDefaultMaxAge, sendTimeout: otlpDefaultTimeout, sampleRatio: otlpDefaultRatio,
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -250,6 +256,20 @@ func OTLPSender(send func(ctx context.Context, batch OTLPBatchValue) error) Open
 	return otlpOption(func(o *otlpOptions) { o.send = send })
 }
 
+// OTLPSampleRatio is the share of the traces the app starts that the export
+// keeps — the default of the setting otlp-sample-ratio (1, every one): from
+// 0, none, to 1, every one, decided on the trace's identifier, so every
+// service that sees the same trace decides alike. A trace another process
+// started is kept or not as that process decided, whatever the ratio: a span
+// is never cut off from its parent. The metrics the framework derives count
+// every unit of work, kept or not.
+//
+// IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+// only hands it to the declaration it configures.
+func OTLPSampleRatio(ratio float64) OpenTelemetryConfigurer {
+	return otlpOption(func(o *otlpOptions) { o.sampleRatio = ratio })
+}
+
 // declareSettings declares the export's settings, the code's values their
 // defaults.
 func (e *otlpExport) declareSettings(o *otlpOptions) {
@@ -262,6 +282,7 @@ func (e *otlpExport) declareSettings(o *otlpOptions) {
 	e.interval = otlpSetting(e, knobOTLPInterval, otlpDefaultInterval, checkPositive())
 	e.drain = otlpSetting(e, knobOTLPDrain, otlpDefaultDrain, checkWait())
 	e.settle = otlpSetting(e, knobOTLPSettle, otlpDefaultSettle, checkPositive())
+	e.sampleRatio = otlpSetting(e, knobOTLPSampleRatio, o.sampleRatio, checkOTLPSampleRatio())
 }
 
 // otlpSetting declares one setting of the export: otlp-<knob>.
@@ -274,7 +295,7 @@ func otlpSetting[T SettingValue](e *otlpExport, knob string, def T, check func(a
 
 // settingDecls are the export's settings, in the table's order.
 func (e *otlpExport) settingDecls() []settingDecl {
-	return []settingDecl{e.endpoint, e.maxBatches, e.maxBytes, e.whenFull, e.maxAge, e.sendTimeout, e.interval, e.drain, e.settle}
+	return []settingDecl{e.endpoint, e.maxBatches, e.maxBytes, e.whenFull, e.maxAge, e.sendTimeout, e.interval, e.drain, e.settle, e.sampleRatio}
 }
 
 // otlpStopBudget is the most the export's stop takes, nothing without an
@@ -346,6 +367,11 @@ func checkOTLPWhenFull() func(v any) phrase {
 		}
 		return false
 	}, func() phrase { return say("otlp.when-full") })
+}
+
+// checkOTLPSampleRatio refuses a ratio outside [0, 1], NaN included.
+func checkOTLPSampleRatio() func(v any) phrase {
+	return judged(func(r float64) bool { return r >= 0 && r <= 1 }, func() phrase { return say("otlp.sample-ratio") })
 }
 
 // parseOTLPHeaders reads the secret otlp-headers: "key=value" pairs joined

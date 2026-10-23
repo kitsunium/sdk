@@ -33,6 +33,9 @@ sequences:
   - of: (*export).SpanSink
     steps:
       - return: "plug.OTLPSinkValue{Sink: e.batch.Sink()}"
+  - of: (*export).Meter
+    steps:
+      - return: "plug.OTLPMeterValue{Meter: e.product}"
   - of: (*export).Record
     participants:
       - id: caller
@@ -170,8 +173,8 @@ sequences:
         kind: value
       - id: t.Stop
         kind: value
-      - id: e.snapshots.ExportContext
-        kind: value
+      - id: e.queueSnapshots
+        kind: internal
       - id: e.report
         kind: internal
     steps:
@@ -203,8 +206,8 @@ sequences:
                               to: e.report
                           init:
                             bind: err
-                            eval: e.snapshots.ExportContext(ctx, e.meter.Collect())
-                            to: e.snapshots.ExportContext
+                            eval: e.queueSnapshots(ctx)
+                            to: e.queueSnapshots
                           when: err != nil
           forever: true
   - of: (*export).report
@@ -237,7 +240,36 @@ sequences:
         eval: e.bounded()
         to: e.bounded
       - defer: cancel2()
-      - return: errors.Join(err, e.snapshots.ExportContext(ctx2, e.meter.Collect()))
+      - return: errors.Join(err, e.queueSnapshots(ctx2))
+        to: errors
+  - of: (*export).queueSnapshots
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*export).queueSnapshots
+        kind: self
+      - id: e.snapshots.ExportContext
+        kind: value
+      - id: e.product.Collect
+        kind: value
+      - id: errors
+        kind: stdlib
+    steps:
+      - bind: err
+        eval: e.snapshots.ExportContext(ctx, e.meter.Collect())
+        to: e.snapshots.ExportContext
+      - opt:
+          do:
+            - return: err
+          when: e.product == nil
+      - bind: snap
+        eval: e.product.Collect()
+        to: e.product.Collect
+      - opt:
+          do:
+            - return: err
+          when: len(snap.Sums)+len(snap.Gauges)+len(snap.Histograms) == 0
+      - return: errors.Join(err, e.snapshots.ExportContext(ctx, snap))
         to: errors
   - of: (*export).bounded
     participants:
@@ -411,6 +443,9 @@ sequences:
       - set: e.meter
         to: metrics
         value: "metrics.NewMeterWithConfig(metrics.MeterConfig{Resource: resource, Scope: scope})"
+      - set: e.product
+        to: metrics
+        value: "metrics.NewMeterWithConfig(metrics.MeterConfig{Resource: resource, Scope: metrics.Scope{Name: cfg.Service}})"
       - eval: e.observeStats()
         to: e.observeStats
       - return: e, nil

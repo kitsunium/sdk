@@ -146,6 +146,7 @@
   "operation.validate": "{node}: the validate tags of {type} are not valid: {detail}",
   "otlp.endpoint": "it must be empty — the export is off — or an absolute http or https URL with a host, and no credentials, query nor fragment: the collector's base URL, each signal's path appended",
   "otlp.memory": "the OTLP export keeps its {signal} in memory: the SDK's durable queue refuses this platform, so a batch waiting at a stop is lost",
+  "otlp.sample-ratio": "it must be a number from 0, no trace kept, to 1, every trace kept",
   "otlp.setting-taken": "the OTLP export's setting {setting} is a setting a service of the product declares already: rename the product's",
   "otlp.when-full": "it must be drop-oldest, drop-newest or block",
   "passwords.history-short": "field {field}: app:\"history={history}\" keeps fewer former values than NotReused({n}) refuses: raise it to {n}, or leave history out — NotReused keeps what it reads",

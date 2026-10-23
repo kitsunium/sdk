@@ -10,6 +10,7 @@ import (
 
 	"github.com/kitsunium/sdk/framework/internal/app/otlpengine"
 	"github.com/kitsunium/sdk/framework/internal/app/plug"
+	"github.com/kitsunium/sdk/pkg/v1/observe/metrics"
 )
 
 // The OTLP/HTTP paths of the two signals.
@@ -177,6 +178,60 @@ func TestTheStopFlushesTheSpansAndTheMetrics(t *testing.T) {
 		if !holds(metrics, name) {
 			t.Errorf("the metrics sent hold no %s", name)
 		}
+	}
+}
+
+// The product's own meter is collected beside the framework's, in a batch
+// of its own under a scope named after the product, apart from the
+// framework's instruments — here by the stop's last collection, the
+// collector down until the next process sends what it left: two batches of
+// metrics when the product's meter holds a counter, one when it holds none.
+func TestTheProductsMeterIsCollectedApart(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		counted bool
+		pending int
+	}{{"a counter", true, 2}, {"no instrument", false, 1}} {
+		t.Run(tc.name, func(t *testing.T) {
+			clk := newTestClock()
+			col := newCollector(t, clk, answer{status: http.StatusServiceUnavailable})
+			dir := t.TempDir()
+			fx := openExport(t, config(clk, col.URL, dir))
+			meter, ok := fx.ex.Meter().Meter.(metrics.FullMeter)
+			if !ok {
+				t.Fatalf("Meter holds a %T, not a metrics.FullMeter", fx.ex.Meter().Meter)
+			}
+			if tc.counted {
+				meter.Counter("orders.placed").Add(4)
+			}
+			fx.close(t)
+			if diskRefused() {
+				t.Skip("the SDK's durable queue refuses this platform by design: a stop's flush lands in memory")
+			}
+			col.script(answer{status: http.StatusOK})
+			pending := -1
+			next := openExport(t, config(clk, col.URL, dir), func(ex plug.OTLPExporter) {
+				for _, st := range ex.Stats() {
+					if st.Signal == plug.OTLPMetrics {
+						pending = st.Pending
+					}
+				}
+			})
+			if pending != tc.pending {
+				t.Fatalf("the stop left %d batches of metrics, want %d", pending, tc.pending)
+			}
+			clk.drive(t, "the batches of metrics sent", func() bool { return next.stats(plug.OTLPMetrics).Sent >= uint64(tc.pending) })
+			for _, p := range col.postsTo(metricsPath) {
+				product := strings.Contains(p.body, `"orders.placed"`)
+				framework := strings.Contains(p.body, `"app.otlp.pending"`)
+				if product == framework {
+					t.Errorf("a batch holds the product's instruments %v and the framework's %v: %s", product, framework, p.body)
+				}
+				if product && (!strings.Contains(p.body, `"scope":{"name":"shop"}`) || !strings.Contains(p.body, `"asInt":"4"`) || !strings.Contains(p.body, `"service.name"`)) {
+					t.Errorf("the product's batch: %s", p.body)
+				}
+			}
+		})
 	}
 }
 

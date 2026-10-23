@@ -119,10 +119,12 @@ The package imports the standard library and the framework's model only, so that
 - [type OTLPConfig](<#OTLPConfig>)
 - [type OTLPDriverConfig](<#OTLPDriverConfig>)
 - [type OTLPExporter](<#OTLPExporter>)
+  - [func \(OTLPExporter\) Meter\(\) OTLPMeterValue](<#OTLPExporter.Meter>)
   - [func \(OTLPExporter\) Record\(node string, op string, took time.Duration, failed bool\)](<#OTLPExporter.Record>)
   - [func \(OTLPExporter\) Run\(ctx context.Context\) error](<#OTLPExporter.Run>)
   - [func \(OTLPExporter\) SpanSink\(\) OTLPSinkValue](<#OTLPExporter.SpanSink>)
   - [func \(OTLPExporter\) Stats\(\) \[\]OTLPStatsValue](<#OTLPExporter.Stats>)
+- [type OTLPMeterValue](<#OTLPMeterValue>)
 - [type OTLPSinkValue](<#OTLPSinkValue>)
 - [type OTLPStatsValue](<#OTLPStatsValue>)
 - [type QueueConfig](<#QueueConfig>)
@@ -2310,6 +2312,10 @@ OTLPExporter is an app's export, open: where the tracer hands its spans, what th
 
 ```go
 type OTLPExporter interface {
+	// Meter is the product's own meter, collected at each interval beside
+	// the framework's, into the same metrics queue, under the same resource
+	// and a scope named after the product.
+	Meter() OTLPMeterValue
 	// Record counts one unit of work the framework observed on node: its
 	// operation, how long it took, and whether it failed.
 	Record(node string, op string, took time.Duration, failed bool)
@@ -2323,6 +2329,15 @@ type OTLPExporter interface {
 	Stats() []OTLPStatsValue
 }
 ```
+
+<a name="OTLPExporter.Meter"></a>
+### func \(OTLPExporter\) [Meter](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/otlp_interface.go>)
+
+```go
+func (OTLPExporter) Meter() OTLPMeterValue
+```
+
+Meter is the product's own meter, collected at each interval beside the framework's, into the same metrics queue, under the same resource and a scope named after the product.
 
 <a name="OTLPExporter.Record"></a>
 ### func \(OTLPExporter\) [Record](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/otlp_interface.go>)
@@ -2359,6 +2374,18 @@ func (OTLPExporter) Stats() []OTLPStatsValue
 ```
 
 Stats is what each signal's queue holds, has sent and has lost.
+
+<a name="OTLPMeterValue"></a>
+## type [OTLPMeterValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/otlp.go>)
+
+OTLPMeterValue is the product's own meter on the export: the SDK's metrics.FullMeter held as any, as OTLPSinkValue holds the span sink.
+
+```go
+type OTLPMeterValue struct {
+	// Meter is the SDK's metrics.FullMeter.
+	Meter any
+}
+```
 
 <a name="OTLPSinkValue"></a>
 ## type [OTLPSinkValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/otlp.go>)

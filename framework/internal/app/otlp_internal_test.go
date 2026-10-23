@@ -2,8 +2,10 @@ package app
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"io"
+	"math/rand/v2"
 	"slices"
 	"strings"
 	"testing"
@@ -11,6 +13,8 @@ import (
 
 	"github.com/kitsunium/sdk/framework/internal/app/plug"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
+	"github.com/kitsunium/sdk/pkg/v1/observe/metrics"
+	"github.com/kitsunium/sdk/pkg/v1/observe/trace"
 )
 
 // withoutOTLP runs the test as a program that does not import
@@ -148,6 +152,9 @@ type failingExport struct{}
 // SpanSink is no sink.
 func (failingExport) SpanSink() plug.OTLPSinkValue { return plug.OTLPSinkValue{} }
 
+// Meter is no meter.
+func (failingExport) Meter() plug.OTLPMeterValue { return plug.OTLPMeterValue{} }
+
 // Record records nothing.
 func (failingExport) Record(string, string, time.Duration, bool) {}
 
@@ -178,5 +185,82 @@ func TestAnOTLPExportWhoseLoopEndedDegradesTheReadiness(t *testing.T) {
 		if err := a.otlpReady(context.Background()); err == nil || !strings.Contains(err.Error(), "stopped sending until the next start") {
 			t.Errorf("the readiness of an export whose loop ended: %v", err)
 		}
+	}
+	// An export that hands no meter leaves the product's own meter one that
+	// keeps nothing.
+	if _, discards := Meter(withNode(context.Background(), "shop", a)).(discardMeter); !discards {
+		t.Error("an export with no meter hands the product a meter that keeps something")
+	}
+}
+
+// otlpRootSampler keeps every trace at 1 — no sampler, the SDK's own —,
+// none at 0, and between the share it names of the traces' identifiers,
+// deciding alike for the same identifier: a seeded draw of 4000 identifiers
+// keeps 50% ± 5 at 0.5 and 10% ± 3 at 0.1.
+func TestTheOTLPRootSamplerKeepsItsRatio(t *testing.T) {
+	if otlpRootSampler(1) != nil {
+		t.Error("a ratio of 1 samples")
+	}
+	ids := make([]trace.TraceID, 4000)
+	rng := rand.New(rand.NewPCG(538, 1))
+	for i := range ids {
+		binary.BigEndian.PutUint64(ids[i][:8], rng.Uint64())
+		binary.BigEndian.PutUint64(ids[i][8:], rng.Uint64())
+	}
+	for _, tc := range []struct {
+		ratio    float64
+		min, max int
+	}{{0, 0, 0}, {0.1, 280, 520}, {0.5, 1800, 2200}} {
+		s := otlpRootSampler(tc.ratio)
+		kept := 0
+		for _, id := range ids {
+			p := trace.SamplingParams{TraceID: id}
+			if s(p) {
+				kept++
+			}
+			if s(p) != s(p) {
+				t.Fatalf("ratio %v decides twice differently on %v", tc.ratio, id)
+			}
+		}
+		if kept < tc.min || kept > tc.max {
+			t.Errorf("ratio %v kept %d of %d, want %d to %d", tc.ratio, kept, len(ids), tc.min, tc.max)
+		}
+	}
+}
+
+// The tracer's sampler is the SDK's default for an app that declares no
+// export; for one that does, it keeps a root while no export runs and
+// decides as the running export's ratio says once one does.
+func TestTheTracersSamplerFollowsTheRunningExport(t *testing.T) {
+	if NewApp("plain").otlpSampler() != nil {
+		t.Error("an app that declares no export gives its tracer a sampler")
+	}
+	a := otlpProduct()
+	root := trace.SamplingParams{TraceID: trace.TraceID{1}}
+	if !a.otlpSampler()(root) {
+		t.Error("a root is not kept while no export runs")
+	}
+	a.otlpRun.Store(&otlpRunning{sample: otlpRootSampler(0)})
+	if a.otlpSampler()(root) {
+		t.Error("a root is kept by an export whose ratio is 0")
+	}
+}
+
+// Outside an app, the product's meter keeps nothing — every instrument it
+// makes is usable, and a collection is empty.
+func TestTheProductsMeterOutsideAnExportKeepsNothing(t *testing.T) {
+	m := Meter(context.Background())
+	m.Counter("orders").Inc()
+	m.Counter("orders").Add(2)
+	m.UpDownCounter("carts").Dec()
+	m.Gauge("stock").Set(3)
+	m.Gauge("stock").Add(1)
+	m.Histogram("latency", []float64{1}).Record(0.5)
+	m.Histogram("latency", []float64{1}).RecordDuration(time.Second)
+	m.ObservableCounter("seen", func(metrics.ObserveInt64) { t.Error("an observable counter was called") })
+	m.ObservableUpDownCounter("open", func(metrics.ObserveInt64) { t.Error("an observable up-down counter was called") })
+	m.ObservableGauge("level", func(metrics.ObserveFloat64) { t.Error("an observable gauge was called") })
+	if snap := m.Collect(); len(snap.Sums)+len(snap.Gauges)+len(snap.Histograms) != 0 {
+		t.Errorf("a collection outside an export: %+v", snap)
 	}
 }

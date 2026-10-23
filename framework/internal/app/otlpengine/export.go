@@ -53,9 +53,12 @@ type export struct {
 	batch     *trace.BatchSink
 	snapshots metrics.ContextExporter
 	meter     metrics.FullMeter
-	interval  time.Duration
-	settle    time.Duration
-	onError   func(err error)
+	// product is the product's own meter (plug.OTLPExporter.Meter),
+	// collected beside meter.
+	product  metrics.FullMeter
+	interval time.Duration
+	settle   time.Duration
+	onError  func(err error)
 	// instruments are the instruments of each node and operation, made at
 	// their first unit of work.
 	instruments sync.Map
@@ -79,6 +82,9 @@ type nodeInstruments struct {
 
 // SpanSink is the trace batch sink's, as the app's tracer takes it.
 func (e *export) SpanSink() plug.OTLPSinkValue { return plug.OTLPSinkValue{Sink: e.batch.Sink()} }
+
+// Meter is the product's own meter, as the core takes it back.
+func (e *export) Meter() plug.OTLPMeterValue { return plug.OTLPMeterValue{Meter: e.product} }
 
 // Record counts one unit of work on node: one run, one failure when it
 // failed, and how long it took.
@@ -160,7 +166,7 @@ func (e *export) collect(ctx context.Context) {
 			if !open {
 				return
 			}
-			if err := e.snapshots.ExportContext(ctx, e.meter.Collect()); err != nil {
+			if err := e.queueSnapshots(ctx); err != nil {
 				e.report(err)
 			}
 		}
@@ -183,7 +189,22 @@ func (e *export) flush() error {
 	err := e.batch.Shutdown(ctx)
 	ctx2, cancel2 := e.bounded()
 	defer cancel2()
-	return errors.Join(err, e.snapshots.ExportContext(ctx2, e.meter.Collect()))
+	return errors.Join(err, e.queueSnapshots(ctx2))
+}
+
+// queueSnapshots queues a snapshot of the framework's meter, then one of
+// the product's when it holds any instrument: one batch each, the product's
+// under its own scope.
+func (e *export) queueSnapshots(ctx context.Context) error {
+	err := e.snapshots.ExportContext(ctx, e.meter.Collect())
+	if e.product == nil {
+		return err
+	}
+	snap := e.product.Collect()
+	if len(snap.Sums)+len(snap.Gauges)+len(snap.Histograms) == 0 {
+		return err
+	}
+	return errors.Join(err, e.snapshots.ExportContext(ctx, snap))
 }
 
 // bounded is a context that ends once the settle passed on the app's clock.

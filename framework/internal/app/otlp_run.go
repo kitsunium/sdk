@@ -14,6 +14,7 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/app/health"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
+	"github.com/kitsunium/sdk/pkg/v1/observe/metrics"
 	"github.com/kitsunium/sdk/pkg/v1/observe/trace"
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
@@ -40,6 +41,12 @@ import (
 type otlpRunning struct {
 	ex   plug.OTLPExporter
 	sink trace.SpanSink
+	// sample decides whether a trace this process starts is kept, as the
+	// setting otlp-sample-ratio says; nil keeps every one.
+	sample trace.Sampler
+	// meter is the product's own meter (Meter), collected into the same
+	// metrics stream; nil when the export hands none.
+	meter metrics.FullMeter
 	// cancel ends the loop; done is closed once it returned, err — written
 	// under mu before done closes — what it returned.
 	cancel context.CancelFunc
@@ -76,6 +83,45 @@ func (a *App) otlpSink() trace.SpanSink {
 			r.sink(span)
 		}
 	}
+}
+
+// otlpSampler is the tracer's sampler when the app declares an export: a
+// parent's decision honoured, and a trace this process starts kept as the
+// running export's ratio says — every one while none runs, which records
+// nothing. nil for an app that declares none: the SDK's default, whose
+// spans no sink receives.
+func (a *App) otlpSampler() trace.Sampler {
+	if a.opts.otlp == nil {
+		return nil
+	}
+	return trace.ParentBased(a.otlpSampleRoot)
+}
+
+// otlpSampleRoot decides whether a trace this process starts is kept: the
+// running export's ratio, every one without it. Without an export it costs
+// one atomic load.
+func (a *App) otlpSampleRoot(p trace.SamplingParams) bool {
+	if r := a.otlpRun.Load(); r != nil && r.sample != nil {
+		return r.sample(p)
+	}
+	return true
+}
+
+// otlpRootSampler is the sampler of the traces this process starts for
+// ratio, which the setting's check holds in [0, 1]: nil — every one — at 1,
+// none at 0, the SDK's ratio on the trace's identifier between.
+func otlpRootSampler(ratio float64) trace.Sampler {
+	switch {
+	case ratio >= 1:
+		return nil
+	case ratio <= 0:
+		return trace.NeverSample
+	}
+	s, err := trace.Ratio(ratio)
+	if err != nil {
+		return nil
+	}
+	return s
 }
 
 // otlpRecord counts a unit of work that ended for the export's metrics.
@@ -122,7 +168,11 @@ func (a *App) startOTLP(ctx context.Context) error {
 	}
 	sink, _ := ex.SpanSink().Sink.(trace.SpanSink)
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	r := &otlpRunning{ex: ex, sink: sink, cancel: cancel, done: make(chan struct{}), lost: map[string]uint64{}}
+	meter, _ := ex.Meter().Meter.(metrics.FullMeter)
+	r := &otlpRunning{
+		ex: ex, sink: sink, sample: otlpRootSampler(resolvedSetting(a, a.opts.otlp.sampleRatio)), meter: meter,
+		cancel: cancel, done: make(chan struct{}), lost: map[string]uint64{},
+	}
 	for _, st := range ex.Stats() {
 		if cfg.Dir != "" && !st.Durable {
 			a.problem("", say("otlp.memory", "signal", st.Signal))

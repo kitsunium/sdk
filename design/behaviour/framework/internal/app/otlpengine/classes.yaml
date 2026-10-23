@@ -92,12 +92,14 @@ files:
       - signal
       - nodeInstruments
       - (*export).SpanSink
+      - (*export).Meter
       - (*export).Record
       - (*export).Stats
       - (*export).Run
       - (*export).collect
       - (*export).report
       - (*export).flush
+      - (*export).queueSnapshots
       - (*export).bounded
       - (*export).close
       - (*export).observeStats
@@ -236,6 +238,11 @@ types:
         type: metrics.ContextExporter
       - name: meter
         type: metrics.FullMeter
+      - doc: |-
+          product is the product's own meter (plug.OTLPExporter.Meter),
+          collected beside meter.
+        name: product
+        type: metrics.FullMeter
       - name: interval
         type: time.Duration
       - name: settle
@@ -253,6 +260,10 @@ types:
         name: SpanSink
         recv: e *export
         results: plug.OTLPSinkValue
+      - doc: Meter is the product's own meter, as the core takes it back.
+        name: Meter
+        recv: e *export
+        results: plug.OTLPMeterValue
       - doc: |-
           Record counts one unit of work on node: one run, one failure when it
           failed, and how long it took.
@@ -291,6 +302,14 @@ types:
           batch sink holds, then one last snapshot, each within the settle on the
           app's clock.
         name: flush
+        recv: e *export
+        results: error
+      - doc: |-
+          queueSnapshots queues a snapshot of the framework's meter, then one of
+          the product's when it holds any instrument: one batch each, the product's
+          under its own scope.
+        name: queueSnapshots
+        params: ctx context.Context
         recv: e *export
         results: error
       - doc: |-

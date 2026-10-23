@@ -80,6 +80,9 @@ func open(ctx context.Context, cfg *plug.OTLPConfig) (plug.OTLPExporter, error) 
 		return nil, errors.Join(err, e.close())
 	}
 	e.meter = metrics.NewMeterWithConfig(metrics.MeterConfig{Resource: resource, Scope: scope})
+	// The product's own instruments: the same resource, a scope of the
+	// product's, so that none of its names meets one of the framework's.
+	e.product = metrics.NewMeterWithConfig(metrics.MeterConfig{Resource: resource, Scope: metrics.Scope{Name: cfg.Service}})
 	e.observeStats()
 	return e, nil
 }

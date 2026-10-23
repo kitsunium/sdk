@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"github.com/kitsunium/sdk/framework/internal/app"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/clock"
+	"github.com/kitsunium/sdk/pkg/v1/observe/metrics"
 )
 
 // otlpKnobs are the settings app.OTLP declares for the app, with the value
@@ -31,12 +33,30 @@ var otlpKnobs = []policyKnob{
 	{"otlp-interval", "SHOP_OTLP_INTERVAL", "duration", "1m0s", "2m0s"},
 	{"otlp-drain", "SHOP_OTLP_DRAIN", "duration", "5s", "0s"},
 	{"otlp-settle", "SHOP_OTLP_SETTLE", "duration", "5s", "6s"},
+	{"otlp-sample-ratio", "SHOP_OTLP_SAMPLE_RATIO", "number", "0.5", "0.25"},
 }
 
 // otlpOptions are the code's values otlpKnobs say, the endpoint left to the
 // setting — the export is then off, and the settings alone are judged.
 func otlpOptions() app.AppConfigurer {
-	return app.OTLP(app.OTLPBounds(50, 1<<20), app.OTLPWhenFull(app.OTLPBlock), app.OTLPMaxAge(2*time.Hour), app.OTLPSendTimeout(3*time.Second))
+	return app.OTLP(app.OTLPBounds(50, 1<<20), app.OTLPWhenFull(app.OTLPBlock), app.OTLPMaxAge(2*time.Hour), app.OTLPSendTimeout(3*time.Second),
+		app.OTLPSampleRatio(0.5))
+}
+
+// The export's own defaults, when the code gives no value: every trace kept
+// (otlp-sample-ratio 1).
+func TestTheOTLPSettingsHaveTheirDefaults(t *testing.T) {
+	a, err := startPolicies(t, []*app.Service{pingService()}, app.OTLP())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for variable, want := range map[string]string{
+		"SHOP_OTLP_SAMPLE_RATIO": "1", "SHOP_OTLP_MAX_BATCHES": "10000", "SHOP_OTLP_WHEN_FULL": "drop-oldest",
+	} {
+		if s := settingOf(t, a, variable); s.From != model.SettingDefault || s.Value != want {
+			t.Errorf("%s: %+v, want %q by default", variable, s, want)
+		}
+	}
 }
 
 // pingService is a service with one endpoint, whose run is a span the
@@ -80,7 +100,7 @@ func TestTheOTLPSettingsAreOverriddenByTheConfiguration(t *testing.T) {
 			file.WriteString(",")
 		}
 		value := k.other
-		if k.kind != "int" {
+		if k.kind != "int" && k.kind != "number" {
 			value = `"` + value + `"`
 		}
 		file.WriteString(`"` + k.key + `":` + value)
@@ -117,6 +137,8 @@ func TestAKeyTheOTLPExportDoesNotDeclareIsRefused(t *testing.T) {
 	}{
 		{"otlp-endpoints", []app.AppConfigurer{otlpOptions()}},
 		{"otlp-max-batch", []app.AppConfigurer{otlpOptions()}},
+		{"otlp-sample-rate", []app.AppConfigurer{otlpOptions()}},
+		{"otlp-sample-ratio", nil},
 		{"otlp-endpoint", nil},
 	} {
 		t.Run(tc.key, func(t *testing.T) {
@@ -145,6 +167,8 @@ func TestAnOTLPValueItCannotRunWithStopsTheStart(t *testing.T) {
 		{"otlp-interval", `"0s"`},
 		{"otlp-drain", `"-1s"`},
 		{"otlp-settle", `"0s"`},
+		{"otlp-sample-ratio", "-0.1"},
+		{"otlp-sample-ratio", "1.5"},
 	} {
 		t.Run(tc.key+"="+tc.value, func(t *testing.T) {
 			_, err := startPolicies(t, []*app.Service{pingService()}, otlpOptions(),
@@ -156,6 +180,19 @@ func TestAnOTLPValueItCannotRunWithStopsTheStart(t *testing.T) {
 	}
 	if _, err := startPolicies(t, []*app.Service{pingService()}, app.OTLP(app.OTLPWhenFull("spill"))); err == nil || !strings.Contains(err.Error(), `setting "otlp-when-full"`) {
 		t.Errorf("an unknown policy in the code: %v", err)
+	}
+	for _, ratio := range []float64{-1, 2, math.NaN()} {
+		if _, err := startPolicies(t, []*app.Service{pingService()}, app.OTLP(app.OTLPSampleRatio(ratio))); err == nil || !strings.Contains(err.Error(), `setting "otlp-sample-ratio"`) {
+			t.Errorf("a ratio of %v in the code: %v", ratio, err)
+		}
+	}
+	if _, err := startPolicies(t, []*app.Service{pingService()}, otlpOptions(),
+		app.ConfigFiles(fstest.MapFS{"config/config.json": {Data: []byte(`{"otlp-sample-ratio": "half"}`)}})); err == nil || !strings.Contains(err.Error(), "otlp-sample-ratio is not a number") {
+		t.Errorf("a ratio that is not a number: %v", err)
+	}
+	t.Setenv("SHOP_OTLP_SAMPLE_RATIO", "1.01")
+	if _, err := startPolicies(t, []*app.Service{pingService()}, otlpOptions()); err == nil || !strings.Contains(err.Error(), `setting "otlp-sample-ratio"`) {
+		t.Errorf("a ratio of 1.01 in the environment: %v", err)
 	}
 }
 
@@ -376,4 +413,134 @@ func componentNamed(a *app.App, name string) *model.Component {
 		}
 	}
 	return nil
+}
+
+// sent is the product's own sender of a case: it keeps every batch it is
+// handed, by signal, and accepts it.
+type sent struct {
+	mu      sync.Mutex
+	batches map[string][]string
+}
+
+// newSent is a sender that has kept nothing yet.
+func newSent() *sent { return &sent{batches: map[string][]string{}} }
+
+// send keeps the batch.
+func (s *sent) send(_ context.Context, b app.OTLPBatchValue) error {
+	s.mu.Lock()
+	s.batches[b.Signal] = append(s.batches[b.Signal], string(b.Document))
+	s.mu.Unlock()
+	return nil
+}
+
+// count is how many batches of signal were kept, and of them how many hold
+// every one of words.
+func (s *sent) count(signal string, words ...string) (all, holding int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, body := range s.batches[signal] {
+		all++
+		if containsAll(body, words) {
+			holding++
+		}
+	}
+	return all, holding
+}
+
+// containsAll reports whether body holds every one of words.
+func containsAll(body string, words []string) bool {
+	for _, w := range words {
+		if !strings.Contains(body, w) {
+			return false
+		}
+	}
+	return true
+}
+
+// startSampled starts the ping service with an export to send, the
+// metrics collected every seven seconds of its clock.
+func startSampled(t *testing.T, clk *drivenClock, send *sent, opts ...app.AppConfigurer) *app.App {
+	t.Helper()
+	a, err := startPolicies(t, []*app.Service{pingService()}, append([]app.AppConfigurer{
+		app.Clock(clk), app.OTLP(app.OTLPSender(send.send), app.OTLPSendTimeout(10*time.Hour)),
+		app.Set("otlp-drain", time.Duration(0)), app.Set("otlp-interval", 7*time.Second),
+	}, opts...)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a
+}
+
+// otlp-sample-ratio decides which of the traces the app starts the export
+// keeps: at 1, the default, every one reaches the sender; at 0 none does —
+// while the framework's metrics still count every request, kept or not. The
+// case at 1 is the control of the case at 0: the same requests, the same
+// two collections waited for.
+func TestTheSampleRatioDecidesWhichTracesAreKept(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		ratio  string
+		traces bool
+	}{{"every trace at 1", "1", true}, {"none at 0", "0", false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("SHOP_OTLP_SAMPLE_RATIO", tc.ratio)
+			clk, send := newDrivenClock(), newSent()
+			a := startSampled(t, clk, send)
+			for range 8 {
+				expectAnswer(t, call(t, a, "GET /orders/ping", noBody), http.StatusNoContent, "")
+			}
+			clk.drive(t, "two collections counting the eight requests", func() bool {
+				_, counted := send.count("metrics", "app.node.runs", "orders/endpoint/ping", `"asInt":"8"`)
+				traces, _ := send.count("traces")
+				return counted >= 2 && (!tc.traces || traces > 0)
+			})
+			if traces, _ := send.count("traces"); (traces > 0) != tc.traces {
+				t.Errorf("at a ratio of %s, %d batches of traces were sent", tc.ratio, traces)
+			}
+		})
+	}
+}
+
+// A trace another process started and kept is kept here too, whatever the
+// ratio: at 0, a request whose traceparent says sampled reaches the sender
+// under that trace's identifier.
+func TestAParentsSampledTraceIsKeptAtAnyRatio(t *testing.T) {
+	clk, send := newDrivenClock(), newSent()
+	a := startSampled(t, clk, send, app.Set("otlp-sample-ratio", 0.0))
+	const traceID = "0af7651916cd43dd8448eb211c80319c"
+	expectAnswer(t, call(t, a, "GET /orders/ping", noBody, "traceparent", "00-"+traceID+"-b7ad6b7169203331-01"),
+		http.StatusNoContent, "")
+	clk.drive(t, "the parent's trace sent", func() bool {
+		_, holding := send.count("traces", traceID)
+		return holding > 0
+	})
+}
+
+// The product's own meter lands in the export's metrics stream: a counter a
+// handler increments reaches the sender in a batch of its own, under the
+// app's resource and a scope named after the app, apart from the
+// framework's instruments.
+func TestTheProductsMeterReachesTheExport(t *testing.T) {
+	clk, send := newDrivenClock(), newSent()
+	s := app.NewService("orders", "Answers a ping.")
+	s.Endpoint("GET /orders/ping", func(ctx context.Context, _ app.EmptyValue) (app.EmptyValue, error) {
+		app.Meter(ctx).Counter("orders.pinged", metrics.String("channel", "web")).Inc()
+		return app.EmptyValue{}, nil
+	}, app.Name("ping"))
+	a, err := startPolicies(t, []*app.Service{s}, app.Clock(clk),
+		app.OTLP(app.OTLPSender(send.send), app.OTLPSendTimeout(10*time.Hour)),
+		app.Set("otlp-drain", time.Duration(0)), app.Set("otlp-interval", 7*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		expectAnswer(t, call(t, a, "GET /orders/ping", noBody), http.StatusNoContent, "")
+	}
+	clk.drive(t, "the product's counter sent", func() bool {
+		_, holding := send.count("metrics", "orders.pinged", `"asInt":"3"`, `"channel"`, `"service.name"`, `"scope":{"name":"shop"}`)
+		return holding > 0
+	})
+	if _, mixed := send.count("metrics", "orders.pinged", "app.node.runs"); mixed > 0 {
+		t.Error("the product's instruments and the framework's share a batch, and so a scope")
+	}
 }

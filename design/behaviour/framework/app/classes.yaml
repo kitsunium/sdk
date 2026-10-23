@@ -788,8 +788,12 @@ files:
       - OTLPWhenFull
       - OTLPMaxAge
       - OTLPSendTimeout
+      - OTLPSampleRatio
       - OTLPSender
     name: otlp.go
+  - decls:
+      - Meter
+    name: otlp_meter.go
   - decls:
       - PasswordPolicy
       - PasswordOption
@@ -1187,9 +1191,15 @@ functions:
   - name: OTLPSendTimeout
     params: d time.Duration
     results: OTLPOption
+  - name: OTLPSampleRatio
+    params: ratio float64
+    results: OTLPOption
   - name: OTLPSender
     params: send func(ctx context.Context, batch OTLPBatch) error
     results: OTLPOption
+  - name: Meter
+    params: ctx context.Context
+    results: metrics.FullMeter
   - name: MinLength
     params: n int
     results: PasswordOption
@@ -1398,6 +1408,7 @@ imports:
   iapp: github.com/kitsunium/sdk/framework/internal/app
   io: io
   logger: github.com/kitsunium/sdk/pkg/v1/observe/logger
+  metrics: github.com/kitsunium/sdk/pkg/v1/observe/metrics
   model: github.com/kitsunium/sdk/framework/model
   secret: github.com/kitsunium/sdk/pkg/v1/security/secret
   time: time
@@ -1870,7 +1881,8 @@ types:
   - alias: true
     doc: |-
       OTLPOption configures the app's export: [OTLPEndpoint], [OTLPBounds],
-      [OTLPWhenFull], [OTLPMaxAge], [OTLPSendTimeout], [OTLPSender].
+      [OTLPWhenFull], [OTLPMaxAge], [OTLPSendTimeout], [OTLPSampleRatio],
+      [OTLPSender].
     kind: alias
     name: OTLPOption
     underlying: iapp.OpenTelemetryConfigurer
