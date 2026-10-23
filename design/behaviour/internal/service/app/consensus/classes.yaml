@@ -595,6 +595,13 @@ constants:
         type: int
         value: 64 << 10
       - doc: |-
+          boundedWriteBytes is the most one deadline of a boundedWriter covers:
+          a source that writes itself out in one call (io.WriterTo) is still
+          cut into writes that each move or fail (#594).
+        name: boundedWriteBytes
+        type: int
+        value: 32 << 10
+      - doc: |-
           acceptBackoffFirst is the wait after the first of consecutive failed
           Accepts; each next one doubles it (#518).
         name: acceptBackoffFirst
@@ -1409,6 +1416,9 @@ files:
       - (*TCPTransport).Stream
       - streamFrom
       - closeWriter
+      - boundedWriter
+      - boundedWriter.Write
+      - boundedWriter.CloseWrite
       - installResult
       - (*TCPTransport).serveSnapshot
       - encodeJoin
@@ -7321,6 +7331,32 @@ types:
       	io.Writer
       	CloseWrite() error
       }
+  - doc: |-
+      boundedWriter gives every write to conn, and the half-close of half, its
+      own deadline d from the moment it starts: a receiver that stops reading
+      fails the stream within d, and a slow one that keeps reading does not
+      (#594). half is conn's half-closing face.
+    fields:
+      - name: conn
+        type: net.Conn
+      - name: half
+        type: closeWriter
+      - name: d
+        type: time.Duration
+    kind: struct
+    methods:
+      - doc: |-
+          Write writes p in pieces of at most boundedWriteBytes, each under a
+          deadline d from its start.
+        name: Write
+        params: p []byte
+        recv: w boundedWriter
+        results: int, error
+      - doc: CloseWrite half-closes the stream under a deadline d from now.
+        name: CloseWrite
+        recv: w boundedWriter
+        results: error
+    name: boundedWriter
 vars:
   - doc: |-
       The engine reaches every interface below by TYPE ASSERTION, on the ports it

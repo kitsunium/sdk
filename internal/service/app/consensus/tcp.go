@@ -76,6 +76,10 @@ const (
 	redialBackoff time.Duration = 100 * time.Millisecond
 	// connBufferBytes sizes the buffered reader and writer of a connection.
 	connBufferBytes int = 64 << 10
+	// boundedWriteBytes is the most one deadline of a boundedWriter covers:
+	// a source that writes itself out in one call (io.WriterTo) is still
+	// cut into writes that each move or fail (#594).
+	boundedWriteBytes int = 32 << 10
 	// acceptBackoffFirst is the wait after the first of consecutive failed
 	// Accepts; each next one doubles it (#518).
 	acceptBackoffFirst time.Duration = 5 * time.Millisecond
@@ -1160,7 +1164,19 @@ func (t *TCPTransport) Stream(ctx context.Context, to coreconsensus.NodeID, offe
 	defer func() { abandon(c.Close()) }()
 	stop := context.AfterFunc(ctx, func() { abandon(c.Close()) })
 	defer stop()
-	if err := writeChunk(c, encodeOffer(offer)); err != nil {
+	// The dial clears every deadline, and only a change of leader or the
+	// node's stop cancelled ctx: a receiver that vanished mid-stream held
+	// the write on a full window until the kernel gave up, about 15 min on
+	// Linux, and its verdict's read until keepalive did, while the peer
+	// could get no other snapshot and the transfer pinned compaction
+	// (#594). Bytes left unacknowledged, and every write, are bounded as on
+	// the message lanes; the receiver resumes a broken stream from its
+	// spool.
+	if err := boundUnacknowledged(c.NetConn(), t.cfg.WriteTimeout); err != nil {
+		return err
+	}
+	w := boundedWriter{conn: c, half: c, d: t.cfg.WriteTimeout}
+	if err := writeChunk(w, encodeOffer(offer)); err != nil {
 		return err
 	}
 	acc, err := readChunk(c, 64)
@@ -1175,7 +1191,7 @@ func (t *TCPTransport) Stream(ctx context.Context, to coreconsensus.NodeID, offe
 	if code != 0 {
 		return origin(sentinelOf(code))
 	}
-	if err := streamFrom(c, open, off); err != nil {
+	if err := streamFrom(w, open, off); err != nil {
 		return err
 	}
 	return installResult(c)
@@ -1204,6 +1220,41 @@ func streamFrom(c closeWriter, open func(int64) (io.ReadCloser, error), off int6
 type closeWriter interface {
 	io.Writer
 	CloseWrite() error
+}
+
+// boundedWriter gives every write to conn, and the half-close of half, its
+// own deadline d from the moment it starts: a receiver that stops reading
+// fails the stream within d, and a slow one that keeps reading does not
+// (#594). half is conn's half-closing face.
+type boundedWriter struct {
+	conn net.Conn
+	half closeWriter
+	d    time.Duration
+}
+
+// Write writes p in pieces of at most boundedWriteBytes, each under a
+// deadline d from its start.
+func (w boundedWriter) Write(p []byte) (int, error) {
+	n := 0
+	for n < len(p) {
+		if err := w.conn.SetWriteDeadline(time.Now().Add(w.d)); err != nil {
+			return n, err
+		}
+		k, err := w.conn.Write(p[n:min(len(p), n+boundedWriteBytes)])
+		n += k
+		if err != nil {
+			return n, err
+		}
+	}
+	return n, nil
+}
+
+// CloseWrite half-closes the stream under a deadline d from now.
+func (w boundedWriter) CloseWrite() error {
+	if err := w.conn.SetWriteDeadline(time.Now().Add(w.d)); err != nil {
+		return err
+	}
+	return w.half.CloseWrite()
 }
 
 // installResult reads the receiver's verdict on the install, the last

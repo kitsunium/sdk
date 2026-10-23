@@ -19257,6 +19257,8 @@ sequences:
         kind: internal
       - id: context
         kind: stdlib
+      - id: boundUnacknowledged
+        kind: internal
       - id: writeChunk
         kind: internal
       - id: readChunk
@@ -19295,7 +19297,17 @@ sequences:
             - return: err
           init:
             bind: err
-            eval: writeChunk(c, encodeOffer(offer))
+            eval: boundUnacknowledged(c.NetConn(), t.cfg.WriteTimeout)
+            to: boundUnacknowledged
+          when: err != nil
+      - bind: w
+        eval: "boundedWriter{conn: c, half: c, d: t.cfg.WriteTimeout}"
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: writeChunk(w, encodeOffer(offer))
             to: writeChunk
           when: err != nil
       - bind: acc, err
@@ -19325,7 +19337,7 @@ sequences:
             - return: err
           init:
             bind: err
-            eval: streamFrom(c, open, off)
+            eval: streamFrom(w, open, off)
             to: streamFrom
           when: err != nil
       - return: installResult(c)
@@ -19367,6 +19379,62 @@ sequences:
           when: err != nil
       - return: c.CloseWrite()
         to: c.CloseWrite
+  - of: boundedWriter.Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: boundedWriter.Write
+        kind: self
+      - id: w.conn.SetWriteDeadline
+        kind: value
+      - id: w.conn.Write
+        kind: value
+    steps:
+      - bind: "n"
+        eval: "0"
+      - loop:
+          cond: n < len(p)
+          do:
+            - opt:
+                do:
+                  - return: n, err
+                init:
+                  bind: err
+                  eval: w.conn.SetWriteDeadline(time.Now().Add(w.d))
+                  to: w.conn.SetWriteDeadline
+                when: err != nil
+            - bind: k, err
+              eval: w.conn.Write(p[n:min(len(p), n+boundedWriteBytes)])
+              to: w.conn.Write
+            - op: +=
+              set: "n"
+              value: k
+            - opt:
+                do:
+                  - return: n, err
+                when: err != nil
+      - return: n, nil
+  - of: boundedWriter.CloseWrite
+    participants:
+      - id: caller
+        kind: actor
+      - id: boundedWriter.CloseWrite
+        kind: self
+      - id: w.conn.SetWriteDeadline
+        kind: value
+      - id: w.half.CloseWrite
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: w.conn.SetWriteDeadline(time.Now().Add(w.d))
+            to: w.conn.SetWriteDeadline
+          when: err != nil
+      - return: w.half.CloseWrite()
+        to: w.half.CloseWrite
   - of: installResult
     participants:
       - id: caller

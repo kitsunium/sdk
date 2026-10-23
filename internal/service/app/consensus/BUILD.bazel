@@ -140,6 +140,7 @@ go_test(
         "tcp_joiner_internal_test.go",
         "tcp_link_internal_test.go",
         "tcp_senderrelease_internal_test.go",
+        "tcp_streamstall_internal_test.go",
         "transferpin_internal_test.go",
         "unacked_linux_test.go",
         "waitapplied_internal_test.go",
