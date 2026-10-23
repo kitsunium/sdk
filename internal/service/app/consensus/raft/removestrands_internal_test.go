@@ -102,3 +102,38 @@ func TestVouchedNeedsAStayingVoterOrTheLeader(t *testing.T) {
 		t.Error("a voter listing the leader, even as a learner, was taken as stranded")
 	}
 }
+
+// A learner vouches for no voter, and was never a voter: a member is
+// promoted, never demoted. Its removal leaves every voter knowing exactly
+// whom it knew, so it is admitted even while a founder listed before the
+// leader is silent over a compacted log, and stranded already. Every
+// removal of an answering member used to be refused until that founder
+// came back or was removed itself (#614). Removing an answering voter
+// stays refused there (#603).
+func TestAnAnsweringLearnerIsRemovedWhileAVoterIsAlreadyStranded(t *testing.T) {
+	setup := func() *Raft {
+		conf := testConf(2, 3, 1, 4, 5, 6)
+		conf.Members[5].Voter = false
+		r := nodeOf(1, 6, conf, Protocol2, 0)
+		r.term, r.vote = 6, 1
+		r.becomeLeader()
+		r.StorageDone(r.Ready().Seq, r.log.lastIndex(), 6)
+		for _, id := range []core.NodeID{3, 4, 5, 6} {
+			ack := msg(core.MsgAppResp, id, 1, 6)
+			ack.Index = r.log.lastIndex()
+			r.Step(r.now, ack)
+		}
+		r.Ready()
+		return r
+	}
+	r := setup()
+	if r.log.snapIndex == 0 || !r.strands(r.conf()) {
+		t.Fatalf("setup: snapIndex %d, voter 2 stranded already %v", r.log.snapIndex, r.strands(r.conf()))
+	}
+	if err := proposeRemove(r, 6); err != nil {
+		t.Fatalf("removing an answering learner, which vouches for no voter, was %v", err)
+	}
+	if err := proposeRemove(setup(), 3); err == nil {
+		t.Fatal("an answering voter was removed while voter 2, whose configuration is unknown, may know no one else")
+	}
+}
