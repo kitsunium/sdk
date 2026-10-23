@@ -31,15 +31,19 @@ const (
 	spaceOperator coreconsensus.Operator = "engine:no-space"
 )
 
-// spaceGuard is the guard's state. checkedAt, nextRaise and fsShort belong
-// to the event loop; raising is set while a proposal of the alarm is in
-// flight, and short while the last check found the disk short.
+// spaceGuard is the guard's state. checkedAt, nextRaise, fsShort and
+// learnerShort belong to the event loop; raising is set while a proposal of
+// the alarm is in flight, and short while the last check found the disk
+// short.
 type spaceGuard struct {
 	checkedAt time.Time
 	nextRaise time.Time
 	fsShort   bool
-	raising   atomic.Bool
-	short     atomic.Bool
+	// learnerShort is set once a learner's short disk was logged, until the
+	// disk is no longer short or the node votes.
+	learnerShort bool
+	raising      atomic.Bool
+	short        atomic.Bool
 }
 
 // spaceReporter is what a log store tells the guard: the bytes its segments
@@ -54,14 +58,35 @@ type spaceReporter interface {
 // the loop, at each tick and each completed write; the proposal runs on a
 // goroutine counted in n.wg, which ends once it is answered, or once the
 // node stops. A follower's is forwarded to the leader, as any proposal
-// (R3-24).
+// (R3-24). A learner raises nothing: it refuses its own proposals
+// (refuseShort) and says so. The cluster needs no learner to commit, and a
+// learner whose state outgrew the MaxSnapshotBytes it announced cannot cut
+// any more while the leader keeps feeding it the log: its log reached its
+// quota, its alarm committed, and every write of the cluster was refused
+// NO_SPACE until it was removed (#600).
 func (n *Node) guardSpace(now time.Time) {
 	g := &n.space
 	why, short := n.spaceShort(now)
 	g.short.Store(short)
-	if !short || g.raising.Load() || now.Before(g.nextRaise) || n.r.Status().NoSpace != 0 {
+	if !short {
+		g.learnerShort = false
 		return
 	}
+	if g.raising.Load() || now.Before(g.nextRaise) {
+		return
+	}
+	st := n.r.Status()
+	if st.NoSpace != 0 {
+		return
+	}
+	if m, ok := st.Conf.Member(n.stamp.ID); ok && !m.Voter {
+		if !g.learnerShort {
+			g.learnerShort = true
+			n.obs.warn("consensus: this learner's disk is short; it refuses its own proposals and raises no alarm for the cluster", lstr("why", why))
+		}
+		return
+	}
+	g.learnerShort = false
 	g.nextRaise = now.Add(spaceRaiseEvery)
 	g.raising.Store(true)
 	n.wg.Add(1)

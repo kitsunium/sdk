@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -191,10 +190,14 @@ func TestATriggerCoalescedDuringASaveIsAsked(t *testing.T) {
 			t.Fatal("setup: the node's cuts never settled")
 		}
 	}
-	req := &saveReq{w: io.Discard, op: "op:test", done: make(chan saveRes, 1)}
+	req := &saveReq{op: "op:test", done: make(chan saveRes, 1)}
 	n.aq.push(applyItem{save: req})
-	if r := <-req.done; r.err != nil {
+	r := <-req.done
+	if r.err != nil {
 		t.Fatal(r.err)
+	}
+	if err := r.h.Close(); err != nil {
+		t.Fatal(err)
 	}
 	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
 		ss.mu.Lock()

@@ -3369,7 +3369,11 @@ packages:
             out:
               - type: error
             recv: pointer
-          - doc: SaveSnapshot cuts a snapshot now and copies its encoded stream to w.
+          - doc: |-
+              SaveSnapshot cuts a snapshot now and copies its encoded stream to w, on a
+              goroutine of its own: once ctx is done it returns, and a write to w
+              already blocked keeps that goroutine, and the snapshot pinned, until w
+              returns.
             in:
               - name: ctx
                 type: context.Context

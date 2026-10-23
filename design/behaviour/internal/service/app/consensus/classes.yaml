@@ -342,7 +342,8 @@ constants:
   - doc: |-
       pinAfterStream bounds the pin of a streamed snapshot, in maximum
       election timeouts: a peer that stopped after its install no longer holds
-      the log back once it passes.
+      the log back once it passes. It bounds the wait for the install's
+      verdict as well, from the moment the transport read the last byte.
     items:
       - name: pinAfterStream
         type: int64
@@ -649,6 +650,9 @@ files:
       - restoreReq
       - saveReq
       - saveRes
+      - (*saveReq).answer
+      - (*saveReq).leave
+      - closeSaved
       - (*Node).token
       - (*Node).applyLoop
       - (*Node).applyItems
@@ -1117,6 +1121,9 @@ files:
       - sendPin
       - (*Node).pinAt
       - (*Node).watchPins
+      - (*Node).dropPin
+      - sentReader
+      - (*sentReader).Read
     name: node_sendpin.go
   - decls:
       - mRole
@@ -1316,6 +1323,7 @@ files:
       - (*Node).maybeSnapshot
       - (*Node).cutFailed
       - (*Node).metaAt
+      - snapshotID
       - (*Node).cut
       - (*Node).cutPending
       - (*Node).writeSnapshot
@@ -1336,6 +1344,7 @@ files:
       - (*Node).verifyHeld
       - (*Node).requestCut
       - (*Node).SaveSnapshot
+      - copySaved
       - (*Node).save
       - (*Node).snapshotToSend
       - (*Node).sendSnapshot
@@ -1461,6 +1470,9 @@ files:
       - boundUnacknowledged
     name: unacked_linux.go
 functions:
+  - doc: closeSaved closes the handle of an answer no caller copies.
+    name: closeSaved
+    params: res *saveRes
   - doc: |-
       unsupportedKind stops a node that meets an entry kind it does not know
       (review M3).
@@ -2568,6 +2580,10 @@ functions:
     name: linkedCodec
     params: name string
     results: coretransform.BoundedDecompressor, error
+  - doc: snapshotID is the identifier of the snapshot cut at idx in term.
+    name: snapshotID
+    params: idx, term uint64
+    results: string
   - doc: payloadBytes is the payload es carries, what SnapshotEveryBytes counts.
     name: payloadBytes
     params: es []coreconsensus.EntryValue
@@ -2615,6 +2631,12 @@ functions:
     name: nearLimit
     params: size, limit int64
     results: bool
+  - doc: |-
+      copySaved copies the encoded stream h holds to w, then closes h, on a
+      goroutine of its own, and returns once it is copied or ctx is done.
+    name: copySaved
+    params: ctx context.Context, h coreconsensus.SnapshotHandle, w io.Writer
+    results: error
   - doc: noteUnmarked records dir in unmarked.
     name: noteUnmarked
     params: dir string
@@ -2918,18 +2940,39 @@ types:
     kind: struct
     name: restoreReq
   - fields:
-      - name: w
-        type: io.Writer
       - doc: op is the operator the save is recorded under.
         name: op
         type: coreconsensus.Operator
       - name: done
         type: chan saveRes
+      - doc: |-
+          mu orders the answer with the caller leaving: gone is set once the
+          caller left, and a handle answered after that is closed, not leaked.
+        name: mu
+        type: sync.Mutex
+      - name: gone
+        type: bool
     kind: struct
+    methods:
+      - doc: |-
+          answer hands res to the caller, or closes its handle when the caller
+          already left. done has one slot and is answered once, so it never blocks
+          the apply goroutine.
+        name: answer
+        params: res *saveRes
+        recv: r *saveReq
+      - doc: |-
+          leave records that the caller left, and closes the handle of an answer
+          already given.
+        name: leave
+        recv: r *saveReq
     name: saveReq
   - fields:
       - name: meta
         type: coreconsensus.SnapshotMetaValue
+      - doc: h pins the saved snapshot until the caller copied it; nil on error.
+        name: h
+        type: coreconsensus.SnapshotHandle
       - name: err
         type: error
     kind: struct
@@ -5771,7 +5814,12 @@ types:
       - doc: |-
           pinAt is the index pin holds compaction back to at now, and false once
           it no longer holds: a streamed snapshot's pin ends when this node no
-          longer leads the peer, or when until passed. It runs on the loop.
+          longer leads the peer, or when until passed. A stream's pin ends
+          pinAfterStream maximum election timeouts after its last byte was read:
+          a receiver that is sent every byte and never answers — a stuck disk
+          under its spool's sync, a stuck Restore, an apply goroutine held by an
+          abandoned SaveSnapshot — pinned this node's compaction for good, and its
+          log grew to the NO_SPACE alarm (#602). It runs on the loop.
         name: pinAt
         params: to coreconsensus.NodeID, pin sendPin, now time.Time
         recv: n *Node
@@ -5788,6 +5836,14 @@ types:
           that followed compacted past the entry it needed next (#588).
         name: watchPins
         params: now time.Time
+        recv: n *Node
+      - doc: |-
+          dropPin ends the pin of peer to, and cancels its stream when the pin is
+          a stream's whose verdict is overdue: the stream ends, raft probes the
+          peer again, and a peer that finished its install meanwhile is found
+          there. The receiver keeps its spool and its install. It runs on the loop.
+        name: dropPin
+        params: to coreconsensus.NodeID
         recv: n *Node
       - doc: |-
           observeStatus publishes the gauges a status turn changes, and logs role
@@ -6107,13 +6163,14 @@ types:
         recv: n *Node
         results: coreconsensus.SnapshotMetaValue, bool
       - doc: |-
-          cut captures the state machine at the applied index and writes it. When w
-          is not nil, the encoded stream is copied to it too (SaveSnapshot). Unless
-          the machine pauses apply to cut, or w is set, the write runs on a
-          background goroutine counted in n.wg, which ends when the write does, so
-          Close waits for it; its failure reaches cutFailed instead of the caller.
+          cut captures the state machine at the applied index and writes it. Unless
+          the machine pauses apply to cut, or wait is set (SaveSnapshot), the write
+          runs on a background goroutine counted in n.wg, which ends when the write
+          does, so Close waits for it; its failure reaches cutFailed instead of the
+          caller. No writer of a caller is written here: SaveSnapshot copies the
+          published snapshot on its own goroutine (#601).
         name: cut
-        params: idx, term uint64, w io.Writer
+        params: idx, term uint64, wait bool
         recv: n *Node
         results: error
       - doc: |-
@@ -6131,14 +6188,14 @@ types:
           again (cutFailed), and only one that falls after the flag is cleared
           survives.
         name: writeSnapshot
-        params: snap coreconsensus.Snapshot, meta coreconsensus.SnapshotMetaValue, extra io.Writer
+        params: snap coreconsensus.Snapshot, meta coreconsensus.SnapshotMetaValue
         recv: n *Node
         results: error
       - doc: |-
           publishSnapshot is writeSnapshot's write: the sink, the encoded stream,
           the commit, then retention and compaction (afterCut).
         name: publishSnapshot
-        params: snap coreconsensus.Snapshot, meta coreconsensus.SnapshotMetaValue, extra io.Writer
+        params: snap coreconsensus.Snapshot, meta coreconsensus.SnapshotMetaValue
         recv: n *Node
         results: error
       - doc: |-
@@ -6245,7 +6302,12 @@ types:
           the loop, at each tick and each completed write; the proposal runs on a
           goroutine counted in n.wg, which ends once it is answered, or once the
           node stops. A follower's is forwarded to the leader, as any proposal
-          (R3-24).
+          (R3-24). A learner raises nothing: it refuses its own proposals
+          (refuseShort) and says so. The cluster needs no learner to commit, and a
+          learner whose state outgrew the MaxSnapshotBytes it announced cannot cut
+          any more while the leader keeps feeding it the log: its log reached its
+          quota, its alarm committed, and every write of the cluster was refused
+          NO_SPACE until it was removed (#600).
         name: guardSpace
         params: now time.Time
         recv: n *Node
@@ -6483,17 +6545,39 @@ types:
     name: progressWatch
   - doc: |-
       sendPin is a snapshot that pins compaction for a peer. While it streams,
-      until is zero. Once streamed, the pin follows the peer's match until the
-      peer catches up or until passes: the leader only probes the peer after an
-      install, and a cut that landed in that window compacted past the entries
-      the peer needed next, so it was offered snapshot after snapshot (#550).
+      until is zero, and sent is when the transport read the snapshot's last
+      byte, in Unix nanoseconds of n.clk, 0 before. Once streamed, the pin
+      follows the peer's match until the peer catches up or until passes: the
+      leader only probes the peer after an install, and a cut that landed in
+      that window compacted past the entries the peer needed next, so it was
+      offered snapshot after snapshot (#550).
     fields:
       - name: index
         type: uint64
       - name: until
         type: time.Time
+      - name: sent
+        type: "*atomic.Int64"
     kind: struct
     name: sendPin
+  - doc: |-
+      sentReader marks sent with n.clk's time once r reads to its end: the
+      transport read the snapshot's last byte.
+    fields:
+      - name: r
+        type: io.Reader
+      - name: "n"
+        type: "*Node"
+      - name: sent
+        type: "*atomic.Int64"
+    kind: struct
+    methods:
+      - doc: Read reads r and marks the end of the stream.
+        name: Read
+        params: p []byte
+        recv: s *sentReader
+        results: int, error
+    name: sentReader
   - doc: |-
       obs holds a node's instruments. Every method is safe on a nil Meter,
       Tracer or Logger: observability is optional and never changes a decision.
@@ -6871,15 +6955,21 @@ types:
         results: error
     name: chunkReader
   - doc: |-
-      spaceGuard is the guard's state. checkedAt, nextRaise and fsShort belong
-      to the event loop; raising is set while a proposal of the alarm is in
-      flight, and short while the last check found the disk short.
+      spaceGuard is the guard's state. checkedAt, nextRaise, fsShort and
+      learnerShort belong to the event loop; raising is set while a proposal of
+      the alarm is in flight, and short while the last check found the disk
+      short.
     fields:
       - name: checkedAt
         type: time.Time
       - name: nextRaise
         type: time.Time
       - name: fsShort
+        type: bool
+      - doc: |-
+          learnerShort is set once a learner's short disk was logged, until the
+          disk is no longer short or the node votes.
+        name: learnerShort
         type: bool
       - name: raising
         type: atomic.Bool
