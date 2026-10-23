@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -127,6 +128,26 @@ func TestAnOTLPSwitchToTheDatabaseWarnsThenMigrates(t *testing.T) {
 	})
 	if strings.Contains(logs.String(), "now lives on database") {
 		t.Errorf("the start still reports a file queue left behind:\n%s", logs.String())
+	}
+}
+
+// A file queue `otlp migrate` cannot read is a failure, never an empty
+// queue: a state directory that is a file — readable as no directory on
+// every platform — fails the command instead of saying there is nothing to
+// move.
+func TestOTLPMigrateRefusesAnUnreadableFileQueue(t *testing.T) {
+	needsFileStore(t)
+	dir := t.TempDir()
+	traces := filepath.Join(dir, ".otlp", app.OTLPTraces)
+	if err := os.MkdirAll(traces, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(traces, "ready"), []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cli := otlpDiskApp(t, dir, app.NewFakeDB(sql.DialectPostgres), newDrivenClock(), io.Discard, newSent().send, app.OTLPDatabase("database"))
+	if status, out, errOut := otlpRun(t, cli, "migrate", "traces"); status != 1 || !strings.Contains(errOut, "the OTLP export's file queue cannot be read") {
+		t.Errorf("migrate over an unreadable file queue: %d\n%s%s", status, out, errOut)
 	}
 }
 

@@ -3690,6 +3690,7 @@ files:
       - otlpQueuePolicy
       - (*App).migrateOTLP
       - (*App).migrateOTLPSignal
+      - fileQueueProbe
       - (*App).otlpQueuePart
       - (*queuePart).verifyHeld
     name: otlp_migrate.go
@@ -7771,6 +7772,14 @@ functions:
     name: otlpQueuePolicy
     params: cfg *plug.OTLPConfig
     results: plug.QueuePolicyValue
+  - doc: |-
+      fileQueueProbe is fileQueueHolds for a command that acts on its answer: a
+      state directory that does not exist holds nothing, but one that cannot be
+      read is an error, never an empty queue — a migrate that took it for one
+      would say there is nothing to move and leave the batches behind.
+    name: fileQueueProbe
+    params: dir string
+    results: bool, error
   - doc: otlpLinked reports whether the program imports framework/app/otlp.
     name: otlpLinked
     results: bool

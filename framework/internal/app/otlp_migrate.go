@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -67,8 +70,14 @@ func (a *App) migrateOTLP(ctx context.Context, signals []string, stdout io.Write
 // migrateOTLPSignal moves the batches of signal's file queue onto its table,
 // and says how many on stdout; nothing when the file queue holds none.
 func (a *App) migrateOTLPSignal(ctx context.Context, cfg *plug.OTLPConfig, signal string, stdout io.Writer) error {
-	dir := otlpFileQueue(a.dataDir, signal)
-	if a.dataDir == "" || !fileQueueHolds(dir) {
+	dir, holds := otlpFileQueue(a.dataDir, signal), false
+	if a.dataDir != "" {
+		var err error
+		if holds, err = fileQueueProbe(dir); err != nil {
+			return failure(CodeOTLPExport, "OTLP_QUEUE", "the OTLP export's file queue cannot be read", err, errs.String("signal", signal), errs.String("dir", dir))
+		}
+	}
+	if !holds {
 		fmt.Fprintf(stdout, "%s: no batch left under the data directory\n", signal)
 		return nil
 	}
@@ -95,6 +104,28 @@ func (a *App) migrateOTLPSignal(ctx context.Context, cfg *plug.OTLPConfig, signa
 	}
 	fmt.Fprintf(stdout, "%s: %d batches moved onto %s, fingerprints found there; the file queue moved aside to %s\n", signal, n, p.name, aside)
 	return nil
+}
+
+// fileQueueProbe is fileQueueHolds for a command that acts on its answer: a
+// state directory that does not exist holds nothing, but one that cannot be
+// read is an error, never an empty queue — a migrate that took it for one
+// would say there is nothing to move and leave the batches behind.
+func fileQueueProbe(dir string) (bool, error) {
+	for _, state := range fileQueueStates {
+		entries, err := os.ReadDir(filepath.Join(dir, state))
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		for _, e := range entries {
+			if !e.IsDir() && (strings.HasSuffix(e.Name(), ".msg") || strings.HasSuffix(e.Name(), ".dead")) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // otlpQueuePart opens signal's file queue at dir and its table on the

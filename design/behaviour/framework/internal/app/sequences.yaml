@@ -28078,7 +28078,9 @@ sequences:
         kind: actor
       - id: (*App).migrateOTLPSignal
         kind: self
-      - id: otlpFileQueue
+      - id: fileQueueProbe
+        kind: internal
+      - id: failure
         kind: internal
       - id: fmt
         kind: stdlib
@@ -28090,18 +28092,31 @@ sequences:
         kind: stdlib
       - id: filepath
         kind: stdlib
-      - id: failure
-        kind: internal
     steps:
-      - bind: dir
-        eval: otlpFileQueue(a.dataDir, signal)
-        to: otlpFileQueue
+      - bind: dir, holds
+        eval: otlpFileQueue(a.dataDir, signal), false
+      - opt:
+          do:
+            - var:
+                name: err
+                type: error
+            - opt:
+                do:
+                  - return: failure(CodeOTLPExport, "OTLP_QUEUE", "the OTLP export's file queue cannot be read", err, errs.String("signal", signal), errs.String("dir", dir))
+                    to: failure
+                init:
+                  bind: holds, err
+                  eval: fileQueueProbe(dir)
+                  op: =
+                  to: fileQueueProbe
+                when: err != nil
+          when: a.dataDir != ""
       - opt:
           do:
             - eval: "fmt.Fprintf(stdout, \"%s: no batch left under the data directory\\n\", signal)"
               to: fmt
             - return: nil
-          when: a.dataDir == "" || !fileQueueHolds(dir)
+          when: "!holds"
       - bind: p, err
         eval: a.otlpQueuePart(cfg, signal, dir)
         to: a.otlpQueuePart
@@ -28144,6 +28159,41 @@ sequences:
       - eval: "fmt.Fprintf(stdout, \"%s: %d batches moved onto %s, fingerprints found there; the file queue moved aside to %s\\n\", signal, n, p.name, aside)"
         to: fmt
       - return: nil
+  - of: fileQueueProbe
+    participants:
+      - id: caller
+        kind: actor
+      - id: fileQueueProbe
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - loop:
+          do:
+            - bind: entries, err
+              eval: os.ReadDir(filepath.Join(dir, state))
+              to: os
+            - opt:
+                do:
+                  - continue: true
+                when: errors.Is(err, fs.ErrNotExist)
+            - opt:
+                do:
+                  - return: false, err
+                when: err != nil
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - return: true, nil
+                      when: "!e.IsDir() && (strings.HasSuffix(e.Name(), \".msg\") || strings.HasSuffix(e.Name(), \".dead\"))"
+                key: _
+                range: entries
+                value: e
+          key: _
+          range: fileQueueStates
+          value: state
+      - return: false, nil
   - of: (*App).otlpQueuePart
     participants:
       - id: caller
