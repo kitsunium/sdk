@@ -34,6 +34,18 @@ const (
 	DatabaseClosed = "closed"
 )
 
+// OTLP export states.
+const (
+	// ExportOff: the export sends nothing — no endpoint and no sender of the
+	// product's, a CLI command, or a process not started.
+	ExportOff = "off"
+	// ExportRunning: the export's loop sends.
+	ExportRunning = "running"
+	// ExportStopped: its loop ended while the process runs — a queue's
+	// storage failed —: nothing is sent until the next start.
+	ExportStopped = "stopped"
+)
+
 // Where a setting's value comes from.
 const (
 	SettingEnv     = "env"     // an environment variable
@@ -200,6 +212,59 @@ type RuntimeMessage struct {
 	// Databases are the databases the app declares, as this run found them:
 	// each one's state, readiness, pool and migrations.
 	Databases []DatabaseMessage `json:"databases,omitempty"`
+	// Export is the product's OTLP export (app.OTLP), as this run found it:
+	// its state and each signal's queue; nil when the app declares none.
+	Export *ExportMessage `json:"export,omitempty"`
+}
+
+// ExportMessage is the product's OTLP export (app.OTLP), as the running
+// process found it: what each signal's queue holds against its bounds, has
+// sent and has lost. Its endpoint and headers are never shown.
+type ExportMessage struct {
+	// State is one of the Export constants.
+	State string `json:"state"`
+	// Problem says why it is not healthy, when it is not: its loop ended, or
+	// a queue holds more than 80% of either bound.
+	Problem string `json:"problem,omitempty"`
+	// Signals are its two queues, traces then metrics; none while it is off.
+	Signals []ExportSignalMessage `json:"signals,omitempty"`
+}
+
+// ExportSignalMessage is one signal's queue of the OTLP export, sampled when
+// the runtime state is read; its counters never move a revision.
+type ExportSignalMessage struct {
+	// LastRetryAfterAt is when the collector last imposed a delay; nil when
+	// it never did.
+	LastRetryAfterAt *time.Time `json:"lastRetryAfterAt,omitempty"`
+	// Signal is "traces" or "metrics".
+	Signal string `json:"signal"`
+	// Store is where the queue lies: "memory", "directory" — under the data
+	// directory — or "database:<name>".
+	Store string `json:"store"`
+	// PendingBytes is the bytes the queue holds.
+	PendingBytes int64 `json:"pendingBytes"`
+	// MaxBytes bounds the bytes it holds.
+	MaxBytes int64 `json:"maxBytes"`
+	// LastRetryAfterMs is the last delay the collector imposed, in
+	// milliseconds.
+	LastRetryAfterMs int64 `json:"lastRetryAfterMs,omitempty"`
+	// Pending is the batches the queue holds.
+	Pending int `json:"pending"`
+	// MaxBatches bounds the batches it holds.
+	MaxBatches int `json:"maxBatches"`
+	// Sent counts the batches sent since the process started.
+	Sent uint64 `json:"sent"`
+	// Retries counts the attempts made again.
+	Retries uint64 `json:"retries"`
+	// Dropped counts the batches lost to a bound.
+	Dropped uint64 `json:"dropped"`
+	// Expired counts the batches lost to their age.
+	Expired uint64 `json:"expired"`
+	// DeadLettered counts the batches the collector refused for good, which
+	// `<product> otlp dead-letters` lists.
+	DeadLettered uint64 `json:"deadLettered"`
+	// Durable reports whether the queue outlives the process.
+	Durable bool `json:"durable"`
 }
 
 // DatabaseMessage is one database the app declares (app.Database), as the running

@@ -33,6 +33,18 @@ const (
 	DatabaseClosed string = core.DatabaseClosed
 )
 
+// OTLP export states.
+const (
+	// ExportOff: the export sends nothing — no endpoint and no sender of the
+	// product's, a CLI command, or a process not started.
+	ExportOff string = core.ExportOff
+	// ExportRunning: the export's loop sends.
+	ExportRunning string = core.ExportRunning
+	// ExportStopped: its loop ended while the process runs — a queue's
+	// storage failed —: nothing is sent until the next start.
+	ExportStopped string = core.ExportStopped
+)
+
 // Where a setting's value comes from.
 const (
 	SettingEnv     string = core.SettingEnv     // an environment variable
@@ -176,6 +188,19 @@ type (
 	// process found it. Its URL is never shown: where it was found, the engine,
 	// the address and the TLS mode are.
 	Database = core.DatabaseMessage
+)
+
+type (
+	// Export is the product's OTLP export (app.OTLP), as the running
+	// process found it: what each signal's queue holds against its bounds, has
+	// sent and has lost. Its endpoint and headers are never shown.
+	Export = core.ExportMessage
+)
+
+type (
+	// ExportSignal is one signal's queue of the OTLP export, sampled when
+	// the runtime state is read; its counters never move a revision.
+	ExportSignal = core.ExportSignalMessage
 )
 
 type (

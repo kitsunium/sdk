@@ -999,6 +999,16 @@ constants:
         type: OTLPFullPolicy
         value: "\"block\""
     name: OTLPDropOldest
+  - doc: The places a queue of the export lies in, as the runtime state says them.
+    grouped: true
+    items:
+      - name: otlpStoreMemory
+        value: "\"memory\""
+      - name: otlpStoreDirectory
+        value: "\"directory\""
+      - name: otlpStoreDatabase
+        value: "\"database:\""
+    name: otlpStoreMemory
   - doc: otlpUsageText is `otlp`'s usage; %[1]s is the product's name.
     items:
       - name: otlpUsageText
@@ -3620,6 +3630,7 @@ files:
       - otlpHooks
       - otlpCode
       - EnableOTLP
+      - (*App).otlpCodeDescribe
       - (*App).otlpCLI
       - (*App).otlpCodeTables
       - (*App).addOTLPComponent
@@ -3654,6 +3665,7 @@ files:
       - discardHistogram.RecordDuration
     name: otlp_meter.go
   - decls:
+      - otlpStoreMemory
       - otlpRunning
       - otlpLinked
       - otlpDeclared
@@ -3674,6 +3686,9 @@ files:
       - (*App).otlpHeaderSettings
       - otlpRetryable
       - (*App).otlpReady
+      - otlpStoreOf
+      - (*App).describeOTLP
+      - exportSignal
       - backlogged
     name: otlp_run.go
   - decls:
@@ -7748,6 +7763,16 @@ functions:
     name: otlpRetryable
     params: err error
     results: bool
+  - doc: otlpStoreOf is where cfg places the export's queues.
+    name: otlpStoreOf
+    params: a *App, cfg *plug.OTLPConfig
+    results: string
+  - doc: |-
+      exportSignal is one signal's stats as the runtime state shows them; a
+      queue that is not durable lies in memory, wherever the export asked.
+    name: exportSignal
+    params: store string, st *plug.OTLPStatsValue
+    results: model.ExportSignal
   - doc: |-
       backlogged reports whether a signal's queue is above the readiness's share
       of either of its bounds.
@@ -11162,8 +11187,9 @@ types:
         results: string
       - doc: |-
           describeRuntime adds to rt what the daemon knows about itself: its phase
-          history, the process, the HTTP server and — in dev — the Studio's clock
-          and mocks.
+          history, the process, the HTTP server, the databases, the OTLP export —
+          through its subsystem, issue #535 — and — in dev — the Studio's clock and
+          mocks.
         name: describeRuntime
         params: rt *model.Runtime
         recv: a *App
@@ -12197,6 +12223,12 @@ types:
         recv: a *App
         results: "[]model.Diagnostic"
       - doc: |-
+          otlpCodeDescribe is the export as the runtime state shows it, nil without
+          framework/app/otlp — whose absence refuses an export's start.
+        name: otlpCodeDescribe
+        recv: a *App
+        results: "*model.Export"
+      - doc: |-
           otlpCLI is Main's `otlp` command, nil when the app declares no export or
           the program does not import framework/app/otlp, which then links none of
           it.
@@ -12353,6 +12385,15 @@ types:
         params: _ context.Context
         recv: a *App
         results: error
+      - doc: |-
+          describeOTLP is the export as the runtime state shows it (issue #535):
+          off while none runs; else each signal's queue against its bounds, what
+          it sent and lost, and the last Retry-After; stopped once its loop ended.
+          It reads the stats and never answers the readiness, whose losses it
+          would consume: the problem it says is the loop's end or a queue's backlog.
+        name: describeOTLP
+        recv: a *App
+        results: "*model.Export"
       - doc: otlpCommand runs `otlp …`.
         name: otlpCommand
         params: ctx context.Context, args []string, stdout, stderr io.Writer
@@ -19371,6 +19412,9 @@ types:
       - doc: "command is Main's `otlp` command (issue #536)."
         name: command
         type: func(a *App) func(ctx context.Context, args []string) int
+      - doc: "describe is the export as the runtime state shows it (issue #535)."
+        name: describe
+        type: func(a *App) *model.Export
     kind: struct
     name: otlpHooks
   - kind: named
@@ -19477,6 +19521,12 @@ types:
           metrics stream; nil when the export hands none.
         name: meter
         type: metrics.FullMeter
+      - doc: |-
+          store is where the queues lie, as the runtime state says it:
+          "database:<name>", "directory" or "memory" (a queue the platform
+          keeps in memory is said so by its stats).
+        name: store
+        type: string
       - doc: |-
           cancel ends the loop; done is closed once it returned, err — written
           under mu before done closes — what it returned.

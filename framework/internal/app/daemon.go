@@ -117,8 +117,9 @@ func stopReason(ctx context.Context) string {
 }
 
 // describeRuntime adds to rt what the daemon knows about itself: its phase
-// history, the process, the HTTP server and — in dev — the Studio's clock
-// and mocks.
+// history, the process, the HTTP server, the databases, the OTLP export —
+// through its subsystem, issue #535 — and — in dev — the Studio's clock and
+// mocks.
 func (a *App) describeRuntime(rt *model.Runtime) {
 	a.mu.Lock()
 	rt.History = slices.Clone(a.rt.history)
@@ -128,6 +129,7 @@ func (a *App) describeRuntime(rt *model.Runtime) {
 	rt.Process = processSample()
 	rt.HTTP = a.describeHTTP()
 	rt.Databases = a.describeDatabases()
+	rt.Export = a.otlpCodeDescribe()
 	if m := a.mockList(); len(m) > 0 {
 		rt.Mocks = m
 	}

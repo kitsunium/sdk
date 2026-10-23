@@ -82,6 +82,15 @@ func TestTheOTLPQueuesLieOnTheDatabase(t *testing.T) {
 			}
 			expectAnswer(t, call(t, first, "GET /orders/ping", noBody), http.StatusNoContent, "")
 			clk.drive(t, "the span's batch refused by a collector that is down", func() bool { return refused.Load() > 0 })
+			// The runtime state says where the queues lie (issue #535).
+			wantStore := "memory"
+			if tc.durable {
+				wantStore = "database:database"
+			}
+			if ex := first.Graph().Runtime.Export; ex == nil || ex.State != model.ExportRunning || len(ex.Signals) != 2 ||
+				ex.Signals[0].Store != wantStore || ex.Signals[0].Durable != tc.durable {
+				t.Errorf("the runtime state of the export: %+v", ex)
+			}
 			tables := db.QueueTables()
 			if has := slices.Contains(tables, otlpTracesTable) && slices.Contains(tables, otlpMetricsTable); has != tc.durable {
 				t.Fatalf("the export's tables on the database: %v, want %v", tables, tc.durable)

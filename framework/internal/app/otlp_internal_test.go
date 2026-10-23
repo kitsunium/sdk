@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/internal/app/plug"
+	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/metrics"
@@ -309,5 +310,96 @@ func TestTheProductsMeterOutsideAnExportKeepsNothing(t *testing.T) {
 	m.ObservableGauge("level", func(metrics.ObserveFloat64) { t.Error("an observable gauge was called") })
 	if snap := m.Collect(); len(snap.Sums)+len(snap.Gauges)+len(snap.Histograms) != 0 {
 		t.Errorf("a collection outside an export: %+v", snap)
+	}
+}
+
+// statsExport is an export whose loop runs until its context ends and whose
+// stats are the case's.
+type statsExport struct {
+	failingExport
+	stats []plug.OTLPStatsValue
+}
+
+// Run waits for the stop.
+func (s statsExport) Run(ctx context.Context) error {
+	<-ctx.Done()
+	return nil
+}
+
+// Stats are the case's.
+func (s statsExport) Stats() []plug.OTLPStatsValue { return s.stats }
+
+// The runtime state shows each signal's queue as its stats say — against
+// its bounds, what it sent and lost, the last Retry-After and when, where it
+// lies —, a queue the platform keeps in memory said so, and a backlog above
+// 80% of a bound as the export's problem; the readiness's losses are not
+// consumed by reading it. Once the loop ended, the export is stopped.
+func TestTheRuntimeStateShowsTheOTLPExportsQueues(t *testing.T) {
+	at := time.Date(2026, 10, 23, 8, 0, 0, 0, time.UTC)
+	stats := []plug.OTLPStatsValue{
+		{
+			Signal: OTLPTraces, Pending: 9, PendingBytes: 900, MaxBatches: 10, MaxBytes: 1 << 20, Sent: 4, Retries: 3,
+			Dropped: 2, Expired: 1, DeadLettered: 5, LastRetryAfter: 45 * time.Second, LastRetryAfterAt: at, Durable: true,
+		},
+		{Signal: OTLPMetrics, Pending: 1, PendingBytes: 10, MaxBatches: 10, MaxBytes: 1 << 20},
+	}
+	saved := plug.OTLP.Load()
+	plug.OTLP.Store(&plug.OTLPDriverConfig{Open: func(context.Context, *plug.OTLPConfig) (plug.OTLPExporter, error) {
+		return statsExport{stats: stats}, nil
+	}})
+	t.Cleanup(func() { plug.OTLP.Store(saved) })
+	a := NewApp("shop", NewService("shop", "Sells.")).With(Profile("daemon"), DataDir(t.TempDir()), Logs(io.Discard),
+		OTLP(OTLPEndpoint("http://127.0.0.1:4318")))
+	if fileStoreRefused() {
+		a = otlpProduct()
+	}
+	must(t, a.Start(context.Background()))
+	defer func() { must(t, a.Stop(context.Background())) }()
+	ex := a.Graph().Runtime.Export
+	if ex == nil || ex.State != model.ExportRunning || len(ex.Signals) != 2 || !strings.Contains(ex.Problem, "traces: 9 batches, 900 bytes waiting") {
+		t.Fatalf("the export: %+v", ex)
+	}
+	traces, metrics := ex.Signals[0], ex.Signals[1]
+	wantStore := otlpStoreDirectory
+	if fileStoreRefused() {
+		wantStore = otlpStoreMemory
+	}
+	if traces.Signal != OTLPTraces || traces.Store != wantStore || !traces.Durable || traces.Pending != 9 || traces.MaxBatches != 10 ||
+		traces.Sent != 4 || traces.Retries != 3 || traces.Dropped != 2 || traces.Expired != 1 || traces.DeadLettered != 5 ||
+		traces.LastRetryAfterMs != 45000 || traces.LastRetryAfterAt == nil || !traces.LastRetryAfterAt.Equal(at) {
+		t.Errorf("the traces' queue: %+v", traces)
+	}
+	if metrics.Store != otlpStoreMemory || metrics.Durable || metrics.LastRetryAfterAt != nil {
+		t.Errorf("a queue in memory: %+v", metrics)
+	}
+	if err := a.otlpReady(context.Background()); err == nil || !strings.Contains(err.Error(), "8 batches lost") {
+		t.Errorf("reading the runtime state consumed the readiness's losses: %v", err)
+	}
+	r := a.otlpRun.Load()
+	r.cancel()
+	<-r.done
+	if ex := a.Graph().Runtime.Export; ex.State != model.ExportStopped || !strings.Contains(ex.Problem, "stopped sending until the next start") {
+		t.Errorf("an export whose loop ended: %+v", ex)
+	}
+}
+
+// An app that declares no export shows none; one whose export is off shows
+// it off, with no queue.
+func TestTheRuntimeStateShowsAnOTLPExportOff(t *testing.T) {
+	if ex := NewApp("plain").describeOTLP(); ex != nil {
+		t.Errorf("an app with no export shows %+v", ex)
+	}
+	a := NewApp("shop", NewService("shop", "Sells.")).With(Profile("daemon"), InMemory(), Logs(io.Discard), OTLP())
+	must(t, a.Start(context.Background()))
+	defer func() { must(t, a.Stop(context.Background())) }()
+	if ex := a.Graph().Runtime.Export; ex == nil || ex.State != model.ExportOff || ex.Signals != nil {
+		t.Errorf("an export that is off: %+v", ex)
+	}
+	withoutOTLP(t)
+	saved := otlpCode.Load()
+	otlpCode.Store(nil)
+	t.Cleanup(func() { otlpCode.Store(saved) })
+	if ex := a.otlpCodeDescribe(); ex != nil {
+		t.Errorf("a program without framework/app/otlp shows %+v", ex)
 	}
 }

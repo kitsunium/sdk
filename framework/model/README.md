@@ -88,6 +88,8 @@ The JSON shape is a contract: [Version](#Version) is bumped on any change an old
 - [type Erasure](<#Erasure>)
 - [type Event](<#Event>)
 - [type EventType](<#EventType>)
+- [type Export](<#Export>)
+- [type ExportSignal](<#ExportSignal>)
 - [type ExportedVersions](<#ExportedVersions>)
 - [type Field](<#Field>)
 - [type File](<#File>)
@@ -905,6 +907,33 @@ const EventTransition EventType = "transition"
 EventTransition reports a workflow instance changing state.
 
 Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.EventTransition`.
+
+<a name="ExportOff"></a>
+```go
+const ExportOff string = "off"
+```
+
+ExportOff: the export sends nothing — no endpoint and no sender of the product's, a CLI command, or a process not started.
+
+Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.ExportOff`.
+
+<a name="ExportRunning"></a>
+```go
+const ExportRunning string = "running"
+```
+
+ExportRunning: the export's loop sends.
+
+Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.ExportRunning`.
+
+<a name="ExportStopped"></a>
+```go
+const ExportStopped string = "stopped"
+```
+
+ExportStopped: its loop ended while the process runs — a queue's storage failed —: nothing is sent until the next start.
+
+Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.ExportStopped`.
 
 <a name="ExposePrivate"></a>
 ```go
@@ -3562,6 +3591,77 @@ EventType is an alias of `github.com/kitsunium/sdk/framework/model/internal/core
 type EventType string
 ```
 
+<a name="Export"></a>
+## type [Export](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go>)
+
+Export is the product's OTLP export (app.OTLP), as the running process found it: what each signal's queue holds against its bounds, has sent and has lost. Its endpoint and headers are never shown.
+
+```go
+type Export = core.ExportMessage
+```
+
+Export is an alias of `github.com/kitsunium/sdk/framework/model/internal/core.ExportMessage`, declared as:
+
+```go
+type Export struct {
+	// State is one of the Export constants.
+	State   string                `json:"state"`
+	// Problem says why it is not healthy, when it is not: its loop ended, or
+	// a queue holds more than 80% of either bound.
+	Problem string                `json:"problem,omitempty"`
+	// Signals are its two queues, traces then metrics; none while it is off.
+	Signals []ExportSignalMessage `json:"signals,omitempty"`
+}
+```
+
+<a name="ExportSignal"></a>
+## type [ExportSignal](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go>)
+
+ExportSignal is one signal's queue of the OTLP export, sampled when the runtime state is read; its counters never move a revision.
+
+```go
+type ExportSignal = core.ExportSignalMessage
+```
+
+ExportSignal is an alias of `github.com/kitsunium/sdk/framework/model/internal/core.ExportSignalMessage`, declared as:
+
+```go
+type ExportSignal struct {
+	// LastRetryAfterAt is when the collector last imposed a delay; nil when
+	// it never did.
+	LastRetryAfterAt *time.Time `json:"lastRetryAfterAt,omitempty"`
+	// Signal is "traces" or "metrics".
+	Signal           string     `json:"signal"`
+	// Store is where the queue lies: "memory", "directory" — under the data
+	// directory — or "database:<name>".
+	Store            string     `json:"store"`
+	// PendingBytes is the bytes the queue holds.
+	PendingBytes     int64      `json:"pendingBytes"`
+	// MaxBytes bounds the bytes it holds.
+	MaxBytes         int64      `json:"maxBytes"`
+	// LastRetryAfterMs is the last delay the collector imposed, in
+	// milliseconds.
+	LastRetryAfterMs int64      `json:"lastRetryAfterMs,omitempty"`
+	// Pending is the batches the queue holds.
+	Pending          int        `json:"pending"`
+	// MaxBatches bounds the batches it holds.
+	MaxBatches       int        `json:"maxBatches"`
+	// Sent counts the batches sent since the process started.
+	Sent             uint64     `json:"sent"`
+	// Retries counts the attempts made again.
+	Retries          uint64     `json:"retries"`
+	// Dropped counts the batches lost to a bound.
+	Dropped          uint64     `json:"dropped"`
+	// Expired counts the batches lost to their age.
+	Expired          uint64     `json:"expired"`
+	// DeadLettered counts the batches the collector refused for good, which
+	// `<product> otlp dead-letters` lists.
+	DeadLettered     uint64     `json:"deadLettered"`
+	// Durable reports whether the queue outlives the process.
+	Durable          bool       `json:"durable"`
+}
+```
+
 <a name="ExportedVersions"></a>
 ## type [ExportedVersions](<https://github.com/kitsunium/sdk/blob/main/framework/model/history.go>)
 
@@ -5379,6 +5479,9 @@ type Runtime struct {
 	// Databases are the databases the app declares, as this run found them:
 	// each one's state, readiness, pool and migrations.
 	Databases  []DatabaseMessage  `json:"databases,omitempty"`
+	// Export is the product's OTLP export (app.OTLP), as this run found it:
+	// its state and each signal's queue; nil when the app declares none.
+	Export     *ExportMessage     `json:"export,omitempty"`
 }
 ```
 

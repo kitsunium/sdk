@@ -36,6 +36,13 @@ import (
 // product, every instance at once. The operator reads the state on the
 // readiness probe, in the log, and in the export's own metrics.
 
+// The places a queue of the export lies in, as the runtime state says them.
+const (
+	otlpStoreMemory    = "memory"
+	otlpStoreDirectory = "directory"
+	otlpStoreDatabase  = "database:"
+)
+
 // otlpRunning is the export of a running app: the subsystem's export, the
 // tracer's sink into it, and the loop that sends.
 type otlpRunning struct {
@@ -47,6 +54,10 @@ type otlpRunning struct {
 	// meter is the product's own meter (Meter), collected into the same
 	// metrics stream; nil when the export hands none.
 	meter metrics.FullMeter
+	// store is where the queues lie, as the runtime state says it:
+	// "database:<name>", "directory" or "memory" (a queue the platform
+	// keeps in memory is said so by its stats).
+	store string
 	// cancel ends the loop; done is closed once it returned, err — written
 	// under mu before done closes — what it returned.
 	cancel context.CancelFunc
@@ -170,7 +181,7 @@ func (a *App) startOTLP(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	meter, _ := ex.Meter().Meter.(metrics.FullMeter)
 	r := &otlpRunning{
-		ex: ex, sink: sink, sample: otlpRootSampler(resolvedSetting(a, a.opts.otlp.sampleRatio)), meter: meter,
+		ex: ex, sink: sink, sample: otlpRootSampler(resolvedSetting(a, a.opts.otlp.sampleRatio)), meter: meter, store: otlpStoreOf(a, cfg),
 		cancel: cancel, done: make(chan struct{}), lost: map[string]uint64{},
 	}
 	for _, st := range ex.Stats() {
@@ -405,6 +416,72 @@ func (a *App) otlpReady(_ context.Context) error {
 		return nil
 	}
 	return Unavailable("the OTLP export is behind: " + strings.Join(problems, "; "))
+}
+
+// otlpStoreOf is where cfg places the export's queues.
+func otlpStoreOf(a *App, cfg *plug.OTLPConfig) string {
+	switch {
+	case cfg.Database != nil:
+		return otlpStoreDatabase + resolvedSetting(a, a.opts.otlp.database)
+	case cfg.Dir != "":
+		return otlpStoreDirectory
+	}
+	return otlpStoreMemory
+}
+
+// describeOTLP is the export as the runtime state shows it (issue #535):
+// off while none runs; else each signal's queue against its bounds, what
+// it sent and lost, and the last Retry-After; stopped once its loop ended.
+// It reads the stats and never answers the readiness, whose losses it
+// would consume: the problem it says is the loop's end or a queue's backlog.
+func (a *App) describeOTLP() *model.Export {
+	if a.opts.otlp == nil {
+		return nil
+	}
+	r := a.otlpRun.Load()
+	if r == nil {
+		return &model.Export{State: model.ExportOff}
+	}
+	out := &model.Export{State: model.ExportRunning}
+	var backlog []string
+	for _, st := range r.ex.Stats() {
+		out.Signals = append(out.Signals, exportSignal(r.store, &st))
+		if backlogged(&st) {
+			backlog = append(backlog, st.Signal+": "+strconv.Itoa(st.Pending)+" batches, "+strconv.FormatInt(st.PendingBytes, 10)+" bytes waiting")
+		}
+	}
+	if len(backlog) > 0 {
+		out.Problem = "the OTLP export is behind: " + strings.Join(backlog, "; ")
+	}
+	select {
+	case <-r.done:
+		out.State, out.Problem = model.ExportStopped, "the OTLP export stopped sending until the next start"
+		r.mu.Lock()
+		if r.err != nil {
+			out.Problem += ": " + errs.PublicOf(r.err)
+		}
+		r.mu.Unlock()
+	default:
+	}
+	return out
+}
+
+// exportSignal is one signal's stats as the runtime state shows them; a
+// queue that is not durable lies in memory, wherever the export asked.
+func exportSignal(store string, st *plug.OTLPStatsValue) model.ExportSignal {
+	if !st.Durable {
+		store = otlpStoreMemory
+	}
+	out := model.ExportSignal{
+		Signal: st.Signal, Store: store, Durable: st.Durable,
+		Pending: st.Pending, PendingBytes: st.PendingBytes, MaxBatches: st.MaxBatches, MaxBytes: st.MaxBytes,
+		Sent: st.Sent, Retries: st.Retries, Dropped: st.Dropped, Expired: st.Expired, DeadLettered: st.DeadLettered,
+		LastRetryAfterMs: st.LastRetryAfter.Milliseconds(),
+	}
+	if !st.LastRetryAfterAt.IsZero() {
+		out.LastRetryAfterAt = new(st.LastRetryAfterAt.UTC())
+	}
+	return out
 }
 
 // backlogged reports whether a signal's queue is above the readiness's share

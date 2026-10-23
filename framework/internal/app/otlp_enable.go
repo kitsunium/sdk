@@ -36,6 +36,8 @@ type otlpHooks struct {
 	tables func(a *App, d *database) []frameworkTable
 	// command is Main's `otlp` command (issue #536).
 	command func(a *App) func(ctx context.Context, args []string) int
+	// describe is the export as the runtime state shows it (issue #535).
+	describe func(a *App) *model.Export
 }
 
 // otlpCode is the framework's own export code, nil until framework/app/otlp
@@ -55,7 +57,17 @@ func EnableOTLP() {
 		headerSettings: (*App).otlpHeaderSettings,
 		tables:         (*App).otlpTables,
 		command:        otlpCommandOf,
+		describe:       (*App).describeOTLP,
 	})
+}
+
+// otlpCodeDescribe is the export as the runtime state shows it, nil without
+// framework/app/otlp — whose absence refuses an export's start.
+func (a *App) otlpCodeDescribe() *model.Export {
+	if h := otlpCode.Load(); h != nil {
+		return h.describe(a)
+	}
+	return nil
 }
 
 // otlpCLI is Main's `otlp` command, nil when the app declares no export or

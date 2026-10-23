@@ -22885,6 +22885,69 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/model.Export",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/framework/model",
+      "name": "Export",
+      "spelled": "core.ExportMessage",
+      "canonical": "github.com/kitsunium/sdk/framework/model/internal/core.ExportMessage",
+      "owner": "go:github.com/kitsunium/sdk/framework/model/internal/core.ExportMessage",
+      "doc": "Export is the product's OTLP export (app.OTLP), as the running\nprocess found it: what each signal's queue holds against its bounds, has\nsent and has lost. Its endpoint and headers are never shown.\n",
+      "file": "framework/model/runtime.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/model.ExportOff",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/model",
+      "name": "ExportOff",
+      "spelled": "string",
+      "canonical": "string",
+      "value": "\"off\"",
+      "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.ExportOff",
+      "doc": "ExportOff: the export sends nothing — no endpoint and no sender of the\nproduct's, a CLI command, or a process not started.\n",
+      "file": "framework/model/runtime.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/model.ExportRunning",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/model",
+      "name": "ExportRunning",
+      "spelled": "string",
+      "canonical": "string",
+      "value": "\"running\"",
+      "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.ExportRunning",
+      "doc": "ExportRunning: the export's loop sends.\n",
+      "file": "framework/model/runtime.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/model.ExportSignal",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/framework/model",
+      "name": "ExportSignal",
+      "spelled": "core.ExportSignalMessage",
+      "canonical": "github.com/kitsunium/sdk/framework/model/internal/core.ExportSignalMessage",
+      "owner": "go:github.com/kitsunium/sdk/framework/model/internal/core.ExportSignalMessage",
+      "doc": "ExportSignal is one signal's queue of the OTLP export, sampled when\nthe runtime state is read; its counters never move a revision.\n",
+      "file": "framework/model/runtime.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/model.ExportStopped",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/model",
+      "name": "ExportStopped",
+      "spelled": "string",
+      "canonical": "string",
+      "value": "\"stopped\"",
+      "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.ExportStopped",
+      "doc": "ExportStopped: its loop ended while the process runs — a queue's\nstorage failed —: nothing is sent until the next start.\n",
+      "file": "framework/model/runtime.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/model.ExportedVersions",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/framework/model",
@@ -28730,6 +28793,170 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/model/internal/core.ExportMessage",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/model/internal/core",
+      "name": "ExportMessage",
+      "spelled": "struct{State string \"json:\\\"state\\\"\"; Problem string \"json:\\\"problem,omitempty\\\"\"; Signals []ExportSignalMessage \"json:\\\"signals,omitempty\\\"\"}",
+      "canonical": "struct{State string \"json:\\\"state\\\"\"; Problem string \"json:\\\"problem,omitempty\\\"\"; Signals []github.com/kitsunium/sdk/framework/model/internal/core.ExportSignalMessage \"json:\\\"signals,omitempty\\\"\"}",
+      "fields": [
+        {
+          "name": "State",
+          "type": "string",
+          "tag": "json:\"state\"",
+          "doc": "State is one of the Export constants.\n"
+        },
+        {
+          "name": "Problem",
+          "type": "string",
+          "tag": "json:\"problem,omitempty\"",
+          "doc": "Problem says why it is not healthy, when it is not: its loop ended, or\na queue holds more than 80% of either bound.\n"
+        },
+        {
+          "name": "Signals",
+          "type": "[]ExportSignalMessage",
+          "tag": "json:\"signals,omitempty\"",
+          "doc": "Signals are its two queues, traces then metrics; none while it is off.\n"
+        }
+      ],
+      "doc": "ExportMessage is the product's OTLP export (app.OTLP), as the running\nprocess found it: what each signal's queue holds against its bounds, has\nsent and has lost. Its endpoint and headers are never shown.\n",
+      "file": "framework/model/internal/core/runtime.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/model/internal/core.ExportOff",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/model/internal/core",
+      "name": "ExportOff",
+      "spelled": "untyped string",
+      "canonical": "untyped string",
+      "value": "\"off\"",
+      "doc": "ExportOff: the export sends nothing — no endpoint and no sender of the\nproduct's, a CLI command, or a process not started.\n",
+      "file": "framework/model/internal/core/runtime.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/model/internal/core.ExportRunning",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/model/internal/core",
+      "name": "ExportRunning",
+      "spelled": "untyped string",
+      "canonical": "untyped string",
+      "value": "\"running\"",
+      "doc": "ExportRunning: the export's loop sends.\n",
+      "file": "framework/model/internal/core/runtime.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/model/internal/core.ExportSignalMessage",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/model/internal/core",
+      "name": "ExportSignalMessage",
+      "spelled": "struct{LastRetryAfterAt *time.Time \"json:\\\"lastRetryAfterAt,omitempty\\\"\"; Signal string \"json:\\\"signal\\\"\"; Store string \"json:\\\"store\\\"\"; PendingBytes int64 \"json:\\\"pendingBytes\\\"\"; MaxBytes int64 \"json:\\\"maxBytes\\\"\"; LastRetryAfterMs int64 \"json:\\\"lastRetryAfterMs,omitempty\\\"\"; Pending int \"json:\\\"pending\\\"\"; MaxBatches int \"json:\\\"maxBatches\\\"\"; Sent uint64 \"json:\\\"sent\\\"\"; Retries uint64 \"json:\\\"retries\\\"\"; Dropped uint64 \"json:\\\"dropped\\\"\"; Expired uint64 \"json:\\\"expired\\\"\"; DeadLettered uint64 \"json:\\\"deadLettered\\\"\"; Durable bool \"json:\\\"durable\\\"\"}",
+      "canonical": "struct{LastRetryAfterAt *time.Time \"json:\\\"lastRetryAfterAt,omitempty\\\"\"; Signal string \"json:\\\"signal\\\"\"; Store string \"json:\\\"store\\\"\"; PendingBytes int64 \"json:\\\"pendingBytes\\\"\"; MaxBytes int64 \"json:\\\"maxBytes\\\"\"; LastRetryAfterMs int64 \"json:\\\"lastRetryAfterMs,omitempty\\\"\"; Pending int \"json:\\\"pending\\\"\"; MaxBatches int \"json:\\\"maxBatches\\\"\"; Sent uint64 \"json:\\\"sent\\\"\"; Retries uint64 \"json:\\\"retries\\\"\"; Dropped uint64 \"json:\\\"dropped\\\"\"; Expired uint64 \"json:\\\"expired\\\"\"; DeadLettered uint64 \"json:\\\"deadLettered\\\"\"; Durable bool \"json:\\\"durable\\\"\"}",
+      "fields": [
+        {
+          "name": "LastRetryAfterAt",
+          "type": "*time.Time",
+          "tag": "json:\"lastRetryAfterAt,omitempty\"",
+          "doc": "LastRetryAfterAt is when the collector last imposed a delay; nil when\nit never did.\n"
+        },
+        {
+          "name": "Signal",
+          "type": "string",
+          "tag": "json:\"signal\"",
+          "doc": "Signal is \"traces\" or \"metrics\".\n"
+        },
+        {
+          "name": "Store",
+          "type": "string",
+          "tag": "json:\"store\"",
+          "doc": "Store is where the queue lies: \"memory\", \"directory\" — under the data\ndirectory — or \"database:<name>\".\n"
+        },
+        {
+          "name": "PendingBytes",
+          "type": "int64",
+          "tag": "json:\"pendingBytes\"",
+          "doc": "PendingBytes is the bytes the queue holds.\n"
+        },
+        {
+          "name": "MaxBytes",
+          "type": "int64",
+          "tag": "json:\"maxBytes\"",
+          "doc": "MaxBytes bounds the bytes it holds.\n"
+        },
+        {
+          "name": "LastRetryAfterMs",
+          "type": "int64",
+          "tag": "json:\"lastRetryAfterMs,omitempty\"",
+          "doc": "LastRetryAfterMs is the last delay the collector imposed, in\nmilliseconds.\n"
+        },
+        {
+          "name": "Pending",
+          "type": "int",
+          "tag": "json:\"pending\"",
+          "doc": "Pending is the batches the queue holds.\n"
+        },
+        {
+          "name": "MaxBatches",
+          "type": "int",
+          "tag": "json:\"maxBatches\"",
+          "doc": "MaxBatches bounds the batches it holds.\n"
+        },
+        {
+          "name": "Sent",
+          "type": "uint64",
+          "tag": "json:\"sent\"",
+          "doc": "Sent counts the batches sent since the process started.\n"
+        },
+        {
+          "name": "Retries",
+          "type": "uint64",
+          "tag": "json:\"retries\"",
+          "doc": "Retries counts the attempts made again.\n"
+        },
+        {
+          "name": "Dropped",
+          "type": "uint64",
+          "tag": "json:\"dropped\"",
+          "doc": "Dropped counts the batches lost to a bound.\n"
+        },
+        {
+          "name": "Expired",
+          "type": "uint64",
+          "tag": "json:\"expired\"",
+          "doc": "Expired counts the batches lost to their age.\n"
+        },
+        {
+          "name": "DeadLettered",
+          "type": "uint64",
+          "tag": "json:\"deadLettered\"",
+          "doc": "DeadLettered counts the batches the collector refused for good, which\n`<product> otlp dead-letters` lists.\n"
+        },
+        {
+          "name": "Durable",
+          "type": "bool",
+          "tag": "json:\"durable\"",
+          "doc": "Durable reports whether the queue outlives the process.\n"
+        }
+      ],
+      "doc": "ExportSignalMessage is one signal's queue of the OTLP export, sampled when\nthe runtime state is read; its counters never move a revision.\n",
+      "file": "framework/model/internal/core/runtime.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/model/internal/core.ExportStopped",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/model/internal/core",
+      "name": "ExportStopped",
+      "spelled": "untyped string",
+      "canonical": "untyped string",
+      "value": "\"stopped\"",
+      "doc": "ExportStopped: its loop ended while the process runs — a queue's\nstorage failed —: nothing is sent until the next start.\n",
+      "file": "framework/model/internal/core/runtime.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/model/internal/core.ExportedVersionsMessage",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/model/internal/core",
@@ -33129,8 +33356,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/model/internal/core",
       "name": "RuntimeMessage",
-      "spelled": "struct{Phase string \"json:\\\"phase\\\"\"; StartedAt time.Time \"json:\\\"startedAt\\\"\"; Components []ComponentMessage \"json:\\\"components\\\"\"; Loops []LoopMessage \"json:\\\"loops\\\"\"; History []PhaseChangeEvent \"json:\\\"history,omitempty\\\"\"; Process *ProcessSpec \"json:\\\"process,omitempty\\\"\"; HTTP *HTTPServer \"json:\\\"http,omitempty\\\"\"; Mocks []MockMessage \"json:\\\"mocks,omitempty\\\"\"; Dev *DevBuildMessage \"json:\\\"dev,omitempty\\\"\"; Config []SettingMessage \"json:\\\"config,omitempty\\\"\"; Boot []BootStepMessage \"json:\\\"boot,omitempty\\\"\"; Databases []DatabaseMessage \"json:\\\"databases,omitempty\\\"\"}",
-      "canonical": "struct{Phase string \"json:\\\"phase\\\"\"; StartedAt time.Time \"json:\\\"startedAt\\\"\"; Components []github.com/kitsunium/sdk/framework/model/internal/core.ComponentMessage \"json:\\\"components\\\"\"; Loops []github.com/kitsunium/sdk/framework/model/internal/core.LoopMessage \"json:\\\"loops\\\"\"; History []github.com/kitsunium/sdk/framework/model/internal/core.PhaseChangeEvent \"json:\\\"history,omitempty\\\"\"; Process *github.com/kitsunium/sdk/framework/model/internal/core.ProcessSpec \"json:\\\"process,omitempty\\\"\"; HTTP *github.com/kitsunium/sdk/framework/model/internal/core.HTTPServer \"json:\\\"http,omitempty\\\"\"; Mocks []github.com/kitsunium/sdk/framework/model/internal/core.MockMessage \"json:\\\"mocks,omitempty\\\"\"; Dev *github.com/kitsunium/sdk/framework/model/internal/core.DevBuildMessage \"json:\\\"dev,omitempty\\\"\"; Config []github.com/kitsunium/sdk/framework/model/internal/core.SettingMessage \"json:\\\"config,omitempty\\\"\"; Boot []github.com/kitsunium/sdk/framework/model/internal/core.BootStepMessage \"json:\\\"boot,omitempty\\\"\"; Databases []github.com/kitsunium/sdk/framework/model/internal/core.DatabaseMessage \"json:\\\"databases,omitempty\\\"\"}",
+      "spelled": "struct{Phase string \"json:\\\"phase\\\"\"; StartedAt time.Time \"json:\\\"startedAt\\\"\"; Components []ComponentMessage \"json:\\\"components\\\"\"; Loops []LoopMessage \"json:\\\"loops\\\"\"; History []PhaseChangeEvent \"json:\\\"history,omitempty\\\"\"; Process *ProcessSpec \"json:\\\"process,omitempty\\\"\"; HTTP *HTTPServer \"json:\\\"http,omitempty\\\"\"; Mocks []MockMessage \"json:\\\"mocks,omitempty\\\"\"; Dev *DevBuildMessage \"json:\\\"dev,omitempty\\\"\"; Config []SettingMessage \"json:\\\"config,omitempty\\\"\"; Boot []BootStepMessage \"json:\\\"boot,omitempty\\\"\"; Databases []DatabaseMessage \"json:\\\"databases,omitempty\\\"\"; Export *ExportMessage \"json:\\\"export,omitempty\\\"\"}",
+      "canonical": "struct{Phase string \"json:\\\"phase\\\"\"; StartedAt time.Time \"json:\\\"startedAt\\\"\"; Components []github.com/kitsunium/sdk/framework/model/internal/core.ComponentMessage \"json:\\\"components\\\"\"; Loops []github.com/kitsunium/sdk/framework/model/internal/core.LoopMessage \"json:\\\"loops\\\"\"; History []github.com/kitsunium/sdk/framework/model/internal/core.PhaseChangeEvent \"json:\\\"history,omitempty\\\"\"; Process *github.com/kitsunium/sdk/framework/model/internal/core.ProcessSpec \"json:\\\"process,omitempty\\\"\"; HTTP *github.com/kitsunium/sdk/framework/model/internal/core.HTTPServer \"json:\\\"http,omitempty\\\"\"; Mocks []github.com/kitsunium/sdk/framework/model/internal/core.MockMessage \"json:\\\"mocks,omitempty\\\"\"; Dev *github.com/kitsunium/sdk/framework/model/internal/core.DevBuildMessage \"json:\\\"dev,omitempty\\\"\"; Config []github.com/kitsunium/sdk/framework/model/internal/core.SettingMessage \"json:\\\"config,omitempty\\\"\"; Boot []github.com/kitsunium/sdk/framework/model/internal/core.BootStepMessage \"json:\\\"boot,omitempty\\\"\"; Databases []github.com/kitsunium/sdk/framework/model/internal/core.DatabaseMessage \"json:\\\"databases,omitempty\\\"\"; Export *github.com/kitsunium/sdk/framework/model/internal/core.ExportMessage \"json:\\\"export,omitempty\\\"\"}",
       "fields": [
         {
           "name": "Phase",
@@ -33203,6 +33430,12 @@
           "type": "[]DatabaseMessage",
           "tag": "json:\"databases,omitempty\"",
           "doc": "Databases are the databases the app declares, as this run found them:\neach one's state, readiness, pool and migrations.\n"
+        },
+        {
+          "name": "Export",
+          "type": "*ExportMessage",
+          "tag": "json:\"export,omitempty\"",
+          "doc": "Export is the product's OTLP export (app.OTLP), as this run found it:\nits state and each signal's queue; nil when the app declares none.\n"
         }
       ],
       "doc": "RuntimeMessage is what a running process says about itself: the daemon's own state\nand its internal loop.\n",

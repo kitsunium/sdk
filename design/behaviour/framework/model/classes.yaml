@@ -1065,6 +1065,26 @@ constants:
         type: string
         value: core.DatabaseClosed
     name: DatabaseUnset
+  - doc: OTLP export states.
+    grouped: true
+    items:
+      - doc: |-
+          ExportOff: the export sends nothing — no endpoint and no sender of the
+          product's, a CLI command, or a process not started.
+        name: ExportOff
+        type: string
+        value: core.ExportOff
+      - doc: "ExportRunning: the export's loop sends."
+        name: ExportRunning
+        type: string
+        value: core.ExportRunning
+      - doc: |-
+          ExportStopped: its loop ended while the process runs — a queue's
+          storage failed —: nothing is sent until the next start.
+        name: ExportStopped
+        type: string
+        value: core.ExportStopped
+    name: ExportOff
   - doc: Where a setting's value comes from.
     grouped: true
     items:
@@ -1595,6 +1615,7 @@ files:
   - decls:
       - PhaseStarting
       - DatabaseUnset
+      - ExportOff
       - SettingEnv
       - VarEnv
       - BootConfig
@@ -1607,6 +1628,8 @@ files:
       - StatusOK
       - Runtime
       - Database
+      - Export
+      - ExportSignal
       - Pool
       - MigrationSet
       - Migration
@@ -2448,6 +2471,21 @@ types:
     kind: alias
     name: Database
     underlying: core.DatabaseMessage
+  - alias: true
+    doc: |-
+      Export is the product's OTLP export (app.OTLP), as the running
+      process found it: what each signal's queue holds against its bounds, has
+      sent and has lost. Its endpoint and headers are never shown.
+    kind: alias
+    name: Export
+    underlying: core.ExportMessage
+  - alias: true
+    doc: |-
+      ExportSignal is one signal's queue of the OTLP export, sampled when
+      the runtime state is read; its counters never move a revision.
+    kind: alias
+    name: ExportSignal
+    underlying: core.ExportSignalMessage
   - alias: true
     doc: |-
       Pool is a database's connection pool, as database/sql counts it.
