@@ -8,6 +8,7 @@ package otlp_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"math"
 	"testing"
 	"unicode/utf8"
@@ -24,6 +25,10 @@ var appendFailure = errs.WrapParams{
 	Public:  "The append oracle failed",
 	Private: "otlp_test: never reached",
 }
+
+// appendPrefix is what every appender is handed as dst, so a rendering that
+// ignored dst — or overwrote it — would fail.
+const appendPrefix string = "prefix:"
 
 // appendStrings is the string corpus: every escape class encoding/json has,
 // with HTML escaping off, and every UTF-8 defect it repairs.
@@ -48,6 +53,29 @@ var appendStrings = []string{
 	"\xff",
 }
 
+// appendAttrs is the attribute corpus: every AnyValue case, each at its zero
+// and away from it, and the invalid kind that selects no case.
+var appendAttrs = []coreotel.AttrValue{
+	coreotel.String("s", "<a&b>\xe2\x80\xa8\xff"),
+	coreotel.String("", ""),
+	coreotel.Bool("t", true),
+	coreotel.Bool("f", false),
+	coreotel.Int64("min", math.MinInt64),
+	coreotel.Int64("zero", 0),
+	coreotel.Float64("nan", math.NaN()),
+	coreotel.Float64("inf", math.Inf(-1)),
+	coreotel.Float64("tiny", 1e-7),
+	{Key: "invalid \"kind\""},
+}
+
+// appendCase is one value and the appender that must render it as Marshal
+// does.
+type appendCase struct {
+	name   string
+	value  any
+	render func(dst []byte) []byte
+}
+
 // oracle renders v the way Marshal does, as the reference.
 func oracle(t *testing.T, v any) []byte {
 	t.Helper()
@@ -58,20 +86,98 @@ func oracle(t *testing.T, v any) []byte {
 	return doc
 }
 
-// TestAppendStringIsMarshalsRendering pins AppendString to encoding/json on the
-// corpus, appended after a prefix so a run that ignores dst would fail.
-func TestAppendStringIsMarshalsRendering(t *testing.T) {
+// stringCases is the string corpus as cases.
+func stringCases() []appendCase {
+	cases := make([]appendCase, 0, len(appendStrings))
 	for _, s := range appendStrings {
-		want := oracle(t, s)
-		got := otlp.AppendString([]byte("prefix:"), s)
-		if !bytes.Equal(got, append([]byte("prefix:"), want...)) {
-			t.Errorf("AppendString(%q) = %s, want prefix:%s", s, got, want)
+		cases = append(cases, appendCase{
+			name:   fmt.Sprintf("%q", s),
+			value:  s,
+			render: func(dst []byte) []byte { return otlp.AppendString(dst, s) },
+		})
+	}
+	return cases
+}
+
+// scalarCases is each scalar at the extremes the specification allows.
+func scalarCases() []appendCase {
+	var cases []appendCase
+	for _, v := range []int64{0, 1, -1, 1 << 53, 1<<53 + 1, math.MinInt64, math.MaxInt64} {
+		cases = append(cases, appendCase{name: fmt.Sprintf("Int64(%d)", v), value: otlp.Int64(v), render: otlp.Int64(v).AppendJSON})
+	}
+	for _, v := range []uint64{0, 1, 1 << 53, 1<<53 + 1, math.MaxInt64, math.MaxUint64} {
+		cases = append(cases, appendCase{name: fmt.Sprintf("Uint64(%d)", v), value: otlp.Uint64(v), render: otlp.Uint64(v).AppendJSON})
+	}
+	doubles := []float64{
+		0, math.Copysign(0, -1), 1, -1.5, 0.1, 0.25, 1e20, 1e21, 1e-6, 1e-7, 123456789.123,
+		math.MaxFloat64, -math.MaxFloat64, math.SmallestNonzeroFloat64, math.NaN(), math.Inf(1), math.Inf(-1),
+	}
+	for _, v := range doubles {
+		cases = append(cases, appendCase{name: fmt.Sprintf("Double(%v)", v), value: otlp.Double(v), render: otlp.Double(v).AppendJSON})
+	}
+	return cases
+}
+
+// messageCases is every shared message, every AnyValue case and every
+// omission included.
+func messageCases() []appendCase {
+	var cases []appendCase
+	for i := range appendAttrs {
+		kv := otlp.KeyValueOf(appendAttrs[i])
+		cases = append(cases, appendCase{name: fmt.Sprintf("KeyValue(%q)", kv.Key), value: kv, render: kv.AppendJSON})
+	}
+	for _, set := range [][]coreotel.AttrValue{nil, {}, appendAttrs[:1], appendAttrs} {
+		kvs := otlp.Attrs(set)
+		if kvs == nil {
+			kvs = []otlp.KeyValue{}
 		}
+		resource := otlp.ResourceOf(coreotel.ResourceValue{Attrs: set})
+		cases = append(cases,
+			appendCase{
+				name:   fmt.Sprintf("AppendKeyValues(%d)", len(set)),
+				value:  kvs,
+				render: func(dst []byte) []byte { return otlp.AppendKeyValues(dst, kvs) },
+			},
+			appendCase{name: fmt.Sprintf("ResourceMessage(%d)", len(set)), value: resource, render: resource.AppendJSON},
+		)
+	}
+	for _, value := range []coreotel.ScopeValue{{}, {Name: "n"}, {Version: "v"}, {Name: "a\"b", Version: "1.0<>"}} {
+		scope := otlp.ScopeOf(value)
+		cases = append(cases, appendCase{name: fmt.Sprintf("ScopeMessage(%+v)", value), value: scope, render: scope.AppendJSON})
+	}
+	return cases
+}
+
+// TestAppendersAreMarshalsRendering pins every appender to encoding/json: the
+// string corpus, the scalars at their extremes and the shared messages, each
+// appended after a prefix.
+func TestAppendersAreMarshalsRendering(t *testing.T) {
+	runCase := func(t *testing.T, c appendCase) {
+		t.Helper()
+		want := append([]byte(appendPrefix), oracle(t, c.value)...)
+		if got := c.render([]byte(appendPrefix)); !bytes.Equal(got, want) {
+			t.Errorf("%s rendered %s, want %s", c.name, got, want)
+		}
+	}
+	groups := []struct {
+		name  string
+		cases []appendCase
+	}{
+		{name: "AppendString", cases: stringCases()},
+		{name: "scalars", cases: scalarCases()},
+		{name: "messages", cases: messageCases()},
+	}
+	for _, group := range groups {
+		t.Run(group.name, func(t *testing.T) {
+			for _, c := range group.cases {
+				runCase(t, c)
+			}
+		})
 	}
 }
 
-// FuzzAppendStringIsMarshalsRendering extends the corpus to whatever the
-// fuzzer finds; under go test it runs the seeds.
+// FuzzAppendStringIsMarshalsRendering extends the string corpus to whatever
+// the fuzzer finds; under go test it runs the seeds.
 func FuzzAppendStringIsMarshalsRendering(f *testing.F) {
 	for _, s := range appendStrings {
 		f.Add(s)
@@ -87,93 +193,40 @@ func FuzzAppendStringIsMarshalsRendering(f *testing.F) {
 	})
 }
 
-// TestScalarAppendJSONIsMarshalJSON pins each scalar's AppendJSON to its own
-// MarshalJSON, through encoding/json, at the extremes the specification allows.
-func TestScalarAppendJSONIsMarshalJSON(t *testing.T) {
-	ints := []int64{0, 1, -1, 1 << 53, 1<<53 + 1, math.MinInt64, math.MaxInt64}
-	for _, v := range ints {
-		if got, want := otlp.Int64(v).AppendJSON(nil), oracle(t, otlp.Int64(v)); !bytes.Equal(got, want) {
-			t.Errorf("Int64(%d).AppendJSON = %s, want %s", v, got, want)
-		}
-	}
-	uints := []uint64{0, 1, 1 << 53, 1<<53 + 1, math.MaxInt64, math.MaxUint64}
-	for _, v := range uints {
-		if got, want := otlp.Uint64(v).AppendJSON(nil), oracle(t, otlp.Uint64(v)); !bytes.Equal(got, want) {
-			t.Errorf("Uint64(%d).AppendJSON = %s, want %s", v, got, want)
-		}
-	}
-	doubles := []float64{
-		0, math.Copysign(0, -1), 1, -1.5, 0.1, 0.25, 1e20, 1e21, 1e-6, 1e-7, 123456789.123,
-		math.MaxFloat64, -math.MaxFloat64, math.SmallestNonzeroFloat64, math.NaN(), math.Inf(1), math.Inf(-1),
-	}
-	for _, v := range doubles {
-		if got, want := otlp.Double(v).AppendJSON(nil), oracle(t, otlp.Double(v)); !bytes.Equal(got, want) {
-			t.Errorf("Double(%v).AppendJSON = %s, want %s", v, got, want)
-		}
-	}
-}
-
-// TestMessageAppendJSONIsMarshalsRendering pins the shared messages, every
-// AnyValue case and every omission included, to encoding/json.
-func TestMessageAppendJSONIsMarshalsRendering(t *testing.T) {
-	attrs := []coreotel.AttrValue{
-		coreotel.String("s", "<a&b>\xe2\x80\xa8\xff"),
-		coreotel.String("", ""),
-		coreotel.Bool("t", true),
-		coreotel.Bool("f", false),
-		coreotel.Int64("min", math.MinInt64),
-		coreotel.Int64("zero", 0),
-		coreotel.Float64("nan", math.NaN()),
-		coreotel.Float64("inf", math.Inf(-1)),
-		coreotel.Float64("tiny", 1e-7),
-		{Key: "invalid \"kind\""},
-	}
-	for i := range attrs {
-		kv := otlp.KeyValueOf(attrs[i])
-		if got, want := kv.AppendJSON(nil), oracle(t, kv); !bytes.Equal(got, want) {
-			t.Errorf("KeyValue(%q).AppendJSON = %s, want %s", attrs[i].Key, got, want)
-		}
-	}
-	sets := [][]coreotel.AttrValue{nil, {}, attrs[:1], attrs}
-	for _, set := range sets {
-		kvs := otlp.Attrs(set)
-		if kvs == nil {
-			kvs = []otlp.KeyValue{}
-		}
-		if got, want := otlp.AppendKeyValues(nil, kvs), oracle(t, kvs); !bytes.Equal(got, want) {
-			t.Errorf("AppendKeyValues(%d) = %s, want %s", len(set), got, want)
-		}
-		resource := otlp.ResourceOf(coreotel.ResourceValue{Attrs: set})
-		if got, want := resource.AppendJSON(nil), oracle(t, resource); !bytes.Equal(got, want) {
-			t.Errorf("ResourceMessage(%d).AppendJSON = %s, want %s", len(set), got, want)
-		}
-	}
-	scopes := []coreotel.ScopeValue{{}, {Name: "n"}, {Version: "v"}, {Name: "a\"b", Version: "1.0<>"}}
-	for _, value := range scopes {
-		scope := otlp.ScopeOf(value)
-		if got, want := scope.AppendJSON(nil), oracle(t, scope); !bytes.Equal(got, want) {
-			t.Errorf("ScopeMessage(%+v).AppendJSON = %s, want %s", value, got, want)
-		}
-	}
-}
-
 // TestAppendKeySeparatesMembers pins the comma rule: none after an opening
 // brace, one after any value.
 func TestAppendKeySeparatesMembers(t *testing.T) {
-	doc := otlp.AppendKey([]byte("{"), "a")
-	doc = otlp.AppendBool(doc, false)
-	doc = otlp.AppendKey(doc, "b")
-	doc = otlp.AppendNull(doc)
-	doc = otlp.AppendKey(doc, "c")
-	doc = append(doc, '{', '}')
-	doc = otlp.AppendKey(doc, "d")
-	doc = otlp.AppendBool(doc, true)
-	doc = append(doc, '}')
-	const want = `{"a":false,"b":null,"c":{},"d":true}`
-	if string(doc) != want {
-		t.Errorf("members = %s, want %s", doc, want)
+	type tc struct {
+		name   string
+		render func() []byte
+		want   string
 	}
-	if !json.Valid(doc) {
-		t.Errorf("members %s are not valid JSON", doc)
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		doc := c.render()
+		if string(doc) != c.want {
+			t.Errorf("%s: members = %s, want %s", c.name, doc, c.want)
+		}
+		if !json.Valid(doc) {
+			t.Errorf("%s: members %s are not valid JSON", c.name, doc)
+		}
+	}
+	cases := []tc{{
+		name: "a literal, null, an empty object and a literal",
+		render: func() []byte {
+			doc := otlp.AppendKey([]byte("{"), "a")
+			doc = otlp.AppendBool(doc, false)
+			doc = otlp.AppendKey(doc, "b")
+			doc = otlp.AppendNull(doc)
+			doc = otlp.AppendKey(doc, "c")
+			doc = append(doc, '{', '}')
+			doc = otlp.AppendKey(doc, "d")
+			doc = otlp.AppendBool(doc, true)
+			return append(doc, '}')
+		},
+		want: `{"a":false,"b":null,"c":{},"d":true}`,
+	}}
+	for _, c := range cases {
+		runCase(t, c)
 	}
 }

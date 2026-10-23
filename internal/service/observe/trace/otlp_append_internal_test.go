@@ -121,27 +121,55 @@ func (g diffGen) request() otlpRequest {
 }
 
 // TestOTLPAppendJSONIsMarshalsRendering compares the appender with the
-// reflection marshal on two thousand random trees.
+// reflection marshal on two thousand random trees, drawn from two seeds.
 func TestOTLPAppendJSONIsMarshalsRendering(t *testing.T) {
-	g := diffGen{rng: rand.New(rand.NewPCG(51, 2026))}
-	for i := range 2000 {
-		request := g.request()
-		want, err := otlp.Marshal(request, &appendOracleFailure)
-		if err != nil {
-			t.Fatalf("tree %d: Marshal: %v", i, err)
+	type tc struct {
+		name         string
+		seed1, seed2 uint64
+		trees        int
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		g := diffGen{rng: rand.New(rand.NewPCG(c.seed1, c.seed2))}
+		for i := range c.trees {
+			request := g.request()
+			want, err := otlp.Marshal(request, &appendOracleFailure)
+			if err != nil {
+				t.Fatalf("%s, tree %d: Marshal: %v", c.name, i, err)
+			}
+			if got := request.appendJSON(nil); !bytes.Equal(got, want) {
+				t.Fatalf("%s, tree %d:\n got %s\nwant %s", c.name, i, got, want)
+			}
 		}
-		if got := request.appendJSON(nil); !bytes.Equal(got, want) {
-			t.Fatalf("tree %d:\n got %s\nwant %s", i, got, want)
-		}
+	}
+	cases := []tc{
+		{name: "seed 51/2026", seed1: 51, seed2: 2026, trees: 1000},
+		{name: "seed 9/3", seed1: 9, seed2: 3, trees: 1000},
+	}
+	for _, c := range cases {
+		runCase(t, c)
 	}
 }
 
-// TestOTLPDocCapacityGrowsWithTheBatch keeps the estimate honest.
+// TestOTLPDocCapacityGrowsWithTheBatch keeps the estimate honest: the
+// envelope, plus one estimate per span.
 func TestOTLPDocCapacityGrowsWithTheBatch(t *testing.T) {
-	if got := otlpDocCapacity(nil); got != otlpDocEnvelopeBytes {
-		t.Errorf("otlpDocCapacity(nil) = %d, want %d", got, otlpDocEnvelopeBytes)
+	type tc struct {
+		name  string
+		spans []otlpSpan
+		want  int
 	}
-	if got := otlpDocCapacity(make([]otlpSpan, 2)); got != otlpDocEnvelopeBytes+2*otlpDocSpanBytes {
-		t.Errorf("otlpDocCapacity(2) = %d", got)
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if got := otlpDocCapacity(c.spans); got != c.want {
+			t.Errorf("%s: otlpDocCapacity = %d, want %d", c.name, got, c.want)
+		}
+	}
+	cases := []tc{
+		{name: "no span", spans: nil, want: otlpDocEnvelopeBytes},
+		{name: "two spans", spans: make([]otlpSpan, 2), want: otlpDocEnvelopeBytes + 2*otlpDocSpanBytes},
+	}
+	for _, c := range cases {
+		runCase(t, c)
 	}
 }

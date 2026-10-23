@@ -154,30 +154,60 @@ func (g diffGen) request() otlpRequest {
 }
 
 // TestOTLPAppendJSONIsMarshalsRendering compares the appender with the
-// reflection marshal on two thousand random trees.
+// reflection marshal on two thousand random trees, drawn from two seeds.
 func TestOTLPAppendJSONIsMarshalsRendering(t *testing.T) {
-	g := diffGen{rng: rand.New(rand.NewPCG(48, 2026))}
-	for i := range 2000 {
-		request := g.request()
-		want, err := otlp.Marshal(request, &appendOracleFailure)
-		if err != nil {
-			t.Fatalf("tree %d: Marshal: %v", i, err)
+	type tc struct {
+		name         string
+		seed1, seed2 uint64
+		trees        int
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		g := diffGen{rng: rand.New(rand.NewPCG(c.seed1, c.seed2))}
+		for i := range c.trees {
+			request := g.request()
+			want, err := otlp.Marshal(request, &appendOracleFailure)
+			if err != nil {
+				t.Fatalf("%s, tree %d: Marshal: %v", c.name, i, err)
+			}
+			if got := request.appendJSON(nil); !bytes.Equal(got, want) {
+				t.Fatalf("%s, tree %d:\n got %s\nwant %s", c.name, i, got, want)
+			}
 		}
-		if got := request.appendJSON(nil); !bytes.Equal(got, want) {
-			t.Fatalf("tree %d:\n got %s\nwant %s", i, got, want)
-		}
+	}
+	cases := []tc{
+		{name: "seed 48/2026", seed1: 48, seed2: 2026, trees: 1000},
+		{name: "seed 7/1", seed1: 7, seed2: 1, trees: 1000},
+	}
+	for _, c := range cases {
+		runCase(t, c)
 	}
 }
 
-// TestOTLPDocCapacityCoversTheBenchShapes keeps the estimate honest: it is
-// never negative and grows with the points it counts.
-func TestOTLPDocCapacityCoversTheBenchShapes(t *testing.T) {
+// TestOTLPDocCapacityCoversTheEnvelope keeps the estimate honest: never below
+// the envelope, and exactly the envelope for an empty list.
+func TestOTLPDocCapacityCoversTheEnvelope(t *testing.T) {
 	g := diffGen{rng: rand.New(rand.NewPCG(1, 2))}
-	list := []otlpMetric{g.metric(), g.metric(), g.metric()}
-	if got := otlpDocCapacity(list); got < otlpDocEnvelopeBytes {
-		t.Errorf("otlpDocCapacity = %d, below the envelope %d", got, otlpDocEnvelopeBytes)
+	type tc struct {
+		name  string
+		list  []otlpMetric
+		exact bool
 	}
-	if got := otlpDocCapacity(nil); got != otlpDocEnvelopeBytes {
-		t.Errorf("otlpDocCapacity(nil) = %d, want %d", got, otlpDocEnvelopeBytes)
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		got := otlpDocCapacity(c.list)
+		if c.exact && got != otlpDocEnvelopeBytes {
+			t.Errorf("%s: otlpDocCapacity = %d, want %d", c.name, got, otlpDocEnvelopeBytes)
+		}
+		if got < otlpDocEnvelopeBytes {
+			t.Errorf("%s: otlpDocCapacity = %d, below the envelope %d", c.name, got, otlpDocEnvelopeBytes)
+		}
+	}
+	cases := []tc{
+		{name: "no metric", list: nil, exact: true},
+		{name: "three random metrics", list: []otlpMetric{g.metric(), g.metric(), g.metric()}},
+	}
+	for _, c := range cases {
+		runCase(t, c)
 	}
 }

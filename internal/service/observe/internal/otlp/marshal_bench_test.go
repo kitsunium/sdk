@@ -184,15 +184,28 @@ func appended(request benchRequest) ([]byte, error) {
 // TestBenchAppendIsMarshal keeps the two benchmarked renderings the same
 // document, so their numbers price the same bytes.
 func TestBenchAppendIsMarshal(t *testing.T) {
-	for _, n := range []int{0, smallPayload, largePayload} {
-		tree := benchTree(n)
+	type tc struct {
+		name   string
+		points int
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		tree := benchTree(c.points)
 		want, err := shared(tree)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if got, _ := appended(tree); !bytes.Equal(got, want) {
-			t.Fatalf("%d points: append and Marshal differ:\n%s\n%s", n, got, want)
+			t.Fatalf("%s: append and Marshal differ:\n%s\n%s", c.name, got, want)
 		}
+	}
+	cases := []tc{
+		{name: "no point", points: 0},
+		{name: "a quiet export", points: smallPayload},
+		{name: "a busy export", points: largePayload},
+	}
+	for _, c := range cases {
+		runCase(t, c)
 	}
 }
 
