@@ -1238,16 +1238,22 @@ func (n *Node) stopOnUnsupported(rd *raft.ReadyValue) bool {
 	return true
 }
 
+// sendMessages sends raft's messages, but no entries to a learner the
+// state outgrew (watchUnfed, #613).
+func (n *Node) sendMessages(ms []coreconsensus.MessageValue) {
+	for i := range ms {
+		if len(ms[i].Entries) > 0 && n.unfed[ms[i].To] {
+			continue
+		}
+		n.cfg.Transport.Send(ms[i].To, wire.AppendMessage(nil, &ms[i]))
+	}
+}
+
 // handleOne carries out one Ready: messages sent, membership and silence
 // applied, writes and entries queued to the storage actor and the apply
 // goroutine, fetches and snapshot sends started, waiters answered.
 func (n *Node) handleOne(rd *raft.ReadyValue) {
-	for _, m := range rd.Messages {
-		if len(m.Entries) > 0 && n.unfed[m.To] {
-			continue
-		}
-		n.cfg.Transport.Send(m.To, wire.AppendMessage(nil, &m))
-	}
+	n.sendMessages(rd.Messages)
 	if h := rd.LeaderHint; h.ID != 0 {
 		// A member vouched for a leader this node's configuration does not
 		// list: admitted for its appends and heartbeats only (D4, #542).

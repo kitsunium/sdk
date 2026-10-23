@@ -767,10 +767,20 @@ func (r *Raft) removeMember(cur *core.MembershipValue, target core.NodeID, idx i
 			return codeMembershipInvalid
 		}
 	}
-	if !r.activeMajority(*cur) || (r.answering(target) && (wasVoter || !r.neverVoter(target)) && r.strands(cur) && !r.mutated(mutRemoveStrands)) {
+	if !r.activeMajority(*cur) || r.removalStrands(cur, target, wasVoter) {
 		return codeMembershipInvalid
 	}
 	return 0
+}
+
+// removalStrands reports whether removing target, which leaves next, may
+// strand a voter: only the removal of a member that answers, and that may
+// vouch for a voter — a voter, or a member that ever was one.
+func (r *Raft) removalStrands(next *core.MembershipValue, target core.NodeID, wasVoter bool) bool {
+	if r.mutated(mutRemoveStrands) || !r.answering(target) || (!wasVoter && r.neverVoter(target)) {
+		return false
+	}
+	return r.strands(next)
 }
 
 // neverVoter reports whether id is a learner in every configuration this

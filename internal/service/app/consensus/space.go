@@ -165,16 +165,22 @@ func (n *Node) watchUnfed() {
 			delete(n.unfed, id)
 		}
 	}
-	for _, m := range st.Conf.Members {
-		over := !m.Voter && m.MaxSnapshotBytes > 0 && newest > m.MaxSnapshotBytes
-		switch {
-		case over && !n.unfed[m.ID]:
-			n.unfed[m.ID] = true
-			n.obs.warn("consensus: the state outgrew a learner's announced snapshot limit; it is sent no more entries until it fits or is removed",
-				lattr("peer", uint64(m.ID)), lattr("bytes", uint64(newest)), lattr("limit", uint64(m.MaxSnapshotBytes)))
-		case !over && n.unfed[m.ID]:
-			delete(n.unfed, m.ID)
-			n.obs.info("consensus: a learner's announced snapshot limit fits the state again; it is fed the log", lattr("peer", uint64(m.ID)))
-		}
+	for i := range st.Conf.Members {
+		n.feedOrNot(&st.Conf.Members[i], newest)
+	}
+}
+
+// feedOrNot marks learner m unfed when newest is over its announced limit,
+// fed again once it is not, and says so at each change.
+func (n *Node) feedOrNot(m *coreconsensus.MemberValue, newest int64) {
+	over := !m.Voter && m.MaxSnapshotBytes > 0 && newest > m.MaxSnapshotBytes
+	switch {
+	case over && !n.unfed[m.ID]:
+		n.unfed[m.ID] = true
+		n.obs.warn("consensus: the state outgrew a learner's announced snapshot limit; it is sent no more entries until it fits or is removed",
+			lattr("peer", uint64(m.ID)), lattr("bytes", uint64(newest)), lattr("limit", uint64(m.MaxSnapshotBytes)))
+	case !over && n.unfed[m.ID]:
+		delete(n.unfed, m.ID)
+		n.obs.info("consensus: a learner's announced snapshot limit fits the state again; it is fed the log", lattr("peer", uint64(m.ID)))
 	}
 }
