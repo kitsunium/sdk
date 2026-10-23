@@ -20,12 +20,14 @@ Code range `0.3.93.*`, declared with its sentinels in
 | File | Surface |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
-| `config.go` | `Config` (`Broker`, `Send`, `Retryable` required), `Sender`, `FullPolicy` (`DropOldest` the zero, `DropNewest`, `Block`) and `String`, the defaults (`DefaultMaxBatches`, `DefaultMaxBytes`, `DefaultBlockTimeout`, `DefaultSendTimeout`, `DefaultMaxAge`, `DefaultRetryBase`, `DefaultRetryMax`), `validate` (every refusal named by field) and `normalized` |
-| `forwarder.go` | `Forwarder`, `New` (the backlog counted through `MessageReader`), `Enqueue` (the bound, the full policy, the reservation before the publication), `Stats`, `Run` (`Consume` with `AutoExtend` and `BatchSize` 1), `dropOldest` (receive and acknowledge), `block` (a wait on the clock, woken by the one-slot signal a leaving batch sends) |
+| `config.go` | `Config` (`Broker`, `Send`, `Retryable` required), `Sender`, `FullPolicy` (`DropOldest` the zero, `DropNewest`, `Block`) and `String`, the defaults (`DefaultMaxBatches`, `DefaultMaxBytes`, `DefaultBlockTimeout`, `DefaultSendTimeout`, `DefaultMaxAge`, `DefaultRetryBase`, `DefaultRetryMax`, `DefaultRecountInterval`), `validate` (every refusal named by field) and `normalized` |
+| `forwarder.go` | `Forwarder`, `New` (the backlog counted through `MessageReader`), `Enqueue` (the bound, the full policy, then `publishCounted`: the publication and its identifier counted under `publish`), `Stats` (asks for a count once `RecountInterval` passed), `Run` (`Consume` with `AutoExtend` and `BatchSize` 1, beside the goroutine that counts the queue when asked), `dropOldest` (receive and acknowledge), `block` (a wait on the clock, woken by the one-slot signal a leaving batch sends), `hold` / `release` / `settle` / `leave` / `forget` (the counts by identifier; a batch not counted waits for a publication in flight, then is another process's and takes nothing) |
+| `recount.go` | issue #580: `list` (every live message, its size and whether it is leased), `recountLoop` / `recountOnce` (a count per request, on Run's goroutine), `forgetGone`, `countListed`, `uncountGone` (the counts made what the listing holds, but for a batch kept during it, settled and still leased, or back unleased), `dueRecount` / `askRecount` (a one-slot request, never blocking) |
 | `deliver.go` | the queue handler: an expired batch acknowledged unsent, the retry (`resilience.NewRetry`, `MaxInt` attempts, `Retryable` AND young enough, `Delay` the collector's `RetryAfter` or `Backoff.Delay`, held at what is left of the age), one attempt bounded by `SendTimeout` on the clock, the verdict: sent, handed back on a stop, `DoNotRetry` for a permanent refusal, expired |
 | `signal.go` | `NewSpanExporter` / `NewMetricExporter`: the producer adapters, `EncodeOTLPJSON` then `Enqueue` |
 | `stats.go` | `StatsValue` |
 | `forward_external_test.go`, `signal_external_test.go`, `harness_external_test.go` | every behaviour on a `ManualClock` that reports each timer it arms, no sleep: refusals, sent and counted, a collector down then back on the backoff, a `Retry-After` waited in full and never past the age, a 400 dead-lettered once, an expired batch dropped unsent, each full policy, a stop that hands the batch back, the bound on one attempt, batches that survive a restart on the file broker; end to end through the real OTLP/HTTP exporter (429 then 400) |
+| `recount_external_test.go` | issue #580, each case failing before it: a dead letter replayed while the head batch is retried is counted at the next count, and both sent leave nothing; a batch another consumer took is no longer counted; a batch another process queued is counted, and its delivery takes nothing from the forwarder's; the caller's `RecountInterval`; four producers, four consumers and a count at every read and settle leave no residue |
 | `forward_bench_test.go` / `BENCH.md` | the cost of `Enqueue`, the producer's path, on the memory and the file broker |
 
 ## Why-this-shape
@@ -44,13 +46,27 @@ Code range `0.3.93.*`, declared with its sentinels in
   ceiling as `RetryConfig.MaxDelay` would, and never past the age. An expired
   batch is acknowledged and counted, not dead-lettered: the dead-letter store
   is unbounded, and a long outage would fill it with every batch it delayed.
-- **The counts are the process's.** `Pending` and `PendingBytes` are reserved
-  before the publication (so a fast consumer never takes them below zero),
-  released on every settle, started by `New` from `MessageReader`, and held
-  at zero against a batch another process queued. A message the broker
-  dead-letters on its own — `MaxDeliveries` reached by lapsed leases — stays
-  counted until the next start: build the broker with a `MaxDeliveries` no
-  outage reaches.
+- **The counts follow the queue (ADR 0185 amended, #580).** `Pending` and
+  `PendingBytes` are the batches counted by identifier: started by `New`
+  from `MessageReader`, added by `Enqueue` with the identifier the broker
+  minted — under `publish`, held from the publication until it is counted,
+  so a batch that leaves before it is counted waits for it rather than being
+  taken for another process's —, taken back by the settle of a batch
+  counted. Another process changes the queue behind it — `otlp replay`, a
+  second instance consuming the same table, a broker dead-lettering on its
+  own —: `Run` lists the queue again when a read of `Stats` or a settle finds
+  `RecountInterval` passed, and at once when it delivers a batch it did not
+  count — once per interval at most (`prompted`), or a second instance
+  feeding the queue would have it listed once per batch. No timer: a manual
+  clock moves only when the test moves it. The
+  listing races the queue (`MessageReader`'s contract), so three cases are
+  the forwarder's word: a batch kept during it stays counted; one settled
+  stays uncounted while it is listed leased, because the consumer
+  acknowledges after the settle (`leaving`, pruned by generation once a
+  listing that began after the settle no longer holds it); one listed again
+  unleased — replayed, or a lease lapsed — is counted again. The listing reads
+  payloads, as `New` always did: its cost is the backlog's, on Run's
+  goroutine, never `Enqueue`'s, which adds one map entry.
 - **`Block` arms no timer while there is room**, and wakes on a one-slot
   signal channel every batch leaving sends to without blocking. One slot is
   enough because `Enqueue` is serialised — at most one producer waits — and a

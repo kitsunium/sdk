@@ -93,6 +93,15 @@ DefaultMaxBytes bounds the bytes a forwarder holds when Config.MaxBytes is zero.
 
 Initialised with `github.com/kitsunium/sdk/internal/service/app/forward.DefaultMaxBytes`.
 
+<a name="DefaultRecountInterval"></a>
+```go
+const DefaultRecountInterval time.Duration = 60000000000
+```
+
+DefaultRecountInterval is how long the counts may go without the queue being counted again when Config.RecountInterval is zero.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/app/forward.DefaultRecountInterval`.
+
 <a name="DefaultRetryBase"></a>
 ```go
 const DefaultRetryBase time.Duration = 5000000000
@@ -180,7 +189,7 @@ Code `0.3.93.1` · reason `FORWARD_MISCONFIGURED` · public "The export forwarde
 func New(ctx context.Context, cfg Config) (*Forwarder, error)
 ```
 
-New builds a forwarder over cfg.Broker, counting the backlog a previous process left in it. It starts nothing: Run sends.
+New builds a forwarder over cfg.Broker, counting the backlog a previous process left in it; Run counts it again once Config.RecountInterval has passed. It starts nothing: Run sends.
 
 <a name="NewMetricExporter"></a>
 ## func [NewMetricExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/forward/gen_facade.go>)
@@ -203,7 +212,7 @@ NewSpanExporter returns a trace ContextSpanExporter that encodes each batch as O
 <a name="Config"></a>
 ## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/forward/gen_facade.go>)
 
-Config is the public alias for a forwarder's configuration: Broker, Send and Retryable required; Clock, MaxBatches, MaxBytes, WhenFull, BlockTimeout, SendTimeout, MaxAge, Backoff, Parallelism, PollInterval, DrainTimeout and SettleTimeout optional.
+Config is the public alias for a forwarder's configuration: Broker, Send and Retryable required; Clock, MaxBatches, MaxBytes, WhenFull, BlockTimeout, SendTimeout, MaxAge, Backoff, Parallelism, PollInterval, DrainTimeout, SettleTimeout and RecountInterval optional.
 
 ```go
 type Config = svcforward.Config
@@ -219,63 +228,74 @@ type Config struct {
 	// VisibilityTimeout above SendTimeout, a MaxDeliveries no outage reaches
 	// — MaxAge is the forwarder's budget — and a MaxMessageBytes that holds
 	// a batch. The forwarder neither sets its policy nor closes it.
-	Broker        corequeue.Broker
+	Broker          corequeue.Broker
 	// Send ships one stored batch: an OTLP/HTTP exporter's ExportDocument,
 	// or any function of that shape.
-	Send          Sender
+	Send            Sender
 	// Retryable classifies a failure of Send as one a later attempt may cure
 	// — trace.OTLPRetryable, metrics.OTLPRetryable. It is REQUIRED: nil reads
 	// as "retry everything" or as "retry nothing", two opposites. A failure
 	// it calls permanent is dead-lettered at once.
-	Retryable     func(error) bool
+	Retryable       func(error) bool
 	// Clock paces every retry, bounds every attempt and the wait of Block,
 	// and ages every batch. Nil means clock.System; a clock.ManualClock drives
 	// a test without a sleep. It must be the broker's: a batch's age is read
 	// from the instant the broker stamped.
-	Clock         clock.Timed
+	Clock           clock.Timed
 	// MaxBatches bounds the batches the forwarder holds. Zero means
 	// DefaultMaxBatches; negative is refused.
-	MaxBatches    int
+	MaxBatches      int
 	// MaxBytes bounds the bytes the forwarder holds. Zero means
 	// DefaultMaxBytes; negative is refused. A batch larger on its own is
 	// refused with BatchTooLarge.
-	MaxBytes      int64
+	MaxBytes        int64
 	// WhenFull is what Enqueue does when either bound is reached. The zero
 	// is DropOldest.
-	WhenFull      FullPolicy
+	WhenFull        FullPolicy
 	// BlockTimeout bounds the wait of Block. Zero means DefaultBlockTimeout;
 	// negative is refused.
-	BlockTimeout  time.Duration
+	BlockTimeout    time.Duration
 	// SendTimeout bounds one attempt, on Clock. Zero means
 	// DefaultSendTimeout; negative is refused.
-	SendTimeout   time.Duration
+	SendTimeout     time.Duration
 	// MaxAge is how long after the queue accepted it a batch may still be
 	// sent: one delivered older is dropped unsent, one whose retryable
 	// failure finds it older is not retried; either is acknowledged and
 	// counted Expired. A Retry-After is honoured in full, but never past it.
 	// Zero means DefaultMaxAge; negative is refused.
-	MaxAge        time.Duration
+	MaxAge          time.Duration
 	// Backoff is the wait before each retry when the failure imposes none:
 	// Backoff.Delay(attempt). The zero value is the
 	// DefaultRetryBase–DefaultRetryMax curve, and a curve without a positive
 	// BaseDelay starts from DefaultRetryBase under its own ceiling: a failed
 	// batch is never retried at once.
-	Backoff       kbackoff.Value
+	Backoff         kbackoff.Value
 	// Parallelism is how many consumers send at once. Non-positive is one,
 	// which keeps the queue's order while nothing fails and sends one request
 	// at a time to a collector that is down; above one there is no order.
-	Parallelism   int
+	Parallelism     int
 	// PollInterval is how late a batch another PROCESS queued may be
 	// noticed; one Enqueue queued in this process is sent at once. Zero is
 	// the queue's own default.
-	PollInterval  time.Duration
+	PollInterval    time.Duration
 	// DrainTimeout is how long the batch being sent when Run's context ends
 	// may still run. Zero stops it at once; it is then handed back uncounted
 	// and sent by the next process.
-	DrainTimeout  time.Duration
+	DrainTimeout    time.Duration
 	// SettleTimeout bounds each acknowledgement and hand-back once Run's
 	// context has ended. Zero is the queue's own default.
-	SettleTimeout time.Duration
+	SettleTimeout   time.Duration
+	// RecountInterval is how long the counts go before the queue is counted
+	// again, over a broker that lists its messages: a read of Stats, or a
+	// batch leaving the queue, once it has passed has Run list the queue and
+	// count what another process changed in it — a dead letter replayed into
+	// it, a batch another consumer took. The delivery of a batch the
+	// forwarder did not count has it counted at once, once per interval at
+	// most. A count reads every live batch, its payload included, on Run's
+	// goroutine and never on
+	// Enqueue's: it costs what the backlog weighs. Zero means
+	// DefaultRecountInterval; negative is refused.
+	RecountInterval time.Duration
 }
 ```
 
@@ -310,7 +330,9 @@ Enqueue keeps batch in the queue, durably once it returns nil, for Run to send. 
 func (*Forwarder) Run(ctx context.Context) error
 ```
 
-Run sends the queued batches until ctx ends, one consumer per Config.Parallelism, and returns what the queue's consumer returns. The batch being sent when ctx ends may finish within Config.DrainTimeout; one cut short is handed back uncounted and sent by the next process.
+Run sends the queued batches until ctx ends, one consumer per Config.Parallelism, and returns what the queue's consumer returns. The batch being sent when ctx ends may finish within Config.DrainTimeout; one cut short is handed back uncounted and sent by the next process. Over a broker that lists its messages, Run also counts the queue again when asked: by a read of Stats or a batch leaving the queue once Config.RecountInterval has passed, and at once, once per interval at most, by the delivery of a batch this forwarder did not count.
+
+Goroutine lifecycle: one counts the queue when asked, until the consumer returns; Run waits for it before it returns.
 
 <a name="Forwarder.Stats"></a>
 ### func \(Forwarder\) [Stats](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/forward/forwarder.go>)
@@ -319,7 +341,7 @@ Run sends the queued batches until ctx ends, one consumer per Config.Parallelism
 func (*Forwarder) Stats() StatsValue
 ```
 
-Stats returns the forwarder's counters, read at once.
+Stats returns the forwarder's counters, read at once. A read once Config.RecountInterval has passed since the queue was last counted asks Run to count it again, and returns the counts as they stand.
 
 <a name="FullPolicy"></a>
 ## type [FullPolicy](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/forward/gen_facade.go>)

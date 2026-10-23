@@ -1,0 +1,17 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: (*Forwarder).forgetGone
+    steps:
+      - loop:
+          do:
+            - bind: batch, present
+              eval: listed[id]
+            - opt:
+                do:
+                  - continue: true
+                when: present && batch.leased || !present && settledIn >= generation
+            - eval: delete(f.leaving, id)
+          key: id
+          range: f.leaving
+          value: settledIn

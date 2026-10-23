@@ -999,6 +999,22 @@ constants:
         type: OTLPFullPolicy
         value: "\"block\""
     name: OTLPDropOldest
+  - doc: |-
+      The export's queue policy, as otlpengine.openQueue opens its queues: a
+      lease above two attempts, deliveries no outage reaches, a batch at most
+      the export's byte bound, up to 64 MiB.
+    grouped: true
+    items:
+      - name: otlpLeaseMargin
+        type: time.Duration
+        value: 30 * time.Second
+      - name: otlpMaxDeliveries
+        type: int
+        value: 1 << 30
+      - name: otlpMaxQueueMessage
+        type: int64
+        value: 64 << 20
+    name: otlpLeaseMargin
   - doc: The places a queue of the export lies in, as the runtime state says them.
     grouped: true
     items:
@@ -1024,6 +1040,11 @@ constants:
                 live queue, their attempts counted afresh: the export sends them
                 again, a running product as soon as it next polls; --drop deletes them
                 for good instead
+            %[1]s otlp migrate [traces|metrics]
+                move the batches the export left under the data directory, waiting and
+                dead, onto the database otlp-database names, where it now keeps its
+                queues: in one transaction, verified by fingerprints, the file queues
+                then moved aside under <data>/.data-copy/
           The queues are read where the export keeps them: under the data directory,
           or on the database otlp-database names. An export that keeps them in memory
           has none to read.
@@ -3665,6 +3686,15 @@ files:
       - discardHistogram.RecordDuration
     name: otlp_meter.go
   - decls:
+      - otlpLeaseMargin
+      - otlpQueuePolicy
+      - (*App).migrateOTLP
+      - (*App).migrateOTLPSignal
+      - fileQueueProbe
+      - (*App).otlpQueuePart
+      - (*queuePart).verifyHeld
+    name: otlp_migrate.go
+  - decls:
       - otlpStoreMemory
       - otlpRunning
       - otlpLinked
@@ -3679,6 +3709,8 @@ files:
       - (*App).stopOTLP
       - (*App).otlpConfig
       - (*App).otlpOnDatabase
+      - (*App).warnOTLPFileQueuesLeft
+      - otlpFileQueue
       - (*App).otlpDatabase
       - otlpTable
       - (*App).otlpTables
@@ -3694,9 +3726,11 @@ files:
   - decls:
       - otlpUsageText
       - otlpMaxDeadLetters
+      - otlpVerbs
       - otlpArgs
       - otlpCommandOf
       - (*App).otlpCommand
+      - (*App).runOTLPVerb
       - parseOTLPArgs
       - (*otlpArgs).take
       - (*App).otlpSettingsRefused
@@ -7734,6 +7768,18 @@ functions:
   - name: Meter
     params: ctx context.Context
     results: metrics.FullMeter
+  - doc: otlpQueuePolicy is the policy the export opens its queues under.
+    name: otlpQueuePolicy
+    params: cfg *plug.OTLPConfig
+    results: plug.QueuePolicyValue
+  - doc: |-
+      fileQueueProbe is fileQueueHolds for a command that acts on its answer: a
+      state directory that does not exist holds nothing, but one that cannot be
+      read is an error, never an empty queue — a migrate that took it for one
+      would say there is nothing to move and leave the batches behind.
+    name: fileQueueProbe
+    params: dir string
+    results: bool, error
   - doc: otlpLinked reports whether the program imports framework/app/otlp.
     name: otlpLinked
     results: bool
@@ -7750,6 +7796,12 @@ functions:
     name: otlpRootSampler
     params: ratio float64
     results: trace.Sampler
+  - doc: |-
+      otlpFileQueue is the directory of signal's file queue under the data
+      directory data, where the export keeps it without otlp-database.
+    name: otlpFileQueue
+    params: data, signal string
+    results: string
   - doc: |-
       otlpTable is the table of signal's queue on the export's database:
       app_otlp__traces, app_otlp__metrics.
@@ -7784,9 +7836,9 @@ functions:
     params: a *App
     results: func(ctx context.Context, args []string) int
   - doc: |-
-      parseOTLPArgs reads `otlp`'s arguments: dead-letters and a signal at most,
-      or replay, a signal, --drop and the IDs in any order; ok is false for any
-      other.
+      parseOTLPArgs reads `otlp`'s arguments: dead-letters or migrate and a
+      signal at most, or replay, a signal, --drop and the IDs in any order; ok
+      is false for any other.
     name: parseOTLPArgs
     params: args []string
     results: otlpArgs, bool
@@ -12276,6 +12328,29 @@ types:
         recv: a *App
         results: "[]model.Setting"
       - doc: |-
+          migrateOTLP moves the batches of signals the export left under the data
+          directory onto the database otlp-database names; refused when it names
+          none.
+        name: migrateOTLP
+        params: ctx context.Context, signals []string, stdout io.Writer
+        recv: a *App
+        results: error
+      - doc: |-
+          migrateOTLPSignal moves the batches of signal's file queue onto its table,
+          and says how many on stdout; nothing when the file queue holds none.
+        name: migrateOTLPSignal
+        params: ctx context.Context, cfg *plug.OTLPConfig, signal string, stdout io.Writer
+        recv: a *App
+        results: error
+      - doc: |-
+          otlpQueuePart opens signal's file queue at dir and its table on the
+          export's database, each as the export opens it, through the queue
+          subsystem.
+        name: otlpQueuePart
+        params: cfg *plug.OTLPConfig, signal, dir string
+        recv: a *App
+        results: queuePart, error
+      - doc: |-
           otlpSink is the tracer's sink when the app declares an export: every span
           that ends goes to the export while it runs, nowhere otherwise. nil for an
           app that declares none, whose tracer then records nothing.
@@ -12349,6 +12424,15 @@ types:
         recv: a *App
         results: error
       - doc: |-
+          warnOTLPFileQueuesLeft says, at the start, that the export's queues moved
+          from the data directory onto a database and left batches behind (issue
+          #580): they wait in the file queues under <data>/.otlp, which nothing
+          sends now, until `otlp migrate` moves them — logged and shown as a
+          problem, as a consumer's queue left behind is (consumer.file-queue-left).
+        name: warnOTLPFileQueuesLeft
+        params: cfg *plug.OTLPConfig
+        recv: a *App
+      - doc: |-
           otlpDatabase is the database otlp-database names, nil when it names none
           the app declares, or nothing.
         name: otlpDatabase
@@ -12399,6 +12483,13 @@ types:
         params: ctx context.Context, args []string, stdout, stderr io.Writer
         recv: a *App
         results: int
+      - doc: |-
+          runOTLPVerb runs the verb p names on the export's queues, placed as its
+          start places them.
+        name: runOTLPVerb
+        params: ctx context.Context, p *otlpArgs, stdout, stderr io.Writer
+        recv: a *App
+        results: error
       - doc: |-
           otlpSettingsRefused resolves the settings — the export's among them — and
           says every error the start would refuse them for.
@@ -16220,6 +16311,14 @@ types:
           verify compares the fingerprints of both sides of the queue: the same
           messages, the same number of times, in any order.
         name: verify
+        params: ctx context.Context
+        recv: p *queuePart
+        results: error
+      - doc: |-
+          verifyHeld reports whether the table holds every message of the file
+          queue, as many times as the file queue does, by fingerprints: the table
+          may hold others besides, which the export queued there itself.
+        name: verifyHeld
         params: ctx context.Context
         recv: p *queuePart
         results: error
@@ -29055,6 +29154,11 @@ vars:
       - name: otlpCode
         type: atomic.Pointer[otlpHooks]
     name: otlpCode
+  - doc: otlpVerbs are `otlp`'s verbs.
+    items:
+      - name: otlpVerbs
+        value: "[]string{\"dead-letters\", \"replay\", \"migrate\"}"
+    name: otlpVerbs
   - doc: "The PHC string format: $id[$v=version][$param=value(,param=value)*][$salt$hash]."
     grouped: true
     items:

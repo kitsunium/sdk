@@ -143,6 +143,17 @@ packages:
         name: DefaultRetryMax
         type: time.Duration
         value: "30000000000"
+      - blockDoc: |-
+          The defaults a zero field clamps to (ADR 0031: each zero has one reading —
+          "not thought about" — and the value below is the one that needs no
+          explanation).
+        doc: |-
+          DefaultRecountInterval is how long the counts may go without the queue
+          being counted again when Config.RecountInterval is zero: a backlog
+          another process changed is said within a minute of a read.
+        name: DefaultRecountInterval
+        type: time.Duration
+        value: "60000000000"
       - blockDoc: The three full policies. The zero is DropOldest.
         doc: |-
           DropOldest takes the oldest batches the consumer is not sending out of
@@ -180,7 +191,9 @@ packages:
           New builds a forwarder over cfg.Broker. It starts nothing: Run sends. When
           the broker is a queue.MessageReader — every broker of the SDK is — New
           counts the backlog a previous process left, so the bounds hold across a
-          restart; ctx bounds that count.
+          restart, and Run counts it again once Config.RecountInterval has passed,
+          so they hold against what another process changes in it; ctx bounds the
+          first count.
         in:
           - name: ctx
             type: context.Context
@@ -350,6 +363,19 @@ packages:
                 context has ended. Zero is the queue's own default.
               name: SettleTimeout
               type: time.Duration
+            - doc: |-
+                RecountInterval is how long the counts go before the queue is counted
+                again, over a broker that lists its messages: a read of Stats, or a
+                batch leaving the queue, once it has passed has Run list the queue and
+                count what another process changed in it — a dead letter replayed into
+                it, a batch another consumer took. The delivery of a batch the
+                forwarder did not count has it counted at once, once per interval at
+                most. A count reads every live batch, its payload included, on Run's
+                goroutine and never on
+                Enqueue's: it costs what the backlog weighs. Zero means
+                DefaultRecountInterval; negative is refused.
+              name: RecountInterval
+              type: time.Duration
       - doc: |-
           Forwarder holds batches in a durable queue and sends each one later,
           retried while its failure is retryable and its age allows, dead-lettered
@@ -373,7 +399,10 @@ packages:
             out:
               - type: error
             recv: pointer
-          - doc: Stats returns the forwarder's counters, read at once.
+          - doc: |-
+              Stats returns the forwarder's counters, read at once. A read once
+              Config.RecountInterval has passed since the queue was last counted asks
+              Run to count it again, and returns the counts as they stand.
             name: Stats
             out:
               - type: StatsValue
@@ -382,7 +411,14 @@ packages:
               Run sends the queued batches until ctx ends, one consumer per
               Config.Parallelism, and returns what the queue's consumer returns. The
               batch being sent when ctx ends may finish within Config.DrainTimeout; one
-              cut short is handed back uncounted and sent by the next process.
+              cut short is handed back uncounted and sent by the next process. Over a
+              broker that lists its messages, Run also counts the queue again when
+              asked: by a read of Stats or a batch leaving the queue once
+              Config.RecountInterval has passed, and at once, once per interval at most,
+              by the delivery of a batch this forwarder did not count.
+
+              Goroutine lifecycle: one counts the queue when asked, until the consumer
+              returns; Run waits for it before it returns.
             in:
               - name: ctx
                 type: context.Context
@@ -396,7 +432,9 @@ packages:
       - doc: |-
           StatsValue is what a forwarder holds, has done and has lost, read at once
           by [Forwarder.Stats]. The counters count since New; Pending and
-          PendingBytes start from the backlog New found in the queue.
+          PendingBytes start from the backlog New found in the queue, and follow
+          it: what the forwarder keeps and settles at once, what another process
+          changed in it at the next count (Config.RecountInterval).
         name: StatsValue
         struct:
           fields:
@@ -539,6 +577,14 @@ packages:
             type: time.Duration
             typed: true
             value: "30000000000"
+          - doc: |-
+              DefaultRecountInterval is how long the counts may go without the queue
+              being counted again when Config.RecountInterval is zero.
+            name: DefaultRecountInterval
+            reexport: svcforward.DefaultRecountInterval
+            type: time.Duration
+            typed: true
+            value: "60000000000"
         doc: "The forwarder's defaults: each zero field of Config takes one."
       - const:
           - doc: |-
@@ -575,7 +621,7 @@ packages:
               Config is the public alias for a forwarder's configuration: Broker, Send
               and Retryable required; Clock, MaxBatches, MaxBytes, WhenFull,
               BlockTimeout, SendTimeout, MaxAge, Backoff, Parallelism, PollInterval,
-              DrainTimeout and SettleTimeout optional.
+              DrainTimeout, SettleTimeout and RecountInterval optional.
             name: Config
             target: svcforward.Config
       - alias:
@@ -620,7 +666,8 @@ packages:
       - func:
           doc: |-
             New builds a forwarder over cfg.Broker, counting the backlog a previous
-            process left in it. It starts nothing: Run sends.
+            process left in it; Run counts it again once Config.RecountInterval has
+            passed. It starts nothing: Run sends.
           forward: svcforward.New
           in:
             - name: ctx

@@ -20,6 +20,8 @@
   (the mail spool, its nearest relative), [ADR 0149](0149-a-product-reports-numbers-on-a-port-and-an-exporter-only-emits.md)
   (the framework's telemetry), [ADR 0183](0183-a-message-may-wait-for-its-instant-and-recurrence-stays-the-schedulers.md)
   (`RetryAfter`), kitsunium/sdk#479, kitsunium/sdk#493
+- **Amended**: 2026-10-23 for kitsunium/sdk#580 — D4's count follows the
+  queue rather than the process: see D4 and the *Amendment* section.
 
 ## Context
 
@@ -141,10 +143,12 @@ dropped: no policy can make room for it.
 The forwarder counts what it holds — the batches it published and has not
 yet acknowledged, dead-lettered or dropped. `New` starts the count from the
 queue itself when the broker is a `queue.MessageReader` (all three SDK brokers
-are), so a restarted process knows the backlog the last one left. The count is
-the process's: a second process writing into the same queue is not seen, and a
-message the broker dead-letters on its own (a consumer that kept dying on it,
-`MaxDeliveries` lapsed leases) is counted until the next start. The dead-letter
+are), so a restarted process knows the backlog the last one left. Since the
+amendment of 2026-10-23 (kitsunium/sdk#580, below) the count follows the
+queue: what another process changes in it — a dead letter replayed, a batch
+another consumer took or another producer queued, a message the broker
+dead-letters on its own — is counted at the next count, within
+`RecountInterval` of a read. The dead-letter
 store is outside the bound: it holds what the collector refused for good,
 which is rare, evidence, and the operator's to purge (`DeadLetterManager`).
 
@@ -292,7 +296,44 @@ it kept.
   rejections and the last `Retry-After` from `Stats`. Outside this ADR.
 - **The logger's `nettransport`** over a forwarder (kitsunium/sdk#479 P3).
 - **OTLP/protobuf** (ADR 0048).
-- **A count shared between processes** writing into one queue (D4).
+
+## Amendment — 2026-10-23: the count follows the queue (kitsunium/sdk#580)
+
+The framework's `otlp replay` moves a dead letter back into the live queue
+from another process while the product runs. The batch was sent at the next
+poll, but D4's count was the process's: the replayed batch was counted only
+from the next start, and its delivery took one from the batches the
+forwarder held, so `Stats` — the readiness and the runtime state built on it —
+under-stated the backlog, and the bounds let it grow past them. The same held
+for a second instance consuming the same table, which left the first one's
+count growing until its bound refused every batch.
+
+- **The forwarder counts by identifier.** `Enqueue` counts the identifier the
+  broker minted, under a lock held from the publication until it is counted;
+  a settle takes back only a batch it counted, and one it did not count —
+  after waiting for a publication in flight — is another process's, which
+  takes nothing.
+- **`Run` lists the queue again when asked**, through `MessageReader`, on its
+  own goroutine: by a read of `Stats` or a batch leaving the queue once
+  `Config.RecountInterval` (`DefaultRecountInterval`, one minute; negative
+  refused) has passed, and at once by the delivery of a batch the forwarder
+  did not count — once per interval at most, so a second instance feeding
+  the queue does not have it listed once per batch. No timer is armed: a
+  forwarder nobody reads and nothing
+  leaves has nothing to say. The counts become what the listing holds, but
+  for what the forwarder knows better than a listing that races it: a batch
+  kept during the listing stays counted, a batch settled and still listed
+  leased — the consumer acknowledges after the settle — stays uncounted, and
+  one listed again unleased is counted again.
+- **The cost is off the producer's path.** `Enqueue` adds one map entry; a
+  count reads every live batch, payload included, as `New` already did —
+  what the backlog weighs, once per interval at most.
+- Rejected: **a timer of the forwarder's own** — it would move a test's
+  manual clock on its own and wake an idle process for nothing; **a
+  notification from the replaying process** — the processes share the queue
+  and nothing else, and the framework's CLI reaches no running product (its
+  D13); **a recount in `Stats` itself** — it would put the backlog's read on
+  the caller's path, a readiness probe's.
 
 ## References
 

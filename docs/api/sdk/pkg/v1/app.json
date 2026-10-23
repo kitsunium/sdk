@@ -3923,7 +3923,7 @@
       "spelled": "svcforward.Config",
       "canonical": "github.com/kitsunium/sdk/internal/service/app/forward.Config",
       "owner": "go:github.com/kitsunium/sdk/internal/service/app/forward.Config",
-      "doc": "Config is the public alias for a forwarder's configuration: Broker, Send\nand Retryable required; Clock, MaxBatches, MaxBytes, WhenFull,\nBlockTimeout, SendTimeout, MaxAge, Backoff, Parallelism, PollInterval,\nDrainTimeout and SettleTimeout optional.\n",
+      "doc": "Config is the public alias for a forwarder's configuration: Broker, Send\nand Retryable required; Clock, MaxBatches, MaxBytes, WhenFull,\nBlockTimeout, SendTimeout, MaxAge, Backoff, Parallelism, PollInterval,\nDrainTimeout, SettleTimeout and RecountInterval optional.\n",
       "file": "forward/gen_facade.go",
       "layer": "public",
       "family": "app"
@@ -3980,6 +3980,20 @@
       "value": "268435456",
       "init": "go:github.com/kitsunium/sdk/internal/service/app/forward.DefaultMaxBytes",
       "doc": "DefaultMaxBytes bounds the bytes a forwarder holds when Config.MaxBytes\nis zero.\n",
+      "file": "forward/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/forward.DefaultRecountInterval",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/forward",
+      "name": "DefaultRecountInterval",
+      "spelled": "time.Duration",
+      "canonical": "time.Duration",
+      "value": "60000000000",
+      "init": "go:github.com/kitsunium/sdk/internal/service/app/forward.DefaultRecountInterval",
+      "doc": "DefaultRecountInterval is how long the counts may go without the queue\nbeing counted again when Config.RecountInterval is zero.\n",
       "file": "forward/gen_facade.go",
       "layer": "public",
       "family": "app"
@@ -4123,7 +4137,7 @@
       "name": "New",
       "spelled": "func(ctx context.Context, cfg Config) (*Forwarder, error)",
       "canonical": "func(ctx context.Context, cfg github.com/kitsunium/sdk/pkg/v1/app/forward.Config) (*github.com/kitsunium/sdk/pkg/v1/app/forward.Forwarder, error)",
-      "doc": "New builds a forwarder over cfg.Broker, counting the backlog a previous\nprocess left in it. It starts nothing: Run sends.\n",
+      "doc": "New builds a forwarder over cfg.Broker, counting the backlog a previous\nprocess left in it; Run counts it again once Config.RecountInterval has\npassed. It starts nothing: Run sends.\n",
       "file": "forward/gen_facade.go",
       "layer": "public",
       "family": "app"

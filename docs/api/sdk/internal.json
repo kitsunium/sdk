@@ -49669,8 +49669,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/forward",
       "name": "Config",
-      "spelled": "struct{Broker corequeue.Broker; Send Sender; Retryable func(error) bool; Clock clock.Timed; MaxBatches int; MaxBytes int64; WhenFull FullPolicy; BlockTimeout time.Duration; SendTimeout time.Duration; MaxAge time.Duration; Backoff kbackoff.Value; Parallelism int; PollInterval time.Duration; DrainTimeout time.Duration; SettleTimeout time.Duration}",
-      "canonical": "struct{Broker github.com/kitsunium/sdk/internal/core/data/queue.Broker; Send github.com/kitsunium/sdk/internal/service/app/forward.Sender; Retryable func(error) bool; Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed; MaxBatches int; MaxBytes int64; WhenFull github.com/kitsunium/sdk/internal/service/app/forward.FullPolicy; BlockTimeout time.Duration; SendTimeout time.Duration; MaxAge time.Duration; Backoff github.com/kitsunium/sdk/internal/kernel/backoff.Value; Parallelism int; PollInterval time.Duration; DrainTimeout time.Duration; SettleTimeout time.Duration}",
+      "spelled": "struct{Broker corequeue.Broker; Send Sender; Retryable func(error) bool; Clock clock.Timed; MaxBatches int; MaxBytes int64; WhenFull FullPolicy; BlockTimeout time.Duration; SendTimeout time.Duration; MaxAge time.Duration; Backoff kbackoff.Value; Parallelism int; PollInterval time.Duration; DrainTimeout time.Duration; SettleTimeout time.Duration; RecountInterval time.Duration}",
+      "canonical": "struct{Broker github.com/kitsunium/sdk/internal/core/data/queue.Broker; Send github.com/kitsunium/sdk/internal/service/app/forward.Sender; Retryable func(error) bool; Clock github.com/kitsunium/sdk/internal/kernel/clock.Timed; MaxBatches int; MaxBytes int64; WhenFull github.com/kitsunium/sdk/internal/service/app/forward.FullPolicy; BlockTimeout time.Duration; SendTimeout time.Duration; MaxAge time.Duration; Backoff github.com/kitsunium/sdk/internal/kernel/backoff.Value; Parallelism int; PollInterval time.Duration; DrainTimeout time.Duration; SettleTimeout time.Duration; RecountInterval time.Duration}",
       "fields": [
         {
           "name": "Broker",
@@ -49746,6 +49746,11 @@
           "name": "SettleTimeout",
           "type": "time.Duration",
           "doc": "SettleTimeout bounds each acknowledgement and hand-back once Run's\ncontext has ended. Zero is the queue's own default.\n"
+        },
+        {
+          "name": "RecountInterval",
+          "type": "time.Duration",
+          "doc": "RecountInterval is how long the counts go before the queue is counted\nagain, over a broker that lists its messages: a read of Stats, or a\nbatch leaving the queue, once it has passed has Run list the queue and\ncount what another process changed in it — a dead letter replayed into\nit, a batch another consumer took. The delivery of a batch the\nforwarder did not count has it counted at once, once per interval at\nmost. A count reads every live batch, its payload included, on Run's\ngoroutine and never on\nEnqueue's: it costs what the backlog weighs. Zero means\nDefaultRecountInterval; negative is refused.\n"
         }
       ],
       "doc": "Config configures [New]. Broker, Send and Retryable are required; every\nother field is optional.\n",
@@ -49801,6 +49806,20 @@
       "canonical": "int64",
       "value": "268435456",
       "doc": "DefaultMaxBytes bounds the bytes a forwarder holds when Config.MaxBytes\nis zero — Vector's smallest disk buffer.\n",
+      "file": "service/app/forward/config.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/forward.DefaultRecountInterval",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/forward",
+      "name": "DefaultRecountInterval",
+      "spelled": "time.Duration",
+      "canonical": "time.Duration",
+      "value": "60000000000",
+      "init": "go:time.Minute",
+      "doc": "DefaultRecountInterval is how long the counts may go without the queue\nbeing counted again when Config.RecountInterval is zero: a backlog\nanother process changed is said within a minute of a read.\n",
       "file": "service/app/forward/config.go",
       "layer": "service",
       "family": "app"
@@ -49903,7 +49922,7 @@
       "recv": "Forwarder",
       "spelled": "func(ctx context.Context) error",
       "canonical": "func(ctx context.Context) error",
-      "doc": "Run sends the queued batches until ctx ends, one consumer per\nConfig.Parallelism, and returns what the queue's consumer returns. The\nbatch being sent when ctx ends may finish within Config.DrainTimeout; one\ncut short is handed back uncounted and sent by the next process.\n",
+      "doc": "Run sends the queued batches until ctx ends, one consumer per\nConfig.Parallelism, and returns what the queue's consumer returns. The\nbatch being sent when ctx ends may finish within Config.DrainTimeout; one\ncut short is handed back uncounted and sent by the next process. Over a\nbroker that lists its messages, Run also counts the queue again when\nasked: by a read of Stats or a batch leaving the queue once\nConfig.RecountInterval has passed, and at once, once per interval at most,\nby the delivery of a batch this forwarder did not count.\n\nGoroutine lifecycle: one counts the queue when asked, until the consumer\nreturns; Run waits for it before it returns.\n",
       "file": "service/app/forward/forwarder.go",
       "layer": "service",
       "family": "app"
@@ -49916,7 +49935,7 @@
       "recv": "Forwarder",
       "spelled": "func() StatsValue",
       "canonical": "func() github.com/kitsunium/sdk/internal/service/app/forward.StatsValue",
-      "doc": "Stats returns the forwarder's counters, read at once.\n",
+      "doc": "Stats returns the forwarder's counters, read at once. A read once\nConfig.RecountInterval has passed since the queue was last counted asks\nRun to count it again, and returns the counts as they stand.\n",
       "file": "service/app/forward/forwarder.go",
       "layer": "service",
       "family": "app"
@@ -49953,7 +49972,7 @@
       "name": "New",
       "spelled": "func(ctx context.Context, cfg Config) (*Forwarder, error)",
       "canonical": "func(ctx context.Context, cfg github.com/kitsunium/sdk/internal/service/app/forward.Config) (*github.com/kitsunium/sdk/internal/service/app/forward.Forwarder, error)",
-      "doc": "New builds a forwarder over cfg.Broker. It starts nothing: Run sends. When\nthe broker is a queue.MessageReader — every broker of the SDK is — New\ncounts the backlog a previous process left, so the bounds hold across a\nrestart; ctx bounds that count.\n",
+      "doc": "New builds a forwarder over cfg.Broker. It starts nothing: Run sends. When\nthe broker is a queue.MessageReader — every broker of the SDK is — New\ncounts the backlog a previous process left, so the bounds hold across a\nrestart, and Run counts it again once Config.RecountInterval has passed,\nso they hold against what another process changes in it; ctx bounds the\nfirst count.\n",
       "file": "service/app/forward/forwarder.go",
       "layer": "service",
       "family": "app"
@@ -50053,7 +50072,7 @@
           "doc": "DeadLettered counts the batches the sender refused for good, kept in\nthe broker's dead-letter store.\n"
         }
       ],
-      "doc": "StatsValue is what a forwarder holds, has done and has lost, read at once\nby [Forwarder.Stats]. The counters count since New; Pending and\nPendingBytes start from the backlog New found in the queue.\n",
+      "doc": "StatsValue is what a forwarder holds, has done and has lost, read at once\nby [Forwarder.Stats]. The counters count since New; Pending and\nPendingBytes start from the backlog New found in the queue, and follow\nit: what the forwarder keeps and settles at once, what another process\nchanged in it at the next count (Config.RecountInterval).\n",
       "file": "service/app/forward/stats.go",
       "layer": "service",
       "family": "app"

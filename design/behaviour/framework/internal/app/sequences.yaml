@@ -24035,6 +24035,8 @@ sequences:
           do:
             - eval: fmt.Fprintf(w, "  %[1]s otlp dead-letters|replay [traces|metrics] [--drop] [ID...]\n%[2]s the OTLP export's dead letters, listed, replayed or dropped\n", a.name, strings.Repeat(" ", 37))
               to: fmt
+            - eval: fmt.Fprintf(w, "  %[1]s otlp migrate [traces|metrics]\n%[2]s the OTLP export's batches left under the data directory, moved onto otlp-database\n", a.name, strings.Repeat(" ", 37))
+              to: fmt
           when: a.otlpCLI() != nil
   - of: (*App).onStores
     participants:
@@ -28034,6 +28036,271 @@ sequences:
   - of: discardGauge.Add
   - of: discardHistogram.Record
   - of: discardHistogram.RecordDuration
+  - of: otlpQueuePolicy
+    steps:
+      - return: |-
+          plug.QueuePolicyValue{
+          		VisibilityTimeout: 2*cfg.SendTimeout + otlpLeaseMargin,
+          		MaxDeliveries:     otlpMaxDeliveries,
+          		MaxMessageBytes:   int(min(cfg.MaxBytes, otlpMaxQueueMessage)),
+          	}
+  - of: (*App).migrateOTLP
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).migrateOTLP
+        kind: self
+      - id: failure
+        kind: internal
+      - id: a.withOTLPQueues
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                failure(CodeOTLPExport, "OTLP_MIGRATE_NO_DATABASE",
+                			"otlp migrate moves the export's batches onto the database otlp-database names, and it names none", nil)
+              to: failure
+          when: resolvedSetting(a, a.opts.otlp.database) == ""
+      - return: |-
+          a.withOTLPQueues(ctx, func(cfg *plug.OTLPConfig) error {
+          		for _, signal := range signals {
+          			if err := a.migrateOTLPSignal(ctx, cfg, signal, stdout); err != nil {
+          				return err
+          			}
+          		}
+          		return nil
+          	})
+        to: a.withOTLPQueues
+  - of: (*App).migrateOTLPSignal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).migrateOTLPSignal
+        kind: self
+      - id: fileQueueProbe
+        kind: internal
+      - id: failure
+        kind: internal
+      - id: fmt
+        kind: stdlib
+      - id: a.otlpQueuePart
+        kind: internal
+      - id: cfg.Database.Transact
+        kind: value
+      - id: errors
+        kind: stdlib
+      - id: filepath
+        kind: stdlib
+    steps:
+      - bind: dir, holds
+        eval: otlpFileQueue(a.dataDir, signal), false
+      - opt:
+          do:
+            - var:
+                name: err
+                type: error
+            - opt:
+                do:
+                  - return: failure(CodeOTLPExport, "OTLP_QUEUE", "the OTLP export's file queue cannot be read", err, errs.String("signal", signal), errs.String("dir", dir))
+                    to: failure
+                init:
+                  bind: holds, err
+                  eval: fileQueueProbe(dir)
+                  op: =
+                  to: fileQueueProbe
+                when: err != nil
+          when: a.dataDir != ""
+      - opt:
+          do:
+            - eval: "fmt.Fprintf(stdout, \"%s: no batch left under the data directory\\n\", signal)"
+              to: fmt
+            - return: nil
+          when: "!holds"
+      - bind: p, err
+        eval: a.otlpQueuePart(cfg, signal, dir)
+        to: a.otlpQueuePart
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: "n"
+        eval: "0"
+      - set: err
+        to: cfg.Database.Transact
+        value: |-
+          cfg.Database.Transact(ctx, func(ctx context.Context) error {
+          		var copyErr error
+          		if n, copyErr = p.copy(ctx); copyErr != nil {
+          			return copyErr
+          		}
+          		return p.verifyHeld(ctx)
+          	})
+      - opt:
+          do:
+            - return: errors.Join(err, p.closeFrom())
+              to: errors
+          when: err != nil
+      - bind: aside
+        eval: filepath.Join(a.dataDir, dataCopyDir, a.clock.Now().UTC().Format("20060102T150405Z"))
+        to: filepath
+      - opt:
+          do:
+            - return: |-
+                failure(CodeOTLPExport, "OTLP_MIGRATE_MOVE",
+                			"the batches are on the database, but their file queue could not be moved aside: move it by hand, or a second migrate copies them again",
+                			err, errs.String("signal", signal), errs.String("dir", dir))
+              to: failure
+          init:
+            bind: err
+            eval: errors.Join(p.closeFrom(), moveAside(a.dataDir, dir, aside))
+            to: errors
+          when: err != nil
+      - eval: "fmt.Fprintf(stdout, \"%s: %d batches moved onto %s, fingerprints found there; the file queue moved aside to %s\\n\", signal, n, p.name, aside)"
+        to: fmt
+      - return: nil
+  - of: fileQueueProbe
+    participants:
+      - id: caller
+        kind: actor
+      - id: fileQueueProbe
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - loop:
+          do:
+            - bind: entries, err
+              eval: os.ReadDir(filepath.Join(dir, state))
+              to: os
+            - opt:
+                do:
+                  - continue: true
+                when: errors.Is(err, fs.ErrNotExist)
+            - opt:
+                do:
+                  - return: false, err
+                when: err != nil
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - return: true, nil
+                      when: "!e.IsDir() && (strings.HasSuffix(e.Name(), \".msg\") || strings.HasSuffix(e.Name(), \".dead\"))"
+                key: _
+                range: entries
+                value: e
+          key: _
+          range: fileQueueStates
+          value: state
+      - return: false, nil
+  - of: (*App).otlpQueuePart
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).otlpQueuePart
+        kind: self
+      - id: otlpQueuePolicy
+        kind: internal
+      - id: a.openQueueWith
+        kind: internal
+      - id: sync
+        kind: stdlib
+    steps:
+      - bind: policy
+        eval: otlpQueuePolicy(cfg)
+        to: otlpQueuePolicy
+      - bind: name
+        eval: "\"otlp/\" + signal"
+      - bind: src, err
+        eval: "a.openQueueWith(plug.QueueConfig{Name: name, Dir: dir, Policy: policy})"
+        to: a.openQueueWith
+      - opt:
+          do:
+            - return: queuePart{}, failure(CodeOTLPExport, "OTLP_QUEUE", "the OTLP export's queue cannot be opened", err, errs.String("signal", signal))
+          when: err != nil
+      - bind: closeFrom
+        eval:
+          closure:
+            results: error
+            steps:
+              - return: nil
+      - opt:
+          do:
+            - set: closeFrom
+              to: sync
+              value: sync.OnceValue(c.Close)
+          init:
+            bind: c, ok
+            eval: src.(io.Closer)
+          when: ok
+      - bind: from, ok
+        eval: src.(copyQueue)
+      - opt:
+          do:
+            - return: queuePart{}, failure(CodeOTLPExport, "OTLP_QUEUE", "a file queue cannot be read as it lies", closeFrom(), errs.String("signal", signal))
+          when: "!ok"
+      - bind: table
+        eval: cfg.Tables[signal]
+      - bind: dst, err
+        eval: "a.openQueueWith(plug.QueueConfig{Name: name, Database: cfg.Database, Table: table, Policy: policy})"
+        to: a.openQueueWith
+      - opt:
+          do:
+            - return: queuePart{}, errors.Join(failure(CodeOTLPExport, "OTLP_QUEUE", "the OTLP export's queue cannot be opened", err, errs.String("signal", signal)), closeFrom())
+          when: err != nil
+      - bind: to, ok
+        eval: dst.(copyQueue)
+      - opt:
+          do:
+            - return: queuePart{}, failure(CodeOTLPExport, "OTLP_QUEUE", "a queue's table cannot be written as a message lies", closeFrom(), errs.String("signal", signal))
+          when: "!ok"
+      - return: "queuePart{from: from, to: to, closeFrom: closeFrom, dir: dir, name: table}, nil"
+  - of: (*queuePart).verifyHeld
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*queuePart).verifyHeld
+        kind: self
+      - id: messageDigests
+        kind: internal
+      - id: failure
+        kind: internal
+    steps:
+      - bind: src, err
+        eval: messageDigests(ctx, p.from)
+        to: messageDigests
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: dst, err
+        eval: messageDigests(ctx, p.to)
+        to: messageDigests
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: found
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - op: ++
+                    set: found
+                when: found < len(src) && d == src[found]
+          key: _
+          range: dst
+          value: d
+      - opt:
+          do:
+            - return: |-
+                failure(CodeOTLPExport, "OTLP_MIGRATE_DIVERGED", "a batch moved is not found on the database", nil,
+                			errs.String("table", p.name), errs.Int("source", len(src)), errs.Int("found", found))
+              to: failure
+          when: found < len(src)
+      - return: nil
   - of: otlpLinked
     steps:
       - return: plug.OTLP.Load() != nil
@@ -28180,6 +28447,8 @@ sequences:
         kind: self
       - id: a.otlpConfig
         kind: internal
+      - id: a.warnOTLPFileQueuesLeft
+        kind: internal
       - id: plug.OTLP.Load
         kind: value
       - id: errs
@@ -28202,6 +28471,8 @@ sequences:
           do:
             - return: err
           when: err != nil || cfg == nil
+      - eval: a.warnOTLPFileQueuesLeft(cfg)
+        to: a.warnOTLPFileQueuesLeft
       - bind: driver
         eval: plug.OTLP.Load()
         to: plug.OTLP.Load
@@ -28455,6 +28726,45 @@ sequences:
       - set: cfg.Tables
         value: "map[string]string{OTLPTraces: otlpTable(OTLPTraces), OTLPMetrics: otlpTable(OTLPMetrics)}"
       - return: nil
+  - of: (*App).warnOTLPFileQueuesLeft
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).warnOTLPFileQueuesLeft
+        kind: self
+      - id: resolvedSetting
+        kind: internal
+      - id: a.problem
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: cfg.Database == nil || a.dataDir == "" || a.opts.memory
+      - bind: database
+        eval: resolvedSetting(a, a.opts.otlp.database)
+        to: resolvedSetting
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: a.problem(otlpNode, say("otlp.file-queue-left", "signal", signal, "database", database, "product", a.name))
+                    to: a.problem
+                when: fileQueueHolds(otlpFileQueue(a.dataDir, signal))
+          key: _
+          range: "[]string{OTLPTraces, OTLPMetrics}"
+          value: signal
+  - of: otlpFileQueue
+    participants:
+      - id: caller
+        kind: actor
+      - id: otlpFileQueue
+        kind: self
+      - id: filepath
+        kind: stdlib
+    steps:
+      - return: filepath.Join(data, otlpDataDir, signal)
+        to: filepath
   - of: (*App).otlpDatabase
     participants:
       - id: caller
@@ -28779,7 +29089,7 @@ sequences:
         kind: stdlib
       - id: a.resolve
         kind: internal
-      - id: a.withOTLPQueues
+      - id: a.runOTLPVerb
         kind: internal
     steps:
       - bind: parsed, ok
@@ -28806,14 +29116,8 @@ sequences:
             - return: exitConfig
           when: a.otlpSettingsRefused(stderr)
       - bind: err
-        eval: |-
-          a.withOTLPQueues(ctx, func(cfg *plug.OTLPConfig) error {
-          		if parsed.verb == "dead-letters" {
-          			return a.listOTLPDeadLetters(ctx, cfg, parsed.signals, stdout)
-          		}
-          		return a.replayOTLPDeadLetters(ctx, cfg, &parsed, stdout, stderr)
-          	})
-        to: a.withOTLPQueues
+        eval: a.runOTLPVerb(ctx, &parsed, stdout, stderr)
+        to: a.runOTLPVerb
       - switch:
           cases:
             - case: err == nil
@@ -28828,6 +29132,30 @@ sequences:
                 - eval: fmt.Fprintln(stderr, describeText(err))
                   to: fmt
       - return: "1"
+  - of: (*App).runOTLPVerb
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).runOTLPVerb
+        kind: self
+      - id: a.migrateOTLP
+        kind: internal
+      - id: a.withOTLPQueues
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: a.migrateOTLP(ctx, p.signals, stdout)
+              to: a.migrateOTLP
+          when: p.verb == "migrate"
+      - return: |-
+          a.withOTLPQueues(ctx, func(cfg *plug.OTLPConfig) error {
+          		if p.verb == "dead-letters" {
+          			return a.listOTLPDeadLetters(ctx, cfg, p.signals, stdout)
+          		}
+          		return a.replayOTLPDeadLetters(ctx, cfg, p, stdout, stderr)
+          	})
+        to: a.withOTLPQueues
   - of: (*otlpArgs).take
     steps:
       - switch:
