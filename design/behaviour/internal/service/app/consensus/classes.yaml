@@ -1024,6 +1024,8 @@ files:
       - termless
       - (*Node).durablePosition
       - (*Node).restoreLatest
+      - unrestored
+      - (*unrestored).heldReason
       - ownFailure
       - (*Node).unpublishNewer
       - (*Node).baseOrNoTable
@@ -5233,13 +5235,12 @@ types:
           base. Each one discarded is logged with its reason: a node that starts
           with no table otherwise says nothing of why (#512). One of a version or
           format this build does not know refuses the start instead: unknown means
-          stop, never skip (D18, #513). failed is the newer snapshots that did not
-          restore for a reason of their own, which load unpublishes once the base
-          is known to continue the log.
+          stop, never skip (D18, #513). set holds the newer snapshots that did not
+          restore, as unrestored says.
         name: restoreLatest
         params: metas []coreconsensus.SnapshotMetaValue, durIdx uint64
         recv: n *Node
-        results: base coreconsensus.SnapshotMetaValue, failed []coreconsensus.SnapshotMetaValue, err error
+        results: base coreconsensus.SnapshotMetaValue, set unrestored, err error
       - doc: |-
           unpublishNewer removes the snapshots newer than the one restored that
           failed to restore for a reason of their own. Left published, a node that
@@ -6388,6 +6389,35 @@ types:
       	acquire() error
       	release()
       }
+  - doc: |-
+      unrestored is what restoreLatest set aside above the base it restored:
+      failed, the snapshots that did not restore for a reason of their own,
+      which load unpublishes once the base is known to continue the log, and
+      held, the newest one that did not for a reason of this node's — its
+      disk, a MaxSnapshotBytes lowered since — with heldErr, that reason.
+    fields:
+      - name: failed
+        type: "[]coreconsensus.SnapshotMetaValue"
+      - name: held
+        type: coreconsensus.SnapshotMetaValue
+      - name: heldErr
+        type: error
+    kind: struct
+    methods:
+      - doc: |-
+          heldReason is heldErr when the log, which starts at first, continues from
+          the held snapshot but not from the base at snapIdx: the reason the held
+          one did not restore is what stops the start then, and it is answered
+          instead of the gap. An install compacts the log to the snapshot it
+          installs, past the node's own older one: with MaxSnapshotBytes lowered
+          below the installed one, the start fell back to the older one and failed
+          LOG_CORRUPT, which names a damage the log does not have and calls for a
+          wipe, where raising the limit back was enough (#574).
+        name: heldReason
+        params: snapIdx, first uint64
+        recv: u *unrestored
+        results: error
+    name: unrestored
   - doc: |-
       joinReleaser is a transport that keeps a JOIN answer's members admitted
       apart from the engine's configuration until the joiner is admitted

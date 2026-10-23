@@ -7929,6 +7929,8 @@ sequences:
         kind: value
       - id: n.baseOrNoTable
         kind: internal
+      - id: set.heldReason
+        kind: internal
       - id: n.finishInstall
         kind: internal
       - id: n.unpublishNewer
@@ -7954,7 +7956,7 @@ sequences:
           when: err != nil
       - bind: durIdx
         eval: dur.Index
-      - bind: base, failed, err
+      - bind: base, set, err
         eval: n.restoreLatest(metas, durIdx)
         to: n.restoreLatest
       - opt:
@@ -7991,6 +7993,14 @@ sequences:
           do:
             - return: raft.StartState{}, err
           init:
+            bind: err
+            eval: set.heldReason(snapIdx, first)
+            to: set.heldReason
+          when: err != nil
+      - opt:
+          do:
+            - return: raft.StartState{}, err
+          init:
             bind: first, last, err
             eval: n.finishInstall(&base, first, last)
             op: =
@@ -8001,7 +8011,7 @@ sequences:
             - return: raft.StartState{}, err
           init:
             bind: err
-            eval: n.unpublishNewer(failed)
+            eval: n.unpublishNewer(set.failed)
             to: n.unpublishNewer
           when: err != nil
       - bind: ents, err
@@ -8078,8 +8088,8 @@ sequences:
                 do:
                   - eval: "n.obs.warn(\"consensus: a snapshot was not restored\", lstr(\"id\", m.ID), lstr(\"error\", \"recorded at term 0\"))"
                     to: n.obs.warn
-                  - set: failed
-                    value: append(failed, m)
+                  - set: set.failed
+                    value: append(set.failed, m)
                   - continue: true
                 when: termless(&m)
             - bind: rerr
@@ -8087,23 +8097,35 @@ sequences:
               to: n.restoreFrom
             - opt:
                 do:
-                  - return: m, failed, nil
+                  - return: m, set, nil
                 when: rerr == nil
             - opt:
                 do:
-                  - return: coreconsensus.SnapshotMetaValue{}, nil, rerr
+                  - return: coreconsensus.SnapshotMetaValue{}, unrestored{}, rerr
                 when: errs.HasCode(rerr, coreconsensus.CodeVersionUnsupported)
             - eval: "n.obs.warn(\"consensus: a snapshot was not restored\", lstr(\"id\", m.ID), lstr(\"error\", rerr.Error()))"
               to: n.obs.warn
-            - opt:
-                do:
-                  - set: failed
-                    value: append(failed, m)
-                when: ownFailure(rerr)
+            - switch:
+                cases:
+                  - case: ownFailure(rerr)
+                    do:
+                      - set: set.failed
+                        value: append(set.failed, m)
+                  - case: set.heldErr == nil
+                    do:
+                      - set: set.held, set.heldErr
+                        value: m, rerr
           key: _
           range: metas
           value: m
-      - return: coreconsensus.SnapshotMetaValue{}, nil, nil
+      - return: coreconsensus.SnapshotMetaValue{}, unrestored{}, nil
+  - of: (*unrestored).heldReason
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: u.heldErr == nil || first <= snapIdx+1 || first > u.held.Position.Index+1
+      - return: u.heldErr
   - of: ownFailure
     steps:
       - return: "!errs.HasCode(err, coreconsensus.CodeStorageFailed) && !errs.HasCode(err, coreconsensus.CodeSnapshotTooLarge)"
