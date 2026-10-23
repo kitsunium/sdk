@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -160,6 +161,51 @@ func TestACoalescedCutIsMade(t *testing.T) {
 			t.Fatalf("the node holds %d snapshots, the newest at %d, none at the applied index %d", len(metas), newest, last)
 		}
 		time.Sleep(time.Millisecond)
+	}
+}
+
+// A trigger coalesced while a SaveSnapshot waited for its turn on the apply
+// goroutine is asked for once the save is written, as the background
+// write's is: SaveSnapshot raises the in-flight flag on its caller's
+// goroutine, an entry applied before the save item coalesces its trigger,
+// and only the background write replayed one. The flag stayed set, and a
+// node's cuts never looked settled until another cut ended (#604).
+func TestATriggerCoalescedDuringASaveIsAsked(t *testing.T) {
+	c := newCluster(t, 1, 0)
+	n := c.nodes[0].node
+	propose(t, n, "k=v")
+	ss := &n.snapState
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
+		ss.mu.Lock()
+		busy := ss.inFlight || ss.pending
+		if !busy {
+			// The state SaveSnapshot leaves before its item runs, with the
+			// trigger of an entry applied in between.
+			ss.inFlight, ss.pending = true, true
+		}
+		ss.mu.Unlock()
+		if !busy {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("setup: the node's cuts never settled")
+		}
+	}
+	req := &saveReq{w: io.Discard, op: "op:test", done: make(chan saveRes, 1)}
+	n.aq.push(applyItem{save: req})
+	if r := <-req.done; r.err != nil {
+		t.Fatal(r.err)
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
+		ss.mu.Lock()
+		busy := ss.inFlight || ss.pending
+		ss.mu.Unlock()
+		if !busy {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the trigger coalesced during the save is still pending")
+		}
 	}
 }
 

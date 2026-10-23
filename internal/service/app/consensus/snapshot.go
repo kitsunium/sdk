@@ -638,7 +638,7 @@ func (n *Node) save(req *saveReq) {
 		}
 	} else {
 		n.snapState.mu.Lock()
-		n.snapState.inFlight = false
+		n.snapState.inFlight, n.snapState.pending = false, false
 		n.snapState.mu.Unlock()
 		// The operator who asked reads the error too, but a storage failure
 		// is the node's before it is the caller's.
@@ -648,6 +648,12 @@ func (n *Node) save(req *saveReq) {
 		// An administrative operation is recorded under its operator, as
 		// the offline ones are in the audit file (D17).
 		n.obs.info("consensus: snapshot saved", lstr("operator", string(req.op)), lattr("index", idx))
+		// SaveSnapshot raised the in-flight flag before this turn came: a
+		// trigger applied meanwhile was coalesced into it, and only the
+		// background write asked for that cut once done. Left set, the
+		// flag said a cut was due until another cut ended, which then
+		// replayed that stale trigger (#604).
+		n.cutPending()
 	}
 	req.done <- saveRes{m, err}
 }

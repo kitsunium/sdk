@@ -2,7 +2,10 @@ package consensus
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
+	"io"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -15,6 +18,13 @@ import (
 // whose follower f took snapshots of its own, then stopped, isolated, while
 // the leader wrote 200 entries and every live log compacted past it. It
 // returns the leader, f, and the leader's newest snapshot.
+//
+// The leader cuts at its applied index before its newest is read. Its last
+// automatic cut was up to 19 entries back, and the entry that opens an
+// election's term, which a loaded run makes at any time, could reach the
+// next cut while the test ran on: the snapshot returned was no longer the
+// leader's newest, which ends a loop by itself (#604). A cut at the applied
+// index leaves twenty entries to the next one.
 func laggingWithOwnSnapshots(t *testing.T) (*cluster, *testNode, *testNode, coreconsensus.SnapshotMetaValue) {
 	t.Helper()
 	c := newCluster(t, 3, 20)
@@ -26,10 +36,30 @@ func laggingWithOwnSnapshots(t *testing.T) (*cluster, *testNode, *testNode, core
 	}
 	c.waitApplied(tok.Index, 10*time.Second)
 	waitFor(t, "a snapshot of the follower's own", func() bool { return len(must(f.snaps.List())(t)) > 0 })
-	lagBehindAnInstall(t, c, f, 200)
-	l = c.leader(5 * time.Second)
-	cutsSettled(t, l)
+	tok = lagBehindAnInstall(t, c, f, 200)
+	c.waitApplied(tok.Index, 10*time.Second)
+	l = cutLeaderAtApplied(t, c)
 	return c, l, f, leaderSnapshots(t, l)[0]
+}
+
+// cutLeaderAtApplied cuts a snapshot on the leader at its applied index,
+// on whichever node leads when the cut is asked, and returns that node.
+func cutLeaderAtApplied(t *testing.T, c *cluster) *testNode {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		l := c.leader(5 * time.Second)
+		cutsSettled(t, l)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_, err := l.node.SaveSnapshot(ctx, "op:test", io.Discard)
+		cancel()
+		if err == nil {
+			cutsSettled(t, l)
+			return l
+		}
+		if !errors.Is(err, coreconsensus.NotLeader) || time.Now().After(deadline) {
+			t.Fatalf("setup: cut the leader at its applied index: %v", err)
+		}
+	}
 }
 
 // publish puts snapshot m, with data, in f's stopped store, as an install
@@ -85,6 +115,32 @@ func TestASnapshotThatDidNotRestoreIsUnpublished(t *testing.T) {
 	caughtUp(t, c, l, f, x)
 }
 
+// olderSmallerSnapshot cuts f off and returns its snapshots, the newest
+// larger than the older one. f is cut off before they are read: an entry
+// reaching it after, then its cut, would remove the older one. The entry
+// that opens an election's term holds no state, and a cut that follows it
+// copies the newest's state under a newer index: two such cuts after the
+// last write, under elections a loaded run makes, left the two newest the
+// same size (#604). A write that reaches f then makes the newest larger
+// again; next is the key it writes.
+func olderSmallerSnapshot(t *testing.T, c *cluster, f *testNode, next int) []coreconsensus.SnapshotMetaValue {
+	t.Helper()
+	for try := 0; ; try++ {
+		c.net.Isolate(f.id, true)
+		cutsSettled(t, f)
+		metas := must(f.snaps.List())(t)
+		if len(metas) >= 2 && snapshotSize(&metas[0]) > snapshotSize(&metas[1]) {
+			return metas
+		}
+		if try == 10 {
+			t.Fatalf("setup: the follower holds no older, smaller snapshot: %+v", metas)
+		}
+		c.net.Isolate(f.id, false)
+		tok := proposeOnLeader(t, c, fmt.Sprintf("k%d=%s", next+try, bytes.Repeat([]byte("v"), 200)))
+		c.waitApplied(tok.Index, 10*time.Second)
+	}
+}
+
 // A snapshot that did not restore for a reason of this node's — a disk
 // failure, a MaxSnapshotBytes lowered since — stays published: it may
 // restore at the next start, and the log may have been compacted to it.
@@ -111,14 +167,9 @@ func TestASnapshotOverALoweredLimitStaysPublished(t *testing.T) {
 		tok = proposeOnLeader(t, c, fmt.Sprintf("k%d=%s", i, bytes.Repeat([]byte("v"), 200)))
 	}
 	c.waitApplied(tok.Index, 10*time.Second)
-	cutsSettled(t, f)
-	metas := must(f.snaps.List())(t)
-	if len(metas) < 2 || max(metas[0].EncodedSize, metas[0].DecodedSize) <= max(metas[1].EncodedSize, metas[1].DecodedSize) {
-		t.Fatalf("setup: the follower holds no older, smaller snapshot: %+v", metas)
-	}
-	c.net.Isolate(f.id, true)
+	metas := olderSmallerSnapshot(t, c, f, 60)
 	c.kill(f)
-	limit.Store((max(metas[0].EncodedSize, metas[0].DecodedSize) + max(metas[1].EncodedSize, metas[1].DecodedSize)) / 2)
+	limit.Store((snapshotSize(&metas[0]) + snapshotSize(&metas[1])) / 2)
 	c.start(f)
 	if f.node.r.NoTable() {
 		t.Fatal("setup: the follower started with no table")
