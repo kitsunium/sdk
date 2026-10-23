@@ -477,7 +477,9 @@ func TestAFollowerSlowerToRestoreThanThePinBoundCatchesUp(t *testing.T) {
 	for stop := time.Now().Add(20 * time.Second); time.Now().Before(stop) && !caught; i++ {
 		propose(t, l.node, fmt.Sprintf("b%05d=v", i))
 		time.Sleep(10 * time.Millisecond)
-		caught = restores.Load() > 0 && f.node.Status().Applied+5 >= l.node.Status().Commit
+		// Restarted behind the leader's compacted log, it catches up by a
+		// snapshot, or by the log of a new leader that still holds it.
+		caught = f.node.Status().Applied+5 >= l.node.Status().Commit
 	}
 	t.Logf("restores on the follower %d, caught up during the writes: %v, follower applied %d, leader commit %d",
 		restores.Load(), caught, f.node.Status().Applied, l.node.Status().Commit)
