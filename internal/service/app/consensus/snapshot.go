@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
@@ -432,7 +433,7 @@ func (n *Node) afterCut() {
 		for to, pin := range n.sending {
 			at, held := n.pinAt(to, pin, now)
 			if !held {
-				delete(n.sending, to)
+				n.dropPin(to)
 				continue
 			}
 			if at <= n.cfg.SnapshotTrailing {
@@ -739,7 +740,8 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 		n.r.SnapshotDone(to, 0, false)
 		return
 	}
-	n.sending[to] = sendPin{index: meta.Position.Index}
+	sent := new(atomic.Int64)
+	n.sending[to] = sendPin{index: meta.Position.Index, sent: sent}
 	offer := coreconsensus.InstallOfferValue{Term: n.r.Status().Term, SnapshotID: meta.ID, Meta: meta}
 	ctx, cancel := context.WithCancel(context.Background())
 	n.sendStop[to] = cancel
@@ -759,7 +761,7 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 			if off < 0 || off > meta.EncodedSize {
 				return nil, origin(coreconsensus.FrameInvalid, errs.Int64("offset", off))
 			}
-			return io.NopCloser(io.NewSectionReader(h, off, meta.EncodedSize-off)), nil
+			return io.NopCloser(&sentReader{r: io.NewSectionReader(h, off, meta.EncodedSize-off), n: n, sent: sent}), nil
 		})
 		cancel()
 		if cerr := h.Close(); cerr != nil {
