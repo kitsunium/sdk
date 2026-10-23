@@ -31,14 +31,16 @@ range, no `codeRangeOwners` row and no `//:audit_sources` label.
 |---|---|---|
 | `IndexByte2(b, c1, c2)` | the first `c1` or `c2` (pass a byte twice for one) | `bytes.IndexAny` (always slower); two `bytes.IndexByte` scans (the word loop wins below 64 bytes, so past it the function IS two scans) |
 | `IndexLess(b, n)` | the first byte below `n` | none in the standard library; the byte loop is 2 to 4 times slower from 16 bytes up, and ahead below 8 |
-| `NewSet(first, second, below, upper).Index(b)` | the first byte that is `first`, `second`, below `below`, or — with `upper` — from `0x80` up | none; the table loop `encoding/json` uses is 2 to 2.6 times slower from 64 bytes up, and ahead below 8 |
+| `NewSet(first, second, below, upper).Index(b)` | the first byte that is `first`, `second`, below `below`, or — with `upper` — from `0x80` up | none; the table loop `encoding/json` uses is 2 to 2.6 times slower from 64 bytes up on the M1 (1.5 to 2.4 on the noisy x86 core; 2 to 9 with AVX2 from 32), and ahead below 8 |
 
-**Dropped, measured on one CPU: `IndexByte`.** `bytes.IndexByte` is an assembly
+**Dropped, measured on an M1 and an EPYC: `IndexByte`.** `bytes.IndexByte` is an assembly
 loop over 32 bytes at a time and beat the word loop at every length but 8 bytes
 on the M1 (NEON), by up to 5 times at 4096. A function that does not win is not
-kept. **That is the M1's answer, not an x86-64 one**: no real x86 CPU was
-available, and under Rosetta the word loop led the translated assembly between
-8 and 64 bytes, which `BENCH.md` reads as the translator's cost. Its forms live
+kept. **The M1's answer, confirmed on x86-64**: on an EPYC 7351P (Zen 1, a
+noisy shared core, `BENCH.md`) `bytes.IndexByte` is ahead (a tie at 16 in one build) from 16 bytes up in
+both builds and the word loop leads only at 8 bytes, by a few ns; under Rosetta
+the word loop led the translated assembly between 8 and 64 bytes, which
+`BENCH.md` reads as the translator's cost. Its forms live
 on, test-only, in `dropped_bench_test.go` and
 `dropped_simd_amd64_bench_test.go`: `go test -bench DroppedIndexByte` re-asks the
 question on real x86-64 or another Go release, and if the word loop wins there

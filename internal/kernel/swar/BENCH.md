@@ -12,27 +12,25 @@ the LAST byte: the scan that reads the most.
 
 ## Reproducibility envelope
 
-> **Numbers vary across machines, and these were taken on a busy one, and NOT
-> on the CPU the package is written for.** The load average was about 17 on 10
-> cores while they ran. Every figure is the median over the runs, in ns/op, and
-> the ratios between rows of one table — measured in the same process — are the
-> trustworthy part. **There is no row measured on a real x86-64 CPU:** the only
-> machine available was an Apple M1 Pro. The AVX2 rows below are the amd64
-> binary run through Rosetta 2, which translates each AVX2 instruction to
-> NEON: they show that the vector form runs and is correct, and say little
-> about its speed on a Skylake or a Zen. **The decision to drop `IndexByte` is
-> proven on the M1 only**: under Rosetta the word loop is ahead of the
-> translated `bytes.IndexByte` between 8 and 64 bytes, which measures the
-> translator's cost for the standard library's SSE2 path, not a win on x86-64.
-> It must be taken again on real x86-64 (`go test -bench DroppedIndexByte`,
-> built with `GOEXPERIMENT=simd`) before anyone relies on it there.
+> **Numbers vary across machines, and these were taken on busy ones.** The
+> M1 tables ran at a load average of about 17 on 10 cores; the x86-64 tables
+> ran on a 1-vCPU VM of a host loaded by CI, and are **noisy** (see their
+> section). Every figure is the median over the runs, in ns/op, and the ratios
+> between rows of one table — measured in the same process — are the
+> trustworthy part. The AVX2 rows of the Rosetta table are the amd64 binary
+> translated to NEON: they show that the vector form runs and is correct, and
+> say little about its speed. **A real x86-64 CPU is measured in the last
+> results section (AMD EPYC 7351P, Zen 1, AVX2, no AVX-512), one machine and
+> not the Cascade Lake the SDK targets.** It confirms the decision to drop
+> `IndexByte` and moves `twoScanMin` toward 32 (see "What the figures do not
+> settle").
 
 | Dimension | Value |
 |---|---|
 | CPU cores          | 10 (Apple M1 Pro) |
 | RAM                | 16 GiB |
 | OS / kernel        | macOS 26.6.2 (Darwin 25.6.0) |
-| Architecture       | arm64 (native); amd64 under Rosetta 2 (second table) |
+| Architecture       | arm64 (native); amd64 under Rosetta 2 (second table); amd64 on an EPYC 7351P (third and fourth tables) |
 | Go toolchain       | go1.27.3 darwin/arm64 |
 | Git branch         | `feat/kernel-swar` |
 | Git commit         | base `fde96eb7a` (uncommitted when measured) |
@@ -142,11 +140,123 @@ bytes it is slower (8.2 against 7.3 and 17.0 against 12.1). The production build
 submission builds without `GOEXPERIMENT`), so the SWAR rows are the ones that
 ship on amd64, and they were measured here only through a translator.
 
+## Results — AMD EPYC 7351P (Zen 1), amd64, native — **noisy, one machine**
+
+A real x86-64 CPU, added by hand after the sections above (the header of this
+file says why `make bench` does not write it). Machine: a virtual machine with
+1 vCPU of an AMD EPYC 7351P 16-Core Processor (Zen 1: AVX2 and SHA-NI, no
+AVX-512), Debian 13, Linux 6.12, on a host that was running CI (load about
+26 on its 32 threads while these ran; the guest's own load average read 0.4 to
+2). Binaries built on the M1 from commit `a7f487ba3` with `GOOS=linux
+GOARCH=amd64 go test -c`, once plain and once with `GOEXPERIMENT=simd`, and
+run there with `-test.bench=. -test.benchmem -test.count=3` at the default
+benchtime. **Medians of 3 runs, not 8, on a shared core**: single cells move by
+10 to 100 % between runs, and the two tables below were taken minutes apart
+under different host load (the same `bytes.IndexByte` at 4 bytes reads 15.6
+plain and 7.8 simd, and the byte loop in `IndexLess` 6.9 against 5.2). Read the
+ratios within one table, and the order of the rows, not the nanoseconds. The
+same binaries pass `TestVectorFormsRunHere` (it logs `AVX2 vector forms
+exercised: true`), `TestEveryValueAtEveryPosition`, `TestAdjacentPairs` and
+`TestNothingPastTheLength` on this CPU. 0 B/op and 0 allocs/op everywhere.
+
+Plain build — **what ships** (the submission builds without the experiment, so
+`public` is the SWAR form and, past `twoScanMin`, two `bytes.IndexByte`
+scans):
+
+```
+DroppedIndexByte         L4       L8      L16      L32      L64     L256    L1024    L4096
+  bytes                15.6     20.7     19.8     22.3     31.6     53.2    103.6    307.7
+  swar                 15.2     14.5     22.2     33.1     49.9    150.7    433.9   1839.0
+IndexByte2               L4       L8      L16      L32      L64     L256    L1024    L4096
+  bytes.IndexAny       56.5    134.5     97.9    104.6    218.8    567.8   1818.0   3958.0
+  two-scan             34.0     30.1     40.6     39.5     58.7     79.2    220.7    983.7
+  loop                 10.4     17.6     38.7     33.3    140.2    481.4   1207.0   7368.0
+  public               17.6     26.9     31.8     38.6     71.6    112.2    282.6    811.9
+  swar                 16.0     20.3     27.9     38.6     64.5    251.2    813.4   3124.0
+IndexLess                L4       L8      L16      L32      L64     L256    L1024    L4096
+  loop                  6.9     15.0     22.6     69.8    129.3    245.8   1325.0   2969.0
+  public               17.7     13.6     15.6     23.5     33.6    110.4    375.1   1945.0
+  swar                 19.8     13.5     15.8     30.1     29.1    121.8    484.0   1920.0
+SetIndex                 L4       L8      L16      L32      L64     L256    L1024    L4096
+  table-loop           14.4     15.5     40.2     51.5    163.0    530.2   1519.0   5808.0
+  predicate-loop       10.5     19.1     43.5     75.5    191.2    809.3   2356.0   3689.0
+  public               31.6     36.0     46.7     72.9    107.6    359.5   1031.0   2452.0
+  swar                 29.7     29.1     42.3     65.2     71.7    278.7   1402.0   2924.0
+```
+
+`GOEXPERIMENT=simd` (`vector` is the AVX2 form, which `public` takes from 32
+bytes up; the quieter of the two runs):
+
+```
+DroppedIndexByte         L4       L8      L16      L32      L64     L256    L1024    L4096
+  bytes                 7.8      7.5      8.8      9.4     12.8     16.5     46.0    208.6
+  swar                 10.0      6.2      8.6     10.6     15.6     56.3    203.2   1102.0
+  vector                  -        -        -     10.7     14.0     38.0    160.0    745.2
+IndexByte2               L4       L8      L16      L32      L64     L256    L1024    L4096
+  bytes.IndexAny       28.2     71.3     38.4     41.0     83.7    177.7    572.3   2386.0
+  two-scan             16.6     15.2     13.2     17.7     19.4     32.9     94.1    329.7
+  loop                  6.5     11.0     18.8     30.5     67.5    209.8    903.4   4047.0
+  public               10.6      9.3     11.5      9.1     11.3     20.0     77.4    256.0
+  swar                  7.3      7.3     13.2     21.7     35.9     97.6    344.6   1451.0
+  vector                  -        -        -      7.9      9.7     23.1     76.5    234.9
+IndexLess                L4       L8      L16      L32      L64     L256    L1024    L4096
+  loop                  5.2      7.0     12.0     18.5     46.5    115.1    396.5   1569.0
+  public               11.3      8.2     10.2      9.0     11.3     22.1     77.7    245.6
+  swar                  9.2      6.0      7.2      9.6     14.9     47.8    187.7    697.7
+  vector                  -        -        -      7.3      9.7     20.8     76.4    256.9
+SetIndex                 L4       L8      L16      L32      L64     L256    L1024    L4096
+  table-loop            5.8      9.0     16.5     27.1     78.1    231.3    762.6   3020.0
+  predicate-loop        5.7      9.4     16.8     27.2     69.0    239.5    790.4   3144.0
+  public               13.4     13.5     20.6     13.5     16.9     36.5    103.0    348.6
+  swar                 10.5      9.8     13.5     20.1     34.3    115.5    459.4   1735.0
+  vector                  -        -        -      9.9     12.2     27.2    105.7    335.5
+```
+
+### Reading it (x86-64, Zen 1)
+
+- **`IndexByte` — the drop stands.** `bytes.IndexByte` beats the word loop at
+  every length from 32 bytes up in both builds, and at 16 (plain: 19.8 against
+  22.2 ns; simd: a tie, 8.8 against 8.6; plain 53.2 against 150.7 at 256, 307.7 against 1839 at 4096; simd 16.5 against 56.3 at 256, 208.6 against 1102 at 4096). The word loop
+  is ahead only at 8 bytes (plain 14.5 against 20.7, simd 6.2 against 7.5), a
+  few nanoseconds, and the one-byte AVX2 form loses to `bytes.IndexByte` at
+  every length (14.0 against 12.8 at 64, 745.2 against 208.6 at 4096). Same
+  answer as the M1, on a CPU where the standard library's SSE2/AVX2 assembly is
+  not translated. Nothing here brings the function back.
+- **`IndexByte2` — kept, and the vector form is what it is for.** 7 to 10 times
+  faster than `bytes.IndexAny` from 64 bytes (simd `public` 11.3 against 83.7
+  at 64, 256.0 against 2386 at 4096). With AVX2 `public` is 1.3 to 1.9 times ahead
+  of the two scans from 32 bytes (9.1 against 17.7 at 32; 20.0 against 32.9 at
+  256).
+- **`IndexLess` — kept.** The byte loop is 1.7 to 2.4 times slower from 16 bytes in
+  the simd run (12.0 against 7.2 at 16, 115.1 against 47.8 at 256) and ahead at
+  4 bytes (5.2 against 9.2) and tied at 8; the plain build shows the same order
+  (loop 129.3 against 29.1 at 64) with noisier cells. AVX2 beats the word loop
+  from 32 bytes (7.3 against 9.6; 20.8 against 47.8 at 256), unlike under
+  Rosetta where it was slower at 32.
+- **`Set.Index` — kept, with a smaller margin than the M1's in the plain build.**
+  Against the table loop `public` is ahead from 64 bytes: 1.5 times at 64 and
+  256 (107.6 against 163.0; 359.5 against 530.2) and 2.4 at 4096 (2452 against
+  5808), against the 2 to 2.6 times of the M1. Below 64 the table is ahead or
+  tied in the plain build (51.5 against 72.9 at 32, 15.5 against 36.0 at 8): the
+  dispatch and the bound's addend cost more here than on the M1. With AVX2 the
+  search is 2 to 9 times ahead from 32 bytes (13.5 against 27.1 at 32, 348.6
+  against 3020 at 4096). A JSON string scan rarely sits under 64 bytes of
+  plain text, but this is the row to take again on a quiet machine.
+
 ## What the figures do not settle
 
-- The amd64 speed of every row, on a CPU that is not Apple's. The SWAR and
-  AVX2 rows need a run on the Cascade Lake of the target (no AVX-512 assumed)
-  and on a Zen: `GOARCH=amd64 go test -c` and `-test.bench .`, with and
-  without `GOEXPERIMENT=simd`.
-- `twoScanMin` (64) is the M1's crossover. On x86-64 `bytes.IndexByte` reads
-  with SSE2 below 32 bytes and AVX2 above; the crossover may move down.
+- The amd64 speed on the CPU the SDK targets. One real x86-64 machine is
+  measured above (a Zen 1 virtual core, on a loaded host, 3 runs per cell). The
+  Cascade Lake of the target (no AVX-512 assumed) and a quiet host are still to
+  do: `GOARCH=amd64 go test -c` and `-test.bench .`, with and without
+  `GOEXPERIMENT=simd`, `-count=8`.
+- `twoScanMin` (64) is the M1's crossover and **not clearly the x86-64 one**. On
+  the EPYC, `IndexByte2/swar` against `two-scan`: plain build 27.9 against 40.6
+  ns at 16 bytes, 38.6 against 39.5 at 32 (a tie), 64.5 against 58.7 at 64; simd
+  build 13.2 against 13.2 at 16, 21.7 against 17.7 at 32. The word loop stops
+  winning between 16 and 32 bytes there, and past 32 the two scans are ahead or
+  tied, so the crossover on this machine is nearer 32 than 64. The effect is a
+  few nanoseconds in the 32 to 63 byte band, inside this run's noise, and with
+  `GOEXPERIMENT=simd` the AVX2 form takes over from 32 anyway. The constant is
+  **left at 64**: lowering it to 32 is a candidate for a quiet-host, 8-run
+  measurement, not a change these numbers justify.
