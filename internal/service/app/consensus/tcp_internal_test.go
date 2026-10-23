@@ -105,33 +105,37 @@ func (tn *tcpNode) listen(t *testing.T, ca *testCA) {
 	if addr == "" {
 		addr = "127.0.0.1:0"
 	}
-	if tn.addr != "" {
-		waitAddrFree(addr)
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		tr, err := NewTCPTransport(&TransportConfig{Certificate: tn.cert, Roots: ca.pool, ListenAddress: addr})
+		if err == nil {
+			tn.tr, tn.addr = tr, tr.Addr()
+			return
+		}
+		if tn.addr == "" || !addrInUse(err) || time.Now().After(deadline) {
+			t.Fatalf("listen on %s: %v (%s)", addr, err, fieldOf(err, "why"))
+		}
 	}
-	tr, err := NewTCPTransport(&TransportConfig{Certificate: tn.cert, Roots: ca.pool, ListenAddress: addr})
-	if err != nil {
-		t.Fatal(err)
-	}
-	tn.tr, tn.addr = tr, tr.Addr()
 }
 
-// waitAddrFree waits, for up to ten seconds, until addr can be bound again.
-// A restart binds the address its previous transport just closed: on
-// Solaris the port was not free again at once, and the restarted node's
-// bind failed one run in a few (TRANSPORT_MISCONFIGURED). Only "address in
-// use" is waited out, as a restarted process would; any other outcome is
-// left to the bind that follows.
-func waitAddrFree(addr string) {
-	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
-		ln, err := net.Listen("tcp", addr)
-		if err == nil {
-			_ = ln.Close()
-			return
-		}
-		if !errors.Is(err, syscall.EADDRINUSE) {
-			return
+// addrInUse reports whether a transport could not bind because its address
+// is still in use. A restart binds the address its previous transport just
+// closed: on Solaris the port was not free again at once, and the
+// restarted node's bind failed one run in a few (TRANSPORT_MISCONFIGURED).
+// Probing the address first and binding after still lost that race on
+// Solaris, so the bind itself is retried, as a restarted process would,
+// for up to ten seconds; any other refusal fails at once.
+func addrInUse(err error) bool {
+	return strings.Contains(fieldOf(err, "why"), syscall.EADDRINUSE.Error())
+}
+
+// fieldOf is the string value of err's field key, "" when it has none.
+func fieldOf(err error, key string) string {
+	for _, f := range errs.FieldsOf(err) {
+		if f.Key() == key {
+			return f.StringValue()
 		}
 	}
+	return ""
 }
 
 func (tn *tcpNode) start(t *testing.T, cid coreconsensus.ClusterID) {
