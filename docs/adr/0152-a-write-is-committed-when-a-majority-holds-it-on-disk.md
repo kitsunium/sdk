@@ -1020,7 +1020,15 @@ followers and sent it nothing. From protocol 2:
   sends that leader a vote request: elections use its own configuration.
 - The provisional admission ends when one of its configurations lists the
   leader (it is then admitted as any member) or retires it, or after four
-  maximum election timeouts.
+  maximum election timeouts without that leader's contact (amended
+  2026-10-24, #618). Every append or heartbeat the voter takes from that
+  leader as contact, at its own term, pushes the end back: counted from the
+  record alone, the delay ended the admission while the leader was heard,
+  the transport cut its connections, the snapshot stream that would list
+  it among them, and a voter whose install streamed longer than the delay
+  never caught up under writes. A leader refused for the term, one of an
+  older term, or another leader extends nothing, and a record that ended
+  is never revived.
 - Threat model: an admitted member can vouch for another member's key to a
   peer that has no leader, for replication only. Raft is crash-fault
   tolerant here, a compromised member can already forge far more, and the

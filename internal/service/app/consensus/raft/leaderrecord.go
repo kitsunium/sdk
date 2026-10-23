@@ -9,7 +9,8 @@ import (
 )
 
 // hintElectionTimeouts is how many maximum election timeouts a vouched-for
-// leader stays admitted with no configuration of this node listing it.
+// leader stays admitted after its record or its last contact, with no
+// configuration of this node listing it.
 const hintElectionTimeouts time.Duration = 4
 
 // stepLeaderRecord runs the admission of a stale voter (ADR 0152 D4, #542)
@@ -142,8 +143,25 @@ func (r *Raft) endHintOnConf() {
 	}
 }
 
+// extendHint pushes the end of the provisional admission to its delay past
+// now, on an append or a heartbeat of the vouched-for leader that this node
+// took as contact at its own term (#618). The delay bounds a leader that is
+// no longer heard. Counted from the record alone, it ended the admission
+// while the leader's heartbeats still arrived: the transport cut every
+// connection of the leader's key, the snapshot stream that would list it
+// among them, and a node that hears its leader sends no PreVote that could
+// bring a new record, so a voter whose install streamed longer than the
+// delay was cut at every window and never caught up under writes. A record
+// that already ended is never revived.
+func (r *Raft) extendHint(now time.Time, from core.NodeID) {
+	if r.hint.ID != 0 && from == r.hint.ID && !r.mutated(mutHintEndsWhileHeard) {
+		r.hintUntil = now.Add(hintElectionTimeouts * r.timing.ElectionTimeoutMax)
+	}
+}
+
 // endHintOnTimeout ends the provisional admission once its delay passed
-// with no configuration of this node listing the leader.
+// after the record or the leader's last contact, with no configuration of
+// this node listing the leader.
 func (r *Raft) endHintOnTimeout(now time.Time) {
 	if r.hint.ID != 0 && !now.Before(r.hintUntil) {
 		r.hint = core.MemberValue{}

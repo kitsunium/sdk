@@ -273,8 +273,9 @@ type Raft struct {
 	admittedPub []core.MemberValue
 	// hint is the leader a member vouched for in a MsgLeaderRecord while
 	// this node knew no leader, admitted at the transport for replication
-	// only until hintUntil, until a configuration of this node lists it, or
-	// retires it (#542). Its ID is 0 when there is none.
+	// only until hintUntil, which each of its contacts pushes back (#618),
+	// until a configuration of this node lists it, or retires it (#542).
+	// Its ID is 0 when there is none.
 	hint      core.MemberValue
 	hintUntil time.Time
 

@@ -56,7 +56,8 @@ constants:
     name: maxFwdAnswers
   - doc: |-
       hintElectionTimeouts is how many maximum election timeouts a vouched-for
-      leader stays admitted with no configuration of this node listing it.
+      leader stays admitted after its record or its last contact, with no
+      configuration of this node listing it.
     items:
       - name: hintElectionTimeouts
         type: time.Duration
@@ -210,6 +211,10 @@ constants:
           mutRemoveStrands removes an answering member even when a voter may
           then know no one left to vouch for this leader (#603).
         name: mutRemoveStrands
+      - doc: |-
+          mutHintEndsWhileHeard ends a leader record its delay after it was
+          taken, while the vouched-for leader is still heard (#618).
+        name: mutHintEndsWhileHeard
     name: mutAckBeforeSync
   - doc: The facts a PeerStatValue carries.
     grouped: true
@@ -395,6 +400,7 @@ files:
       - (*Raft).knows
       - (*Raft).hintedOnly
       - (*Raft).endHintOnConf
+      - (*Raft).extendHint
       - (*Raft).endHintOnTimeout
     name: leaderrecord.go
   - decls:
@@ -1235,8 +1241,9 @@ types:
       - doc: |-
           hint is the leader a member vouched for in a MsgLeaderRecord while
           this node knew no leader, admitted at the transport for replication
-          only until hintUntil, until a configuration of this node lists it, or
-          retires it (#542). Its ID is 0 when there is none.
+          only until hintUntil, which each of its contacts pushes back (#618),
+          until a configuration of this node lists it, or retires it (#542).
+          Its ID is 0 when there is none.
         name: hint
         type: core.MemberValue
       - name: hintUntil
@@ -1913,8 +1920,23 @@ types:
         name: endHintOnConf
         recv: r *Raft
       - doc: |-
+          extendHint pushes the end of the provisional admission to its delay past
+          now, on an append or a heartbeat of the vouched-for leader that this node
+          took as contact at its own term (#618). The delay bounds a leader that is
+          no longer heard. Counted from the record alone, it ended the admission
+          while the leader's heartbeats still arrived: the transport cut every
+          connection of the leader's key, the snapshot stream that would list it
+          among them, and a node that hears its leader sends no PreVote that could
+          bring a new record, so a voter whose install streamed longer than the
+          delay was cut at every window and never caught up under writes. A record
+          that already ended is never revived.
+        name: extendHint
+        params: now time.Time, from core.NodeID
+        recv: r *Raft
+      - doc: |-
           endHintOnTimeout ends the provisional admission once its delay passed
-          with no configuration of this node listing the leader.
+          after the record or the leader's last contact, with no configuration of
+          this node listing the leader.
         name: endHintOnTimeout
         params: now time.Time
         recv: r *Raft
@@ -2359,8 +2381,9 @@ types:
         recv: r *Raft
       - doc: |-
           stepFollower handles a message of the leader's term at a follower or a
-          learner; an append or a heartbeat is contact with the leader, unless this
-          node refused that leader for the term.
+          learner; an append or a heartbeat is contact with the leader, and extends
+          the record of a vouched-for one (#618), unless this node refused that
+          leader for the term.
         name: stepFollower
         params: now time.Time, m core.MessageValue
         recv: r *Raft

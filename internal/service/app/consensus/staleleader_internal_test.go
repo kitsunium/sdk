@@ -2,7 +2,10 @@ package consensus
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
+	"math/rand/v2"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -32,7 +35,14 @@ func restartTCP(t *testing.T, ca *testCA, cid coreconsensus.ClusterID, tn *tcpNo
 // leadership. It returns A (stopped), the founders and D.
 func staleVoterSetup(t *testing.T) (*testCA, coreconsensus.ClusterID, []*tcpNode, *tcpNode) {
 	t.Helper()
-	ca, cid, ns := newTCPCluster(t)
+	return staleVoterSetupWith(t, nil)
+}
+
+// staleVoterSetupWith is staleVoterSetup with tweak applied to the
+// configuration of every founder and of D.
+func staleVoterSetupWith(t *testing.T, tweak func(*Config)) (*testCA, coreconsensus.ClusterID, []*tcpNode, *tcpNode) {
+	t.Helper()
+	ca, cid, ns := newTCPClusterWith(t, tweak)
 	raiseNodes(t, tcpNodes(ns))
 	for i := range 5 {
 		proposeOnTCPLeader(t, ns, fmt.Sprintf("k%d=%d", i, i))
@@ -48,7 +58,7 @@ func staleVoterSetup(t *testing.T) (*testCA, coreconsensus.ClusterID, []*tcpNode
 	}
 	a.stop(t)
 	live := ns[1:]
-	d := joinTCP(t, ca, cid, live, "site-d")
+	d := joinTCPWith(t, ca, cid, live, "site-d", tweak)
 	proposeOnTCPLeader(t, live, "d=1")
 	if !waitKV(t, d, "d", "1", 10*time.Second) {
 		t.Fatalf("setup: D never caught up: %+v", d.node.Status())
@@ -112,6 +122,131 @@ func TestHuntR4ProveStaleVoterReplacementThenFailure(t *testing.T) {
 			t.Fatalf("%d never applied the write of the two running voters: %+v", tn.id, tn.node.Status())
 		}
 	}
+}
+
+// slowSpool is a snapshot store whose spools take per for every write: the
+// install of a large state over a slow disk or link, read from the stream
+// no faster than it is spooled. streamed is how long the last committed
+// spool took from its first write to its commit.
+type slowSpool struct {
+	coreconsensus.SnapshotStore
+	per      time.Duration
+	streamed *atomic.Int64
+}
+
+func (s slowSpool) Create(id string, meta coreconsensus.SnapshotMetaValue) (coreconsensus.SnapshotSink, int64, error) {
+	sink, off, err := s.SnapshotStore.Create(id, meta)
+	if err != nil {
+		return nil, off, err
+	}
+	return &slowSink{SnapshotSink: sink, s: s}, off, nil
+}
+
+// slowSink is a spool of slowSpool.
+type slowSink struct {
+	coreconsensus.SnapshotSink
+	s     slowSpool
+	first time.Time
+}
+
+func (k *slowSink) Write(p []byte) (int, error) {
+	if k.first.IsZero() {
+		k.first = time.Now()
+	}
+	time.Sleep(k.s.per)
+	return k.SnapshotSink.Write(p)
+}
+
+func (k *slowSink) Commit(final coreconsensus.SnapshotMetaValue) error {
+	k.s.streamed.Store(int64(time.Since(k.first)))
+	return k.SnapshotSink.Commit(final)
+}
+
+// writeOnTCPLeader proposes small writes to whichever of ns leads, one
+// every few milliseconds, until stop is closed, ignoring their outcome:
+// the write rate a cluster keeps while a member catches up.
+func writeOnTCPLeader(ns []*tcpNode, stop <-chan struct{}) {
+	for i := 0; ; i++ {
+		select {
+		case <-stop:
+			return
+		case <-time.After(5 * time.Millisecond):
+		}
+		for _, tn := range ns {
+			if n := tn.node; n != nil && n.Status().Role == coreconsensus.RoleLeader {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				_, _, _ = n.Propose(ctx, fmt.Appendf(nil, "w%d=v", i))
+				cancel()
+				break
+			}
+		}
+	}
+}
+
+// TestAStaleVoterWhoseInstallOutlastsTheRecordCatchesUp is #618 over the
+// real mTLS transport. The returned voter of #542 admits D on a member's
+// record, and D, whose log is compacted past the voter's end, streams it a
+// snapshot that takes longer to spool than the record's four maximum
+// election timeouts, while the cluster keeps writing and D keeps cutting.
+// The record used to end at that delay while D was heard: the voter's
+// transport cut D's connections, the snapshot lane among them, the next
+// window offered a newer snapshot, which started over, and the voter, a
+// voter of D's configuration, never installed. The record now lasts while
+// D is heard, and the voter applies a write made after its return.
+func TestAStaleVoterWhoseInstallOutlastsTheRecordCatchesUp(t *testing.T) {
+	compact := func(c *Config) { c.SnapshotEvery, c.SnapshotTrailing = 8, 1 }
+	ca, cid, ns, d := staleVoterSetupWith(t, compact)
+	a := ns[0]
+	all := append(append([]*tcpNode(nil), ns...), d)
+	// About 380 KiB of state once compressed: incompressible values, in
+	// base64 so the kv's "key=value" form holds them.
+	rng := rand.New(rand.NewPCG(618, 618))
+	raw := make([]byte, 24<<10)
+	for i := range 16 {
+		for k := range raw {
+			raw[k] = byte(rng.Uint32())
+		}
+		proposeOnTCPLeader(t, all, fmt.Sprintf("big%02d=%s", i, base64.StdEncoding.EncodeToString(raw)))
+	}
+	_, end := a.log.Bounds()
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		proposeOnTCPLeader(t, all, "fill=1")
+		if first, _ := d.log.Bounds(); first > end+1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			first, _ := d.log.Bounds()
+			t.Fatalf("setup: D's log still starts at %d, not past A's end %d", first, end)
+		}
+	}
+	// A spools at most 16 KiB, one TLS record, per write: 80 ms each puts
+	// the install near 3 s, past the record's 4 x 200 ms.
+	streamed := new(atomic.Int64)
+	a.tweak = func(c *Config) {
+		c.Snapshots = slowSpool{SnapshotStore: c.Snapshots, per: 80 * time.Millisecond, streamed: streamed}
+	}
+	restartTCP(t, ca, cid, a)
+	// The writes run from A's return on, so D cuts a newer snapshot
+	// within every window of the record; started after the restart, the
+	// writer reads the nodes the test no longer changes.
+	stop, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		writeOnTCPLeader(all, stop)
+	}()
+	defer func() {
+		close(stop)
+		<-done
+	}()
+	proposeOnTCPLeader(t, all, "b=2")
+	if !waitKV(t, a, "b", "2", 20*time.Second) {
+		t.Fatalf("the returned voter never applied D's write while its install outlasted the record (%v): %+v",
+			4*testTimingFast().ElectionTimeoutMax, a.node.Status())
+	}
+	if got, bound := time.Duration(streamed.Load()), 4*testTimingFast().ElectionTimeoutMax; got <= bound {
+		t.Fatalf("the install took %v, not past the record's delay %v: the test proves nothing", got, bound)
+	}
+	t.Logf("the install streamed for %v, past the record's delay %v", time.Duration(streamed.Load()), 4*testTimingFast().ElectionTimeoutMax)
 }
 
 // The memory double's admission model refuses what the TCP transport

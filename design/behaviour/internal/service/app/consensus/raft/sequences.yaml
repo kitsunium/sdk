@@ -2270,6 +2270,21 @@ sequences:
             - set: r.hint
               value: core.MemberValue{}
           when: r.hint.ID != 0 && r.knows(r.hint.ID)
+  - of: (*Raft).extendHint
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).extendHint
+        kind: self
+      - id: now.Add
+        kind: value
+    steps:
+      - opt:
+          do:
+            - set: r.hintUntil
+              to: now.Add
+              value: now.Add(hintElectionTimeouts * r.timing.ElectionTimeoutMax)
+          when: r.hint.ID != 0 && from == r.hint.ID && !r.mutated(mutHintEndsWhileHeard)
   - of: (*Raft).endHintOnTimeout
     participants:
       - id: caller
@@ -4401,6 +4416,8 @@ sequences:
         kind: actor
       - id: (*Raft).stepFollower
         kind: self
+      - id: r.extendHint
+        kind: internal
       - id: r.resetElection
         kind: internal
       - id: r.handleAppend
@@ -4426,6 +4443,8 @@ sequences:
                   value: m.From
                 - set: r.lastLeaderContact
                   value: now
+                - eval: r.extendHint(now, m.From)
+                  to: r.extendHint
                 - eval: r.resetElection(now)
                   to: r.resetElection
                 - eval: r.handleAppend(m)
@@ -4452,6 +4471,8 @@ sequences:
         kind: actor
       - id: (*Raft).followHeartbeat
         kind: self
+      - id: r.extendHint
+        kind: internal
       - id: r.resetElection
         kind: internal
       - id: r.commitTo
@@ -4463,6 +4484,8 @@ sequences:
         value: m.From
       - set: r.lastLeaderContact
         value: now
+      - eval: r.extendHint(now, m.From)
+        to: r.extendHint
       - eval: r.resetElection(now)
         to: r.resetElection
       - opt:

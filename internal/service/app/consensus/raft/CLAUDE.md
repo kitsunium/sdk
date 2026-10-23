@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-23T02:00:00Z -->
+<!-- updated: 2026-10-24T02:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -95,3 +95,10 @@ under coverage before touching `shard_count`.
   its appends and heartbeats, or take a record from a non-member, at an
   older term, for a known or retired ID, or while a leader is live (#542,
   `mutHintAnyKind`, `TestALeaderRecordIsBoundedAndEnds`).
+- End a leader record while its leader is heard, or extend it on anything
+  but an append or a heartbeat this node took as that leader's contact at
+  its own term: the delay counted from the record cut a leader still
+  heard, its snapshot stream included, and a node that hears its leader
+  sends no PreVote that could bring a new record (#618,
+  `mutHintEndsWhileHeard`, `checkVouchedLeaderAdmittedWhileHeard`,
+  `TestAVouchedLeaderEndsItsDelayAfterTheLastContact`).
