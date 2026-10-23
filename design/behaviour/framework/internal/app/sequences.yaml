@@ -27577,6 +27577,9 @@ sequences:
   - of: OTLPSampleRatio
     steps:
       - return: otlpOption(func(o *otlpOptions) { o.sampleRatio = ratio })
+  - of: OTLPDatabase
+    steps:
+      - return: otlpOption(func(o *otlpOptions) { o.database = name })
   - of: (*otlpExport).declareSettings
     participants:
       - id: caller
@@ -27616,6 +27619,9 @@ sequences:
       - set: e.sampleRatio
         to: otlpSetting
         value: otlpSetting(e, knobOTLPSampleRatio, o.sampleRatio, checkOTLPSampleRatio())
+      - set: e.database
+        to: otlpSetting
+        value: otlpSetting(e, knobOTLPDatabase, o.database, nil)
   - of: otlpSetting
     participants:
       - id: caller
@@ -27635,7 +27641,7 @@ sequences:
       - return: s
   - of: (*otlpExport).settingDecls
     steps:
-      - return: "[]settingDecl{e.endpoint, e.maxBatches, e.maxBytes, e.whenFull, e.maxAge, e.sendTimeout, e.interval, e.drain, e.settle, e.sampleRatio}"
+      - return: "[]settingDecl{e.endpoint, e.maxBatches, e.maxBytes, e.whenFull, e.maxAge, e.sendTimeout, e.interval, e.drain, e.settle, e.sampleRatio, e.database}"
   - of: (*App).otlpStopBudget
     steps:
       - bind: e
@@ -27645,6 +27651,56 @@ sequences:
             - return: "0"
           when: e == nil
       - return: resolvedSetting(a, e.drain) + 3*resolvedSetting(a, e.settle)
+  - of: (*App).otlpProblems
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).otlpProblems
+        kind: self
+      - id: resolvedSetting
+        kind: internal
+    steps:
+      - bind: e
+        eval: a.opts.otlp
+      - opt:
+          do:
+            - return: nil
+          when: e == nil
+      - bind: taken
+        eval: map[string]bool{}
+      - loop:
+          do:
+            - set: taken[d.base().key()]
+              value: "true"
+          key: _
+          range: a.settingDecls()
+          value: d
+      - var:
+          name: out
+          type: "[]model.Diagnostic"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, diagnosticOf("error", otlpNode, a.source(&e.decl), say("otlp.setting-taken", "setting", name)))
+                init:
+                  bind: name
+                  eval: d.base().name
+                when: taken[name]
+          key: _
+          range: e.settingDecls()
+          value: d
+      - opt:
+          do:
+            - set: out
+              value: append(out, diagnosticOf("error", otlpNode, a.source(&e.decl), say("otlp.database", "database", name)))
+          init:
+            bind: name
+            eval: resolvedSetting(a, e.database)
+            to: resolvedSetting
+          when: name != "" && a.otlpDatabase() == nil
+      - return: out
   - of: checkOTLPEndpoint
     participants:
       - id: caller
@@ -27748,8 +27804,27 @@ sequences:
           		problems:       (*App).otlpProblems,
           		stopTakes:      (*App).otlpStopBudget,
           		headerSettings: (*App).otlpHeaderSettings,
+          		tables:         (*App).otlpTables,
           	})
         to: otlpCode.Store
+  - of: (*App).otlpCodeTables
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).otlpCodeTables
+        kind: self
+      - id: otlpCode.Load
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: h.tables(a, d)
+          init:
+            bind: h
+            eval: otlpCode.Load()
+            to: otlpCode.Load
+          when: h != nil
+      - return: nil
   - of: (*App).addOTLPComponent
     participants:
       - id: caller
@@ -28185,6 +28260,8 @@ sequences:
         kind: internal
       - id: filepath
         kind: stdlib
+      - id: a.otlpOnDatabase
+        kind: internal
     steps:
       - bind: e
         eval: a.opts.otlp
@@ -28225,6 +28302,14 @@ sequences:
           when: a.dataDir != "" && !a.opts.memory
       - opt:
           do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: a.otlpOnDatabase(ctx, cfg)
+            to: a.otlpOnDatabase
+          when: err != nil
+      - opt:
+          do:
             - set: cfg.Send
               value:
                 closure:
@@ -28239,6 +28324,123 @@ sequences:
             eval: e.send
           when: send != nil
       - return: cfg, nil
+  - of: (*App).otlpOnDatabase
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).otlpOnDatabase
+        kind: self
+      - id: resolvedSetting
+        kind: internal
+      - id: a.otlpDatabase
+        kind: internal
+      - id: failure
+        kind: internal
+      - id: queuesMissing
+        kind: internal
+      - id: a.runOf
+        kind: internal
+      - id: logger
+        kind: package
+    steps:
+      - bind: name
+        eval: resolvedSetting(a, a.opts.otlp.database)
+        to: resolvedSetting
+      - opt:
+          do:
+            - return: nil
+          when: name == ""
+      - bind: d
+        eval: a.otlpDatabase()
+        to: a.otlpDatabase
+      - opt:
+          do:
+            - return: |-
+                failure(CodeOTLPExport, "OTLP_DATABASE", "the OTLP export's database is none the app declares", nil,
+                			errs.String("database", name))
+              to: failure
+          when: d == nil
+      - opt:
+          do:
+            - return: queuesMissing()
+              to: queuesMissing
+          when: "!queuesLinked()"
+      - bind: r
+        eval: a.runOf(d)
+        to: a.runOf
+      - opt:
+          do:
+            - eval: "logger.Warn(ctx, a.log, \"the OTLP export's database is not open: its queues are kept apart from it\", logger.String(\"database\", name))"
+              to: logger
+            - return: nil
+          when: a.opts.memory || r == nil || !r.open() || r.database() == nil
+      - set: cfg.Dir, cfg.Database
+        value: "\"\", r.database()"
+      - set: cfg.Tables
+        value: "map[string]string{OTLPTraces: otlpTable(OTLPTraces), OTLPMetrics: otlpTable(OTLPMetrics)}"
+      - return: nil
+  - of: (*App).otlpDatabase
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).otlpDatabase
+        kind: self
+      - id: resolvedSetting
+        kind: internal
+    steps:
+      - bind: name
+        eval: resolvedSetting(a, a.opts.otlp.database)
+        to: resolvedSetting
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: d
+                when: name != "" && d.name == name
+          key: _
+          range: a.opts.databases
+          value: d
+      - return: nil
+  - of: otlpTable
+    participants:
+      - id: caller
+        kind: actor
+      - id: otlpTable
+        kind: self
+      - id: tableName
+        kind: internal
+    steps:
+      - return: tableName(otlpTableService, signal, "")
+        to: tableName
+  - of: (*App).otlpTables
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*App).otlpTables
+        kind: self
+      - id: otlpTable
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: a.opts.otlp == nil || a.opts.memory || a.otlpDatabase() != d
+      - var:
+          name: out
+          type: "[]frameworkTable"
+      - loop:
+          do:
+            - bind: table
+              eval: otlpTable(signal)
+              to: otlpTable
+            - set: out
+              value: |-
+                append(out, frameworkTable{name: table, node: otlpNode, queue: true},
+                			frameworkTable{name: table + trailSuffix, node: otlpNode, queue: true, trailOf: table})
+          key: _
+          range: "[]string{OTLPTraces, OTLPMetrics}"
+          value: signal
+      - return: out
   - of: (*App).otlpHeaders
     participants:
       - id: caller
@@ -35441,7 +35643,7 @@ sequences:
     steps:
       - return: |-
           errs.New(CodeSubsystemMissing, "SUBSYSTEM_NOT_IMPORTED", subsystemPublic,
-          		"app: a topic, a subscription, a watch, a queued command or an outbox on a database needs the queue subsystem, which the program does not import: "+queuePackage,
+          		"app: a topic, a subscription, a watch, a queued command, an outbox or the OTLP export on a database needs the queue subsystem, which the program does not import: "+queuePackage,
           		errs.String("packages", queuePackage))
         to: errs
   - of: queuesLinked
@@ -56356,6 +56558,15 @@ sequences:
               types: interface{ queued() bool }
           "on": "n"
       - return: "false"
+  - of: otlpOnADatabase
+    steps:
+      - bind: e
+        eval: a.opts.otlp
+      - opt:
+          do:
+            - return: nil
+          when: e == nil || resolvedSetting(a, e.database) == ""
+      - return: "&e.decl"
   - of: storesLinked
     steps:
       - return: plug.Stores.Load() != nil && stores() != nil

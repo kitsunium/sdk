@@ -29,6 +29,11 @@ type QueueDriverConfig struct {
 	// Open opens one queue, as cfg places it: on a database, in a
 	// directory, or in memory.
 	Open func(cfg QueueConfig) (Broker, error)
+	// OpenSDK opens one queue as cfg places it, and hands the SDK's
+	// queue.Broker itself, held as any: for a subsystem that drives the
+	// SDK's queue on its own — the OTLP export's forwarder (issue #537) —,
+	// with no consumer, no sealing and no test's wrapper.
+	OpenSDK func(cfg QueueConfig) (any, error)
 	// TableMigration is the migration that makes the queue table on a
 	// database of the dialect named, at version.
 	TableMigration func(dialect, table string, version uint64) (MigrationValue, error)

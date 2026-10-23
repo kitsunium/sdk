@@ -525,7 +525,8 @@ func statement(d *fakeData, query string, args []driver.NamedValue) (driver.Rows
 		}
 		return readVersions(d, query, args)
 	}
-	if names := quoted.FindStringSubmatch(query); names != nil && strings.HasPrefix(names[1], queueTableService+"__") {
+	if names := quoted.FindStringSubmatch(query); names != nil &&
+		(strings.HasPrefix(names[1], queueTableService+"__") || strings.HasPrefix(names[1], otlpTableService+"__")) {
 		return queueStatement(d, query, names[1], args)
 	}
 	if names := quoted.FindStringSubmatch(query); names != nil && strings.HasSuffix(names[1], "___vs") {

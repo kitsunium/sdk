@@ -335,6 +335,7 @@ go_test(
         "module_only_test.go",
         "module_test.go",
         "nocommand_test.go",
+        "otlp_database_test.go",
         "otlp_internal_test.go",
         "otlp_test.go",
         "passwords_internal_test.go",

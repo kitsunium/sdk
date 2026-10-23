@@ -608,6 +608,14 @@ sequences:
       - eval: |-
           plug.Queues.Store(&plug.QueueDriverConfig{
           		Open: open, TableMigration: tableMigration, TrailMigration: trailMigration,
+          		// A nil broker is a nil any: openBroker returns none with its error.
+          		OpenSDK: func(cfg plug.QueueConfig) (any, error) {
+          			b, err := openSDK(cfg)
+          			if err != nil {
+          				return nil, err
+          			}
+          			return b, nil
+          		},
           		DoNotRetry: queue.DoNotRetry, NotRetryable: notRetryable,
           	})
         to: plug.Queues.Store
@@ -617,46 +625,19 @@ sequences:
         kind: actor
       - id: open
         kind: self
-      - id: policyOf
-        kind: internal
       - id: clockOf
         kind: internal
-      - id: openSQL
+      - id: openBroker
         kind: internal
-      - id: queue
-        kind: package
       - id: newSealedOutbox
         kind: internal
     steps:
-      - bind: policy
-        eval: policyOf(cfg.Policy)
-        to: policyOf
       - bind: clk
         eval: clockOf(cfg.Clock)
         to: clockOf
-      - leaf: a const or type declaration in a body
-        stmt: |-
-          var (
-          		b   queue.Broker
-          		err error
-          	)
-      - switch:
-          cases:
-            - case: cfg.Database != nil
-              do:
-                - set: b, err
-                  to: openSQL
-                  value: openSQL(&cfg, policy, clk)
-            - case: cfg.Dir != ""
-              do:
-                - set: b, err
-                  to: queue
-                  value: "queue.NewFile(queue.FileConfig{Clock: clk, Dir: cfg.Dir, Policy: policy})"
-            - default: true
-              do:
-                - set: b, err
-                  to: queue
-                  value: "queue.NewMemory(queue.MemoryConfig{Clock: clk, Policy: policy})"
+      - bind: b, err
+        eval: openBroker(&cfg, clk)
+        to: openBroker
       - opt:
           do:
             - return: nil, err
@@ -682,6 +663,45 @@ sequences:
             eval: cfg.Wrap.(func(queue.Broker) queue.Broker)
           when: ok && wrap != nil
       - return: "&broker{q: b, clock: clk}, nil"
+  - of: openSDK
+    participants:
+      - id: caller
+        kind: actor
+      - id: openSDK
+        kind: self
+      - id: openBroker
+        kind: internal
+    steps:
+      - return: openBroker(&cfg, clockOf(cfg.Clock))
+        to: openBroker
+  - of: openBroker
+    participants:
+      - id: caller
+        kind: actor
+      - id: openBroker
+        kind: self
+      - id: policyOf
+        kind: internal
+      - id: openSQL
+        kind: internal
+      - id: queue
+        kind: package
+    steps:
+      - bind: policy
+        eval: policyOf(cfg.Policy)
+        to: policyOf
+      - switch:
+          cases:
+            - case: cfg.Database != nil
+              do:
+                - return: openSQL(cfg, policy, clk)
+                  to: openSQL
+            - case: cfg.Dir != ""
+              do:
+                - return: "queue.NewFile(queue.FileConfig{Clock: clk, Dir: cfg.Dir, Policy: policy})"
+                  to: queue
+      - return: "queue.NewMemory(queue.MemoryConfig{Clock: clk, Policy: policy})"
+        to: queue
   - of: openSQL
     participants:
       - id: caller

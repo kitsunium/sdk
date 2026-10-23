@@ -120,6 +120,10 @@ func openQueue(cfg *plug.OTLPConfig, clk clock.Timed, name string) (queue.Broker
 		MaxDeliveries:     maxDeliveries,
 		MaxMessageBytes:   int(min(cfg.MaxBytes, maxQueueMessage)),
 	}
+	if cfg.Database != nil {
+		b, err := openTable(cfg, policy, name)
+		return b, err == nil, err
+	}
 	if cfg.Dir != "" {
 		if err := os.MkdirAll(cfg.Dir, 0o700); err != nil {
 			return nil, false, err
@@ -131,6 +135,32 @@ func openQueue(cfg *plug.OTLPConfig, clk clock.Timed, name string) (queue.Broker
 	}
 	b, err := queue.NewMemory(queue.MemoryConfig{Clock: clk, Policy: policy})
 	return b, false, err
+}
+
+// openTable opens one signal's queue in its table on cfg.Database: the
+// SDK's SQL broker, which the queue subsystem opens on the database the
+// store subsystem opened (plug.QueueDriverConfig.OpenSDK) — durable
+// wherever the database is, the platforms whose file queue the SDK refuses
+// included (issue #537).
+func openTable(cfg *plug.OTLPConfig, policy queue.Policy, name string) (queue.Broker, error) {
+	queues := plug.Queues.Load()
+	if queues == nil || queues.OpenSDK == nil {
+		return nil, errs.Wrap(forward.Misconfigured, errs.WrapParams{}, errs.String("signal", name), errs.String("problem", "no queue subsystem"))
+	}
+	opened, err := queues.OpenSDK(plug.QueueConfig{
+		Name: "otlp/" + name, Database: cfg.Database, Table: cfg.Tables[name], Clock: cfg.Clock,
+		Policy: plug.QueuePolicyValue{
+			VisibilityTimeout: policy.VisibilityTimeout, MaxDeliveries: policy.MaxDeliveries, MaxMessageBytes: policy.MaxMessageBytes,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	b, ok := opened.(queue.Broker)
+	if !ok {
+		return nil, errs.Wrap(forward.Misconfigured, errs.WrapParams{}, errs.String("signal", name), errs.String("problem", "not a queue.Broker"))
+	}
+	return b, nil
 }
 
 // senderOf is how one signal's batches are shipped, and how a failure is

@@ -112,6 +112,7 @@ files:
       - open
       - openSignal
       - openQueue
+      - openTable
       - senderOf
       - lacks
       - fullPolicyOf
@@ -152,6 +153,15 @@ functions:
     name: openQueue
     params: cfg *plug.OTLPConfig, clk clock.Timed, name string
     results: queue.Broker, bool, error
+  - doc: |-
+      openTable opens one signal's queue in its table on cfg.Database: the
+      SDK's SQL broker, which the queue subsystem opens on the database the
+      store subsystem opened (plug.QueueDriverConfig.OpenSDK) — durable
+      wherever the database is, the platforms whose file queue the SDK refuses
+      included (issue #537).
+    name: openTable
+    params: cfg *plug.OTLPConfig, policy queue.Policy, name string
+    results: queue.Broker, error
   - doc: |-
       senderOf is how one signal's batches are shipped, and how a failure is
       classified: the product's own sender when it gave one, else the signal's

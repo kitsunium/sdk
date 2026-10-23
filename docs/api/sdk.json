@@ -64,7 +64,7 @@
       "name": "otlp",
       "dir": "framework/app/otlp",
       "layer": "framework",
-      "doc": "Package otlp plugs the framework's OTLP export in: the product's traces\nand the metrics the framework derives from them, each signal kept in a\ndurable queue of its own — the SDK's app/forward over its data/queue, in\nthe data directory — and forwarded to an OpenTelemetry collector over\nOTLP/HTTP, retried on a backoff, a Retry-After waited in full. A product\nthat declares app.OTLP imports it:\n\n\timport _ \"github.com/kitsunium/sdk/framework/app/otlp\"\n\nA product that declares no export does not, and links none of that\nforwarder, queue or exporter; a program that declares one without it is\nrefused at the start, the refusal naming this import\n(CodeSubsystemMissing). framework/app does not import it (ADR 0179 step\n10): kit gen writes the line for a designed product, and a hand-written\none writes it.\n"
+      "doc": "Package otlp plugs the framework's OTLP export in: the product's traces\nand the metrics the framework derives from them, each signal kept in a\ndurable queue of its own — the SDK's app/forward over its data/queue, in\nthe data directory, or on the product's database when otlp-database names\none, which needs framework/app/queue too — and forwarded to an OpenTelemetry collector over\nOTLP/HTTP, retried on a backoff, a Retry-After waited in full. A product\nthat declares app.OTLP imports it:\n\n\timport _ \"github.com/kitsunium/sdk/framework/app/otlp\"\n\nA product that declares no export does not, and links none of that\nforwarder, queue or exporter; a program that declares one without it is\nrefused at the start, the refusal naming this import\n(CodeSubsystemMissing). framework/app does not import it (ADR 0179 step\n10): kit gen writes the line for a designed product, and a hand-written\none writes it.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/framework/app/queue",
@@ -3344,6 +3344,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/app.OTLPDatabase",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "OTLPDatabase",
+      "spelled": "func(name string) OTLPOption",
+      "canonical": "func(name string) github.com/kitsunium/sdk/framework/app.OTLPOption",
+      "doc": "OTLPDatabase keeps the export's queues on the database the app declares\nunder name — the default of the setting otlp-database —, one table per\nsignal (app_otlp__traces, app_otlp__metrics), made by the framework's own\nmigrations: a backlog then outlives a restart with no data directory —\na container with no volume — and on the platforms whose file queue the\nSDK refuses. It needs framework/app/queue, which the start names when the\nprogram does not import it; a name the app does not declare stops the\nstart. The empty default keeps the queues in the data directory, else in\nmemory.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/app/otlp.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/app.OTLPDropNewest",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/app",
@@ -3424,7 +3435,7 @@
       "spelled": "iapp.OpenTelemetryConfigurer",
       "canonical": "github.com/kitsunium/sdk/framework/internal/app.OpenTelemetryConfigurer",
       "owner": "go:github.com/kitsunium/sdk/framework/internal/app.OpenTelemetryConfigurer",
-      "doc": "OTLPOption configures the app's export: [OTLPEndpoint], [OTLPBounds],\n[OTLPWhenFull], [OTLPMaxAge], [OTLPSendTimeout], [OTLPSampleRatio],\n[OTLPSender].\n",
+      "doc": "OTLPOption configures the app's export: [OTLPEndpoint], [OTLPBounds],\n[OTLPWhenFull], [OTLPMaxAge], [OTLPSendTimeout], [OTLPSampleRatio],\n[OTLPDatabase], [OTLPSender].\n",
       "file": "framework/app/otlp.go",
       "layer": "framework"
     },
@@ -9836,6 +9847,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.OTLPDatabase",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "OTLPDatabase",
+      "spelled": "func(name string) OpenTelemetryConfigurer",
+      "canonical": "func(name string) github.com/kitsunium/sdk/framework/internal/app.OpenTelemetryConfigurer",
+      "doc": "OTLPDatabase keeps the export's queues on the database the app declares\nunder name — the default of the setting otlp-database —, one table per\nsignal (app_otlp__traces, app_otlp__metrics), made by the framework's own\nmigrations: a backlog then outlives a restart with no data directory —\na container with no volume — and on the platforms whose file queue the\nSDK refuses. It needs framework/app/queue, which the start names when the\nprogram does not import it; a name the app does not declare stops the\nstart. The empty default keeps the queues in the data directory, else in\nmemory.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
+      "file": "framework/internal/app/otlp.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app.OTLPDropNewest",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/internal/app",
@@ -10002,7 +10024,7 @@
       "name": "OpenTelemetryConfigurer",
       "spelled": "interface{openTelemetryConfigure(o *otlpOptions)}",
       "canonical": "interface{openTelemetryConfigure(o *github.com/kitsunium/sdk/framework/internal/app.otlpOptions)}",
-      "doc": "OpenTelemetryConfigurer configures the app's OTLP export: [OTLPEndpoint],\n[OTLPBounds], [OTLPWhenFull], [OTLPMaxAge], [OTLPSendTimeout],\n[OTLPSampleRatio], [OTLPSender].\n",
+      "doc": "OpenTelemetryConfigurer configures the app's OTLP export: [OTLPEndpoint],\n[OTLPBounds], [OTLPWhenFull], [OTLPMaxAge], [OTLPSendTimeout],\n[OTLPSampleRatio], [OTLPDatabase], [OTLPSender].\n",
       "file": "framework/internal/app/otlp_interface.go",
       "layer": "framework"
     },
@@ -14456,8 +14478,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
       "name": "OTLPConfig",
-      "spelled": "struct{Clock Clock; Headers map[string]string; Send func(ctx context.Context, batch OTLPBatchValue) error; Retryable func(err error) bool; OnError func(err error); Service string; Version string; Endpoint string; Dir string; WhenFull string; MaxBytes int64; MaxBatches int; MaxAge time.Duration; SendTimeout time.Duration; Interval time.Duration; DrainTimeout time.Duration; SettleTimeout time.Duration}",
-      "canonical": "struct{Clock github.com/kitsunium/sdk/framework/internal/app/plug.Clock; Headers map[string]string; Send func(ctx context.Context, batch github.com/kitsunium/sdk/framework/internal/app/plug.OTLPBatchValue) error; Retryable func(err error) bool; OnError func(err error); Service string; Version string; Endpoint string; Dir string; WhenFull string; MaxBytes int64; MaxBatches int; MaxAge time.Duration; SendTimeout time.Duration; Interval time.Duration; DrainTimeout time.Duration; SettleTimeout time.Duration}",
+      "spelled": "struct{Clock Clock; Headers map[string]string; Send func(ctx context.Context, batch OTLPBatchValue) error; Retryable func(err error) bool; OnError func(err error); Service string; Version string; Endpoint string; Dir string; Database Database; Tables map[string]string; WhenFull string; MaxBytes int64; MaxBatches int; MaxAge time.Duration; SendTimeout time.Duration; Interval time.Duration; DrainTimeout time.Duration; SettleTimeout time.Duration}",
+      "canonical": "struct{Clock github.com/kitsunium/sdk/framework/internal/app/plug.Clock; Headers map[string]string; Send func(ctx context.Context, batch github.com/kitsunium/sdk/framework/internal/app/plug.OTLPBatchValue) error; Retryable func(err error) bool; OnError func(err error); Service string; Version string; Endpoint string; Dir string; Database github.com/kitsunium/sdk/framework/internal/app/plug.Database; Tables map[string]string; WhenFull string; MaxBytes int64; MaxBatches int; MaxAge time.Duration; SendTimeout time.Duration; Interval time.Duration; DrainTimeout time.Duration; SettleTimeout time.Duration}",
       "fields": [
         {
           "name": "Clock",
@@ -14502,7 +14524,17 @@
         {
           "name": "Dir",
           "type": "string",
-          "doc": "Dir is the directory the two queues lie in, one subdirectory per\nsignal; \"\" keeps them in memory, lost at a stop.\n"
+          "doc": "Dir is the directory the two queues lie in, one subdirectory per\nsignal; \"\" keeps them in memory, lost at a stop. Unused with Database.\n"
+        },
+        {
+          "name": "Database",
+          "type": "Database",
+          "doc": "Database keeps the two queues, one table each (Tables), nil when Dir\nor memory does: a scope the store subsystem's Database opened, on\nwhich the queue subsystem opens the SDK's SQL broker (OpenSDK).\n"
+        },
+        {
+          "name": "Tables",
+          "type": "map[string]string",
+          "doc": "Tables are the queues' tables on Database, by signal.\n"
         },
         {
           "name": "WhenFull",
@@ -14873,13 +14905,18 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
       "name": "QueueDriverConfig",
-      "spelled": "struct{Open func(cfg QueueConfig) (Broker, error); TableMigration func(dialect string, table string, version uint64) (MigrationValue, error); TrailMigration func(dialect string, table string, version uint64) (MigrationValue, error); DoNotRetry func(err error) error; NotRetryable func(err error) bool}",
-      "canonical": "struct{Open func(cfg github.com/kitsunium/sdk/framework/internal/app/plug.QueueConfig) (github.com/kitsunium/sdk/framework/internal/app/plug.Broker, error); TableMigration func(dialect string, table string, version uint64) (github.com/kitsunium/sdk/framework/internal/app/plug.MigrationValue, error); TrailMigration func(dialect string, table string, version uint64) (github.com/kitsunium/sdk/framework/internal/app/plug.MigrationValue, error); DoNotRetry func(err error) error; NotRetryable func(err error) bool}",
+      "spelled": "struct{Open func(cfg QueueConfig) (Broker, error); OpenSDK func(cfg QueueConfig) (any, error); TableMigration func(dialect string, table string, version uint64) (MigrationValue, error); TrailMigration func(dialect string, table string, version uint64) (MigrationValue, error); DoNotRetry func(err error) error; NotRetryable func(err error) bool}",
+      "canonical": "struct{Open func(cfg github.com/kitsunium/sdk/framework/internal/app/plug.QueueConfig) (github.com/kitsunium/sdk/framework/internal/app/plug.Broker, error); OpenSDK func(cfg github.com/kitsunium/sdk/framework/internal/app/plug.QueueConfig) (any, error); TableMigration func(dialect string, table string, version uint64) (github.com/kitsunium/sdk/framework/internal/app/plug.MigrationValue, error); TrailMigration func(dialect string, table string, version uint64) (github.com/kitsunium/sdk/framework/internal/app/plug.MigrationValue, error); DoNotRetry func(err error) error; NotRetryable func(err error) bool}",
       "fields": [
         {
           "name": "Open",
           "type": "func(cfg QueueConfig) (Broker, error)",
           "doc": "Open opens one queue, as cfg places it: on a database, in a\ndirectory, or in memory.\n"
+        },
+        {
+          "name": "OpenSDK",
+          "type": "func(cfg QueueConfig) (any, error)",
+          "doc": "OpenSDK opens one queue as cfg places it, and hands the SDK's\nqueue.Broker itself, held as any: for a subsystem that drives the\nSDK's queue on its own — the OTLP export's forwarder (issue #537) —,\nwith no consumer, no sealing and no test's wrapper.\n"
         },
         {
           "name": "TableMigration",

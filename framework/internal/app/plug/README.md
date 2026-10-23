@@ -2264,8 +2264,14 @@ type OTLPConfig struct {
 	// signal's path is appended to it. Unused with Send.
 	Endpoint      string
 	// Dir is the directory the two queues lie in, one subdirectory per
-	// signal; "" keeps them in memory, lost at a stop.
+	// signal; "" keeps them in memory, lost at a stop. Unused with Database.
 	Dir           string
+	// Database keeps the two queues, one table each (Tables), nil when Dir
+	// or memory does: a scope the store subsystem's Database opened, on
+	// which the queue subsystem opens the SDK's SQL broker (OpenSDK).
+	Database      Database
+	// Tables are the queues' tables on Database, by signal.
+	Tables        map[string]string
 	// WhenFull is what a full queue does with a new batch: OTLPDropOldest,
 	// OTLPDropNewest or OTLPBlock.
 	WhenFull      string
@@ -2495,6 +2501,11 @@ type QueueDriverConfig struct {
 	// Open opens one queue, as cfg places it: on a database, in a
 	// directory, or in memory.
 	Open           func(cfg QueueConfig) (Broker, error)
+	// OpenSDK opens one queue as cfg places it, and hands the SDK's
+	// queue.Broker itself, held as any: for a subsystem that drives the
+	// SDK's queue on its own — the OTLP export's forwarder (issue #537) —,
+	// with no consumer, no sealing and no test's wrapper.
+	OpenSDK        func(cfg QueueConfig) (any, error)
 	// TableMigration is the migration that makes the queue table on a
 	// database of the dialect named, at version.
 	TableMigration func(dialect string, table string, version uint64) (MigrationValue, error)

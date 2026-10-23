@@ -3244,6 +3244,25 @@ packages:
         out:
           - type: OpenTelemetryConfigurer
       - doc: |-
+          OTLPDatabase keeps the export's queues on the database the app declares
+          under name — the default of the setting otlp-database —, one table per
+          signal (app_otlp__traces, app_otlp__metrics), made by the framework's own
+          migrations: a backlog then outlives a restart with no data directory —
+          a container with no volume — and on the platforms whose file queue the
+          SDK refuses. It needs framework/app/queue, which the start names when the
+          program does not import it; a name the app does not declare stops the
+          start. The empty default keeps the queues in the data directory, else in
+          memory.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: name
+            type: string
+        name: OTLPDatabase
+        out:
+          - type: OpenTelemetryConfigurer
+      - doc: |-
           Meter is the product's own meter, for the app ctx runs inside: the
           counters, gauges and histograms it makes land in the OTLP export's
           metrics stream, under the app's resource and an instrumentation scope
@@ -6157,7 +6176,7 @@ packages:
       - doc: |-
           OpenTelemetryConfigurer configures the app's OTLP export: [OTLPEndpoint],
           [OTLPBounds], [OTLPWhenFull], [OTLPMaxAge], [OTLPSendTimeout],
-          [OTLPSampleRatio], [OTLPSender].
+          [OTLPSampleRatio], [OTLPDatabase], [OTLPSender].
         interface:
           unexported: true
         name: OpenTelemetryConfigurer
@@ -7269,6 +7288,13 @@ packages:
                 directory, or in memory.
               name: Open
               type: func(cfg QueueConfig) (Broker, error)
+            - doc: |-
+                OpenSDK opens one queue as cfg places it, and hands the SDK's
+                queue.Broker itself, held as any: for a subsystem that drives the
+                SDK's queue on its own — the OTLP export's forwarder (issue #537) —,
+                with no consumer, no sealing and no test's wrapper.
+              name: OpenSDK
+              type: func(cfg QueueConfig) (any, error)
             - doc: |-
                 TableMigration is the migration that makes the queue table on a
                 database of the dialect named, at version.
@@ -9531,9 +9557,18 @@ packages:
               type: string
             - doc: |-
                 Dir is the directory the two queues lie in, one subdirectory per
-                signal; "" keeps them in memory, lost at a stop.
+                signal; "" keeps them in memory, lost at a stop. Unused with Database.
               name: Dir
               type: string
+            - doc: |-
+                Database keeps the two queues, one table each (Tables), nil when Dir
+                or memory does: a scope the store subsystem's Database opened, on
+                which the queue subsystem opens the SDK's SQL broker (OpenSDK).
+              name: Database
+              type: Database
+            - doc: Tables are the queues' tables on Database, by signal.
+              name: Tables
+              type: map[string]string
             - doc: |-
                 WhenFull is what a full queue does with a new batch: OTLPDropOldest,
                 OTLPDropNewest or OTLPBlock.
@@ -10577,7 +10612,7 @@ packages:
       - doc: |-
           OTLPOption configures the app's export: [OTLPEndpoint], [OTLPBounds],
           [OTLPWhenFull], [OTLPMaxAge], [OTLPSendTimeout], [OTLPSampleRatio],
-          [OTLPSender].
+          [OTLPDatabase], [OTLPSender].
         name: OTLPOption
         target: iapp.OpenTelemetryConfigurer
     constants:
@@ -13524,6 +13559,25 @@ packages:
           - name: ratio
             type: float64
         name: OTLPSampleRatio
+        out:
+          - type: OTLPOption
+      - doc: |-
+          OTLPDatabase keeps the export's queues on the database the app declares
+          under name — the default of the setting otlp-database —, one table per
+          signal (app_otlp__traces, app_otlp__metrics), made by the framework's own
+          migrations: a backlog then outlives a restart with no data directory —
+          a container with no volume — and on the platforms whose file queue the
+          SDK refuses. It needs framework/app/queue, which the start names when the
+          program does not import it; a name the app does not declare stops the
+          start. The empty default keeps the queues in the data directory, else in
+          memory.
+
+          IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+          only hands it to the declaration it configures.
+        in:
+          - name: name
+            type: string
+        name: OTLPDatabase
         out:
           - type: OTLPOption
       - doc: |-

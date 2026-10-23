@@ -247,6 +247,9 @@ func (a *App) otlpConfig(ctx context.Context) (*plug.OTLPConfig, error) {
 	if a.dataDir != "" && !a.opts.memory {
 		cfg.Dir = filepath.Join(a.dataDir, otlpDataDir)
 	}
+	if err := a.otlpOnDatabase(ctx, cfg); err != nil {
+		return nil, err
+	}
 	if send := e.send; send != nil {
 		cfg.Send = func(ctx context.Context, b plug.OTLPBatchValue) error {
 			return send(ctx, OTLPBatchValue{Signal: b.Signal, Document: b.Document})
@@ -254,6 +257,69 @@ func (a *App) otlpConfig(ctx context.Context) (*plug.OTLPConfig, error) {
 		cfg.Retryable = otlpRetryable
 	}
 	return cfg, nil
+}
+
+// otlpOnDatabase places the export's queues on the database otlp-database
+// names (issue #537): one table per signal, which the framework's own
+// migrations made when the database started. Nothing when the setting is
+// empty; refused when it names no database the app declares, or when the
+// program does not import framework/app/queue, whose SQL broker keeps them.
+// A database that is not open — the app in memory, or in dev without its
+// URL — leaves the queues where they were, and says so.
+func (a *App) otlpOnDatabase(ctx context.Context, cfg *plug.OTLPConfig) error {
+	name := resolvedSetting(a, a.opts.otlp.database)
+	if name == "" {
+		return nil
+	}
+	d := a.otlpDatabase()
+	if d == nil {
+		return failure(CodeOTLPExport, "OTLP_DATABASE", "the OTLP export's database is none the app declares", nil,
+			errs.String("database", name))
+	}
+	if !queuesLinked() {
+		return queuesMissing()
+	}
+	r := a.runOf(d)
+	if a.opts.memory || r == nil || !r.open() || r.database() == nil {
+		logger.Warn(ctx, a.log, "the OTLP export's database is not open: its queues are kept apart from it", logger.String("database", name))
+		return nil
+	}
+	cfg.Dir, cfg.Database = "", r.database()
+	cfg.Tables = map[string]string{OTLPTraces: otlpTable(OTLPTraces), OTLPMetrics: otlpTable(OTLPMetrics)}
+	return nil
+}
+
+// otlpDatabase is the database otlp-database names, nil when it names none
+// the app declares, or nothing.
+func (a *App) otlpDatabase() *database {
+	name := resolvedSetting(a, a.opts.otlp.database)
+	for _, d := range a.opts.databases {
+		if name != "" && d.name == name {
+			return d
+		}
+	}
+	return nil
+}
+
+// otlpTable is the table of signal's queue on the export's database:
+// app_otlp__traces, app_otlp__metrics.
+func otlpTable(signal string) string { return tableName(otlpTableService, signal, "") }
+
+// otlpTables are the export's tables on d, when d is the database
+// otlp-database names and the app keeps its data out of memory: each
+// signal's queue, the SDK's SQL broker's one table, and its trail column
+// (store_sql.go's frameworkTables, as a consumer's queue).
+func (a *App) otlpTables(d *database) []frameworkTable {
+	if a.opts.otlp == nil || a.opts.memory || a.otlpDatabase() != d {
+		return nil
+	}
+	var out []frameworkTable
+	for _, signal := range []string{OTLPTraces, OTLPMetrics} {
+		table := otlpTable(signal)
+		out = append(out, frameworkTable{name: table, node: otlpNode, queue: true},
+			frameworkTable{name: table + trailSuffix, node: otlpNode, queue: true, trailOf: table})
+	}
+	return out
 }
 
 // otlpHeaders reads the secret otlp-headers; none when it is set nowhere.

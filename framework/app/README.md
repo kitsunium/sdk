@@ -264,6 +264,7 @@ Package app — workflows: a state machine over the entities of one store.
 - [func Now\(ctx context.Context\) time.Time](<#Now>)
 - [func OTLP\(opts ...OTLPOption\) AppOption](<#OTLP>)
 - [func OTLPBounds\(maxBatches int, maxBytes int\) OTLPOption](<#OTLPBounds>)
+- [func OTLPDatabase\(name string\) OTLPOption](<#OTLPDatabase>)
 - [func OTLPEndpoint\(url string\) OTLPOption](<#OTLPEndpoint>)
 - [func OTLPMaxAge\(d time.Duration\) OTLPOption](<#OTLPMaxAge>)
 - [func OTLPSampleRatio\(ratio float64\) OTLPOption](<#OTLPSampleRatio>)
@@ -2728,6 +2729,17 @@ OTLPBounds bounds each signal's queue: at most maxBatches batches and maxBytes b
 
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
+<a name="OTLPDatabase"></a>
+## func [OTLPDatabase](<https://github.com/kitsunium/sdk/blob/main/framework/app/otlp.go>)
+
+```go
+func OTLPDatabase(name string) OTLPOption
+```
+
+OTLPDatabase keeps the export's queues on the database the app declares under name — the default of the setting otlp-database —, one table per signal (app\_otlp\_\_traces, app\_otlp\_\_metrics), made by the framework's own migrations: a backlog then outlives a restart with no data directory — a container with no volume — and on the platforms whose file queue the SDK refuses. It needs framework/app/queue, which the start names when the program does not import it; a name the app does not declare stops the start. The empty default keeps the queues in the data directory, else in memory.
+
+IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
+
 <a name="OTLPEndpoint"></a>
 ## func [OTLPEndpoint](<https://github.com/kitsunium/sdk/blob/main/framework/app/otlp.go>)
 
@@ -4817,7 +4829,7 @@ type OTLPFullPolicy string
 <a name="OTLPOption"></a>
 ## type [OTLPOption](<https://github.com/kitsunium/sdk/blob/main/framework/app/otlp.go>)
 
-OTLPOption configures the app's export: [OTLPEndpoint](#OTLPEndpoint), [OTLPBounds](#OTLPBounds), [OTLPWhenFull](#OTLPWhenFull), [OTLPMaxAge](#OTLPMaxAge), [OTLPSendTimeout](#OTLPSendTimeout), [OTLPSampleRatio](#OTLPSampleRatio), [OTLPSender](#OTLPSender).
+OTLPOption configures the app's export: [OTLPEndpoint](#OTLPEndpoint), [OTLPBounds](#OTLPBounds), [OTLPWhenFull](#OTLPWhenFull), [OTLPMaxAge](#OTLPMaxAge), [OTLPSendTimeout](#OTLPSendTimeout), [OTLPSampleRatio](#OTLPSampleRatio), [OTLPDatabase](#OTLPDatabase), [OTLPSender](#OTLPSender).
 
 ```go
 type OTLPOption = iapp.OpenTelemetryConfigurer

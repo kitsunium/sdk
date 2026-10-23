@@ -2,7 +2,7 @@ package app
 
 // OpenTelemetryConfigurer configures the app's OTLP export: [OTLPEndpoint],
 // [OTLPBounds], [OTLPWhenFull], [OTLPMaxAge], [OTLPSendTimeout],
-// [OTLPSampleRatio], [OTLPSender].
+// [OTLPSampleRatio], [OTLPDatabase], [OTLPSender].
 type OpenTelemetryConfigurer interface {
 	openTelemetryConfigure(o *otlpOptions)
 }

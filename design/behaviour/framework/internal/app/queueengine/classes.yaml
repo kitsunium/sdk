@@ -52,6 +52,8 @@ files:
   - decls:
       - Enable
       - open
+      - openSDK
+      - openBroker
       - openSQL
       - policyOf
       - notRetryable
@@ -115,6 +117,20 @@ functions:
     name: open
     params: cfg plug.QueueConfig
     results: plug.Broker, error
+  - doc: |-
+      openSDK opens the SDK's queue cfg places and hands it as it is — plug
+      holds it as any —: the OTLP export's forwarder drives it itself (issue
+      #537).
+    name: openSDK
+    params: cfg plug.QueueConfig
+    results: queue.Broker, error
+  - doc: |-
+      openBroker is the SDK's queue cfg places: one table of the SDK's SQL
+      broker on its database, else a file queue in its directory, else a
+      memory queue.
+    name: openBroker
+    params: cfg *plug.QueueConfig, clk clock.Timed
+    results: queue.Broker, error
   - doc: |-
       openSQL is the SDK's SQL broker over cfg's table: on the transaction
       manager and in the dialect of the database the store subsystem opened,

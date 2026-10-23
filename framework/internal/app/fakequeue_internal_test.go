@@ -35,6 +35,13 @@ func fakeTrailColumns(d *fakeData, args []driver.NamedValue) driver.Rows {
 	return &fakeRows{cols: []string{"columns", "trails"}, rows: [][]driver.Value{{columns, trails}}}
 }
 
+// QueueTables are the queue tables the database holds, sorted.
+func (f *FakeDB) QueueTables() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Sorted(maps.Keys(f.data.queues))
+}
+
 // Messages are the payloads table holds, live and dead, oldest first.
 func (f *FakeDB) Messages(table string) []string {
 	f.mu.Lock()

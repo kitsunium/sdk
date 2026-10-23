@@ -15,6 +15,14 @@ import (
 func Enable() {
 	plug.Queues.Store(&plug.QueueDriverConfig{
 		Open: open, TableMigration: tableMigration, TrailMigration: trailMigration,
+		// A nil broker is a nil any: openBroker returns none with its error.
+		OpenSDK: func(cfg plug.QueueConfig) (any, error) {
+			b, err := openSDK(cfg)
+			if err != nil {
+				return nil, err
+			}
+			return b, nil
+		},
 		DoNotRetry: queue.DoNotRetry, NotRetryable: notRetryable,
 	})
 }
@@ -27,20 +35,8 @@ func Enable() {
 // IFACE-PLUGIN: kit reaches a queue through plug.Broker; this is its
 // implementation.
 func open(cfg plug.QueueConfig) (plug.Broker, error) {
-	policy := policyOf(cfg.Policy)
 	clk := clockOf(cfg.Clock)
-	var (
-		b   queue.Broker
-		err error
-	)
-	switch {
-	case cfg.Database != nil:
-		b, err = openSQL(&cfg, policy, clk)
-	case cfg.Dir != "":
-		b, err = queue.NewFile(queue.FileConfig{Clock: clk, Dir: cfg.Dir, Policy: policy})
-	default:
-		b, err = queue.NewMemory(queue.MemoryConfig{Clock: clk, Policy: policy})
-	}
+	b, err := openBroker(&cfg, clk)
 	if err != nil {
 		return nil, err
 	}
@@ -53,6 +49,27 @@ func open(cfg plug.QueueConfig) (plug.Broker, error) {
 		b = wrap(b)
 	}
 	return &broker{q: b, clock: clk}, nil
+}
+
+// openSDK opens the SDK's queue cfg places and hands it as it is — plug
+// holds it as any —: the OTLP export's forwarder drives it itself (issue
+// #537).
+func openSDK(cfg plug.QueueConfig) (queue.Broker, error) {
+	return openBroker(&cfg, clockOf(cfg.Clock))
+}
+
+// openBroker is the SDK's queue cfg places: one table of the SDK's SQL
+// broker on its database, else a file queue in its directory, else a
+// memory queue.
+func openBroker(cfg *plug.QueueConfig, clk clock.Timed) (queue.Broker, error) {
+	policy := policyOf(cfg.Policy)
+	switch {
+	case cfg.Database != nil:
+		return openSQL(cfg, policy, clk)
+	case cfg.Dir != "":
+		return queue.NewFile(queue.FileConfig{Clock: clk, Dir: cfg.Dir, Policy: policy})
+	}
+	return queue.NewMemory(queue.MemoryConfig{Clock: clk, Policy: policy})
 }
 
 // openSQL is the SDK's SQL broker over cfg's table: on the transaction

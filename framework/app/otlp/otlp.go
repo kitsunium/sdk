@@ -1,7 +1,8 @@
 // Package otlp plugs the framework's OTLP export in: the product's traces
 // and the metrics the framework derives from them, each signal kept in a
 // durable queue of its own — the SDK's app/forward over its data/queue, in
-// the data directory — and forwarded to an OpenTelemetry collector over
+// the data directory, or on the product's database when otlp-database names
+// one, which needs framework/app/queue too — and forwarded to an OpenTelemetry collector over
 // OTLP/HTTP, retried on a backoff, a Retry-After waited in full. A product
 // that declares app.OTLP imports it:
 //
