@@ -22,8 +22,13 @@ import (
 //     `if span != nil` at every instrumentation site, and the one place it was
 //     forgotten would panic in production on the cheap path.
 //
-// It is a value type with no pointer receiver, so it allocates nothing: an
-// unsampled span costs one interface conversion and no heap.
+// Start hands it out as a POINTER, and the same pointer is what the child
+// context holds (coretrace.ContextWithSpan): the span context is too wide for an
+// interface word, so a noopSpan value boxed as the Span and the span context
+// boxed for the context were two heap copies of one identity. One allocation
+// now serves both, which leaves an unsampled Start at two — the span and the
+// context.WithValue node. The identity is immutable, which is what lets the
+// context read it through the span.
 type noopSpan struct {
 	// context is the identity — valid and unsampled, minted as every span's
 	// is (minting cannot fail).

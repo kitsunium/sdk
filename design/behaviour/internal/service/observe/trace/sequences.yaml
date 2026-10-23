@@ -1701,13 +1701,15 @@ sequences:
         to: t.mint
       - opt:
           do:
-            - return: "coretrace.ContextWithSpanContext(ctx, spanContext), noopSpan{context: spanContext}"
+            - bind: unsampled
+              eval: "&noopSpan{context: spanContext}"
+            - return: coretrace.ContextWithSpan(ctx, unsampled), unsampled
               to: coretrace
           when: "!spanContext.IsSampled()"
       - bind: recording
         eval: newSpan(t, spanContext, parent, name, params)
         to: newSpan
-      - return: coretrace.ContextWithSpanContext(ctx, spanContext), recording
+      - return: coretrace.ContextWithSpan(ctx, recording), recording
         to: coretrace
   - of: (*Tracer).mint
     participants:

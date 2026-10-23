@@ -45,12 +45,15 @@ const allocRuntimeWarmup int = 30000
 // theirs are deltas and these are not.
 const (
 	// allocBudgetSampled is a request that starts a RECORDING root span: no
-	// inbound traceparent, AlwaysSample. Twelve, itemised in BENCH.md §1.3.
-	allocBudgetSampled int = 12
+	// inbound traceparent, AlwaysSample. Eleven: the twelve itemised in
+	// BENCH.md §1.3, less the span context Start no longer boxes for the
+	// context — the context holds the span itself (BENCH.md §The span context Start stores).
+	allocBudgetSampled int = 11
 	// allocBudgetUnsampled is the same request against NeverSample. It is the
 	// number that governs a service running a low sampling ratio, because it
-	// is what the overwhelming majority of its requests pay.
-	allocBudgetUnsampled int = 10
+	// is what the overwhelming majority of its requests pay. Nine since the
+	// unsampled span and its context share one allocation (BENCH.md §The span context Start stores).
+	allocBudgetUnsampled int = 9
 )
 
 // warmRuntimeCaches pays for the runtime's lazily-built interface-switch caches

@@ -23,9 +23,58 @@ sampled row.
 put it (0.1 × 728 + 0.9 × 403 = 435), which is how these three rows check each
 other. The sampling decision itself is the ~19 ns of residue.
 
+## The shared span context — three allocations became two
+
+The profile below was taken when an unsampled `Start` paid three allocations:
+the `context.WithValue` node, the `SpanContextValue` boxed into its `any`, and
+the `noopSpan` value boxed into the returned `Span` — two heap copies of one
+identity, because a span context is too wide for an interface word. `Start` now
+stores the SPAN on the context (`coretrace.ContextWithSpan`), and
+`SpanContextFromContext` reads the identity back through `SpanContext()`; the
+unsampled span is a `*noopSpan`, so the span and the context share its one
+allocation. A recording span is a pointer already, so its context stops boxing
+too.
+
+A/B against the base binary (the same benchmark source on `d91642be`), the two
+run alternately ten times, `benchstat`:
+
+```
+                            │    base     │                 new                 │
+                            │   sec/op    │    sec/op     vs base               │
+StartEnd_Sampled-8            690.8n ± 4%   626.3n ±  4%   -9.33% (p=0.002 n=10)
+StartEnd_NotSampled-8         330.1n ± 1%   273.5n ±  1%  -17.15% (p=0.000 n=10)
+StartEnd_SampledWithAttrs-8   913.7n ± 5%   836.1n ±  2%   -8.49% (p=0.000 n=10)
+StartEnd_Nested-8             1.922µ ± 4%   1.683µ ±  2%  -12.41% (p=0.000 n=10)
+Span_SpanContext-8            5.766n ± 2%   5.804n ±  7%        ~ (p=0.436 n=10)
+Sampler_Ratio-8               376.2n ± 4%   318.1n ± 11%  -15.44% (p=0.000 n=10)
+
+                            │    B/op     │     B/op      vs base               │
+StartEnd_Sampled-8              432 ± 0%      368 ± 0%    -14.81% (p=0.000 n=10)
+StartEnd_NotSampled-8           176 ± 0%      112 ± 0%    -36.36% (p=0.000 n=10)
+StartEnd_SampledWithAttrs-8     576 ± 0%      512 ± 0%    -11.11% (p=0.000 n=10)
+StartEnd_Nested-8           1.266Ki ± 0%  1.078Ki ± 0%    -14.81% (p=0.000 n=10)
+Sampler_Ratio-8                 201 ± 0%      137 ± 0%    -31.84% (p=0.000 n=10)
+
+                            │  allocs/op  │  allocs/op    vs base               │
+StartEnd_Sampled-8            3.000 ± 0%    2.000 ± 0%    -33.33% (p=0.000 n=10)
+StartEnd_NotSampled-8         3.000 ± 0%    2.000 ± 0%    -33.33% (p=0.000 n=10)
+StartEnd_SampledWithAttrs-8   4.000 ± 0%    3.000 ± 0%    -25.00% (p=0.000 n=10)
+StartEnd_Nested-8             9.000 ± 0%    6.000 ± 0%    -33.33% (p=0.000 n=10)
+Sampler_Ratio-8               3.000 ± 0%    2.000 ± 0%    -33.33% (p=0.000 n=10)
+```
+
+What the unsampled path still allocates is the context node and the span —
+the two things propagation needs, argued below. The tables above and below
+this section are the earlier measurement, kept as it was taken (its machine is
+in §Reproducibility envelope); this one was measured on an AMD EPYC 7351P
+16-Core, 8 vCPU visible, 11 GiB RAM, Linux 6.12.101+deb13-amd64 (Debian 13),
+go1.27.3 linux/amd64, base d91642be, branch `perf/trace-span-context`,
+2026-10-23, benchtime 1s.
+
 ## Why the unsampled path allocates — and why it is not waste
 
-`go tool pprof -sample_index=alloc_objects` on the unsampled path:
+`go tool pprof -sample_index=alloc_objects` on the unsampled path, before the
+shared span context above:
 
 | | share of allocated objects |
 |---|---:|

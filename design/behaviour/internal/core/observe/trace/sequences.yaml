@@ -56,19 +56,44 @@ sequences:
     steps:
       - return: context.WithValue(parent, spanContextKey, value)
         to: context
+  - of: ContextWithSpan
+    participants:
+      - id: caller
+        kind: actor
+      - id: ContextWithSpan
+        kind: self
+      - id: context
+        kind: stdlib
+    steps:
+      - return: context.WithValue(parent, spanContextKey, span)
+        to: context
   - of: SpanContextFromContext
+    participants:
+      - id: caller
+        kind: actor
+      - id: SpanContextFromContext
+        kind: self
+      - id: stored.SpanContext
+        kind: internal
     steps:
       - opt:
           do:
             - return: SpanContextValue{}
           when: ctx == nil
-      - bind: stored, ok
-        eval: ctx.Value(spanContextKey).(SpanContextValue)
-      - opt:
-          do:
-            - return: SpanContextValue{}
-          when: "!ok"
-      - return: stored
+      - typeswitch:
+          bind: stored
+          cases:
+            - do:
+                - return: stored
+              types: SpanContextValue
+            - do:
+                - return: stored.SpanContext()
+                  to: stored.SpanContext
+              types: Span
+            - default: true
+              do:
+                - return: SpanContextValue{}
+          "on": ctx.Value(spanContextKey)
   - of: EventValue.Normalized
     steps:
       - return: "EventValue{Time: e.Time, Name: e.Name, Attrs: SortAttrs(e.Attrs)}"

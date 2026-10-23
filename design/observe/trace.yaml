@@ -499,6 +499,27 @@ packages:
         out:
           - type: context.Context
       - doc: |-
+          ContextWithSpan returns a copy of parent carrying span's context, exactly as
+          ContextWithSpanContext(parent, span.SpanContext()) would — SpanContextFromContext
+          reads the same value back — without copying that value onto the heap.
+
+          The context stores the span itself and asks it for its context when the
+          context is read. A span the tracer returns is a pointer, so storing it costs
+          no allocation, where boxing the span context does: an unsampled Start pays
+          two allocations instead of three. The price is the contract it states: span's
+          SpanContext must return the same value for as long as the context lives,
+          which every span Start returns guarantees — its identity is immutable once
+          minted. A nil span reads back as the invalid zero context, and shadows any
+          outer one as ContextWithSpanContext's invalid context does.
+        in:
+          - name: parent
+            type: context.Context
+          - name: span
+            type: Span
+        name: ContextWithSpan
+        out:
+          - type: context.Context
+      - doc: |-
           SpanContextFromContext returns the span context carried by ctx, or the invalid
           zero value when there is none.
 
