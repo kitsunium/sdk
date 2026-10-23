@@ -3975,6 +3975,12 @@ types:
       - doc: owners is the one sink each id's spool belongs to (#547).
         name: owners
         type: map[string]*fileSink
+      - doc: |-
+          afterPublish, when set by a test, runs in Create once its sink owns
+          the id's spool and before the sink it took the spool from is
+          superseded (#582).
+        name: afterPublish
+        type: func(id string)
     kind: struct
     methods:
       - doc: |-
@@ -4005,18 +4011,19 @@ types:
         recv: s *fileSnapshots
         results: coreconsensus.SnapshotSink, int64, error
       - doc: |-
-          claim makes sink the owner of its id's spool, which Create opens under
-          the same hold of s.mu. A spool another sink still writes to is never
-          shared: that sink is superseded, its handle closed, and the new one
-          writes the spool from offset 0, which claim reports. Shared, a stale
-          install's Abort unlinked the spool the current leader's install of the
-          same id wrote, whose Commit then failed STORAGE_FAILED and stopped a node
-          with a healthy disk (#547). A sink whose open then fails owns nothing
-          once closed. The caller holds s.mu.
+          claim makes sink the owner of its id's spool and returns the sink it took
+          the spool from, if any. A spool another sink still writes to is never
+          shared: Create supersedes that sink, its handle closed, before it opens
+          the spool, and writes it from offset 0. Shared, a stale install's Abort
+          unlinked the spool the current leader's install of the same id wrote,
+          whose Commit then failed STORAGE_FAILED and stopped a node with a
+          healthy disk (#547). A sink whose open then fails owns nothing once
+          closed. The caller holds s.mu, never the old sink's mu: supersede waits
+          for that one outside s.mu (#582).
         name: claim
         params: sink *fileSink
         recv: s *fileSnapshots
-        results: bool
+        results: "*fileSink"
       - doc: |-
           published reads the snapshot a directory entry named name publishes. ok
           is false for anything that is not a complete snapshot: another file, a
@@ -4072,7 +4079,9 @@ types:
     methods:
       - doc: |-
           supersede closes the sink's handle and marks it superseded; it waits for
-          a write, Commit or Abort in progress. The caller holds k.s.mu.
+          a write, Commit, Abort or Create in progress. A sink whose Create failed
+          before its open has no handle. The caller holds no lock but its own
+          sink's mu.
         name: supersede
         recv: k *fileSink
       - doc: |-

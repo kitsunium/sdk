@@ -31,6 +31,10 @@ type fileSnapshots struct {
 	writing map[string]int
 	// owners is the one sink each id's spool belongs to (#547).
 	owners map[string]*fileSink
+	// afterPublish, when set by a test, runs in Create once its sink owns
+	// the id's spool and before the sink it took the spool from is
+	// superseded (#582).
+	afterPublish func(id string)
 }
 
 // newFileSnapshots opens the snapshot directory dir, creating it private
@@ -164,55 +168,73 @@ func (s *fileSnapshots) Create(id string, meta coreconsensus.SnapshotMetaValue) 
 		sink.closed()
 		return nil, 0, err
 	}
+	// The sink is held until its spool is positioned: a Create of the same
+	// id that supersedes it in the meantime waits, then closes the handle
+	// this one opened (#582).
+	sink.mu.Lock()
 	s.mu.Lock()
-	superseding := s.claim(sink)
-	f, err := os.OpenFile(filepath.Join(s.dir, id+".spool"), os.O_RDWR|os.O_CREATE, 0o600)
+	old := s.claim(sink)
 	s.mu.Unlock()
+	if s.afterPublish != nil {
+		s.afterPublish(id)
+	}
+	if old != nil {
+		// Locks go from the younger sink to the older one, never back.
+		old.supersede()
+	}
+	f, err := os.OpenFile(filepath.Join(s.dir, id+".spool"), os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
+		sink.mu.Unlock()
 		sink.closed()
 		return nil, 0, storageFailed("spool", err)
 	}
 	sink.f = f
 	var off int64
-	if superseding {
+	if old != nil {
 		// What another install wrote there is not resumed from.
 		err = f.Truncate(0)
 	} else {
 		off, err = resumeOffset(f, meta.ChunkSize)
 	}
 	if err != nil {
+		err = alsoFailed(storageFailed("spool", err), "close", f.Close())
+		sink.f = nil
+		sink.mu.Unlock()
 		sink.closed()
-		return nil, 0, alsoFailed(storageFailed("spool", err), "close", f.Close())
+		return nil, 0, err
 	}
+	sink.mu.Unlock()
 	return sink, off, nil
 }
 
-// claim makes sink the owner of its id's spool, which Create opens under
-// the same hold of s.mu. A spool another sink still writes to is never
-// shared: that sink is superseded, its handle closed, and the new one
-// writes the spool from offset 0, which claim reports. Shared, a stale
-// install's Abort unlinked the spool the current leader's install of the
-// same id wrote, whose Commit then failed STORAGE_FAILED and stopped a node
-// with a healthy disk (#547). A sink whose open then fails owns nothing
-// once closed. The caller holds s.mu.
-func (s *fileSnapshots) claim(sink *fileSink) bool {
+// claim makes sink the owner of its id's spool and returns the sink it took
+// the spool from, if any. A spool another sink still writes to is never
+// shared: Create supersedes that sink, its handle closed, before it opens
+// the spool, and writes it from offset 0. Shared, a stale install's Abort
+// unlinked the spool the current leader's install of the same id wrote,
+// whose Commit then failed STORAGE_FAILED and stopped a node with a
+// healthy disk (#547). A sink whose open then fails owns nothing once
+// closed. The caller holds s.mu, never the old sink's mu: supersede waits
+// for that one outside s.mu (#582).
+func (s *fileSnapshots) claim(sink *fileSink) *fileSink {
 	old := s.owners[sink.id]
-	if old != nil {
-		old.supersede()
-	}
 	s.owners[sink.id] = sink
-	return old != nil
+	return old
 }
 
 // supersede closes the sink's handle and marks it superseded; it waits for
-// a write, Commit or Abort in progress. The caller holds k.s.mu.
+// a write, Commit, Abort or Create in progress. A sink whose Create failed
+// before its open has no handle. The caller holds no lock but its own
+// sink's mu.
 func (k *fileSink) supersede() {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	if !k.superseded {
 		k.superseded = true
-		// Nothing reads what this sink wrote again.
-		abandon(k.f.Close())
+		if k.f != nil {
+			// Nothing reads what this sink wrote again.
+			abandon(k.f.Close())
+		}
 	}
 }
 

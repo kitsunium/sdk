@@ -4787,13 +4787,21 @@ sequences:
         kind: internal
       - id: sink.closed
         kind: internal
+      - id: sink.mu.Lock
+        kind: value
       - id: s.claim
+        kind: internal
+      - id: old.supersede
         kind: internal
       - id: os
         kind: stdlib
+      - id: sink.mu.Unlock
+        kind: value
       - id: f.Truncate
         kind: value
       - id: resumeOffset
+        kind: internal
+      - id: alsoFailed
         kind: internal
     steps:
       - opt:
@@ -4818,18 +4826,31 @@ sequences:
             eval: s.sweepSpools(id)
             to: s.sweepSpools
           when: err != nil
+      - eval: sink.mu.Lock()
+        to: sink.mu.Lock
       - eval: s.mu.Lock()
         to: s.mu.Lock
-      - bind: superseding
+      - bind: old
         eval: s.claim(sink)
         to: s.claim
-      - bind: f, err
-        eval: os.OpenFile(filepath.Join(s.dir, id+".spool"), os.O_RDWR|os.O_CREATE, 0o600)
-        to: os
       - eval: s.mu.Unlock()
         to: s.mu.Unlock
       - opt:
           do:
+            - eval: s.afterPublish(id)
+          when: s.afterPublish != nil
+      - opt:
+          do:
+            - eval: old.supersede()
+              to: old.supersede
+          when: old != nil
+      - bind: f, err
+        eval: os.OpenFile(filepath.Join(s.dir, id+".spool"), os.O_RDWR|os.O_CREATE, 0o600)
+        to: os
+      - opt:
+          do:
+            - eval: sink.mu.Unlock()
+              to: sink.mu.Unlock
             - eval: sink.closed()
               to: sink.closed
             - return: nil, 0, storageFailed("spool", err)
@@ -4844,7 +4865,7 @@ sequences:
               - set: err
                 to: f.Truncate
                 value: f.Truncate(0)
-            when: superseding
+            when: old != nil
           - do:
               - set: off, err
                 to: resumeOffset
@@ -4852,30 +4873,27 @@ sequences:
             else: true
       - opt:
           do:
+            - set: err
+              to: alsoFailed
+              value: alsoFailed(storageFailed("spool", err), "close", f.Close())
+            - set: sink.f
+              value: nil
+            - eval: sink.mu.Unlock()
+              to: sink.mu.Unlock
             - eval: sink.closed()
               to: sink.closed
-            - return: nil, 0, alsoFailed(storageFailed("spool", err), "close", f.Close())
+            - return: nil, 0, err
           when: err != nil
+      - eval: sink.mu.Unlock()
+        to: sink.mu.Unlock
       - return: sink, off, nil
   - of: (*fileSnapshots).claim
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*fileSnapshots).claim
-        kind: self
-      - id: old.supersede
-        kind: internal
     steps:
       - bind: old
         eval: s.owners[sink.id]
-      - opt:
-          do:
-            - eval: old.supersede()
-              to: old.supersede
-          when: old != nil
       - set: s.owners[sink.id]
         value: sink
-      - return: old != nil
+      - return: old
   - of: (*fileSink).supersede
     participants:
       - id: caller
@@ -4891,8 +4909,11 @@ sequences:
           do:
             - set: k.superseded
               value: "true"
-            - eval: abandon(k.f.Close())
-              to: abandon
+            - opt:
+                do:
+                  - eval: abandon(k.f.Close())
+                    to: abandon
+                when: k.f != nil
           when: "!k.superseded"
   - of: resumeOffset
     participants:
