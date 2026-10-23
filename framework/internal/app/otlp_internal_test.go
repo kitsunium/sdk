@@ -6,12 +6,14 @@ import (
 	"errors"
 	"io"
 	"math/rand/v2"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kitsunium/sdk/framework/internal/app/plug"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/metrics"
 	"github.com/kitsunium/sdk/pkg/v1/observe/trace"
@@ -191,6 +193,51 @@ func TestAnOTLPExportWhoseLoopEndedDegradesTheReadiness(t *testing.T) {
 	if _, discards := Meter(withNode(context.Background(), "shop", a)).(discardMeter); !discards {
 		t.Error("an export with no meter hands the product a meter that keeps something")
 	}
+}
+
+// An export whose queues otlp-database places on a database needs the
+// queue subsystem, whose SQL broker keeps them: without framework/app/queue
+// the start is refused with CodeSubsystemMissing, naming the import — the
+// database's start, whose migrations make the export's tables, first —; the
+// same app with the subsystem starts, its queues on the database.
+func TestAnOTLPExportOnADatabaseNeedsTheQueueSubsystem(t *testing.T) {
+	t.Setenv("SHOP_SECRETS", "memory")
+	t.Setenv("SHOP_SMTP_URL", "")
+	// Built, never written out: a URL holding its credentials is what a
+	// scanner looks for.
+	t.Setenv("SHOP_DATABASE_URL", (&url.URL{Scheme: "fake", User: url.UserPassword("shop", "pw"), Host: "db.internal:5432", Path: "/shop", RawQuery: "tls=verify-full"}).String())
+	product := func() *App {
+		return NewApp("shop", NewService("shop", "Sells.")).With(Profile("daemon"), Env(EnvProduction), Logs(io.Discard),
+			Database("database", NewFakeDB(sql.DialectPostgres).Engine()),
+			OTLP(OTLPSender(func(context.Context, OTLPBatchValue) error { return nil }), OTLPDatabase("database")))
+	}
+	t.Run("with the subsystem", func(t *testing.T) {
+		a := product()
+		must(t, a.Start(context.Background()))
+		defer func() { must(t, a.Stop(context.Background())) }()
+		r := a.otlpRun.Load()
+		if r == nil {
+			t.Fatal("the export does not run")
+		}
+		for _, st := range r.ex.Stats() {
+			if !st.Durable {
+				t.Errorf("the %s queue on the database is not durable", st.Signal)
+			}
+		}
+	})
+	t.Run("without the subsystem", func(t *testing.T) {
+		withoutQueues(t)
+		err := product().Start(context.Background())
+		if !errs.HasCode(err, CodeSubsystemMissing) || !strings.Contains(errs.PrivateOf(err), queuePackage) {
+			t.Errorf("an export on a database without framework/app/queue: %v", err)
+		}
+		a := product()
+		must(t, a.resolve())
+		cfg := &plug.OTLPConfig{}
+		if err := a.otlpOnDatabase(context.Background(), cfg); !errs.HasCode(err, CodeSubsystemMissing) || cfg.Database != nil {
+			t.Errorf("the export's placement without framework/app/queue: %v, %+v", err, cfg)
+		}
+	})
 }
 
 // otlpRootSampler keeps every trace at 1 — no sampler, the SDK's own —,

@@ -496,6 +496,8 @@ sequences:
         kind: actor
       - id: openQueue
         kind: self
+      - id: openTable
+        kind: internal
       - id: os
         kind: stdlib
       - id: queue
@@ -508,6 +510,13 @@ sequences:
           		MaxDeliveries:     maxDeliveries,
           		MaxMessageBytes:   int(min(cfg.MaxBytes, maxQueueMessage)),
           	}
+      - opt:
+          do:
+            - bind: b, err
+              eval: openTable(cfg, policy, name)
+              to: openTable
+            - return: b, err == nil, err
+          when: cfg.Database != nil
       - opt:
           do:
             - opt:
@@ -530,6 +539,41 @@ sequences:
         eval: "queue.NewMemory(queue.MemoryConfig{Clock: clk, Policy: policy})"
         to: queue
       - return: b, false, err
+  - of: openTable
+    participants:
+      - id: caller
+        kind: actor
+      - id: openTable
+        kind: self
+      - id: plug.Queues.Load
+        kind: value
+    steps:
+      - bind: queues
+        eval: plug.Queues.Load()
+        to: plug.Queues.Load
+      - opt:
+          do:
+            - return: nil, errs.Wrap(forward.Misconfigured, errs.WrapParams{}, errs.String("signal", name), errs.String("problem", "no queue subsystem"))
+          when: queues == nil || queues.OpenSDK == nil
+      - bind: opened, err
+        eval: |-
+          queues.OpenSDK(plug.QueueConfig{
+          		Name: "otlp/" + name, Database: cfg.Database, Table: cfg.Tables[name], Clock: cfg.Clock,
+          		Policy: plug.QueuePolicyValue{
+          			VisibilityTimeout: policy.VisibilityTimeout, MaxDeliveries: policy.MaxDeliveries, MaxMessageBytes: policy.MaxMessageBytes,
+          		},
+          	})
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: b, ok
+        eval: opened.(queue.Broker)
+      - opt:
+          do:
+            - return: nil, errs.Wrap(forward.Misconfigured, errs.WrapParams{}, errs.String("signal", name), errs.String("problem", "not a queue.Broker"))
+          when: "!ok"
+      - return: b, nil
   - of: senderOf
     participants:
       - id: caller

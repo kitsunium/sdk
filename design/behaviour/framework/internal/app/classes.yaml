@@ -911,6 +911,10 @@ constants:
         value: "\"settle\""
       - name: knobOTLPSampleRatio
         value: "\"sample-ratio\""
+      - name: knobOTLPDatabase
+        value: "\"database\""
+      - name: otlpTableService
+        value: frameworkName + "_otlp"
       - name: otlpHeadersSecret
         value: "\"otlp-headers\""
       - name: varOTLPHeaders
@@ -3574,6 +3578,7 @@ files:
       - OTLPSendTimeout
       - OTLPSender
       - OTLPSampleRatio
+      - OTLPDatabase
       - (*otlpExport).declareSettings
       - otlpSetting
       - (*otlpExport).settingDecls
@@ -3589,6 +3594,7 @@ files:
       - otlpHooks
       - otlpCode
       - EnableOTLP
+      - (*App).otlpCodeTables
       - (*App).addOTLPComponent
       - (*App).otlpCodeSettings
       - (*App).otlpCodeProblems
@@ -3633,6 +3639,10 @@ files:
       - (*App).startOTLP
       - (*App).stopOTLP
       - (*App).otlpConfig
+      - (*App).otlpOnDatabase
+      - (*App).otlpDatabase
+      - otlpTable
+      - (*App).otlpTables
       - (*App).otlpHeaders
       - (*App).otlpHeaderSettings
       - otlpRetryable
@@ -5176,6 +5186,7 @@ files:
       - subsystem
       - subsystems
       - needsQueue
+      - otlpOnADatabase
       - storesLinked
       - unlinkedDecl
       - unlinkedSubsystems
@@ -7629,6 +7640,9 @@ functions:
   - name: OTLPSampleRatio
     params: ratio float64
     results: OpenTelemetryConfigurer
+  - name: OTLPDatabase
+    params: name string
+    results: OpenTelemetryConfigurer
   - doc: "otlpSetting declares one setting of the export: otlp-<knob>."
     name: otlpSetting
     params: e *otlpExport, knob string, def T, check func(any) phrase
@@ -7673,6 +7687,12 @@ functions:
     name: otlpRootSampler
     params: ratio float64
     results: trace.Sampler
+  - doc: |-
+      otlpTable is the table of signal's queue on the export's database:
+      app_otlp__traces, app_otlp__metrics.
+    name: otlpTable
+    params: signal string
+    results: string
   - doc: |-
       otlpRetryable reports whether a failure of the product's own sender may
       be cured by a later attempt: all but a refusal the caller must fix, a 4xx
@@ -9467,6 +9487,14 @@ functions:
     name: needsQueue
     params: a *App, n node
     results: bool
+  - doc: |-
+      otlpOnADatabase is where the app declared its OTLP export when
+      otlp-database places its queues on a database — the queues' SQL broker
+      keeps them (issue #537) —, nil otherwise. The configuration is resolved
+      before the start's check, so a variable that names a database counts.
+    name: otlpOnADatabase
+    params: a *App
+    results: "*pos"
   - doc: |-
       storesLinked reports whether the program imports framework/app/store: the
       store subsystem is plugged in, its engines and kit's own store code.
@@ -12069,10 +12097,18 @@ types:
         results: "[]settingDecl"
       - doc: |-
           otlpProblems are what stops a start in the app's export: a setting of
-          its own a product's setting already names.
+          its own a product's setting already names, and an otlp-database that names
+          no database the app declares — the configuration is resolved by then.
         name: otlpProblems
         recv: a *App
         results: "[]model.Diagnostic"
+      - doc: |-
+          otlpCodeTables are the export's tables on d, none without
+          framework/app/otlp.
+        name: otlpCodeTables
+        params: d *database
+        recv: a *App
+        results: "[]frameworkTable"
       - doc: |-
           addOTLPComponent adds the export's component, when the program imports
           framework/app/otlp; an export declared without it is refused before
@@ -12167,6 +12203,33 @@ types:
         params: ctx context.Context
         recv: a *App
         results: "*plug.OTLPConfig, error"
+      - doc: |-
+          otlpOnDatabase places the export's queues on the database otlp-database
+          names (issue #537): one table per signal, which the framework's own
+          migrations made when the database started. Nothing when the setting is
+          empty; refused when it names no database the app declares, or when the
+          program does not import framework/app/queue, whose SQL broker keeps them.
+          A database that is not open — the app in memory, or in dev without its
+          URL — leaves the queues where they were, and says so.
+        name: otlpOnDatabase
+        params: ctx context.Context, cfg *plug.OTLPConfig
+        recv: a *App
+        results: error
+      - doc: |-
+          otlpDatabase is the database otlp-database names, nil when it names none
+          the app declares, or nothing.
+        name: otlpDatabase
+        recv: a *App
+        results: "*database"
+      - doc: |-
+          otlpTables are the export's tables on d, when d is the database
+          otlp-database names and the app keeps its data out of memory: each
+          signal's queue, the SDK's SQL broker's one table, and its trail column
+          (store_sql.go's frameworkTables, as a consumer's queue).
+        name: otlpTables
+        params: d *database
+        recv: a *App
+        results: "[]frameworkTable"
       - doc: otlpHeaders reads the secret otlp-headers; none when it is set nowhere.
         name: otlpHeaders
         params: ctx context.Context
@@ -13415,7 +13478,8 @@ types:
       - doc: |-
           frameworkTables are the tables kit keeps on d: each store it keeps, the former
           values of those that remember, the journals of the workflows over them,
-          the queues of the consumers it keeps (ADR 0178 C1); in the order the app
+          the queues of the consumers it keeps (ADR 0178 C1) and of the OTLP export
+          (issue #537); in the order the app
           mounts them.
         name: frameworkTables
         params: d *database
@@ -19082,6 +19146,8 @@ types:
         type: "*SettingService[time.Duration]"
       - name: sampleRatio
         type: "*SettingService[float64]"
+      - name: database
+        type: "*SettingService[string]"
     kind: struct
     methods:
       - doc: |-
@@ -19100,6 +19166,8 @@ types:
       - name: send
         type: func(ctx context.Context, batch OTLPBatchValue) error
       - name: endpoint
+        type: string
+      - name: database
         type: string
       - name: whenFull
         type: OTLPFullPolicy
@@ -19144,6 +19212,9 @@ types:
       - doc: headerSettings is the export's secret as the configuration shows it.
         name: headerSettings
         type: func(a *App, ctx context.Context) []model.Setting
+      - doc: "tables are the export's tables on a database (issue #537)."
+        name: tables
+        type: func(a *App, d *database) []frameworkTable
     kind: struct
     name: otlpHooks
   - kind: named
@@ -29276,7 +29347,7 @@ vars:
           }, {
           	name: "queue", pkg: queuePackage,
           	kinds: []model.NodeKind{model.KindTopic, model.KindSubscription},
-          	needs: needsQueue, linked: queuesLinked,
+          	needs: needsQueue, app: otlpOnADatabase, linked: queuesLinked,
           }, {
           	name: "workflow", pkg: workflowPackage,
           	kinds: []model.NodeKind{model.KindWorkflow}, linked: workflowsLinked,

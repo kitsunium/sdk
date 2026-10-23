@@ -789,6 +789,7 @@ files:
       - OTLPMaxAge
       - OTLPSendTimeout
       - OTLPSampleRatio
+      - OTLPDatabase
       - OTLPSender
     name: otlp.go
   - decls:
@@ -1193,6 +1194,9 @@ functions:
     results: OTLPOption
   - name: OTLPSampleRatio
     params: ratio float64
+    results: OTLPOption
+  - name: OTLPDatabase
+    params: name string
     results: OTLPOption
   - name: OTLPSender
     params: send func(ctx context.Context, batch OTLPBatch) error
@@ -1882,7 +1886,7 @@ types:
     doc: |-
       OTLPOption configures the app's export: [OTLPEndpoint], [OTLPBounds],
       [OTLPWhenFull], [OTLPMaxAge], [OTLPSendTimeout], [OTLPSampleRatio],
-      [OTLPSender].
+      [OTLPDatabase], [OTLPSender].
     kind: alias
     name: OTLPOption
     underlying: iapp.OpenTelemetryConfigurer

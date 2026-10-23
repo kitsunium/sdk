@@ -32,6 +32,8 @@ type otlpHooks struct {
 	stopTakes func(a *App) time.Duration
 	// headerSettings is the export's secret as the configuration shows it.
 	headerSettings func(a *App, ctx context.Context) []model.Setting
+	// tables are the export's tables on a database (issue #537).
+	tables func(a *App, d *database) []frameworkTable
 }
 
 // otlpCode is the framework's own export code, nil until framework/app/otlp
@@ -49,7 +51,17 @@ func EnableOTLP() {
 		problems:       (*App).otlpProblems,
 		stopTakes:      (*App).otlpStopBudget,
 		headerSettings: (*App).otlpHeaderSettings,
+		tables:         (*App).otlpTables,
 	})
+}
+
+// otlpCodeTables are the export's tables on d, none without
+// framework/app/otlp.
+func (a *App) otlpCodeTables(d *database) []frameworkTable {
+	if h := otlpCode.Load(); h != nil {
+		return h.tables(a, d)
+	}
+	return nil
 }
 
 // addOTLPComponent adds the export's component, when the program imports

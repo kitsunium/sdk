@@ -68,7 +68,7 @@ var subsystems = []subsystem{{
 }, {
 	name: "queue", pkg: queuePackage,
 	kinds: []model.NodeKind{model.KindTopic, model.KindSubscription},
-	needs: needsQueue, linked: queuesLinked,
+	needs: needsQueue, app: otlpOnADatabase, linked: queuesLinked,
 }, {
 	name: "workflow", pkg: workflowPackage,
 	kinds: []model.NodeKind{model.KindWorkflow}, linked: workflowsLinked,
@@ -93,6 +93,18 @@ func needsQueue(a *App, n node) bool {
 		return q.queued()
 	}
 	return false
+}
+
+// otlpOnADatabase is where the app declared its OTLP export when
+// otlp-database places its queues on a database — the queues' SQL broker
+// keeps them (issue #537) —, nil otherwise. The configuration is resolved
+// before the start's check, so a variable that names a database counts.
+func otlpOnADatabase(a *App) *pos {
+	e := a.opts.otlp
+	if e == nil || resolvedSetting(a, e.database) == "" {
+		return nil
+	}
+	return &e.decl
 }
 
 // storesLinked reports whether the program imports framework/app/store: the

@@ -40,7 +40,7 @@ type OTLPBatch = iapp.OTLPBatchValue
 
 // OTLPOption configures the app's export: [OTLPEndpoint], [OTLPBounds],
 // [OTLPWhenFull], [OTLPMaxAge], [OTLPSendTimeout], [OTLPSampleRatio],
-// [OTLPSender].
+// [OTLPDatabase], [OTLPSender].
 type OTLPOption = iapp.OpenTelemetryConfigurer
 
 // OTLP declares that the app forwards its traces and the metrics the
@@ -140,6 +140,24 @@ func OTLPSendTimeout(d time.Duration) OTLPOption {
 func OTLPSampleRatio(ratio float64) OTLPOption {
 	//: the implementation is framework/internal/app's; this facade only forwards.
 	return iapp.OTLPSampleRatio(ratio)
+}
+
+// OTLPDatabase keeps the export's queues on the database the app declares
+// under name — the default of the setting otlp-database —, one table per
+// signal (app_otlp__traces, app_otlp__metrics), made by the framework's own
+// migrations: a backlog then outlives a restart with no data directory —
+// a container with no volume — and on the platforms whose file queue the
+// SDK refuses. It needs framework/app/queue, which the start names when the
+// program does not import it; a name the app does not declare stops the
+// start. The empty default keeps the queues in the data directory, else in
+// memory, and so does a declared database that is not open — the app in
+// memory, or in dev without its URL —, which the log says.
+//
+// IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+// only hands it to the declaration it configures.
+func OTLPDatabase(name string) OTLPOption {
+	//: the implementation is framework/internal/app's; this facade only forwards.
+	return iapp.OTLPDatabase(name)
 }
 
 // OTLPSender replaces the network: each batch is handed to send instead of

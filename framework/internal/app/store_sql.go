@@ -126,7 +126,8 @@ type frameworkTable struct {
 
 // frameworkTables are the tables kit keeps on d: each store it keeps, the former
 // values of those that remember, the journals of the workflows over them,
-// the queues of the consumers it keeps (ADR 0178 C1); in the order the app
+// the queues of the consumers it keeps (ADR 0178 C1) and of the OTLP export
+// (issue #537); in the order the app
 // mounts them.
 func (a *App) frameworkTables(d *database) []frameworkTable {
 	var out []frameworkTable
@@ -138,7 +139,8 @@ func (a *App) frameworkTables(d *database) []frameworkTable {
 	for _, n := range a.mountedNodes() {
 		out = append(out, a.nodeTables(n, d)...)
 	}
-	return out
+	// The OTLP export's queues, when otlp-database names d (issue #537).
+	return append(out, a.otlpCodeTables(d)...)
 }
 
 // nodeTables are the tables kit keeps on d for a node that is no store: a

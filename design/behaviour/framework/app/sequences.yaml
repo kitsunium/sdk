@@ -154,6 +154,8 @@ sequences:
     of: OTLPSendTimeout
   - forward: iapp.OTLPSampleRatio
     of: OTLPSampleRatio
+  - forward: iapp.OTLPDatabase
+    of: OTLPDatabase
   - forward: iapp.OTLPSender
     of: OTLPSender
   - forward: iapp.Meter

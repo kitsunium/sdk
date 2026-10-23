@@ -40,6 +40,8 @@ import (
 //	otlp-drain         how long the batch being sent at a stop may finish (5s)
 //	otlp-settle        each acknowledgement's and the stop's flush's bound (5s)
 //	otlp-sample-ratio  the share of the traces started here that are kept (1)
+//	otlp-database      the database the queues are kept on ("", or one not
+//	                   open: the data directory, else memory)
 //
 // and the headers every request carries — a collector's Authorization — are
 // the framework's secret otlp-headers, <PRODUCT>_OTLP_HEADERS or its _FILE
@@ -58,6 +60,8 @@ const (
 	knobOTLPDrain       = "drain"
 	knobOTLPSettle      = "settle"
 	knobOTLPSampleRatio = "sample-ratio"
+	knobOTLPDatabase    = "database"
+	otlpTableService    = frameworkName + "_otlp"
 	otlpHeadersSecret   = "otlp-headers"
 	varOTLPHeaders      = "OTLP_HEADERS"
 	otlpPackage         = "github.com/kitsunium/sdk/framework/app/otlp"
@@ -132,12 +136,14 @@ type otlpExport struct {
 	drain       *SettingService[time.Duration]
 	settle      *SettingService[time.Duration]
 	sampleRatio *SettingService[float64]
+	database    *SettingService[string]
 }
 
 // otlpOptions are an export's code values, the settings' defaults.
 type otlpOptions struct {
 	send        func(ctx context.Context, batch OTLPBatchValue) error
 	endpoint    string
+	database    string
 	whenFull    OTLPFullPolicy
 	maxBytes    int
 	maxBatches  int
@@ -270,6 +276,23 @@ func OTLPSampleRatio(ratio float64) OpenTelemetryConfigurer {
 	return otlpOption(func(o *otlpOptions) { o.sampleRatio = ratio })
 }
 
+// OTLPDatabase keeps the export's queues on the database the app declares
+// under name — the default of the setting otlp-database —, one table per
+// signal (app_otlp__traces, app_otlp__metrics), made by the framework's own
+// migrations: a backlog then outlives a restart with no data directory —
+// a container with no volume — and on the platforms whose file queue the
+// SDK refuses. It needs framework/app/queue, which the start names when the
+// program does not import it; a name the app does not declare stops the
+// start. The empty default keeps the queues in the data directory, else in
+// memory, and so does a declared database that is not open — the app in
+// memory, or in dev without its URL —, which the log says.
+//
+// IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+// only hands it to the declaration it configures.
+func OTLPDatabase(name string) OpenTelemetryConfigurer {
+	return otlpOption(func(o *otlpOptions) { o.database = name })
+}
+
 // declareSettings declares the export's settings, the code's values their
 // defaults.
 func (e *otlpExport) declareSettings(o *otlpOptions) {
@@ -283,6 +306,7 @@ func (e *otlpExport) declareSettings(o *otlpOptions) {
 	e.drain = otlpSetting(e, knobOTLPDrain, otlpDefaultDrain, checkWait())
 	e.settle = otlpSetting(e, knobOTLPSettle, otlpDefaultSettle, checkPositive())
 	e.sampleRatio = otlpSetting(e, knobOTLPSampleRatio, o.sampleRatio, checkOTLPSampleRatio())
+	e.database = otlpSetting(e, knobOTLPDatabase, o.database, nil)
 }
 
 // otlpSetting declares one setting of the export: otlp-<knob>.
@@ -295,7 +319,7 @@ func otlpSetting[T SettingValue](e *otlpExport, knob string, def T, check func(a
 
 // settingDecls are the export's settings, in the table's order.
 func (e *otlpExport) settingDecls() []settingDecl {
-	return []settingDecl{e.endpoint, e.maxBatches, e.maxBytes, e.whenFull, e.maxAge, e.sendTimeout, e.interval, e.drain, e.settle, e.sampleRatio}
+	return []settingDecl{e.endpoint, e.maxBatches, e.maxBytes, e.whenFull, e.maxAge, e.sendTimeout, e.interval, e.drain, e.settle, e.sampleRatio, e.database}
 }
 
 // otlpStopBudget is the most the export's stop takes, nothing without an
@@ -326,7 +350,8 @@ func (a *App) otlpSettings(byName map[string]settingDecl) []settingDecl {
 }
 
 // otlpProblems are what stops a start in the app's export: a setting of
-// its own a product's setting already names.
+// its own a product's setting already names, and an otlp-database that names
+// no database the app declares — the configuration is resolved by then.
 func (a *App) otlpProblems() []model.Diagnostic {
 	e := a.opts.otlp
 	if e == nil {
@@ -341,6 +366,9 @@ func (a *App) otlpProblems() []model.Diagnostic {
 		if name := d.base().name; taken[name] {
 			out = append(out, diagnosticOf("error", otlpNode, a.source(&e.decl), say("otlp.setting-taken", "setting", name)))
 		}
+	}
+	if name := resolvedSetting(a, e.database); name != "" && a.otlpDatabase() == nil {
+		out = append(out, diagnosticOf("error", otlpNode, a.source(&e.decl), say("otlp.database", "database", name)))
 	}
 	return out
 }

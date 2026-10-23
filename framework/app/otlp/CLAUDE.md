@@ -14,7 +14,13 @@ start, the refusal naming this import and carrying `CodeSubsystemMissing`
 
 It imports no other registration package: the export keeps its queues
 itself, in the data directory or in memory, and needs neither the store nor
-the queue subsystem. `framework/app` does not import this package (ADR 0179
+the queue subsystem — but when `otlp-database` (`app.OTLPDatabase`, issue
+#537) places them on one of the product's databases, which the store
+subsystem opens and on which the queue subsystem's SQL broker keeps them
+(`plug.QueueDriverConfig.OpenSDK`): the product then imports
+`framework/app/queue`, and the start refuses it otherwise, naming the import
+(`CodeSubsystemMissing`). A product that keeps its export off a database
+links none of the queue subsystem. `framework/app` does not import this package (ADR 0179
 step 10): a product that declares an export imports it, and `kit gen` writes
 the line for a designed product (§5).
 

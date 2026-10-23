@@ -825,40 +825,6 @@ workflows:
           range: a.opts.otlp.settingDecls()
           value: d
       - return: out
-  - of: (*App).otlpProblems
-    steps:
-      - bind: e
-        eval: a.opts.otlp
-      - opt:
-          do:
-            - return: nil
-          when: e == nil
-      - bind: taken
-        eval: map[string]bool{}
-      - loop:
-          do:
-            - set: taken[d.base().key()]
-              value: "true"
-          key: _
-          range: a.settingDecls()
-          value: d
-      - var:
-          name: out
-          type: "[]model.Diagnostic"
-      - loop:
-          do:
-            - opt:
-                do:
-                  - set: out
-                    value: append(out, diagnosticOf("error", otlpNode, a.source(&e.decl), say("otlp.setting-taken", "setting", name)))
-                init:
-                  bind: name
-                  eval: d.base().name
-                when: taken[name]
-          key: _
-          range: e.settingDecls()
-          value: d
-      - return: out
   - of: (*storeCore).policyOn
     steps:
       - loop:
@@ -1382,7 +1348,7 @@ workflows:
           key: _
           range: a.mountedNodes()
           value: "n"
-      - return: out
+      - return: append(out, a.otlpCodeTables(d)...)
   - of: unlinkedSubsystems
     steps:
       - var:
