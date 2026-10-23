@@ -66,8 +66,7 @@ func load(b []byte, i int) uint64 {
 }
 
 // IndexByte2 returns the index of the first byte of b equal to c1 or to c2,
-// or -1 when there is none: the search for a line end, '\r' or '\n', in one
-// pass. A slice of 64 bytes or more goes to two scans of bytes.IndexByte
+// or -1 when there is none: the search for a line end, '\r' or '\n'. A slice of 64 bytes or more goes to two scans of bytes.IndexByte
 // where the build has no AVX2 form.
 func IndexByte2(b []byte, c1, c2 byte) int {
 	return indexByte2(b, c1, c2)

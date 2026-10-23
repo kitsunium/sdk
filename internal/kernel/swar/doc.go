@@ -43,15 +43,17 @@
 // Built with GOEXPERIMENT=simd on amd64, the package also carries an AVX2 form
 // of each search that reads thirty-two bytes at a time, used for a slice of
 // thirty-two bytes or more on a CPU that reports AVX2 when the program starts.
-// The SWAR form is in the same binary and takes every other call, and a build
-// without the experiment has only that. Both answer alike, and the suite holds
-// them to the same oracle. The experiment's package, simd/archsimd, is not
+// The SWAR form is in the same binary and takes every other call: a slice of
+// under thirty-two bytes, any slice on a CPU without AVX2, and IndexLess with
+// a bound of zero. Without AVX2 (and in a build without the experiment, which
+// has only the SWAR form) [IndexByte2] hands a slice of 64 bytes or more to
+// two scans of bytes.IndexByte instead. Both forms answer alike, and the suite
+// holds them to the same oracle. The experiment's package, simd/archsimd, is not
 // covered by the Go 1 promise: the vector form may stop compiling on a new Go
 // version, and a consumer that cannot afford that builds without the
 // experiment.
 //
-// Without a vector form, [IndexByte2] hands a slice of 64 bytes or more to two
-// scans of bytes.IndexByte, which read faster than the word loop from there on.
+// Those scans read faster than the word loop from 64 bytes on.
 //
 // # Cost
 //

@@ -7,7 +7,7 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/swar"
 )
 
-// ExampleIndexByte2 finds the first bare or paired line end in one pass, and
+// ExampleIndexByte2 finds the first bare or paired line end, and
 // searches for a single byte by passing it twice.
 func ExampleIndexByte2() {
 	fmt.Println(swar.IndexByte2([]byte("Host: x\r\nAccept: */*"), '\r', '\n'))
