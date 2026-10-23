@@ -566,7 +566,7 @@ sequences:
         kind: internal
       - id: r.confirmRounds
         kind: internal
-      - id: pr.becomeProbe
+      - id: r.probeIfLost
         kind: internal
       - id: r.sendAppend
         kind: internal
@@ -581,11 +581,15 @@ sequences:
               set: pr.facts
               value: peerProbeSent
           when: pr.state == stateProbe
-      - opt:
-          do:
-            - eval: pr.becomeProbe()
-              to: pr.becomeProbe
-          when: pr.state == stateReplicate && len(pr.inflight) > 0 && pr.match == pr.hbMatch && m.Index < pr.inflight[0]
+      - alt:
+          - do:
+              - eval: r.probeIfLost(pr, m.Index)
+                to: r.probeIfLost
+            when: pr.state == stateReplicate && len(pr.inflight) > 0 && pr.match == pr.hbMatch
+          - do:
+              - set: pr.heldSince
+                value: time.Time{}
+            else: true
       - set: pr.hbMatch
         value: pr.match
       - opt:
@@ -593,6 +597,31 @@ sequences:
             - eval: r.sendAppend(m.From, false)
               to: r.sendAppend
           when: pr.match < r.log.lastIndex()
+  - of: (*Raft).probeIfLost
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).probeIfLost
+        kind: self
+      - id: pr.becomeProbe
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - set: pr.heldSince
+                    value: r.now
+                when: pr.heldSince.IsZero()
+            - opt:
+                do:
+                  - return: ""
+                when: r.now.Sub(pr.heldSince) <= r.timing.ElectionTimeoutMax
+          when: held >= pr.inflight[0]
+      - set: pr.heldSince
+        value: time.Time{}
+      - eval: pr.becomeProbe()
+        to: pr.becomeProbe
   - of: (*Raft).handleAppResp
     participants:
       - id: caller

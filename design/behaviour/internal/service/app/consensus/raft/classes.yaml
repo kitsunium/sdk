@@ -318,6 +318,7 @@ files:
       - (*Raft).maybeCommit
       - (*Raft).stepLeader
       - (*Raft).handleHeartbeatResp
+      - (*Raft).probeIfLost
       - (*Raft).ackRounds
       - (*Raft).handleAppResp
       - (*Raft).ackMoved
@@ -832,6 +833,11 @@ types:
           lost one, and is probed again.
         name: hbMatch
         type: uint64
+      - doc: |-
+          heldSince is when a peer whose window did not move first reported
+          holding the oldest append in flight; zero when it does not.
+        name: heldSince
+        type: time.Time
     kind: struct
     methods:
       - doc: |-
@@ -1387,6 +1393,18 @@ types:
           that a lost append left stalled.
         name: handleHeartbeatResp
         params: pr *progress, m core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          probeIfLost probes a peer whose window did not move across two heartbeat
+          answers: an append in it was lost, the transport may drop, and a window
+          that never refills must not stall (R1-11). A follower that reports
+          holding the oldest append in flight may only acknowledge it late, after
+          its fdatasync: probing it resent, then refilled, a window it held (#560).
+          It has ElectionTimeoutMax for it. Past that, its acknowledgement was lost
+          too, by a dropped frame or a restart after the write, and the window,
+          full, never moved again. held 0 is a follower that reports nothing.
+        name: probeIfLost
+        params: pr *progress, held uint64
         recv: r *Raft
       - doc: |-
           ackRounds records from's answer to every round up to round, with the

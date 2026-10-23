@@ -52,6 +52,9 @@ type progress struct {
 	// flight, and whose answer does not report holding the oldest of them,
 	// lost one, and is probed again.
 	hbMatch uint64
+	// heldSince is when a peer whose window did not move first reported
+	// holding the oldest append in flight; zero when it does not.
+	heldSince time.Time
 }
 
 // becomeProbe restarts the peer at one append at a time from its match. Out

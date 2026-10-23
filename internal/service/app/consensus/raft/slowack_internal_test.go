@@ -102,6 +102,26 @@ func TestALostAppendIsStillProbedOnHeartbeats(t *testing.T) {
 	}
 }
 
+// A follower that holds the oldest append in flight but whose
+// acknowledgement was lost, by a dropped frame or a restart after the
+// write, never acknowledges it again: waiting for it stalled the full
+// window for good (TestALeaderReplacesASnapshotItsPeerFindsCorrupt under
+// load). Past ElectionTimeoutMax the leader probes it all the same.
+func TestALostAcknowledgementOfAHeldAppendIsProbed(t *testing.T) {
+	l, sent := slowAckLeader(t)
+	heartbeatAnswers(l, 2, 5, sent)
+	if pr := l.prs[2]; pr.state != stateReplicate {
+		t.Fatalf("peer 2 %+v probed before ElectionTimeoutMax", *pr)
+	}
+	heartbeatAnswers(l, int(l.timing.ElectionTimeoutMax/(100*time.Millisecond))+1, 5, sent)
+	if pr := l.prs[2]; pr.state != stateProbe || pr.next != 2 {
+		t.Fatalf("peer 2 %+v, want probe from 2 once ElectionTimeoutMax passed", *pr)
+	}
+	if sent[2] != 2 {
+		t.Fatalf("entry 2 sent %d times, want resent once on the probe", sent[2])
+	}
+}
+
 // The follower reports its last index in its heartbeat answer when that
 // entry is of the leader's term (it then holds the leader's log through
 // it), and 0 otherwise.
