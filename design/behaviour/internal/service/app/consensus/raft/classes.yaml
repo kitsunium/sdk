@@ -318,6 +318,7 @@ files:
       - (*Raft).maybeCommit
       - (*Raft).stepLeader
       - (*Raft).handleHeartbeatResp
+      - (*Raft).probeIfLost
       - (*Raft).ackRounds
       - (*Raft).handleAppResp
       - (*Raft).ackMoved
@@ -533,6 +534,7 @@ files:
       - (*Raft).followWinner
       - (*Raft).stepFollower
       - (*Raft).followHeartbeat
+      - (*Raft).heldOfTerm
       - (*Raft).reportedContract
       - (*Raft).followTimeoutNow
       - (*Raft).handleAppend
@@ -827,9 +829,15 @@ types:
       - doc: |-
           hbMatch is match at the previous heartbeat answer: a replicating
           peer whose match did not move across two answers while appends are in
-          flight lost one, and is probed again.
+          flight, and whose answer does not report holding the oldest of them,
+          lost one, and is probed again.
         name: hbMatch
         type: uint64
+      - doc: |-
+          heldSince is when a peer whose window did not move first reported
+          holding the oldest append in flight; zero when it does not.
+        name: heldSince
+        type: time.Time
     kind: struct
     methods:
       - doc: |-
@@ -1385,6 +1393,18 @@ types:
           that a lost append left stalled.
         name: handleHeartbeatResp
         params: pr *progress, m core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          probeIfLost probes a peer whose window did not move across two heartbeat
+          answers: an append in it was lost, the transport may drop, and a window
+          that never refills must not stall (R1-11). A follower that reports
+          holding the oldest append in flight may only acknowledge it late, after
+          its fdatasync: probing it resent, then refilled, a window it held (#560).
+          It has ElectionTimeoutMax for it. Past that, its acknowledgement was lost
+          too, by a dropped frame or a restart after the write, and the window,
+          full, never moved again. held 0 is a follower that reports nothing.
+        name: probeIfLost
+        params: pr *progress, held uint64
         recv: r *Raft
       - doc: |-
           ackRounds records from's answer to every round up to round, with the
@@ -2260,6 +2280,15 @@ types:
         name: followHeartbeat
         params: now time.Time, m core.MessageValue
         recv: r *Raft
+      - doc: |-
+          heldOfTerm is the index a heartbeat answer reports: the last index when
+          that entry is of this term, so this node holds the leader's log through
+          it (Log Matching), durable or not; 0 otherwise, read as nothing
+          reported. The leader tells a slow acknowledgement from a lost append by
+          it (#560).
+        name: heldOfTerm
+        recv: r *Raft
+        results: uint64
       - doc: |-
           reportedContract is the contract generation a heartbeat answer reports:
           the one the committed entries this node holds durably put in force, the

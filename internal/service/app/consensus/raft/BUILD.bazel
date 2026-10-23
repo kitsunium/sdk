@@ -54,6 +54,7 @@ go_test(
         "readresp_internal_test.go",
         "sim_internal_test.go",
         "sim_scenarios_internal_test.go",
+        "slowack_internal_test.go",
         "soak_internal_test.go",
         "timing_internal_test.go",
     ],

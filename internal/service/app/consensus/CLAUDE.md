@@ -79,6 +79,14 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   back and carried by the next cut — a node with a table evicted the
   payloads it applied, so they cannot be replayed (#416,
   `TestAnInstallBelowTheCommitLeavesTheEngineStateAlone`).
+- Sync once per queued Ready: every request the storage actor takes is
+  staged, then synced ONCE, then completed in order, so no `AfterSync`
+  leaves before the sync that covers it; a group of commit-only Readys is
+  not synced, its record rides the next sync (#558,
+  `TestABacklogOfWritesIsSyncedAsOneGroup`).
+- Probe a replicating peer whose heartbeat answer reports holding the
+  oldest append in flight: its acknowledgement is only late, and the probe
+  resent a window it held (#560, `TestASlowAcknowledgementIsNotALostAppend`).
 - Hold `mu` across a batch's write and fdatasync: writers serialise on
   `wmu`, readers must not wait for the disk (review L6).
 - Write a batch's end record before the rest of the batch is durable: a

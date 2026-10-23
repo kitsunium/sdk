@@ -354,14 +354,35 @@ func (r *Raft) handleHeartbeatResp(pr *progress, m core.MessageValue) {
 		pr.facts &^= peerProbeSent
 	}
 	if pr.state == stateReplicate && len(pr.inflight) > 0 && pr.match == pr.hbMatch {
-		// An append in the window was lost: the transport may drop,
-		// and a window that never refills must not stall (R1-11).
-		pr.becomeProbe()
+		r.probeIfLost(pr, m.Index)
+	} else {
+		pr.heldSince = time.Time{}
 	}
 	pr.hbMatch = pr.match
 	if pr.match < r.log.lastIndex() {
 		r.sendAppend(m.From, false)
 	}
+}
+
+// probeIfLost probes a peer whose window did not move across two heartbeat
+// answers: an append in it was lost, the transport may drop, and a window
+// that never refills must not stall (R1-11). A follower that reports
+// holding the oldest append in flight may only acknowledge it late, after
+// its fdatasync: probing it resent, then refilled, a window it held (#560).
+// It has ElectionTimeoutMax for it. Past that, its acknowledgement was lost
+// too, by a dropped frame or a restart after the write, and the window,
+// full, never moved again. held 0 is a follower that reports nothing.
+func (r *Raft) probeIfLost(pr *progress, held uint64) {
+	if held >= pr.inflight[0] {
+		if pr.heldSince.IsZero() {
+			pr.heldSince = r.now
+		}
+		if r.now.Sub(pr.heldSince) <= r.timing.ElectionTimeoutMax {
+			return
+		}
+	}
+	pr.heldSince = time.Time{}
+	pr.becomeProbe()
 }
 
 // ackRounds records from's answer to every round up to round, with the

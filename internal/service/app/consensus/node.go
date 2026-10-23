@@ -132,6 +132,9 @@ type Node struct {
 	contact       leaderContact
 	progress      applyProgress
 	watch         progressWatch
+	// preferAt is the earliest tick at which this leader tries
+	// PreferredLeaders again after a transfer it started (#559).
+	preferAt time.Time
 
 	watchMu  sync.Mutex
 	watchers map[chan coreconsensus.StatusValue]struct{}
@@ -905,6 +908,7 @@ func (n *Node) onTick(tick clock.Ticker, ok bool) (time.Time, bool) {
 	n.probeLeader(turn)
 	n.watchProgress(turn)
 	n.watchPins(turn)
+	n.watchPreferred(turn)
 	if d := n.tickInterval(); d != time.Duration(n.tickEvery.Load()) {
 		// A committed contract changed the heartbeat (review of PR
 		// #301, L5).
@@ -1299,9 +1303,9 @@ func (n *Node) leadershipChanged() {
 		delete(n.reads, ctx)
 		w.done <- readResult{code: coreconsensus.CodeNotLeader}
 	}
-	if st.Role == coreconsensus.RoleLeader && len(n.cfg.PreferredLeaders) > 0 {
-		n.preferLeader(st)
-	}
+	// The preferred nodes are judged from the next tick: becomeLeader has
+	// just reset every match to 0 (#559).
+	n.preferAt = time.Time{}
 }
 
 // startGrace starts the grace period of every unresolved proposal.
@@ -1326,20 +1330,40 @@ func (n *Node) startGrace(commit uint64) {
 	n.am.Unlock()
 }
 
-// preferLeader transfers to a preferred node after an election when this
-// one is not preferred (D8).
-func (n *Node) preferLeader(st raft.StatusValue) {
-	if slices.Contains(n.cfg.PreferredLeaders, n.stamp.ID) {
+// watchPreferred hands the leadership to a preferred node once one holds
+// the commit, while this leader is not preferred (D8). It runs on the loop,
+// at every tick: on the Ready where a node becomes leader every match is
+// still 0, so a check made only then never transferred (#559). A transfer
+// it started, done or not, is not tried again before the maximum election
+// timeout, so a lagging preferred node causes no churn.
+func (n *Node) watchPreferred(now time.Time) {
+	if len(n.cfg.PreferredLeaders) == 0 || now.Before(n.preferAt) {
 		return
+	}
+	st := n.r.Status()
+	if st.Role != coreconsensus.RoleLeader || st.Transfer != 0 {
+		return
+	}
+	if n.preferLeader(now, &st) {
+		n.preferAt = now.Add(st.Timing.ElectionTimeoutMax)
+	}
+}
+
+// preferLeader starts a transfer to the first preferred voter that holds
+// the commit, and reports whether it did; a preferred node never hands
+// over.
+func (n *Node) preferLeader(now time.Time, st *raft.StatusValue) bool {
+	if slices.Contains(n.cfg.PreferredLeaders, n.stamp.ID) {
+		return false
 	}
 	for _, id := range n.cfg.PreferredLeaders {
 		if m, ok := st.Conf.Member(id); ok && m.Voter {
 			if match, _, ok := n.r.Progress(id); ok && match >= st.Commit {
-				n.r.TransferLeadership(n.clk.Now(), id)
-				return
+				return n.r.TransferLeadership(now, id) == 0
 			}
 		}
 	}
+	return false
 }
 
 // publish stores the status a turn produced and wakes every watcher with
@@ -1437,13 +1461,14 @@ func (n *Node) fetch(f raft.FetchSpec) bool {
 
 // ---- storage actor ----
 
-// storageActor is the one writer of the log (D5b). Each request is appended
-// and synced before its completion goes back to the loop, and only then do
-// the replies that depend on it leave.
+// storageActor is the one writer of the log (D5b). Every request taken
+// together is appended and synced once, a group commit (D6, G2), before
+// their completions go back to the loop, in order, and only then do the
+// replies that depend on them leave.
 func (n *Node) storageActor() {
 	defer n.wg.Done()
 	var reqs []storeReq
-	var synced uint64
+	var st storeState
 	for {
 		select {
 		case _, ok := <-n.sq.signal:
@@ -1453,59 +1478,105 @@ func (n *Node) storageActor() {
 				return
 			}
 		case <-n.stopc:
-			n.finalWrites(reqs, &synced)
+			n.finalWrites(reqs, &st)
 			return
 		}
 		reqs = n.sq.take(reqs)
-		if !n.writeAll(reqs, &synced) {
+		if !n.writeAll(reqs, &st) {
 			return
 		}
 	}
+}
+
+// storeState is the storage actor's view of the log: the last index a sync
+// made durable, and whether a commit-only record waits in the log for the
+// next sync.
+type storeState struct {
+	synced uint64
+	lazy   bool
 }
 
 // finalWrites is the storage actor's exit on stop. The actor owns the
-// final sync: on Close it writes and syncs what it holds before it exits
-// (D5b); on a hard stop it writes nothing more.
-func (n *Node) finalWrites(reqs []storeReq, synced *uint64) {
-	if n.hard.Load() {
+// final sync: on Close it writes and syncs what it holds, a commit-only
+// record included, before it exits (D5b); on a hard stop it writes nothing
+// more.
+func (n *Node) finalWrites(reqs []storeReq, st *storeState) {
+	if n.hard.Load() || !n.writeAll(n.sq.take(reqs), st) || !st.lazy {
 		return
 	}
-	for _, q := range n.sq.take(reqs) {
-		if !n.write(&q, synced) {
-			return
-		}
+	if err := n.cfg.Log.Sync(); err != nil {
+		n.stop(storageFailed("sync", err), true)
 	}
 }
 
-// writeAll writes a batch of requests in order, and returns false when the
-// actor must end: a hard stop arrived, or a write stopped the node.
-func (n *Node) writeAll(reqs []storeReq, synced *uint64) bool {
-	for _, q := range reqs {
-		if n.hard.Load() {
+// writeAll writes a batch of requests as one group: each one's truncation,
+// entries with their hard state, and compaction, in order, then ONE sync,
+// then each completion in order (#558). Each Ready used to end with its own
+// sync, so a follower with a slower disk paid one fdatasync (two on the
+// file log) per queued Ready, and the next commit or election waited for
+// it to drain its backlog one sync at a time. A group of commit-only
+// Readys is not synced: the persisted commit is an optimisation, and its
+// record rides the next sync. It returns false when the actor must end: a
+// hard stop arrived, or a write stopped the node.
+func (n *Node) writeAll(reqs []storeReq, st *storeState) bool {
+	if len(reqs) == 0 {
+		return true
+	}
+	written, durable, ok := n.stageAll(reqs, st.synced)
+	if !ok {
+		return false
+	}
+	if durable {
+		if !n.syncFor(reqs) {
 			return false
 		}
-		if !n.write(&q, synced) {
+		st.synced, st.lazy = written, false
+	} else {
+		st.lazy = true
+	}
+	for i := range reqs {
+		if !n.completeWrite(&reqs[i].rd) {
 			return false
 		}
 	}
 	return true
 }
 
-// write persists one Ready, truncation, entries with their hard state,
-// then compaction, syncs it, and only then hands the loop its completion
-// with the replies that waited on it. Any storage failure stops the node
-// and is never retried (D4); it returns false then, or when the node
-// stopped before the completion was taken.
-func (n *Node) write(q *storeReq, synced *uint64) bool {
+// stageAll stages every request of a group in order, from synced, the last
+// index already durable. It returns the last index the group holds,
+// whether one of its requests must be synced, and false when the actor
+// must end.
+func (n *Node) stageAll(reqs []storeReq, synced uint64) (written uint64, durable, ok bool) {
+	written = synced
+	for i := range reqs {
+		if n.hard.Load() || !n.write(&reqs[i], &written) {
+			return written, durable, false
+		}
+		durable = durable || needsSync(&reqs[i].rd)
+	}
+	return written, durable, true
+}
+
+// needsSync reports whether a Ready must be durable before its completion:
+// all but one that only carries a commit, which is written lazily (raft's
+// ReadyValue.Commit).
+func needsSync(rd *raft.ReadyValue) bool {
+	return rd.HardState != nil || rd.TruncateFrom != 0 || rd.Compact != 0 || len(rd.Entries) != 0 || len(rd.AfterSync) != 0
+}
+
+// write stages one Ready in the log, truncation, entries with their hard
+// state, then compaction, without syncing it; written follows the last
+// index the group holds. Any storage failure stops the node and is never
+// retried (D4); it returns false then.
+func (n *Node) write(q *storeReq, written *uint64) bool {
 	rd := &q.rd
-	if !n.truncateFor(rd, synced) {
+	if !n.truncateFor(rd, written) {
 		return false
 	}
-	last := *synced
 	if k := len(rd.Entries); k > 0 {
-		last = rd.Entries[k-1].Position.Index
+		*written = rd.Entries[k-1].Position.Index
 	}
-	if !n.appendFor(rd, last) {
+	if !n.appendFor(rd, *written) {
 		return false
 	}
 	if rd.Compact != 0 {
@@ -1514,16 +1585,13 @@ func (n *Node) write(q *storeReq, synced *uint64) bool {
 			return false
 		}
 	}
-	if !n.syncFor(rd) {
-		return false
-	}
-	*synced = max(*synced, last)
-	return n.completeWrite(rd)
+	return true
 }
 
 // truncateFor removes the log suffix a Ready overwrites, and lowers the
-// synced index with it, since what was synced there no longer exists.
-func (n *Node) truncateFor(rd *raft.ReadyValue, synced *uint64) bool {
+// group's last index with it, since what was written there no longer
+// exists.
+func (n *Node) truncateFor(rd *raft.ReadyValue, written *uint64) bool {
 	if rd.TruncateFrom == 0 {
 		return true
 	}
@@ -1531,7 +1599,7 @@ func (n *Node) truncateFor(rd *raft.ReadyValue, synced *uint64) bool {
 		n.stop(storageFailed("truncate", err), true)
 		return false
 	}
-	*synced = min(*synced, rd.TruncateFrom-1)
+	*written = min(*written, rd.TruncateFrom-1)
 	return true
 }
 
@@ -1553,7 +1621,7 @@ func (n *Node) appendFor(rd *raft.ReadyValue, last uint64) bool {
 
 // hardStateFor is the hard state a Ready changes, or nil when it changes
 // none: the term and vote raft set, and a commit capped at the last index
-// this batch makes durable (R7-13).
+// this group makes durable (R7-13).
 func (n *Node) hardStateFor(rd *raft.ReadyValue, last uint64) (*coreconsensus.HardState, bool) {
 	if rd.HardState == nil && rd.Commit == 0 {
 		return nil, true
@@ -1568,24 +1636,27 @@ func (n *Node) hardStateFor(rd *raft.ReadyValue, last uint64) (*coreconsensus.Ha
 	}
 	if rd.Commit != 0 {
 		// A persisted commit never passes the last synced index; the
-		// record rides this batch, synced with it (R7-13).
+		// record rides this group, synced with it (R7-13).
 		h.Commit = max(h.Commit, min(rd.Commit, last))
 	}
 	return &h, true
 }
 
-// syncFor syncs the log and records the latency and the batch's size. A
-// failed sync stops the node and is never retried (D4).
-func (n *Node) syncFor(rd *raft.ReadyValue) bool {
+// syncFor syncs the log once for a group and records the latency and the
+// group's size. A failed sync stops the node and is never retried (D4).
+func (n *Node) syncFor(reqs []storeReq) bool {
 	syncStart := n.clk.Now()
 	err := n.cfg.Log.Sync()
 	n.obs.record(mFsyncLatency, n.clk.Since(syncStart).Seconds())
-	if len(rd.Entries) > 0 {
-		size := 0
-		for i := range rd.Entries {
-			size += len(rd.Entries[i].Data)
+	entries, size := 0, 0
+	for i := range reqs {
+		for j := range reqs[i].rd.Entries {
+			size += len(reqs[i].rd.Entries[j].Data)
 		}
-		n.obs.record(mBatchEntries, float64(len(rd.Entries)))
+		entries += len(reqs[i].rd.Entries)
+	}
+	if entries > 0 {
+		n.obs.record(mBatchEntries, float64(entries))
 		n.obs.record(mBatchBytes, float64(size))
 	}
 	if err != nil {

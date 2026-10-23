@@ -404,7 +404,10 @@ func (r *Raft) followHeartbeat(now time.Time, m core.MessageValue) {
 	if c := min(m.Commit, r.log.lastIndex()); c > r.log.committed {
 		r.commitTo(c)
 	}
-	r.send(core.MessageValue{Kind: core.MsgHeartbeatResp, To: m.From, Context: m.Context, Contract: r.reportedContract()})
+	r.send(core.MessageValue{
+		Kind: core.MsgHeartbeatResp, To: m.From, Context: m.Context, Contract: r.reportedContract(),
+		Index: r.heldOfTerm(),
+	})
 	if r.cfg.NoTable {
 		// A node with no table asks for a snapshot on every heartbeat, as
 		// on an append (D7, R7-18): a leader with nothing to append to it
@@ -416,6 +419,19 @@ func (r *Raft) followHeartbeat(now time.Time, m core.MessageValue) {
 			RejectHint: r.log.lastIndex(), Flags: core.FlagNeedSnapshot,
 		})
 	}
+}
+
+// heldOfTerm is the index a heartbeat answer reports: the last index when
+// that entry is of this term, so this node holds the leader's log through
+// it (Log Matching), durable or not; 0 otherwise, read as nothing
+// reported. The leader tells a slow acknowledgement from a lost append by
+// it (#560).
+func (r *Raft) heldOfTerm() uint64 {
+	last := r.log.lastIndex()
+	if t, ok := r.log.term(last); ok && t == r.term {
+		return last
+	}
+	return 0
 }
 
 // reportedContract is the contract generation a heartbeat answer reports:

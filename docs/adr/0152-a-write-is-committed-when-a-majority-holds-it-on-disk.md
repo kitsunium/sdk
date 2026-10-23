@@ -1751,6 +1751,11 @@ The POC measured 10 ms for a transfer, against at least one election timeout
 for an election. `PreferredLeaders` in the configuration names the nodes a
 leader transfers to after an election when it is not one of them — here FRA
 and RBX, 9.6 ms apart, so a commit costs ~10 ms of network instead of ~23.
+The leader judges them at every tick, not only when it is elected: at that
+moment no peer has acknowledged anything yet, so a check made only then never
+transferred (#559). It hands over to the first preferred voter that holds the
+commit, and does not try again before `ElectionTimeoutMax` after a transfer it
+started.
 
 ### D9 — Reads: ReadIndex by default, a lease kept with every correction (Q2, R1-19)
 
@@ -2362,7 +2367,7 @@ transport. The cross-field rules are checked after defaults are applied
 | `MaxBatchBytes` | engine | 1 MiB | clamp; refuse if it plus 1 KiB of framing is above the shipped transport's `MaxFrameBytes` (review M2) |
 | `MaxInflight`, `MaxInflightBytes` | engine | 64, 8 MiB | clamp; refuse if `MaxInflightBytes` < `MaxBatchBytes` |
 | `MaxEntryBytes` | engine | 1 MiB | clamp; refuse if > `MaxBatchBytes` |
-| `MaxPendingBytes` | engine | 64 MiB | clamp |
+| `MaxPendingBytes` | engine | 64 MiB | clamp; refuse if < `MaxEntryBytes` (#557) |
 | `MaxApplyLagBytes` | engine | 256 MiB | clamp |
 | `RecentEntriesBytes` | engine | 32 MiB | clamp (R2-40) |
 | `SnapshotEvery`, `SnapshotEveryBytes` | engine | 16 384, 64 MiB | clamp |
