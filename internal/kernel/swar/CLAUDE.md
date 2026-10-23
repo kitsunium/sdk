@@ -9,7 +9,7 @@ escape and no token in a signature — so it passes SDK rule 1. It exists for th
 two loops the network path runs per byte today: the HTTP/1 codec looking for a
 line end, and the JSON string encoder looking for a byte it must escape.
 
-**Not published** (ADR 0159, §3 table): a program reaches it through the
+**Not published** (ADR 0186 §D10, which amends ADR 0159): a program reaches it through the
 domains that search, not through `pkg/v1`. Emits **no error codes** — every
 function answers with an index or `-1`, and bad input has no meaning to refuse
 (a bound above 128 is answered byte by byte) — so the package needs no `PP`

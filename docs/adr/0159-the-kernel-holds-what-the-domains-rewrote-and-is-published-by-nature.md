@@ -59,7 +59,7 @@ its own until a second consumer shows it is generic.
   ticks run on the clock a service injects; `clock.System` stays the default.
 - `ring` gains a multi-producer mode beside the single-producer one.
 
-### 3. Added: `backoff`, `semver`, `flock`, `swar` and a generic registry
+### 3. Added: `backoff`, `semver`, `flock`, and a generic registry
 
 | Primitive | Holds | Replaces |
 |---|---|---|
@@ -67,7 +67,6 @@ its own until a second consumer shows it is generic.
 | `semver` | SemVer 2.0.0 precedence with Go's `v`, and Go pseudo-versions (ADR 0156) | `golang.org/x/mod` |
 | `flock` | a non-blocking try-lock and unlock over `flock(2)` and `LockFileEx`; never a blocking call — the domains poll it on their own clocks | the copies in `lock` and `session` |
 | `plugin.Registry[K, V]` | a copy-on-write registry over `snapshot`: lookup, idempotent re-registration, `Unusable` before storing, and the caller's own codes for a conflict and an unusable value, passed at construction | the six near-copy registries in the core, which become instances; codec's MIME and extension indexes stay codec's |
-| `swar` | first-match byte search a word at a time (SWAR, with an AVX2 form behind `GOEXPERIMENT=simd`): one byte, either of two, a byte below a bound, a set; exact lane tests, bounds-checked loads only. **Not published**: a program reaches it through the domains that search (the HTTP/1 codec, the JSON encoder) | the per-byte loops those domains each write |
 
 ### 4. Published by nature, as aliases
 
@@ -82,8 +81,8 @@ published in `pkg/v1` as pure aliases of the kernel, grouped by what they are
 | `semver` | at the root, beside `errs` and `clock`: a value every family may compare and none owns |
 | `app/resilience` | `backoff`, through the alias `resilience` already declares |
 
-`pathchain`, `plugin`, `flock`, `buffer`, `cache` and `swar` are not published on
-their own: a program reaches them through the domain that uses them (`lock`, the
+`pathchain`, `plugin`, `flock`, `buffer` and `cache` are not published on their
+own: a program reaches them through the domain that uses them (`lock`, the
 registries, the logger, the `cache` domain, which already publishes the
 primitive beside itself). The kernel mirrors the two new families where they
 apply — `kernel/concur`, `kernel/collections` — and keeps every other package

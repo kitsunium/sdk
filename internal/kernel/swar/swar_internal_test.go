@@ -5,6 +5,39 @@ import (
 	"testing"
 )
 
+// coverageValues is the thinned grid of byte values a coverage build runs the
+// two exhaustive suites over: every edge a lane test has (0, 1, the control
+// range's end, quote, backslash, DEL, both sides of 0x80, 0xFE, 0xFF) and
+// every seventh value between. The full 256 take 108 s of the 60 s .bazelrc
+// gives the target once the race detector and the coverage counters are both
+// on (42 s and 66 s for the two suites, against 12 s without the counters), and
+// the line coverage is the same 100% either way. The race suite, the alloc
+// lane and a plain `go test` run all 256; this is the one place that does not.
+var coverageValues = func() []int {
+	edges := map[int]bool{0: true, 1: true, 0x0A: true, 0x0D: true, 0x1F: true, 0x20: true, 0x21: true,
+		0x22: true, 0x5C: true, 0x7E: true, 0x7F: true, 0x80: true, 0x81: true, 0xFE: true, 0xFF: true}
+	var vs []int
+	for v := range 256 {
+		if edges[v] || v%7 == 0 {
+			vs = append(vs, v)
+		}
+	}
+	return vs
+}()
+
+// exhaustiveValues returns every byte value, or the thinned grid when the
+// binary is a coverage build (see coverageValues).
+func exhaustiveValues() []int {
+	if testing.CoverMode() != "" {
+		return coverageValues
+	}
+	all := make([]int, 256)
+	for v := range all {
+		all[v] = v
+	}
+	return all
+}
+
 // lengthsUnderTest are the slice lengths the lane suites run: none, the
 // tail-only lengths, a word and its neighbours, a vector and its neighbours,
 // and two words and two vectors past them — where the word loop, the tail
@@ -41,6 +74,7 @@ func exhaustiveSpecs() []spec {
 // lane — the fault a random corpus meets once in a thousand runs — fails here
 // every run.
 func TestEveryValueAtEveryPosition(t *testing.T) {
+	values := exhaustiveValues()
 	for _, s := range exhaustiveSpecs() {
 		for _, n := range exhaustiveLengths {
 			b := make([]byte, n)
@@ -49,7 +83,7 @@ func TestEveryValueAtEveryPosition(t *testing.T) {
 					b[i] = bg
 				}
 				for pos := range n {
-					for v := range 256 {
+					for _, v := range values {
 						b[pos] = byte(v)
 						s.check(t, b)
 					}
@@ -72,14 +106,15 @@ var pairPositions = []int{0, 7, 30, 31}
 // true match whatever it holds — is wrong for some pair and right for every
 // single byte, which is why the suite above cannot catch it.
 func TestAdjacentPairs(t *testing.T) {
+	values := exhaustiveValues()
 	for _, s := range exhaustiveSpecs() {
 		b := make([]byte, 40)
 		for i := range b {
 			b[i] = 'a'
 		}
 		for _, pos := range pairPositions {
-			for v1 := range 256 {
-				for v2 := range 256 {
+			for _, v1 := range values {
+				for _, v2 := range values {
 					b[pos], b[pos+1] = byte(v1), byte(v2)
 					s.check(t, b)
 				}
