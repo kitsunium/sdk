@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-04T11:15:00Z -->
+<!-- updated: 2026-10-23T12:00:00Z -->
 # internal/core/net/
 
 ## Purpose
@@ -272,6 +272,9 @@ cd internal/core && GOWORK=off go test -race -cover ./net/...
 
 - ADR 0029 — `docs/adr/0029-sdk-net-domain.md`
 - ADR 0047 — WebSocket — `docs/adr/0047-sdk-net-websocket.md`
+- ADR 0186 — the loop engine's ports and values (`LoopConnRef`, `LoopIO`,
+  `LoopHandler`, `LoopValue`) and its sentinels from `0.2.11.35`, decided and
+  not yet declared — `docs/adr/0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md`
 - ADR 0043 (drain is a signal), ADR 0016 (one-sibling/many-facades),
   ADR 0018 (portability, `x/sys` ban), ADR 0013 (the redacting `Key`
   precedent), ADR 0028 (config decode shape)

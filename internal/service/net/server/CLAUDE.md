@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T19:59:04Z -->
+<!-- updated: 2026-10-23T12:00:00Z -->
 # internal/service/net/server/
 
 ## Purpose
@@ -54,6 +54,10 @@ Public façade: `pkg/v1/net/server`.
   event loop: TLS is a hard requirement and `crypto/tls` is written against
   blocking `net.Conn`, the netpoller already *is* an epoll, and every io helper
   in the ecosystem speaks `net.Conn`.
+  It stays the default engine and the only one that serves TLS. ADR 0186 adds
+  an opt-in, plaintext-only loop engine beside it, entered by one method,
+  `StreamGroup.HandleLoop`, with this package keeping the lifecycle, the bind,
+  the adoption, the admission and the portable backend; decided, not yet built.
 - **`conn` embeds `stdnet.Conn`**, so reads and writes reach the socket with no
   wrapper on the hot path, and `io.Copy(c, c)` is a working echo server.
 - **`Group` returns the group, not `(group, error)`.** A declaration mistake is
@@ -426,5 +430,6 @@ cd internal/service && GOWORK=off go test -race -cover ./net/server/...
 - ADR 0029 — `docs/adr/0029-sdk-net-domain.md`
 - ADR 0043 — the drain signal — `docs/adr/0043-drain-is-a-signal-not-a-cancellation.md`
 - ADR 0047 §D9 — the hijacked-connection hand-over — `docs/adr/0047-sdk-net-websocket.md`
+- ADR 0186 — the opt-in loop engine and its HTTP/1.1 profile — `docs/adr/0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md`
 - Contract layer — `internal/core/net/CLAUDE.md`
 - The two protocols that depend on both — `internal/service/net/{sse,websocket}/CLAUDE.md`
