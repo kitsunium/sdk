@@ -6362,13 +6362,7 @@ types:
       - doc: requestCut asks the apply goroutine for a cut, unless one is in flight.
         name: requestCut
         recv: n *Node
-      - doc: |-
-          SaveSnapshot cuts a snapshot now and copies its encoded stream to w, on a
-          goroutine of its own: once ctx is done it returns, the copy stops at its
-          next read, and only a write to w already begun may end after the return;
-          one that blocks keeps that goroutine, and the snapshot pinned, until w
-          returns.
-        name: SaveSnapshot
+      - name: SaveSnapshot
         params: ctx context.Context, op coreconsensus.Operator, w io.Writer
         recv: n *Node
         results: coreconsensus.SnapshotMetaValue, error
