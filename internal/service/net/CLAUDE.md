@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T04:40:00Z -->
+<!-- updated: 2026-10-23T12:00:00Z -->
 # internal/service/net/
 
 ## Purpose
@@ -43,6 +43,15 @@ None of them is in `//:audit_sources`: none declares a code, so there is
 nothing for the errs audits to judge (`check-audit-coverage.sh` requires
 exactly the declaring packages), and `codeRangeOwners` gives `0x00_02_0B_00`
 to `internal/core/net` alone.
+
+**Decided, not yet built (ADR 0186).** Two members are to come: `loop/`, the
+opt-in plaintext event-loop engine (io_uring and epoll on Linux), a leaf that
+imports `internal/core/net` and the kernel and nothing else; and `http1/`, the
+restricted HTTP/1.1 profile, which implements `core/net`'s loop handler port
+and imports no member. `server` will import `loop` — it binds and adopts the
+listeners, owns the lifecycle and keeps the portable backend — which makes it
+the first edge between two members; both `CLAUDE.md` files say so when it
+lands. Neither member declares a code.
 
 ## Do NOT
 
