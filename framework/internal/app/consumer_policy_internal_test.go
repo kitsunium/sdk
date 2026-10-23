@@ -405,26 +405,29 @@ func TestAFailureOnceTheAppStopsKeepsTheKey(t *testing.T) {
 	a := startConsumers(t, svc, manualAt())
 	stopAtCleanup(t, a)
 	lost := failure(CodeCommandKey, "COMMAND_KEY", "the command's key could not be held", context.Canceled)
-	for _, tc := range []struct {
+	type tc struct {
 		err      error
 		name     string
 		stopping bool
 		settled  bool
-	}{
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		a.mu.Lock()
+		a.stopping = c.stopping
+		a.mu.Unlock()
+		if got := cmd.settled(a, 1, c.err); got != c.settled {
+			t.Errorf("settled: %v, want %v", got, c.settled)
+		}
+	}
+	for _, c := range []tc{
 		{name: "handled while it stops", stopping: true, settled: true},
 		{name: "its key's lease lost while it stops", err: lost, stopping: true},
 		{name: "its drain over", err: context.Canceled, stopping: true},
 		{name: "refused for good while it stops", err: doNotRetry(lost), stopping: true, settled: true},
 		{name: "its key's lease lost while it runs", err: lost, settled: true},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			a.mu.Lock()
-			a.stopping = tc.stopping
-			a.mu.Unlock()
-			if got := cmd.settled(a, 1, tc.err); got != tc.settled {
-				t.Errorf("settled: %v, want %v", got, tc.settled)
-			}
-		})
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 	a.mu.Lock()
 	a.stopping = false

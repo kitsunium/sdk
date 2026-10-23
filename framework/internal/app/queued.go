@@ -218,7 +218,16 @@ func (c *Command[C, R]) handler(a *App, q *commandQueue, loop *loopState) delive
 // whatever its delivery and whatever failed — the drain's end, or the key's
 // lease lost before it —: its queue hands it back uncounted (stoppedBy), and
 // it is handled again at the next start — its key given back then would let
-// a dispatch with the same key be queued beside it.
+// a dispatch with the same key be queued beside it. A failure no retry can
+// help is the exception: its queue dead-letters it even during the stop, so
+// it leaves the queue and gives its key back.
+//
+// The stop is marked before any consumer hears it, so a failure in between
+// keeps its key though its consumer may still nack or dead-letter it: the
+// key is then held a little longer than its dispatch, until the end of a run
+// whose keys the next start does not keep. The other way round — a key given
+// back for a message handed back — is a duplicate dispatch, which this
+// order rules out.
 func (c *Command[C, R]) settled(a *App, deliveries int, err error) bool {
 	switch {
 	case err == nil:
