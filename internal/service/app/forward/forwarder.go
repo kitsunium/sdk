@@ -3,6 +3,7 @@ package forward
 import (
 	"context"
 	"sync"
+	"time"
 
 	coreforward "github.com/kitsunium/sdk/internal/core/app/forward"
 	corequeue "github.com/kitsunium/sdk/internal/core/data/queue"
@@ -20,6 +21,28 @@ type Forwarder struct {
 	// one producer waiting under Block — Enqueue is serialised — wakes on. A
 	// signal nobody waited for only makes the next wait look again.
 	room chan struct{}
+	// recount holds one request for Run to count the queue again; a request
+	// already pending makes another one nothing.
+	recount chan struct{}
+	// reader lists the queue without leasing it; nil when the broker cannot,
+	// and then the counts are this process's alone.
+	reader corequeue.MessageReader
+	// held is every batch counted, by identifier: its size. Pending is its
+	// length and PendingBytes the sum of its sizes.
+	held map[string]int64
+	// leaving is every batch settled — sent, expired, dead-lettered or
+	// dropped — that a count may still list, because the consumer settles a
+	// batch before the broker forgets it: the count it was settled before,
+	// by generation. A count forgets those it no longer lists. Nil when the
+	// broker cannot list its messages.
+	leaving map[string]uint64
+	// recorded is every batch Enqueue kept while a count lists the queue,
+	// nil outside one: the listing may have missed it.
+	recorded map[string]struct{}
+	// counted is when the queue was last counted, generation how many
+	// counts Run started.
+	counted    time.Time
+	generation uint64
 	// cfg is the normalized configuration.
 	cfg Config
 	// stats is what the forwarder holds and has done.
@@ -27,56 +50,48 @@ type Forwarder struct {
 	// admit serialises Enqueue, so two producers never both make room for
 	// one slot.
 	admit sync.Mutex
-	// mu guards stats.
+	// publish is held from a publication until its batch is counted, so a
+	// batch that leaves the queue before Enqueue counted it, and a count that
+	// lists it first, wait for that and never take it for another
+	// process's. It is taken before mu, never after.
+	publish sync.Mutex
+	// mu guards stats, held, leaving, recorded, counted and generation.
 	mu sync.Mutex
 }
 
 // New builds a forwarder over cfg.Broker. It starts nothing: Run sends. When
 // the broker is a queue.MessageReader — every broker of the SDK is — New
 // counts the backlog a previous process left, so the bounds hold across a
-// restart; ctx bounds that count.
+// restart, and Run counts it again once Config.RecountInterval has passed,
+// so they hold against what another process changes in it; ctx bounds the
+// first count.
 func New(ctx context.Context, cfg Config) (*Forwarder, error) {
 	//: refuse what could never forward.
 	if err := cfg.validate(); err != nil {
 		//: named by field.
 		return nil, err
 	}
-	forwarder := &Forwarder{cfg: cfg.normalized(), room: make(chan struct{}, 1)}
+	n := cfg.normalized()
+	forwarder := &Forwarder{
+		cfg: n, room: make(chan struct{}, 1), recount: make(chan struct{}, 1),
+		held: make(map[string]int64), counted: n.Clock.Now(),
+	}
 	//: the backlog on disk, when the broker can list it without leasing it.
 	if reader, ok := cfg.Broker.(corequeue.MessageReader); ok {
-		//: every live message, queued or leased, is held.
-		if err := forwarder.countBacklog(ctx, reader); err != nil {
-			//: a queue that cannot be read cannot be bounded.
+		forwarder.reader, forwarder.leaving = reader, make(map[string]uint64)
+		listed, err := forwarder.list(ctx)
+		//: a queue that cannot be read cannot be bounded.
+		if err != nil {
+			//: as the broker said it.
 			return nil, err
+		}
+		//: every live message, queued or leased, is held.
+		for id, batch := range listed {
+			forwarder.hold(id, batch.size)
 		}
 	}
 	//: ready; Run sends.
 	return forwarder, nil
-}
-
-// countBacklog adds every live message of reader to Pending and PendingBytes.
-func (f *Forwarder) countBacklog(ctx context.Context, reader corequeue.MessageReader) error {
-	after := ""
-	//: page by page, in the broker's identifier order.
-	for {
-		page, err := reader.Messages(ctx, after, countPage)
-		//: the medium failed.
-		if err != nil {
-			//: surfaced as the broker said it.
-			return err
-		}
-		//: one message, one batch.
-		for _, live := range page {
-			f.stats.Pending++
-			f.stats.PendingBytes += int64(len(live.Message.Payload))
-			after = live.Message.ID
-		}
-		//: a short page is the last.
-		if len(page) < countPage {
-			//: counted.
-			return nil
-		}
-	}
 }
 
 // Enqueue keeps batch in the queue, durably once it returns nil, for Run to
@@ -94,7 +109,7 @@ func (f *Forwarder) Enqueue(ctx context.Context, batch []byte) error {
 	}
 	//: no policy can make room for it.
 	if size > f.cfg.MaxBytes {
-		f.settle(0, &f.stats.Dropped)
+		f.settle("", &f.stats.Dropped)
 		//: refused with its size and the bound, never its bytes.
 		return kerrs.Wrap(coreforward.BatchTooLarge, kerrs.WrapParams{},
 			kerrs.Int64("bytes", size), kerrs.Int64("max_bytes", f.cfg.MaxBytes))
@@ -106,24 +121,41 @@ func (f *Forwarder) Enqueue(ctx context.Context, batch []byte) error {
 		//: refused, counted where it was decided.
 		return err
 	}
-	f.reserve(size)
 	//: durable before it is counted kept.
-	if _, err := f.cfg.Broker.Publish(ctx, batch); err != nil {
-		f.unreserve(size)
+	return f.publishCounted(ctx, batch)
+}
+
+// publishCounted publishes batch and counts it, under publish: a batch that
+// leaves the queue before it is counted, and a count that lists it first,
+// wait for it.
+func (f *Forwarder) publishCounted(ctx context.Context, batch []byte) error {
+	f.publish.Lock()
+	defer f.publish.Unlock()
+	message, err := f.cfg.Broker.Publish(ctx, batch)
+	//: not kept.
+	if err != nil {
 		//: the broker's verdict, as it gave it.
 		return err
 	}
 	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.stats.Enqueued++
-	f.mu.Unlock()
+	f.hold(message.ID, int64(len(batch)))
+	//: a count listing the queue now may have missed it.
+	if f.recorded != nil {
+		f.recorded[message.ID] = struct{}{}
+	}
 	//: kept.
 	return nil
 }
 
-// Stats returns the forwarder's counters, read at once.
+// Stats returns the forwarder's counters, read at once. A read once
+// Config.RecountInterval has passed since the queue was last counted asks
+// Run to count it again, and returns the counts as they stand.
 func (f *Forwarder) Stats() StatsValue {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.dueRecount()
 	//: a copy.
 	return f.stats
 }
@@ -131,10 +163,23 @@ func (f *Forwarder) Stats() StatsValue {
 // Run sends the queued batches until ctx ends, one consumer per
 // Config.Parallelism, and returns what the queue's consumer returns. The
 // batch being sent when ctx ends may finish within Config.DrainTimeout; one
-// cut short is handed back uncounted and sent by the next process.
+// cut short is handed back uncounted and sent by the next process. Over a
+// broker that lists its messages, Run also counts the queue again when
+// asked: by a read of Stats or a batch leaving the queue once
+// Config.RecountInterval has passed, and at once by the delivery of a batch
+// this forwarder did not count.
+//
+// Goroutine lifecycle: one counts the queue when asked, until the consumer
+// returns; Run waits for it before it returns.
 func (f *Forwarder) Run(ctx context.Context) error {
+	counting, stop := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		f.recountLoop(counting)
+	}()
 	//: the queue's consumer, its lease renewed while a batch is retried.
-	return svcqueue.Consume(ctx, f.cfg.Broker, svcqueue.ConsumerConfig{
+	err := svcqueue.Consume(ctx, f.cfg.Broker, svcqueue.ConsumerConfig{
 		Handler:       f.deliver,
 		Clock:         f.cfg.Clock,
 		PollInterval:  f.cfg.PollInterval,
@@ -149,6 +194,10 @@ func (f *Forwarder) Run(ctx context.Context) error {
 		// counted twice, as the package documentation says (ADR 0185 D6).
 		HandlerIsIdempotent: true,
 	})
+	stop()
+	<-done
+	//: what the consumer returned.
+	return err
 }
 
 // makeRoom applies the full policy until size fits.
@@ -198,7 +247,7 @@ func (f *Forwarder) dropOldest(ctx context.Context, size int64) error {
 			//: as the broker said it.
 			return ackErr
 		}
-		f.settle(int64(len(oldest.Message.Payload)), &f.stats.Dropped)
+		f.settle(oldest.Message.ID, &f.stats.Dropped)
 	}
 	//: it fits.
 	return nil
@@ -225,7 +274,7 @@ func (f *Forwarder) block(ctx context.Context, size int64) error {
 			return f.full()
 		//: the caller gave up.
 		case <-ctx.Done():
-			f.settle(0, &f.stats.Dropped)
+			f.settle("", &f.stats.Dropped)
 			//: the caller's reason.
 			return ctx.Err()
 		}
@@ -250,51 +299,86 @@ func (f *Forwarder) holds(size int64) bool {
 
 // full counts the new batch Dropped and refuses it with ForwardFull.
 func (f *Forwarder) full() error {
-	f.settle(0, &f.stats.Dropped)
+	f.settle("", &f.stats.Dropped)
 	//: the policy that refused it.
 	return kerrs.Wrap(coreforward.ForwardFull, kerrs.WrapParams{},
 		kerrs.String("policy", f.cfg.WhenFull.String()))
 }
 
-// reserve counts a batch held before it is published, so a consumer that
-// acknowledges it at once never takes the count below zero.
-func (f *Forwarder) reserve(size int64) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.stats.Pending++
+// hold counts the batch id of size, with mu held or before the forwarder is
+// shared.
+func (f *Forwarder) hold(id string, size int64) {
+	f.held[id] = size
+	f.stats.Pending = len(f.held)
 	f.stats.PendingBytes += size
 }
 
-// unreserve takes back a reservation whose publication failed.
-func (f *Forwarder) unreserve(size int64) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.leave(size)
-}
-
-// settle records a batch of size leaving the queue under counter — size 0
-// for one that never entered it — and wakes a producer waiting for room.
-func (f *Forwarder) settle(size int64, counter *uint64) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	*counter++
-	//: a batch that was held.
-	if size > 0 {
-		f.leave(size)
-	}
-}
-
-// leave takes a held batch of size out of the counts, never below zero — a
-// batch another process queued is not counted — and wakes a waiting
-// producer.
-func (f *Forwarder) leave(size int64) {
-	f.stats.Pending = max(f.stats.Pending-1, 0)
-	f.stats.PendingBytes = max(f.stats.PendingBytes-size, 0)
+// release takes the counted batch id out of the counts, with mu held, and
+// wakes a producer waiting for room.
+func (f *Forwarder) release(id string) {
+	f.stats.PendingBytes -= f.held[id]
+	delete(f.held, id)
+	f.stats.Pending = len(f.held)
 	//: wake a producer waiting for room, without ever blocking.
 	select {
 	//: signalled.
 	case f.room <- struct{}{}:
 	//: a signal is already pending.
 	default:
+	}
+}
+
+// settle records the batch id leaving the queue under counter — "" for one
+// that never entered it. A batch the forwarder does not count may be one
+// whose publication it has not counted yet: settle waits for that
+// publication. One it still does not count is another process's, which
+// takes nothing from the counts, and Run counts the queue again at once.
+func (f *Forwarder) settle(id string, counter *uint64) {
+	f.mu.Lock()
+	*counter++
+	_, held := f.held[id]
+	//: never in the queue, or counted: settled under one lock.
+	if id == "" || held {
+		f.leave(id)
+		f.mu.Unlock()
+		//: settled.
+		return
+	}
+	f.mu.Unlock()
+	f.publish.Lock()
+	defer f.publish.Unlock()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	//: counted once its publication was.
+	if _, held = f.held[id]; held {
+		f.leave(id)
+		//: settled.
+		return
+	}
+	f.forget(id)
+	//: another process's: a count says what else it changed.
+	f.askRecount()
+}
+
+// leave takes the batch id, which left the queue, out of the counts, with mu
+// held: nothing for "", which never entered it.
+func (f *Forwarder) leave(id string) {
+	//: a batch that never entered the queue.
+	if id == "" {
+		//: nothing held.
+		return
+	}
+	f.release(id)
+	f.forget(id)
+	f.dueRecount()
+}
+
+// forget records that the batch id was settled, with mu held: the broker
+// forgets it once the consumer acknowledges it, after the settle, and a count
+// that lists it before must not count it again.
+func (f *Forwarder) forget(id string) {
+	//: a broker that cannot list keeps no record.
+	if f.leaving != nil {
+		f.leaving[id] = f.generation
 	}
 }

@@ -37,10 +37,13 @@ const (
 	DefaultRetryBase time.Duration = 5 * time.Second
 	// DefaultRetryMax is the ceiling of the default backoff.
 	DefaultRetryMax time.Duration = 30 * time.Second
+	// DefaultRecountInterval is how long the counts may go without the queue
+	// being counted again when Config.RecountInterval is zero: a backlog
+	// another process changed is said within a minute of a read.
+	DefaultRecountInterval time.Duration = time.Minute
 )
 
-// countPage is how many live messages New reads per call when it counts the
-// backlog a previous process left.
+// countPage is how many live messages a count of the queue reads per call.
 const countPage int = 256
 
 // The three full policies. The zero is DropOldest.
@@ -143,6 +146,16 @@ type Config struct {
 	// SettleTimeout bounds each acknowledgement and hand-back once Run's
 	// context has ended. Zero is the queue's own default.
 	SettleTimeout time.Duration
+	// RecountInterval is how long the counts go before the queue is counted
+	// again, over a broker that lists its messages: a read of Stats, or a
+	// batch leaving the queue, once it has passed has Run list the queue and
+	// count what another process changed in it — a dead letter replayed into
+	// it, a batch another consumer took. The delivery of a batch the
+	// forwarder did not count has it counted at once. A count reads every
+	// live batch, its payload included, on Run's goroutine and never on
+	// Enqueue's: it costs what the backlog weighs. Zero means
+	// DefaultRecountInterval; negative is refused.
+	RecountInterval time.Duration
 }
 
 // String renders the policy for a log line; a value this package never mints
@@ -221,6 +234,10 @@ func (c *Config) validateBounds() error {
 	case c.MaxAge < 0:
 		//: named by field.
 		return misconfigured("MaxAge", "negative")
+	//: negative interval between counts.
+	case c.RecountInterval < 0:
+		//: named by field.
+		return misconfigured("RecountInterval", "negative")
 	//: every knob readable.
 	default:
 		//: accepted.
@@ -242,6 +259,7 @@ func (c *Config) normalized() Config {
 	n.BlockTimeout = orDefault(n.BlockTimeout, DefaultBlockTimeout)
 	n.SendTimeout = orDefault(n.SendTimeout, DefaultSendTimeout)
 	n.MaxAge = orDefault(n.MaxAge, DefaultMaxAge)
+	n.RecountInterval = orDefault(n.RecountInterval, DefaultRecountInterval)
 	n.Parallelism = max(n.Parallelism, 1)
 	//: a curve that starts at nothing would retry at once.
 	if n.Backoff.BaseDelay <= 0 {

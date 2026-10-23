@@ -39,6 +39,9 @@ func TestNewRefusesWhatCouldNeverForward(t *testing.T) {
 		"BlockTimeout": func(c *svcforward.Config) { c.BlockTimeout = -time.Second },
 		"SendTimeout":  func(c *svcforward.Config) { c.SendTimeout = -time.Second },
 		"MaxAge":       func(c *svcforward.Config) { c.MaxAge = -time.Second },
+		"RecountInterval": func(c *svcforward.Config) {
+			c.RecountInterval = -time.Second
+		},
 	}
 	for field, spoil := range cases {
 		t.Run(field, func(t *testing.T) {

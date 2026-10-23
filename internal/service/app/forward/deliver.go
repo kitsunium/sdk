@@ -15,11 +15,11 @@ import (
 // dead-lettered. A stop hands it back as it is.
 func (f *Forwarder) deliver(ctx context.Context, delivery corequeue.DeliveryValue) error {
 	payload := delivery.Message.Payload
-	size := int64(len(payload))
+	id := delivery.Message.ID
 	expiry := delivery.Message.EnqueuedAt.Add(f.cfg.MaxAge)
 	//: too old to be worth sending.
 	if !f.cfg.Clock.Now().Before(expiry) {
-		f.settle(size, &f.stats.Expired)
+		f.settle(id, &f.stats.Expired)
 		//: acknowledged, unsent.
 		return nil
 	}
@@ -31,7 +31,7 @@ func (f *Forwarder) deliver(ctx context.Context, delivery corequeue.DeliveryValu
 	switch {
 	//: the sender took it.
 	case err == nil:
-		f.settle(size, &f.stats.Sent)
+		f.settle(id, &f.stats.Sent)
 		//: acknowledged.
 		return nil
 	//: a stop, or a lease lost: handed back, sent again later.
@@ -40,12 +40,12 @@ func (f *Forwarder) deliver(ctx context.Context, delivery corequeue.DeliveryValu
 		return err
 	//: refused for good: never sent again.
 	case !f.cfg.Retryable(err):
-		f.settle(size, &f.stats.DeadLettered)
+		f.settle(id, &f.stats.DeadLettered)
 		//: the broker's Rejecter dead-letters it with the sender's verdict.
 		return corequeue.DoNotRetry(err)
 	//: still retryable, but past its age.
 	default:
-		f.settle(size, &f.stats.Expired)
+		f.settle(id, &f.stats.Expired)
 		//: acknowledged, unsent.
 		return nil
 	}
