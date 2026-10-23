@@ -342,6 +342,8 @@ files:
       - (*Raft).addLearner
       - (*Raft).promote
       - (*Raft).removeMember
+      - (*Raft).removalStrands
+      - (*Raft).neverVoter
       - (*Raft).answering
       - (*Raft).strands
       - (*Raft).reachedBy
@@ -1581,6 +1583,27 @@ types:
         params: cur *core.MembershipValue, target core.NodeID, idx int
         recv: r *Raft
         results: errs.Code
+      - doc: |-
+          removalStrands reports whether removing target, which leaves next, may
+          strand a voter: only the removal of a member that answers, and that may
+          vouch for a voter — a voter, or a member that ever was one.
+        name: removalStrands
+        params: next *core.MembershipValue, target core.NodeID, wasVoter bool
+        recv: r *Raft
+        results: bool
+      - doc: |-
+          neverVoter reports whether id is a learner in every configuration this
+          leader retains that lists it, the snapshot base's included. A member is
+          promoted, never demoted, so it was a learner in every configuration
+          before those as well, and vouched counts it for no voter, whatever
+          configuration that voter holds: its removal strands no one. strands
+          alone cannot tell, since a voter it already finds stranded stays so, and
+          every removal of an answering learner was refused while a founder listed
+          before the leader was silent over a compacted log (#614).
+        name: neverVoter
+        params: id core.NodeID
+        recv: r *Raft
+        results: bool
       - doc: answering reports whether peer id answered within the vote window.
         name: answering
         params: id core.NodeID

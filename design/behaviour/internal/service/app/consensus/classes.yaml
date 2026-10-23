@@ -350,6 +350,15 @@ constants:
         value: "10"
     name: pinAfterStream
   - doc: |-
+      pinScaleMax caps the doublings of a peer's pin bound: at most 64 times
+      pinAfterStream maximum election timeouts, about 21 minutes at the
+      default 2 s.
+    items:
+      - name: pinScaleMax
+        type: uint8
+        value: "6"
+    name: pinScaleMax
+  - doc: |-
       The metric names are part of the contract (D13): spelled as Prometheus
       exposes them, underscores, _total on counters, units in the name.
     grouped: true
@@ -920,6 +929,8 @@ files:
       - (*Node).judgeOffer
       - (*Node).screenOffer
       - (*Node).answerFromHeld
+      - (*Node).answerRestoring
+      - (*Node).markRestoring
       - (*Node).keepSpool
       - (*Node).releaseKept
       - releaseSink
@@ -1063,6 +1074,7 @@ files:
       - (*Node).handleReady
       - (*Node).auditAppended
       - (*Node).stopOnUnsupported
+      - (*Node).sendMessages
       - (*Node).handleOne
       - (*Node).reportNotices
       - (*Node).endSilence
@@ -1118,9 +1130,14 @@ files:
     name: node_progresswatch.go
   - decls:
       - pinAfterStream
+      - pinScaleMax
       - sendPin
       - (*Node).pinAt
+      - (*Node).pinBound
+      - (*Node).logTight
+      - (*Node).growPin
       - (*Node).watchPins
+      - (*Node).prunePinScale
       - (*Node).dropPin
       - sentReader
       - (*sentReader).Read
@@ -1345,6 +1362,9 @@ files:
       - (*Node).requestCut
       - (*Node).SaveSnapshot
       - copySaved
+      - (*Node).publishedAt
+      - ctxReader
+      - ctxReader.Read
       - (*Node).save
       - (*Node).snapshotToSend
       - (*Node).sendSnapshot
@@ -1357,6 +1377,8 @@ files:
       - (*Node).spaceShort
       - (*Node).refuseShort
       - (*Node).raiseNoSpace
+      - (*Node).watchUnfed
+      - (*Node).feedOrNot
     name: space.go
   - decls:
       - unmarked
@@ -2633,7 +2655,10 @@ functions:
     results: bool
   - doc: |-
       copySaved copies the encoded stream h holds to w, then closes h, on a
-      goroutine of its own, and returns once it is copied or ctx is done.
+      goroutine of its own, and returns once it is copied or ctx is done. The
+      copy reads through ctx: it went on to the end after the caller left, and
+      a caller that reused or read w once SaveSnapshot returned raced with it
+      (#612).
     name: copySaved
     params: ctx context.Context, h coreconsensus.SnapshotHandle, w io.Writer
     results: error
@@ -4863,10 +4888,22 @@ types:
         name: sendStop
         type: map[coreconsensus.NodeID]context.CancelFunc
       - doc: |-
+          pinScale is, per peer, how many times its pin bound doubled: a
+          receiver still answering when its stream's pin fell due was slow to
+          install, not stuck (#610).
+        name: pinScale
+        type: map[coreconsensus.NodeID]uint8
+      - doc: |-
           tooLarge is, per learner, the newest snapshot it was found too small
           to install, so that it is said once per snapshot (#591).
         name: tooLarge
         type: map[coreconsensus.NodeID]string
+      - doc: |-
+          unfed is, while this node leads, the learners whose announced
+          MaxSnapshotBytes the newest snapshot is over: they are sent no
+          entries (#613).
+        name: unfed
+        type: map[coreconsensus.NodeID]bool
       - doc: unreachableAt is when the transport last failed to reach a peer.
         name: unreachableAt
         type: map[coreconsensus.NodeID]time.Time
@@ -5111,6 +5148,25 @@ types:
         params: o *coreconsensus.InstallOfferValue, acc *coreconsensus.InstallAcceptValue
         recv: n *Node
         results: bool
+      - doc: |-
+          answerRestoring refuses OVERLOADED an offer of a snapshot this node
+          committed and is restoring, and reports whether it did. A leader whose
+          pin on a slow receiver fell due offers the same snapshot again:
+          accepted, a spool was opened over the published id, the whole snapshot
+          was streamed a second time, committed over the file the restore in
+          progress reads — a rename Windows refuses — and restored once more
+          (#610). Refused, the leader probes again, and finds the receiver at the
+          snapshot once restored.
+        name: answerRestoring
+        params: o *coreconsensus.InstallOfferValue, acc *coreconsensus.InstallAcceptValue
+        recv: n *Node
+        results: bool
+      - doc: |-
+          markRestoring counts one more, or one less, install of id waiting for
+          or under its restore.
+        name: markRestoring
+        params: id string, d int
+        recv: n *Node
       - doc: |-
           keepSpool holds the sink an accepted offer opened until its body
           arrives. A sink an earlier offer of the same id left open is released,
@@ -5539,6 +5595,12 @@ types:
         recv: n *Node
         results: bool
       - doc: |-
+          sendMessages sends raft's messages, but no entries to a learner the
+          state outgrew (watchUnfed, #613).
+        name: sendMessages
+        params: ms []coreconsensus.MessageValue
+        recv: n *Node
+      - doc: |-
           handleOne carries out one Ready: messages sent, membership and silence
           applied, writes and entries queued to the storage actor and the apply
           goroutine, fetches and snapshot sends started, waiters answered.
@@ -5815,15 +5877,45 @@ types:
           pinAt is the index pin holds compaction back to at now, and false once
           it no longer holds: a streamed snapshot's pin ends when this node no
           longer leads the peer, or when until passed. A stream's pin ends
-          pinAfterStream maximum election timeouts after its last byte was read:
-          a receiver that is sent every byte and never answers — a stuck disk
-          under its spool's sync, a stuck Restore, an apply goroutine held by an
-          abandoned SaveSnapshot — pinned this node's compaction for good, and its
-          log grew to the NO_SPACE alarm (#602). It runs on the loop.
+          pinBound after its last byte was read: a receiver that is sent every
+          byte and never answers — a stuck disk under its spool's sync, a stuck
+          Restore, an apply goroutine held by an abandoned SaveSnapshot — pinned
+          this node's compaction for good, and its log grew to the NO_SPACE alarm
+          (#602). No pin holds once the log is tight. It runs on the loop.
         name: pinAt
         params: to coreconsensus.NodeID, pin sendPin, now time.Time
         recv: n *Node
         results: uint64, bool
+      - doc: |-
+          pinBound is how long a pin to peer to holds once its stream read the
+          last byte, and once its stream ended: pinAfterStream maximum election
+          timeouts, doubled each time a stream's pin to that peer fell due while
+          the peer still answered, up to pinScaleMax times. The bound alone could
+          not tell a receiver stuck in its install from one only slow to restore:
+          a Restore longer than the bound saw the log compacted past the snapshot
+          while it ran, and under a steady write rate the follower installed
+          snapshot after snapshot and never caught up (#610, #550). Each doubling
+          costs it one transfer; a stuck receiver holds compaction at most the
+          capped bound at a time, and never once the log is tight.
+        name: pinBound
+        params: to coreconsensus.NodeID
+        recv: n *Node
+        results: time.Duration
+      - doc: |-
+          logTight reports whether the log is within twice LogReserveBytes of
+          MaxLogBytes, half way to the no-space alarm: no pin holds compaction
+          back then, whatever its bound.
+        name: logTight
+        recv: n *Node
+        results: bool
+      - doc: |-
+          growPin doubles the pin bound of peer to, whose stream's pin fell due,
+          when it answered within the last maximum election timeout: it is alive
+          and still installing, slow rather than stuck. A pin dropped because the
+          log is tight says nothing of the peer, and grows nothing.
+        name: growPin
+        params: to coreconsensus.NodeID, now time.Time
+        recv: n *Node
       - doc: |-
           watchPins ends, at each tick, the pins of streamed snapshots that no
           longer hold: their peer caught up with the log, left, or until passed.
@@ -5837,11 +5929,15 @@ types:
         name: watchPins
         params: now time.Time
         recv: n *Node
+      - doc: prunePinScale forgets the pin bounds of peers this node no longer leads.
+        name: prunePinScale
+        recv: n *Node
       - doc: |-
           dropPin ends the pin of peer to, and cancels its stream when the pin is
           a stream's whose verdict is overdue: the stream ends, raft probes the
           peer again, and a peer that finished its install meanwhile is found
-          there. The receiver keeps its spool and its install. It runs on the loop.
+          there. The receiver keeps its spool and its install, and its next pin
+          holds longer when it still answers (growPin). It runs on the loop.
         name: dropPin
         params: to coreconsensus.NodeID
         recv: n *Node
@@ -6270,6 +6366,18 @@ types:
         params: ctx context.Context, op coreconsensus.Operator, w io.Writer
         recv: n *Node
         results: coreconsensus.SnapshotMetaValue, error
+      - doc: |-
+          publishedAt opens the snapshot of idx in term when it is published
+          already: an idle node's applied index is that of its last cut, or of a
+          previous SaveSnapshot. Cut again, it was committed over the published
+          file, which an abandoned copy of a previous save or a stream to a peer
+          may hold open; on Windows that rename fails, and the STORAGE_FAILED it
+          answers stopped the node (#611). The id names one state, so the
+          published snapshot is the one a cut would write.
+        name: publishedAt
+        params: idx, term uint64
+        recv: n *Node
+        results: coreconsensus.SnapshotHandle, bool
       - doc: save runs a SaveSnapshot on the apply goroutine.
         name: save
         params: req *saveReq
@@ -6333,6 +6441,25 @@ types:
         name: raiseNoSpace
         params: why string
         recv: n *Node
+      - doc: |-
+          watchUnfed finds, at each tick while this node leads, the learners whose
+          announced MaxSnapshotBytes the newest snapshot is over, and handleOne
+          sends them no entries. Such a learner cuts nothing, its own cuts held to
+          its own limit, and installs nothing, the leader withholding the
+          snapshot: the log it was fed was never compacted, passed its quota, and
+          grew until its filesystem was full and it stopped STORAGE_FAILED (#613).
+          Its log now stops within about one cut of the state outgrowing its
+          limit; it stays a learner the leader names in its log, until the state
+          fits again, when the leader offers it a snapshot, or it is removed.
+          Heartbeats and empty appends still reach it.
+        name: watchUnfed
+        recv: n *Node
+      - doc: |-
+          feedOrNot marks learner m unfed when newest is over its announced limit,
+          fed again once it is not, and says so at each change.
+        name: feedOrNot
+        params: m *coreconsensus.MemberValue, newest int64
+        recv: n *Node
     name: Node
   - doc: "snapState tracks the cuts: at most one in flight, coalesced (D7)."
     fields:
@@ -6367,6 +6494,11 @@ types:
           and decoded sizes, which Health compares with the limit (R2-30, #556).
         name: newestBytes
         type: int64
+      - doc: |-
+          restoring counts, per id, the installs of that snapshot committed
+          and waiting for or under their restore (#610).
+        name: restoring
+        type: map[string]int
     kind: struct
     name: snapState
   - fields:
@@ -6954,6 +7086,20 @@ types:
         recv: c *chunkReader
         results: error
     name: chunkReader
+  - doc: ctxReader reads r until ctx is done, then answers ctx's error.
+    fields:
+      - name: ctx
+        type: context.Context
+      - name: r
+        type: io.Reader
+    kind: struct
+    methods:
+      - doc: Read reads r, unless ctx is done.
+        name: Read
+        params: p []byte
+        recv: c ctxReader
+        results: int, error
+    name: ctxReader
   - doc: |-
       spaceGuard is the guard's state. checkedAt, nextRaise, fsShort and
       learnerShort belong to the event loop; raising is set while a proposal of

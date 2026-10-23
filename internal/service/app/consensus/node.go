@@ -121,9 +121,17 @@ type Node struct {
 	// sendStop cancels the snapshot stream in flight to each peer: a
 	// leader that lost its leadership or its term stops streaming (#547).
 	sendStop map[coreconsensus.NodeID]context.CancelFunc
+	// pinScale is, per peer, how many times its pin bound doubled: a
+	// receiver still answering when its stream's pin fell due was slow to
+	// install, not stuck (#610).
+	pinScale map[coreconsensus.NodeID]uint8
 	// tooLarge is, per learner, the newest snapshot it was found too small
 	// to install, so that it is said once per snapshot (#591).
 	tooLarge map[coreconsensus.NodeID]string
+	// unfed is, while this node leads, the learners whose announced
+	// MaxSnapshotBytes the newest snapshot is over: they are sent no
+	// entries (#613).
+	unfed map[coreconsensus.NodeID]bool
 	// unreachableAt is when the transport last failed to reach a peer.
 	unreachableAt map[coreconsensus.NodeID]time.Time
 	lastTerm      uint64
@@ -189,6 +197,9 @@ type snapState struct {
 	// newestBytes is the newest snapshot's size, the larger of its encoded
 	// and decoded sizes, which Health compares with the limit (R2-30, #556).
 	newestBytes int64
+	// restoring counts, per id, the installs of that snapshot committed
+	// and waiting for or under their restore (#610).
+	restoring map[string]int
 }
 
 type applyResult struct {
@@ -394,7 +405,7 @@ func newNode(cfg *Config, stamp *coreconsensus.StampValue) *Node {
 		propc: make(chan *proposal, inboxDepth), execc: make(chan func(), loopBacklog), storec: make(chan storeDone, loopBacklog),
 		stopc: make(chan struct{}), sq: newFifo[storeReq](), fetchq: newFifo[raft.FetchSpec](), fetchc: make(chan fetchDone, fetchBacklog), aq: newFifo[applyItem](),
 		waiters: map[uint64]*proposal{}, results: map[uint64]applyResult{},
-		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]sendPin{}, sendStop: map[coreconsensus.NodeID]context.CancelFunc{}, tooLarge: map[coreconsensus.NodeID]string{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
+		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]sendPin{}, sendStop: map[coreconsensus.NodeID]context.CancelFunc{}, pinScale: map[coreconsensus.NodeID]uint8{}, tooLarge: map[coreconsensus.NodeID]string{}, unfed: map[coreconsensus.NodeID]bool{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
 		watchers: map[chan coreconsensus.StatusValue]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
 	}
 	n.acond = sync.NewCond(&n.am)
@@ -958,6 +969,7 @@ func (n *Node) onTick(tick clock.Ticker, ok bool) (time.Time, bool) {
 	n.observePeers()
 	n.observeResources()
 	n.guardSpace(turn)
+	n.watchUnfed()
 	return turn, true
 }
 
@@ -1233,13 +1245,22 @@ func (n *Node) stopOnUnsupported(rd *raft.ReadyValue) bool {
 	return true
 }
 
+// sendMessages sends raft's messages, but no entries to a learner the
+// state outgrew (watchUnfed, #613).
+func (n *Node) sendMessages(ms []coreconsensus.MessageValue) {
+	for i := range ms {
+		if len(ms[i].Entries) > 0 && n.unfed[ms[i].To] {
+			continue
+		}
+		n.cfg.Transport.Send(ms[i].To, wire.AppendMessage(nil, &ms[i]))
+	}
+}
+
 // handleOne carries out one Ready: messages sent, membership and silence
 // applied, writes and entries queued to the storage actor and the apply
 // goroutine, fetches and snapshot sends started, waiters answered.
 func (n *Node) handleOne(rd *raft.ReadyValue) {
-	for _, m := range rd.Messages {
-		n.cfg.Transport.Send(m.To, wire.AppendMessage(nil, &m))
-	}
+	n.sendMessages(rd.Messages)
 	if h := rd.LeaderHint; h.ID != 0 {
 		// A member vouched for a leader this node's configuration does not
 		// list: admitted for its appends and heartbeats only (D4, #542).

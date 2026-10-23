@@ -14,6 +14,11 @@ import (
 // verdict as well, from the moment the transport read the last byte.
 const pinAfterStream int64 = 10
 
+// pinScaleMax caps the doublings of a peer's pin bound: at most 64 times
+// pinAfterStream maximum election timeouts, about 21 minutes at the
+// default 2 s.
+const pinScaleMax uint8 = 6
+
 // sendPin is a snapshot that pins compaction for a peer. While it streams,
 // until is zero, and sent is when the transport read the snapshot's last
 // byte, in Unix nanoseconds of n.clk, 0 before. Once streamed, the pin
@@ -30,15 +35,18 @@ type sendPin struct {
 // pinAt is the index pin holds compaction back to at now, and false once
 // it no longer holds: a streamed snapshot's pin ends when this node no
 // longer leads the peer, or when until passed. A stream's pin ends
-// pinAfterStream maximum election timeouts after its last byte was read:
-// a receiver that is sent every byte and never answers — a stuck disk
-// under its spool's sync, a stuck Restore, an apply goroutine held by an
-// abandoned SaveSnapshot — pinned this node's compaction for good, and its
-// log grew to the NO_SPACE alarm (#602). It runs on the loop.
+// pinBound after its last byte was read: a receiver that is sent every
+// byte and never answers — a stuck disk under its spool's sync, a stuck
+// Restore, an apply goroutine held by an abandoned SaveSnapshot — pinned
+// this node's compaction for good, and its log grew to the NO_SPACE alarm
+// (#602). No pin holds once the log is tight. It runs on the loop.
 func (n *Node) pinAt(to coreconsensus.NodeID, pin sendPin, now time.Time) (uint64, bool) {
+	if n.logTight() {
+		return 0, false
+	}
 	if pin.until.IsZero() {
 		if pin.sent != nil {
-			if at := pin.sent.Load(); at != 0 && now.Sub(time.Unix(0, at)) > time.Duration(pinAfterStream)*n.r.Status().Timing.ElectionTimeoutMax {
+			if at := pin.sent.Load(); at != 0 && now.Sub(time.Unix(0, at)) > n.pinBound(to) {
 				return 0, false
 			}
 		}
@@ -49,6 +57,42 @@ func (n *Node) pinAt(to coreconsensus.NodeID, pin sendPin, now time.Time) (uint6
 		return 0, false
 	}
 	return max(pin.index, match), true
+}
+
+// pinBound is how long a pin to peer to holds once its stream read the
+// last byte, and once its stream ended: pinAfterStream maximum election
+// timeouts, doubled each time a stream's pin to that peer fell due while
+// the peer still answered, up to pinScaleMax times. The bound alone could
+// not tell a receiver stuck in its install from one only slow to restore:
+// a Restore longer than the bound saw the log compacted past the snapshot
+// while it ran, and under a steady write rate the follower installed
+// snapshot after snapshot and never caught up (#610, #550). Each doubling
+// costs it one transfer; a stuck receiver holds compaction at most the
+// capped bound at a time, and never once the log is tight.
+func (n *Node) pinBound(to coreconsensus.NodeID) time.Duration {
+	return time.Duration(pinAfterStream) * n.r.Status().Timing.ElectionTimeoutMax << n.pinScale[to]
+}
+
+// logTight reports whether the log is within twice LogReserveBytes of
+// MaxLogBytes, half way to the no-space alarm: no pin holds compaction
+// back then, whatever its bound.
+func (n *Node) logTight() bool {
+	sr, ok := n.cfg.Log.(spaceReporter)
+	return ok && sr.logBytes()+2*n.cfg.LogReserveBytes >= n.cfg.MaxLogBytes
+}
+
+// growPin doubles the pin bound of peer to, whose stream's pin fell due,
+// when it answered within the last maximum election timeout: it is alive
+// and still installing, slow rather than stuck. A pin dropped because the
+// log is tight says nothing of the peer, and grows nothing.
+func (n *Node) growPin(to coreconsensus.NodeID, now time.Time) {
+	_, heard, ok := n.r.Progress(to)
+	if !ok || n.logTight() || n.pinScale[to] >= pinScaleMax || now.Sub(heard) >= n.r.Status().Timing.ElectionTimeoutMax {
+		return
+	}
+	n.pinScale[to]++
+	n.obs.info("consensus: a snapshot receiver still installing outlasted its pin; the next pin holds longer",
+		lattr("peer", uint64(to)), lstr("bound", n.pinBound(to).String()))
 }
 
 // watchPins ends, at each tick, the pins of streamed snapshots that no
@@ -77,20 +121,32 @@ func (n *Node) watchPins(now time.Time) {
 			ended = true
 		}
 	}
+	n.prunePinScale()
 	if ended {
 		n.aq.push(applyItem{compact: true})
+	}
+}
+
+// prunePinScale forgets the pin bounds of peers this node no longer leads.
+func (n *Node) prunePinScale() {
+	for to := range n.pinScale {
+		if _, _, ok := n.r.Progress(to); !ok {
+			delete(n.pinScale, to)
+		}
 	}
 }
 
 // dropPin ends the pin of peer to, and cancels its stream when the pin is
 // a stream's whose verdict is overdue: the stream ends, raft probes the
 // peer again, and a peer that finished its install meanwhile is found
-// there. The receiver keeps its spool and its install. It runs on the loop.
+// there. The receiver keeps its spool and its install, and its next pin
+// holds longer when it still answers (growPin). It runs on the loop.
 func (n *Node) dropPin(to coreconsensus.NodeID) {
 	if n.sending[to].until.IsZero() {
 		if stop, ok := n.sendStop[to]; ok {
 			stop()
 		}
+		n.growPin(to, n.clk.Now())
 	}
 	delete(n.sending, to)
 }

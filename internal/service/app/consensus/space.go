@@ -140,3 +140,47 @@ func (n *Node) raiseNoSpace(why string) {
 	// next check while the disk stays short.
 	abandon(n.admin(ctx, coreconsensus.EntryNoSpaceRaise, wire.AdminValue{Operator: string(spaceOperator)}))
 }
+
+// watchUnfed finds, at each tick while this node leads, the learners whose
+// announced MaxSnapshotBytes the newest snapshot is over, and handleOne
+// sends them no entries. Such a learner cuts nothing, its own cuts held to
+// its own limit, and installs nothing, the leader withholding the
+// snapshot: the log it was fed was never compacted, passed its quota, and
+// grew until its filesystem was full and it stopped STORAGE_FAILED (#613).
+// Its log now stops within about one cut of the state outgrowing its
+// limit; it stays a learner the leader names in its log, until the state
+// fits again, when the leader offers it a snapshot, or it is removed.
+// Heartbeats and empty appends still reach it.
+func (n *Node) watchUnfed() {
+	st := n.r.Status()
+	if st.Role != coreconsensus.RoleLeader {
+		clear(n.unfed)
+		return
+	}
+	n.snapState.mu.Lock()
+	newest := n.snapState.newestBytes
+	n.snapState.mu.Unlock()
+	for id := range n.unfed {
+		if m, ok := st.Conf.Member(id); !ok || m.Voter {
+			delete(n.unfed, id)
+		}
+	}
+	for i := range st.Conf.Members {
+		n.feedOrNot(&st.Conf.Members[i], newest)
+	}
+}
+
+// feedOrNot marks learner m unfed when newest is over its announced limit,
+// fed again once it is not, and says so at each change.
+func (n *Node) feedOrNot(m *coreconsensus.MemberValue, newest int64) {
+	over := !m.Voter && m.MaxSnapshotBytes > 0 && newest > m.MaxSnapshotBytes
+	switch {
+	case over && !n.unfed[m.ID]:
+		n.unfed[m.ID] = true
+		n.obs.warn("consensus: the state outgrew a learner's announced snapshot limit; it is sent no more entries until it fits or is removed",
+			lattr("peer", uint64(m.ID)), lattr("bytes", uint64(newest)), lattr("limit", uint64(m.MaxSnapshotBytes)))
+	case !over && n.unfed[m.ID]:
+		delete(n.unfed, m.ID)
+		n.obs.info("consensus: a learner's announced snapshot limit fits the state again; it is fed the log", lattr("peer", uint64(m.ID)))
+	}
+}

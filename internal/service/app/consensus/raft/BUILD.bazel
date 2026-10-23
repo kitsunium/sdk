@@ -66,8 +66,11 @@ go_test(
     # 60-seed suites are twelve top-level tests each and the 30-seed one
     # three (seedPart), every seed loop runs its seeds as parallel subtests
     # (eachSeed), and 26 shards hold each shard near 20 CPU-seconds: at
-    # eight, two shards of ~55 overran 60 s on CI (#304).
-    shard_count = 26,
+    # eight, two shards of ~55 overran 60 s on CI (#304). At 26 the
+    # fourth shard held both TestChecksPassUnmutated and
+    # TestLinearizableUnderFaults, about 17 CPU-seconds each under race,
+    # and overran 60 s under coverage on main; 27 deals them apart.
+    shard_count = 27,
     deps = [
         "//internal/core/app/consensus",
         "//internal/kernel/errs",

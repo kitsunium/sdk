@@ -592,8 +592,9 @@ func (n *Node) requestCut() {
 }
 
 // SaveSnapshot cuts a snapshot now and copies its encoded stream to w, on a
-// goroutine of its own: once ctx is done it returns, and a write to w
-// already blocked keeps that goroutine, and the snapshot pinned, until w
+// goroutine of its own: once ctx is done it returns, the copy stops at its
+// next read, and only a write to w already begun may end after the return;
+// one that blocks keeps that goroutine, and the snapshot pinned, until w
 // returns.
 func (n *Node) SaveSnapshot(ctx context.Context, op coreconsensus.Operator, w io.Writer) (coreconsensus.SnapshotMetaValue, error) {
 	// The cut is published on the apply goroutine and copied to w from the
@@ -634,11 +635,14 @@ func (n *Node) SaveSnapshot(ctx context.Context, op coreconsensus.Operator, w io
 }
 
 // copySaved copies the encoded stream h holds to w, then closes h, on a
-// goroutine of its own, and returns once it is copied or ctx is done.
+// goroutine of its own, and returns once it is copied or ctx is done. The
+// copy reads through ctx: it went on to the end after the caller left, and
+// a caller that reused or read w once SaveSnapshot returned raced with it
+// (#612).
 func copySaved(ctx context.Context, h coreconsensus.SnapshotHandle, w io.Writer) error {
 	copied := make(chan error, 1)
 	go func() {
-		_, err := io.Copy(w, io.NewSectionReader(h, 0, h.Meta().EncodedSize))
+		_, err := io.Copy(w, ctxReader{ctx: ctx, r: io.NewSectionReader(h, 0, h.Meta().EncodedSize)})
 		if cerr := h.Close(); err == nil {
 			err = cerr
 		} else {
@@ -654,11 +658,52 @@ func copySaved(ctx context.Context, h coreconsensus.SnapshotHandle, w io.Writer)
 	}
 }
 
+// publishedAt opens the snapshot of idx in term when it is published
+// already: an idle node's applied index is that of its last cut, or of a
+// previous SaveSnapshot. Cut again, it was committed over the published
+// file, which an abandoned copy of a previous save or a stream to a peer
+// may hold open; on Windows that rename fails, and the STORAGE_FAILED it
+// answers stopped the node (#611). The id names one state, so the
+// published snapshot is the one a cut would write.
+func (n *Node) publishedAt(idx, term uint64) (coreconsensus.SnapshotHandle, bool) {
+	if idx == 0 {
+		return nil, false
+	}
+	h, err := n.cfg.Snapshots.Open(snapshotID(idx, term))
+	if err != nil {
+		return nil, false
+	}
+	return h, true
+}
+
+// ctxReader reads r until ctx is done, then answers ctx's error.
+type ctxReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+// Read reads r, unless ctx is done.
+func (c ctxReader) Read(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.r.Read(p)
+}
+
 // save runs a SaveSnapshot on the apply goroutine.
 func (n *Node) save(req *saveReq) {
 	n.am.Lock()
 	idx, term := n.applied, n.appliedTerm
 	n.am.Unlock()
+	if h, ok := n.publishedAt(idx, term); ok {
+		n.snapState.mu.Lock()
+		n.snapState.inFlight = false
+		n.snapState.mu.Unlock()
+		n.obs.info("consensus: snapshot saved", lstr("operator", string(req.op)), lattr("index", idx))
+		n.cutPending()
+		req.answer(&saveRes{meta: h.Meta(), h: h})
+		return
+	}
 	err := n.cut(idx, term, true)
 	var m coreconsensus.SnapshotMetaValue
 	var h coreconsensus.SnapshotHandle
@@ -778,7 +823,7 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 		n.streamEnded(meta, to, err)
 		n.exec(func() {
 			if err == nil {
-				until := n.clk.Now().Add(time.Duration(pinAfterStream) * n.r.Status().Timing.ElectionTimeoutMax)
+				until := n.clk.Now().Add(n.pinBound(to))
 				n.sending[to] = sendPin{index: meta.Position.Index, until: until}
 			} else {
 				delete(n.sending, to)

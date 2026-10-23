@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-23T20:00:00Z -->
+<!-- updated: 2026-10-24T00:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -487,13 +487,30 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
 - Write a caller's writer on the apply goroutine: an abandoned
   `SaveSnapshot` into a writer that stopped reading froze the node (#601,
   `copySaved`, `TestASaveSnapshotWriterThatStopsReadingDoesNotFreezeApply`).
-- Hold a stream's pin past `pinAfterStream` maximum election timeouts after
-  its last byte: a receiver that never answers its verdict pinned the
-  leader's compaction for good (#602, `pinAt`, `dropPin`,
+- Hold a stream's pin past its peer's `pinBound` after its last byte, or
+  once the log is tight: a receiver that never answers its verdict pinned
+  the leader's compaction for good (#602, `pinAt`, `dropPin`,
   `TestAFollowerStuckInItsInstallDoesNotPinCompaction`,
-  `TestTCPStreamWhoseReceiverNeverAnswersEndsWithItsContext`).
+  `TestTCPStreamWhoseReceiverNeverAnswersEndsWithItsContext`). Nor fix the
+  bound for good: a receiver only slow to restore never caught up, and the
+  bound doubles for a peer that still answered when its pin fell due (#610,
+  `growPin`, `TestAFollowerSlowerToRestoreThanThePinBoundCatchesUp`).
+- Accept an offer of the snapshot this node is restoring: it was streamed
+  again and committed over the file the restore reads (#610,
+  `answerRestoring`, `TestAnOfferOfTheSnapshotBeingRestoredIsRefused`).
+- Feed the log to a learner whose announced limit the newest snapshot is
+  over: it compacts nothing and its log filled its disk (#613,
+  `watchUnfed`, `TestALearnerTheStateOutgrewIsNotFedTheLogPastItsQuota`).
+- Cut again at an index whose snapshot is published: the commit renamed
+  over a file a copy may hold open, which Windows refuses (#611,
+  `publishedAt`, `TestASecondSaveOfAnIdleNodeDoesNotRecommitThePublishedSnapshot`).
+- Let `SaveSnapshot`'s copy write to `w` once the caller left (#612,
+  `ctxReader`, `TestSaveSnapshotStopsWritingOnceTheCallerLeft`).
 - Remove an answering member that may be the last voter a silent voter
   knows: that voter comes back hearing no one and the cluster loses its vote
   for good (#603, `strands`, `TestAStaleVoterIsNotLeftWithNoKnownPeer`,
   `TestARemovalThatMayStrandAStaleVoterIsRefused`). Never widen admission
   for it: a key is admitted only on a member's word or a configuration.
+  Nor refuse the removal of a learner that never voted: it vouches for no
+  one (#614, `neverVoter`,
+  `TestAnAnsweringLearnerIsRemovedWhileAVoterIsAlreadyStranded`).

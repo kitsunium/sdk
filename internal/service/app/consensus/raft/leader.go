@@ -767,10 +767,40 @@ func (r *Raft) removeMember(cur *core.MembershipValue, target core.NodeID, idx i
 			return codeMembershipInvalid
 		}
 	}
-	if !r.activeMajority(*cur) || (r.answering(target) && r.strands(cur) && !r.mutated(mutRemoveStrands)) {
+	if !r.activeMajority(*cur) || r.removalStrands(cur, target, wasVoter) {
 		return codeMembershipInvalid
 	}
 	return 0
+}
+
+// removalStrands reports whether removing target, which leaves next, may
+// strand a voter: only the removal of a member that answers, and that may
+// vouch for a voter — a voter, or a member that ever was one.
+func (r *Raft) removalStrands(next *core.MembershipValue, target core.NodeID, wasVoter bool) bool {
+	if r.mutated(mutRemoveStrands) || !r.answering(target) || (!wasVoter && r.neverVoter(target)) {
+		return false
+	}
+	return r.strands(next)
+}
+
+// neverVoter reports whether id is a learner in every configuration this
+// leader retains that lists it, the snapshot base's included. A member is
+// promoted, never demoted, so it was a learner in every configuration
+// before those as well, and vouched counts it for no voter, whatever
+// configuration that voter holds: its removal strands no one. strands
+// alone cannot tell, since a voter it already finds stranded stays so, and
+// every removal of an answering learner was refused while a founder listed
+// before the leader was silent over a compacted log (#614).
+func (r *Raft) neverVoter(id core.NodeID) bool {
+	if m, ok := r.base.Member(id); ok && m.Voter {
+		return false
+	}
+	for k := range r.confs {
+		if m, ok := r.confs[k].m.Member(id); ok && m.Voter {
+			return false
+		}
+	}
+	return true
 }
 
 // answering reports whether peer id answered within the vote window.
