@@ -1160,8 +1160,85 @@ sequences:
       - opt:
           do:
             - return: codeMembershipInvalid
-          when: "!r.activeMajority(*cur)"
+          when: "!r.activeMajority(*cur) || (r.answering(target) && r.strands(cur) && !r.mutated(mutRemoveStrands))"
       - return: "0"
+  - of: (*Raft).answering
+    steps:
+      - bind: pr
+        eval: r.prs[id]
+      - return: pr != nil && pr.facts&peerHeard != 0 && r.now.Sub(pr.lastHeard) < r.voteWindow
+  - of: (*Raft).reachedBy
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).reachedBy
+        kind: self
+      - id: vouched
+        kind: internal
+      - id: r.base.Member
+        kind: value
+      - id: listedBefore
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: vouched(next, r.confAt(pr.match), v, r.id)
+              to: vouched
+          init:
+            bind: pr
+            eval: r.prs[v]
+          when: pr != nil && pr.facts&peerHeard != 0 && pr.match >= r.log.snapIndex
+      - opt:
+          do:
+            - return: "false"
+          when: "!r.vouchedInRetained(next, v)"
+      - opt:
+          do:
+            - return: "true"
+          init:
+            bind: _, listed
+            eval: r.base.Member(v)
+            to: r.base.Member
+          when: "!listed || r.log.snapIndex == 0"
+      - return: listedBefore(next, r.id, v)
+        to: listedBefore
+  - of: vouched
+    participants:
+      - id: caller
+        kind: actor
+      - id: vouched
+        kind: self
+      - id: known.Member
+        kind: value
+      - id: next.Member
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          init:
+            bind: _, listed
+            eval: known.Member(v)
+            to: known.Member
+          when: "!listed"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: k.ID == v
+            - opt:
+                do:
+                  - return: "true"
+                init:
+                  bind: _, stays
+                  eval: next.Member(k.ID)
+                  to: next.Member
+                when: stays && (k.ID == leader || k.Voter)
+          key: _
+          range: known.Members
+          value: k
+      - return: "false"
   - of: (*Raft).updateAddress
     steps:
       - opt:

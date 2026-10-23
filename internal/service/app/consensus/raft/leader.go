@@ -767,10 +767,108 @@ func (r *Raft) removeMember(cur *core.MembershipValue, target core.NodeID, idx i
 			return codeMembershipInvalid
 		}
 	}
-	if !r.activeMajority(*cur) {
+	if !r.activeMajority(*cur) || (r.answering(target) && r.strands(cur) && !r.mutated(mutRemoveStrands)) {
 		return codeMembershipInvalid
 	}
 	return 0
+}
+
+// answering reports whether peer id answered within the vote window.
+func (r *Raft) answering(id core.NodeID) bool {
+	pr := r.prs[id]
+	return pr != nil && pr.facts&peerHeard != 0 && r.now.Sub(pr.lastHeard) < r.voteWindow
+}
+
+// strands reports whether next leaves a voter unable to hear this leader
+// once it comes back: a voter admits on its own configuration, and when
+// every voter it knows has left, no member of it can vouch for this leader
+// (#542) and its transport refuses this leader's key. A voter of {A, B, C}
+// down while B and C were replaced by D and E came back as a voter of
+// {A, D, E} that heard nobody, and after one more failure A and D, two
+// running voters of three, never committed again (#603).
+//
+// The guard admits no one: it only refuses a removal, of a member that
+// answers, which would take away the last voter such a voter knows. A
+// member that does not answer cannot vouch for anyone now, and its removal
+// is never refused here, so a dead voter can always be removed.
+func (r *Raft) strands(next *core.MembershipValue) bool {
+	for _, m := range next.Members {
+		if m.Voter && m.ID != r.id && !r.reachedBy(next, m.ID) {
+			return true
+		}
+	}
+	return false
+}
+
+// reachedBy reports whether voter v, whatever configuration of its past it
+// holds, still knows in next this leader or a voter that would vouch for
+// it. A voter this leader heard at a match its log still resolves holds
+// that configuration or a later one: every member of next it lists there
+// it lists in every later one, since an id is never added back once
+// removed. For any other voter every retained configuration that lists it
+// is a candidate, and when it was a member before the log's start the
+// oldest it may hold is unknown: only this leader listed before it, so
+// added before it, is then known to it for sure.
+func (r *Raft) reachedBy(next *core.MembershipValue, v core.NodeID) bool {
+	if pr := r.prs[v]; pr != nil && pr.facts&peerHeard != 0 && pr.match >= r.log.snapIndex {
+		return vouched(next, r.confAt(pr.match), v, r.id)
+	}
+	if !r.vouchedInRetained(next, v) {
+		return false
+	}
+	if _, listed := r.base.Member(v); !listed || r.log.snapIndex == 0 {
+		// Added after the log's start, or a founder of a log that was never
+		// compacted: the retained configurations are every one it may hold.
+		return true
+	}
+	return listedBefore(next, r.id, v)
+}
+
+// vouchedInRetained reports whether v is vouched for in every retained
+// configuration, the snapshot base's included.
+func (r *Raft) vouchedInRetained(next *core.MembershipValue, v core.NodeID) bool {
+	if !vouched(next, &r.base, v, r.id) {
+		return false
+	}
+	for k := range r.confs {
+		if !vouched(next, &r.confs[k].m, v, r.id) {
+			return false
+		}
+	}
+	return true
+}
+
+// listedBefore reports whether first comes before then in next's members,
+// the order members were added in.
+func listedBefore(next *core.MembershipValue, first, then core.NodeID) bool {
+	for _, m := range next.Members {
+		switch m.ID {
+		case then:
+			return false
+		case first:
+			return true
+		}
+	}
+	return false
+}
+
+// vouched reports whether a voter v holding known still finds in next the
+// leader, as any member, or another voter of known, which answers its
+// PreVote with the leader's record (#542). A known that does not list v is
+// not one v holds, and is passed.
+func vouched(next, known *core.MembershipValue, v, leader core.NodeID) bool {
+	if _, listed := known.Member(v); !listed {
+		return true
+	}
+	for _, k := range known.Members {
+		if k.ID == v {
+			continue
+		}
+		if _, stays := next.Member(k.ID); stays && (k.ID == leader || k.Voter) {
+			return true
+		}
+	}
+	return false
 }
 
 // updateAddress changes the address of the member at idx to the one admin

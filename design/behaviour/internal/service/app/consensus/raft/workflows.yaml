@@ -70,6 +70,50 @@ workflows:
           range: r.conf().Members
           value: m
       - return: "0"
+  - of: (*Raft).strands
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: m.Voter && m.ID != r.id && !r.reachedBy(next, m.ID)
+          key: _
+          range: next.Members
+          value: m
+      - return: "false"
+  - of: (*Raft).vouchedInRetained
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: "!vouched(next, &r.base, v, r.id)"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!vouched(next, &r.confs[k].m, v, r.id)"
+          key: k
+          range: r.confs
+      - return: "true"
+  - of: listedBefore
+    steps:
+      - loop:
+          do:
+            - switch:
+                cases:
+                  - case: then
+                    do:
+                      - return: "false"
+                  - case: first
+                    do:
+                      - return: "true"
+                "on": m.ID
+          key: _
+          range: next.Members
+          value: m
+      - return: "false"
   - of: (*Raft).EngineAt
     steps:
       - bind: v
