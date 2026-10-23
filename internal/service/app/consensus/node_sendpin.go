@@ -34,3 +34,25 @@ func (n *Node) pinAt(to coreconsensus.NodeID, pin sendPin, now time.Time) (uint6
 	}
 	return max(pin.index, match), true
 }
+
+// watchPins ends, at each tick, the pins of streamed snapshots that no
+// longer hold: their peer caught up with the log, left, or until passed.
+// Compaction only runs after a cut, so the log is compacted again at once:
+// a pin that ended once the writes stopped held it back until the next
+// write.
+func (n *Node) watchPins(now time.Time) {
+	last := n.r.Status().Last
+	ended := false
+	for to, pin := range n.sending {
+		if pin.until.IsZero() {
+			continue
+		}
+		if at, held := n.pinAt(to, pin, now); !held || at >= last {
+			delete(n.sending, to)
+			ended = true
+		}
+	}
+	if ended {
+		n.aq.push(applyItem{compact: true})
+	}
+}

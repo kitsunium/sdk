@@ -1067,6 +1067,7 @@ files:
       - pinAfterStream
       - sendPin
       - (*Node).pinAt
+      - (*Node).watchPins
     name: node_sendpin.go
   - decls:
       - mRole
@@ -2785,6 +2786,9 @@ types:
       - name: save
         type: "*saveReq"
       - name: cut
+        type: bool
+      - doc: compact compacts the log again once a pin on it ended (sendPin).
+        name: compact
         type: bool
     kind: struct
     name: applyItem
@@ -5501,6 +5505,15 @@ types:
         params: to coreconsensus.NodeID, pin sendPin, now time.Time
         recv: n *Node
         results: uint64, bool
+      - doc: |-
+          watchPins ends, at each tick, the pins of streamed snapshots that no
+          longer hold: their peer caught up with the log, left, or until passed.
+          Compaction only runs after a cut, so the log is compacted again at once:
+          a pin that ended once the writes stopped held it back until the next
+          write.
+        name: watchPins
+        params: now time.Time
+        recv: n *Node
       - doc: |-
           observeStatus publishes the gauges a status turn changes, and logs role
           and term changes (D13).

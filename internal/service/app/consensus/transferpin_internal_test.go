@@ -224,6 +224,72 @@ func TestAStreamedSnapshotPinsCompactionUntilThePeerCatchesUp(t *testing.T) {
 	}
 }
 
+// A streamed snapshot's pin ends on its own bound when the peer never
+// answers again, and the log is compacted then, with no write to cut a new
+// snapshot: compaction only ran after a cut, so a pin that ended once the
+// writes stopped held the log back until the next write.
+func TestAPinThatEndsCompactsTheLogWithoutAWrite(t *testing.T) {
+	trs := map[coreconsensus.NodeID]*holdTransport{}
+	var mu sync.Mutex
+	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{1, 2, 5}, every: 20, size: 3}
+	c.configure = func(tn *testNode, cfg *Config) {
+		mu.Lock()
+		defer mu.Unlock()
+		trs[tn.id] = &holdTransport{
+			MemoryTransport: cfg.Transport.(*MemoryTransport),
+			started:         make(chan coreconsensus.InstallOfferValue), release: make(chan struct{}),
+		}
+		cfg.Transport = trs[tn.id]
+	}
+	newClusterWith(t, c)
+	l := c.settledLeader(5 * time.Second)
+	lag := c.otherThan(l)
+	c.kill(lag)
+	for i := range 200 {
+		propose(t, l.node, fmt.Sprintf("a%d=v", i))
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if first, _ := l.log.Bounds(); first > 100 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("setup: the leader never compacted")
+		}
+	}
+	mu.Lock()
+	lt := trs[l.id]
+	mu.Unlock()
+	// The node goes silent as its stream ends: its match stays where the
+	// snapshot left it.
+	cutOff := func() { c.net.Isolate(lag.id, true) }
+	lt.streamed.Store(&cutOff)
+	lt.holding.Store(true)
+	c.start(lag)
+	var offer coreconsensus.InstallOfferValue
+	select {
+	case offer = <-lt.started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("no snapshot offered to the lagging node")
+	}
+	lt.holding.Store(false)
+	lt.release <- struct{}{}
+	for i := range 45 {
+		propose(t, l.node, fmt.Sprintf("c%d=v", i))
+	}
+	// No write from here on. The pin lasts ten maximum election timeouts,
+	// two seconds here.
+	held := offer.Meta.Position.Index
+	for deadline := time.Now().Add(6 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if first, _ := l.log.Bounds(); first > held {
+			return
+		}
+		if time.Now().After(deadline) {
+			f, _ := l.log.Bounds()
+			t.Fatalf("the leader's log still starts at %d, not past the %d it streamed", f, held)
+		}
+	}
+}
+
 // #547, the sender's half: a leader that loses its leadership stops the
 // snapshot stream it had in flight. Nothing cancelled it but a stop, so the
 // stale stream ran on next to the new leader's install of the same

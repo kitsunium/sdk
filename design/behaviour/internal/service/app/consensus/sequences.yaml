@@ -69,6 +69,8 @@ sequences:
         kind: internal
       - id: n.forceCut
         kind: internal
+      - id: n.afterCut
+        kind: internal
       - id: n.maybeSnapshot
         kind: internal
     steps:
@@ -103,6 +105,12 @@ sequences:
                     to: n.forceCut
                   - continue: true
                 when: it.cut
+            - opt:
+                do:
+                  - eval: n.afterCut()
+                    to: n.afterCut
+                  - continue: true
+                when: it.compact
             - opt:
                 do:
                   - return: "false"
@@ -8379,6 +8387,8 @@ sequences:
         kind: internal
       - id: n.watchProgress
         kind: internal
+      - id: n.watchPins
+        kind: internal
       - id: n.tickInterval
         kind: internal
       - id: n.tickEvery.Store
@@ -8407,6 +8417,8 @@ sequences:
         to: n.probeLeader
       - eval: n.watchProgress(turn)
         to: n.watchProgress
+      - eval: n.watchPins(turn)
+        to: n.watchPins
       - opt:
           do:
             - eval: n.tickEvery.Store(int64(d))
@@ -10262,6 +10274,45 @@ sequences:
             - return: 0, false
           when: "!ok || now.After(pin.until)"
       - return: max(pin.index, match), true
+  - of: (*Node).watchPins
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).watchPins
+        kind: self
+      - id: n.pinAt
+        kind: internal
+      - id: n.aq.push
+        kind: internal
+    steps:
+      - bind: last
+        eval: n.r.Status().Last
+      - bind: ended
+        eval: "false"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: pin.until.IsZero()
+            - opt:
+                do:
+                  - eval: delete(n.sending, to)
+                  - set: ended
+                    value: "true"
+                init:
+                  bind: at, held
+                  eval: n.pinAt(to, pin, now)
+                  to: n.pinAt
+                when: "!held || at >= last"
+          key: to
+          range: n.sending
+          value: pin
+      - opt:
+          do:
+            - eval: "n.aq.push(applyItem{compact: true})"
+              to: n.aq.push
+          when: ended
   - of: newObs
     steps:
       - return: |-
@@ -16544,6 +16595,7 @@ sequences:
           				n.sending[to] = sendPin{index: meta.Position.Index, until: until}
           			} else {
           				delete(n.sending, to)
+          				n.aq.push(applyItem{compact: true})
           			}
           			delete(n.sendStop, to)
           			n.r.SnapshotDone(to, meta.Position.Index, err == nil)

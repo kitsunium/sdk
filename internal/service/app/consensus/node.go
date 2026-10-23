@@ -904,6 +904,7 @@ func (n *Node) onTick(tick clock.Ticker, ok bool) (time.Time, bool) {
 	n.r.Tick(n.clk.Now())
 	n.probeLeader(turn)
 	n.watchProgress(turn)
+	n.watchPins(turn)
 	if d := n.tickInterval(); d != time.Duration(n.tickEvery.Load()) {
 		// A committed contract changed the heartbeat (review of PR
 		// #301, L5).

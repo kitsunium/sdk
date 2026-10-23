@@ -686,6 +686,7 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 				n.sending[to] = sendPin{index: meta.Position.Index, until: until}
 			} else {
 				delete(n.sending, to)
+				n.aq.push(applyItem{compact: true})
 			}
 			delete(n.sendStop, to)
 			n.r.SnapshotDone(to, meta.Position.Index, err == nil)

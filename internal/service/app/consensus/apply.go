@@ -13,6 +13,8 @@ type applyItem struct {
 	restore *restoreReq
 	save    *saveReq
 	cut     bool
+	// compact compacts the log again once a pin on it ended (sendPin).
+	compact bool
 }
 
 type restoreReq struct {
@@ -90,6 +92,10 @@ func (n *Node) applyItems(items []applyItem) bool {
 		}
 		if it.cut {
 			n.forceCut()
+			continue
+		}
+		if it.compact {
+			n.afterCut()
 			continue
 		}
 		if !n.applyEntries(it.entries) {
