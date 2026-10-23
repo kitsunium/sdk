@@ -54,6 +54,9 @@ has none to read.
 // otlpMaxDeadLetters bounds the dead letters the command reads per signal.
 const otlpMaxDeadLetters int = 1000
 
+// otlpVerbs are `otlp`'s verbs.
+var otlpVerbs = []string{"dead-letters", "replay", "migrate"}
+
 // otlpArgs are `otlp`'s arguments, read: the verb, the signals it acts on,
 // whether a replay drops, and the dead letters it names.
 type otlpArgs struct {
@@ -112,7 +115,7 @@ func (a *App) runOTLPVerb(ctx context.Context, p *otlpArgs, stdout, stderr io.Wr
 // signal at most, or replay, a signal, --drop and the IDs in any order; ok
 // is false for any other.
 func parseOTLPArgs(args []string) (otlpArgs, bool) {
-	if len(args) == 0 || !slices.Contains([]string{"dead-letters", "replay", "migrate"}, args[0]) {
+	if len(args) == 0 || !slices.Contains(otlpVerbs, args[0]) {
 		return otlpArgs{}, false
 	}
 	out := otlpArgs{verb: args[0], signals: []string{OTLPTraces, OTLPMetrics}}

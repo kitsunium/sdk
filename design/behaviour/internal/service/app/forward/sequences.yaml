@@ -469,6 +469,7 @@ sequences:
       - bind: counting, stop
         eval: context.WithCancel(ctx)
         to: context
+      - defer: stop()
       - bind: done
         eval: make(chan struct{})
       - go: |-
@@ -683,7 +684,11 @@ sequences:
         kind: value
       - id: f.forget
         kind: internal
+      - id: f.cfg.Clock.Now
+        kind: value
       - id: f.askRecount
+        kind: internal
+      - id: f.dueRecount
         kind: internal
     steps:
       - eval: f.mu.Lock()
@@ -718,8 +723,19 @@ sequences:
           when: held
       - eval: f.forget(id)
         to: f.forget
-      - eval: f.askRecount()
-        to: f.askRecount
+      - bind: now
+        eval: f.cfg.Clock.Now()
+        to: f.cfg.Clock.Now
+      - opt:
+          do:
+            - set: f.prompted
+              value: now
+            - eval: f.askRecount()
+              to: f.askRecount
+            - return: ""
+          when: now.Sub(f.prompted) >= f.cfg.RecountInterval
+      - eval: f.dueRecount()
+        to: f.dueRecount
   - of: (*Forwarder).leave
     participants:
       - id: caller
@@ -760,7 +776,7 @@ sequences:
         kind: value
     steps:
       - bind: listed
-        eval: make(map[string]listedBatch)
+        eval: make(map[string]listedBatch, countPage)
       - bind: after
         eval: "\"\""
       - loop:
@@ -802,8 +818,12 @@ sequences:
                   - comm: <-ctx.Done()
                     do:
                       - return: ""
-                  - comm: <-f.recount
+                  - comm: _, open := <-f.recount
                     do:
+                      - opt:
+                          do:
+                            - return: ""
+                          when: "!open"
                       - eval: f.recountOnce(ctx)
                         to: f.recountOnce
           forever: true

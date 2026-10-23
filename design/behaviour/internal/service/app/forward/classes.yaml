@@ -317,8 +317,9 @@ types:
           batch leaving the queue, once it has passed has Run list the queue and
           count what another process changed in it — a dead letter replayed into
           it, a batch another consumer took. The delivery of a batch the
-          forwarder did not count has it counted at once. A count reads every
-          live batch, its payload included, on Run's goroutine and never on
+          forwarder did not count has it counted at once, once per interval at
+          most. A count reads every live batch, its payload included, on Run's
+          goroutine and never on
           Enqueue's: it costs what the backlog weighs. Zero means
           DefaultRecountInterval; negative is refused.
         name: RecountInterval
@@ -378,9 +379,16 @@ types:
         name: recorded
         type: map[string]struct{}
       - doc: |-
-          counted is when the queue was last counted, generation how many
-          counts Run started.
+          counted is when the queue was last counted, prompted when a batch
+          another process queued last asked for a count at once, generation how
+          many counts Run started.
         name: counted
+        type: time.Time
+      - doc: |-
+          counted is when the queue was last counted, prompted when a batch
+          another process queued last asked for a count at once, generation how
+          many counts Run started.
+        name: prompted
         type: time.Time
       - name: generation
         type: uint64
@@ -402,7 +410,9 @@ types:
           process's. It is taken before mu, never after.
         name: publish
         type: sync.Mutex
-      - doc: mu guards stats, held, leaving, recorded, counted and generation.
+      - doc: |-
+          mu guards stats, held, leaving, recorded, counted, prompted and
+          generation.
         name: mu
         type: sync.Mutex
     kind: struct
@@ -510,7 +520,9 @@ types:
           that never entered it. A batch the forwarder does not count may be one
           whose publication it has not counted yet: settle waits for that
           publication. One it still does not count is another process's, which
-          takes nothing from the counts, and Run counts the queue again at once.
+          takes nothing from the counts, and Run counts the queue again at once —
+          once per Config.RecountInterval at most, so a stream of batches another
+          instance queued does not list the queue once per batch.
         name: settle
         params: id string, counter *uint64
         recv: f *Forwarder

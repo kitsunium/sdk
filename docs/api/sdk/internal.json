@@ -49659,7 +49659,7 @@
         {
           "name": "RecountInterval",
           "type": "time.Duration",
-          "doc": "RecountInterval is how long the counts go before the queue is counted\nagain, over a broker that lists its messages: a read of Stats, or a\nbatch leaving the queue, once it has passed has Run list the queue and\ncount what another process changed in it — a dead letter replayed into\nit, a batch another consumer took. The delivery of a batch the\nforwarder did not count has it counted at once. A count reads every\nlive batch, its payload included, on Run's goroutine and never on\nEnqueue's: it costs what the backlog weighs. Zero means\nDefaultRecountInterval; negative is refused.\n"
+          "doc": "RecountInterval is how long the counts go before the queue is counted\nagain, over a broker that lists its messages: a read of Stats, or a\nbatch leaving the queue, once it has passed has Run list the queue and\ncount what another process changed in it — a dead letter replayed into\nit, a batch another consumer took. The delivery of a batch the\nforwarder did not count has it counted at once, once per interval at\nmost. A count reads every live batch, its payload included, on Run's\ngoroutine and never on\nEnqueue's: it costs what the backlog weighs. Zero means\nDefaultRecountInterval; negative is refused.\n"
         }
       ],
       "doc": "Config configures [New]. Broker, Send and Retryable are required; every\nother field is optional.\n",
@@ -49831,7 +49831,7 @@
       "recv": "Forwarder",
       "spelled": "func(ctx context.Context) error",
       "canonical": "func(ctx context.Context) error",
-      "doc": "Run sends the queued batches until ctx ends, one consumer per\nConfig.Parallelism, and returns what the queue's consumer returns. The\nbatch being sent when ctx ends may finish within Config.DrainTimeout; one\ncut short is handed back uncounted and sent by the next process. Over a\nbroker that lists its messages, Run also counts the queue again when\nasked: by a read of Stats or a batch leaving the queue once\nConfig.RecountInterval has passed, and at once by the delivery of a batch\nthis forwarder did not count.\n\nGoroutine lifecycle: one counts the queue when asked, until the consumer\nreturns; Run waits for it before it returns.\n",
+      "doc": "Run sends the queued batches until ctx ends, one consumer per\nConfig.Parallelism, and returns what the queue's consumer returns. The\nbatch being sent when ctx ends may finish within Config.DrainTimeout; one\ncut short is handed back uncounted and sent by the next process. Over a\nbroker that lists its messages, Run also counts the queue again when\nasked: by a read of Stats or a batch leaving the queue once\nConfig.RecountInterval has passed, and at once, once per interval at most,\nby the delivery of a batch this forwarder did not count.\n\nGoroutine lifecycle: one counts the queue when asked, until the consumer\nreturns; Run waits for it before it returns.\n",
       "file": "service/app/forward/forwarder.go",
       "layer": "service",
       "family": "app"

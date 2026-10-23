@@ -3725,6 +3725,7 @@ files:
   - decls:
       - otlpUsageText
       - otlpMaxDeadLetters
+      - otlpVerbs
       - otlpArgs
       - otlpCommandOf
       - (*App).otlpCommand
@@ -29144,6 +29145,11 @@ vars:
       - name: otlpCode
         type: atomic.Pointer[otlpHooks]
     name: otlpCode
+  - doc: otlpVerbs are `otlp`'s verbs.
+    items:
+      - name: otlpVerbs
+        value: "[]string{\"dead-letters\", \"replay\", \"migrate\"}"
+    name: otlpVerbs
   - doc: "The PHC string format: $id[$v=version][$param=value(,param=value)*][$salt$hash]."
     grouped: true
     items:

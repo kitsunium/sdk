@@ -290,8 +290,9 @@ type Config struct {
 	// batch leaving the queue, once it has passed has Run list the queue and
 	// count what another process changed in it — a dead letter replayed into
 	// it, a batch another consumer took. The delivery of a batch the
-	// forwarder did not count has it counted at once. A count reads every
-	// live batch, its payload included, on Run's goroutine and never on
+	// forwarder did not count has it counted at once, once per interval at
+	// most. A count reads every live batch, its payload included, on Run's
+	// goroutine and never on
 	// Enqueue's: it costs what the backlog weighs. Zero means
 	// DefaultRecountInterval; negative is refused.
 	RecountInterval time.Duration
@@ -329,7 +330,7 @@ Enqueue keeps batch in the queue, durably once it returns nil, for Run to send. 
 func (*Forwarder) Run(ctx context.Context) error
 ```
 
-Run sends the queued batches until ctx ends, one consumer per Config.Parallelism, and returns what the queue's consumer returns. The batch being sent when ctx ends may finish within Config.DrainTimeout; one cut short is handed back uncounted and sent by the next process. Over a broker that lists its messages, Run also counts the queue again when asked: by a read of Stats or a batch leaving the queue once Config.RecountInterval has passed, and at once by the delivery of a batch this forwarder did not count.
+Run sends the queued batches until ctx ends, one consumer per Config.Parallelism, and returns what the queue's consumer returns. The batch being sent when ctx ends may finish within Config.DrainTimeout; one cut short is handed back uncounted and sent by the next process. Over a broker that lists its messages, Run also counts the queue again when asked: by a read of Stats or a batch leaving the queue once Config.RecountInterval has passed, and at once, once per interval at most, by the delivery of a batch this forwarder did not count.
 
 Goroutine lifecycle: one counts the queue when asked, until the consumer returns; Run waits for it before it returns.
 

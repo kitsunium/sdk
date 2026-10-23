@@ -317,7 +317,9 @@ count growing until its bound refused every batch.
   own goroutine: by a read of `Stats` or a batch leaving the queue once
   `Config.RecountInterval` (`DefaultRecountInterval`, one minute; negative
   refused) has passed, and at once by the delivery of a batch the forwarder
-  did not count. No timer is armed: a forwarder nobody reads and nothing
+  did not count — once per interval at most, so a second instance feeding
+  the queue does not have it listed once per batch. No timer is armed: a
+  forwarder nobody reads and nothing
   leaves has nothing to say. The counts become what the listing holds, but
   for what the forwarder knows better than a listing that races it: a batch
   kept during the listing stays counted, a batch settled and still listed

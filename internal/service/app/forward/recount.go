@@ -28,7 +28,7 @@ type listedBatch struct {
 // list reads every live message of the queue, queued or leased, by
 // identifier.
 func (f *Forwarder) list(ctx context.Context) (map[string]listedBatch, error) {
-	listed := make(map[string]listedBatch)
+	listed := make(map[string]listedBatch, countPage)
 	after := ""
 	//: page by page, in the broker's identifier order.
 	for {
@@ -62,8 +62,13 @@ func (f *Forwarder) recountLoop(ctx context.Context) {
 		case <-ctx.Done():
 			//: nothing left to count for.
 			return
-		//: asked.
-		case <-f.recount:
+		//: asked; the channel is never closed, but a closed one would end the loop.
+		case _, open := <-f.recount:
+			//: never asked again.
+			if !open {
+				//: nothing left to count for.
+				return
+			}
 			f.recountOnce(ctx)
 		}
 	}

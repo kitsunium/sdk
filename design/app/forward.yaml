@@ -369,8 +369,9 @@ packages:
                 batch leaving the queue, once it has passed has Run list the queue and
                 count what another process changed in it — a dead letter replayed into
                 it, a batch another consumer took. The delivery of a batch the
-                forwarder did not count has it counted at once. A count reads every
-                live batch, its payload included, on Run's goroutine and never on
+                forwarder did not count has it counted at once, once per interval at
+                most. A count reads every live batch, its payload included, on Run's
+                goroutine and never on
                 Enqueue's: it costs what the backlog weighs. Zero means
                 DefaultRecountInterval; negative is refused.
               name: RecountInterval
@@ -413,8 +414,8 @@ packages:
               cut short is handed back uncounted and sent by the next process. Over a
               broker that lists its messages, Run also counts the queue again when
               asked: by a read of Stats or a batch leaving the queue once
-              Config.RecountInterval has passed, and at once by the delivery of a batch
-              this forwarder did not count.
+              Config.RecountInterval has passed, and at once, once per interval at most,
+              by the delivery of a batch this forwarder did not count.
 
               Goroutine lifecycle: one counts the queue when asked, until the consumer
               returns; Run waits for it before it returns.

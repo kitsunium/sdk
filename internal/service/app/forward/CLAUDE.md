@@ -56,7 +56,9 @@ Code range `0.3.93.*`, declared with its sentinels in
   second instance consuming the same table, a broker dead-lettering on its
   own —: `Run` lists the queue again when a read of `Stats` or a settle finds
   `RecountInterval` passed, and at once when it delivers a batch it did not
-  count. No timer: a manual clock moves only when the test moves it. The
+  count — once per interval at most (`prompted`), or a second instance
+  feeding the queue would have it listed once per batch. No timer: a manual
+  clock moves only when the test moves it. The
   listing races the queue (`MessageReader`'s contract), so three cases are
   the forwarder's word: a batch kept during it stays counted; one settled
   stays uncounted while it is listed leased, because the consumer

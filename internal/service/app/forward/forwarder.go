@@ -39,10 +39,11 @@ type Forwarder struct {
 	// recorded is every batch Enqueue kept while a count lists the queue,
 	// nil outside one: the listing may have missed it.
 	recorded map[string]struct{}
-	// counted is when the queue was last counted, generation how many
-	// counts Run started.
-	counted    time.Time
-	generation uint64
+	// counted is when the queue was last counted, prompted when a batch
+	// another process queued last asked for a count at once, generation how
+	// many counts Run started.
+	counted, prompted time.Time
+	generation        uint64
 	// cfg is the normalized configuration.
 	cfg Config
 	// stats is what the forwarder holds and has done.
@@ -55,7 +56,8 @@ type Forwarder struct {
 	// lists it first, wait for that and never take it for another
 	// process's. It is taken before mu, never after.
 	publish sync.Mutex
-	// mu guards stats, held, leaving, recorded, counted and generation.
+	// mu guards stats, held, leaving, recorded, counted, prompted and
+	// generation.
 	mu sync.Mutex
 }
 
@@ -166,13 +168,14 @@ func (f *Forwarder) Stats() StatsValue {
 // cut short is handed back uncounted and sent by the next process. Over a
 // broker that lists its messages, Run also counts the queue again when
 // asked: by a read of Stats or a batch leaving the queue once
-// Config.RecountInterval has passed, and at once by the delivery of a batch
-// this forwarder did not count.
+// Config.RecountInterval has passed, and at once, once per interval at most,
+// by the delivery of a batch this forwarder did not count.
 //
 // Goroutine lifecycle: one counts the queue when asked, until the consumer
 // returns; Run waits for it before it returns.
 func (f *Forwarder) Run(ctx context.Context) error {
 	counting, stop := context.WithCancel(ctx)
+	defer stop()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -332,7 +335,9 @@ func (f *Forwarder) release(id string) {
 // that never entered it. A batch the forwarder does not count may be one
 // whose publication it has not counted yet: settle waits for that
 // publication. One it still does not count is another process's, which
-// takes nothing from the counts, and Run counts the queue again at once.
+// takes nothing from the counts, and Run counts the queue again at once —
+// once per Config.RecountInterval at most, so a stream of batches another
+// instance queued does not list the queue once per batch.
 func (f *Forwarder) settle(id string, counter *uint64) {
 	f.mu.Lock()
 	*counter++
@@ -356,8 +361,15 @@ func (f *Forwarder) settle(id string, counter *uint64) {
 		return
 	}
 	f.forget(id)
-	//: another process's: a count says what else it changed.
-	f.askRecount()
+	now := f.cfg.Clock.Now()
+	//: another process's: a count says what else it changed, at once once per interval.
+	if now.Sub(f.prompted) >= f.cfg.RecountInterval {
+		f.prompted = now
+		f.askRecount()
+		//: asked.
+		return
+	}
+	f.dueRecount()
 }
 
 // leave takes the batch id, which left the queue, out of the counts, with mu

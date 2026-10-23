@@ -151,8 +151,9 @@ type Config struct {
 	// batch leaving the queue, once it has passed has Run list the queue and
 	// count what another process changed in it — a dead letter replayed into
 	// it, a batch another consumer took. The delivery of a batch the
-	// forwarder did not count has it counted at once. A count reads every
-	// live batch, its payload included, on Run's goroutine and never on
+	// forwarder did not count has it counted at once, once per interval at
+	// most. A count reads every live batch, its payload included, on Run's
+	// goroutine and never on
 	// Enqueue's: it costs what the backlog weighs. Zero means
 	// DefaultRecountInterval; negative is refused.
 	RecountInterval time.Duration
