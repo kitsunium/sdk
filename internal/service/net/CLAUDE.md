@@ -35,6 +35,7 @@ machine is the proc family's (`ipc`, ADR 0148).
 | `sse/` | an HTTP response held open and written one `text/event-stream` frame at a time, on `net/http`'s own interfaces, and the frame's wire form (`AppendEvent`, `AppendComment` — ADR 0029, ADR 0043, ADR 0160) | `core/net` | none (core `0.2.11.*`) | `pkg/v1/net/sse` |
 | `websocket/` | RFC 6455 in the stdlib — the handshake, the frame codec, the close payload and the UTF-8 check included — every MUST-fail enforced, the origin checked by default (ADR 0047, ADR 0069, ADR 0160) | `core/net` | none (core `0.2.11.*`) | `pkg/v1/net/websocket` |
 | `static/` | an `http.Handler` over an `io/fs.FS` that never lists a directory and sends the security headers on every response (ADR 0130) | `core/net` | none (core sentinel `0.2.11.34`) | `pkg/v1/net/static` |
+| `http1/` | the restricted HTTP/1.1 profile's codec — `Parser.Parse` frames a request out of bytes with no allocation, the writer appends a response or a refusal's canned answer; refusals (any Transfer-Encoding, a bad or repeated Content-Length, a bare CR or LF, obs-fold, …) never reach a handler (ADR 0186 §D6). No loop adapter yet | `core/net` | none (core `0.2.11.45` – `0.2.11.55`) | none yet (`pkg/v1/net/http1` with `HandleLoop`, ADR 0186 §D9) |
 
 No member imports another: each composes `internal/core/net` and the kernel,
 and `server` alone reaches another family — `proc`, for socket activation
@@ -44,11 +45,11 @@ nothing for the errs audits to judge (`check-audit-coverage.sh` requires
 exactly the declaring packages), and `codeRangeOwners` gives `0x00_02_0B_00`
 to `internal/core/net` alone.
 
-**Decided, not yet built (ADR 0186).** Two members are to come: `loop/`, the
-opt-in plaintext event-loop engine (io_uring and epoll on Linux), a leaf that
-imports `internal/core/net` and the kernel and nothing else; and `http1/`, the
-restricted HTTP/1.1 profile, which implements `core/net`'s loop handler port
-and imports no member. `server` will import `loop` — it binds and adopts the
+**Decided, partly built (ADR 0186).** `http1/` holds the profile's pure codec;
+its adapter onto `core/net`'s loop handler port comes with the loop, and it
+imports no member. `loop/`, the opt-in plaintext event-loop engine (io_uring
+and epoll on Linux), is to come: a leaf that imports `internal/core/net` and
+the kernel and nothing else. `server` will import `loop` — it binds and adopts the
 listeners, owns the lifecycle and keeps the portable backend — which makes it
 the first edge between two members; both `CLAUDE.md` files say so when it
 lands. Neither member declares a code.

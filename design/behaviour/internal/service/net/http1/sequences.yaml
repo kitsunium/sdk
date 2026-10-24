@@ -1,0 +1,839 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: tokenTable
+    steps:
+      - var:
+          name: t
+          type: "[byteValues]bool"
+      - loop:
+          cond: c <= '9'
+          do:
+            - set: t[c]
+              value: "true"
+          init: c := '0'
+          post: c++
+      - loop:
+          cond: c <= 'z'
+          do:
+            - set: t[c], t[c-'a'+'A']
+              value: true, true
+          init: c := 'a'
+          post: c++
+      - loop:
+          do:
+            - set: t[c]
+              value: "true"
+          key: _
+          range: "[]byte(\"!#$%&'*+-.^_`|~\")"
+          value: c
+      - return: t
+  - of: NewParser
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewParser
+        kind: self
+      - id: orDefault
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: Parser{}, errs.Wrap(corenet.HTTP1Misconfigured, errs.WrapParams{}, errs.String("option", "head"))
+          when: l.Head < 0 || l.Head > corenet.HTTP1MaxHead
+      - bind: head
+        eval: orDefault(l.Head, corenet.HTTP1DefaultHead)
+        to: orDefault
+      - opt:
+          do:
+            - return: Parser{}, errs.Wrap(corenet.HTTP1Misconfigured, errs.WrapParams{}, errs.String("option", "target"))
+          when: l.Target < 0 || l.Target > head
+      - opt:
+          do:
+            - return: Parser{}, errs.Wrap(corenet.HTTP1Misconfigured, errs.WrapParams{}, errs.String("option", "body"))
+          when: l.Body < 0 || l.Body > corenet.HTTP1MaxBody
+      - return: |-
+          Parser{
+          		head:   head,
+          		target: orDefault(l.Target, min(corenet.HTTP1DefaultTarget, head)),
+          		body:   orDefault(l.Body, corenet.HTTP1DefaultBody),
+          	}, nil
+  - of: orDefault
+    steps:
+      - opt:
+          do:
+            - return: def
+          when: v == 0
+      - return: v
+  - of: Parser.Limits
+    steps:
+      - return: |-
+          corenet.HTTP1LimitsValue{
+          		Head:   orDefault(p.head, corenet.HTTP1DefaultHead),
+          		Target: orDefault(p.target, corenet.HTTP1DefaultTarget),
+          		Body:   orDefault(p.body, corenet.HTTP1DefaultBody),
+          	}
+  - of: Parser.Parse
+    participants:
+      - id: caller
+        kind: actor
+      - id: Parser.Parse
+        kind: self
+      - id: reset
+        kind: internal
+      - id: orDefault
+        kind: internal
+      - id: requestLine
+        kind: internal
+      - id: fields
+        kind: internal
+      - id: Continue
+        kind: internal
+    steps:
+      - eval: reset(req)
+        to: reset
+      - bind: head
+        eval: orDefault(p.head, corenet.HTTP1DefaultHead)
+        to: orDefault
+      - bind: limit
+        eval: min(len(buf), head)
+      - bind: end, r
+        eval: requestLine(buf[:limit], orDefault(p.target, corenet.HTTP1DefaultTarget), req)
+        to: requestLine
+      - opt:
+          do:
+            - set: end, r
+              to: fields
+              value: fields(buf[:limit], end, orDefault(p.body, corenet.HTTP1DefaultBody), req)
+          when: r == RefusalNone && end > 0
+      - opt:
+          do:
+            - return: 0, ranOut(r, len(buf), head)
+          when: r != RefusalNone || end == 0
+      - set: req.HeadLen
+        value: end
+      - set: req.Consumed
+        value: end + int(req.ContentLength)
+      - return: Continue(buf, req), RefusalNone
+        to: Continue
+  - of: ranOut
+    steps:
+      - opt:
+          do:
+            - return: RefusalHeadTooLarge
+          when: r == RefusalNone && n >= head
+      - return: r
+  - of: Continue
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: req.HeadLen == 0 || len(buf) < req.Consumed
+      - set: req.Body
+        value: buf[req.HeadLen:req.Consumed]
+      - return: req.Consumed
+  - of: Pending
+    steps:
+      - return: max(0, req.Consumed-buffered)
+  - of: reset
+    steps:
+      - set: req.Method, req.Target, req.Host, req.Authorization, req.Body
+        value: nil, nil, nil, nil, nil
+      - set: req.ContentLength, req.HeadLen, req.Consumed, req.NFields
+        value: 0, 0, 0, 0
+      - set: req.HasHost, req.HasAuthorization, req.Close
+        value: false, false, false
+  - of: requestLine
+    participants:
+      - id: caller
+        kind: actor
+      - id: requestLine
+        kind: self
+      - id: method
+        kind: internal
+      - id: requestTarget
+        kind: internal
+      - id: versionLine
+        kind: internal
+    steps:
+      - bind: end, r
+        eval: method(head, req)
+        to: method
+      - opt:
+          do:
+            - return: 0, r
+          when: r != RefusalNone || end == 0
+      - set: end, r
+        to: requestTarget
+        value: requestTarget(head, end, target, req)
+      - opt:
+          do:
+            - return: 0, r
+          when: r != RefusalNone || end == 0
+      - return: versionLine(head, end)
+        to: versionLine
+  - of: method
+    participants:
+      - id: caller
+        kind: actor
+      - id: method
+        kind: self
+      - id: tokenEnd
+        kind: internal
+    steps:
+      - bind: end
+        eval: tokenEnd(head)
+        to: tokenEnd
+      - opt:
+          do:
+            - return: 0, RefusalNone
+          when: end == len(head)
+      - opt:
+          do:
+            - return: 0, RefusalMethod
+          when: end == 0
+      - opt:
+          do:
+            - return: 0, lineEnd(head[end], RefusalMethod)
+          when: head[end] != ' '
+      - opt:
+          do:
+            - return: 0, RefusalMethodUnsupported
+          when: bytes.Equal(head[:end], methodConnect)
+      - set: req.Method
+        value: head[:end]
+      - return: end + 1, RefusalNone
+  - of: requestTarget
+    participants:
+      - id: caller
+        kind: actor
+      - id: requestTarget
+        kind: self
+      - id: targetStop.Index
+        kind: value
+    steps:
+      - bind: "n"
+        eval: targetStop.Index(head[start:])
+        to: targetStop.Index
+      - opt:
+          do:
+            - return: 0, tooLong(len(head)-start > bound)
+          when: n < 0
+      - opt:
+          do:
+            - return: 0, emptyOrLong(n)
+          when: n == 0 || n > bound
+      - bind: end
+        eval: start + n
+      - opt:
+          do:
+            - return: 0, lineEnd(head[end], RefusalTarget)
+          when: head[end] != ' '
+      - set: req.Target
+        value: head[start:end]
+      - return: end + 1, RefusalNone
+  - of: tooLong
+    steps:
+      - opt:
+          do:
+            - return: RefusalTargetTooLong
+          when: past
+      - return: RefusalNone
+  - of: emptyOrLong
+    steps:
+      - opt:
+          do:
+            - return: RefusalTarget
+          when: n == 0
+      - return: RefusalTargetTooLong
+  - of: versionLine
+    participants:
+      - id: caller
+        kind: actor
+      - id: versionLine
+        kind: self
+      - id: versionEnd
+        kind: internal
+    steps:
+      - bind: avail
+        eval: len(head) - start
+      - opt:
+          do:
+            - return: 0, versionPrefix(head[start:])
+          when: avail < len(version)+crlfLen
+      - opt:
+          do:
+            - return: 0, RefusalVersion
+          when: "!bytes.Equal(head[start:start+len(version)], versionBytes)"
+      - bind: end
+        eval: start + len(version)
+      - opt:
+          do:
+            - return: 0, r
+          init:
+            bind: r
+            eval: versionEnd(head[end], head[end+1], true)
+            to: versionEnd
+          when: r != RefusalNone
+      - return: end + crlfLen, RefusalNone
+  - of: versionPrefix
+    participants:
+      - id: caller
+        kind: actor
+      - id: versionPrefix
+        kind: self
+      - id: versionEnd
+        kind: internal
+    steps:
+      - bind: "n"
+        eval: min(len(rest), len(version))
+      - opt:
+          do:
+            - return: RefusalVersion
+          when: "!bytes.Equal(rest[:n], versionBytes[:n])"
+      - opt:
+          do:
+            - return: versionEnd(rest[len(version)], 0, false)
+              to: versionEnd
+          when: len(rest) > len(version)
+      - return: RefusalNone
+  - of: versionEnd
+    steps:
+      - switch:
+          cases:
+            - case: c == '\n'
+              do:
+                - return: RefusalBareLF
+            - case: c != '\r'
+              do:
+                - return: RefusalRequestLine
+            - case: "!have"
+              do:
+                - return: RefusalNone
+            - case: next != '\n'
+              do:
+                - return: RefusalBareCR
+            - default: true
+              do:
+                - return: RefusalNone
+  - of: lineEnd
+    steps:
+      - switch:
+          cases:
+            - case: "'\\r'"
+              do:
+                - return: RefusalBareCR
+            - case: "'\\n'"
+              do:
+                - return: RefusalBareLF
+            - default: true
+              do:
+                - return: def
+          "on": c
+  - of: fields
+    participants:
+      - id: caller
+        kind: actor
+      - id: fields
+        kind: self
+      - id: lineStart
+        kind: internal
+      - id: field
+        kind: internal
+    steps:
+      - bind: pos
+        eval: start
+      - loop:
+          do:
+            - bind: end, done, r
+              eval: lineStart(head, pos, req.NFields)
+              to: lineStart
+            - opt:
+                do:
+                  - return: end, r
+                when: done || r != RefusalNone || end == 0
+            - set: pos, r
+              to: field
+              value: field(head, pos, body, req)
+            - opt:
+                do:
+                  - return: 0, r
+                when: r != RefusalNone || pos == 0
+          forever: true
+  - of: lineStart
+    participants:
+      - id: caller
+        kind: actor
+      - id: lineStart
+        kind: self
+      - id: crlfAt
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: 0, false, RefusalNone
+          when: pos == len(head)
+      - switch:
+          cases:
+            - case: "'\\r'"
+              do:
+                - bind: end, r
+                  eval: crlfAt(head, pos)
+                  to: crlfAt
+                - return: end, true, r
+            - case: "' ', '\\t'"
+              do:
+                - return: 0, false, RefusalObsFold
+            - case: "'\\n'"
+              do:
+                - return: 0, false, RefusalBareLF
+          "on": head[pos]
+      - opt:
+          do:
+            - return: 0, false, RefusalTooManyFields
+          when: nfields == corenet.HTTP1MaxFields
+      - return: pos, false, RefusalNone
+  - of: crlfAt
+    steps:
+      - opt:
+          do:
+            - return: 0, RefusalNone
+          when: pos+1 == len(head)
+      - opt:
+          do:
+            - return: 0, RefusalBareCR
+          when: head[pos+1] != '\n'
+      - return: pos + crlfLen, RefusalNone
+  - of: field
+    participants:
+      - id: caller
+        kind: actor
+      - id: field
+        kind: self
+      - id: fieldValue
+        kind: internal
+      - id: trimRight
+        kind: internal
+      - id: known
+        kind: internal
+    steps:
+      - bind: colon
+        eval: start + tokenEnd(head[start:])
+      - opt:
+          do:
+            - return: 0, RefusalNone
+          when: colon == len(head)
+      - opt:
+          do:
+            - return: 0, nameEnd(head, colon, colon-start)
+          when: colon == start || head[colon] != ':'
+      - bind: name
+        eval: head[start:colon]
+      - bind: valueStart, valueEnd, r
+        eval: fieldValue(head, colon+1)
+        to: fieldValue
+      - opt:
+          do:
+            - return: 0, r
+          when: r != RefusalNone || valueEnd == 0
+      - bind: value
+        eval: trimRight(head[valueStart:valueEnd])
+        to: trimRight
+      - opt:
+          do:
+            - return: 0, r
+          init:
+            bind: r
+            eval: known(name, value, body, req)
+            op: =
+            to: known
+          when: r != RefusalNone
+      - set: req.Fields[req.NFields]
+        value: "corenet.HTTP1FieldValue{Name: name, Value: value}"
+      - op: ++
+        set: req.NFields
+      - return: valueEnd + crlfLen, RefusalNone
+  - of: fieldValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: fieldValue
+        kind: self
+      - id: valueStop.Index
+        kind: value
+    steps:
+      - set: valueStart
+        value: start
+      - loop:
+          cond: valueStart < len(head) && (head[valueStart] == ' ' || head[valueStart] == '\t')
+          do:
+            - op: ++
+              set: valueStart
+      - bind: stop
+        eval: valueStart
+      - loop:
+          do:
+            - bind: "n"
+              eval: valueStop.Index(head[stop:])
+              to: valueStop.Index
+            - opt:
+                do:
+                  - return: 0, 0, RefusalNone
+                when: n < 0
+            - op: +=
+              set: stop
+              value: "n"
+            - opt:
+                do:
+                  - break: true
+                when: head[stop] != '\t'
+            - op: ++
+              set: stop
+          forever: true
+      - opt:
+          do:
+            - return: 0, 0, RefusalNone
+          when: head[stop] == '\r' && stop+1 == len(head)
+      - return: valueStart, stop, valueStopAt(head, stop)
+  - of: valueStopAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: valueStopAt
+        kind: self
+      - id: crValue
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: "'\\r'"
+              do:
+                - return: crValue(head, pos)
+                  to: crValue
+            - case: "'\\n'"
+              do:
+                - return: RefusalBareLF
+            - case: "0"
+              do:
+                - return: RefusalNUL
+            - default: true
+              do:
+                - return: RefusalControl
+          "on": head[pos]
+  - of: crValue
+    steps:
+      - opt:
+          do:
+            - return: RefusalBareCR
+          when: head[pos+1] != '\n'
+      - return: RefusalNone
+  - of: trimRight
+    steps:
+      - bind: end
+        eval: len(v)
+      - loop:
+          cond: end > 0 && (v[end-1] == ' ' || v[end-1] == '\t')
+          do:
+            - op: "--"
+              set: end
+      - return: v[:end]
+  - of: nameEnd
+    participants:
+      - id: caller
+        kind: actor
+      - id: nameEnd
+        kind: self
+      - id: crName
+        kind: internal
+    steps:
+      - bind: c
+        eval: head[pos]
+      - switch:
+          cases:
+            - case: c == '\r'
+              do:
+                - return: crName(head, pos)
+                  to: crName
+            - case: (c == ' ' || c == '\t') && n > 0
+              do:
+                - return: RefusalSpaceBeforeColon
+            - case: c == '\n'
+              do:
+                - return: RefusalBareLF
+            - case: c == 0
+              do:
+                - return: RefusalNUL
+            - default: true
+              do:
+                - return: RefusalName
+  - of: crName
+    steps:
+      - opt:
+          do:
+            - return: RefusalNone
+          when: pos+1 == len(head)
+      - opt:
+          do:
+            - return: RefusalName
+          when: head[pos+1] == '\n'
+      - return: RefusalBareCR
+  - of: known
+    participants:
+      - id: caller
+        kind: actor
+      - id: known
+        kind: self
+      - id: host
+        kind: internal
+      - id: authorization
+        kind: internal
+      - id: contentLength
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: kindOther
+              do:
+                - return: RefusalNone
+            - case: kindHost
+              do:
+                - return: host(value, req)
+                  to: host
+            - case: kindAuthorization
+              do:
+                - return: authorization(value, req)
+                  to: authorization
+            - case: kindContentLength
+              do:
+                - return: contentLength(value, body, req)
+                  to: contentLength
+            - case: kindConnection
+              do:
+                - set: req.Close
+                  value: req.Close || hasClose(value)
+                - return: RefusalNone
+            - case: kindExpect
+              do:
+                - return: RefusalExpect
+            - default: true
+              do:
+                - return: RefusalTransferEncoding
+          "on": kindOf(name)
+  - of: kindOf
+    steps:
+      - opt:
+          do:
+            - return: kindOther
+          when: len(name) >= knownMaxLen || knownNames[len(name)] == "" || !foldIs(name, knownNames[len(name)])
+      - return: knownKinds[len(name)]
+  - of: host
+    steps:
+      - opt:
+          do:
+            - return: RefusalHostDuplicated
+          when: req.HasHost
+      - set: req.HasHost, req.Host
+        value: true, value
+      - return: RefusalNone
+  - of: authorization
+    steps:
+      - opt:
+          do:
+            - return: RefusalAuthorizationDuplicated
+          when: req.HasAuthorization
+      - set: req.HasAuthorization, req.Authorization
+        value: true, value
+      - return: RefusalNone
+  - of: hasClose
+    participants:
+      - id: caller
+        kind: actor
+      - id: hasClose
+        kind: self
+      - id: nextToken
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: foldIs(v, "keep-alive")
+      - loop:
+          cond: pos < len(v)
+          do:
+            - var:
+                name: tok
+                type: "[]byte"
+            - set: tok, pos
+              to: nextToken
+              value: nextToken(v, pos)
+            - opt:
+                do:
+                  - return: "true"
+                when: foldIs(tok, "close")
+          init: pos := 0
+      - return: "false"
+  - of: nextToken
+    steps:
+      - bind: start
+        eval: pos
+      - loop:
+          cond: start < len(v) && isListSep(v[start])
+          do:
+            - op: ++
+              set: start
+      - bind: end
+        eval: start
+      - loop:
+          cond: end < len(v) && !isListSep(v[end])
+          do:
+            - op: ++
+              set: end
+      - return: v[start:end], end
+  - of: isListSep
+    steps:
+      - return: c == ',' || c == ' ' || c == '\t'
+  - of: Refusal.String
+    steps:
+      - opt:
+          do:
+            - return: "\"unknown\""
+          when: int(r) >= refusalCount
+      - return: refusalNames[r]
+  - of: Refusal.Status
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: int(r) >= refusalCount
+      - return: refusalStatus[r]
+  - of: Refusal.Err
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: int(r) >= refusalCount
+      - return: refusalErrs[r]
+  - of: refusalAnswerTable
+    steps:
+      - var:
+          name: t
+          type: "[refusalCount]string"
+      - loop:
+          do:
+            - bind: status
+              eval: max(refusalStatus[r], statusBadRequest)
+            - set: t[r]
+              value: "statusLines[status] + \"Content-Length: 0\\r\\nConnection: close\\r\\n\\r\\n\""
+          key: r
+          range: refusalCount
+      - return: t
+  - of: AppendStatusLine
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendStatusLine
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: dst, corenet.HTTP1ResponseInvalid
+          when: status < statusMin || status > statusMax
+      - opt:
+          do:
+            - return: append(dst, statusLines[status]...), nil
+          when: status < statusRegistered && statusLines[status] != ""
+      - set: dst
+        value: append(dst, "HTTP/1.1 "...)
+      - set: dst
+        to: strconv
+        value: strconv.AppendInt(dst, int64(status), decimal)
+      - return: append(dst, " \r\n"...), nil
+  - of: AppendField
+    steps:
+      - opt:
+          do:
+            - return: dst, corenet.HTTP1ResponseInvalid
+          when: "!token(name) || owned(name) || !fieldText(value)"
+      - set: dst
+        value: append(dst, name...)
+      - set: dst
+        value: "append(dst, \": \"...)"
+      - set: dst
+        value: append(dst, value...)
+      - return: append(dst, "\r\n"...), nil
+  - of: owned
+    steps:
+      - return: foldIs(name, "content-length") || foldIs(name, "connection") || foldIs(name, "transfer-encoding")
+  - of: AppendResponse
+    participants:
+      - id: caller
+        kind: actor
+      - id: AppendResponse
+        kind: self
+      - id: orDefault
+        kind: internal
+      - id: AppendStatusLine
+        kind: internal
+      - id: appendFraming
+        kind: internal
+    steps:
+      - bind: status
+        eval: orDefault(res.Status, statusOK)
+        to: orDefault
+      - bind: bodiless
+        eval: status == statusNoContent || status == statusNotModified
+      - opt:
+          do:
+            - return: dst, corenet.HTTP1ResponseInvalid
+          when: bodiless && len(res.Body) > 0
+      - bind: out, err
+        eval: AppendStatusLine(dst, status)
+        to: AppendStatusLine
+      - opt:
+          do:
+            - return: dst, err
+          when: err != nil
+      - set: out
+        value: append(out, res.Header...)
+      - set: out
+        to: appendFraming
+        value: appendFraming(out, len(res.Body), bodiless, closing || res.Close || req.Close)
+      - opt:
+          do:
+            - return: out, nil
+          when: bytes.Equal(req.Method, methodHead)
+      - return: append(out, res.Body...), nil
+  - of: appendFraming
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendFraming
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - set: dst
+              value: "append(dst, \"Content-Length: \"...)"
+            - set: dst
+              to: strconv
+              value: strconv.AppendInt(dst, int64(n), decimal)
+            - set: dst
+              value: append(dst, "\r\n"...)
+          when: "!bodiless"
+      - opt:
+          do:
+            - set: dst
+              value: "append(dst, \"Connection: close\\r\\n\"...)"
+          when: closing
+      - return: append(dst, "\r\n"...)
+  - of: AppendRefusal
+    steps:
+      - opt:
+          do:
+            - return: append(dst, refusalAnswers[RefusalNone]...)
+          when: int(r) >= refusalCount
+      - return: append(dst, refusalAnswers[r]...)
