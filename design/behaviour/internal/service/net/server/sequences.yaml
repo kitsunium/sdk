@@ -2554,7 +2554,7 @@ sequences:
           key: _
           range: ls
           value: l
-  - of: (*StreamGroup).handleLoop
+  - of: (*StreamGroup).HandleLoop
     steps:
       - opt:
           do:
@@ -3750,6 +3750,9 @@ sequences:
         eval: pl.lookup(ref)
         to: pl.lookup
       - return: pc != nil && pc.pressure
+  - of: (*portableLoop).Loop
+    steps:
+      - return: "0"
   - of: (*portableLoop).Post
     participants:
       - id: caller

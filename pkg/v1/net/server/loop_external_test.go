@@ -1,7 +1,11 @@
 package server_test
 
 import (
+	"bufio"
+	"bytes"
+	"context"
 	"errors"
+	stdnet "net"
 	"testing"
 	"time"
 
@@ -87,6 +91,9 @@ func (*fakeIO) Pressure(server.LoopConnRef) bool { return false }
 // Post refuses, as a full queue would.
 func (*fakeIO) Post(server.PostFunc, uintptr) error { return server.LoopPostQueueFull }
 
+// Loop is the one loop a fake has.
+func (*fakeIO) Loop() int { return 0 }
+
 // TestLoopPortsArePublic pins ADR 0186 §D9 step 6: a consumer implements
 // LoopHandler and LoopIO with the public package alone, OptionKind renders the
 // constructor's name, and the loop sentinels match through the facade.
@@ -138,6 +145,142 @@ func TestLoopPortsArePublic(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
+		})
+	}
+}
+
+// lineLoop answers each line it receives with the index of the loop that
+// served it, written against the public package alone: what a consumer of
+// HandleLoop writes, per-loop state included.
+type lineLoop struct {
+	// lines counts the lines answered, one slot per loop, each written only
+	// by its own loop's thread.
+	lines [4]int
+}
+
+// OnOpen needs no per-connection state.
+func (*lineLoop) OnOpen(server.LoopIO, server.LoopConnRef) {}
+
+// OnData answers every whole line with "<loop> <line>\n" and keeps the rest.
+func (h *lineLoop) OnData(io server.LoopIO, ref server.LoopConnRef, buf []byte) int {
+	used := 0
+	//: one answer per whole line; a partial one waits in the spill.
+	for {
+		i := bytes.IndexByte(buf[used:], '\n')
+		//: no whole line left.
+		if i < 0 {
+			//: the tail comes back with the next bytes.
+			return used
+		}
+		h.lines[io.Loop()]++
+		out := append([]byte{byte('0' + io.Loop()), ' '}, buf[used:used+i+1]...)
+		//: a refused write leaves nothing to answer.
+		if err := io.Write(ref, out); err != nil {
+			_ = io.Close(ref)
+			//: everything is dropped with the connection.
+			return len(buf)
+		}
+		used += i + 1
+	}
+}
+
+// OnTimeout is never armed.
+func (*lineLoop) OnTimeout(server.LoopIO, server.LoopConnRef) {}
+
+// OnWritable has nothing to resume.
+func (*lineLoop) OnWritable(server.LoopIO, server.LoopConnRef) {}
+
+// OnBatchEnd has nothing batched.
+func (*lineLoop) OnBatchEnd(server.LoopIO) {}
+
+// OnClose keeps nothing.
+func (*lineLoop) OnClose(server.LoopIO, server.LoopConnRef, error) {}
+
+// TestHandleLoopServesInPublic pins ADR 0186 §D9 step 11: a group declared
+// with HandleLoop and sized by Loop serves through the public package alone,
+// each callback names its loop with LoopIO.Loop, State reports the loop group,
+// and the group refuses TLS and a second handler at Start.
+func TestHandleLoopServesInPublic(t *testing.T) {
+	h := &lineLoop{}
+	srv := server.New()
+	t.Cleanup(func() { _ = srv.Close() })
+	srv.Group("loop", server.Listen("tcp", "127.0.0.1:0"), server.Loop(server.LoopValue{Loops: 2})).HandleLoop(h)
+	//: the loop group starts on the platform's best backend.
+	if err := srv.Start(t.Context()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	st := srv.State()
+	//: State reports the one loop group, sized.
+	if len(st.Loops) != 1 || st.Loops[0].Group != "loop" || st.Loops[0].Loops < 1 || st.Loops[0].Loops > 2 {
+		t.Fatalf("State().Loops = %+v, want one group of 1 or 2 loops", st.Loops)
+	}
+	loops := st.Loops[0].Loops
+	addr := st.Listeners[0].Address
+	//: several connections, so a two-loop group spreads them.
+	for i := range 4 {
+		c, err := stdnet.DialTimeout("tcp", addr, 3*time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = c.SetDeadline(time.Now().Add(10 * time.Second))
+		_, _ = c.Write([]byte("hel"))
+		_, _ = c.Write([]byte("lo\nbye\n"))
+		r := bufio.NewReader(c)
+		//: two answers, in order, each naming a loop of the group.
+		for _, want := range []string{"hello\n", "bye\n"} {
+			line, err := r.ReadString('\n')
+			if err != nil || len(line) < 2 || line[2:] != want || int(line[0]-'0') >= loops {
+				t.Fatalf("conn %d: answer %q, %v; want \"<loop < %d> %s\"", i, line, err, loops, want)
+			}
+		}
+		_ = c.Close()
+	}
+	//: the drain stops the loops before the counters are read.
+	if err := srv.Shutdown(t.Context()); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	total := 0
+	for _, n := range h.lines {
+		total += n
+	}
+	//: every line was counted by the loop that answered it.
+	if total != 8 {
+		t.Fatalf("lines = %v, want 8 in all", h.lines)
+	}
+	refusals := []struct {
+		// name describes the case.
+		name string
+		// declare builds the refused group on srv.
+		declare func(srv *server.Server)
+		// want is the sentinel Start returns.
+		want error
+	}{
+		{
+			name: "a second handler",
+			declare: func(srv *server.Server) {
+				srv.Group("twice", server.Listen("tcp", "127.0.0.1:0")).HandleLoop(&lineLoop{}).HandleFunc(
+					func(context.Context, server.Conn) error { return nil })
+			},
+			want: server.HandlerAlreadySet,
+		},
+		{
+			name: "middleware",
+			declare: func(srv *server.Server) {
+				srv.Group("used", server.Listen("tcp", "127.0.0.1:0")).HandleLoop(&lineLoop{}).Use(
+					func(next server.Handler) server.Handler { return next })
+			},
+			want: server.LoopOptionUnsupported,
+		},
+	}
+	for _, c := range refusals {
+		t.Run(c.name, func(t *testing.T) {
+			srv := server.New()
+			t.Cleanup(func() { _ = srv.Close() })
+			c.declare(srv)
+			//: refused at Start, by name.
+			if err := srv.Start(t.Context()); !errors.Is(err, c.want) {
+				t.Fatalf("Start = %v, want %v", err, c.want)
+			}
 		})
 	}
 }

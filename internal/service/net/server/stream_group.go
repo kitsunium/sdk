@@ -54,7 +54,7 @@ type StreamGroup struct {
 	// handler is not a loop handler (ADR 0186 §D1).
 	loop    corenet.LoopValue
 	loopSet bool
-	// loopHandler is the group's loop handler, set by handleLoop; a group
+	// loopHandler is the group's loop handler, set by HandleLoop; a group
 	// with one is served by the loop engine (ADR 0186 §D1).
 	loopHandler corenet.LoopHandler
 }
@@ -66,9 +66,9 @@ func (g *StreamGroup) Name() string {
 }
 
 // Handle sets the group's handler. A group declares one handler, once: a
-// second declaration on the same group — Handle, HandleFunc or HandleHTTP, in
-// any order — does not replace the first, and Start returns HandlerAlreadySet
-// naming the group (ADR 0186 §D1).
+// second declaration on the same group — Handle, HandleFunc, HandleHTTP or
+// HandleLoop, in any order — does not replace the first, and Start returns
+// HandlerAlreadySet naming the group (ADR 0186 §D1).
 func (g *StreamGroup) Handle(h corenet.ConnHandler) *StreamGroup {
 	//: a second declaration keeps the first handler and is reported by Start.
 	if !g.claimHandler() {

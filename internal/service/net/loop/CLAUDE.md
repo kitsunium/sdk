@@ -9,10 +9,8 @@ io_uring on `linux && (amd64 || arm64 || riscv64 || loong64)` after a staged
 probe of the running kernel, and epoll on every Linux architecture and after
 any probe failure. The
 portable backend is not here: it needs the netpoller and `net.Conn`, so it lives
-in `server` (`loop_portable.go`). Nothing is public yet:
-`server.Group.HandleLoop` publishes the engine once every `linux-init` lane and
-the Ubuntu lane name both Linux backends (§D9 step 11). Until then
-`server`'s unexported `handleLoop` and this package's tests are the only way in.
+in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
+(§D9 step 11); nothing of this package is published itself.
 
 ## Contents
 
@@ -21,7 +19,7 @@ the Ubuntu lane name both Linux backends (§D9 step 11). Until then
 | `group.go` | `Listener` (the one hand-off: a duplicated descriptor), `Config`, `Group` (`Shutdown`, `Close`, `State`, `Rejected`, `Live`) and `Start`, which resolves the sizing, starts the backend and writes the one start line |
 | `sizing.go` | `resolve`: the defaults, the `LoopNoDescriptors` refusal of a zero `RLIMIT_NOFILE`, and the one ring formula (explicit, else ⌈max(MaxConns, SoftConns) / min(RLIMIT_NOFILE, IORING_MAX_FIXED_FILES)⌉, else 1) |
 | `conn.go` | `connCtl`, one slot's pointer-free control state; its states, flags and close reasons |
-| `core.go` | the backend-neutral core: `ring` (slot table, free list, LRU, dirty list, timers), `loop` (the `corenet.LoopIO` implementation), `driver` (what a backend does: flush, shutdown, unread), the spill, the double-buffered output, the close and eviction rules |
+| `core.go` | the backend-neutral core: `ring` (slot table, free list, LRU, dirty list, timers), `loop` (the `corenet.LoopIO` implementation; `Loop` is its index, set at build), `driver` (what a backend does: flush, shutdown, unread), the spill, the double-buffered output, the close and eviction rules |
 | `slab.go` | the mmap'd slab: power-of-two size classes from 2 KiB, arenas mapped lazily, a global budget that sheds load by name |
 | `wheel.go` | the hashed timer wheel, index-linked, one timer per slot, 10 ms ticks |
 | `postq.go` | the `Post` queue: preallocated, mutex, `pending` CAS false→true wakes once per drain |

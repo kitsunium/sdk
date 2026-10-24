@@ -15,7 +15,7 @@ Public façade: `pkg/v1/net/server`.
 |---|---|
 | `server.go` | `Server`, `New`, `Group`, `State` |
 | `lifecycle.go` | `Start`, `Serve`, `Shutdown`, `Close`, the accept loop and its backoff (`acceptDelay`, `backOff`), the drain |
-| `loop_group.go` | loop groups: `handleLoop` (unexported until `HandleLoop`, ADR 0186 §D9 step 11), `loopRefusal` — TLS, `Use` and every option neither the engine (IdleTimeout, MaxConns, Adopt) nor the handler's `LoopOptionHonourer` honours — the listeners bound or adopted and registered like any group's, the engines in `Shutdown`, `Close` and `State` |
+| `loop_group.go` | loop groups: `HandleLoop` (ADR 0186 §D9 step 11), `loopRefusal` — TLS, `Use` and every option neither the engine (IdleTimeout, MaxConns, Adopt) nor the handler's `LoopOptionHonourer` honours — the listeners bound or adopted and registered like any group's, the engines in `Shutdown`, `Close` and `State` |
 | `loop_engine_linux.go`, `loop_engine_other.go` | the backend: on Linux the leaf `loop` on duplicated descriptors (`F_DUPFD_CLOEXEC`, non-blocking), auto falling back to portable with the reason in `State`; elsewhere the portable backend, an explicit native one refused with `UnsupportedPlatform` |
 | `loop_portable.go` | the portable loop backend: a reader and a writer goroutine per connection on the netpoller, every callback on one handler goroutine, the reader's buffer held until the batch ends |
 | `loop_group_internal_test.go` | loop groups on every backend the platform has: split lines, a 4 MiB response byte-exact, close, spill, drain, and every refusal |
@@ -62,7 +62,7 @@ Public façade: `pkg/v1/net/server`.
   It stays the default engine and the only one that serves TLS. ADR 0186 adds
   an opt-in, plaintext-only loop engine beside it, entered by one method,
   `StreamGroup.HandleLoop`, with this package keeping the lifecycle, the bind,
-  the adoption, the admission and the portable backend; decided, not yet built.
+  the adoption, the admission and the portable backend.
 - **`conn` embeds `stdnet.Conn`**, so reads and writes reach the socket with no
   wrapper on the hot path, and `io.Copy(c, c)` is a working echo server.
 - **`Group` returns the group, not `(group, error)`.** A declaration mistake is
@@ -70,7 +70,7 @@ Public façade: `pkg/v1/net/server`.
   wiring a server to five statements; it is only acceptable because `Start`
   reports every recorded error, and `TestServer_Start` pins that it does.
 - **A stream group declares one handler, once** (ADR 0186 §D1). `Handle`,
-  `HandleFunc` and `HandleHTTP` each claim the group through `claimHandler`; a
+  `HandleFunc`, `HandleHTTP` and `HandleLoop` each claim the group through `claimHandler`; a
   second claim, of any of them and in any order — a `nil` handler included —
   keeps the first handler, records `HandlerAlreadySet` naming the group on the
   group's own `declErr`, and `Start` returns it before binding anything. The
@@ -80,11 +80,11 @@ Public façade: `pkg/v1/net/server`.
   the new handler, so the group served neither cleanly; `HandleHTTP` now claims
   before it builds its adapter. `HandleHTTP`'s body is `mountHTTP`'s so the
   method stays inlinable. A `PacketGroup` keeps its replacing `Handle`.
-- **`Loop(v)` is refused by every group until `HandleLoop` exists** (ADR 0186
-  §D1 and §D9 step 8). The option records its value and that it was given — a
-  zero `LoopValue` included — and `Start` judges it once the handler is known,
-  in `groupDeclErr`, before anything is bound: `LoopOptionUnsupported` with
-  `option=Loop`. A missing handler (`HandlerMissing`) and a second one
+- **`Loop(v)` is judged once the handler is known** (ADR 0186 §D1). The
+  option records its value and that it was given — a zero `LoopValue`
+  included — and `Start` judges it in `groupDeclErr`, before anything is
+  bound: a `HandleLoop` group runs on it, any other group refuses it with
+  `LoopOptionUnsupported` and `option=Loop`. A missing handler (`HandlerMissing`) and a second one
   (`HandlerAlreadySet`) win, because they explain the refusal. A datagram group
   records the refusal at declaration, since its shim would otherwise drop it.
 - **A loop group is a group like the others, served by another engine** (ADR

@@ -48,9 +48,8 @@
 //
 // Package server — a loop group's engine off Linux: the portable backend.
 //
-// Package server — loop groups: the handler declaration kept unexported until
-// HandleLoop is published, the options a loop group refuses at Start, its
-// listeners and its engine in the server's lifecycle (ADR 0186).
+// Package server — loop groups: HandleLoop, the options a loop group refuses
+// at Start, its listeners and its engine in the server's lifecycle (ADR 0186).
 //
 // Package server — the portable loop backend: the default engine's accept
 // path and goroutines, every handler callback serialised onto one handler

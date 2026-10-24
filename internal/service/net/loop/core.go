@@ -829,3 +829,10 @@ func (lp *loop) Post(op corenet.PostFunc, arg uintptr) error {
 	//: queued and the loop woken.
 	return lp.post.post(op, arg)
 }
+
+// Loop implements corenet.LoopIO: the loop's index in its group, set at build
+// and never written again, so any goroutine may read it.
+func (lp *loop) Loop() int {
+	//: fixed for the loop's life.
+	return lp.index
+}

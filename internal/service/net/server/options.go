@@ -23,12 +23,12 @@ func WithDrainTimeout(d time.Duration) Option {
 
 // Loop configures a group's loop engine (ADR 0186 §D5): its backend, its loops
 // and rings, and its per-connection and pressure bounds. It is judged at Start,
-// once the group's handler is known: a group served by Handle, HandleFunc or
-// HandleHTTP refuses it with LoopOptionUnsupported, whichever order the
-// declarations came in. A group with no handler fails with HandlerMissing
-// instead, and one given a second handler with HandlerAlreadySet. A datagram
-// group refuses it with LoopOptionUnsupported too. No group is served by a loop
-// yet, so every group refuses it until the loop engine's entry is published.
+// once the group's handler is known: a group served by HandleLoop runs on it,
+// and a group served by Handle, HandleFunc or HandleHTTP refuses it with
+// LoopOptionUnsupported, whichever order the declarations came in. A group with
+// no handler fails with HandlerMissing instead, and one given a second handler
+// with HandlerAlreadySet. A datagram group refuses it with LoopOptionUnsupported
+// too. A group served by HandleLoop without it runs on the zero LoopValue.
 func Loop(v corenet.LoopValue) GroupOption {
 	//: the option is applied by the constructor, in declaration order; it is
 	//: judged at Start, once the group's handler is known.

@@ -108,6 +108,7 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
   - [func \(\*Group\) Handle\(h corenet.ConnHandler\) \*StreamGroup](<#Group.Handle>)
   - [func \(\*Group\) HandleFunc\(f corenet.ConnHandlerFunc\) \*StreamGroup](<#Group.HandleFunc>)
   - [func \(\*Group\) HandleHTTP\(h http.Handler\) \*StreamGroup](<#Group.HandleHTTP>)
+  - [func \(\*Group\) HandleLoop\(h corenet.LoopHandler\) \*StreamGroup](<#Group.HandleLoop>)
   - [func \(\*Group\) Name\(\) string](<#Group.Name>)
   - [func \(\*Group\) Use\(middlewares ...corenet.Middleware\[corenet.ConnHandler\]\) \*StreamGroup](<#Group.Use>)
 - [type GroupOption](<#GroupOption>)
@@ -128,6 +129,7 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
   - [func \(LoopHandler\) OnWritable\(io LoopIO, ref LoopConnRef\)](<#LoopHandler.OnWritable>)
 - [type LoopIO](<#LoopIO>)
   - [func \(LoopIO\) Close\(ref LoopConnRef\) error](<#LoopIO.Close>)
+  - [func \(LoopIO\) Loop\(\) int](<#LoopIO.Loop>)
   - [func \(LoopIO\) Post\(op PostFunc, arg uintptr\) error](<#LoopIO.Post>)
   - [func \(LoopIO\) Pressure\(ref LoopConnRef\) bool](<#LoopIO.Pressure>)
   - [func \(LoopIO\) SetDeadline\(ref LoopConnRef, d time.Duration\) error](<#LoopIO.SetDeadline>)
@@ -694,7 +696,7 @@ On Windows, whose AF\_UNIX sockets are stream-only, a "unixgram" or "unixpacket"
 func Loop(v LoopValue) GroupOption
 ```
 
-Loop configures a group's loop engine (ADR 0186 §D5): its backend, its loops and rings, and its per-connection and pressure bounds. It is judged at Start, once the group's handler is known: a group served by Handle, HandleFunc or HandleHTTP refuses it with LoopOptionUnsupported, whichever order the declarations came in. A group with no handler fails with HandlerMissing instead, and one given a second handler with HandlerAlreadySet. A datagram group refuses it with LoopOptionUnsupported too. No group is served by a loop yet, so every group refuses it until the loop engine's entry is published.
+Loop configures a group's loop engine (ADR 0186 §D5): its backend, its loops and rings, and its per-connection and pressure bounds. It is judged at Start, once the group's handler is known: a group served by HandleLoop runs on it, and a group served by Handle, HandleFunc or HandleHTTP refuses it with LoopOptionUnsupported, whichever order the declarations came in. A group with no handler fails with HandlerMissing instead, and one given a second handler with HandlerAlreadySet. A datagram group refuses it with LoopOptionUnsupported too. A group served by HandleLoop without it runs on the zero LoopValue.
 
 <a name="MaxConns"></a>
 ## func [MaxConns](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
@@ -885,7 +887,7 @@ type Group struct{}
 func (*Group) Handle(h corenet.ConnHandler) *StreamGroup
 ```
 
-Handle sets the group's handler. A group declares one handler, once: a second declaration on the same group — Handle, HandleFunc or HandleHTTP, in any order — does not replace the first, and Start returns HandlerAlreadySet naming the group (ADR 0186 §D1).
+Handle sets the group's handler. A group declares one handler, once: a second declaration on the same group — Handle, HandleFunc, HandleHTTP or HandleLoop, in any order — does not replace the first, and Start returns HandlerAlreadySet naming the group (ADR 0186 §D1).
 
 <a name="Group.HandleFunc"></a>
 ### func \(Group\) [HandleFunc](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/server/stream_group.go>)
@@ -906,6 +908,19 @@ func (*Group) HandleHTTP(h http.Handler) *StreamGroup
 HandleHTTP serves an http.Handler over this group's listeners.
 
 The group keeps its own limits, TLS identity and drain; net/http only does the protocol. That split is ADR 0029 D3: reimplementing HTTP would mean owning request smuggling defences, HTTP/2 flow control and HPACK to lose, not gain, throughput.
+
+<a name="Group.HandleLoop"></a>
+### func \(Group\) [HandleLoop](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/server/loop_group.go>)
+
+```go
+func (*Group) HandleLoop(h corenet.LoopHandler) *StreamGroup
+```
+
+HandleLoop serves the group on the loop engine (ADR 0186): h is called on the loop's own thread for every connection of the group, with the bytes each one receives, instead of a goroutine per connection. It is opt-in, and plaintext only.
+
+The group keeps the server's lifecycle — the bind, the adoption of inherited sockets, MaxConns, the drain, State — and Loop(v) sizes and places the engine: io\_uring after a probe of the running kernel, then epoll, on Linux, and the portable backend, the default engine's accept path serialised onto one handler goroutine, everywhere else. Start refuses a loop group given TLS with LoopTLSUnsupported, one given Use or an option neither the engine (IdleTimeout, MaxConns, Adopt) nor h, through LoopOptionHonourer, honours with LoopOptionUnsupported, and an explicit backend the platform or the kernel cannot run with UnsupportedPlatform or LoopBackendUnavailable.
+
+A callback of h runs on the loop's thread and must not block it: a blocking call stalls every connection of its loop. h is declared once, like every handler: a second declaration of any kind makes Start return HandlerAlreadySet.
 
 <a name="Group.Name"></a>
 ### func \(Group\) [Name](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/server/stream_group.go>)
@@ -1185,6 +1200,12 @@ type LoopIO interface {
 	// and calls OnClose. A second Close, or a Close on a stale reference, returns
 	// LoopStaleRef and does nothing.
 	Close(ref LoopConnRef) error
+	// Loop returns the index of the loop this LoopIO belongs to, from 0 to the
+	// group's loop count less one, fixed for the loop's life. A handler keeps
+	// its per-loop state — a scratch, a batch, a buffer — in a slice indexed by
+	// it, so a callback finds its own with no lock and no map. The portable
+	// backend runs one loop, index 0. Any goroutine may call it.
+	Loop() int
 	// Post queues op to run once on the loop's thread with arg, and wakes the
 	// loop. It is the one operation any goroutine may call. The queue is
 	// preallocated and holds no closure: op is a plain function and arg an
@@ -1220,6 +1241,15 @@ func (LoopIO) Close(ref LoopConnRef) error
 ```
 
 Close closes ref's connection once the output already written has left, and calls OnClose. A second Close, or a Close on a stale reference, returns LoopStaleRef and does nothing.
+
+<a name="LoopIO.Loop"></a>
+### func \(LoopIO\) [Loop](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (LoopIO) Loop() int
+```
+
+Loop returns the index of the loop this LoopIO belongs to, from 0 to the group's loop count less one, fixed for the loop's life. A handler keeps its per-loop state — a scratch, a batch, a buffer — in a slice indexed by it, so a callback finds its own with no lock and no map. The portable backend runs one loop, index 0. Any goroutine may call it.
 
 <a name="LoopIO.Post"></a>
 ### func \(LoopIO\) [Post](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)

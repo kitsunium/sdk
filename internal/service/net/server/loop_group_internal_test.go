@@ -1,5 +1,5 @@
-// Package server — loop groups, reached through the unexported handleLoop
-// until HandleLoop is published (ADR 0186 §D9 step 11).
+// Package server — loop groups served through HandleLoop (ADR 0186 §D9
+// step 11), on the backend the platform's probe reaches.
 package server
 
 import (
@@ -131,7 +131,7 @@ func startLoopServer(t *testing.T, b corenet.LoopBackend, h corenet.LoopHandler,
 	srv := New()
 	t.Cleanup(func() { swallowErr(srv.Close()) })
 	opts = append([]GroupOption{Listen("tcp", "127.0.0.1:0"), Loop(corenet.LoopValue{Backend: b, OutputCap: 128 << 10})}, opts...)
-	srv.Group("loop", opts...).handleLoop(h)
+	srv.Group("loop", opts...).HandleLoop(h)
 	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -296,7 +296,7 @@ func TestLoopGroup_refusals(t *testing.T) {
 			if h == nil {
 				h = &loopLineH{}
 			}
-			g := srv.Group("loop", append([]GroupOption{Listen("tcp", "127.0.0.1:0")}, c.opts...)...).handleLoop(h)
+			g := srv.Group("loop", append([]GroupOption{Listen("tcp", "127.0.0.1:0")}, c.opts...)...).HandleLoop(h)
 			if c.also != nil {
 				c.also(g)
 			}
@@ -317,6 +317,68 @@ func TestLoopGroup_refusals(t *testing.T) {
 			}
 			if n := len(srv.State().Listeners); n != 0 {
 				t.Fatalf("a refused Start bound %d listeners", n)
+			}
+		})
+	}
+}
+
+// loopKey names one connection of a group: a LoopConnRef names it within its
+// loop only, so two loops hand out equal references.
+type loopKey struct {
+	loop int
+	ref  corenet.LoopConnRef
+}
+
+// loopIndexH records the loop each connection was opened on, and counts the
+// callbacks that named another loop for it.
+type loopIndexH struct {
+	loopLineH
+	opened map[loopKey]bool
+	stray  int
+}
+
+func (h *loopIndexH) OnOpen(io corenet.LoopIO, ref corenet.LoopConnRef) {
+	h.mu.Lock()
+	h.opened[loopKey{io.Loop(), ref}] = true
+	h.mu.Unlock()
+	h.loopLineH.OnOpen(io, ref)
+}
+
+func (h *loopIndexH) OnData(io corenet.LoopIO, ref corenet.LoopConnRef, buf []byte) int {
+	h.mu.Lock()
+	if !h.opened[loopKey{io.Loop(), ref}] {
+		h.stray++
+	}
+	h.mu.Unlock()
+	return h.loopLineH.OnData(io, ref, buf)
+}
+
+// TestLoopGroup_loopIndex pins LoopIO.Loop on every backend: each callback
+// names a loop of the group, in [0, State's Loops), and a connection's data
+// arrives on the loop that opened it.
+func TestLoopGroup_loopIndex(t *testing.T) {
+	for _, b := range loopBackends() {
+		t.Run(b.String(), func(t *testing.T) {
+			h := &loopIndexH{opened: map[loopKey]bool{}}
+			srv, addr := startLoopServer(t, b, h, Loop(corenet.LoopValue{Backend: b, Loops: 3}))
+			loops := srv.State().Loops[0].Loops
+			if b == corenet.LoopBackendPortable && loops != 1 || b != corenet.LoopBackendPortable && runtime.GOOS == "linux" && loops != 3 {
+				t.Fatalf("State Loops = %d on %v", loops, b)
+			}
+			for range 12 {
+				c := loopDial(t, addr)
+				_, _ = c.Write([]byte("hi\n"))
+				_, _ = io.ReadFull(c, make([]byte, 3))
+			}
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			if len(h.opened) != 12 || h.stray != 0 {
+				t.Fatalf("%d connections opened, %d callbacks on another loop; want 12 and 0", len(h.opened), h.stray)
+			}
+			for k := range h.opened {
+				if k.loop < 0 || k.loop >= loops {
+					t.Fatalf("%+v names a loop outside [0, %d)", k, loops)
+				}
 			}
 		})
 	}
