@@ -42,6 +42,7 @@ go_test(
         "perf_fixtures_test.go",
         "write_external_test.go",
     ],
+    data = glob(["testdata/**"]),
     deps = [
         ":http1",
         "//internal/core/net",

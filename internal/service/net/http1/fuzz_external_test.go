@@ -167,7 +167,8 @@ func FuzzDifferential(f *testing.F) {
 		if r != http1.RefusalNone || n == 0 {
 			return
 		}
-		br := bufio.NewReader(bytes.NewReader(in))
+		src := bytes.NewReader(in)
+		br := bufio.NewReader(src)
 		hr, err := http.ReadRequest(br)
 		if err != nil {
 			if !netHTTPStricter(&req, err) {
@@ -179,7 +180,9 @@ func FuzzDifferential(f *testing.F) {
 		if err != nil {
 			t.Fatalf("%q: net/http body: %v", in, err)
 		}
-		left := br.Buffered()
+		//: what net/http left is what bufio holds plus what it never read: an
+		//: input past bufio's 4096 bytes is not all in the buffer.
+		left := br.Buffered() + src.Len()
 		if len(in)-left != n {
 			t.Fatalf("%q: the codec takes %d bytes, net/http %d", in, n, len(in)-left)
 		}
