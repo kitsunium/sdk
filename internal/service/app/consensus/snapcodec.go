@@ -169,7 +169,7 @@ func (c *chunkReader) next() error {
 	// made for it: on 32 bits an offer's chunk size near 2^31 let a length
 	// of 2^31 or more through, and make panicked the node that verified or
 	// restored the snapshot.
-	if decLen > c.chunk || encLen > c.chunk+c.chunk/8+1024 || encLen > math.MaxInt || c.total+decLen > c.limit {
+	if decLen > c.chunk || encLen > min(c.chunk+c.chunk/8+1024, math.MaxInt) || c.total+decLen > c.limit {
 		return origin(coreconsensus.SnapshotTooLarge, errs.Int64("chunk", decLen))
 	}
 	if int64(cap(c.enc)) < encLen {
