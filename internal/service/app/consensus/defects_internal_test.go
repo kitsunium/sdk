@@ -16,7 +16,7 @@ import (
 // an I/O failure (STORAGE_FAILED), never a snapshot of the wrong size
 // (SNAPSHOT_CORRUPT) — the two send an operator down opposite paths.
 func TestACommitWhoseSeekFailsIsAStorageFailure(t *testing.T) {
-	s, err := newFileSnapshots(t.TempDir())
+	s, err := newFileSnapshots(t.TempDir(), storageFailed)
 	if err != nil {
 		t.Fatal(err)
 	}

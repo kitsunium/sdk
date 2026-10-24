@@ -415,7 +415,7 @@ func TestAReofferDuringTheCommitIsRefusedWithoutHoldingTheLoop(t *testing.T) {
 		s := stores[tn]
 		if s == nil {
 			var err error
-			if s, err = newFileSnapshots(filepath.Join(t.TempDir(), "snap")); err != nil {
+			if s, err = newFileSnapshots(filepath.Join(t.TempDir(), "snap"), storageFailed); err != nil {
 				t.Fatal(err)
 			}
 			stores[tn] = s

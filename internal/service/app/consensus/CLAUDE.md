@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T02:00:00Z -->
+<!-- updated: 2026-10-24T05:30:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -61,6 +61,22 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   `syncAtOpen` fdatasyncs every segment and syncs the log, data and
   snapshot directories before anything is trusted (#414,
   `TestRecoverySyncsWhatItTrustsBeforeServing`).
+- Return a sync that failed at open without the STORAGE_FAILED markers. The
+  kernel reports a failed write-back once, to the first descriptor that
+  syncs (errseq): the open that saw it failed with no marker, and the next
+  one in the same boot synced clean and trusted pages the disk had refused.
+  `syncFailedAtOpen` writes them first, boot-scoped one first, for a
+  segment's, the log, data or snapshot directory's, or a zeroed torn tail's
+  sync, and `noteUnmarked` covers a device that refuses both (#637,
+  `TestASyncThatFailsAtOpenRefusesTheSameBootRestart`,
+  `TestAnUnmarkedSyncFailureAtOpenRefusesAnyLaterOpenInTheProcess`). Nor
+  write them for a failure that is no sync's: a read at open, or a
+  directory that cannot be opened to be synced (a descriptor table full,
+  `syncRan`), consumes no write-back error, and a marker would refuse every
+  start until the reboot (`TestAReadThatFailsAtOpenWritesNoMarker`,
+  `TestADirectoryThatCannotBeOpenedToSyncWritesNoMarker`). A recovery that
+  fails closes the segments it opened
+  (`TestAFailedRecoveryClosesTheSegmentsItOpened`).
 - Compact the store past its end without the term: it holds no entry to read
   it from, and a node restarted with no table votes on that term. The engine
   passes it (`storeReq.compactTerm`, `compactLog`), the file log refuses a

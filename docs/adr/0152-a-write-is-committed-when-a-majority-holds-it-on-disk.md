@@ -4050,6 +4050,37 @@ completed:
   `PAYLOAD_VERSION_REFUSED` (follow-ups of kodflow/forgejo-raft#65 and #50)
   have no issue yet. Each that changes a format will need protocol 3.
 
+## Amendment — a sync that fails at open writes the STORAGE_FAILED markers (2026-10-24, #637)
+
+The rule above, "after `STORAGE_FAILED`, the node refuses to start until the
+machine reboots", wrote its markers only when a running node stopped. The
+sync at open of #414 failed `STORAGE_FAILED` with no marker, and the kernel
+reports a failed write-back once, to the first descriptor that syncs after
+it (errseq, Linux 4.13). That open consumed the error. The next open in the
+same boot, a supervisor's restart, synced clean over the pages the disk had
+refused, and the node acknowledged and voted on them
+([#637](https://github.com/kitsunium/sdk/issues/637), an incomplete fix of
+#414).
+
+- **A sync that fails at open writes the markers before the open returns**,
+  as a running node's stop writes them (R9-05): a segment's `fdatasync`, the
+  log, data and snapshot directories' syncs, and the sync of a torn tail the
+  open zeroed. The next open in the boot is refused `STOP_MARKER_PRESENT`;
+  after the reboot the directory opens. A device that refuses both markers
+  leaves the directory refused to any later open in the process (#562).
+- **The boot-scoped marker is written first**, at an open as at a running
+  node's stop. It sits on a tmpfs and alone refuses a restart in the boot,
+  so a data directory whose device hangs or refuses the write cannot keep it
+  from being written. The data directory's follows, at best.
+- **Only a sync's failure writes them.** A read that fails at open, or a
+  directory that cannot be opened to be synced (a descriptor table that is
+  full), consumes no write-back error. A marker there would refuse every
+  start until the reboot for a cause that may be gone a moment later.
+- A recovery that fails closes the segments it opened, which a caller
+  retrying in the process leaked at every try.
+
+Nothing published changes: no frame, no payload, no record format.
+
 ## Revision history
 
 | Version | Round | What changed |

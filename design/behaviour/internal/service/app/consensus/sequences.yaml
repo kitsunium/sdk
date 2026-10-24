@@ -1396,7 +1396,7 @@ sequences:
             - return: err
           when: err != nil
       - bind: s, err
-        eval: newFileSnapshots(filepath.Join(d.dir, "snap"))
+        eval: newFileSnapshots(filepath.Join(d.dir, "snap"), l.syncFailedAtOpen)
         to: newFileSnapshots
       - opt:
           do:
@@ -1541,34 +1541,33 @@ sequences:
         kind: self
       - id: reasonOf
         kind: internal
-      - id: writeFileSync
-        kind: internal
       - id: os
         kind: stdlib
+      - id: writeFileSync
+        kind: internal
     steps:
       - bind: reason
         eval: reasonOf(code)
         to: reasonOf
       - bind: body
         eval: "[]byte(fmt.Sprintf(\"boot=%s\\n%s\\n\", bootID(), detail))"
+      - opt:
+          do:
+            - opt:
+                do:
+                  - set: runErr
+                    to: writeFileSync
+                    value: writeFileSync(l.runtimeMarker(reason), body)
+                init:
+                  bind: runErr
+                  eval: os.MkdirAll(l.runDir, 0o700)
+                  op: =
+                  to: os
+                when: runErr == nil
+          when: code == coreconsensus.CodeStorageFailed
       - set: dirErr
         to: writeFileSync
         value: writeFileSync(filepath.Join(l.dir, markerStopPrefix+reason), body)
-      - opt:
-          do:
-            - return: dirErr, nil
-          when: code != coreconsensus.CodeStorageFailed
-      - opt:
-          do:
-            - set: runErr
-              to: writeFileSync
-              value: writeFileSync(l.runtimeMarker(reason), body)
-          init:
-            bind: runErr
-            eval: os.MkdirAll(l.runDir, 0o700)
-            op: =
-            to: os
-          when: runErr == nil
       - return: dirErr, runErr
   - of: reasonOf
     steps:
@@ -2464,7 +2463,7 @@ sequences:
                     value: err
                   - return: l, nil
                 when: errs.HasCode(err, coreconsensus.CodeLogQuarantined)
-            - return: nil, err
+            - return: nil, alsoFailed(err, "close log", l.Close())
           init:
             bind: err
             eval: l.recover()
@@ -3210,23 +3209,18 @@ sequences:
         kind: actor
       - id: (*fileLog).syncAtOpen
         kind: self
-      - id: datasync
-        kind: internal
-      - id: storageFailed
-        kind: internal
-      - id: syncDir
+      - id: l.syncFailedAtOpen
         kind: internal
     steps:
       - loop:
           do:
             - opt:
                 do:
-                  - return: storageFailed("sync at open", err)
-                    to: storageFailed
+                  - return: l.syncFailedAtOpen("sync at open", err)
+                    to: l.syncFailedAtOpen
                 init:
                   bind: err
-                  eval: datasync(s.f)
-                  to: datasync
+                  eval: syncFileAtOpen(s.f)
                 when: err != nil
             - op: ++
               set: l.syncedAtOpen
@@ -3237,26 +3231,67 @@ sequences:
           do:
             - opt:
                 do:
-                  - return: storageFailed("sync at open", err)
-                    to: storageFailed
+                  - return: l.syncFailedAtOpen("sync at open", err)
+                    to: l.syncFailedAtOpen
                 init:
                   bind: err
-                  eval: syncDir(dir)
-                  to: syncDir
+                  eval: syncDirAtOpen(dir)
                 when: err != nil
           key: _
           range: "[]string{l.logDir(), l.dir}"
           value: dir
       - return: nil
+  - of: (*fileLog).syncFailedAtOpen
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileLog).syncFailedAtOpen
+        kind: self
+      - id: storageFailed
+        kind: internal
+      - id: l.markStopEach
+        kind: internal
+      - id: noteUnmarked
+        kind: internal
+      - id: alsoFailed
+        kind: internal
+    steps:
+      - bind: err
+        eval: storageFailed(op, cause)
+        to: storageFailed
+      - opt:
+          do:
+            - return: err
+          when: "!syncRan(cause)"
+      - bind: dirErr, runErr
+        eval: l.markStopEach(coreconsensus.CodeStorageFailed, err.Error())
+        to: l.markStopEach
+      - opt:
+          do:
+            - eval: noteUnmarked(l.dir)
+              to: noteUnmarked
+          when: dirErr != nil && runErr != nil
+      - set: err
+        to: alsoFailed
+        value: alsoFailed(err, "data_dir_marker", dirErr)
+      - return: alsoFailed(err, "boot_marker", runErr)
+        to: alsoFailed
+  - of: syncRan
+    steps:
+      - bind: pe, ok
+        eval: errors.AsType[*fs.PathError](cause)
+      - return: "!ok || pe.Op != \"open\""
   - of: (*fileLog).positionTail
     participants:
       - id: caller
         kind: actor
       - id: (*fileLog).positionTail
         kind: self
-      - id: zeroFrom
+      - id: zeroRange
         kind: internal
       - id: storageFailed
+        kind: internal
+      - id: l.syncFailedAtOpen
         kind: internal
     steps:
       - switch:
@@ -3273,8 +3308,16 @@ sequences:
                               to: storageFailed
                           init:
                             bind: err
-                            eval: zeroFrom(tail.f, l.off, tail.size)
-                            to: zeroFrom
+                            eval: zeroRange(tail.f, l.off, tail.size)
+                            to: zeroRange
+                          when: err != nil
+                      - opt:
+                          do:
+                            - return: l.syncFailedAtOpen("zero tail", err)
+                              to: l.syncFailedAtOpen
+                          init:
+                            bind: err
+                            eval: syncFileAtOpen(tail.f)
                           when: err != nil
                     when: "!allZero(last.data[l.off:])"
             - case: len(last.recs) > 0
@@ -3377,15 +3420,33 @@ sequences:
         kind: actor
       - id: zeroFrom
         kind: self
+      - id: zeroRange
+        kind: internal
       - id: datasync
         kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: zeroRange(f, off, size)
+            to: zeroRange
+          when: err != nil
+      - return: datasync(f)
+        to: datasync
+  - of: zeroRange
+    participants:
+      - id: caller
+        kind: actor
+      - id: zeroRange
+        kind: self
       - id: f.WriteAt
         kind: value
     steps:
       - opt:
           do:
-            - return: datasync(f)
-              to: datasync
+            - return: nil
           when: off >= size
       - bind: zero
         eval: make([]byte, min(size-off, 1<<20))
@@ -3406,8 +3467,7 @@ sequences:
               set: p
               value: "n"
           init: p := off
-      - return: datasync(f)
-        to: datasync
+      - return: nil
   - of: (*fileLog).quarantine
     participants:
       - id: caller
@@ -4740,8 +4800,6 @@ sequences:
         kind: stdlib
       - id: s.sweepSpools
         kind: internal
-      - id: syncDir
-        kind: internal
     steps:
       - opt:
           do:
@@ -4797,11 +4855,10 @@ sequences:
           when: err != nil
       - opt:
           do:
-            - return: nil, storageFailed("sync snapshots at open", err)
+            - return: nil, syncFailed("sync snapshots at open", err)
           init:
             bind: err
-            eval: syncDir(dir)
-            to: syncDir
+            eval: syncDirAtOpen(dir)
           when: err != nil
       - return: s, nil
   - of: newestSpool
