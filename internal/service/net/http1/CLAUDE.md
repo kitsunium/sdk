@@ -101,10 +101,10 @@ negative one or one past its maximum is `HTTP1Misconfigured` at `NewParser`.
 ## Cost
 
 `BENCH.md` holds the figures (Apple M1 Pro, busy): `Parse` frames the
-challenge's GET in about 175 ns with 0 allocations, where `net/http.ReadRequest`
-takes about 1.5 µs and 11 allocations; `AppendResponse` about 16 ns. On the C
-reference's own stream the codec is about 1.9× `http_parse.c` (219 against
-115 ns a request) — a diagnostic, never a gate. Budgets
+challenge's GET in about 165 ns with 0 allocations, where `net/http.ReadRequest`
+takes about 1.4 µs and 11 allocations; `AppendResponse` about 16 ns. On the C
+reference's own stream the codec is about 2.1× `http_parse.c` (249 against
+118 ns a request) — a diagnostic, never a gate. Budgets
 (`design/sdk.yaml`) are allocation counts only — `Parse`, `AppendResponse`,
 `AppendStatusLine`, `AppendField`, `AppendRefusal` at 0 — never nanoseconds
 (ADR 0165).
