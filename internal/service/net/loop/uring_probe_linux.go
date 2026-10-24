@@ -36,7 +36,7 @@ func (ul *uLoop) selfTest(flags uint32) error {
 		return probeError("self_test listen", errnoOfErr(err))
 	}
 	defer closeFDs([]int{lfd})
-	prepAccept(rg.get(), lfd, udPack(udAccept, 0, 0))
+	prepAccept(rg.get(), lfd, udPack(udAccept, 0, 0), true)
 	rg.submit()
 	cfd, err := selfTestClient(port)
 	//: no client, no connection, or no payload sent.
@@ -55,7 +55,7 @@ func (ul *uLoop) selfTest(flags uint32) error {
 // selfTestRing opens the self-test's ring with flags, and gives it buffers
 // and a table as a serving ring has them. A failure closes it.
 func selfTestRing(flags uint32) (*uring, error) {
-	rg, step, errno := openURing(flags)
+	rg, step, errno := openURing(probeEntries, flags)
 	//: no ring.
 	if errno != 0 {
 		//: named.

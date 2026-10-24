@@ -3273,7 +3273,7 @@ sequences:
             - return: nil, 0, probeError("setup", syscall.EPERM)
           when: ul.hooks.failStage == "setup"
       - bind: opened, step, errno
-        eval: openURing(flags)
+        eval: openURing(probeEntries, flags)
         to: openURing
       - opt:
           do:
@@ -3281,7 +3281,7 @@ sequences:
               value: setupCoopTaskrun | setupSubmitAll
             - set: opened, step, errno
               to: openURing
-              value: openURing(flags)
+              value: openURing(probeEntries, flags)
           when: errno == syscall.EINVAL && step == "setup" && !ul.hooks.deferTaskrun
       - opt:
           do:
@@ -3376,7 +3376,7 @@ sequences:
         kind: internal
     steps:
       - bind: u, step, errno
-        eval: openURing(flags)
+        eval: openURing(uringEntries, flags)
         to: openURing
       - opt:
           do:
@@ -3385,7 +3385,7 @@ sequences:
       - bind: lp
         eval: ul.lp
       - bind: rr
-        eval: "&uRing{ul: ul, u: u, armed: make([]bool, len(ul.lfds))}"
+        eval: "&uRing{ul: ul, u: u, armed: make([]int, len(ul.lfds))}"
       - set: rr.r
         to: newRing
         value: newRing(lp, i, rr)
@@ -3494,6 +3494,8 @@ sequences:
         kind: actor
       - id: (*uRing).armAccepts
         kind: self
+      - id: rr.acceptRoom
+        kind: internal
       - id: rr.u.get
         kind: internal
       - id: prepAccept
@@ -3503,28 +3505,49 @@ sequences:
           do:
             - return: ""
           when: rr.paused || rr.r.draining || rr.ul.lp.draining
+      - bind: room
+        eval: rr.acceptRoom()
+        to: rr.acceptRoom
       - loop:
           do:
-            - opt:
+            - loop:
+                cond: rr.armed[i] < acceptDepth && room > 0
                 do:
-                  - continue: true
-                when: rr.armed[i]
-            - bind: s
-              eval: rr.u.get()
-              to: rr.u.get
-            - opt:
-                do:
+                  - bind: s
+                    eval: rr.u.get()
+                    to: rr.u.get
+                  - opt:
+                      do:
+                        - op: ++
+                          set: rr.r.st.retries
+                        - return: ""
+                      when: s == nil
+                  - eval: prepAccept(s, fd, udPack(udAccept, 0, uint32(i)), false)
+                    to: prepAccept
                   - op: ++
-                    set: rr.r.st.retries
-                  - return: ""
-                when: s == nil
-            - eval: prepAccept(s, fd, udPack(udAccept, 0, uint32(i)))
-              to: prepAccept
-            - set: rr.armed[i]
-              value: "true"
+                    set: rr.armed[i]
+                  - op: "--"
+                    set: room
           key: i
           range: rr.ul.lfds
           value: fd
+  - of: (*uRing).acceptRoom
+    steps:
+      - bind: table
+        eval: rr.ul.lp.sz.tableSize
+      - bind: reserve
+        eval: max(min(acceptReserve, table/8), 1)
+      - bind: inFlight
+        eval: "0"
+      - loop:
+          do:
+            - op: +=
+              set: inFlight
+              value: "n"
+          key: _
+          range: rr.armed
+          value: "n"
+      - return: max(table-rr.used()-reserve-inFlight+1, 0)
   - of: (*uRing).cancelAccepts
     participants:
       - id: caller
@@ -3541,7 +3564,7 @@ sequences:
             - opt:
                 do:
                   - continue: true
-                when: "!on"
+                when: n == 0
             - bind: s
               eval: rr.u.get()
               to: rr.u.get
@@ -3555,7 +3578,7 @@ sequences:
               to: prepCancelUserData
           key: i
           range: rr.armed
-          value: "on"
+          value: "n"
   - of: (*uRing).used
     steps:
       - return: len(rr.r.conns) - len(rr.r.free)
@@ -3834,6 +3857,8 @@ sequences:
         kind: actor
       - id: (*uRing).onAccept
         kind: self
+      - id: rr.armAccepts
+        kind: internal
       - id: rr.acceptFailed
         kind: internal
       - id: lp.grp.rejected.Add
@@ -3855,9 +3880,11 @@ sequences:
         value: "0"
       - opt:
           do:
-            - set: rr.armed[li]
-              value: "false"
-          when: c.flags&cqeFMore == 0 && li < len(rr.armed)
+            - op: "--"
+              set: rr.armed[li]
+          when: c.flags&cqeFMore == 0 && li < len(rr.armed) && rr.armed[li] > 0
+      - defer: rr.armAccepts()
+        to: rr.armAccepts
       - opt:
           do:
             - eval: rr.acceptFailed(c.res)
@@ -4516,7 +4543,7 @@ sequences:
             - opt:
                 do:
                   - continue: true
-                when: "!rr.armed[i] || listenerQueue(fd) == 0"
+                when: rr.armed[i] == 0 || listenerQueue(fd) == 0
             - op: ++
               set: rr.r.st.watchdog
             - op: ++
@@ -4780,7 +4807,7 @@ sequences:
           when: err != nil
       - defer: closeFDs([]int{lfd})
         to: closeFDs
-      - eval: prepAccept(rg.get(), lfd, udPack(udAccept, 0, 0))
+      - eval: prepAccept(rg.get(), lfd, udPack(udAccept, 0, 0), true)
         to: prepAccept
       - eval: rg.submit()
         to: rg.submit
@@ -4815,7 +4842,7 @@ sequences:
         kind: internal
     steps:
       - bind: rg, step, errno
-        eval: openURing(flags)
+        eval: openURing(probeEntries, flags)
         to: openURing
       - opt:
           do:
@@ -5032,9 +5059,9 @@ sequences:
       - set: u.params.flags
         value: flags | setupCQSize | setupClamp
       - set: u.params.cqEntries
-        value: uringEntries * cqFactor
+        value: entries * cqFactor
       - bind: fd, errno
-        eval: uringSetup(uringEntries, &u.params)
+        eval: uringSetup(entries, &u.params)
         to: uringSetup
       - opt:
           do:
@@ -5355,25 +5382,13 @@ sequences:
         kind: stdlib
       - id: errnoOfErr
         kind: internal
-      - id: uringRegister
+      - id: u.mapBufRing
         kind: internal
       - id: u.addBuf
         kind: internal
       - id: u.publishBufs
         kind: internal
     steps:
-      - bind: ringBytes
-        eval: int(count) * int(unsafe.Sizeof(uringBuf{}))
-      - bind: rm, err
-        eval: syscall.Mmap(-1, 0, max(ringBytes, 4096), syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS)
-        to: syscall
-      - opt:
-          do:
-            - return: errnoOfErr(err)
-              to: errnoOfErr
-          when: err != nil
-      - set: u.bufRing
-        value: rm
       - bind: bm, err
         eval: syscall.Mmap(-1, 0, int(count)*int(size), syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS)
         to: syscall
@@ -5384,15 +5399,13 @@ sequences:
           when: err != nil
       - set: u.bufMem, u.bufCount, u.bufSize
         value: bm, count, size
-      - bind: reg
-        eval: "new(bufReg{ringAddr: uint64(uintptr(unsafe.Pointer(&rm[0]))), ringEntries: count, bgid: bufGroup})"
       - opt:
           do:
             - return: errno
           init:
             bind: errno
-            eval: uringRegister(u.fd, regPbufRing, unsafe.Pointer(reg), 1)
-            to: uringRegister
+            eval: u.mapBufRing(count)
+            to: u.mapBufRing
           when: errno != 0
       - loop:
           do:
@@ -5403,6 +5416,60 @@ sequences:
       - eval: u.publishBufs()
         to: u.publishBufs
       - return: "0"
+  - of: (*uring).mapBufRing
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uring).mapBufRing
+        kind: self
+      - id: uringRegister
+        kind: internal
+      - id: syscall
+        kind: stdlib
+      - id: errnoOfErr
+        kind: internal
+    steps:
+      - bind: ringBytes
+        eval: max(int(count)*int(unsafe.Sizeof(uringBuf{})), syscall.Getpagesize())
+      - bind: reg
+        eval: "new(bufReg{ringEntries: count, bgid: bufGroup, flags: pbufRingMmap})"
+      - bind: errno
+        eval: uringRegister(u.fd, regPbufRing, unsafe.Pointer(reg), 1)
+        to: uringRegister
+      - opt:
+          do:
+            - bind: "off"
+              eval: offPbufRing | uintptr(bufGroup)<<offPbufShift
+            - bind: rm, err
+              eval: syscall.Mmap(u.fd, int64(off), ringBytes, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED|syscall.MAP_POPULATE)
+              to: syscall
+            - opt:
+                do:
+                  - return: errnoOfErr(err)
+                    to: errnoOfErr
+                when: err != nil
+            - set: u.bufRing
+              value: rm
+            - return: "0"
+          when: errno == 0
+      - opt:
+          do:
+            - return: errno
+          when: errno != syscall.EINVAL
+      - bind: rm, err
+        eval: syscall.Mmap(-1, 0, ringBytes, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS)
+        to: syscall
+      - opt:
+          do:
+            - return: errnoOfErr(err)
+              to: errnoOfErr
+          when: err != nil
+      - set: u.bufRing
+        value: rm
+      - set: reg
+        value: "new(bufReg{ringAddr: uint64(uintptr(unsafe.Pointer(&rm[0]))), ringEntries: count, bgid: bufGroup})"
+      - return: uringRegister(u.fd, regPbufRing, unsafe.Pointer(reg), 1)
+        to: uringRegister
   - of: (*uring).bufEntries
     participants:
       - id: caller
@@ -5502,8 +5569,11 @@ sequences:
         value: opAccept
       - set: s.fd
         value: int32(lfd)
-      - set: s.ioprio
-        value: acceptMultishot
+      - opt:
+          do:
+            - set: s.ioprio
+              value: acceptMultishot
+          when: multishot
       - set: s.fileIdx
         value: fileIndexAlloc
       - set: s.userData
@@ -5594,6 +5664,8 @@ sequences:
         value: opAsyncCancel
       - set: s.addr
         value: target
+      - set: s.opFlags
+        value: cancelAll
       - set: s.userData
         value: ud
   - of: prepPollMulti

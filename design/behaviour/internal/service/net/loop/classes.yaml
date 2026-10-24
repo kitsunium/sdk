@@ -440,6 +440,19 @@ constants:
       - name: unregPbufRing
         type: uintptr
         value: "23"
+      - doc: |-
+          pbufRingMmap is IOU_PBUF_RING_MMAP (6.4): the kernel allocates the
+          buffer ring and the loop maps it, at offPbufRing | bgid << offPbufShift,
+          so no user page is pinned against RLIMIT_MEMLOCK.
+        name: pbufRingMmap
+        type: uint16
+        value: "1"
+      - name: offPbufRing
+        type: uintptr
+        value: "0x80000000"
+      - name: offPbufShift
+        type: uintptr
+        value: "16"
       - doc: rsrcRegisterSparse is IORING_RSRC_REGISTER_SPARSE.
         name: rsrcRegisterSparse
         type: uint32
@@ -479,6 +492,12 @@ constants:
   - grouped: true
     items:
       - doc: |-
+          acceptDepth is how many single-shot accepts a ring keeps in flight per
+          listener.
+        name: acceptDepth
+        type: int
+        value: "32"
+      - doc: |-
           acceptReserve is the free direct-descriptor entries a ring keeps: under
           it the ring stops accepting, and it resumes at twice as many.
         name: acceptReserve
@@ -504,15 +523,23 @@ constants:
         name: genMask
         type: uint32
         value: 1<<24 - 1
-    name: acceptReserve
+    name: acceptDepth
   - grouped: true
     items:
       - doc: |-
-          uringEntries is the SQ size asked for; CLAMP lets the kernel lower it,
-          and the size it grants is read back from the params.
+          uringEntries is a serving ring's SQ size; CLAMP lets the kernel lower
+          it, and the size it grants is read back from the params. A ring's SQ and
+          CQ are charged to RLIMIT_MEMLOCK for a process without CAP_IPC_LOCK
+          (an 8 MiB default on most distributions), so they are sized to keep a
+          few rings within it rather than to the largest burst: a full SQ submits
+          inline, a full CQ overflows into the kernel's list (NODROP).
         name: uringEntries
         type: uint32
-        value: "4096"
+        value: "1024"
+      - doc: probeEntries sizes the probe's short-lived rings.
+        name: probeEntries
+        type: uint32
+        value: "16"
       - doc: cqFactor is how many times uringEntries CQSIZE asks for the CQ.
         name: cqFactor
         type: uint32
@@ -740,7 +767,7 @@ files:
     name: uring_abi_linux.go
   - decls:
       - udRecv
-      - acceptReserve
+      - acceptDepth
       - udPack
       - udOp
       - udGen
@@ -767,6 +794,7 @@ files:
       - (*uLoop).registerFan
       - (*uRing).pollFD
       - (*uRing).armAccepts
+      - (*uRing).acceptRoom
       - (*uRing).cancelAccepts
       - (*uRing).used
       - (*uRing).pace
@@ -836,6 +864,7 @@ files:
       - (*uring).reap
       - (*uring).overflowed
       - (*uring).setupBuffers
+      - (*uring).mapBufRing
       - (*uring).bufEntries
       - (*uring).buf
       - (*uring).addBuf
@@ -1068,20 +1097,21 @@ functions:
     name: loopbackListener
     results: fd, port int, err error
   - doc: |-
-      openURing sets an io_uring up with flags, mapping it and building the
+      openURing sets an io_uring of entries SQEs up with flags, mapping it and building the
       views. It returns the errno of the step that failed.
     name: openURing
-    params: flags uint32
+    params: entries, flags uint32
     results: "*uring, string, syscall.Errno"
   - doc: errnoOfErr extracts an errno, EIO otherwise.
     name: errnoOfErr
     params: err error
     results: syscall.Errno
   - doc: |-
-      prepAccept fills s as a multishot accept on lfd into a kernel-allocated
-      direct descriptor.
+      prepAccept fills s as an accept on lfd into a kernel-allocated direct
+      descriptor: multishot for the probe's self-test, single-shot for serving
+      (uRing.armAccepts says why).
     name: prepAccept
-    params: s *sqe, lfd int, ud uint64
+    params: s *sqe, lfd int, ud uint64, multishot bool
   - doc: |-
       prepRecv fills s as a multishot recv on direct descriptor index, selecting
       provided buffers.
@@ -1098,7 +1128,7 @@ functions:
   - doc: prepCloseDirect fills s as the close of direct descriptor index.
     name: prepCloseDirect
     params: s *sqe, index uint32, ud uint64
-  - doc: prepCancelUserData fills s as a cancel of the operation carrying target.
+  - doc: prepCancelUserData fills s as a cancel of every operation carrying target.
     name: prepCancelUserData
     params: s *sqe, target, ud uint64
   - doc: prepPollMulti fills s as a multishot POLLIN on a process descriptor.
@@ -2323,10 +2353,11 @@ types:
         name: slotOf
         type: "[]int32"
       - doc: |-
-          armed is whether each listener's multishot accept is armed; paused a
+          armed is how many single-shot accepts each listener has in flight;
+          paused a
           ring that stopped accepting under its reserve.
         name: armed
-        type: "[]bool"
+        type: "[]int"
       - name: paused
         type: bool
       - doc: |-
@@ -2355,10 +2386,25 @@ types:
         name: pollFD
         params: fd int, op uint64
         recv: rr *uRing
-      - doc: armAccepts arms every listener's multishot accept not already armed.
+      - doc: |-
+          armAccepts keeps up to acceptDepth single-shot accepts in flight per
+          listener, never more than the entries left above the reserve. A multishot
+          accept into a direct-descriptor table keeps accepting the whole listen
+          backlog before the loop can see the reserve reached: past the table's last
+          entry the kernel accepts the connection, cannot install it, and drops it
+          (ENFILE), which CI saw on a 6.11 kernel. Single-shot accepts, each holding
+          one entry until it completes, cannot overshoot.
         name: armAccepts
         recv: rr *uRing
-      - doc: cancelAccepts cancels every armed accept; their final CQEs disarm them.
+      - doc: |-
+          acceptRoom is how many more accepts may be in flight: the free entries
+          above the reserve, less those the accepts in flight will take.
+        name: acceptRoom
+        recv: rr *uRing
+        results: int
+      - doc: |-
+          cancelAccepts cancels every accept in flight; their completions disarm
+          them.
         name: cancelAccepts
         recv: rr *uRing
       - doc: |-
@@ -2833,6 +2879,16 @@ types:
           group bufGroup. count must be a power of two.
         name: setupBuffers
         params: count, size uint32
+        recv: u *uring
+        results: syscall.Errno
+      - doc: |-
+          mapBufRing registers group bufGroup's ring of count entries and maps it.
+          It asks the kernel to allocate it (IOU_PBUF_RING_MMAP, 6.4): a ring in user
+          pages is pinned and charged to RLIMIT_MEMLOCK, which an unprivileged
+          process runs out of after a few rings (CI's non-root lane did). A kernel
+          that does not know the flag (EINVAL) gets the ring in user pages.
+        name: mapBufRing
+        params: count uint32
         recv: u *uring
         results: syscall.Errno
       - doc: bufEntries views the buffer ring.

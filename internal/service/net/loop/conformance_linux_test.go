@@ -80,9 +80,12 @@ func TestBackendsRequired(t *testing.T) {
 	}
 	present := map[string]bool{}
 	for _, b := range backendsPresent() {
-		if probeBackend(b.backend) == nil {
+		err := probeBackend(b.backend)
+		if err == nil {
 			present[b.name] = true
+			continue
 		}
+		t.Logf("net/loop backend %s absent: %v %v", b.name, err, errs.FieldsOf(err))
 	}
 	for _, want := range strings.Split(requiredBackends, ",") {
 		if !present[want] {
@@ -267,7 +270,7 @@ func serve(t *testing.T, b backendCase, h corenet.LoopHandler, mod func(*Config)
 	}
 	g, err := Start(cfg)
 	if err != nil {
-		t.Fatalf("Start: %v", err)
+		t.Fatalf("Start: %v %v", err, errs.FieldsOf(err))
 	}
 	t.Cleanup(func() { _ = g.Close() })
 	return g, addr
@@ -390,7 +393,7 @@ func TestConformance_spillFull(t *testing.T) {
 func TestConformance_closeTargetOnly(t *testing.T) {
 	eachBackend(t, func(t *testing.T, b backendCase) {
 		h := &lineH{}
-		_, addr := serve(t, b, h, nil)
+		g, addr := serve(t, b, h, nil)
 		c0 := dial(t, addr)
 		c1 := dial(t, addr)
 		waitFor(t, "two opens", func() bool { o, _ := h.counts(); return o == 2 })
@@ -400,8 +403,9 @@ func TestConformance_closeTargetOnly(t *testing.T) {
 		}
 		_, _ = c1.Write([]byte("alive\n"))
 		got := make([]byte, 6)
+		_ = c1.SetReadDeadline(time.Now().Add(5 * time.Second))
 		if _, err := io.ReadFull(c1, got); err != nil || string(got) != "alive\n" {
-			t.Fatalf("the other connection = %q, %v", got, err)
+			t.Fatalf("the other connection = %q, %v\n%s", got, err, dumpGroup(g))
 		}
 	})
 }
@@ -1072,4 +1076,35 @@ func TestConformance_idleNoWatchdog(t *testing.T) {
 			t.Fatalf("degraded: %s", st.DegradedReason)
 		}
 	})
+}
+
+// dumpOut receives dumpGroup's snapshot, taken on the loop's own thread.
+var dumpOut = make(chan string, 1)
+
+// dumpGroup snapshots every slot of the group's first loop from its own
+// thread, through Post, for a failure message.
+func dumpGroup(g *Group) string {
+	lp := g.loops[0]
+	op := func(_ corenet.LoopIO, _ uintptr) {
+		var b strings.Builder
+		for _, r := range lp.rings {
+			fmt.Fprintf(&b, "ring %d live=%d free=%v\n", r.index, r.live, r.free)
+			for s := range r.conns {
+				c := &r.conns[s]
+				fmt.Fprintf(&b, "  slot %d gen=%d state=%d flags=%#x fd=%d ops=%d spill=%+v out=%+v flight=%+v\n",
+					s, c.gen, c.state, c.flags, c.fd, c.ops, c.spill, c.out, c.flight)
+			}
+		}
+		fmt.Fprintf(&b, "state: %+v", g.State())
+		dumpOut <- b.String()
+	}
+	if err := lp.post.post(op, 0); err != nil {
+		return "dump: " + err.Error()
+	}
+	select {
+	case s := <-dumpOut:
+		return s
+	case <-time.After(2 * time.Second):
+		return "dump: the loop did not run the post within 2 s"
+	}
 }
