@@ -12905,6 +12905,8 @@ sequences:
         kind: self
       - id: d.d.snaps.List
         kind: internal
+      - id: d.verifySnapshotFile
+        kind: internal
       - id: flog.Bounds
         kind: internal
       - id: flog.Term
@@ -12923,8 +12925,16 @@ sequences:
           do:
             - opt:
                 do:
+                  - opt:
+                      do:
+                        - return: coreconsensus.SnapshotMetaValue{}, false, verr
+                      when: errs.HasCode(verr, coreconsensus.CodeVersionUnsupported)
                   - continue: true
-                when: d.verifySnapshotFile(m) != nil
+                init:
+                  bind: verr
+                  eval: d.verifySnapshotFile(m)
+                  to: d.verifySnapshotFile
+                when: verr != nil
             - bind: first, last
               eval: flog.Bounds()
               to: flog.Bounds

@@ -4188,7 +4188,12 @@ cannot read back ([#640](https://github.com/kitsunium/sdk/issues/640)).
   and stops the node.
 - **Offline**, `RestoreSnapshot`, `OpenSnapshot` and `ImportObserved` refuse
   `VERSION_UNSUPPORTED` an `Expected` metadata above `ProtocolMax` before
-  any byte is read or written.
+  any byte is read or written. `Recover` refuses `VERSION_UNSUPPORTED`, before
+  anything is written, a directory whose newest snapshot it reads back names
+  a version, a codec or a cluster version this build does not know, as a
+  start does: skipped as a snapshot that fails its checksums, an interrupted
+  install above the protocol let it plan from the older log below it and
+  write a new history from an older state.
 - It is a refusal, never a new format: no frame, payload or record changes,
   and nothing is written at another version.
 

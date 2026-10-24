@@ -404,8 +404,13 @@ func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsen
 // the log's end or does not match the log's term at its index. The next
 // start finishes it (finishInstall); Recover finishes it first and keeps it,
 // or its forced entry followed the short log, the start erased it, and the
-// node ran the snapshot's old voters and never led again (#506). It reads
-// and writes nothing else.
+// node ran the snapshot's old voters and never led again (#506). One of a
+// version, codec or cluster version this build does not know refuses it
+// VERSION_UNSUPPORTED, as it refuses a start: unknown means stop, never
+// skip (D18). Skipped as one that fails its checksums, a snapshot above
+// ProtocolMax let Recover plan from the older log below it and write a new
+// history from a state older than the one the directory holds (#640). It
+// reads and writes nothing else.
 func (d DataDir) interruptedInstall() (coreconsensus.SnapshotMetaValue, bool, error) {
 	metas, err := d.d.snaps.List()
 	if err != nil {
@@ -413,7 +418,10 @@ func (d DataDir) interruptedInstall() (coreconsensus.SnapshotMetaValue, bool, er
 	}
 	flog := d.d.log
 	for _, m := range metas {
-		if d.verifySnapshotFile(m) != nil {
+		if verr := d.verifySnapshotFile(m); verr != nil {
+			if errs.HasCode(verr, coreconsensus.CodeVersionUnsupported) {
+				return coreconsensus.SnapshotMetaValue{}, false, verr
+			}
 			continue // a start falls back past it too (D7)
 		}
 		first, last := flog.Bounds()

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -137,4 +138,59 @@ func TestTheOfflineReadersRefuseASnapshotAboveTheProtocol(t *testing.T) {
 	if r.Stamp.State != coreconsensus.StampJoining || r.Last >= r.First || len(r.Snapshots) != 0 {
 		t.Fatalf("a refused restore wrote the directory: stamp %v, log [%d, %d], %d snapshot(s)", r.Stamp.State, r.First, r.Last, len(r.Snapshots))
 	}
+}
+
+// A Recover whose interrupted install published a snapshot above the
+// protocol this build speaks is refused VERSION_UNSUPPORTED before it writes
+// anything, as a start on that snapshot is (#640). interruptedInstall read
+// the refusal as a snapshot that fails its checksums and skipped it: Recover
+// planned from the short log below it and wrote a new history from a state
+// older than the one the directory holds.
+func TestRecoverRefusesAnInterruptedInstallAboveTheProtocol(t *testing.T) {
+	c, nodes, keep := installInterrupted(t)
+	m := must(keep.dd.Snapshots().List())(t)[0]
+	if err := keep.dd.Close(); err != nil {
+		t.Fatal(err)
+	}
+	m.ClusterVersion, m.ClusterGeneration = raft.ProtocolMax+1, 1
+	if err := os.WriteFile(filepath.Join(keep.dir, "snap", m.ID+".meta"), wire.AppendSnapshotMeta(nil, &m), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	keep.dd = openDir(t, keep.dir, 16<<10)
+	defer func() {
+		if err := keep.dd.Close(); err != nil {
+			t.Errorf("close data directory %d: %v", keep.id, err)
+		}
+	}()
+	next := coreconsensus.ClusterID{7, 5, 7}
+	members, opt := recoverArgs(t, c, nodes, keep, next)
+	before := treeOf(t, keep.dir)
+	audit := auditOf(t, keep.dir)
+	if err := Recover(keep.dd, next, members, opt); !errors.Is(err, coreconsensus.VersionUnsupported) {
+		t.Fatalf("Recover over an interrupted install at cluster version %d: %v, want VERSION_UNSUPPORTED", raft.ProtocolMax+1, err)
+	}
+	after := treeOf(t, keep.dir)
+	for p, b := range after {
+		if old, ok := before[p]; !ok || !bytes.Equal(old, b) {
+			t.Fatalf("a refused Recover wrote %s", p)
+		}
+	}
+	for p := range before {
+		if _, ok := after[p]; !ok {
+			t.Fatalf("a refused Recover removed %s", p)
+		}
+	}
+	if got := auditOf(t, keep.dir); !bytes.Equal(got, audit) {
+		t.Fatalf("a refused Recover wrote its audit line: %q", got)
+	}
+}
+
+// auditOf is the audit file of dir, nil when there is none.
+func auditOf(t *testing.T, dir string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(dir, fileAudit))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal(err)
+	}
+	return b
 }

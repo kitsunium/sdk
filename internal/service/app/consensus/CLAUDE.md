@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T11:20:00Z -->
+<!-- updated: 2026-10-24T15:05:20Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -281,7 +281,11 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   raft flags it at `NewRaft`, `CheckOffer` and `InstallSnapshot` (#640,
   `TestANodeRefusesToStartOnASnapshotAboveItsProtocol`,
   `TestAnOfferOfASnapshotAboveTheProtocolStopsTheNode`,
-  `TestTheOfflineReadersRefuseASnapshotAboveTheProtocol`).
+  `TestTheOfflineReadersRefuseASnapshotAboveTheProtocol`). Nor skip a
+  snapshot `verifySnapshotFile` refuses VERSION_UNSUPPORTED as if it failed
+  its checksums: `interruptedInstall` did, and Recover planned from the
+  older log below an install above the protocol and wrote a new history
+  from it (#640, `TestRecoverRefusesAnInterruptedInstallAboveTheProtocol`).
 - Stream again a snapshot a peer refused SNAPSHOT_CORRUPT without reading
   it back: `sentCorrupt` verifies the sender's copy and replaces one that
   fails (#525, `TestALeaderReplacesASnapshotItsPeerFindsCorrupt`).
