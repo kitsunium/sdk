@@ -119,6 +119,10 @@ func TestAnOfferOfTheSnapshotBeingCommittedIsRefused(t *testing.T) {
 	var fid coreconsensus.NodeID
 	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{1, 2, 8}, every: 20, size: 3}
 	c.configure = func(tn *testNode, cfg *Config) {
+		// The leader keeps its leadership: a new one whose log still held
+		// the entries caught the follower up by appends, and the Commit
+		// that hung was the follower's own cut (macOS CI).
+		cfg.InitialTiming = steadyTiming()
 		if fid != 0 && tn.id == fid {
 			cfg.Snapshots = stuck
 		}
@@ -137,11 +141,15 @@ func TestAnOfferOfTheSnapshotBeingCommittedIsRefused(t *testing.T) {
 	compactedPastItsEnd(t, l, f)
 	stuck.armed.Store(true)
 	fid = f.id
+	hearOnlyTheLeader(c, l, f)
 	c.start(f)
 	waitFor(t, "the follower's install stuck in its spool's fsync", func() bool { return stuck.commits.Load() > 0 })
 	id, meta, ok := stuck.committing()
 	if !ok {
 		t.Fatal("setup: no install committing")
+	}
+	if st := f.node.Status(); st.Commit >= meta.Position.Index || l.node.Status().Role != coreconsensus.RoleLeader {
+		t.Fatalf("setup: the follower committed %d, past the snapshot %s it is committing, or the leader lost its leadership", st.Commit, id)
 	}
 	answered := make(chan coreconsensus.InstallAcceptValue, 1)
 	go func() {
