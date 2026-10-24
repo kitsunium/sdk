@@ -39,6 +39,49 @@ constants:
         type: time.Duration
         value: 10 * time.Millisecond
     name: drainPollInterval
+  - grouped: true
+    items:
+      - doc: |-
+          portableReadSize is one connection's read buffer on the portable
+          backend.
+        name: portableReadSize
+        type: int
+        value: 16 << 10
+      - doc: portableTick is the portable backend's timer resolution.
+        name: portableTick
+        type: time.Duration
+        value: 10 * time.Millisecond
+      - doc: portableEvents bounds the events one batch takes.
+        name: portableEvents
+        type: int
+        value: "512"
+      - doc: portablePostCap is the portable backend's post queue.
+        name: portablePostCap
+        type: int
+        value: "4096"
+      - doc: |-
+          portableSpillCap is LoopValue.SpillCap's default, as the native
+          backends have it.
+        name: portableSpillCap
+        type: int
+        value: 64 << 10
+      - doc: |-
+          portableOutputCap is LoopValue.OutputCap's default, as the native
+          backends have it.
+        name: portableOutputCap
+        type: int
+        value: 1 << 20
+    name: portableReadSize
+  - doc: The kinds of a portable event.
+    grouped: true
+    items:
+      - name: pevOpen
+        type: uint8
+        value: iota
+      - name: pevData
+      - name: pevEnd
+      - name: pevSent
+    name: pevOpen
   - doc: |-
       mmsghdrAlign is the alignment C gives struct mmsghdr, which it inherits from
       struct msghdr — the widest member decides, and msghdr holds the pointers.
@@ -284,6 +327,66 @@ files:
       - trackedListener
       - (*trackedListener).Accept
     name: listen_tracked.go
+  - decls:
+      - startLoopEngine
+      - dupListeners
+      - closeHandoff
+    name: loop_engine_linux.go
+  - decls:
+      - loopEngine
+      - (*StreamGroup).handleLoop
+      - (*StreamGroup).loopRefusal
+      - loopHonours
+      - (*StreamGroup).loopOptionsSet
+      - (*Server).bindLoopGroup
+      - (*Server).registerLoopListeners
+      - (*Server).loopStates
+      - (*Server).shutdownLoops
+      - (*Server).closeLoops
+      - loopIdle
+    name: loop_group.go
+  - decls:
+      - portableReadSize
+      - pevOpen
+      - portableEvent
+      - portableConn
+      - portableLoop
+      - startPortable
+      - orDefaultInt
+      - (*portableLoop).acceptLoop
+      - (*portableLoop).run
+      - (*portableLoop).collect
+      - (*portableLoop).handle
+      - (*portableLoop).handleData
+      - (*portableLoop).handleEnd
+      - (*portableLoop).handleSent
+      - (*portableLoop).open
+      - (*portableLoop).reader
+      - (*portableLoop).writer
+      - (*portableLoop).lookupSlot
+      - (*portableLoop).lookup
+      - (*portableLoop).deliver
+      - clampUsed
+      - (*portableLoop).pending
+      - (*portableLoop).markDirty
+      - (*portableLoop).finish
+      - (*portableLoop).timers
+      - (*portableLoop).control
+      - (*portableLoop).endBatch
+      - (*portableLoop).settle
+      - (*portableLoop).compactSpills
+      - (*portableLoop).closeAll
+      - (*portableLoop).drainPosts
+      - (*portableLoop).Write
+      - (*portableLoop).Close
+      - (*portableLoop).SetDeadline
+      - (*portableLoop).Pressure
+      - (*portableLoop).Post
+      - portableEngine
+      - portableEngine.Shutdown
+      - portableEngine.Close
+      - portableEngine.State
+    name: loop_portable.go
   - decls:
       - multiReader
       - newMultiReader
@@ -691,6 +794,57 @@ functions:
     name: layered
     params: raw stdnet.Listener, id corenet.IdentityValue, trackCloses bool
     results: stdnet.Listener
+  - doc: |-
+      startLoopEngine starts a loop group on Linux: the leaf's native backends,
+      handed duplicated descriptors of the listeners server bound (ADR 0186 §D3),
+      or the portable backend when asked for it or, under auto, when no native
+      backend starts — reported, never silent.
+
+      IFACE-OPAQUE: which engine runs is decided here at Start — the leaf's
+      *loop.Group or the portable backend — and server only drives the lifecycle
+      half both share, so the caller holds the interface and never the type.
+    name: startLoopEngine
+    params: group *StreamGroup, lns []stdnet.Listener
+    results: loopEngine, error
+  - doc: |-
+      dupListeners duplicates each listener's descriptor, close-on-exec and
+      non-blocking: the one hand-off type the leaf takes.
+    name: dupListeners
+    params: lns []stdnet.Listener
+    results: "[]loop.Listener, error"
+  - doc: closeHandoff closes descriptors duplicated before a failure.
+    name: closeHandoff
+    params: ls []loop.Listener
+  - doc: |-
+      loopHonours reports the options the loop engine honours itself (ADR 0186
+      §D4): IdleTimeout, MaxConns and Adopt. Listen and Loop are not options a
+      loop judges; the drain is the server's.
+    name: loopHonours
+    params: k corenet.OptionKind
+    results: bool
+  - doc: loopIdle is the group's IdleTimeout as the loop takes it.
+    name: loopIdle
+    params: group *StreamGroup
+    results: time.Duration
+  - doc: |-
+      startPortable starts the portable backend on lns. degraded names why a
+      Linux auto group fell back to it, empty otherwise.
+
+      Goroutine lifecycle: it launches one acceptor per listener, which returns
+      once server closes that listener or the backend stops, and the handler
+      goroutine, which returns once the backend stopped or drained to its last
+      connection, closing done as it does.
+    name: startPortable
+    params: group *StreamGroup, lns []stdnet.Listener, degraded string
+    results: portableEngine
+  - doc: orDefaultInt returns v, or def when v is zero or less.
+    name: orDefaultInt
+    params: v, def int
+    results: int
+  - doc: clampUsed treats an OnData return outside 0 to n as n.
+    name: clampUsed
+    params: v, n int
+    results: int
   - doc: newMultiReader builds a batched reader over pc.
     name: newMultiReader
     params: pc stdnet.PacketConn, sc rawConnProvider
@@ -840,6 +994,7 @@ imports:
   http: net/http
   io: io
   kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
+  loop: github.com/kitsunium/sdk/internal/service/net/loop
   maps: maps
   os: os
   recycler: github.com/kitsunium/sdk/internal/kernel/concur/recycler
@@ -1505,6 +1660,321 @@ types:
         results: conn stdnet.Conn, err error
     name: trackedListener
   - doc: |-
+      loopEngine is a running loop group, whatever its backend: the leaf's native
+      loops or the portable backend below.
+    kind: named
+    name: loopEngine
+    underlying: |-
+      interface {
+      	// Shutdown stops accepting and drains until ctx is done.
+      	Shutdown(ctx context.Context) error
+      	// Close closes everything now.
+      	Close() error
+      	// State reports the group.
+      	State() corenet.LoopStateValue
+      }
+  - doc: portableEvent is what a connection's goroutines tell the handler goroutine.
+    fields:
+      - name: kind
+        type: uint8
+      - name: slot
+        type: int32
+      - name: gen
+        type: uint32
+      - name: conn
+        type: stdnet.Conn
+      - name: data
+        type: "[]byte"
+      - name: err
+        type: error
+    kind: struct
+    name: portableEvent
+  - doc: |-
+      portableConn is one connection on the portable backend. Its reader and
+      writer goroutines touch only conn, mu's fields and the channels; everything
+      else is the handler goroutine's.
+    fields:
+      - name: conn
+        type: stdnet.Conn
+      - name: gen
+        type: uint32
+      - doc: ack lets the reader reuse its buffer once the batch that holds it ended.
+        name: ack
+        type: chan struct{}
+      - doc: kick wakes the writer.
+        name: kick
+        type: chan struct{}
+      - doc: mu guards out, flight and closing, shared with the writer.
+        name: mu
+        type: sync.Mutex
+      - name: out
+        type: "[]byte"
+      - name: flight
+        type: int
+      - name: closing
+        type: bool
+      - doc: The handler goroutine's own state.
+        name: open
+        type: bool
+      - name: spill
+        type: "[]byte"
+      - name: spillOff
+        type: int
+      - name: lastIO
+        type: time.Time
+      - name: deadline
+        type: time.Time
+      - name: pressure
+        type: bool
+      - name: wantWrite
+        type: bool
+      - name: peerDone
+        type: bool
+      - name: closeErr
+        type: error
+      - name: reasonSet
+        type: bool
+    kind: struct
+    name: portableConn
+  - doc: |-
+      portableLoop is the portable backend (ADR 0186 §D3, §D7): the default
+      engine's accept path and a goroutine pair per connection on the netpoller,
+      every handler callback serialised onto one handler goroutine, so the
+      LoopHandler contract holds unchanged: one goroutine calls it, buf valid
+      until OnBatchEnd.
+    fields:
+      - name: group
+        type: string
+      - name: h
+        type: corenet.LoopHandler
+      - name: spillCap
+        type: int
+      - name: outCap
+        type: int
+      - name: soft
+        type: int
+      - name: maxConns
+        type: int
+      - name: idle
+        type: time.Duration
+      - name: degraded
+        type: string
+      - name: events
+        type: chan portableEvent
+      - doc: post is the queue of posted operations; wake rouses the handler.
+        name: postMu
+        type: sync.Mutex
+      - name: postOps
+        type: "[]corenet.PostFunc"
+      - name: postArgs
+        type: "[]uintptr"
+      - name: postHead
+        type: int
+      - name: postN
+        type: int
+      - name: postWait
+        type: atomic.Bool
+      - name: postShut
+        type: bool
+      - name: wake
+        type: chan struct{}
+      - name: conns
+        type: "[]*portableConn"
+      - name: free
+        type: "[]int32"
+      - name: live
+        type: atomic.Int64
+      - name: drainReq
+        type: atomic.Bool
+      - name: stopReq
+        type: atomic.Bool
+      - name: draining
+        type: bool
+      - name: done
+        type: chan struct{}
+      - name: lns
+        type: "[]stdnet.Listener"
+      - name: accepted
+        type: atomic.Uint64
+      - name: closed
+        type: atomic.Uint64
+      - name: batches
+        type: atomic.Uint64
+      - name: rejected
+        type: atomic.Uint64
+      - name: once
+        type: sync.Once
+      - name: readers
+        type: sync.WaitGroup
+      - doc: batchAcks are the readers waiting on the current batch.
+        name: batchAcks
+        type: "[]chan struct{}"
+      - name: dirty
+        type: "[]int32"
+    kind: struct
+    methods:
+      - doc: acceptLoop hands each accepted connection to the handler goroutine.
+        name: acceptLoop
+        params: ln stdnet.Listener
+        recv: pl *portableLoop
+      - doc: |-
+          run is the handler goroutine: one batch per iteration. It is the one
+          goroutine that closes done, as it returns.
+        name: run
+        params: done chan<- struct{}
+        recv: pl *portableLoop
+      - doc: collect takes the events already queued, up to a batch.
+        name: collect
+        recv: pl *portableLoop
+      - doc: handle serves one event.
+        name: handle
+        params: ev *portableEvent
+        recv: pl *portableLoop
+      - doc: |-
+          handleData delivers a reader's bytes, and holds its buffer until the batch
+          ends.
+        name: handleData
+        params: ev *portableEvent
+        recv: pl *portableLoop
+      - doc: handleEnd serves the end of a connection's reader or writer.
+        name: handleEnd
+        params: ev *portableEvent
+        recv: pl *portableLoop
+      - doc: |-
+          handleSent records a flight the writer sent, and fires OnWritable when a
+          producer waits and the output fell under a quarter of its cap.
+        name: handleSent
+        params: ev *portableEvent
+        recv: pl *portableLoop
+      - doc: |-
+          open takes a slot for c and starts its reader and writer.
+
+          Goroutine lifecycle: it launches the connection's reader, which returns at
+          the end of input or a read failure, and its writer, which returns once kick
+          is closed by finish, the connection closing with its output sent, or a
+          write failure.
+        name: open
+        params: c stdnet.Conn
+        recv: pl *portableLoop
+      - doc: reader reads pc into one buffer, reused once the handler's batch ended.
+        name: reader
+        params: slot int32, pc *portableConn
+        recv: pl *portableLoop
+      - doc: writer sends pc's output, one flight at a time.
+        name: writer
+        params: slot int32, pc *portableConn
+        recv: pl *portableLoop
+      - doc: lookupSlot returns slot's connection when gen is still its generation.
+        name: lookupSlot
+        params: slot int32, gen uint32
+        recv: pl *portableLoop
+        results: "*portableConn"
+      - doc: lookup resolves a reference to an open connection.
+        name: lookup
+        params: ref corenet.LoopConnRef
+        recv: pl *portableLoop
+        results: int32, *portableConn
+      - doc: deliver hands data to the handler behind any spill.
+        name: deliver
+        params: slot int32, pc *portableConn, data []byte
+        recv: pl *portableLoop
+      - doc: pending is how many output bytes pc holds.
+        name: pending
+        params: pc *portableConn
+        recv: pl *portableLoop
+        results: int
+      - doc: markDirty lists slot for the end of the batch.
+        name: markDirty
+        params: slot int32
+        recv: pl *portableLoop
+      - doc: |-
+          finish calls OnClose and closes the connection; the slot is free at once,
+          its generation moved on, so nothing of it is reachable any more.
+        name: finish
+        params: slot int32, pc *portableConn, err error
+        recv: pl *portableLoop
+      - doc: timers fires deadlines and closes idle connections.
+        name: timers
+        recv: pl *portableLoop
+      - doc: control applies the drain.
+        name: control
+        recv: pl *portableLoop
+      - doc: |-
+          endBatch flushes the dirty connections, settles the closes, releases the
+          batch's buffers and compacts the spills.
+        name: endBatch
+        recv: pl *portableLoop
+      - doc: |-
+          settle finishes a dirty connection that is closing with nothing left to
+          send, and otherwise kicks its writer.
+        name: settle
+        params: slot int32
+        recv: pl *portableLoop
+      - doc: |-
+          compactSpills moves every spill's consumed head out, now that no
+          handed-out buffer survives.
+        name: compactSpills
+        recv: pl *portableLoop
+      - doc: |-
+          closeAll closes every connection as the backend stops.
+
+          Goroutine lifecycle: it launches one drainer that takes the last events a
+          reader may still send, and returns after one second with none.
+        name: closeAll
+        recv: pl *portableLoop
+      - doc: drainPosts runs the posted operations.
+        name: drainPosts
+        recv: pl *portableLoop
+      - doc: Write implements corenet.LoopIO.
+        name: Write
+        params: ref corenet.LoopConnRef, p []byte
+        recv: pl *portableLoop
+        results: error
+      - doc: Close implements corenet.LoopIO.
+        name: Close
+        params: ref corenet.LoopConnRef
+        recv: pl *portableLoop
+        results: error
+      - doc: SetDeadline implements corenet.LoopIO.
+        name: SetDeadline
+        params: ref corenet.LoopConnRef, d time.Duration
+        recv: pl *portableLoop
+        results: error
+      - doc: Pressure implements corenet.LoopIO.
+        name: Pressure
+        params: ref corenet.LoopConnRef
+        recv: pl *portableLoop
+        results: bool
+      - doc: Post implements corenet.LoopIO.
+        name: Post
+        params: op corenet.PostFunc, arg uintptr
+        recv: pl *portableLoop
+        results: error
+    name: portableLoop
+  - doc: |-
+      portableEngine is the portable backend as server drives it: the lifecycle
+      half, apart from the LoopIO its handler is called with, whose Close names a
+      connection.
+    fields:
+      - name: pl
+        type: "*portableLoop"
+    kind: struct
+    methods:
+      - doc: Shutdown implements loopEngine.
+        name: Shutdown
+        params: ctx context.Context
+        recv: e portableEngine
+        results: error
+      - doc: Close implements loopEngine.
+        name: Close
+        recv: e portableEngine
+        results: error
+      - doc: State implements loopEngine.
+        name: State
+        recv: e portableEngine
+        results: corenet.LoopStateValue
+    name: portableEngine
+  - doc: |-
       multiReader reads several datagrams per syscall using recvmmsg(2).
 
       It reuses one message array for the life of the socket: the iovecs and name
@@ -1746,6 +2216,9 @@ types:
       - doc: listeners are the live bound listeners.
         name: listeners
         type: "[]*boundListener"
+      - doc: loopEngines are the running loop groups (ADR 0186).
+        name: loopEngines
+        type: "[]loopEngine"
       - doc: states mirrors listeners for reporting, including any degradation.
         name: states
         type: "[]corenet.ListenerStateValue"
@@ -1990,6 +2463,31 @@ types:
         name: closeListeners
         recv: s *Server
       - doc: |-
+          bindLoopGroup binds or adopts a loop group's listeners, registers them as
+          the server's like any other, and starts the group's engine on them.
+        name: bindLoopGroup
+        params: ctx context.Context, group *StreamGroup
+        recv: s *Server
+        results: error
+      - doc: |-
+          registerLoopListeners records a loop group's listeners, so Close and
+          Shutdown close them and State reports them, as for every group.
+        name: registerLoopListeners
+        params: group *StreamGroup, lns []stdnet.Listener, adopted bool
+        recv: s *Server
+      - doc: loopStates reports every loop group.
+        name: loopStates
+        recv: s *Server
+        results: "[]corenet.LoopStateValue"
+      - doc: shutdownLoops drains every loop group within ctx.
+        name: shutdownLoops
+        params: ctx context.Context
+        recv: s *Server
+        results: error
+      - doc: closeLoops closes every loop group now.
+        name: closeLoops
+        recv: s *Server
+      - doc: |-
           readLoop serves datagrams until its socket is closed.
 
           Goroutine lifecycle: one per datagram socket, started by bindPacketGroup and
@@ -2147,8 +2645,34 @@ types:
         type: corenet.LoopValue
       - name: loopSet
         type: bool
+      - doc: |-
+          loopHandler is the group's loop handler, set by handleLoop; a group
+          with one is served by the loop engine (ADR 0186 §D1).
+        name: loopHandler
+        type: corenet.LoopHandler
     kind: struct
     methods:
+      - doc: |-
+          handleLoop declares h as the group's loop handler (ADR 0186 §D1). It stays
+          unexported until StreamGroup.HandleLoop is published, after every
+          linux-init lane and the Ubuntu lane name both Linux backends (§D9 step 11):
+          until then only this package's tests reach it.
+        name: handleLoop
+        params: h corenet.LoopHandler
+        recv: g *StreamGroup
+        results: "*StreamGroup"
+      - doc: |-
+          loopRefusal judges a loop group's options at Start, once its handler is
+          known: TLS is never served (LoopTLSUnsupported), Use never applies, and
+          every other option set is refused unless the loop engine or the handler
+          honours it (LoopOptionUnsupported, naming it).
+        name: loopRefusal
+        recv: g *StreamGroup
+        results: error
+      - doc: loopOptionsSet lists the kinds of every option set on the group.
+        name: loopOptionsSet
+        recv: g *StreamGroup
+        results: "[]corenet.OptionKind"
       - name: Name
         recv: g *StreamGroup
         results: string

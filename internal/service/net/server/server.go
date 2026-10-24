@@ -49,6 +49,8 @@ type Server struct {
 	declErr error
 	// listeners are the live bound listeners.
 	listeners []*boundListener
+	// loopEngines are the running loop groups (ADR 0186).
+	loopEngines []loopEngine
 	// states mirrors listeners for reporting, including any degradation.
 	states []corenet.ListenerStateValue
 	// drainTimeout bounds Shutdown.
@@ -215,5 +217,6 @@ func (s *Server) State() corenet.StateValue {
 		RejectedConns:    s.rejected.Load(),
 		OversizedPackets: s.oversized.Load(),
 		AcceptBackoffs:   s.acceptBackoffs.Load(),
+		Loops:            s.loopStates(),
 	}
 }

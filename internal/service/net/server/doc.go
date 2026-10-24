@@ -43,6 +43,19 @@
 //
 // Package server — the listener that hands out close-tracking sockets.
 //
+// Package server — a loop group's engine on Linux: the leaf's native backends,
+// handed duplicated listener descriptors, or the portable backend.
+//
+// Package server — a loop group's engine off Linux: the portable backend.
+//
+// Package server — loop groups: the handler declaration kept unexported until
+// HandleLoop is published, the options a loop group refuses at Start, its
+// listeners and its engine in the server's lifecycle (ADR 0186).
+//
+// Package server — the portable loop backend: the default engine's accept
+// path and goroutines, every handler callback serialised onto one handler
+// goroutine (ADR 0186 §D3, §D7).
+//
 // Package server — the recvmmsg batched datagram reader.
 //
 // Package server — the recvmmsg message header layout.

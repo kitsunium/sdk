@@ -1,0 +1,3107 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      The states of a connection slot. A slot returns to stFree only once its
+      backend released the descriptor and every operation still in flight, its
+      generation moved on.
+    grouped: true
+    items:
+      - doc: stFree is a slot on the free list.
+        name: stFree
+        type: uint8
+        value: iota
+      - doc: stOpen serves its connection.
+        name: stOpen
+      - doc: stClosing was asked to close and still has output to send.
+        name: stClosing
+      - doc: |-
+          stDead has called OnClose and waits for its backend to release the
+          descriptor and every operation still in flight.
+        name: stDead
+    name: stFree
+  - doc: The flags of a connection slot.
+    grouped: true
+    items:
+      - doc: fPressure is the soft pressure set at accept.
+        name: fPressure
+        type: uint8
+        value: 1 << iota
+      - doc: |-
+          fWantWritable asks for OnWritable once the output falls under the
+          low-water mark.
+        name: fWantWritable
+      - doc: fDirty puts the slot on its ring's dirty list.
+        name: fDirty
+      - doc: fPeerDone is a peer that sent its last byte.
+        name: fPeerDone
+      - doc: |-
+          fSending is output the backend holds: EPOLLOUT armed, or a send in
+          flight.
+        name: fSending
+    name: fPressure
+  - doc: |-
+      The reasons a connection is closed, mapped to the preallocated error
+      OnClose receives (closeErr).
+    grouped: true
+    items:
+      - doc: |-
+          rNone is a clean close, by the handler or the peer: OnClose receives
+          nil.
+        name: rNone
+        type: uint8
+        value: iota
+      - doc: rSpill is unconsumed input past SpillCap, or the slab's budget spent.
+        name: rSpill
+      - doc: rIdle is no traffic for IdleTimeout.
+        name: rIdle
+      - doc: rDrain is the group's drain or stop.
+        name: rDrain
+      - doc: rErrno is a socket failure; the slot's errno says which.
+        name: rErrno
+      - doc: rEvict is an idle connection evicted under hard pressure.
+        name: rEvict
+    name: rNone
+  - grouped: true
+    items:
+      - doc: |-
+          lowWaterDiv sets the output low-water mark at OutputCap / lowWaterDiv:
+          a connection refused with LoopOutputFull hears OnWritable once its
+          pending output falls under it.
+        name: lowWaterDiv
+        type: int
+        value: "4"
+      - doc: |-
+          evictPerTick paces hard-pressure eviction: at most this many idle
+          connections closed per ring and tick.
+        name: evictPerTick
+        type: int
+        value: "16"
+    name: lowWaterDiv
+  - doc: |-
+      loopDebug reports whether the loopdebug build tag compiled the thread
+      check in.
+    items:
+      - name: loopDebug
+        value: "false"
+    name: loopDebug
+  - grouped: true
+    items:
+      - doc: |-
+          epollAcceptBurst is the most connections one listener readiness
+          accepts before the loop serves the events already in hand.
+        name: epollAcceptBurst
+        type: int
+        value: "128"
+      - doc: readChunk is the most bytes one read asks for.
+        name: readChunk
+        type: int
+        value: 16 << 10
+      - doc: |-
+          minRead is the least room in the read arena worth a read: below it the
+          connection is read on the next iteration, its readiness still level.
+        name: minRead
+        type: int
+        value: 2 << 10
+      - doc: |-
+          arenaSize is the loop's read arena: where a batch's received bytes
+          live until OnBatchEnd returns.
+        name: arenaSize
+        type: int
+        value: 2 << 20
+      - doc: |-
+          backoffMin is the first wait before a listener disarmed by EMFILE or
+          ENFILE is armed again, in ticks (5 ms rounds up to one).
+        name: backoffMin
+        type: int64
+        value: "1"
+      - doc: backoffMax caps that wait, doubled at each pause, at one second.
+        name: backoffMax
+        type: int64
+        value: int64(time.Second / tickEvery)
+      - doc: tagWake marks the epoll event of the wake eventfd, not a connection.
+        name: tagWake
+        type: int32
+        value: "-1"
+      - doc: tagListen marks listener i's epoll event, at tagListen-i.
+        name: tagListen
+        type: int32
+        value: "-2"
+      - doc: |-
+          efdNonblock is EFD_NONBLOCK (include/uapi/linux/eventfd.h, the O_
+          flag's value).
+        name: efdNonblock
+        type: uintptr
+        value: syscall.O_NONBLOCK
+      - doc: |-
+          efdCloexec is EFD_CLOEXEC (include/uapi/linux/eventfd.h, the O_ flag's
+          value).
+        name: efdCloexec
+        type: uintptr
+        value: syscall.O_CLOEXEC
+      - doc: |-
+          epollExclusive is EPOLLEXCLUSIVE (include/uapi/linux/eventpoll.h, 4.5):
+          one loop woken per incoming connection, not every loop.
+        name: epollExclusive
+        type: uint32
+        value: 1 << 28
+      - doc: siocinq is SIOCINQ, FIONREAD on a socket (asm-generic/ioctls.h).
+        name: siocinq
+        type: uintptr
+        value: "0x541B"
+      - doc: connEvents are a connection's events while it reads.
+        name: connEvents
+        type: uint32
+        value: syscall.EPOLLIN | syscall.EPOLLRDHUP
+    name: epollAcceptBurst
+  - doc: |-
+      idleSlotHeapBudget is the most Go heap, in bytes, one idle connection
+      costs on a native backend — 256 bytes, its slot and its timer link, as the
+      package documentation states. The memory test measures the same bound.
+    items:
+      - name: idleSlotHeapBudget
+        type: uintptr
+        value: "256"
+    name: idleSlotHeapBudget
+  - doc: |-
+      A slot and its timer link — the wheel's next, prev and at entries — must
+      fit idleSlotHeapBudget: past it the difference is a negative uintptr
+      constant, which does not compile.
+    items:
+      - name: _
+        type: uintptr
+        value: idleSlotHeapBudget - (unsafe.Sizeof(connCtl{}) + 2*unsafe.Sizeof(int32(0)) + unsafe.Sizeof(int64(0)))
+    name: _
+  - doc: backendEpoll is the backend startEpoll reports.
+    items:
+      - name: backendEpoll
+        type: corenet.LoopBackend
+        value: corenet.LoopBackendEpoll
+    name: backendEpoll
+  - doc: |-
+      The io_uring accept watchdog's bounds. They live in a file every Linux
+      architecture builds, not beside the watchdog, because the conformance suite
+      reads them on every Linux architecture, io_uring's wave 1 or not.
+    grouped: true
+    items:
+      - doc: |-
+          watchdogTicks is how long an accept may look stalled — armed, the
+          listener's queue not empty, no accept completion on any ring — before
+          the watchdog re-arms it.
+        name: watchdogTicks
+        type: int64
+        value: "100"
+      - doc: |-
+          watchdogFires is how many re-arms the watchdog makes before the ring
+          drains.
+        name: watchdogFires
+        type: int
+        value: "3"
+    name: watchdogTicks
+  - doc: |-
+      postQueueCap is how many posted operations one loop holds before Post
+      refuses with LoopPostQueueFull.
+    items:
+      - name: postQueueCap
+        type: int
+        value: "4096"
+    name: postQueueCap
+  - grouped: true
+    items:
+      - doc: |-
+          ioringMaxFixedFiles is IORING_MAX_FIXED_FILES, the most entries one
+          io_uring file table holds (io_uring/rsrc.h, 1 << 20 since 5.11).
+        name: ioringMaxFixedFiles
+        type: uint64
+        value: 1 << 20
+      - doc: |-
+          defaultCQBatch is how many completions or events one iteration reaps
+          when LoopValue.CQBatch is zero.
+        name: defaultCQBatch
+        type: int
+        value: "512"
+      - doc: |-
+          defaultSpillCap is LoopValue.SpillCap's default: one request head and
+          a modest body, unconsumed, per connection.
+        name: defaultSpillCap
+        type: int
+        value: 64 << 10
+      - doc: defaultOutputCap is LoopValue.OutputCap's default.
+        name: defaultOutputCap
+        type: int
+        value: 1 << 20
+      - doc: |-
+          ringsExplicit is a Rings the LoopValue set; the three ringsX values
+          are where Rings came from, as State reports it.
+        name: ringsExplicit
+        type: string
+        value: "\"explicit\""
+      - doc: |-
+          ringsDerived is a Rings the formula derived: ⌈target / table⌉, more
+          than one.
+        name: ringsDerived
+        type: string
+        value: "\"derived\""
+      - doc: |-
+          ringsSingle is one ring: no bound to size against, or one table holds
+          the target.
+        name: ringsSingle
+        type: string
+        value: "\"single\""
+    name: ioringMaxFixedFiles
+  - grouped: true
+    items:
+      - doc: minClassShift is the smallest chunk, 2 KiB.
+        name: minClassShift
+        type: uint
+        value: "11"
+      - doc: |-
+          arenaBytes is the least memory one mapping adds to a class: chunks are
+          mapped a quarter of a mebibyte at a time, or one chunk when a chunk is
+          larger.
+        name: arenaBytes
+        type: int
+        value: 256 << 10
+      - doc: |-
+          defaultSlabBudget is the global ceiling on the bytes a loop's
+          connections hold in spill and output together. Past it a Write is
+          refused with LoopOutputFull and an unconsumed tail closes its
+          connection with LoopSpillFull: load is shed by name, never by the
+          kernel's OOM killer.
+        name: defaultSlabBudget
+        type: int
+        value: 128 << 20
+      - doc: noChunk marks a chunkRef that holds nothing.
+        name: noChunk
+        type: int32
+        value: "-1"
+    name: minClassShift
+  - doc: |-
+      batchBuckets is the batch-duration histogram's width: bucket i counts
+      batches of under 2^i nanoseconds.
+    items:
+      - name: batchBuckets
+        type: int
+        value: "40"
+    name: batchBuckets
+  - doc: |-
+      The io_uring ABI this backend speaks, declared in-tree because the standard
+      library's syscall package has none of it and golang.org/x/sys is banned
+      (ADR 0018). Every number and layout is Linux include/uapi/linux/io_uring.h
+      as of 6.8, and the layouts are frozen by uring_abi_linux_internal_test.go's
+      Sizeof and Offsetof checks. The four architectures share the generic syscall
+      table, where io_uring has had the same numbers since 5.1.
+    grouped: true
+    items:
+      - name: sysIOURingSetup
+        type: uintptr
+        value: "425"
+      - name: sysIOURingEnter
+        type: uintptr
+        value: "426"
+      - name: sysIOURingRegister
+        type: uintptr
+        value: "427"
+      - doc: io_uring_setup flags.
+        name: setupCQSize
+        type: uint32
+        value: 1 << 3
+      - name: setupClamp
+        type: uint32
+        value: 1 << 4
+      - name: setupSubmitAll
+        type: uint32
+        value: 1 << 7
+      - name: setupCoopTaskrun
+        type: uint32
+        value: 1 << 8
+      - name: setupSingleIssuer
+        type: uint32
+        value: 1 << 12
+      - name: setupDeferTaskrun
+        type: uint32
+        value: 1 << 13
+      - doc: io_uring_params.features.
+        name: featSingleMmap
+        type: uint32
+        value: 1 << 0
+      - name: featNoDrop
+        type: uint32
+        value: 1 << 1
+      - name: featExtArg
+        type: uint32
+        value: 1 << 8
+      - doc: io_uring_enter flags.
+        name: enterGetEvents
+        type: uint32
+        value: 1 << 0
+      - name: enterExtArg
+        type: uint32
+        value: 1 << 3
+      - doc: SQ ring flags.
+        name: sqCQOverflow
+        type: uint32
+        value: 1 << 1
+      - doc: mmap offsets.
+        name: offSQRing
+        type: uintptr
+        value: "0"
+      - name: offCQRing
+        type: uintptr
+        value: "0x8000000"
+      - name: offSQEs
+        type: uintptr
+        value: "0x10000000"
+      - doc: Opcodes.
+        name: opNop
+        type: uint8
+        value: "0"
+      - name: opPollAdd
+        type: uint8
+        value: "6"
+      - name: opAccept
+        type: uint8
+        value: "13"
+      - name: opAsyncCancel
+        type: uint8
+        value: "14"
+      - name: opClose
+        type: uint8
+        value: "19"
+      - name: opRead
+        type: uint8
+        value: "22"
+      - name: opSend
+        type: uint8
+        value: "26"
+      - name: opRecv
+        type: uint8
+        value: "27"
+      - doc: SQE flags.
+        name: sqeFixedFile
+        type: uint8
+        value: 1 << 0
+      - name: sqeAsync
+        type: uint8
+        value: 1 << 4
+      - name: sqeBufferSelect
+        type: uint8
+        value: 1 << 5
+      - doc: ioprio flags of accept and recv.
+        name: acceptMultishot
+        type: uint16
+        value: 1 << 0
+      - name: recvMultishot
+        type: uint16
+        value: 1 << 1
+      - doc: "len flag of POLL_ADD: a multishot poll."
+        name: pollAddMulti
+        type: uint32
+        value: 1 << 0
+      - doc: Cancel flags.
+        name: cancelAll
+        type: uint32
+        value: 1 << 0
+      - name: cancelFD
+        type: uint32
+        value: 1 << 1
+      - name: cancelFDFixed
+        type: uint32
+        value: 1 << 3
+      - doc: CQE flags.
+        name: cqeFBuffer
+        type: uint32
+        value: 1 << 0
+      - name: cqeFMore
+        type: uint32
+        value: 1 << 1
+      - name: cqeBufferShift
+        type: uint32
+        value: "16"
+      - doc: |-
+          fileIndexAlloc is IORING_FILE_INDEX_ALLOC, (~0U): the kernel picks a
+          free slot of the direct-descriptor table and returns it in res.
+        name: fileIndexAlloc
+        type: uint32
+        value: "0xFFFFFFFF"
+      - doc: io_uring_register opcodes.
+        name: regEventFD
+        type: uintptr
+        value: "4"
+      - name: regProbe
+        type: uintptr
+        value: "8"
+      - name: regFiles2
+        type: uintptr
+        value: "13"
+      - name: regPbufRing
+        type: uintptr
+        value: "22"
+      - name: unregPbufRing
+        type: uintptr
+        value: "23"
+      - doc: |-
+          pbufRingMmap is IOU_PBUF_RING_MMAP (6.4): the kernel allocates the
+          buffer ring and the loop maps it, at offPbufRing | bgid << offPbufShift,
+          so no user page is pinned against RLIMIT_MEMLOCK.
+        name: pbufRingMmap
+        type: uint16
+        value: "1"
+      - name: offPbufRing
+        type: uintptr
+        value: "0x80000000"
+      - name: offPbufShift
+        type: uintptr
+        value: "16"
+      - doc: rsrcRegisterSparse is IORING_RSRC_REGISTER_SPARSE.
+        name: rsrcRegisterSparse
+        type: uint32
+        value: 1 << 0
+      - doc: probeOpSupported is IO_URING_OP_SUPPORTED.
+        name: probeOpSupported
+        type: uint16
+        value: 1 << 0
+      - doc: probeOps is how many entries the probe asks about.
+        name: probeOps
+        type: uint32
+        value: "64"
+      - doc: errnoETIME and the others the enter loop branches on.
+        name: errnoETIME
+        value: syscall.Errno(62)
+      - name: errnoECANCELED
+        value: syscall.Errno(125)
+      - name: errnoENOBUFS
+        type: syscall.Errno
+        value: syscall.ENOBUFS
+    name: sysIOURingSetup
+  - doc: The operations a CQE's user_data names, in its top byte.
+    grouped: true
+    items:
+      - name: udRecv
+        type: uint64
+        value: iota + 1
+      - name: udSend
+      - name: udCancel
+      - name: udClose
+      - name: udAccept
+      - name: udWake
+      - name: udFan
+      - name: udAcceptCancel
+      - name: udOrphanClose
+    name: udRecv
+  - grouped: true
+    items:
+      - doc: |-
+          acceptDepth is how many single-shot accepts a ring keeps in flight per
+          listener.
+        name: acceptDepth
+        type: int
+        value: "32"
+      - doc: |-
+          acceptReserve is the free direct-descriptor entries a ring keeps: under
+          it the ring stops accepting, and it resumes at twice as many.
+        name: acceptReserve
+        type: int
+        value: "16"
+      - doc: starvedCap bounds the connections waiting for a provided buffer.
+        name: starvedCap
+        type: int
+        value: "65536"
+      - doc: |-
+          reapRounds bounds the CQ batches one ring reaps per iteration, so one
+          ring cannot starve the others forever.
+        name: reapRounds
+        type: int
+        value: "4"
+      - doc: |-
+          staleFill is the byte a provided buffer is overwritten with under the
+          fill hook: a stale byte read back shows as it.
+        name: staleFill
+        type: byte
+        value: "0xAA"
+      - doc: |-
+          maxProcessFDs bounds slotOf on process descriptors, whatever
+          RLIMIT_NOFILE says.
+        name: maxProcessFDs
+        type: uint64
+        value: 1 << 22
+      - doc: genMask keeps the 24 bits of a generation user_data carries.
+        name: genMask
+        type: uint32
+        value: 1<<24 - 1
+    name: acceptDepth
+  - doc: |-
+      peerPeekBytes is the release check's read buffer: any read will do, the
+      check only waits for the end of the stream.
+    items:
+      - name: peerPeekBytes
+        type: int
+        value: "64"
+    name: peerPeekBytes
+  - grouped: true
+    items:
+      - doc: |-
+          uringEntries is a serving ring's SQ size; CLAMP lets the kernel lower
+          it, and the size it grants is read back from the params. A ring's SQ and
+          CQ are charged to RLIMIT_MEMLOCK for a process without CAP_IPC_LOCK
+          (an 8 MiB default on most distributions), so they are sized to keep a
+          few rings within it rather than to the largest burst: a full SQ submits
+          inline, a full CQ overflows into the kernel's list (NODROP).
+        name: uringEntries
+        type: uint32
+        value: "1024"
+      - doc: probeEntries sizes the probe's short-lived rings.
+        name: probeEntries
+        type: uint32
+        value: "16"
+      - doc: cqFactor is how many times uringEntries CQSIZE asks for the CQ.
+        name: cqFactor
+        type: uint32
+        value: "4"
+      - doc: bufGroup is the provided-buffer group every recv selects from.
+        name: bufGroup
+        type: uint16
+        value: "1"
+      - doc: defaultBufs is how many provided buffers a ring has.
+        name: defaultBufs
+        type: uint32
+        value: "4096"
+      - doc: defaultBufSize is the size of one provided buffer, in bytes.
+        name: defaultBufSize
+        type: uint32
+        value: "4096"
+      - doc: enterRetries bounds the retries of a busy submit.
+        name: enterRetries
+        type: int
+        value: "8"
+    name: uringEntries
+  - grouped: true
+    items:
+      - doc: |-
+          tickEvery is the timer wheel's resolution: a deadline fires no earlier
+          than asked and at most one tick late.
+        name: tickEvery
+        type: time.Duration
+        value: 10 * time.Millisecond
+      - doc: |-
+          wheelSlots is the wheel's circumference, a power of two; a deadline
+          further than wheelSlots ticks away waits in its bucket for its round.
+        name: wheelSlots
+        type: int64
+        value: "1024"
+      - doc: noLink ends a bucket list.
+        name: noLink
+        type: int32
+        value: "-1"
+    name: tickEvery
+files:
+  - decls:
+      - stFree
+      - fPressure
+      - rNone
+      - connCtl
+      - (*connCtl).pending
+      - emptyConn
+    name: conn.go
+  - decls:
+      - lowWaterDiv
+      - driver
+      - shared
+      - ring
+      - ringCounters
+      - ringStats
+      - loop
+      - newRing
+      - (*ring).take
+      - (*ring).opened
+      - (*ring).abandon
+      - (*ring).ref
+      - (*ring).deliver
+      - (*ring).keep
+      - (*ring).appendSpill
+      - (*ring).spillRoom
+      - (*ring).deliverSpill
+      - (*ring).hasSpill
+      - (*ring).compactSpill
+      - clampConsumed
+      - (*ring).markDirty
+      - (*ring).flushDirty
+      - (*ring).settle
+      - (*ring).sent
+      - (*ring).fail
+      - (*ring).finish
+      - (*ring).release
+      - closeErr
+      - (*ring).armTimer
+      - (*ring).expire
+      - (*ring).lruPush
+      - (*ring).lruUnlink
+      - (*ring).lruTouch
+      - (*ring).evict
+      - (*loop).endBatch
+      - (*ring).compactAll
+      - (*loop).now
+      - (*loop).lookup
+      - (*loop).Write
+      - (*loop).growOut
+      - (*loop).Close
+      - (*loop).SetDeadline
+      - (*loop).Pressure
+      - (*loop).Post
+    name: core.go
+  - decls:
+      - loopDebug
+      - threadCheck
+    name: debug_off_linux.go
+  - decls: []
+    name: doc.go
+  - decls:
+      - epollAcceptBurst
+      - epollRunner
+      - epollLoop
+      - startEpoll
+      - (*epollRunner).drain
+      - (*epollRunner).stop
+      - (*epollRunner).wait
+      - (*epollRunner).done
+      - (*epollLoop).wake
+      - (*epollLoop).setup
+      - (*epollLoop).ctl
+      - (*epollLoop).armListeners
+      - (*epollLoop).disarmListeners
+      - (*epollLoop).run
+      - (*epollLoop).wait
+      - (*epollLoop).handle
+      - (*epollLoop).drainWake
+      - (*epollLoop).accept
+      - (*epollLoop).acceptFailed
+      - (*epollLoop).admit
+      - (*epollLoop).reject
+      - (*epollLoop).pause
+      - (*epollLoop).pace
+      - (*epollLoop).conn
+      - (*epollLoop).writable
+      - (*epollLoop).readable
+      - (*epollLoop).read
+      - (*epollLoop).readBuf
+      - (*epollLoop).received
+      - (*epollLoop).outEvents
+      - (*epollLoop).flush
+      - (*epollLoop).shutdown
+      - (*epollLoop).unread
+      - (*epollLoop).control
+      - (*epollLoop).closeAll
+      - (*epollLoop).teardown
+      - errnoOf
+    name: epoll_linux.go
+  - decls:
+      - idleSlotHeapBudget
+      - _
+      - Listener
+      - Config
+      - loopHooks
+      - Group
+      - runner
+      - Start
+      - (*Group).Shutdown
+      - (*Group).Close
+      - (*Group).State
+      - (*Group).Rejected
+      - (*Group).Live
+      - newLoop
+      - swallowErr
+    name: group.go
+  - decls:
+      - backendEpoll
+      - watchdogTicks
+      - startNative
+      - descriptorLimit
+      - mmapAnon
+      - closeFDs
+      - closeListeners
+      - unavailable
+    name: group_linux.go
+  - decls:
+      - postQueueCap
+      - postQueue
+      - newPostQueue
+      - (*postQueue).post
+      - (*postQueue).drain
+      - (*postQueue).close
+    name: postq.go
+  - decls:
+      - ioringMaxFixedFiles
+      - sizing
+      - resolve
+      - ringCount
+      - orDefault
+    name: sizing.go
+  - decls:
+      - minClassShift
+      - chunkRef
+      - chunkRef.empty
+      - slab
+      - slabClass
+      - newSlab
+      - classOf
+      - (*slab).alloc
+      - (*slab).grow
+      - (*slab).free
+      - (*slab).bytes
+      - (*slab).data
+      - (*slab).size
+    name: slab.go
+  - decls:
+      - batchBuckets
+      - (*shared).observe
+      - (*shared).batchP99
+      - (*ring).publish
+    name: stats.go
+  - decls:
+      - sysIOURingSetup
+      - sqringOffsets
+      - cqringOffsets
+      - uringParams
+      - sqe
+      - cqe
+      - uringBuf
+      - bufReg
+      - rsrcRegister
+      - getEventsArg
+      - kernelTimespec
+      - probeHeader
+      - probeOp
+      - probeBuf
+      - uringSetup
+      - uringRegister
+      - uringEnterWait
+      - uringEnterSubmit
+      - fixedFd
+      - targetIndex
+    name: uring_abi_linux.go
+  - decls:
+      - udRecv
+      - acceptDepth
+      - udPack
+      - udOp
+      - udGen
+      - udSlot
+      - uRing
+      - uLoop
+      - uringRunner
+      - (*uringRunner).drain
+      - (*uringRunner).stop
+      - (*uringRunner).wait
+      - (*uringRunner).done
+      - (*uLoop).wake
+      - startIOURing
+      - probeError
+      - (*uLoop).run
+      - (*uLoop).setup
+      - (*uLoop).setupFlags
+      - (*uLoop).probe
+      - (*uLoop).openStaged
+      - (*uLoop).build
+      - orErrno
+      - (*uLoop).newRing
+      - (*uLoop).bufShape
+      - (*uLoop).registerFan
+      - (*uLoop).registerTable
+      - (*uLoop).slotSpace
+      - (*uLoop).onFD
+      - (*uRing).pollFD
+      - (*uRing).armAccepts
+      - (*uRing).acceptRoom
+      - (*uRing).cancelAccepts
+      - (*uRing).used
+      - (*uRing).pace
+      - (*uLoop).serve
+      - (*uLoop).batch
+      - (*uLoop).live
+      - (*uRing).reapAll
+      - (*uRing).handle
+      - (*uRing).onConnOp
+      - (*uRing).onAccept
+      - (*uRing).acceptFailed
+      - (*uRing).refuses
+      - (*uRing).orphanClose
+      - (*uRing).armRecv
+      - (*uRing).owns
+      - (*uRing).onRecv
+      - (*uRing).recvCancelled
+      - (*uRing).recvBytes
+      - (*uRing).recvStarved
+      - (*uRing).recvEOF
+      - (*uRing).failLive
+      - (*uRing).onSend
+      - (*uRing).sendProgress
+      - (*uRing).opDone
+      - (*uRing).maybeClose
+      - (*uRing).onClose
+      - (*uRing).onWake
+      - (*uRing).onFan
+      - (*uRing).returnBuffers
+      - (*uRing).giveBack
+      - fillStale
+      - (*uRing).rearmStarved
+      - (*uRing).flush
+      - (*uRing).sendFlight
+      - (*uRing).shutdown
+      - (*uRing).unread
+      - (*uRing).watchdog
+      - listenerQueue
+      - (*uLoop).control
+      - (*uLoop).closeAll
+      - (*uLoop).teardown
+    name: uring_loop_linux.go
+  - decls:
+      - peerPeekBytes
+      - selfTestPayload
+      - (*uLoop).selfTest
+      - (*selfTestRun).releases
+      - peerSeesEnd
+      - selfTestRing
+      - selfTestClient
+      - selfTestRun
+      - (*selfTestRun).pump
+      - (*selfTestRun).exchange
+      - (*selfTestRun).onCQE
+      - (*selfTestRun).onAccept
+      - (*selfTestRun).verdict
+      - loopbackListener
+    name: uring_probe_linux.go
+  - decls:
+      - uringEntries
+      - uring
+      - openURing
+      - (*uring).mapRings
+      - (*uring).buildViews
+      - errnoOfErr
+      - (*uring).close
+      - (*uring).get
+      - (*uring).publish
+      - (*uring).pending
+      - (*uring).submit
+      - (*uring).wait
+      - (*uring).ready
+      - (*uring).reap
+      - (*uring).overflowed
+      - (*uring).setupBuffers
+      - (*uring).mapBufRing
+      - registerBufRing
+      - (*uring).bufEntries
+      - (*uring).buf
+      - (*uring).addBuf
+      - (*uring).publishBufs
+      - (*uring).registerSparse
+      - (*uring).supports
+      - prepAccept
+      - prepRecv
+      - prepSend
+      - prepCancelFixed
+      - onProcessFD
+      - prepCloseDirect
+      - prepCancelUserData
+      - prepPollMulti
+    name: uring_ring_linux.go
+  - decls:
+      - tickEvery
+      - wheel
+      - newWheel
+      - (*wheel).arm
+      - (*wheel).disarm
+      - (*wheel).grow
+      - (*wheel).armed
+      - (*wheel).advance
+    name: wheel.go
+functions:
+  - doc: emptyConn is a slot's state on the free list.
+    name: emptyConn
+    params: gen uint32
+    results: connCtl
+  - doc: newRing builds ring i of lp over drv.
+    name: newRing
+    params: lp *loop, i int, drv driver
+    results: "*ring"
+  - doc: |-
+      clampConsumed treats an OnData return outside 0 to n as n, as LoopHandler
+      documents.
+    name: clampConsumed
+    params: v, n int
+    results: int
+  - doc: closeErr maps a close reason to the preallocated error OnClose receives.
+    name: closeErr
+    params: reason uint8, errno int32
+    results: error
+  - doc: threadCheck compiles no check without the loopdebug build tag.
+    name: threadCheck
+    params: _ int
+    results: func() bool
+  - doc: |-
+      startEpoll starts g's loops on epoll.
+
+      Goroutine lifecycle: it launches one goroutine per loop, locked to its
+      thread, which returns once the loop stopped or drained, and one reaper that
+      waits for them all, closes the listeners and closes fin, then returns.
+    name: startEpoll
+    params: g *Group, cfg *Config
+    results: error
+  - doc: errnoOf extracts the errno of a syscall error, EIO when it is none.
+    name: errnoOf
+    params: err error
+    results: int32
+  - name: Start
+    params: cfg Config
+    results: "*Group, error"
+  - doc: newLoop builds loop i of g, its rings empty, its slab mapped by mapper.
+    name: newLoop
+    params: g *Group, cfg Config, i int, mapper func(int) ([]byte, error)
+    results: "*loop"
+  - doc: |-
+      swallowErr intentionally discards a non-actionable error, recording the
+      discard so the error audit treats it as deliberate rather than dropped.
+
+      The loop has no caller to return to on these paths: a descriptor it closes
+      is already out of its tables, a mapping it unmaps is already out of its
+      slab, an epoll_ctl on a listener or a connection the loop is about to drop
+      or retry at the next readiness, and the start line's writer is the
+      caller's own object. None of them changes what the loop does next.
+    name: swallowErr
+    params: err error
+  - doc: |-
+      startNative starts g on the backend cfg asks for. auto takes io_uring when
+      the staged probe passes and epoll otherwise, the reason in State and on the
+      start line (the batchDegradation precedent); an explicit io_uring the probe
+      refused is LoopBackendUnavailable. The portable backend is server's, never
+      the leaf's (ADR 0186 §D3).
+    name: startNative
+    params: g *Group, cfg *Config
+    results: error
+  - doc: |-
+      descriptorLimit is the effective RLIMIT_NOFILE soft limit, zero when it
+      cannot be read.
+    name: descriptorLimit
+    results: uint64
+  - doc: mmapAnon maps n bytes of private anonymous memory, outside the Go heap.
+    name: mmapAnon
+    params: n int
+    results: "[]byte, error"
+  - doc: closeFDs closes every valid descriptor of fds.
+    name: closeFDs
+    params: fds []int
+  - doc: closeListeners closes the hand-off descriptors of a group that never started.
+    name: closeListeners
+    params: ls []Listener
+  - doc: unavailable wraps a setup failure as LoopBackendUnavailable naming the step.
+    name: unavailable
+    params: step string, err error
+    results: error
+  - doc: newPostQueue allocates a queue of postQueueCap entries.
+    name: newPostQueue
+    params: wake func()
+    results: "*postQueue"
+  - doc: |-
+      resolve applies the defaults and the one ring formula of ADR 0186 §D5 to v,
+      against the effective descriptor limit. A limit of zero leaves no
+      descriptor for anything, and is refused before the division it would
+      otherwise reach.
+    name: resolve
+    params: v corenet.LoopValue, maxConns int, rlimit uint64
+    results: sizing, error
+  - doc: |-
+      ringCount is the one formula: the explicit value, otherwise
+      ⌈target / table⌉, and one when no bound was set.
+    name: ringCount
+    params: explicit, target int, table uint64
+    results: int, string
+  - doc: orDefault returns v, or def when v is zero or less.
+    name: orDefault
+    params: v, def int
+    results: int
+  - doc: newSlab builds a slab whose largest class holds maxChunk bytes.
+    name: newSlab
+    params: maxChunk, budget int, mapper func(n int) ([]byte, error)
+    results: "*slab"
+  - doc: classOf is the smallest class whose chunk holds n bytes.
+    name: classOf
+    params: n int
+    results: uint8
+  - doc: uringSetup is io_uring_setup(2).
+    name: uringSetup
+    params: entries uint32, p *uringParams
+    results: int, syscall.Errno
+  - doc: uringRegister is io_uring_register(2).
+    name: uringRegister
+    params: fd int, op uintptr, arg unsafe.Pointer, n uint32
+    results: syscall.Errno
+  - doc: |-
+      uringEnterWait is io_uring_enter(2) that may block: one Syscall6, so the
+      runtime knows the thread is in the kernel, per batch.
+    name: uringEnterWait
+    params: fd int, submit, minComplete, flags uint32, arg unsafe.Pointer, argSz uintptr
+    results: int, syscall.Errno
+  - doc: |-
+      uringEnterSubmit is io_uring_enter(2) that only submits and never blocks:
+      RawSyscall6, with no scheduler round trip.
+    name: uringEnterSubmit
+    params: fd int, submit uint32
+    results: int, syscall.Errno
+  - doc: |-
+      fixedFd is the descriptor field of an SQE flagged IOSQE_FIXED_FILE: the
+      direct-descriptor index itself, 0-based.
+    name: fixedFd
+    params: index uint32
+    results: int32
+  - doc: |-
+      targetIndex is the file_index field that names a direct descriptor for
+      IORING_OP_CLOSE and for an accept into a chosen index: the index plus one,
+      zero meaning "not a direct descriptor".
+    name: targetIndex
+    params: index uint32
+    results: uint32
+  - doc: "udPack builds a user_data: the operation, 24 bits of generation, the slot."
+    name: udPack
+    params: op uint64, gen, slot uint32
+    results: uint64
+  - doc: udOp is the operation a user_data names, in its top byte.
+    name: udOp
+    params: ud uint64
+    results: uint64
+  - doc: udGen is the 24 bits of generation a user_data carries.
+    name: udGen
+    params: ud uint64
+    results: uint32
+  - doc: udSlot is the slot a user_data names, in its low half.
+    name: udSlot
+    params: ud uint64
+    results: uint32
+  - doc: |-
+      startIOURing starts g's loops on io_uring. A loop whose probe fails stops
+      the others; the error names the stage and the kernel's answer.
+
+      Goroutine lifecycle: it launches one goroutine per loop, locked to its
+      thread, which returns once the loop stopped or drained; one reaper that
+      waits for them all and closes fin; and, once the group runs, one goroutine
+      that waits on fin, closes the listeners and returns.
+    name: startIOURing
+    params: g *Group, cfg *Config, hooks loopHooks
+    results: error
+  - doc: probeError is a probe stage's failure.
+    name: probeError
+    params: stage string, errno syscall.Errno
+    results: error
+  - doc: orErrno returns the first non-zero errno.
+    name: orErrno
+    params: a, b syscall.Errno
+    results: syscall.Errno
+  - doc: fillStale overwrites b with staleFill.
+    name: fillStale
+    params: b []byte
+  - doc: |-
+      listenerQueue is the listening socket's accept queue (TCP_INFO's unacked
+      on a listener), zero when it cannot be read.
+    name: listenerQueue
+    params: fd int
+    results: uint32
+  - doc: peerSeesEnd reports whether fd reads end-of-stream within 200 ms.
+    name: peerSeesEnd
+    params: fd int
+    results: bool
+  - doc: |-
+      selfTestRing opens the self-test's ring with flags, and gives it buffers
+      and a table as a serving ring has them. A failure closes it.
+    name: selfTestRing
+    params: flags uint32
+    results: "*uring, error"
+  - doc: |-
+      selfTestClient connects a blocking client socket to the loopback port and
+      writes the payload, which waits in the socket before the recv is armed. A
+      failure closes the socket.
+    name: selfTestClient
+    params: port int, payload []byte
+    results: int, error
+  - doc: |-
+      loopbackListener binds a listening socket on 127.0.0.1, port chosen by the
+      kernel.
+    name: loopbackListener
+    results: fd, port int, err error
+  - doc: |-
+      openURing sets an io_uring of entries SQEs up with flags, mapping it and building the
+      views. It returns the errno of the step that failed.
+    name: openURing
+    params: entries, flags uint32
+    results: "*uring, string, syscall.Errno"
+  - doc: errnoOfErr extracts an errno, EIO otherwise.
+    name: errnoOfErr
+    params: err error
+    results: syscall.Errno
+  - doc: |-
+      registerBufRing is IORING_REGISTER_PBUF_RING with reg, resv zero as the
+      uapi requires. Ubuntu's noble kernel 6.8.0-147 inverts that check
+      (io_uring/kbuf.c: `if (!memchr_inv(reg.resv, 0, sizeof(reg.resv)))
+      return -EINVAL;`, Ubuntu-6.8.0-147.147) and refuses every zero resv; on
+      EINVAL the registration is tried once more with one resv byte set, which
+      that kernel accepts and a correct one refuses again with EINVAL.
+    name: registerBufRing
+    params: fd int, reg *bufReg
+    results: syscall.Errno
+  - doc: |-
+      prepAccept fills s as an accept on lfd into a kernel-allocated direct
+      descriptor: multishot for the probe's self-test, single-shot for serving
+      (uRing.armAccepts says why).
+    name: prepAccept
+    params: s *sqe, lfd int, ud uint64, multishot bool
+  - doc: |-
+      prepRecv fills s as a multishot recv on direct descriptor index, selecting
+      provided buffers.
+    name: prepRecv
+    params: s *sqe, index uint32, ud uint64
+  - doc: prepSend fills s as a send of p on direct descriptor index.
+    name: prepSend
+    params: s *sqe, index uint32, p []byte, ud uint64
+  - doc: |-
+      prepCancelFixed fills s as a cancel of every operation on direct descriptor
+      index. It is never linked to the close: the close waits for the count.
+    name: prepCancelFixed
+    params: s *sqe, index uint32, ud uint64
+  - doc: |-
+      onProcessFD turns an SQE filled for a direct descriptor into the same
+      operation on the process descriptor of the same number: no fixed-file
+      flag, a cancel that looks the number up in the process table, an accept
+      that installs into it, close-on-exec.
+    name: onProcessFD
+    params: s *sqe
+  - doc: prepCloseDirect fills s as the close of direct descriptor index.
+    name: prepCloseDirect
+    params: s *sqe, index uint32, ud uint64
+  - doc: prepCancelUserData fills s as a cancel of every operation carrying target.
+    name: prepCancelUserData
+    params: s *sqe, target, ud uint64
+  - doc: prepPollMulti fills s as a multishot POLLIN on a process descriptor.
+    name: prepPollMulti
+    params: s *sqe, fd int, ud uint64
+  - doc: newWheel builds a wheel for n slots, its clock at tick now.
+    name: newWheel
+    params: n int, now int64
+    results: "*wheel"
+imports:
+  atomic: sync/atomic
+  bits: math/bits
+  bytes: bytes
+  cmp: cmp
+  context: context
+  corenet: github.com/kitsunium/sdk/internal/core/net
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  fmt: fmt
+  io: io
+  os: os
+  runtime: runtime
+  slices: slices
+  sync: sync
+  syscall: syscall
+  time: time
+  unsafe: unsafe
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/net/loop
+  name: loop
+  purpose: "Package loop is the network domain's event-loop engine (ADR 0186): the native backends a plaintext stream group runs on when it is served by a corenet.LoopHandler — epoll on every Linux architecture, io_uring after a staged probe of the running kernel — and nothing else of the SDK."
+types:
+  - doc: |-
+      connCtl is one connection slot's control state. It holds no pointer, so the
+      table of them is a pointer-free Go slice the race detector sees and the
+      collector does not scan (ADR 0186 §D7); every byte it names lives in the
+      slab.
+    fields:
+      - doc: gen is the slot's generation, never zero once the slot has served.
+        name: gen
+        type: uint32
+      - doc: state and flags are the slot's state and its flags.
+        name: state
+        type: uint8
+      - name: flags
+        type: uint8
+      - doc: reason is why the connection closed; errno its errno when it is rErrno.
+        name: reason
+        type: uint8
+      - name: errno
+        type: int32
+      - doc: |-
+          fd is the connection's descriptor: a process descriptor on epoll, a
+          direct-descriptor index on io_uring.
+        name: fd
+        type: int32
+      - doc: |-
+          ops counts operations in flight on io_uring; the slot is released only
+          at zero.
+        name: ops
+        type: int32
+      - doc: |-
+          spill holds the unconsumed input; out the written, unsent output;
+          flight the output the kernel is sending.
+        name: spill
+        type: chunkRef
+      - name: out
+        type: chunkRef
+      - name: flight
+        type: chunkRef
+      - doc: lastIO is the tick of the last byte received or sent.
+        name: lastIO
+        type: int64
+      - doc: deadline is the handler's deadline tick, zero when none.
+        name: deadline
+        type: int64
+      - doc: lruPrev and lruNext link the ring's open connections, least recent first.
+        name: lruPrev
+        type: int32
+      - name: lruNext
+        type: int32
+      - doc: dirtyNext links the ring's dirty list.
+        name: dirtyNext
+        type: int32
+    kind: struct
+    methods:
+      - doc: pending is how many output bytes the slot holds, sent or not.
+        name: pending
+        recv: c *connCtl
+        results: int
+    name: connCtl
+  - doc: |-
+      driver is what a backend does for the core: send a connection's output and
+      release its descriptor. The core owns every other decision.
+    kind: named
+    name: driver
+    underlying: |-
+      interface {
+      	// flush starts or continues sending slot's output. It is called on the
+      	// loop's thread, once the batch's callbacks have returned.
+      	flush(r *ring, slot int32)
+      	// shutdown releases slot's descriptor once OnClose has been called; the
+      	// backend calls r.release(slot) when nothing of the connection remains in
+      	// the kernel.
+      	shutdown(r *ring, slot int32)
+      	// unread reports whether slot's socket holds bytes not yet received, so
+      	// eviction never closes a connection mid-request.
+      	unread(r *ring, slot int32) bool
+      }
+  - doc: |-
+      shared is what every loop of one group shares: the connection bound and
+      the counters it is judged on.
+    fields:
+      - doc: live is the group's open connections, across loops.
+        name: live
+        type: atomic.Int64
+      - doc: rejected counts connections closed at accept by MaxConns.
+        name: rejected
+        type: atomic.Uint64
+      - doc: |-
+          hist counts batch durations by power of two, for the p99 State
+          reports: loops write it, State reads it.
+        name: hist
+        type: "[batchBuckets]atomic.Uint64"
+    kind: struct
+    methods:
+      - doc: observe records one batch's duration in the group's histogram.
+        name: observe
+        params: d time.Duration
+        recv: g *shared
+      - doc: |-
+          batchP99 returns the upper bound of the bucket holding the 99th
+          percentile, zero before any batch.
+        name: batchP99
+        recv: g *shared
+        results: time.Duration
+    name: shared
+  - doc: |-
+      ring is one descriptor shard of a loop: its slot table, its timers, its
+      least-recently-used list and its counters.
+    fields:
+      - doc: lp is the loop the ring belongs to; index its place in it.
+        name: lp
+        type: "*loop"
+      - name: index
+        type: int
+      - doc: conns is the slot table, grown on demand up to the loop's table size.
+        name: conns
+        type: "[]connCtl"
+      - doc: free is a stack of released slots.
+        name: free
+        type: "[]int32"
+      - doc: live is the ring's open connections.
+        name: live
+        type: int
+      - doc: wheel times every slot's deadline and idle bound.
+        name: wheel
+        type: "*wheel"
+      - doc: |-
+          lruHead and lruTail bound the list of open connections, least recent
+          at the head.
+        name: lruHead
+        type: int32
+      - name: lruTail
+        type: int32
+      - doc: dirtyHead starts the list of slots to flush at the end of the batch.
+        name: dirtyHead
+        type: int32
+      - doc: drv is the backend.
+        name: drv
+        type: driver
+      - doc: st is the ring's counters, published at the end of each batch.
+        name: st
+        type: ringCounters
+      - name: pub
+        type: "*ringStats"
+      - doc: draining is a ring that accepts nothing more.
+        name: draining
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          take reserves a slot for a new connection on descriptor fd. It reports
+          false when the ring's table is full; the caller closes fd. The backend
+          registers the slot, then calls opened.
+        name: take
+        params: fd int32
+        recv: r *ring
+        results: int32, bool
+      - doc: |-
+          opened counts the connection taken on slot, flags its pressure, arms its
+          timers and calls OnOpen.
+        name: opened
+        params: slot int32
+        recv: r *ring
+      - doc: abandon returns a slot taken for a connection that never opened.
+        name: abandon
+        params: slot int32
+        recv: r *ring
+      - doc: ref is slot's current reference.
+        name: ref
+        params: slot int32
+        recv: r *ring
+        results: corenet.LoopConnRef
+      - doc: |-
+          deliver hands data, received on slot, to the handler behind any spill, and
+          keeps what it does not consume. data must stay valid until OnBatchEnd
+          returns, as the handler's buf does.
+        name: deliver
+        params: slot int32, data []byte
+        recv: r *ring
+      - doc: keep copies an unconsumed tail into a fresh spill.
+        name: keep
+        params: slot int32, tail []byte
+        recv: r *ring
+      - doc: |-
+          appendSpill adds data behind slot's spill. The spill's bytes already handed
+          to the handler stay where they are until OnBatchEnd: a spill too small is
+          copied to a larger chunk and the old one released after the batch, never
+          compacted or reallocated in place.
+        name: appendSpill
+        params: slot int32, data []byte
+        recv: r *ring
+        results: bool
+      - doc: |-
+          spillRoom returns the free bytes behind slot's spill, growing it to a chunk
+          with at least want free bytes within the cap, so a backend can read
+          straight into it. It returns nil when the spill is at its cap or the budget
+          is spent; the caller then closes or reads elsewhere.
+        name: spillRoom
+        params: slot int32, want int
+        recv: r *ring
+        results: "[]byte"
+      - doc: |-
+          deliverSpill hands n bytes read straight into slot's spill (spillRoom) to
+          the handler with the rest of the spill.
+        name: deliverSpill
+        params: slot int32, n int
+        recv: r *ring
+      - doc: hasSpill reports whether slot holds unconsumed input.
+        name: hasSpill
+        params: slot int32
+        recv: r *ring
+        results: bool
+      - doc: |-
+          compactSpill moves slot's spill's unconsumed bytes to the front of its chunk.
+          It runs after OnBatchEnd, when no handed-out buffer survives.
+        name: compactSpill
+        params: slot int32
+        recv: r *ring
+      - doc: markDirty puts slot on the list flushed at the end of the batch.
+        name: markDirty
+        params: slot int32
+        recv: r *ring
+      - doc: |-
+          flushDirty sends every dirty slot's output and finishes the closes it
+          waited for. It runs once OnBatchEnd has returned.
+        name: flushDirty
+        recv: r *ring
+      - doc: |-
+          settle flushes slot's output and finishes it when it was waiting to close
+          and has nothing left to send.
+        name: settle
+        params: slot int32
+        recv: r *ring
+      - doc: |-
+          sent records that some of slot's output was sent, and fires OnWritable when
+          a producer waits and the output fell under the low-water mark. The byte
+          count is the driver's to pass; the pending total already reflects it.
+        name: sent
+        params: slot int32, _ int
+        recv: r *ring
+      - doc: fail closes slot now for reason, whatever output it holds.
+        name: fail
+        params: slot int32, reason uint8, errno int32
+        recv: r *ring
+      - doc: |-
+          finish calls OnClose, releases every chunk and timer of slot, and hands the
+          descriptor to the backend; the slot returns to the free list once the
+          backend calls release.
+        name: finish
+        params: slot int32, reason uint8, errno int32
+        recv: r *ring
+      - doc: |-
+          release returns a dead slot to the free list. The backend calls it once the
+          descriptor is closed and no operation of the slot remains in flight, so the
+          slot's memory and generation move on only then.
+        name: release
+        params: slot int32
+        recv: r *ring
+      - doc: |-
+          armTimer arms slot's timer at the earlier of its deadline and its idle
+          bound.
+        name: armTimer
+        params: slot int32
+        recv: r *ring
+      - doc: |-
+          expire is the wheel's callback: it fires the handler's deadline or closes
+          an idle connection, and re-arms what is still due later.
+        name: expire
+        params: slot int32
+        recv: r *ring
+      - doc: lruPush appends slot as the most recent.
+        name: lruPush
+        params: slot int32
+        recv: r *ring
+      - doc: lruUnlink removes slot from the list.
+        name: lruUnlink
+        params: slot int32
+        recv: r *ring
+      - doc: lruTouch moves slot to the most recent end.
+        name: lruTouch
+        params: slot int32
+        recv: r *ring
+      - doc: |-
+          evict closes up to evictPerTick connections idle for at least the eviction
+          age, least recent first, never one holding unread or unconsumed bytes or
+          output. It returns how many it closed.
+        name: evict
+        recv: r *ring
+        results: int
+      - doc: compactAll compacts every open slot's spill.
+        name: compactAll
+        recv: r *ring
+      - doc: publish copies the ring's counters to its atomics.
+        name: publish
+        recv: r *ring
+    name: ring
+  - doc: ringCounters are a ring's counters as its thread keeps them, plain.
+    fields:
+      - name: accepted
+        type: uint64
+      - name: closed
+        type: uint64
+      - name: batches
+        type: uint64
+      - name: completions
+        type: uint64
+      - name: starved
+        type: uint64
+      - name: retries
+        type: uint64
+      - name: pauses
+        type: uint64
+      - name: evicted
+        type: uint64
+      - name: watchdog
+        type: uint64
+    kind: struct
+    name: ringCounters
+  - doc: |-
+      ringStats are a ring's counters as State reads them, published at the
+      end of each batch.
+    fields:
+      - name: conns
+        type: atomic.Int64
+      - name: accepted
+        type: atomic.Uint64
+      - name: closed
+        type: atomic.Uint64
+      - name: batches
+        type: atomic.Uint64
+      - name: completions
+        type: atomic.Uint64
+      - name: starved
+        type: atomic.Uint64
+      - name: retries
+        type: atomic.Uint64
+      - name: pauses
+        type: atomic.Uint64
+      - name: evicted
+        type: atomic.Uint64
+      - name: watchdog
+        type: atomic.Uint64
+      - name: draining
+        type: atomic.Bool
+    kind: struct
+    name: ringStats
+  - doc: |-
+      loop is one loop: a thread, its rings, its slab, and the LoopIO its
+      handler is called with. Everything but post is touched by the loop's
+      thread alone.
+    fields:
+      - doc: index is the loop's place in its group.
+        name: index
+        type: int
+      - doc: |-
+          sz is the group's resolved configuration; idle its idle bound in
+          ticks, zero for none; evictIdle the idle age eviction waits for.
+        name: sz
+        type: sizing
+      - name: idle
+        type: int64
+      - name: evictIdle
+        type: int64
+      - doc: h is the handler.
+        name: h
+        type: corenet.LoopHandler
+      - doc: grp is what the group's loops share.
+        name: grp
+        type: "*shared"
+      - doc: rings are the loop's rings.
+        name: rings
+        type: "[]*ring"
+      - doc: slab holds every spill and output byte of the loop.
+        name: slab
+        type: "*slab"
+      - doc: post is the loop's queue of posted operations.
+        name: post
+        type: "*postQueue"
+      - doc: |-
+          deferred are chunks released once OnBatchEnd has returned, since a
+          buffer handed to OnData stays valid until then.
+        name: deferred
+        type: "[]chunkRef"
+      - doc: tick is the loop's clock, in ticks since start.
+        name: tick
+        type: int64
+      - name: epoch
+        type: time.Time
+      - doc: |-
+          threadOK reports whether the caller runs on the loop's thread; nil when
+          the check is not compiled (the loopdebug build tag).
+        name: threadOK
+        type: func() bool
+      - doc: draining refuses new connections and closes idle ones.
+        name: draining
+        type: bool
+      - doc: "hard is the loop's hard pressure: out of descriptors, or at MaxConns."
+        name: hard
+        type: bool
+      - doc: lowWater is the output mark under which OnWritable fires.
+        name: lowWater
+        type: int
+    kind: struct
+    methods:
+      - doc: |-
+          endBatch runs once OnBatchEnd has returned: flushes, releases the chunks the
+          batch held, compacts spills, and publishes the counters.
+        name: endBatch
+        params: started time.Time
+        recv: lp *loop
+      - doc: now converts the wall clock into the loop's ticks.
+        name: now
+        recv: lp *loop
+        results: int64
+      - doc: lookup resolves ref to its ring and slot, or reports it stale.
+        name: lookup
+        params: ref corenet.LoopConnRef
+        recv: lp *loop
+        results: "*ring, int32, bool"
+      - doc: "Write implements corenet.LoopIO: it copies p into ref's output."
+        name: Write
+        params: ref corenet.LoopConnRef, p []byte
+        recv: lp *loop
+        results: error
+      - doc: |-
+          growOut moves c's unsent output to a chunk with room for n more bytes. The
+          output is never what the kernel reads, so it may move; the flight never.
+        name: growOut
+        params: c *connCtl, n int
+        recv: lp *loop
+        results: bool
+      - doc: |-
+          Close implements corenet.LoopIO: the connection closes once its output has
+          left.
+        name: Close
+        params: ref corenet.LoopConnRef
+        recv: lp *loop
+        results: error
+      - doc: SetDeadline implements corenet.LoopIO, on the loop's timer wheel.
+        name: SetDeadline
+        params: ref corenet.LoopConnRef, d time.Duration
+        recv: lp *loop
+        results: error
+      - doc: Pressure implements corenet.LoopIO.
+        name: Pressure
+        params: ref corenet.LoopConnRef
+        recv: lp *loop
+        results: bool
+      - doc: "Post implements corenet.LoopIO: the one call any goroutine may make."
+        name: Post
+        params: op corenet.PostFunc, arg uintptr
+        recv: lp *loop
+        results: error
+    name: loop
+  - doc: epollRunner runs one epoll loop per thread.
+    fields:
+      - name: loops
+        type: "[]*epollLoop"
+      - name: wg
+        type: sync.WaitGroup
+      - name: fin
+        type: chan struct{}
+      - doc: lfds are the group's listeners, closed once every loop returned.
+        name: lfds
+        type: "[]int"
+    kind: struct
+    methods:
+      - doc: drain implements runner.
+        name: drain
+        recv: er *epollRunner
+      - doc: stop implements runner.
+        name: stop
+        recv: er *epollRunner
+      - doc: wait implements runner.
+        name: wait
+        recv: er *epollRunner
+      - doc: done implements runner.
+        name: done
+        recv: er *epollRunner
+        results: <-chan struct{}
+    name: epollRunner
+  - doc: "epollLoop is one loop on epoll: one ring, one epoll instance, one thread."
+    fields:
+      - name: lp
+        type: "*loop"
+      - name: r
+        type: "*ring"
+      - name: epfd
+        type: int
+      - name: evfd
+        type: int
+      - doc: lfds are the listeners, shared with the group's other loops.
+        name: lfds
+        type: "[]int"
+      - doc: |-
+          armed reports whether the listeners are in the epoll set; rearmAt is
+          the tick an EMFILE backoff ends at, backoff its current length.
+        name: armed
+        type: bool
+      - name: rearmAt
+        type: int64
+      - name: backoff
+        type: int64
+      - doc: events receives one epoll_wait.
+        name: events
+        type: "[]syscall.EpollEvent"
+      - doc: arena is the read arena; off how much of it this batch used.
+        name: arena
+        type: "[]byte"
+      - name: "off"
+        type: int
+      - doc: drainReq and stopReq are the group's requests, set from any goroutine.
+        name: drainReq
+        type: atomic.Bool
+      - name: stopReq
+        type: atomic.Bool
+      - doc: tid is the loop's thread, for the loopdebug check.
+        name: tid
+        type: int
+      - doc: |-
+          wakeMu orders a wake against the eventfd's close: a Post or a request
+          that lands as the loop stops must never write a descriptor number the
+          process has reused since.
+        name: wakeMu
+        type: sync.Mutex
+      - doc: evClosed is set once the eventfd is closed.
+        name: evClosed
+        type: bool
+    kind: struct
+    methods:
+      - doc: wake writes the loop's eventfd. It is safe from any goroutine.
+        name: wake
+        recv: el *epollLoop
+      - doc: |-
+          setup builds the loop's epoll instance, eventfd, arena and ring on its own
+          thread.
+        name: setup
+        recv: el *epollLoop
+        results: error
+      - doc: ctl adds or modifies fd in the epoll set, tagging the event with tag and gen.
+        name: ctl
+        params: op, fd int, events uint32, tag int32, gen uint32
+        recv: el *epollLoop
+        results: error
+      - doc: |-
+          armListeners puts every listener in the epoll set, one loop woken per
+          connection.
+        name: armListeners
+        recv: el *epollLoop
+      - doc: disarmListeners takes every listener out of the epoll set.
+        name: disarmListeners
+        recv: el *epollLoop
+      - doc: run is the loop's thread.
+        name: run
+        params: wg *sync.WaitGroup, ready chan<- error
+        recv: el *epollLoop
+      - doc: |-
+          wait blocks for the next batch of events, a tick at most while anything is
+          timed.
+        name: wait
+        recv: el *epollLoop
+        results: int
+      - doc: handle dispatches n events.
+        name: handle
+        params: n int
+        recv: el *epollLoop
+      - doc: drainWake reads the eventfd's counter and runs the posted operations.
+        name: drainWake
+        recv: el *epollLoop
+      - doc: accept takes up to epollAcceptBurst connections from lfd.
+        name: accept
+        params: lfd int
+        recv: el *epollLoop
+      - doc: |-
+          acceptFailed handles an accept4 failure and reports whether it ends the
+          burst.
+        name: acceptFailed
+        params: err error
+        recv: el *epollLoop
+        results: bool
+      - doc: |-
+          admit registers the accepted descriptor nfd on the ring, or closes it: a
+          draining loop takes no more connections, MaxConns and a full table refuse.
+        name: admit
+        params: nfd int
+        recv: el *epollLoop
+      - doc: reject closes nfd at accept, counts the refusal and raises hard pressure.
+        name: reject
+        params: nfd int
+        recv: el *epollLoop
+      - doc: |-
+          pause disarms the listeners for a backoff after EMFILE or ENFILE, and
+          raises hard pressure so idle connections can be evicted.
+        name: pause
+        recv: el *epollLoop
+      - doc: |-
+          pace re-arms the listeners once a backoff ended, and evicts idle
+          connections while the loop is under hard pressure.
+        name: pace
+        recv: el *epollLoop
+      - doc: conn serves the events of the connection on slot.
+        name: conn
+        params: slot int32, gen, events uint32
+        recv: el *epollLoop
+      - doc: |-
+          writable resumes slot's output on EPOLLOUT, and stops asking for room once
+          it drained.
+        name: writable
+        params: slot int32
+        recv: el *epollLoop
+      - doc: readable serves slot's input and hang-up events.
+        name: readable
+        params: slot int32, events uint32
+        recv: el *epollLoop
+      - doc: read reads once from slot and hands the bytes to the handler.
+        name: read
+        params: slot int32
+        recv: el *epollLoop
+      - doc: |-
+          readBuf is where slot's next read lands: behind a spill, straight into it
+          so the handler sees one run; otherwise the read arena. ok is false when
+          there is no room: the spill failed the connection, or the arena is spent.
+        name: readBuf
+        params: slot int32
+        recv: el *epollLoop
+        results: buf []byte, inSpill, ok bool
+      - doc: |-
+          received hands the n bytes just read for slot to the handler, from where
+          they were read.
+        name: received
+        params: slot int32, data []byte, inSpill bool
+        recv: el *epollLoop
+      - doc: |-
+          outEvents is the event mask slot wants: reading unless its peer is done,
+          writing while output waits on the socket.
+        name: outEvents
+        params: c *connCtl
+        recv: el *epollLoop
+        results: uint32
+      - doc: "flush implements driver: it writes slot's output until the socket is full."
+        name: flush
+        params: r *ring, slot int32
+        recv: el *epollLoop
+      - doc: |-
+          shutdown implements driver: the descriptor leaves the set and closes, and
+          the slot is free at once, since epoll holds nothing in flight.
+        name: shutdown
+        params: r *ring, slot int32
+        recv: el *epollLoop
+      - doc: "unread implements driver: SIOCINQ, the bytes the socket holds unread."
+        name: unread
+        params: r *ring, slot int32
+        recv: el *epollLoop
+        results: bool
+      - doc: control applies the group's drain and stop requests.
+        name: control
+        recv: el *epollLoop
+      - doc: closeAll closes every connection still open, as the loop stops.
+        name: closeAll
+        recv: el *epollLoop
+      - doc: teardown releases everything the loop owns but the listeners.
+        name: teardown
+        recv: el *epollLoop
+    name: epollLoop
+  - fields:
+      - doc: FD is the duplicated descriptor, close-on-exec.
+        name: FD
+        type: int
+    kind: struct
+    name: Listener
+  - fields:
+      - doc: Group is the group's name, for the start line and State.
+        name: Group
+        type: string
+      - doc: Value is the group's LoopValue.
+        name: Value
+        type: corenet.LoopValue
+      - doc: |-
+          MaxConns is LimitsValue.MaxConns: past it a connection is accepted and
+          closed at once. Zero sets no ceiling.
+        name: MaxConns
+        type: int
+      - doc: |-
+          IdleTimeout closes a connection with no traffic for that long, its
+          output sent. Zero sets none.
+        name: IdleTimeout
+        type: time.Duration
+      - doc: Handler is the group's loop handler.
+        name: Handler
+        type: corenet.LoopHandler
+      - doc: Listeners are the sockets to accept on.
+        name: Listeners
+        type: "[]Listener"
+      - doc: Log receives the one start line; nil is standard error.
+        name: Log
+        type: io.Writer
+      - doc: |-
+          tableCap, when positive, caps every ring's table below the descriptor
+          limit: the conformance suite's tiny slot table.
+        name: tableCap
+        type: int
+      - doc: hooks are the conformance suite's other fault injections.
+        name: hooks
+        type: loopHooks
+    kind: struct
+    name: Config
+  - doc: |-
+      loopHooks are the conformance suite's fault injections; zero in
+      production.
+    fields:
+      - doc: "bufs and bufSize override io_uring's provided buffers: a two-entry ring."
+        name: bufs
+        type: uint32
+      - doc: "bufs and bufSize override io_uring's provided buffers: a two-entry ring."
+        name: bufSize
+        type: uint32
+      - doc: fill writes 0xAA over a provided buffer before it returns to the ring.
+        name: fill
+        type: bool
+      - doc: shuffle returns a batch's buffers in a scrambled order.
+        name: shuffle
+        type: bool
+      - doc: failStage fails the io_uring probe at the named stage.
+        name: failStage
+        type: string
+      - doc: deferTaskrun sets IORING_SETUP_DEFER_TASKRUN instead of COOP_TASKRUN.
+        name: deferTaskrun
+        type: bool
+    kind: struct
+    name: loopHooks
+  - fields:
+      - doc: name is the group's name.
+        name: name
+        type: string
+      - doc: backend, stage and reason are what the probe decided.
+        name: backend
+        type: corenet.LoopBackend
+      - name: stage
+        type: string
+      - name: reason
+        type: string
+      - doc: sz is the resolved configuration.
+        name: sz
+        type: sizing
+      - doc: grp is what the loops share.
+        name: grp
+        type: "*shared"
+      - doc: loops are the running loops.
+        name: loops
+        type: "[]*loop"
+      - doc: "ctl drives the loops' threads: drain, stop, wait."
+        name: ctl
+        type: runner
+      - doc: once closes the group once.
+        name: once
+        type: sync.Once
+      - doc: procs is GOMAXPROCS read at Start.
+        name: procs
+        type: int
+    kind: struct
+    methods:
+      - name: Shutdown
+        params: ctx context.Context
+        recv: g *Group
+        results: error
+      - name: Close
+        recv: g *Group
+        results: error
+      - name: State
+        recv: g *Group
+        results: corenet.LoopStateValue
+      - name: Rejected
+        recv: g *Group
+        results: uint64
+      - name: Live
+        recv: g *Group
+        results: int64
+    name: Group
+  - doc: runner is a backend's handle on its threads.
+    kind: named
+    name: runner
+    underlying: |-
+      interface {
+      	// drain asks every loop to stop accepting and close its connections as
+      	// they settle.
+      	drain()
+      	// stop asks every loop to close everything now.
+      	stop()
+      	// wait blocks until every loop's thread has returned.
+      	wait()
+      	// done is closed once every loop's thread has returned.
+      	done() <-chan struct{}
+      }
+  - doc: |-
+      postQueue is a loop's preallocated queue of posted operations, the one
+      door another goroutine has into a loop (ADR 0186 §D4).
+
+      The protocol: a poster appends under mu, then moves pending from false to
+      true; only the poster that wins that CAS wakes the loop, so a burst of posts
+      costs one wake-up. The loop clears pending BEFORE it drains, so a post that
+      lands after the drain began either is seen by it or wins the next CAS and
+      wakes the loop again. Each operation is popped under mu, so it runs once.
+    fields:
+      - doc: mu guards the ring below.
+        name: mu
+        type: sync.Mutex
+      - doc: ops and args are the ring's storage, allocated once.
+        name: ops
+        type: "[]corenet.PostFunc"
+      - name: args
+        type: "[]uintptr"
+      - doc: head is the next slot to pop; n how many are queued.
+        name: head
+        type: int
+      - name: "n"
+        type: int
+      - doc: pending is true from a winning post to the loop's next drain.
+        name: pending
+        type: atomic.Bool
+      - doc: closed refuses every post once the loop has stopped.
+        name: closed
+        type: bool
+      - doc: "wake rouses the loop: an eventfd write on the native backends."
+        name: wake
+        type: func()
+    kind: struct
+    methods:
+      - doc: |-
+          post queues op and wakes the loop when it is the first since its last
+          drain.
+        name: post
+        params: op corenet.PostFunc, arg uintptr
+        recv: q *postQueue
+        results: error
+      - doc: |-
+          drain runs every queued operation on the calling loop, in order. It clears
+          pending first: see the type's comment.
+        name: drain
+        params: io corenet.LoopIO
+        recv: q *postQueue
+        results: int
+      - doc: |-
+          close refuses every later post. Operations already queued are dropped by
+          the loop that stops.
+        name: close
+        recv: q *postQueue
+    name: postQueue
+  - doc: |-
+      sizing is a loop group's resolved configuration: every zero of the
+      LoopValue replaced by its default, the ring count derived once.
+    fields:
+      - doc: loops is the number of loops.
+        name: loops
+        type: int
+      - doc: rings is the number of rings per loop.
+        name: rings
+        type: int
+      - doc: ringsSource is where rings came from.
+        name: ringsSource
+        type: string
+      - doc: tableSize is the most connections one ring holds.
+        name: tableSize
+        type: int
+      - doc: cqBatch bounds one iteration's reaping.
+        name: cqBatch
+        type: int
+      - doc: spillCap and outputCap are the per-connection byte ceilings.
+        name: spillCap
+        type: int
+      - name: outputCap
+        type: int
+      - doc: softConns flags pressure past it; zero sets no soft bound.
+        name: softConns
+        type: int
+      - doc: maxConns refuses past it; zero sets no ceiling.
+        name: maxConns
+        type: int
+      - doc: rlimit is the effective RLIMIT_NOFILE soft limit.
+        name: rlimit
+        type: uint64
+    kind: struct
+    name: sizing
+  - doc: |-
+      chunkRef names one chunk of the slab by size class and index, and how
+      much of it is used. It holds no pointer, so the connection table that
+      carries it stays pointer-free (ADR 0186 §D7).
+    fields:
+      - doc: idx is the chunk's index in its class, noChunk when none.
+        name: idx
+        type: int32
+      - doc: cls is the size class.
+        name: cls
+        type: uint8
+      - doc: off is the first byte still meaningful; len the end of the data.
+        name: "off"
+        type: int32
+      - name: len
+        type: int32
+    kind: struct
+    methods:
+      - doc: empty reports whether the ref holds no chunk.
+        name: empty
+        recv: c chunkRef
+        results: bool
+    name: chunkRef
+  - doc: |-
+      slab is a loop's shared store of payload memory, cut into power-of-two
+      size classes and mapped outside the Go heap (ADR 0186 §D7): what the
+      kernel reads or writes never moves, and the collector scans none of it.
+      It belongs to one loop, so it takes no lock.
+    fields:
+      - doc: classes holds each class's arenas and free chunks, smallest first.
+        name: classes
+        type: "[]slabClass"
+      - doc: inUse is the bytes handed out; budget its ceiling.
+        name: inUse
+        type: int
+      - name: budget
+        type: int
+      - doc: mapper maps a new arena; the platform's mmap, a heap slice elsewhere.
+        name: mapper
+        type: func(n int) ([]byte, error)
+      - doc: mapped is every mapping, for release.
+        name: mapped
+        type: "[][]byte"
+    kind: struct
+    methods:
+      - doc: |-
+          alloc returns a chunk holding at least n bytes, or false when n passes the
+          largest class, the budget, or the mapping fails.
+        name: alloc
+        params: n int
+        recv: s *slab
+        results: chunkRef, bool
+      - doc: grow maps one arena for c and pushes its chunks on the free stack.
+        name: grow
+        params: c *slabClass
+        recv: s *slab
+        results: bool
+      - doc: free returns the chunk to its class. A ref that holds nothing is ignored.
+        name: free
+        params: r chunkRef
+        recv: s *slab
+      - doc: bytes returns the whole chunk r names.
+        name: bytes
+        params: r chunkRef
+        recv: s *slab
+        results: "[]byte"
+      - doc: data returns the meaningful bytes of r, off to len.
+        name: data
+        params: r chunkRef
+        recv: s *slab
+        results: "[]byte"
+      - doc: size returns the capacity of r's chunk.
+        name: size
+        params: r chunkRef
+        recv: s *slab
+        results: int
+    name: slab
+  - doc: slabClass is one size class.
+    fields:
+      - doc: size is the chunk size; perArena how many chunks one arena holds.
+        name: size
+        type: int
+      - name: perArena
+        type: int
+      - doc: arenas are the class's mappings, in index order.
+        name: arenas
+        type: "[][]byte"
+      - doc: free is a stack of free chunk indexes.
+        name: free
+        type: "[]int32"
+    kind: struct
+    name: slabClass
+  - doc: sqringOffsets is struct io_sqring_offsets.
+    fields:
+      - name: head
+        type: uint32
+      - name: tail
+        type: uint32
+      - name: ringMask
+        type: uint32
+      - name: ringEntries
+        type: uint32
+      - name: flags
+        type: uint32
+      - name: dropped
+        type: uint32
+      - name: array
+        type: uint32
+      - name: resv1
+        type: uint32
+      - name: userAddr
+        type: uint64
+    kind: struct
+    name: sqringOffsets
+  - doc: cqringOffsets is struct io_cqring_offsets.
+    fields:
+      - name: head
+        type: uint32
+      - name: tail
+        type: uint32
+      - name: ringMask
+        type: uint32
+      - name: ringEntries
+        type: uint32
+      - name: overflow
+        type: uint32
+      - name: cqes
+        type: uint32
+      - name: flags
+        type: uint32
+      - name: resv1
+        type: uint32
+      - name: userAddr
+        type: uint64
+    kind: struct
+    name: cqringOffsets
+  - doc: uringParams is struct io_uring_params.
+    fields:
+      - name: sqEntries
+        type: uint32
+      - name: cqEntries
+        type: uint32
+      - name: flags
+        type: uint32
+      - name: sqThreadCPU
+        type: uint32
+      - name: sqThreadIdle
+        type: uint32
+      - name: features
+        type: uint32
+      - name: wqFD
+        type: uint32
+      - name: resv
+        type: "[3]uint32"
+      - name: sqOff
+        type: sqringOffsets
+      - name: cqOff
+        type: cqringOffsets
+    kind: struct
+    name: uringParams
+  - doc: |-
+      sqe is struct io_uring_sqe, 64 bytes; the unions are named by what this
+      backend puts in them.
+    fields:
+      - name: opcode
+        type: uint8
+      - name: flags
+        type: uint8
+      - name: ioprio
+        type: uint16
+      - name: fd
+        type: int32
+      - name: "off"
+        type: uint64
+      - name: addr
+        type: uint64
+      - name: len
+        type: uint32
+      - name: opFlags
+        type: uint32
+      - name: userData
+        type: uint64
+      - name: bufIndex
+        type: uint16
+      - name: persona
+        type: uint16
+      - name: fileIdx
+        type: uint32
+      - name: addr3
+        type: uint64
+      - name: pad2
+        type: uint64
+    kind: struct
+    name: sqe
+  - doc: cqe is struct io_uring_cqe, 16 bytes.
+    fields:
+      - name: userData
+        type: uint64
+      - name: res
+        type: int32
+      - name: flags
+        type: uint32
+    kind: struct
+    name: cqe
+  - doc: |-
+      uringBuf is struct io_uring_buf, 16 bytes; in the buffer ring's first entry
+      the last two bytes are the ring's tail.
+    fields:
+      - name: addr
+        type: uint64
+      - name: len
+        type: uint32
+      - name: bid
+        type: uint16
+      - name: resv
+        type: uint16
+    kind: struct
+    name: uringBuf
+  - doc: bufReg is struct io_uring_buf_reg.
+    fields:
+      - name: ringAddr
+        type: uint64
+      - name: ringEntries
+        type: uint32
+      - name: bgid
+        type: uint16
+      - name: flags
+        type: uint16
+      - name: resv
+        type: "[3]uint64"
+    kind: struct
+    name: bufReg
+  - doc: rsrcRegister is struct io_uring_rsrc_register.
+    fields:
+      - name: nr
+        type: uint32
+      - name: flags
+        type: uint32
+      - name: resv2
+        type: uint64
+      - name: data
+        type: uint64
+      - name: tags
+        type: uint64
+    kind: struct
+    name: rsrcRegister
+  - doc: getEventsArg is struct io_uring_getevents_arg.
+    fields:
+      - name: sigmask
+        type: uint64
+      - name: sigmaskSz
+        type: uint32
+      - name: pad
+        type: uint32
+      - name: ts
+        type: uint64
+    kind: struct
+    name: getEventsArg
+  - doc: kernelTimespec is struct __kernel_timespec.
+    fields:
+      - name: sec
+        type: int64
+      - name: nsec
+        type: int64
+    kind: struct
+    name: kernelTimespec
+  - doc: probeHeader is struct io_uring_probe without its flexible array.
+    fields:
+      - name: lastOp
+        type: uint8
+      - name: opsLen
+        type: uint8
+      - name: resv
+        type: uint16
+      - name: resv2
+        type: "[3]uint32"
+    kind: struct
+    name: probeHeader
+  - doc: probeOp is struct io_uring_probe_op.
+    fields:
+      - name: op
+        type: uint8
+      - name: resv
+        type: uint8
+      - name: flags
+        type: uint16
+      - name: resv2
+        type: uint32
+    kind: struct
+    name: probeOp
+  - doc: probeBuf is a probe with room for probeOps entries.
+    fields:
+      - name: hdr
+        type: probeHeader
+      - name: ops
+        type: "[probeOps]probeOp"
+    kind: struct
+    name: probeBuf
+  - doc: uRing is one ring of an io_uring loop.
+    fields:
+      - name: ul
+        type: "*uLoop"
+      - name: u
+        type: "*uring"
+      - name: r
+        type: "*ring"
+      - doc: slotOf maps a direct-descriptor index to its slot, -1 when none.
+        name: slotOf
+        type: "[]int32"
+      - doc: |-
+          armed is how many single-shot accepts each listener has in flight;
+          paused a
+          ring that stopped accepting under its reserve.
+        name: armed
+        type: "[]int"
+      - name: paused
+        type: bool
+      - doc: |-
+          starved are slots whose recv ran out of buffers, re-armed as buffers
+          come back; recycle the buffers the batch handed out.
+        name: starved
+        type: "[]int32"
+      - name: recycle
+        type: "[]uint16"
+      - doc: |-
+          inRing is how many provided buffers the kernel holds: a starved recv
+          is re-armed only while some remain, whether or not this batch
+          returned any.
+        name: inRing
+        type: int
+      - doc: |-
+          lastAccept is the tick of the ring's last accept completion; stalls
+          counts the watchdog's re-arms.
+        name: lastAccept
+        type: int64
+      - name: stalls
+        type: int
+      - doc: |-
+          resumeAt and backoff pace the accepts of a ring on process descriptors
+          after EMFILE or ENFILE, as epoll paces its listeners.
+        name: resumeAt
+        type: int64
+      - name: backoff
+        type: int64
+    kind: struct
+    methods:
+      - doc: pollFD arms a multishot POLLIN on fd, tagged op.
+        name: pollFD
+        params: fd int, op uint64
+        recv: rr *uRing
+      - doc: |-
+          armAccepts keeps up to acceptDepth single-shot accepts in flight per
+          listener, never more than the entries left above the reserve. A multishot
+          accept into a direct-descriptor table keeps accepting the whole listen
+          backlog before the loop can see the reserve reached: past the table's last
+          entry the kernel accepts the connection, cannot install it, and drops it
+          (ENFILE), which CI saw on a 6.11 kernel. Single-shot accepts, each holding
+          one entry until it completes, cannot overshoot.
+        name: armAccepts
+        recv: rr *uRing
+      - doc: |-
+          acceptRoom is how many more accepts may be in flight: the free entries
+          above the reserve, less those the accepts in flight will take.
+        name: acceptRoom
+        recv: rr *uRing
+        results: int
+      - doc: |-
+          cancelAccepts cancels every accept in flight; their completions disarm
+          them.
+        name: cancelAccepts
+        recv: rr *uRing
+      - doc: |-
+          used is how many direct-descriptor entries the ring holds, draining slots
+          included: an index stays the kernel's until its close completes.
+        name: used
+        recv: rr *uRing
+        results: int
+      - doc: |-
+          pace pauses accepting under the reserve and resumes at twice it. The
+          reserve is acceptReserve entries, an eighth of a smaller table, and at
+          least one: a full table pauses whatever its size.
+        name: pace
+        recv: rr *uRing
+      - doc: |-
+          reapAll reaps the ring's CQ until it is empty, a batch at a time, and
+          flushes an overflow the kernel held back.
+        name: reapAll
+        recv: rr *uRing
+      - doc: handle serves one completion.
+        name: handle
+        params: c *cqe
+        recv: rr *uRing
+      - doc: onConnOp serves the completion of an operation slot issued.
+        name: onConnOp
+        params: op uint64, slot int32, gen uint32, c *cqe
+        recv: rr *uRing
+      - doc: onAccept takes a new direct descriptor into a slot and arms its recv.
+        name: onAccept
+        params: li int, c *cqe
+        recv: rr *uRing
+      - doc: |-
+          acceptFailed pauses the ring when an accept failed for want of entries:
+          closes make room.
+        name: acceptFailed
+        params: res int32
+        recv: rr *uRing
+      - doc: |-
+          refuses reports whether a connection accepted on index is closed at once:
+          the loop or the ring drains, MaxConns is reached, or the index is past the
+          table.
+        name: refuses
+        params: index uint32
+        recv: rr *uRing
+        results: bool
+      - doc: orphanClose closes a direct descriptor no slot owns.
+        name: orphanClose
+        params: index uint32
+        recv: rr *uRing
+      - doc: armRecv arms slot's multishot recv, counted.
+        name: armRecv
+        params: slot int32
+        recv: rr *uRing
+      - doc: owns reports whether user_data's generation is slot's.
+        name: owns
+        params: slot int32, gen uint32
+        recv: rr *uRing
+        results: bool
+      - doc: onRecv delivers received bytes and keeps the multishot armed.
+        name: onRecv
+        params: slot int32, gen uint32, c *cqe
+        recv: rr *uRing
+      - doc: |-
+          recvCancelled re-arms the recv of a connection still open whose recv was
+          cancelled and ended.
+        name: recvCancelled
+        params: slot int32, more bool
+        recv: rr *uRing
+      - doc: |-
+          recvBytes delivers n bytes of buffer bid to an open connection, and
+          re-arms its recv when the multishot ended.
+        name: recvBytes
+        params: slot int32, bid uint16, n int32, more bool
+        recv: rr *uRing
+      - doc: |-
+          recvStarved queues an open connection whose recv ran out of buffers, to
+          be re-armed as buffers come back; past the bounded queue it fails.
+        name: recvStarved
+        params: slot int32
+        recv: rr *uRing
+      - doc: |-
+          recvEOF marks an open connection's peer done: it settles at the end of the
+          batch, its output still leaving.
+        name: recvEOF
+        params: slot int32
+        recv: rr *uRing
+      - doc: "failLive fails slot with errno unless it already finished: only once."
+        name: failLive
+        params: slot, errno int32
+        recv: rr *uRing
+      - doc: onSend advances slot's flight, resubmitting what a short send left.
+        name: onSend
+        params: slot int32, gen uint32, c *cqe
+        recv: rr *uRing
+      - doc: |-
+          sendProgress records n bytes of slot's flight sent. A short send resubmits
+          the rest of the same flight, never grown, and reports true; otherwise the
+          flight is released and an alive connection is flushed again.
+        name: sendProgress
+        params: slot, n int32
+        recv: rr *uRing
+        results: bool
+      - doc: opDone counts a cancel's completion.
+        name: opDone
+        params: slot int32, gen uint32
+        recv: rr *uRing
+      - doc: |-
+          maybeClose closes a dead slot's direct descriptor once no operation of it
+          remains in flight: only then can the kernel not hand the index out again
+          while a completion for it is still coming.
+        name: maybeClose
+        params: slot int32
+        recv: rr *uRing
+      - doc: onClose releases the slot whose direct descriptor closed.
+        name: onClose
+        params: slot int32, gen uint32
+        recv: rr *uRing
+      - doc: onWake runs the posted operations.
+        name: onWake
+        params: c *cqe
+        recv: rr *uRing
+      - doc: onFan resets the secondaries' eventfd.
+        name: onFan
+        params: c *cqe
+        recv: rr *uRing
+      - doc: |-
+          returnBuffers gives the batch's buffers back to the kernel, then re-arms
+          the recvs that ran out, as many as the kernel holds buffers for.
+        name: returnBuffers
+        recv: rr *uRing
+      - doc: |-
+          giveBack adds each buffer the batch handed out back to the ring, filled
+          with staleFill under test, and publishes them once.
+        name: giveBack
+        recv: rr *uRing
+      - doc: |-
+          rearmStarved re-arms one starved recv per buffer the kernel holds, the
+          oldest first; a recv re-armed on an empty ring would only fail again.
+        name: rearmStarved
+        recv: rr *uRing
+      - doc: |-
+          flush implements driver: the output becomes the flight, and the flight is
+          sent. The flight never grows while the kernel holds it.
+        name: flush
+        params: r *ring, slot int32
+        recv: rr *uRing
+      - doc: sendFlight submits the unsent rest of slot's flight.
+        name: sendFlight
+        params: slot int32
+        recv: rr *uRing
+      - doc: |-
+          shutdown implements driver: every operation of the slot is cancelled,
+          unlinked; the close follows once the count reaches zero.
+        name: shutdown
+        params: r *ring, slot int32
+        recv: rr *uRing
+      - doc: |-
+          unread implements driver. A direct descriptor has no process descriptor
+          to ask SIOCINQ of, so it is never evicted blind: it reports unread. A
+          process descriptor is asked, as epoll asks it.
+        name: unread
+        params: r *ring, slot int32
+        recv: rr *uRing
+        results: bool
+      - doc: |-
+          watchdog re-arms an accept that looks stalled, and drains a ring whose
+          accept stays stalled. It acts on an observable stall only: the accept armed
+          and not paused, the listener's queue not empty, and no accept completion
+          for watchdogTicks.
+        name: watchdog
+        recv: rr *uRing
+    name: uRing
+  - doc: "uLoop is one loop on io_uring: one thread owns every ring."
+    fields:
+      - name: lp
+        type: "*loop"
+      - name: rings
+        type: "[]*uRing"
+      - name: lfds
+        type: "[]int"
+      - name: hooks
+        type: loopHooks
+      - doc: |-
+          wakefd is the Post eventfd, polled by the primary ring; fanfd the
+          secondary rings' completion eventfd, polled by the primary too.
+        name: wakefd
+        type: int
+      - name: fanfd
+        type: int
+      - doc: wakeMu orders a wake against the eventfd's close.
+        name: wakeMu
+        type: sync.Mutex
+      - name: evClosed
+        type: bool
+      - name: drainReq
+        type: atomic.Bool
+      - name: stopReq
+        type: atomic.Bool
+      - name: tid
+        type: int
+      - doc: flags is the setup flags the probe settled on; stage the stage reached.
+        name: flags
+        type: uint32
+      - name: stage
+        type: string
+      - doc: |-
+          direct is whether connections live in the rings' direct-descriptor
+          tables (the probe's release check passed) or in the process table.
+        name: direct
+        type: bool
+    kind: struct
+    methods:
+      - doc: wake writes the Post eventfd.
+        name: wake
+        recv: ul *uLoop
+      - doc: run is the loop's thread.
+        name: run
+        params: wg *sync.WaitGroup, ready chan<- error, rings int
+        recv: ul *uLoop
+      - doc: setup runs the staged probe on this thread, then builds the rings.
+        name: setup
+        params: rings int
+        recv: ul *uLoop
+        results: error
+      - doc: |-
+          setupFlags is the full flag set the probe tries first: DEFER_TASKRUN
+          replaces COOP_TASKRUN when the hook asks for it.
+        name: setupFlags
+        recv: ul *uLoop
+        results: uint32
+      - doc: |-
+          probe runs stages 1 to 3: a ring with the full flag set, one with fewer on
+          an older kernel, and REGISTER_PROBE for every op this backend issues. It
+          returns the flags that passed.
+        name: probe
+        recv: ul *uLoop
+        results: uint32, error
+      - doc: |-
+          openStaged runs stages 1 and 2: a ring with flags, and, when an older
+          kernel refuses a flag it does not know, one without SINGLE_ISSUER. It
+          returns the ring and the flags it was opened with.
+        name: openStaged
+        params: flags uint32
+        recv: ul *uLoop
+        results: "*uring, uint32, error"
+      - doc: |-
+          build creates the Post queue, the two eventfds and every ring, and arms
+          the primary's polls.
+        name: build
+        params: rings int, flags uint32
+        recv: ul *uLoop
+        results: error
+      - doc: |-
+          newRing builds ring i: its io_uring, its sparse table, its buffers, and
+          its accepts.
+        name: newRing
+        params: i int, flags uint32
+        recv: ul *uLoop
+        results: "*uRing, error"
+      - doc: |-
+          bufShape is a ring's provided buffers: how many, and their size, or a
+          test's tiny buffer ring.
+        name: bufShape
+        recv: ul *uLoop
+        results: bufs, size uint32
+      - doc: |-
+          registerFan registers the secondaries' eventfd as ring i's CQ notifier,
+          never the Post eventfd; the primary, ring 0, needs none.
+        name: registerFan
+        params: i int, u *uring
+        recv: ul *uLoop
+        results: error
+      - doc: |-
+          registerTable registers ring u's sparse direct-descriptor table of n
+          entries, when connections are direct descriptors.
+        name: registerTable
+        params: u *uring, n uint32
+        recv: ul *uLoop
+        results: error
+      - doc: |-
+          slotSpace is how many numbers slotOf maps: the table's entries for direct
+          descriptors, every process descriptor below RLIMIT_NOFILE otherwise.
+        name: slotSpace
+        params: table uint32
+        recv: ul *uLoop
+        results: int
+      - doc: onFD adapts an SQE filled for a direct descriptor to the loop's mode.
+        name: onFD
+        params: s *sqe
+        recv: ul *uLoop
+      - doc: "serve is the loop: one wait on the primary, every ring reaped, one batch."
+        name: serve
+        recv: ul *uLoop
+      - doc: |-
+          batch is one iteration: the wait on the primary, every ring reaped, the
+          drain, the timers, OnBatchEnd, and the buffers returned.
+        name: batch
+        params: tick *kernelTimespec
+        recv: ul *uLoop
+      - doc: live is the loop's open connections and slots still held by the kernel.
+        name: live
+        recv: ul *uLoop
+        results: int
+      - doc: control applies the group's drain.
+        name: control
+        recv: ul *uLoop
+      - doc: |-
+          closeAll fails every open connection as the loop stops, and lets the
+          cancels and closes they issue complete, a bounded time.
+        name: closeAll
+        recv: ul *uLoop
+      - doc: teardown releases the rings, the eventfds and the slab.
+        name: teardown
+        recv: ul *uLoop
+      - doc: |-
+          selfTest is the probe's last stage: on a ring of its own, a multishot
+          accept into a direct descriptor on a loopback listener, a connection, and
+          a multishot recv that must deliver the payload through the buffer ring.
+          Any failure, or a second without the completions, falls back to epoll.
+
+          It then reports whether closing a direct descriptor releases its socket
+          while another connection's recv, issued before the close, is still armed.
+          Before 6.13 a fixed file removed from the table is put only once every
+          request issued under the table's previous resource node has completed, and
+          a multishot recv on an idle connection never does: closed sockets would
+          stay allocated, their peers never told, for as long as the oldest
+          connection lives (rsrc.c's io_rsrc_node, reworked in 6.13). Where that
+          holds, the loop serves on process descriptors instead.
+        name: selfTest
+        params: flags uint32
+        recv: ul *uLoop
+        results: bool, error
+    name: uLoop
+  - doc: uringRunner runs the group's io_uring loops.
+    fields:
+      - name: loops
+        type: "[]*uLoop"
+      - name: wg
+        type: sync.WaitGroup
+      - name: fin
+        type: chan struct{}
+      - name: lfds
+        type: "[]int"
+    kind: struct
+    methods:
+      - doc: drain implements runner.
+        name: drain
+        recv: ur *uringRunner
+      - doc: stop implements runner.
+        name: stop
+        recv: ur *uringRunner
+      - doc: wait implements runner.
+        name: wait
+        recv: ur *uringRunner
+      - doc: done implements runner.
+        name: done
+        recv: ur *uringRunner
+        results: <-chan struct{}
+    name: uringRunner
+  - doc: |-
+      selfTestRun is the self-test's exchange: the ring it runs on, the direct
+      descriptor the accept returned, and the bytes the recv delivered.
+    fields:
+      - doc: u is the self-test's own ring.
+        name: u
+        type: "*uring"
+      - doc: index is the accepted direct descriptor, -1 before the accept.
+        name: index
+        type: int32
+      - doc: got is what the recv delivered so far.
+        name: got
+        type: "[]byte"
+      - doc: second is the release check's second connection, -1 before it.
+        name: second
+        type: int32
+      - doc: cancelled and closed are the release check's completions.
+        name: cancelled
+        type: bool
+      - name: closed
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          releases reports whether a direct descriptor closed with another
+          connection's recv still armed lets its peer see the end at once.
+        name: releases
+        params: port, first int
+        recv: st *selfTestRun
+        results: bool
+      - doc: |-
+          pump reaps the self-test's completions until done reports true or 500 ms
+          are up.
+        name: pump
+        params: done func() bool
+        recv: st *selfTestRun
+      - doc: |-
+          exchange reaps the self-test's completions until the payload came back
+          whole, or a second is up.
+        name: exchange
+        recv: st *selfTestRun
+      - doc: |-
+          onCQE serves one self-test completion: the accept arms the recv on its
+          index, the recv appends the bytes of its provided buffer.
+        name: onCQE
+        params: c *cqe
+        recv: st *selfTestRun
+      - doc: onAccept arms a recv on the first and the second accepted index.
+        name: onAccept
+        params: res int32
+        recv: st *selfTestRun
+      - doc: |-
+          verdict is nil once the payload came back whole, otherwise the stage that
+          never completed.
+        name: verdict
+        recv: st *selfTestRun
+        results: error
+    name: selfTestRun
+  - doc: |-
+      uring is one io_uring instance: its mappings, the views into them, and its
+      provided-buffer ring. It belongs to one loop thread.
+    fields:
+      - name: fd
+        type: int
+      - name: params
+        type: uringParams
+      - doc: ringMem is the SQ and CQ rings' single mapping; sqeMem the SQEs'.
+        name: ringMem
+        type: "[]byte"
+      - name: sqeMem
+        type: "[]byte"
+      - doc: The SQ ring's fields, in the mapping.
+        name: sqHead
+        type: "*uint32"
+      - name: sqTail
+        type: "*uint32"
+      - name: sqFlags
+        type: "*uint32"
+      - name: sqMask
+        type: uint32
+      - name: sqLen
+        type: uint32
+      - name: sqes
+        type: "[]sqe"
+      - doc: |-
+          tail is the next SQE this thread fills; submitted the tail last handed
+          to the kernel.
+        name: tail
+        type: uint32
+      - name: submitted
+        type: uint32
+      - doc: The CQ ring's fields, in the mapping.
+        name: cqHead
+        type: "*uint32"
+      - name: cqTail
+        type: "*uint32"
+      - name: cqMask
+        type: uint32
+      - name: cqLen
+        type: uint32
+      - name: cqes
+        type: "[]cqe"
+      - doc: bufRing is the provided-buffer ring's mapping; bufs the buffers'.
+        name: bufRing
+        type: "[]byte"
+      - name: bufMem
+        type: "[]byte"
+      - name: bufCount
+        type: uint32
+      - name: bufSize
+        type: uint32
+      - name: bufTail
+        type: uint16
+      - name: shadowBid
+        type: uint16
+      - doc: retries counts busy submits retried.
+        name: retries
+        type: uint64
+    kind: struct
+    methods:
+      - doc: |-
+          mapRings maps the SQ and CQ rings, one mapping under FEAT_SINGLE_MMAP, and
+          the SQEs. It returns the step that failed and the kernel's errno.
+        name: mapRings
+        recv: u *uring
+        results: step string, errno syscall.Errno
+      - doc: |-
+          buildViews points the ring's fields into its mappings, and maps SQ slot i
+          to SQE i once and for all.
+        name: buildViews
+        recv: u *uring
+      - doc: close releases every mapping and the ring.
+        name: close
+        recv: u *uring
+      - doc: |-
+          get returns a zeroed SQE, submitting what is queued when the SQ is full.
+          It returns nil only when the kernel takes nothing after the bounded
+          retries.
+        name: get
+        recv: u *uring
+        results: "*sqe"
+      - doc: publish hands every filled SQE to the kernel's view of the SQ tail.
+        name: publish
+        recv: u *uring
+      - doc: pending is how many SQEs are published but not yet submitted.
+        name: pending
+        recv: u *uring
+        results: uint32
+      - doc: |-
+          submit submits every pending SQE without waiting. EINTR retries; EBUSY and
+          EAGAIN return so the caller reaps and retries, counted.
+        name: submit
+        recv: u *uring
+      - doc: |-
+          wait submits what is pending and blocks until one completion or the
+          timeout, in one io_uring_enter with EXT_ARG. ETIME is the tick.
+        name: wait
+        params: ts *kernelTimespec
+        recv: u *uring
+      - doc: ready is how many completions wait in the CQ.
+        name: ready
+        recv: u *uring
+        results: uint32
+      - doc: reap calls fn for up to max completions and advances the head past them.
+        name: reap
+        params: max int, fn func(c *cqe)
+        recv: u *uring
+        results: int
+      - doc: |-
+          overflowed reports a CQ the kernel had to hold back (NODROP): a submit
+          flushes it.
+        name: overflowed
+        recv: u *uring
+        results: bool
+      - doc: |-
+          setupBuffers maps count buffers of size bytes and registers their ring as
+          group bufGroup. count must be a power of two.
+        name: setupBuffers
+        params: count, size uint32
+        recv: u *uring
+        results: syscall.Errno
+      - doc: |-
+          mapBufRing registers group bufGroup's ring of count entries and maps it.
+          It asks the kernel to allocate it (IOU_PBUF_RING_MMAP, 6.4): a ring in user
+          pages is pinned and charged to RLIMIT_MEMLOCK, which an unprivileged
+          process runs out of after a few rings (CI's non-root lane did). A kernel
+          that does not know the flag (EINVAL) gets the ring in user pages.
+        name: mapBufRing
+        params: count uint32
+        recv: u *uring
+        results: syscall.Errno
+      - doc: bufEntries views the buffer ring.
+        name: bufEntries
+        recv: u *uring
+        results: "[]uringBuf"
+      - doc: buf returns buffer bid's bytes.
+        name: buf
+        params: bid uint16
+        recv: u *uring
+        results: "[]byte"
+      - doc: |-
+          addBuf writes buffer bid at the ring's next entry, unpublished. Entry 0's
+          bid shares its word with the ring's tail, so it is kept in shadowBid and
+          written with the tail by publishBufs.
+        name: addBuf
+        params: bid uint16
+        recv: u *uring
+      - doc: |-
+          publishBufs makes every added buffer the kernel's: one 32-bit store of
+          entry 0's bid and the tail, its last two bytes, after every entry field
+          was written. The word is little-endian on every architecture this file
+          builds for: bid in the low half, tail in the high one.
+        name: publishBufs
+        recv: u *uring
+      - doc: registerSparse registers a sparse direct-descriptor table of n entries.
+        name: registerSparse
+        params: n uint32
+        recv: u *uring
+        results: syscall.Errno
+      - doc: supports asks REGISTER_PROBE whether every op of ops is supported.
+        name: supports
+        params: ops ...uint8
+        recv: u *uring
+        results: bool, syscall.Errno
+    name: uring
+  - doc: |-
+      wheel is a hashed timer wheel over one ring's connection slots: one timer
+      per slot, armed at an absolute tick, in index-linked buckets, so it holds
+      no pointer and arming costs no allocation.
+    fields:
+      - doc: buckets holds the first slot of each bucket.
+        name: buckets
+        type: "[]int32"
+      - doc: |-
+          next and prev link a bucket's slots; at is each slot's armed tick, zero
+          when unarmed.
+        name: next
+        type: "[]int32"
+      - name: prev
+        type: "[]int32"
+      - name: at
+        type: "[]int64"
+      - doc: now is the last tick the wheel advanced to.
+        name: now
+        type: int64
+      - doc: |-
+          due collects the slots one advance fires, reused across advances: the
+          buckets are unlinked before any fires, so a callback that arms or
+          disarms another slot never walks a list under the wheel's feet.
+        name: due
+        type: "[]int32"
+    kind: struct
+    methods:
+      - doc: |-
+          arm sets slot's timer to fire at tick, replacing any previous one. A tick
+          at or before now fires on the next advance.
+        name: arm
+        params: slot int32, tick int64
+        recv: w *wheel
+      - doc: disarm clears slot's timer; an unarmed slot is left as it is.
+        name: disarm
+        params: slot int32
+        recv: w *wheel
+      - doc: grow extends the wheel to n slots, the new ones unarmed.
+        name: grow
+        params: n int
+        recv: w *wheel
+      - doc: armed reports slot's armed tick, zero when none.
+        name: armed
+        params: slot int32
+        recv: w *wheel
+        results: int64
+      - doc: |-
+          advance moves the wheel to tick now and calls fire for every slot whose
+          tick has come, disarming it first, so fire may arm it again. It walks each
+          bucket passed once at most.
+        name: advance
+        params: now int64, fire func(slot int32)
+        recv: w *wheel
+    name: wheel
+vars:
+  - doc: |-
+      selfTestPayload is what the loopback self-test sends and expects back
+      through a provided buffer.
+    items:
+      - name: selfTestPayload
+        value: "[]byte(\"kitsunium net/loop io_uring self-test\")"
+    name: selfTestPayload

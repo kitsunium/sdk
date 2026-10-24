@@ -1234,12 +1234,20 @@
       "doc": "Package client — the response body size ceiling.\n\nPackage client is the outbound half of the SDK's network domain (ADR 0029):\nan HTTP client whose read-only posture is enforced by the transport rather\nthan by the call site.\n\nPackage client — the policy conjunction.\n\nPackage client — the configuration defaults.\n\nPackage client — the path denylist policy.\n\nPackage client — the policy-enforcing RoundTripper.\n\nPackage client — the method allowlist policy.\n\nPackage client — path safety checks applied before any allowlist pattern.\n\nPackage client — the path allowlist policy.\n\nPackage client — the policy constructors.\n"
     },
     {
+      "path": "github.com/kitsunium/sdk/internal/service/net/loop",
+      "name": "loop",
+      "dir": "service/net/loop",
+      "layer": "service",
+      "family": "net",
+      "doc": "Package loop is the network domain's event-loop engine (ADR 0186): the\nnative backends a plaintext stream group runs on when it is served by a\ncorenet.LoopHandler — epoll on every Linux architecture, io_uring after a\nstaged probe of the running kernel — and nothing else of the SDK.\n\nIt is a leaf below server (§D3): it imports internal/core/net, the shared\nUnsupportedPlatform of internal/core/proc and the kernel, never server.\nserver binds or adopts the listeners, keeps the lifecycle, the admission and\nthe drain, and hands the loop duplicated descriptors through one type,\nListener. The portable backend stays in server: it needs the netpoller.\n\nA loop is one goroutine locked to its OS thread, owning its rings or its\nepoll instance. Its connection table is pointer-free Go memory the race\ndetector sees; every byte the kernel reads or writes — the read arena, the\nspill and output slab — is mapped outside the Go heap (§D7). The engine\nknows bytes, references, deadlines, write pressure and the order of\nwrites; it speaks no HTTP.\n\nAn idle connection on a native backend costs at most 256 bytes of Go heap\n— its slot and its timer link — and no mapped byte: its output chunk is\nattached at its first Write and returned once drained.\n"
+    },
+    {
       "path": "github.com/kitsunium/sdk/internal/service/net/server",
       "name": "server",
       "dir": "service/net/server",
       "layer": "service",
       "family": "net",
-      "doc": "Package server — adoption of listeners inherited from a supervisor.\n\nPackage server — the datagram batch-read abstraction.\n\nPackage server — compile-time interface assertions, kept out of the\nproduction source per KTN-IFACE-ASSERT-PLACEMENT.\n\nPackage server — the portable datagram reader.\n\nPackage server — the pooled stream connection.\n\nPackage server — compile-time interface assertions, kept out of the\nproduction source per KTN-IFACE-ASSERT-PLACEMENT.\n\nPackage server — the socket that holds its connection slot until it closes.\n\nPackage server — the completion state of one connection handed to net/http.\n\nPackage server — batch-reader selection on Linux.\n\nPackage server — batch-reader selection on platforms without recvmmsg.\n\nPackage server — every served socket family is left to the kernel here.\n\nPackage server — the two socket families Windows cannot open at all.\n\nPackage server — the bounded TLS handshake.\n\nPackage server — the net/http adapter.\n\nPackage server — the bounds only an HTTP group has.\n\nPackage server — the listener bridge that lets net/http consume our accepts.\n\nPackage server — the width-correct kernel length assignment.\n\nPackage server — the start, accept and drain lifecycle.\n\nPackage server — compile-time interface assertions, kept out of the\nproduction source per KTN-IFACE-ASSERT-PLACEMENT.\n\nPackage server — listener construction.\n\nPackage server — the listener that hands out close-tracking sockets.\n\nPackage server — the recvmmsg batched datagram reader.\n\nPackage server — the recvmmsg message header layout.\n\nPackage server — the functional options.\n\nPackage server — the pooled datagram.\n\nPackage server — a group of datagram listeners.\n\nPackage server — datagram listener construction and the read loop.\n\nPackage server — the datagram read loop.\n\nPackage server — per-connection state recycling.\n\nPackage server — the descriptor-bearing socket contract.\n\nPackage server — SO_REUSEPORT support on the BSD family.\n\nPackage server — SO_REUSEPORT support on Linux.\n\nPackage server — the SO_REUSEPORT floor for platforms without it.\n\nPackage server is the inbound half of the SDK's network domain (ADR 0029):\none unified listener engine for TCP, Unix, TLS and mutual TLS, serving\npluggable handlers grouped behind shared middlewares and policies.\n\nPackage server — kernel sockaddr decoding for the batched reader.\n\nPackage server — a group of listeners sharing one handler and policy.\n\nPackage server — the per-group connection ceiling.\n\nPackage server — deliberate discard of non-actionable cleanup errors.\n\nPackage server — how a Unix kernel reports a datagram longer than the read\nbuffer: by truncating it, which is not an error at all.\n\nPackage server — how Windows reports a datagram longer than the read buffer.\n"
+      "doc": "Package server — adoption of listeners inherited from a supervisor.\n\nPackage server — the datagram batch-read abstraction.\n\nPackage server — compile-time interface assertions, kept out of the\nproduction source per KTN-IFACE-ASSERT-PLACEMENT.\n\nPackage server — the portable datagram reader.\n\nPackage server — the pooled stream connection.\n\nPackage server — compile-time interface assertions, kept out of the\nproduction source per KTN-IFACE-ASSERT-PLACEMENT.\n\nPackage server — the socket that holds its connection slot until it closes.\n\nPackage server — the completion state of one connection handed to net/http.\n\nPackage server — batch-reader selection on Linux.\n\nPackage server — batch-reader selection on platforms without recvmmsg.\n\nPackage server — every served socket family is left to the kernel here.\n\nPackage server — the two socket families Windows cannot open at all.\n\nPackage server — the bounded TLS handshake.\n\nPackage server — the net/http adapter.\n\nPackage server — the bounds only an HTTP group has.\n\nPackage server — the listener bridge that lets net/http consume our accepts.\n\nPackage server — the width-correct kernel length assignment.\n\nPackage server — the start, accept and drain lifecycle.\n\nPackage server — compile-time interface assertions, kept out of the\nproduction source per KTN-IFACE-ASSERT-PLACEMENT.\n\nPackage server — listener construction.\n\nPackage server — the listener that hands out close-tracking sockets.\n\nPackage server — a loop group's engine on Linux: the leaf's native backends,\nhanded duplicated listener descriptors, or the portable backend.\n\nPackage server — a loop group's engine off Linux: the portable backend.\n\nPackage server — loop groups: the handler declaration kept unexported until\nHandleLoop is published, the options a loop group refuses at Start, its\nlisteners and its engine in the server's lifecycle (ADR 0186).\n\nPackage server — the portable loop backend: the default engine's accept\npath and goroutines, every handler callback serialised onto one handler\ngoroutine (ADR 0186 §D3, §D7).\n\nPackage server — the recvmmsg batched datagram reader.\n\nPackage server — the recvmmsg message header layout.\n\nPackage server — the functional options.\n\nPackage server — the pooled datagram.\n\nPackage server — a group of datagram listeners.\n\nPackage server — datagram listener construction and the read loop.\n\nPackage server — the datagram read loop.\n\nPackage server — per-connection state recycling.\n\nPackage server — the descriptor-bearing socket contract.\n\nPackage server — SO_REUSEPORT support on the BSD family.\n\nPackage server — SO_REUSEPORT support on Linux.\n\nPackage server — the SO_REUSEPORT floor for platforms without it.\n\nPackage server is the inbound half of the SDK's network domain (ADR 0029):\none unified listener engine for TCP, Unix, TLS and mutual TLS, serving\npluggable handlers grouped behind shared middlewares and policies.\n\nPackage server — kernel sockaddr decoding for the batched reader.\n\nPackage server — a group of listeners sharing one handler and policy.\n\nPackage server — the per-group connection ceiling.\n\nPackage server — deliberate discard of non-actionable cleanup errors.\n\nPackage server — how a Unix kernel reports a datagram longer than the read\nbuffer: by truncating it, which is not an error at all.\n\nPackage server — how Windows reports a datagram longer than the read buffer.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/service/net/sse",
@@ -61156,6 +61164,163 @@
       "canonical": "func(members ...github.com/kitsunium/sdk/internal/core/net.Policy) github.com/kitsunium/sdk/internal/core/net.Policy",
       "doc": "Policies requires every policy to allow the request. Composition is by\nconjunction so that adding a policy can only ever narrow what is permitted.\n",
       "file": "service/net/client/policies.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/loop.Config",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/net/loop",
+      "name": "Config",
+      "spelled": "struct{Group string; Value corenet.LoopValue; MaxConns int; IdleTimeout time.Duration; Handler corenet.LoopHandler; Listeners []Listener; Log io.Writer}",
+      "canonical": "struct{Group string; Value github.com/kitsunium/sdk/internal/core/net.LoopValue; MaxConns int; IdleTimeout time.Duration; Handler github.com/kitsunium/sdk/internal/core/net.LoopHandler; Listeners []github.com/kitsunium/sdk/internal/service/net/loop.Listener; Log io.Writer}",
+      "fields": [
+        {
+          "name": "Group",
+          "type": "string",
+          "doc": "Group is the group's name, for the start line and State.\n"
+        },
+        {
+          "name": "Value",
+          "type": "corenet.LoopValue",
+          "doc": "Value is the group's LoopValue.\n"
+        },
+        {
+          "name": "MaxConns",
+          "type": "int",
+          "doc": "MaxConns is LimitsValue.MaxConns: past it a connection is accepted and\nclosed at once. Zero sets no ceiling.\n"
+        },
+        {
+          "name": "IdleTimeout",
+          "type": "time.Duration",
+          "doc": "IdleTimeout closes a connection with no traffic for that long, its\noutput sent. Zero sets none.\n"
+        },
+        {
+          "name": "Handler",
+          "type": "corenet.LoopHandler",
+          "doc": "Handler is the group's loop handler.\n"
+        },
+        {
+          "name": "Listeners",
+          "type": "[]Listener",
+          "doc": "Listeners are the sockets to accept on.\n"
+        },
+        {
+          "name": "Log",
+          "type": "io.Writer",
+          "doc": "Log receives the one start line; nil is standard error.\n"
+        }
+      ],
+      "doc": "Config is what server gives a loop group to start: the group's name, its\nLoopValue, the two options the engine honours itself — MaxConns and\nIdleTimeout — its handler and its listeners.\n",
+      "file": "service/net/loop/group.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/loop.Group",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/net/loop",
+      "name": "Group",
+      "spelled": "struct{}",
+      "canonical": "struct{}",
+      "doc": "Group is a running loop group: its loops, their threads and their rings.\nStart is the one way to get one, so a Group always runs, or ran and was\nstopped by Shutdown or Close.\n",
+      "file": "service/net/loop/group.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/loop.(*Group).Close",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/loop",
+      "name": "Close",
+      "recv": "Group",
+      "spelled": "func() error",
+      "canonical": "func() error",
+      "doc": "Close closes every connection and stops every loop now.\n",
+      "file": "service/net/loop/group.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/loop.(*Group).Live",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/loop",
+      "name": "Live",
+      "recv": "Group",
+      "spelled": "func() int64",
+      "canonical": "func() int64",
+      "doc": "Live is how many connections the group serves now.\n",
+      "file": "service/net/loop/group.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/loop.(*Group).Rejected",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/loop",
+      "name": "Rejected",
+      "recv": "Group",
+      "spelled": "func() uint64",
+      "canonical": "func() uint64",
+      "doc": "Rejected is how many connections MaxConns turned away.\n",
+      "file": "service/net/loop/group.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/loop.(*Group).Shutdown",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/loop",
+      "name": "Shutdown",
+      "recv": "Group",
+      "spelled": "func(ctx context.Context) error",
+      "canonical": "func(ctx context.Context) error",
+      "doc": "Shutdown stops accepting and waits for every connection to settle, its\noutput sent, until ctx is done; then it closes the rest. A drain cut short\nreturns DrainTimeout.\n",
+      "file": "service/net/loop/group.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/loop.(*Group).State",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/loop",
+      "name": "State",
+      "recv": "Group",
+      "spelled": "func() corenet.LoopStateValue",
+      "canonical": "func() github.com/kitsunium/sdk/internal/core/net.LoopStateValue",
+      "doc": "State reports the group's backend and every ring's counters.\n",
+      "file": "service/net/loop/group.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/loop.Listener",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/net/loop",
+      "name": "Listener",
+      "spelled": "struct{FD int}",
+      "canonical": "struct{FD int}",
+      "fields": [
+        {
+          "name": "FD",
+          "type": "int",
+          "doc": "FD is the duplicated descriptor, close-on-exec.\n"
+        }
+      ],
+      "doc": "Listener is the one hand-off from server to the loop: a listening socket\nserver has already bound or adopted, as a duplicated descriptor the loop\ngroup owns from then on and closes when it stops.\n",
+      "file": "service/net/loop/group.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/loop.Start",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/net/loop",
+      "name": "Start",
+      "spelled": "func(cfg Config) (*Group, error)",
+      "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/net/loop.Config) (*github.com/kitsunium/sdk/internal/service/net/loop.Group, error)",
+      "doc": "Start resolves cfg against the effective RLIMIT_NOFILE — refusing with\nLoopNoDescriptors when it is zero or unreadable, before the one ring formula\ndivides by it — starts the group's loops on the backend cfg asks for, and\nwrites one line to cfg.Log naming the backend, the probe stage, any fallback\nreason, the loops, the rings and their sizes. The listeners are the group's\nfrom the call on, started or refused. An explicit backend the platform has\nno mechanic for is UnsupportedPlatform; one the kernel's probe refused is\nLoopBackendUnavailable.\n",
+      "file": "service/net/loop/group.go",
       "layer": "service",
       "family": "net"
     },

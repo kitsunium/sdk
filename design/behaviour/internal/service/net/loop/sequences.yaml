@@ -1,0 +1,6159 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+sequences:
+  - of: (*connCtl).pending
+    steps:
+      - return: int(c.out.len-c.out.off) + int(c.flight.len-c.flight.off)
+  - of: emptyConn
+    steps:
+      - return: |-
+          connCtl{
+          		gen: gen, fd: -1, state: stFree, reason: rNone,
+          		spill: chunkRef{idx: noChunk}, out: chunkRef{idx: noChunk}, flight: chunkRef{idx: noChunk},
+          		lruPrev: noLink, lruNext: noLink, dirtyNext: noLink,
+          	}
+  - of: newRing
+    steps:
+      - return: |-
+          &ring{
+          		lp: lp, index: i, drv: drv,
+          		wheel:   newWheel(0, lp.tick),
+          		lruHead: noLink, lruTail: noLink, dirtyHead: noLink,
+          		pub: &ringStats{},
+          	}
+  - of: (*ring).take
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ring).take
+        kind: self
+      - id: r.wheel.grow
+        kind: internal
+      - id: emptyConn
+        kind: internal
+    steps:
+      - var:
+          name: slot
+          type: int32
+      - alt:
+          - do:
+              - set: slot
+                value: r.free[n-1]
+              - set: r.free
+                value: r.free[:n-1]
+            init:
+              bind: "n"
+              eval: len(r.free)
+            when: n > 0
+          - do:
+              - opt:
+                  do:
+                    - return: 0, false
+                  when: len(r.conns) >= r.lp.sz.tableSize
+              - set: slot
+                value: int32(len(r.conns))
+              - set: r.conns
+                value: append(r.conns, emptyConn(0))
+              - eval: r.wheel.grow(len(r.conns))
+                to: r.wheel.grow
+            else: true
+      - bind: c
+        eval: "&r.conns[slot]"
+      - bind: gen
+        eval: c.gen + 1
+      - opt:
+          do:
+            - set: gen
+              value: "1"
+          when: gen == 0
+      - set: "*c"
+        to: emptyConn
+        value: emptyConn(gen)
+      - set: c.state, c.fd, c.lastIO
+        value: stOpen, fd, r.lp.tick
+      - return: slot, true
+  - of: (*ring).opened
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ring).opened
+        kind: self
+      - id: r.lp.grp.live.Add
+        kind: value
+      - id: r.lruPush
+        kind: internal
+      - id: r.armTimer
+        kind: internal
+      - id: r.lp.h.OnOpen
+        kind: value
+    steps:
+      - bind: c
+        eval: "&r.conns[slot]"
+      - bind: live
+        eval: r.lp.grp.live.Add(1)
+        to: r.lp.grp.live.Add
+      - op: ++
+        set: r.live
+      - op: ++
+        set: r.st.accepted
+      - opt:
+          do:
+            - op: "|="
+              set: c.flags
+              value: fPressure
+          init:
+            bind: soft
+            eval: r.lp.sz.softConns
+          when: soft > 0 && live > int64(soft)
+      - eval: r.lruPush(slot)
+        to: r.lruPush
+      - eval: r.armTimer(slot)
+        to: r.armTimer
+      - eval: r.lp.h.OnOpen(r.lp, r.ref(slot))
+        to: r.lp.h.OnOpen
+  - of: (*ring).abandon
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ring).abandon
+        kind: self
+      - id: emptyConn
+        kind: internal
+    steps:
+      - bind: c
+        eval: "&r.conns[slot]"
+      - set: "*c"
+        to: emptyConn
+        value: emptyConn(c.gen)
+      - set: r.free
+        value: append(r.free, slot)
+  - of: (*ring).ref
+    steps:
+      - return: "corenet.LoopConnRef{Ring: uint32(r.index), Slot: uint32(slot), Gen: r.conns[slot].gen}"
+  - of: (*ring).deliver
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ring).deliver
+        kind: self
+      - id: r.lruTouch
+        kind: internal
+      - id: clampConsumed
+        kind: internal
+      - id: r.keep
+        kind: internal
+      - id: lp.slab.data
+        kind: internal
+    steps:
+      - bind: c
+        eval: "&r.conns[slot]"
+      - opt:
+          do:
+            - return: ""
+          when: c.state != stOpen || len(data) == 0
+      - set: c.lastIO
+        value: r.lp.tick
+      - eval: r.lruTouch(slot)
+        to: r.lruTouch
+      - bind: lp
+        eval: r.lp
+      - opt:
+          do:
+            - bind: "n"
+              eval: clampConsumed(lp.h.OnData(lp, r.ref(slot), data), len(data))
+              to: clampConsumed
+            - opt:
+                do:
+                  - eval: r.keep(slot, data[n:])
+                    to: r.keep
+                when: c.state == stOpen && n < len(data)
+            - return: ""
+          when: c.spill.empty()
+      - opt:
+          do:
+            - return: ""
+          when: "!r.appendSpill(slot, data)"
+      - bind: buf
+        eval: lp.slab.data(c.spill)
+        to: lp.slab.data
+      - bind: "n"
+        eval: clampConsumed(lp.h.OnData(lp, r.ref(slot), buf), len(buf))
+        to: clampConsumed
+      - set: c
+        value: "&r.conns[slot]"
+      - op: +=
+        set: c.spill.off
+        value: int32(n)
+      - opt:
+          do:
+            - set: lp.deferred
+              value: append(lp.deferred, c.spill)
+            - set: c.spill
+              value: "chunkRef{idx: noChunk}"
+          when: c.spill.off == c.spill.len
+  - of: (*ring).keep
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ring).keep
+        kind: self
+      - id: r.fail
+        kind: internal
+      - id: lp.slab.alloc
+        kind: internal
+    steps:
+      - bind: lp
+        eval: r.lp
+      - opt:
+          do:
+            - eval: r.fail(slot, rSpill, 0)
+              to: r.fail
+            - return: ""
+          when: len(tail) > lp.sz.spillCap
+      - bind: ch, ok
+        eval: lp.slab.alloc(len(tail))
+        to: lp.slab.alloc
+      - opt:
+          do:
+            - eval: r.fail(slot, rSpill, 0)
+              to: r.fail
+            - return: ""
+          when: "!ok"
+      - set: ch.len
+        value: int32(copy(lp.slab.bytes(ch), tail))
+      - set: r.conns[slot].spill
+        value: ch
+  - of: (*ring).appendSpill
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ring).appendSpill
+        kind: self
+      - id: r.fail
+        kind: internal
+      - id: lp.slab.alloc
+        kind: internal
+      - id: lp.slab.bytes
+        kind: internal
+    steps:
+      - bind: lp
+        eval: r.lp
+      - bind: c
+        eval: "&r.conns[slot]"
+      - bind: held
+        eval: int(c.spill.len - c.spill.off)
+      - opt:
+          do:
+            - eval: r.fail(slot, rSpill, 0)
+              to: r.fail
+            - return: "false"
+          when: held+len(data) > lp.sz.spillCap
+      - opt:
+          do:
+            - op: +=
+              set: c.spill.len
+              value: int32(copy(lp.slab.bytes(c.spill)[c.spill.len:], data))
+            - return: "true"
+          when: lp.slab.size(c.spill)-int(c.spill.len) >= len(data)
+      - bind: ch, ok
+        eval: lp.slab.alloc(held + len(data))
+        to: lp.slab.alloc
+      - opt:
+          do:
+            - eval: r.fail(slot, rSpill, 0)
+              to: r.fail
+            - return: "false"
+          when: "!ok"
+      - bind: dst
+        eval: lp.slab.bytes(ch)
+        to: lp.slab.bytes
+      - bind: "n"
+        eval: copy(dst, lp.slab.data(c.spill))
+      - op: +=
+        set: "n"
+        value: copy(dst[n:], data)
+      - set: ch.len
+        value: int32(n)
+      - set: lp.deferred
+        value: append(lp.deferred, c.spill)
+      - set: c.spill
+        value: ch
+      - return: "true"
+  - of: (*ring).spillRoom
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ring).spillRoom
+        kind: self
+      - id: lp.slab.alloc
+        kind: internal
+    steps:
+      - bind: lp
+        eval: r.lp
+      - bind: c
+        eval: "&r.conns[slot]"
+      - bind: held
+        eval: int(c.spill.len - c.spill.off)
+      - bind: room
+        eval: min(want, lp.sz.spillCap-held)
+      - opt:
+          do:
+            - return: nil
+          when: room <= 0
+      - bind: free
+        eval: lp.slab.size(c.spill) - int(c.spill.len)
+      - opt:
+          do:
+            - return: "lp.slab.bytes(c.spill)[c.spill.len : int(c.spill.len)+room]"
+          when: free >= room
+      - bind: ch, ok
+        eval: lp.slab.alloc(held + room)
+        to: lp.slab.alloc
+      - opt:
+          do:
+            - return: nil
+          when: "!ok"
+      - set: ch.len
+        value: int32(copy(lp.slab.bytes(ch), lp.slab.data(c.spill)))
+      - set: lp.deferred
+        value: append(lp.deferred, c.spill)
+      - set: c.spill
+        value: ch
+      - return: "lp.slab.bytes(ch)[ch.len : int(ch.len)+room]"
+  - of: (*ring).deliverSpill
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ring).deliverSpill
+        kind: self
+      - id: r.lruTouch
+        kind: internal
+      - id: lp.slab.data
+        kind: internal
+      - id: clampConsumed
+        kind: internal
+    steps:
+      - bind: c
+        eval: "&r.conns[slot]"
+      - op: +=
+        set: c.spill.len
+        value: int32(n)
+      - set: c.lastIO
+        value: r.lp.tick
+      - eval: r.lruTouch(slot)
+        to: r.lruTouch
+      - bind: lp
+        eval: r.lp
+      - bind: buf
+        eval: lp.slab.data(c.spill)
+        to: lp.slab.data
+      - bind: used
+        eval: clampConsumed(lp.h.OnData(lp, r.ref(slot), buf), len(buf))
+        to: clampConsumed
+      - set: c
+        value: "&r.conns[slot]"
+      - op: +=
+        set: c.spill.off
+        value: int32(used)
+      - opt:
+          do:
+            - set: lp.deferred
+              value: append(lp.deferred, c.spill)
+            - set: c.spill
+              value: "chunkRef{idx: noChunk}"
+          when: c.spill.off == c.spill.len
+  - of: (*ring).hasSpill
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ring).hasSpill
+        kind: self
+      - id: r.conns[slot].spill.empty
+        kind: internal
+    steps:
+      - return: "!r.conns[slot].spill.empty()"
+        to: r.conns[slot].spill.empty
+  - of: (*ring).compactSpill
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ring).compactSpill
+        kind: self
+      - id: r.lp.slab.bytes
+        kind: internal
+    steps:
+      - bind: c
+        eval: "&r.conns[slot]"
+      - opt:
+          do:
+            - return: ""
+          when: c.spill.empty() || c.spill.off == 0
+      - bind: b
+        eval: r.lp.slab.bytes(c.spill)
+        to: r.lp.slab.bytes
+      - bind: "n"
+        eval: copy(b, b[c.spill.off:c.spill.len])
+      - set: c.spill.off, c.spill.len
+        value: 0, int32(n)
+  - of: clampConsumed
+    steps:
+      - opt:
+          do:
+            - return: "n"
+          when: v < 0 || v > n
+      - return: v
+  - of: (*ring).markDirty
+    steps:
+      - bind: c
+        eval: "&r.conns[slot]"
+      - opt:
+          do:
+            - return: ""
+          when: c.flags&fDirty != 0
+      - op: "|="
+        set: c.flags
+        value: fDirty
+      - set: c.dirtyNext
+        value: r.dirtyHead
+      - set: r.dirtyHead
+        value: slot
+  - of: (*ring).flushDirty
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ring).flushDirty
+        kind: self
+      - id: r.settle
+        kind: internal
+    steps:
+      - loop:
+          cond: s != noLink
+          do:
+            - set: r.dirtyHead
+              value: noLink
+            - loop:
+                cond: s != noLink
+                do:
+                  - bind: c
+                    eval: "&r.conns[s]"
+                  - bind: nxt
+                    eval: c.dirtyNext
+                  - op: "&^="
+                    set: c.flags
+                    value: fDirty
+                  - set: c.dirtyNext
+                    value: noLink
+                  - eval: r.settle(s)
+                    to: r.settle
+                  - set: s
+                    value: nxt
+            - set: s
+              value: r.dirtyHead
+          init: s := r.dirtyHead
+  - of: (*ring).settle
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ring).settle
+        kind: self
+      - id: r.drv.flush
+        kind: internal
+      - id: r.finish
+        kind: internal
+    steps:
+      - bind: c
+        eval: "&r.conns[slot]"
+      - opt:
+          do:
+            - return: ""
+          when: c.state != stOpen && c.state != stClosing
+      - opt:
+          do:
+            - eval: r.drv.flush(r, slot)
+              to: r.drv.flush
+            - set: c
+              value: "&r.conns[slot]"
+          when: c.pending() > 0
+      - opt:
+          do:
+            - eval: r.finish(slot, c.reason, c.errno)
+              to: r.finish
+          when: (c.state == stClosing || c.flags&fPeerDone != 0) && c.pending() == 0 && c.state != stDead
+  - of: (*ring).sent
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ring).sent
+        kind: self
+      - id: r.lp.h.OnWritable
+        kind: value
+    steps:
+      - bind: c
+        eval: "&r.conns[slot]"
+      - set: c.lastIO
+        value: r.lp.tick
+      - opt:
+          do:
+            - op: "&^="
+              set: c.flags
+              value: fWantWritable
+            - eval: r.lp.h.OnWritable(r.lp, r.ref(slot))
+              to: r.lp.h.OnWritable
+          when: c.flags&fWantWritable != 0 && c.state == stOpen && c.pending() < r.lp.lowWater
+  - of: (*ring).fail
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ring).fail
+        kind: self
+      - id: r.finish
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: r.finish(slot, reason, errno)
+              to: r.finish
+          when: r.conns[slot].state == stOpen || r.conns[slot].state == stClosing
+  - of: (*ring).finish
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ring).finish
+        kind: self
+      - id: r.ref
+        kind: internal
+      - id: r.wheel.disarm
+        kind: internal
+      - id: r.lruUnlink
+        kind: internal
+      - id: lp.grp.live.Add
+        kind: value
+      - id: lp.h.OnClose
+        kind: value
+      - id: r.drv.shutdown
+        kind: internal
+    steps:
+      - bind: c
+        eval: "&r.conns[slot]"
+      - bind: ref
+        eval: r.ref(slot)
+        to: r.ref
+      - set: c.state
+        value: stDead
+      - set: c.reason, c.errno
+        value: reason, errno
+      - eval: r.wheel.disarm(slot)
+        to: r.wheel.disarm
+      - eval: r.lruUnlink(slot)
+        to: r.lruUnlink
+      - bind: lp
+        eval: r.lp
+      - set: lp.deferred
+        value: append(lp.deferred, c.spill, c.out)
+      - set: c.spill, c.out
+        value: "chunkRef{idx: noChunk}, chunkRef{idx: noChunk}"
+      - op: "--"
+        set: r.live
+      - op: ++
+        set: r.st.closed
+      - eval: lp.grp.live.Add(-1)
+        to: lp.grp.live.Add
+      - eval: lp.h.OnClose(lp, ref, closeErr(reason, errno))
+        to: lp.h.OnClose
+      - eval: r.drv.shutdown(r, slot)
+        to: r.drv.shutdown
+  - of: (*ring).release
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ring).release
+        kind: self
+      - id: emptyConn
+        kind: internal
+    steps:
+      - bind: c
+        eval: "&r.conns[slot]"
+      - set: r.lp.deferred
+        value: append(r.lp.deferred, c.flight)
+      - set: "*c"
+        to: emptyConn
+        value: emptyConn(c.gen)
+      - set: r.free
+        value: append(r.free, slot)
+  - of: closeErr
+    participants:
+      - id: caller
+        kind: actor
+      - id: closeErr
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - switch:
+          cases:
+            - case: rSpill
+              do:
+                - return: corenet.LoopSpillFull
+            - case: rIdle
+              do:
+                - return: os.ErrDeadlineExceeded
+            - case: rDrain
+              do:
+                - return: corenet.ServerClosed
+            - case: rEvict
+              do:
+                - return: corenet.ConnLimitReached
+            - case: rErrno
+              do:
+                - return: syscall.Errno(errno)
+                  to: syscall
+            - default: true
+              do:
+                - return: nil
+          "on": reason
+  - of: (*ring).armTimer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ring).armTimer
+        kind: self
+      - id: r.wheel.disarm
+        kind: internal
+      - id: r.wheel.arm
+        kind: internal
+    steps:
+      - bind: c
+        eval: "&r.conns[slot]"
+      - bind: at
+        eval: c.deadline
+      - opt:
+          do:
+            - bind: exp
+              eval: c.lastIO + idle
+            - opt:
+                do:
+                  - set: at
+                    value: exp
+                when: at == 0 || exp < at
+          init:
+            bind: idle
+            eval: r.lp.idle
+          when: idle > 0
+      - opt:
+          do:
+            - eval: r.wheel.disarm(slot)
+              to: r.wheel.disarm
+            - return: ""
+          when: at == 0
+      - eval: r.wheel.arm(slot, at)
+        to: r.wheel.arm
+  - of: (*ring).expire
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ring).expire
+        kind: self
+      - id: r.finish
+        kind: internal
+      - id: r.armTimer
+        kind: internal
+      - id: r.lp.h.OnTimeout
+        kind: value
+    steps:
+      - bind: c
+        eval: "&r.conns[slot]"
+      - opt:
+          do:
+            - return: ""
+          when: c.state != stOpen
+      - bind: now
+        eval: r.lp.tick
+      - opt:
+          do:
+            - eval: r.finish(slot, rIdle, 0)
+              to: r.finish
+            - return: ""
+          init:
+            bind: idle
+            eval: r.lp.idle
+          when: idle > 0 && c.lastIO+idle <= now && c.pending() == 0
+      - opt:
+          do:
+            - set: c.deadline
+              value: "0"
+            - eval: r.armTimer(slot)
+              to: r.armTimer
+            - eval: r.lp.h.OnTimeout(r.lp, r.ref(slot))
+              to: r.lp.h.OnTimeout
+            - return: ""
+          when: c.deadline != 0 && c.deadline <= now
+      - eval: r.armTimer(slot)
+        to: r.armTimer
+  - of: (*ring).lruPush
+    steps:
+      - bind: c
+        eval: "&r.conns[slot]"
+      - set: c.lruPrev, c.lruNext
+        value: r.lruTail, noLink
+      - alt:
+          - do:
+              - set: r.conns[r.lruTail].lruNext
+                value: slot
+            when: r.lruTail != noLink
+          - do:
+              - set: r.lruHead
+                value: slot
+            else: true
+      - set: r.lruTail
+        value: slot
+  - of: (*ring).lruUnlink
+    steps:
+      - bind: c
+        eval: "&r.conns[slot]"
+      - alt:
+          - do:
+              - set: r.conns[c.lruPrev].lruNext
+                value: c.lruNext
+            when: c.lruPrev != noLink
+          - do:
+              - set: r.lruHead
+                value: c.lruNext
+            when: r.lruHead == slot
+      - alt:
+          - do:
+              - set: r.conns[c.lruNext].lruPrev
+                value: c.lruPrev
+            when: c.lruNext != noLink
+          - do:
+              - set: r.lruTail
+                value: c.lruPrev
+            when: r.lruTail == slot
+      - set: c.lruPrev, c.lruNext
+        value: noLink, noLink
+  - of: (*ring).lruTouch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ring).lruTouch
+        kind: self
+      - id: r.lruUnlink
+        kind: internal
+      - id: r.lruPush
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: r.lruTail == slot
+      - eval: r.lruUnlink(slot)
+        to: r.lruUnlink
+      - eval: r.lruPush(slot)
+        to: r.lruPush
+  - of: (*ring).evict
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ring).evict
+        kind: self
+      - id: r.finish
+        kind: internal
+    steps:
+      - bind: lp
+        eval: r.lp
+      - opt:
+          do:
+            - return: "0"
+          when: lp.evictIdle <= 0
+      - bind: done
+        eval: "0"
+      - bind: s
+        eval: r.lruHead
+      - loop:
+          cond: s != noLink && done < evictPerTick
+          do:
+            - bind: c
+              eval: "&r.conns[s]"
+            - bind: nxt
+              eval: c.lruNext
+            - opt:
+                do:
+                  - break: true
+                when: lp.tick-c.lastIO < lp.evictIdle
+            - opt:
+                do:
+                  - op: ++
+                    set: r.st.evicted
+                  - eval: r.finish(s, rEvict, 0)
+                    to: r.finish
+                  - op: ++
+                    set: done
+                when: c.state == stOpen && c.spill.empty() && c.pending() == 0 && !r.drv.unread(r, s)
+            - set: s
+              value: nxt
+      - return: done
+  - of: (*loop).endBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loop).endBatch
+        kind: self
+      - id: r.flushDirty
+        kind: internal
+      - id: lp.slab.free
+        kind: internal
+      - id: r.compactAll
+        kind: internal
+      - id: r.publish
+        kind: internal
+      - id: lp.grp.observe
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: r.flushDirty()
+              to: r.flushDirty
+          key: _
+          range: lp.rings
+          value: r
+      - loop:
+          do:
+            - eval: lp.slab.free(ch)
+              to: lp.slab.free
+          key: _
+          range: lp.deferred
+          value: ch
+      - set: lp.deferred
+        value: lp.deferred[:0]
+      - loop:
+          do:
+            - eval: r.compactAll()
+              to: r.compactAll
+            - op: ++
+              set: r.st.batches
+            - eval: r.publish()
+              to: r.publish
+          key: _
+          range: lp.rings
+          value: r
+      - eval: lp.grp.observe(time.Since(started))
+        to: lp.grp.observe
+  - of: (*ring).compactAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ring).compactAll
+        kind: self
+      - id: r.compactSpill
+        kind: internal
+    steps:
+      - loop:
+          cond: s != noLink
+          do:
+            - eval: r.compactSpill(s)
+              to: r.compactSpill
+          init: s := r.lruHead
+          post: s = r.conns[s].lruNext
+  - of: (*loop).now
+    steps:
+      - return: int64(time.Since(lp.epoch)/tickEvery) + 1
+  - of: (*loop).lookup
+    steps:
+      - opt:
+          do:
+            - return: nil, 0, false
+          when: int(ref.Ring) >= len(lp.rings)
+      - bind: r
+        eval: lp.rings[ref.Ring]
+      - opt:
+          do:
+            - return: nil, 0, false
+          when: int(ref.Slot) >= len(r.conns)
+      - bind: c
+        eval: "&r.conns[ref.Slot]"
+      - opt:
+          do:
+            - return: nil, 0, false
+          when: c.gen != ref.Gen || c.state != stOpen || ref.Gen == 0
+      - return: r, int32(ref.Slot), true
+  - of: (*loop).Write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loop).Write
+        kind: self
+      - id: lp.lookup
+        kind: internal
+      - id: lp.slab.alloc
+        kind: internal
+      - id: r.markDirty
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corenet.LoopWrongThread
+          when: lp.threadOK != nil && !lp.threadOK()
+      - bind: r, slot, ok
+        eval: lp.lookup(ref)
+        to: lp.lookup
+      - opt:
+          do:
+            - return: corenet.LoopStaleRef
+          when: "!ok"
+      - opt:
+          do:
+            - return: nil
+          when: len(p) == 0
+      - bind: c
+        eval: "&r.conns[slot]"
+      - opt:
+          do:
+            - op: "|="
+              set: c.flags
+              value: fWantWritable
+            - return: corenet.LoopOutputFull
+          when: c.pending()+len(p) > lp.sz.outputCap
+      - alt:
+          - do:
+              - bind: ch, ok
+                eval: lp.slab.alloc(len(p))
+                to: lp.slab.alloc
+              - opt:
+                  do:
+                    - op: "|="
+                      set: c.flags
+                      value: fWantWritable
+                    - return: corenet.LoopOutputFull
+                  when: "!ok"
+              - set: c.out
+                value: ch
+            when: c.out.empty()
+          - do:
+              - opt:
+                  do:
+                    - op: "|="
+                      set: c.flags
+                      value: fWantWritable
+                    - return: corenet.LoopOutputFull
+                  when: "!lp.growOut(c, len(p))"
+            when: lp.slab.size(c.out)-int(c.out.len) < len(p)
+      - op: +=
+        set: c.out.len
+        value: int32(copy(lp.slab.bytes(c.out)[c.out.len:], p))
+      - eval: r.markDirty(slot)
+        to: r.markDirty
+      - return: nil
+  - of: (*loop).growOut
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loop).growOut
+        kind: self
+      - id: lp.slab.alloc
+        kind: internal
+      - id: lp.slab.free
+        kind: internal
+    steps:
+      - bind: held
+        eval: int(c.out.len - c.out.off)
+      - bind: ch, ok
+        eval: lp.slab.alloc(held + n)
+        to: lp.slab.alloc
+      - opt:
+          do:
+            - return: "false"
+          when: "!ok"
+      - set: ch.len
+        value: int32(copy(lp.slab.bytes(ch), lp.slab.data(c.out)))
+      - eval: lp.slab.free(c.out)
+        to: lp.slab.free
+      - set: c.out
+        value: ch
+      - return: "true"
+  - of: (*loop).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loop).Close
+        kind: self
+      - id: lp.lookup
+        kind: internal
+      - id: r.markDirty
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corenet.LoopWrongThread
+          when: lp.threadOK != nil && !lp.threadOK()
+      - bind: r, slot, ok
+        eval: lp.lookup(ref)
+        to: lp.lookup
+      - opt:
+          do:
+            - return: corenet.LoopStaleRef
+          when: "!ok"
+      - set: r.conns[slot].state
+        value: stClosing
+      - eval: r.markDirty(slot)
+        to: r.markDirty
+      - return: nil
+  - of: (*loop).SetDeadline
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loop).SetDeadline
+        kind: self
+      - id: lp.lookup
+        kind: internal
+      - id: r.armTimer
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: corenet.LoopWrongThread
+          when: lp.threadOK != nil && !lp.threadOK()
+      - bind: r, slot, ok
+        eval: lp.lookup(ref)
+        to: lp.lookup
+      - opt:
+          do:
+            - return: corenet.LoopStaleRef
+          when: "!ok"
+      - bind: c
+        eval: "&r.conns[slot]"
+      - alt:
+          - do:
+              - set: c.deadline
+                value: "0"
+            when: d <= 0
+          - do:
+              - set: c.deadline
+                value: lp.now() + int64((d+tickEvery-1)/tickEvery)
+            else: true
+      - eval: r.armTimer(slot)
+        to: r.armTimer
+      - return: nil
+  - of: (*loop).Pressure
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loop).Pressure
+        kind: self
+      - id: lp.lookup
+        kind: internal
+    steps:
+      - bind: r, slot, ok
+        eval: lp.lookup(ref)
+        to: lp.lookup
+      - opt:
+          do:
+            - return: "false"
+          when: "!ok"
+      - return: r.conns[slot].flags&fPressure != 0 || lp.hard
+  - of: (*loop).Post
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loop).Post
+        kind: self
+      - id: lp.post.post
+        kind: internal
+    steps:
+      - return: lp.post.post(op, arg)
+        to: lp.post.post
+  - of: threadCheck
+    steps:
+      - return: nil
+  - of: startEpoll
+    participants:
+      - id: caller
+        kind: actor
+      - id: startEpoll
+        kind: self
+      - id: swallowErr
+        kind: internal
+      - id: newLoop
+        kind: internal
+      - id: er.wg.Add
+        kind: value
+      - id: el.run
+        kind: internal
+      - id: er.stop
+        kind: internal
+      - id: er.wait
+        kind: internal
+    steps:
+      - bind: fin
+        eval: make(chan struct{})
+      - bind: er
+        eval: "&epollRunner{fin: fin}"
+      - loop:
+          do:
+            - eval: swallowErr(syscall.SetsockoptInt(l.FD, syscall.IPPROTO_TCP, syscall.TCP_NODELAY, 1))
+              to: swallowErr
+            - set: er.lfds
+              value: append(er.lfds, l.FD)
+          key: _
+          range: cfg.Listeners
+          value: l
+      - bind: ready
+        eval: make(chan error, g.sz.loops)
+      - loop:
+          do:
+            - bind: lp
+              eval: newLoop(g, *cfg, i, mmapAnon)
+              to: newLoop
+            - bind: el
+              eval: "&epollLoop{lp: lp, lfds: er.lfds, epfd: -1, evfd: -1, events: make([]syscall.EpollEvent, g.sz.cqBatch), backoff: backoffMin}"
+            - set: er.loops
+              value: append(er.loops, el)
+            - set: g.loops
+              value: append(g.loops, lp)
+            - eval: er.wg.Add(1)
+              to: er.wg.Add
+            - go: el.run(&er.wg, ready)
+              to: el.run
+          key: i
+          range: g.sz.loops
+      - var:
+          name: first
+          type: error
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: first
+                    value: err
+                init:
+                  bind: err
+                  eval: <-ready
+                when: err != nil && first == nil
+          range: g.sz.loops
+      - set: g.ctl
+        value: er
+      - go: |-
+          func() {
+          		er.wg.Wait()
+          		closeFDs(er.lfds)
+          		close(fin)
+          	}()
+      - opt:
+          do:
+            - eval: er.stop()
+              to: er.stop
+            - eval: er.wait()
+              to: er.wait
+            - return: first
+          when: first != nil
+      - set: g.backend
+        value: backendEpoll
+      - return: nil
+  - of: (*epollRunner).drain
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollRunner).drain
+        kind: self
+      - id: el.drainReq.Store
+        kind: value
+      - id: el.wake
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: el.drainReq.Store(true)
+              to: el.drainReq.Store
+            - eval: el.wake()
+              to: el.wake
+          key: _
+          range: er.loops
+          value: el
+  - of: (*epollRunner).stop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollRunner).stop
+        kind: self
+      - id: el.stopReq.Store
+        kind: value
+      - id: el.wake
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: el.stopReq.Store(true)
+              to: el.stopReq.Store
+            - eval: el.wake()
+              to: el.wake
+          key: _
+          range: er.loops
+          value: el
+  - of: (*epollRunner).wait
+    steps:
+      - eval: <-er.fin
+  - of: (*epollRunner).done
+    steps:
+      - return: er.fin
+  - of: (*epollLoop).wake
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollLoop).wake
+        kind: self
+      - id: syscall
+        kind: stdlib
+      - id: swallowErr
+        kind: internal
+    steps:
+      - lock:
+          mutex: el.wakeMu
+      - opt:
+          do:
+            - return: ""
+          when: el.evClosed || el.evfd < 0
+      - bind: one
+        eval: new(uint64(1))
+      - bind: _, _, errno
+        eval: syscall.RawSyscall(syscall.SYS_WRITE, uintptr(el.evfd), uintptr(unsafe.Pointer(one)), 8)
+        to: syscall
+      - eval: swallowErr(errno)
+        to: swallowErr
+  - of: (*epollLoop).setup
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollLoop).setup
+        kind: self
+      - id: syscall
+        kind: stdlib
+      - id: unavailable
+        kind: internal
+      - id: el.ctl
+        kind: internal
+      - id: mmapAnon
+        kind: internal
+      - id: newPostQueue
+        kind: internal
+      - id: newRing
+        kind: internal
+      - id: el.armListeners
+        kind: internal
+    steps:
+      - bind: epfd, err
+        eval: syscall.EpollCreate1(syscall.EPOLL_CLOEXEC)
+        to: syscall
+      - opt:
+          do:
+            - return: unavailable("epoll_create1", err)
+              to: unavailable
+          when: err != nil
+      - set: el.epfd
+        value: epfd
+      - bind: evfd, _, errno
+        eval: syscall.RawSyscall(syscall.SYS_EVENTFD2, 0, efdNonblock|efdCloexec, 0)
+        to: syscall
+      - opt:
+          do:
+            - return: unavailable("eventfd2", errno)
+              to: unavailable
+          when: errno != 0
+      - set: el.evfd
+        value: int(evfd)
+      - opt:
+          do:
+            - return: unavailable("epoll_ctl eventfd", err)
+              to: unavailable
+          init:
+            bind: err
+            eval: el.ctl(syscall.EPOLL_CTL_ADD, el.evfd, syscall.EPOLLIN, tagWake, 0)
+            to: el.ctl
+          when: err != nil
+      - bind: arena, err
+        eval: mmapAnon(arenaSize)
+        to: mmapAnon
+      - opt:
+          do:
+            - return: unavailable("mmap arena", err)
+              to: unavailable
+          when: err != nil
+      - set: el.arena
+        value: arena
+      - bind: lp
+        eval: el.lp
+      - set: lp.post
+        to: newPostQueue
+        value: newPostQueue(el.wake)
+      - set: el.r
+        to: newRing
+        value: newRing(lp, 0, el)
+      - set: lp.rings
+        value: "[]*ring{el.r}"
+      - eval: el.armListeners()
+        to: el.armListeners
+      - return: nil
+  - of: (*epollLoop).ctl
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollLoop).ctl
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - bind: ev
+        eval: "new(syscall.EpollEvent{Events: events, Fd: tag, Pad: int32(gen)})"
+      - return: syscall.EpollCtl(el.epfd, op, fd, ev)
+        to: syscall
+  - of: (*epollLoop).armListeners
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollLoop).armListeners
+        kind: self
+      - id: swallowErr
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: el.armed || el.lp.draining
+      - loop:
+          do:
+            - eval: swallowErr(el.ctl(syscall.EPOLL_CTL_ADD, fd, syscall.EPOLLIN|epollExclusive, tagListen-int32(i), 0))
+              to: swallowErr
+          key: i
+          range: el.lfds
+          value: fd
+      - set: el.armed
+        value: "true"
+  - of: (*epollLoop).disarmListeners
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollLoop).disarmListeners
+        kind: self
+      - id: swallowErr
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!el.armed"
+      - loop:
+          do:
+            - eval: swallowErr(syscall.EpollCtl(el.epfd, syscall.EPOLL_CTL_DEL, fd, nil))
+              to: swallowErr
+          key: _
+          range: el.lfds
+          value: fd
+      - set: el.armed
+        value: "false"
+  - of: (*epollLoop).run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollLoop).run
+        kind: self
+      - id: wg.Done
+        kind: value
+      - id: runtime
+        kind: stdlib
+      - id: syscall
+        kind: stdlib
+      - id: threadCheck
+        kind: internal
+      - id: el.setup
+        kind: internal
+      - id: el.teardown
+        kind: internal
+      - id: el.wait
+        kind: internal
+      - id: time
+        kind: stdlib
+      - id: lp.now
+        kind: internal
+      - id: el.handle
+        kind: internal
+      - id: el.control
+        kind: internal
+      - id: el.r.wheel.advance
+        kind: internal
+      - id: el.pace
+        kind: internal
+      - id: lp.h.OnBatchEnd
+        kind: value
+      - id: lp.endBatch
+        kind: internal
+      - id: el.closeAll
+        kind: internal
+    steps:
+      - defer: wg.Done()
+        to: wg.Done
+      - eval: runtime.LockOSThread()
+        to: runtime
+      - set: el.tid
+        to: syscall
+        value: syscall.Gettid()
+      - set: el.lp.threadOK
+        to: threadCheck
+        value: threadCheck(el.tid)
+      - opt:
+          do:
+            - eval: el.teardown()
+              to: el.teardown
+            - send:
+                chan: ready
+                value: err
+            - return: ""
+          init:
+            bind: err
+            eval: el.setup()
+            to: el.setup
+          when: err != nil
+      - send:
+          chan: ready
+          value: nil
+      - bind: lp
+        eval: el.lp
+      - loop:
+          do:
+            - bind: "n"
+              eval: el.wait()
+              to: el.wait
+            - bind: started
+              eval: time.Now()
+              to: time
+            - set: lp.tick
+              to: lp.now
+              value: lp.now()
+            - eval: el.handle(n)
+              to: el.handle
+            - eval: el.control()
+              to: el.control
+            - eval: el.r.wheel.advance(lp.tick, el.r.expire)
+              to: el.r.wheel.advance
+            - eval: el.pace()
+              to: el.pace
+            - eval: lp.h.OnBatchEnd(lp)
+              to: lp.h.OnBatchEnd
+            - eval: lp.endBatch(started)
+              to: lp.endBatch
+            - set: el.off
+              value: "0"
+            - opt:
+                do:
+                  - break: true
+                when: el.stopReq.Load() || (lp.draining && el.r.live == 0)
+          forever: true
+      - eval: el.closeAll()
+        to: el.closeAll
+      - eval: el.teardown()
+        to: el.teardown
+  - of: (*epollLoop).wait
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollLoop).wait
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - bind: timeout
+        eval: int(tickEvery / time.Millisecond)
+      - opt:
+          do:
+            - set: timeout
+              value: "-1"
+          when: el.r.live == 0 && el.armed && !el.lp.draining
+      - bind: n, err
+        eval: syscall.EpollWait(el.epfd, el.events, timeout)
+        to: syscall
+      - opt:
+          do:
+            - return: "0"
+          when: err != nil
+      - op: +=
+        set: el.r.st.completions
+        value: uint64(n)
+      - return: "n"
+  - of: (*epollLoop).handle
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollLoop).handle
+        kind: self
+      - id: el.drainWake
+        kind: internal
+      - id: el.accept
+        kind: internal
+      - id: el.conn
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: ev
+              eval: "&el.events[i]"
+            - switch:
+                cases:
+                  - case: ev.Fd == tagWake
+                    do:
+                      - eval: el.drainWake()
+                        to: el.drainWake
+                  - case: ev.Fd <= tagListen
+                    do:
+                      - eval: el.accept(el.lfds[tagListen-ev.Fd])
+                        to: el.accept
+                  - default: true
+                    do:
+                      - eval: el.conn(ev.Fd, uint32(ev.Pad), ev.Events)
+                        to: el.conn
+          key: i
+          range: "n"
+  - of: (*epollLoop).drainWake
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollLoop).drainWake
+        kind: self
+      - id: syscall
+        kind: stdlib
+      - id: swallowErr
+        kind: internal
+      - id: el.lp.post.drain
+        kind: internal
+    steps:
+      - var:
+          name: buf
+          type: "[8]byte"
+      - bind: _, _, errno
+        eval: syscall.RawSyscall(syscall.SYS_READ, uintptr(el.evfd), uintptr(unsafe.Pointer(&buf[0])), 8)
+        to: syscall
+      - eval: swallowErr(errno)
+        to: swallowErr
+      - opt:
+          do:
+            - panic: "\"net/loop: Post consumer off its loop's thread\""
+          when: el.lp.threadOK != nil && !el.lp.threadOK()
+      - eval: el.lp.post.drain(el.lp)
+        to: el.lp.post.drain
+  - of: (*epollLoop).accept
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollLoop).accept
+        kind: self
+      - id: syscall
+        kind: stdlib
+      - id: el.admit
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: nfd, _, err
+              eval: syscall.Accept4(lfd, syscall.SOCK_NONBLOCK|syscall.SOCK_CLOEXEC)
+              to: syscall
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: ""
+                      when: el.acceptFailed(err)
+                  - continue: true
+                when: err != nil
+            - eval: el.admit(nfd)
+              to: el.admit
+          range: epollAcceptBurst
+  - of: (*epollLoop).acceptFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollLoop).acceptFailed
+        kind: self
+      - id: el.pause
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: syscall.EAGAIN
+              do:
+                - return: "true"
+            - case: syscall.EMFILE, syscall.ENFILE
+              do:
+                - eval: el.pause()
+                  to: el.pause
+                - return: "true"
+            - case: syscall.ECONNABORTED, syscall.EINTR
+              do:
+                - return: "false"
+            - default: true
+              do:
+                - return: "true"
+          "on": err
+  - of: (*epollLoop).admit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollLoop).admit
+        kind: self
+      - id: swallowErr
+        kind: internal
+      - id: el.reject
+        kind: internal
+      - id: rg.take
+        kind: internal
+      - id: el.ctl
+        kind: internal
+      - id: rg.abandon
+        kind: internal
+      - id: rg.opened
+        kind: internal
+    steps:
+      - bind: lp, rg
+        eval: el.lp, el.r
+      - opt:
+          do:
+            - eval: swallowErr(syscall.Close(nfd))
+              to: swallowErr
+            - return: ""
+          when: lp.draining
+      - opt:
+          do:
+            - eval: el.reject(nfd)
+              to: el.reject
+            - return: ""
+          init:
+            bind: m
+            eval: lp.sz.maxConns
+          when: m > 0 && lp.grp.live.Load() >= int64(m)
+      - bind: slot, ok
+        eval: rg.take(int32(nfd))
+        to: rg.take
+      - opt:
+          do:
+            - eval: el.reject(nfd)
+              to: el.reject
+            - return: ""
+          when: "!ok"
+      - opt:
+          do:
+            - eval: rg.abandon(slot)
+              to: rg.abandon
+            - eval: swallowErr(syscall.Close(nfd))
+              to: swallowErr
+            - return: ""
+          init:
+            bind: err
+            eval: el.ctl(syscall.EPOLL_CTL_ADD, nfd, connEvents, slot, rg.conns[slot].gen)
+            to: el.ctl
+          when: err != nil
+      - set: el.backoff
+        value: backoffMin
+      - eval: rg.opened(slot)
+        to: rg.opened
+  - of: (*epollLoop).reject
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollLoop).reject
+        kind: self
+      - id: swallowErr
+        kind: internal
+      - id: el.lp.grp.rejected.Add
+        kind: value
+    steps:
+      - eval: swallowErr(syscall.Close(nfd))
+        to: swallowErr
+      - eval: el.lp.grp.rejected.Add(1)
+        to: el.lp.grp.rejected.Add
+      - set: el.lp.hard
+        value: "true"
+  - of: (*epollLoop).pause
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollLoop).pause
+        kind: self
+      - id: el.disarmListeners
+        kind: internal
+    steps:
+      - eval: el.disarmListeners()
+        to: el.disarmListeners
+      - set: el.rearmAt
+        value: el.lp.tick + el.backoff
+      - set: el.backoff
+        value: min(el.backoff*2, backoffMax)
+      - set: el.lp.hard
+        value: "true"
+      - op: ++
+        set: el.r.st.pauses
+  - of: (*epollLoop).pace
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollLoop).pace
+        kind: self
+      - id: el.armListeners
+        kind: internal
+      - id: el.r.evict
+        kind: internal
+    steps:
+      - bind: lp
+        eval: el.lp
+      - opt:
+          do:
+            - eval: el.armListeners()
+              to: el.armListeners
+          when: "!el.armed && !lp.draining && lp.tick >= el.rearmAt"
+      - opt:
+          do:
+            - eval: el.r.evict()
+              to: el.r.evict
+            - opt:
+                do:
+                  - set: lp.hard
+                    value: "false"
+                when: el.armed && (lp.sz.maxConns == 0 || lp.grp.live.Load() < int64(lp.sz.maxConns))
+          when: lp.hard
+  - of: (*epollLoop).conn
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollLoop).conn
+        kind: self
+      - id: el.writable
+        kind: internal
+      - id: el.readable
+        kind: internal
+    steps:
+      - bind: r
+        eval: el.r
+      - opt:
+          do:
+            - return: ""
+          when: int(slot) >= len(r.conns) || r.conns[slot].gen != gen
+      - opt:
+          do:
+            - eval: el.writable(slot)
+              to: el.writable
+          when: events&syscall.EPOLLOUT != 0 && r.conns[slot].state != stDead
+      - eval: el.readable(slot, events)
+        to: el.readable
+  - of: (*epollLoop).writable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollLoop).writable
+        kind: self
+      - id: el.flush
+        kind: internal
+      - id: swallowErr
+        kind: internal
+    steps:
+      - bind: r
+        eval: el.r
+      - op: "&^="
+        set: r.conns[slot].flags
+        value: fSending
+      - eval: el.flush(r, slot)
+        to: el.flush
+      - bind: c
+        eval: "&r.conns[slot]"
+      - opt:
+          do:
+            - eval: swallowErr(el.ctl(syscall.EPOLL_CTL_MOD, int(c.fd), el.outEvents(c), slot, c.gen))
+              to: swallowErr
+          when: c.state != stDead && c.flags&fSending == 0
+  - of: (*epollLoop).readable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollLoop).readable
+        kind: self
+      - id: el.read
+        kind: internal
+      - id: r.fail
+        kind: internal
+    steps:
+      - bind: r
+        eval: el.r
+      - bind: c
+        eval: "&r.conns[slot]"
+      - opt:
+          do:
+            - eval: el.read(slot)
+              to: el.read
+            - return: ""
+          when: events&(syscall.EPOLLIN|syscall.EPOLLRDHUP|syscall.EPOLLHUP|syscall.EPOLLERR) != 0 && c.state == stOpen && c.flags&fPeerDone == 0
+      - opt:
+          do:
+            - eval: r.fail(slot, rErrno, int32(syscall.ECONNRESET))
+              to: r.fail
+          when: events&(syscall.EPOLLHUP|syscall.EPOLLERR) != 0 && (c.state == stOpen || c.state == stClosing)
+  - of: (*epollLoop).read
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollLoop).read
+        kind: self
+      - id: el.readBuf
+        kind: internal
+      - id: syscall
+        kind: stdlib
+      - id: el.received
+        kind: internal
+      - id: swallowErr
+        kind: internal
+      - id: r.markDirty
+        kind: internal
+      - id: r.fail
+        kind: internal
+    steps:
+      - bind: buf, inSpill, ok
+        eval: el.readBuf(slot)
+        to: el.readBuf
+      - opt:
+          do:
+            - return: ""
+          when: "!ok"
+      - bind: r
+        eval: el.r
+      - bind: c
+        eval: "&r.conns[slot]"
+      - bind: n, err
+        eval: syscall.Read(int(c.fd), buf)
+        to: syscall
+      - switch:
+          cases:
+            - case: n > 0
+              do:
+                - eval: el.received(slot, buf[:n], inSpill)
+                  to: el.received
+            - case: n == 0 && err == nil
+              do:
+                - op: "|="
+                  set: c.flags
+                  value: fPeerDone
+                - eval: swallowErr(el.ctl(syscall.EPOLL_CTL_MOD, int(c.fd), el.outEvents(c), slot, c.gen))
+                  to: swallowErr
+                - eval: r.markDirty(slot)
+                  to: r.markDirty
+            - case: err == syscall.EAGAIN || err == syscall.EINTR
+            - default: true
+              do:
+                - eval: r.fail(slot, rErrno, errnoOf(err))
+                  to: r.fail
+  - of: (*epollLoop).readBuf
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollLoop).readBuf
+        kind: self
+      - id: r.spillRoom
+        kind: internal
+      - id: r.fail
+        kind: internal
+    steps:
+      - bind: r
+        eval: el.r
+      - opt:
+          do:
+            - set: buf
+              to: r.spillRoom
+              value: r.spillRoom(slot, readChunk)
+            - opt:
+                do:
+                  - eval: r.fail(slot, rSpill, 0)
+                    to: r.fail
+                  - return: nil, true, false
+                when: buf == nil
+            - return: buf, true, true
+          when: r.hasSpill(slot)
+      - opt:
+          do:
+            - return: nil, false, false
+          when: len(el.arena)-el.off < minRead
+      - return: el.arena[el.off:min(len(el.arena), el.off+readChunk)], false, true
+  - of: (*epollLoop).received
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollLoop).received
+        kind: self
+      - id: el.r.deliverSpill
+        kind: internal
+      - id: el.r.deliver
+        kind: internal
+    steps:
+      - alt:
+          - do:
+              - eval: el.r.deliverSpill(slot, len(data))
+                to: el.r.deliverSpill
+            when: inSpill
+          - do:
+              - op: +=
+                set: el.off
+                value: len(data)
+              - eval: el.r.deliver(slot, data)
+                to: el.r.deliver
+            else: true
+  - of: (*epollLoop).outEvents
+    steps:
+      - var:
+          name: ev
+          type: uint32
+      - opt:
+          do:
+            - op: "|="
+              set: ev
+              value: connEvents
+          when: c.state == stOpen && c.flags&fPeerDone == 0
+      - opt:
+          do:
+            - op: "|="
+              set: ev
+              value: syscall.EPOLLOUT
+          when: c.flags&fSending != 0
+      - return: ev
+  - of: (*epollLoop).flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollLoop).flush
+        kind: self
+      - id: lp.slab.data
+        kind: internal
+      - id: syscall
+        kind: stdlib
+      - id: lp.slab.free
+        kind: internal
+      - id: r.sent
+        kind: internal
+      - id: swallowErr
+        kind: internal
+      - id: r.fail
+        kind: internal
+    steps:
+      - bind: lp
+        eval: el.lp
+      - loop:
+          do:
+            - bind: c
+              eval: "&r.conns[slot]"
+            - opt:
+                do:
+                  - return: ""
+                when: c.flags&fSending != 0
+            - bind: data
+              eval: lp.slab.data(c.out)
+              to: lp.slab.data
+            - opt:
+                do:
+                  - return: ""
+                when: len(data) == 0
+            - bind: n, err
+              eval: syscall.Write(int(c.fd), data)
+              to: syscall
+            - switch:
+                cases:
+                  - case: n > 0
+                    do:
+                      - op: +=
+                        set: c.out.off
+                        value: int32(n)
+                      - opt:
+                          do:
+                            - eval: lp.slab.free(c.out)
+                              to: lp.slab.free
+                            - set: c.out
+                              value: "chunkRef{idx: noChunk}"
+                          when: c.out.off == c.out.len
+                      - eval: r.sent(slot, n)
+                        to: r.sent
+                  - case: err == syscall.EAGAIN
+                    do:
+                      - op: "|="
+                        set: c.flags
+                        value: fSending
+                      - eval: swallowErr(el.ctl(syscall.EPOLL_CTL_MOD, int(c.fd), el.outEvents(c), slot, c.gen))
+                        to: swallowErr
+                      - return: ""
+                  - case: err == syscall.EINTR
+                  - default: true
+                    do:
+                      - eval: r.fail(slot, rErrno, errnoOf(err))
+                        to: r.fail
+                      - return: ""
+          forever: true
+  - of: (*epollLoop).shutdown
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollLoop).shutdown
+        kind: self
+      - id: swallowErr
+        kind: internal
+      - id: r.release
+        kind: internal
+      - id: el.armListeners
+        kind: internal
+    steps:
+      - bind: fd
+        eval: int(r.conns[slot].fd)
+      - eval: swallowErr(syscall.EpollCtl(el.epfd, syscall.EPOLL_CTL_DEL, fd, nil))
+        to: swallowErr
+      - eval: swallowErr(syscall.Close(fd))
+        to: swallowErr
+      - eval: r.release(slot)
+        to: r.release
+      - opt:
+          do:
+            - eval: el.armListeners()
+              to: el.armListeners
+          when: "!el.armed && !el.lp.draining"
+  - of: (*epollLoop).unread
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollLoop).unread
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - var:
+          name: "n"
+          type: int32
+      - bind: _, _, errno
+        eval: syscall.Syscall(syscall.SYS_IOCTL, uintptr(r.conns[slot].fd), siocinq, uintptr(unsafe.Pointer(&n)))
+        to: syscall
+      - return: errno != 0 || n > 0
+  - of: (*epollLoop).control
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollLoop).control
+        kind: self
+      - id: el.disarmListeners
+        kind: internal
+      - id: r.markDirty
+        kind: internal
+    steps:
+      - bind: lp, r
+        eval: el.lp, el.r
+      - opt:
+          do:
+            - set: lp.draining
+              value: "true"
+            - set: r.draining
+              value: "true"
+            - eval: el.disarmListeners()
+              to: el.disarmListeners
+          when: el.drainReq.Load() && !lp.draining
+      - opt:
+          do:
+            - loop:
+                cond: s != noLink
+                do:
+                  - bind: c
+                    eval: "&r.conns[s]"
+                  - bind: nxt
+                    eval: c.lruNext
+                  - opt:
+                      do:
+                        - set: c.state, c.reason
+                          value: stClosing, rDrain
+                        - eval: r.markDirty(s)
+                          to: r.markDirty
+                      when: c.state == stOpen && c.spill.empty()
+                  - set: s
+                    value: nxt
+                init: s := r.lruHead
+          when: lp.draining
+  - of: (*epollLoop).closeAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollLoop).closeAll
+        kind: self
+      - id: r.fail
+        kind: internal
+      - id: r.publish
+        kind: internal
+    steps:
+      - bind: r
+        eval: el.r
+      - loop:
+          cond: r.lruHead != noLink
+          do:
+            - eval: r.fail(r.lruHead, rDrain, 0)
+              to: r.fail
+      - eval: r.publish()
+        to: r.publish
+  - of: (*epollLoop).teardown
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollLoop).teardown
+        kind: self
+      - id: lp.post.close
+        kind: internal
+      - id: el.disarmListeners
+        kind: internal
+      - id: el.wakeMu.Lock
+        kind: value
+      - id: closeFDs
+        kind: internal
+      - id: el.wakeMu.Unlock
+        kind: value
+      - id: swallowErr
+        kind: internal
+    steps:
+      - bind: lp
+        eval: el.lp
+      - opt:
+          do:
+            - eval: lp.post.close()
+              to: lp.post.close
+          when: lp.post != nil
+      - eval: el.disarmListeners()
+        to: el.disarmListeners
+      - eval: el.wakeMu.Lock()
+        to: el.wakeMu.Lock
+      - eval: closeFDs([]int{el.epfd, el.evfd})
+        to: closeFDs
+      - set: el.evClosed
+        value: "true"
+      - eval: el.wakeMu.Unlock()
+        to: el.wakeMu.Unlock
+      - opt:
+          do:
+            - eval: swallowErr(syscall.Munmap(el.arena))
+              to: swallowErr
+          when: el.arena != nil
+      - loop:
+          do:
+            - eval: swallowErr(syscall.Munmap(m))
+              to: swallowErr
+          key: _
+          range: lp.slab.mapped
+          value: m
+      - set: lp.slab.mapped
+        value: nil
+  - of: errnoOf
+    steps:
+      - opt:
+          do:
+            - return: int32(e)
+          init:
+            bind: e, ok
+            eval: err.(syscall.Errno)
+          when: ok
+      - return: int32(syscall.EIO)
+  - of: Start
+    participants:
+      - id: caller
+        kind: actor
+      - id: Start
+        kind: self
+      - id: descriptorLimit
+        kind: internal
+      - id: resolve
+        kind: internal
+      - id: closeListeners
+        kind: internal
+      - id: startNative
+        kind: internal
+      - id: fmt
+        kind: stdlib
+      - id: swallowErr
+        kind: internal
+    steps:
+      - bind: rlimit
+        eval: descriptorLimit()
+        to: descriptorLimit
+      - bind: sz, err
+        eval: resolve(cfg.Value, cfg.MaxConns, rlimit)
+        to: resolve
+      - opt:
+          do:
+            - eval: closeListeners(cfg.Listeners)
+              to: closeListeners
+            - return: nil, err
+          when: err != nil
+      - opt:
+          do:
+            - eval: closeListeners(cfg.Listeners)
+              to: closeListeners
+            - return: nil, errs.Wrap(corenet.HandlerMissing, errs.WrapParams{}, errs.String("group", cfg.Group))
+          when: cfg.Handler == nil
+      - opt:
+          do:
+            - set: sz.tableSize
+              value: cfg.tableCap
+          when: cfg.tableCap > 0
+      - bind: g
+        eval: "&Group{name: cfg.Group, sz: sz, grp: &shared{}, procs: runtime.GOMAXPROCS(0)}"
+      - opt:
+          do:
+            - eval: closeListeners(cfg.Listeners)
+              to: closeListeners
+            - return: nil, err
+          init:
+            bind: err
+            eval: startNative(g, &cfg)
+            to: startNative
+          when: err != nil
+      - bind: w
+        eval: cfg.Log
+      - opt:
+          do:
+            - set: w
+              value: os.Stderr
+          when: w == nil
+      - bind: _, werr
+        eval: |-
+          fmt.Fprintf(w, "net/loop: group=%q backend=%s probe=%s reason=%q loops=%d rings=%d rings_source=%s table=%d cq_batch=%d spill_cap=%d output_cap=%d rlimit_nofile=%d gomaxprocs=%d\n",
+          		g.name, g.backend, g.stage, g.reason, sz.loops, sz.rings, sz.ringsSource, sz.tableSize, sz.cqBatch, sz.spillCap, sz.outputCap, sz.rlimit, g.procs)
+        to: fmt
+      - eval: swallowErr(werr)
+        to: swallowErr
+      - return: g, nil
+  - of: (*Group).Shutdown
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Group).Shutdown
+        kind: self
+      - id: g.ctl.drain
+        kind: internal
+      - id: g.ctl.stop
+        kind: internal
+      - id: g.ctl.wait
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - eval: g.ctl.drain()
+        to: g.ctl.drain
+      - select:
+          cases:
+            - comm: <-g.ctl.done()
+              do:
+                - return: nil
+            - comm: <-ctx.Done()
+              do:
+                - eval: g.ctl.stop()
+                  to: g.ctl.stop
+                - eval: g.ctl.wait()
+                  to: g.ctl.wait
+                - return: errs.Wrap(corenet.DrainTimeout, errs.WrapParams{}, errs.String("group", g.name))
+                  to: errs
+  - of: (*Group).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Group).Close
+        kind: self
+      - id: g.once.Do
+        kind: value
+    steps:
+      - eval: |-
+          g.once.Do(func() {
+          		g.ctl.stop()
+          		g.ctl.wait()
+          	})
+        to: g.once.Do
+      - return: nil
+  - of: (*Group).State
+    steps:
+      - bind: st
+        eval: |-
+          corenet.LoopStateValue{
+          		Group: g.name, Backend: g.backend, ProbeStage: g.stage,
+          		Degraded: g.reason != "", DegradedReason: g.reason,
+          		Loops: g.sz.loops, Rings: g.sz.rings, RingsSource: g.sz.ringsSource,
+          		RLimitNoFile: g.sz.rlimit, GOMAXPROCS: g.procs,
+          		BatchP99: corenet.DurationValue(g.grp.batchP99()),
+          	}
+      - loop:
+          do:
+            - loop:
+                do:
+                  - bind: p
+                    eval: r.pub
+                  - set: st.RingStates
+                    value: |-
+                      append(st.RingStates, corenet.LoopRingStateValue{
+                      				Loop: lp.index, Ring: r.index, Conns: p.conns.Load(),
+                      				Accepted: p.accepted.Load(), Closed: p.closed.Load(),
+                      				Batches: p.batches.Load(), Completions: p.completions.Load(),
+                      				BufferStarved: p.starved.Load(), EnterRetries: p.retries.Load(),
+                      				AcceptPauses: p.pauses.Load(), Evicted: p.evicted.Load(),
+                      				WatchdogFires: p.watchdog.Load(), Draining: p.draining.Load(),
+                      			})
+                key: _
+                range: lp.rings
+                value: r
+          key: _
+          range: g.loops
+          value: lp
+      - return: st
+  - of: (*Group).Rejected
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Group).Rejected
+        kind: self
+      - id: g.grp.rejected.Load
+        kind: value
+    steps:
+      - return: g.grp.rejected.Load()
+        to: g.grp.rejected.Load
+  - of: (*Group).Live
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Group).Live
+        kind: self
+      - id: g.grp.live.Load
+        kind: value
+    steps:
+      - return: g.grp.live.Load()
+        to: g.grp.live.Load
+  - of: newLoop
+    participants:
+      - id: caller
+        kind: actor
+      - id: newLoop
+        kind: self
+      - id: time
+        kind: stdlib
+      - id: newSlab
+        kind: internal
+    steps:
+      - bind: lp
+        eval: |-
+          &loop{
+          		index: i, sz: g.sz, h: cfg.Handler, grp: g.grp,
+          		epoch:    time.Now(),
+          		lowWater: g.sz.outputCap / lowWaterDiv,
+          	}
+      - opt:
+          do:
+            - set: lp.idle
+              value: int64((cfg.IdleTimeout + tickEvery - 1) / tickEvery)
+          when: cfg.IdleTimeout > 0
+      - opt:
+          do:
+            - set: lp.evictIdle
+              value: int64((d + tickEvery - 1) / tickEvery)
+          init:
+            bind: d
+            eval: time.Duration(cfg.Value.EvictIdle)
+            to: time
+          when: d > 0
+      - set: lp.slab
+        to: newSlab
+        value: newSlab(max(g.sz.outputCap, g.sz.spillCap), defaultSlabBudget, mapper)
+      - set: lp.tick
+        value: "1"
+      - return: lp
+  - of: swallowErr
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: err == nil
+  - of: startNative
+    participants:
+      - id: caller
+        kind: actor
+      - id: startNative
+        kind: self
+      - id: startIOURing
+        kind: internal
+      - id: startEpoll
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - switch:
+          cases:
+            - case: corenet.LoopBackendAuto
+              do:
+                - bind: err
+                  eval: startIOURing(g, cfg, cfg.hooks)
+                  to: startIOURing
+                - opt:
+                    do:
+                      - return: nil
+                    when: err == nil
+                - set: g.stage
+                  value: "\"epoll\""
+                - set: g.reason
+                  value: "\"io_uring unavailable: \" + err.Error()"
+                - return: startEpoll(g, cfg)
+                  to: startEpoll
+            - case: corenet.LoopBackendIOURing
+              do:
+                - return: startIOURing(g, cfg, cfg.hooks)
+                  to: startIOURing
+            - case: corenet.LoopBackendEpoll
+              do:
+                - set: g.stage
+                  value: "\"epoll\""
+                - return: startEpoll(g, cfg)
+                  to: startEpoll
+            - default: true
+              do:
+                - return: |-
+                    errs.Wrap(corenet.LoopBackendUnavailable, errs.WrapParams{},
+                    			errs.String("group", cfg.Group), errs.String("backend", cfg.Value.Backend.String()),
+                    			errs.String("reason", "not a backend of the leaf"))
+                  to: errs
+          "on": cfg.Value.Backend
+  - of: descriptorLimit
+    participants:
+      - id: caller
+        kind: actor
+      - id: descriptorLimit
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - var:
+          name: lim
+          type: syscall.Rlimit
+      - opt:
+          do:
+            - return: "0"
+          init:
+            bind: err
+            eval: syscall.Getrlimit(syscall.RLIMIT_NOFILE, &lim)
+            to: syscall
+          when: err != nil
+      - return: lim.Cur
+  - of: mmapAnon
+    participants:
+      - id: caller
+        kind: actor
+      - id: mmapAnon
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - return: syscall.Mmap(-1, 0, n, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS)
+        to: syscall
+  - of: closeFDs
+    participants:
+      - id: caller
+        kind: actor
+      - id: closeFDs
+        kind: self
+      - id: swallowErr
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: swallowErr(syscall.Close(fd))
+                    to: swallowErr
+                when: fd >= 0
+          key: _
+          range: fds
+          value: fd
+  - of: closeListeners
+    participants:
+      - id: caller
+        kind: actor
+      - id: closeListeners
+        kind: self
+      - id: swallowErr
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: swallowErr(syscall.Close(l.FD))
+              to: swallowErr
+          key: _
+          range: ls
+          value: l
+  - of: unavailable
+    participants:
+      - id: caller
+        kind: actor
+      - id: unavailable
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corenet.LoopBackendUnavailable, errs.WrapParams{},
+          		errs.String("stage", step), errs.String("reason", err.Error()))
+        to: errs
+  - of: newPostQueue
+    steps:
+      - return: |-
+          &postQueue{
+          		ops:  make([]corenet.PostFunc, postQueueCap),
+          		args: make([]uintptr, postQueueCap),
+          		wake: wake,
+          	}
+  - of: (*postQueue).post
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*postQueue).post
+        kind: self
+      - id: q.mu.Lock
+        kind: value
+      - id: q.mu.Unlock
+        kind: value
+    steps:
+      - eval: q.mu.Lock()
+        to: q.mu.Lock
+      - opt:
+          do:
+            - eval: q.mu.Unlock()
+              to: q.mu.Unlock
+            - return: corenet.ServerClosed
+          when: q.closed
+      - opt:
+          do:
+            - eval: q.mu.Unlock()
+              to: q.mu.Unlock
+            - return: corenet.LoopPostQueueFull
+          when: q.n == len(q.ops)
+      - bind: i
+        eval: (q.head + q.n) % len(q.ops)
+      - set: q.ops[i], q.args[i]
+        value: op, arg
+      - op: ++
+        set: q.n
+      - eval: q.mu.Unlock()
+        to: q.mu.Unlock
+      - opt:
+          do:
+            - eval: q.wake()
+          when: q.pending.CompareAndSwap(false, true)
+      - return: nil
+  - of: (*postQueue).drain
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*postQueue).drain
+        kind: self
+      - id: q.pending.Store
+        kind: value
+      - id: q.mu.Lock
+        kind: value
+      - id: q.mu.Unlock
+        kind: value
+    steps:
+      - eval: q.pending.Store(false)
+        to: q.pending.Store
+      - bind: ran
+        eval: "0"
+      - loop:
+          do:
+            - eval: q.mu.Lock()
+              to: q.mu.Lock
+            - opt:
+                do:
+                  - eval: q.mu.Unlock()
+                    to: q.mu.Unlock
+                  - return: ran
+                when: q.n == 0
+            - bind: op, arg
+              eval: q.ops[q.head], q.args[q.head]
+            - set: q.ops[q.head]
+              value: nil
+            - set: q.head
+              value: (q.head + 1) % len(q.ops)
+            - op: "--"
+              set: q.n
+            - eval: q.mu.Unlock()
+              to: q.mu.Unlock
+            - eval: op(io, arg)
+            - op: ++
+              set: ran
+          forever: true
+  - of: (*postQueue).close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*postQueue).close
+        kind: self
+      - id: q.mu.Lock
+        kind: value
+      - id: q.mu.Unlock
+        kind: value
+    steps:
+      - eval: q.mu.Lock()
+        to: q.mu.Lock
+      - set: q.closed
+        value: "true"
+      - eval: q.mu.Unlock()
+        to: q.mu.Unlock
+  - of: resolve
+    participants:
+      - id: caller
+        kind: actor
+      - id: resolve
+        kind: self
+      - id: ringCount
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: sizing{}, errs.Wrap(corenet.LoopNoDescriptors, errs.WrapParams{})
+          when: rlimit == 0
+      - bind: table
+        eval: min(rlimit, ioringMaxFixedFiles)
+      - bind: sz
+        eval: |-
+          sizing{
+          		loops:     max(v.Loops, 1),
+          		cqBatch:   orDefault(v.CQBatch, defaultCQBatch),
+          		spillCap:  orDefault(v.SpillCap, defaultSpillCap),
+          		outputCap: orDefault(v.OutputCap, defaultOutputCap),
+          		softConns: max(v.SoftConns, 0),
+          		maxConns:  max(maxConns, 0),
+          		rlimit:    rlimit,
+          		tableSize: int(table),
+          	}
+      - set: sz.rings, sz.ringsSource
+        to: ringCount
+        value: ringCount(v.Rings, max(sz.maxConns, sz.softConns), table)
+      - return: sz, nil
+  - of: ringCount
+    steps:
+      - opt:
+          do:
+            - return: explicit, ringsExplicit
+          when: explicit > 0
+      - opt:
+          do:
+            - return: 1, ringsSingle
+          when: target <= 0
+      - bind: "n"
+        eval: (uint64(target) + table - 1) / table
+      - opt:
+          do:
+            - return: 1, ringsSingle
+          when: n <= 1
+      - return: int(n), ringsDerived
+  - of: orDefault
+    steps:
+      - opt:
+          do:
+            - return: def
+          when: v <= 0
+      - return: v
+  - of: chunkRef.empty
+    steps:
+      - return: c.idx == noChunk
+  - of: newSlab
+    participants:
+      - id: caller
+        kind: actor
+      - id: newSlab
+        kind: self
+      - id: classOf
+        kind: internal
+    steps:
+      - bind: top
+        eval: classOf(maxChunk)
+        to: classOf
+      - bind: s
+        eval: "&slab{budget: budget, mapper: mapper, classes: make([]slabClass, int(top)+1)}"
+      - loop:
+          do:
+            - bind: size
+              eval: 1 << (minClassShift + uint(i))
+            - set: s.classes[i]
+              value: "slabClass{size: size, perArena: max(arenaBytes/size, 1)}"
+          key: i
+          range: s.classes
+      - return: s
+  - of: classOf
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: n <= 1<<minClassShift
+      - return: uint8(uint(bits.Len(uint(n-1))) - minClassShift)
+  - of: (*slab).alloc
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*slab).alloc
+        kind: self
+      - id: classOf
+        kind: internal
+    steps:
+      - bind: cls
+        eval: classOf(n)
+        to: classOf
+      - opt:
+          do:
+            - return: "chunkRef{idx: noChunk}, false"
+          when: int(cls) >= len(s.classes)
+      - bind: c
+        eval: "&s.classes[cls]"
+      - opt:
+          do:
+            - return: "chunkRef{idx: noChunk}, false"
+          when: s.inUse+c.size > s.budget || (len(c.free) == 0 && !s.grow(c))
+      - bind: idx
+        eval: c.free[len(c.free)-1]
+      - set: c.free
+        value: c.free[:len(c.free)-1]
+      - op: +=
+        set: s.inUse
+        value: c.size
+      - return: "chunkRef{idx: idx, cls: cls}, true"
+  - of: (*slab).grow
+    steps:
+      - bind: mem, err
+        eval: s.mapper(c.size * c.perArena)
+      - opt:
+          do:
+            - return: "false"
+          when: err != nil
+      - set: s.mapped
+        value: append(s.mapped, mem)
+      - bind: base
+        eval: int32(len(c.arenas) * c.perArena)
+      - set: c.arenas
+        value: append(c.arenas, mem)
+      - loop:
+          cond: i >= 0
+          do:
+            - set: c.free
+              value: append(c.free, base+i)
+          init: i := int32(c.perArena) - 1
+          post: i--
+      - return: "true"
+  - of: (*slab).free
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: r.empty()
+      - bind: c
+        eval: "&s.classes[r.cls]"
+      - set: c.free
+        value: append(c.free, r.idx)
+      - op: "-="
+        set: s.inUse
+        value: c.size
+  - of: (*slab).bytes
+    steps:
+      - bind: c
+        eval: "&s.classes[r.cls]"
+      - bind: a
+        eval: int(r.idx) / c.perArena
+      - bind: o
+        eval: (int(r.idx) % c.perArena) * c.size
+      - return: "c.arenas[a][o : o+c.size : o+c.size]"
+  - of: (*slab).data
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: r.empty()
+      - return: s.bytes(r)[r.off:r.len]
+  - of: (*slab).size
+    steps:
+      - return: s.classes[r.cls].size
+  - of: (*shared).observe
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*shared).observe
+        kind: self
+      - id: bits
+        kind: stdlib
+      - id: g.hist[min(i, batchBuckets-1)].Add
+        kind: value
+    steps:
+      - bind: i
+        eval: bits.Len64(uint64(max(d, 0)))
+        to: bits
+      - eval: g.hist[min(i, batchBuckets-1)].Add(1)
+        to: g.hist[min(i, batchBuckets-1)].Add
+  - of: (*shared).batchP99
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*shared).batchP99
+        kind: self
+      - id: g.hist[i].Load
+        kind: value
+      - id: time
+        kind: stdlib
+    steps:
+      - var:
+          name: counts
+          type: "[batchBuckets]uint64"
+      - var:
+          name: total
+          type: uint64
+      - loop:
+          do:
+            - set: counts[i]
+              to: g.hist[i].Load
+              value: g.hist[i].Load()
+            - op: +=
+              set: total
+              value: counts[i]
+          key: i
+          range: counts
+      - opt:
+          do:
+            - return: "0"
+          when: total == 0
+      - bind: want
+        eval: total - total/100
+      - var:
+          name: seen
+          type: uint64
+      - loop:
+          do:
+            - op: +=
+              set: seen
+              value: "n"
+            - opt:
+                do:
+                  - return: time.Duration(uint64(1) << uint(i))
+                    to: time
+                when: seen >= want
+          key: i
+          range: counts
+          value: "n"
+      - return: time.Duration(uint64(1) << uint(batchBuckets-1))
+        to: time
+  - of: (*ring).publish
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ring).publish
+        kind: self
+      - id: p.conns.Store
+        kind: value
+      - id: p.accepted.Store
+        kind: value
+      - id: p.closed.Store
+        kind: value
+      - id: p.batches.Store
+        kind: value
+      - id: p.completions.Store
+        kind: value
+      - id: p.starved.Store
+        kind: value
+      - id: p.retries.Store
+        kind: value
+      - id: p.pauses.Store
+        kind: value
+      - id: p.evicted.Store
+        kind: value
+      - id: p.watchdog.Store
+        kind: value
+      - id: p.draining.Store
+        kind: value
+    steps:
+      - bind: p, s
+        eval: r.pub, &r.st
+      - eval: p.conns.Store(int64(r.live))
+        to: p.conns.Store
+      - eval: p.accepted.Store(s.accepted)
+        to: p.accepted.Store
+      - eval: p.closed.Store(s.closed)
+        to: p.closed.Store
+      - eval: p.batches.Store(s.batches)
+        to: p.batches.Store
+      - eval: p.completions.Store(s.completions)
+        to: p.completions.Store
+      - eval: p.starved.Store(s.starved)
+        to: p.starved.Store
+      - eval: p.retries.Store(s.retries)
+        to: p.retries.Store
+      - eval: p.pauses.Store(s.pauses)
+        to: p.pauses.Store
+      - eval: p.evicted.Store(s.evicted)
+        to: p.evicted.Store
+      - eval: p.watchdog.Store(s.watchdog)
+        to: p.watchdog.Store
+      - eval: p.draining.Store(r.draining)
+        to: p.draining.Store
+  - of: uringSetup
+    participants:
+      - id: caller
+        kind: actor
+      - id: uringSetup
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - bind: fd, _, errno
+        eval: syscall.RawSyscall(sysIOURingSetup, uintptr(entries), uintptr(unsafe.Pointer(p)), 0)
+        to: syscall
+      - return: int(fd), errno
+  - of: uringRegister
+    participants:
+      - id: caller
+        kind: actor
+      - id: uringRegister
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - bind: _, _, errno
+        eval: syscall.RawSyscall6(sysIOURingRegister, uintptr(fd), op, uintptr(arg), uintptr(n), 0, 0)
+        to: syscall
+      - return: errno
+  - of: uringEnterWait
+    participants:
+      - id: caller
+        kind: actor
+      - id: uringEnterWait
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - bind: n, _, errno
+        eval: syscall.Syscall6(sysIOURingEnter, uintptr(fd), uintptr(submit), uintptr(minComplete), uintptr(flags), uintptr(arg), argSz)
+        to: syscall
+      - return: int(n), errno
+  - of: uringEnterSubmit
+    participants:
+      - id: caller
+        kind: actor
+      - id: uringEnterSubmit
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - bind: n, _, errno
+        eval: syscall.RawSyscall6(sysIOURingEnter, uintptr(fd), uintptr(submit), 0, 0, 0, 0)
+        to: syscall
+      - return: int(n), errno
+  - of: fixedFd
+    steps:
+      - return: int32(index)
+  - of: targetIndex
+    steps:
+      - return: index + 1
+  - of: udPack
+    steps:
+      - return: op<<56 | uint64(gen&genMask)<<32 | uint64(slot)
+  - of: udOp
+    steps:
+      - return: ud >> 56
+  - of: udGen
+    steps:
+      - return: uint32(ud>>32) & genMask
+  - of: udSlot
+    steps:
+      - return: uint32(ud)
+  - of: (*uringRunner).drain
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uringRunner).drain
+        kind: self
+      - id: ul.drainReq.Store
+        kind: value
+      - id: ul.wake
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: ul.drainReq.Store(true)
+              to: ul.drainReq.Store
+            - eval: ul.wake()
+              to: ul.wake
+          key: _
+          range: ur.loops
+          value: ul
+  - of: (*uringRunner).stop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uringRunner).stop
+        kind: self
+      - id: ul.stopReq.Store
+        kind: value
+      - id: ul.wake
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: ul.stopReq.Store(true)
+              to: ul.stopReq.Store
+            - eval: ul.wake()
+              to: ul.wake
+          key: _
+          range: ur.loops
+          value: ul
+  - of: (*uringRunner).wait
+    steps:
+      - eval: <-ur.fin
+  - of: (*uringRunner).done
+    steps:
+      - return: ur.fin
+  - of: (*uLoop).wake
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).wake
+        kind: self
+      - id: syscall
+        kind: stdlib
+      - id: swallowErr
+        kind: internal
+    steps:
+      - lock:
+          mutex: ul.wakeMu
+      - opt:
+          do:
+            - return: ""
+          when: ul.evClosed || ul.wakefd < 0
+      - bind: one
+        eval: new(uint64(1))
+      - bind: _, _, errno
+        eval: syscall.RawSyscall(syscall.SYS_WRITE, uintptr(ul.wakefd), uintptr(unsafe.Pointer(one)), 8)
+        to: syscall
+      - eval: swallowErr(errno)
+        to: swallowErr
+  - of: startIOURing
+    participants:
+      - id: caller
+        kind: actor
+      - id: startIOURing
+        kind: self
+      - id: swallowErr
+        kind: internal
+      - id: newLoop
+        kind: internal
+      - id: runner.wg.Add
+        kind: value
+      - id: ul.run
+        kind: internal
+      - id: runner.stop
+        kind: internal
+      - id: runner.wait
+        kind: internal
+    steps:
+      - bind: fin
+        eval: make(chan struct{})
+      - bind: runner
+        eval: "&uringRunner{fin: fin}"
+      - loop:
+          do:
+            - eval: swallowErr(syscall.SetsockoptInt(l.FD, syscall.IPPROTO_TCP, syscall.TCP_NODELAY, 1))
+              to: swallowErr
+            - set: runner.lfds
+              value: append(runner.lfds, l.FD)
+          key: _
+          range: cfg.Listeners
+          value: l
+      - bind: ready
+        eval: make(chan error, g.sz.loops)
+      - loop:
+          do:
+            - bind: lp
+              eval: newLoop(g, *cfg, i, mmapAnon)
+              to: newLoop
+            - bind: ul
+              eval: "&uLoop{lp: lp, lfds: runner.lfds, hooks: hooks, wakefd: -1, fanfd: -1}"
+            - set: runner.loops
+              value: append(runner.loops, ul)
+            - set: g.loops
+              value: append(g.loops, lp)
+            - eval: runner.wg.Add(1)
+              to: runner.wg.Add
+            - go: ul.run(&runner.wg, ready, g.sz.rings)
+              to: ul.run
+          key: i
+          range: g.sz.loops
+      - var:
+          name: first
+          type: error
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: first
+                    value: err
+                init:
+                  bind: err
+                  eval: <-ready
+                when: err != nil && first == nil
+          range: g.sz.loops
+      - set: g.ctl
+        value: runner
+      - go: |-
+          func() {
+          		runner.wg.Wait()
+          		close(fin)
+          	}()
+      - opt:
+          do:
+            - eval: runner.stop()
+              to: runner.stop
+            - eval: runner.wait()
+              to: runner.wait
+            - set: g.loops
+              value: nil
+            - return: first
+          when: first != nil
+      - go: |-
+          func() {
+          		<-fin
+          		closeFDs(runner.lfds)
+          	}()
+      - set: g.backend
+        value: corenet.LoopBackendIOURing
+      - set: g.stage
+        value: runner.loops[0].stage
+      - return: nil
+  - of: probeError
+    participants:
+      - id: caller
+        kind: actor
+      - id: probeError
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corenet.LoopBackendUnavailable, errs.WrapParams{},
+          		errs.String("stage", stage), errs.String("reason", errno.Error()))
+        to: errs
+  - of: (*uLoop).run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).run
+        kind: self
+      - id: wg.Done
+        kind: value
+      - id: runtime
+        kind: stdlib
+      - id: syscall
+        kind: stdlib
+      - id: threadCheck
+        kind: internal
+      - id: ul.setup
+        kind: internal
+      - id: ul.teardown
+        kind: internal
+      - id: ul.serve
+        kind: internal
+    steps:
+      - defer: wg.Done()
+        to: wg.Done
+      - eval: runtime.LockOSThread()
+        to: runtime
+      - set: ul.tid
+        to: syscall
+        value: syscall.Gettid()
+      - set: ul.lp.threadOK
+        to: threadCheck
+        value: threadCheck(ul.tid)
+      - opt:
+          do:
+            - eval: ul.teardown()
+              to: ul.teardown
+            - send:
+                chan: ready
+                value: err
+            - return: ""
+          init:
+            bind: err
+            eval: ul.setup(rings)
+            to: ul.setup
+          when: err != nil
+      - send:
+          chan: ready
+          value: nil
+      - eval: ul.serve()
+        to: ul.serve
+      - eval: ul.teardown()
+        to: ul.teardown
+  - of: (*uLoop).setup
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).setup
+        kind: self
+      - id: ul.probe
+        kind: internal
+      - id: ul.selfTest
+        kind: internal
+      - id: ul.build
+        kind: internal
+    steps:
+      - bind: flags, err
+        eval: ul.probe()
+        to: ul.probe
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - bind: direct, err
+        eval: ul.selfTest(flags)
+        to: ul.selfTest
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - set: ul.direct
+        value: direct
+      - set: ul.stage
+        value: "\"self_test+fds\""
+      - opt:
+          do:
+            - set: ul.stage
+              value: "\"self_test+direct\""
+          when: direct
+      - return: ul.build(rings, flags)
+        to: ul.build
+  - of: (*uLoop).setupFlags
+    steps:
+      - opt:
+          do:
+            - return: setupDeferTaskrun | setupSingleIssuer | setupSubmitAll
+          when: ul.hooks.deferTaskrun
+      - return: setupCoopTaskrun | setupSingleIssuer | setupSubmitAll
+  - of: (*uLoop).probe
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).probe
+        kind: self
+      - id: ul.openStaged
+        kind: internal
+      - id: probed.supports
+        kind: internal
+      - id: probed.close
+        kind: internal
+    steps:
+      - bind: probed, flags, err
+        eval: ul.openStaged(ul.setupFlags())
+        to: ul.openStaged
+      - opt:
+          do:
+            - return: 0, err
+          when: err != nil
+      - set: ul.flags
+        value: flags
+      - set: ul.stage
+        value: "\"setup\""
+      - bind: ok, perr
+        eval: probed.supports(opAccept, opRecv, opSend, opAsyncCancel, opClose, opPollAdd, opRead, opNop)
+        to: probed.supports
+      - opt:
+          do:
+            - eval: probed.close()
+              to: probed.close
+            - return: 0, probeError("register_probe", orErrno(perr, syscall.EOPNOTSUPP))
+          when: perr != 0 || !ok || ul.hooks.failStage == "probe"
+      - set: ul.stage
+        value: "\"register_probe\""
+      - eval: probed.close()
+        to: probed.close
+      - return: flags, nil
+  - of: (*uLoop).openStaged
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).openStaged
+        kind: self
+      - id: openURing
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, 0, probeError("setup", syscall.EPERM)
+          when: ul.hooks.failStage == "setup"
+      - bind: opened, step, errno
+        eval: openURing(probeEntries, flags)
+        to: openURing
+      - opt:
+          do:
+            - set: flags
+              value: setupCoopTaskrun | setupSubmitAll
+            - set: opened, step, errno
+              to: openURing
+              value: openURing(probeEntries, flags)
+          when: errno == syscall.EINVAL && step == "setup" && !ul.hooks.deferTaskrun
+      - opt:
+          do:
+            - return: nil, 0, probeError(step, errno)
+          when: errno != 0
+      - return: opened, flags, nil
+  - of: (*uLoop).build
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).build
+        kind: self
+      - id: newPostQueue
+        kind: internal
+      - id: syscall
+        kind: stdlib
+      - id: probeError
+        kind: internal
+      - id: ul.newRing
+        kind: internal
+      - id: primary.pollFD
+        kind: internal
+    steps:
+      - bind: lp
+        eval: ul.lp
+      - set: lp.post
+        to: newPostQueue
+        value: newPostQueue(ul.wake)
+      - bind: wfd, _, e1
+        eval: syscall.RawSyscall(syscall.SYS_EVENTFD2, 0, efdNonblock|efdCloexec, 0)
+        to: syscall
+      - bind: ffd, _, e2
+        eval: syscall.RawSyscall(syscall.SYS_EVENTFD2, 0, efdNonblock|efdCloexec, 0)
+        to: syscall
+      - opt:
+          do:
+            - return: probeError("eventfd", orErrno(e1, e2))
+              to: probeError
+          when: e1 != 0 || e2 != 0
+      - set: ul.wakefd, ul.fanfd
+        value: int(wfd), int(ffd)
+      - loop:
+          do:
+            - bind: rr, err
+              eval: ul.newRing(i, flags)
+              to: ul.newRing
+            - opt:
+                do:
+                  - return: err
+                when: err != nil
+            - set: ul.rings
+              value: append(ul.rings, rr)
+            - set: lp.rings
+              value: append(lp.rings, rr.r)
+          key: i
+          range: rings
+      - bind: primary
+        eval: ul.rings[0]
+      - eval: primary.pollFD(ul.wakefd, udWake)
+        to: primary.pollFD
+      - opt:
+          do:
+            - eval: primary.pollFD(ul.fanfd, udFan)
+              to: primary.pollFD
+          when: len(ul.rings) > 1
+      - return: nil
+  - forward: cmp.Or
+    of: orErrno
+  - of: (*uLoop).newRing
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).newRing
+        kind: self
+      - id: openURing
+        kind: internal
+      - id: newRing
+        kind: internal
+      - id: ul.bufShape
+        kind: internal
+      - id: u.setupBuffers
+        kind: internal
+      - id: u.close
+        kind: internal
+      - id: ul.registerTable
+        kind: internal
+      - id: slices
+        kind: stdlib
+      - id: ul.registerFan
+        kind: internal
+      - id: rr.armAccepts
+        kind: internal
+    steps:
+      - bind: u, step, errno
+        eval: openURing(uringEntries, flags)
+        to: openURing
+      - opt:
+          do:
+            - return: nil, probeError(step, errno)
+          when: errno != 0
+      - bind: lp
+        eval: ul.lp
+      - bind: rr
+        eval: "&uRing{ul: ul, u: u, armed: make([]int, len(ul.lfds)), backoff: backoffMin}"
+      - set: rr.r
+        to: newRing
+        value: newRing(lp, i, rr)
+      - bind: bufs, size
+        eval: ul.bufShape()
+        to: ul.bufShape
+      - opt:
+          do:
+            - eval: u.close()
+              to: u.close
+            - return: nil, probeError("buf_ring", orErrno(errno, syscall.EOPNOTSUPP))
+          init:
+            bind: errno
+            eval: u.setupBuffers(bufs, size)
+            to: u.setupBuffers
+          when: errno != 0 || ul.hooks.failStage == "buf_ring"
+      - bind: table
+        eval: uint32(lp.sz.tableSize)
+      - opt:
+          do:
+            - eval: u.close()
+              to: u.close
+            - return: nil, err
+          init:
+            bind: err
+            eval: ul.registerTable(u, table)
+            to: ul.registerTable
+          when: err != nil
+      - set: rr.inRing
+        value: int(bufs)
+      - set: rr.slotOf
+        to: slices
+        value: slices.Repeat([]int32{-1}, ul.slotSpace(table))
+      - opt:
+          do:
+            - eval: u.close()
+              to: u.close
+            - return: nil, err
+          init:
+            bind: err
+            eval: ul.registerFan(i, u)
+            to: ul.registerFan
+          when: err != nil
+      - eval: rr.armAccepts()
+        to: rr.armAccepts
+      - return: rr, nil
+  - of: (*uLoop).bufShape
+    steps:
+      - opt:
+          do:
+            - return: ul.hooks.bufs, max(ul.hooks.bufSize, 64)
+          when: ul.hooks.bufs > 0
+      - return: defaultBufs, defaultBufSize
+  - of: (*uLoop).registerFan
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).registerFan
+        kind: self
+      - id: uringRegister
+        kind: internal
+      - id: probeError
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: i == 0
+      - bind: fd
+        eval: new(int32(ul.fanfd))
+      - opt:
+          do:
+            - return: probeError("register_eventfd", errno)
+              to: probeError
+          init:
+            bind: errno
+            eval: uringRegister(u.fd, regEventFD, unsafe.Pointer(fd), 1)
+            to: uringRegister
+          when: errno != 0
+      - return: nil
+  - of: (*uLoop).registerTable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).registerTable
+        kind: self
+      - id: u.registerSparse
+        kind: internal
+      - id: probeError
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!ul.direct && ul.hooks.failStage != \"sparse_files\""
+      - bind: errno
+        eval: u.registerSparse(n)
+        to: u.registerSparse
+      - opt:
+          do:
+            - return: probeError("sparse_files", orErrno(errno, syscall.EOPNOTSUPP))
+              to: probeError
+          when: errno != 0 || ul.hooks.failStage == "sparse_files"
+      - return: nil
+  - of: (*uLoop).slotSpace
+    steps:
+      - opt:
+          do:
+            - return: int(table)
+          when: ul.direct
+      - return: int(min(ul.lp.sz.rlimit, maxProcessFDs))
+  - of: (*uLoop).onFD
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).onFD
+        kind: self
+      - id: onProcessFD
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: onProcessFD(s)
+              to: onProcessFD
+          when: "!ul.direct"
+  - of: (*uRing).pollFD
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).pollFD
+        kind: self
+      - id: rr.u.get
+        kind: internal
+      - id: prepPollMulti
+        kind: internal
+    steps:
+      - bind: s
+        eval: rr.u.get()
+        to: rr.u.get
+      - opt:
+          do:
+            - op: ++
+              set: rr.r.st.retries
+            - return: ""
+          when: s == nil
+      - eval: prepPollMulti(s, fd, udPack(op, 0, 0))
+        to: prepPollMulti
+  - of: (*uRing).armAccepts
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).armAccepts
+        kind: self
+      - id: rr.acceptRoom
+        kind: internal
+      - id: rr.u.get
+        kind: internal
+      - id: prepAccept
+        kind: internal
+      - id: rr.ul.onFD
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: rr.paused || rr.r.draining || rr.ul.lp.draining
+      - bind: room
+        eval: rr.acceptRoom()
+        to: rr.acceptRoom
+      - loop:
+          do:
+            - loop:
+                cond: rr.armed[i] < acceptDepth && room > 0
+                do:
+                  - bind: s
+                    eval: rr.u.get()
+                    to: rr.u.get
+                  - opt:
+                      do:
+                        - op: ++
+                          set: rr.r.st.retries
+                        - return: ""
+                      when: s == nil
+                  - eval: prepAccept(s, fd, udPack(udAccept, 0, uint32(i)), false)
+                    to: prepAccept
+                  - eval: rr.ul.onFD(s)
+                    to: rr.ul.onFD
+                  - op: ++
+                    set: rr.armed[i]
+                  - op: "--"
+                    set: room
+          key: i
+          range: rr.ul.lfds
+          value: fd
+  - of: (*uRing).acceptRoom
+    steps:
+      - bind: table
+        eval: rr.ul.lp.sz.tableSize
+      - bind: reserve
+        eval: max(min(acceptReserve, table/8), 1)
+      - bind: inFlight
+        eval: "0"
+      - loop:
+          do:
+            - op: +=
+              set: inFlight
+              value: "n"
+          key: _
+          range: rr.armed
+          value: "n"
+      - return: max(table-rr.used()-reserve-inFlight+1, 0)
+  - of: (*uRing).cancelAccepts
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).cancelAccepts
+        kind: self
+      - id: rr.u.get
+        kind: internal
+      - id: prepCancelUserData
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: n == 0
+            - bind: s
+              eval: rr.u.get()
+              to: rr.u.get
+            - opt:
+                do:
+                  - op: ++
+                    set: rr.r.st.retries
+                  - return: ""
+                when: s == nil
+            - eval: prepCancelUserData(s, udPack(udAccept, 0, uint32(i)), udPack(udAcceptCancel, 0, uint32(i)))
+              to: prepCancelUserData
+          key: i
+          range: rr.armed
+          value: "n"
+  - of: (*uRing).used
+    steps:
+      - return: len(rr.r.conns) - len(rr.r.free)
+  - of: (*uRing).pace
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).pace
+        kind: self
+      - id: rr.cancelAccepts
+        kind: internal
+      - id: rr.r.evict
+        kind: internal
+      - id: rr.armAccepts
+        kind: internal
+    steps:
+      - bind: table
+        eval: rr.ul.lp.sz.tableSize
+      - bind: reserve
+        eval: min(acceptReserve, table/8)
+      - bind: free
+        eval: table - rr.used()
+      - opt:
+          do:
+            - set: rr.paused
+              value: "true"
+            - op: ++
+              set: rr.r.st.pauses
+            - eval: rr.cancelAccepts()
+              to: rr.cancelAccepts
+            - return: ""
+          when: "!rr.paused && free < max(reserve, 1)"
+      - opt:
+          do:
+            - set: rr.paused
+              value: "false"
+          when: rr.paused && free >= max(2*reserve, 1) && rr.ul.lp.tick >= rr.resumeAt
+      - opt:
+          do:
+            - eval: rr.r.evict()
+              to: rr.r.evict
+          when: rr.ul.lp.hard && !rr.ul.direct
+      - eval: rr.armAccepts()
+        to: rr.armAccepts
+  - of: (*uLoop).serve
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).serve
+        kind: self
+      - id: ul.batch
+        kind: internal
+      - id: ul.closeAll
+        kind: internal
+    steps:
+      - bind: lp
+        eval: ul.lp
+      - bind: tick
+        eval: "kernelTimespec{nsec: int64(tickEvery)}"
+      - loop:
+          do:
+            - eval: ul.batch(&tick)
+              to: ul.batch
+            - opt:
+                do:
+                  - break: true
+                when: ul.stopReq.Load() || (lp.draining && ul.live() == 0)
+          forever: true
+      - eval: ul.closeAll()
+        to: ul.closeAll
+  - of: (*uLoop).batch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).batch
+        kind: self
+      - id: rr.u.submit
+        kind: internal
+      - id: ul.rings[0].u.wait
+        kind: internal
+      - id: time
+        kind: stdlib
+      - id: lp.now
+        kind: internal
+      - id: rr.reapAll
+        kind: internal
+      - id: ul.control
+        kind: internal
+      - id: rr.r.wheel.advance
+        kind: internal
+      - id: rr.pace
+        kind: internal
+      - id: rr.watchdog
+        kind: internal
+      - id: lp.h.OnBatchEnd
+        kind: value
+      - id: lp.endBatch
+        kind: internal
+      - id: rr.returnBuffers
+        kind: internal
+    steps:
+      - bind: lp
+        eval: ul.lp
+      - loop:
+          do:
+            - eval: rr.u.submit()
+              to: rr.u.submit
+          key: _
+          range: ul.rings[1:]
+          value: rr
+      - eval: ul.rings[0].u.wait(tick)
+        to: ul.rings[0].u.wait
+      - bind: started
+        eval: time.Now()
+        to: time
+      - set: lp.tick
+        to: lp.now
+        value: lp.now()
+      - loop:
+          do:
+            - eval: rr.reapAll()
+              to: rr.reapAll
+          key: _
+          range: ul.rings
+          value: rr
+      - eval: ul.control()
+        to: ul.control
+      - loop:
+          do:
+            - eval: rr.r.wheel.advance(lp.tick, rr.r.expire)
+              to: rr.r.wheel.advance
+            - eval: rr.pace()
+              to: rr.pace
+            - eval: rr.watchdog()
+              to: rr.watchdog
+          key: _
+          range: ul.rings
+          value: rr
+      - eval: lp.h.OnBatchEnd(lp)
+        to: lp.h.OnBatchEnd
+      - eval: lp.endBatch(started)
+        to: lp.endBatch
+      - loop:
+          do:
+            - eval: rr.returnBuffers()
+              to: rr.returnBuffers
+            - set: rr.r.st.retries
+              value: rr.u.retries
+          key: _
+          range: ul.rings
+          value: rr
+  - of: (*uLoop).live
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).live
+        kind: self
+      - id: rr.used
+        kind: internal
+    steps:
+      - bind: "n"
+        eval: "0"
+      - loop:
+          do:
+            - op: +=
+              set: "n"
+              to: rr.used
+              value: rr.used()
+          key: _
+          range: ul.rings
+          value: rr
+      - return: "n"
+  - of: (*uRing).reapAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).reapAll
+        kind: self
+      - id: rr.u.reap
+        kind: internal
+      - id: rr.u.submit
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: "n"
+              eval: rr.u.reap(rr.ul.lp.sz.cqBatch, rr.handle)
+              to: rr.u.reap
+            - op: +=
+              set: rr.r.st.completions
+              value: uint64(n)
+            - opt:
+                do:
+                  - eval: rr.u.submit()
+                    to: rr.u.submit
+                  - continue: true
+                when: rr.u.overflowed()
+            - opt:
+                do:
+                  - return: ""
+                when: n == 0
+          range: reapRounds
+  - of: (*uRing).handle
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).handle
+        kind: self
+      - id: udOp
+        kind: internal
+      - id: rr.onAccept
+        kind: internal
+      - id: rr.onConnOp
+        kind: internal
+      - id: rr.onWake
+        kind: internal
+      - id: rr.onFan
+        kind: internal
+    steps:
+      - bind: ud
+        eval: c.userData
+      - switch:
+          cases:
+            - case: udAccept
+              do:
+                - eval: rr.onAccept(int(udSlot(ud)), c)
+                  to: rr.onAccept
+            - case: udRecv, udSend, udCancel, udClose
+              do:
+                - eval: rr.onConnOp(op, int32(udSlot(ud)), udGen(ud), c)
+                  to: rr.onConnOp
+            - case: udWake
+              do:
+                - eval: rr.onWake(c)
+                  to: rr.onWake
+            - case: udFan
+              do:
+                - eval: rr.onFan(c)
+                  to: rr.onFan
+            - case: udOrphanClose, udAcceptCancel
+          init:
+            bind: op
+            eval: udOp(ud)
+            to: udOp
+          "on": op
+  - of: (*uRing).onConnOp
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).onConnOp
+        kind: self
+      - id: rr.onRecv
+        kind: internal
+      - id: rr.onSend
+        kind: internal
+      - id: rr.opDone
+        kind: internal
+      - id: rr.onClose
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: udRecv
+              do:
+                - eval: rr.onRecv(slot, gen, c)
+                  to: rr.onRecv
+            - case: udSend
+              do:
+                - eval: rr.onSend(slot, gen, c)
+                  to: rr.onSend
+            - case: udCancel
+              do:
+                - eval: rr.opDone(slot, gen)
+                  to: rr.opDone
+            - case: udClose
+              do:
+                - eval: rr.onClose(slot, gen)
+                  to: rr.onClose
+          "on": op
+  - of: (*uRing).onAccept
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).onAccept
+        kind: self
+      - id: rr.armAccepts
+        kind: internal
+      - id: rr.acceptFailed
+        kind: internal
+      - id: lp.grp.rejected.Add
+        kind: value
+      - id: rr.orphanClose
+        kind: internal
+      - id: r.take
+        kind: internal
+      - id: rr.armRecv
+        kind: internal
+      - id: r.opened
+        kind: internal
+    steps:
+      - bind: r, lp
+        eval: rr.r, rr.ul.lp
+      - set: rr.lastAccept
+        value: lp.tick
+      - set: rr.stalls
+        value: "0"
+      - opt:
+          do:
+            - op: "--"
+              set: rr.armed[li]
+          when: c.flags&cqeFMore == 0 && li < len(rr.armed) && rr.armed[li] > 0
+      - defer: rr.armAccepts()
+        to: rr.armAccepts
+      - opt:
+          do:
+            - eval: rr.acceptFailed(c.res)
+              to: rr.acceptFailed
+            - return: ""
+          when: c.res < 0
+      - bind: index
+        eval: uint32(c.res)
+      - opt:
+          do:
+            - eval: lp.grp.rejected.Add(1)
+              to: lp.grp.rejected.Add
+            - eval: rr.orphanClose(index)
+              to: rr.orphanClose
+            - return: ""
+          when: rr.refuses(index)
+      - bind: slot, ok
+        eval: r.take(int32(index))
+        to: r.take
+      - opt:
+          do:
+            - eval: lp.grp.rejected.Add(1)
+              to: lp.grp.rejected.Add
+            - eval: rr.orphanClose(index)
+              to: rr.orphanClose
+            - return: ""
+          when: "!ok"
+      - set: rr.slotOf[index]
+        value: slot
+      - set: rr.backoff
+        value: backoffMin
+      - eval: rr.armRecv(slot)
+        to: rr.armRecv
+      - eval: r.opened(slot)
+        to: r.opened
+  - of: (*uRing).acceptFailed
+    steps:
+      - opt:
+          do:
+            - set: rr.paused
+              value: "true"
+            - op: ++
+              set: rr.r.st.pauses
+            - opt:
+                do:
+                  - set: rr.resumeAt
+                    value: rr.ul.lp.tick + rr.backoff
+                  - set: rr.backoff
+                    value: min(rr.backoff*2, backoffMax)
+                  - set: rr.ul.lp.hard
+                    value: "true"
+                when: "!rr.ul.direct"
+          when: res == -int32(syscall.ENFILE) || res == -int32(syscall.EMFILE)
+  - of: (*uRing).refuses
+    steps:
+      - bind: lp
+        eval: rr.ul.lp
+      - return: lp.draining || rr.r.draining || (lp.sz.maxConns > 0 && lp.grp.live.Load() >= int64(lp.sz.maxConns)) || int(index) >= len(rr.slotOf)
+  - of: (*uRing).orphanClose
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).orphanClose
+        kind: self
+      - id: closeFDs
+        kind: internal
+      - id: rr.u.get
+        kind: internal
+      - id: prepCloseDirect
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: closeFDs([]int{int(index)})
+              to: closeFDs
+            - return: ""
+          when: "!rr.ul.direct"
+      - bind: s
+        eval: rr.u.get()
+        to: rr.u.get
+      - opt:
+          do:
+            - op: ++
+              set: rr.r.st.retries
+            - return: ""
+          when: s == nil
+      - eval: prepCloseDirect(s, index, udPack(udOrphanClose, 0, index))
+        to: prepCloseDirect
+  - of: (*uRing).armRecv
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).armRecv
+        kind: self
+      - id: rr.u.get
+        kind: internal
+      - id: rr.r.fail
+        kind: internal
+      - id: prepRecv
+        kind: internal
+      - id: rr.ul.onFD
+        kind: internal
+    steps:
+      - bind: c
+        eval: "&rr.r.conns[slot]"
+      - bind: s
+        eval: rr.u.get()
+        to: rr.u.get
+      - opt:
+          do:
+            - op: ++
+              set: rr.r.st.retries
+            - eval: rr.r.fail(slot, rErrno, int32(syscall.EBUSY))
+              to: rr.r.fail
+            - return: ""
+          when: s == nil
+      - eval: prepRecv(s, uint32(c.fd), udPack(udRecv, c.gen, uint32(slot)))
+        to: prepRecv
+      - eval: rr.ul.onFD(s)
+        to: rr.ul.onFD
+      - op: ++
+        set: c.ops
+  - of: (*uRing).owns
+    steps:
+      - return: int(slot) < len(rr.r.conns) && rr.r.conns[slot].gen&genMask == gen
+  - of: (*uRing).onRecv
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).onRecv
+        kind: self
+      - id: rr.recvBytes
+        kind: internal
+      - id: rr.recvStarved
+        kind: internal
+      - id: rr.recvEOF
+        kind: internal
+      - id: rr.recvCancelled
+        kind: internal
+      - id: rr.failLive
+        kind: internal
+      - id: rr.maybeClose
+        kind: internal
+    steps:
+      - bind: more
+        eval: c.flags&cqeFMore != 0
+      - opt:
+          do:
+            - set: rr.recycle
+              value: append(rr.recycle, uint16(c.flags>>cqeBufferShift))
+            - op: "--"
+              set: rr.inRing
+          when: c.flags&cqeFBuffer != 0
+      - opt:
+          do:
+            - return: ""
+          when: "!rr.owns(slot, gen)"
+      - opt:
+          do:
+            - op: "--"
+              set: rr.r.conns[slot].ops
+          when: "!more"
+      - switch:
+          cases:
+            - case: c.res > 0 && c.flags&cqeFBuffer != 0
+              do:
+                - eval: rr.recvBytes(slot, uint16(c.flags>>cqeBufferShift), c.res, more)
+                  to: rr.recvBytes
+            - case: c.res == -int32(errnoENOBUFS)
+              do:
+                - eval: rr.recvStarved(slot)
+                  to: rr.recvStarved
+            - case: c.res == 0
+              do:
+                - eval: rr.recvEOF(slot)
+                  to: rr.recvEOF
+            - case: c.res == -int32(errnoECANCELED)
+              do:
+                - eval: rr.recvCancelled(slot, more)
+                  to: rr.recvCancelled
+            - default: true
+              do:
+                - eval: rr.failLive(slot, -c.res)
+                  to: rr.failLive
+      - eval: rr.maybeClose(slot)
+        to: rr.maybeClose
+  - of: (*uRing).recvCancelled
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).recvCancelled
+        kind: self
+      - id: rr.armRecv
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: rr.armRecv(slot)
+              to: rr.armRecv
+          when: "!more && rr.r.conns[slot].state == stOpen"
+  - of: (*uRing).recvBytes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).recvBytes
+        kind: self
+      - id: rr.r.deliver
+        kind: internal
+      - id: rr.armRecv
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: rr.r.deliver(slot, rr.u.buf(bid)[:n])
+              to: rr.r.deliver
+          when: rr.r.conns[slot].state == stOpen
+      - opt:
+          do:
+            - eval: rr.armRecv(slot)
+              to: rr.armRecv
+          when: "!more && rr.r.conns[slot].state == stOpen"
+  - of: (*uRing).recvStarved
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).recvStarved
+        kind: self
+      - id: rr.r.fail
+        kind: internal
+    steps:
+      - op: ++
+        set: rr.r.st.starved
+      - bind: open
+        eval: rr.r.conns[slot].state == stOpen
+      - alt:
+          - do:
+              - set: rr.starved
+                value: append(rr.starved, slot)
+            when: open && len(rr.starved) < starvedCap
+          - do:
+              - eval: rr.r.fail(slot, rErrno, int32(errnoENOBUFS))
+                to: rr.r.fail
+            when: open
+  - of: (*uRing).recvEOF
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).recvEOF
+        kind: self
+      - id: rr.r.markDirty
+        kind: internal
+    steps:
+      - bind: cc
+        eval: "&rr.r.conns[slot]"
+      - opt:
+          do:
+            - op: "|="
+              set: cc.flags
+              value: fPeerDone
+            - eval: rr.r.markDirty(slot)
+              to: rr.r.markDirty
+          when: cc.state == stOpen
+  - of: (*uRing).failLive
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).failLive
+        kind: self
+      - id: rr.r.fail
+        kind: internal
+    steps:
+      - bind: state
+        eval: rr.r.conns[slot].state
+      - opt:
+          do:
+            - eval: rr.r.fail(slot, rErrno, errno)
+              to: rr.r.fail
+          when: state == stOpen || state == stClosing
+  - of: (*uRing).onSend
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).onSend
+        kind: self
+      - id: rr.sendFlight
+        kind: internal
+      - id: rr.failLive
+        kind: internal
+      - id: rr.maybeClose
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!rr.owns(slot, gen)"
+      - bind: cc
+        eval: "&rr.r.conns[slot]"
+      - op: "--"
+        set: cc.ops
+      - switch:
+          cases:
+            - case: c.res > 0
+              do:
+                - opt:
+                    do:
+                      - return: ""
+                    when: rr.sendProgress(slot, c.res)
+            - case: c.res == -int32(errnoECANCELED)
+              do:
+                - op: "&^="
+                  set: cc.flags
+                  value: fSending
+                - opt:
+                    do:
+                      - eval: rr.sendFlight(slot)
+                        to: rr.sendFlight
+                      - return: ""
+                    when: cc.state == stOpen || cc.state == stClosing
+            - default: true
+              do:
+                - op: "&^="
+                  set: cc.flags
+                  value: fSending
+                - eval: rr.failLive(slot, -c.res)
+                  to: rr.failLive
+      - eval: rr.maybeClose(slot)
+        to: rr.maybeClose
+  - of: (*uRing).sendProgress
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).sendProgress
+        kind: self
+      - id: rr.sendFlight
+        kind: internal
+      - id: rr.ul.lp.slab.free
+        kind: internal
+      - id: r.sent
+        kind: internal
+      - id: r.markDirty
+        kind: internal
+    steps:
+      - bind: r
+        eval: rr.r
+      - bind: cc
+        eval: "&r.conns[slot]"
+      - op: +=
+        set: cc.flight.off
+        value: "n"
+      - bind: alive
+        eval: cc.state == stOpen || cc.state == stClosing
+      - opt:
+          do:
+            - eval: rr.sendFlight(slot)
+              to: rr.sendFlight
+            - return: "true"
+          when: cc.flight.off < cc.flight.len && alive
+      - eval: rr.ul.lp.slab.free(cc.flight)
+        to: rr.ul.lp.slab.free
+      - set: cc.flight
+        value: "chunkRef{idx: noChunk}"
+      - op: "&^="
+        set: cc.flags
+        value: fSending
+      - opt:
+          do:
+            - eval: r.sent(slot, int(n))
+              to: r.sent
+            - eval: r.markDirty(slot)
+              to: r.markDirty
+          when: alive
+      - return: "false"
+  - of: (*uRing).opDone
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).opDone
+        kind: self
+      - id: rr.maybeClose
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!rr.owns(slot, gen)"
+      - op: "--"
+        set: rr.r.conns[slot].ops
+      - eval: rr.maybeClose(slot)
+        to: rr.maybeClose
+  - of: (*uRing).maybeClose
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).maybeClose
+        kind: self
+      - id: closeFDs
+        kind: internal
+      - id: rr.onClose
+        kind: internal
+      - id: rr.u.get
+        kind: internal
+      - id: prepCloseDirect
+        kind: internal
+    steps:
+      - bind: c
+        eval: "&rr.r.conns[slot]"
+      - opt:
+          do:
+            - return: ""
+          when: c.state != stDead || c.ops != 0
+      - opt:
+          do:
+            - eval: closeFDs([]int{int(c.fd)})
+              to: closeFDs
+            - eval: rr.onClose(slot, c.gen&genMask)
+              to: rr.onClose
+            - return: ""
+          when: "!rr.ul.direct"
+      - bind: s
+        eval: rr.u.get()
+        to: rr.u.get
+      - opt:
+          do:
+            - op: ++
+              set: rr.r.st.retries
+            - return: ""
+          when: s == nil
+      - eval: prepCloseDirect(s, uint32(c.fd), udPack(udClose, c.gen, uint32(slot)))
+        to: prepCloseDirect
+      - set: c.ops
+        value: "1"
+      - set: c.state
+        value: stFree
+  - of: (*uRing).onClose
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).onClose
+        kind: self
+      - id: rr.r.release
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!rr.owns(slot, gen)"
+      - bind: c
+        eval: "&rr.r.conns[slot]"
+      - bind: index
+        eval: c.fd
+      - opt:
+          do:
+            - set: rr.slotOf[index]
+              value: "-1"
+          when: index >= 0 && int(index) < len(rr.slotOf)
+      - eval: rr.r.release(slot)
+        to: rr.r.release
+  - of: (*uRing).onWake
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).onWake
+        kind: self
+      - id: syscall
+        kind: stdlib
+      - id: swallowErr
+        kind: internal
+      - id: ul.lp.post.drain
+        kind: internal
+      - id: rr.pollFD
+        kind: internal
+    steps:
+      - bind: ul
+        eval: rr.ul
+      - var:
+          name: buf
+          type: "[8]byte"
+      - bind: _, _, errno
+        eval: syscall.RawSyscall(syscall.SYS_READ, uintptr(ul.wakefd), uintptr(unsafe.Pointer(&buf[0])), 8)
+        to: syscall
+      - eval: swallowErr(errno)
+        to: swallowErr
+      - opt:
+          do:
+            - panic: "\"net/loop: Post consumer off its loop's thread\""
+          when: ul.lp.threadOK != nil && !ul.lp.threadOK()
+      - eval: ul.lp.post.drain(ul.lp)
+        to: ul.lp.post.drain
+      - opt:
+          do:
+            - eval: rr.pollFD(ul.wakefd, udWake)
+              to: rr.pollFD
+          when: c.flags&cqeFMore == 0
+  - of: (*uRing).onFan
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).onFan
+        kind: self
+      - id: syscall
+        kind: stdlib
+      - id: swallowErr
+        kind: internal
+      - id: rr.pollFD
+        kind: internal
+    steps:
+      - var:
+          name: buf
+          type: "[8]byte"
+      - bind: _, _, errno
+        eval: syscall.RawSyscall(syscall.SYS_READ, uintptr(rr.ul.fanfd), uintptr(unsafe.Pointer(&buf[0])), 8)
+        to: syscall
+      - eval: swallowErr(errno)
+        to: swallowErr
+      - opt:
+          do:
+            - eval: rr.pollFD(rr.ul.fanfd, udFan)
+              to: rr.pollFD
+          when: c.flags&cqeFMore == 0
+  - of: (*uRing).returnBuffers
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).returnBuffers
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: rr.giveBack
+        kind: internal
+      - id: rr.rearmStarved
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: slices.Reverse(rr.recycle)
+              to: slices
+          when: rr.ul.hooks.shuffle
+      - eval: rr.giveBack()
+        to: rr.giveBack
+      - eval: rr.rearmStarved()
+        to: rr.rearmStarved
+  - of: (*uRing).giveBack
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).giveBack
+        kind: self
+      - id: fillStale
+        kind: internal
+      - id: u.addBuf
+        kind: internal
+      - id: u.publishBufs
+        kind: internal
+    steps:
+      - bind: u
+        eval: rr.u
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: fillStale(u.buf(bid))
+                    to: fillStale
+                when: rr.ul.hooks.fill
+            - eval: u.addBuf(bid)
+              to: u.addBuf
+          key: _
+          range: rr.recycle
+          value: bid
+      - opt:
+          do:
+            - eval: u.publishBufs()
+              to: u.publishBufs
+            - op: +=
+              set: rr.inRing
+              value: len(rr.recycle)
+            - set: rr.recycle
+              value: rr.recycle[:0]
+          when: len(rr.recycle) > 0
+  - of: fillStale
+    steps:
+      - loop:
+          do:
+            - set: b[i]
+              value: staleFill
+          key: i
+          range: b
+  - of: (*uRing).rearmStarved
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).rearmStarved
+        kind: self
+      - id: rr.armRecv
+        kind: internal
+    steps:
+      - bind: k
+        eval: "0"
+      - loop:
+          cond: k < len(rr.starved) && k < rr.inRing
+          do:
+            - bind: slot
+              eval: rr.starved[k]
+            - op: ++
+              set: k
+            - opt:
+                do:
+                  - eval: rr.armRecv(slot)
+                    to: rr.armRecv
+                when: rr.r.conns[slot].state == stOpen
+      - set: rr.starved
+        value: rr.starved[:copy(rr.starved, rr.starved[k:])]
+  - of: (*uRing).flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).flush
+        kind: self
+      - id: rr.sendFlight
+        kind: internal
+    steps:
+      - bind: c
+        eval: "&r.conns[slot]"
+      - opt:
+          do:
+            - return: ""
+          when: c.flags&fSending != 0 || c.out.empty() || c.out.off == c.out.len
+      - set: c.flight, c.out
+        value: "c.out, chunkRef{idx: noChunk}"
+      - eval: rr.sendFlight(slot)
+        to: rr.sendFlight
+  - of: (*uRing).sendFlight
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).sendFlight
+        kind: self
+      - id: rr.u.get
+        kind: internal
+      - id: rr.r.fail
+        kind: internal
+      - id: prepSend
+        kind: internal
+      - id: rr.ul.onFD
+        kind: internal
+    steps:
+      - bind: c
+        eval: "&rr.r.conns[slot]"
+      - bind: s
+        eval: rr.u.get()
+        to: rr.u.get
+      - opt:
+          do:
+            - op: ++
+              set: rr.r.st.retries
+            - eval: rr.r.fail(slot, rErrno, int32(syscall.EBUSY))
+              to: rr.r.fail
+            - return: ""
+          when: s == nil
+      - eval: prepSend(s, uint32(c.fd), rr.ul.lp.slab.data(c.flight), udPack(udSend, c.gen, uint32(slot)))
+        to: prepSend
+      - eval: rr.ul.onFD(s)
+        to: rr.ul.onFD
+      - op: ++
+        set: c.ops
+      - op: "|="
+        set: c.flags
+        value: fSending
+  - of: (*uRing).shutdown
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).shutdown
+        kind: self
+      - id: rr.maybeClose
+        kind: internal
+      - id: rr.u.get
+        kind: internal
+      - id: prepCancelFixed
+        kind: internal
+      - id: rr.ul.onFD
+        kind: internal
+    steps:
+      - bind: c
+        eval: "&r.conns[slot]"
+      - opt:
+          do:
+            - eval: rr.maybeClose(slot)
+              to: rr.maybeClose
+            - return: ""
+          when: c.ops == 0
+      - bind: s
+        eval: rr.u.get()
+        to: rr.u.get
+      - opt:
+          do:
+            - op: ++
+              set: r.st.retries
+            - return: ""
+          when: s == nil
+      - eval: prepCancelFixed(s, uint32(c.fd), udPack(udCancel, c.gen, uint32(slot)))
+        to: prepCancelFixed
+      - eval: rr.ul.onFD(s)
+        to: rr.ul.onFD
+      - op: ++
+        set: c.ops
+  - of: (*uRing).unread
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).unread
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: rr.ul.direct
+      - var:
+          name: "n"
+          type: int32
+      - bind: _, _, errno
+        eval: syscall.Syscall(syscall.SYS_IOCTL, uintptr(r.conns[slot].fd), siocinq, uintptr(unsafe.Pointer(&n)))
+        to: syscall
+      - return: errno != 0 || n > 0
+  - of: (*uRing).watchdog
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).watchdog
+        kind: self
+      - id: rr.cancelAccepts
+        kind: internal
+    steps:
+      - bind: lp
+        eval: rr.ul.lp
+      - opt:
+          do:
+            - return: ""
+          when: rr.paused || rr.r.draining || lp.draining || lp.tick-rr.lastAccept < watchdogTicks
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: rr.armed[i] == 0 || listenerQueue(fd) == 0
+            - op: ++
+              set: rr.r.st.watchdog
+            - op: ++
+              set: rr.stalls
+            - set: rr.lastAccept
+              value: lp.tick
+            - opt:
+                do:
+                  - set: rr.r.draining
+                    value: "true"
+                  - eval: rr.cancelAccepts()
+                    to: rr.cancelAccepts
+                  - return: ""
+                when: rr.stalls > watchdogFires
+            - eval: rr.cancelAccepts()
+              to: rr.cancelAccepts
+            - return: ""
+          key: i
+          range: rr.ul.lfds
+          value: fd
+  - of: listenerQueue
+    participants:
+      - id: caller
+        kind: actor
+      - id: listenerQueue
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - var:
+          name: info
+          type: syscall.TCPInfo
+      - bind: "n"
+        eval: new(uint32(unsafe.Sizeof(info)))
+      - bind: _, _, errno
+        eval: |-
+          syscall.Syscall6(syscall.SYS_GETSOCKOPT, uintptr(fd), syscall.IPPROTO_TCP, syscall.TCP_INFO,
+          		uintptr(unsafe.Pointer(&info)), uintptr(unsafe.Pointer(n)), 0)
+        to: syscall
+      - opt:
+          do:
+            - return: "0"
+          when: errno != 0
+      - return: info.Unacked
+  - of: (*uLoop).control
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).control
+        kind: self
+      - id: rr.cancelAccepts
+        kind: internal
+      - id: r.markDirty
+        kind: internal
+    steps:
+      - bind: lp
+        eval: ul.lp
+      - opt:
+          do:
+            - set: lp.draining
+              value: "true"
+            - loop:
+                do:
+                  - set: rr.r.draining
+                    value: "true"
+                  - eval: rr.cancelAccepts()
+                    to: rr.cancelAccepts
+                key: _
+                range: ul.rings
+                value: rr
+          when: ul.drainReq.Load() && !lp.draining
+      - opt:
+          do:
+            - return: ""
+          when: "!lp.draining"
+      - loop:
+          do:
+            - bind: r
+              eval: rr.r
+            - loop:
+                cond: s != noLink
+                do:
+                  - bind: c
+                    eval: "&r.conns[s]"
+                  - bind: nxt
+                    eval: c.lruNext
+                  - opt:
+                      do:
+                        - set: c.state, c.reason
+                          value: stClosing, rDrain
+                        - eval: r.markDirty(s)
+                          to: r.markDirty
+                      when: c.state == stOpen && c.spill.empty()
+                  - set: s
+                    value: nxt
+                init: s := r.lruHead
+          key: _
+          range: ul.rings
+          value: rr
+  - of: (*uLoop).closeAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).closeAll
+        kind: self
+      - id: r.fail
+        kind: internal
+      - id: rr.cancelAccepts
+        kind: internal
+      - id: rr.u.submit
+        kind: internal
+      - id: time.Now().Add
+        kind: value
+      - id: ul.rings[0].u.wait
+        kind: internal
+      - id: rr.reapAll
+        kind: internal
+      - id: rr.r.publish
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: r
+              eval: rr.r
+            - loop:
+                cond: r.lruHead != noLink
+                do:
+                  - eval: r.fail(r.lruHead, rDrain, 0)
+                    to: r.fail
+            - eval: rr.cancelAccepts()
+              to: rr.cancelAccepts
+            - eval: rr.u.submit()
+              to: rr.u.submit
+          key: _
+          range: ul.rings
+          value: rr
+      - bind: deadline
+        eval: time.Now().Add(time.Second)
+        to: time.Now().Add
+      - bind: tick
+        eval: "kernelTimespec{nsec: int64(tickEvery)}"
+      - loop:
+          cond: ul.live() > 0 && time.Now().Before(deadline)
+          do:
+            - eval: ul.rings[0].u.wait(&tick)
+              to: ul.rings[0].u.wait
+            - loop:
+                do:
+                  - eval: rr.u.submit()
+                    to: rr.u.submit
+                  - eval: rr.reapAll()
+                    to: rr.reapAll
+                key: _
+                range: ul.rings
+                value: rr
+      - loop:
+          do:
+            - eval: rr.r.publish()
+              to: rr.r.publish
+          key: _
+          range: ul.rings
+          value: rr
+  - of: (*uLoop).teardown
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).teardown
+        kind: self
+      - id: lp.post.close
+        kind: internal
+      - id: rr.u.close
+        kind: internal
+      - id: ul.wakeMu.Lock
+        kind: value
+      - id: closeFDs
+        kind: internal
+      - id: ul.wakeMu.Unlock
+        kind: value
+      - id: swallowErr
+        kind: internal
+    steps:
+      - bind: lp
+        eval: ul.lp
+      - opt:
+          do:
+            - eval: lp.post.close()
+              to: lp.post.close
+          when: lp.post != nil
+      - loop:
+          do:
+            - eval: rr.u.close()
+              to: rr.u.close
+          key: _
+          range: ul.rings
+          value: rr
+      - eval: ul.wakeMu.Lock()
+        to: ul.wakeMu.Lock
+      - eval: closeFDs([]int{ul.wakefd, ul.fanfd})
+        to: closeFDs
+      - set: ul.evClosed
+        value: "true"
+      - eval: ul.wakeMu.Unlock()
+        to: ul.wakeMu.Unlock
+      - loop:
+          do:
+            - eval: swallowErr(syscall.Munmap(m))
+              to: swallowErr
+          key: _
+          range: lp.slab.mapped
+          value: m
+      - set: lp.slab.mapped
+        value: nil
+  - of: (*uLoop).selfTest
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).selfTest
+        kind: self
+      - id: selfTestRing
+        kind: internal
+      - id: rg.close
+        kind: internal
+      - id: loopbackListener
+        kind: internal
+      - id: closeFDs
+        kind: internal
+      - id: prepAccept
+        kind: internal
+      - id: rg.submit
+        kind: internal
+      - id: selfTestClient
+        kind: internal
+      - id: run.exchange
+        kind: internal
+      - id: run.verdict
+        kind: internal
+      - id: run.releases
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: false, probeError("self_test", syscall.EIO)
+          when: ul.hooks.failStage == "self_test"
+      - bind: rg, err
+        eval: selfTestRing(flags)
+        to: selfTestRing
+      - opt:
+          do:
+            - return: false, err
+          when: err != nil
+      - defer: rg.close()
+        to: rg.close
+      - bind: lfd, port, err
+        eval: loopbackListener()
+        to: loopbackListener
+      - opt:
+          do:
+            - return: false, probeError("self_test listen", errnoOfErr(err))
+          when: err != nil
+      - defer: closeFDs([]int{lfd})
+        to: closeFDs
+      - eval: prepAccept(rg.get(), lfd, udPack(udAccept, 0, 0), true)
+        to: prepAccept
+      - eval: rg.submit()
+        to: rg.submit
+      - bind: cfd, err
+        eval: selfTestClient(port, selfTestPayload)
+        to: selfTestClient
+      - opt:
+          do:
+            - return: false, err
+          when: err != nil
+      - defer: closeFDs([]int{cfd})
+        to: closeFDs
+      - bind: run
+        eval: "&selfTestRun{u: rg, index: -1, second: -1}"
+      - eval: run.exchange()
+        to: run.exchange
+      - opt:
+          do:
+            - return: false, err
+          init:
+            bind: err
+            eval: run.verdict()
+            to: run.verdict
+          when: err != nil
+      - return: run.releases(port, cfd), nil
+        to: run.releases
+  - of: (*selfTestRun).releases
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*selfTestRun).releases
+        kind: self
+      - id: selfTestClient
+        kind: internal
+      - id: closeFDs
+        kind: internal
+      - id: st.pump
+        kind: internal
+      - id: prepCancelFixed
+        kind: internal
+      - id: prepCloseDirect
+        kind: internal
+    steps:
+      - bind: other, err
+        eval: selfTestClient(port, nil)
+        to: selfTestClient
+      - opt:
+          do:
+            - return: "false"
+          when: err != nil
+      - defer: closeFDs([]int{other})
+        to: closeFDs
+      - eval: st.pump(func() bool { return st.second >= 0 })
+        to: st.pump
+      - opt:
+          do:
+            - return: "false"
+          when: st.second < 0
+      - eval: prepCancelFixed(st.u.get(), uint32(st.index), udPack(udCancel, 0, 0))
+        to: prepCancelFixed
+      - eval: st.pump(func() bool { return st.cancelled })
+        to: st.pump
+      - eval: prepCloseDirect(st.u.get(), uint32(st.index), udPack(udClose, 0, 0))
+        to: prepCloseDirect
+      - eval: st.pump(func() bool { return st.closed })
+        to: st.pump
+      - return: st.closed && peerSeesEnd(first)
+  - of: peerSeesEnd
+    participants:
+      - id: caller
+        kind: actor
+      - id: peerSeesEnd
+        kind: self
+      - id: time.Now().Add
+        kind: value
+      - id: syscall
+        kind: stdlib
+      - id: time
+        kind: stdlib
+    steps:
+      - var:
+          name: buf
+          type: "[peerPeekBytes]byte"
+      - bind: deadline
+        eval: time.Now().Add(200 * time.Millisecond)
+        to: time.Now().Add
+      - loop:
+          cond: time.Now().Before(deadline)
+          do:
+            - bind: n, _, err
+              eval: syscall.Recvfrom(fd, buf[:], syscall.MSG_DONTWAIT)
+              to: syscall
+            - opt:
+                do:
+                  - return: "true"
+                when: n == 0 && err == nil
+            - eval: time.Sleep(5 * time.Millisecond)
+              to: time
+      - return: "false"
+  - of: selfTestRing
+    participants:
+      - id: caller
+        kind: actor
+      - id: selfTestRing
+        kind: self
+      - id: openURing
+        kind: internal
+      - id: rg.setupBuffers
+        kind: internal
+      - id: rg.close
+        kind: internal
+      - id: rg.registerSparse
+        kind: internal
+    steps:
+      - bind: rg, step, errno
+        eval: openURing(probeEntries, flags)
+        to: openURing
+      - opt:
+          do:
+            - return: nil, probeError("self_test "+step, errno)
+          when: errno != 0
+      - opt:
+          do:
+            - eval: rg.close()
+              to: rg.close
+            - return: nil, probeError("self_test buf_ring", errno)
+          init:
+            bind: errno
+            eval: rg.setupBuffers(8, 4096)
+            to: rg.setupBuffers
+          when: errno != 0
+      - opt:
+          do:
+            - eval: rg.close()
+              to: rg.close
+            - return: nil, probeError("self_test sparse_files", errno)
+          init:
+            bind: errno
+            eval: rg.registerSparse(2)
+            to: rg.registerSparse
+          when: errno != 0
+      - return: rg, nil
+  - of: selfTestClient
+    participants:
+      - id: caller
+        kind: actor
+      - id: selfTestClient
+        kind: self
+      - id: syscall
+        kind: stdlib
+      - id: closeFDs
+        kind: internal
+    steps:
+      - bind: cfd, err
+        eval: syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM|syscall.SOCK_CLOEXEC, 0)
+        to: syscall
+      - opt:
+          do:
+            - return: "-1, probeError(\"self_test socket\", errnoOfErr(err))"
+          when: err != nil
+      - opt:
+          do:
+            - eval: closeFDs([]int{cfd})
+              to: closeFDs
+            - return: "-1, probeError(\"self_test connect\", errnoOfErr(err))"
+          init:
+            bind: err
+            eval: "syscall.Connect(cfd, &syscall.SockaddrInet4{Port: port, Addr: [4]byte{127, 0, 0, 1}})"
+            to: syscall
+          when: err != nil
+      - opt:
+          do:
+            - return: cfd, nil
+          when: payload == nil
+      - opt:
+          do:
+            - eval: closeFDs([]int{cfd})
+              to: closeFDs
+            - return: "-1, probeError(\"self_test write\", errnoOfErr(err))"
+          init:
+            bind: _, err
+            eval: syscall.Write(cfd, payload)
+            to: syscall
+          when: err != nil
+      - return: cfd, nil
+  - of: (*selfTestRun).pump
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*selfTestRun).pump
+        kind: self
+      - id: time.Now().Add
+        kind: value
+      - id: st.u.wait
+        kind: internal
+      - id: st.u.reap
+        kind: internal
+    steps:
+      - bind: deadline
+        eval: time.Now().Add(500 * time.Millisecond)
+        to: time.Now().Add
+      - bind: tick
+        eval: "kernelTimespec{nsec: int64(tickEvery)}"
+      - loop:
+          cond: "!done() && time.Now().Before(deadline)"
+          do:
+            - eval: st.u.wait(&tick)
+              to: st.u.wait
+            - eval: st.u.reap(64, st.onCQE)
+              to: st.u.reap
+  - of: (*selfTestRun).exchange
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*selfTestRun).exchange
+        kind: self
+      - id: time.Now().Add
+        kind: value
+      - id: st.u.wait
+        kind: internal
+      - id: st.u.reap
+        kind: internal
+    steps:
+      - bind: deadline
+        eval: time.Now().Add(time.Second)
+        to: time.Now().Add
+      - bind: tick
+        eval: "kernelTimespec{nsec: int64(tickEvery)}"
+      - loop:
+          cond: "!bytes.Equal(st.got, selfTestPayload) && time.Now().Before(deadline)"
+          do:
+            - eval: st.u.wait(&tick)
+              to: st.u.wait
+            - eval: st.u.reap(64, st.onCQE)
+              to: st.u.reap
+  - of: (*selfTestRun).onCQE
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*selfTestRun).onCQE
+        kind: self
+      - id: st.onAccept
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: udAccept
+              do:
+                - eval: st.onAccept(c.res)
+                  to: st.onAccept
+            - case: udCancel
+              do:
+                - set: st.cancelled
+                  value: "true"
+            - case: udClose
+              do:
+                - set: st.closed
+                  value: "true"
+            - case: udRecv
+              do:
+                - opt:
+                    do:
+                      - set: st.got
+                        value: append(st.got, st.u.buf(uint16(c.flags >> cqeBufferShift))[:c.res]...)
+                    when: c.res > 0 && c.flags&cqeFBuffer != 0
+          "on": udOp(c.userData)
+  - of: (*selfTestRun).onAccept
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*selfTestRun).onAccept
+        kind: self
+      - id: prepRecv
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: res < 0
+            - case: st.index < 0
+              do:
+                - set: st.index
+                  value: res
+                - eval: prepRecv(st.u.get(), uint32(res), udPack(udRecv, 0, 0))
+                  to: prepRecv
+            - case: st.second < 0
+              do:
+                - set: st.second
+                  value: res
+                - eval: prepRecv(st.u.get(), uint32(res), udPack(udRecv, 0, 1))
+                  to: prepRecv
+  - of: (*selfTestRun).verdict
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*selfTestRun).verdict
+        kind: self
+      - id: probeError
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: bytes.Equal(st.got, selfTestPayload)
+      - opt:
+          do:
+            - return: probeError("self_test accept", syscall.ETIMEDOUT)
+              to: probeError
+          when: st.index < 0
+      - return: probeError("self_test recv", syscall.ETIMEDOUT)
+        to: probeError
+  - of: loopbackListener
+    participants:
+      - id: caller
+        kind: actor
+      - id: loopbackListener
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - set: fd, err
+        to: syscall
+        value: syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM|syscall.SOCK_NONBLOCK|syscall.SOCK_CLOEXEC, 0)
+      - opt:
+          do:
+            - return: "-1, 0, err"
+          when: err != nil
+      - opt:
+          do:
+            - set: _
+              to: syscall
+              value: syscall.Close(fd)
+            - return: "-1, 0, err"
+          init:
+            bind: err
+            eval: "syscall.Bind(fd, &syscall.SockaddrInet4{Addr: [4]byte{127, 0, 0, 1}})"
+            to: syscall
+          when: err != nil
+      - opt:
+          do:
+            - set: _
+              to: syscall
+              value: syscall.Close(fd)
+            - return: "-1, 0, err"
+          init:
+            bind: err
+            eval: syscall.Listen(fd, 8)
+            to: syscall
+          when: err != nil
+      - bind: sa, err
+        eval: syscall.Getsockname(fd)
+        to: syscall
+      - opt:
+          do:
+            - set: _
+              to: syscall
+              value: syscall.Close(fd)
+            - return: "-1, 0, err"
+          when: err != nil
+      - bind: in4, ok
+        eval: sa.(*syscall.SockaddrInet4)
+      - opt:
+          do:
+            - set: _
+              to: syscall
+              value: syscall.Close(fd)
+            - return: "-1, 0, syscall.EAFNOSUPPORT"
+          when: "!ok"
+      - return: fd, in4.Port, nil
+  - of: openURing
+    participants:
+      - id: caller
+        kind: actor
+      - id: openURing
+        kind: self
+      - id: uringSetup
+        kind: internal
+      - id: u.close
+        kind: internal
+      - id: u.mapRings
+        kind: internal
+      - id: u.buildViews
+        kind: internal
+    steps:
+      - bind: u
+        eval: "&uring{fd: -1}"
+      - set: u.params.flags
+        value: flags | setupCQSize | setupClamp
+      - set: u.params.cqEntries
+        value: entries * cqFactor
+      - bind: fd, errno
+        eval: uringSetup(entries, &u.params)
+        to: uringSetup
+      - opt:
+          do:
+            - return: nil, "setup", errno
+          when: errno != 0
+      - set: u.fd
+        value: fd
+      - bind: p
+        eval: "&u.params"
+      - opt:
+          do:
+            - eval: u.close()
+              to: u.close
+            - return: nil, "features", syscall.EOPNOTSUPP
+          when: p.features&featExtArg == 0 || p.features&featNoDrop == 0 || p.features&featSingleMmap == 0
+      - opt:
+          do:
+            - eval: u.close()
+              to: u.close
+            - return: nil, step, errno
+          init:
+            bind: step, errno
+            eval: u.mapRings()
+            to: u.mapRings
+          when: errno != 0
+      - eval: u.buildViews()
+        to: u.buildViews
+      - return: u, "", 0
+  - of: (*uring).mapRings
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uring).mapRings
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - bind: p
+        eval: "&u.params"
+      - bind: sqSize
+        eval: uintptr(p.sqOff.array) + uintptr(p.sqEntries)*4
+      - bind: cqSize
+        eval: uintptr(p.cqOff.cqes) + uintptr(p.cqEntries)*unsafe.Sizeof(cqe{})
+      - bind: size
+        eval: max(sqSize, cqSize)
+      - bind: mem, err
+        eval: syscall.Mmap(u.fd, int64(offSQRing), int(size), syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED|syscall.MAP_POPULATE)
+        to: syscall
+      - opt:
+          do:
+            - return: "\"mmap rings\", errnoOfErr(err)"
+          when: err != nil
+      - set: u.ringMem
+        value: mem
+      - bind: sqeBytes, err
+        eval: syscall.Mmap(u.fd, int64(offSQEs), int(uintptr(p.sqEntries)*unsafe.Sizeof(sqe{})), syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED|syscall.MAP_POPULATE)
+        to: syscall
+      - opt:
+          do:
+            - return: "\"mmap sqes\", errnoOfErr(err)"
+          when: err != nil
+      - set: u.sqeMem
+        value: sqeBytes
+      - return: "\"\", 0"
+  - of: (*uring).buildViews
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uring).buildViews
+        kind: self
+      - id: unsafe
+        kind: stdlib
+      - id: atomic
+        kind: stdlib
+    steps:
+      - bind: p
+        eval: "&u.params"
+      - bind: base
+        eval: unsafe.Pointer(&u.ringMem[0])
+        to: unsafe
+      - set: u.sqHead
+        value: (*uint32)(unsafe.Add(base, p.sqOff.head))
+      - set: u.sqTail
+        value: (*uint32)(unsafe.Add(base, p.sqOff.tail))
+      - set: u.sqFlags
+        value: (*uint32)(unsafe.Add(base, p.sqOff.flags))
+      - set: u.sqMask
+        value: "*(*uint32)(unsafe.Add(base, p.sqOff.ringMask))"
+      - set: u.sqLen
+        value: p.sqEntries
+      - set: u.cqHead
+        value: (*uint32)(unsafe.Add(base, p.cqOff.head))
+      - set: u.cqTail
+        value: (*uint32)(unsafe.Add(base, p.cqOff.tail))
+      - set: u.cqMask
+        value: "*(*uint32)(unsafe.Add(base, p.cqOff.ringMask))"
+      - set: u.cqLen
+        value: p.cqEntries
+      - set: u.cqes
+        to: unsafe
+        value: unsafe.Slice((*cqe)(unsafe.Add(base, p.cqOff.cqes)), p.cqEntries)
+      - set: u.sqes
+        to: unsafe
+        value: unsafe.Slice((*sqe)(unsafe.Pointer(&u.sqeMem[0])), p.sqEntries)
+      - bind: array
+        eval: unsafe.Slice((*uint32)(unsafe.Add(base, p.sqOff.array)), p.sqEntries)
+        to: unsafe
+      - loop:
+          do:
+            - set: array[i]
+              value: uint32(i)
+          key: i
+          range: array
+      - set: u.tail
+        to: atomic
+        value: atomic.LoadUint32(u.sqTail)
+      - set: u.submitted
+        value: u.tail
+  - of: errnoOfErr
+    steps:
+      - opt:
+          do:
+            - return: e
+          init:
+            bind: e, ok
+            eval: err.(syscall.Errno)
+          when: ok
+      - return: syscall.EIO
+  - of: (*uring).close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uring).close
+        kind: self
+      - id: swallowErr
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: swallowErr(syscall.Munmap(m))
+                    to: swallowErr
+                when: m != nil
+          key: _
+          range: "[][]byte{u.bufRing, u.bufMem, u.sqeMem, u.ringMem}"
+          value: m
+      - set: u.bufRing, u.bufMem, u.sqeMem, u.ringMem
+        value: nil, nil, nil, nil
+      - opt:
+          do:
+            - eval: swallowErr(syscall.Close(u.fd))
+              to: swallowErr
+            - set: u.fd
+              value: "-1"
+          when: u.fd >= 0
+  - of: (*uring).get
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uring).get
+        kind: self
+      - id: u.submit
+        kind: internal
+    steps:
+      - loop:
+          cond: u.tail-atomic.LoadUint32(u.sqHead) >= u.sqLen
+          do:
+            - opt:
+                do:
+                  - return: nil
+                when: i >= enterRetries
+            - eval: u.submit()
+              to: u.submit
+          init: i := 0
+          post: i++
+      - bind: s
+        eval: "&u.sqes[u.tail&u.sqMask]"
+      - set: "*s"
+        value: sqe{}
+      - op: ++
+        set: u.tail
+      - return: s
+  - of: (*uring).publish
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uring).publish
+        kind: self
+      - id: atomic
+        kind: stdlib
+    steps:
+      - eval: atomic.StoreUint32(u.sqTail, u.tail)
+        to: atomic
+  - of: (*uring).pending
+    steps:
+      - return: u.tail - u.submitted
+  - of: (*uring).submit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uring).submit
+        kind: self
+      - id: u.publish
+        kind: internal
+      - id: u.pending
+        kind: internal
+      - id: uringEnterSubmit
+        kind: internal
+    steps:
+      - eval: u.publish()
+        to: u.publish
+      - loop:
+          do:
+            - bind: "n"
+              eval: u.pending()
+              to: u.pending
+            - opt:
+                do:
+                  - return: ""
+                when: n == 0
+            - bind: got, errno
+              eval: uringEnterSubmit(u.fd, n)
+              to: uringEnterSubmit
+            - switch:
+                cases:
+                  - case: "0"
+                    do:
+                      - op: +=
+                        set: u.submitted
+                        value: uint32(got)
+                  - case: syscall.EINTR
+                  - default: true
+                    do:
+                      - op: ++
+                        set: u.retries
+                      - return: ""
+                "on": errno
+          range: enterRetries
+  - of: (*uring).wait
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uring).wait
+        kind: self
+      - id: u.publish
+        kind: internal
+      - id: uringEnterWait
+        kind: internal
+    steps:
+      - eval: u.publish()
+        to: u.publish
+      - bind: arg
+        eval: "getEventsArg{ts: uint64(uintptr(unsafe.Pointer(ts)))}"
+      - bind: minComplete
+        eval: uint32(1)
+      - opt:
+          do:
+            - set: minComplete
+              value: "0"
+          when: u.ready() > 0
+      - bind: got, errno
+        eval: uringEnterWait(u.fd, u.pending(), minComplete, enterGetEvents|enterExtArg, unsafe.Pointer(&arg), unsafe.Sizeof(arg))
+        to: uringEnterWait
+      - switch:
+          cases:
+            - case: "0"
+              do:
+                - op: +=
+                  set: u.submitted
+                  value: uint32(got)
+            - case: errnoETIME, syscall.EINTR
+            - default: true
+              do:
+                - op: ++
+                  set: u.retries
+          "on": errno
+  - of: (*uring).ready
+    steps:
+      - return: atomic.LoadUint32(u.cqTail) - *u.cqHead
+  - of: (*uring).reap
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uring).reap
+        kind: self
+      - id: atomic
+        kind: stdlib
+    steps:
+      - bind: head
+        eval: "*u.cqHead"
+      - bind: tail
+        eval: atomic.LoadUint32(u.cqTail)
+        to: atomic
+      - bind: "n"
+        eval: "0"
+      - loop:
+          cond: head != tail && n < max
+          do:
+            - eval: fn(&u.cqes[head&u.cqMask])
+            - op: ++
+              set: head
+            - op: ++
+              set: "n"
+      - eval: atomic.StoreUint32(u.cqHead, head)
+        to: atomic
+      - return: "n"
+  - of: (*uring).overflowed
+    steps:
+      - return: atomic.LoadUint32(u.sqFlags)&sqCQOverflow != 0
+  - of: (*uring).setupBuffers
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uring).setupBuffers
+        kind: self
+      - id: syscall
+        kind: stdlib
+      - id: errnoOfErr
+        kind: internal
+      - id: u.mapBufRing
+        kind: internal
+      - id: u.addBuf
+        kind: internal
+      - id: u.publishBufs
+        kind: internal
+    steps:
+      - bind: bm, err
+        eval: syscall.Mmap(-1, 0, int(count)*int(size), syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS)
+        to: syscall
+      - opt:
+          do:
+            - return: errnoOfErr(err)
+              to: errnoOfErr
+          when: err != nil
+      - set: u.bufMem, u.bufCount, u.bufSize
+        value: bm, count, size
+      - opt:
+          do:
+            - return: errno
+          init:
+            bind: errno
+            eval: u.mapBufRing(count)
+            to: u.mapBufRing
+          when: errno != 0
+      - loop:
+          do:
+            - eval: u.addBuf(uint16(bid))
+              to: u.addBuf
+          key: bid
+          range: count
+      - eval: u.publishBufs()
+        to: u.publishBufs
+      - return: "0"
+  - of: (*uring).mapBufRing
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uring).mapBufRing
+        kind: self
+      - id: registerBufRing
+        kind: internal
+      - id: syscall
+        kind: stdlib
+      - id: errnoOfErr
+        kind: internal
+    steps:
+      - bind: ringBytes
+        eval: max(int(count)*int(unsafe.Sizeof(uringBuf{})), syscall.Getpagesize())
+      - bind: errno
+        eval: "registerBufRing(u.fd, &bufReg{ringEntries: count, bgid: bufGroup, flags: pbufRingMmap})"
+        to: registerBufRing
+      - opt:
+          do:
+            - bind: "off"
+              eval: offPbufRing | uintptr(bufGroup)<<offPbufShift
+            - bind: rm, err
+              eval: syscall.Mmap(u.fd, int64(off), ringBytes, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED|syscall.MAP_POPULATE)
+              to: syscall
+            - opt:
+                do:
+                  - return: errnoOfErr(err)
+                    to: errnoOfErr
+                when: err != nil
+            - set: u.bufRing
+              value: rm
+            - return: "0"
+          when: errno == 0
+      - opt:
+          do:
+            - return: errno
+          when: errno != syscall.EINVAL
+      - bind: rm, err
+        eval: syscall.Mmap(-1, 0, ringBytes, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS)
+        to: syscall
+      - opt:
+          do:
+            - return: errnoOfErr(err)
+              to: errnoOfErr
+          when: err != nil
+      - set: u.bufRing
+        value: rm
+      - return: "registerBufRing(u.fd, &bufReg{ringAddr: uint64(uintptr(unsafe.Pointer(&rm[0]))), ringEntries: count, bgid: bufGroup})"
+        to: registerBufRing
+  - of: registerBufRing
+    participants:
+      - id: caller
+        kind: actor
+      - id: registerBufRing
+        kind: self
+      - id: uringRegister
+        kind: internal
+    steps:
+      - bind: errno
+        eval: uringRegister(fd, regPbufRing, unsafe.Pointer(reg), 1)
+        to: uringRegister
+      - opt:
+          do:
+            - return: errno
+          when: errno != syscall.EINVAL
+      - bind: quirk
+        eval: "*reg"
+      - set: quirk.resv[2]
+        value: "1"
+      - return: uringRegister(fd, regPbufRing, unsafe.Pointer(&quirk), 1)
+        to: uringRegister
+  - of: (*uring).bufEntries
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uring).bufEntries
+        kind: self
+      - id: unsafe
+        kind: stdlib
+    steps:
+      - return: unsafe.Slice((*uringBuf)(unsafe.Pointer(&u.bufRing[0])), u.bufCount)
+        to: unsafe
+  - of: (*uring).buf
+    steps:
+      - bind: o
+        eval: int(bid) * int(u.bufSize)
+      - return: "u.bufMem[o : o+int(u.bufSize) : o+int(u.bufSize)]"
+  - of: (*uring).addBuf
+    steps:
+      - bind: i
+        eval: uint32(u.bufTail) & (u.bufCount - 1)
+      - bind: e
+        eval: "&u.bufEntries()[i]"
+      - set: e.addr
+        value: uint64(uintptr(unsafe.Pointer(&u.bufMem[int(bid)*int(u.bufSize)])))
+      - set: e.len
+        value: u.bufSize
+      - alt:
+          - do:
+              - set: u.shadowBid
+                value: bid
+            when: i == 0
+          - do:
+              - set: e.bid
+                value: bid
+            else: true
+      - op: ++
+        set: u.bufTail
+  - of: (*uring).publishBufs
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uring).publishBufs
+        kind: self
+      - id: atomic
+        kind: stdlib
+    steps:
+      - bind: w
+        eval: (*uint32)(unsafe.Pointer(&u.bufRing[12]))
+      - eval: atomic.StoreUint32(w, uint32(u.shadowBid)|uint32(u.bufTail)<<16)
+        to: atomic
+  - of: (*uring).registerSparse
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uring).registerSparse
+        kind: self
+      - id: uringRegister
+        kind: internal
+    steps:
+      - bind: r
+        eval: "rsrcRegister{nr: n, flags: rsrcRegisterSparse}"
+      - return: uringRegister(u.fd, regFiles2, unsafe.Pointer(&r), uint32(unsafe.Sizeof(r)))
+        to: uringRegister
+  - of: (*uring).supports
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uring).supports
+        kind: self
+      - id: uringRegister
+        kind: internal
+    steps:
+      - var:
+          name: p
+          type: probeBuf
+      - opt:
+          do:
+            - return: false, errno
+          init:
+            bind: errno
+            eval: uringRegister(u.fd, regProbe, unsafe.Pointer(&p), probeOps)
+            to: uringRegister
+          when: errno != 0
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: false, 0
+                when: op > p.hdr.lastOp || p.ops[op].flags&probeOpSupported == 0
+          key: _
+          range: ops
+          value: op
+      - return: true, 0
+  - of: prepAccept
+    steps:
+      - set: s.opcode
+        value: opAccept
+      - set: s.fd
+        value: int32(lfd)
+      - opt:
+          do:
+            - set: s.ioprio
+              value: acceptMultishot
+          when: multishot
+      - set: s.fileIdx
+        value: fileIndexAlloc
+      - set: s.userData
+        value: ud
+  - of: prepRecv
+    participants:
+      - id: caller
+        kind: actor
+      - id: prepRecv
+        kind: self
+      - id: fixedFd
+        kind: internal
+    steps:
+      - set: s.opcode
+        value: opRecv
+      - set: s.fd
+        to: fixedFd
+        value: fixedFd(index)
+      - set: s.flags
+        value: sqeFixedFile | sqeBufferSelect
+      - set: s.ioprio
+        value: recvMultishot
+      - set: s.bufIndex
+        value: bufGroup
+      - set: s.userData
+        value: ud
+  - of: prepSend
+    participants:
+      - id: caller
+        kind: actor
+      - id: prepSend
+        kind: self
+      - id: fixedFd
+        kind: internal
+    steps:
+      - set: s.opcode
+        value: opSend
+      - set: s.fd
+        to: fixedFd
+        value: fixedFd(index)
+      - set: s.flags
+        value: sqeFixedFile
+      - set: s.addr
+        value: uint64(uintptr(unsafe.Pointer(&p[0])))
+      - set: s.len
+        value: uint32(len(p))
+      - set: s.opFlags
+        value: uint32(syscall.MSG_NOSIGNAL)
+      - set: s.userData
+        value: ud
+  - of: prepCancelFixed
+    participants:
+      - id: caller
+        kind: actor
+      - id: prepCancelFixed
+        kind: self
+      - id: fixedFd
+        kind: internal
+    steps:
+      - set: s.opcode
+        value: opAsyncCancel
+      - set: s.fd
+        to: fixedFd
+        value: fixedFd(index)
+      - set: s.opFlags
+        value: cancelFD | cancelFDFixed | cancelAll
+      - set: s.userData
+        value: ud
+  - of: onProcessFD
+    steps:
+      - op: "&^="
+        set: s.flags
+        value: sqeFixedFile
+      - switch:
+          cases:
+            - case: opAccept
+              do:
+                - set: s.fileIdx
+                  value: "0"
+                - set: s.opFlags
+                  value: syscall.SOCK_CLOEXEC
+            - case: opAsyncCancel
+              do:
+                - op: "&^="
+                  set: s.opFlags
+                  value: cancelFDFixed
+          "on": s.opcode
+  - of: prepCloseDirect
+    participants:
+      - id: caller
+        kind: actor
+      - id: prepCloseDirect
+        kind: self
+      - id: targetIndex
+        kind: internal
+    steps:
+      - set: s.opcode
+        value: opClose
+      - set: s.fileIdx
+        to: targetIndex
+        value: targetIndex(index)
+      - set: s.userData
+        value: ud
+  - of: prepCancelUserData
+    steps:
+      - set: s.opcode
+        value: opAsyncCancel
+      - set: s.addr
+        value: target
+      - set: s.opFlags
+        value: cancelAll
+      - set: s.userData
+        value: ud
+  - of: prepPollMulti
+    steps:
+      - set: s.opcode
+        value: opPollAdd
+      - set: s.fd
+        value: int32(fd)
+      - set: s.opFlags
+        value: uint32(syscall.EPOLLIN)
+      - set: s.len
+        value: pollAddMulti
+      - set: s.userData
+        value: ud
+  - of: newWheel
+    steps:
+      - bind: w
+        eval: |-
+          &wheel{
+          		buckets: make([]int32, wheelSlots),
+          		next:    make([]int32, n),
+          		prev:    make([]int32, n),
+          		at:      make([]int64, n),
+          		now:     now,
+          	}
+      - loop:
+          do:
+            - set: w.buckets[i]
+              value: noLink
+          key: i
+          range: w.buckets
+      - return: w
+  - of: (*wheel).arm
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*wheel).arm
+        kind: self
+      - id: w.disarm
+        kind: internal
+    steps:
+      - eval: w.disarm(slot)
+        to: w.disarm
+      - set: tick
+        value: max(tick, w.now+1)
+      - set: w.at[slot]
+        value: tick
+      - bind: b
+        eval: tick & (wheelSlots - 1)
+      - set: w.prev[slot]
+        value: noLink
+      - set: w.next[slot]
+        value: w.buckets[b]
+      - opt:
+          do:
+            - set: w.prev[h]
+              value: slot
+          init:
+            bind: h
+            eval: w.buckets[b]
+          when: h != noLink
+      - set: w.buckets[b]
+        value: slot
+  - of: (*wheel).disarm
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*wheel).disarm
+        kind: self
+      - id: w.armed
+        kind: internal
+    steps:
+      - bind: at
+        eval: w.armed(slot)
+        to: w.armed
+      - opt:
+          do:
+            - return: ""
+          when: at == 0
+      - bind: b
+        eval: at & (wheelSlots - 1)
+      - alt:
+          - do:
+              - set: w.next[p]
+                value: w.next[slot]
+            init:
+              bind: p
+              eval: w.prev[slot]
+            when: p != noLink
+          - do:
+              - set: w.buckets[b]
+                value: w.next[slot]
+            else: true
+      - opt:
+          do:
+            - set: w.prev[n]
+              value: w.prev[slot]
+          init:
+            bind: "n"
+            eval: w.next[slot]
+          when: n != noLink
+      - set: w.at[slot]
+        value: "0"
+  - of: (*wheel).grow
+    steps:
+      - loop:
+          cond: len(w.at) < n
+          do:
+            - set: w.next
+              value: append(w.next, noLink)
+            - set: w.prev
+              value: append(w.prev, noLink)
+            - set: w.at
+              value: append(w.at, 0)
+  - of: (*wheel).armed
+    steps:
+      - return: w.at[slot]
+  - of: (*wheel).advance
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*wheel).advance
+        kind: self
+      - id: w.disarm
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: now <= w.now
+      - bind: from
+        eval: w.now + 1
+      - opt:
+          do:
+            - set: from
+              value: now - wheelSlots + 1
+          when: now-from >= wheelSlots
+      - set: w.now
+        value: now
+      - set: w.due
+        value: w.due[:0]
+      - loop:
+          cond: t <= now
+          do:
+            - bind: b
+              eval: t & (wheelSlots - 1)
+            - bind: s
+              eval: w.buckets[b]
+            - loop:
+                cond: s != noLink
+                do:
+                  - bind: nxt
+                    eval: w.next[s]
+                  - opt:
+                      do:
+                        - eval: w.disarm(s)
+                          to: w.disarm
+                        - set: w.due
+                          value: append(w.due, s)
+                      when: w.at[s] <= now
+                  - set: s
+                    value: nxt
+          init: t := from
+          post: t++
+      - loop:
+          do:
+            - eval: fire(s)
+          key: _
+          range: w.due
+          value: s
