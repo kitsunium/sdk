@@ -15,11 +15,12 @@ Public façade: `pkg/v1/net/server`.
 |---|---|
 | `server.go` | `Server`, `New`, `Group`, `State` |
 | `lifecycle.go` | `Start`, `Serve`, `Shutdown`, `Close`, the accept loop and its backoff (`acceptDelay`, `backOff`), the drain |
+| `loop_option_external_test.go` | `TestLoop` — the `Loop` option refused before or after the handler, on both natures, and what wins over it |
 | `stream_group.go` | `StreamGroup` — `Handle`, `HandleFunc`, `HandleHTTP`, `Use`; `claimHandler`, the one-handler rule every declaration takes |
 | `listen.go` | listener construction; TLS/mTLS wrapping; family validation |
 | `conn.go` | the pooled `corenet.Conn` implementation, and the `hijacked` hand-over flag |
 | `pool.go` | per-connection recycling + the live-socket registry |
-| `options.go` | `Option` / `GroupOption` — including the two HTTP-only group options, `ReadHeaderTimeout` and `MaxHeaderBytes` |
+| `options.go` | `Option` / `GroupOption` — including the two HTTP-only group options, `ReadHeaderTimeout` and `MaxHeaderBytes`, and `Loop`, refused by every group until a loop handler can serve one |
 | `packet_group.go` | `PacketGroup` — the datagram mirror of `StreamGroup` |
 | `packet.go` | the pooled `corenet.Packet` implementation |
 | `packet_listen.go` | datagram socket construction; family validation; ceilings |
@@ -75,6 +76,13 @@ Public façade: `pkg/v1/net/server`.
   the new handler, so the group served neither cleanly; `HandleHTTP` now claims
   before it builds its adapter. `HandleHTTP`'s body is `mountHTTP`'s so the
   method stays inlinable. A `PacketGroup` keeps its replacing `Handle`.
+- **`Loop(v)` is refused by every group until `HandleLoop` exists** (ADR 0186
+  §D1 and §D9 step 8). The option records its value and that it was given — a
+  zero `LoopValue` included — and `Start` judges it once the handler is known,
+  in `groupDeclErr`, before anything is bound: `LoopOptionUnsupported` with
+  `option=Loop`. A missing handler (`HandlerMissing`) and a second one
+  (`HandlerAlreadySet`) win, because they explain the refusal. A datagram group
+  records the refusal at declaration, since its shim would otherwise drop it.
 - **TLS is applied at the listener, not in the accept loop.** `tls.NewListener`
   defers the handshake to the connection's own goroutine, so a slow or hostile
   peer stalls only itself. Doing the handshake inline in `Accept` would let one

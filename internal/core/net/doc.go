@@ -32,6 +32,11 @@
 // posted operation, the option kinds a loop group judges, and the ports a loop
 // and its handler implement (ADR 0186 §D4).
 //
+// Package net — a loop group's reported state: the backend it runs on, how it
+// got there, and its rings' counters.
+//
+// Package net — the loop engine's configuration value and its backends.
+//
 // Package net — TLS material parsing helpers shared by NewIdentity.
 //
 // Package net — the generic handler decorator.

@@ -71,6 +71,43 @@ func Test_StateValue_Degraded(t *testing.T) {
 	}
 }
 
+// Test_StateValue_Degraded_loops pins that a loop group's fallback degrades
+// the server's answer as a listener's does (ADR 0186 §D5): auto falling back
+// from io_uring to epoll is reported, never silent.
+func Test_StateValue_Degraded_loops(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name  string
+		loops []corenet.LoopStateValue
+		want  bool
+	}
+	tests := []tc{
+		{"no loop group", nil, false},
+		{"a loop group on what it asked for", []corenet.LoopStateValue{{Group: "api", Backend: corenet.LoopBackendIOURing}}, false},
+		{
+			"a fallback among healthy groups",
+			[]corenet.LoopStateValue{
+				{Group: "api", Backend: corenet.LoopBackendIOURing},
+				{Group: "rpc", Backend: corenet.LoopBackendEpoll, Degraded: true, DegradedReason: "io_uring probe: setup EPERM"},
+			},
+			true,
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		state := corenet.StateValue{Listeners: []corenet.ListenerStateValue{{Group: "api"}}, Loops: c.loops}
+		if got := state.Degraded(); got != c.want {
+			t.Errorf("Degraded() = %v, want %v", got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
 // TestPhaseNamesEveryValue pins the phase/name mapping in BOTH directions:
 // every phase renders a token, and every token comes back from exactly one
 // phase. The reverse pass is what catches a copy-pasted case arm returning a
