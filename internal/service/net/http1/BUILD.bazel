@@ -1,0 +1,50 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "http1",
+    srcs = [
+        "doc.go",
+        "parse.go",
+        "refusal.go",
+        "write.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/net/http1",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/net",
+        "//internal/kernel/errs",
+        "//internal/kernel/swar",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":http1",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "http1_test",
+    srcs = [
+        "corpus_external_test.go",
+        "fuzz_external_test.go",
+        "gen_api_test.go",
+        "gen_perf_test.go",
+        "http1_bench_test.go",
+        "perf_fixtures_test.go",
+        "write_external_test.go",
+    ],
+    deps = [
+        ":http1",
+        "//internal/core/net",
+        "//internal/kernel/errs",
+    ],
+)

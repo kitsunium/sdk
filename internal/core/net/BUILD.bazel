@@ -15,6 +15,7 @@ go_library(
         "gen_codes.go",
         "gen_ports.go",
         "handler_compliance.go",
+        "http1.go",
         "identity.go",
         "identity_file_params.go",
         "identity_params.go",

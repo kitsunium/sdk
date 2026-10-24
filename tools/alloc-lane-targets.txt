@@ -176,5 +176,6 @@
 //internal/kernel/errs:errs_test
 //internal/kernel/semver:semver_test
 //internal/kernel/swar:swar_test
+//internal/service/net/http1:http1_test
 //pkg/v1/observe/logger:logger_test
 # END kit gen

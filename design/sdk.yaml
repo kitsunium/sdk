@@ -562,6 +562,25 @@ budgets:
     escapes: []
     allocs: 0
     fixture: SetIndex
+  # http1: the restricted HTTP/1.1 profile's codec (ADR 0186 §D6). Framing a
+  # request slices the caller's bytes into a reused HTTP1RequestValue, whose
+  # fields are an array, and the writer appends precomputed lines and an
+  # integer formatted in place: none of them allocates once dst has room.
+  - fn: go:github.com/kitsunium/sdk/internal/service/net/http1.Parser.Parse
+    allocs: 0
+    fixture: Parse
+  - fn: go:github.com/kitsunium/sdk/internal/service/net/http1.AppendResponse
+    allocs: 0
+    fixture: AppendResponse
+  - fn: go:github.com/kitsunium/sdk/internal/service/net/http1.AppendStatusLine
+    allocs: 0
+    fixture: AppendStatusLine
+  - fn: go:github.com/kitsunium/sdk/internal/service/net/http1.AppendField
+    allocs: 0
+    fixture: AppendField
+  - fn: go:github.com/kitsunium/sdk/internal/service/net/http1.AppendRefusal
+    allocs: 0
+    fixture: AppendRefusal
   # A recycler's warm round trip (ADR 0010) and a snapshot's three verbs
   # (ADR 0011) allocate nothing.
   - fn: go:github.com/kitsunium/sdk/internal/kernel/concur/recycler.(*Pool[...]).Get

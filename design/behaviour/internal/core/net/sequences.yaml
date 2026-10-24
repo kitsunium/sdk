@@ -111,6 +111,16 @@ sequences:
       - set: "*d"
         value: DurationValue(parsed)
       - return: nil
+  - of: foldByte
+    steps:
+      - opt:
+          do:
+            - return: c + 'a' - 'A'
+          when: c >= 'A' && c <= 'Z'
+      - return: c
+  - of: HTTP1HandlerFunc.ServeHTTP1
+    steps:
+      - eval: f(req, res)
   - of: IdentityValue.String
     steps:
       - return: "\"<redacted>\""
