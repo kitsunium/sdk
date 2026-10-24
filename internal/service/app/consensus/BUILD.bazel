@@ -88,6 +88,7 @@ alias(
 go_test(
     name = "consensus_test",
     srcs = [
+        "acceptbound_internal_test.go",
         "adoptedfrom_internal_test.go",
         "allpeersgone_internal_test.go",
         "cancel_internal_test.go",
@@ -115,6 +116,7 @@ go_test(
         "joinlimit_internal_test.go",
         "joinsmalllimit_internal_test.go",
         "learnerownlimit_internal_test.go",
+        "logtight_internal_test.go",
         "lostframe_internal_test.go",
         "metabitflip_internal_test.go",
         "metav2_internal_test.go",

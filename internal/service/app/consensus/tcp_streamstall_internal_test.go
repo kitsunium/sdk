@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -136,5 +137,81 @@ func TestTCPStreamWhoseReceiverNeverAnswersEndsWithItsContext(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("a cancelled stream still waited for the verdict 2 s later")
+	}
+}
+
+// Stream read the receiver's accept of its offer with no deadline: a
+// receiver that read the offer and never answered it — its loop standing
+// still in its judgment — held the sender past every WriteTimeout and the
+// TCP user timeout, which bound unacknowledged writes only, and only the
+// stream's context ended it (#623). The accept is read under JoinTimeout,
+// as a JOIN's answer is.
+func TestTCPStreamWhoseOfferIsNeverAnsweredEndsAtItsBound(t *testing.T) {
+	ca := newTestCA(t)
+	cid := coreconsensus.ClusterID{0xc0, 0xff, 0xef}
+	a, b := &tcpNode{id: 1, slot: "a"}, &tcpNode{id: 2, slot: "b"}
+	const bound = 300 * time.Millisecond
+	var members []coreconsensus.MemberValue
+	for _, tn := range []*tcpNode{a, b} {
+		tn.cert, tn.spki = ca.issue(t, SAN(cid, tn.slot), nil)
+		tr, err := NewTCPTransport(&TransportConfig{Certificate: tn.cert, Roots: ca.pool, ListenAddress: "127.0.0.1:0", WriteTimeout: 100 * time.Millisecond, JoinTimeout: bound})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tn.tr, tn.addr = tr, tr.Addr()
+		defer tn.tr.Close()
+		members = append(members, coreconsensus.MemberValue{ID: tn.id, Slot: tn.slot, SPKI: tn.spki, Address: tn.addr, Voter: true})
+	}
+	asked := make(chan struct{})
+	never := make(chan struct{})
+	defer close(never)
+	accept := func(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue) coreconsensus.InstallAcceptValue {
+		close(asked)
+		<-never // the receiver's loop never judges the offer
+		return coreconsensus.InstallAcceptValue{}
+	}
+	install := func(p coreconsensus.InstallParams) error {
+		_, err := io.Copy(io.Discard, p.Body)
+		return err
+	}
+	if err := b.tr.Bind(1, func(coreconsensus.AuthenticatedPeerValue, []byte) {}, accept, install, nil); err != nil {
+		t.Fatal(err)
+	}
+	a.tr.SetMembership(1, members)
+	b.tr.SetMembership(1, members)
+	const size = 64 << 10
+	offer := coreconsensus.InstallOfferValue{Term: 1, SnapshotID: "s", Meta: coreconsensus.SnapshotMetaValue{ID: "s", Version: 1, EncodedSize: size}}
+	opened := atomic.Bool{}
+	open := func(off int64) (io.ReadCloser, error) {
+		opened.Store(true)
+		return io.NopCloser(bytes.NewReader(make([]byte, size-off))), nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	start := time.Now()
+	go func() { done <- a.tr.Stream(ctx, b.id, offer, open) }()
+	select {
+	case <-asked:
+	case err := <-done:
+		t.Fatalf("the stream ended before its offer was read: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the receiver never read the offer")
+	}
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("a stream whose offer was never answered reported an install")
+		}
+		if opened.Load() {
+			t.Error("a stream whose offer was never answered read the snapshot")
+		}
+		if d := time.Since(start); d > bound+2*time.Second {
+			t.Errorf("the stream took %v to end, want about its %v bound", d, bound)
+		}
+	case <-time.After(3 * time.Second):
+		t.Errorf("a stream whose offer is never answered still waits %v later, its bound %v; only its context ends it", time.Since(start), bound)
+		cancel()
+		<-done
 	}
 }

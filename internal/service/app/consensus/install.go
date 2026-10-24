@@ -120,13 +120,14 @@ func (n *Node) answerFromHeld(o *coreconsensus.InstallOfferValue, acc *coreconse
 	return false
 }
 
-// answerRestoring refuses OVERLOADED an offer of a snapshot this node
-// committed and is restoring, and reports whether it did. A leader whose
-// pin on a slow receiver fell due offers the same snapshot again:
-// accepted, a spool was opened over the published id, the whole snapshot
-// was streamed a second time, committed over the file the restore in
-// progress reads — a rename Windows refuses — and restored once more
-// (#610). Refused, the leader probes again, and finds the receiver at the
+// answerRestoring refuses OVERLOADED an offer of a snapshot this node is
+// installing — committing, then restoring — and reports whether it did. A
+// leader whose pin on a slow receiver fell due offers the same snapshot
+// again: accepted, a spool was opened over the published id, the whole
+// snapshot was streamed a second time, committed over the file the restore
+// in progress reads — a rename Windows refuses — and restored once more
+// (#610); during the Commit, the offer's Create waited for it on the loop
+// (#623). Refused, the leader probes again, and finds the receiver at the
 // snapshot once restored.
 func (n *Node) answerRestoring(o *coreconsensus.InstallOfferValue, acc *coreconsensus.InstallAcceptValue) bool {
 	n.snapState.mu.Lock()
@@ -139,8 +140,8 @@ func (n *Node) answerRestoring(o *coreconsensus.InstallOfferValue, acc *corecons
 	return true
 }
 
-// markRestoring counts one more, or one less, install of id waiting for
-// or under its restore.
+// markRestoring counts one more, or one less, install of id between its
+// last freshness check and the end of its restore.
 func (n *Node) markRestoring(id string, d int) {
 	n.snapState.mu.Lock()
 	defer n.snapState.mu.Unlock()
@@ -236,6 +237,16 @@ func (n *Node) install(req coreconsensus.InstallParams) error {
 		releaseSink(sink)
 		return snapshotCorrupt("stream ended early")
 	}
+	// The install counts as restoring from here, before its Commit: an
+	// offer of the same id is refused OVERLOADED (answerRestoring). Marked
+	// once Commit had returned, an offer judged during the Commit's fsync
+	// waited on the loop, in Create, for that Commit to let the sink go:
+	// the loop stood still, the offer was never answered, and the leader's
+	// pin on it held its compaction (#623). The mark precedes stillFresh's
+	// turn on the loop: an offer the loop judges after that turn sees it,
+	// and one it judged before was answered before this Commit began.
+	n.markRestoring(snapID, 1)
+	defer n.markRestoring(snapID, -1)
 	if err := n.stillFresh(&req, sink); err != nil {
 		return err
 	}
@@ -253,8 +264,6 @@ func (n *Node) install(req coreconsensus.InstallParams) error {
 		go n.HardClose()
 		return n.stoppedErr()
 	}
-	n.markRestoring(snapID, 1)
-	defer n.markRestoring(snapID, -1)
 	done := make(chan error, 1)
 	n.aq.push(applyItem{restore: &restoreReq{meta: meta, done: done}})
 	select {

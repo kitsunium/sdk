@@ -433,7 +433,7 @@ func (n *Node) afterCut() {
 		for to, pin := range n.sending {
 			at, held := n.pinAt(to, pin, now)
 			if !held {
-				n.dropPin(to)
+				n.releasePin(to, pin, now)
 				continue
 			}
 			if at <= n.cfg.SnapshotTrailing {
@@ -791,8 +791,9 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 		n.r.SnapshotDone(to, 0, false)
 		return
 	}
-	sent := new(atomic.Int64)
-	n.sending[to] = sendPin{index: meta.Position.Index, sent: sent}
+	sent, moved := new(atomic.Int64), new(atomic.Int64)
+	moved.Store(n.clk.Now().UnixNano())
+	n.sending[to] = sendPin{index: meta.Position.Index, sent: sent, moved: moved}
 	offer := coreconsensus.InstallOfferValue{Term: n.r.Status().Term, SnapshotID: meta.ID, Meta: meta}
 	ctx, cancel := context.WithCancel(context.Background())
 	n.sendStop[to] = cancel
@@ -812,7 +813,9 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 			if off < 0 || off > meta.EncodedSize {
 				return nil, origin(coreconsensus.FrameInvalid, errs.Int64("offset", off))
 			}
-			return io.NopCloser(&sentReader{r: io.NewSectionReader(h, off, meta.EncodedSize-off), n: n, sent: sent}), nil
+			// The offer was accepted: the stream moved.
+			moved.Store(n.clk.Now().UnixNano())
+			return io.NopCloser(&sentReader{r: io.NewSectionReader(h, off, meta.EncodedSize-off), n: n, sent: sent, moved: moved}), nil
 		})
 		cancel()
 		if cerr := h.Close(); cerr != nil {
