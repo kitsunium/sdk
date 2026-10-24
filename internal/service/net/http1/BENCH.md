@@ -11,7 +11,7 @@ shapes: a GET carrying a bearer token and a POST carrying a JSON body.
 ## Reproducibility envelope
 
 > **Numbers vary across machines, and these were taken on a busy one** (load
-> average 14 to 22 on 10 cores, fuzzing and other agents running). Every
+> average 27 to 50 on 10 cores, fuzzing and other agents running). Every
 > figure is benchstat's median over six runs; the ± is its spread. The ratios
 > between rows measured in the same process, and the C harness interleaved
 > run by run with the Go benchmark, are the trustworthy part. No x86-64 figure
@@ -25,7 +25,7 @@ shapes: a GET carrying a bearer token and a POST carrying a JSON body.
 | Go toolchain       | go1.27.3 darwin/arm64, no GOEXPERIMENT (the SWAR forms) |
 | C toolchain        | Apple clang, `-std=c23 -O2` |
 | Git branch         | `feat/net-http1-codec` |
-| Git commit         | base `6f89b0852` (uncommitted when measured) |
+| Git commit         | base `88ad7f3ea` (uncommitted when measured) |
 | Generated (UTC)    | 2026-10-24 |
 | Bench wall-clock   | `-benchtime=300ms -count=6` |
 
@@ -33,16 +33,16 @@ shapes: a GET carrying a bearer token and a POST carrying a JSON body.
 
 | Benchmark | ns/op | B/op | allocs/op |
 |---|---|---|---|
-| `Parse/get` (266 B) | **175.2** ± 20% | 0 | 0 |
-| `Parse/post` (240 B, 44 B body) | **174.5** ± 17% | 0 | 0 |
-| `Parse/refused` (Transfer-Encoding) | 75.0 ± 48% | 0 | 0 |
-| `Parse/pipelined16` (16 GETs, one buffer) | 2 511 ± 26% (157 a request) | 0 | 0 |
-| `NetHTTPReadRequest/get` | 1 542 ± 20% | 1 188 | 11 |
-| `NetHTTPReadRequest/post` | 1 473 ± 37% | 1 204 | 14 |
-| `AppendResponse` (JSON, one extra field) | 15.9 ± 28% | 0 | 0 |
-| `AppendRefusal` | 6.0 ± 15% | 0 | 0 |
+| `Parse/get` (266 B) | **164.8** ± 8% | 0 | 0 |
+| `Parse/post` (240 B, 44 B body) | **206.0** ± 16% | 0 | 0 |
+| `Parse/refused` (Transfer-Encoding) | 81.1 ± 14% | 0 | 0 |
+| `Parse/pipelined16` (16 GETs, one buffer) | 2 647 ± 8% (165 a request) | 0 | 0 |
+| `NetHTTPReadRequest/get` | 1 441 ± 39% | 1 188 | 11 |
+| `NetHTTPReadRequest/post` | 1 664 ± 59% | 1 204 | 14 |
+| `AppendResponse` (JSON, one extra field) | 21.5 ± 210% (15.2 to 15.9 on a quieter run) | 0 | 0 |
+| `AppendRefusal` | 4.8 ± 31% | 0 | 0 |
 
-`Parse` frames a request in about a ninth of what `net/http` takes to read
+`Parse` frames a request in about an eighth of what `net/http` takes to read
 it, and allocates nothing where `net/http` allocates 11 to 14 times.
 
 ## Against the C reference
@@ -55,11 +55,14 @@ it is not committed: `bench/cref` is a diagnostic, never a gate).
 
 | Parser | ns/request, median of six | spread |
 |---|---|---|
-| C reference (`http_parse.c`) | **115.0** | 112.4 – 121.2 |
-| Go (`Parser.Parse`) | **218.8** | ± 40% (205 – 301 in the interleaved runs) |
+| C reference (`http_parse.c`) | **118.4** | 114.6 – 127.0 |
+| Go (`Parser.Parse`) | **249.4** | 235.8 – 260.5 |
 
-**The Go codec is about 1.9× the C reference on this machine**, with no
-allocation on either side. The profile puts the time in the field-value word
+Eight runs, C and Go interleaved run by run. **The Go codec is about 2.1× the
+C reference on this machine**, with no allocation on either side. Before the
+functions were split to the linter's size and complexity bounds the same
+interleaving gave about 1.9× (219 against 115 ns): the split costs about 30 ns
+a request, in calls the compiler does not inline. The profile puts the time in the field-value word
 scan (`swar.Set.Index`, about a third), the tchar run of names (a sixth), and
 the per-field calls the Go compiler does not inline; the C reference keeps
 everything in one function. What was tried and kept: a `tchar` run unrolled by
