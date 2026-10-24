@@ -809,3 +809,123 @@ func TestASpoolResumesBeforeARegionOfZeros(t *testing.T) {
 		t.Fatalf("resume offset %d over a chunk then zeros, want %d", got, want)
 	}
 }
+
+// fillLog appends synced batches of about 512 KiB of entries of payload
+// bytes to l until its segments occupy size bytes, and returns the last
+// index.
+func fillLog(t *testing.T, l *fileLog, payload int, size int64) uint64 {
+	t.Helper()
+	data := make([]byte, payload)
+	per := max(1, (512<<10)/(payload+recHeader+recFixed))
+	var idx uint64
+	for l.logBytes() < size {
+		es := make([]coreconsensus.EntryValue, 0, per)
+		for range per {
+			idx++
+			es = append(es, coreconsensus.EntryValue{
+				Position: coreconsensus.PositionValue{Term: 1, Index: idx},
+				Kind:     coreconsensus.EntryCommand, BodySum: wire.BodySum(data), Data: data,
+			})
+		}
+		if err := l.Append(es, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := l.Sync(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return idx
+}
+
+// A reopen of the file log read every segment whole and kept them all, with
+// a record struct per record pointing into them, until recover returned:
+// the transient heap was one to three times the log on disk, and a node
+// whose log grew while its compaction stalled was OOM-killed at every
+// restart on a small host, Inspect and WipeAndRejoin with it (#630). The
+// open reads one segment at a time into the same buffer and keeps 40 bytes
+// per record past it, beside the index's 32 per entry: a 32 MiB log in
+// 4 MiB segments, of entries of 4 KiB, where the open costs about a
+// segment, and of 64 B, where the per-record cost dominates. What the
+// reopen allocates in all bounds its peak from above, whenever the
+// collector ran.
+func TestReopeningTheLogHoldsOneSegmentAtATime(t *testing.T) {
+	const segBytes, logSize = 4 << 20, 32 << 20
+	for _, payload := range []int{4096, 64} {
+		dir := t.TempDir()
+		d := openDir(t, dir, segBytes)
+		last := fillLog(t, d.d.log, payload, logSize)
+		onDisk := d.d.log.logBytes()
+		if err := d.Close(); err != nil {
+			t.Fatal(err)
+		}
+		// The closed log's index goes too: the heap starts without a log.
+		d = DataDir{}
+		var before, opened, after runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&before)
+		d = openDir(t, dir, segBytes)
+		runtime.ReadMemStats(&opened)
+		runtime.GC()
+		runtime.ReadMemStats(&after)
+		allocated := int64(opened.TotalAlloc - before.TotalAlloc)
+		retained := int64(after.HeapAlloc) - int64(before.HeapAlloc)
+		if f, la := d.Log().Bounds(); f != 1 || la != last {
+			t.Fatalf("bounds %d..%d after the reopen, want 1..%d", f, la, last)
+		}
+		if err := d.Close(); err != nil {
+			t.Fatal(err)
+		}
+		// Three segments and 160 bytes an entry, about twice what the open
+		// allocates. Reading every segment whole took the eight segments,
+		// and a record of 88 bytes an entry, grown by append, several
+		// times over: about three times this bound.
+		bound := 3*segBytes + 160*int64(last)
+		t.Logf("entries of %d B: %d of them, a log of %.1f MiB on disk; the reopen allocated %.1f MiB, bound %.1f MiB, and retained %.1f MiB",
+			payload, last, mib(onDisk), mib(allocated), mib(bound), mib(retained))
+		if allocated > bound {
+			t.Errorf("entries of %d B: reopening a log of %.1f MiB allocated %.1f MiB, over %.1f MiB: the open holds the log, not a segment at a time",
+				payload, mib(onDisk), mib(allocated), mib(bound))
+		}
+	}
+}
+
+// A sealed segment is read up to its seal (R9-02), not to its
+// preallocated size: the scan read every segment whole (#630). Segment 1,
+// of 4 MiB, sealed after three entries, as a crash after a rotation's seal
+// leaves it; the open that follows finishes the rotation on the records it
+// read (review H2).
+func TestASealedSegmentIsReadUpToItsSeal(t *testing.T) {
+	const segBytes = 4 << 20
+	dir := t.TempDir()
+	d := openDir(t, dir, segBytes)
+	l := d.d.log
+	if err := l.Append(ents(1, 3, 1), nil); err != nil {
+		t.Fatal(err)
+	}
+	mustSync(t, l)
+	seal := appendRecord(nil, &record{kind: recSeal, end: true, batch: l.batch, index: uint64(l.off)})
+	sealEnd := l.off + int64(len(seal))
+	tail(t, d, seal, 0)
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := (&fileLog{dir: dir}).scanSegment(1, &scanBufs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.sealed || s.size != segBytes {
+		t.Fatalf("segment 1: sealed %v, size %d, want sealed, of %d", s.sealed, s.size, segBytes)
+	}
+	if read := int64(len(s.data)); read >= sealEnd+scanChunk || read >= s.size {
+		t.Fatalf("a segment of %d sealed at %d read %d bytes, want at most a chunk past its seal", s.size, sealEnd, read)
+	}
+	d = openDir(t, dir, segBytes)
+	defer d.Close()
+	checkEntries(t, d.Log(), 1, 3, 1)
+	if n := len(d.d.log.segs); n != 2 {
+		t.Fatalf("%d segments after the open, want the next one published", n)
+	}
+}
+
+// mib is n bytes in MiB.
+func mib(n int64) float64 { return float64(n) / (1 << 20) }

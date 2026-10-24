@@ -645,7 +645,9 @@ and spelled out:
   checkpoint means an interrupted rotation", was only true before the rename,
   and the rename is now after the checkpoint's sync.
 - **A sealed segment is read up to its sealed length (R9-02).** Its
-  activation record names that length. Bytes beyond it are ignored.
+  activation record names that length. Bytes beyond it are ignored and
+  not read, and recovery holds one segment at a time (amendment of
+  2026-10-24, [#630](https://github.com/kitsunium/sdk/issues/630)).
 - **Continuity is judged only on the effective log (R8-01, R9-02)**, after
   the truncate records are applied, never on raw indexes.
 - **A zero header at the end of a segment that is not the last** is
@@ -2568,6 +2570,9 @@ transport. The cross-field rules are checked after defaults are applied
   `PeerQueueBytes` per peer and connection, and `InboundDataBytes`. With the
   defaults and two peers, that is under 1 GiB. `NewRaft` reports the total,
   so a product can check it against its own limit.
+- **Opening the log is outside that sum**: about one segment plus 72 bytes
+  per record, before any of these bounds holds anything (amendment of
+  2026-10-24, [#630](https://github.com/kitsunium/sdk/issues/630)).
 - **Snapshot slots are bounded and enforced, and the disk reservation is
   their actual maximum (R4-28, R5-01, R6-02).** At most FOUR snapshots exist
   at once: the two retained, one being written, and one being received.
@@ -4256,6 +4261,45 @@ cannot read back ([#640](https://github.com/kitsunium/sdk/issues/640)).
   write a new history from an older state.
 - It is a refusal, never a new format: no frame, payload or record changes,
   and nothing is written at another version.
+
+## Amendment — the log is reopened one segment at a time (2026-10-24, #630)
+
+Recovery read every segment whole and kept them all until it returned,
+with a record of 88 bytes per record pointing into them: a sealed segment
+cost its preallocated size, 64 MiB by default. The transient heap was one
+to three times the log on disk. The log is large exactly when compaction
+stalled, and that is when its nodes are restarted to repair it: a host
+short of RAM was OOM-killed at every start, and `Inspect` and WipeAndRejoin,
+which open the log the same way, with it
+([#630](https://github.com/kitsunium/sdk/issues/630)).
+
+- **One segment's bytes at a time.** Each segment is read into the same
+  buffer and judged before the next one is read. A sealed segment is read
+  at most 1 MiB past its seal; the rest of a file is read only for a hole,
+  which is classified on the whole file, as before.
+- **What the later steps read is kept, and nothing else:** per record,
+  its kind, batch, end flag, term, index, offset and length (40 bytes),
+  and a copy of each checkpoint and hard-state payload. Only the last
+  segment's bytes stay, for its tail. The log's index is sized once, for
+  the entry records read.
+- **The procedure is unchanged.** Every segment is scanned and every hole
+  classified before anything changes (R8-02, R9-03), in the same order and
+  with the same verdicts: a fuzz target holds the scan in pieces to a parse
+  of the whole file.
+- **The open's cost, stated.** About one segment (`SegmentBytes`, more for
+  a segment grown to hold one batch) plus 40 bytes per record, transient,
+  beside the index of 32 bytes per entry that stays while the node runs:
+  with 64-byte entries, about 0.6 times the log on disk; with 4 KiB
+  entries, under 2 % of it. A 32 MiB log in 4 MiB segments allocated
+  35 MiB to reopen with 4 KiB entries and 156 MiB with 64-byte ones; it
+  now allocates 5 MiB and 26 MiB. The transient part comes before any
+  bound of D14 holds anything, so a node needs the larger of it and the
+  budget, not their sum, plus the index. `MemoryBudget` sums configuration
+  bounds, and neither `SegmentBytes` nor the number of entries is one of
+  them, so it counts neither: a product that sizes a small host adds them,
+  with `MaxLogBytes` divided by its record size for the per-record parts.
+
+Nothing published changes: no frame, no payload, no record format.
 
 ## Revision history
 

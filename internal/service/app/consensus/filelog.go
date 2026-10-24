@@ -1,6 +1,7 @@
 package consensus
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -56,6 +57,11 @@ const (
 
 	// sealReserve keeps room for the seal record at a segment's end.
 	sealReserve int64 = 64
+
+	// scanChunk is how far ahead of its parse recovery reads a segment: a
+	// sealed one is read up to its seal and at most this much past it, not
+	// to its preallocated size (#630).
+	scanChunk int64 = 1 << 20
 
 	// DefaultSegmentBytes is a segment's fixed size (provisional).
 	DefaultSegmentBytes int64 = 64 << 20
@@ -357,13 +363,55 @@ func (l *fileLog) prepareOpen() error {
 }
 
 // scanned is one segment as recovery read it, before anything is changed.
+// It keeps what the later steps read and nothing more: a scanRec per
+// record, the payloads replay decodes, copied out, and the bytes read only
+// for the last segment, whose tail is still to be classified. Holding every
+// segment's bytes whole, with a record pointing into them per record, took
+// one to three times the log in heap until recover returned, and a node
+// whose log grew while its compaction stalled was OOM-killed at every
+// restart on a small host, Inspect and WipeAndRejoin with it (#630).
 type scanned struct {
-	n       uint64
-	data    []byte
-	recs    []record
+	n    uint64
+	size int64 // the segment file's size: what it occupies on disk
+	// data is the bytes read of the last segment, nil for the others: the
+	// whole file, unless it is sealed and was read up to its seal only.
+	data []byte
+	recs []scanRec
+	// pay holds, by record position, the payloads of the checkpoint and
+	// hard-state records, the only ones recovery reads past the scan.
+	pay     map[int][]byte
 	hole    int64 // -1 when none
 	sealed  bool
 	trimmed int64 // truncation point decided for the last segment, -1 none
+}
+
+// keep copies out the payload of record i, a checkpoint or a hard state:
+// replay decodes it once the buffer it was read into holds the next
+// segment.
+func (s *scanned) keep(i int, payload []byte) {
+	if s.pay == nil {
+		s.pay = map[int][]byte{}
+	}
+	s.pay[i] = bytes.Clone(payload)
+}
+
+// scanRec is what recovery keeps of a record past the scan: its kind,
+// batch, end flag, term, index, offset and length on disk, without the
+// payload's slice and the entry fields a record carries, under half its
+// size.
+type scanRec struct {
+	off    int64
+	batch  uint64
+	term   uint64
+	index  uint64
+	length uint32
+	kind   uint8
+	end    bool
+}
+
+// scanRecOf is the scanRec of r, parsed at offset off.
+func scanRecOf(r *record, off int64) scanRec {
+	return scanRec{off: off, batch: r.batch, term: r.term, index: r.index, length: uint32(r.length), kind: r.kind, end: r.end}
 }
 
 // recover runs the written recovery procedure (D4, R8-02, R9-01, R9-03):
@@ -444,13 +492,19 @@ func (l *fileLog) segmentNumbers() ([]uint64, error) {
 
 // scanSegments reads and parses every segment in order. A segment is judged
 // as soon as it is read, so the first damage found is the one quarantined,
-// and nothing after it is read.
+// and nothing after it is read. The segments are read one at a time into
+// the same buffers, and only the last one's bytes are kept (#630).
 func (l *fileLog) scanSegments(nums []uint64) ([]*scanned, error) {
 	segs := make([]*scanned, len(nums))
+	var sb scanBufs
 	for i, n := range nums {
-		s, err := l.scanSegment(n)
+		s, err := l.scanSegment(n, &sb)
 		if err != nil {
 			return nil, err
+		}
+		if i < len(nums)-1 {
+			// The next segment is read into the same buffer.
+			s.data = nil
 		}
 		segs[i] = s
 		if len(s.recs) == 0 || s.recs[0].kind != recCheckpt {
@@ -467,41 +521,144 @@ func (l *fileLog) scanSegments(nums []uint64) ([]*scanned, error) {
 
 // scanSegment reads segment n and parses its records up to the first hole,
 // or through its seal: a sealed segment is read up to its sealed length
-// (R9-02).
-func (l *fileLog) scanSegment(n uint64) (*scanned, error) {
-	b, err := os.ReadFile(filepath.Join(l.logDir(), segName(n)))
+// (R9-02), and the rest of a segment is read only for a hole, which is
+// classified on the whole file. The bytes go to sb's buffer, which the next
+// segment reuses: what the scanned segment keeps past the scan is copied
+// out of it, its data aside.
+func (l *fileLog) scanSegment(n uint64, sb *scanBufs) (*scanned, error) {
+	f, err := os.Open(filepath.Join(l.logDir(), segName(n)))
 	if err != nil {
 		return nil, storageFailed("read segment", err)
 	}
-	s := &scanned{n: n, data: b, hole: -1, trimmed: -1}
-	limit := int64(len(b))
-	var off int64
-	for off < limit {
-		r, ok := parseRecord(b[off:limit])
-		if !ok {
-			// A record a newer build wrote, here or past the hole, stops
-			// the open before anything is classified or changed (#511).
-			if err := unknownVersionAt(b[:limit], n, off); err != nil {
-				return nil, err
-			}
-			s.hole = off
-			break
+	// Read-only: there is nothing a failed close could lose.
+	defer func() { abandon(f.Close()) }()
+	reader, err := sb.reader(f)
+	if err != nil {
+		return nil, storageFailed("read segment", err)
+	}
+	s := &scanned{n: n, size: int64(len(reader.b)), hole: -1, trimmed: -1}
+	recs, err := s.parse(reader, sb.recs[:0])
+	if err != nil {
+		return nil, err
+	}
+	// Copied at their count: grown record by record, every segment's slice
+	// left its earlier copies to the collector and kept a quarter more
+	// room than it held.
+	s.recs = slices.Clone(recs)
+	sb.recs = recs
+	s.data = reader.b[:reader.n]
+	return s, nil
+}
+
+// parse appends to recs the records of s read through reader, up to the
+// first hole or through the seal, and returns them.
+func (s *scanned) parse(reader *segRead, recs []scanRec) ([]scanRec, error) {
+	for off := int64(0); off < s.size; {
+		if err := reader.record(off); err != nil {
+			return nil, storageFailed("read segment", err)
 		}
-		r.off = off
-		s.recs = append(s.recs, r)
+		r, ok := parseRecord(reader.b[off:reader.n])
+		if !ok {
+			return recs, s.holeAt(reader, off)
+		}
+		if r.kind == recCheckpt || r.kind == recHardState {
+			s.keep(len(recs), r.data)
+		}
+		recs = append(recs, scanRecOf(&r, off))
 		off += int64(r.length)
 		if r.kind == recSeal {
 			s.sealed = true
 			break
 		}
 	}
-	return s, nil
+	return recs, nil
+}
+
+// holeAt records the hole at off once the rest of the file is read, which
+// is where it is classified. A record a newer build wrote, here or past the
+// hole, stops the open before anything is classified or changed (#511).
+func (s *scanned) holeAt(reader *segRead, off int64) error {
+	if err := reader.upTo(s.size); err != nil {
+		return storageFailed("read segment", err)
+	}
+	if err := unknownVersionAt(reader.b, s.n, off); err != nil {
+		return err
+	}
+	s.hole = off
+	return nil
+}
+
+// scanBufs is what the scan reuses from one segment to the next: the
+// buffer a segment is read into, and the records parsed from it. chunk is
+// how far ahead it reads, scanChunk when zero; only a test sets it.
+type scanBufs struct {
+	b     []byte
+	recs  []scanRec
+	chunk int64
+}
+
+// reader is the read of segment file f into sb's buffer, grown when the
+// file is larger than any before it.
+func (sb *scanBufs) reader(f *os.File) (*segRead, error) {
+	st, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	size := st.Size()
+	if int64(cap(sb.b)) < size {
+		sb.b = make([]byte, 0, size)
+	}
+	chunk := sb.chunk
+	if chunk <= 0 {
+		chunk = scanChunk
+	}
+	return &segRead{f: f, b: sb.b[:size], chunk: chunk}, nil
+}
+
+// segRead is a segment file read in order into b, the file's size, of
+// which the first n bytes are read, chunk at least at a time. What lies
+// past n is the bytes of an earlier segment, and no parse looks at it.
+type segRead struct {
+	f     *os.File
+	b     []byte
+	n     int64
+	chunk int64
+}
+
+// record reads enough for parseRecord to judge the record at off on b[off:n]
+// as it would on the whole file: its header and fixed fields, then the
+// length its header announces, both bounded by the file's size.
+func (r *segRead) record(off int64) error {
+	if err := r.upTo(off + int64(recHeader+recFixed)); err != nil {
+		return err
+	}
+	if off+int64(recHeader) > r.n {
+		// Short of a header: the file is read to its end.
+		return nil
+	}
+	return r.upTo(off + int64(recHeader) + int64(binary.LittleEndian.Uint32(r.b[off:])))
+}
+
+// upTo reads the file up to end, at most its size, a chunk at least at a
+// time.
+func (r *segRead) upTo(end int64) error {
+	size := int64(len(r.b))
+	end = min(end, size)
+	if r.n >= end {
+		return nil
+	}
+	to := min(size, max(end, r.n+r.chunk))
+	if _, err := io.ReadFull(r.f, r.b[r.n:to]); err != nil {
+		return err
+	}
+	r.n = to
+	return nil
 }
 
 // checkBatchSequence quarantines a log whose batch sequences are not
 // contiguous across the whole log (R9-01).
 func (l *fileLog) checkBatchSequence(segs []*scanned) error {
-	var prev *record
+	var prev *scanRec
 	for _, s := range segs {
 		for i := range s.recs {
 			r := &s.recs[i]
@@ -516,7 +673,7 @@ func (l *fileLog) checkBatchSequence(segs []*scanned) error {
 
 // continuesBatch reports whether r may follow prev: in prev's batch, or
 // first of the next one once prev ended its own.
-func continuesBatch(prev, r *record) bool {
+func continuesBatch(prev, r *scanRec) bool {
 	return r.batch == prev.batch || (r.batch == prev.batch+1 && prev.end)
 }
 
@@ -546,16 +703,21 @@ func (l *fileLog) trimTornTail(last *scanned) error {
 // and records in order, truncate records included, and judges continuity
 // on the result (R8-01).
 func (l *fileLog) replay(segs []*scanned) error {
+	// Sized once, for every entry record read: grown entry by entry, the
+	// index left several times its size to the collector within the open
+	// (#630). A truncate that drops it starts a new one.
+	l.slots = make([]slot, 0, entryRecords(segs))
 	for si, s := range segs {
-		cp, ok := decodeCheckpoint(s.recs[0].data)
+		cp, ok := decodeCheckpoint(s.pay[0])
 		if !ok {
 			return l.quarantine(s.n, 0, "checkpoint payload")
 		}
 		if err := l.applyCheckpoint(si == 0, s.n, &cp); err != nil {
 			return err
 		}
-		for _, r := range s.recs[1:] {
-			if err := l.applyRecord(s.n, &r); err != nil {
+		for i := 1; i < len(s.recs); i++ {
+			r := &s.recs[i]
+			if err := l.applyRecord(s.n, r, s.pay[i]); err != nil {
 				return err
 			}
 			l.batch = r.batch
@@ -565,6 +727,20 @@ func (l *fileLog) replay(segs []*scanned) error {
 		}
 	}
 	return nil
+}
+
+// entryRecords is the number of entry records segs hold, the most slots
+// replay appends.
+func entryRecords(segs []*scanned) int {
+	n := 0
+	for _, s := range segs {
+		for i := range s.recs {
+			if s.recs[i].kind == recEntry {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 // applyCheckpoint applies the checkpoint opening segment seg. The first
@@ -589,19 +765,20 @@ func (l *fileLog) applyCheckpoint(first bool, seg uint64, cp *checkpoint) error 
 	return nil
 }
 
-// applyRecord applies one record of segment seg to the log being rebuilt.
-// An entry out of sequence is quarantined; a record kind this build does
-// not know, or a hard state of another length, is a newer layout and stops
-// the open VERSION_UNSUPPORTED — skipped, it lost what a newer build wrote
-// there (D18, #511). A seal changes nothing.
-func (l *fileLog) applyRecord(seg uint64, r *record) error {
+// applyRecord applies one record of segment seg to the log being rebuilt,
+// pay its payload when it is a hard state's. An entry out of sequence is
+// quarantined; a record kind this build does not know, or a hard state of
+// another length, is a newer layout and stops the open VERSION_UNSUPPORTED
+// — skipped, it lost what a newer build wrote there (D18, #511). A seal
+// changes nothing.
+func (l *fileLog) applyRecord(seg uint64, r *scanRec, pay []byte) error {
 	switch r.kind {
 	case recEntry:
 		return l.applyEntry(seg, r)
 	case recTruncate:
 		l.applyTruncate(r.index)
 	case recHardState:
-		return l.applyHardState(seg, r)
+		return l.applyHardState(seg, r, pay)
 	case recCommit:
 		l.hs.Commit = max(l.hs.Commit, r.index)
 	case recCompact:
@@ -615,7 +792,7 @@ func (l *fileLog) applyRecord(seg uint64, r *record) error {
 
 // applyEntry appends an entry record's slot, quarantining one out of
 // sequence.
-func (l *fileLog) applyEntry(seg uint64, r *record) error {
+func (l *fileLog) applyEntry(seg uint64, r *scanRec) error {
 	if r.index != l.first+uint64(len(l.slots)) {
 		return l.quarantine(seg, r.off, "index out of sequence")
 	}
@@ -630,7 +807,7 @@ func (l *fileLog) applyEntry(seg uint64, r *record) error {
 func checkLayouts(segs []*scanned) error {
 	for _, s := range segs {
 		for i := range s.recs {
-			if err := knownLayout(s.n, &s.recs[i]); err != nil {
+			if err := knownLayout(s.n, &s.recs[i], s.pay[i]); err != nil {
 				return err
 			}
 		}
@@ -639,14 +816,15 @@ func checkLayouts(segs []*scanned) error {
 }
 
 // knownLayout is nil for a record of a kind this build reads, with the
-// payload length that kind has where it has one.
-func knownLayout(seg uint64, r *record) error {
+// payload length that kind has where it has one; pay is the payload of a
+// hard-state record.
+func knownLayout(seg uint64, r *scanRec, pay []byte) error {
 	switch r.kind {
 	case recEntry, recTruncate, recCheckpt, recSeal, recCompact, recCommit:
 		return nil
 	case recHardState:
-		if len(r.data) != hardStateLen {
-			return unknownLayout(seg, r, "hard_state_bytes", len(r.data))
+		if len(pay) != hardStateLen {
+			return unknownLayout(seg, r, "hard_state_bytes", len(pay))
 		}
 		return nil
 	default:
@@ -654,19 +832,19 @@ func knownLayout(seg uint64, r *record) error {
 	}
 }
 
-// applyHardState applies a hard-state record; one of another length is a
-// newer layout (#511).
-func (l *fileLog) applyHardState(seg uint64, r *record) error {
-	if len(r.data) != hardStateLen {
-		return unknownLayout(seg, r, "hard_state_bytes", len(r.data))
+// applyHardState applies a hard-state record, of payload pay; one of
+// another length is a newer layout (#511).
+func (l *fileLog) applyHardState(seg uint64, r *scanRec, pay []byte) error {
+	if len(pay) != hardStateLen {
+		return unknownLayout(seg, r, "hard_state_bytes", len(pay))
 	}
-	l.hs = decodeHS(r.data)
+	l.hs = decodeHS(pay)
 	return nil
 }
 
 // unknownLayout is the VERSION_UNSUPPORTED of record r of segment seg, a
 // layout this build does not read: field names what it is, v its value.
-func unknownLayout(seg uint64, r *record, field string, v int) error {
+func unknownLayout(seg uint64, r *scanRec, field string, v int) error {
 	return origin(coreconsensus.VersionUnsupported, errs.String("segment", segName(seg)),
 		errs.Int64("offset", r.off), errs.Int(field, v))
 }
@@ -736,8 +914,8 @@ func (l *fileLog) openSegments(segs []*scanned) error {
 		if err != nil {
 			return storageFailed("open segment", err)
 		}
-		l.segs = append(l.segs, &segment{n: s.n, f: f, size: int64(len(s.data))})
-		l.occupied.Add(int64(len(s.data)))
+		l.segs = append(l.segs, &segment{n: s.n, f: f, size: s.size})
+		l.occupied.Add(s.size)
 	}
 	return nil
 }
@@ -838,7 +1016,7 @@ func (l *fileLog) positionTail(last *scanned, tail *segment) error {
 // classifyTail is step 2 to 4 of the decision procedure (R8-02, R9-01,
 // R9-03): it returns where to truncate a torn tail, or -1 and why the hole
 // is quarantined.
-func classifyTail(b []byte, recs []record, hole int64) (int64, string) {
+func classifyTail(b []byte, recs []scanRec, hole int64) (int64, string) {
 	rb := recs[len(recs)-1]
 	after := recordsAfter(b, hole)
 	// The batch the hole sits in: rb's, unless rb ended its batch.
@@ -889,7 +1067,7 @@ func judgeAfterHole(after []record, torn uint64) string {
 // tornBatchStart is where the batch torn, which never completed, begins:
 // all of it is dropped, as it was never synced and never acknowledged. A
 // torn batch that starts with the segment's checkpoint is quarantined.
-func tornBatchStart(recs []record, lastOff int64, torn uint64) (int64, string) {
+func tornBatchStart(recs []scanRec, lastOff int64, torn uint64) (int64, string) {
 	start := lastOff
 	for i := len(recs) - 1; i >= 0 && recs[i].batch == torn; i-- {
 		start = recs[i].off
