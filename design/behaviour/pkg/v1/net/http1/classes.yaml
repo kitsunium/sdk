@@ -1,0 +1,12 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+files:
+  - decls: []
+    name: doc.go
+imports: {}
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/pkg/v1/net/http1
+  name: http1
+  purpose: "Package http1 is the restricted HTTP/1.1 profile the SDK serves on its loop engine (ADR 0186 §D6): a codec that frames requests out of bytes and appends responses to bytes, and HandleLoop, the adapter that serves a Handler on a loop group of package server."
+types: []

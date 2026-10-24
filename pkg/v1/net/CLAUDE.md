@@ -18,6 +18,7 @@ say so: `server` and `client` both take a `tlsid.Identity`.
 A domain belongs here when it moves bytes between processes over a socket
 (ADR 0029): the inbound engine (`server`) and the outbound guarded client
 (`client`), the TLS and mutual-TLS identity both ends present (`tlsid`), and the
+restricted HTTP/1.1 profile the loop engine serves (`http1`, ADR 0186), the
 three things served over the inbound engine's HTTP — a Server-Sent Events
 stream (`sse`), a WebSocket connection (`websocket`, ADR 0047) and a file tree
 (`static`, ADR 0130). They share one contract, `internal/core/net`, which owns
@@ -35,6 +36,7 @@ arrived is the security family's (`pkg/v1/security`).
 | `tlsid/` | `New` for material in memory, `Load` for material on disk → an `Identity` shared by `server` and `client`; `MaterialInvalid`, `HandshakeFailed` (ADR 0029) | `internal/core/net`, `internal/service/net/tlsid` | `tlsid/README.md` |
 | `sse/` | `New(w, r, opts…)` → a `Stream` with keep-alive, `Retry` and a write timeout; `DrainSignal` (ADR 0029, ADR 0043) | `internal/core/net`, `internal/service/net/sse` | `sse/README.md` |
 | `websocket/` | `Upgrade` → a `Conn`, RFC 6455 in the stdlib, the origin checked by default; `DrainSignal` (ADR 0047, ADR 0069) | `internal/core/net`, `internal/service/net/websocket` | `websocket/README.md` |
+| `http1/` | the restricted HTTP/1.1 profile: `HandleLoop(h, Parser)` → the handler of `server.Group.HandleLoop`, a `Batcher` capability for answers deferred to the batch's end, and the codec (`Parser`, `AppendResponse`, …); its refusals' sentinels (ADR 0186) | `internal/core/net`, `internal/service/net/http1` | `http1/README.md` |
 | `static/` | `New(fsys, Config)` → an `http.Handler` that never lists a directory and sends the security headers on every answer; `Misconfigured` (ADR 0130) | `internal/core/net`, `internal/service/net/static` | `static/README.md` |
 
 `server`, `client` and `tlsid` moved here from the root of `pkg/v1`, and `sse`,

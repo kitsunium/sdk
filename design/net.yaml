@@ -1283,9 +1283,11 @@ packages:
           and the body — and the codec writes the framing: the status line,
           Content-Length and Connection: close.
 
-          req and every byte it aliases are valid until ServeHTTP1 returns; a handler
-          that keeps one copies it. On the loop engine a handler runs on the loop's
-          thread and must not block it.
+          req is valid until ServeHTTP1 returns, and so is every byte it aliases
+          unless the caller says longer: on the loop engine those bytes stay valid
+          until the loop's batch ends, HTTP1Batcher.EndBatch included. A handler that
+          keeps one past that copies it. On the loop engine a handler runs on the
+          loop's thread and must not block it.
         methods:
           - in:
               - name: req
@@ -1294,6 +1296,30 @@ packages:
                 type: "*HTTP1ResponseValue"
             name: ServeHTTP1
         name: HTTP1Handler
+      - doc: |-
+          HTTP1Batcher is the optional capability of an HTTP1Handler served on a loop
+          group: the end of each batch of the loop's requests.
+
+          The loop adapter calls EndBatch once per loop iteration that served at least
+          one request, on the loop's thread, after every request of the batch went
+          through ServeHTTP1 and before any answer of the batch is written. A handler
+          runs the work it batched there — one transaction for every request, say —
+          and completes each response it deferred (HTTP1ResponseValue.Defer). Every
+          byte the batch's requests aliased is still valid while EndBatch runs, and
+          none is once it returns. Like every callback of the loop, it must not block
+          the loop's thread longer than the batch's own work.
+
+          IFACE-PLUGIN: what a consumer writes beside HTTP1Handler; the adapter that
+          calls it is internal/service/net/http1's.
+        methods:
+          - doc: |-
+              EndBatch ends the batch of the loop whose index is loop: the Loop every
+              request of the batch carried.
+            in:
+              - name: loop
+                type: int
+            name: EndBatch
+        name: HTTP1Batcher
       - doc: |-
           Packet is one received datagram.
 
@@ -2239,6 +2265,13 @@ packages:
                 this request: a Connection field holding the close token.
               name: Close
               type: bool
+            - doc: |-
+                Loop is the index of the loop that framed the request — its
+                LoopIO.Loop — set by the loop adapter before the handler runs, so a
+                handler finds its per-loop state in a slice, with no lock. Parse leaves
+                it as it is; outside the loop adapter it is what the caller set.
+              name: Loop
+              type: int
       - doc: |-
           HTTP1ResponseValue is the answer an HTTP1Handler gives to one request.
 
@@ -2266,6 +2299,16 @@ packages:
               type: "[]byte"
             - doc: Close asks the codec to close the connection after this response.
               name: Close
+              type: bool
+            - doc: |-
+                Defer, set by the handler, holds the answer back until the end of the
+                loop's batch, for work it batches — one database transaction for every
+                request of the batch, say. The response value then stays valid, at the
+                same address, until HTTP1Batcher.EndBatch returns, and the handler
+                completes it there: it fills it and clears Defer. An answer still
+                deferred when EndBatch returns is answered 500 and its connection
+                closed. Only the loop adapter reads it; AppendResponse does not.
+              name: Defer
               type: bool
       - doc: HTTP1HandlerFunc adapts a plain function to HTTP1Handler.
         methods:
@@ -3422,11 +3465,12 @@ packages:
         type: Refusal
         value: "22"
     doc: |-
-      Package http1 is the codec of the restricted HTTP/1.1 profile (ADR 0186
-      §D6): it frames requests out of bytes and appends responses to bytes, and
-      does no I/O. Its request value and handler port are internal/core/net's
-      (HTTP1RequestValue, HTTP1Handler); the loop engine's adapter, and the
-      pkg/v1/net/http1 facade, come with HandleLoop (ADR 0186 §D9).
+      Package http1 is the restricted HTTP/1.1 profile (ADR 0186 §D6): a codec
+      that frames requests out of bytes and appends responses to bytes, doing no
+      I/O, and HandleLoop, the adapter that serves it on a loop group. Its request
+      value and handler ports are internal/core/net's (HTTP1RequestValue,
+      HTTP1Handler, HTTP1Batcher); pkg/v1/net/http1 publishes it (ADR 0186 §D9
+      step 12).
 
       The profile is defined by what it refuses. A request is answered with its
       Refusal's status and Connection: close, and the connection closed, when it
@@ -3567,10 +3611,121 @@ packages:
         name: AppendRefusal
         out:
           - type: "[]byte"
+      - doc: |-
+          HandleLoop adapts h to the loop engine: the corenet.LoopHandler a group
+          serves with StreamGroup.HandleLoop. p frames every request, so its limits
+          are the group's; the zero Parser is the profile's defaults.
+
+          Each loop frames its requests into a request value of its own, sets its
+          Loop, and calls h on the loop's thread, one request at a time, in the order
+          they arrived, pipelined ones included. A refused request is answered and
+          its connection closed without reaching h. An answer has AppendResponse's
+          framing, with Connection: close when the request, the response or the
+          loop's soft pressure (LoopIO.Pressure) asks for it, and nothing more is
+          read from a connection that closes. The batch's answers are written at
+          its end, after h's EndBatch when h is a corenet.HTTP1Batcher, in request
+          order on each connection, deferred ones in their place.
+
+          The response value h fills starts every request with a zero status and a
+          nil Header and Body: h points them at bytes it owns, valid until the
+          answer is taken — when ServeHTTP1 returns, or when EndBatch returns for a
+          deferred one. An answer AppendResponse refuses is answered 500 and its
+          connection closed, and so is a deferred answer EndBatch left deferred. An
+          answer the connection's output refuses (LoopOutputFull: OutputCap is the
+          most a connection's answers to one batch may hold) closes the connection
+          rather than wait. A request the spill cannot hold whole (LoopValue.SpillCap
+          below p's head and body bounds) closes it too, with LoopSpillFull.
+        in:
+          - name: h
+            type: corenet.HTTP1Handler
+          - name: p
+            type: Parser
+        name: HandleLoop
+        out:
+          - type: "*LoopHandler"
     imports:
       corenet: github.com/kitsunium/sdk/internal/core/net
     path: github.com/kitsunium/sdk/internal/service/net/http1
     types:
+      - doc: |-
+          LoopHandler serves the restricted HTTP/1.1 profile on a loop group: the
+          corenet.LoopHandler HandleLoop returns. Its state is per loop — a request
+          value, the batch's answers, a flag per connection — and a loop touches only
+          its own, found by LoopIO.Loop, so the data path takes no lock and, once a
+          loop's buffers have grown to its batches, allocates nothing. It honours no
+          group option itself: a loop group given ReadHeaderTimeout or MaxHeaderBytes
+          refuses it at Start, the head bound being p's.
+        methods:
+          - doc: OnOpen implements corenet.LoopHandler. It marks the connection open on its loop.
+            in:
+              - name: io
+                type: corenet.LoopIO
+              - name: ref
+                type: corenet.LoopConnRef
+            name: OnOpen
+            recv: pointer
+          - doc: |-
+              OnData implements corenet.LoopHandler. It frames every whole request at the
+              start of buf, serves each in turn, and returns the bytes they took: a
+              request still incomplete waits in the loop's spill for its next bytes. A
+              refused request, or one whose answer closes the connection, takes the rest
+              of buf, which is never read.
+            in:
+              - name: io
+                type: corenet.LoopIO
+              - name: ref
+                type: corenet.LoopConnRef
+              - name: buf
+                type: "[]byte"
+            name: OnData
+            out:
+              - type: int
+            recv: pointer
+          - doc: |-
+              OnTimeout implements corenet.LoopHandler. The adapter arms no deadline, so a
+              timeout it did not ask for closes the connection.
+            in:
+              - name: io
+                type: corenet.LoopIO
+              - name: ref
+                type: corenet.LoopConnRef
+            name: OnTimeout
+            recv: pointer
+          - doc: |-
+              OnWritable implements corenet.LoopHandler. Nothing waits on it: an answer
+              the output refuses closes its connection.
+            in:
+              - name: io
+                type: corenet.LoopIO
+              - name: ref
+                type: corenet.LoopConnRef
+            name: OnWritable
+            recv: pointer
+          - doc: |-
+              OnBatchEnd implements corenet.LoopHandler. When the batch served a request,
+              it calls the handler's EndBatch if it has one, then writes the batch's
+              answers in order and closes the connections whose answer asked to.
+            in:
+              - name: io
+                type: corenet.LoopIO
+            name: OnBatchEnd
+            recv: pointer
+          - doc: |-
+              OnClose implements corenet.LoopHandler. The connection's flag stays until
+              the next OnOpen of its slot replaces it; an answer of the batch still
+              queued for it is dropped when its Write is refused as stale.
+            in:
+              - name: io
+                type: corenet.LoopIO
+              - name: ref
+                type: corenet.LoopConnRef
+              - name: err
+                type: error
+            name: OnClose
+            recv: pointer
+        name: LoopHandler
+        struct:
+          unexported: true
       - doc: |-
           Parser frames requests of the restricted HTTP/1.1 profile under its limits.
           It holds three integers and no state between calls, so one Parser serves
@@ -5799,6 +5954,338 @@ packages:
       svcclient: github.com/kitsunium/sdk/internal/service/net/client
       tlsid: github.com/kitsunium/sdk/pkg/v1/net/tlsid
     path: github.com/kitsunium/sdk/pkg/v1/net/client
+  - doc: |-
+      Package http1 is the restricted HTTP/1.1 profile the SDK serves on its loop
+      engine (ADR 0186 §D6): a codec that frames requests out of bytes and appends
+      responses to bytes, and HandleLoop, the adapter that serves a Handler on a
+      loop group of package server.
+
+      It is a profile, not an HTTP server, and what it refuses defines it. A
+      request is answered with its status and Connection: close, and its
+      connection closed, before any handler sees it, when it carries any
+      Transfer-Encoding (chunked, and so trailers, included), Expect, a bare CR or
+      LF, a NUL or another control byte in a value, obs-fold, whitespace before a
+      colon, a name outside tchar, a Content-Length that is not one run of at most
+      ten digits or that repeats, a second Authorization or Host, CONNECT, or a
+      head, target or body past its Limits. HTTP/2, Upgrade and TLS are out of the
+      profile: a program that needs them mounts net/http with Group.HandleHTTP.
+      Framing depends on neither the method nor the route: a request takes its
+      head plus its Content-Length.
+
+      # Serving
+
+      	type api struct{ loops []perLoop } // one per loop, indexed by Request.Loop
+
+      	func (a *api) ServeHTTP1(req *http1.Request, res *http1.Response) {
+      		l := &a.loops[req.Loop]
+      		// route, authenticate with l's own scratch, ...
+      		res.Defer = true // answered at the end of the batch
+      		l.pending = append(l.pending, job{res: res})
+      	}
+
+      	func (a *api) EndBatch(loop int) {
+      		l := &a.loops[loop]
+      		// one transaction for every job of l.pending, then for each:
+      		// job.res.Status, job.res.Body = ..., ...; job.res.Defer = false
+      	}
+
+      	srv.Group("api", server.Listen("tcp", ":8080"), server.Loop(server.LoopValue{Loops: 2})).
+      		HandleLoop(http1.HandleLoop(a, http1.Parser{}))
+
+      A handler runs on its loop's thread and must not block it. Every callback
+      of one loop runs on that thread, one at a time, so state kept per loop needs
+      no lock; Request.Loop and the loop argument of EndBatch name the loop. The
+      answers of a batch leave at its end, in request order on each connection.
+
+      # The codec alone
+
+      Parser.Parse, AppendResponse and AppendRefusal frame and write without the
+      loop, on any []byte: nothing allocates once the caller's buffers have room.
+    facade:
+      - alias:
+          - doc: |-
+              Handler answers one request of the profile. It sees only requests the
+              codec framed and accepted, fills the Response, and the codec writes the
+              framing: the status line, Content-Length and Connection: close.
+            name: Handler
+            target: corenet.HTTP1Handler
+      - alias:
+          - doc: HandlerFunc adapts a plain function to Handler.
+            name: HandlerFunc
+            target: corenet.HTTP1HandlerFunc
+      - alias:
+          - doc: |-
+              Batcher is the optional capability of a Handler served on a loop group:
+              EndBatch runs once per batch of the loop's requests, before any answer of
+              the batch is written, and completes the responses the handler deferred.
+            name: Batcher
+            target: corenet.HTTP1Batcher
+      - alias:
+          - doc: |-
+              Request is one request, framed by the codec. Every slice aliases the bytes
+              it was framed from; Loop names the loop that framed it.
+            name: Request
+            target: corenet.HTTP1RequestValue
+      - alias:
+          - doc: |-
+              Response is the answer a Handler gives: a status, extra field lines written
+              by AppendField, a body, Close, and Defer to answer at the batch's end.
+            name: Response
+            target: corenet.HTTP1ResponseValue
+      - alias:
+          - doc: Field is one field line of a Request, as it arrived.
+            name: Field
+            target: corenet.HTTP1FieldValue
+      - alias:
+          - doc: |-
+              Limits bounds what one request may carry. Zero selects the profile's
+              default, never unbounded.
+            name: Limits
+            target: corenet.HTTP1LimitsValue
+      - alias:
+          - doc: |-
+              Parser frames requests under its Limits. The zero Parser uses the
+              profile's defaults; NewParser validates others.
+            name: Parser
+            target: svchttp1.Parser
+      - alias:
+          - doc: |-
+              Refusal names the rule a request broke; RefusalNone is none. Branch on its
+              Err, a sentinel of this package, and log its String.
+            name: Refusal
+            target: svchttp1.Refusal
+      - alias:
+          - doc: |-
+              LoopHandler serves the profile on a loop group: the server.LoopHandler
+              HandleLoop returns.
+            name: LoopHandler
+            target: svchttp1.LoopHandler
+      - const:
+          - doc: "RefusalNone is no refusal: the request was framed, or needs more bytes."
+            name: RefusalNone
+            reexport: svchttp1.RefusalNone
+            type: Refusal
+            typed: true
+            value: "0"
+      - const:
+          - doc: |-
+              MaxFields is how many field lines one request may carry; one more is
+              refused (431).
+            name: MaxFields
+            reexport: corenet.HTTP1MaxFields
+            type: int
+            typed: true
+            value: "64"
+      - const:
+          - doc: DefaultHead is the head bound a zero Limits.Head selects, in bytes.
+            name: DefaultHead
+            reexport: corenet.HTTP1DefaultHead
+            type: int
+            typed: true
+            value: "8192"
+      - const:
+          - doc: MaxHead is the largest head bound Limits.Head may ask for.
+            name: MaxHead
+            reexport: corenet.HTTP1MaxHead
+            type: int
+            typed: true
+            value: "65536"
+      - const:
+          - doc: DefaultTarget is the request-target bound a zero Limits.Target selects.
+            name: DefaultTarget
+            reexport: corenet.HTTP1DefaultTarget
+            type: int
+            typed: true
+            value: "2048"
+      - const:
+          - doc: DefaultBody is the Content-Length bound a zero Limits.Body selects.
+            name: DefaultBody
+            reexport: corenet.HTTP1DefaultBody
+            type: int64
+            typed: true
+            value: "1048576"
+      - const:
+          - doc: MaxBody is the largest Content-Length bound Limits.Body may ask for.
+            name: MaxBody
+            reexport: corenet.HTTP1MaxBody
+            type: int64
+            typed: true
+            value: "1073741824"
+      - doc: Sentinels returned by this package. Match with errors.Is or errs.HasCode.
+        var:
+          - doc: |-
+              RequestMalformed is the refusal of a request whose syntax the profile does
+              not accept: its request line, a name, a bare CR or LF, a control byte.
+            name: RequestMalformed
+            reexport: corenet.HTTP1RequestMalformed
+            type: "*errs.Error"
+          - doc: TransferEncoding is the refusal of any Transfer-Encoding, chunked included.
+            name: TransferEncoding
+            reexport: corenet.HTTP1TransferEncoding
+            type: "*errs.Error"
+          - doc: |-
+              ContentLengthInvalid is the refusal of a Content-Length that is not one run
+              of digits, is too long, or repeats.
+            name: ContentLengthInvalid
+            reexport: corenet.HTTP1ContentLengthInvalid
+            type: "*errs.Error"
+          - doc: FieldDuplicated is the refusal of a second Authorization or Host field.
+            name: FieldDuplicated
+            reexport: corenet.HTTP1FieldDuplicated
+            type: "*errs.Error"
+          - doc: ExpectRefused is the refusal of a request carrying Expect.
+            name: ExpectRefused
+            reexport: corenet.HTTP1ExpectRefused
+            type: "*errs.Error"
+          - doc: HeadTooLarge is the refusal of a head past its bound, or of too many fields.
+            name: HeadTooLarge
+            reexport: corenet.HTTP1HeadTooLarge
+            type: "*errs.Error"
+          - doc: TargetTooLong is the refusal of a request-target past its bound.
+            name: TargetTooLong
+            reexport: corenet.HTTP1TargetTooLong
+            type: "*errs.Error"
+          - doc: BodyTooLarge is the refusal of a Content-Length past the body bound.
+            name: BodyTooLarge
+            reexport: corenet.HTTP1BodyTooLarge
+            type: "*errs.Error"
+          - doc: MethodUnsupported is the refusal of CONNECT.
+            name: MethodUnsupported
+            reexport: corenet.HTTP1MethodUnsupported
+            type: "*errs.Error"
+          - doc: ResponseInvalid is a response the writer refuses to write.
+            name: ResponseInvalid
+            reexport: corenet.HTTP1ResponseInvalid
+            type: "*errs.Error"
+          - doc: Misconfigured is a Limits NewParser refuses.
+            name: Misconfigured
+            reexport: corenet.HTTP1Misconfigured
+            type: "*errs.Error"
+      - func:
+          doc: |-
+            HandleLoop adapts h to the loop engine: the handler of
+            server.Group.HandleLoop. p frames every request; the zero Parser is the
+            profile's defaults. A refused request is answered and closed without
+            reaching h; the batch's answers leave at its end, after h's EndBatch when h
+            is a Batcher, in request order on each connection. A Response starts every
+            request with a nil Header and Body, which h points at bytes it owns until
+            the answer is taken. An answer the writer refuses, or one left deferred, is
+            answered 500 and its connection closed; one the connection's output refuses
+            closes the connection.
+          forward: svchttp1.HandleLoop
+          in:
+            - name: h
+              type: Handler
+            - name: p
+              type: Parser
+          name: HandleLoop
+          out:
+            - type: "*LoopHandler"
+      - func:
+          doc: |-
+            NewParser returns a Parser bounded by l, refusing a negative or oversized
+            bound with Misconfigured.
+          forward: svchttp1.NewParser
+          in:
+            - name: l
+              type: Limits
+          name: NewParser
+          out:
+            - type: Parser
+            - type: error
+      - func:
+          doc: |-
+            Continue returns req.Consumed and sets req.Body once buf holds the whole
+            body of a request whose head Parse framed; until then it returns 0.
+          forward: svchttp1.Continue
+          in:
+            - name: buf
+              type: "[]byte"
+            - name: req
+              type: "*Request"
+          name: Continue
+          out:
+            - type: int
+      - func:
+          doc: |-
+            Pending returns how many bytes of req's body have yet to arrive when
+            buffered bytes of the request are held.
+          forward: svchttp1.Pending
+          in:
+            - name: req
+              type: "*Request"
+            - name: buffered
+              type: int
+          name: Pending
+          out:
+            - type: int
+      - func:
+          doc: |-
+            AppendStatusLine appends the status line of status to dst; below 200 is
+            refused with ResponseInvalid.
+          forward: svchttp1.AppendStatusLine
+          in:
+            - name: dst
+              type: "[]byte"
+            - name: status
+              type: int
+          name: AppendStatusLine
+          out:
+            - type: "[]byte"
+            - type: error
+      - func:
+          doc: |-
+            AppendField appends "name: value\r\n" to dst. A name that is not a token, a
+            control byte in the value, and Content-Length, Connection and
+            Transfer-Encoding, which the codec writes, are refused with ResponseInvalid.
+          forward: svchttp1.AppendField
+          in:
+            - name: dst
+              type: "[]byte"
+            - name: name
+            - name: value
+              type: string
+          name: AppendField
+          out:
+            - type: "[]byte"
+            - type: error
+      - func:
+          doc: |-
+            AppendResponse appends the whole answer res gives req: the status line,
+            res.Header, Content-Length from len(res.Body), Connection: close when res,
+            req or closing asks for it, then the body.
+          forward: svchttp1.AppendResponse
+          in:
+            - name: dst
+              type: "[]byte"
+            - name: req
+              type: "*Request"
+            - name: res
+              type: "*Response"
+            - name: closing
+              type: bool
+          name: AppendResponse
+          out:
+            - type: "[]byte"
+            - type: error
+      - func:
+          doc: |-
+            AppendRefusal appends the whole answer to r — its status, Content-Length: 0
+            and Connection: close; the caller then closes the connection.
+          forward: svchttp1.AppendRefusal
+          in:
+            - name: dst
+              type: "[]byte"
+            - name: r
+              type: Refusal
+          name: AppendRefusal
+          out:
+            - type: "[]byte"
+    imports:
+      corenet: github.com/kitsunium/sdk/internal/core/net
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svchttp1: github.com/kitsunium/sdk/internal/service/net/http1
+    path: github.com/kitsunium/sdk/pkg/v1/net/http1
   - doc: |-
       Package server — the two group options only an HTTP group reads: the header
       phase's own deadline and the header size cap.

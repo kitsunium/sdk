@@ -1247,7 +1247,7 @@
       "dir": "service/net/http1",
       "layer": "service",
       "family": "net",
-      "doc": "Package http1 is the codec of the restricted HTTP/1.1 profile (ADR 0186\n§D6): it frames requests out of bytes and appends responses to bytes, and\ndoes no I/O. Its request value and handler port are internal/core/net's\n(HTTP1RequestValue, HTTP1Handler); the loop engine's adapter, and the\npkg/v1/net/http1 facade, come with HandleLoop (ADR 0186 §D9).\n\nThe profile is defined by what it refuses. A request is answered with its\nRefusal's status and Connection: close, and the connection closed, when it\ncarries a bare CR or LF, a NUL or another control byte in a value, obs-fold,\nwhitespace before a colon, a name outside tchar, any Transfer-Encoding, a\nContent-Length that is not one run of at most ten digits or that repeats, a\nsecond Authorization or Host, an Expect field, CONNECT, or a head, target or\nbody past its bound. None of those reaches a handler, and a handler cannot\nanswer one.\n\nFraming depends on neither the method nor the route: a request takes its\nhead plus its Content-Length, which Parse computes, so a body that spells a\nrequest is never read as one, and an early answer knows what it must drain\nbefore the next pipelined request.\n\n\tvar p http1.Parser                    // the profile's default limits\n\tvar req corenet.HTTP1RequestValue     // reused: Fields is an array\n\tn, r := p.Parse(buf, &req)\n\tswitch {\n\tcase r != http1.RefusalNone:\n\t\tout = http1.AppendRefusal(out, r) // then close\n\tcase n == 0:\n\t\t// more bytes; req.Consumed is set once the head is whole\n\tdefault:\n\t\th.ServeHTTP1(&req, &res)\n\t\tout, err = http1.AppendResponse(out, &req, &res, false)\n\t\tbuf = buf[n:]\n\t}\n\nNothing here allocates once the caller's buffers have room: Parse slices the\nbytes it was given, and the writer appends precomputed status lines and an\ninteger formatted in place.\n"
+      "doc": "Package http1 is the restricted HTTP/1.1 profile (ADR 0186 §D6): a codec\nthat frames requests out of bytes and appends responses to bytes, doing no\nI/O, and HandleLoop, the adapter that serves it on a loop group. Its request\nvalue and handler ports are internal/core/net's (HTTP1RequestValue,\nHTTP1Handler, HTTP1Batcher); pkg/v1/net/http1 publishes it (ADR 0186 §D9\nstep 12).\n\nThe profile is defined by what it refuses. A request is answered with its\nRefusal's status and Connection: close, and the connection closed, when it\ncarries a bare CR or LF, a NUL or another control byte in a value, obs-fold,\nwhitespace before a colon, a name outside tchar, any Transfer-Encoding, a\nContent-Length that is not one run of at most ten digits or that repeats, a\nsecond Authorization or Host, an Expect field, CONNECT, or a head, target or\nbody past its bound. None of those reaches a handler, and a handler cannot\nanswer one.\n\nFraming depends on neither the method nor the route: a request takes its\nhead plus its Content-Length, which Parse computes, so a body that spells a\nrequest is never read as one, and an early answer knows what it must drain\nbefore the next pipelined request.\n\n\tvar p http1.Parser                    // the profile's default limits\n\tvar req corenet.HTTP1RequestValue     // reused: Fields is an array\n\tn, r := p.Parse(buf, &req)\n\tswitch {\n\tcase r != http1.RefusalNone:\n\t\tout = http1.AppendRefusal(out, r) // then close\n\tcase n == 0:\n\t\t// more bytes; req.Consumed is set once the head is whole\n\tdefault:\n\t\th.ServeHTTP1(&req, &res)\n\t\tout, err = http1.AppendResponse(out, &req, &res, false)\n\t\tbuf = buf[n:]\n\t}\n\nNothing here allocates once the caller's buffers have room: Parse slices the\nbytes it was given, and the writer appends precomputed status lines and an\ninteger formatted in place.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/service/net/loop",
@@ -26507,6 +26507,31 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1Batcher",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1Batcher",
+      "spelled": "interface{EndBatch(loop int)}",
+      "canonical": "interface{EndBatch(loop int)}",
+      "doc": "HTTP1Batcher is the optional capability of an HTTP1Handler served on a loop\ngroup: the end of each batch of the loop's requests.\n\nThe loop adapter calls EndBatch once per loop iteration that served at least\none request, on the loop's thread, after every request of the batch went\nthrough ServeHTTP1 and before any answer of the batch is written. A handler\nruns the work it batched there — one transaction for every request, say —\nand completes each response it deferred (HTTP1ResponseValue.Defer). Every\nbyte the batch's requests aliased is still valid while EndBatch runs, and\nnone is once it returns. Like every callback of the loop, it must not block\nthe loop's thread longer than the batch's own work.\n\nIFACE-PLUGIN: what a consumer writes beside HTTP1Handler; the adapter that\ncalls it is internal/service/net/http1's.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1Batcher.EndBatch",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "EndBatch",
+      "recv": "HTTP1Batcher",
+      "spelled": "func(loop int)",
+      "canonical": "func(loop int)",
+      "doc": "EndBatch ends the batch of the loop whose index is loop: the Loop every\nrequest of the batch carried.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1BodyTooLarge",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -26644,7 +26669,7 @@
       "name": "HTTP1Handler",
       "spelled": "interface{ServeHTTP1(req *HTTP1RequestValue, res *HTTP1ResponseValue)}",
       "canonical": "interface{ServeHTTP1(req *github.com/kitsunium/sdk/internal/core/net.HTTP1RequestValue, res *github.com/kitsunium/sdk/internal/core/net.HTTP1ResponseValue)}",
-      "doc": "HTTP1Handler answers one request of the restricted HTTP/1.1 profile.\n\nIt sees only requests the codec framed and accepted: a refusal is answered\nand the connection closed before any handler runs, and no handler can turn\none into an answer of its own. It fills res — the status, extra field lines\nand the body — and the codec writes the framing: the status line,\nContent-Length and Connection: close.\n\nreq and every byte it aliases are valid until ServeHTTP1 returns; a handler\nthat keeps one copies it. On the loop engine a handler runs on the loop's\nthread and must not block it.\n",
+      "doc": "HTTP1Handler answers one request of the restricted HTTP/1.1 profile.\n\nIt sees only requests the codec framed and accepted: a refusal is answered\nand the connection closed before any handler runs, and no handler can turn\none into an answer of its own. It fills res — the status, extra field lines\nand the body — and the codec writes the framing: the status line,\nContent-Length and Connection: close.\n\nreq is valid until ServeHTTP1 returns, and so is every byte it aliases\nunless the caller says longer: on the loop engine those bytes stay valid\nuntil the loop's batch ends, HTTP1Batcher.EndBatch included. A handler that\nkeeps one past that copies it. On the loop engine a handler runs on the\nloop's thread and must not block it.\n",
       "file": "core/net/gen_ports.go",
       "layer": "core",
       "family": "net"
@@ -26843,8 +26868,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/net",
       "name": "HTTP1RequestValue",
-      "spelled": "struct{Method []byte; Target []byte; Host []byte; Authorization []byte; Body []byte; ContentLength int64; HeadLen int; Consumed int; NFields int; Fields [64]HTTP1FieldValue; HasHost bool; HasAuthorization bool; Close bool}",
-      "canonical": "struct{Method []byte; Target []byte; Host []byte; Authorization []byte; Body []byte; ContentLength int64; HeadLen int; Consumed int; NFields int; Fields [64]github.com/kitsunium/sdk/internal/core/net.HTTP1FieldValue; HasHost bool; HasAuthorization bool; Close bool}",
+      "spelled": "struct{Method []byte; Target []byte; Host []byte; Authorization []byte; Body []byte; ContentLength int64; HeadLen int; Consumed int; NFields int; Fields [64]HTTP1FieldValue; HasHost bool; HasAuthorization bool; Close bool; Loop int}",
+      "canonical": "struct{Method []byte; Target []byte; Host []byte; Authorization []byte; Body []byte; ContentLength int64; HeadLen int; Consumed int; NFields int; Fields [64]github.com/kitsunium/sdk/internal/core/net.HTTP1FieldValue; HasHost bool; HasAuthorization bool; Close bool; Loop int}",
       "fields": [
         {
           "name": "Method",
@@ -26910,6 +26935,11 @@
           "name": "Close",
           "type": "bool",
           "doc": "Close reports whether the client asked to close the connection after\nthis request: a Connection field holding the close token.\n"
+        },
+        {
+          "name": "Loop",
+          "type": "int",
+          "doc": "Loop is the index of the loop that framed the request — its\nLoopIO.Loop — set by the loop adapter before the handler runs, so a\nhandler finds its per-loop state in a slice, with no lock. Parse leaves\nit as it is; outside the loop adapter it is what the caller set.\n"
         }
       ],
       "doc": "HTTP1RequestValue is one request of the restricted HTTP/1.1 profile, framed\nby the codec (internal/service/net/http1).\n\nIt is not named RequestValue: that name is the outbound request the Policy\nport judges, and the two never meet. The profile's prefix is the domain's\nway of naming a protocol's value, as SSEEventValue and WSMessageValue do.\n\nEvery slice aliases the bytes the codec read: the value is valid while those\nbytes are, which on the loop engine is until OnBatchEnd returns. A handler\nthat keeps a byte past that copies it. Fields is an array, so a value framed\ninto a reused HTTP1RequestValue allocates nothing.\n",
@@ -26952,8 +26982,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/net",
       "name": "HTTP1ResponseValue",
-      "spelled": "struct{Status int; Header []byte; Body []byte; Close bool}",
-      "canonical": "struct{Status int; Header []byte; Body []byte; Close bool}",
+      "spelled": "struct{Status int; Header []byte; Body []byte; Close bool; Defer bool}",
+      "canonical": "struct{Status int; Header []byte; Body []byte; Close bool; Defer bool}",
       "fields": [
         {
           "name": "Status",
@@ -26974,6 +27004,11 @@
           "name": "Close",
           "type": "bool",
           "doc": "Close asks the codec to close the connection after this response.\n"
+        },
+        {
+          "name": "Defer",
+          "type": "bool",
+          "doc": "Defer, set by the handler, holds the answer back until the end of the\nloop's batch, for work it batches — one database transaction for every\nrequest of the batch, say. The response value then stays valid, at the\nsame address, until HTTP1Batcher.EndBatch returns, and the handler\ncompletes it there: it fills it and clears Defer. An answer still\ndeferred when EndBatch returns is answered 500 and its connection\nclosed. Only the loop adapter reads it; AppendResponse does not.\n"
         }
       ],
       "doc": "HTTP1ResponseValue is the answer an HTTP1Handler gives to one request.\n\nThe handler sets the status, appends any field lines to Header with the\ncodec's writer and the content to Body. The codec writes the status line,\nthe Content-Length computed from Body and Connection: close when it is\nneeded: the handler never spells the response's framing, so it cannot get it\nwrong.\n",
@@ -62174,6 +62209,108 @@
       "canonical": "func(buf []byte, req *github.com/kitsunium/sdk/internal/core/net.HTTP1RequestValue) int",
       "doc": "Continue returns req.Consumed and sets req.Body once buf, the bytes the\nrequest was framed from, holds the whole body; until then it returns 0. It\nreads no head: a caller that got 0 from Parse with req.HeadLen set calls\nContinue as bytes arrive, and calls Parse only for the next request.\n",
       "file": "service/net/http1/parse.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.HandleLoop",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "HandleLoop",
+      "spelled": "func(h corenet.HTTP1Handler, p Parser) *LoopHandler",
+      "canonical": "func(h github.com/kitsunium/sdk/internal/core/net.HTTP1Handler, p github.com/kitsunium/sdk/internal/service/net/http1.Parser) *github.com/kitsunium/sdk/internal/service/net/http1.LoopHandler",
+      "doc": "HandleLoop adapts h to the loop engine: the corenet.LoopHandler a group\nserves with StreamGroup.HandleLoop. p frames every request, so its limits\nare the group's; the zero Parser is the profile's defaults.\n\nEach loop frames its requests into a request value of its own, sets its\nLoop, and calls h on the loop's thread, one request at a time, in the order\nthey arrived, pipelined ones included. A refused request is answered and\nits connection closed without reaching h. An answer has AppendResponse's\nframing, with Connection: close when the request, the response or the\nloop's soft pressure (LoopIO.Pressure) asks for it, and nothing more is\nread from a connection that closes. The batch's answers are written at\nits end, after h's EndBatch when h is a corenet.HTTP1Batcher, in request\norder on each connection, deferred ones in their place.\n\nThe response value h fills starts every request with a zero status and a\nnil Header and Body: h points them at bytes it owns, valid until the\nanswer is taken — when ServeHTTP1 returns, or when EndBatch returns for a\ndeferred one. An answer AppendResponse refuses is answered 500 and its\nconnection closed, and so is a deferred answer EndBatch left deferred. An\nanswer the connection's output refuses (LoopOutputFull: OutputCap is the\nmost a connection's answers to one batch may hold) closes the connection\nrather than wait. A request the spill cannot hold whole (LoopValue.SpillCap\nbelow p's head and body bounds) closes it too, with LoopSpillFull.\n",
+      "file": "service/net/http1/loop.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.LoopHandler",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "LoopHandler",
+      "spelled": "struct{}",
+      "canonical": "struct{}",
+      "doc": "LoopHandler serves the restricted HTTP/1.1 profile on a loop group: the\ncorenet.LoopHandler HandleLoop returns. Its state is per loop — a request\nvalue, the batch's answers, a flag per connection — and a loop touches only\nits own, found by LoopIO.Loop, so the data path takes no lock and, once a\nloop's buffers have grown to its batches, allocates nothing. It honours no\ngroup option itself: a loop group given ReadHeaderTimeout or MaxHeaderBytes\nrefuses it at Start, the head bound being p's.\n",
+      "file": "service/net/http1/loop.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.(*LoopHandler).OnBatchEnd",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "OnBatchEnd",
+      "recv": "LoopHandler",
+      "spelled": "func(io corenet.LoopIO)",
+      "canonical": "func(io github.com/kitsunium/sdk/internal/core/net.LoopIO)",
+      "doc": "OnBatchEnd implements corenet.LoopHandler. When the batch served a request,\nit calls the handler's EndBatch if it has one, then writes the batch's\nanswers in order and closes the connections whose answer asked to.\n",
+      "file": "service/net/http1/loop.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.(*LoopHandler).OnClose",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "OnClose",
+      "recv": "LoopHandler",
+      "spelled": "func(io corenet.LoopIO, ref corenet.LoopConnRef, err error)",
+      "canonical": "func(io github.com/kitsunium/sdk/internal/core/net.LoopIO, ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef, err error)",
+      "doc": "OnClose implements corenet.LoopHandler. The connection's flag stays until\nthe next OnOpen of its slot replaces it; an answer of the batch still\nqueued for it is dropped when its Write is refused as stale.\n",
+      "file": "service/net/http1/loop.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.(*LoopHandler).OnData",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "OnData",
+      "recv": "LoopHandler",
+      "spelled": "func(io corenet.LoopIO, ref corenet.LoopConnRef, buf []byte) int",
+      "canonical": "func(io github.com/kitsunium/sdk/internal/core/net.LoopIO, ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef, buf []byte) int",
+      "doc": "OnData implements corenet.LoopHandler. It frames every whole request at the\nstart of buf, serves each in turn, and returns the bytes they took: a\nrequest still incomplete waits in the loop's spill for its next bytes. A\nrefused request, or one whose answer closes the connection, takes the rest\nof buf, which is never read.\n",
+      "file": "service/net/http1/loop.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.(*LoopHandler).OnOpen",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "OnOpen",
+      "recv": "LoopHandler",
+      "spelled": "func(io corenet.LoopIO, ref corenet.LoopConnRef)",
+      "canonical": "func(io github.com/kitsunium/sdk/internal/core/net.LoopIO, ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef)",
+      "doc": "OnOpen implements corenet.LoopHandler. It marks the connection open on its loop.\n",
+      "file": "service/net/http1/loop.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.(*LoopHandler).OnTimeout",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "OnTimeout",
+      "recv": "LoopHandler",
+      "spelled": "func(io corenet.LoopIO, ref corenet.LoopConnRef)",
+      "canonical": "func(io github.com/kitsunium/sdk/internal/core/net.LoopIO, ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef)",
+      "doc": "OnTimeout implements corenet.LoopHandler. The adapter arms no deadline, so a\ntimeout it did not ask for closes the connection.\n",
+      "file": "service/net/http1/loop.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.(*LoopHandler).OnWritable",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "OnWritable",
+      "recv": "LoopHandler",
+      "spelled": "func(io corenet.LoopIO, ref corenet.LoopConnRef)",
+      "canonical": "func(io github.com/kitsunium/sdk/internal/core/net.LoopIO, ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef)",
+      "doc": "OnWritable implements corenet.LoopHandler. Nothing waits on it: an answer\nthe output refuses closes its connection.\n",
+      "file": "service/net/http1/loop.go",
       "layer": "service",
       "family": "net"
     },

@@ -1,0 +1,37 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "http1",
+    srcs = [
+        "doc.go",
+        "gen_facade.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/net/http1",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/net",
+        "//internal/service/net/http1",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":http1",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "http1_test",
+    srcs = [
+        "gen_api_test.go",
+        "http1_external_test.go",
+    ],
+    deps = [
+        ":http1",
+        "//internal/core/net",
+        "//internal/service/net/http1",
+        "//pkg/v1/net/server",
+    ],
+)

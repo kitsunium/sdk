@@ -6,6 +6,7 @@ go_library(
     name = "http1",
     srcs = [
         "doc.go",
+        "loop.go",
         "parse.go",
         "refusal.go",
         "write.go",
@@ -39,6 +40,8 @@ go_test(
         "gen_api_test.go",
         "gen_perf_test.go",
         "http1_bench_test.go",
+        "loop_external_test.go",
+        "loop_fixtures_test.go",
         "perf_fixtures_test.go",
         "write_external_test.go",
     ],

@@ -1198,6 +1198,12 @@ rules:
       # against. Scoped to the one file.
       - "**/internal/service/net/loop/group.go"
       - "internal/service/net/loop/group.go"
+      # service/net/http1.LoopHandler is built by HandleLoop(h, p), the name
+      # ADR 0186 §D9 gives the adapter: it reads at the call site as what it
+      # does, group.HandleLoop(http1.HandleLoop(h, p)). A NewLoopHandler beside
+      # it would be a second way to the same value. Scoped to the one file.
+      - "**/internal/service/net/http1/loop.go"
+      - "internal/service/net/http1/loop.go"
       # kernel/jsonenc.Object is built by BeginObject, which is what it does: it
       # writes the opening brace onto the caller's slice and returns the value
       # that writes the members after it. The zero Object holds no slice and is

@@ -45,6 +45,27 @@ shapes: a GET carrying a bearer token and a POST carrying a JSON body.
 `Parse` frames a request in about an eighth of what `net/http` takes to read
 it, and allocates nothing where `net/http` allocates 11 to 14 times.
 
+## The loop adapter
+
+`BenchmarkLoopHandler` runs one loop batch through `HandleLoop`'s adapter —
+`OnData` then `OnBatchEnd` — on a `LoopIO` that only counts its writes, so the
+figure is the adapter's own: framing, the handler call, the answer written
+into the loop's buffer, the batch's end. Measured on the same machine on
+2026-10-24 (load average 10 to 20), `feat/s5b-http1-loop`, median of six at
+`-benchtime=300ms`.
+
+| Benchmark | ns/op (per batch) | per request | B/op | allocs/op |
+|---|---|---|---|---|
+| `LoopHandler/now16` (16 pipelined GETs, answered at once) | **1 710** | 107 | 0 | 0 |
+| `LoopHandler/deferred16` (the same, every answer deferred to `EndBatch`) | **1 762** | 110 | 0 | 0 |
+| `LoopHandler/mixed` (GET, deferred GET, POST, deferred GET, and a refusal on a second connection) | **681** | 136 | 0 | 0 |
+
+A deferred answer costs about 3 ns more than an immediate one: the batch's
+answers are written again in request order (`complete`), so each connection
+still leaves in one `Write`. The `allocs: 0` budgets of `design/sdk.yaml` on
+`(*LoopHandler).OnData` and `(*LoopHandler).OnBatchEnd` hold the same batch
+(`TestPerfAllocsLoopHandlerOnData`, `TestPerfAllocsLoopHandlerOnBatchEnd`, race off).
+
 ## Against the C reference
 
 `ParseCRefStream` parses the C harness's stream: `build_stream` of

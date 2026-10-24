@@ -889,6 +889,13 @@ types:
           this request: a Connection field holding the close token.
         name: Close
         type: bool
+      - doc: |-
+          Loop is the index of the loop that framed the request — its
+          LoopIO.Loop — set by the loop adapter before the handler runs, so a
+          handler finds its per-loop state in a slice, with no lock. Parse leaves
+          it as it is; outside the loop adapter it is what the caller set.
+        name: Loop
+        type: int
     kind: struct
     methods:
       - name: Field
@@ -913,6 +920,16 @@ types:
         type: "[]byte"
       - doc: Close asks the codec to close the connection after this response.
         name: Close
+        type: bool
+      - doc: |-
+          Defer, set by the handler, holds the answer back until the end of the
+          loop's batch, for work it batches — one database transaction for every
+          request of the batch, say. The response value then stays valid, at the
+          same address, until HTTP1Batcher.EndBatch returns, and the handler
+          completes it there: it fills it and clears Defer. An answer still
+          deferred when EndBatch returns is answered 500 and its connection
+          closed. Only the loop adapter reads it; AppendResponse does not.
+        name: Defer
         type: bool
     kind: struct
     name: HTTP1ResponseValue
