@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T07:19:32Z -->
+<!-- updated: 2026-10-24T11:20:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -272,6 +272,16 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   A snapshot is decoded with the codec its metadata names (#513, #512,
   `TestASnapshotOfAnUnknownFormatStopsTheNode`,
   `TestASnapshotIsReadWithTheCodecItWasWrittenWith`).
+- Take a snapshot's `ClusterVersion` without comparing it with
+  `ProtocolMax`. Once the log is compacted past a raise, the snapshot is
+  all that carries it: a node rolled back started or installed it and ran
+  at a version whose formats it cannot read back. `knownClusterVersion`
+  refuses it VERSION_UNSUPPORTED in `snapshotCodec` (a start, an offer) and
+  `restoreCodec` (`RestoreSnapshot`, `OpenSnapshot`, `ImportObserved`), and
+  raft flags it at `NewRaft`, `CheckOffer` and `InstallSnapshot` (#640,
+  `TestANodeRefusesToStartOnASnapshotAboveItsProtocol`,
+  `TestAnOfferOfASnapshotAboveTheProtocolStopsTheNode`,
+  `TestTheOfflineReadersRefuseASnapshotAboveTheProtocol`).
 - Stream again a snapshot a peer refused SNAPSHOT_CORRUPT without reading
   it back: `sentCorrupt` verifies the sender's copy and replaces one that
   fails (#525, `TestALeaderReplacesASnapshotItsPeerFindsCorrupt`).

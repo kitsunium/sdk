@@ -1097,6 +1097,12 @@ func checkRestore(flog *fileLog, stamp *coreconsensus.StampValue, newCluster cor
 // with another codec failed as corrupt instead of being refused cleanly
 // when this build does not link its codec (D18, #548).
 func restoreCodec(opt *RestoreOptions) (coretransform.BoundedDecompressor, error) {
+	// A snapshot at a cluster version this build does not speak would found
+	// a history at it: RestoreSnapshot, OpenSnapshot and ImportObserved all
+	// come here first (#640).
+	if err := knownClusterVersion(&opt.Expected); err != nil {
+		return nil, err
+	}
 	if opt.Codec != nil {
 		return opt.Codec, nil
 	}

@@ -4078,8 +4078,13 @@ completed:
   `VERSION_UNSUPPORTED` while any member of the latest configuration, voter
   or learner, was not heard in the term announcing protocol 2. A member
   rolled back stops announcing at its next message. A node of protocol 1
-  that finds the raise committed stops (`VERSION_UNSUPPORTED`): the rollback
-  after the raise is refused cleanly, never run on the formats below.
+  that replays the raise from its log stops (`VERSION_UNSUPPORTED`). The
+  rollback after the raise is refused cleanly only while the raise entry is
+  in the log: a build of protocol 1 reads a snapshot cut after the raise
+  without comparing its cluster version, and runs at version 2 once the
+  log is compacted past the entry. Do not roll back past a raise. Builds
+  from the amendment of 2026-10-24 (#640) refuse such a snapshot too
+  (corrected 2026-10-24, #640).
 - **What protocol 2 writes**, each chosen by the committed cluster version,
   never before the raise, and each older form still read:
   - the snapshot metadata in version 2, exactly as the amendment of
@@ -4142,6 +4147,31 @@ refused, and the node acknowledged and voted on them
   retrying in the process leaked at every try.
 
 Nothing published changes: no frame, no payload, no record format.
+
+## Amendment — a snapshot above the protocol a node speaks stops it (2026-10-24, #640)
+
+D18's "unknown means stop" held for a raise replayed from the log alone
+(`commitClusterVersion`). Once a snapshot cut after a raise is the base and
+the log is compacted past the raise entry, the raise reaches a node only as
+the snapshot's `ClusterVersion`, and nothing compared it with what the node
+speaks: a node rolled back, or this build under a raise to a later protocol,
+started or installed such a snapshot and ran at a version whose formats it
+cannot read back ([#640](https://github.com/kitsunium/sdk/issues/640)).
+
+- **A start is refused `VERSION_UNSUPPORTED`** when the snapshot it would
+  restore names a cluster version above `ProtocolMax`, before the state
+  machine restores it, as for a metadata version or a codec this build does
+  not know (#513). The step function flags the same base in its first
+  Ready, and the driver stops the node, as on the raise replayed from the
+  log.
+- **An offer is refused `VERSION_UNSUPPORTED`** and the node stops, as for an
+  unknown metadata version. An install of such a snapshot changes nothing
+  and stops the node.
+- **Offline**, `RestoreSnapshot`, `OpenSnapshot` and `ImportObserved` refuse
+  `VERSION_UNSUPPORTED` an `Expected` metadata above `ProtocolMax` before
+  any byte is read or written.
+- It is a refusal, never a new format: no frame, payload or record changes,
+  and nothing is written at another version.
 
 ## Revision history
 

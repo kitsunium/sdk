@@ -494,6 +494,8 @@ files:
       - round
       - Raft
       - NewRaft
+      - (*Raft).adoptClusterVersion
+      - (*Raft).refusesClusterVersion
       - (*Raft).loadEntries
       - (*Raft).raiseSilenceOverSnapshot
       - (*Raft).Tick
@@ -2017,6 +2019,25 @@ types:
       - name: SetOverloaded
         params: on bool
         recv: r *Raft
+      - doc: |-
+          adoptClusterVersion takes the start's snapshot's cluster version, unless
+          it is above the protocol this node speaks: the node then stops on its
+          first Ready, as on the raise replayed from the log (D18). Once a snapshot
+          cut after a raise is the base and the log is compacted past the raise
+          entry, the raise reaches a node rolled back only as that snapshot's
+          ClusterVersion; taken as it was, the node ran at a version whose formats
+          it cannot read back (#640).
+        name: adoptClusterVersion
+        params: sm *core.SnapshotMetaValue
+        recv: r *Raft
+      - doc: |-
+          refusesClusterVersion names a snapshot whose cluster version is above the
+          protocol this node speaks in the Ready, for the driver to stop the node
+          with VERSION_UNSUPPORTED, and reports whether it did.
+        name: refusesClusterVersion
+        params: sm *core.SnapshotMetaValue
+        recv: r *Raft
+        results: bool
       - doc: |-
           loadEntries appends the start's entries past the snapshot to the log,
           noting what each changes at append time.

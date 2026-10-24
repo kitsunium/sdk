@@ -18,12 +18,13 @@ func (n *Node) offer(from coreconsensus.AuthenticatedPeerValue, o coreconsensus.
 		acc.Refused = coreconsensus.CodeNodeStopped
 	}
 	if acc.Refused == coreconsensus.CodeVersionUnsupported {
-		// A snapshot version this node does not know stops it (D18): only
-		// refused, it was offered again at every probe while the node
-		// stayed out of replication and reported ready (#513). The stop
-		// is off the loop, which never waits on the marker's write.
+		// A snapshot version, or a cluster version (#640), this node does
+		// not know stops it (D18): only refused, it was offered again at
+		// every probe while the node stayed out of replication and
+		// reported ready (#513). The stop is off the loop, which never
+		// waits on the marker's write.
 		n.stop(origin(coreconsensus.VersionUnsupported, errs.Int("snapshot_version", int(o.Meta.Version)),
-			errs.String("snapshot_codec", o.Meta.Codec)), false)
+			errs.String("snapshot_codec", o.Meta.Codec), errs.Int("cluster_version", int(o.Meta.ClusterVersion))), false)
 	}
 	return acc
 }

@@ -1343,6 +1343,7 @@ files:
       - idNamesPosition
       - (*Node).codecOf
       - snapshotCodec
+      - knownClusterVersion
       - linkedCodec
       - (*Node).maybeSnapshot
       - (*Node).cutFailed
@@ -2616,10 +2617,21 @@ functions:
   - doc: |-
       snapshotCodec is codecOf for a node whose own codec is own; an offline
       operation, which has none, passes nil and reads only the codecs this build
-      links.
+      links. A snapshot whose cluster version this build does not speak is
+      refused too: a start, an offer and an install all read it here (#640).
     name: snapshotCodec
     params: m *coreconsensus.SnapshotMetaValue, own coretransform.BoundedDecompressor
     results: coretransform.BoundedDecompressor, error
+  - doc: |-
+      knownClusterVersion refuses VERSION_UNSUPPORTED a snapshot whose cluster
+      version is above the protocol this build speaks. Once the cluster raised
+      past it, cut a snapshot and compacted the log past the raise entry, the
+      raise reaches a node rolled back only as a snapshot's ClusterVersion, and
+      unknown means stop, never skip (D18, #640). It is a refusal, never a new
+      format: nothing is written at another version.
+    name: knownClusterVersion
+    params: m *coreconsensus.SnapshotMetaValue
+    results: error
   - doc: |-
       linkedCodec is the bounded codec this build links under name, refused
       VERSION_UNSUPPORTED when there is none.
