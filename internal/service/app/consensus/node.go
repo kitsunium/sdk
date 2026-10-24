@@ -506,6 +506,9 @@ func (n *Node) bindTransport() error {
 	if jb, ok := cfg.Transport.(coreconsensus.JoinReasonBinder); ok {
 		jb.BindJoinReason(cfg.Group, n.joinReason)
 	}
+	if wb, ok := cfg.Transport.(bindWarner); ok {
+		wb.bindWarn(n.obs.warn)
+	}
 	return nil
 }
 

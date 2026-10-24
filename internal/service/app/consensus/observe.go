@@ -225,6 +225,13 @@ func lstr(k, v string) corelogger.AttrValue {
 	return corelogger.AttrValue{Key: k, Value: corelogger.StringValue(v)}
 }
 
+// bindWarner is a transport that logs, through the node's log, what it
+// refuses before any callback of the node sees it: a snapshot offer above
+// its bound ended the stream with no line on the receiver (#634).
+type bindWarner interface {
+	bindWarn(warn func(msg string, attrs ...corelogger.AttrValue))
+}
+
 // span starts a span when a Tracer is configured; the returned span may be
 // nil, and every helper below accepts it.
 func (o *obs) span(ctx context.Context, name string) coretrace.Span {

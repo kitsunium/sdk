@@ -603,6 +603,12 @@ constants:
         type: int
         value: "10"
       - doc: |-
+          defaultMaxFrameBytes is MaxFrameBytes when unset, and the bound the
+          memory double reads a snapshot offer under (#634).
+        name: defaultMaxFrameBytes
+        type: int
+        value: 16 << 20
+      - doc: |-
           senderQueueFrames bounds the frames queued for one peer and lane; the
           byte bound PeerQueueBytes usually binds first.
         name: senderQueueFrames
@@ -1037,6 +1043,7 @@ files:
       - (*MemoryTransport).deliverFrame
       - (*MemoryTransport).BindJoinReason
       - (*MemoryTransport).SetMembership
+      - (*MemoryTransport).bindWarn
       - (*MemoryTransport).releaseJoinAnswer
       - (*MemoryNetwork).admitted
       - (*MemoryTransport).Join
@@ -1196,6 +1203,7 @@ files:
       - (*obs).warn
       - lattr
       - lstr
+      - bindWarner
       - (*obs).span
       - spanEvent
       - spanEnd
@@ -1508,6 +1516,8 @@ files:
       - boundedWriter.CloseWrite
       - installResult
       - (*TCPTransport).serveSnapshot
+      - offerRefused
+      - (*TCPTransport).bindWarn
       - encodeJoin
       - decodeJoin
       - encodeJoinV2
@@ -2939,6 +2949,13 @@ functions:
     name: installResult
     params: c *tls.Conn
     results: error
+  - doc: |-
+      offerRefused logs, through warn, a snapshot offer from peer that the
+      receiving transport refused before the node judged it: one above bound, or
+      one that does not decode. A failure to read that carries no code, the
+      sender's own end of the stream, is not logged (#634).
+    name: offerRefused
+    params: warn func(string, ...corelogger.AttrValue), from coreconsensus.NodeID, bound int, err error
   - doc: |-
       encodeJoin is the wire form of a JOIN: cluster, id, incarnation, the
       slot with its one-byte length, then the address to the end.
@@ -4961,6 +4978,17 @@ types:
       - doc: hold keeps the JOIN answer's configuration and release (#632).
         name: hold
         type: joinHold
+      - doc: |-
+          maxOffer bounds the snapshot offer this end accepts, encoded as the
+          TCP transport sends it; 0 is the TCP transport's default
+          MaxFrameBytes. Set by the package's own tests only (#634).
+        name: maxOffer
+        type: int
+      - doc: |-
+          warn is the node's log, for an offer refused before the node judged
+          it, as on the TCP transport (#634).
+        name: warn
+        type: func(msg string, attrs ...corelogger.AttrValue)
     kind: struct
     methods:
       - name: Send
@@ -4999,6 +5027,10 @@ types:
         recv: t *MemoryTransport
       - name: SetMembership
         params: group coreconsensus.GroupID, admitted []coreconsensus.MemberValue
+        recv: t *MemoryTransport
+      - doc: bindWarn implements bindWarner.
+        name: bindWarn
+        params: warn func(msg string, attrs ...corelogger.AttrValue)
         recv: t *MemoryTransport
       - doc: |-
           releaseJoinAnswer drops the JOIN answer's group once the node is
@@ -7198,6 +7230,16 @@ types:
         recv: o *obs
     name: obs
   - doc: |-
+      bindWarner is a transport that logs, through the node's log, what it
+      refuses before any callback of the node sees it: a snapshot offer above
+      its bound ended the stream with no line on the receiver (#634).
+    kind: named
+    name: bindWarner
+    underlying: |-
+      interface {
+      	bindWarn(warn func(msg string, attrs ...corelogger.AttrValue))
+      }
+  - doc: |-
       snapshotReader is OpenSnapshot's reader: a chunk reader whose end is
       checked against the metadata.
     fields:
@@ -7675,6 +7717,11 @@ types:
       - doc: hold keeps the JOIN answer's configuration and release (#632).
         name: hold
         type: joinHold
+      - doc: |-
+          warn is the node's log, for what the transport refuses before any
+          callback of the node sees it (#634); nil logs nothing.
+        name: warn
+        type: func(msg string, attrs ...corelogger.AttrValue)
     kind: struct
     methods:
       - name: Addr
@@ -7890,8 +7937,21 @@ types:
           serveSnapshot is the receiving end of a snapshot stream: it reads the
           offer, answers with the engine's acceptance, and when accepted hands the
           stream to install, then writes back the install's verdict.
+
+          The offer is read under MaxFrameBytes, the data lane's bound, never the
+          control lane's: its metadata carries the configuration at the snapshot's
+          index, Retired included, which every Remove grows by an ID for the life of
+          the cluster. Read under MaxControlFrameBytes (64 KiB by default), past
+          about 8 100 removals no snapshot was ever installed again, and the
+          receiver ended each stream without a word (#634). A configuration already
+          reaches every member in a membership entry under MaxFrameBytes. An offer
+          refused before the node judged it is logged.
         name: serveSnapshot
         params: c *tls.Conn, peer coreconsensus.AuthenticatedPeerValue
+        recv: t *TCPTransport
+      - doc: bindWarn implements bindWarner.
+        name: bindWarn
+        params: warn func(msg string, attrs ...corelogger.AttrValue)
         recv: t *TCPTransport
       - doc: |-
           serveJoin answers the one frame a non-member may send. The slot comes
@@ -8144,6 +8204,12 @@ vars:
         value: (*TCPTransport)(nil)
       - name: _
         type: refreshJoiner
+        value: (*MemoryTransport)(nil)
+      - name: _
+        type: bindWarner
+        value: (*TCPTransport)(nil)
+      - name: _
+        type: bindWarner
         value: (*MemoryTransport)(nil)
       - name: _
         type: |-

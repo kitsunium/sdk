@@ -1126,6 +1126,29 @@ removable. The operator brings the stale voter back, or removes it, first.
 **Limits TLS does not set (R1-24, from raft-sql-poc).**
 - A frame's announced length is checked against `MaxFrameBytes` before
   anything is allocated.
+- **A snapshot offer is read under `MaxFrameBytes`, never the control
+  bound (amendment of 2026-10-24,
+  [#634](https://github.com/kitsunium/sdk/issues/634)).** The offer is the
+  term and the snapshot's metadata, which carries the configuration at its
+  index, `Retired` included, 8 bytes per ID. Every Remove retires an ID for
+  the life of the cluster and nothing prunes the list. Read under
+  `MaxControlFrameBytes` (64 KiB by default), an offer outgrew it past
+  about 8 100 removals, and from then on no snapshot was ever installed over
+  TCP: the receiver ended every stream without an answer or a line in its
+  log, and the leader saw `FRAME_INVALID` or a reset at every probe. The
+  snapshot lane now reads the offer under `MaxFrameBytes`, the bound the
+  same configuration already meets in every membership entry, which the
+  leader rewrites into the whole configuration (D8): about two million
+  removals at 16 MiB. The receiver logs an offer it refuses before the node
+  judges it (above the bound, or one that does not decode), the sender
+  refuses one above its own `MaxFrameBytes` before it dials, and the memory
+  double applies the same bound. No frame changes. A node that still reads
+  the offer under the control bound refuses an offer past the old threshold
+  until it is upgraded. A Remove is not refused on this ground: it shrinks
+  the encoding, a member's record weighing more than the ID it retires, and
+  the list grows only with the member added after it. Bounding `Retired`
+  itself would need another way to keep "an ID is never added back", and is
+  left open.
 - A snapshot is inflated no further than `MaxSnapshotBytes` and the size its
   metadata announces, whichever is smaller (R1-15), before its hash is checked
   (`raft.js:1272-1289`).

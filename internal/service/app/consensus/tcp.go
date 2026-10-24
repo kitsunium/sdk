@@ -21,6 +21,7 @@ import (
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 	"github.com/kitsunium/sdk/internal/service/net/server"
@@ -65,6 +66,9 @@ const (
 	// minFrameBody is the smallest body a frame can announce: its version,
 	// kind and group. A shorter one is refused before any allocation.
 	minFrameBody int = 10
+	// defaultMaxFrameBytes is MaxFrameBytes when unset, and the bound the
+	// memory double reads a snapshot offer under (#634).
+	defaultMaxFrameBytes int = 16 << 20
 	// senderQueueFrames bounds the frames queued for one peer and lane; the
 	// byte bound PeerQueueBytes usually binds first.
 	senderQueueFrames int = 4096
@@ -285,6 +289,9 @@ type TCPTransport struct {
 	predatesJoinV2 atomic.Bool
 	// hold keeps the JOIN answer's configuration and release (#632).
 	hold joinHold
+	// warn is the node's log, for what the transport refuses before any
+	// callback of the node sees it (#634); nil logs nothing.
+	warn func(msg string, attrs ...corelogger.AttrValue)
 }
 
 type outKey struct {
@@ -294,7 +301,7 @@ type outKey struct {
 
 // validate applies the defaults and the refusals of the configuration.
 func (c *TransportConfig) validate() error {
-	clampInt(&c.MaxFrameBytes, 16<<20)
+	clampInt(&c.MaxFrameBytes, defaultMaxFrameBytes)
 	clampInt(&c.MaxControlFrameBytes, 64<<10)
 	clampDuration(&c.HandshakeTimeout, time.Second)
 	clampInt64(&c.PeerQueueBytes, 64<<20)
@@ -1193,6 +1200,12 @@ func decodeOffer(b []byte) (coreconsensus.InstallOfferValue, error) {
 
 // Stream implements Transport.
 func (t *TCPTransport) Stream(ctx context.Context, to coreconsensus.NodeID, offer coreconsensus.InstallOfferValue, open func(int64) (io.ReadCloser, error)) error {
+	// An offer above MaxFrameBytes, the bound the receiver reads it under,
+	// is refused before any dial (#634).
+	body := encodeOffer(offer)
+	if len(body) > t.cfg.MaxFrameBytes {
+		return origin(coreconsensus.FrameInvalid, errs.String("what", "snapshot offer"), errs.Int("length", len(body)))
+	}
 	addr, pin, ok := t.address(to)
 	if !ok {
 		return peerRejected("no address")
@@ -1219,7 +1232,7 @@ func (t *TCPTransport) Stream(ctx context.Context, to coreconsensus.NodeID, offe
 		return err
 	}
 	w := boundedWriter{conn: c, half: c, d: t.cfg.WriteTimeout}
-	if err := writeChunk(w, encodeOffer(offer)); err != nil {
+	if err := writeChunk(w, body); err != nil {
 		return err
 	}
 	acc, err := readAccept(c, t.cfg.JoinTimeout)
@@ -1335,18 +1348,28 @@ func installResult(c *tls.Conn) error {
 // serveSnapshot is the receiving end of a snapshot stream: it reads the
 // offer, answers with the engine's acceptance, and when accepted hands the
 // stream to install, then writes back the install's verdict.
+//
+// The offer is read under MaxFrameBytes, the data lane's bound, never the
+// control lane's: its metadata carries the configuration at the snapshot's
+// index, Retired included, which every Remove grows by an ID for the life of
+// the cluster. Read under MaxControlFrameBytes (64 KiB by default), past
+// about 8 100 removals no snapshot was ever installed again, and the
+// receiver ended each stream without a word (#634). A configuration already
+// reaches every member in a membership entry under MaxFrameBytes. An offer
+// refused before the node judged it is logged.
 func (t *TCPTransport) serveSnapshot(c *tls.Conn, peer coreconsensus.AuthenticatedPeerValue) {
-	b, err := readChunk(c, t.cfg.MaxControlFrameBytes)
-	if err != nil {
-		return
-	}
-	o, err := decodeOffer(b)
-	if err != nil {
-		return
+	b, err := readChunk(c, t.cfg.MaxFrameBytes)
+	var o coreconsensus.InstallOfferValue
+	if err == nil {
+		o, err = decodeOffer(b)
 	}
 	t.mu.Lock()
-	of, in := t.offer, t.install
+	of, in, warn := t.offer, t.install, t.warn
 	t.mu.Unlock()
+	if err != nil {
+		offerRefused(warn, peer.ID, t.cfg.MaxFrameBytes, err)
+		return
+	}
 	if of == nil || in == nil {
 		return
 	}
@@ -1373,6 +1396,30 @@ func (t *TCPTransport) serveSnapshot(c *tls.Conn, peer coreconsensus.Authenticat
 	// The last write of the stream: a sender that does not read it sees the
 	// connection end and treats the install as failed, which it retries.
 	abandon(writeChunk(c, binary.LittleEndian.AppendUint32(nil, uint32(code))))
+}
+
+// offerRefused logs, through warn, a snapshot offer from peer that the
+// receiving transport refused before the node judged it: one above bound, or
+// one that does not decode. A failure to read that carries no code, the
+// sender's own end of the stream, is not logged (#634).
+func offerRefused(warn func(string, ...corelogger.AttrValue), from coreconsensus.NodeID, bound int, err error) {
+	if _, coded := errs.CodeOf(err); !coded || warn == nil {
+		return
+	}
+	attrs := []corelogger.AttrValue{lattr("from", uint64(from)), lattr("bound", uint64(bound)), lstr("error", err.Error())}
+	for _, f := range errs.FieldsOf(err) {
+		if f.Key() == "length" {
+			attrs = append(attrs, lstr("length", f.StringValue()))
+		}
+	}
+	warn("consensus: snapshot offer refused before it was judged", attrs...)
+}
+
+// bindWarn implements bindWarner.
+func (t *TCPTransport) bindWarn(warn func(msg string, attrs ...corelogger.AttrValue)) {
+	t.mu.Lock()
+	t.warn = warn
+	t.mu.Unlock()
 }
 
 // ---- pre-admission JOIN (D4, R7-42, R8-09) ----

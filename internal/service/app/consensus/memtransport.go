@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
@@ -116,6 +117,13 @@ type MemoryTransport struct {
 	members []coreconsensus.MemberValue
 	// hold keeps the JOIN answer's configuration and release (#632).
 	hold joinHold
+	// maxOffer bounds the snapshot offer this end accepts, encoded as the
+	// TCP transport sends it; 0 is the TCP transport's default
+	// MaxFrameBytes. Set by the package's own tests only (#634).
+	maxOffer int
+	// warn is the node's log, for an offer refused before the node judged
+	// it, as on the TCP transport (#634).
+	warn func(msg string, attrs ...corelogger.AttrValue)
 }
 
 // memRun is one delivery goroutine's life: Close closes stop, once, and
@@ -160,8 +168,17 @@ func (t *MemoryTransport) Stream(ctx context.Context, to coreconsensus.NodeID, o
 		return origin(coreconsensus.PeerRejected, errs.String("why", "not admitted"))
 	}
 	dst.mu.Lock()
-	of, in := dst.offer, dst.install
+	of, in, warn, bound := dst.offer, dst.install, dst.warn, dst.maxOffer
 	dst.mu.Unlock()
+	if bound <= 0 {
+		bound = defaultMaxFrameBytes
+	}
+	if n := len(encodeOffer(offer)); n > bound {
+		// The receiver refuses it as the TCP one does, and the sender sees
+		// its stream end unanswered (#634).
+		offerRefused(warn, t.id, bound, origin(coreconsensus.FrameInvalid, errs.Int("length", n)))
+		return origin(coreconsensus.FrameInvalid, errs.String("what", "install accept"))
+	}
 	if of == nil {
 		return origin(coreconsensus.PeerRejected, errs.String("why", "unbound"))
 	}
@@ -269,6 +286,13 @@ func (t *MemoryTransport) SetMembership(group coreconsensus.GroupID, admitted []
 	for _, g := range slices.Sorted(maps.Keys(t.groups)) {
 		t.members = append(t.members, t.groups[g]...)
 	}
+}
+
+// bindWarn implements bindWarner.
+func (t *MemoryTransport) bindWarn(warn func(msg string, attrs ...corelogger.AttrValue)) {
+	t.mu.Lock()
+	t.warn = warn
+	t.mu.Unlock()
 }
 
 // releaseJoinAnswer drops the JOIN answer's group once the node is

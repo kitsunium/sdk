@@ -51,6 +51,8 @@ var (
 	_ joinReleaser                     = (*MemoryTransport)(nil)
 	_ refreshJoiner                    = (*TCPTransport)(nil)
 	_ refreshJoiner                    = (*MemoryTransport)(nil)
+	_ bindWarner                       = (*TCPTransport)(nil)
+	_ bindWarner                       = (*MemoryTransport)(nil)
 	_ interface {
 		CertExpiry() time.Time
 		PeerCertExpiry() map[coreconsensus.NodeID]time.Time

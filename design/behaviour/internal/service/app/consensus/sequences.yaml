@@ -7618,6 +7618,8 @@ sequences:
         kind: value
       - id: dst.mu.Unlock
         kind: value
+      - id: offerRefused
+        kind: internal
       - id: rc.Close
         kind: value
     steps:
@@ -7636,10 +7638,25 @@ sequences:
           when: "!t.net.admitted(t, to) || !t.net.admitted(dst, t.id)"
       - eval: dst.mu.Lock()
         to: dst.mu.Lock
-      - bind: of, in
-        eval: dst.offer, dst.install
+      - bind: of, in, warn, bound
+        eval: dst.offer, dst.install, dst.warn, dst.maxOffer
       - eval: dst.mu.Unlock()
         to: dst.mu.Unlock
+      - opt:
+          do:
+            - set: bound
+              value: defaultMaxFrameBytes
+          when: bound <= 0
+      - opt:
+          do:
+            - eval: offerRefused(warn, t.id, bound, origin(coreconsensus.FrameInvalid, errs.Int("length", n)))
+              to: offerRefused
+            - return: origin(coreconsensus.FrameInvalid, errs.String("what", "install accept"))
+              to: origin
+          init:
+            bind: "n"
+            eval: len(encodeOffer(offer))
+          when: n > bound
       - opt:
           do:
             - return: origin(coreconsensus.PeerRejected, errs.String("why", "unbound"))
@@ -7810,6 +7827,23 @@ sequences:
           key: _
           range: slices.Sorted(maps.Keys(t.groups))
           value: g
+  - of: (*MemoryTransport).bindWarn
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*MemoryTransport).bindWarn
+        kind: self
+      - id: t.mu.Lock
+        kind: value
+      - id: t.mu.Unlock
+        kind: value
+    steps:
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - set: t.warn
+        value: warn
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
   - of: (*MemoryTransport).releaseJoinAnswer
     participants:
       - id: caller
@@ -8471,6 +8505,8 @@ sequences:
         kind: value
       - id: jb.BindJoinReason
         kind: value
+      - id: wb.bindWarn
+        kind: internal
     steps:
       - bind: cfg
         eval: "&n.cfg"
@@ -8506,6 +8542,14 @@ sequences:
           init:
             bind: jb, ok
             eval: cfg.Transport.(coreconsensus.JoinReasonBinder)
+          when: ok
+      - opt:
+          do:
+            - eval: wb.bindWarn(n.obs.warn)
+              to: wb.bindWarn
+          init:
+            bind: wb, ok
+            eval: cfg.Transport.(bindWarner)
           when: ok
       - return: nil
   - of: (*Node).load
@@ -18868,7 +18912,7 @@ sequences:
       - id: transportMisconfigured
         kind: internal
     steps:
-      - eval: clampInt(&c.MaxFrameBytes, 16<<20)
+      - eval: clampInt(&c.MaxFrameBytes, defaultMaxFrameBytes)
         to: clampInt
       - eval: clampInt(&c.MaxControlFrameBytes, 64<<10)
         to: clampInt
@@ -20420,6 +20464,10 @@ sequences:
         kind: actor
       - id: (*TCPTransport).Stream
         kind: self
+      - id: encodeOffer
+        kind: internal
+      - id: origin
+        kind: internal
       - id: t.address
         kind: internal
       - id: peerRejected
@@ -20436,13 +20484,19 @@ sequences:
         kind: internal
       - id: errs
         kind: package
-      - id: origin
-        kind: internal
       - id: streamFrom
         kind: internal
       - id: installResult
         kind: internal
     steps:
+      - bind: body
+        eval: encodeOffer(offer)
+        to: encodeOffer
+      - opt:
+          do:
+            - return: origin(coreconsensus.FrameInvalid, errs.String("what", "snapshot offer"), errs.Int("length", len(body)))
+              to: origin
+          when: len(body) > t.cfg.MaxFrameBytes
       - bind: addr, pin, ok
         eval: t.address(to)
         to: t.address
@@ -20478,7 +20532,7 @@ sequences:
             - return: err
           init:
             bind: err
-            eval: writeChunk(w, encodeOffer(offer))
+            eval: writeChunk(w, body)
             to: writeChunk
           when: err != nil
       - bind: acc, err
@@ -20677,6 +20731,8 @@ sequences:
         kind: value
       - id: t.mu.Unlock
         kind: value
+      - id: offerRefused
+        kind: internal
       - id: binary.LittleEndian.AppendUint64
         kind: value
       - id: binary.LittleEndian.AppendUint32
@@ -20691,25 +20747,29 @@ sequences:
         kind: internal
     steps:
       - bind: b, err
-        eval: readChunk(c, t.cfg.MaxControlFrameBytes)
+        eval: readChunk(c, t.cfg.MaxFrameBytes)
         to: readChunk
+      - var:
+          name: o
+          type: coreconsensus.InstallOfferValue
       - opt:
           do:
-            - return: ""
-          when: err != nil
-      - bind: o, err
-        eval: decodeOffer(b)
-        to: decodeOffer
-      - opt:
-          do:
-            - return: ""
-          when: err != nil
+            - set: o, err
+              to: decodeOffer
+              value: decodeOffer(b)
+          when: err == nil
       - eval: t.mu.Lock()
         to: t.mu.Lock
-      - bind: of, in
-        eval: t.offer, t.install
+      - bind: of, in, warn
+        eval: t.offer, t.install, t.warn
       - eval: t.mu.Unlock()
         to: t.mu.Unlock
+      - opt:
+          do:
+            - eval: offerRefused(warn, peer.ID, t.cfg.MaxFrameBytes, err)
+              to: offerRefused
+            - return: ""
+          when: err != nil
       - opt:
           do:
             - return: ""
@@ -20758,6 +20818,53 @@ sequences:
           when: ierr != nil
       - eval: abandon(writeChunk(c, binary.LittleEndian.AppendUint32(nil, uint32(code))))
         to: abandon
+  - of: offerRefused
+    participants:
+      - id: caller
+        kind: actor
+      - id: offerRefused
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: _, coded
+            eval: errs.CodeOf(err)
+            to: errs
+          when: "!coded || warn == nil"
+      - bind: attrs
+        eval: "[]corelogger.AttrValue{lattr(\"from\", uint64(from)), lattr(\"bound\", uint64(bound)), lstr(\"error\", err.Error())}"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: attrs
+                    value: append(attrs, lstr("length", f.StringValue()))
+                when: f.Key() == "length"
+          key: _
+          range: errs.FieldsOf(err)
+          value: f
+      - eval: "warn(\"consensus: snapshot offer refused before it was judged\", attrs...)"
+  - of: (*TCPTransport).bindWarn
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).bindWarn
+        kind: self
+      - id: t.mu.Lock
+        kind: value
+      - id: t.mu.Unlock
+        kind: value
+    steps:
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - set: t.warn
+        value: warn
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
   - of: encodeJoin
     participants:
       - id: caller

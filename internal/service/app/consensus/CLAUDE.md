@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T16:07:05Z -->
+<!-- updated: 2026-10-24T16:10:55Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -545,6 +545,14 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   `TestAJoinerHearsALeaderAdmittedAfterItsJoinAnswer`); never once the
   admission released the answer (`joinHold`,
   `TestAJoinSentAgainReplacesOnlyAHeldAnswer`).
+- Read a snapshot offer under `MaxControlFrameBytes`, or end a refused one
+  without a line: its metadata carries the configuration, `Retired`
+  included, which every Remove grows for good, and past about 8 100
+  removals no snapshot was ever installed over TCP again (#634,
+  `serveSnapshot`, `offerRefused`,
+  `TestASnapshotOfferCarryingManyRetiredIDsIsInstalledOverTCP`). The memory
+  double holds the same bound (`maxOffer`,
+  `TestASnapshotOfferAboveTheFrameBoundIsRefusedAndLogged`).
 - Report a leader known from heartbeats alone: a leader answered one of the
   node's reads within `ElectionTimeoutMax`, or the node leads (#541, #540,
   `probeLeader`). Keep a leader whose sync or apply has not moved for
