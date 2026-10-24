@@ -1581,6 +1581,20 @@ is refused with `OVERLOADED`. Nothing is appended in either case.
   - the RECEIVER chooses the resume offset, from what it has durably spooled.
     `Transport.Stream` takes a function that opens the snapshot at an offset,
     so the sender can resume where the receiver says;
+  - **the offer is screened on the event loop, and its spool positioned off
+    it (amendment of 2026-10-24, #643).** The loop screens the offer, answers
+    it held, or refuses it, including `OVERLOADED` while that snapshot is
+    being installed or another offer's spool is being positioned. The
+    caller's goroutine then opens and positions the spool, and the node's
+    stop waits for it. Finding a resume offset reads the spool back chunk by
+    chunk. On the loop, a cold 1 GiB spool held the node from acknowledging
+    and voting for longer than the sender waits for the accept (`JoinTimeout`,
+    #623), and every later offer read the spool back again. A spool
+    positioned and then released with nothing written resumes from the
+    offset kept in memory, so the offer after a judgment that outlasted the
+    bound is answered at once. A resume offset past the snapshot's encoded
+    size is never accepted: the spool is discarded and the snapshot accepted
+    from its start;
   - **freshness is checked again on the event loop, right before the install
     is accepted.** A snapshot whose index is not beyond the receiver's commit
     index is refused, even from the same leader in the same term. Then the

@@ -4191,8 +4191,10 @@ Transport is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.T
 ```go
 type Transport interface {
 	// Bind registers the group's callbacks. deliver gets the frame and the
-	// peer TLS authenticated, valid until deliver returns; offer is answered
-	// on the event loop; join is answered off it, under a deadline.
+	// peer TLS authenticated, valid until deliver returns; offer is judged
+	// on the event loop and its spool then positioned off it, and the
+	// shipped transport reads its answer under JoinTimeout; join is
+	// answered off the loop, under a deadline.
 	Bind(group GroupID, deliver func(from AuthenticatedPeerValue, frame []byte), offer func(from AuthenticatedPeerValue, o InstallOfferValue) InstallAcceptValue, install func(InstallParams) error, join func(ctx context.Context, from AuthenticatedPeerValue, r JoinRequestValue) (PositionValue, errs.Code)) error
 	// Send hands over an encoded frame. It never blocks and may drop; the
 	// transport owns frame after the call.
@@ -4214,7 +4216,7 @@ type Transport interface {
 func (Transport) Bind(group GroupID, deliver func(from AuthenticatedPeerValue, frame []byte), offer func(from AuthenticatedPeerValue, o InstallOfferValue) InstallAcceptValue, install func(InstallParams) error, join func(ctx context.Context, from AuthenticatedPeerValue, r JoinRequestValue) (PositionValue, errs.Code)) error
 ```
 
-Bind registers the group's callbacks. deliver gets the frame and the peer TLS authenticated, valid until deliver returns; offer is answered on the event loop; join is answered off it, under a deadline.
+Bind registers the group's callbacks. deliver gets the frame and the peer TLS authenticated, valid until deliver returns; offer is judged on the event loop and its spool then positioned off it, and the shipped transport reads its answer under JoinTimeout; join is answered off the loop, under a deadline.
 
 <a name="Transport.Send"></a>
 ### func \(Transport\) [Send](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/gen_ports.go>)
