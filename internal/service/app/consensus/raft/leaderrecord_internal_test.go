@@ -367,3 +367,120 @@ func TestAVouchedLeaderEndsItsDelayAfterTheLastContact(t *testing.T) {
 		})
 	}
 }
+
+// strandedLearner is member 4, a learner of voters 1 to 3, at term 5 over a
+// snapshot at 5, which heard no leader since its start at t0.
+func strandedLearner(mut mutation) *Raft {
+	conf := testConf(1, 2, 3, 4)
+	conf.Members[3].Voter = false
+	conf.Index = 5
+	r := NewRaft(&Config{
+		ID: 4, Group: 1, Seed: 4, Timing: testTiming(), MaxInflight: 8, MaxInflightBytes: 1 << 20,
+		MaxBatchBytes: 1 << 16, MinVoters: 1, PromoteLag: 16, CanVote: true, MaxChainRefusals: 3, mut: mut,
+	}, &StartState{
+		HardState: core.HardState{Term: 5, Commit: 5},
+		Snapshot: core.SnapshotMetaValue{
+			Position: core.PositionValue{Term: 5, Index: 5}, Membership: conf,
+			Timing: testTiming(), ClusterVersion: Protocol2, ClusterGeneration: 2,
+		},
+		Now: t0,
+	})
+	r.Ready()
+	return r
+}
+
+// asked returns the questions rd carries: the PreVotes, by receiver.
+func asked(rd ReadyValue) map[core.NodeID]core.MessageValue {
+	out := map[core.NodeID]core.MessageValue{}
+	for _, m := range rd.Messages {
+		if m.Kind == core.MsgPreVote {
+			out[m.To] = m
+		}
+	}
+	return out
+}
+
+// checkStrandedLearnerAsks: a learner that hears no leader for
+// askElectionTimeouts maximum election timeouts asks every member of its
+// configuration for the record of the leader it follows, once in that
+// time, and tells the driver; a follower of a leader the learner does not
+// know answers with that leader's record, which the learner admits for
+// replication (#639). It used to wait for nothing: a learner never
+// campaigns, so it never sent the PreVote #542's record answers.
+func checkStrandedLearnerAsks(mut mutation) error {
+	x := strandedLearner(mut)
+	x.Tick(t0.Add(askElectionTimeouts*testTiming().ElectionTimeoutMax - time.Millisecond))
+	if q := asked(x.Ready()); len(q) != 0 {
+		return fmt.Errorf("a learner asked before %v without a leader: %d questions", askElectionTimeouts*testTiming().ElectionTimeoutMax, len(q))
+	}
+	at := t0.Add(askElectionTimeouts * testTiming().ElectionTimeoutMax)
+	x.Tick(at)
+	rd := x.Ready()
+	q := asked(rd)
+	if len(q) != 3 || !rd.LeaderUnheard {
+		return fmt.Errorf("a stranded learner asked %d members (LeaderUnheard %v), want 3 and set", len(q), rd.LeaderUnheard)
+	}
+	pv := q[2]
+	if pv.Flags&core.FlagProtocol2 == 0 || pv.Term != 6 || pv.Index != 5 {
+		return fmt.Errorf("the question to 2: %+v", pv)
+	}
+	x.Tick(at.Add(time.Second))
+	if q := asked(x.Ready()); len(q) != 0 {
+		return fmt.Errorf("a learner asked again within %v", askElectionTimeouts*testTiming().ElectionTimeoutMax)
+	}
+	// Member 2 follows leader 5, which the learner's configuration does not
+	// list, and answers with its record.
+	bc := testConf(1, 2, 3, 4, 5)
+	bc.Members[3].Voter = false
+	b := nodeOf(2, 5, bc, Protocol2, 0)
+	hb := msg(core.MsgHeartbeat, 5, 2, 5)
+	hb.Commit = 10
+	b.Step(b.now, hb)
+	b.Ready()
+	b.Step(b.now, pv)
+	var rec core.MessageValue
+	for _, m := range b.Ready().Messages {
+		if m.Kind == core.MsgLeaderRecord && m.To == 4 {
+			rec = m
+		}
+	}
+	if rec.Kind != core.MsgLeaderRecord {
+		return fmt.Errorf("a follower sent no record to a learner's question")
+	}
+	x.Step(at.Add(time.Second), rec)
+	if rd := x.Ready(); rd.LeaderHint.ID != 5 || !admits(x, 5) {
+		return fmt.Errorf("the learner did not admit the leader its member vouched for (hint %d)", rd.LeaderHint.ID)
+	}
+	return nil
+}
+
+// checkLearnerAskBindsNothing: a learner's question for the leader's record
+// is never a campaign. Granted by every voter, it leaves the learner a
+// learner at its term, with no vote request; and the PreVote moves neither
+// the term nor the role of a leader that receives it (#639).
+func checkLearnerAskBindsNothing(mut mutation) error {
+	x := strandedLearner(mut)
+	x.Tick(t0.Add(askElectionTimeouts * testTiming().ElectionTimeoutMax))
+	x.Ready()
+	for _, from := range []core.NodeID{1, 2, 3} {
+		x.Step(x.now, core.MessageValue{Version: 1, Group: 1, Kind: core.MsgPreVoteResp, From: from, To: 4, Term: 6})
+	}
+	rd := x.Ready()
+	for _, m := range append(rd.Messages, rd.AfterSync...) {
+		if m.Kind == core.MsgVote {
+			return fmt.Errorf("a learner whose question was granted requested votes at term %d", m.Term)
+		}
+	}
+	if x.role != core.RoleLearner || x.term != 5 {
+		return fmt.Errorf("a learner whose question was granted is %v at term %d, want a learner at 5", x.role, x.term)
+	}
+	l := leaderOf(5, 0, nil, mut, false)
+	pv := msg(core.MsgPreVote, 4, 1, 6)
+	pv.Index, pv.LogTerm, pv.Flags = 5, 5, core.FlagProtocol2
+	l.Step(l.now, pv)
+	l.Ready()
+	if l.role != core.RoleLeader || l.term != 5 {
+		return fmt.Errorf("a learner's question moved the leader to %v at term %d", l.role, l.term)
+	}
+	return nil
+}

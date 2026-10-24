@@ -13,6 +13,11 @@ import (
 // configuration of this node listing it.
 const hintElectionTimeouts time.Duration = 4
 
+// askElectionTimeouts is how many maximum election timeouts a learner goes
+// without hearing a leader before it asks its members for the record of the
+// one they follow, and then between two questions (#639).
+const askElectionTimeouts time.Duration = 2
+
 // stepLeaderRecord runs the admission of a stale voter (ADR 0152 D4, #542)
 // before anything else reads m, and reports whether m was consumed.
 //
@@ -84,6 +89,46 @@ func (r *Raft) mayRecordTo(m core.MessageValue) bool {
 		return true
 	default:
 		return r.speaks() >= Protocol2 && m.Flags&core.FlagProtocol2 != 0
+	}
+}
+
+// askForLeader asks every other member of this node's configuration for
+// the record of the leader it follows, when this node is a learner that
+// heard no leader for askElectionTimeouts maximum election timeouts, at most
+// once in that time (#639). The record answers a PreVote (#542), and a
+// learner never campaigns: one down while a member was admitted and made
+// leader came back with a configuration that does not list that leader, its
+// transport refused the leader's key, and nothing vouched for it, so it was
+// never fed while that leader led and kept every raise of the cluster
+// version refused (#638).
+//
+// The question is a PreVote, the kind a follower answers with the record,
+// asked and never campaigned: the learner does not become a candidate,
+// counts no answer and moves no term of its own, and a PreVote binds no
+// receiver, which raises no term on it and records nothing (R2-03). A
+// follower of a live leader drops it, a leader that hears a majority does
+// too, and a grant reaches a learner, which drops it. The Ready's
+// LeaderUnheard tells the driver, which sends a joining node's JOIN again
+// (#632).
+func (r *Raft) askForLeader(now time.Time) {
+	wait := askElectionTimeouts * r.timing.ElectionTimeoutMax
+	if r.role != core.RoleLearner || r.speaks() < Protocol2 || r.mutated(mutLearnerNeverAsks) ||
+		now.Sub(r.lastLeaderContact) < wait || (!r.askedAt.IsZero() && now.Sub(r.askedAt) < wait) {
+		return
+	}
+	r.askedAt = now
+	r.rd.LeaderUnheard = true
+	if r.mutated(mutAskCampaigns) {
+		r.campaign(true, 0, 0)
+		return
+	}
+	for _, m := range r.conf().Members {
+		if m.ID != r.id {
+			r.send(core.MessageValue{
+				Kind: core.MsgPreVote, To: m.ID, Term: r.term + 1,
+				LogTerm: r.log.lastTerm(), Index: r.log.lastIndex(),
+			})
+		}
 	}
 }
 

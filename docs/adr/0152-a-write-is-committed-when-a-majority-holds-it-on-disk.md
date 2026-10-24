@@ -1090,6 +1090,23 @@ followers and sent it nothing. From protocol 2:
   peer that has no leader, for replication only. Raft is crash-fault
   tolerant here, a compromised member can already forge far more, and the
   key must still be one the cluster CA signed.
+- **A learner asks for the record (amendment of 2026-10-24,
+  [#639](https://github.com/kitsunium/sdk/issues/639)).** The record
+  answers a PreVote, and a learner never campaigns: a learner down while a
+  member was admitted and made leader came back in the same state as the
+  stale voter, and nothing ever vouched for that leader, at cluster version
+  2 too, while it also kept every raise refused (#638). A learner that has
+  heard no leader for two maximum election timeouts now sends a PreVote to
+  every other member of its configuration, then again every two maximum
+  election timeouts while it hears none. It is a question, never a
+  campaign: the learner does not become a pre-candidate, counts no answer
+  and keeps its term, and a PreVote binds its receiver to nothing, raising
+  no term and recording no vote (R2-03); a follower of a live leader, and a
+  leader that hears a majority, drop it, and a grant that reaches the
+  learner is dropped. A follower answers it with the record under the rules
+  above, which the learner takes under the same bounds as a voter. No frame
+  or format is added: the PreVote is protocol 1's, and the record is still
+  sent only to a PreVote carrying `FlagProtocol2`.
 
 **A removal never leaves a voter with no known member to vouch for the
 leader (amendment of 2026-10-23, #603).** The record above needs a member of
@@ -1109,6 +1126,29 @@ removable. The operator brings the stale voter back, or removes it, first.
 **Limits TLS does not set (R1-24, from raft-sql-poc).**
 - A frame's announced length is checked against `MaxFrameBytes` before
   anything is allocated.
+- **A snapshot offer is read under `MaxFrameBytes`, never the control
+  bound (amendment of 2026-10-24,
+  [#634](https://github.com/kitsunium/sdk/issues/634)).** The offer is the
+  term and the snapshot's metadata, which carries the configuration at its
+  index, `Retired` included, 8 bytes per ID. Every Remove retires an ID for
+  the life of the cluster and nothing prunes the list. Read under
+  `MaxControlFrameBytes` (64 KiB by default), an offer outgrew it past
+  about 8 100 removals, and from then on no snapshot was ever installed over
+  TCP: the receiver ended every stream without an answer or a line in its
+  log, and the leader saw `FRAME_INVALID` or a reset at every probe. The
+  snapshot lane now reads the offer under `MaxFrameBytes`, the bound the
+  same configuration already meets in every membership entry, which the
+  leader rewrites into the whole configuration (D8): about two million
+  removals at 16 MiB. The receiver logs an offer it refuses before the node
+  judges it (above the bound, or one that does not decode), the sender
+  refuses one above its own `MaxFrameBytes` before it dials, and the memory
+  double applies the same bound. No frame changes. A node that still reads
+  the offer under the control bound refuses an offer past the old threshold
+  until it is upgraded. A Remove is not refused on this ground: it shrinks
+  the encoding, a member's record weighing more than the ID it retires, and
+  the list grows only with the member added after it. Bounding `Retired`
+  itself would need another way to keep "an ID is never added back", and is
+  left open.
 - A snapshot is inflated no further than `MaxSnapshotBytes` and the size its
   metadata announces, whichever is smaller (R1-15), before its hash is checked
   (`raft.js:1272-1289`).
@@ -1181,6 +1221,26 @@ open ONE control connection to any member.
   `TRANSPORT_MISCONFIGURED`. An answer counts only from a peer presenting
   one of them, and only when the membership it returns lists that peer
   under that key.
+- **A joiner that hears no leader sends its JOIN again (amendment of
+  2026-10-24, [#632](https://github.com/kitsunium/sdk/issues/632)).** The
+  answer covers every member admitted before the joiner's `AddLearner`, and
+  stays admitted until the joiner's own committed configuration lists it
+  (#552). A member admitted after the answer, then promoted and handed the
+  leadership before the joiner replayed its `AddLearner`, was in no group of
+  the joiner's transport: every connection of that leader was refused, and a
+  learner, which never campaigns, had no record to learn of it from either,
+  so the joiner was never fed while that leader led. While the answer is
+  held and the joiner has heard no leader for two maximum election timeouts
+  (the same question as a learner's, #639), its transport sends the JOIN
+  again with the configuration of the last one answered, and the fresh
+  answer replaces the held one. A member answers a node it already lists
+  without proposing anything or counting it against the slot's rate (#533).
+  A JOIN sent again that is answered after the node's admission released the
+  answer installs nothing; only an explicit `Join` installs one again. Each
+  explicit `Join` opens a new generation of the hold, and an answer installs
+  only in the generation its JOIN began in: a JOIN sent again still in
+  flight across a release and a later `Join` never replaces that `Join`'s
+  answer with its older one. No frame changes: it is the existing JOIN.
 
 **Batching on the wire, from raft-sql-poc.** Every frame queued for a peer
 on one connection during one turn of its sender leaves in one write

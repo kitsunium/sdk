@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T15:05:20Z -->
+<!-- updated: 2026-10-24T16:59:26Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -509,6 +509,11 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   (#638, `TestAStaleVoterHearsTheNewLeaderBeforeTheRaise`, raft's
   `checkLeaderRecordFollowsTheAnnouncement`). The record follows the
   PreVote's own `FlagProtocol2`, never an older state of its sender.
+- Leave a learner whose configuration does not list the leader with no
+  way to hear it: it never campaigns, so it asks the members of its
+  configuration for the leader's record with a PreVote it never counts
+  (#639, `TestALearnerDownWhileANewLeaderWasAdmittedIsFed`, raft's
+  `checkStrandedLearnerAsks`).
 - Trust a predecessor's token by its index above the identity's
   AdoptedFrom once its term can no longer be read: that part of the kept
   range is the suffix Recover adopted past the persisted commit (#509,
@@ -533,6 +538,23 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   whose configuration does not list the leader: the joiner's first older
   configuration cut its leader (#552, `joinGroup`,
   `TestAJoinerKeepsALeaderNewerThanTheConfigurationItReplays`).
+- Keep a joiner on the JOIN answer it got first while it hears no leader:
+  a leader admitted after that answer was refused at every connection, and
+  the joiner was never fed while it led. Raft's `LeaderUnheard` sends the
+  JOIN again with the kept configuration (#632, `refreshJoin`,
+  `TestAJoinerHearsALeaderAdmittedAfterItsJoinAnswer`); never once the
+  admission released the answer (`joinHold`,
+  `TestAJoinSentAgainReplacesOnlyAHeldAnswer`), nor over a later explicit
+  Join: an answer installs only in the hold's generation its JOIN began in
+  (`joinHold.gen`, `TestAJoinSentAgainNeverInstallsOverALaterJoin`).
+- Read a snapshot offer under `MaxControlFrameBytes`, or end a refused one
+  without a line: its metadata carries the configuration, `Retired`
+  included, which every Remove grows for good, and past about 8 100
+  removals no snapshot was ever installed over TCP again (#634,
+  `serveSnapshot`, `offerRefused`,
+  `TestASnapshotOfferCarryingManyRetiredIDsIsInstalledOverTCP`). The memory
+  double holds the same bound (`maxOffer`,
+  `TestASnapshotOfferAboveTheFrameBoundIsRefusedAndLogged`).
 - Report a leader known from heartbeats alone: a leader answered one of the
   node's reads within `ElectionTimeoutMax`, or the node leads (#541, #540,
   `probeLeader`). Keep a leader whose sync or apply has not moved for

@@ -512,6 +512,8 @@ var checks = map[string]func(mutation) error{
 	"silence not ended by own snapshot": checkSilenceNotEndedByItsOwnSnapshot,
 	"silent heartbeat reports":          checkSilentHeartbeatReports,
 	"leader record by announcement":     checkLeaderRecordFollowsTheAnnouncement,
+	"stranded learner asks":             checkStrandedLearnerAsks,
+	"learner question binds nothing":    checkLearnerAskBindsNothing,
 }
 
 func TestChecksPassUnmutated(t *testing.T) {
@@ -580,6 +582,8 @@ func TestMutationsAreCaught(t *testing.T) {
 		"silent report ignored":            mutSilentReportIgnored,
 		"record by cluster version":        mutRecordAtClusterVersion,
 		"record to an unannounced prevote": mutRecordUnannounced,
+		"learner never asks":               mutLearnerNeverAsks,
+		"learner asks by campaigning":      mutAskCampaigns,
 	}
 	for name, m := range muts {
 		caught := ""

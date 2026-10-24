@@ -21,6 +21,7 @@ import (
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 	"github.com/kitsunium/sdk/internal/service/net/server"
@@ -65,6 +66,9 @@ const (
 	// minFrameBody is the smallest body a frame can announce: its version,
 	// kind and group. A shorter one is refused before any allocation.
 	minFrameBody int = 10
+	// defaultMaxFrameBytes is MaxFrameBytes when unset, and the bound the
+	// memory double reads a snapshot offer under (#634).
+	defaultMaxFrameBytes int = 16 << 20
 	// senderQueueFrames bounds the frames queued for one peer and lane; the
 	// byte bound PeerQueueBytes usually binds first.
 	senderQueueFrames int = 4096
@@ -92,7 +96,9 @@ const (
 	// answer, and a leader admitted after that configuration was cut and
 	// refused for as long as it led (#552). The answer stays until the
 	// joiner's own committed configuration lists it: every member admitted
-	// before its AddLearner is in its log by then.
+	// before its AddLearner is in its log by then. A member admitted after
+	// the answer is in none of them: a joiner that hears no leader sends its
+	// JOIN again and the fresh answer replaces this one (#632, refreshJoin).
 	joinGroup coreconsensus.GroupID = 0
 )
 
@@ -281,6 +287,11 @@ type TCPTransport struct {
 	// predatesJoinV2 serves laneJoinV2 as a member built before it does:
 	// the connection ends unanswered. Set by the package's own tests only.
 	predatesJoinV2 atomic.Bool
+	// hold keeps the JOIN answer's configuration and release (#632).
+	hold joinHold
+	// warn is the node's log, for what the transport refuses before any
+	// callback of the node sees it (#634); nil logs nothing.
+	warn func(msg string, attrs ...corelogger.AttrValue)
 }
 
 type outKey struct {
@@ -290,7 +301,7 @@ type outKey struct {
 
 // validate applies the defaults and the refusals of the configuration.
 func (c *TransportConfig) validate() error {
-	clampInt(&c.MaxFrameBytes, 16<<20)
+	clampInt(&c.MaxFrameBytes, defaultMaxFrameBytes)
 	clampInt(&c.MaxControlFrameBytes, 64<<10)
 	clampDuration(&c.HandshakeTimeout, time.Second)
 	clampInt64(&c.PeerQueueBytes, 64<<20)
@@ -1189,6 +1200,12 @@ func decodeOffer(b []byte) (coreconsensus.InstallOfferValue, error) {
 
 // Stream implements Transport.
 func (t *TCPTransport) Stream(ctx context.Context, to coreconsensus.NodeID, offer coreconsensus.InstallOfferValue, open func(int64) (io.ReadCloser, error)) error {
+	// An offer above MaxFrameBytes, the bound the receiver reads it under,
+	// is refused before any dial (#634).
+	body := encodeOffer(offer)
+	if len(body) > t.cfg.MaxFrameBytes {
+		return origin(coreconsensus.FrameInvalid, errs.String("what", "snapshot offer"), errs.Int("length", len(body)))
+	}
 	addr, pin, ok := t.address(to)
 	if !ok {
 		return peerRejected("no address")
@@ -1215,7 +1232,7 @@ func (t *TCPTransport) Stream(ctx context.Context, to coreconsensus.NodeID, offe
 		return err
 	}
 	w := boundedWriter{conn: c, half: c, d: t.cfg.WriteTimeout}
-	if err := writeChunk(w, encodeOffer(offer)); err != nil {
+	if err := writeChunk(w, body); err != nil {
 		return err
 	}
 	acc, err := readAccept(c, t.cfg.JoinTimeout)
@@ -1331,18 +1348,28 @@ func installResult(c *tls.Conn) error {
 // serveSnapshot is the receiving end of a snapshot stream: it reads the
 // offer, answers with the engine's acceptance, and when accepted hands the
 // stream to install, then writes back the install's verdict.
+//
+// The offer is read under MaxFrameBytes, the data lane's bound, never the
+// control lane's: its metadata carries the configuration at the snapshot's
+// index, Retired included, which every Remove grows by an ID for the life of
+// the cluster. Read under MaxControlFrameBytes (64 KiB by default), past
+// about 8 100 removals no snapshot was ever installed again, and the
+// receiver ended each stream without a word (#634). A configuration already
+// reaches every member in a membership entry under MaxFrameBytes. An offer
+// refused before the node judged it is logged.
 func (t *TCPTransport) serveSnapshot(c *tls.Conn, peer coreconsensus.AuthenticatedPeerValue) {
-	b, err := readChunk(c, t.cfg.MaxControlFrameBytes)
-	if err != nil {
-		return
-	}
-	o, err := decodeOffer(b)
-	if err != nil {
-		return
+	b, err := readChunk(c, t.cfg.MaxFrameBytes)
+	var o coreconsensus.InstallOfferValue
+	if err == nil {
+		o, err = decodeOffer(b)
 	}
 	t.mu.Lock()
-	of, in := t.offer, t.install
+	of, in, warn := t.offer, t.install, t.warn
 	t.mu.Unlock()
+	if err != nil {
+		offerRefused(warn, peer.ID, t.cfg.MaxFrameBytes, err)
+		return
+	}
 	if of == nil || in == nil {
 		return
 	}
@@ -1369,6 +1396,30 @@ func (t *TCPTransport) serveSnapshot(c *tls.Conn, peer coreconsensus.Authenticat
 	// The last write of the stream: a sender that does not read it sees the
 	// connection end and treats the install as failed, which it retries.
 	abandon(writeChunk(c, binary.LittleEndian.AppendUint32(nil, uint32(code))))
+}
+
+// offerRefused logs, through warn, a snapshot offer from peer that the
+// receiving transport refused before the node judged it: one above bound, or
+// one that does not decode. A failure to read that carries no code, the
+// sender's own end of the stream, is not logged (#634).
+func offerRefused(warn func(string, ...corelogger.AttrValue), from coreconsensus.NodeID, bound int, err error) {
+	if _, coded := errs.CodeOf(err); !coded || warn == nil {
+		return
+	}
+	attrs := []corelogger.AttrValue{lattr("from", uint64(from)), lattr("bound", uint64(bound)), lstr("error", err.Error())}
+	for _, f := range errs.FieldsOf(err) {
+		if f.Key() == "length" {
+			attrs = append(attrs, lstr("length", f.StringValue()))
+		}
+	}
+	warn("consensus: snapshot offer refused before it was judged", attrs...)
+}
+
+// bindWarn implements bindWarner.
+func (t *TCPTransport) bindWarn(warn func(msg string, attrs ...corelogger.AttrValue)) {
+	t.mu.Lock()
+	t.warn = warn
+	t.mu.Unlock()
 }
 
 // ---- pre-admission JOIN (D4, R7-42, R8-09) ----
@@ -1496,6 +1547,44 @@ func (t *TCPTransport) serveJoin(c net.Conn, peer coreconsensus.AuthenticatedPee
 // Join implements Joiner: the JOIN goes to each address in turn until one
 // member answers JOIN_ACK with the position its AddLearner was appended at.
 func (t *TCPTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (coreconsensus.PositionValue, error) {
+	gen := t.hold.begin()
+	pos, err := t.joinVia(ctx, &cfg, gen)
+	if err == nil {
+		// Kept for a JOIN sent again while no leader is heard (#632).
+		t.hold.keep(gen, &cfg)
+	}
+	return pos, err
+}
+
+// refreshJoin sends the JOIN again with the configuration last answered,
+// while its answer is held, and reports whether the answer changed (#632).
+func (t *TCPTransport) refreshJoin(ctx context.Context) (bool, error) {
+	cfg, gen, ok := t.hold.again()
+	if !ok {
+		return false, nil
+	}
+	t.mu.Lock()
+	before := slices.Clone(t.members[joinGroup])
+	t.mu.Unlock()
+	if _, err := t.joinVia(ctx, &cfg, gen); err != nil {
+		return false, err
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return !sameAnswer(before, t.members[joinGroup]), nil
+}
+
+// joinTry is one JOIN to send: the request, the keys an answer is taken
+// from, and the generation of the hold its answer installs in (#632).
+type joinTry struct {
+	req  coreconsensus.JoinRequestValue
+	pins [][32]byte
+	gen  uint64
+}
+
+// joinVia sends the JOIN of cfg to each address in turn, and installs the
+// answer in the hold's generation gen.
+func (t *TCPTransport) joinVia(ctx context.Context, cfg *coreconsensus.JoinConfig, gen uint64) (coreconsensus.PositionValue, error) {
 	req := coreconsensus.JoinRequestValue{
 		Cluster: cfg.Stamp.Log.Cluster, ID: cfg.Stamp.ID, Incarnation: cfg.Stamp.Incarnation,
 		Slot: t.slot, Address: cfg.Address, MaxSnapshotBytes: max(cfg.MaxSnapshotBytes, 0),
@@ -1512,7 +1601,7 @@ func (t *TCPTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (
 	last := origin(coreconsensus.JoinRefused, errs.String("why", "no address answered"))
 	var refused error
 	for _, addr := range cfg.Addresses {
-		pos, answered, err := t.joinOne(ctx, addr, req, cfg.Pins)
+		pos, answered, err := t.joinOne(ctx, addr, &joinTry{req: req, pins: cfg.Pins, gen: gen})
 		switch {
 		case err == nil:
 			return pos, nil
@@ -1529,32 +1618,34 @@ func (t *TCPTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (
 	return coreconsensus.PositionValue{}, last
 }
 
-// joinOne sends the JOIN to one address, to a peer presenting one of pins,
-// and installs the membership it answers once that membership lists the
-// peer under its key. refused is set when the peer answered with a refusal.
+// joinOne sends try's JOIN to one address, to a peer presenting one of its
+// pins, and installs the membership it answers, in try's generation of the
+// hold, once that membership lists the peer under its key. refused is set when the peer answered with a refusal.
 // A JOIN that announces a limit goes on laneJoinV2 first; a peer that ends
 // that connection without a word predates the lane, and the JOIN goes again
 // on laneJoin, announcing nothing, as it did before (#556).
-func (t *TCPTransport) joinOne(ctx context.Context, addr string, req coreconsensus.JoinRequestValue, pins [][32]byte) (pos coreconsensus.PositionValue, refused bool, err error) {
-	if req.MaxSnapshotBytes > 0 {
-		pos, refused, silent, err := t.joinOnLane(ctx, addr, laneJoinV2, req, pins)
+func (t *TCPTransport) joinOne(ctx context.Context, addr string, try *joinTry) (pos coreconsensus.PositionValue, refused bool, err error) {
+	if try.req.MaxSnapshotBytes > 0 {
+		pos, refused, silent, err := t.joinOnLane(ctx, addr, laneJoinV2, try)
 		if !silent {
 			return pos, refused, err
 		}
 	}
-	pos, refused, _, err = t.joinOnLane(ctx, addr, laneJoin, req, pins)
+	pos, refused, _, err = t.joinOnLane(ctx, addr, laneJoin, try)
 	return pos, refused, err
 }
 
 // joinOnLane is one JOIN on lane. silent is set when the peer, verified,
 // ended the connection before any byte of an answer.
-func (t *TCPTransport) joinOnLane(ctx context.Context, addr string, lane byte, req coreconsensus.JoinRequestValue, pins [][32]byte) (pos coreconsensus.PositionValue, refused, silent bool, err error) {
-	c, derr := t.dialAny(ctx, addr, lane, pins)
+func (t *TCPTransport) joinOnLane(ctx context.Context, addr string, lane byte, try *joinTry) (pos coreconsensus.PositionValue, refused, silent bool, err error) {
+	c, derr := t.dialAny(ctx, addr, lane, try.pins)
 	if derr != nil {
 		return coreconsensus.PositionValue{}, false, false, derr
 	}
-	// The answer is read, or its failure is: the socket has served.
+	// The answer is read, or its failure is: the socket has served. A
+	// caller that gives up ends the JOIN at once, not at its deadline.
 	defer func() { abandon(c.Close()) }()
+	defer context.AfterFunc(ctx, func() { abandon(c.Close()) })()
 	peer, verified := tlsid.PeerOf(c.ConnectionState())
 	if !verified {
 		return coreconsensus.PositionValue{}, false, false, peerRejected("no verified peer")
@@ -1563,9 +1654,9 @@ func (t *TCPTransport) joinOnLane(ctx context.Context, addr string, lane byte, r
 	if err := c.SetDeadline(time.Now().Add(t.cfg.JoinTimeout)); err != nil {
 		return coreconsensus.PositionValue{}, false, false, err
 	}
-	body := encodeJoin(req)
+	body := encodeJoin(try.req)
 	if lane == laneJoinV2 {
-		body = encodeJoinV2(req)
+		body = encodeJoinV2(try.req)
 	}
 	if err := writeChunk(c, body); err != nil {
 		return coreconsensus.PositionValue{}, false, endedUnanswered(err), err
@@ -1574,7 +1665,7 @@ func (t *TCPTransport) joinOnLane(ctx context.Context, addr string, lane byte, r
 	if b == nil && endedUnanswered(rerr) {
 		return coreconsensus.PositionValue{}, false, true, origin(coreconsensus.FrameInvalid, errs.String("what", "join answer"))
 	}
-	pos, refused, err = t.joinAnswered(b, rerr, peer.SPKI)
+	pos, refused, err = t.joinAnswered(b, rerr, peer.SPKI, try.gen)
 	return pos, refused, false, err
 }
 
@@ -1595,8 +1686,9 @@ func endedUnanswered(err error) bool {
 }
 
 // joinAnswered reads a JOIN's answer b, or the failure rerr to read it, from
-// the peer that presented spki, and installs the membership it carries.
-func (t *TCPTransport) joinAnswered(b []byte, rerr error, spki [32]byte) (pos coreconsensus.PositionValue, refused bool, err error) {
+// the peer that presented spki, and installs the membership it carries in
+// the hold's generation gen.
+func (t *TCPTransport) joinAnswered(b []byte, rerr error, spki [32]byte, gen uint64) (pos coreconsensus.PositionValue, refused bool, err error) {
 	if rerr != nil || len(b) < 20 {
 		return coreconsensus.PositionValue{}, false, origin(coreconsensus.FrameInvalid, errs.String("what", "join answer"))
 	}
@@ -1611,22 +1703,25 @@ func (t *TCPTransport) joinAnswered(b []byte, rerr error, spki [32]byte) (pos co
 	if !joinAnswerListsPeer(m, spki) {
 		return coreconsensus.PositionValue{}, false, peerRejected("the answer does not list its own sender")
 	}
-	t.SetMembership(joinGroup, m.Members)
+	t.hold.install(gen, func() { t.SetMembership(joinGroup, m.Members) })
 	return coreconsensus.PositionValue{Term: binary.LittleEndian.Uint64(b[4:]), Index: binary.LittleEndian.Uint64(b[12:])}, false, nil
 }
 
 // releaseJoinAnswer drops the JOIN answer's admission group once the node
-// is admitted: from then on the engine's configuration alone admits.
+// is admitted: from then on the engine's configuration alone admits, and a
+// JOIN sent again installs nothing.
 func (t *TCPTransport) releaseJoinAnswer() {
-	t.mu.Lock()
-	_, held := t.members[joinGroup]
-	t.mu.Unlock()
-	if held {
-		t.SetMembership(joinGroup, nil)
+	t.hold.release(func() {
 		t.mu.Lock()
-		delete(t.members, joinGroup)
+		_, held := t.members[joinGroup]
 		t.mu.Unlock()
-	}
+		if held {
+			t.SetMembership(joinGroup, nil)
+			t.mu.Lock()
+			delete(t.members, joinGroup)
+			t.mu.Unlock()
+		}
+	})
 }
 
 // joinAnswerListsPeer reports whether a JOIN answer's membership lists the

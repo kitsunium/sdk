@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T11:20:00Z -->
+<!-- updated: 2026-10-24T15:36:41Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -126,3 +126,9 @@ under coverage before touching `shard_count`.
   not know the kind, and the raise is refused while the stale voter the
   record is for stays unheard (#638, `mutRecordAtClusterVersion`,
   `mutRecordUnannounced`, `checkLeaderRecordFollowsTheAnnouncement`).
+- Leave a learner that hears no leader waiting for nothing, or let its
+  question be a campaign: it never sends the PreVote #542's record answers,
+  and a learner down while a member was made leader was never fed by it
+  (#639, `askForLeader`, `mutLearnerNeverAsks`, `checkStrandedLearnerAsks`).
+  The question is a PreVote it never counts, keeping its role and its term
+  (`mutAskCampaigns`, `checkLearnerAskBindsNothing`).

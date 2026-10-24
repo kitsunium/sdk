@@ -184,6 +184,11 @@ type ReadyValue struct {
 	// SilenceEnded is set once the silence condition held: the driver
 	// removes it durably.
 	SilenceEnded bool
+	// LeaderUnheard is set when this learner, which never campaigns, heard
+	// no leader for askElectionTimeouts maximum election timeouts and asked
+	// its members for the leader's record: the driver of a joining node
+	// sends its JOIN again (#632, #639).
+	LeaderUnheard bool
 	// Fetch asks the driver to read entries the step function no longer
 	// holds, off the event loop, and hand them back with Fetched.
 	Fetch []FetchSpec
@@ -281,6 +286,9 @@ type Raft struct {
 	// Its ID is 0 when there is none.
 	hint      core.MemberValue
 	hintUntil time.Time
+	// askedAt is when this learner last asked its members for the record
+	// of the leader they follow (#639).
+	askedAt time.Time
 
 	prs   map[core.NodeID]*progress
 	votes map[core.NodeID]bool
@@ -452,6 +460,7 @@ func (r *Raft) Tick(now time.Time) {
 		r.tickLeader(now)
 		return
 	}
+	r.askForLeader(now)
 	if !now.Before(r.electionDeadline) {
 		r.resetElection(now)
 		if r.promotable() && r.outsideVoteWindow(now) {
@@ -671,12 +680,18 @@ func (rd *ReadyValue) hasLogWork() bool {
 }
 
 // hasNotices reports whether the Ready queues anything else for the
-// driver: snapshots to send, answers, a membership, fetches, the end of the
-// silence, an entry this version cannot apply.
+// driver: snapshots to send, answers, a membership, fetches, or a state
+// notice.
 func (rd *ReadyValue) hasNotices() bool {
 	return len(rd.SendSnapshot) != 0 || len(rd.ReadStates) != 0 || len(rd.Forwarded) != 0 ||
-		len(rd.Transfers) != 0 || rd.Membership != nil || len(rd.Fetch) != 0 || rd.SilenceEnded ||
-		rd.Unsupported.Index != 0
+		len(rd.Transfers) != 0 || rd.Membership != nil || len(rd.Fetch) != 0 || rd.hasStateNotice()
+}
+
+// hasStateNotice reports whether the Ready tells the driver of a state: the
+// end of the silence, an entry this version cannot apply, or a learner that
+// hears no leader.
+func (rd *ReadyValue) hasStateNotice() bool {
+	return rd.SilenceEnded || rd.Unsupported.Index != 0 || rd.LeaderUnheard
 }
 
 // Ready returns the work of the turns since the last call and resets it.

@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
@@ -114,6 +115,15 @@ type MemoryTransport struct {
 	// groups are the admitted members per group, members their union.
 	groups  map[coreconsensus.GroupID][]coreconsensus.MemberValue
 	members []coreconsensus.MemberValue
+	// hold keeps the JOIN answer's configuration and release (#632).
+	hold joinHold
+	// maxOffer bounds the snapshot offer this end accepts, encoded as the
+	// TCP transport sends it; 0 is the TCP transport's default
+	// MaxFrameBytes. Set by the package's own tests only (#634).
+	maxOffer int
+	// warn is the node's log, for an offer refused before the node judged
+	// it, as on the TCP transport (#634).
+	warn func(msg string, attrs ...corelogger.AttrValue)
 }
 
 // memRun is one delivery goroutine's life: Close closes stop, once, and
@@ -158,8 +168,17 @@ func (t *MemoryTransport) Stream(ctx context.Context, to coreconsensus.NodeID, o
 		return origin(coreconsensus.PeerRejected, errs.String("why", "not admitted"))
 	}
 	dst.mu.Lock()
-	of, in := dst.offer, dst.install
+	of, in, warn, bound := dst.offer, dst.install, dst.warn, dst.maxOffer
 	dst.mu.Unlock()
+	if bound <= 0 {
+		bound = defaultMaxFrameBytes
+	}
+	if n := len(encodeOffer(offer)); n > bound {
+		// The receiver refuses it as the TCP one does, and the sender sees
+		// its stream end unanswered (#634).
+		offerRefused(warn, t.id, bound, origin(coreconsensus.FrameInvalid, errs.Int("length", n)))
+		return origin(coreconsensus.FrameInvalid, errs.String("what", "install accept"))
+	}
 	if of == nil {
 		return origin(coreconsensus.PeerRejected, errs.String("why", "unbound"))
 	}
@@ -269,10 +288,17 @@ func (t *MemoryTransport) SetMembership(group coreconsensus.GroupID, admitted []
 	}
 }
 
+// bindWarn implements bindWarner.
+func (t *MemoryTransport) bindWarn(warn func(msg string, attrs ...corelogger.AttrValue)) {
+	t.mu.Lock()
+	t.warn = warn
+	t.mu.Unlock()
+}
+
 // releaseJoinAnswer drops the JOIN answer's group once the node is
 // admitted, as the TCP transport does (#552).
 func (t *MemoryTransport) releaseJoinAnswer() {
-	t.SetMembership(joinGroup, nil)
+	t.hold.release(func() { t.SetMembership(joinGroup, nil) })
 }
 
 // admitted reports whether at admits peer: always without the admission
@@ -293,6 +319,34 @@ func (n *MemoryNetwork) admitted(at *MemoryTransport, peer coreconsensus.NodeID)
 
 // Join implements Joiner over the network, as the TCP transport does.
 func (t *MemoryTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (coreconsensus.PositionValue, error) {
+	gen := t.hold.begin()
+	pos, err := t.joinVia(ctx, &cfg, gen)
+	if err == nil {
+		t.hold.keep(gen, &cfg)
+	}
+	return pos, err
+}
+
+// refreshJoin sends the JOIN again as the TCP transport does (#632).
+func (t *MemoryTransport) refreshJoin(ctx context.Context) (bool, error) {
+	cfg, gen, ok := t.hold.again()
+	if !ok {
+		return false, nil
+	}
+	t.mu.Lock()
+	before := slices.Clone(t.groups[joinGroup])
+	t.mu.Unlock()
+	if _, err := t.joinVia(ctx, &cfg, gen); err != nil {
+		return false, err
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return !sameAnswer(before, t.groups[joinGroup]), nil
+}
+
+// joinVia sends the JOIN of cfg to every other transport of the network in
+// turn, and installs the answer in the hold's generation gen.
+func (t *MemoryTransport) joinVia(ctx context.Context, cfg *coreconsensus.JoinConfig, gen uint64) (coreconsensus.PositionValue, error) {
 	targets := t.net.othersThan(t.id)
 	req := coreconsensus.JoinRequestValue{
 		Cluster: cfg.Stamp.Log.Cluster, ID: cfg.Stamp.ID, Incarnation: cfg.Stamp.Incarnation,
@@ -323,7 +377,7 @@ func (t *MemoryTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig
 			x.mu.Lock()
 			answer := slices.Clone(x.members)
 			x.mu.Unlock()
-			t.SetMembership(joinGroup, answer)
+			t.hold.install(gen, func() { t.SetMembership(joinGroup, answer) })
 			return pos, nil
 		}
 		last = joinRefused(code, reason)

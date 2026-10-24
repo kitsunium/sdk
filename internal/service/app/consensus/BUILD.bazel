@@ -134,6 +134,7 @@ go_test(
         "recover_install_internal_test.go",
         "recovervoters_internal_test.go",
         "removeleader_internal_test.go",
+        "retiredoffer_internal_test.go",
         "runtimedir_unix_internal_test.go",
         "savesnapshotstall_internal_test.go",
         "snaplimit_internal_test.go",
