@@ -50,16 +50,18 @@ const (
 	maxProcessFDs uint64 = 1 << 22
 	// genMask keeps the 24 bits of a generation user_data carries.
 	genMask uint32 = 1<<24 - 1
-	// sweepCloses is how many closes since the last sweep start the next one
-	// on a ring whose closes put their files late (uRing.sweep).
+	// sweepCloses is the fewest closes since the last sweep started that
+	// start the next one on a ring whose closes put their files late
+	// (uRing.sweep); a quarter of the table when that is more.
 	sweepCloses uint64 = 8192
 	// sweepEvery is how many ticks after the last sweep the next one starts,
 	// whatever the closes, once at least one happened.
 	sweepEvery int64 = 1000
-	// sweepScan is how many slots a sweep walks per tick, so a pass over a
-	// 65 536-entry table takes about five seconds and issues at most this
-	// many cancels a tick.
+	// sweepScan is the fewest slots a sweep walks per tick.
 	sweepScan int = 128
+	// sweepTicks is the most ticks a pass takes, so a large table is walked
+	// in a second.
+	sweepTicks int = 100
 	// noEpoch marks a slot with no recv armed.
 	noEpoch uint64 = 1<<64 - 1
 )
@@ -1250,20 +1252,24 @@ func (rr *uRing) shutdown(r *ring, slot int32) {
 }
 
 // sweep bounds the files a direct descriptor's close leaves pinned where the
-// put is deferred (sweepOn, before 6.13): a closed socket, its
-// inode and its file wait for every recv armed before the close, and an idle
-// connection's multishot recv never completes by itself, so with churn and
-// one old keep-alive the pinned sockets would grow without bound — an
-// unmeasured 2 to 4 KiB of kernel memory each, and no descriptor.
+// put is deferred (sweepOn, before 6.13): a closed socket, its inode and its
+// file wait for every recv armed before the close, and an idle connection's
+// multishot recv never completes by itself, so with churn and one old
+// keep-alive the pinned sockets would grow without bound. Each costs about
+// 3.6 KiB of kernel slab and no descriptor (the TCP object, its socket inode,
+// its file and its dentry, read from /proc/slabinfo on 6.8 and 6.12; the
+// package's CLAUDE.md has the sizes).
 //
-// Once sweepCloses closes happened since the last pass started, or
-// sweepEvery ticks passed since it ended with at least one close, a pass
-// walks the table sweepScan slots a tick and cancels every recv armed before
-// the pass began and before a close; recvCancelled arms each again under the
-// current node, so the older nodes drain and their files are put. Pinned
-// sockets stay under sweepCloses plus the closes of one pass. Bytes that
-// arrive between the cancel and the re-arm wait in the socket and are read by
-// the new recv: nothing is lost.
+// A pass starts once the closes since the last one started reach a quarter
+// of the table, 8192 at least, or sweepEvery ticks after the last with at
+// least one close. It walks the table in at most sweepTicks ticks, sweepScan
+// slots a tick at least, and cancels every recv armed before the pass began
+// and before a close; recvCancelled arms each again under the current node,
+// so the older nodes drain and their files are put. Pinned sockets stay
+// under that threshold plus one second of closes, and a pass costs at most
+// one cancel and one re-arm per open connection, so at most four of each per
+// close. Bytes that arrive between the cancel and the re-arm wait in the
+// socket and are read by the new recv: nothing is lost.
 func (rr *uRing) sweep() {
 	lp := rr.ul.lp
 	//: only where a close's put waits on older recvs, once a tick.
@@ -1282,7 +1288,7 @@ func (rr *uRing) sweep() {
 		rr.sweepAt, rr.sweepEpoch = 0, rr.closes
 	}
 	conns := rr.r.conns
-	end := min(rr.sweepAt+sweepScan, len(conns))
+	end := min(rr.sweepAt+max(sweepScan, (len(conns)+sweepTicks-1)/sweepTicks), len(conns))
 	//: this tick's share of the table.
 	for ; rr.sweepAt < end; rr.sweepAt++ {
 		//: no room: the rest at the next tick.
@@ -1305,8 +1311,9 @@ func (rr *uRing) sweep() {
 func (rr *uRing) sweepDue(tick int64) bool {
 	since := rr.closes - rr.sweptCloses
 	every := cmp.Or(rr.ul.hooks.sweepEvery, sweepEvery)
+	enough := max(sweepCloses, uint64(len(rr.r.conns)/4))
 	//: closes enough, or time with some.
-	return since >= sweepCloses || (since > 0 && tick-rr.lastSweep >= every)
+	return since >= enough || (since > 0 && tick-rr.lastSweep >= every)
 }
 
 // cancelOld cancels slot's recv when it was armed before the pass began and

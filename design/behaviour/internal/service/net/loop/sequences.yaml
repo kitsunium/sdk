@@ -4702,7 +4702,9 @@ sequences:
       - bind: every
         eval: cmp.Or(rr.ul.hooks.sweepEvery, sweepEvery)
         to: cmp
-      - return: since >= sweepCloses || (since > 0 && tick-rr.lastSweep >= every)
+      - bind: enough
+        eval: max(sweepCloses, uint64(len(rr.r.conns)/4))
+      - return: since >= enough || (since > 0 && tick-rr.lastSweep >= every)
   - of: (*uRing).cancelOld
     participants:
       - id: caller

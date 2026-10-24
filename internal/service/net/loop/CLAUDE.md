@@ -119,21 +119,23 @@ the Ubuntu lane name both Linux backends (§D9 step 11). Until then
   third connection is closed without the shutdown: where its peer reads no
   end, the put is deferred and the rings sweep (`sweepOn`).
 - **The sweep bounds the deferred puts** (`uRing.sweep`, only with
-  `sweepOn`, so never on 6.13+). A closed socket stays allocated —
-  struct file, inode and `tcp_sock`, an **unmeasured estimate of 2 to 4 KiB of
-  kernel memory each**, no descriptor — until every recv armed before its
-  close completes; with churn and one old keep-alive that is unbounded. After
-  `sweepCloses` (8192) closes, or `sweepEvery` (10 s) with at least one, a
-  pass walks the table `sweepScan` (128) slots a tick and cancels by
-  user_data each recv armed before the pass and before a close
-  (`armEpoch` < the pass's `closes`); `recvCancelled` re-arms it under the
-  current node and the older nodes drain. Pinned sockets stay under 8192
-  plus one pass's closes (a 65 536-entry table is walked in about 5 s), at
-  most 12 800 cancels a second. Bytes arriving between cancel and re-arm wait
-  in the socket. `TestConformance_sweepReleases` counts `/proc/net/sockstat`'s
-  TCP `alloc` before and after a pass; `TestConformance_directCloseEOF` reads
-  the end within 200 ms with a keeper armed first, server close and peer
-  first, on 6.8, 6.12 and 6.13+.
+  `sweepOn`, so never on 6.13+). A closed socket stays allocated — about
+  **3.6 KiB of kernel slab** each, measured from `/proc/slabinfo` on 6.8.0-147
+  and 6.12.113 (TCP 2368/2432 + sock_inode_cache 832 + filp 192–256 + dentry
+  192), no descriptor — until every recv armed before its close completes;
+  with churn and one old keep-alive that is unbounded. A pass starts after
+  max(8192, table/4) closes, or every 10 s with at least one, walks the
+  table in at most 1 s (128 slots a tick at least), and cancels by user_data
+  each recv armed before the pass and before a close (`armEpoch` < the
+  pass's `closes`); `recvCancelled` re-arms it under the current node and the
+  older nodes drain. Pinned sockets stay under that threshold plus one second
+  of closes — 16 384 on a 65 536-entry table, about 58 MiB, plus the second —
+  for at most four cancels and four re-arms per close. Bytes arriving between
+  cancel and re-arm wait in the socket. `TestConformance_sweepReleases`
+  counts `/proc/net/sockstat`'s TCP `alloc` (254 pinned after 256 closes on
+  6.8 and 6.12, all released by one pass); `TestConformance_directCloseEOF`
+  reads the end within 200 ms with a keeper armed first, server close and
+  peer first.
 - **Rings an unprivileged process can afford.** Without `CAP_IPC_LOCK` the
   kernel charges each ring's SQ and CQ to `RLIMIT_MEMLOCK` (8 MiB by
   default). A serving ring asks for 1024 SQEs and a 4096-entry CQ, the

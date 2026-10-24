@@ -23,7 +23,7 @@ workflows:
       - bind: conns
         eval: rr.r.conns
       - bind: end
-        eval: min(rr.sweepAt+sweepScan, len(conns))
+        eval: min(rr.sweepAt+max(sweepScan, (len(conns)+sweepTicks-1)/sweepTicks), len(conns))
       - loop:
           cond: rr.sweepAt < end
           do:
