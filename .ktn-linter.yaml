@@ -1005,8 +1005,45 @@ rules:
   # Scoped to the one file that closes it.
   KTN-GOROUTINE-DOUBLECLOSE:
     exclude:
+      # service/net/server's portable loop closes pc.kick in finish, and finish
+      # closes it once by construction: it runs only on the handler goroutine
+      # and returns at once unless pc.open is set, clearing it before the
+      # close. A sync.Once would not make that safer; it would turn a broken
+      # latch into a silently ignored second close, the health/runner.go case
+      # above. Scoped to the one file.
+      - "**/internal/service/net/server/loop_portable.go"
+      - "internal/service/net/server/loop_portable.go"
       - "**/internal/service/app/health/runner.go"
       - "internal/service/app/health/runner.go"
+
+  # KTN-GOROUTINE-CHANCLOSE (error) — the sender and the closer are the same
+  # goroutine.
+  #
+  # service/net/server's portable loop closes pc.kick in finish and sends on it
+  # in settle, and both run on the handler goroutine, one after the other: a
+  # send-on-closed would need settle to run concurrently with finish, which
+  # the single handler goroutine rules out, and settle sends only after
+  # checking pc.open, which finish clears before it closes. The writer, the
+  # only other party, only receives. Scoped to the one file.
+  KTN-GOROUTINE-CHANCLOSE:
+    exclude:
+      - "**/internal/service/net/server/loop_portable.go"
+      - "internal/service/net/server/loop_portable.go"
+
+  # KTN-GOROUTINE-CHANRECV-OK (error) — the channels it guards are never
+  # closed, by design.
+  #
+  # service/net/server's portable loop receives in for-select on pl.events and
+  # pl.wake. Neither is ever closed, and must not be: a connection's reader
+  # may still be sending its last event when the handler goroutine returns,
+  # and closing events would turn that send into a panic — closeAll drains
+  # the stragglers instead. With no close, the hot-spin the rule guards
+  # against cannot happen, and a comma-ok branch would be dead code. Scoped to
+  # the one file.
+  KTN-GOROUTINE-CHANRECV-OK:
+    exclude:
+      - "**/internal/service/net/server/loop_portable.go"
+      - "internal/service/net/server/loop_portable.go"
 
   # KTN-STRUCT-FLAGS (info) — the suggested bitfield would create a data race
   # in one case and delete a test's own vocabulary in the other.
@@ -1038,6 +1075,25 @@ rules:
   # jobs subsystem (issue #483 part 4), the same three facts by the same names.
   KTN-STRUCT-FLAGS:
     exclude:
+      # service/net/loop's loopHooks are the conformance suite's fault
+      # injections, zero in production: fill, shuffle and deferTaskrun are
+      # three independent knobs the suite sets BY NAME in a composite literal
+      # (loopHooks{bufs: 2, bufSize: 64, fill: true, shuffle: true}). A
+      # bitfield would turn each test case's declaration into a mask of an
+      # SDK-private layout, the readability a table test exists for — the
+      # health probe_external_test.go case above. Scoped to the one file.
+      - "**/internal/service/net/loop/group.go"
+      - "internal/service/net/loop/group.go"
+      # service/net/server's portableConn (the portable loop backend) carries
+      # six bools that are not one kind: closing is written by the handler
+      # goroutine UNDER mu and read by the connection's writer goroutine, while
+      # open, pressure, wantWrite, peerDone and reasonSet belong to the handler
+      # goroutine alone and are read without the lock. Packing them into one
+      # word would make every write of a handler-owned flag a read-modify-write
+      # of closing's word without mu — a data race the race detector would
+      # report, introduced by a readability suggestion. Scoped to the one file.
+      - "**/internal/service/net/server/loop_portable.go"
+      - "internal/service/net/server/loop_portable.go"
       - "**/internal/service/app/health/entry.go"
       - "internal/service/app/health/entry.go"
       - "**/internal/core/app/scheduler/scheduler_result.go"
@@ -1110,6 +1166,14 @@ rules:
   # this entry needs (Makefile KTN_LINTER_VERSION).
   KTN-FUNC-MAXPARAM:
     exclude_functions:
+      # uringEnterWait(fd, submit, minComplete, flags, arg, argSz) is
+      # io_uring_enter(2) itself: the syscall takes six arguments, and the
+      # wrapper passes them straight to one Syscall6. A struct would put a
+      # second copy of the kernel's argument list between the loop and the
+      # call on every batch, for a function whose whole job is to be that
+      # argument list. Only this function.
+      - "**/internal/service/net/loop/uring_abi_linux.go:uringEnterWait"
+      - "internal/service/net/loop/uring_abi_linux.go:uringEnterWait"
       - "**/internal/kernel/errs/error.go:Static"
       - "internal/kernel/errs/error.go:Static"
 
@@ -1121,6 +1185,14 @@ rules:
   # would stutter, which the same linter's own naming rules discourage elsewhere.
   KTN-STRUCT-CTOR:
     exclude:
+      # service/net/loop.Group is a RUNNING loop group, and ADR 0186 declares
+      # loop.Start(cfg) as the one way to get one: it resolves the sizing,
+      # starts the threads and returns the group, or refuses. A NewGroup that
+      # did not start would hand out a group with no loops, no backend and no
+      # runner — a second, half-built state every method would have to guard
+      # against. Scoped to the one file.
+      - "**/internal/service/net/loop/group.go"
+      - "internal/service/net/loop/group.go"
       # kernel/plugin.Registry's zero value IS the empty registry, ready to
       # use, as sync.Mutex's is an unlocked mutex: every registry is a
       # package-level `var registry plugin.Registry[...]`, initialised before
@@ -1469,6 +1541,18 @@ rules:
   # too but is not flagged (it is not a pure forwarder).
   KTN-VAR-BIGSTRUCT:
     exclude:
+      # service/net/loop's group.go holds the two by-value Config parameters
+      # the design fixes. Start(cfg Config) is the leaf's published entry
+      # point as ADR 0186 declares it: server writes the Config as a composite
+      # literal, and the group owns its copy from the call on. newLoop(g, cfg,
+      # i, mapper) is called once per loop at Start, never on a batch path, and
+      # its by-value Config is pinned by the white-box suite, which builds a
+      # loop straight from a Config literal (core_internal_test.go). Every
+      # other function of the package takes *Config — startNative,
+      # startEpoll — so the copy happens once, at the boundary. Scoped to the
+      # one file.
+      - "**/internal/service/net/loop/group.go"
+      - "internal/service/net/loop/group.go"
       # service/app/resilience.BreakerConfig (72 bytes) and
       # service/app/lifecycle.SupervisorConfig (88 bytes) crossed 64 bytes when
       # ADR 0184 gave them HalfOpenTrials and GiveUpAfter. Both are published
@@ -1964,6 +2048,15 @@ rules:
   # alone (mirror the 2026-05-28 retirements).
   KTN-FUNC-DEADCODE:
     exclude:
+      # service/net/server's StreamGroup.handleLoop is unexported ON PURPOSE
+      # until StreamGroup.HandleLoop is published (ADR 0186 §D9 step 11, once
+      # every linux-init lane and the Ubuntu lane name both Linux backends);
+      # until then only the package's own tests declare a loop handler, which
+      # is exactly what its doc comment says. Publishing it early to satisfy
+      # the rule would ship the loop engine before the lanes that gate it.
+      # RETIRE this entry when HandleLoop is published. Scoped to the one file.
+      - "**/internal/service/net/server/loop_group.go"
+      - "internal/service/net/server/loop_group.go"
       - "**/internal/service/proc/cgroup/option.go"
       - "internal/service/proc/cgroup/option.go"
       - "**/internal/service/proc/exec/wrap.go"
@@ -1979,6 +2072,17 @@ rules:
 
   KTN-CONST-UNUSED:
     exclude:
+      # service/net/loop's uring_abi_linux.go is a transcription of Linux
+      # include/uapi/linux/io_uring.h (ADR 0018 bans golang.org/x/sys), read
+      # side by side with the header. IORING_OFF_CQ_RING, IOSQE_ASYNC and
+      # IORING_UNREGISTER_PBUF_RING are kept although the backend issues none
+      # of them: the CQ ring shares the SQ mapping under FEAT_SINGLE_MMAP, no
+      # SQE is forced async, and closing the ring unregisters the buffer ring.
+      # Dropping them would leave holes in a table whose value is that it can
+      # be checked line by line against the uapi header. Scoped to the one
+      # file; every other constant of the package stays bound by the rule.
+      - "**/internal/service/net/loop/uring_abi_linux.go"
+      - "internal/service/net/loop/uring_abi_linux.go"
       - "**/internal/service/proc/systemd/notify/sdnotify.go"
       - "internal/service/proc/systemd/notify/sdnotify.go"
 
@@ -2016,6 +2120,16 @@ rules:
   # naming the parameter would suggest the answer depends on it.
   KTN-FUNC-BLANKPARAM:
     exclude:
+      # service/net/loop's ring.sent(slot, _ int) is the ring's half of the
+      # driver contract: a backend reports each send with its byte count —
+      # write(2)'s return on epoll, a completion's res on io_uring — and the
+      # white-box suite's fake driver calls it the same way
+      # (core_internal_test.go). The ring needs no count: the driver already
+      # advanced the chunk offsets, so the pending total says the rest.
+      # Writing `_` says that in the signature; removing the parameter would
+      # break the contract the tests pin. Scoped to the one file.
+      - "**/internal/service/net/loop/core.go"
+      - "internal/service/net/loop/core.go"
       - "**/internal/service/proc/cgroup/cgroup_other.go"
       - "internal/service/proc/cgroup/cgroup_other.go"
       - "**/internal/service/data/cache/**"

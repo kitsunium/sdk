@@ -1,0 +1,138 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "loop",
+    srcs = [
+        "conn.go",
+        "core.go",
+        "debug_off_linux.go",
+        "debug_on_linux.go",  # keep: compiled under the loopdebug tag the tests set
+        "doc.go",
+        "epoll_linux.go",
+        "group.go",
+        "group_linux.go",
+        "group_other.go",
+        "postq.go",
+        "sizing.go",
+        "slab.go",
+        "stats.go",
+        "uring_abi_linux.go",
+        "uring_loop_linux.go",
+        "uring_none_linux.go",
+        "uring_probe_linux.go",
+        "uring_ring_linux.go",
+        "wheel.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/net/loop",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/net",
+        "//internal/kernel/errs",
+    ] + select({
+        "@rules_go//go/platform:aix": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:darwin": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:dragonfly": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:freebsd": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:illumos": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:ios": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:js": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:netbsd": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:openbsd": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:osx": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:plan9": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:qnx": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:solaris": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:windows": [
+            "//internal/core/proc",
+        ],
+        "//conditions:default": [],
+    }),
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":loop",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+# The suite runs under the loopdebug build tag (the thread check compiled in)
+# and with the backends it must find compiled in, failing closed on Linux
+# (ADR 0186): a backend missing on a lane fails the target. This lane asks for
+# epoll alone: Bazel runs on the hosted runner, whose kernel's io_uring this
+# repository does not control, and the required check must not hang on it.
+# e2e-cross's linux-init lanes, on kernels they pin, require iouring,epoll.
+go_test(
+    name = "loop_test",
+    srcs = [
+        "conformance_linux_test.go",
+        "core_internal_test.go",
+        "gen_api_test.go",
+        "memory_linux_test.go",
+        "parts_internal_test.go",
+        "uring_abi_linux_internal_test.go",
+    ],
+    embed = [":loop"],
+    gotags = ["loopdebug"],  # keep
+    # keep
+    x_defs = {
+        "github.com/kitsunium/sdk/internal/service/net/loop.requiredBackends": "epoll",
+    },
+    deps = [
+        "//internal/core/net",
+        "//internal/kernel/errs",
+    ],
+)
+
+# The idle-connection memory budget (memory_linux_test.go, //go:build !race),
+# its own target so the race-off lane (tools/alloc-lane-targets.txt) runs it
+# by name; under race it compiles to nothing it runs.
+# keep
+go_test(
+    name = "loop_memory_test",
+    srcs = [
+        "conformance_linux_test.go",
+        "memory_linux_test.go",
+    ],
+    args = ["-test.run=^TestMemory_"],
+    embed = [":loop"],
+    x_defs = {
+        "github.com/kitsunium/sdk/internal/service/net/loop.requiredBackends": "epoll",
+    },
+    deps = [
+        "//internal/core/net",
+    ],
+)
