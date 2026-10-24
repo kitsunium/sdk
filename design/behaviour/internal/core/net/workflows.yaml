@@ -25,4 +25,13 @@ workflows:
           key: _
           range: s.Listeners
           value: listener
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: loop.Degraded
+          key: _
+          range: s.Loops
+          value: loop
       - return: "false"

@@ -328,6 +328,33 @@ packages:
             value: "0x00_02_0B_2C"
         type: errs.Code
     constants:
+      - blockDoc: The loop backends. The zero value is LoopBackendAuto.
+        doc: |-
+          LoopBackendAuto takes the best backend the platform's probe reaches:
+          io_uring, then epoll on Linux, the portable backend elsewhere.
+        name: LoopBackendAuto
+        type: LoopBackend
+        value: "0"
+      - blockDoc: The loop backends. The zero value is LoopBackendAuto.
+        doc: |-
+          LoopBackendIOURing is io_uring, on linux/amd64, arm64, riscv64 and loong64,
+          after the kernel's staged probe.
+        name: LoopBackendIOURing
+        type: LoopBackend
+        value: "1"
+      - blockDoc: The loop backends. The zero value is LoopBackendAuto.
+        doc: |-
+          LoopBackendEpoll is epoll, on every Linux architecture.
+        name: LoopBackendEpoll
+        type: LoopBackend
+        value: "2"
+      - blockDoc: The loop backends. The zero value is LoopBackendAuto.
+        doc: |-
+          LoopBackendPortable is the default engine's accept path and goroutines,
+          serialised onto one handler goroutine, on every platform.
+        name: LoopBackendPortable
+        type: LoopBackend
+        value: "3"
       - blockDoc: The group options a loop group judges at Start, by kind.
         doc: OptionNone names no option; it is the zero value.
         name: OptionNone
@@ -757,6 +784,11 @@ packages:
       Package net — the loop engine's contract: the connection reference, the
       posted operation, the option kinds a loop group judges, and the ports a loop
       and its handler implement (ADR 0186 §D4).
+
+      Package net — a loop group's reported state: the backend it runs on, how it
+      got there, and its rings' counters.
+
+      Package net — the loop engine's configuration value and its backends.
 
       Package net — TLS material parsing helpers shared by NewIdentity.
 
@@ -2028,6 +2060,17 @@ packages:
               tag: json:"batch_size"
               type: int
       - doc: |-
+          LoopBackend names the mechanic a loop group runs on (ADR 0186 §D5). The zero
+          value is LoopBackendAuto.
+        methods:
+          - doc: String renders the backend as State and the start line spell it.
+            name: String
+            out:
+              - type: string
+            recv: value
+        name: LoopBackend
+        underlying: uint8
+      - doc: |-
           LoopConnRef names one connection of a loop: the ring it lives on, its slot
           in that ring's table and the generation of that slot. It is a comparable value
           with no behaviour, so a handler can key a map with it and hold it without
@@ -2052,6 +2095,212 @@ packages:
                 the zero LoopConnRef is stale on every loop.
               name: Gen
               type: uint32
+      - doc: |-
+          LoopRingStateValue reports one ring of one loop: counters the loop refreshes
+          at the end of each batch, read without stopping it (ADR 0186 §D8).
+        name: LoopRingStateValue
+        struct:
+          fields:
+            - doc: Loop is the loop's index in its group.
+              name: Loop
+              tag: json:"loop"
+              type: int
+            - doc: Ring is the ring's index in its loop.
+              name: Ring
+              tag: json:"ring"
+              type: int
+            - doc: Conns is the number of connections the ring holds now.
+              name: Conns
+              tag: json:"conns"
+              type: int64
+            - doc: Accepted is the number of connections the ring accepted.
+              name: Accepted
+              tag: json:"accepted"
+              type: uint64
+            - doc: Closed is the number of connections the ring closed.
+              name: Closed
+              tag: json:"closed"
+              type: uint64
+            - doc: Batches is the number of loop iterations that reaped this ring.
+              name: Batches
+              tag: json:"batches"
+              type: uint64
+            - doc: Completions is the number of completions or events the ring reaped.
+              name: Completions
+              tag: json:"completions"
+              type: uint64
+            - doc: |-
+                BufferStarved is the number of receives that found no provided buffer
+                (ENOBUFS) and waited for one to come back.
+              name: BufferStarved
+              tag: json:"buffer_starved"
+              type: uint64
+            - doc: |-
+                EnterRetries is the number of times submitting to the kernel was retried
+                after it was busy — the completion queue full, typically.
+              name: EnterRetries
+              tag: json:"enter_retries"
+              type: uint64
+            - doc: |-
+                AcceptPauses is the number of times the ring stopped accepting: the
+                descriptor reserve reached, or the process out of descriptors.
+              name: AcceptPauses
+              tag: json:"accept_pauses"
+              type: uint64
+            - doc: Evicted is the number of idle connections closed to admit others.
+              name: Evicted
+              tag: json:"evicted"
+              type: uint64
+            - doc: |-
+                WatchdogFires is the number of times the liveness watchdog saw a stall it
+                could observe and acted on it.
+              name: WatchdogFires
+              tag: json:"watchdog_fires"
+              type: uint64
+            - doc: |-
+                Draining reports a ring the watchdog judged sick: it accepts nothing new
+                and closes its connections as they fall idle.
+              name: Draining
+              tag: json:"draining"
+              type: bool
+      - doc: |-
+          LoopStateValue reports one loop group: the backend it runs on, how it got
+          there, how it is sized, and its rings' counters (ADR 0186 §D8). A fallback is
+          reported here and by Degraded, never silently.
+        name: LoopStateValue
+        struct:
+          fields:
+            - doc: Group is the loop group's name.
+              name: Group
+              tag: json:"group"
+              type: string
+            - doc: Backend is the backend in use.
+              name: Backend
+              tag: json:"backend"
+              type: LoopBackend
+            - doc: |-
+                ProbeStage names the last stage of the kernel probe the backend passed,
+                or the stage that failed when the group fell back.
+              name: ProbeStage
+              tag: json:"probe_stage"
+              type: string
+            - doc: |-
+                Degraded reports that the group runs on a backend other than the best one
+                it asked for: auto fell back from io_uring, say.
+              name: Degraded
+              tag: json:"degraded"
+              type: bool
+            - doc: DegradedReason names the fallback and its cause when Degraded is set.
+              name: DegradedReason
+              tag: json:"degraded_reason,omitempty"
+              type: string
+            - doc: Loops is the number of loops running.
+              name: Loops
+              tag: json:"loops"
+              type: int
+            - doc: Rings is the number of rings per loop.
+              name: Rings
+              tag: json:"rings"
+              type: int
+            - doc: |-
+                RingsSource says where Rings came from: "explicit", "derived" from the
+                connection bounds and the descriptor limit, or "single" when no bound was
+                set or the backend runs one ring.
+              name: RingsSource
+              tag: json:"rings_source"
+              type: string
+            - doc: |-
+                RLimitNoFile is the effective RLIMIT_NOFILE soft limit read at Start. The
+                SDK never raises it; the Go runtime already lifts the soft limit to the
+                hard one.
+              name: RLimitNoFile
+              tag: json:"rlimit_nofile"
+              type: uint64
+            - doc: |-
+                GOMAXPROCS is runtime.GOMAXPROCS(0) read at Start. The SDK never sets it.
+              name: GOMAXPROCS
+              tag: json:"gomaxprocs"
+              type: int
+            - doc: |-
+                BatchP99 is the 99th percentile of one loop iteration's duration, over the
+                loops' recent batches.
+              name: BatchP99
+              tag: json:"batch_p99"
+              type: DurationValue
+            - doc: RingStates reports every ring of every loop, loop by loop.
+              name: RingStates
+              tag: json:"ring_states"
+              type: "[]LoopRingStateValue"
+      - doc: |-
+          LoopValue configures a loop group's engine (ADR 0186 §D5). It is a value of
+          its own, passed by the Loop group option, so LimitsValue and TimeoutsValue
+          keep the meanings they publish for every engine. Every field is optional:
+          zero selects the domain default, never "unbounded".
+        name: LoopValue
+        struct:
+          fields:
+            - doc: |-
+                Backend is the mechanic to run on. LoopBackendAuto takes the best one the
+                platform's probe reaches and reports any fallback in State; an explicit
+                backend the platform cannot run is refused at Start.
+              name: Backend
+              tag: json:"backend"
+              type: LoopBackend
+            - doc: |-
+                Loops is the number of loops, each one goroutine locked to its OS thread
+                on a native backend. Zero selects one. The SDK never sets GOMAXPROCS:
+                sizing the process against its loops is the consumer's policy, and State
+                reports both.
+              name: Loops
+              tag: json:"loops"
+              type: int
+            - doc: |-
+                Rings is the number of descriptor shards inside one loop, each with its
+                own table of at most min(RLIMIT_NOFILE, IORING_MAX_FIXED_FILES) entries:
+                what lets io_uring serve more connections than RLIMIT_NOFILE. Zero
+                derives it, ⌈max(MaxConns, SoftConns) / min(RLIMIT_NOFILE,
+                IORING_MAX_FIXED_FILES)⌉, and one when both are zero; that is the only
+                formula, and State says where the value came from. epoll and the portable
+                backend run one ring whatever it says.
+              name: Rings
+              tag: json:"rings"
+              type: int
+            - doc: |-
+                CQBatch bounds the completions or events one loop iteration reaps before
+                it calls OnBatchEnd. Zero selects the domain default.
+              name: CQBatch
+              tag: json:"cq_batch"
+              type: int
+            - doc: |-
+                SpillCap is the most unconsumed input, in bytes, one connection may hold
+                between OnData calls. Past it the connection is closed with
+                LoopSpillFull. Zero selects the domain default.
+              name: SpillCap
+              tag: json:"spill_cap"
+              type: int
+            - doc: |-
+                OutputCap is the most written and unsent output, in bytes, one
+                connection may hold. A Write past it is refused with LoopOutputFull. Zero
+                selects the domain default.
+              name: OutputCap
+              tag: json:"output_cap"
+              type: int
+            - doc: |-
+                SoftConns is the soft connection bound: a connection accepted while the
+                group serves more is flagged under pressure (LoopIO.Pressure), so a
+                protocol can ask its peer to leave. It refuses nothing; MaxConns does.
+                Zero sets no soft bound.
+              name: SoftConns
+              tag: json:"soft_conns"
+              type: int
+            - doc: |-
+                EvictIdle is how long a connection must have been idle before the loop
+                may close it to admit another under hard pressure — the process out of
+                descriptors, or MaxConns reached. A connection with unread bytes is
+                never evicted. Zero evicts nothing.
+              name: EvictIdle
+              tag: json:"evict_idle"
+              type: DurationValue
       - doc: |-
           Middleware decorates a handler with another of the same type.
 
@@ -2255,9 +2504,9 @@ packages:
           the server that produced it.
         methods:
           - doc: |-
-              Degraded reports whether any listener fell back from a requested
-              optimisation, so a caller can assert "no silent degradation" in one call
-              instead of walking the slice.
+              Degraded reports whether any listener or loop group fell back from a
+              requested optimisation, so a caller can assert "no silent degradation" in
+              one call instead of walking the slices.
             name: Degraded
             out:
               - type: bool
@@ -2304,6 +2553,12 @@ packages:
               name: AcceptBackoffs
               tag: json:"accept_backoffs"
               type: uint64
+            - doc: |-
+                Loops reports every loop group (ADR 0186 §D8). It is empty while the
+                server serves none.
+              name: Loops
+              tag: json:"loops,omitempty"
+              type: "[]LoopStateValue"
       - doc: |-
           ListenerStateValue reports one bound listener.
 
@@ -2730,6 +2985,19 @@ packages:
         name: WithDrainTimeout
         out:
           - type: Option
+      - doc: |-
+          Loop configures a group's loop engine (ADR 0186 §D5): its backend, its loops
+          and rings, and its per-connection and pressure bounds. It is judged at Start,
+          once the group's handler is known: a group served by Handle, HandleFunc or
+          HandleHTTP, or one with no handler, refuses it with LoopOptionUnsupported,
+          whichever order the declarations came in. No group is served by a loop yet,
+          so every group refuses it until the loop engine's entry is published.
+        in:
+          - name: v
+            type: corenet.LoopValue
+        name: Loop
+        out:
+          - type: GroupOption
       - doc: |-
           Listen adds an address to a group. It is variadic-friendly by repetition:
           calling it twice binds two addresses to the same handler, which is how one
@@ -4777,6 +5045,59 @@ packages:
             name: ListenerState
             target: corenet.ListenerStateValue
       - alias:
+          - doc: |-
+              LoopState reports one loop group: its backend, how it got there, how it is
+              sized, and its rings' counters.
+            name: LoopState
+            target: corenet.LoopStateValue
+      - alias:
+          - doc: LoopRingState reports one ring of one loop group.
+            name: LoopRingState
+            target: corenet.LoopRingStateValue
+      - alias:
+          - doc: |-
+              LoopValue configures a group's loop engine, passed by Loop. Every field is
+              optional: zero selects the domain default.
+            name: LoopValue
+            target: corenet.LoopValue
+      - alias:
+          - doc: LoopBackend names the mechanic a loop group runs on.
+            name: LoopBackend
+            target: corenet.LoopBackend
+      - const:
+          - doc: |-
+              LoopBackendAuto takes the best backend the platform's probe reaches.
+            name: LoopBackendAuto
+            reexport: corenet.LoopBackendAuto
+            type: LoopBackend
+            typed: true
+            value: "0"
+      - const:
+          - doc: |-
+              LoopBackendIOURing is io_uring, after the kernel's staged probe.
+            name: LoopBackendIOURing
+            reexport: corenet.LoopBackendIOURing
+            type: LoopBackend
+            typed: true
+            value: "1"
+      - const:
+          - doc: |-
+              LoopBackendEpoll is epoll, on every Linux architecture.
+            name: LoopBackendEpoll
+            reexport: corenet.LoopBackendEpoll
+            type: LoopBackend
+            typed: true
+            value: "2"
+      - const:
+          - doc: |-
+              LoopBackendPortable is the default engine's accept path, serialised onto
+              one handler goroutine.
+            name: LoopBackendPortable
+            reexport: corenet.LoopBackendPortable
+            type: LoopBackend
+            typed: true
+            value: "3"
+      - alias:
           - doc: Phase is where a server sits in its lifecycle.
             name: Phase
             target: corenet.Phase
@@ -4906,6 +5227,21 @@ packages:
           out:
             - type: Handler
           variadic: true
+      - func:
+          doc: |-
+            Loop configures a group's loop engine (ADR 0186 §D5): its backend, its loops
+            and rings, and its per-connection and pressure bounds. It is judged at Start,
+            once the group's handler is known: a group served by Handle, HandleFunc or
+            HandleHTTP, or one with no handler, refuses it with LoopOptionUnsupported,
+            whichever order the declarations came in. No group is served by a loop yet,
+            so every group refuses it until the loop engine's entry is published.
+          forward: svcserver.Loop
+          in:
+            - name: v
+              type: LoopValue
+          name: Loop
+          out:
+            - type: GroupOption
       - func:
           doc: |-
             Listen adds an address to a group. Repeat it to bind several addresses to one

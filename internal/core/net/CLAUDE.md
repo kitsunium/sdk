@@ -51,6 +51,8 @@ adapter.
 | `address.go` | `AddressValue` — one socket to bind |
 | `limits.go` | `LimitsValue` — one listener group's resource ceilings; a zero field means the domain default, never unbounded |
 | `loop.go` | the loop engine's contract values (ADR 0186 §D4): `LoopConnRef` — ring, slot, generation, comparable, the zero value stale; `PostFunc` — an operation posted to a loop, a plain function and an integer, no closure; `OptionKind` + its constants + `String` — the group options a loop group judges at `Start` |
+| `loop_state.go` | `LoopStateValue` — one loop group's backend, probe stage, fallback, sizing (`Loops`, `Rings` and where it came from), the effective `RLIMIT_NOFILE` and `GOMAXPROCS`, the batch p99 — and `LoopRingStateValue`, one ring's counters (ADR 0186 §D8) |
+| `loop_value.go` | `LoopValue` — a loop group's engine configuration, passed by the `Loop` group option; `LoopBackend` + its constants (`auto`, the zero, `iouring`, `epoll`, `portable`) + `String` (ADR 0186 §D5) |
 | `timeouts.go` | `TimeoutsValue` — per-operation deadlines, one per phase (`Read` / `Write` / `Idle` / `Handshake`) |
 | `conn.go` | `ConnHandlerFunc`, the func adapter of the `ConnHandler` port |
 | `packet.go` | `PacketHandlerFunc`, the func adapter of the `PacketHandler` port |
@@ -58,7 +60,7 @@ adapter.
 | `handler_compliance.go` | the compile-time proof that both func adapters satisfy their ports |
 | `middleware.go` | `Middleware[H]` + `Chain` — one generic decorator shape for stream and datagram handlers, the first listed outermost |
 | `phase.go` | `Phase` — `PhaseNew` / `PhaseStarting` / `PhaseServing` / `PhaseDraining` / `PhaseStopped` + `String` |
-| `state.go` | `StateValue` (+ `Degraded`) and `ListenerStateValue` — the server's reported state |
+| `state.go` | `StateValue` (+ `Degraded`, which a loop group's fallback sets as a listener's does) and `ListenerStateValue` — the server's reported state; `StateValue.Loops` is empty while no loop group exists |
 | `policy.go` | `PolicyFunc`, the func form of the outbound authorisation port `Policy` |
 | `policy_compliance.go` | the compile-time proof that `PolicyFunc` satisfies `Policy` |
 | `response.go` | `ResponseValue` — a fully-read outbound response — and `RequestValue`, the request a `Policy` judges |
@@ -287,7 +289,8 @@ cd internal/core && GOWORK=off go test -race -cover ./net/...
 - ADR 0047 — WebSocket — `docs/adr/0047-sdk-net-websocket.md`
 - ADR 0186 — the loop engine's ports and values (`LoopConnRef`, `LoopIO`,
   `LoopHandler`, `PostFunc`, `OptionKind`) and its sentinels `0.2.11.35` –
-  `0.2.11.44`, declared; `LoopValue` and the engines are still to come — `docs/adr/0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md`
+  `0.2.11.44`, `LoopValue`, `LoopBackend` and the loop `State` fields, declared;
+  the engines are still to come — `docs/adr/0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md`
 - ADR 0043 (drain is a signal), ADR 0016 (one-sibling/many-facades),
   ADR 0018 (portability, `x/sys` ban), ADR 0013 (the redacting `Key`
   precedent), ADR 0028 (config decode shape)

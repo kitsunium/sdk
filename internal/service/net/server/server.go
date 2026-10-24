@@ -177,6 +177,12 @@ func (s *Server) PacketGroup(name string, opts ...GroupOption) *PacketGroup {
 	for _, opt := range opts {
 		opt(shim)
 	}
+	//: a datagram group has no loop engine: the option is refused at Start
+	//: rather than dropped with the rest of the shim.
+	if shim.loopSet {
+		s.recordDeclError(errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
+			errs.String("group", name), errs.String("option", "Loop")))
+	}
 	group.addrs = shim.addrs
 	group.limits = shim.limits
 	group.adopt = shim.adopt

@@ -248,6 +248,26 @@ sequences:
             - return: "\"unknown\""
           when: int(k) >= len(optionNames)
       - return: optionNames[k]
+  - of: LoopBackend.String
+    steps:
+      - switch:
+          cases:
+            - case: LoopBackendAuto
+              do:
+                - return: "\"auto\""
+            - case: LoopBackendIOURing
+              do:
+                - return: "\"iouring\""
+            - case: LoopBackendEpoll
+              do:
+                - return: "\"epoll\""
+            - case: LoopBackendPortable
+              do:
+                - return: "\"portable\""
+            - default: true
+              do:
+                - return: "\"unknown\""
+          "on": b
   - of: parseKeyPair
     participants:
       - id: caller

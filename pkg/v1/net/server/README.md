@@ -88,6 +88,7 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
 - [func HandshakeTimeout\(d time.Duration\) GroupOption](<#HandshakeTimeout>)
 - [func IdleTimeout\(d time.Duration\) GroupOption](<#IdleTimeout>)
 - [func Listen\(network string, addr string\) GroupOption](<#Listen>)
+- [func Loop\(v LoopValue\) GroupOption](<#Loop>)
 - [func MaxConns\(n int\) GroupOption](<#MaxConns>)
 - [func MaxHeaderBytes\(n int\) GroupOption](<#MaxHeaderBytes>)
 - [func MaxPacketSize\(n int\) GroupOption](<#MaxPacketSize>)
@@ -115,6 +116,11 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
 - [type HandlerFunc](<#HandlerFunc>)
   - [func \(HandlerFunc\) ServeConn\(ctx context.Context, c Conn\) error](<#HandlerFunc.ServeConn>)
 - [type ListenerState](<#ListenerState>)
+- [type LoopBackend](<#LoopBackend>)
+  - [func \(LoopBackend\) String\(\) string](<#LoopBackend.String>)
+- [type LoopRingState](<#LoopRingState>)
+- [type LoopState](<#LoopState>)
+- [type LoopValue](<#LoopValue>)
 - [type Middleware](<#Middleware>)
 - [type Option](<#Option>)
 - [type Packet](<#Packet>)
@@ -148,6 +154,42 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
   - [func \(State\) Degraded\(\) bool](<#State.Degraded>)
 
 ## Constants
+
+<a name="LoopBackendAuto"></a>
+```go
+const LoopBackendAuto LoopBackend = 0
+```
+
+LoopBackendAuto takes the best backend the platform's probe reaches.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopBackendAuto`.
+
+<a name="LoopBackendEpoll"></a>
+```go
+const LoopBackendEpoll LoopBackend = 2
+```
+
+LoopBackendEpoll is epoll, on every Linux architecture.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopBackendEpoll`.
+
+<a name="LoopBackendIOURing"></a>
+```go
+const LoopBackendIOURing LoopBackend = 1
+```
+
+LoopBackendIOURing is io\_uring, after the kernel's staged probe.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopBackendIOURing`.
+
+<a name="LoopBackendPortable"></a>
+```go
+const LoopBackendPortable LoopBackend = 3
+```
+
+LoopBackendPortable is the default engine's accept path, serialised onto one handler goroutine.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopBackendPortable`.
 
 <a name="PhaseDraining"></a>
 ```go
@@ -371,6 +413,15 @@ func Listen(network string, addr string) GroupOption
 Listen adds an address to a group. Repeat it to bind several addresses to one handler — a TCP port and a Unix socket, for instance.
 
 On Windows, whose AF\_UNIX sockets are stream-only, a "unixgram" or "unixpacket" address fails Start with the SDK's UNSUPPORTED\_PLATFORM, before any socket is opened; "unix" is served there as everywhere else.
+
+<a name="Loop"></a>
+## func [Loop](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+```go
+func Loop(v LoopValue) GroupOption
+```
+
+Loop configures a group's loop engine (ADR 0186 §D5): its backend, its loops and rings, and its per-connection and pressure bounds. It is judged at Start, once the group's handler is known: a group served by Handle, HandleFunc or HandleHTTP, or one with no handler, refuses it with LoopOptionUnsupported, whichever order the declarations came in. No group is served by a loop yet, so every group refuses it until the loop engine's entry is published.
 
 <a name="MaxConns"></a>
 ## func [MaxConns](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
@@ -696,6 +747,178 @@ type ListenerState struct {
 	// Adopted reports a listener inherited from a supervisor rather than bound
 	// by this process.
 	Adopted        bool   `json:"adopted"`
+}
+```
+
+<a name="LoopBackend"></a>
+## type [LoopBackend](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+LoopBackend names the mechanic a loop group runs on.
+
+```go
+type LoopBackend = corenet.LoopBackend
+```
+
+LoopBackend is an alias of `github.com/kitsunium/sdk/internal/core/net.LoopBackend`, declared as:
+
+```go
+type LoopBackend uint8
+```
+
+<a name="LoopBackend.String"></a>
+### func \(LoopBackend\) [String](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/loop_value.go>)
+
+```go
+func (LoopBackend) String() string
+```
+
+String renders the backend as State and the start line spell it.
+
+<a name="LoopRingState"></a>
+## type [LoopRingState](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+LoopRingState reports one ring of one loop group.
+
+```go
+type LoopRingState = corenet.LoopRingStateValue
+```
+
+LoopRingState is an alias of `github.com/kitsunium/sdk/internal/core/net.LoopRingStateValue`, declared as:
+
+```go
+type LoopRingState struct {
+	// Loop is the loop's index in its group.
+	Loop          int    `json:"loop"`
+	// Ring is the ring's index in its loop.
+	Ring          int    `json:"ring"`
+	// Conns is the number of connections the ring holds now.
+	Conns         int64  `json:"conns"`
+	// Accepted is the number of connections the ring accepted.
+	Accepted      uint64 `json:"accepted"`
+	// Closed is the number of connections the ring closed.
+	Closed        uint64 `json:"closed"`
+	// Batches is the number of loop iterations that reaped this ring.
+	Batches       uint64 `json:"batches"`
+	// Completions is the number of completions or events the ring reaped.
+	Completions   uint64 `json:"completions"`
+	// BufferStarved is the number of receives that found no provided buffer
+	// (ENOBUFS) and waited for one to come back.
+	BufferStarved uint64 `json:"buffer_starved"`
+	// EnterRetries is the number of times submitting to the kernel was retried
+	// after it was busy — the completion queue full, typically.
+	EnterRetries  uint64 `json:"enter_retries"`
+	// AcceptPauses is the number of times the ring stopped accepting: the
+	// descriptor reserve reached, or the process out of descriptors.
+	AcceptPauses  uint64 `json:"accept_pauses"`
+	// Evicted is the number of idle connections closed to admit others.
+	Evicted       uint64 `json:"evicted"`
+	// WatchdogFires is the number of times the liveness watchdog saw a stall it
+	// could observe and acted on it.
+	WatchdogFires uint64 `json:"watchdog_fires"`
+	// Draining reports a ring the watchdog judged sick: it accepts nothing new
+	// and closes its connections as they fall idle.
+	Draining      bool   `json:"draining"`
+}
+```
+
+<a name="LoopState"></a>
+## type [LoopState](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+LoopState reports one loop group: its backend, how it got there, how it is sized, and its rings' counters.
+
+```go
+type LoopState = corenet.LoopStateValue
+```
+
+LoopState is an alias of `github.com/kitsunium/sdk/internal/core/net.LoopStateValue`, declared as:
+
+```go
+type LoopState struct {
+	// Group is the loop group's name.
+	Group          string               `json:"group"`
+	// Backend is the backend in use.
+	Backend        LoopBackend          `json:"backend"`
+	// ProbeStage names the last stage of the kernel probe the backend passed,
+	// or the stage that failed when the group fell back.
+	ProbeStage     string               `json:"probe_stage"`
+	// Degraded reports that the group runs on a backend other than the best one
+	// it asked for: auto fell back from io_uring, say.
+	Degraded       bool                 `json:"degraded"`
+	// DegradedReason names the fallback and its cause when Degraded is set.
+	DegradedReason string               `json:"degraded_reason,omitempty"`
+	// Loops is the number of loops running.
+	Loops          int                  `json:"loops"`
+	// Rings is the number of rings per loop.
+	Rings          int                  `json:"rings"`
+	// RingsSource says where Rings came from: "explicit", "derived" from the
+	// connection bounds and the descriptor limit, or "single" when no bound was
+	// set or the backend runs one ring.
+	RingsSource    string               `json:"rings_source"`
+	// RLimitNoFile is the effective RLIMIT_NOFILE soft limit read at Start. The
+	// SDK never raises it; the Go runtime already lifts the soft limit to the
+	// hard one.
+	RLimitNoFile   uint64               `json:"rlimit_nofile"`
+	// GOMAXPROCS is runtime.GOMAXPROCS(0) read at Start. The SDK never sets it.
+	GOMAXPROCS     int                  `json:"gomaxprocs"`
+	// BatchP99 is the 99th percentile of one loop iteration's duration, over the
+	// loops' recent batches.
+	BatchP99       DurationValue        `json:"batch_p99"`
+	// RingStates reports every ring of every loop, loop by loop.
+	RingStates     []LoopRingStateValue `json:"ring_states"`
+}
+```
+
+<a name="LoopValue"></a>
+## type [LoopValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+LoopValue configures a group's loop engine, passed by Loop. Every field is optional: zero selects the domain default.
+
+```go
+type LoopValue = corenet.LoopValue
+```
+
+LoopValue is an alias of `github.com/kitsunium/sdk/internal/core/net.LoopValue`, declared as:
+
+```go
+type LoopValue struct {
+	// Backend is the mechanic to run on. LoopBackendAuto takes the best one the
+	// platform's probe reaches and reports any fallback in State; an explicit
+	// backend the platform cannot run is refused at Start.
+	Backend   LoopBackend   `json:"backend"`
+	// Loops is the number of loops, each one goroutine locked to its OS thread
+	// on a native backend. Zero selects one. The SDK never sets GOMAXPROCS:
+	// sizing the process against its loops is the consumer's policy, and State
+	// reports both.
+	Loops     int           `json:"loops"`
+	// Rings is the number of descriptor shards inside one loop, each with its
+	// own table of at most min(RLIMIT_NOFILE, IORING_MAX_FIXED_FILES) entries:
+	// what lets io_uring serve more connections than RLIMIT_NOFILE. Zero
+	// derives it, ⌈max(MaxConns, SoftConns) / min(RLIMIT_NOFILE,
+	// IORING_MAX_FIXED_FILES)⌉, and one when both are zero; that is the only
+	// formula, and State says where the value came from. epoll and the portable
+	// backend run one ring whatever it says.
+	Rings     int           `json:"rings"`
+	// CQBatch bounds the completions or events one loop iteration reaps before
+	// it calls OnBatchEnd. Zero selects the domain default.
+	CQBatch   int           `json:"cq_batch"`
+	// SpillCap is the most unconsumed input, in bytes, one connection may hold
+	// between OnData calls. Past it the connection is closed with
+	// LoopSpillFull. Zero selects the domain default.
+	SpillCap  int           `json:"spill_cap"`
+	// OutputCap is the most written and unsent output, in bytes, one
+	// connection may hold. A Write past it is refused with LoopOutputFull. Zero
+	// selects the domain default.
+	OutputCap int           `json:"output_cap"`
+	// SoftConns is the soft connection bound: a connection accepted while the
+	// group serves more is flagged under pressure (LoopIO.Pressure), so a
+	// protocol can ask its peer to leave. It refuses nothing; MaxConns does.
+	// Zero sets no soft bound.
+	SoftConns int           `json:"soft_conns"`
+	// EvictIdle is how long a connection must have been idle before the loop
+	// may close it to admit another under hard pressure — the process out of
+	// descriptors, or MaxConns reached. A connection with unread bytes is
+	// never evicted. Zero evicts nothing.
+	EvictIdle DurationValue `json:"evict_idle"`
 }
 ```
 
@@ -1070,6 +1293,9 @@ type State struct {
 	// 5 ms, doubling to 1 s, and the next accepted connection starts the curve
 	// over. A count that keeps rising is a server that cannot accept.
 	AcceptBackoffs   uint64               `json:"accept_backoffs"`
+	// Loops reports every loop group (ADR 0186 §D8). It is empty while the
+	// server serves none.
+	Loops            []LoopStateValue     `json:"loops,omitempty"`
 }
 ```
 
@@ -1080,6 +1306,6 @@ type State struct {
 func (State) Degraded() bool
 ```
 
-Degraded reports whether any listener fell back from a requested optimisation, so a caller can assert "no silent degradation" in one call instead of walking the slice.
+Degraded reports whether any listener or loop group fell back from a requested optimisation, so a caller can assert "no silent degradation" in one call instead of walking the slices.
 
 Generated from [docs/api](<https://github.com/kitsunium/sdk/blob/main/docs/api>) by tools/genindex.
