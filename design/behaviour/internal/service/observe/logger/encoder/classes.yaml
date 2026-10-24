@@ -25,14 +25,6 @@ constants:
         type: byte
         value: "'.'"
     name: jsonGroupSeparator
-  - doc: |-
-      jsonHexDigits maps a nibble to its lowercase hexadecimal rune for the
-      \u00XX escape of control bytes.
-    items:
-      - name: jsonHexDigits
-        type: string
-        value: "\"0123456789abcdef\""
-    name: jsonHexDigits
   - doc: jsonDecimalBase is the radix passed to strconv.Append* for JSON numbers.
     items:
       - name: jsonDecimalBase
@@ -61,28 +53,6 @@ constants:
         type: byte
         value: "'g'"
     name: jsonFloatFormat
-  - doc: |-
-      jsonControlCeiling is the exclusive upper bound of the bytes the JSON grammar
-      forbids unescaped inside a string literal (everything below U+0020).
-    items:
-      - name: jsonControlCeiling
-        type: byte
-        value: "0x20"
-    name: jsonControlCeiling
-  - doc: |-
-      jsonNibbleShift is the bit-shift that isolates the high nibble of a byte for
-      the \u00XX escape.
-    items:
-      - name: jsonNibbleShift
-        type: byte
-        value: "4"
-    name: jsonNibbleShift
-  - doc: jsonNibbleMask isolates the low nibble of a byte for the \u00XX escape.
-    items:
-      - name: jsonNibbleMask
-        type: byte
-        value: "0x0f"
-    name: jsonNibbleMask
   - doc: |-
       jsonTimestampOpen opens the object's first member, "ts", up to the opening
       quote of its value.
@@ -305,14 +275,10 @@ files:
   - decls:
       - jsonEncoderName
       - jsonGroupSeparator
-      - jsonHexDigits
       - jsonDecimalBase
       - jsonFloatPrec
       - jsonFloatBitSize
       - jsonFloatFormat
-      - jsonControlCeiling
-      - jsonNibbleShift
-      - jsonNibbleMask
       - jsonTimestampOpen
       - jsonLevelMember
       - jsonMessageMember
@@ -325,9 +291,6 @@ files:
       - appendJSONAttr
       - appendJSONValue
       - appendJSONFloat
-      - appendJSONString
-      - appendJSONEscaped
-      - appendJSONByteEscape
     name: json.go
   - decls:
       - decimalBase
@@ -405,27 +368,6 @@ functions:
       the null literal because the JSON grammar has no representation for them.
     name: appendJSONFloat
     params: dst []byte, f float64
-    results: "[]byte"
-  - doc: appendJSONString writes s as a quoted, JSON-escaped string token onto dst.
-    name: appendJSONString
-    params: dst []byte, s string
-    results: "[]byte"
-  - doc: |-
-      appendJSONEscaped writes the JSON-escaped body of s onto dst without the
-      surrounding quotes, so callers can compose multi-part keys before quoting.
-
-      The bytes that need no escape are copied in RUNS — one append per stretch
-      between two escapes, one for the whole string in the common case of a key
-      or value with nothing to escape — instead of one append per byte, which
-      paid a capacity check and a store for every byte of every member.
-    name: appendJSONEscaped
-    params: dst []byte, s string
-    results: "[]byte"
-  - doc: |-
-      appendJSONByteEscape appends the escape of one byte the JSON grammar forbids
-      verbatim inside a string literal: '"', '\\' or a byte below U+0020.
-    name: appendJSONByteEscape
-    params: dst []byte, c byte
     results: "[]byte"
   - name: NewText
     params: clk clock.Clock
@@ -566,6 +508,7 @@ functions:
 imports:
   clock: github.com/kitsunium/sdk/internal/kernel/clock
   corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+  jsonenc: github.com/kitsunium/sdk/internal/kernel/jsonenc
   math: math
   strconv: strconv
   strings: strings

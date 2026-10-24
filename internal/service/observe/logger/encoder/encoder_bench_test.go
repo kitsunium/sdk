@@ -295,3 +295,22 @@ func BenchmarkText_TraceContext(b *testing.B) {
 func BenchmarkJSON_TraceContext(b *testing.B) {
 	runEncode(b, encoder.NewJSON(clock.System), nil, traceRecord())
 }
+
+// benchLongValue is 192 bytes of plain ASCII with a quote and a newline near
+// the end: the shape a message or a path has, where a run is long and a scan
+// that stops at each byte pays for every one of them.
+const benchLongValue string = "GET /api/v1/organizations/4f3a9c1e/projects/92ab77d0/deployments?state=active&limit=100 completed in 12ms; upstream said: " +
+	"connection reset by peer, retrying with a \"fresh\" socket\n"
+
+// benchUnicodeValue is non-ASCII text, valid UTF-8, with no escape in it.
+const benchUnicodeValue string = "déploiement terminé avec succès — 東京リージョン ✓"
+
+// BenchmarkJSON_EscapeLong encodes four 192-byte strings with two escapes each.
+func BenchmarkJSON_EscapeLong(b *testing.B) {
+	runEncode(b, encoder.NewJSON(clock.System), nil, benchRecord(escapingAttrs(benchLongValue)))
+}
+
+// BenchmarkJSON_EscapeUnicode encodes four non-ASCII strings needing no escape.
+func BenchmarkJSON_EscapeUnicode(b *testing.B) {
+	runEncode(b, encoder.NewJSON(clock.System), nil, benchRecord(escapingAttrs(benchUnicodeValue)))
+}

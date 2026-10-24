@@ -1,12 +1,6 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 constants:
-  - doc: hexDigits spells the low nibble of an escaped byte or line separator.
-    items:
-      - name: hexDigits
-        type: string
-        value: "\"0123456789abcdef\""
-    name: hexDigits
   - doc: |-
       The JSON literals an appender writes for a bool; null is jsonNull, the
       literal the response decoder reads.
@@ -19,28 +13,6 @@ constants:
         type: string
         value: "\"false\""
     name: jsonTrue
-  - doc: |-
-      The byte ranges AppendString treats specially: below spaceByte a byte is a
-      control character JSON requires escaped; lineSeparator and paragraphSeparator
-      are escaped unconditionally, as encoding/json does.
-    grouped: true
-    items:
-      - name: spaceByte
-        type: byte
-        value: "0x20"
-      - name: lineSeparator
-        type: rune
-        value: "0x2028"
-      - name: paragraphSeparator
-        type: rune
-        value: "0x2029"
-      - name: nibbleShift
-        type: int
-        value: "4"
-      - name: nibbleMask
-        type: byte
-        value: "0x0f"
-    name: spaceByte
   - doc: |-
       DefaultTimeout bounds one export round trip when an HTTPConfig leaves Timeout
       unset. Ten seconds is the value the OpenTelemetry protocol exporter
@@ -208,12 +180,8 @@ files:
       - AnyValue
     name: any_value.go
   - decls:
-      - hexDigits
       - jsonTrue
-      - spaceByte
       - AppendString
-      - appendMultiByte
-      - appendEscapedByte
       - AppendKey
       - AppendBool
       - AppendNull
@@ -307,21 +275,6 @@ files:
 functions:
   - name: AppendString
     params: dst []byte, s string
-    results: "[]byte"
-  - doc: |-
-      appendMultiByte handles the sequence that starts at s[i], a byte at or above
-      utf8.RuneSelf, for AppendString: it returns dst, the sequence's size and the
-      start of the run still to copy. A valid rune stays in the run; an invalid
-      byte and the two separators JSONP cannot carry flush the run first, as
-      encoding/json does — the byte replaced by U+FFFD, the separators escaped.
-    name: appendMultiByte
-    params: dst []byte, s string, i, start int
-    results: rendered []byte, size, runStart int
-  - doc: |-
-      appendEscapedByte appends the escape of one ASCII byte AppendString does not
-      keep as it is.
-    name: appendEscapedByte
-    params: dst []byte, b byte
     results: "[]byte"
   - name: AppendKey
     params: dst []byte, key string
@@ -501,6 +454,7 @@ imports:
   http: net/http
   io: io
   json: encoding/json
+  jsonenc: github.com/kitsunium/sdk/internal/kernel/jsonenc
   maps: maps
   math: math
   strconv: strconv
@@ -508,7 +462,6 @@ imports:
   sync: sync
   time: time
   url: net/url
-  utf8: unicode/utf8
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/service/observe/internal/otlp

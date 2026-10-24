@@ -1,111 +1,8 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 sequences:
-  - of: AppendString
-    participants:
-      - id: caller
-        kind: actor
-      - id: AppendString
-        kind: self
-      - id: appendEscapedByte
-        kind: internal
-      - id: appendMultiByte
-        kind: internal
-    steps:
-      - set: dst
-        value: append(dst, '"')
-      - bind: start
-        eval: "0"
-      - loop:
-          cond: i < len(s)
-          do:
-            - opt:
-                do:
-                  - opt:
-                      do:
-                        - op: ++
-                          set: i
-                        - continue: true
-                      when: b >= spaceByte && b != '"' && b != '\\'
-                  - set: dst
-                    value: append(dst, s[start:i]...)
-                  - set: dst
-                    to: appendEscapedByte
-                    value: appendEscapedByte(dst, b)
-                  - op: ++
-                    set: i
-                  - set: start
-                    value: i
-                  - continue: true
-                init:
-                  bind: b
-                  eval: s[i]
-                when: b < utf8.RuneSelf
-            - var:
-                name: size
-                type: int
-            - set: dst, size, start
-              to: appendMultiByte
-              value: appendMultiByte(dst, s, i, start)
-            - op: +=
-              set: i
-              value: size
-          init: i := 0
-      - set: dst
-        value: append(dst, s[start:]...)
-      - return: append(dst, '"')
-  - of: appendMultiByte
-    participants:
-      - id: caller
-        kind: actor
-      - id: appendMultiByte
-        kind: self
-      - id: utf8
-        kind: stdlib
-    steps:
-      - bind: c, size
-        eval: utf8.DecodeRuneInString(s[i:])
-        to: utf8
-      - opt:
-          do:
-            - set: dst
-              value: append(dst, s[start:i]...)
-            - return: utf8.AppendRune(dst, utf8.RuneError), size, i + size
-              to: utf8
-          when: c == utf8.RuneError && size == 1
-      - opt:
-          do:
-            - set: dst
-              value: append(dst, s[start:i]...)
-            - return: append(dst, '\\', 'u', '2', '0', '2', hexDigits[c&rune(nibbleMask)]), size, i + size
-          when: c == lineSeparator || c == paragraphSeparator
-      - return: dst, size, start
-  - of: appendEscapedByte
-    steps:
-      - switch:
-          cases:
-            - case: "'\\\\', '\"'"
-              do:
-                - return: append(dst, '\\', b)
-            - case: "'\\b'"
-              do:
-                - return: append(dst, '\\', 'b')
-            - case: "'\\f'"
-              do:
-                - return: append(dst, '\\', 'f')
-            - case: "'\\n'"
-              do:
-                - return: append(dst, '\\', 'n')
-            - case: "'\\r'"
-              do:
-                - return: append(dst, '\\', 'r')
-            - case: "'\\t'"
-              do:
-                - return: append(dst, '\\', 't')
-            - default: true
-              do:
-                - return: append(dst, '\\', 'u', '0', '0', hexDigits[b>>nibbleShift], hexDigits[b&nibbleMask])
-          "on": b
+  - forward: jsonenc.AppendString
+    of: AppendString
   - of: AppendKey
     steps:
       - opt:
@@ -541,28 +438,10 @@ sequences:
           when: math.IsInf(value, -1)
       - return: strconv.AppendFloat(nil, value, floatFmt, floatPrec, floatBitSize), nil
         to: strconv
-  - of: appendInt
-    participants:
-      - id: caller
-        kind: actor
-      - id: appendInt
-        kind: self
-      - id: strconv
-        kind: stdlib
-    steps:
-      - return: strconv.AppendInt(dst, v, decimalBase)
-        to: strconv
-  - of: appendUint
-    participants:
-      - id: caller
-        kind: actor
-      - id: appendUint
-        kind: self
-      - id: strconv
-        kind: stdlib
-    steps:
-      - return: strconv.AppendUint(dst, v, decimalBase)
-        to: strconv
+  - forward: jsonenc.AppendInt
+    of: appendInt
+  - forward: jsonenc.AppendUint
+    of: appendUint
   - of: appendDouble
     participants:
       - id: caller

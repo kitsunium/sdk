@@ -27,6 +27,14 @@ files:
       - (*jsonEncoder).Encode
       - (*jsonEncoder).Close
     name: encoder.go
+  - decls:
+      - Object
+      - AppendString
+      - AppendEscaped
+      - AppendInt
+      - AppendUint
+      - BeginObject
+    name: jsonenc.go
 functions:
   - name: New
     results: codec.Codec
@@ -39,11 +47,27 @@ functions:
     name: marshalRawMessage
     params: v any
     results: encoded []byte, ok bool
+  - name: AppendString
+    params: dst []byte, s string
+    results: "[]byte"
+  - name: AppendEscaped
+    params: dst []byte, s string
+    results: "[]byte"
+  - name: AppendInt
+    params: dst []byte, v int64
+    results: "[]byte"
+  - name: AppendUint
+    params: dst []byte, v uint64
+    results: "[]byte"
+  - name: BeginObject
+    params: dst []byte
+    results: Object
 imports:
   codec: github.com/kitsunium/sdk/internal/core/data/codec
   corejson: github.com/kitsunium/sdk/internal/core/data/codec/json
   errs: github.com/kitsunium/sdk/internal/kernel/errs
   io: io
+  jsonenc: github.com/kitsunium/sdk/internal/kernel/jsonenc
   scratch: github.com/kitsunium/sdk/internal/core/data/codec/scratch
   slices: slices
   stdjson: encoding/json
@@ -140,6 +164,13 @@ types:
         recv: "*jsonEncoder"
         results: error
     name: jsonEncoder
+  - alias: true
+    doc: |-
+      Object is a JSON object being written by [BeginObject]: members land in
+      the order they are named, and nothing allocates but the caller's slice.
+    kind: alias
+    name: Object
+    underlying: jsonenc.Object
 vars:
   - doc: |-
       Codec is the JSON singleton, registered with core/data/codec at package

@@ -248,7 +248,11 @@ functions:
     name: quotedLength
     params: value string
     results: int
-  - doc: appendQuoted appends value as a JSON string.
+  - doc: |-
+      appendQuoted appends value as a JSON string: kernel/jsonenc's literal, which
+      writes what appendEscaped writes character by character — invalid UTF-8 as
+      U+FFFD, which is what is shown — so quotedLength still counts it exactly
+      (Test_appendQuotedIsQuotedLength holds the two).
     name: appendQuoted
     params: out []byte, value string
     results: "[]byte"
@@ -315,6 +319,7 @@ imports:
   io: io
   iter: iter
   json: encoding/json
+  jsonenc: github.com/kitsunium/sdk/internal/kernel/jsonenc
   jsontext: encoding/json/jsontext
   reflect: reflect
   regexp: regexp
