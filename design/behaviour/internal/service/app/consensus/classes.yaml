@@ -1134,10 +1134,12 @@ files:
       - sendPin
       - (*Node).pinAt
       - (*Node).pinBound
+      - (*Node).streamDue
       - (*Node).logTight
       - (*Node).growPin
       - (*Node).watchPins
       - (*Node).prunePinScale
+      - (*Node).releasePin
       - (*Node).dropPin
       - sentReader
       - (*sentReader).Read
@@ -5876,12 +5878,9 @@ types:
       - doc: |-
           pinAt is the index pin holds compaction back to at now, and false once
           it no longer holds: a streamed snapshot's pin ends when this node no
-          longer leads the peer, or when until passed. A stream's pin ends
-          pinBound after its last byte was read: a receiver that is sent every
-          byte and never answers — a stuck disk under its spool's sync, a stuck
-          Restore, an apply goroutine held by an abandoned SaveSnapshot — pinned
-          this node's compaction for good, and its log grew to the NO_SPACE alarm
-          (#602). No pin holds once the log is tight. It runs on the loop.
+          longer leads the peer, or when until passed. A stream's pin ends once
+          its stream is due (streamDue), or once it was lifted. No pin holds once
+          the log is tight. It runs on the loop.
         name: pinAt
         params: to coreconsensus.NodeID, pin sendPin, now time.Time
         recv: n *Node
@@ -5902,23 +5901,44 @@ types:
         recv: n *Node
         results: time.Duration
       - doc: |-
-          logTight reports whether the log is within twice LogReserveBytes of
-          MaxLogBytes, half way to the no-space alarm: no pin holds compaction
-          back then, whatever its bound.
+          streamDue reports whether the stream of pin to peer to is to be
+          cancelled at now: its verdict is overdue, pinBound after the transport
+          read its last byte. A receiver that is sent every byte and never answers
+          — a stuck disk under its spool's sync, a stuck Restore, an apply
+          goroutine held by an abandoned SaveSnapshot — pinned this node's
+          compaction for good, and its log grew to the NO_SPACE alarm (#602). It
+          runs on the loop.
+        name: streamDue
+        params: to coreconsensus.NodeID, pin sendPin, now time.Time
+        recv: n *Node
+        results: bool
+      - doc: |-
+          logTight reports whether the log is past both of two thresholds: within
+          twice LogReserveBytes of MaxLogBytes, and half way to the no-space
+          alarm, which rises at MaxLogBytes less LogReserveBytes. No pin holds
+          compaction back then, whatever its bound, so a pin never brings the
+          alarm on. The first threshold alone covered the whole quota once
+          MaxLogBytes was at most twice LogReserveBytes, which refuseCeilings
+          accepts — 512 MiB under the default reserve — and no pin ever held: a
+          snapshot in flight was compacted past, as before #550 (#622). From three
+          reserves up, the first is the later of the two and the band is #616's.
         name: logTight
         recv: n *Node
         results: bool
       - doc: |-
           growPin doubles the pin bound of peer to, whose stream's pin fell due,
           when it answered within the last maximum election timeout: it is alive
-          and still installing, slow rather than stuck. A pin dropped because the
-          log is tight says nothing of the peer, and grows nothing.
+          and still installing, slow rather than stuck. Nor while the log is
+          tight: no pin holds compaction back then, and a longer bound would hold
+          nothing.
         name: growPin
         params: to coreconsensus.NodeID, now time.Time
         recv: n *Node
       - doc: |-
           watchPins ends, at each tick, the pins of streamed snapshots that no
-          longer hold: their peer caught up with the log, left, or until passed.
+          longer hold: their peer caught up with the log, left, or until passed;
+          it cancels the streams that are due, and lifts the others' hold once the
+          log is tight (releasePin).
           Compaction only runs after a cut, so the log is compacted again at once:
           a pin that ended once the writes stopped held it back until the next
           write. Caught up is the peer's match at the last index, never the pin's
@@ -5933,11 +5953,26 @@ types:
         name: prunePinScale
         recv: n *Node
       - doc: |-
+          releasePin settles the pin of peer to, which no longer holds compaction
+          at now, and reports whether it changed: a stream's pin is dropped, and
+          its stream cancelled, only when the stream is due (streamDue); one that
+          only lost its hold to a tight log is lifted, for good, and its stream
+          goes on. A tight log says nothing of the transfer: cancelled with it, no
+          stream outlived the band's first tick, and under a quota of at most
+          twice LogReserveBytes no follower behind the compacted log, joiner or
+          learner was ever installed (#622). Any other pin is dropped. It runs on
+          the loop.
+        name: releasePin
+        params: to coreconsensus.NodeID, pin sendPin, now time.Time
+        recv: n *Node
+        results: bool
+      - doc: |-
           dropPin ends the pin of peer to, and cancels its stream when the pin is
-          a stream's whose verdict is overdue: the stream ends, raft probes the
-          peer again, and a peer that finished its install meanwhile is found
-          there. The receiver keeps its spool and its install, and its next pin
-          holds longer when it still answers (growPin). It runs on the loop.
+          a stream's, which releasePin drops only once the stream is due: the
+          stream ends, raft probes the peer again, and a peer that finished its
+          install meanwhile is found there. The receiver keeps its spool and its
+          install, and its next pin holds longer when it still answers (growPin).
+          It runs on the loop.
         name: dropPin
         params: to coreconsensus.NodeID
         recv: n *Node
@@ -6681,12 +6716,14 @@ types:
     name: progressWatch
   - doc: |-
       sendPin is a snapshot that pins compaction for a peer. While it streams,
-      until is zero, and sent is when the transport read the snapshot's last
-      byte, in Unix nanoseconds of n.clk, 0 before. Once streamed, the pin
-      follows the peer's match until the peer catches up or until passes: the
-      leader only probes the peer after an install, and a cut that landed in
-      that window compacted past the entries the peer needed next, so it was
-      offered snapshot after snapshot (#550).
+      until is zero, sent is when the transport read the snapshot's last byte,
+      in Unix nanoseconds of n.clk, 0 before, and lifted is set once the log
+      was tight during the stream: the pin holds compaction back no more, for
+      good, and the stream goes on (#622). Once streamed, the pin follows the
+      peer's match until the peer catches up or until passes: the leader only
+      probes the peer after an install, and a cut that landed in that window
+      compacted past the entries the peer needed next, so it was offered
+      snapshot after snapshot (#550).
     fields:
       - name: index
         type: uint64
@@ -6694,6 +6731,8 @@ types:
         type: time.Time
       - name: sent
         type: "*atomic.Int64"
+      - name: lifted
+        type: bool
     kind: struct
     name: sendPin
   - doc: |-

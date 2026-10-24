@@ -1490,7 +1490,14 @@ is refused with `OVERLOADED`. Nothing is appended in either case.
     replacement of the snapshot it reads are DEFERRED, and compaction is
     pinned, as etcd skips compaction while a snapshot is in flight
     (`server.go:2140-2141`).
-  - The transfer is cancelled only when the log reaches `LogReserveBytes`.
+  - The log's pressure never cancels a transfer (amendment of 2026-10-24,
+    #622). Once the log is tight — past both `MaxLogBytes` less twice
+    `LogReserveBytes` and half way to the no-space alarm — the pin's hold
+    on compaction is lifted for the rest of the transfer, and the transfer
+    goes on. Cancelled with it, no transfer outlived the band's first tick,
+    and under a quota of at most twice the reserve, which the configuration
+    accepts, the band covered the whole quota: no pin ever held, and no
+    peer behind the compacted log was ever installed.
   - On the receiving side, an install from a higher term, or of a newer
     snapshot id, replaces a stale receive spool.
   - A simulator case makes a transfer last longer than the cut interval,

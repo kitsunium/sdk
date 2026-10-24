@@ -523,3 +523,13 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   Nor refuse the removal of a learner that never voted: it vouches for no
   one (#614, `neverVoter`,
   `TestAnAnsweringLearnerIsRemovedWhileAVoterIsAlreadyStranded`).
+- Cancel a snapshot stream because the log is tight: its pin's hold on
+  compaction is lifted, for good, and the stream goes on; only a stream
+  that is due is cancelled (`streamDue`). Cancelled with it, no stream
+  outlived the band's first tick (#622, `releasePin`,
+  `TestAStreamSurvivesATightLogOverTCP`,
+  `TestTheVerdictBoundStillEndsAStreamOnATightLog`). Nor start the band
+  before half way to the no-space alarm: within twice `LogReserveBytes` of
+  `MaxLogBytes` alone, it covered the whole of a quota of at most twice the
+  reserve, which the configuration accepts, and no pin ever held (#622,
+  `logTight`, `TestAPinHoldsCompactionUnderAQuotaOfTwoReservesOrLess`).

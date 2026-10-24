@@ -10800,8 +10800,6 @@ sequences:
         kind: actor
       - id: (*Node).pinAt
         kind: self
-      - id: pin.sent.Load
-        kind: value
       - id: n.r.Progress
         kind: value
     steps:
@@ -10813,15 +10811,8 @@ sequences:
           do:
             - opt:
                 do:
-                  - opt:
-                      do:
-                        - return: 0, false
-                      init:
-                        bind: at
-                        eval: pin.sent.Load()
-                        to: pin.sent.Load
-                      when: at != 0 && now.Sub(time.Unix(0, at)) > n.pinBound(to)
-                when: pin.sent != nil
+                  - return: 0, false
+                when: pin.lifted || n.streamDue(to, pin, now)
             - return: pin.index, true
           when: pin.until.IsZero()
       - bind: match, _, ok
@@ -10835,11 +10826,42 @@ sequences:
   - of: (*Node).pinBound
     steps:
       - return: time.Duration(pinAfterStream) * n.r.Status().Timing.ElectionTimeoutMax << n.pinScale[to]
+  - of: (*Node).streamDue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).streamDue
+        kind: self
+      - id: pin.sent.Load
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: pin.sent == nil
+      - bind: at
+        eval: pin.sent.Load()
+        to: pin.sent.Load
+      - return: at != 0 && now.Sub(time.Unix(0, at)) > n.pinBound(to)
   - of: (*Node).logTight
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).logTight
+        kind: self
+      - id: sr.logBytes
+        kind: internal
     steps:
       - bind: sr, ok
         eval: n.cfg.Log.(spaceReporter)
-      - return: ok && sr.logBytes()+2*n.cfg.LogReserveBytes >= n.cfg.MaxLogBytes
+      - opt:
+          do:
+            - return: "false"
+          when: "!ok"
+      - bind: b
+        eval: sr.logBytes()
+        to: sr.logBytes
+      - return: b+2*n.cfg.LogReserveBytes >= n.cfg.MaxLogBytes && 2*b >= n.cfg.MaxLogBytes-n.cfg.LogReserveBytes
   - of: (*Node).growPin
     participants:
       - id: caller
@@ -10872,8 +10894,6 @@ sequences:
         kind: self
       - id: n.pinAt
         kind: internal
-      - id: n.dropPin
-        kind: internal
       - id: n.r.Progress
         kind: value
       - id: n.prunePinScale
@@ -10894,11 +10914,9 @@ sequences:
                 do:
                   - opt:
                       do:
-                        - eval: n.dropPin(to)
-                          to: n.dropPin
                         - set: ended
                           value: "true"
-                      when: "!held"
+                      when: "!held && n.releasePin(to, pin, now)"
                   - continue: true
                 when: pin.until.IsZero()
             - opt:
@@ -10942,6 +10960,30 @@ sequences:
                 when: "!ok"
           key: to
           range: n.pinScale
+  - of: (*Node).releasePin
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).releasePin
+        kind: self
+      - id: n.dropPin
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: pin.lifted
+            - set: pin.lifted
+              value: "true"
+            - set: n.sending[to]
+              value: pin
+            - return: "true"
+          when: pin.until.IsZero() && !n.streamDue(to, pin, now)
+      - eval: n.dropPin(to)
+        to: n.dropPin
+      - return: "true"
   - of: (*Node).dropPin
     participants:
       - id: caller
@@ -16969,7 +17011,7 @@ sequences:
           		for to, pin := range n.sending {
           			at, held := n.pinAt(to, pin, now)
           			if !held {
-          				n.dropPin(to)
+          				n.releasePin(to, pin, now)
           				continue
           			}
           			if at <= n.cfg.SnapshotTrailing {

@@ -433,7 +433,7 @@ func (n *Node) afterCut() {
 		for to, pin := range n.sending {
 			at, held := n.pinAt(to, pin, now)
 			if !held {
-				n.dropPin(to)
+				n.releasePin(to, pin, now)
 				continue
 			}
 			if at <= n.cfg.SnapshotTrailing {
