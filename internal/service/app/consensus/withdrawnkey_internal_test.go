@@ -45,17 +45,25 @@ func liveNodes(c *cluster) []*Node {
 	return out
 }
 
+// joinRateReason is the refusal of a JOIN within its slot's rate window.
+const joinRateReason = "one JOIN per slot per election timeout"
+
 // joinOn is a JOIN of id on slot, its connection proving key, answered by
-// whichever node of c leads; it waits out the slot's rate window first.
+// whichever node of c leads, asked again while the slot's rate window
+// refuses it.
 func joinOn(t *testing.T, c *cluster, id coreconsensus.NodeID, slot string, key [32]byte) (errs.Code, string) {
 	t.Helper()
-	l := c.settledLeader(5 * time.Second)
-	time.Sleep(l.node.Status().Timing.ElectionTimeoutMin + 10*time.Millisecond)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	peer := coreconsensus.AuthenticatedPeerValue{Slot: slot, SPKI: key}
-	_, code, why := l.node.joinReason(ctx, peer, coreconsensus.JoinRequestValue{Cluster: c.cid, ID: id, Slot: slot})
-	return code, why
+	for {
+		l := c.settledLeader(5 * time.Second)
+		_, code, why := l.node.joinReason(ctx, peer, coreconsensus.JoinRequestValue{Cluster: c.cid, ID: id, Slot: slot})
+		if why != joinRateReason || ctx.Err() != nil {
+			return code, why
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 // removeOn removes id through whichever node of c leads, and waits until
@@ -179,6 +187,10 @@ func TestANodeThatInstallsASnapshotRefusesItsRetiredKeys(t *testing.T) {
 	raiseNodesTo(t, liveNodes(c), raft.Protocol3)
 	l := c.settledLeader(5 * time.Second)
 	lag := c.otherThan(l)
+	// Isolated before it stops: the memory network keeps what it is sent
+	// while it is down and delivers it at the restart, which catches it up
+	// by appends where the test means an install (#374).
+	c.net.Isolate(lag.id, true)
 	c.kill(lag)
 	key := [32]byte{0x99}
 	if code, why := joinOn(t, c, 991, "y", key); code != 0 {
@@ -189,8 +201,12 @@ func TestANodeThatInstallsASnapshotRefusesItsRetiredKeys(t *testing.T) {
 	for i := range 70 {
 		tok = proposeOnLeader(t, c, fmt.Sprintf("k%d=%d", i, i))
 	}
+	// Past the entry after the stopped node's end, not only past its end:
+	// a log that starts at end+1 still feeds it by appends, which a slower
+	// runner left it to, and nothing was installed.
 	_, end := lag.log.Bounds()
-	compactedPast(t, c, end)
+	compactedPast(t, c, end+1)
+	c.net.Isolate(lag.id, false)
 	c.start(lag)
 	c.waitApplied(tok.Index, 10*time.Second)
 	if !lag.node.Membership().IsRetiredKey(key) {
@@ -267,11 +283,11 @@ func (r *keyReuseRig) removed() coreconsensus.MemberValue {
 	return coreconsensus.MemberValue{ID: 5, Slot: "y", SPKI: r.old, Address: r.l.addr, Voter: true}
 }
 
-// sendFor sends L's heartbeat to S every 50 ms for d and returns how many S
-// delivered meanwhile.
-func (r *keyReuseRig) sendFor(d time.Duration) int64 {
+// sendUntilDelivered sends L's heartbeat to S every 50 ms until S delivered
+// one, or for d, and returns how many S delivered meanwhile.
+func (r *keyReuseRig) sendUntilDelivered(d time.Duration) int64 {
 	before := r.delivered.Load()
-	for end := time.Now().Add(d); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
+	for end := time.Now().Add(d); time.Now().Before(end) && r.delivered.Load() == before; time.Sleep(50 * time.Millisecond) {
 		r.l.tr.Send(r.s.id, r.frame)
 	}
 	return r.delivered.Load() - before
@@ -287,7 +303,7 @@ func (r *keyReuseRig) sendFor(d time.Duration) int64 {
 func TestAStaleVoterHearsALeaderThatRejoinedOverAFreshKey(t *testing.T) {
 	r := newKeyReuseRig(t)
 	r.s.tr.SetMembership(1, []coreconsensus.MemberValue{r.sMember(), r.removed(), r.lMember()})
-	got := r.sendFor(1500 * time.Millisecond)
+	got := r.sendUntilDelivered(3 * time.Second)
 	t.Logf("vouched-for leader beside the removed member, each under its own key: %d frames delivered", got)
 	if got == 0 {
 		t.Fatal("the vouched-for leader's frames never reach the stale voter")
@@ -302,12 +318,12 @@ func TestAStaleVoterHearsALeaderThatRejoinedOverAFreshKey(t *testing.T) {
 func TestAJoinerReplayingARemovedMemberHearsTheLeaderOfItsJoinAnswer(t *testing.T) {
 	r := newKeyReuseRig(t)
 	r.s.tr.SetMembership(joinGroup, []coreconsensus.MemberValue{r.sMember(), r.lMember()})
-	if n := r.sendFor(time.Second); n == 0 {
+	if n := r.sendUntilDelivered(3 * time.Second); n == 0 {
 		t.Fatal("setup: the JOIN answer alone does not admit L")
 	}
 	r.s.tr.SetMembership(1, []coreconsensus.MemberValue{r.sMember(), r.removed()})
 	time.Sleep(200 * time.Millisecond)
-	got := r.sendFor(1500 * time.Millisecond)
+	got := r.sendUntilDelivered(3 * time.Second)
 	t.Logf("joiner whose replay lists removed member 5 under the old key: %d frames delivered", got)
 	if got == 0 {
 		t.Fatal("the joiner stops hearing the leader that feeds it once its replay lists member 5")

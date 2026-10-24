@@ -36,11 +36,15 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
 | fuzz | `go test -fuzz` on the targets of `wire/` and this package; nightly in CI |
 | dm-crypt | `testdata/dmcrypt/run.sh` (Docker, privileged): fsync latency and power cuts through LUKS; results in `testdata/dmcrypt/RESULTS.md` |
 
-Under Bazel `consensus_test` has 6 shards: under race and coverage the suite
+Under Bazel `consensus_test` has 8 shards: under race and coverage the suite
 passed the 60 s cap per target once the disk scenarios of #507, #516 and
 #524 joined it (4 shards), and the snapshot and disk scenarios of #506,
 #512, #513, #515, #520, #525, #526 and #533 brought the slowest of 4 to
-28 s on an 8-core machine, too close to the cap on a CI runner.
+28 s on an 8-core machine, too close to the cap on a CI runner (6
+shards). The slowest of 6 reached 52 s under coverage on CI, and #648's
+scenarios took it past 60 s: Bazel deals top-level tests by index, and
+the sums per shard of a `-race -json` run, 43 s for the slowest of 6 on
+one machine, are 31 s at 8.
 
 ## Do NOT
 
