@@ -1198,6 +1198,13 @@ rules:
       # against. Scoped to the one file.
       - "**/internal/service/net/loop/group.go"
       - "internal/service/net/loop/group.go"
+      # kernel/jsonenc.Object is built by BeginObject, which is what it does: it
+      # writes the opening brace onto the caller's slice and returns the value
+      # that writes the members after it. The zero Object holds no slice and is
+      # not usable, so a NewObject() taking no slice could only build that, and
+      # NewObject(dst) would be BeginObject under a name that hides the brace.
+      - "**/internal/kernel/jsonenc/object.go"
+      - "internal/kernel/jsonenc/object.go"
       # kernel/plugin.Registry's zero value IS the empty registry, ready to
       # use, as sync.Mutex's is an unlocked mutex: every registry is a
       # package-level `var registry plugin.Registry[...]`, initialised before
@@ -1458,6 +1465,14 @@ rules:
   # finding (KTN-STRUCT-ROLE-COMPATALIAS). Scoped to the one file.
   KTN-STRUCT-ROLE:
     exclude:
+      # kernel/jsonenc.Object is a value — two words, copied by every member
+      # method, and a stale copy is a snapshot — but the rule infers "Service"
+      # from its methods and unexported fields. "Object" is JSON's word for what
+      # is being written (RFC 8259 §4), the word the design and the facades use,
+      # and "ObjectValue" would rename it to satisfy the rule. Scoped to the one
+      # file.
+      - "**/internal/kernel/jsonenc/object.go"
+      - "internal/kernel/jsonenc/object.go"
       - "**/internal/service/proc/childwait/childwait.go"
       - "internal/service/proc/childwait/childwait.go"
       # core/net.LoopConnRef is the loop engine's connection reference, the word

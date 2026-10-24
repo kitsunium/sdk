@@ -28,6 +28,7 @@ go_library(
     deps = [
         "//internal/core/observe/otel",
         "//internal/kernel/errs",
+        "//internal/kernel/jsonenc",
     ],
 )
 
@@ -43,6 +44,7 @@ alias(
 go_test(
     name = "otlp_test",
     srcs = [
+        "append_bench_test.go",
         "append_external_test.go",
         "gen_api_test.go",
         "marshal_bench_test.go",

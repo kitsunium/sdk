@@ -238,3 +238,13 @@ sequences:
   - of: (*jsonEncoder).Close
     steps:
       - return: nil
+  - forward: jsonenc.AppendString
+    of: AppendString
+  - forward: jsonenc.AppendEscaped
+    of: AppendEscaped
+  - forward: jsonenc.AppendInt
+    of: AppendInt
+  - forward: jsonenc.AppendUint
+    of: AppendUint
+  - forward: jsonenc.BeginObject
+    of: BeginObject

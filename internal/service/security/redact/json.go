@@ -11,6 +11,7 @@ import (
 
 	coreredact "github.com/kitsunium/sdk/internal/core/security/redact"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/kernel/jsonenc"
 )
 
 // Byte costs the bound accounts for.
@@ -364,15 +365,12 @@ func quotedLength(value string) int {
 	return length
 }
 
-// appendQuoted appends value as a JSON string.
+// appendQuoted appends value as a JSON string: kernel/jsonenc's literal, which
+// writes what appendEscaped writes character by character — invalid UTF-8 as
+// U+FFFD, which is what is shown — so quotedLength still counts it exactly
+// (Test_appendQuotedIsQuotedLength holds the two).
 func appendQuoted(out []byte, value string) []byte {
-	out = append(out, '"')
-	//: rune by rune; invalid UTF-8 ranges as U+FFFD, which is what is shown.
-	for _, character := range value {
-		out = appendEscaped(out, character)
-	}
-	//: closed.
-	return append(out, '"')
+	return jsonenc.AppendString(out, value)
 }
 
 // escapedLength returns how many bytes appendEscaped writes for character.

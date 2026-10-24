@@ -6,6 +6,7 @@ import (
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
+	"github.com/kitsunium/sdk/internal/kernel/jsonenc"
 )
 
 // The "ts" member's format is timestampLayout, declared in timestamp.go and
@@ -21,10 +22,6 @@ const jsonEncoderName string = "json"
 // dotted convention rather than nesting objects.
 const jsonGroupSeparator byte = '.'
 
-// jsonHexDigits maps a nibble to its lowercase hexadecimal rune for the
-// \u00XX escape of control bytes.
-const jsonHexDigits string = "0123456789abcdef"
-
 // jsonDecimalBase is the radix passed to strconv.Append* for JSON numbers.
 const jsonDecimalBase int = 10
 
@@ -38,17 +35,6 @@ const jsonFloatBitSize int = 64
 // jsonFloatFormat is the byte verb ('g') selecting strconv's
 // exponent-or-decimal float64 mode.
 const jsonFloatFormat byte = 'g'
-
-// jsonControlCeiling is the exclusive upper bound of the bytes the JSON grammar
-// forbids unescaped inside a string literal (everything below U+0020).
-const jsonControlCeiling byte = 0x20
-
-// jsonNibbleShift is the bit-shift that isolates the high nibble of a byte for
-// the \u00XX escape.
-const jsonNibbleShift byte = 4
-
-// jsonNibbleMask isolates the low nibble of a byte for the \u00XX escape.
-const jsonNibbleMask byte = 0x0f
 
 // jsonTimestampOpen opens the object's first member, "ts", up to the opening
 // quote of its value.
@@ -127,11 +113,11 @@ func appendJSONHeader(dst []byte, r corelogger.RecordEvent) []byte {
 	//: and BENCH.md §5.2.
 	dst = appendTimestamp(dst, r.Time)
 	dst = append(dst, jsonLevelMember...)
-	dst = appendJSONString(dst, r.Level.String())
+	dst = jsonenc.AppendString(dst, r.Level.String())
 	dst = append(dst, jsonMessageMember...)
 	//: Message is escaped as a JSON string — no separate framing sanitiser is
 	//: needed because JSON escaping already neutralises CR/LF/NUL.
-	return appendJSONString(dst, r.Message)
+	return jsonenc.AppendString(dst, r.Message)
 }
 
 // appendJSONTraceContext writes the two correlation members
@@ -158,13 +144,13 @@ func appendJSONTraceContext(dst []byte, r corelogger.RecordEvent) []byte {
 	}
 	//: ,"trace_id":"<32 hex>" — the hex alphabet needs no JSON escaping.
 	dst = append(dst, ',')
-	dst = appendJSONString(dst, corelogger.TraceIDKey)
+	dst = jsonenc.AppendString(dst, corelogger.TraceIDKey)
 	dst = append(dst, ':', '"')
 	dst = tc.AppendTraceIDHex(dst)
 	dst = append(dst, '"')
 	//: ,"span_id":"<16 hex>".
 	dst = append(dst, ',')
-	dst = appendJSONString(dst, corelogger.SpanIDKey)
+	dst = jsonenc.AppendString(dst, corelogger.SpanIDKey)
 	dst = append(dst, ':', '"')
 	dst = tc.AppendSpanIDHex(dst)
 	//: hand back the buffer carrying both correlation members.
@@ -177,7 +163,7 @@ func appendJSONAttr(dst []byte, groups []string, a corelogger.AttrValue) []byte 
 	//: walk the group stack to emit "g1.g2.…" before the attribute key.
 	for _, g := range groups {
 		//: append each group name followed by the dotted separator.
-		dst = appendJSONEscaped(dst, g)
+		dst = jsonenc.AppendEscaped(dst, g)
 		dst = append(dst, jsonGroupSeparator)
 	}
 	//: a top-level attribute may not spell one of the SDK's own fields; inside
@@ -187,7 +173,7 @@ func appendJSONAttr(dst []byte, groups []string, a corelogger.AttrValue) []byte 
 		//: key itself just below.
 		dst = append(dst, ReservedPrefix...)
 	}
-	dst = appendJSONEscaped(dst, a.Key)
+	dst = jsonenc.AppendEscaped(dst, a.Key)
 	dst = append(dst, '"', ':')
 	//: hand back the buffer with the encoded attribute value appended.
 	return appendJSONValue(dst, a)
@@ -201,7 +187,7 @@ func appendJSONValue(dst []byte, a corelogger.AttrValue) []byte {
 	//: strings render as escaped JSON string literals.
 	case corelogger.KindString:
 		//: appendJSONString quotes and escapes per the JSON grammar.
-		return appendJSONString(dst, a.Value.String())
+		return jsonenc.AppendString(dst, a.Value.String())
 	//: int64 (also covers int / int32) renders as a bare JSON number.
 	case corelogger.KindInt64:
 		//: strconv.AppendInt is the canonical alloc-free integer renderer.
@@ -221,7 +207,7 @@ func appendJSONValue(dst []byte, a corelogger.AttrValue) []byte {
 	//: durations render as a quoted string (matches the text encoder).
 	case corelogger.KindDuration:
 		//: AppendQuote-style escaping keeps the value a valid JSON string.
-		return appendJSONString(dst, a.Value.Duration().String())
+		return jsonenc.AppendString(dst, a.Value.Duration().String())
 	//: timestamps render as a quoted RFC3339-with-millis string.
 	case corelogger.KindTime:
 		//: reuse the header renderer so all timestamps share one shape.
@@ -232,7 +218,7 @@ func appendJSONValue(dst []byte, a corelogger.AttrValue) []byte {
 	//: every other Kind degrades to a quoted "?" placeholder, kept valid JSON.
 	default:
 		//: "?" mirrors the text encoder's unsupported-variant placeholder.
-		return appendJSONString(dst, "?")
+		return jsonenc.AppendString(dst, "?")
 	}
 }
 
@@ -246,65 +232,4 @@ func appendJSONFloat(dst []byte, f float64) []byte {
 	}
 	//: finite floats use the shortest round-trip 'g' format.
 	return strconv.AppendFloat(dst, f, jsonFloatFormat, jsonFloatPrec, jsonFloatBitSize)
-}
-
-// appendJSONString writes s as a quoted, JSON-escaped string token onto dst.
-func appendJSONString(dst []byte, s string) []byte {
-	dst = append(dst, '"')
-	dst = appendJSONEscaped(dst, s)
-	//: close the quoted token before handing the buffer back.
-	return append(dst, '"')
-}
-
-// appendJSONEscaped writes the JSON-escaped body of s onto dst without the
-// surrounding quotes, so callers can compose multi-part keys before quoting.
-//
-// The bytes that need no escape are copied in RUNS — one append per stretch
-// between two escapes, one for the whole string in the common case of a key
-// or value with nothing to escape — instead of one append per byte, which
-// paid a capacity check and a store for every byte of every member.
-func appendJSONEscaped(dst []byte, s string) []byte {
-	//: start is the first byte of the run not yet copied.
-	start := 0
-	//: escape each byte that the JSON grammar forbids inside a string literal.
-	for i := range len(s) {
-		c := s[i]
-		//: a byte that passes through unchanged extends the current run.
-		if c >= jsonControlCeiling && c != '\\' && c != '"' {
-			continue
-		}
-		//: flush the run, then the byte's escape in place of the byte.
-		dst = appendJSONByteEscape(append(dst, s[start:i]...), c)
-		start = i + 1
-	}
-	//: hand back the buffer with the last run appended.
-	return append(dst, s[start:]...)
-}
-
-// appendJSONByteEscape appends the escape of one byte the JSON grammar forbids
-// verbatim inside a string literal: '"', '\\' or a byte below U+0020.
-func appendJSONByteEscape(dst []byte, c byte) []byte {
-	//: route the byte through the matching escape form.
-	switch c {
-	//: backslash and quote take their two-byte escapes.
-	case '\\', '"':
-		//: the byte itself, behind a backslash.
-		return append(dst, '\\', c)
-	//: newline takes the short \n escape.
-	case '\n':
-		//: two bytes.
-		return append(dst, '\\', 'n')
-	//: carriage return takes the short \r escape.
-	case '\r':
-		//: two bytes.
-		return append(dst, '\\', 'r')
-	//: tab takes the short \t escape.
-	case '\t':
-		//: two bytes.
-		return append(dst, '\\', 't')
-	//: remaining control bytes need a \u00XX escape.
-	default:
-		//: six bytes, the two hex digits from the nibbles.
-		return append(dst, '\\', 'u', '0', '0', jsonHexDigits[c>>jsonNibbleShift], jsonHexDigits[c&jsonNibbleMask])
-	}
 }

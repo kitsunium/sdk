@@ -2,6 +2,7 @@ package encoder
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -217,7 +218,14 @@ func inf(sign int) float64 {
 	return -1.0 / zero
 }
 
-func Test_appendJSONString(t *testing.T) {
+// Test_jsonStringsThroughTheEncoder pins what the encoder writes for a message,
+// a value and a key, now that all three are escaped by kernel/jsonenc: the
+// escapes the byte loop wrote, and the three differences from it. A control
+// byte that has a short escape (\b, \f) is written with it and not as \u00XX;
+// invalid UTF-8 is written as U+FFFD, where the loop copied the bad byte and
+// left the line invalid; U+2028 and U+2029 are escaped, where the loop copied
+// them. These are the behaviour change the migration declares.
+func Test_jsonStringsThroughTheEncoder(t *testing.T) {
 	t.Parallel()
 	// lowControl holds a single 0x01 byte built from a byte slice so the test
 	// source carries no raw control-character literal.
@@ -231,83 +239,42 @@ func Test_appendJSONString(t *testing.T) {
 		{"quote and backslash", "a\"b\\c", `"a\"b\\c"`},
 		{"whitespace controls", "\n\r\t", `"\n\r\t"`},
 		{"low control escapes to unicode", lowControl, "\"\\u0001\""},
+		{"backspace and form feed take their short escapes", "\b\f", `"\b\f"`},
+		{"valid multibyte passes through", "café 東京", "\"café 東京\""},
+		{"invalid UTF-8 becomes U+FFFD", "a\xffb", "\"a\uFFFDb\""},
+		{"truncated rune becomes U+FFFD", "ab\xe6\x9d", "\"ab\uFFFD\uFFFD\""},
+		{"line separator is escaped", "a\u2028b", `"a\u2028b"`},
+		{"paragraph separator is escaped", "a\u2029b", `"a\u2029b"`},
+		{"html is not escaped", "<b>&</b>", `"<b>&</b>"`},
+	}
+	e := &jsonEncoder{clk: clock.System}
+	rec := func(msg string, attrs ...corelogger.AttrValue) corelogger.RecordEvent {
+		return corelogger.RecordEvent{Time: time.Date(2026, 4, 20, 12, 0, 0, 0, time.UTC), Level: level.Info, Message: msg, Attrs: attrs}
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := string(appendJSONString(nil, tc.in)); got != tc.want {
-				t.Errorf("appendJSONString = %q, want %q", got, tc.want)
+			//: the message, the value of an attribute, and the key of one.
+			byMessage := string(e.Append(nil, nil, rec(tc.in)))
+			byValue := string(e.Append(nil, nil, rec("m", corelogger.AttrValue{Key: "k", Value: corelogger.StringValue(tc.in)})))
+			byKey := string(e.Append(nil, nil, rec("m", corelogger.AttrValue{Key: tc.in, Value: corelogger.StringValue("v")})))
+			if want := `,"msg":` + tc.want + "}\n"; !strings.HasSuffix(byMessage, want) {
+				t.Errorf("message %q: line %q does not end with %q", tc.in, byMessage, want)
+			}
+			if want := `,"k":` + tc.want + "}\n"; !strings.HasSuffix(byValue, want) {
+				t.Errorf("value %q: line %q does not end with %q", tc.in, byValue, want)
+			}
+			//: a key is the same literal, so the member is its escape plus the colon.
+			if want := `,` + tc.want + `:"v"}` + "\n"; !strings.HasSuffix(byKey, want) {
+				t.Errorf("key %q: line %q does not end with %q", tc.in, byKey, want)
+			}
+			for _, line := range []string{byMessage, byValue, byKey} {
+				if !json.Valid([]byte(line)) {
+					t.Errorf("line %q is not valid JSON", line)
+				}
 			}
 		})
 	}
-}
-
-func Test_appendJSONEscaped(t *testing.T) {
-	t.Parallel()
-	// lowControl holds a single 0x01 byte built from a byte slice so the test
-	// source carries no raw control-character literal.
-	lowControl := string([]byte{1})
-	tests := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{"no quotes added", "ab", "ab"},
-		{"escapes a quote", "a\"b", `a\"b`},
-		{"escapes a backslash", "a\\b", `a\\b`},
-		{"escapes newline", "a\nb", `a\nb`},
-		{"escapes carriage return", "a\rb", `a\rb`},
-		{"escapes tab", "a\tb", `a\tb`},
-		{"escapes low control to unicode", lowControl, "\\u0001"},
-		{"empty stays empty", "", ""},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if got := string(appendJSONEscaped(nil, tc.in)); got != tc.want {
-				t.Errorf("appendJSONEscaped = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-// Test_appendJSONEscapedRunsMatchBytewise holds the run-copying escaper to the
-// byte-at-a-time form it replaced: every byte value, alone, at the start, in
-// the middle and at the end of a run, and two escapes back to back — so a run
-// boundary off by one byte cannot pass.
-func Test_appendJSONEscapedRunsMatchBytewise(t *testing.T) {
-	t.Parallel()
-	for b := range 256 {
-		c := string([]byte{byte(b)})
-		for _, in := range []string{c, c + "tail", "head" + c, "head" + c + "tail", c + c, "a" + c + "\"" + c + "z"} {
-			if got, want := string(appendJSONEscaped([]byte("pre"), in)), "pre"+bytewiseJSONEscape(in); got != want {
-				t.Fatalf("appendJSONEscaped(%q) = %q, want %q", in, got, want)
-			}
-		}
-	}
-}
-
-// bytewiseJSONEscape is the reference: one decision per byte, exactly the
-// escapes appendJSONEscaped documents.
-func bytewiseJSONEscape(s string) string {
-	var out []byte
-	for i := range len(s) {
-		switch c := s[i]; {
-		case c == '\\' || c == '"':
-			out = append(out, '\\', c)
-		case c == '\n':
-			out = append(out, '\\', 'n')
-		case c == '\r':
-			out = append(out, '\\', 'r')
-		case c == '\t':
-			out = append(out, '\\', 't')
-		case c < 0x20:
-			out = append(out, '\\', 'u', '0', '0', jsonHexDigits[c>>4], jsonHexDigits[c&0x0f])
-		default:
-			out = append(out, c)
-		}
-	}
-	return string(out)
 }
 
 func Test_jsonEncoderName(t *testing.T) {

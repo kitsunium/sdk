@@ -23,6 +23,7 @@ go_library(
         "//internal/core/observe/logger",
         "//internal/core/security/redact",
         "//internal/kernel/errs",
+        "//internal/kernel/jsonenc",
     ],
 )
 
@@ -40,6 +41,7 @@ go_test(
     srcs = [
         "attrs_external_test.go",
         "gen_api_test.go",
+        "json_bench_test.go",
         "redact_external_test.go",
         "redact_internal_test.go",
     ],

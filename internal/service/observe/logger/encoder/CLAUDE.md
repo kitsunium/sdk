@@ -84,17 +84,28 @@ exports it as a type alias for legacy call sites). This package ships two:
   `TestAppendTimestampMatchesAppendFormat` sweeps four zones × 100 000 instants.
   Change either fast path and those tests are the contract — widen an accepted
   set and they fail before a malformed log line ever reaches a parser.
-- **The two byte scrubs copy runs, not bytes.** `appendJSONEscaped` (json.go)
-  and `AppendSanitized` (text.go) append each stretch of bytes that needs no
-  rewrite in one `append`, and only the escaped or scrubbed byte on its own;
+- **JSON strings are `kernel/jsonenc`'s.** The encoder no longer escapes
+  anything itself: the message, a string value, a duration and the group
+  prefix and key all go through `jsonenc.AppendString` / `AppendEscaped`, which
+  searches a word at a time for the next byte that needs attention (ADR 0186
+  §D10). **This changed the output, and the change is declared**: `\b` and
+  `\f` are written as `\b` and `\f` (they were `\u0008`, `\u000c`); an invalid
+  UTF-8 byte is written as U+FFFD (it was copied, which left the line invalid
+  UTF-8 and, to a strict reader, invalid JSON); U+2028 and U+2029 are written
+  as `\u2028` and `\u2029` (they were copied). Every other byte of output is
+  unchanged. `Test_jsonStringsThroughTheEncoder` pins the message, the value
+  and the key for each. The TEXT encoder is not JSON and is untouched.
+- **`AppendSanitized` copies runs, not bytes** (the JSON encoder did too, before
+  `jsonenc`). `AppendSanitized` (text.go) appends each stretch of bytes that
+  needs no rewrite in one `append`, and only the scrubbed byte on its own;
   the JSON header appends its three member names as constants
   (`jsonTimestampOpen`, `jsonLevelMember`, `jsonMessageMember`) instead of
   escaping them per record. Measured (interleaved A/B, n=8): a JSON encode
   −29 % to −63 % across every benchmark, `AppendSanitized` on a 19-byte
   message −45 %. Pinned like the fast paths above, by the byte-at-a-time
-  forms they replaced: `Test_appendJSONEscapedRunsMatchBytewise` and
-  `Test_AppendSanitizedRunsMatchBytewise` sweep all 256 byte values alone, at
-  the start, middle and end of a run, and doubled.
+  form it replaced: `Test_AppendSanitizedRunsMatchBytewise` sweeps all 256
+  byte values alone, at the start, middle and end of a run, and doubled
+  (`jsonenc` sweeps its own, against `encoding/json`).
 - **`AppendSanitized` inlines, and its slow path is a call.** Since #464 it
   scrubs C0, DEL, C1, U+2028 and U+2029, yet it stays within the inlining
   budget (cost 80 of 80 on go1.27.2): it tests printable ASCII in ONE unsigned

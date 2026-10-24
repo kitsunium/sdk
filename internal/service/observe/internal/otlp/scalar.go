@@ -3,6 +3,8 @@ package otlp
 import (
 	"math"
 	"strconv"
+
+	"github.com/kitsunium/sdk/internal/kernel/jsonenc"
 )
 
 // The three spellings proto3 JSON gives a non-finite double. A double is "a
@@ -99,13 +101,13 @@ func (v Double) MarshalJSON() (encoded []byte, err error) {
 // appendInt appends a signed decimal, unquoted.
 func appendInt(dst []byte, v int64) []byte {
 	//: base ten.
-	return strconv.AppendInt(dst, v, decimalBase)
+	return jsonenc.AppendInt(dst, v)
 }
 
 // appendUint appends an unsigned decimal, unquoted.
 func appendUint(dst []byte, v uint64) []byte {
 	//: base ten.
-	return strconv.AppendUint(dst, v, decimalBase)
+	return jsonenc.AppendUint(dst, v)
 }
 
 // appendDouble appends value as Double's MarshalJSON renders it: shortest
