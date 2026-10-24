@@ -36,6 +36,7 @@ go_test(
         "//internal/core/data/codec",
         "//internal/kernel/errs",
         "//internal/service/app/config",
+        "//internal/service/data/codec/json",
         "//pkg/v1/errs",
     ],
 )

@@ -46,10 +46,24 @@ packages:
             private: "service/data/codec/json: encoding/json.Unmarshal returned an error"
             public: JSON decoding failed
             reason: UNMARSHAL_FAILED
-  - doc: |-
+  - aliases:
+      - doc: |-
+          Object is a JSON object being written by [BeginObject]: members land in
+          the order they are named, and nothing allocates but the caller's slice.
+        name: Object
+        target: jsonenc.Object
+    doc: |-
       Package json wraps encoding/json as a codec.Codec implementation
       registered under Format("json"). Blank-importing this package is enough
       to make JSON resolvable via the core/data/codec registry.
+
+      It also re-exports the JSON appenders of internal/kernel/jsonenc —
+      [AppendString], [AppendEscaped], [AppendInt], [AppendUint], [BeginObject]
+      and the [Object] it returns — for the programs that write a JSON document
+      by hand and want the escaping the SDK's own emitters use (ADR 0186 §D10).
+      They register no codec and read no value by reflection; Marshal is still
+      encoding/json, and does not change. A string is escaped as encoding/json
+      escapes it, except that '<', '>' and '&' are NOT.
 
       Package json — adapts *encoding/json.Decoder to codec.Decoder.
 
@@ -59,8 +73,63 @@ packages:
         name: New
         out:
           - type: codec.Codec
+      - doc: |-
+          AppendString appends s to dst as a JSON string literal, quotes included.
+          See the package comment for the escapes: invalid UTF-8 becomes U+FFFD,
+          U+2028 and U+2029 are escaped, and '<', '>' and '&' are not.
+        in:
+          - name: dst
+            type: "[]byte"
+          - name: s
+            type: string
+        name: AppendString
+        out:
+          - type: "[]byte"
+      - doc: |-
+          AppendEscaped appends the body of the JSON string literal of s — what
+          [AppendString] writes between its quotes — so a caller can join several
+          pieces into one literal.
+        in:
+          - name: dst
+            type: "[]byte"
+          - name: s
+            type: string
+        name: AppendEscaped
+        out:
+          - type: "[]byte"
+      - doc: |-
+          AppendInt appends v to dst in decimal, as a JSON number.
+        in:
+          - name: dst
+            type: "[]byte"
+          - name: v
+            type: int64
+        name: AppendInt
+        out:
+          - type: "[]byte"
+      - doc: |-
+          AppendUint appends v to dst in decimal, as a JSON number. A value past
+          2^53 is exact here and is not in a JavaScript reader.
+        in:
+          - name: dst
+            type: "[]byte"
+          - name: v
+            type: uint64
+        name: AppendUint
+        out:
+          - type: "[]byte"
+      - doc: |-
+          BeginObject appends the opening brace of an object to dst and returns the
+          [Object] that writes its members after it, in the order they are named.
+        in:
+          - name: dst
+            type: "[]byte"
+        name: BeginObject
+        out:
+          - type: Object
     imports:
       codec: github.com/kitsunium/sdk/internal/core/data/codec
+      jsonenc: github.com/kitsunium/sdk/internal/kernel/jsonenc
     path: github.com/kitsunium/sdk/internal/service/data/codec/json
     variables:
       - doc: |-
@@ -88,12 +157,30 @@ packages:
       github.com/kitsunium/sdk/pkg/v1/data/codec instead registers every format the SDK
       ships — BSON, CBOR, MessagePack and the rest — which
       a program that only reads JSON does not need to link. This package links
-      the JSON codec, the core package declaring its codes and the standard
-      library's encoding/json, and nothing else.
+      the JSON codec, the core package declaring its codes, the standard
+      library's encoding/json and internal/kernel/jsonenc (the standard library
+      again), and nothing else.
 
       Importing both packages is harmless: a format is registered by the package
       that implements it, which Go initialises once however many packages import
       it.
+
+      # Appenders
+
+      For a program that writes JSON by hand, the package re-exports the
+      appenders the SDK's own emitters use (ADR 0186 §D10):
+
+      	out := json.BeginObject(buf[:0]).
+      		String("level", "info").
+      		Int("n", 7).
+      		End()
+      	stringOut := json.AppendString(nil, "a \"quoted\" word")
+
+      A string is escaped as encoding/json escapes it — U+2028 and U+2029
+      included, an invalid UTF-8 byte written as U+FFFD — with one difference:
+      '<', '>' and '&' are NOT escaped, so the literal is not safe to embed in
+      HTML as it is. The appenders register no codec and read no value by
+      reflection, and Marshal is unchanged.
 
       # Errors
 
@@ -127,7 +214,76 @@ packages:
             name: UnmarshalFailed
             reexport: corejson.UnmarshalFailed
             type: "*errs.Error"
+      - alias:
+          - doc: |-
+              Object is a JSON object being written by [BeginObject]: members land in
+              the order they are named, and nothing allocates but the caller's slice.
+            name: Object
+            target: svcjson.Object
+      - func:
+          doc: |-
+            AppendString appends s to dst as a JSON string literal, quotes included.
+            An invalid UTF-8 byte becomes U+FFFD, U+2028 and U+2029 are escaped, and
+            '<', '>' and '&' are NOT: the literal is not safe to embed in HTML.
+          forward: svcjson.AppendString
+          in:
+            - name: dst
+              type: "[]byte"
+            - name: s
+              type: string
+          name: AppendString
+          out:
+            - type: "[]byte"
+      - func:
+          doc: |-
+            AppendEscaped appends the body of the JSON string literal of s, without
+            its quotes, so a caller can join several pieces into one literal.
+          forward: svcjson.AppendEscaped
+          in:
+            - name: dst
+              type: "[]byte"
+            - name: s
+              type: string
+          name: AppendEscaped
+          out:
+            - type: "[]byte"
+      - func:
+          doc: |-
+            AppendInt appends v to dst in decimal, as a JSON number.
+          forward: svcjson.AppendInt
+          in:
+            - name: dst
+              type: "[]byte"
+            - name: v
+              type: int64
+          name: AppendInt
+          out:
+            - type: "[]byte"
+      - func:
+          doc: |-
+            AppendUint appends v to dst in decimal, as a JSON number.
+          forward: svcjson.AppendUint
+          in:
+            - name: dst
+              type: "[]byte"
+            - name: v
+              type: uint64
+          name: AppendUint
+          out:
+            - type: "[]byte"
+      - func:
+          doc: |-
+            BeginObject appends the opening brace of an object to dst and returns the
+            [Object] that writes its members after it, in the order they are named.
+          forward: svcjson.BeginObject
+          in:
+            - name: dst
+              type: "[]byte"
+          name: BeginObject
+          out:
+            - type: Object
     imports:
       corejson: github.com/kitsunium/sdk/internal/core/data/codec/json
       errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcjson: github.com/kitsunium/sdk/internal/service/data/codec/json
     path: github.com/kitsunium/sdk/pkg/v1/data/codec/json

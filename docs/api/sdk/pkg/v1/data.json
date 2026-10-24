@@ -95,7 +95,7 @@
       "dir": "codec/json",
       "layer": "public",
       "family": "data",
-      "doc": "Package json registers the JSON codec with the SDK's codec registry — and\nno other codec — when it is imported (ADR 0134):\n\n\timport _ \"github.com/kitsunium/sdk/pkg/v1/data/codec/json\"\n\nEverything that dispatches through the registry by format name then reads\nand writes JSON: config.FileSource and config.FSSource, i18n.LoadFS, and\nthe codec package's Marshal and Unmarshal. Importing\ngithub.com/kitsunium/sdk/pkg/v1/data/codec instead registers every format the SDK\nships — BSON, CBOR, MessagePack and the rest — which\na program that only reads JSON does not need to link. This package links\nthe JSON codec, the core package declaring its codes and the standard\nlibrary's encoding/json, and nothing else.\n\nImporting both packages is harmless: a format is registered by the package\nthat implements it, which Go initialises once however many packages import\nit.\n\n# Errors\n\nFailures carry the range 0.3.2.*; match them with errs.HasCode, or the\nsentinels with errors.Is:\n\n\tCodeMarshalFailed    0.3.2.1  encoding/json could not encode the value\n\tCodeUnmarshalFailed  0.3.2.2  the input is not JSON the target can hold\n"
+      "doc": "Package json registers the JSON codec with the SDK's codec registry — and\nno other codec — when it is imported (ADR 0134):\n\n\timport _ \"github.com/kitsunium/sdk/pkg/v1/data/codec/json\"\n\nEverything that dispatches through the registry by format name then reads\nand writes JSON: config.FileSource and config.FSSource, i18n.LoadFS, and\nthe codec package's Marshal and Unmarshal. Importing\ngithub.com/kitsunium/sdk/pkg/v1/data/codec instead registers every format the SDK\nships — BSON, CBOR, MessagePack and the rest — which\na program that only reads JSON does not need to link. This package links\nthe JSON codec, the core package declaring its codes, the standard\nlibrary's encoding/json and internal/kernel/jsonenc (the standard library\nagain), and nothing else.\n\nImporting both packages is harmless: a format is registered by the package\nthat implements it, which Go initialises once however many packages import\nit.\n\n# Appenders\n\nFor a program that writes JSON by hand, the package re-exports the\nappenders the SDK's own emitters use (ADR 0186 §D10):\n\n\tout := json.BeginObject(buf[:0]).\n\t\tString(\"level\", \"info\").\n\t\tInt(\"n\", 7).\n\t\tEnd()\n\tstringOut := json.AppendString(nil, \"a \\\"quoted\\\" word\")\n\nA string is escaped as encoding/json escapes it — U+2028 and U+2029\nincluded, an invalid UTF-8 byte written as U+FFFD — with one difference:\n'<', '>' and '&' are NOT escaped, so the literal is not safe to embed in\nHTML as it is. The appenders register no codec and read no value by\nreflection, and Marshal is unchanged.\n\n# Errors\n\nFailures carry the range 0.3.2.*; match them with errs.HasCode, or the\nsentinels with errors.Is:\n\n\tCodeMarshalFailed    0.3.2.1  encoding/json could not encode the value\n\tCodeUnmarshalFailed  0.3.2.2  the input is not JSON the target can hold\n"
     },
     {
       "path": "github.com/kitsunium/sdk/pkg/v1/data/codec/jsonpatch",
@@ -2713,6 +2713,66 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/codec/json.AppendEscaped",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/codec/json",
+      "name": "AppendEscaped",
+      "spelled": "func(dst []byte, s string) []byte",
+      "canonical": "func(dst []byte, s string) []byte",
+      "doc": "AppendEscaped appends the body of the JSON string literal of s, without\nits quotes, so a caller can join several pieces into one literal.\n",
+      "file": "codec/json/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/codec/json.AppendInt",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/codec/json",
+      "name": "AppendInt",
+      "spelled": "func(dst []byte, v int64) []byte",
+      "canonical": "func(dst []byte, v int64) []byte",
+      "doc": "AppendInt appends v to dst in decimal, as a JSON number.\n",
+      "file": "codec/json/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/codec/json.AppendString",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/codec/json",
+      "name": "AppendString",
+      "spelled": "func(dst []byte, s string) []byte",
+      "canonical": "func(dst []byte, s string) []byte",
+      "doc": "AppendString appends s to dst as a JSON string literal, quotes included.\nAn invalid UTF-8 byte becomes U+FFFD, U+2028 and U+2029 are escaped, and\n'<', '>' and '&' are NOT: the literal is not safe to embed in HTML.\n",
+      "file": "codec/json/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/codec/json.AppendUint",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/codec/json",
+      "name": "AppendUint",
+      "spelled": "func(dst []byte, v uint64) []byte",
+      "canonical": "func(dst []byte, v uint64) []byte",
+      "doc": "AppendUint appends v to dst in decimal, as a JSON number.\n",
+      "file": "codec/json/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/codec/json.BeginObject",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/codec/json",
+      "name": "BeginObject",
+      "spelled": "func(dst []byte) Object",
+      "canonical": "func(dst []byte) github.com/kitsunium/sdk/pkg/v1/data/codec/json.Object",
+      "doc": "BeginObject appends the opening brace of an object to dst and returns the\n[Object] that writes its members after it, in the order they are named.\n",
+      "file": "codec/json/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/data/codec/json.CodeMarshalFailed",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/pkg/v1/data/codec/json",
@@ -2773,6 +2833,19 @@
         "public": "JSON encoding failed"
       },
       "doc": "MarshalFailed is the sentinel of [CodeMarshalFailed].\n",
+      "file": "codec/json/gen_facade.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/codec/json.Object",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/codec/json",
+      "name": "Object",
+      "spelled": "svcjson.Object",
+      "canonical": "github.com/kitsunium/sdk/internal/service/data/codec/json.Object",
+      "owner": "go:github.com/kitsunium/sdk/internal/kernel/jsonenc.Object",
+      "doc": "Object is a JSON object being written by [BeginObject]: members land in\nthe order they are named, and nothing allocates but the caller's slice.\n",
       "file": "codec/json/gen_facade.go",
       "layer": "public",
       "family": "data"

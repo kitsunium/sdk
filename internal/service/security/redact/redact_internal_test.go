@@ -160,3 +160,31 @@ func TestDeepNestingStaysWithinTheBound(t *testing.T) {
 		}
 	}
 }
+
+// Test_appendQuotedIsQuotedLength pins what the byte bound rests on now that
+// the whole-string path is kernel/jsonenc's and the cut path is still this
+// package's rune loop: for every input, the literal appendQuoted writes is as
+// long as quotedLength counted it and is exactly the one appendEscaped spells
+// character by character — over every byte alone and in context, and strings
+// with bad bytes, separators and multi-byte text.
+func Test_appendQuotedIsQuotedLength(t *testing.T) {
+	t.Parallel()
+	inputs := []string{"", "plain", "a\"b\\c\n", "\b\f\x00\x1f\x7f", "é東😀", "\u2028\u2029", "ab\xe6\x9d", "\xff\xfe", "\xed\xa0\x80", "x\xc3(y", "\uFFFD"}
+	for b := range 256 {
+		inputs = append(inputs, string([]byte{byte(b)}), "head"+string([]byte{byte(b)})+"tail")
+	}
+	for _, in := range inputs {
+		got := appendQuoted(nil, in)
+		if len(got) != quotedLength(in) {
+			t.Fatalf("appendQuoted(%q) is %d bytes, quotedLength says %d", in, len(got), quotedLength(in))
+		}
+		want := []byte{'"'}
+		for _, character := range in {
+			want = appendEscaped(want, character)
+		}
+		want = append(want, '"')
+		if string(got) != string(want) {
+			t.Fatalf("appendQuoted(%q) = %q, rune by rune %q", in, got, want)
+		}
+	}
+}

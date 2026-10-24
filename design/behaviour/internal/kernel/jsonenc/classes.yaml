@@ -1,0 +1,305 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: |-
+      hexDigits spells the two digits of a \u00XX escape, lowercase as
+      encoding/json writes them.
+    items:
+      - name: hexDigits
+        type: string
+        value: "\"0123456789abcdef\""
+    name: hexDigits
+  - doc: The bytes AppendEscaped never copies as they are, and the sizes of its loops.
+    grouped: true
+    items:
+      - doc: |-
+          controlBound is the bound below which a byte is a control character, which
+          RFC 8259 §7 requires escaped. 0x20 is within swar's exact range (128).
+        name: controlBound
+        type: byte
+        value: "0x20"
+      - doc: nibbleShift reaches a byte's high nibble.
+        name: nibbleShift
+        type: byte
+        value: "4"
+      - doc: nibbleMask keeps a byte's low nibble.
+        name: nibbleMask
+        type: byte
+        value: "0x0f"
+      - doc: "byteValues is how many values a byte has: the size of the table of plain bytes."
+        name: byteValues
+        type: int
+        value: "256"
+      - doc: |-
+          scalarWindow is how many bytes the byte loop reads after the search finds
+          a byte: enough that a dense stretch pays for the search once, few enough
+          that a lone escape in a long string does not make the rest of it a byte loop.
+        name: scalarWindow
+        type: int
+        value: "16"
+      - doc: |-
+          dense is how many hits a window needs to be called dense, which keeps the
+          byte loop reading: the hit that ended the search is one of them.
+        name: dense
+        type: int
+        value: "2"
+      - doc: |-
+          searchMin is the length from which the word search beats the byte loop,
+          measured (BENCH.md): below it the fixed price of a search call is not repaid.
+        name: searchMin
+        type: int
+        value: "32"
+    name: controlBound
+  - doc: |-
+      The UTF-8 shapes the byte loop reads in place, without a decode call. C2 to
+      DF lead a two-byte rune (C0 and C1 would be overlong); E1 to EC, EE and EF
+      lead a three-byte rune that is neither overlong (E0) nor a surrogate (ED);
+      a continuation byte is 10xxxxxx. E2 80 A8 and E2 80 A9 are the two
+      separators, which the loop does not copy.
+    grouped: true
+    items:
+      - name: twoByteLead
+        type: byte
+        value: "0xC2"
+      - name: twoByteMax
+        type: byte
+        value: "0xDF"
+      - name: threeByteOverlong
+        type: byte
+        value: "0xE0"
+      - name: threeByteMax
+        type: byte
+        value: "0xEF"
+      - name: threeByteSurr
+        type: byte
+        value: "0xED"
+      - name: contMask
+        type: byte
+        value: "0xC0"
+      - name: contBits
+        type: byte
+        value: "0x80"
+      - name: twoBytes
+        type: int
+        value: "2"
+      - name: threeBytes
+        type: int
+        value: "3"
+      - name: separatorLead
+        type: byte
+        value: "0xE2"
+      - name: separatorMid
+        type: byte
+        value: "0x80"
+      - name: separatorLast
+        type: byte
+        value: "0xA8"
+    name: twoByteLead
+  - doc: |-
+      The two separators encoding/json escapes though RFC 8259 does not require it:
+      legal in a JSON string, a line end in a script.
+    grouped: true
+    items:
+      - name: lineSeparator
+        type: rune
+        value: "0x2028"
+      - name: paragraphSeparator
+        type: rune
+        value: "0x2029"
+    name: lineSeparator
+  - doc: replacement is U+FFFD as the three UTF-8 bytes it is written with.
+    items:
+      - name: replacement
+        type: string
+        value: "\"\\xef\\xbf\\xbd\""
+    name: replacement
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - Object
+      - BeginObject
+      - Object.key
+      - Object.String
+      - Object.Int
+      - Object.Uint
+      - Object.Bool
+      - Object.Null
+      - Object.Raw
+      - Object.End
+    name: object.go
+  - decls:
+      - hexDigits
+      - controlBound
+      - twoByteLead
+      - lineSeparator
+      - replacement
+      - plain
+      - plainTable
+      - AppendString
+      - AppendEscaped
+      - appendShort
+      - appendScalar
+      - isContinuation
+      - twoByteSize
+      - isSeparator
+      - isThreeByteLead
+      - threeByteSize
+      - appendDecoded
+      - AppendInt
+      - AppendUint
+      - readOnly
+      - appendEscapedByte
+    name: string.go
+functions:
+  - name: BeginObject
+    params: dst []byte
+    results: Object
+  - doc: plainTable builds plain.
+    name: plainTable
+    results: "[byteValues]bool"
+  - name: AppendString
+    params: dst []byte, s string
+    results: "[]byte"
+  - name: AppendEscaped
+    params: dst []byte, s string
+    results: "[]byte"
+  - doc: |-
+      appendShort is AppendEscaped for a string too short to repay the word search.
+      A search call costs a copy of the set and a dispatch, a fixed price that a
+      dozen bytes of text never earn back.
+    name: appendShort
+    params: dst []byte, s string
+    results: "[]byte"
+  - doc: |-
+      appendScalar is the byte loop: it writes s up to the first byte at or past
+      window that ends a run of plain bytes, and returns the rest and how many
+      bytes it had to escape or replace (a valid multi-byte rune counts as one). It
+      copies runs, breaks one for an escape, a bad byte or a separator, and passes
+      a valid multi-byte rune through whole.
+    name: appendScalar
+    params: dst []byte, s string, window int
+    results: appended []byte, rest string, hits int
+  - doc: isContinuation reports whether b is a UTF-8 continuation byte.
+    name: isContinuation
+    params: b byte
+    results: bool
+  - doc: |-
+      twoByteSize is 2 when s starts with a complete two-byte rune (U+0080 to
+      U+07FF), else 0.
+    name: twoByteSize
+    params: s string
+    results: int
+  - doc: |-
+      isSeparator reports whether s starts with E2 80 A8 or E2 80 A9, the two
+      separators, which are escaped. It reads three bytes: the caller checked them.
+    name: isSeparator
+    params: s string
+    results: bool
+  - doc: |-
+      isThreeByteLead reports whether b leads a three-byte rune that is neither
+      overlong (E0) nor a surrogate (ED): E1 to EC, EE and EF.
+    name: isThreeByteLead
+    params: b byte
+    results: bool
+  - doc: |-
+      threeByteSize is 3 when s starts with a complete three-byte rune that is not
+      U+2028 or U+2029, else 0.
+    name: threeByteSize
+    params: s string
+    results: int
+  - doc: |-
+      appendDecoded handles the rune at s[pos] that inPlaceRune did not take: a bad
+      byte becomes U+FFFD, a separator its escape, any other valid rune stays in
+      the run.
+    name: appendDecoded
+    params: dst []byte, s string, pos, start int
+    results: appended []byte, next, runStart int
+  - name: AppendInt
+    params: dst []byte, v int64
+    results: "[]byte"
+  - name: AppendUint
+    params: dst []byte, v uint64
+    results: "[]byte"
+  - doc: |-
+      readOnly views s as a slice for the byte search, which only reads it. The
+      caller guarantees len(s) > 0: the data pointer of an empty string is
+      unspecified. No copy is made, which is the point: converting would allocate
+      for any string past the compiler's small-buffer size.
+    name: readOnly
+    params: s string
+    results: "[]byte"
+  - doc: |-
+      appendEscapedByte appends the escape of one ASCII byte: a quote, a backslash
+      or a control byte.
+    name: appendEscapedByte
+    params: dst []byte, c byte
+    results: "[]byte"
+imports:
+  strconv: strconv
+  swar: github.com/kitsunium/sdk/internal/kernel/swar
+  unsafe: unsafe
+  utf8: unicode/utf8
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/kernel/jsonenc
+  name: jsonenc
+  purpose: "Package jsonenc appends JSON to a byte slice: a string literal, an integer, and an object whose members are written in the order they are named."
+types:
+  - fields:
+      - doc: dst is the slice so far, ending after the last member or the brace.
+        name: dst
+        type: "[]byte"
+      - doc: started is whether a member has been written, which decides the comma.
+        name: started
+        type: bool
+    kind: struct
+    methods:
+      - doc: key writes the separator, the escaped key and the colon.
+        name: key
+        params: key string
+        recv: o Object
+        results: Object
+      - name: String
+        params: key, value string
+        recv: o Object
+        results: Object
+      - name: Int
+        params: key string, v int64
+        recv: o Object
+        results: Object
+      - name: Uint
+        params: key string, v uint64
+        recv: o Object
+        results: Object
+      - name: Bool
+        params: key string, v bool
+        recv: o Object
+        results: Object
+      - name: "Null"
+        params: key string
+        recv: o Object
+        results: Object
+      - name: Raw
+        params: key string, raw []byte
+        recv: o Object
+        results: Object
+      - name: End
+        recv: o Object
+        results: "[]byte"
+    name: Object
+vars:
+  - grouped: true
+    items:
+      - doc: |-
+          plain says, for each byte, that it is written as it is: printable ASCII
+          less the quote and the backslash (DEL included). Every other byte is a hit.
+        name: plain
+        value: plainTable()
+      - doc: |-
+          needsAttention is the one search every string takes: the next quote,
+          backslash, control byte or byte from 0x80 up. It is built once and read by
+          every call, so concurrent use is safe.
+        name: needsAttention
+        value: swar.NewSet('"', '\\', controlBound, true)
+    name: plain

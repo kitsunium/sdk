@@ -178,35 +178,22 @@ constants:
       - doc: kindObject is an object.
         name: kindObject
     name: kindNull
-  - grouped: true
+  - doc: |-
+      firstPrintable is the lowest byte JSON may carry unescaped in a string;
+      everything below it needs the \u00XX form (RFC 8259 §7).
     items:
-      - doc: |-
-          firstPrintable is the lowest byte JSON may carry unescaped in a string;
-          everything below it needs the \u00XX form (RFC 8259 §7).
-        name: firstPrintable
+      - name: firstPrintable
         type: byte
         value: "0x20"
-      - doc: lowNibbleMask selects the low four bits of a byte.
-        name: lowNibbleMask
-        type: byte
-        value: "0x0F"
-      - doc: nibbleBits is how far to shift a byte to reach its high nibble.
-        name: nibbleBits
-        type: byte
-        value: "4"
-      - doc: |-
-          decimalDigits is the number of decimal digits, i.e. where hex letters
-          start when rendering a nibble.
-        name: decimalDigits
-        type: byte
-        value: "10"
-      - doc: |-
-          quoteOverhead is the two delimiting quotes a JSON string literal adds
-          around its content.
-        name: quoteOverhead
-        type: int
-        value: "2"
     name: firstPrintable
+  - doc: |-
+      quoteScratch is the stack buffer a literal is built in: an issuer, an
+      audience or a key id fits, so the one allocation is the string returned.
+    items:
+      - name: quoteScratch
+        type: int
+        value: "128"
+    name: quoteScratch
   - grouped: true
     items:
       - doc: |-
@@ -564,10 +551,9 @@ files:
     name: json_scan.go
   - decls:
       - firstPrintable
+      - quoteScratch
       - quoteJSONString
       - quoteJSONStrings
-      - writeJSONStringByte
-      - hexDigit
     name: jsonstring.go
   - decls:
       - NewVerifierFromJWK
@@ -839,13 +825,13 @@ functions:
       valid UTF-8.
 
       JSON text is UTF-8 (RFC 8259 §8.1, RFC 8725 §3.7), and on the ISSUE path
-      nothing else would say so. quoteJSONString passes every byte at or above 0x20
-      through by design, and a reader that does not refuse the result repairs it
-      instead: encoding/json — this package's own verifier included — decodes each
-      invalid byte to U+FFFD, so a "sub" of "a\xff" and one of "a\xfe" are minted
-      as two tokens and verified as ONE subject. A strict JOSE reader elsewhere
-      rejects both. Nothing is repaired here either: which bytes the caller meant
-      is not something this package can know.
+      nothing else would say so. quoteJSONString repairs what it is given (each
+      invalid byte becomes U+FFFD, as encoding/json — this package's own verifier
+      included — decodes it), so a "sub" of "a\xff" and one of "a\xfe" would be
+      minted as two tokens and verified as ONE subject. Before it was the byte loop
+      that copied the bad byte, and a strict JOSE reader elsewhere rejected both.
+      Neither repair is wanted here: which bytes the caller meant is not something
+      this package can know.
     name: checkClaimText
     params: claims coretoken.ClaimsValue, audience []string
     results: error
@@ -1082,12 +1068,19 @@ functions:
     params: dst, lit []byte
     results: n int, ok bool
   - doc: |-
-      quoteJSONString renders s as a JSON string literal.
+      quoteJSONString renders s as a JSON string literal, escaped by
+      kernel/jsonenc: the same rules as every other JSON emitter of the SDK.
 
       Every value it renders today comes from the SDK's own configuration or from
       a claim this package already decoded — never straight off the wire. It
       escapes anyway, because a string concatenated into JSON is exactly the shape
       that stops being safe the day somebody makes one of its inputs dynamic.
+
+      It REPAIRS invalid UTF-8 (each bad byte becomes U+FFFD) where the byte loop
+      it replaced copied the byte and left a literal no strict reader accepts. The
+      issuer does not rely on that repair: checkClaimText refuses claim text that
+      is not UTF-8 before anything is rendered, because a repair would mint
+      "a\xff" and "a\xfe" as two tokens a reader decodes to one subject.
     name: quoteJSONString
     params: s string
     results: string
@@ -1095,13 +1088,6 @@ functions:
     name: quoteJSONStrings
     params: values []string
     results: string
-  - doc: writeJSONStringByte appends one byte of string content in escaped form.
-    name: writeJSONStringByte
-    params: builder *strings.Builder, char byte
-  - doc: hexDigit renders one nibble as a lowercase hex digit.
-    name: hexDigit
-    params: nibble byte
-    results: byte
   - name: NewVerifierFromJWK
     params: key jwk.KeyValue, cfg VerifierConfig
     results: verifier coretoken.Verifier, err error
@@ -1409,6 +1395,7 @@ imports:
   errs: github.com/kitsunium/sdk/internal/kernel/errs
   hmacsha2: github.com/kitsunium/sdk/internal/service/crypto/mac/hmacsha2
   json: encoding/json
+  jsonenc: github.com/kitsunium/sdk/internal/kernel/jsonenc
   jwk: github.com/kitsunium/sdk/internal/service/crypto/key/jwk
   math: math
   rand: crypto/rand

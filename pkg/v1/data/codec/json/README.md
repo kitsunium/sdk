@@ -12,9 +12,23 @@ Package json registers the JSON codec with the SDK's codec registry — and no o
 import _ "github.com/kitsunium/sdk/pkg/v1/data/codec/json"
 ```
 
-Everything that dispatches through the registry by format name then reads and writes JSON: config.FileSource and config.FSSource, i18n.LoadFS, and the codec package's Marshal and Unmarshal. Importing github.com/kitsunium/sdk/pkg/v1/data/codec instead registers every format the SDK ships — BSON, CBOR, MessagePack and the rest — which a program that only reads JSON does not need to link. This package links the JSON codec, the core package declaring its codes and the standard library's encoding/json, and nothing else.
+Everything that dispatches through the registry by format name then reads and writes JSON: config.FileSource and config.FSSource, i18n.LoadFS, and the codec package's Marshal and Unmarshal. Importing github.com/kitsunium/sdk/pkg/v1/data/codec instead registers every format the SDK ships — BSON, CBOR, MessagePack and the rest — which a program that only reads JSON does not need to link. This package links the JSON codec, the core package declaring its codes, the standard library's encoding/json and internal/kernel/jsonenc (the standard library again), and nothing else.
 
 Importing both packages is harmless: a format is registered by the package that implements it, which Go initialises once however many packages import it.
+
+### Appenders
+
+For a program that writes JSON by hand, the package re-exports the appenders the SDK's own emitters use (ADR 0186 §D10):
+
+```
+out := json.BeginObject(buf[:0]).
+	String("level", "info").
+	Int("n", 7).
+	End()
+stringOut := json.AppendString(nil, "a \"quoted\" word")
+```
+
+A string is escaped as encoding/json escapes it — U+2028 and U+2029 included, an invalid UTF-8 byte written as U+FFFD — with one difference: '\<', '>' and '&' are NOT escaped, so the literal is not safe to embed in HTML as it is. The appenders register no codec and read no value by reflection, and Marshal is unchanged.
 
 ### Errors
 
@@ -29,6 +43,19 @@ CodeUnmarshalFailed  0.3.2.2  the input is not JSON the target can hold
 
 - [Constants](<#constants>)
 - [Variables](<#variables>)
+- [func AppendEscaped\(dst \[\]byte, s string\) \[\]byte](<#AppendEscaped>)
+- [func AppendInt\(dst \[\]byte, v int64\) \[\]byte](<#AppendInt>)
+- [func AppendString\(dst \[\]byte, s string\) \[\]byte](<#AppendString>)
+- [func AppendUint\(dst \[\]byte, v uint64\) \[\]byte](<#AppendUint>)
+- [func BeginObject\(dst \[\]byte\) Object](<#BeginObject>)
+- [type Object](<#Object>)
+  - [func \(Object\) Bool\(key string, v bool\) Object](<#Object.Bool>)
+  - [func \(Object\) End\(\) \[\]byte](<#Object.End>)
+  - [func \(Object\) Int\(key string, v int64\) Object](<#Object.Int>)
+  - [func \(Object\) Null\(key string\) Object](<#Object.Null>)
+  - [func \(Object\) Raw\(key string, raw \[\]byte\) Object](<#Object.Raw>)
+  - [func \(Object\) String\(key string, value string\) Object](<#Object.String>)
+  - [func \(Object\) Uint\(key string, v uint64\) Object](<#Object.Uint>)
 
 ## Constants
 
@@ -84,5 +111,128 @@ UnmarshalFailed is the sentinel of [CodeUnmarshalFailed](#CodeUnmarshalFailed).
 Initialised with `github.com/kitsunium/sdk/internal/core/data/codec/json.UnmarshalFailed`.
 
 Code `0.3.2.2` · reason `UNMARSHAL_FAILED` · public "JSON decoding failed"
+
+<a name="AppendEscaped"></a>
+## func [AppendEscaped](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/json/gen_facade.go>)
+
+```go
+func AppendEscaped(dst []byte, s string) []byte
+```
+
+AppendEscaped appends the body of the JSON string literal of s, without its quotes, so a caller can join several pieces into one literal.
+
+<a name="AppendInt"></a>
+## func [AppendInt](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/json/gen_facade.go>)
+
+```go
+func AppendInt(dst []byte, v int64) []byte
+```
+
+AppendInt appends v to dst in decimal, as a JSON number.
+
+<a name="AppendString"></a>
+## func [AppendString](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/json/gen_facade.go>)
+
+```go
+func AppendString(dst []byte, s string) []byte
+```
+
+AppendString appends s to dst as a JSON string literal, quotes included. An invalid UTF-8 byte becomes U+FFFD, U+2028 and U+2029 are escaped, and '\<', '>' and '&' are NOT: the literal is not safe to embed in HTML.
+
+<a name="AppendUint"></a>
+## func [AppendUint](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/json/gen_facade.go>)
+
+```go
+func AppendUint(dst []byte, v uint64) []byte
+```
+
+AppendUint appends v to dst in decimal, as a JSON number.
+
+<a name="BeginObject"></a>
+## func [BeginObject](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/json/gen_facade.go>)
+
+```go
+func BeginObject(dst []byte) Object
+```
+
+BeginObject appends the opening brace of an object to dst and returns the [Object](#Object) that writes its members after it, in the order they are named.
+
+<a name="Object"></a>
+## type [Object](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/json/gen_facade.go>)
+
+Object is a JSON object being written by [BeginObject](#BeginObject): members land in the order they are named, and nothing allocates but the caller's slice.
+
+```go
+type Object = svcjson.Object
+```
+
+Object is an alias of `github.com/kitsunium/sdk/internal/kernel/jsonenc.Object`, declared as:
+
+```go
+type Object struct{}
+```
+
+<a name="Object.Bool"></a>
+### func \(Object\) [Bool](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/jsonenc/object.go>)
+
+```go
+func (Object) Bool(key string, v bool) Object
+```
+
+Bool writes the member key with the literal true or false.
+
+<a name="Object.End"></a>
+### func \(Object\) [End](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/jsonenc/object.go>)
+
+```go
+func (Object) End() []byte
+```
+
+End appends the closing brace and returns the slice.
+
+<a name="Object.Int"></a>
+### func \(Object\) [Int](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/jsonenc/object.go>)
+
+```go
+func (Object) Int(key string, v int64) Object
+```
+
+Int writes the member key with the number v.
+
+<a name="Object.Null"></a>
+### func \(Object\) [Null](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/jsonenc/object.go>)
+
+```go
+func (Object) Null(key string) Object
+```
+
+Null writes the member key with the literal null.
+
+<a name="Object.Raw"></a>
+### func \(Object\) [Raw](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/jsonenc/object.go>)
+
+```go
+func (Object) Raw(key string, raw []byte) Object
+```
+
+Raw writes the member key with raw, which the caller guarantees is one valid JSON value: it is copied as it is, so a nested object built by another Object, or a number the caller formatted, goes in without a second escape.
+
+<a name="Object.String"></a>
+### func \(Object\) [String](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/jsonenc/object.go>)
+
+```go
+func (Object) String(key string, value string) Object
+```
+
+String writes the member key with the string value, both escaped as [AppendString](#AppendString) escapes.
+
+<a name="Object.Uint"></a>
+### func \(Object\) [Uint](<https://github.com/kitsunium/sdk/blob/main/internal/kernel/jsonenc/object.go>)
+
+```go
+func (Object) Uint(key string, v uint64) Object
+```
+
+Uint writes the member key with the unsigned number v, as [AppendUint](#AppendUint) writes it.
 
 Generated from [docs/api](<https://github.com/kitsunium/sdk/blob/main/docs/api>) by tools/genindex.

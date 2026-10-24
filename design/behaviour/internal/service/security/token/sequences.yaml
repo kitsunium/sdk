@@ -2640,109 +2640,39 @@ sequences:
           init: i := 0
       - return: n, true
   - of: quoteJSONString
-    participants:
-      - id: caller
-        kind: actor
-      - id: quoteJSONString
-        kind: self
-      - id: builder.Grow
-        kind: value
-      - id: builder.WriteByte
-        kind: value
-      - id: writeJSONStringByte
-        kind: internal
-      - id: builder.String
-        kind: value
     steps:
       - var:
-          name: builder
-          type: strings.Builder
-      - eval: builder.Grow(len(s) + quoteOverhead)
-        to: builder.Grow
-      - eval: builder.WriteByte('"')
-        to: builder.WriteByte
-      - loop:
-          do:
-            - eval: writeJSONStringByte(&builder, s[i])
-              to: writeJSONStringByte
-          key: i
-          range: len(s)
-      - eval: builder.WriteByte('"')
-        to: builder.WriteByte
-      - return: builder.String()
-        to: builder.String
+          name: scratch
+          type: "[quoteScratch]byte"
+      - return: string(jsonenc.AppendString(scratch[:0], s))
   - of: quoteJSONStrings
     participants:
       - id: caller
         kind: actor
       - id: quoteJSONStrings
         kind: self
-      - id: builder.WriteByte
-        kind: value
-      - id: builder.WriteString
-        kind: value
-      - id: builder.String
-        kind: value
+      - id: jsonenc
+        kind: package
     steps:
       - var:
-          name: builder
-          type: strings.Builder
-      - eval: builder.WriteByte('[')
-        to: builder.WriteByte
+          name: scratch
+          type: "[quoteScratch]byte"
+      - bind: out
+        eval: append(scratch[:0], '[')
       - loop:
           do:
             - opt:
                 do:
-                  - eval: builder.WriteByte(',')
-                    to: builder.WriteByte
+                  - set: out
+                    value: append(out, ',')
                 when: i > 0
-            - eval: builder.WriteString(quoteJSONString(value))
-              to: builder.WriteString
+            - set: out
+              to: jsonenc
+              value: jsonenc.AppendString(out, value)
           key: i
           range: values
           value: value
-      - eval: builder.WriteByte(']')
-        to: builder.WriteByte
-      - return: builder.String()
-        to: builder.String
-  - of: writeJSONStringByte
-    participants:
-      - id: caller
-        kind: actor
-      - id: writeJSONStringByte
-        kind: self
-      - id: builder.WriteByte
-        kind: value
-      - id: builder.WriteString
-        kind: value
-    steps:
-      - switch:
-          cases:
-            - case: char == '"' || char == '\\'
-              do:
-                - eval: builder.WriteByte('\\')
-                  to: builder.WriteByte
-                - eval: builder.WriteByte(char)
-                  to: builder.WriteByte
-            - case: char < firstPrintable
-              do:
-                - eval: builder.WriteString(`\u00`)
-                  to: builder.WriteString
-                - eval: builder.WriteByte(hexDigit(char >> nibbleBits))
-                  to: builder.WriteByte
-                - eval: builder.WriteByte(hexDigit(char & lowNibbleMask))
-                  to: builder.WriteByte
-            - default: true
-              do:
-                - eval: builder.WriteByte(char)
-                  to: builder.WriteByte
-  - of: hexDigit
-    steps:
-      - opt:
-          do:
-            - return: "'0' + nibble"
-          when: nibble < decimalDigits
-      - return: "'a' + nibble - decimalDigits"
+      - return: string(append(out, ']'))
   - of: NewVerifierFromJWK
     participants:
       - id: caller

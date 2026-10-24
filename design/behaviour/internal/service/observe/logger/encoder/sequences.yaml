@@ -67,8 +67,8 @@ sequences:
         kind: self
       - id: appendTimestamp
         kind: internal
-      - id: appendJSONString
-        kind: internal
+      - id: jsonenc
+        kind: package
     steps:
       - set: dst
         value: append(dst, jsonTimestampOpen...)
@@ -78,20 +78,20 @@ sequences:
       - set: dst
         value: append(dst, jsonLevelMember...)
       - set: dst
-        to: appendJSONString
-        value: appendJSONString(dst, r.Level.String())
+        to: jsonenc
+        value: jsonenc.AppendString(dst, r.Level.String())
       - set: dst
         value: append(dst, jsonMessageMember...)
-      - return: appendJSONString(dst, r.Message)
-        to: appendJSONString
+      - return: jsonenc.AppendString(dst, r.Message)
+        to: jsonenc
   - of: appendJSONTraceContext
     participants:
       - id: caller
         kind: actor
       - id: appendJSONTraceContext
         kind: self
-      - id: appendJSONString
-        kind: internal
+      - id: jsonenc
+        kind: package
       - id: tc.AppendTraceIDHex
         kind: value
       - id: tc.AppendSpanIDHex
@@ -106,8 +106,8 @@ sequences:
       - set: dst
         value: append(dst, ',')
       - set: dst
-        to: appendJSONString
-        value: appendJSONString(dst, corelogger.TraceIDKey)
+        to: jsonenc
+        value: jsonenc.AppendString(dst, corelogger.TraceIDKey)
       - set: dst
         value: append(dst, ':', '"')
       - set: dst
@@ -118,8 +118,8 @@ sequences:
       - set: dst
         value: append(dst, ',')
       - set: dst
-        to: appendJSONString
-        value: appendJSONString(dst, corelogger.SpanIDKey)
+        to: jsonenc
+        value: jsonenc.AppendString(dst, corelogger.SpanIDKey)
       - set: dst
         value: append(dst, ':', '"')
       - set: dst
@@ -132,8 +132,8 @@ sequences:
         kind: actor
       - id: appendJSONAttr
         kind: self
-      - id: appendJSONEscaped
-        kind: internal
+      - id: jsonenc
+        kind: package
       - id: appendJSONValue
         kind: internal
     steps:
@@ -142,8 +142,8 @@ sequences:
       - loop:
           do:
             - set: dst
-              to: appendJSONEscaped
-              value: appendJSONEscaped(dst, g)
+              to: jsonenc
+              value: jsonenc.AppendEscaped(dst, g)
             - set: dst
               value: append(dst, jsonGroupSeparator)
           key: _
@@ -155,8 +155,8 @@ sequences:
               value: append(dst, ReservedPrefix...)
           when: len(groups) == 0 && ReservesKey(a.Key)
       - set: dst
-        to: appendJSONEscaped
-        value: appendJSONEscaped(dst, a.Key)
+        to: jsonenc
+        value: jsonenc.AppendEscaped(dst, a.Key)
       - set: dst
         value: append(dst, '"', ':')
       - return: appendJSONValue(dst, a)
@@ -167,8 +167,8 @@ sequences:
         kind: actor
       - id: appendJSONValue
         kind: self
-      - id: appendJSONString
-        kind: internal
+      - id: jsonenc
+        kind: package
       - id: strconv
         kind: stdlib
       - id: appendJSONFloat
@@ -180,8 +180,8 @@ sequences:
           cases:
             - case: corelogger.KindString
               do:
-                - return: appendJSONString(dst, a.Value.String())
-                  to: appendJSONString
+                - return: jsonenc.AppendString(dst, a.Value.String())
+                  to: jsonenc
             - case: corelogger.KindInt64
               do:
                 - return: strconv.AppendInt(dst, a.Value.Int64(), jsonDecimalBase)
@@ -200,8 +200,8 @@ sequences:
                   to: appendJSONFloat
             - case: corelogger.KindDuration
               do:
-                - return: appendJSONString(dst, a.Value.Duration().String())
-                  to: appendJSONString
+                - return: jsonenc.AppendString(dst, a.Value.Duration().String())
+                  to: jsonenc
             - case: corelogger.KindTime
               do:
                 - set: dst
@@ -212,8 +212,8 @@ sequences:
                 - return: append(dst, '"')
             - default: true
               do:
-                - return: appendJSONString(dst, "?")
-                  to: appendJSONString
+                - return: jsonenc.AppendString(dst, "?")
+                  to: jsonenc
           "on": a.Value.Kind()
   - of: appendJSONFloat
     participants:
@@ -230,68 +230,6 @@ sequences:
           when: math.IsNaN(f) || math.IsInf(f, 0)
       - return: strconv.AppendFloat(dst, f, jsonFloatFormat, jsonFloatPrec, jsonFloatBitSize)
         to: strconv
-  - of: appendJSONString
-    participants:
-      - id: caller
-        kind: actor
-      - id: appendJSONString
-        kind: self
-      - id: appendJSONEscaped
-        kind: internal
-    steps:
-      - set: dst
-        value: append(dst, '"')
-      - set: dst
-        to: appendJSONEscaped
-        value: appendJSONEscaped(dst, s)
-      - return: append(dst, '"')
-  - of: appendJSONEscaped
-    participants:
-      - id: caller
-        kind: actor
-      - id: appendJSONEscaped
-        kind: self
-      - id: appendJSONByteEscape
-        kind: internal
-    steps:
-      - bind: start
-        eval: "0"
-      - loop:
-          do:
-            - bind: c
-              eval: s[i]
-            - opt:
-                do:
-                  - continue: true
-                when: c >= jsonControlCeiling && c != '\\' && c != '"'
-            - set: dst
-              to: appendJSONByteEscape
-              value: appendJSONByteEscape(append(dst, s[start:i]...), c)
-            - set: start
-              value: i + 1
-          key: i
-          range: len(s)
-      - return: append(dst, s[start:]...)
-  - of: appendJSONByteEscape
-    steps:
-      - switch:
-          cases:
-            - case: "'\\\\', '\"'"
-              do:
-                - return: append(dst, '\\', c)
-            - case: "'\\n'"
-              do:
-                - return: append(dst, '\\', 'n')
-            - case: "'\\r'"
-              do:
-                - return: append(dst, '\\', 'r')
-            - case: "'\\t'"
-              do:
-                - return: append(dst, '\\', 't')
-            - default: true
-              do:
-                - return: append(dst, '\\', 'u', '0', '0', jsonHexDigits[c>>jsonNibbleShift], jsonHexDigits[c&jsonNibbleMask])
-          "on": c
   - of: NewText
     steps:
       - opt:
