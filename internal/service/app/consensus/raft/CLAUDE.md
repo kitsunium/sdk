@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T04:18:33Z -->
+<!-- updated: 2026-10-24T05:41:53Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -115,3 +115,8 @@ under coverage before touching `shard_count`.
   append, the probe never moved past its first batch, and the node stayed
   silent for as long as its leader led (`mutSilentReportIgnored`,
   `TestTheSilenceEndsOnceTheSameTermLeadersCommitIsHeld`).
+- Answer with a leader record a PreVote that does not carry FlagProtocol2,
+  or wait for the cluster version 2 to send one: a node of protocol 1 does
+  not know the kind, and the raise is refused while the stale voter the
+  record is for stays unheard (#638, `mutRecordAtClusterVersion`,
+  `mutRecordUnannounced`, `checkLeaderRecordFollowsTheAnnouncement`).

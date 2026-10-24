@@ -42,10 +42,16 @@ func followerOf4(cv uint32) *Raft {
 }
 
 // recordFrom is the leader record member 2 sends 1 for leader 4, as
-// followerOf4 answers a PreVote of member 1 behind its commit.
+// followerOf4 answers a PreVote of member 1 behind its commit that
+// announces protocol 2.
 func recordFrom(b *Raft) (core.MessageValue, bool) {
+	return recordFor(b, core.FlagProtocol2)
+}
+
+// recordFor is recordFrom for a PreVote carrying flags.
+func recordFor(b *Raft, flags core.MessageFlags) (core.MessageValue, bool) {
 	pv := msg(core.MsgPreVote, 1, 2, 6)
-	pv.Index, pv.LogTerm = 3, 2
+	pv.Index, pv.LogTerm, pv.Flags = 3, 2, flags
 	b.Step(b.now, pv)
 	for _, m := range b.Ready().Messages {
 		if m.Kind == core.MsgLeaderRecord && m.To == 1 {
@@ -102,9 +108,10 @@ func TestALeaderRecordAdmitsForReplicationOnly(t *testing.T) {
 	}
 }
 
-// A follower sends the record only at cluster version 2, only while it
-// follows a live leader, and only to a member campaigning behind its
-// commit; the record is the committed configuration's.
+// A follower sends the record only to a PreVote that announces protocol 2
+// (#638), only while it follows a live leader, and only to a member
+// campaigning behind its commit; the record is the committed
+// configuration's.
 func TestALeaderRecordIsSentOnlyToAStaleMemberAtProtocol2(t *testing.T) {
 	rec, ok := recordFrom(followerOf4(Protocol2))
 	if !ok {
@@ -113,23 +120,51 @@ func TestALeaderRecordIsSentOnlyToAStaleMemberAtProtocol2(t *testing.T) {
 	if rec.Term != 5 || len(rec.Entries) != 1 {
 		t.Fatalf("record %+v", rec)
 	}
-	if _, ok := recordFrom(followerOf4(1)); ok {
-		t.Fatal("a record was sent at cluster version 1")
+	if err := checkLeaderRecordFollowsTheAnnouncement(0); err != nil {
+		t.Fatal(err)
 	}
-	b := followerOf4(Protocol2)
+	b := followerOf4(0)
+	b.cfg.speaks = 1
+	if _, ok := recordFrom(b); ok {
+		t.Fatal("a node of protocol 1 sent a record")
+	}
+	b = followerOf4(Protocol2)
 	b.now = b.now.Add(10 * time.Second)
 	if _, ok := recordFrom(b); ok {
 		t.Fatal("a record was sent with no live leader")
 	}
 	b = followerOf4(Protocol2)
 	pv := msg(core.MsgPreVote, 1, 2, 6)
-	pv.Index, pv.LogTerm = 10, 5
+	pv.Index, pv.LogTerm, pv.Flags = 10, 5, core.FlagProtocol2
 	b.Step(b.now, pv)
 	for _, m := range b.Ready().Messages {
 		if m.Kind == core.MsgLeaderRecord {
 			t.Fatal("a record was sent to a member not behind the commit")
 		}
 	}
+}
+
+// checkLeaderRecordFollowsTheAnnouncement: the leader record is sent by
+// the PreVote's own announcement of protocol 2, at any cluster version, and
+// never to a PreVote without it (#638). Sent only at cluster version 2, it
+// waited for a raise the leader refuses while the stale voter it would
+// reach is unheard; sent without the announcement, it would reach a node
+// of protocol 1, which does not know the kind.
+func checkLeaderRecordFollowsTheAnnouncement(mut mutation) error {
+	for _, cv := range []uint32{0, 1, Protocol2} {
+		b := nodeOf(2, 5, testConf(1, 2, 3, 4), cv, mut)
+		hb := msg(core.MsgHeartbeat, 4, 2, 5)
+		hb.Commit = 10
+		b.Step(b.now, hb)
+		b.Ready()
+		if _, ok := recordFor(b, core.FlagProtocol2); !ok {
+			return fmt.Errorf("cluster version %d: no record to a PreVote announcing protocol 2", cv)
+		}
+		if _, ok := recordFor(b, 0); ok {
+			return fmt.Errorf("cluster version %d: a record to a PreVote that does not announce protocol 2", cv)
+		}
+	}
+	return nil
 }
 
 // A record is refused from a non-member, at an older term, for a retired

@@ -234,6 +234,14 @@ constants:
           answer carries: a stale match is not lowered and the probe never
           moves past the first batch (#636).
         name: mutSilentReportIgnored
+      - doc: |-
+          mutRecordAtClusterVersion sends the leader record by the cluster
+          version, as before #638: below 2 never, at 2 to any PreVote.
+        name: mutRecordAtClusterVersion
+      - doc: |-
+          mutRecordUnannounced answers with a leader record a PreVote that does
+          not announce protocol 2 (#638).
+        name: mutRecordUnannounced
     name: mutAckBeforeSync
   - doc: The facts a PeerStatValue carries.
     grouped: true
@@ -413,6 +421,7 @@ files:
       - hintElectionTimeouts
       - (*Raft).stepLeaderRecord
       - (*Raft).sendLeaderRecord
+      - (*Raft).mayRecordTo
       - (*Raft).takeLeaderRecord
       - (*Raft).mayTakeRecord
       - (*Raft).hearsLeader
@@ -1911,11 +1920,26 @@ types:
       - doc: |-
           sendLeaderRecord answers a PreVote from a member that campaigns behind
           this node's commit, while this node follows a live leader, with that
-          leader's record read from the committed configuration. Only once the
-          cluster version is 2: a node of protocol 1 does not know the kind.
+          leader's record read from the committed configuration.
+
+          Only to a PreVote that itself announces protocol 2, from a node that
+          speaks it: a node of protocol 1 does not know the kind, and the two
+          speak the highest version both announce (D18). The announcement is read
+          on the PreVote answered, never on an older state of its sender. It used
+          to wait for the cluster version 2, whose raise is refused while a member
+          is not heard announcing protocol 2: the stale voter that needs the record
+          is one the leader cannot hear, so it blocked the very raise that would
+          send it (#638).
         name: sendLeaderRecord
         params: now time.Time, m core.MessageValue
         recv: r *Raft
+      - doc: |-
+          mayRecordTo reports whether the PreVote m may be answered with a leader
+          record: both this node and m speak protocol 2.
+        name: mayRecordTo
+        params: m core.MessageValue
+        recv: r *Raft
+        results: bool
       - doc: |-
           takeLeaderRecord admits the leader a member vouched for, provisionally:
           only while this node knows no live leader, from a member of its own

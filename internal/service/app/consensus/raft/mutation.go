@@ -138,6 +138,12 @@ const (
 	// answer carries: a stale match is not lowered and the probe never
 	// moves past the first batch (#636).
 	mutSilentReportIgnored
+	// mutRecordAtClusterVersion sends the leader record by the cluster
+	// version, as before #638: below 2 never, at 2 to any PreVote.
+	mutRecordAtClusterVersion
+	// mutRecordUnannounced answers with a leader record a PreVote that does
+	// not announce protocol 2 (#638).
+	mutRecordUnannounced
 )
 
 // mutated reports whether a test switched mutation m on; it is false in every

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	"github.com/kitsunium/sdk/internal/service/app/consensus/raft"
 )
 
 // tcpNodes are the engines of ns that run.
@@ -306,6 +307,68 @@ func TestHuntR4ProveStaleVoterNewLeaderInMemory(t *testing.T) {
 	}
 	if st := a.node.Status(); st.Leader != d.id {
 		t.Fatalf("the returned voter follows %d, want D %d", st.Leader, d.id)
+	}
+}
+
+// raiseOn proposes the raise to protocol 2 on n with n's own precondition.
+func raiseOn(n *Node) error {
+	st := n.Status()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	return n.RaiseClusterVersion(ctx, "op:raise", coreconsensus.PreconditionSpec{Log: st.Log, Generation: st.Versions.ClusterGeneration}, raft.Protocol2)
+}
+
+// #638: #542's stale voter in a cluster that never raised its version
+// (Forgejo's, kodflow/forgejo-raft#170). A was down while D was admitted,
+// promoted and handed the leadership, and comes back with a configuration
+// that does not list D. The leader record went out only at cluster version
+// 2, and D refused the raise VERSION_UNSUPPORTED for as long as it led:
+// checkAnnounced wants every member heard in the term, and A, whose
+// transport refused D's key, never answered D. The record now follows the
+// PreVote's own announcement of protocol 2: A hears D at cluster version 0,
+// applies its writes, answers it, and the raise passes while D leads.
+func TestAStaleVoterHearsTheNewLeaderBeforeTheRaise(t *testing.T) {
+	net := NewMemoryNetwork()
+	net.admission = true
+	c := newClusterWith(t, &cluster{t: t, net: net, cid: coreconsensus.ClusterID{5, 4, 9}, size: 3})
+	l := c.settledLeader(5 * time.Second)
+	a := c.otherThan(l)
+	c.kill(a)
+	net.Isolate(a.id, true)
+	d := c.join(t, "slot-d")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	retryAdmin(t, "promote D", func() error { return c.leader(5*time.Second).node.Promote(ctx, "op:test", d.id) })
+	retryAdmin(t, "transfer to D", func() error { return c.leader(5*time.Second).node.TransferLeadership(ctx, "op:test", d.id) })
+	if ld := c.leader(5 * time.Second); ld != d {
+		t.Fatalf("setup: D does not lead: %d does", ld.id)
+	}
+	if v := d.node.Status().Versions.Cluster; v >= raft.Protocol2 {
+		t.Fatalf("setup: cluster version %d, want below 2", v)
+	}
+	net.Isolate(a.id, false)
+	c.start(a)
+	tok := propose(t, d.node, "b=2")
+	for deadline := time.Now().Add(4*testTimingFast().ElectionTimeoutMax + 5*time.Second); a.node.Status().Applied < tok.Index; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Errorf("the returned voter never applied D's write at cluster version %d: %+v", d.node.Status().Versions.Cluster, a.node.Status())
+			break
+		}
+	}
+	var err error
+	tries, refused := 0, 0
+	for deadline := time.Now().Add(4 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		if d.node.Status().Role != coreconsensus.RoleLeader {
+			continue
+		}
+		tries++
+		if err = raiseOn(d.node); err == nil {
+			break
+		}
+		refused++
+	}
+	if tries == 0 || refused == tries {
+		t.Fatalf("the raise was refused at every one of %d tries for 4s while D leads: %v; A: %+v", tries, err, a.node.Status())
 	}
 }
 

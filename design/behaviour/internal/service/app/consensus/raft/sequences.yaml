@@ -2169,7 +2169,7 @@ sequences:
           do:
             - return: ""
           when: |-
-            r.clusterVer < Protocol2 || r.role == core.RoleLeader || r.lead == 0 || r.lead == m.From ||
+            !r.mayRecordTo(m) || r.role == core.RoleLeader || r.lead == 0 || r.lead == m.From ||
             		r.lastLeaderContact.IsZero() || now.Sub(r.lastLeaderContact) >= r.voteWindow || m.Index >= r.log.committed
       - opt:
           do:
@@ -2195,6 +2195,19 @@ sequences:
           		Entries: []core.EntryValue{{Kind: core.EntryMembership, BodySum: wire.BodySum(data), Data: data}},
           	})
         to: r.send
+  - of: (*Raft).mayRecordTo
+    steps:
+      - switch:
+          cases:
+            - case: r.mutated(mutRecordAtClusterVersion)
+              do:
+                - return: r.clusterVer >= Protocol2
+            - case: r.mutated(mutRecordUnannounced)
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: r.speaks() >= Protocol2 && m.Flags&core.FlagProtocol2 != 0
   - of: (*Raft).takeLeaderRecord
     participants:
       - id: caller

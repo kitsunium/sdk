@@ -1052,7 +1052,21 @@ followers and sent it nothing. From protocol 2:
 - A follower that follows a live leader and receives a PreVote from a
   member of its configuration whose last index is behind its commit answers
   with `MsgLeaderRecord`: the leader's member record (ID, slot, SPKI,
-  address), read from its COMMITTED configuration. Only at cluster version 2.
+  address), read from its COMMITTED configuration. Only to a PreVote that
+  itself carries `FlagProtocol2`, from a follower that speaks protocol 2
+  (amended 2026-10-24, [#638](https://github.com/kitsunium/sdk/issues/638)).
+  It was sent only at cluster version 2, and the raise to 2 is refused while
+  a member was not heard announcing protocol 2 in the term: the stale voter
+  the record is for is a member the leader cannot hear, so it blocked the
+  very raise that would have sent it, for as long as that leader led, in
+  every cluster that had not raised before (kodflow/forgejo-raft#170). The
+  record is a frame between two peers, consumed at once and never
+  persisted or replicated, so D18's per-connection rule applies to it, as
+  it never could to the replicated formats protocol 2 writes: the two
+  peers speak the highest version both announce. A node of protocol 1
+  never sets the flag, so it never receives the kind; the flag is read on
+  the PreVote answered, never on an older state of its sender. The voter
+  takes a record at any cluster version, as before.
 - The voter that receives it, knowing no live leader, takes it only from a
   member of its own configuration, at a term at least its own, for a pinned
   key, and for an ID it neither lists nor retired. It adds the record to its
@@ -4069,8 +4083,13 @@ completed:
     adopted range above it is `LINEAGE_MISMATCH`, as phase 1 answered for
     the whole kept range (#509).
 - `MsgLeaderRecord`, the admission of a stale voter by a leader a member
-  vouches for (D4, #542, arbitrated on 2026-10-22): sent only at cluster
-  version 2.
+  vouches for (D4, #542, arbitrated on 2026-10-22): sent only to a PreVote
+  that announces protocol 2, at any cluster version (amended 2026-10-24,
+  [#638](https://github.com/kitsunium/sdk/issues/638)). It is the one
+  protocol 2 frame chosen by the peer's announcement rather than by the
+  committed cluster version: a frame consumed by its receiver alone binds
+  no other member and no later release, and gated on the raise, the record
+  waited for a raise that the very voter it is for kept refused.
 - **Not in protocol 2.** The fresh epoch in the stamp and D18's announced `PayloadMax` with
   `PAYLOAD_VERSION_REFUSED` (follow-ups of kodflow/forgejo-raft#65 and #50)
   have no issue yet. Each that changes a format will need protocol 3.

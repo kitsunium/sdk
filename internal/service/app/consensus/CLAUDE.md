@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T04:18:33Z -->
+<!-- updated: 2026-10-24T05:41:53Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -464,6 +464,12 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   voter whose install outlasted it never caught up under writes (#618,
   `TestAStaleVoterWhoseInstallOutlastsTheRecordCatchesUp`, raft's
   `checkVouchedLeaderAdmittedWhileHeard`).
+- Gate the leader record on the cluster version: the raise to 2 is refused
+  while a member is unheard, and the stale voter the record is for is one
+  the leader cannot hear, so a cluster that had not raised never repaired
+  (#638, `TestAStaleVoterHearsTheNewLeaderBeforeTheRaise`, raft's
+  `checkLeaderRecordFollowsTheAnnouncement`). The record follows the
+  PreVote's own `FlagProtocol2`, never an older state of its sender.
 - Trust a predecessor's token by its index above the identity's
   AdoptedFrom once its term can no longer be read: that part of the kept
   range is the suffix Recover adopted past the persisted commit (#509,
