@@ -1,8 +1,9 @@
-// Package http1 is the codec of the restricted HTTP/1.1 profile (ADR 0186
-// §D6): it frames requests out of bytes and appends responses to bytes, and
-// does no I/O. Its request value and handler port are internal/core/net's
-// (HTTP1RequestValue, HTTP1Handler); the loop engine's adapter, and the
-// pkg/v1/net/http1 facade, come with HandleLoop (ADR 0186 §D9).
+// Package http1 is the restricted HTTP/1.1 profile (ADR 0186 §D6): a codec
+// that frames requests out of bytes and appends responses to bytes, doing no
+// I/O, and HandleLoop, the adapter that serves it on a loop group. Its request
+// value and handler ports are internal/core/net's (HTTP1RequestValue,
+// HTTP1Handler, HTTP1Batcher); pkg/v1/net/http1 publishes it (ADR 0186 §D9
+// step 12).
 //
 // The profile is defined by what it refuses. A request is answered with its
 // Refusal's status and Connection: close, and the connection closed, when it

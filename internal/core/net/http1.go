@@ -104,6 +104,11 @@ type HTTP1RequestValue struct {
 	// Close reports whether the client asked to close the connection after
 	// this request: a Connection field holding the close token.
 	Close bool
+	// Loop is the index of the loop that framed the request — its
+	// LoopIO.Loop — set by the loop adapter before the handler runs, so a
+	// handler finds its per-loop state in a slice, with no lock. Parse leaves
+	// it as it is; outside the loop adapter it is what the caller set.
+	Loop int
 }
 
 // Field returns the value of the first field named name and true, or nil and
@@ -171,6 +176,14 @@ type HTTP1ResponseValue struct {
 	Body []byte
 	// Close asks the codec to close the connection after this response.
 	Close bool
+	// Defer, set by the handler, holds the answer back until the end of the
+	// loop's batch, for work it batches — one database transaction for every
+	// request of the batch, say. The response value then stays valid, at the
+	// same address, until HTTP1Batcher.EndBatch returns, and the handler
+	// completes it there: it fills it and clears Defer. An answer still
+	// deferred when EndBatch returns is answered 500 and its connection
+	// closed. Only the loop adapter reads it; AppendResponse does not.
+	Defer bool
 }
 
 // HTTP1HandlerFunc adapts a plain function to HTTP1Handler.

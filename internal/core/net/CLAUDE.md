@@ -71,7 +71,7 @@ adapter.
 | `websocket_opcode.go` | `WSOpCode` — the six assigned opcodes, `IsControl` / `Defined` / `String` |
 | `websocket_close.go` | `WSCloseCode` — the §7.4.1 registry, `Sendable` / `Echoable`; the close payload's wire form is `service/net/websocket`'s |
 | `websocket_message.go` | `WSMessageValue` — the reassembled message and its `OpCode`; its §8.1 UTF-8 rule is checked by the engine |
-| `http1.go` | the restricted HTTP/1.1 profile's vocabulary (ADR 0186 §D6): `HTTP1RequestValue` (+ `Field`, A–Z folding only), `HTTP1FieldValue`, `HTTP1ResponseValue`, `HTTP1LimitsValue` and its bounds (`HTTP1DefaultHead`, `HTTP1MaxHead`, `HTTP1DefaultTarget`, `HTTP1DefaultBody`, `HTTP1MaxBody`, `HTTP1MaxFields`, `HTTP1MaxContentLengthDigits`), `HTTP1HandlerFunc`, the func adapter of the `HTTP1Handler` port (in `gen_ports.go`); the codec is `service/net/http1`'s |
+| `http1.go` | the restricted HTTP/1.1 profile's vocabulary (ADR 0186 §D6): `HTTP1RequestValue` (+ `Field`, A–Z folding only; `Loop`, the loop that framed it), `HTTP1FieldValue`, `HTTP1ResponseValue` (`Defer`, answered at the batch's end), `HTTP1LimitsValue` and its bounds (`HTTP1DefaultHead`, `HTTP1MaxHead`, `HTTP1DefaultTarget`, `HTTP1DefaultBody`, `HTTP1MaxBody`, `HTTP1MaxFields`, `HTTP1MaxContentLengthDigits`), `HTTP1HandlerFunc`, the func adapter of the `HTTP1Handler` port (in `gen_ports.go`, beside `HTTP1Batcher`, its optional batch end); the codec is `service/net/http1`'s |
 
 ## Why-this-shape
 

@@ -1,6 +1,14 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 constants:
+  - doc: |-
+      internalError is the whole answer to a response the writer refused or a
+      handler left deferred: a 500 with no body, and the connection closed.
+    items:
+      - name: internalError
+        type: string
+        value: "\"HTTP/1.1 500 Internal Server Error\\r\\nContent-Length: 0\\r\\nConnection: close\\r\\n\\r\\n\""
+    name: internalError
   - doc: version is the one version the profile speaks.
     items:
       - name: version
@@ -210,6 +218,30 @@ files:
   - decls: []
     name: doc.go
   - decls:
+      - internalError
+      - HandleLoop
+      - LoopHandler
+      - loopState
+      - item
+      - connFlag
+      - (*LoopHandler).OnOpen
+      - (*LoopHandler).OnData
+      - (*LoopHandler).serve
+      - (*LoopHandler).OnTimeout
+      - (*LoopHandler).OnWritable
+      - (*LoopHandler).OnBatchEnd
+      - (*LoopHandler).OnClose
+      - (*loopState).complete
+      - (*loopState).flush
+      - (*loopState).write
+      - (*loopState).take
+      - (*loopState).give
+      - (*loopState).flag
+      - (*LoopHandler).state
+      - (*LoopHandler).grow
+      - swallowErr
+    name: loop.go
+  - decls:
       - version
       - byteValues
       - kindOther
@@ -280,6 +312,16 @@ files:
       - AppendRefusal
     name: write.go
 functions:
+  - name: HandleLoop
+    params: h corenet.HTTP1Handler, p Parser
+    results: "*LoopHandler"
+  - doc: |-
+      swallowErr intentionally discards a non-actionable error, recording the
+      discard so the error audit treats it as deliberate: the adapter has no
+      caller to return a refused Close to, and a refused Close means the
+      connection is already gone.
+    name: swallowErr
+    params: err error
   - doc: "tokenTable builds the tchar table: the alphanumerics and fifteen symbols."
     name: tokenTable
     results: "[byteValues]bool"
@@ -512,17 +554,192 @@ functions:
     params: dst []byte, r Refusal
     results: "[]byte"
 imports:
+  atomic: sync/atomic
   bytes: bytes
   corenet: github.com/kitsunium/sdk/internal/core/net
   errs: github.com/kitsunium/sdk/internal/kernel/errs
   strconv: strconv
   swar: github.com/kitsunium/sdk/internal/kernel/swar
+  sync: sync
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/service/net/http1
   name: http1
-  purpose: "Package http1 is the codec of the restricted HTTP/1.1 profile (ADR 0186 §D6): it frames requests out of bytes and appends responses to bytes, and does no I/O."
+  purpose: "Package http1 is the restricted HTTP/1.1 profile (ADR 0186 §D6): a codec that frames requests out of bytes and appends responses to bytes, doing no I/O, and HandleLoop, the adapter that serves it on a loop group."
 types:
+  - fields:
+      - doc: h serves every request.
+        name: h
+        type: corenet.HTTP1Handler
+      - doc: batcher is h as an HTTP1Batcher, nil when it is not one.
+        name: batcher
+        type: corenet.HTTP1Batcher
+      - doc: p frames every request.
+        name: p
+        type: Parser
+      - doc: |-
+          loops holds each loop's state at its LoopIO.Loop index. It is replaced,
+          never written in place, under mu; a loop reads it without the lock.
+        name: loops
+        type: atomic.Pointer[[]*loopState]
+      - doc: mu serialises the first sight of a loop.
+        name: mu
+        type: sync.Mutex
+    kind: struct
+    methods:
+      - name: OnOpen
+        params: io corenet.LoopIO, ref corenet.LoopConnRef
+        recv: a *LoopHandler
+      - name: OnData
+        params: io corenet.LoopIO, ref corenet.LoopConnRef, buf []byte
+        recv: a *LoopHandler
+        results: int
+      - doc: |-
+          serve hands the request framed into st.req to the handler and queues its
+          answer, and reports whether the connection closes after it.
+        name: serve
+        params: io corenet.LoopIO, ref corenet.LoopConnRef, st *loopState, loop int
+        recv: a *LoopHandler
+        results: bool
+      - name: OnTimeout
+        params: io corenet.LoopIO, ref corenet.LoopConnRef
+        recv: "*LoopHandler"
+      - name: OnWritable
+        params: io corenet.LoopIO, ref corenet.LoopConnRef
+        recv: "*LoopHandler"
+      - name: OnBatchEnd
+        params: io corenet.LoopIO
+        recv: a *LoopHandler
+      - name: OnClose
+        params: io corenet.LoopIO, ref corenet.LoopConnRef, err error
+        recv: "*LoopHandler"
+      - doc: state returns loop i's state, built on the loop's first call.
+        name: state
+        params: i int
+        recv: a *LoopHandler
+        results: "*loopState"
+      - doc: grow builds loop i's state and publishes a table that holds it.
+        name: grow
+        params: i int
+        recv: a *LoopHandler
+        results: "*loopState"
+    name: LoopHandler
+  - doc: loopState is one loop's state. Only that loop's thread touches it.
+    fields:
+      - doc: req is the request value every request of the loop is framed into.
+        name: req
+        type: corenet.HTTP1RequestValue
+      - doc: |-
+          stub carries the Method and Close a deferred answer is written with,
+          once req has moved on to the next request.
+        name: stub
+        type: corenet.HTTP1RequestValue
+      - doc: out holds the batch's answers, written in place as each is taken.
+        name: out
+        type: "[]byte"
+      - doc: |-
+          spare is the buffer complete orders a batch with deferred answers into;
+          it and out swap, so neither is allocated again.
+        name: spare
+        type: "[]byte"
+      - doc: deferred counts the batch's deferred answers.
+        name: deferred
+        type: int
+      - doc: items are the batch's answers, in the order their requests arrived.
+        name: items
+        type: "[]item"
+      - doc: free are the response values no request holds.
+        name: free
+        type: "[]*corenet.HTTP1ResponseValue"
+      - doc: conns is a flag per connection, by ring and slot.
+        name: conns
+        type: "[][]connFlag"
+      - doc: served counts the requests the batch handed to the handler.
+        name: served
+        type: int
+    kind: struct
+    methods:
+      - doc: |-
+          complete writes the batch's answers again into spare, in request order,
+          each deferred one in its place, and makes spare the batch's out: the
+          answers of one connection then lie side by side, and leave in one Write.
+          A batch with no deferred answer is already in order and is left as it is.
+        name: complete
+        recv: st *loopState
+      - doc: |-
+          flush writes the batch's answers in order, a run of one connection's
+          answers that lie side by side in out in one Write, and closes each
+          connection whose answer asked to, or whose output refused one.
+        name: flush
+        params: io corenet.LoopIO
+        recv: st *loopState
+      - doc: |-
+          write writes p on ref, then closes ref when closing or when the write is
+          refused. A connection already given up on is skipped.
+        name: write
+        params: io corenet.LoopIO, ref corenet.LoopConnRef, p []byte, closing bool
+        recv: st *loopState
+      - doc: take returns a zeroed response value for one request.
+        name: take
+        recv: st *loopState
+        results: "*corenet.HTTP1ResponseValue"
+      - doc: |-
+          give returns res to the pool. Its slices are dropped at the next take,
+          never reused: they are the handler's.
+        name: give
+        params: res *corenet.HTTP1ResponseValue
+        recv: st *loopState
+      - doc: |-
+          flag returns ref's flag, growing the table on the first sight of its ring
+          or its slot. A flag of an older generation reads as nothing set.
+        name: flag
+        params: ref corenet.LoopConnRef
+        recv: st *loopState
+        results: "*connFlag"
+    name: loopState
+  - doc: item is one answer of a batch.
+    fields:
+      - doc: ref is the connection it answers on.
+        name: ref
+        type: corenet.LoopConnRef
+      - doc: |-
+          res is the deferred response, written at the batch's end; nil once the
+          answer is in out.
+        name: res
+        type: "*corenet.HTTP1ResponseValue"
+      - doc: off and end bound the answer in out.
+        name: "off"
+        type: int
+      - doc: off and end bound the answer in out.
+        name: end
+        type: int
+      - doc: head is whether the request was a HEAD, for a deferred answer.
+        name: head
+        type: bool
+      - doc: closing is whether the connection closes after this answer.
+        name: closing
+        type: bool
+    kind: struct
+    name: item
+  - doc: |-
+      connFlag is what the adapter keeps of one connection: its generation, so a
+      stale slot reads as a new one, and how it ends.
+    fields:
+      - doc: gen is the generation of the connection the flag describes.
+        name: gen
+        type: uint32
+      - doc: |-
+          closing is set once an answer that closes the connection is queued:
+          nothing more is read from it.
+        name: closing
+        type: bool
+      - doc: |-
+          dead is set once a write was refused or the close was asked: nothing
+          more is written to it.
+        name: dead
+        type: bool
+    kind: struct
+    name: connFlag
   - doc: fieldKind is which of the profile's known fields a name is.
     kind: named
     name: fieldKind

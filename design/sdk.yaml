@@ -581,6 +581,16 @@ budgets:
   - fn: go:github.com/kitsunium/sdk/internal/service/net/http1.AppendRefusal
     allocs: 0
     fixture: AppendRefusal
+  # The loop adapter: a batch of requests framed into the loop's reused
+  # request value, answered into the loop's reused buffer and written at the
+  # batch's end. Once a loop's buffers and pools have grown to its batches,
+  # neither callback allocates, deferred answers and refusals included.
+  - fn: go:github.com/kitsunium/sdk/internal/service/net/http1.(*LoopHandler).OnData
+    allocs: 0
+    fixture: LoopHandlerOnData
+  - fn: go:github.com/kitsunium/sdk/internal/service/net/http1.(*LoopHandler).OnBatchEnd
+    allocs: 0
+    fixture: LoopHandlerOnBatchEnd
   # jsonenc: every appender writes into the caller's slice and allocates
   # nothing once it has the room. The string appenders read their string
   # through a view, not a copy, so none of them lets it escape; the object

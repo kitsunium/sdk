@@ -139,3 +139,39 @@ func BenchmarkParseCRefStream(b *testing.B) {
 	}
 	b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*64), "ns/request")
 }
+
+// BenchmarkLoopHandler is a loop batch through the adapter, on a LoopIO that
+// counts its writes: sixteen pipelined GETs answered at once ("now"), the
+// same sixteen deferred and answered at the batch's end ("deferred"), and
+// the fixtures' mixed batch with a refusal on a second connection ("mixed").
+// ns/op is per batch; divide by the requests for a request's cost.
+func BenchmarkLoopHandler(b *testing.B) {
+	pipe := func(target string) []byte {
+		return bytes.Repeat([]byte("GET "+target+" HTTP/1.1\r\nHost: 127.0.0.1:3000\r\nAuthorization: Bearer [masked:jwt]\r\n\r\n"), 16)
+	}
+	for _, c := range []struct {
+		name string
+		in   []byte
+	}{{"now16", pipe("/users/12345")}, {"deferred16", pipe("/deferred/12345")}} {
+		b.Run(c.name, func(b *testing.B) {
+			h := &perfH{body: []byte(`{"id":12345,"username":"user_12345"}`)}
+			a := http1.HandleLoop(h, http1.Parser{})
+			io := &fakeIO{}
+			ref := corenet.LoopConnRef{Slot: 1, Gen: 1}
+			a.OnOpen(io, ref)
+			b.SetBytes(int64(len(c.in)))
+			b.ReportAllocs()
+			for b.Loop() {
+				perfInt = a.OnData(io, ref, c.in)
+				a.OnBatchEnd(io)
+			}
+		})
+	}
+	b.Run("mixed", func(b *testing.B) {
+		batch := perfLoop(b)
+		b.ReportAllocs()
+		for b.Loop() {
+			batch()
+		}
+	})
+}

@@ -250,6 +250,13 @@ The profile's request value and handler port are declared in `core/net`, under
 names that do not collide with the outbound `RequestValue` the `Policy` port
 already judges.
 
+The adapter, `http1.HandleLoop(h, p)`, writes a batch's answers at its end,
+in request order on each connection. Step 12 adds what a handler needs to
+batch its work: `HTTP1RequestValue.Loop` (the loop that framed the request,
+from `LoopIO.Loop`), `HTTP1ResponseValue.Defer` (answered at the batch's end),
+and `HTTP1Batcher`, an optional capability whose `EndBatch(loop)` runs before
+the batch's answers leave — one transaction for every request of the batch.
+
 ### D7 — Memory and the connection lifecycle, amending D4
 
 ADR 0029 D4 reuses `recycler.Pool` for per-connection objects and

@@ -1,6 +1,424 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 sequences:
+  - of: HandleLoop
+    steps:
+      - bind: b, _
+        eval: h.(corenet.HTTP1Batcher)
+      - return: "&LoopHandler{h: h, batcher: b, p: p}"
+  - of: (*LoopHandler).OnOpen
+    steps:
+      - set: "*a.state(io.Loop()).flag(ref)"
+        value: "connFlag{gen: ref.Gen}"
+  - of: (*LoopHandler).OnData
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).OnData
+        kind: self
+      - id: io.Loop
+        kind: value
+      - id: a.state
+        kind: internal
+      - id: st.flag
+        kind: internal
+      - id: a.p.Parse
+        kind: internal
+      - id: AppendRefusal
+        kind: internal
+    steps:
+      - bind: loop
+        eval: io.Loop()
+        to: io.Loop
+      - bind: st
+        eval: a.state(loop)
+        to: a.state
+      - bind: f
+        eval: st.flag(ref)
+        to: st.flag
+      - opt:
+          do:
+            - return: len(buf)
+          when: f.gen == ref.Gen && f.closing
+      - bind: used
+        eval: "0"
+      - loop:
+          cond: used < len(buf)
+          do:
+            - bind: n, r
+              eval: a.p.Parse(buf[used:], &st.req)
+              to: a.p.Parse
+            - opt:
+                do:
+                  - bind: "off"
+                    eval: len(st.out)
+                  - set: st.out
+                    to: AppendRefusal
+                    value: AppendRefusal(st.out, r)
+                  - set: st.items
+                    value: "append(st.items, item{ref: ref, off: off, end: len(st.out), closing: true})"
+                  - set: f.closing
+                    value: "true"
+                  - return: len(buf)
+                when: r != RefusalNone
+            - opt:
+                do:
+                  - break: true
+                when: n == 0
+            - op: +=
+              set: used
+              value: "n"
+            - opt:
+                do:
+                  - set: f.closing
+                    value: "true"
+                  - return: len(buf)
+                when: a.serve(io, ref, st, loop)
+      - return: used
+  - of: (*LoopHandler).serve
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).serve
+        kind: self
+      - id: st.take
+        kind: internal
+      - id: a.h.ServeHTTP1
+        kind: value
+      - id: AppendResponse
+        kind: internal
+      - id: st.give
+        kind: internal
+    steps:
+      - set: st.req.Loop
+        value: loop
+      - bind: res
+        eval: st.take()
+        to: st.take
+      - op: ++
+        set: st.served
+      - eval: a.h.ServeHTTP1(&st.req, res)
+        to: a.h.ServeHTTP1
+      - bind: closing
+        eval: st.req.Close || res.Close || io.Pressure(ref)
+      - opt:
+          do:
+            - op: ++
+              set: st.deferred
+            - set: st.items
+              value: |-
+                append(st.items, item{
+                			ref: ref, res: res, head: bytes.Equal(st.req.Method, methodHead), closing: closing,
+                		})
+            - return: closing
+          when: res.Defer
+      - bind: "off"
+        eval: len(st.out)
+      - bind: out, err
+        eval: AppendResponse(st.out, &st.req, res, closing)
+        to: AppendResponse
+      - opt:
+          do:
+            - set: out
+              value: append(st.out, internalError...)
+            - set: closing
+              value: "true"
+          when: err != nil
+      - set: st.out
+        value: out
+      - set: st.items
+        value: "append(st.items, item{ref: ref, off: off, end: len(st.out), closing: closing})"
+      - eval: st.give(res)
+        to: st.give
+      - return: closing
+  - of: (*LoopHandler).OnTimeout
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).OnTimeout
+        kind: self
+      - id: swallowErr
+        kind: internal
+    steps:
+      - eval: swallowErr(io.Close(ref))
+        to: swallowErr
+  - of: (*LoopHandler).OnWritable
+    steps:
+      - set: _, _
+        value: io, ref
+  - of: (*LoopHandler).OnBatchEnd
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).OnBatchEnd
+        kind: self
+      - id: io.Loop
+        kind: value
+      - id: a.state
+        kind: internal
+      - id: a.batcher.EndBatch
+        kind: value
+      - id: st.complete
+        kind: internal
+      - id: st.flush
+        kind: internal
+    steps:
+      - bind: loop
+        eval: io.Loop()
+        to: io.Loop
+      - bind: st
+        eval: a.state(loop)
+        to: a.state
+      - opt:
+          do:
+            - return: ""
+          when: len(st.items) == 0
+      - opt:
+          do:
+            - eval: a.batcher.EndBatch(loop)
+              to: a.batcher.EndBatch
+          when: st.served > 0 && a.batcher != nil
+      - eval: st.complete()
+        to: st.complete
+      - eval: st.flush(io)
+        to: st.flush
+      - set: st.items, st.out, st.served
+        value: st.items[:0], st.out[:0], 0
+  - of: (*LoopHandler).OnClose
+    steps:
+      - set: _, _, _
+        value: io, ref, err
+  - of: (*loopState).complete
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loopState).complete
+        kind: self
+      - id: AppendResponse
+        kind: internal
+      - id: st.give
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: st.deferred == 0
+      - bind: out
+        eval: st.spare[:0]
+      - loop:
+          do:
+            - bind: it
+              eval: "&st.items[i]"
+            - bind: "off"
+              eval: len(out)
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, st.out[it.off:it.end]...)
+                  - set: it.off, it.end
+                    value: off, len(out)
+                  - continue: true
+                when: it.res == nil
+            - bind: res
+              eval: it.res
+            - set: st.stub.Method, st.stub.Close
+              value: nil, false
+            - opt:
+                do:
+                  - set: st.stub.Method
+                    value: methodHead
+                when: it.head
+            - bind: next, err
+              eval: AppendResponse(out, &st.stub, res, it.closing)
+              to: AppendResponse
+            - opt:
+                do:
+                  - set: next
+                    value: append(out, internalError...)
+                  - set: it.closing
+                    value: "true"
+                when: res.Defer || err != nil
+            - set: it.closing
+              value: it.closing || res.Close
+            - set: out, it.off, it.end, it.res
+              value: next, off, len(next), nil
+            - eval: st.give(res)
+              to: st.give
+          key: i
+          range: st.items
+      - set: st.spare, st.out, st.deferred
+        value: st.out, out, 0
+  - of: (*loopState).flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loopState).flush
+        kind: self
+      - id: st.write
+        kind: internal
+    steps:
+      - loop:
+          cond: i < len(st.items)
+          do:
+            - bind: it
+              eval: st.items[i]
+            - bind: end, closing
+              eval: it.end, it.closing
+            - bind: j
+              eval: i + 1
+            - loop:
+                cond: j < len(st.items) && !closing && st.items[j].ref == it.ref && st.items[j].off == end
+                do:
+                  - set: end, closing
+                    value: st.items[j].end, st.items[j].closing
+                post: j++
+            - eval: st.write(io, it.ref, st.out[it.off:end], closing)
+              to: st.write
+            - set: i
+              value: j
+          init: i := 0
+  - of: (*loopState).write
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loopState).write
+        kind: self
+      - id: st.flag
+        kind: internal
+      - id: io.Write
+        kind: value
+      - id: swallowErr
+        kind: internal
+    steps:
+      - bind: f
+        eval: st.flag(ref)
+        to: st.flag
+      - opt:
+          do:
+            - return: ""
+          when: f.gen == ref.Gen && f.dead
+      - opt:
+          do:
+            - return: ""
+          init:
+            bind: err
+            eval: io.Write(ref, p)
+            to: io.Write
+          when: err == nil && !closing
+      - set: f.dead
+        value: "true"
+      - eval: swallowErr(io.Close(ref))
+        to: swallowErr
+  - of: (*loopState).take
+    steps:
+      - opt:
+          do:
+            - return: "&corenet.HTTP1ResponseValue{}"
+          when: len(st.free) == 0
+      - bind: res
+        eval: st.free[len(st.free)-1]
+      - set: st.free
+        value: st.free[:len(st.free)-1]
+      - set: "*res"
+        value: corenet.HTTP1ResponseValue{}
+      - return: res
+  - of: (*loopState).give
+    steps:
+      - set: st.free
+        value: append(st.free, res)
+  - of: (*loopState).flag
+    steps:
+      - bind: ring, slot
+        eval: int(ref.Ring), int(ref.Slot)
+      - opt:
+          do:
+            - set: st.conns
+              value: append(st.conns, make([][]connFlag, ring+1-len(st.conns))...)
+          when: ring >= len(st.conns)
+      - opt:
+          do:
+            - bind: grown
+              eval: make([]connFlag, max(slot+1, 2*len(st.conns[ring])))
+            - eval: copy(grown, st.conns[ring])
+            - set: st.conns[ring]
+              value: grown
+          when: slot >= len(st.conns[ring])
+      - bind: f
+        eval: "&st.conns[ring][slot]"
+      - opt:
+          do:
+            - set: "*f"
+              value: "connFlag{gen: ref.Gen}"
+          when: f.gen != ref.Gen
+      - return: f
+  - of: (*LoopHandler).state
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).state
+        kind: self
+      - id: a.loops.Load
+        kind: value
+      - id: a.grow
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: (*p)[i]
+          init:
+            bind: p
+            eval: a.loops.Load()
+            to: a.loops.Load
+          when: p != nil && i < len(*p) && (*p)[i] != nil
+      - return: a.grow(i)
+        to: a.grow
+  - of: (*LoopHandler).grow
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).grow
+        kind: self
+      - id: a.loops.Load
+        kind: value
+      - id: a.loops.Store
+        kind: value
+    steps:
+      - lock:
+          mutex: a.mu
+      - var:
+          name: cur
+          type: "[]*loopState"
+      - opt:
+          do:
+            - set: cur
+              value: "*p"
+          init:
+            bind: p
+            eval: a.loops.Load()
+            to: a.loops.Load
+          when: p != nil
+      - opt:
+          do:
+            - return: cur[i]
+          when: i < len(cur) && cur[i] != nil
+      - bind: next
+        eval: make([]*loopState, max(len(cur), i+1))
+      - eval: copy(next, cur)
+      - bind: st
+        eval: "&loopState{}"
+      - set: st.req.Loop
+        value: i
+      - set: next[i]
+        value: st
+      - eval: a.loops.Store(&next)
+        to: a.loops.Store
+      - return: st
+  - of: swallowErr
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: err == nil
   - of: tokenTable
     steps:
       - var:

@@ -22,14 +22,6 @@ import (
 	"github.com/kitsunium/sdk/internal/service/net/http1"
 )
 
-// perfGet and perfPost are the two requests of the challenge's API, as a load
-// generator sends them; perfBad is refused at its Transfer-Encoding.
-var (
-	perfGet  = []byte("GET /users/12345 HTTP/1.1\r\nHost: 127.0.0.1:3000\r\nUser-Agent: k6/2.3.0 (https://k6.io/)\r\nAuthorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NSIsIm5hbWUiOiJ1c2VyIiwiZXhwIjo0MTAyNDQ0ODAwfQ.c2lnbmF0dXJlc2lnbmF0dXJlc2lnbmF0dXJlc2ln\r\nAccept-Encoding: gzip\r\n\r\n")
-	perfPost = []byte("POST /users HTTP/1.1\r\nHost: 127.0.0.1:3000\r\nUser-Agent: k6/2.3.0 (https://k6.io/)\r\nContent-Type: application/json\r\nContent-Length: 44\r\nAuthorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2ln\r\n\r\n{\"username\":\"user_12345\",\"email\":\"u@e.test\"}")
-	perfBad  = []byte("POST /users HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n")
-)
-
 // perfParse is Parse's fixture: two accepted requests and a refusal, into one
 // reused value.
 func perfParse(tb testing.TB) func() {
@@ -105,3 +97,11 @@ func perfAppendRefusal(tb testing.TB) func() {
 		perfBytes = http1.AppendRefusal(dst[:0], http1.RefusalTooManyFields)
 	}
 }
+
+// perfLoopHandlerOnData is OnData's fixture: a batch, since OnData's answers are
+// only released by the batch's end.
+func perfLoopHandlerOnData(tb testing.TB) func() { return perfLoop(tb) }
+
+// perfLoopHandlerOnBatchEnd is OnBatchEnd's fixture: the same batch, deferred
+// answers completed and written.
+func perfLoopHandlerOnBatchEnd(tb testing.TB) func() { return perfLoop(tb) }

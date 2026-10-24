@@ -3,19 +3,19 @@
 
 ## Purpose
 
-The codec of the restricted HTTP/1.1 profile (ADR 0186 §D6): `Parser.Parse`
+The restricted HTTP/1.1 profile (ADR 0186 §D6): its codec, and `HandleLoop`,
+the adapter that serves it on a loop group. `Parser.Parse`
 frames a request out of a `[]byte` into a reused `corenet.HTTP1RequestValue`,
 and the writer appends a response, or the canned answer to a refusal, to a
 `[]byte`. It does no I/O and owns no connection. Its request value, response
 value, limits and handler port are `internal/core/net`'s, declared in
 `design/net.yaml` (ADR 0160 §4: the value in the core, the wire format here).
 
-**Not wired yet, not published yet.** The loop engine's adapter — the piece
-that calls `Parse` from `OnData`, runs an `HTTP1Handler`, drains or closes,
-and turns the engine's soft pressure into `Connection: close` — lands with the
-loop (`internal/service/net/loop`, S5b of the plan). The facade
-`pkg/v1/net/http1` comes with `StreamGroup.HandleLoop` or after it (ADR 0186
-§D9 step 12). Today the package is reached by its own tests only.
+`HandleLoop(h, p)` returns the `*LoopHandler`, a `corenet.LoopHandler`: it calls
+`Parse` from `OnData`, runs the `HTTP1Handler`, answers a refusal and closes,
+turns the engine's soft pressure into `Connection: close`, and writes the
+batch's answers at `OnBatchEnd`, after the handler's `HTTP1Batcher.EndBatch`.
+Published by `pkg/v1/net/http1` (ADR 0186 §D9 step 12).
 
 ## Contents
 
@@ -25,6 +25,9 @@ loop (`internal/service/net/loop`, S5b of the plan). The facade
 | `parse.go` | `Parser` (`NewParser`, `Limits`, `Parse`), `Continue`, `Pending`; the request line, field and Content-Length rules |
 | `refusal.go` | `Refusal` and its 23 values; `Status`, `Err` (the core sentinel), `String` |
 | `write.go` | `AppendStatusLine`, `AppendField`, `AppendResponse`, `AppendRefusal`; the precomputed status lines |
+| `loop.go` | `HandleLoop`, `LoopHandler`: the loop adapter — per-loop state (`loopState`: the request value, the batch's answers in `out`, the pooled response values, a flag per connection by ring and slot), deferred answers completed in request order (`complete`), one `Write` per connection run (`flush`) |
+| `loop_fixtures_test.go` | the adapter's batch fixture (`perfLoop`, `perfH`) and the request bytes, untagged so the benchmarks reach them under race too |
+| `loop_external_test.go` | the adapter on a fake `LoopIO`: order of immediate and deferred answers, every way a connection closes, HEAD, slot reuse, several loops |
 | `corpus_external_test.go` | every vector of the C reference (`bench/cref/src/parse_test.c`), the profile's own refusals, the smuggling vectors, limits, prefixes, framing, early answers, pipelining |
 | `fuzz_external_test.go` | `FuzzParseProperties`, `TestMutations` (the C reference's mutation loop), `FuzzDifferential` against `net/http.ReadRequest` |
 | `write_external_test.go` | the writer, read back by `net/http.ReadResponse` |
@@ -98,6 +101,33 @@ negative one or one past its maximum is `HTTP1Misconfigured` at `NewParser`.
   refusal on the hot path costs no allocation (ADR 0186 §D4). `NewParser`
   wraps with the field it refused, since it runs once.
 
+- **The adapter's state is per loop, found by `LoopIO.Loop`.** A table of
+  `*loopState` behind an `atomic.Pointer`, replaced under a mutex the first
+  time a loop calls; the data path reads it without a lock. A loop touches
+  only its own entry, so nothing else is shared between loop threads.
+- **Answers leave at the batch's end, in request order.** An immediate answer
+  is written into the loop's `out` when `ServeHTTP1` returns, so the handler's
+  bytes need live no longer; a deferred one (`Defer`) keeps its pooled
+  response value until `EndBatch` returns. When a batch deferred anything,
+  `complete` writes every answer again into `spare` in request order, so a
+  connection's answers still leave in one `Write`. The engine flushes after
+  `OnBatchEnd` anyway, so the wait adds no latency.
+- **Whether a connection closes is known when the request is served** — the
+  request's `Connection: close`, the response's `Close`, the loop's pressure,
+  a refusal — and nothing after it is read (`connFlag.closing`). A deferred
+  answer left deferred, or a status the writer refuses, becomes a 500 that
+  closes at the batch's end; requests pipelined behind it in the same batch
+  were already served, and their answers are dropped with the connection.
+- **A refused `Write` closes the connection rather than queue.** Queuing
+  would hold the answer's bytes per connection; `OutputCap` bounds what one
+  connection's answers to one batch may hold.
+- **Response values are pooled per loop and handed out zeroed**, `Header` and
+  `Body` nil: a pooled slice is never appended to again, since it may be the
+  handler's own buffer.
+- **No option is honoured by the adapter.** `ReadHeaderTimeout` and
+  `MaxHeaderBytes` on a loop group are refused at `Start`; the head bound is
+  the `Parser`'s, and a slow head is bounded by `IdleTimeout` and the spill.
+
 ## Cost
 
 `BENCH.md` holds the figures (Apple M1 Pro, busy): `Parse` frames the
@@ -106,8 +136,10 @@ takes about 1.4 µs and 11 allocations; `AppendResponse` about 16 ns. On the C
 reference's own stream the codec is about 2.1× `http_parse.c` (249 against
 118 ns a request) — a diagnostic, never a gate. Budgets
 (`design/sdk.yaml`) are allocation counts only — `Parse`, `AppendResponse`,
-`AppendStatusLine`, `AppendField`, `AppendRefusal` at 0 — never nanoseconds
-(ADR 0165).
+`AppendStatusLine`, `AppendField`, `AppendRefusal`, `(*LoopHandler).OnData` and
+`(*LoopHandler).OnBatchEnd` at 0 — never nanoseconds (ADR 0165). A batch of
+sixteen pipelined GETs through the adapter costs about 107 ns a request,
+deferred ones about 110.
 
 ## Error range
 
@@ -124,6 +156,8 @@ None of its own: every sentinel is `internal/core/net`'s, `0.2.11.45` –
 - Read past `len(buf)`. The scans are bounded by `min(len, head)`; the fuzz
   fills the capacity with `\r\n\r\n` to catch a read beyond it.
 - Wrap a sentinel on a path that runs per request.
+- Keep a response value or a request's bytes past `OnBatchEnd`, or append to
+  a pooled response's slices: they are the handler's.
 - Add HTTP/2, CONNECT, Upgrade or TLS here: out of the profile (ADR 0186 §D6).
 
 ## Verification
