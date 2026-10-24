@@ -1004,3 +1004,67 @@ Re-measured controls, both arms, for the cross-checks in 16.7:
 | `BenchmarkPrimitive/ecdsa_p256_verify` | 110 069 | 110 406 | 109 891 |
 | `BenchmarkPrimitive/ed25519_verify` | 88 929 | 89 668 | 88 621 |
 | `BenchmarkPrimitive/hmac_sha256_verify` | 1 261.0 | 1 242.0 | 1 299.0 |
+
+## 17. The reflection-free claims reader and `VerifyInto` — 2026-10-24
+
+A third campaign, **written by hand** (the manual-section convention of
+`internal/kernel/swar/BENCH.md`): `make bench` regenerates the codec's
+report only, and no generator writes this file. Refresh with the command in
+the header, adding `-bench='BenchmarkVerify$|BenchmarkVerifyInto'`.
+
+**What changed.** `decodeClaims` was `json.Unmarshal` into a map behind a
+`json.Decoder.Token` duplicate pass — 95.5 % of an HS256 verification (§3).
+It is now `readClaims` (`json_scan.go`): one strict RFC 8259 pass indexing the
+top-level members into a fixed array, shared by every format, with the legacy
+reader's whole refusal set (CLAUDE.md §One refusal set). `VerifyInto` is the
+same verification into a caller's `ClaimsBuf` through a caller's
+`VerifyScratch`: header, signature and claims decoded on the stack, the MAC
+summed into the scratch, zero allocations held by the race-off gate
+`verify_into_alloc_internal_test.go`.
+
+### Envelope
+
+| Dimension | Value |
+|---|---|
+| CPU | Apple M1 Pro, 10 cores (darwin/arm64) — **not** the EPYC of §1–§16 |
+| Go toolchain | go1.27.3 darwin/arm64 |
+| Base | `6f89b0852` (origin/main), built as `token_old.test` |
+| Machine load | **load average 24 to 75 on 10 cores** — other agents were building and benchmarking on the same machine |
+| Method | the two test binaries run alternately, `-count=3`, three rounds each: nine samples per row, median shown |
+
+> **The nanoseconds below are noisy and are not a published number.** The
+> spread of a row reached 200–600 %, and an EdDSA row whose cryptography did
+> not change moved by 17 %. What travels is the **allocation count**, which
+> the load does not touch, and the **order of magnitude** of the HS256 gain,
+> which held in every round. Re-measure on a quiet machine before quoting a
+> time; the VM bench (S7) is where the plan prices it.
+
+### Results
+
+| benchmark | before ns | after ns | before B / allocs | after B / allocs |
+|---|---:|---:|---:|---:|
+| `BenchmarkVerify/HS256/minimal` | 6 002 | 1 782 | 3 084 / 64 | 824 / 12 |
+| `BenchmarkVerify/HS256/realistic` | 12 877 | 3 689 | 7 122 / 121 | 2 872 / 29 |
+| `BenchmarkVerifyInto/HS256/minimal` | — | 1 595 | — | **0 / 0** |
+| `BenchmarkVerifyInto/HS256/realistic` | — | 3 258 | — | **0 / 0** |
+| `BenchmarkVerify/EdDSA/minimal` (control, crypto-bound) | 52 644 | 61 415 | 2 572 / 57 | 312 / 5 |
+
+From the first, non-interleaved run of the same session (nine samples each,
+heavier load): `BenchmarkVerifyStage/whole` 121 → 29 allocs, 7 122 → 2 872 B;
+`BenchmarkPasetoStage/whole` 93 → 22 allocs, 5 833 → 2 345 B; ES256 realistic
+134 → 42 allocs; PASETO v4.public realistic 93 → 22 allocs. Every format
+gains, because every format goes through the one reader.
+
+**Reconciliation with §2.1.** §2.1 publishes HS256 realistic at 28 905 ns on
+the EPYC and 121 allocs; the M1 base here reads 9–13 µs and the **same 121
+allocs**, so the allocation counts carry across machines and the times do not.
+The plan quoted "20.5 µs and 87 allocs" for the stage decomposition's
+`4_decodeAndValidate` (§15); the row this section replaces is the whole
+verification.
+
+**What is left in `Verify`'s 29 allocations** is the `ClaimsValue` itself —
+a string per registered claim, the audience slice, and `WithPrivateRaw`'s
+copy-on-write map per private claim — plus the MAC `hmacsha2.MAC.Verify`
+builds per call and the signing input's `[]byte` copy of the token string.
+None of them is parsing. `VerifyInto` has none of them: that is the whole
+reason it exists.

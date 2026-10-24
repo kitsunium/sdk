@@ -33,6 +33,7 @@ go_test(
         "gen_api_test.go",
         "token_bench_test.go",
         "token_external_test.go",
+        "verify_into_external_test.go",
         "wiring_external_test.go",
     ],
     deps = [

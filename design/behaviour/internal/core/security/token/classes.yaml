@@ -54,6 +54,91 @@ constants:
         type: int
         value: "7"
     name: claimSlots
+  - doc: |-
+      The fixed capacities of a [ClaimsBuf]. They are bounds, not budgets: a claim
+      longer than its slot, an audience with more members, or more declared
+      private names than this is refused with [ClaimsBufOverflow] — never cut to
+      fit, because a truncated subject is another subject.
+    grouped: true
+    items:
+      - doc: |-
+          ClaimsBufTextCap is the capacity, in octets, of every text slot of a
+          ClaimsBuf: each registered string claim, each audience member and each
+          declared private claim, decoded.
+        name: ClaimsBufTextCap
+        type: int
+        value: "256"
+      - doc: ClaimsBufAudienceCap is how many "aud" members a ClaimsBuf holds.
+        name: ClaimsBufAudienceCap
+        type: int
+        value: "4"
+      - doc: |-
+          ClaimsBufPrivateCap is how many private claim names a ClaimsBuf may
+          declare.
+        name: ClaimsBufPrivateCap
+        type: int
+        value: "8"
+    name: ClaimsBufTextCap
+  - grouped: true
+    items:
+      - doc: |-
+          ClaimAbsent is the state of a claim the token did not carry — and of
+          every claim of a ClaimsBuf that was reset or whose verification failed.
+        name: ClaimAbsent
+        type: ClaimState
+        value: iota
+      - doc: |-
+          ClaimWrongType is the state of a declared private claim whose JSON type
+          is not a string. A registered claim of the wrong type is never stored:
+          the token is refused with [Malformed].
+        name: ClaimWrongType
+      - doc: ClaimInvalid is the state of a text claim that is the empty string.
+        name: ClaimInvalid
+      - doc: ClaimOK is the state of a claim present with a usable value.
+        name: ClaimOK
+    name: ClaimAbsent
+  - grouped: true
+    items:
+      - doc: TextIssuer is the "iss" claim.
+        name: TextIssuer
+        type: TextClaim
+        value: iota
+      - doc: TextSubject is the "sub" claim.
+        name: TextSubject
+      - doc: TextID is the "jti" claim.
+        name: TextID
+    name: TextIssuer
+  - doc: textClaims is how many TextClaim values exist.
+    items:
+      - name: textClaims
+        type: int
+        value: "3"
+    name: textClaims
+  - grouped: true
+    items:
+      - doc: TimeExpiry is the "exp" claim.
+        name: TimeExpiry
+        type: TimeClaim
+        value: iota
+      - doc: TimeNotBefore is the "nbf" claim.
+        name: TimeNotBefore
+      - doc: TimeIssuedAt is the "iat" claim.
+        name: TimeIssuedAt
+    name: TimeExpiry
+  - doc: timeClaims is how many TimeClaim values exist.
+    items:
+      - name: timeClaims
+        type: int
+        value: "3"
+    name: timeClaims
+  - doc: |-
+      scratchSumLen is the widest tag a scratch sums into: SHA-512's 64 octets,
+      so a scratch is never the reason a wider MAC cannot be carried.
+    items:
+      - name: scratchSumLen
+        type: int
+        value: "64"
+    name: scratchSumLen
   - grouped: true
     items:
       - doc: |-
@@ -105,6 +190,41 @@ files:
       - ClaimsValue.registeredCount
     name: claims.go
   - decls:
+      - ClaimsBufTextCap
+      - ClaimState
+      - ClaimAbsent
+      - ClaimState.String
+      - TextClaim
+      - TextIssuer
+      - textClaims
+      - TimeClaim
+      - TimeExpiry
+      - timeClaims
+      - textSlot
+      - timeSlot
+      - ClaimsBuf
+      - NewClaimsBuf
+      - (*ClaimsBuf).declare
+      - plainMemberName
+      - (*ClaimsBuf).Reset
+      - (*ClaimsBuf).Text
+      - (*ClaimsBuf).SetText
+      - (*ClaimsBuf).Unix
+      - (*ClaimsBuf).SetUnix
+      - (*ClaimsBuf).AudienceLen
+      - (*ClaimsBuf).Audience
+      - (*ClaimsBuf).AppendAudience
+      - (*ClaimsBuf).Declared
+      - (*ClaimsBuf).PrivateIndex
+      - (*ClaimsBuf).Private
+      - (*ClaimsBuf).SetPrivate
+      - (*ClaimsBuf).MarkPrivate
+      - ClaimsBuf.String
+      - ClaimsBuf.GoString
+      - (*textSlot).view
+      - (*textSlot).set
+    name: claims_buf.go
+  - decls:
       - ClaimsValue.WithIssuer
       - ClaimsValue.WithSubject
       - ClaimsValue.WithID
@@ -117,6 +237,16 @@ files:
   - decls: []
     name: doc.go
   - decls:
+      - scratchSumLen
+      - VerifyScratch
+      - NewVerifyScratch
+      - (*VerifyScratch).Enter
+      - (*VerifyScratch).Leave
+      - (*VerifyScratch).MACEqual
+      - (*VerifyScratch).String
+      - (*VerifyScratch).GoString
+    name: scratch.go
+  - decls:
       - Algorithm
       - AlgorithmUnknown
       - Algorithm.String
@@ -128,11 +258,27 @@ functions:
     results: bool
   - name: NewClaimsValue
     results: ClaimsValue
+  - name: NewClaimsBuf
+    params: private ...string
+    results: buf *ClaimsBuf, err error
+  - doc: |-
+      plainMemberName reports whether name is UTF-8 that a JSON member name
+      carries without an escape: no quote, no backslash, no control character.
+    name: plainMemberName
+    params: name string
+    results: bool
+  - name: NewVerifyScratch
+    params: owner any, mac hash.Hash
+    results: "*VerifyScratch"
 imports:
+  atomic: sync/atomic
+  hash: hash
+  hmac: crypto/hmac
   maps: maps
   slices: slices
   strconv: strconv
   time: time
+  utf8: unicode/utf8
 package:
   docFile: doc.go
   importPath: github.com/kitsunium/sdk/internal/core/security/token
@@ -245,6 +391,177 @@ types:
         recv: c ClaimsValue
         results: claims ClaimsValue, err error
     name: ClaimsValue
+  - kind: named
+    methods:
+      - name: String
+        recv: s ClaimState
+        results: string
+    name: ClaimState
+    underlying: uint8
+  - kind: named
+    name: TextClaim
+    underlying: uint8
+  - kind: named
+    name: TimeClaim
+    underlying: uint8
+  - doc: textSlot is one fixed-capacity text claim.
+    fields:
+      - doc: value holds the decoded octets; only the first n are meaningful.
+        name: value
+        type: "[ClaimsBufTextCap]byte"
+      - doc: n is how many octets of value the claim occupies.
+        name: "n"
+        type: uint16
+      - doc: state is what is known about the claim.
+        name: state
+        type: ClaimState
+    kind: struct
+    methods:
+      - doc: view returns the slot's octets when usable, and its state.
+        name: view
+        recv: s *textSlot
+        results: value []byte, state ClaimState
+      - doc: set copies value into the slot, or refuses it when it does not fit.
+        name: set
+        params: value []byte
+        recv: s *textSlot
+        results: error
+    name: textSlot
+  - doc: timeSlot is one registered instant, as Unix seconds and nanoseconds.
+    fields:
+      - doc: sec is the whole seconds since the Unix epoch.
+        name: sec
+        type: int64
+      - doc: |-
+          nsec is the fraction past sec, in nanoseconds, in [0, 1e9): sec is the
+          floor, as time.Time.Unix reports it.
+        name: nsec
+        type: int32
+      - doc: state is what is known about the claim.
+        name: state
+        type: ClaimState
+    kind: struct
+    name: timeSlot
+  - fields:
+      - doc: text holds iss, sub and jti, indexed by TextClaim.
+        name: text
+        type: "[textClaims]textSlot"
+      - doc: times holds exp, nbf and iat, indexed by TimeClaim.
+        name: times
+        type: "[timeClaims]timeSlot"
+      - doc: audience holds the "aud" members, in token order.
+        name: audience
+        type: "[ClaimsBufAudienceCap]textSlot"
+      - doc: audienceLen is how many audience entries are populated.
+        name: audienceLen
+        type: uint8
+      - doc: |-
+          names are the declared private claim names, configuration kept across
+          resets.
+        name: names
+        type: "[ClaimsBufPrivateCap]string"
+      - doc: declared is how many entries of names are populated.
+        name: declared
+        type: uint8
+      - doc: private holds the declared private claims, indexed like names.
+        name: private
+        type: "[ClaimsBufPrivateCap]textSlot"
+    kind: struct
+    methods:
+      - doc: declare appends one private claim name to b's declaration.
+        name: declare
+        params: name string
+        recv: b *ClaimsBuf
+        results: error
+      - name: Reset
+        recv: b *ClaimsBuf
+      - name: Text
+        params: c TextClaim
+        recv: b *ClaimsBuf
+        results: value []byte, state ClaimState
+      - name: SetText
+        params: c TextClaim, value []byte
+        recv: b *ClaimsBuf
+        results: error
+      - name: Unix
+        params: c TimeClaim
+        recv: b *ClaimsBuf
+        results: sec int64, nsec int32, state ClaimState
+      - name: SetUnix
+        params: c TimeClaim, sec int64, nsec int32
+        recv: b *ClaimsBuf
+      - name: AudienceLen
+        recv: b *ClaimsBuf
+        results: int
+      - name: Audience
+        params: i int
+        recv: b *ClaimsBuf
+        results: value []byte, state ClaimState
+      - name: AppendAudience
+        params: value []byte
+        recv: b *ClaimsBuf
+        results: error
+      - name: Declared
+        recv: b *ClaimsBuf
+        results: int
+      - name: PrivateIndex
+        params: name []byte
+        recv: b *ClaimsBuf
+        results: int
+      - name: Private
+        params: name string
+        recv: b *ClaimsBuf
+        results: value []byte, state ClaimState
+      - name: SetPrivate
+        params: i int, value []byte
+        recv: b *ClaimsBuf
+        results: error
+      - name: MarkPrivate
+        params: i int, state ClaimState
+        recv: b *ClaimsBuf
+      - name: String
+        recv: b ClaimsBuf
+        results: string
+      - name: GoString
+        recv: b ClaimsBuf
+        results: string
+    name: ClaimsBuf
+  - fields:
+      - doc: mac is the keyed MAC this scratch reuses, Reset before every use.
+        name: mac
+        type: hash.Hash
+      - doc: |-
+          owner is the token of the verifier that made the scratch; compared by
+          identity, never read.
+        name: owner
+        type: any
+      - doc: |-
+          inUse is 1 while a verification holds the scratch: entered by a CAS
+          from 0, left by a store of 0.
+        name: inUse
+        type: atomic.Uint32
+      - doc: sum receives the computed tag, so summing allocates nothing.
+        name: sum
+        type: "[scratchSumLen]byte"
+    kind: struct
+    methods:
+      - name: Enter
+        params: owner any
+        recv: s *VerifyScratch
+        results: error
+      - name: Leave
+        recv: s *VerifyScratch
+      - name: MACEqual
+        params: input, tag []byte
+        recv: s *VerifyScratch
+        results: bool
+      - name: String
+        recv: s *VerifyScratch
+        results: string
+      - name: GoString
+        recv: s *VerifyScratch
+        results: string
+    name: VerifyScratch
   - kind: named
     methods:
       - name: String

@@ -20,12 +20,13 @@ is the maintainer's half.
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167): the fragments `codes.go`, `constants.go`, `constructors.go` and `sentinels.go` held, joined in file-name order when their declarations moved to `gen_facade.go` (ADR 0166), then the package doc proper |
 | `token.go` | `PrivateClaim` / `SetPrivateClaim` |
-| `gen_facade.go` | kit's, from `design/security/token.yaml`'s `facade:` (ADR 0166): the type aliases (`Algorithm`, `Claims`, `Issuer`, `Verifier`, the four `*Config`, `Key` / `JWK` / `JWKSet` / `KeyType` / `Curve`), `NewClaims`, the four `Algorithm*` values, the seven `Claim*` names and the JWK vocabulary (three `KeyType*`, four `Curve*`), the ten issuer/verifier `New*` forwarders and the three JWK loaders `ParseJWK` / `ParseJWKSet` / `NewJWKSet`, the 29 verdict vars re-exported from `core/security/token` (all 23 token verdicts, ADR 0160) and `core/crypto/key/jwk` (the six `JWK*` parse refusals), and the 29 `Code*` constants re-exported for `errs.HasCode` |
+| `gen_facade.go` | kit's, from `design/security/token.yaml`'s `facade:` (ADR 0166): the type aliases (`Algorithm`, `Claims`, `Issuer`, `Verifier`, `VerifierInto`, `VerifyScratch`, `ClaimsBuf`, `ClaimState`, `TextClaim`, `TimeClaim`, the four `*Config`, `Key` / `JWK` / `JWKSet` / `KeyType` / `Curve`), `NewClaims`, `NewClaimsBuf`, the four `Algorithm*` values, the seven `Claim*` names, the three `ClaimsBuf*Cap` bounds, the four `ClaimState` values (`ClaimAbsent`, `ClaimWrongType`, `ClaimInvalid`, `ClaimOK`), the three `Text*` and three `Time*` claim names and the JWK vocabulary (three `KeyType*`, four `Curve*`), the ten issuer/verifier `New*` forwarders and the three JWK loaders `ParseJWK` / `ParseJWKSet` / `NewJWKSet`, the 32 verdict vars re-exported from `core/security/token` (all 26 token verdicts, ADR 0160) and `core/crypto/key/jwk` (the six `JWK*` parse refusals), and the 32 `Code*` constants re-exported for `errs.HasCode` |
+| `verify_into_external_test.go` | the allocation-free path through public names only — the `VerifierInto` assertion, a scratch, a buffer, the states and `CodeScratchForeign` — and `ExampleVerifierInto`, which the README carries |
 
 ## Why the codes are re-exported
 
 `gen_facade.go` declares `CodeExpired errs.Code = coretoken.CodeExpired` and
-twenty-eight siblings. These are **re-exports, not declarations**: the ranges
+thirty-one siblings. These are **re-exports, not declarations**: the ranges
 `0.2.13.*` and `0.3.44.*` stay owned by `internal/core/security/token` — where
 every code of the token domain is declared since ADR 0160 — and `0.3.42.*` by
 `internal/core/crypto/key/jwk`, and the ADR 0035
@@ -94,7 +95,11 @@ reason `Claims` aliases `ClaimsValue`.
   confusion unwritable, and one "ergonomic" wrapper taking an algorithm name
   would hand it back. See ADR 0042 and `internal/service/security/token/CLAUDE.md`.
 - Do not widen `Issuer` or `Verifier` — they are aliased ports, so ADR 0039
-  applies: a sibling interface, never a widening.
+  applies: a sibling interface, never a widening. `VerifierInto` is that
+  sibling, reached by a type assertion on a `Verifier`.
+- Do not publish `NewVerifyScratch`. A scratch is made by the verifier that
+  owns it (`VerifierInto.NewScratch`); a consumer's own double of the port can
+  accept a zero `VerifyScratch`.
 - Do not add a constant, a field or a flag that admits `alg: none`.
 - Do not hand-edit `README.md`. Edit the package comment in the design
   (`design/security/token.yaml`), run `kit gen`, then `make api` and

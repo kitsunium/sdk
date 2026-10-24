@@ -1,26 +1,75 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 workflows:
-  - of: nullRegisteredClaim
+  - of: numericInteger
+    steps:
+      - bind: digits
+        eval: raw
+      - bind: negative
+        eval: raw[0] == '-'
+      - opt:
+          do:
+            - set: digits
+              value: raw[1:]
+          when: negative
+      - opt:
+          do:
+            - return: 0, false
+          when: len(digits) == 0 || len(digits) > maxIntegerDigits
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: 0, false
+                when: "!isDigit(c)"
+            - set: value
+              value: value*int64(decimalBase) + int64(c-'0')
+          key: _
+          range: digits
+          value: c
+      - opt:
+          do:
+            - set: value
+              value: "-value"
+          when: negative
+      - return: value, true
+  - of: (*objectIndex).lookup
     steps:
       - loop:
           do:
             - opt:
                 do:
-                  - return: claim, true
-                init:
-                  bind: raw, present
-                  eval: members[claim]
-                when: present && bytes.Equal(raw, []byte("null"))
-          key: _
-          range: |-
-            [...]string{
-            		coretoken.ClaimIssuer, coretoken.ClaimSubject, coretoken.ClaimAudience,
-            		coretoken.ClaimExpiry, coretoken.ClaimNotBefore, coretoken.ClaimIssuedAt,
-            		coretoken.ClaimID,
-            	}
-          value: claim
-      - return: "\"\", false"
+                  - return: i
+                when: string(x.name(raw, i)) == name
+          key: i
+          range: x.count
+      - return: "-1"
+  - of: (*objectIndex).hasName
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: string(x.name(raw, i)) == string(name)
+          key: i
+          range: x.count
+      - return: "false"
+  - of: (*jsonScan).skipSpace
+    steps:
+      - loop:
+          cond: s.pos < len(s.raw)
+          do:
+            - switch:
+                cases:
+                  - case: "' ', '\\t', '\\n', '\\r'"
+                    do:
+                      - op: ++
+                        set: s.pos
+                  - default: true
+                    do:
+                      - return: ""
+                "on": s.raw[s.pos]
   - of: selectable
     steps:
       - loop:

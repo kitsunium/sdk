@@ -14,14 +14,13 @@ import (
 type pasetoShape struct{}
 
 // decodeTime reads an RFC 3339 timestamp.
-func (pasetoShape) decodeTime(raw json.RawMessage) (instant time.Time, err error) {
-	var text string
+func (pasetoShape) decodeTime(raw []byte) (instant time.Time, err error) {
 	//: PASETO timestamps are JSON strings, not numbers.
-	if json.Unmarshal(raw, &text) != nil {
+	if raw[0] != '"' {
 		//: name the shape, never the value.
 		return time.Time{}, malformed("PASETO time claim is not a JSON string")
 	}
-	parsed, perr := time.Parse(time.RFC3339, text)
+	parsed, perr := time.Parse(time.RFC3339, decodeText(raw))
 	//: a non-RFC-3339 timestamp is malformed.
 	if perr != nil {
 		//: time.ParseError quotes the offending value, which here is a claim
@@ -38,21 +37,26 @@ func (pasetoShape) encodeTime(instant time.Time) json.RawMessage {
 	return json.RawMessage(quoteJSONString(instant.UTC().Format(time.RFC3339)))
 }
 
-// decodeAudience accepts a single string only.
-func (pasetoShape) decodeAudience(raw json.RawMessage) (audience []string, err error) {
+// checkAudience accepts a single string only.
+func (pasetoShape) checkAudience(raw []byte) error {
+	//: PASETO defines "aud" as a string; an array is a JWT habit.
+	if raw[0] != '"' {
+		//: refuse rather than accept a JWT-shaped aud in a PASETO token.
+		return malformed("PASETO aud is not a string")
+	}
+	//: exactly one audience.
+	return nil
+}
+
+// decodeAudience reads an "aud" checkAudience accepted.
+func (pasetoShape) decodeAudience(raw []byte) (audience []string, err error) {
 	//: absence is normal.
 	if len(raw) == 0 {
 		//: no audience claim.
 		return nil, nil
 	}
-	var single string
-	//: PASETO defines "aud" as a string; an array is a JWT habit.
-	if json.Unmarshal(raw, &single) != nil {
-		//: refuse rather than accept a JWT-shaped aud in a PASETO token.
-		return nil, malformed("PASETO aud is not a string")
-	}
 	//: exactly one audience.
-	return []string{single}, nil
+	return []string{decodeText(raw)}, nil
 }
 
 // encodeAudience refuses to render more than one audience: PASETO has no array
