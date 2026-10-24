@@ -15,6 +15,10 @@ Public façade: `pkg/v1/net/server`.
 |---|---|
 | `server.go` | `Server`, `New`, `Group`, `State` |
 | `lifecycle.go` | `Start`, `Serve`, `Shutdown`, `Close`, the accept loop and its backoff (`acceptDelay`, `backOff`), the drain |
+| `loop_group.go` | loop groups: `handleLoop` (unexported until `HandleLoop`, ADR 0186 §D9 step 11), `loopRefusal` — TLS, `Use` and every option neither the engine (IdleTimeout, MaxConns, Adopt) nor the handler's `LoopOptionHonourer` honours — the listeners bound or adopted and registered like any group's, the engines in `Shutdown`, `Close` and `State` |
+| `loop_engine_linux.go`, `loop_engine_other.go` | the backend: on Linux the leaf `loop` on duplicated descriptors (`F_DUPFD_CLOEXEC`, non-blocking), auto falling back to portable with the reason in `State`; elsewhere the portable backend, an explicit native one refused with `UnsupportedPlatform` |
+| `loop_portable.go` | the portable loop backend: a reader and a writer goroutine per connection on the netpoller, every callback on one handler goroutine, the reader's buffer held until the batch ends |
+| `loop_group_internal_test.go` | loop groups on every backend the platform has: split lines, a 4 MiB response byte-exact, close, spill, drain, and every refusal |
 | `loop_option_external_test.go` | `TestLoop` — the `Loop` option refused before or after the handler, on both natures, and what wins over it |
 | `stream_group.go` | `StreamGroup` — `Handle`, `HandleFunc`, `HandleHTTP`, `Use`; `claimHandler`, the one-handler rule every declaration takes |
 | `listen.go` | listener construction; TLS/mTLS wrapping; family validation |
@@ -83,6 +87,18 @@ Public façade: `pkg/v1/net/server`.
   `option=Loop`. A missing handler (`HandlerMissing`) and a second one
   (`HandlerAlreadySet`) win, because they explain the refusal. A datagram group
   records the refusal at declaration, since its shim would otherwise drop it.
+- **A loop group is a group like the others, served by another engine** (ADR
+  0186 §D1, §D3). It binds and adopts through the same `listen` and
+  `adoptStream`, without TLS and without sharding, and its listeners join
+  `s.listeners` and `s.states`, so `Close` and `Shutdown` close them as any
+  other. The engine (`loopEngine`) drains within `Shutdown`'s budget, and its
+  overrun is the drain's. `State.Loops` reports it. `server` imports the leaf
+  `loop` on Linux only. The portable backend stays here, because it needs
+  `net.Conn` and the netpoller; it serialises every callback onto one
+  goroutine, and each reader waits for the batch's end before it reuses its
+  buffer, so `buf` stays valid until `OnBatchEnd` as the contract says. Its
+  `LoopIO` and its lifecycle are two types (`portableLoop`,
+  `portableEngine`), because `LoopIO.Close` names a connection.
 - **TLS is applied at the listener, not in the accept loop.** `tls.NewListener`
   defers the handshake to the connection's own goroutine, so a slow or hostile
   peer stalls only itself. Doing the handshake inline in `Accept` would let one

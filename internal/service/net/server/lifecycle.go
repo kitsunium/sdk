@@ -82,6 +82,16 @@ func groupDeclErr(groups []*StreamGroup) error {
 		//: no stream group is served by a loop handler yet, so the Loop option
 		//: is one no group can honour. A missing handler wins, because it
 		//: explains the refusal; bindAll reports it.
+		//: a loop group judges every option it was given against the engine
+		//: and its handler.
+		if group.loopHandler != nil {
+			//: the first option nobody honours.
+			if err := group.loopRefusal(); err != nil {
+				//: refused before anything is bound.
+				return err
+			}
+			continue
+		}
 		if group.loopSet && group.handler != nil {
 			//: refuse rather than ignore a configuration the group cannot apply.
 			return errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
@@ -226,7 +236,7 @@ func (s *Server) bindAll(ctx context.Context, groups []*StreamGroup) error {
 	//: bind in declaration order so a failure is reproducible.
 	for _, group := range groups {
 		//: a group with no handler would accept connections and drop them.
-		if group.handler == nil {
+		if group.handler == nil && group.loopHandler == nil {
 			//: refuse rather than accept connections and drop them.
 			return errs.Wrap(corenet.HandlerMissing, errs.WrapParams{},
 				errs.String("group", group.name))
@@ -250,6 +260,11 @@ func (s *Server) bindAll(ctx context.Context, groups []*StreamGroup) error {
 
 // bindGroup binds one group's addresses and starts their accept loops.
 func (s *Server) bindGroup(ctx context.Context, group *StreamGroup) error {
+	//: a loop group binds the same way and serves on its own engine.
+	if group.loopHandler != nil {
+		//: no accept loop, no goroutine per connection on a native backend.
+		return s.bindLoopGroup(ctx, group)
+	}
 	handler := group.resolved()
 	//: built once per group, so the ceiling is shared by every shard and
 	//: every address the group listens on — one budget, not one per socket.
@@ -504,6 +519,8 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	s.phase.Store(uint32(corenet.PhaseDraining))
 	//: closing the listeners is what ends the accept loops.
 	s.closeListeners()
+	//: loop groups drain on their own threads within the same budget.
+	loopErr := s.shutdownLoops(ctx)
 	//: stop any embedded http.Server first, so its keep-alive connections are
 	//: released instead of holding the drain open to its full budget.
 	s.shutdownHTTP(ctx)
@@ -525,8 +542,8 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	//: every handler has returned, so this wait is short by construction.
 	s.inFlight.Wait()
 	s.phase.Store(uint32(corenet.PhaseStopped))
-	//: the drain completed within its budget.
-	return nil
+	//: a loop group's overrun is the drain's too.
+	return loopErr
 }
 
 // shutdownHTTP stops every group's embedded http.Server, if it has one.
@@ -585,6 +602,8 @@ func (s *Server) waitIdle(ctx context.Context) error {
 // without draining.
 func (s *Server) Close() error {
 	s.closeListeners()
+	//: loop groups close their connections and stop their threads.
+	s.closeLoops()
 	//: an HTTP group's embedded server runs on a bridge listener the engine
 	//: does not otherwise know about, so closing the bound listeners does not
 	//: reach it. Without this it outlived the server on every Close.

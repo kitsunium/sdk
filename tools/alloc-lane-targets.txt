@@ -157,6 +157,13 @@
 //pkg/v1/data/codec:codec_test
 //framework/telemetry:telemetry_test
 
+# internal/service/net/loop — the idle-connection memory budget of ADR 0186
+# §D7 (memory_linux_test.go, //go:build linux && !race): heap measured after
+# two collections through runtime/metrics, clients in a re-executed child.
+# Its own target, so the lane runs the one test; the race detector's shadow
+# memory would measure itself.
+//internal/service/net/loop:loop_memory_test
+
 # BEGIN kit gen from design/sdk.yaml: the packages whose budgets name a fixture,
 # whose gen_perf_test.go runs race off here alone. DO NOT EDIT to the line
 # below: kit gen writes it from the design.
