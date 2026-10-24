@@ -216,19 +216,19 @@ constants:
           taken, while the vouched-for leader is still heard (#618).
         name: mutHintEndsWhileHeard
       - doc: |-
-          mutSilenceEndsBeforeTheLeadersCommit ends the silence under the
+          mutSilenceEndsBeforeCommit ends the silence under the
           leader of the node's own SilentTerm before the node holds that
           leader's commit (#636).
-        name: mutSilenceEndsBeforeTheLeadersCommit
+        name: mutSilenceEndsBeforeCommit
       - doc: |-
           mutSilenceEndsOnARefusal ends the silence on an append the node
           refused (#636).
         name: mutSilenceEndsOnARefusal
       - doc: |-
-          mutSilenceIndexUnderTheSnapshot keeps a SilentIndex the node's own
+          mutSilenceIndexBelowSnapshot keeps a SilentIndex the node's own
           snapshot covers at start, so that snapshot's commit ends the silence
           (#636).
-        name: mutSilenceIndexUnderTheSnapshot
+        name: mutSilenceIndexBelowSnapshot
       - doc: |-
           mutSilentReportIgnored ignores the report a silent node's heartbeat
           answer carries: a stale match is not lowered and the probe never
@@ -494,6 +494,8 @@ files:
       - round
       - Raft
       - NewRaft
+      - (*Raft).loadEntries
+      - (*Raft).raiseSilenceOverSnapshot
       - (*Raft).Tick
       - (*Raft).outsideVoteWindow
       - (*Raft).StorageDone
@@ -580,6 +582,7 @@ files:
       - (*Raft).stepCandidate
       - (*Raft).followWinner
       - (*Raft).stepFollower
+      - (*Raft).followAppend
       - (*Raft).followHeartbeat
       - (*Raft).heldOfTerm
       - (*Raft).reportSilence
@@ -2014,6 +2017,23 @@ types:
       - name: SetOverloaded
         params: on bool
         recv: r *Raft
+      - doc: |-
+          loadEntries appends the start's entries past the snapshot to the log,
+          noting what each changes at append time.
+        name: loadEntries
+        params: ents []core.EntryValue
+        recv: r *Raft
+      - doc: |-
+          raiseSilenceOverSnapshot raises a SilentIndex the start's snapshot
+          covers past it. TruncateAndStaySilent set the index at the truncated
+          log's end, before the start moved the log onto a newer snapshot of this
+          node's own. That snapshot's commit is a past the node may have
+          acknowledged beyond, and taken as an entry of the leader's term past the
+          truncation point it ended the silence on the first append of the leader
+          of SilentTerm, a refused one included. The leader's rewrite must pass
+          the log's start (#636).
+        name: raiseSilenceOverSnapshot
+        recv: r *Raft
       - name: Tick
         params: now time.Time
         recv: r *Raft
@@ -2449,6 +2469,12 @@ types:
           the record of a vouched-for one (#618), unless this node refused that
           leader for the term.
         name: stepFollower
+        params: now time.Time, m core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          followAppend records the leader's contact and handles its append; only
+          an append this node accepted may end a silence (#636).
+        name: followAppend
         params: now time.Time, m core.MessageValue
         recv: r *Raft
       - doc: |-

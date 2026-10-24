@@ -380,13 +380,7 @@ func (r *Raft) stepFollower(now time.Time, m core.MessageValue) {
 	}
 	switch m.Kind {
 	case core.MsgApp:
-		r.lead = m.From
-		r.lastLeaderContact = now
-		r.extendHint(now, m.From)
-		r.resetElection(now)
-		if r.handleAppend(m) || r.mutated(mutSilenceEndsOnARefusal) {
-			r.maybeEndSilence(m)
-		}
+		r.followAppend(now, m)
 	case core.MsgHeartbeat:
 		r.followHeartbeat(now, m)
 	case core.MsgTimeoutNow:
@@ -395,6 +389,18 @@ func (r *Raft) stepFollower(now time.Time, m core.MessageValue) {
 		r.send(core.MessageValue{Kind: core.MsgReadIndexResp, To: m.From, Context: m.Context, Code: codeNotLeader})
 	default:
 		// Nothing else concerns a follower: it is dropped.
+	}
+}
+
+// followAppend records the leader's contact and handles its append; only
+// an append this node accepted may end a silence (#636).
+func (r *Raft) followAppend(now time.Time, m core.MessageValue) {
+	r.lead = m.From
+	r.lastLeaderContact = now
+	r.extendHint(now, m.From)
+	r.resetElection(now)
+	if r.handleAppend(m) || r.mutated(mutSilenceEndsOnARefusal) {
+		r.maybeEndSilence(m)
 	}
 }
 
@@ -682,7 +688,7 @@ func (r *Raft) maybeEndSilence(m core.MessageValue) {
 	if t, ok := r.log.term(r.log.committed); !ok || t != m.Term || r.log.committed < r.cfg.SilentIndex {
 		return
 	}
-	if m.Term == r.cfg.SilentTerm && r.log.committed < m.Commit && !r.mutated(mutSilenceEndsBeforeTheLeadersCommit) {
+	if m.Term == r.cfg.SilentTerm && r.log.committed < m.Commit && !r.mutated(mutSilenceEndsBeforeCommit) {
 		return
 	}
 	r.cfg.SilentIndex, r.cfg.SilentTerm = 0, 0

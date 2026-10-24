@@ -123,17 +123,17 @@ const (
 	// mutHintEndsWhileHeard ends a leader record its delay after it was
 	// taken, while the vouched-for leader is still heard (#618).
 	mutHintEndsWhileHeard
-	// mutSilenceEndsBeforeTheLeadersCommit ends the silence under the
+	// mutSilenceEndsBeforeCommit ends the silence under the
 	// leader of the node's own SilentTerm before the node holds that
 	// leader's commit (#636).
-	mutSilenceEndsBeforeTheLeadersCommit
+	mutSilenceEndsBeforeCommit
 	// mutSilenceEndsOnARefusal ends the silence on an append the node
 	// refused (#636).
 	mutSilenceEndsOnARefusal
-	// mutSilenceIndexUnderTheSnapshot keeps a SilentIndex the node's own
+	// mutSilenceIndexBelowSnapshot keeps a SilentIndex the node's own
 	// snapshot covers at start, so that snapshot's commit ends the silence
 	// (#636).
-	mutSilenceIndexUnderTheSnapshot
+	mutSilenceIndexBelowSnapshot
 	// mutSilentReportIgnored ignores the report a silent node's heartbeat
 	// answer carries: a stale match is not lowered and the probe never
 	// moves past the first batch (#636).

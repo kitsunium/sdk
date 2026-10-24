@@ -107,8 +107,8 @@ under coverage before touching `shard_count`.
   refused, or on the commit of the snapshot it started from: that leader
   committed the entries the truncation dropped with the node's own
   acknowledgements, and the node voted again without them (#636,
-  `mutSilenceEndsBeforeTheLeadersCommit`, `mutSilenceEndsOnARefusal`,
-  `mutSilenceIndexUnderTheSnapshot`,
+  `mutSilenceEndsBeforeCommit`, `mutSilenceEndsOnARefusal`,
+  `mutSilenceIndexBelowSnapshot`,
   `TestTheSilenceHoldsUntilTheSameTermLeadersCommit`,
   `TestTheSilenceNeverEndsOnARefusedAppendOverASnapshot`). Nor ignore
   the FlagTruncated heartbeat answer of a silent node: it acknowledges no

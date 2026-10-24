@@ -365,25 +365,9 @@ func NewRaft(cfg *Config, st *StartState) *Raft {
 	node.voteWindow = node.timing.ElectionTimeoutMin
 	node.contracts = map[uint64]core.TimingContractSpec{node.timing.Generation: node.timing}
 	node.engBase = node.engine()
-	for _, e := range st.Entries {
-		if e.Position.Index <= node.log.snapIndex {
-			continue
-		}
-		node.log.ents = append(node.log.ents, e)
-		node.log.window += int64(len(e.Data))
-		node.noteAppended(&e)
-	}
+	node.loadEntries(st.Entries)
 	node.log.stable = node.log.lastIndex()
-	if node.cfg.SilentIndex != 0 && node.cfg.SilentIndex <= node.log.snapIndex && !node.mutated(mutSilenceIndexUnderTheSnapshot) {
-		// TruncateAndStaySilent set the index at the truncated log's end,
-		// before the start moved the log onto a newer snapshot of this
-		// node's own. That snapshot's commit is a past the node may have
-		// acknowledged beyond, and taken as an entry of the leader's term
-		// past the truncation point it ended the silence on the first
-		// append of the leader of SilentTerm, a refused one included. The
-		// leader's rewrite must pass the log's start (#636).
-		node.cfg.SilentIndex = node.log.snapIndex + 1
-	}
+	node.raiseSilenceOverSnapshot()
 	node.log.committed = min(max(st.HardState.Commit, node.log.snapIndex), node.log.lastIndex())
 	node.log.applied = max(st.Applied, node.log.snapIndex)
 	node.log.applied = min(node.log.applied, node.log.committed)
@@ -403,6 +387,33 @@ func NewRaft(cfg *Config, st *StartState) *Raft {
 	node.admittedPub = node.admitted()
 	node.rd.Membership = node.admittedPub
 	return node
+}
+
+// loadEntries appends the start's entries past the snapshot to the log,
+// noting what each changes at append time.
+func (r *Raft) loadEntries(ents []core.EntryValue) {
+	for _, e := range ents {
+		if e.Position.Index <= r.log.snapIndex {
+			continue
+		}
+		r.log.ents = append(r.log.ents, e)
+		r.log.window += int64(len(e.Data))
+		r.noteAppended(&e)
+	}
+}
+
+// raiseSilenceOverSnapshot raises a SilentIndex the start's snapshot
+// covers past it. TruncateAndStaySilent set the index at the truncated
+// log's end, before the start moved the log onto a newer snapshot of this
+// node's own. That snapshot's commit is a past the node may have
+// acknowledged beyond, and taken as an entry of the leader's term past the
+// truncation point it ended the silence on the first append of the leader
+// of SilentTerm, a refused one included. The leader's rewrite must pass
+// the log's start (#636).
+func (r *Raft) raiseSilenceOverSnapshot() {
+	if r.cfg.SilentIndex != 0 && r.cfg.SilentIndex <= r.log.snapIndex && !r.mutated(mutSilenceIndexBelowSnapshot) {
+		r.cfg.SilentIndex = r.log.snapIndex + 1
+	}
 }
 
 // ---- inputs ----

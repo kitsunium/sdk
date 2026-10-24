@@ -2735,9 +2735,11 @@ sequences:
         kind: value
       - id: node.engine
         kind: internal
-      - id: node.noteAppended
+      - id: node.loadEntries
         kind: internal
       - id: node.log.lastIndex
+        kind: internal
+      - id: node.raiseSilenceOverSnapshot
         kind: internal
       - id: node.applyCommitEffects
         kind: internal
@@ -2787,30 +2789,13 @@ sequences:
       - set: node.engBase
         to: node.engine
         value: node.engine()
-      - loop:
-          do:
-            - opt:
-                do:
-                  - continue: true
-                when: e.Position.Index <= node.log.snapIndex
-            - set: node.log.ents
-              value: append(node.log.ents, e)
-            - op: +=
-              set: node.log.window
-              value: int64(len(e.Data))
-            - eval: node.noteAppended(&e)
-              to: node.noteAppended
-          key: _
-          range: st.Entries
-          value: e
+      - eval: node.loadEntries(st.Entries)
+        to: node.loadEntries
       - set: node.log.stable
         to: node.log.lastIndex
         value: node.log.lastIndex()
-      - opt:
-          do:
-            - set: node.cfg.SilentIndex
-              value: node.log.snapIndex + 1
-          when: node.cfg.SilentIndex != 0 && node.cfg.SilentIndex <= node.log.snapIndex && !node.mutated(mutSilenceIndexUnderTheSnapshot)
+      - eval: node.raiseSilenceOverSnapshot()
+        to: node.raiseSilenceOverSnapshot
       - set: node.log.committed
         value: min(max(st.HardState.Commit, node.log.snapIndex), node.log.lastIndex())
       - set: node.log.applied
@@ -2843,6 +2828,38 @@ sequences:
       - set: node.rd.Membership
         value: node.admittedPub
       - return: node
+  - of: (*Raft).loadEntries
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).loadEntries
+        kind: self
+      - id: r.noteAppended
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: e.Position.Index <= r.log.snapIndex
+            - set: r.log.ents
+              value: append(r.log.ents, e)
+            - op: +=
+              set: r.log.window
+              value: int64(len(e.Data))
+            - eval: r.noteAppended(&e)
+              to: r.noteAppended
+          key: _
+          range: ents
+          value: e
+  - of: (*Raft).raiseSilenceOverSnapshot
+    steps:
+      - opt:
+          do:
+            - set: r.cfg.SilentIndex
+              value: r.log.snapIndex + 1
+          when: r.cfg.SilentIndex != 0 && r.cfg.SilentIndex <= r.log.snapIndex && !r.mutated(mutSilenceIndexBelowSnapshot)
   - of: (*Raft).Tick
     participants:
       - id: caller
@@ -4466,11 +4483,7 @@ sequences:
         kind: actor
       - id: (*Raft).stepFollower
         kind: self
-      - id: r.extendHint
-        kind: internal
-      - id: r.resetElection
-        kind: internal
-      - id: r.maybeEndSilence
+      - id: r.followAppend
         kind: internal
       - id: r.followHeartbeat
         kind: internal
@@ -4487,19 +4500,8 @@ sequences:
           cases:
             - case: core.MsgApp
               do:
-                - set: r.lead
-                  value: m.From
-                - set: r.lastLeaderContact
-                  value: now
-                - eval: r.extendHint(now, m.From)
-                  to: r.extendHint
-                - eval: r.resetElection(now)
-                  to: r.resetElection
-                - opt:
-                    do:
-                      - eval: r.maybeEndSilence(m)
-                        to: r.maybeEndSilence
-                    when: r.handleAppend(m) || r.mutated(mutSilenceEndsOnARefusal)
+                - eval: r.followAppend(now, m)
+                  to: r.followAppend
             - case: core.MsgHeartbeat
               do:
                 - eval: r.followHeartbeat(now, m)
@@ -4514,6 +4516,32 @@ sequences:
                   to: r.send
             - default: true
           "on": m.Kind
+  - of: (*Raft).followAppend
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).followAppend
+        kind: self
+      - id: r.extendHint
+        kind: internal
+      - id: r.resetElection
+        kind: internal
+      - id: r.maybeEndSilence
+        kind: internal
+    steps:
+      - set: r.lead
+        value: m.From
+      - set: r.lastLeaderContact
+        value: now
+      - eval: r.extendHint(now, m.From)
+        to: r.extendHint
+      - eval: r.resetElection(now)
+        to: r.resetElection
+      - opt:
+          do:
+            - eval: r.maybeEndSilence(m)
+              to: r.maybeEndSilence
+          when: r.handleAppend(m) || r.mutated(mutSilenceEndsOnARefusal)
   - of: (*Raft).followHeartbeat
     participants:
       - id: caller
@@ -4905,7 +4933,7 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: m.Term == r.cfg.SilentTerm && r.log.committed < m.Commit && !r.mutated(mutSilenceEndsBeforeTheLeadersCommit)
+          when: m.Term == r.cfg.SilentTerm && r.log.committed < m.Commit && !r.mutated(mutSilenceEndsBeforeCommit)
       - set: r.cfg.SilentIndex, r.cfg.SilentTerm
         value: 0, 0
       - set: r.rd.SilenceEnded
