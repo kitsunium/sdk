@@ -235,21 +235,27 @@ func TestMultibyteSequences(t *testing.T) {
 	t.Parallel()
 	edges := []byte{0x00, 0x22, 0x5c, 0x7f, 0x80, 0x81, 0x8f, 0x90, 0x9f, 0xa0, 0xa8, 0xa9, 0xbf, 0xc0, 0xc2, 0xe2, 0xff}
 	long := strings.Repeat("a", 40)
-	check := func(seq string) {
+	check := func(t *testing.T, seq string) {
 		checkAgainstStdlib(t, seq)
 		checkAgainstStdlib(t, "x"+seq+"y")
 		checkAgainstStdlib(t, long+seq+long)
 		checkAgainstStdlib(t, seq+seq+long+seq)
 	}
+	// One parallel subtest per lead byte: the set is 64 x 17^3 sequences, each
+	// held in four contexts, and a coverage or race build runs it many times
+	// slower than a plain one.
 	for lead := 0xc0; lead <= 0xff; lead++ {
-		for _, b := range edges {
-			check(string([]byte{byte(lead), b}))
-			for _, c := range edges {
-				check(string([]byte{byte(lead), b, c}))
-				for _, d := range edges {
-					check(string([]byte{byte(lead), b, c, d}))
+		t.Run(fmt.Sprintf("lead_%02x", lead), func(t *testing.T) {
+			t.Parallel()
+			for _, b := range edges {
+				check(t, string([]byte{byte(lead), b}))
+				for _, c := range edges {
+					check(t, string([]byte{byte(lead), b, c}))
+					for _, d := range edges {
+						check(t, string([]byte{byte(lead), b, c, d}))
+					}
 				}
 			}
-		}
+		})
 	}
 }

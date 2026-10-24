@@ -28,7 +28,7 @@ alias(
 
 go_test(
     name = "jsonenc_test",
-    size = "small",
+    size = "medium",
     srcs = [
         "bench_test.go",
         "gen_api_test.go",
