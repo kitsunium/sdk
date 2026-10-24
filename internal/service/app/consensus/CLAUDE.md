@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T05:30:00Z -->
+<!-- updated: 2026-10-24T07:19:32Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -246,6 +246,14 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   one voter of its new history and never be elected (#524,
   `TestRecoverEndsTheSilence`; the election side,
   `TestASilentNodeIsNeverElected`).
+- End a silence under the leader of the node's own SilentTerm before the
+  node holds that leader's commit, or on an append it refused: that leader
+  committed the entries the truncation dropped with the node's own
+  acknowledgements, one batch past the truncation point committed an entry
+  of its term, and the node voted again without them (#636,
+  `TestASilentNodeVotesAgainOnlyWithTheWritesItAcknowledged`; the
+  liveness half, the silent node caught up across batches it never
+  acknowledges, `TestASilentNodeRejoinsUnderItsLeaderWithTheWritesItAcknowledged`).
 - Refuse a JOIN on a held slot when the member holding it is the requester
   itself — id, incarnation, slot and key all equal: a joiner restarted
   before anything reached its log admits the members only from a JOIN
@@ -472,6 +480,12 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   voter whose install outlasted it never caught up under writes (#618,
   `TestAStaleVoterWhoseInstallOutlastsTheRecordCatchesUp`, raft's
   `checkVouchedLeaderAdmittedWhileHeard`).
+- Gate the leader record on the cluster version: the raise to 2 is refused
+  while a member is unheard, and the stale voter the record is for is one
+  the leader cannot hear, so a cluster that had not raised never repaired
+  (#638, `TestAStaleVoterHearsTheNewLeaderBeforeTheRaise`, raft's
+  `checkLeaderRecordFollowsTheAnnouncement`). The record follows the
+  PreVote's own `FlagProtocol2`, never an older state of its sender.
 - Trust a predecessor's token by its index above the identity's
   AdoptedFrom once its term can no longer be read: that part of the kept
   range is the suffix Recover adopted past the persisted commit (#509,

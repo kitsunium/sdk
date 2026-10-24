@@ -566,6 +566,8 @@ sequences:
         kind: internal
       - id: r.confirmRounds
         kind: internal
+      - id: r.followSilentReport
+        kind: internal
       - id: r.probeIfLost
         kind: internal
       - id: r.sendAppend
@@ -575,6 +577,11 @@ sequences:
         to: r.ackRounds
       - eval: r.confirmRounds()
         to: r.confirmRounds
+      - opt:
+          do:
+            - eval: r.followSilentReport(pr, m)
+              to: r.followSilentReport
+          when: m.Flags&core.FlagTruncated != 0 && !r.mutated(mutSilentReportIgnored)
       - opt:
           do:
             - op: "&^="
@@ -597,6 +604,31 @@ sequences:
             - eval: r.sendAppend(m.From, false)
               to: r.sendAppend
           when: pr.match < r.log.lastIndex()
+  - of: (*Raft).followSilentReport
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).followSilentReport
+        kind: self
+      - id: pr.becomeProbe
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: pr.state == stateSnapshot
+      - opt:
+          do:
+            - set: pr.match
+              value: m.RejectHint
+            - eval: pr.becomeProbe()
+              to: pr.becomeProbe
+          when: m.RejectHint < pr.match
+      - opt:
+          do:
+            - set: pr.next
+              value: m.Commit + 1
+          when: pr.state == stateProbe && m.Commit >= pr.next && m.Commit <= r.log.lastIndex()
   - of: (*Raft).probeIfLost
     participants:
       - id: caller
@@ -2137,7 +2169,7 @@ sequences:
           do:
             - return: ""
           when: |-
-            r.clusterVer < Protocol2 || r.role == core.RoleLeader || r.lead == 0 || r.lead == m.From ||
+            !r.mayRecordTo(m) || r.role == core.RoleLeader || r.lead == 0 || r.lead == m.From ||
             		r.lastLeaderContact.IsZero() || now.Sub(r.lastLeaderContact) >= r.voteWindow || m.Index >= r.log.committed
       - opt:
           do:
@@ -2163,6 +2195,19 @@ sequences:
           		Entries: []core.EntryValue{{Kind: core.EntryMembership, BodySum: wire.BodySum(data), Data: data}},
           	})
         to: r.send
+  - of: (*Raft).mayRecordTo
+    steps:
+      - switch:
+          cases:
+            - case: r.mutated(mutRecordAtClusterVersion)
+              do:
+                - return: r.clusterVer >= Protocol2
+            - case: r.mutated(mutRecordUnannounced)
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: r.speaks() >= Protocol2 && m.Flags&core.FlagProtocol2 != 0
   - of: (*Raft).takeLeaderRecord
     participants:
       - id: caller
@@ -2690,9 +2735,11 @@ sequences:
         kind: value
       - id: node.engine
         kind: internal
-      - id: node.noteAppended
+      - id: node.loadEntries
         kind: internal
       - id: node.log.lastIndex
+        kind: internal
+      - id: node.raiseSilenceOverSnapshot
         kind: internal
       - id: node.applyCommitEffects
         kind: internal
@@ -2742,25 +2789,13 @@ sequences:
       - set: node.engBase
         to: node.engine
         value: node.engine()
-      - loop:
-          do:
-            - opt:
-                do:
-                  - continue: true
-                when: e.Position.Index <= node.log.snapIndex
-            - set: node.log.ents
-              value: append(node.log.ents, e)
-            - op: +=
-              set: node.log.window
-              value: int64(len(e.Data))
-            - eval: node.noteAppended(&e)
-              to: node.noteAppended
-          key: _
-          range: st.Entries
-          value: e
+      - eval: node.loadEntries(st.Entries)
+        to: node.loadEntries
       - set: node.log.stable
         to: node.log.lastIndex
         value: node.log.lastIndex()
+      - eval: node.raiseSilenceOverSnapshot()
+        to: node.raiseSilenceOverSnapshot
       - set: node.log.committed
         value: min(max(st.HardState.Commit, node.log.snapIndex), node.log.lastIndex())
       - set: node.log.applied
@@ -2793,6 +2828,38 @@ sequences:
       - set: node.rd.Membership
         value: node.admittedPub
       - return: node
+  - of: (*Raft).loadEntries
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).loadEntries
+        kind: self
+      - id: r.noteAppended
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: e.Position.Index <= r.log.snapIndex
+            - set: r.log.ents
+              value: append(r.log.ents, e)
+            - op: +=
+              set: r.log.window
+              value: int64(len(e.Data))
+            - eval: r.noteAppended(&e)
+              to: r.noteAppended
+          key: _
+          range: ents
+          value: e
+  - of: (*Raft).raiseSilenceOverSnapshot
+    steps:
+      - opt:
+          do:
+            - set: r.cfg.SilentIndex
+              value: r.log.snapIndex + 1
+          when: r.cfg.SilentIndex != 0 && r.cfg.SilentIndex <= r.log.snapIndex && !r.mutated(mutSilenceIndexBelowSnapshot)
   - of: (*Raft).Tick
     participants:
       - id: caller
@@ -4416,13 +4483,7 @@ sequences:
         kind: actor
       - id: (*Raft).stepFollower
         kind: self
-      - id: r.extendHint
-        kind: internal
-      - id: r.resetElection
-        kind: internal
-      - id: r.handleAppend
-        kind: internal
-      - id: r.maybeEndSilence
+      - id: r.followAppend
         kind: internal
       - id: r.followHeartbeat
         kind: internal
@@ -4439,18 +4500,8 @@ sequences:
           cases:
             - case: core.MsgApp
               do:
-                - set: r.lead
-                  value: m.From
-                - set: r.lastLeaderContact
-                  value: now
-                - eval: r.extendHint(now, m.From)
-                  to: r.extendHint
-                - eval: r.resetElection(now)
-                  to: r.resetElection
-                - eval: r.handleAppend(m)
-                  to: r.handleAppend
-                - eval: r.maybeEndSilence(m)
-                  to: r.maybeEndSilence
+                - eval: r.followAppend(now, m)
+                  to: r.followAppend
             - case: core.MsgHeartbeat
               do:
                 - eval: r.followHeartbeat(now, m)
@@ -4465,6 +4516,32 @@ sequences:
                   to: r.send
             - default: true
           "on": m.Kind
+  - of: (*Raft).followAppend
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).followAppend
+        kind: self
+      - id: r.extendHint
+        kind: internal
+      - id: r.resetElection
+        kind: internal
+      - id: r.maybeEndSilence
+        kind: internal
+    steps:
+      - set: r.lead
+        value: m.From
+      - set: r.lastLeaderContact
+        value: now
+      - eval: r.extendHint(now, m.From)
+        to: r.extendHint
+      - eval: r.resetElection(now)
+        to: r.resetElection
+      - opt:
+          do:
+            - eval: r.maybeEndSilence(m)
+              to: r.maybeEndSilence
+          when: r.handleAppend(m) || r.mutated(mutSilenceEndsOnARefusal)
   - of: (*Raft).followHeartbeat
     participants:
       - id: caller
@@ -4476,6 +4553,8 @@ sequences:
       - id: r.resetElection
         kind: internal
       - id: r.commitTo
+        kind: internal
+      - id: r.reportSilence
         kind: internal
       - id: r.send
         kind: internal
@@ -4496,11 +4575,15 @@ sequences:
             bind: c
             eval: min(m.Commit, r.log.lastIndex())
           when: c > r.log.committed
-      - eval: |-
-          r.send(core.MessageValue{
+      - bind: resp
+        eval: |-
+          core.MessageValue{
           		Kind: core.MsgHeartbeatResp, To: m.From, Context: m.Context, Contract: r.reportedContract(),
           		Index: r.heldOfTerm(),
-          	})
+          	}
+      - eval: r.reportSilence(&resp)
+        to: r.reportSilence
+      - eval: r.send(resp)
         to: r.send
       - opt:
           do:
@@ -4534,6 +4617,19 @@ sequences:
             to: r.log.term
           when: ok && t == r.term
       - return: "0"
+  - of: (*Raft).reportSilence
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: r.cfg.SilentIndex == 0
+      - op: "|="
+        set: m.Flags
+        value: core.FlagTruncated
+      - set: m.RejectHint
+        value: min(r.log.lastIndex(), r.log.stable)
+      - set: m.Commit
+        value: r.log.committed
   - of: (*Raft).reportedContract
     steps:
       - opt:
@@ -4582,11 +4678,11 @@ sequences:
                 			RejectHint: r.log.lastIndex(), Flags: core.FlagNeedSnapshot,
                 		})
               to: r.send
-            - return: ""
+            - return: "false"
           when: r.cfg.NoTable
       - opt:
           do:
-            - return: ""
+            - return: "false"
           when: "!r.rebaseOnCommit(&m)"
       - opt:
           do:
@@ -4594,7 +4690,7 @@ sequences:
               eval: min(m.Index, r.log.lastIndex())
             - eval: "r.send(core.MessageValue{Kind: core.MsgAppResp, To: m.From, Index: m.Index, Reject: true, RejectHint: hint})"
               to: r.send
-            - return: ""
+            - return: "false"
           when: "!r.log.matchTerm(m.Index, m.LogTerm)"
       - eval: r.dropUnknownKinds(&m)
         to: r.dropUnknownKinds
@@ -4603,10 +4699,11 @@ sequences:
         to: r.firstNewEntry
       - opt:
           do:
-            - return: ""
+            - return: "false"
           when: "!ok || (start >= 0 && !r.appendNew(&m, start, prevChain))"
       - eval: r.acknowledgeAppend(&m)
         to: r.acknowledgeAppend
+      - return: "true"
   - of: (*Raft).rebaseOnCommit
     participants:
       - id: caller
@@ -4833,6 +4930,10 @@ sequences:
             eval: r.log.term(r.log.committed)
             to: r.log.term
           when: "!ok || t != m.Term || r.log.committed < r.cfg.SilentIndex"
+      - opt:
+          do:
+            - return: ""
+          when: m.Term == r.cfg.SilentTerm && r.log.committed < m.Commit && !r.mutated(mutSilenceEndsBeforeCommit)
       - set: r.cfg.SilentIndex, r.cfg.SilentTerm
         value: 0, 0
       - set: r.rd.SilenceEnded

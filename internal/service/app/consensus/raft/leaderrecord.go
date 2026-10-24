@@ -45,10 +45,18 @@ func (r *Raft) stepLeaderRecord(now time.Time, m core.MessageValue) bool {
 
 // sendLeaderRecord answers a PreVote from a member that campaigns behind
 // this node's commit, while this node follows a live leader, with that
-// leader's record read from the committed configuration. Only once the
-// cluster version is 2: a node of protocol 1 does not know the kind.
+// leader's record read from the committed configuration.
+//
+// Only to a PreVote that itself announces protocol 2, from a node that
+// speaks it: a node of protocol 1 does not know the kind, and the two
+// speak the highest version both announce (D18). The announcement is read
+// on the PreVote answered, never on an older state of its sender. It used
+// to wait for the cluster version 2, whose raise is refused while a member
+// is not heard announcing protocol 2: the stale voter that needs the record
+// is one the leader cannot hear, so it blocked the very raise that would
+// send it (#638).
 func (r *Raft) sendLeaderRecord(now time.Time, m core.MessageValue) {
-	if r.clusterVer < Protocol2 || r.role == core.RoleLeader || r.lead == 0 || r.lead == m.From ||
+	if !r.mayRecordTo(m) || r.role == core.RoleLeader || r.lead == 0 || r.lead == m.From ||
 		r.lastLeaderContact.IsZero() || now.Sub(r.lastLeaderContact) >= r.voteWindow || m.Index >= r.log.committed {
 		return
 	}
@@ -64,6 +72,19 @@ func (r *Raft) sendLeaderRecord(now time.Time, m core.MessageValue) {
 		Kind: core.MsgLeaderRecord, To: m.From, Index: r.log.committed,
 		Entries: []core.EntryValue{{Kind: core.EntryMembership, BodySum: wire.BodySum(data), Data: data}},
 	})
+}
+
+// mayRecordTo reports whether the PreVote m may be answered with a leader
+// record: both this node and m speak protocol 2.
+func (r *Raft) mayRecordTo(m core.MessageValue) bool {
+	switch {
+	case r.mutated(mutRecordAtClusterVersion):
+		return r.clusterVer >= Protocol2
+	case r.mutated(mutRecordUnannounced):
+		return true
+	default:
+		return r.speaks() >= Protocol2 && m.Flags&core.FlagProtocol2 != 0
+	}
 }
 
 // takeLeaderRecord admits the leader a member vouched for, provisionally:
