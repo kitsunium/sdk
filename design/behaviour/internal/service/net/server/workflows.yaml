@@ -1,6 +1,20 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 workflows:
+  - of: (*portableLoop).compactSpills
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: pc.spill
+                    value: append(pc.spill[:0], pc.spill[pc.spillOff:]...)
+                  - set: pc.spillOff
+                    value: "0"
+                when: pc.open && pc.spillOff > 0
+          key: _
+          range: pl.conns
+          value: pc
   - of: unixAddr
     steps:
       - bind: sa

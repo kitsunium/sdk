@@ -1,5 +1,7 @@
 load("@rules_go//go:def.bzl", "go_library", "go_test")
 
+package(default_visibility = ["//internal/service:service_consumers"])
+
 go_library(
     name = "loop",
     srcs = [
@@ -16,6 +18,11 @@ go_library(
         "sizing.go",
         "slab.go",
         "stats.go",
+        "uring_abi_linux.go",
+        "uring_loop_linux.go",
+        "uring_none_linux.go",
+        "uring_probe_linux.go",
+        "uring_ring_linux.go",
         "wheel.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/net/loop",
@@ -96,6 +103,7 @@ go_test(
         "gen_api_test.go",
         "memory_linux_test.go",
         "parts_internal_test.go",
+        "uring_abi_linux_internal_test.go",
     ],
     embed = [":loop"],
     gotags = ["loopdebug"],  # keep
