@@ -1948,6 +1948,10 @@ sequences:
           when: o.Term != r.term || from != r.lead || r.role == core.RoleLeader
       - opt:
           do:
+            - return: codeVersion
+          when: o.Meta.ClusterVersion > r.speaks()
+      - opt:
+          do:
             - return: codePrecondition
           when: o.Meta.Position.Index <= r.log.committed && !needTable
       - opt:
@@ -1983,7 +1987,7 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: r.ignoresInstall(idx)
+          when: r.refusesClusterVersion(&meta) || r.ignoresInstall(idx)
       - alt:
           - do:
               - eval: r.log.compactTo(idx, t, meta.ChainTip)
@@ -2733,6 +2737,8 @@ sequences:
         kind: self
       - id: sm.Membership.Clone
         kind: value
+      - id: node.adoptClusterVersion
+        kind: internal
       - id: node.engine
         kind: internal
       - id: node.loadEntries
@@ -2780,8 +2786,10 @@ sequences:
               - set: node.ownTiming
                 value: node.timing.Generation
             else: true
-      - set: node.clusterVer, node.clusterGen, node.noSpace
-        value: sm.ClusterVersion, sm.ClusterGeneration, sm.NoSpace
+      - set: node.noSpace
+        value: sm.NoSpace
+      - eval: node.adoptClusterVersion(&sm)
+        to: node.adoptClusterVersion
       - set: node.voteWindow
         value: node.timing.ElectionTimeoutMin
       - set: node.contracts
@@ -2828,6 +2836,23 @@ sequences:
       - set: node.rd.Membership
         value: node.admittedPub
       - return: node
+  - of: (*Raft).adoptClusterVersion
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: r.refusesClusterVersion(sm)
+      - set: r.clusterVer, r.clusterGen
+        value: sm.ClusterVersion, sm.ClusterGeneration
+  - of: (*Raft).refusesClusterVersion
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: sm.ClusterVersion <= r.speaks()
+      - set: r.rd.Unsupported
+        value: "UnsupportedEntryValue{Index: max(sm.Position.Index, 1), Kind: core.EntryClusterVersion}"
+      - return: "true"
   - of: (*Raft).loadEntries
     participants:
       - id: caller

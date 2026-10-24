@@ -1352,6 +1352,7 @@ files:
       - idNamesPosition
       - (*Node).codecOf
       - snapshotCodec
+      - knownClusterVersion
       - linkedCodec
       - (*Node).maybeSnapshot
       - (*Node).cutFailed
@@ -2389,8 +2390,13 @@ functions:
     params: stamp *coreconsensus.StampValue, newCluster coreconsensus.ClusterID, opt *RecoverOptions
     results: error
   - doc: |-
-      checkRecoverMembers refuses new members that are not all pinned, or
-      among which this node, at its incarnation, is not a voter.
+      checkRecoverMembers refuses new members that are not all pinned, among
+      which this node, at its incarnation, is not a voter, or which name
+      another voter. The others enter as learners and are promoted through
+      Promote, never as empty voters (R3-02, R4-04): a member Init only
+      prepared cannot vote before a leader admits it, so a forced configuration
+      that needed its vote never elected one, and two survivors naming each
+      other recovered two histories into one identity (#642).
     name: checkRecoverMembers
     params: stamp *coreconsensus.StampValue, members []coreconsensus.MemberValue
     results: error
@@ -2640,10 +2646,21 @@ functions:
   - doc: |-
       snapshotCodec is codecOf for a node whose own codec is own; an offline
       operation, which has none, passes nil and reads only the codecs this build
-      links.
+      links. A snapshot whose cluster version this build does not speak is
+      refused too: a start, an offer and an install all read it here (#640).
     name: snapshotCodec
     params: m *coreconsensus.SnapshotMetaValue, own coretransform.BoundedDecompressor
     results: coretransform.BoundedDecompressor, error
+  - doc: |-
+      knownClusterVersion refuses VERSION_UNSUPPORTED a snapshot whose cluster
+      version is above the protocol this build speaks. Once the cluster raised
+      past it, cut a snapshot and compacted the log past the raise entry, the
+      raise reaches a node rolled back only as a snapshot's ClusterVersion, and
+      unknown means stop, never skip (D18, #640). It is a refusal, never a new
+      format: nothing is written at another version.
+    name: knownClusterVersion
+    params: m *coreconsensus.SnapshotMetaValue
+    results: error
   - doc: |-
       linkedCodec is the bounded codec this build links under name, refused
       VERSION_UNSUPPORTED when there is none.
@@ -3282,8 +3299,13 @@ types:
           the log's end or does not match the log's term at its index. The next
           start finishes it (finishInstall); Recover finishes it first and keeps it,
           or its forced entry followed the short log, the start erased it, and the
-          node ran the snapshot's old voters and never led again (#506). It reads
-          and writes nothing else.
+          node ran the snapshot's old voters and never led again (#506). One of a
+          version, codec or cluster version this build does not know refuses it
+          VERSION_UNSUPPORTED, as it refuses a start: unknown means stop, never
+          skip (D18). Skipped as one that fails its checksums, a snapshot above
+          ProtocolMax let Recover plan from the older log below it and write a new
+          history from a state older than the one the directory holds (#640). It
+          reads and writes nothing else.
         name: interruptedInstall
         recv: d DataDir
         results: coreconsensus.SnapshotMetaValue, bool, error

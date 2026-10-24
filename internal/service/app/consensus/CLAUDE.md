@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T10:28:32Z -->
+<!-- updated: 2026-10-24T15:05:20Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -272,9 +272,32 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   A snapshot is decoded with the codec its metadata names (#513, #512,
   `TestASnapshotOfAnUnknownFormatStopsTheNode`,
   `TestASnapshotIsReadWithTheCodecItWasWrittenWith`).
+- Take a snapshot's `ClusterVersion` without comparing it with
+  `ProtocolMax`. Once the log is compacted past a raise, the snapshot is
+  all that carries it: a node rolled back started or installed it and ran
+  at a version whose formats it cannot read back. `knownClusterVersion`
+  refuses it VERSION_UNSUPPORTED in `snapshotCodec` (a start, an offer) and
+  `restoreCodec` (`RestoreSnapshot`, `OpenSnapshot`, `ImportObserved`), and
+  raft flags it at `NewRaft`, `CheckOffer` and `InstallSnapshot` (#640,
+  `TestANodeRefusesToStartOnASnapshotAboveItsProtocol`,
+  `TestAnOfferOfASnapshotAboveTheProtocolStopsTheNode`,
+  `TestTheOfflineReadersRefuseASnapshotAboveTheProtocol`). Nor skip a
+  snapshot `verifySnapshotFile` refuses VERSION_UNSUPPORTED as if it failed
+  its checksums: `interruptedInstall` did, and Recover planned from the
+  older log below an install above the protocol and wrote a new history
+  from it (#640, `TestRecoverRefusesAnInterruptedInstallAboveTheProtocol`).
 - Stream again a snapshot a peer refused SNAPSHOT_CORRUPT without reading
   it back: `sentCorrupt` verifies the sender's copy and replaces one that
   fails (#525, `TestALeaderReplacesASnapshotItsPeerFindsCorrupt`).
+- Let `Recover` name a voter other than the survivor: a member `Init` only
+  prepared cannot vote before a leader admits it, so the forced
+  configuration that needed its vote never elected a leader, and two
+  survivors naming each other recovered two histories into one identity.
+  `checkRecoverMembers` refuses it RECOVER_REFUSED; the others enter as
+  learners (R4-04, #642, `TestRecoverRefusesAMemberInitPreparedAsAVoter`,
+  `TestTwoSurvivorsNamingEachOtherAVoterAreRefused`). `RestoreSnapshot`
+  keeps every voter it is given: it runs on every node it names
+  (`TestARestoreOnEveryNodeWithTheSameMembersElects`).
 - Plan `Recover` from the log's bounds alone: an install a crash
   interrupted after its publication left the snapshot past the log, and
   the forced entry written after the short log was erased at the next

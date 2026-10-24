@@ -404,8 +404,13 @@ func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsen
 // the log's end or does not match the log's term at its index. The next
 // start finishes it (finishInstall); Recover finishes it first and keeps it,
 // or its forced entry followed the short log, the start erased it, and the
-// node ran the snapshot's old voters and never led again (#506). It reads
-// and writes nothing else.
+// node ran the snapshot's old voters and never led again (#506). One of a
+// version, codec or cluster version this build does not know refuses it
+// VERSION_UNSUPPORTED, as it refuses a start: unknown means stop, never
+// skip (D18). Skipped as one that fails its checksums, a snapshot above
+// ProtocolMax let Recover plan from the older log below it and write a new
+// history from a state older than the one the directory holds (#640). It
+// reads and writes nothing else.
 func (d DataDir) interruptedInstall() (coreconsensus.SnapshotMetaValue, bool, error) {
 	metas, err := d.d.snaps.List()
 	if err != nil {
@@ -413,7 +418,10 @@ func (d DataDir) interruptedInstall() (coreconsensus.SnapshotMetaValue, bool, er
 	}
 	flog := d.d.log
 	for _, m := range metas {
-		if d.verifySnapshotFile(m) != nil {
+		if verr := d.verifySnapshotFile(m); verr != nil {
+			if errs.HasCode(verr, coreconsensus.CodeVersionUnsupported) {
+				return coreconsensus.SnapshotMetaValue{}, false, verr
+			}
 			continue // a start falls back past it too (D7)
 		}
 		first, last := flog.Bounds()
@@ -747,13 +755,21 @@ func checkRecover(stamp *coreconsensus.StampValue, newCluster coreconsensus.Clus
 	return nil
 }
 
-// checkRecoverMembers refuses new members that are not all pinned, or
-// among which this node, at its incarnation, is not a voter.
+// checkRecoverMembers refuses new members that are not all pinned, among
+// which this node, at its incarnation, is not a voter, or which name
+// another voter. The others enter as learners and are promoted through
+// Promote, never as empty voters (R3-02, R4-04): a member Init only
+// prepared cannot vote before a leader admits it, so a forced configuration
+// that needed its vote never elected one, and two survivors naming each
+// other recovered two histories into one identity (#642).
 func checkRecoverMembers(stamp *coreconsensus.StampValue, members []coreconsensus.MemberValue) error {
 	self := false
 	for _, m := range members {
 		if isZeroDigest(m.SPKI) || m.ID == 0 {
 			return recoverRefused("a member without an SPKI pin")
+		}
+		if m.ID != stamp.ID && m.Voter {
+			return recoverRefused("a voter other than this node: the other members enter as learners")
 		}
 		if m.ID == stamp.ID && m.Voter {
 			self = m.Incarnation == stamp.Incarnation
@@ -1097,6 +1113,12 @@ func checkRestore(flog *fileLog, stamp *coreconsensus.StampValue, newCluster cor
 // with another codec failed as corrupt instead of being refused cleanly
 // when this build does not link its codec (D18, #548).
 func restoreCodec(opt *RestoreOptions) (coretransform.BoundedDecompressor, error) {
+	// A snapshot at a cluster version this build does not speak would found
+	// a history at it: RestoreSnapshot, OpenSnapshot and ImportObserved all
+	// come here first (#640).
+	if err := knownClusterVersion(&opt.Expected); err != nil {
+		return nil, err
+	}
 	if opt.Codec != nil {
 		return opt.Codec, nil
 	}

@@ -12,6 +12,7 @@ import (
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	coretransform "github.com/kitsunium/sdk/internal/core/data/transform"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/app/consensus/raft"
 )
 
 // The bounds of the wait after a cut that failed without stopping the node.
@@ -104,8 +105,12 @@ func (n *Node) codecOf(m *coreconsensus.SnapshotMetaValue) (coretransform.Bounde
 
 // snapshotCodec is codecOf for a node whose own codec is own; an offline
 // operation, which has none, passes nil and reads only the codecs this build
-// links.
+// links. A snapshot whose cluster version this build does not speak is
+// refused too: a start, an offer and an install all read it here (#640).
 func snapshotCodec(m *coreconsensus.SnapshotMetaValue, own coretransform.BoundedDecompressor) (coretransform.BoundedDecompressor, error) {
+	if err := knownClusterVersion(m); err != nil {
+		return nil, err
+	}
 	if m.Version != 1 {
 		return nil, origin(coreconsensus.VersionUnsupported, errs.Int("snapshot_version", int(m.Version)))
 	}
@@ -113,6 +118,20 @@ func snapshotCodec(m *coreconsensus.SnapshotMetaValue, own coretransform.Bounded
 		return own, nil
 	}
 	return linkedCodec(m.Codec)
+}
+
+// knownClusterVersion refuses VERSION_UNSUPPORTED a snapshot whose cluster
+// version is above the protocol this build speaks. Once the cluster raised
+// past it, cut a snapshot and compacted the log past the raise entry, the
+// raise reaches a node rolled back only as a snapshot's ClusterVersion, and
+// unknown means stop, never skip (D18, #640). It is a refusal, never a new
+// format: nothing is written at another version.
+func knownClusterVersion(m *coreconsensus.SnapshotMetaValue) error {
+	if m.ClusterVersion > raft.ProtocolMax {
+		return origin(coreconsensus.VersionUnsupported, errs.Int("cluster_version", int(m.ClusterVersion)),
+			errs.Int("protocol_max", int(raft.ProtocolMax)))
+	}
+	return nil
 }
 
 // linkedCodec is the bounded codec this build links under name, refused

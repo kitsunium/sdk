@@ -118,3 +118,74 @@ func TestANodeOfThePreviousReleaseStopsOnTheRaise(t *testing.T) {
 		t.Fatalf("a node of protocol 2 did not apply the raise: %+v, cluster %d", u, g.Status().Cluster)
 	}
 }
+
+// snapAt is the metadata of a snapshot at index 10, term 1, of members 1, 2
+// and 3, carrying cluster version v at generation 1.
+func snapAt(v uint32) core.SnapshotMetaValue {
+	return core.SnapshotMetaValue{
+		Position: core.PositionValue{Term: 1, Index: 10}, Membership: testConf(1, 2, 3),
+		ClusterVersion: v, ClusterGeneration: 1,
+	}
+}
+
+// startOn starts node id, speaking speaks (0: ProtocolMax), on snapshot sm.
+func startOn(id core.NodeID, speaks uint32, sm core.SnapshotMetaValue) *Raft {
+	cfg := &Config{
+		ID: id, Group: 1, Seed: 1, Timing: testTiming(), MaxInflight: 8, MaxInflightBytes: 1 << 20,
+		MaxBatchBytes: 1 << 16, MinVoters: 1, PromoteLag: 16, CanVote: true, MaxChainRefusals: 3, speaks: speaks,
+	}
+	return NewRaft(cfg, &StartState{HardState: core.HardState{Term: 1, Commit: 10}, Snapshot: sm, Now: t0})
+}
+
+// A snapshot whose cluster version is above the protocol a node speaks
+// stops it, at a start, at an offer and at an install, its cluster version
+// left as it was: once a snapshot cut after a raise is the base and the log
+// is compacted past the raise entry, the raise reaches a node only as that
+// snapshot's ClusterVersion, and NewRaft and installEngine took it as it
+// was. A node of protocol 1 started on a snapshot cut after the raise to 2
+// then wrote admin payloads of version 2 it cannot read back (#640, D18).
+// The driver stops the node on the Ready's Unsupported, as on the raise
+// replayed from the log; a snapshot at the version the node speaks still
+// starts and installs.
+func TestASnapshotAboveTheProtocolStopsTheNode(t *testing.T) {
+	cases := []struct {
+		name    string
+		speaks  uint32
+		v       uint32
+		refused bool
+	}{
+		{name: "this build, a raise past ProtocolMax", v: ProtocolMax + 1, refused: true},
+		{name: "protocol 1, the raise to 2", speaks: 1, v: Protocol2, refused: true},
+		{name: "this build, the raise to 2", v: Protocol2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := startOn(2, tc.speaks, snapAt(tc.v))
+			u := r.Ready().Unsupported
+			if got := u.Index != 0; got != tc.refused {
+				t.Fatalf("start on a snapshot at cluster version %d: Unsupported %+v", tc.v, u)
+			}
+			if tc.refused && (u.Index != 10 || u.Kind != core.EntryClusterVersion || r.Status().Cluster > r.speaks()) {
+				t.Fatalf("start: Unsupported %+v, cluster %d, speaks %d", u, r.Status().Cluster, r.speaks())
+			}
+
+			f := newTest(2, testState{term: 1}, 0, false)
+			f.cfg.speaks = tc.speaks
+			f.Step(t0, msg(core.MsgHeartbeat, 1, 2, 1))
+			f.Ready()
+			offer := core.InstallOfferValue{Term: 1, Meta: snapAt(tc.v)}
+			if code := f.CheckOffer(1, offer, false); (code == core.CodeVersionUnsupported) != tc.refused {
+				t.Fatalf("offer of a snapshot at cluster version %d: %v", tc.v, code)
+			}
+			f.InstallSnapshot(snapAt(tc.v))
+			rd := f.Ready()
+			if got := rd.Unsupported.Index != 0; got != tc.refused {
+				t.Fatalf("install of a snapshot at cluster version %d: Unsupported %+v", tc.v, rd.Unsupported)
+			}
+			installed := f.SnapshotIndex() == 10
+			if installed == tc.refused || (tc.refused && (f.Status().Cluster > f.speaks() || len(rd.Messages) != 0)) {
+				t.Fatalf("install: installed %v, cluster %d, %d messages", installed, f.Status().Cluster, len(rd.Messages))
+			}
+		})
+	}
+}

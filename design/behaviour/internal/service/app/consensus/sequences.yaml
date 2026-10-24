@@ -6121,7 +6121,7 @@ sequences:
           do:
             - eval: |-
                 n.stop(origin(coreconsensus.VersionUnsupported, errs.Int("snapshot_version", int(o.Meta.Version)),
-                			errs.String("snapshot_codec", o.Meta.Codec)), false)
+                			errs.String("snapshot_codec", o.Meta.Codec), errs.Int("cluster_version", int(o.Meta.ClusterVersion))), false)
               to: n.stop
           when: acc.Refused == coreconsensus.CodeVersionUnsupported
       - return: acc
@@ -12049,6 +12049,8 @@ sequences:
         kind: self
       - id: RestoreSnapshot
         kind: internal
+      - id: knownClusterVersion
+        kind: internal
       - id: checkObservedTail
         kind: internal
       - id: restoreCodec
@@ -12067,6 +12069,14 @@ sequences:
             - return: RestoreSnapshot(d, p.Snapshot, newCluster, members, opt)
               to: RestoreSnapshot
           when: len(p.Tail) == 0
+      - opt:
+          do:
+            - return: coreconsensus.SnapshotMetaValue{}, err
+          init:
+            bind: err
+            eval: knownClusterVersion(&opt.Expected)
+            to: knownClusterVersion
+          when: err != nil
       - opt:
           do:
             - return: coreconsensus.SnapshotMetaValue{}, err
@@ -12895,6 +12905,8 @@ sequences:
         kind: self
       - id: d.d.snaps.List
         kind: internal
+      - id: d.verifySnapshotFile
+        kind: internal
       - id: flog.Bounds
         kind: internal
       - id: flog.Term
@@ -12913,8 +12925,16 @@ sequences:
           do:
             - opt:
                 do:
+                  - opt:
+                      do:
+                        - return: coreconsensus.SnapshotMetaValue{}, false, verr
+                      when: errs.HasCode(verr, coreconsensus.CodeVersionUnsupported)
                   - continue: true
-                when: d.verifySnapshotFile(m) != nil
+                init:
+                  bind: verr
+                  eval: d.verifySnapshotFile(m)
+                  to: d.verifySnapshotFile
+                when: verr != nil
             - bind: first, last
               eval: flog.Bounds()
               to: flog.Bounds
@@ -13539,6 +13559,11 @@ sequences:
                 when: isZeroDigest(m.SPKI) || m.ID == 0
             - opt:
                 do:
+                  - return: "recoverRefused(\"a voter other than this node: the other members enter as learners\")"
+                    to: recoverRefused
+                when: m.ID != stamp.ID && m.Voter
+            - opt:
+                do:
                   - set: self
                     value: m.Incarnation == stamp.Incarnation
                 when: m.ID == stamp.ID && m.Voter
@@ -14115,11 +14140,21 @@ sequences:
         kind: actor
       - id: restoreCodec
         kind: self
+      - id: knownClusterVersion
+        kind: internal
       - id: linkedCodec
         kind: internal
       - id: defaultRestoreCodec
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: knownClusterVersion(&opt.Expected)
+            to: knownClusterVersion
+          when: err != nil
       - opt:
           do:
             - return: opt.Codec, nil
@@ -16764,9 +16799,19 @@ sequences:
         kind: actor
       - id: snapshotCodec
         kind: self
+      - id: knownClusterVersion
+        kind: internal
       - id: linkedCodec
         kind: internal
     steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: knownClusterVersion(m)
+            to: knownClusterVersion
+          when: err != nil
       - opt:
           do:
             - return: nil, origin(coreconsensus.VersionUnsupported, errs.Int("snapshot_version", int(m.Version)))
@@ -16777,6 +16822,23 @@ sequences:
           when: own != nil && (m.Codec == "" || coretransform.Algorithm(m.Codec) == own.Algorithm())
       - return: linkedCodec(m.Codec)
         to: linkedCodec
+  - of: knownClusterVersion
+    participants:
+      - id: caller
+        kind: actor
+      - id: knownClusterVersion
+        kind: self
+      - id: origin
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                origin(coreconsensus.VersionUnsupported, errs.Int("cluster_version", int(m.ClusterVersion)),
+                			errs.Int("protocol_max", int(raft.ProtocolMax)))
+              to: origin
+          when: m.ClusterVersion > raft.ProtocolMax
+      - return: nil
   - of: linkedCodec
     participants:
       - id: caller
