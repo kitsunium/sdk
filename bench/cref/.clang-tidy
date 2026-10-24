@@ -1,0 +1,13 @@
+# parse_test builds unterminated buffers on purpose (every length is passed
+# explicitly), so not-null-terminated-result is disabled.
+#
+# Annex K (fprintf_s and friends) is not implemented by glibc; the analyzer
+# check that asks for it flags every fprintf, so it only produces noise here.
+Checks: >-
+  clang-analyzer-*,
+  bugprone-*,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -bugprone-not-null-terminated-result
+WarningsAsErrors: ''
