@@ -234,6 +234,14 @@ func TestObjectValueSemantics(t *testing.T) {
 func TestMultibyteSequences(t *testing.T) {
 	t.Parallel()
 	edges := []byte{0x00, 0x22, 0x5c, 0x7f, 0x80, 0x81, 0x8f, 0x90, 0x9f, 0xa0, 0xa8, 0xa9, 0xbf, 0xc0, 0xc2, 0xe2, 0xff}
+	if testing.CoverMode() != "" {
+		// A coverage build runs the grid far slower than the 60 s cap of
+		// bazel coverage allows; keep the boundary of each class (ASCII, the
+		// quote and backslash, each continuation range edge, the separators'
+		// bytes, the invalid leads) and let go test, -race and the alloc
+		// lane run the full grid.
+		edges = []byte{0x00, 0x22, 0x5c, 0x80, 0x8f, 0x90, 0xa8, 0xa9, 0xbf, 0xc0, 0xe2, 0xff}
+	}
 	long := strings.Repeat("a", 40)
 	check := func(t *testing.T, seq string) {
 		checkAgainstStdlib(t, seq)
