@@ -137,3 +137,28 @@ func TestARefusalCarriesTheNamedCode(t *testing.T) {
 		t.Errorf("errors.Is(%v, sentinel) = false", err)
 	}
 }
+
+// TestTheAppendersAreTheKernels pins the re-export (ADR 0186 §D10): the
+// appenders write what kernel/jsonenc writes, the Object they return is the
+// kernel's own type, and none of it registers a codec or changes Marshal.
+func TestTheAppendersAreTheKernels(t *testing.T) {
+	t.Parallel()
+	out := json.BeginObject(nil).
+		String("msg", "say \"hi\"\n<b>\xff").
+		Int("n", -3).
+		Raw("k", json.AppendUint(nil, 7)).
+		End()
+	if want := "{\"msg\":\"say \\\"hi\\\"\\n<b>\uFFFD\",\"n\":-3,\"k\":7}"; string(out) != want {
+		t.Fatalf("got %s, want %s", out, want)
+	}
+	if got := string(json.AppendEscaped([]byte("x"), "a\tb")); got != `xa\tb` {
+		t.Errorf("AppendEscaped = %s", got)
+	}
+	if got := string(json.AppendString(nil, "\u2028")); got != `"\u2028"` {
+		t.Errorf("AppendString = %s", got)
+	}
+	var o json.Object = json.BeginObject(nil)
+	if string(o.End()) != "{}" {
+		t.Errorf("empty Object = %s", o.End())
+	}
+}

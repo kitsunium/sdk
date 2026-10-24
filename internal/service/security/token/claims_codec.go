@@ -282,13 +282,13 @@ func encodeClaims(claims coretoken.ClaimsValue, shape claimShape) (raw []byte, e
 // valid UTF-8.
 //
 // JSON text is UTF-8 (RFC 8259 §8.1, RFC 8725 §3.7), and on the ISSUE path
-// nothing else would say so. quoteJSONString passes every byte at or above 0x20
-// through by design, and a reader that does not refuse the result repairs it
-// instead: encoding/json — this package's own verifier included — decodes each
-// invalid byte to U+FFFD, so a "sub" of "a\xff" and one of "a\xfe" are minted
-// as two tokens and verified as ONE subject. A strict JOSE reader elsewhere
-// rejects both. Nothing is repaired here either: which bytes the caller meant
-// is not something this package can know.
+// nothing else would say so. quoteJSONString repairs what it is given (each
+// invalid byte becomes U+FFFD, as encoding/json — this package's own verifier
+// included — decodes it), so a "sub" of "a\xff" and one of "a\xfe" would be
+// minted as two tokens and verified as ONE subject. Before it was the byte loop
+// that copied the bad byte, and a strict JOSE reader elsewhere rejected both.
+// Neither repair is wanted here: which bytes the caller meant is not something
+// this package can know.
 func checkClaimText(claims coretoken.ClaimsValue, audience []string) error {
 	names := [...]string{coretoken.ClaimIssuer, coretoken.ClaimSubject, coretoken.ClaimID}
 	values := [...]string{claims.Issuer(), claims.Subject(), claims.ID()}

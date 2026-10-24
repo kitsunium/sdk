@@ -1,0 +1,40 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/kernel:kernel_consumers"])
+
+go_library(
+    name = "jsonenc",
+    srcs = [
+        "doc.go",
+        "object.go",
+        "string.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/kernel/jsonenc",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+    deps = ["//internal/kernel/swar"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":jsonenc",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+)
+
+go_test(
+    name = "jsonenc_test",
+    size = "small",
+    srcs = [
+        "bench_test.go",
+        "gen_api_test.go",
+        "gen_perf_test.go",
+        "jsonenc_external_test.go",
+        "perf_fixtures_test.go",
+    ],
+    deps = [":jsonenc"],
+)

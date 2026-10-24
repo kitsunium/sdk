@@ -19,6 +19,7 @@ go_library(
     deps = [
         "//internal/core/observe/logger",
         "//internal/kernel/clock",
+        "//internal/kernel/jsonenc",
     ],
 )
 

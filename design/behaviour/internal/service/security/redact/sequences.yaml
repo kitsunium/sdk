@@ -861,26 +861,8 @@ sequences:
           range: value
           value: character
       - return: length
-  - of: appendQuoted
-    participants:
-      - id: caller
-        kind: actor
-      - id: appendQuoted
-        kind: self
-      - id: appendEscaped
-        kind: internal
-    steps:
-      - set: out
-        value: append(out, '"')
-      - loop:
-          do:
-            - set: out
-              to: appendEscaped
-              value: appendEscaped(out, character)
-          key: _
-          range: value
-          value: character
-      - return: append(out, '"')
+  - forward: jsonenc.AppendString
+    of: appendQuoted
   - of: escapedLength
     participants:
       - id: caller

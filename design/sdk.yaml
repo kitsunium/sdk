@@ -130,7 +130,7 @@ layers:
 # observe and security hold one domain per directory (its FAMILIES).
 families:
   - in: [kernel]
-    root: [backoff, clock, errs, plugin, semver, swar]
+    root: [backoff, clock, errs, jsonenc, plugin, semver, swar]
     names: [collections, concur, fs]
   - in: [core]
     names: [app, crypto, data, net, observe, proc, security]
@@ -562,6 +562,31 @@ budgets:
     escapes: []
     allocs: 0
     fixture: SetIndex
+  # jsonenc: every appender writes into the caller's slice and allocates
+  # nothing once it has the room. The string appenders read their string
+  # through a view, not a copy, so none of them lets it escape; the object
+  # chain is one budget, since an Object that reached the heap would show there.
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/jsonenc.AppendString
+    escapes: []
+    allocs: 0
+    fixture: AppendString
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/jsonenc.AppendEscaped
+    escapes: []
+    allocs: 0
+    fixture: AppendEscaped
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/jsonenc.AppendInt
+    inline: true
+    escapes: []
+    allocs: 0
+    fixture: AppendInt
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/jsonenc.AppendUint
+    inline: true
+    escapes: []
+    allocs: 0
+    fixture: AppendUint
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/jsonenc.BeginObject
+    allocs: 0
+    fixture: BeginObject
   # A recycler's warm round trip (ADR 0010) and a snapshot's three verbs
   # (ADR 0011) allocate nothing.
   - fn: go:github.com/kitsunium/sdk/internal/kernel/concur/recycler.(*Pool[...]).Get
