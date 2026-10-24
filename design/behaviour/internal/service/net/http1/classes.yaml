@@ -1,0 +1,762 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+constants:
+  - doc: version is the one version the profile speaks.
+    items:
+      - name: version
+        type: string
+        value: "\"HTTP/1.1\""
+    name: version
+  - grouped: true
+    items:
+      - doc: "byteValues is how many values a byte takes: the size of a byte table."
+        name: byteValues
+        type: int
+        value: "256"
+      - doc: tokenStride is how many name bytes tokenEnd tests per turn.
+        name: tokenStride
+        type: int
+        value: "4"
+      - doc: crlfLen is the length of a line's end.
+        name: crlfLen
+        type: int
+        value: "2"
+      - doc: decimalBase is the base of a Content-Length.
+        name: decimalBase
+        type: int64
+        value: "10"
+      - doc: lastDigit is the largest value of one decimal digit.
+        name: lastDigit
+        type: byte
+        value: "9"
+      - doc: asciiCase is the bit that tells a lowercase ASCII letter from its capital.
+        name: asciiCase
+        type: byte
+        value: "0x20"
+      - doc: asciiDEL is the one control byte above the space.
+        name: asciiDEL
+        type: byte
+        value: "0x7f"
+      - doc: asciiSpace is the first byte that is not a C0 control.
+        name: asciiSpace
+        type: byte
+        value: "0x20"
+      - doc: |-
+          knownMaxLen is one past the longest name the profile reads,
+          transfer-encoding.
+        name: knownMaxLen
+        type: int
+        value: len("transfer-encoding") + 1
+    name: byteValues
+  - doc: fieldKind names the fields the profile reads; kindOther is every other one.
+    grouped: true
+    items:
+      - doc: kindOther is a field the profile carries without reading.
+        name: kindOther
+        type: fieldKind
+        value: iota
+      - doc: kindHost is Host.
+        name: kindHost
+      - doc: kindExpect is Expect.
+        name: kindExpect
+      - doc: kindConnection is Connection.
+        name: kindConnection
+      - doc: kindAuthorization is Authorization.
+        name: kindAuthorization
+      - doc: kindContentLength is Content-Length.
+        name: kindContentLength
+      - doc: kindTransferEncoding is Transfer-Encoding.
+        name: kindTransferEncoding
+    name: kindOther
+  - grouped: true
+    items:
+      - doc: "RefusalNone is no refusal: the request was framed, or needs more bytes."
+        name: RefusalNone
+        type: Refusal
+        value: iota
+      - doc: |-
+          RefusalRequestLine is a request line that does not end right after its
+          version.
+        name: RefusalRequestLine
+      - doc: RefusalMethod is an empty method, or one that is not a token.
+        name: RefusalMethod
+      - doc: |-
+          RefusalTarget is an empty request-target, or one holding a control byte,
+          DEL or a byte from 0x80 up.
+        name: RefusalTarget
+      - doc: RefusalVersion is any version but HTTP/1.1.
+        name: RefusalVersion
+      - doc: RefusalBareCR is a CR not followed by LF.
+        name: RefusalBareCR
+      - doc: RefusalBareLF is a LF not preceded by CR.
+        name: RefusalBareLF
+      - doc: RefusalNUL is a NUL inside a field value or name.
+        name: RefusalNUL
+      - doc: |-
+          RefusalControl is a control byte other than the tab, or DEL, inside a
+          field value.
+        name: RefusalControl
+      - doc: |-
+          RefusalObsFold is a field line that starts with a space or a tab: the
+          obsolete line folding (RFC 9112 §5.2).
+        name: RefusalObsFold
+      - doc: |-
+          RefusalSpaceBeforeColon is whitespace between a field name and its colon
+          (RFC 9112 §5.1).
+        name: RefusalSpaceBeforeColon
+      - doc: |-
+          RefusalName is an empty field name, one that is not a token, or a field
+          line with no colon.
+        name: RefusalName
+      - doc: |-
+          RefusalTransferEncoding is any Transfer-Encoding field, chunked or not:
+          the profile frames by Content-Length alone, so it carries no chunked body
+          and no trailer.
+        name: RefusalTransferEncoding
+      - doc: |-
+          RefusalContentLength is a Content-Length that is empty, not decimal
+          digits, or longer than corenet.HTTP1MaxContentLengthDigits.
+        name: RefusalContentLength
+      - doc: |-
+          RefusalContentLengthDuplicated is a second Content-Length field, equal to
+          the first or not.
+        name: RefusalContentLengthDuplicated
+      - doc: RefusalAuthorizationDuplicated is a second Authorization field.
+        name: RefusalAuthorizationDuplicated
+      - doc: RefusalHostDuplicated is a second Host field.
+        name: RefusalHostDuplicated
+      - doc: |-
+          RefusalExpect is an Expect field: the profile sends no interim response,
+          so 100-continue cannot be met (RFC 9110 §10.1.1).
+        name: RefusalExpect
+      - doc: RefusalHeadTooLarge is a head that does not end within the head bound.
+        name: RefusalHeadTooLarge
+      - doc: RefusalTooManyFields is a field line past corenet.HTTP1MaxFields.
+        name: RefusalTooManyFields
+      - doc: RefusalTargetTooLong is a request-target past the target bound.
+        name: RefusalTargetTooLong
+      - doc: RefusalBodyTooLarge is a Content-Length past the body bound.
+        name: RefusalBodyTooLarge
+      - doc: "RefusalMethodUnsupported is CONNECT: the profile opens no tunnel."
+        name: RefusalMethodUnsupported
+    name: RefusalNone
+  - doc: "refusalCount is one past the last Refusal: the length of every table below."
+    items:
+      - name: refusalCount
+        type: int
+        value: int(RefusalMethodUnsupported) + 1
+    name: refusalCount
+  - doc: The status codes a refusal is answered with (RFC 9110 §15).
+    grouped: true
+    items:
+      - doc: statusBadRequest answers every syntax and framing refusal.
+        name: statusBadRequest
+        type: int
+        value: "400"
+      - doc: statusContentTooLarge answers a body past its bound.
+        name: statusContentTooLarge
+        type: int
+        value: "413"
+      - doc: statusURITooLong answers a target past its bound.
+        name: statusURITooLong
+        type: int
+        value: "414"
+      - doc: statusExpectationFailed answers an Expect field.
+        name: statusExpectationFailed
+        type: int
+        value: "417"
+      - doc: statusFieldsTooLarge answers a head past its bound.
+        name: statusFieldsTooLarge
+        type: int
+        value: "431"
+      - doc: statusNotImplemented answers CONNECT.
+        name: statusNotImplemented
+        type: int
+        value: "501"
+    name: statusBadRequest
+  - doc: The status codes the writer reasons about.
+    grouped: true
+    items:
+      - doc: statusOK is what a zero HTTP1ResponseValue.Status means.
+        name: statusOK
+        type: int
+        value: "200"
+      - doc: statusNoContent carries neither a length nor a body.
+        name: statusNoContent
+        type: int
+        value: "204"
+      - doc: statusNotModified carries neither a length nor a body.
+        name: statusNotModified
+        type: int
+        value: "304"
+      - doc: "statusMin is the lowest status the profile sends: no interim response."
+        name: statusMin
+        type: int
+        value: "200"
+      - doc: statusMax is the highest three-digit status.
+        name: statusMax
+        type: int
+        value: "999"
+      - doc: statusRegistered is one past the highest code statusLines spells.
+        name: statusRegistered
+        type: int
+        value: "600"
+      - doc: decimal is the base a status and a Content-Length are written in.
+        name: decimal
+        type: int
+        value: "10"
+    name: statusOK
+files:
+  - decls: []
+    name: doc.go
+  - decls:
+      - version
+      - byteValues
+      - kindOther
+      - tchar
+      - fieldKind
+      - Parser
+      - tokenTable
+      - NewParser
+      - orDefault
+      - Parser.Limits
+      - Parser.Parse
+      - ranOut
+      - Continue
+      - Pending
+      - reset
+      - requestLine
+      - method
+      - requestTarget
+      - tooLong
+      - emptyOrLong
+      - versionLine
+      - versionPrefix
+      - versionEnd
+      - lineEnd
+      - fields
+      - lineStart
+      - crlfAt
+      - field
+      - fieldValue
+      - valueStopAt
+      - crValue
+      - trimRight
+      - nameEnd
+      - crName
+      - known
+      - kindOf
+      - host
+      - authorization
+      - contentLength
+      - hasField
+      - hasClose
+      - nextToken
+      - isListSep
+      - tokenEnd
+      - foldIs
+    name: parse.go
+  - decls:
+      - RefusalNone
+      - refusalCount
+      - statusBadRequest
+      - refusalNames
+      - Refusal
+      - Refusal.String
+      - Refusal.Status
+      - Refusal.Err
+    name: refusal.go
+  - decls:
+      - statusOK
+      - statusLines
+      - refusalAnswerTable
+      - AppendStatusLine
+      - AppendField
+      - token
+      - fieldText
+      - owned
+      - AppendResponse
+      - appendFraming
+      - AppendRefusal
+    name: write.go
+functions:
+  - doc: "tokenTable builds the tchar table: the alphanumerics and fifteen symbols."
+    name: tokenTable
+    results: "[byteValues]bool"
+  - name: NewParser
+    params: l corenet.HTTP1LimitsValue
+    results: Parser, error
+  - doc: orDefault returns v, or def when v is zero.
+    name: orDefault
+    params: v, def T
+    results: T
+    typeParams: T int | int64
+  - doc: |-
+      ranOut turns a scan's outcome into Parse's refusal: a scan that stopped for
+      want of bytes is a refusal only once the head bound has been reached.
+    name: ranOut
+    params: r Refusal, n, head int
+    results: Refusal
+  - name: Continue
+    params: buf []byte, req *corenet.HTTP1RequestValue
+    results: int
+  - name: Pending
+    params: req *corenet.HTTP1RequestValue, buffered int
+    results: int
+  - doc: |-
+      reset clears what Parse sets, leaving the field array's stale entries past
+      NFields, which nothing reads.
+    name: reset
+    params: req *corenet.HTTP1RequestValue
+  - doc: |-
+      requestLine reads "method SP target SP HTTP/1.1 CRLF" from the start of
+      head and returns the index after it, or 0 when head ends first, or a
+      refusal.
+    name: requestLine
+    params: head []byte, target int, req *corenet.HTTP1RequestValue
+    results: int, Refusal
+  - doc: method reads the method and its space, and returns the index after them.
+    name: method
+    params: head []byte, req *corenet.HTTP1RequestValue
+    results: int, Refusal
+  - doc: |-
+      requestTarget reads the target that starts at start, and its space, and
+      returns the index after them.
+    name: requestTarget
+    params: head []byte, start, bound int, req *corenet.HTTP1RequestValue
+    results: int, Refusal
+  - doc: tooLong returns RefusalTargetTooLong when past is true, RefusalNone else.
+    name: tooLong
+    params: past bool
+    results: Refusal
+  - doc: |-
+      emptyOrLong names the refusal of a target of n bytes that is either empty
+      or past its bound.
+    name: emptyOrLong
+    params: n int
+    results: Refusal
+  - doc: |-
+      versionLine reads "HTTP/1.1 CRLF" at start and returns the index after it,
+      or 0 when head ends first, or a refusal.
+    name: versionLine
+    params: head []byte, start int
+    results: int, Refusal
+  - doc: |-
+      versionPrefix judges a version line cut short: rest holds fewer bytes than
+      the version and its CRLF.
+    name: versionPrefix
+    params: rest []byte
+    results: Refusal
+  - doc: |-
+      versionEnd judges the bytes after the version: c, and next when have says
+      it has arrived.
+    name: versionEnd
+    params: c, next byte, have bool
+    results: Refusal
+  - doc: |-
+      lineEnd names the refusal for c found where a request-line element should
+      go on: a bare CR or LF when it is one, def otherwise.
+    name: lineEnd
+    params: c byte, def Refusal
+    results: Refusal
+  - doc: |-
+      fields reads the field lines from start up to and including the blank line,
+      and returns the index after it, or 0 when head ends first, or a refusal.
+    name: fields
+    params: head []byte, start int, body int64, req *corenet.HTTP1RequestValue
+    results: int, Refusal
+  - doc: |-
+      lineStart judges the first byte of a line at pos: the blank line (done, and
+      the index after it), a refusal, the bytes running out (0), or a field line
+      (pos itself).
+    name: lineStart
+    params: head []byte, pos, nfields int
+    results: int, bool, Refusal
+  - doc: |-
+      crlfAt judges the CR at pos: the index after its LF, 0 while the LF has not
+      arrived, or a bare CR.
+    name: crlfAt
+    params: head []byte, pos int
+    results: int, Refusal
+  - doc: |-
+      field reads one field line at start, records it, and returns the index
+      after its CRLF, or 0 when head ends first, or a refusal.
+    name: field
+    params: head []byte, start int, body int64, req *corenet.HTTP1RequestValue
+    results: int, Refusal
+  - doc: |-
+      fieldValue scans a field value from start: it skips the leading whitespace
+      and returns where the value starts and the index of its CR, or a 0 end when
+      head ends first, or a refusal.
+    name: fieldValue
+    params: head []byte, start int
+    results: valueStart, valueEnd int, refusal Refusal
+  - doc: |-
+      valueStopAt judges the control byte that stopped a value scan at pos, the
+      byte after it present: RefusalNone for a CRLF, or a refusal named after the
+      byte.
+    name: valueStopAt
+    params: head []byte, pos int
+    results: Refusal
+  - doc: crValue judges the CR that ends a value at pos, the byte after it present.
+    name: crValue
+    params: head []byte, pos int
+    results: Refusal
+  - doc: trimRight returns v without its trailing spaces and tabs.
+    name: trimRight
+    params: v []byte
+    results: "[]byte"
+  - doc: |-
+      nameEnd names the refusal for a field name of n bytes that stopped at pos
+      on something other than its colon. A CR whose LF has not arrived yet gives
+      RefusalNone, which the caller reads as "more bytes".
+    name: nameEnd
+    params: head []byte, pos, n int
+    results: Refusal
+  - doc: crName judges the CR that ends a field line with no colon.
+    name: crName
+    params: head []byte, pos int
+    results: Refusal
+  - doc: |-
+      known applies the profile's rules to the fields it reads — Host,
+      Authorization, Content-Length, Connection, Expect and Transfer-Encoding —
+      and lets every other field through.
+    name: known
+    params: name, value []byte, body int64, req *corenet.HTTP1RequestValue
+    results: Refusal
+  - doc: |-
+      kindOf returns which known field name is, or kindOther: no two known
+      names share a length, so one comparison decides.
+    name: kindOf
+    params: name []byte
+    results: fieldKind
+  - doc: host records the Host field, refusing a second one.
+    name: host
+    params: value []byte, req *corenet.HTTP1RequestValue
+    results: Refusal
+  - doc: authorization records the Authorization field, refusing a second one.
+    name: authorization
+    params: value []byte, req *corenet.HTTP1RequestValue
+    results: Refusal
+  - doc: |-
+      contentLength reads a Content-Length value: one to ten decimal digits, no
+      sign, no space, no list, at most body, and the first of its name.
+    name: contentLength
+    params: value []byte, body int64, req *corenet.HTTP1RequestValue
+    results: Refusal
+  - doc: hasField reports whether req already holds a field named name.
+    name: hasField
+    params: req *corenet.HTTP1RequestValue, name string
+    results: bool
+  - doc: |-
+      hasClose reports whether a Connection value, a comma list of tokens, holds
+      the close token.
+    name: hasClose
+    params: v []byte
+    results: bool
+  - doc: |-
+      nextToken returns the token of a comma list that starts at or after pos,
+      separators skipped, and the index after it.
+    name: nextToken
+    params: v []byte, pos int
+    results: "[]byte, int"
+  - doc: isListSep reports whether c separates the tokens of a comma list.
+    name: isListSep
+    params: c byte
+    results: bool
+  - doc: tokenEnd returns the length of the run of tchar bytes b starts with.
+    name: tokenEnd
+    params: b []byte
+    results: int
+  - doc: |-
+      foldIs reports whether b equals lit once A–Z in b are folded to a–z. lit is
+      lowercase letters and '-' only, which is what makes OR 0x20 exact: a byte
+      ORed with 0x20 equals a lowercase letter only when it is that letter or its
+      capital, and equals '-' only when it is '-' or CR, which no caller passes —
+      a name is a token, and a Connection value holds no CR.
+    name: foldIs
+    params: b T, lit string
+    results: bool
+    typeParams: T ~string | ~[]byte
+  - doc: refusalAnswerTable spells, once, the answer to every refusal.
+    name: refusalAnswerTable
+    results: "[refusalCount]string"
+  - name: AppendStatusLine
+    params: dst []byte, status int
+    results: "[]byte, error"
+  - name: AppendField
+    params: dst []byte, name, value string
+    results: "[]byte, error"
+  - doc: token reports whether s is a non-empty RFC 9110 token.
+    name: token
+    params: s string
+    results: bool
+  - doc: fieldText reports whether s holds no control byte but the tab, and no DEL.
+    name: fieldText
+    params: s string
+    results: bool
+  - doc: owned reports whether name is a field the codec writes itself.
+    name: owned
+    params: name string
+    results: bool
+  - name: AppendResponse
+    params: dst []byte, req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue, closing bool
+    results: "[]byte, error"
+  - doc: |-
+      appendFraming appends Content-Length unless the status forbids it,
+      Connection: close when asked, and the blank line that ends the head.
+    name: appendFraming
+    params: dst []byte, n int, bodiless, closing bool
+    results: "[]byte"
+  - name: AppendRefusal
+    params: dst []byte, r Refusal
+    results: "[]byte"
+imports:
+  bytes: bytes
+  corenet: github.com/kitsunium/sdk/internal/core/net
+  errs: github.com/kitsunium/sdk/internal/kernel/errs
+  strconv: strconv
+  swar: github.com/kitsunium/sdk/internal/kernel/swar
+package:
+  docFile: doc.go
+  importPath: github.com/kitsunium/sdk/internal/service/net/http1
+  name: http1
+  purpose: "Package http1 is the codec of the restricted HTTP/1.1 profile (ADR 0186 §D6): it frames requests out of bytes and appends responses to bytes, and does no I/O."
+types:
+  - doc: fieldKind is which of the profile's known fields a name is.
+    kind: named
+    name: fieldKind
+    underlying: uint8
+  - fields:
+      - doc: head bounds the head in bytes; zero selects corenet.HTTP1DefaultHead.
+        name: head
+        type: int
+      - doc: target bounds the request-target in bytes; zero selects corenet.HTTP1DefaultTarget.
+        name: target
+        type: int
+      - doc: body bounds the Content-Length; zero selects corenet.HTTP1DefaultBody.
+        name: body
+        type: int64
+    kind: struct
+    methods:
+      - name: Limits
+        recv: p Parser
+        results: corenet.HTTP1LimitsValue
+      - name: Parse
+        params: buf []byte, req *corenet.HTTP1RequestValue
+        recv: p Parser
+        results: int, Refusal
+    name: Parser
+  - kind: named
+    methods:
+      - name: String
+        recv: r Refusal
+        results: string
+      - name: Status
+        recv: r Refusal
+        results: int
+      - name: Err
+        recv: r Refusal
+        results: error
+    name: Refusal
+    underlying: uint8
+vars:
+  - grouped: true
+    items:
+      - doc: tchar holds the RFC 9110 §5.6.2 token characters.
+        name: tchar
+        value: tokenTable()
+      - doc: |-
+          targetStop is every byte that ends or breaks a request-target: a space
+          or any byte below it, DEL, and the bytes from 0x80 up.
+        name: targetStop
+        value: swar.NewSet(asciiDEL, asciiDEL, asciiSpace+1, true)
+      - doc: |-
+          valueStop is every byte a field value scan must look at: the C0
+          controls, CR and LF included, and DEL. The tab is among them and is the
+          one allowed.
+        name: valueStop
+        value: swar.NewSet(asciiDEL, asciiDEL, asciiSpace, false)
+      - doc: |-
+          knownNames holds, at its length, the lowercase name of each field the
+          profile reads: no two share a length, so one comparison identifies one.
+        name: knownNames
+        value: |-
+          [knownMaxLen]string{
+          		len("host"):              "host",
+          		len("expect"):            "expect",
+          		len("connection"):        "connection",
+          		len("authorization"):     "authorization",
+          		len("content-length"):    "content-length",
+          		len("transfer-encoding"): "transfer-encoding",
+          	}
+      - doc: knownKinds is the kind of the name knownNames holds at the same length.
+        name: knownKinds
+        value: |-
+          [knownMaxLen]fieldKind{
+          		len("host"):              kindHost,
+          		len("expect"):            kindExpect,
+          		len("connection"):        kindConnection,
+          		len("authorization"):     kindAuthorization,
+          		len("content-length"):    kindContentLength,
+          		len("transfer-encoding"): kindTransferEncoding,
+          	}
+      - doc: methodConnect is the one method the profile refuses by name.
+        name: methodConnect
+        value: "[]byte(\"CONNECT\")"
+      - doc: versionBytes is version, for the comparisons with a slice of the input.
+        name: versionBytes
+        value: "[]byte(version)"
+    name: tchar
+  - grouped: true
+    items:
+      - doc: refusalNames are the names String renders, indexed by Refusal.
+        name: refusalNames
+        value: |-
+          [refusalCount]string{
+          		RefusalNone:                    "none",
+          		RefusalRequestLine:             "request_line",
+          		RefusalMethod:                  "method",
+          		RefusalTarget:                  "target",
+          		RefusalVersion:                 "version",
+          		RefusalBareCR:                  "bare_cr",
+          		RefusalBareLF:                  "bare_lf",
+          		RefusalNUL:                     "nul",
+          		RefusalControl:                 "control",
+          		RefusalObsFold:                 "obs_fold",
+          		RefusalSpaceBeforeColon:        "space_before_colon",
+          		RefusalName:                    "name",
+          		RefusalTransferEncoding:        "transfer_encoding",
+          		RefusalContentLength:           "content_length",
+          		RefusalContentLengthDuplicated: "content_length_duplicated",
+          		RefusalAuthorizationDuplicated: "authorization_duplicated",
+          		RefusalHostDuplicated:          "host_duplicated",
+          		RefusalExpect:                  "expect",
+          		RefusalHeadTooLarge:            "head_too_large",
+          		RefusalTooManyFields:           "too_many_fields",
+          		RefusalTargetTooLong:           "target_too_long",
+          		RefusalBodyTooLarge:            "body_too_large",
+          		RefusalMethodUnsupported:       "method_unsupported",
+          	}
+      - doc: |-
+          refusalStatus is the status each refusal is answered with; RefusalNone's
+          is zero.
+        name: refusalStatus
+        value: |-
+          [refusalCount]int{
+          		RefusalRequestLine:             statusBadRequest,
+          		RefusalMethod:                  statusBadRequest,
+          		RefusalTarget:                  statusBadRequest,
+          		RefusalVersion:                 statusBadRequest,
+          		RefusalBareCR:                  statusBadRequest,
+          		RefusalBareLF:                  statusBadRequest,
+          		RefusalNUL:                     statusBadRequest,
+          		RefusalControl:                 statusBadRequest,
+          		RefusalObsFold:                 statusBadRequest,
+          		RefusalSpaceBeforeColon:        statusBadRequest,
+          		RefusalName:                    statusBadRequest,
+          		RefusalTransferEncoding:        statusBadRequest,
+          		RefusalContentLength:           statusBadRequest,
+          		RefusalContentLengthDuplicated: statusBadRequest,
+          		RefusalAuthorizationDuplicated: statusBadRequest,
+          		RefusalHostDuplicated:          statusBadRequest,
+          		RefusalExpect:                  statusExpectationFailed,
+          		RefusalHeadTooLarge:            statusFieldsTooLarge,
+          		RefusalTooManyFields:           statusFieldsTooLarge,
+          		RefusalTargetTooLong:           statusURITooLong,
+          		RefusalBodyTooLarge:            statusContentTooLarge,
+          		RefusalMethodUnsupported:       statusNotImplemented,
+          	}
+      - doc: |-
+          refusalErrs is the core/net sentinel each refusal belongs to, grouped by
+          the decision a caller makes rather than by the byte that broke.
+        name: refusalErrs
+        value: |-
+          [refusalCount]error{
+          		RefusalRequestLine:             corenet.HTTP1RequestMalformed,
+          		RefusalMethod:                  corenet.HTTP1RequestMalformed,
+          		RefusalTarget:                  corenet.HTTP1RequestMalformed,
+          		RefusalVersion:                 corenet.HTTP1RequestMalformed,
+          		RefusalBareCR:                  corenet.HTTP1RequestMalformed,
+          		RefusalBareLF:                  corenet.HTTP1RequestMalformed,
+          		RefusalNUL:                     corenet.HTTP1RequestMalformed,
+          		RefusalControl:                 corenet.HTTP1RequestMalformed,
+          		RefusalObsFold:                 corenet.HTTP1RequestMalformed,
+          		RefusalSpaceBeforeColon:        corenet.HTTP1RequestMalformed,
+          		RefusalName:                    corenet.HTTP1RequestMalformed,
+          		RefusalTransferEncoding:        corenet.HTTP1TransferEncoding,
+          		RefusalContentLength:           corenet.HTTP1ContentLengthInvalid,
+          		RefusalContentLengthDuplicated: corenet.HTTP1ContentLengthInvalid,
+          		RefusalAuthorizationDuplicated: corenet.HTTP1FieldDuplicated,
+          		RefusalHostDuplicated:          corenet.HTTP1FieldDuplicated,
+          		RefusalExpect:                  corenet.HTTP1ExpectRefused,
+          		RefusalHeadTooLarge:            corenet.HTTP1HeadTooLarge,
+          		RefusalTooManyFields:           corenet.HTTP1HeadTooLarge,
+          		RefusalTargetTooLong:           corenet.HTTP1TargetTooLong,
+          		RefusalBodyTooLarge:            corenet.HTTP1BodyTooLarge,
+          		RefusalMethodUnsupported:       corenet.HTTP1MethodUnsupported,
+          	}
+    name: refusalNames
+  - grouped: true
+    items:
+      - doc: |-
+          statusLines are the status lines of the codes RFC 9110 §15 registers,
+          spelled once, indexed by code. An entry left empty is composed on demand.
+        name: statusLines
+        value: |-
+          [statusRegistered]string{
+          		200: "HTTP/1.1 200 OK\r\n",
+          		201: "HTTP/1.1 201 Created\r\n",
+          		202: "HTTP/1.1 202 Accepted\r\n",
+          		203: "HTTP/1.1 203 Non-Authoritative Information\r\n",
+          		204: "HTTP/1.1 204 No Content\r\n",
+          		205: "HTTP/1.1 205 Reset Content\r\n",
+          		206: "HTTP/1.1 206 Partial Content\r\n",
+          		300: "HTTP/1.1 300 Multiple Choices\r\n",
+          		301: "HTTP/1.1 301 Moved Permanently\r\n",
+          		302: "HTTP/1.1 302 Found\r\n",
+          		303: "HTTP/1.1 303 See Other\r\n",
+          		304: "HTTP/1.1 304 Not Modified\r\n",
+          		307: "HTTP/1.1 307 Temporary Redirect\r\n",
+          		308: "HTTP/1.1 308 Permanent Redirect\r\n",
+          		400: "HTTP/1.1 400 Bad Request\r\n",
+          		401: "HTTP/1.1 401 Unauthorized\r\n",
+          		402: "HTTP/1.1 402 Payment Required\r\n",
+          		403: "HTTP/1.1 403 Forbidden\r\n",
+          		404: "HTTP/1.1 404 Not Found\r\n",
+          		405: "HTTP/1.1 405 Method Not Allowed\r\n",
+          		406: "HTTP/1.1 406 Not Acceptable\r\n",
+          		407: "HTTP/1.1 407 Proxy Authentication Required\r\n",
+          		408: "HTTP/1.1 408 Request Timeout\r\n",
+          		409: "HTTP/1.1 409 Conflict\r\n",
+          		410: "HTTP/1.1 410 Gone\r\n",
+          		411: "HTTP/1.1 411 Length Required\r\n",
+          		412: "HTTP/1.1 412 Precondition Failed\r\n",
+          		413: "HTTP/1.1 413 Content Too Large\r\n",
+          		414: "HTTP/1.1 414 URI Too Long\r\n",
+          		415: "HTTP/1.1 415 Unsupported Media Type\r\n",
+          		416: "HTTP/1.1 416 Range Not Satisfiable\r\n",
+          		417: "HTTP/1.1 417 Expectation Failed\r\n",
+          		421: "HTTP/1.1 421 Misdirected Request\r\n",
+          		422: "HTTP/1.1 422 Unprocessable Content\r\n",
+          		426: "HTTP/1.1 426 Upgrade Required\r\n",
+          		428: "HTTP/1.1 428 Precondition Required\r\n",
+          		429: "HTTP/1.1 429 Too Many Requests\r\n",
+          		431: "HTTP/1.1 431 Request Header Fields Too Large\r\n",
+          		500: "HTTP/1.1 500 Internal Server Error\r\n",
+          		501: "HTTP/1.1 501 Not Implemented\r\n",
+          		502: "HTTP/1.1 502 Bad Gateway\r\n",
+          		503: "HTTP/1.1 503 Service Unavailable\r\n",
+          		504: "HTTP/1.1 504 Gateway Timeout\r\n",
+          		505: "HTTP/1.1 505 HTTP Version Not Supported\r\n",
+          	}
+      - doc: |-
+          refusalAnswers is the whole answer to each refusal, indexed by Refusal:
+          its status line, no body, and the connection closed. RefusalNone's slot
+          holds the 400, which AppendRefusal also gives a value past the table.
+        name: refusalAnswers
+        value: refusalAnswerTable()
+      - doc: methodHead is the one method whose answer carries no body.
+        name: methodHead
+        value: "[]byte(\"HEAD\")"
+    name: statusLines

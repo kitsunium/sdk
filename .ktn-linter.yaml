@@ -1038,6 +1038,11 @@ rules:
   # jobs subsystem (issue #483 part 4), the same three facts by the same names.
   KTN-STRUCT-FLAGS:
     exclude:
+      # core/net.HTTP1RequestValue: HasHost, HasAuthorization and Close are three
+      # answers about one request a handler reads by name, not a set of flags;
+      # HasHost is what tells an empty Host from an absent one (ADR 0186 §D6).
+      - "**/internal/core/net/http1.go"
+      - "internal/core/net/http1.go"
       - "**/internal/service/app/health/entry.go"
       - "internal/service/app/health/entry.go"
       - "**/internal/core/app/scheduler/scheduler_result.go"

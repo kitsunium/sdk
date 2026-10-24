@@ -533,6 +533,50 @@ codes:
     const: CodeStaticMisconfigured
     hex: "0x00_02_0B_22"
     package: internal/core/net
+  - code: "0.2.11.45"
+    const: CodeHTTP1RequestMalformed
+    hex: "0x00_02_0B_2D"
+    package: internal/core/net
+  - code: "0.2.11.46"
+    const: CodeHTTP1TransferEncoding
+    hex: "0x00_02_0B_2E"
+    package: internal/core/net
+  - code: "0.2.11.47"
+    const: CodeHTTP1ContentLengthInvalid
+    hex: "0x00_02_0B_2F"
+    package: internal/core/net
+  - code: "0.2.11.48"
+    const: CodeHTTP1FieldDuplicated
+    hex: "0x00_02_0B_30"
+    package: internal/core/net
+  - code: "0.2.11.49"
+    const: CodeHTTP1ExpectRefused
+    hex: "0x00_02_0B_31"
+    package: internal/core/net
+  - code: "0.2.11.50"
+    const: CodeHTTP1HeadTooLarge
+    hex: "0x00_02_0B_32"
+    package: internal/core/net
+  - code: "0.2.11.51"
+    const: CodeHTTP1TargetTooLong
+    hex: "0x00_02_0B_33"
+    package: internal/core/net
+  - code: "0.2.11.52"
+    const: CodeHTTP1BodyTooLarge
+    hex: "0x00_02_0B_34"
+    package: internal/core/net
+  - code: "0.2.11.53"
+    const: CodeHTTP1MethodUnsupported
+    hex: "0x00_02_0B_35"
+    package: internal/core/net
+  - code: "0.2.11.54"
+    const: CodeHTTP1ResponseInvalid
+    hex: "0x00_02_0B_36"
+    package: internal/core/net
+  - code: "0.2.11.55"
+    const: CodeHTTP1Misconfigured
+    hex: "0x00_02_0B_37"
+    package: internal/core/net
   - code: "0.2.12.1"
     const: CodeInvalidEntry
     hex: "0x00_02_0C_01"

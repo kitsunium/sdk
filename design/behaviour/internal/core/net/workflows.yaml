@@ -1,6 +1,32 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 workflows:
+  - of: (*HTTP1RequestValue).Field
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: r.Fields[i].Value, true
+                when: foldEqual(r.Fields[i].Name, name)
+          key: i
+          range: r.NFields
+      - return: nil, false
+  - of: foldEqual
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(b) != len(s)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: foldByte(b[i]) != foldByte(s[i])
+          key: i
+          range: len(b)
+      - return: "true"
   - of: Chain
     steps:
       - loop:

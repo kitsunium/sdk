@@ -252,7 +252,133 @@ packages:
             name: CodeStaticMisconfigured
             value: "0x00_02_0B_22"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeHTTP1RequestMalformed identifies a request the restricted HTTP/1.1
+              profile refuses for its syntax: a bare CR or LF, a NUL or other control byte
+              in a value, obs-fold, whitespace before a colon, a name outside tchar, or a
+              request line that is not method, target and HTTP/1.1 (ADR 0186 §D6).
+            name: CodeHTTP1RequestMalformed
+            value: "0x00_02_0B_2D"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeHTTP1TransferEncoding identifies a request carrying a
+              Transfer-Encoding field, chunked or not: the profile frames by Content-Length
+              alone, so it carries no chunked body and no trailer.
+            name: CodeHTTP1TransferEncoding
+            value: "0x00_02_0B_2E"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeHTTP1ContentLengthInvalid identifies a Content-Length the profile cannot
+              frame by: empty, not decimal digits, too long, or present twice, equal or not.
+            name: CodeHTTP1ContentLengthInvalid
+            value: "0x00_02_0B_2F"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeHTTP1FieldDuplicated identifies a second Authorization or Host field in
+              one request.
+            name: CodeHTTP1FieldDuplicated
+            value: "0x00_02_0B_30"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeHTTP1ExpectRefused identifies a request carrying an Expect field: the
+              profile sends no interim response, so 100-continue cannot be met.
+            name: CodeHTTP1ExpectRefused
+            value: "0x00_02_0B_31"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeHTTP1HeadTooLarge identifies a request head past the profile's head
+              bound or its field-line count.
+            name: CodeHTTP1HeadTooLarge
+            value: "0x00_02_0B_32"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeHTTP1TargetTooLong identifies a request-target past the profile's target
+              bound.
+            name: CodeHTTP1TargetTooLong
+            value: "0x00_02_0B_33"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeHTTP1BodyTooLarge identifies a Content-Length past the profile's body
+              bound.
+            name: CodeHTTP1BodyTooLarge
+            value: "0x00_02_0B_34"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeHTTP1MethodUnsupported identifies a CONNECT request: the profile opens no
+              tunnel.
+            name: CodeHTTP1MethodUnsupported
+            value: "0x00_02_0B_35"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeHTTP1ResponseInvalid identifies a response the profile's writer refuses
+              to put on the wire: a status outside 200 to 999, a body on a 204 or a 304, a
+              field name that is not a token or that the codec writes itself, or a field
+              value with a control byte.
+            name: CodeHTTP1ResponseInvalid
+            value: "0x00_02_0B_36"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeHTTP1Misconfigured identifies profile limits the codec refuses to
+              interpret: a negative bound, or one past its maximum.
+            name: CodeHTTP1Misconfigured
+            value: "0x00_02_0B_37"
+        type: errs.Code
     constants:
+      - doc: |-
+          HTTP1MaxFields is how many field lines one request of the restricted
+          HTTP/1.1 profile may carry. It sizes HTTP1RequestValue.Fields, so a request is
+          framed into a fixed array and never into a slice that grows: one more line is
+          refused (431), never stored elsewhere.
+        name: HTTP1MaxFields
+        type: int
+        value: "64"
+      - doc: |-
+          HTTP1DefaultHead is the head bound a zero HTTP1LimitsValue.Head selects: the
+          request line, every field line and the blank line that ends them, in bytes.
+        name: HTTP1DefaultHead
+        type: int
+        value: "8192"
+      - doc: HTTP1MaxHead is the largest head bound HTTP1LimitsValue.Head may ask for.
+        name: HTTP1MaxHead
+        type: int
+        value: "65536"
+      - doc: |-
+          HTTP1DefaultTarget is the request-target bound a zero HTTP1LimitsValue.Target
+          selects, in bytes.
+        name: HTTP1DefaultTarget
+        type: int
+        value: "2048"
+      - doc: |-
+          HTTP1DefaultBody is the Content-Length bound a zero HTTP1LimitsValue.Body
+          selects: one mebibyte.
+        name: HTTP1DefaultBody
+        type: int64
+        value: 1 << 20
+      - doc: |-
+          HTTP1MaxBody is the largest Content-Length bound HTTP1LimitsValue.Body may
+          ask for: one gibibyte, which ten decimal digits always hold.
+        name: HTTP1MaxBody
+        type: int64
+        value: 1 << 30
+      - doc: |-
+          HTTP1MaxContentLengthDigits is how many digits a Content-Length may carry,
+          leading zeros included. Ten digits hold HTTP1MaxBody and stay far from the
+          int64 limit, so the value is accumulated with no overflow to check: a longer
+          field is refused before it is read.
+        name: HTTP1MaxContentLengthDigits
+        type: int
+        value: "10"
       - blockDoc: The lifecycle phases, in the order a server passes through them.
         doc: PhaseNew is a constructed server that has not bound anything yet.
         name: PhaseNew
@@ -762,6 +888,26 @@ packages:
               - type: error
         name: ConnHandler
       - doc: |-
+          HTTP1Handler answers one request of the restricted HTTP/1.1 profile.
+
+          It sees only requests the codec framed and accepted: a refusal is answered
+          and the connection closed before any handler runs, and no handler can turn
+          one into an answer of its own. It fills res — the status, extra field lines
+          and the body — and the codec writes the framing: the status line,
+          Content-Length and Connection: close.
+
+          req and every byte it aliases are valid until ServeHTTP1 returns; a handler
+          that keeps one copies it. On the loop engine a handler runs on the loop's
+          thread and must not block it.
+        methods:
+          - in:
+              - name: req
+                type: "*HTTP1RequestValue"
+              - name: res
+                type: "*HTTP1ResponseValue"
+            name: ServeHTTP1
+        name: HTTP1Handler
+      - doc: |-
           Packet is one received datagram.
 
           Data is valid only until ServePacket returns: the buffer is recycled straight
@@ -1151,6 +1297,121 @@ packages:
             private: "core/net: a nil file tree, a header value with a control character, or an unknown Referrer-Policy token"
             public: The static file handler configuration is not valid
             reason: STATIC_MISCONFIGURED
+          - code: CodeHTTP1RequestMalformed
+            doc: |-
+              HTTP1RequestMalformed is the refusal of a request whose syntax the profile
+              does not accept. It is answered 400 with Connection: close, and the
+              connection is closed: no handler sees the request.
+            exit: DATAERR
+            http: 400
+            name: HTTP1RequestMalformed
+            private: "core/net: a bare CR or LF, a NUL or control byte, obs-fold, whitespace before a colon, a non-token name, or a bad request line"
+            public: The request is malformed
+            reason: HTTP1_REQUEST_MALFORMED
+          - code: CodeHTTP1TransferEncoding
+            doc: |-
+              HTTP1TransferEncoding is the refusal of any Transfer-Encoding. A
+              request that carries one alongside a Content-Length is the classic smuggling
+              vector (RFC 9112 §11.2), so the profile never chooses between them.
+            exit: DATAERR
+            http: 400
+            name: HTTP1TransferEncoding
+            private: "core/net: a Transfer-Encoding field, chunked or not; the profile frames by Content-Length alone"
+            public: Transfer-Encoding is not supported
+            reason: HTTP1_TRANSFER_ENCODING
+          - code: CodeHTTP1ContentLengthInvalid
+            doc: |-
+              HTTP1ContentLengthInvalid is the refusal of a Content-Length the profile
+              cannot frame by. A second one is refused even when it repeats the first:
+              two parsers disagreeing on which one counts is how a body becomes a request.
+            exit: DATAERR
+            http: 400
+            name: HTTP1ContentLengthInvalid
+            private: "core/net: an empty, non-digit, over-long or repeated Content-Length"
+            public: The Content-Length is not valid
+            reason: HTTP1_CONTENT_LENGTH_INVALID
+          - code: CodeHTTP1FieldDuplicated
+            doc: |-
+              HTTP1FieldDuplicated is the refusal of a second Authorization or Host. The
+              profile hands a handler one of each, and picking one of two would let a
+              front end and this server judge different credentials or origins.
+            exit: DATAERR
+            http: 400
+            name: HTTP1FieldDuplicated
+            private: "core/net: a second Authorization or Host field"
+            public: A request field is repeated
+            reason: HTTP1_FIELD_DUPLICATED
+          - code: CodeHTTP1ExpectRefused
+            doc: |-
+              HTTP1ExpectRefused is the refusal of an Expect field, answered 417
+              (RFC 9110 §10.1.1).
+            exit: DATAERR
+            http: 417
+            name: HTTP1ExpectRefused
+            private: "core/net: an Expect field; the profile sends no 100 Continue"
+            public: The expectation cannot be met
+            reason: HTTP1_EXPECT_REFUSED
+          - code: CodeHTTP1HeadTooLarge
+            doc: |-
+              HTTP1HeadTooLarge is the refusal of a head past the profile's bound, in
+              bytes or in field lines, answered 431.
+            exit: DATAERR
+            http: 431
+            name: HTTP1HeadTooLarge
+            private: "core/net: the head did not end within its byte bound, or carried more than HTTP1MaxFields field lines"
+            public: The request header is too large
+            reason: HTTP1_HEAD_TOO_LARGE
+          - code: CodeHTTP1TargetTooLong
+            doc: |-
+              HTTP1TargetTooLong is the refusal of a request-target past the profile's
+              bound, answered 414.
+            exit: DATAERR
+            http: 414
+            name: HTTP1TargetTooLong
+            private: "core/net: the request-target is longer than the target bound"
+            public: The request target is too long
+            reason: HTTP1_TARGET_TOO_LONG
+          - code: CodeHTTP1BodyTooLarge
+            doc: |-
+              HTTP1BodyTooLarge is the refusal of a Content-Length past the profile's
+              body bound, answered 413 before a byte of the body is read.
+            exit: DATAERR
+            http: 413
+            name: HTTP1BodyTooLarge
+            private: "core/net: the declared Content-Length is past the body bound"
+            public: The request content is too large
+            reason: HTTP1_BODY_TOO_LARGE
+          - code: CodeHTTP1MethodUnsupported
+            doc: |-
+              HTTP1MethodUnsupported is the refusal of CONNECT, answered 501: a tunnel is
+              outside the profile (ADR 0186 §D6).
+            exit: DATAERR
+            http: 501
+            name: HTTP1MethodUnsupported
+            private: "core/net: a CONNECT request"
+            public: The request method is not supported
+            reason: HTTP1_METHOD_UNSUPPORTED
+          - code: CodeHTTP1ResponseInvalid
+            doc: |-
+              HTTP1ResponseInvalid is returned by the profile's writer for a response it
+              will not put on the wire. Nothing is appended: a half-written response on a
+              kept-alive connection would frame every response after it wrongly.
+            exit: USAGE
+            name: HTTP1ResponseInvalid
+            private: "core/net: a status outside 200-999, a body on 204 or 304, a non-token or codec-owned field name, or a control byte in a field value"
+            public: The response is not valid
+            reason: HTTP1_RESPONSE_INVALID
+          - code: CodeHTTP1Misconfigured
+            doc: |-
+              HTTP1Misconfigured is returned for profile limits the codec refuses to
+              interpret rather than guess at (ADR 0031): a zero bound is the default, a
+              negative one, or one past its maximum, is refused. The "option" field names
+              which.
+            exit: CONFIG
+            name: HTTP1Misconfigured
+            private: "core/net: a negative bound, a head past HTTP1MaxHead, a target past the head, or a body past HTTP1MaxBody"
+            public: The HTTP/1.1 profile limits are not valid
+            reason: HTTP1_MISCONFIGURED
     types:
       - doc: |-
           AddressValue names one socket to bind. It is a value type so a group's listen
@@ -1363,6 +1624,169 @@ packages:
             recv: pointer
         name: DurationValue
         underlying: time.Duration
+      - doc: |-
+          HTTP1LimitsValue bounds what one request of the restricted HTTP/1.1 profile
+          may carry. Zero means the profile's default, never unbounded; a negative
+          field, or one past its maximum, is refused when the codec is built.
+        name: HTTP1LimitsValue
+        struct:
+          fields:
+            - doc: |-
+                Head bounds the request line, the field lines and the blank line that
+                ends them, in bytes: zero selects HTTP1DefaultHead, at most HTTP1MaxHead.
+              name: Head
+              tag: json:"head"
+              type: int
+            - doc: |-
+                Target bounds the request-target, in bytes: zero selects
+                HTTP1DefaultTarget, and it may not exceed Head.
+              name: Target
+              tag: json:"target"
+              type: int
+            - doc: |-
+                Body bounds the Content-Length a request may declare: zero selects
+                HTTP1DefaultBody, at most HTTP1MaxBody.
+              name: Body
+              tag: json:"body"
+              type: int64
+      - doc: |-
+          HTTP1FieldValue is one field line of a request, as it arrived: its name,
+          in the case the client wrote it, and its value with the surrounding
+          whitespace removed. Both slices alias the bytes the request was framed from.
+        name: HTTP1FieldValue
+        struct:
+          fields:
+            - doc: Name is the field name, validated as an RFC 9110 token.
+              name: Name
+              type: "[]byte"
+            - doc: |-
+                Value is the field value, without its leading and trailing spaces and
+                tabs; it holds no NUL, CR, LF or other control byte but the tab.
+              name: Value
+              type: "[]byte"
+      - doc: |-
+          HTTP1RequestValue is one request of the restricted HTTP/1.1 profile, framed
+          by the codec (internal/service/net/http1).
+
+          It is not named RequestValue: that name is the outbound request the Policy
+          port judges, and the two never meet. The profile's prefix is the domain's
+          way of naming a protocol's value, as SSEEventValue and WSMessageValue do.
+
+          Every slice aliases the bytes the codec read: the value is valid while those
+          bytes are, which on the loop engine is until OnBatchEnd returns. A handler
+          that keeps a byte past that copies it. Fields is an array, so a value framed
+          into a reused HTTP1RequestValue allocates nothing.
+        methods:
+          - doc: |-
+              Field returns the value of the first field named name and true, or nil and
+              false when the request carries none. Names compare case-insensitively on
+              A–Z only, so no locale or Unicode folding can make two names equal.
+            in:
+              - name: name
+                type: string
+            name: Field
+            out:
+              - type: "[]byte"
+              - type: bool
+            recv: pointer
+        name: HTTP1RequestValue
+        struct:
+          fields:
+            - doc: Method is the request method, a token.
+              name: Method
+              type: "[]byte"
+            - doc: Target is the request-target exactly as sent, still percent-encoded.
+              name: Target
+              type: "[]byte"
+            - doc: Host is the Host field's value; HasHost says whether it was present.
+              name: Host
+              type: "[]byte"
+            - doc: |-
+                Authorization is the Authorization field's value; HasAuthorization says
+                whether it was present.
+              name: Authorization
+              type: "[]byte"
+            - doc: |-
+                Body is the request content, Content-Length bytes after the head. It is
+                empty until the whole body has arrived.
+              name: Body
+              type: "[]byte"
+            - doc: ContentLength is the declared body length, zero when the field is absent.
+              name: ContentLength
+              type: int64
+            - doc: |-
+                HeadLen is the length of the head: the request line, the field lines and
+                the blank line. It is zero until the head is complete.
+              name: HeadLen
+              type: int
+            - doc: |-
+                Consumed is HeadLen plus ContentLength: the bytes this request takes from
+                the stream, whatever its method or route. The next pipelined request
+                starts there. It is set as soon as the head is complete, before the body
+                arrives, so an early answer knows how much it has to drain.
+              name: Consumed
+              type: int
+            - doc: NFields is how many entries of Fields the request filled.
+              name: NFields
+              type: int
+            - doc: |-
+                Fields holds the request's field lines in the order they arrived,
+                Host, Authorization and Content-Length included.
+              name: Fields
+              type: "[HTTP1MaxFields]HTTP1FieldValue"
+            - doc: HasHost reports whether the request carried a Host field.
+              name: HasHost
+              type: bool
+            - doc: |-
+                HasAuthorization reports whether the request carried an Authorization
+                field.
+              name: HasAuthorization
+              type: bool
+            - doc: |-
+                Close reports whether the client asked to close the connection after
+                this request: a Connection field holding the close token.
+              name: Close
+              type: bool
+      - doc: |-
+          HTTP1ResponseValue is the answer an HTTP1Handler gives to one request.
+
+          The handler sets the status, appends any field lines to Header with the
+          codec's writer and the content to Body. The codec writes the status line,
+          the Content-Length computed from Body and Connection: close when it is
+          needed: the handler never spells the response's framing, so it cannot get it
+          wrong.
+        name: HTTP1ResponseValue
+        struct:
+          fields:
+            - doc: |-
+                Status is the status code, 200 to 999; zero means 200. The profile
+                sends no interim response.
+              name: Status
+              type: int
+            - doc: |-
+                Header holds the response's extra field lines, each written as
+                "Name: value\r\n" by the codec's writer. It never holds Content-Length or
+                Connection, which the codec writes.
+              name: Header
+              type: "[]byte"
+            - doc: Body is the response content.
+              name: Body
+              type: "[]byte"
+            - doc: Close asks the codec to close the connection after this response.
+              name: Close
+              type: bool
+      - doc: HTTP1HandlerFunc adapts a plain function to HTTP1Handler.
+        methods:
+          - doc: ServeHTTP1 implements HTTP1Handler by calling f.
+            in:
+              - name: req
+                type: "*HTTP1RequestValue"
+              - name: res
+                type: "*HTTP1ResponseValue"
+            name: ServeHTTP1
+            recv: value
+        name: HTTP1HandlerFunc
+        underlying: func(req *HTTP1RequestValue, res *HTTP1ResponseValue)
       - doc: |-
           IdentityValue is an opaque TLS identity: a certificate chain, the trust
           anchors used to verify the peer, and the negotiated-version policy. Its String
@@ -2123,6 +2547,341 @@ packages:
         name: Client
         struct:
           unexported: true
+  - constants:
+      - doc: "RefusalNone is no refusal: the request was framed, or needs more bytes."
+        name: RefusalNone
+        type: Refusal
+        value: "0"
+      - doc: |-
+          RefusalRequestLine is a request line that does not end right after its
+          version.
+        name: RefusalRequestLine
+        type: Refusal
+        value: "1"
+      - doc: RefusalMethod is an empty method, or one that is not a token.
+        name: RefusalMethod
+        type: Refusal
+        value: "2"
+      - doc: |-
+          RefusalTarget is an empty request-target, or one holding a control byte,
+          DEL or a byte from 0x80 up.
+        name: RefusalTarget
+        type: Refusal
+        value: "3"
+      - doc: RefusalVersion is any version but HTTP/1.1.
+        name: RefusalVersion
+        type: Refusal
+        value: "4"
+      - doc: RefusalBareCR is a CR not followed by LF.
+        name: RefusalBareCR
+        type: Refusal
+        value: "5"
+      - doc: RefusalBareLF is a LF not preceded by CR.
+        name: RefusalBareLF
+        type: Refusal
+        value: "6"
+      - doc: RefusalNUL is a NUL inside a field value or name.
+        name: RefusalNUL
+        type: Refusal
+        value: "7"
+      - doc: |-
+          RefusalControl is a control byte other than the tab, or DEL, inside a
+          field value.
+        name: RefusalControl
+        type: Refusal
+        value: "8"
+      - doc: |-
+          RefusalObsFold is a field line that starts with a space or a tab: the
+          obsolete line folding (RFC 9112 §5.2).
+        name: RefusalObsFold
+        type: Refusal
+        value: "9"
+      - doc: |-
+          RefusalSpaceBeforeColon is whitespace between a field name and its colon
+          (RFC 9112 §5.1).
+        name: RefusalSpaceBeforeColon
+        type: Refusal
+        value: "10"
+      - doc: |-
+          RefusalName is an empty field name, one that is not a token, or a field
+          line with no colon.
+        name: RefusalName
+        type: Refusal
+        value: "11"
+      - doc: |-
+          RefusalTransferEncoding is any Transfer-Encoding field, chunked or not:
+          the profile frames by Content-Length alone, so it carries no chunked body
+          and no trailer.
+        name: RefusalTransferEncoding
+        type: Refusal
+        value: "12"
+      - doc: |-
+          RefusalContentLength is a Content-Length that is empty, not decimal
+          digits, or longer than corenet.HTTP1MaxContentLengthDigits.
+        name: RefusalContentLength
+        type: Refusal
+        value: "13"
+      - doc: |-
+          RefusalContentLengthDuplicated is a second Content-Length field, equal to
+          the first or not.
+        name: RefusalContentLengthDuplicated
+        type: Refusal
+        value: "14"
+      - doc: RefusalAuthorizationDuplicated is a second Authorization field.
+        name: RefusalAuthorizationDuplicated
+        type: Refusal
+        value: "15"
+      - doc: RefusalHostDuplicated is a second Host field.
+        name: RefusalHostDuplicated
+        type: Refusal
+        value: "16"
+      - doc: |-
+          RefusalExpect is an Expect field: the profile sends no interim response,
+          so 100-continue cannot be met (RFC 9110 §10.1.1).
+        name: RefusalExpect
+        type: Refusal
+        value: "17"
+      - doc: RefusalHeadTooLarge is a head that does not end within the head bound.
+        name: RefusalHeadTooLarge
+        type: Refusal
+        value: "18"
+      - doc: RefusalTooManyFields is a field line past corenet.HTTP1MaxFields.
+        name: RefusalTooManyFields
+        type: Refusal
+        value: "19"
+      - doc: RefusalTargetTooLong is a request-target past the target bound.
+        name: RefusalTargetTooLong
+        type: Refusal
+        value: "20"
+      - doc: RefusalBodyTooLarge is a Content-Length past the body bound.
+        name: RefusalBodyTooLarge
+        type: Refusal
+        value: "21"
+      - doc: "RefusalMethodUnsupported is CONNECT: the profile opens no tunnel."
+        name: RefusalMethodUnsupported
+        type: Refusal
+        value: "22"
+    doc: |-
+      Package http1 is the codec of the restricted HTTP/1.1 profile (ADR 0186
+      §D6): it frames requests out of bytes and appends responses to bytes, and
+      does no I/O. Its request value and handler port are internal/core/net's
+      (HTTP1RequestValue, HTTP1Handler); the loop engine's adapter, and the
+      pkg/v1/net/http1 facade, come with HandleLoop (ADR 0186 §D9).
+
+      The profile is defined by what it refuses. A request is answered with its
+      Refusal's status and Connection: close, and the connection closed, when it
+      carries a bare CR or LF, a NUL or another control byte in a value, obs-fold,
+      whitespace before a colon, a name outside tchar, any Transfer-Encoding, a
+      Content-Length that is not one run of at most ten digits or that repeats, a
+      second Authorization or Host, an Expect field, CONNECT, or a head, target or
+      body past its bound. None of those reaches a handler, and a handler cannot
+      answer one.
+
+      Framing depends on neither the method nor the route: a request takes its
+      head plus its Content-Length, which Parse computes, so a body that spells a
+      request is never read as one, and an early answer knows what it must drain
+      before the next pipelined request.
+
+      	var p http1.Parser                    // the profile's default limits
+      	var req corenet.HTTP1RequestValue     // reused: Fields is an array
+      	n, r := p.Parse(buf, &req)
+      	switch {
+      	case r != http1.RefusalNone:
+      		out = http1.AppendRefusal(out, r) // then close
+      	case n == 0:
+      		// more bytes; req.Consumed is set once the head is whole
+      	default:
+      		h.ServeHTTP1(&req, &res)
+      		out, err = http1.AppendResponse(out, &req, &res, false)
+      		buf = buf[n:]
+      	}
+
+      Nothing here allocates once the caller's buffers have room: Parse slices the
+      bytes it was given, and the writer appends precomputed status lines and an
+      integer formatted in place.
+    functions:
+      - doc: |-
+          NewParser returns a Parser bounded by l. A zero field selects the profile's
+          default; a negative one, a head past corenet.HTTP1MaxHead, a target past the
+          head or a body past corenet.HTTP1MaxBody is refused with
+          corenet.HTTP1Misconfigured, the field named.
+        in:
+          - name: l
+            type: corenet.HTTP1LimitsValue
+        name: NewParser
+        out:
+          - type: Parser
+          - type: error
+      - doc: |-
+          Continue returns req.Consumed and sets req.Body once buf, the bytes the
+          request was framed from, holds the whole body; until then it returns 0. It
+          reads no head: a caller that got 0 from Parse with req.HeadLen set calls
+          Continue as bytes arrive, and calls Parse only for the next request.
+        in:
+          - name: buf
+            type: "[]byte"
+          - name: req
+            type: "*corenet.HTTP1RequestValue"
+        name: Continue
+        out:
+          - type: int
+      - doc: |-
+          Pending returns how many bytes of req's body have yet to arrive when
+          buffered bytes of the request are already held: what an early answer to a
+          complete head has to read and discard before the next request, or the
+          reason to close instead.
+        in:
+          - name: req
+            type: "*corenet.HTTP1RequestValue"
+          - name: buffered
+            type: int
+        name: Pending
+        out:
+          - type: int
+      - doc: |-
+          AppendStatusLine appends the status line of status to dst: a registered
+          code's line is copied whole, any other code from 200 to 999 gets an empty
+          reason phrase, which RFC 9112 §4 allows. A code below 200 is refused with
+          corenet.HTTP1ResponseInvalid: the profile sends no interim response. It
+          allocates nothing when dst has room.
+        in:
+          - name: dst
+            type: "[]byte"
+          - name: status
+            type: int
+        name: AppendStatusLine
+        out:
+          - type: "[]byte"
+          - type: error
+      - doc: |-
+          AppendField appends the field line "name: value\r\n" to dst. A name that is
+          not a token, a value with a control byte other than the tab, and the names
+          the codec writes itself — Content-Length, Connection and Transfer-Encoding —
+          are refused with corenet.HTTP1ResponseInvalid, and nothing is appended. It
+          allocates nothing when dst has room.
+        in:
+          - name: dst
+            type: "[]byte"
+          - name: name
+          - name: value
+            type: string
+        name: AppendField
+        out:
+          - type: "[]byte"
+          - type: error
+      - doc: |-
+          AppendResponse appends the whole response res answers req with: the status
+          line, res.Header, Content-Length and, when res.Close, req.Close or closing
+          asks for it, Connection: close, then the body.
+
+          Content-Length is len(res.Body), so the response's framing is the codec's.
+          The answer to a HEAD carries the Content-Length and no body. A 204 or a 304
+          carries neither, and refuses a body. A status the profile does not send is
+          refused with corenet.HTTP1ResponseInvalid, before anything is appended.
+          res.Header is copied as it is: it is the handler's, written by AppendField.
+          It allocates nothing when dst has room.
+        in:
+          - name: dst
+            type: "[]byte"
+          - name: req
+            type: "*corenet.HTTP1RequestValue"
+          - name: res
+            type: "*corenet.HTTP1ResponseValue"
+          - name: closing
+            type: bool
+        name: AppendResponse
+        out:
+          - type: "[]byte"
+          - type: error
+      - doc: |-
+          AppendRefusal appends the whole answer to r: its status line,
+          Content-Length: 0 and Connection: close. The caller closes the connection
+          once it is written; nothing a handler does changes it. RefusalNone, and a
+          value this package does not return, append a 400. It allocates nothing
+          when dst has room.
+        in:
+          - name: dst
+            type: "[]byte"
+          - name: r
+            type: Refusal
+        name: AppendRefusal
+        out:
+          - type: "[]byte"
+    imports:
+      corenet: github.com/kitsunium/sdk/internal/core/net
+    path: github.com/kitsunium/sdk/internal/service/net/http1
+    types:
+      - doc: |-
+          Parser frames requests of the restricted HTTP/1.1 profile under its limits.
+          It holds three integers and no state between calls, so one Parser serves
+          any number of connections and goroutines. The zero Parser uses the
+          profile's default limits.
+        methods:
+          - doc: Limits returns the bounds the Parser applies, defaults resolved.
+            name: Limits
+            out:
+              - type: corenet.HTTP1LimitsValue
+            recv: value
+          - doc: |-
+              Parse frames the request at the start of buf into req and returns the
+              bytes it takes and RefusalNone, once the whole request is there.
+
+              It returns 0 and RefusalNone while more bytes are needed. When the head is
+              complete and only the body is missing, req.HeadLen and req.Consumed are
+              already set: Continue then waits for the body without reading the head
+              again, and an early answer knows how much the request still has to send.
+
+              It returns 0 and the refusal when the bytes break the profile. A refusal
+              never depends on bytes past the one that broke a rule, so more bytes never
+              turn it into an acceptance; and an accepted request takes the same bytes
+              whatever follows it, the next pipelined request included.
+
+              Framing depends on neither the method nor the target: a request takes its
+              head plus its Content-Length, a GET's included. Every slice in req aliases
+              buf. Parse allocates nothing.
+            in:
+              - name: buf
+                type: "[]byte"
+              - name: req
+                type: "*corenet.HTTP1RequestValue"
+            name: Parse
+            out:
+              - type: int
+              - type: Refusal
+            recv: value
+        name: Parser
+        struct:
+          unexported: true
+      - doc: |-
+          Refusal names the rule a request broke. The zero Refusal, RefusalNone, is
+          no refusal at all. Every other one is answered with its Status, Connection:
+          close, and the connection closed: the request never reaches a handler, and a
+          handler has no say in it.
+        methods:
+          - doc: String names the refusal for a log line or a metric label.
+            name: String
+            out:
+              - type: string
+            recv: value
+          - doc: |-
+              Status returns the status code the refusal is answered with: 400 for a
+              malformed or smuggling-prone request, 413, 414 and 431 for the size bounds,
+              417 for Expect and 501 for CONNECT. RefusalNone, and a value this package
+              does not return, give 0.
+            name: Status
+            out:
+              - type: int
+            recv: value
+          - doc: |-
+              Err returns the core/net sentinel the refusal belongs to, or nil for
+              RefusalNone. Several refusals share a sentinel: the sentinel is what a caller
+              branches on, the Refusal is what a log line names.
+            name: Err
+            out:
+              - type: error
+            recv: value
+        name: Refusal
+        underlying: uint8
   - doc: |-
       Package server — adoption of listeners inherited from a supervisor.
 
