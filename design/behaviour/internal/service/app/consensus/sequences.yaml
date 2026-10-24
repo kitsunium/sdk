@@ -2213,22 +2213,30 @@ sequences:
       - bind: "n"
         eval: binary.LittleEndian.Uint32(b)
         to: binary.LittleEndian.Uint32
-      - eval: binary.LittleEndian.PutUint32(b[4:], crc32.Checksum(b[recHeader:recHeader+int(n)], castagnoli))
+      - eval: binary.LittleEndian.PutUint32(b[4:], crc32.Checksum(b[recHeader:uint64(recHeader)+uint64(n)], castagnoli))
         to: binary.LittleEndian.PutUint32
   - of: sealedBody
+    participants:
+      - id: caller
+        kind: actor
+      - id: sealedBody
+        kind: self
+      - id: binary.LittleEndian.Uint32
+        kind: value
     steps:
       - opt:
           do:
             - return: nil
           when: len(b) < recHeader+recFixed
       - bind: "n"
-        eval: int(binary.LittleEndian.Uint32(b))
+        eval: binary.LittleEndian.Uint32(b)
+        to: binary.LittleEndian.Uint32
       - opt:
           do:
             - return: nil
-          when: n < recFixed || recHeader+n > len(b)
+          when: n < uint32(recFixed) || uint64(n) > uint64(len(b)-recHeader)
       - bind: body
-        eval: "b[recHeader : recHeader+n]"
+        eval: "b[recHeader : recHeader+int(n)]"
       - opt:
           do:
             - return: nil
@@ -2917,6 +2925,10 @@ sequences:
       - bind: size
         eval: st.Size()
         to: st.Size
+      - opt:
+          do:
+            - return: nil, errSegmentTooLarge
+          when: size > math.MaxInt
       - opt:
           do:
             - set: sb.b
@@ -4263,7 +4275,7 @@ sequences:
       - opt:
           do:
             - return: coreconsensus.EntryValue{}, origin(coreconsensus.LogCorrupt, errs.String("segment", segName(s.seg)), errs.Int64("offset", s.off))
-          when: int64(ln) > seg.size-s.off-int64(recHeader)
+          when: int64(ln) > min(seg.size-s.off, math.MaxInt)-int64(recHeader)
       - bind: b
         eval: make([]byte, recHeader+int(ln))
       - opt:
@@ -16936,7 +16948,7 @@ sequences:
           do:
             - return: origin(coreconsensus.SnapshotTooLarge, errs.Int64("chunk", decLen))
               to: origin
-          when: decLen > c.chunk || encLen > c.chunk+c.chunk/8+1024 || c.total+decLen > c.limit
+          when: decLen > c.chunk || encLen > c.chunk+c.chunk/8+1024 || encLen > math.MaxInt || c.total+decLen > c.limit
       - opt:
           do:
             - set: c.enc
@@ -17020,7 +17032,7 @@ sequences:
     steps:
       - set: chunk
         value: min(max(chunk, 1), math.MaxUint32)
-      - return: chunk + chunk/8 + 1024
+      - return: min(chunk+chunk/8+1024, math.MaxInt)
   - of: alignedOffsetAt
     participants:
       - id: caller
@@ -19699,6 +19711,8 @@ sequences:
         kind: self
       - id: io
         kind: stdlib
+      - id: binary.LittleEndian.Uint32
+        kind: value
     steps:
       - var:
           name: h
@@ -19711,12 +19725,15 @@ sequences:
             eval: io.ReadFull(r, h[:])
             to: io
           when: err != nil
-      - bind: "n"
-        eval: int(binary.LittleEndian.Uint32(h[:]))
+      - bind: ln
+        eval: binary.LittleEndian.Uint32(h[:])
+        to: binary.LittleEndian.Uint32
       - opt:
           do:
             - return: buf, false
-          when: n < minFrameBody || n+4 > limit
+          when: limit < 0 || ln < uint32(minFrameBody) || uint64(ln)+4 > uint64(limit)
+      - bind: "n"
+        eval: int(ln)
       - opt:
           do:
             - set: buf

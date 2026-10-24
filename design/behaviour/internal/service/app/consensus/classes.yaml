@@ -111,6 +111,12 @@ constants:
         name: errSilenceLength
         type: cause
         value: "\"silence condition of the wrong length\""
+      - doc: |-
+          errSegmentTooLarge is the cause of a log segment larger than an int
+          holds on this platform: its scan cannot be given a buffer of its size.
+        name: errSegmentTooLarge
+        type: cause
+        value: "\"segment larger than this platform's int\""
       - doc: MaxJoinReasonBytes bounds the reason a JOIN refusal carries to the joiner.
         name: MaxJoinReasonBytes
         type: int
@@ -1903,12 +1909,18 @@ functions:
     name: boolByte
     params: v bool
     results: byte
-  - doc: sealRecord recomputes a record's crc over its body.
+  - doc: |-
+      sealRecord recomputes a record's crc over its body. The body's end is
+      summed in uint64, where a length near 2^31 cannot wrap as an int sum does
+      on 32 bits.
     name: sealRecord
     params: b []byte
   - doc: |-
       sealedBody is the body of the record at b[0:] when its length is in range
-      and its crc holds, whatever version it carries; nil otherwise.
+      and its crc holds, whatever version it carries; nil otherwise. The length
+      is bounded as the u32 it is, before any int sum: on 32 bits one near 2^31
+      wrapped recHeader+n negative, passed the bound, and the slice panicked
+      the open of a log whose tail held a torn or damaged header.
     name: sealedBody
     params: b []byte
     results: "[]byte"
@@ -2676,7 +2688,9 @@ functions:
       maxEncodedChunk is the largest encoded chunk a stream of decoded chunks
       of chunk bytes may hold, the bound chunkReader applies. chunk comes from
       a peer's offer: it is clamped to what a chunk header's u32 lengths can
-      name, so the sum cannot overflow into a negative buffer size.
+      name, so the sum cannot overflow into a negative buffer size, and the sum
+      to what an int holds, as chunkReader bounds a chunk: alignedOffsetAt makes
+      a buffer of it, and on 32 bits make panicked on a chunk size near 2^31.
     name: maxEncodedChunk
     params: chunk int64
     results: int64
@@ -4403,7 +4417,8 @@ types:
     methods:
       - doc: |-
           reader is the read of segment file f into sb's buffer, grown when the
-          file is larger than any before it.
+          file is larger than any before it. A file larger than an int holds is
+          refused before the buffer is made: on 32 bits make panicked on it.
         name: reader
         params: f *os.File
         recv: sb *scanBufs
