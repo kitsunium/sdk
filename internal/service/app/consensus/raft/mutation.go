@@ -150,6 +150,16 @@ const (
 	// mutAskCampaigns asks for the leader's record by campaigning: a learner
 	// becomes a pre-candidate and counts the grants (#639).
 	mutAskCampaigns
+	// mutRetiredKeyAdmitted adds a learner over a key retired with a
+	// member, as before #648: the key is taken again under a new id.
+	mutRetiredKeyAdmitted
+	// mutKeyNotRetired removes a member, or denies its pin, without keeping
+	// its key at protocol 3 (#648).
+	mutKeyNotRetired
+	// mutProtocol3BelowRaise writes protocol 3's formats below the raise:
+	// the retired keys, in an entry of payload version 3, which a node of
+	// protocol 2 cannot read (#648, D18).
+	mutProtocol3BelowRaise
 )
 
 // mutated reports whether a test switched mutation m on; it is false in every

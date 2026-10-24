@@ -51,10 +51,23 @@ sequences:
         kind: actor
       - id: AppendAdminAt
         kind: self
+      - id: appendAdminAt
+        kind: internal
+    steps:
+      - return: appendAdminAt(dst, v, a)
+        to: appendAdminAt
+  - of: appendAdminAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendAdminAt
+        kind: self
       - id: AppendAdmin
         kind: internal
       - id: binary.LittleEndian.AppendUint64
         kind: value
+      - id: appendKeys
+        kind: internal
     steps:
       - set: dst
         to: AppendAdmin
@@ -64,7 +77,13 @@ sequences:
             - set: dst
               to: binary.LittleEndian.AppendUint64
               value: binary.LittleEndian.AppendUint64(dst, uint64(a.Origin))
-          when: v == AdminVersion2
+          when: v == AdminVersion2 || v == AdminVersion3
+      - opt:
+          do:
+            - set: dst
+              to: appendKeys
+              value: appendKeys(dst, a.Membership.RetiredKeys)
+          when: v == AdminVersion3
       - return: dst
   - of: ParseAdmin
     participants:
@@ -99,6 +118,8 @@ sequences:
         kind: internal
       - id: r.u32
         kind: internal
+      - id: r.keys
+        kind: internal
       - id: frameInvalid
         kind: internal
     steps:
@@ -107,7 +128,7 @@ sequences:
             - return: |-
                 AdminValue{}, errs.Wrap(coreconsensus.VersionUnsupported, errs.WrapParams{},
                 			errs.Int("admin_version", int(v)))
-          when: v != 0 && v != AdminVersion2
+          when: v != 0 && v != AdminVersion2 && v != AdminVersion3
       - bind: r
         eval: "reader{b: b}"
       - var:
@@ -145,7 +166,13 @@ sequences:
             - set: a.Origin
               to: coreconsensus
               value: coreconsensus.NodeID(r.u64())
-          when: v == AdminVersion2
+          when: v == AdminVersion2 || v == AdminVersion3
+      - opt:
+          do:
+            - set: a.Membership.RetiredKeys
+              to: r.keys
+              value: r.keys()
+          when: v == AdminVersion3
       - opt:
           do:
             - set: r.err
@@ -540,13 +567,20 @@ sequences:
       - id: appendMeta
         kind: internal
     steps:
-      - opt:
-          do:
-            - return: appendMeta(dst, metaVersion1, m)
-              to: appendMeta
-          when: m.ClusterVersion < metaProtocol2
-      - return: appendMeta(dst, metaVersion2, m)
-        to: appendMeta
+      - switch:
+          cases:
+            - case: m.ClusterVersion >= metaProtocol3
+              do:
+                - return: appendMeta(dst, metaVersion3, m)
+                  to: appendMeta
+            - case: m.ClusterVersion >= metaProtocol2
+              do:
+                - return: appendMeta(dst, metaVersion2, m)
+                  to: appendMeta
+            - default: true
+              do:
+                - return: appendMeta(dst, metaVersion1, m)
+                  to: appendMeta
   - of: appendMeta
     participants:
       - id: caller
@@ -566,6 +600,8 @@ sequences:
       - id: AppendTimingContract
         kind: internal
       - id: appendBytes
+        kind: internal
+      - id: appendKeys
         kind: internal
     steps:
       - bind: start
@@ -624,9 +660,15 @@ sequences:
       - opt:
           do:
             - set: dst
+              to: appendKeys
+              value: appendKeys(dst, m.Membership.RetiredKeys)
+          when: v == metaVersion3
+      - opt:
+          do:
+            - set: dst
               to: binary.LittleEndian.AppendUint32
               value: binary.LittleEndian.AppendUint32(dst, crc32.Checksum(dst[start:], castagnoli))
-          when: v == metaVersion2
+          when: v == metaVersion2 || v == metaVersion3
       - return: dst
   - of: ParseSnapshotMeta
     participants:
@@ -656,6 +698,8 @@ sequences:
         kind: internal
       - id: slices
         kind: stdlib
+      - id: r.keys
+        kind: internal
       - id: frameInvalid
         kind: internal
     steps:
@@ -726,6 +770,12 @@ sequences:
           when: len(reserved) != 0
       - opt:
           do:
+            - set: out.Membership.RetiredKeys
+              to: r.keys
+              value: r.keys()
+          when: b[0] == metaVersion3
+      - opt:
+          do:
             - set: r.err
               to: frameInvalid
               value: frameInvalid("snapshot meta trailing bytes", len(b))
@@ -748,7 +798,7 @@ sequences:
             - case: metaVersion1
               do:
                 - return: b[1:], nil
-            - case: metaVersion2
+            - case: metaVersion2, metaVersion3
               do:
                 - opt:
                     do:
@@ -928,6 +978,25 @@ sequences:
         to: binary.LittleEndian.AppendUint32
         value: binary.LittleEndian.AppendUint32(dst, uint32(len(s)))
       - return: append(dst, s...)
+  - of: appendKeys
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendKeys
+        kind: self
+      - id: binary.LittleEndian.AppendUint32
+        kind: value
+    steps:
+      - set: dst
+        to: binary.LittleEndian.AppendUint32
+        value: binary.LittleEndian.AppendUint32(dst, uint32(len(keys)))
+      - loop:
+          do:
+            - set: dst
+              value: append(dst, keys[i][:]...)
+          key: i
+          range: keys
+      - return: dst
   - of: appendBytes
     participants:
       - id: caller
@@ -1234,3 +1303,37 @@ sequences:
               value: append(m.Retired, coreconsensus.NodeID(r.u64()))
           range: k
       - return: m
+  - of: (*reader).keys
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*reader).keys
+        kind: self
+      - id: r.u32
+        kind: internal
+      - id: frameInvalid
+        kind: internal
+    steps:
+      - bind: k
+        eval: r.u32()
+        to: r.u32
+      - opt:
+          do:
+            - return: nil
+          when: r.err != nil
+      - opt:
+          do:
+            - set: r.err
+              to: frameInvalid
+              value: frameInvalid("retired key count", len(r.b))
+            - return: nil
+          when: uint64(k)*uint64(keyLen) > uint64(len(r.b))
+      - var:
+          name: out
+          type: "[][32]byte"
+      - loop:
+          do:
+            - set: out
+              value: append(out, [32]byte(r.n(keyLen)))
+          range: k
+      - return: out

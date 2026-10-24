@@ -421,6 +421,16 @@ packages:
         name: FlagProtocol2
         type: MessageFlags
         value: "16"
+      - blockDoc: The flags.
+        doc: |-
+          FlagProtocol3 marks a frame from a node that speaks protocol version
+          3, which sets FlagProtocol2 beside it. A node of protocol 2 or below
+          tests the bits it names only and ignores it, and a leader refuses to
+          raise the cluster version to 3 while a member's last frame of the term
+          lacks it.
+        name: FlagProtocol3
+        type: MessageFlags
+        value: "32"
       - blockDoc: The states of a stamp.
         doc: |-
           StampJoining is a directory Init prepared: it may join as an empty
@@ -1556,8 +1566,9 @@ packages:
               name: MaxSnapshotBytes
               type: int64
       - doc: |-
-          MembershipValue is the configuration at a position: its members and the set of
-          retired IDs, which is never reused.
+          MembershipValue is the configuration at a position: its members, the set of
+          retired IDs, which is never reused, and from protocol 3 the set of retired
+          keys, which is never admitted again.
         methods:
           - doc: Member returns the member with that id.
             in:
@@ -1573,6 +1584,16 @@ packages:
               - name: id
                 type: NodeID
             name: IsRetired
+            out:
+              - type: bool
+            recv: value
+          - doc: |-
+              IsRetiredKey reports whether the key was retired with a member removed, or
+              with a pin denied.
+            in:
+              - name: spki
+                type: "[32]byte"
+            name: IsRetiredKey
             out:
               - type: bool
             recv: value
@@ -1600,6 +1621,12 @@ packages:
             - doc: Retired lists every removed NodeID.
               name: Retired
               type: "[]NodeID"
+            - doc: |-
+                RetiredKeys lists the SPKI pin of every member removed, and every pin
+                DenyPin withdrew, since the cluster version is 3: a key held once is
+                never admitted again under another id. Empty below version 3.
+              name: RetiredKeys
+              type: "[][32]byte"
       - doc: |-
           MessageKind says what a Message is. The two high bits are its lane, so that
           the frame header alone routes it (ADR 0152 D18).
@@ -3762,16 +3789,24 @@ packages:
           version above it is refused, and stops a node that finds it committed.
           Version 2 adds the snapshot metadata's checksum, the admin payload's
           Origin and the log identity's AdoptedFrom, each written only once the
-          committed cluster version is 2 (lot S3).
+          committed cluster version is 2 (lot S3). Version 3 adds the retired keys
+          of the configuration, written only once it is 3 (#648).
         name: ProtocolMax
         type: uint32
-        value: "2"
+        value: "3"
       - doc: |-
           Protocol2 is the protocol version whose formats a node writes once the
           cluster version is raised to it.
         name: Protocol2
         type: uint32
         value: "2"
+      - doc: |-
+          Protocol3 is the protocol version from which a configuration keeps the
+          key of every member removed, and of every pin denied, and refuses it to
+          any new member (#648).
+        name: Protocol3
+        type: uint32
+        value: "3"
     doc: |-
       Package raft is the consensus engine's step function (ADR 0152 D15): a
       value with no goroutine, no I/O and no clock. Every decision of the
@@ -4464,6 +4499,14 @@ packages:
         name: AdminVersion2
         type: uint32
         value: "2"
+      - doc: |-
+          AdminVersion3 is the payload version of an engine entry whose admin
+          carries, after version 2's Origin, the retired keys of its membership. A
+          leader writes it once the committed cluster version is 3, never before: a
+          node of protocol 2 reads versions 0 and 2 only (D18, #648).
+        name: AdminVersion3
+        type: uint32
+        value: "3"
     doc: |-
       Package wire holds the consensus domain's hand-written fixed layouts: the
       frame of a Message, the 41-byte Token, SnapshotMeta, Membership and the
@@ -4485,8 +4528,9 @@ packages:
           - type: "[]byte"
       - doc: |-
           AppendAdminAt appends the encoding of an engine entry's payload of
-          version v: version 0's fields, then Origin from AdminVersion2. Another
-          version is not written: the encoding of version 0 is returned for it.
+          version v: version 0's fields, then Origin from AdminVersion2, then the
+          membership's retired keys from AdminVersion3. Another version is not
+          written: the encoding of version 0 is returned for it.
         in:
           - name: dst
             type: "[]byte"
@@ -4593,10 +4637,11 @@ packages:
       - doc: |-
           AppendSnapshotMeta appends the versioned encoding of m. The version
           follows the cluster version m carries: a meta of a cluster below protocol
-          version 2 is written in version 1, and one of a cluster at 2 or above in
-          version 2, checksummed, which the release before already reads (D18,
-          #546). Only a cluster whose every member announced protocol 2 reaches
-          that version.
+          version 2 is written in version 1, one of a cluster at 2 in version 2,
+          checksummed, which the release before already reads (D18, #546), and one
+          of a cluster at 3 or above in version 3, which adds the retired keys of
+          its configuration (#648). Only a cluster whose every member announced a
+          protocol reaches its version.
         in:
           - name: dst
             type: "[]byte"
@@ -4607,8 +4652,8 @@ packages:
           - type: "[]byte"
       - doc: |-
           ParseSnapshotMeta decodes a SnapshotMeta, copying every byte it keeps:
-          version 1, or version 2 once its trailing CRC-32C holds. Another
-          version is VERSION_UNSUPPORTED, a version 2 whose sum fails
+          version 1, or version 2 or 3 once its trailing CRC-32C holds. Another
+          version is VERSION_UNSUPPORTED, a version 2 or 3 whose sum fails
           FRAME_INVALID.
         in:
           - name: b
@@ -4689,7 +4734,8 @@ packages:
                 Origin is the authenticated node the leader received the operation
                 from: the member that forwarded it, or the leader itself. The leader
                 writes it, overwriting whatever the proposer wrote, and only in an
-                entry of payload version AdminVersion2 (ADR 0152 D8, #561).
+                entry of payload version AdminVersion2 or AdminVersion3 (ADR 0152 D8,
+                #561).
               name: Origin
               type: coreconsensus.NodeID
   - doc: |-
@@ -5218,6 +5264,10 @@ packages:
             reexport: coreconsensus.FlagProtocol2
             type: coreconsensus.MessageFlags
             value: "16"
+          - name: FlagProtocol3
+            reexport: coreconsensus.FlagProtocol3
+            type: coreconsensus.MessageFlags
+            value: "32"
           - name: MsgForward
             reexport: coreconsensus.MsgForward
             type: coreconsensus.MessageKind
@@ -5480,8 +5530,8 @@ packages:
             - type: "[]byte"
       - func:
           doc: |-
-            ParseSnapshotMeta decodes a SnapshotMeta: version 1, or version 2
-            once its trailing CRC-32C holds.
+            ParseSnapshotMeta decodes a SnapshotMeta: version 1, or version 2 or
+            3 once its trailing CRC-32C holds.
           forward: wire.ParseSnapshotMeta
           in:
             - name: b

@@ -75,6 +75,12 @@ const (
 	// the cluster version to 2 while a member's last frame of the term
 	// lacks it.
 	FlagProtocol2
+	// FlagProtocol3 marks a frame from a node that speaks protocol version
+	// 3, which sets FlagProtocol2 beside it. A node of protocol 2 or below
+	// tests the bits it names only and ignores it, and a leader refuses to
+	// raise the cluster version to 3 while a member's last frame of the term
+	// lacks it.
+	FlagProtocol3
 )
 
 // Lane returns the connection the kind belongs on.

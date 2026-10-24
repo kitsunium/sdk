@@ -514,6 +514,9 @@ var checks = map[string]func(mutation) error{
 	"leader record by announcement":     checkLeaderRecordFollowsTheAnnouncement,
 	"stranded learner asks":             checkStrandedLearnerAsks,
 	"learner question binds nothing":    checkLearnerAskBindsNothing,
+	"retired key refused":               checkRetiredKeyRefused,
+	"nothing new below protocol 3":      checkNothingNewBelowProtocol3,
+	"raise to 3 announced":              checkRaise3Announced,
 }
 
 func TestChecksPassUnmutated(t *testing.T) {
@@ -584,6 +587,9 @@ func TestMutationsAreCaught(t *testing.T) {
 		"record to an unannounced prevote": mutRecordUnannounced,
 		"learner never asks":               mutLearnerNeverAsks,
 		"learner asks by campaigning":      mutAskCampaigns,
+		"retired key admitted":             mutRetiredKeyAdmitted,
+		"key not retired":                  mutKeyNotRetired,
+		"protocol 3 below the raise":       mutProtocol3BelowRaise,
 	}
 	for name, m := range muts {
 		caught := ""

@@ -16,3 +16,11 @@ func AppendSnapshotMetaV1ForTest(dst []byte, m *coreconsensus.SnapshotMetaValue)
 func AppendSnapshotMetaV2ForTest(dst []byte, m *coreconsensus.SnapshotMetaValue) []byte {
 	return appendMeta(dst, metaVersion2, m)
 }
+
+// AppendSnapshotMetaV3ForTest appends m in version 3, whatever its cluster
+// version: the fields of version 1 under the version byte 3, the retired
+// keys of its configuration, then the CRC-32C of every byte before it
+// (#648).
+func AppendSnapshotMetaV3ForTest(dst []byte, m *coreconsensus.SnapshotMetaValue) []byte {
+	return appendMeta(dst, metaVersion3, m)
+}

@@ -909,7 +909,9 @@ func extends(e *coreconsensus.EntryValue, end, term uint64, chain uint32) bool {
 // appendForced cuts the log back to hard.Commit, the last index Recover
 // adopts, and appends, synced, the forced configuration entry of the new
 // history, chained to the entry it follows and one term past any the log
-// knew.
+// knew. It keeps the old configuration's retired IDs and, in a history at
+// protocol version 3, its retired keys, in an entry of payload version 3:
+// below, the entry is of version 0, as it always was (#648).
 func (d DataDir) appendForced(hard *coreconsensus.HardState, members []coreconsensus.MemberValue, old *coreconsensus.MembershipValue, operator coreconsensus.Operator) error {
 	flog := d.d.log
 	commit := hard.Commit
@@ -924,11 +926,19 @@ func (d DataDir) appendForced(hard *coreconsensus.HardState, members []coreconse
 		return err
 	}
 	term := max(hard.Term, termAt) + 1
+	cluster, err := clusterVersionThrough(flog, d.d.snaps, commit)
+	if err != nil {
+		return err
+	}
 	conf := coreconsensus.MembershipValue{Members: byID(members), Retired: old.Retired}
-	data := wire.AppendAdmin(nil, &wire.AdminValue{Operator: string(operator), Change: wire.ChangeForced, Membership: conf})
+	var version uint32
+	if cluster >= raft.Protocol3 {
+		version, conf.RetiredKeys = wire.AdminVersion3, slices.Clone(old.RetiredKeys)
+	}
+	data := wire.AppendAdminAt(nil, version, &wire.AdminValue{Operator: string(operator), Change: wire.ChangeForced, Membership: conf})
 	e := coreconsensus.EntryValue{
 		Position: coreconsensus.PositionValue{Term: term, Index: commit + 1}, Kind: coreconsensus.EntryMembership,
-		BodySum: wire.BodySum(data), Data: data,
+		Version: version, BodySum: wire.BodySum(data), Data: data,
 	}
 	e.ChainSum = wire.ChainSum(chain, &e)
 	if err := flog.Append([]coreconsensus.EntryValue{e}, &coreconsensus.HardState{Term: term, Commit: commit + 1}); err != nil {
@@ -1192,9 +1202,10 @@ func checkRestoreMembers(stamp *coreconsensus.StampValue, members []coreconsensu
 // restoredMeta is the metadata the restored snapshot is published under:
 // the expected one, in a new history that records the old cluster as its
 // predecessor and the snapshot's index as the last it kept, with the new
-// members. Every entry a snapshot covers was committed: at protocol version
-// 2 the identity records the whole kept range as adopted from a commit, in
-// the stamp the restore writes; the meta does not carry it (#509).
+// members, the retired IDs and the retired keys. Every entry a snapshot
+// covers was committed: at protocol version 2 the identity records the
+// whole kept range as adopted from a commit, in the stamp the restore
+// writes; the meta does not carry it (#509).
 func restoredMeta(exp *coreconsensus.SnapshotMetaValue, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue) coreconsensus.SnapshotMetaValue {
 	meta := *exp
 	meta.Log = coreconsensus.LogIdentityValue{
@@ -1204,7 +1215,10 @@ func restoredMeta(exp *coreconsensus.SnapshotMetaValue, newCluster coreconsensus
 	if exp.ClusterVersion >= raft.Protocol2 {
 		meta.Log.AdoptedFrom = exp.Position.Index
 	}
-	meta.Membership = coreconsensus.MembershipValue{Index: exp.Position.Index, Members: slices.Clone(members), Retired: exp.Membership.Retired}
+	meta.Membership = coreconsensus.MembershipValue{
+		Index: exp.Position.Index, Members: slices.Clone(members), Retired: exp.Membership.Retired,
+		RetiredKeys: exp.Membership.RetiredKeys,
+	}
 	return meta
 }
 

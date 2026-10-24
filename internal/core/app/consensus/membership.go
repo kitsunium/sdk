@@ -27,8 +27,9 @@ type MemberValue struct {
 	MaxSnapshotBytes int64
 }
 
-// MembershipValue is the configuration at a position: its members and the set of
-// retired IDs, which is never reused.
+// MembershipValue is the configuration at a position: its members, the set of
+// retired IDs, which is never reused, and from protocol 3 the set of retired
+// keys, which is never admitted again.
 type MembershipValue struct {
 	// Index is the index of the entry that produced it, 0 at founding.
 	Index uint64
@@ -36,6 +37,10 @@ type MembershipValue struct {
 	Members []MemberValue
 	// Retired lists every removed NodeID.
 	Retired []NodeID
+	// RetiredKeys lists the SPKI pin of every member removed, and every pin
+	// DenyPin withdrew, since the cluster version is 3: a key held once is
+	// never admitted again under another id. Empty below version 3.
+	RetiredKeys [][32]byte
 }
 
 // Member returns the member with that id.
@@ -51,6 +56,12 @@ func (m MembershipValue) Member(id NodeID) (MemberValue, bool) {
 // IsRetired reports whether the id was removed.
 func (m MembershipValue) IsRetired(id NodeID) bool {
 	return slices.Contains(m.Retired, id)
+}
+
+// IsRetiredKey reports whether the key was retired with a member removed, or
+// with a pin denied.
+func (m MembershipValue) IsRetiredKey(spki [32]byte) bool {
+	return slices.Contains(m.RetiredKeys, spki)
 }
 
 // Voters returns the ids of the voters, in membership order.
@@ -72,7 +83,8 @@ func (m MembershipValue) Clone() MembershipValue {
 		// append(s[:0:0], s...) is the copy slices.Clone makes, nil kept nil,
 		// written out because slices.Clone's own body would push the engine's
 		// ConfAt, which inlines this method, past the inliner's budget.
-		Members: append(m.Members[:0:0], m.Members...),
-		Retired: append(m.Retired[:0:0], m.Retired...),
+		Members:     append(m.Members[:0:0], m.Members...),
+		Retired:     append(m.Retired[:0:0], m.Retired...),
+		RetiredKeys: append(m.RetiredKeys[:0:0], m.RetiredKeys...),
 	}
 }

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T20:23:47Z -->
+<!-- updated: 2026-10-24T23:30:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -176,6 +176,20 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   which one process does not exclude from itself (#422, ADR 0152).
 - Take a JOIN answer from an unpinned peer (`JoinConfig.Pins`, review M4),
   or admit a key two members share (review M5).
+- Admit at the JOIN, once the cluster is at protocol 3, the key of a member
+  removed or whose pin was denied, under any new id: one key, one id for
+  the cluster's whole life. A host back over a removed member's key file
+  led under a new id, and every node whose configuration still listed the
+  removed member under that key refused it as leader, a stale voter as a
+  joiner (#648, `TestAJoinOnARemovedMembersKeyIsRefusedOnceTheProtocolIsRaised`;
+  raft's `checkRetiredKeyRefused`). Nor keep a retired key below the raise
+  (`TestBelowProtocol3ARemovedMembersKeyIsAdmittedAsBefore`), drop the
+  retired keys at a `Recover` or a `RestoreSnapshot`
+  (`TestRecoverKeepsTheRetiredKeysOfAHistoryAtProtocol3`,
+  `TestARestoredSnapshotKeepsItsRetiredKeys`) or at an install
+  (`TestANodeThatInstallsASnapshotRefusesItsRetiredKeys`), or read them
+  anywhere but the JOIN and raft's `addLearner`: a retired key never cuts a
+  live member, and the transport's admission stays M5's.
 - Extend the JOIN of `laneJoin` in place: a member that predates a field
   reads it as part of the address. A joiner announcing its
   `MaxSnapshotBytes` uses `laneJoinV2` (`joinVersion2`, the limit, then the
@@ -503,7 +517,10 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   meta never carries it) are chosen by the cluster version, and a node of protocol 1 stops on the
   raise instead of meeting them (`TestAVersion2MetaThatRottedIsNotRestored`,
   `TestRecoverBelowProtocol2RecordsNoAdoptedRange`, raft's
-  `checkRaiseAnnounced`).
+  `checkRaiseAnnounced`). Nor one of protocol 3 before it is 3: the admin
+  payload and the snapshot meta of version 3, which carry the retired keys,
+  and `Recover`'s forced entry of version 3 (#648, raft's
+  `checkNothingNewBelowProtocol3` and `TestAMixedClusterRaisesTo3OnceEveryMemberSpeaksIt`).
 - Commit an administrative entry with an origin the forwarder wrote, or
   append one as leader without a Warn naming its origin (#561,
   `TestAForwardedRemoveRecordsTheFollowerAsItsOrigin`, raft's
@@ -570,7 +587,8 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   (`joinHold.gen`, `TestAJoinSentAgainNeverInstallsOverALaterJoin`).
 - Read a snapshot offer under `MaxControlFrameBytes`, or end a refused one
   without a line: its metadata carries the configuration, `Retired`
-  included, which every Remove grows for good, and past about 8 100
+  included, and from protocol 3 `RetiredKeys` (#648), which every Remove
+  grows for good, and past about 8 100
   removals no snapshot was ever installed over TCP again (#634,
   `serveSnapshot`, `offerRefused`,
   `TestASnapshotOfferCarryingManyRetiredIDsIsInstalledOverTCP`). The memory

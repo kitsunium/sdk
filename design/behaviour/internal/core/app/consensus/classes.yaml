@@ -171,6 +171,13 @@ constants:
           the cluster version to 2 while a member's last frame of the term
           lacks it.
         name: FlagProtocol2
+      - doc: |-
+          FlagProtocol3 marks a frame from a node that speaks protocol version
+          3, which sets FlagProtocol2 beside it. A node of protocol 2 or below
+          tests the bits it names only and ignores it, and a leader refuses to
+          raise the cluster version to 3 while a member's last frame of the term
+          lacks it.
+        name: FlagProtocol3
     name: FlagTransfer
   - doc: The states of a stamp.
     grouped: true
@@ -253,6 +260,7 @@ files:
       - MembershipValue
       - MembershipValue.Member
       - MembershipValue.IsRetired
+      - MembershipValue.IsRetiredKey
       - MembershipValue.Voters
       - MembershipValue.Clone
     name: membership.go
@@ -525,6 +533,12 @@ types:
       - doc: Retired lists every removed NodeID.
         name: Retired
         type: "[]NodeID"
+      - doc: |-
+          RetiredKeys lists the SPKI pin of every member removed, and every pin
+          DenyPin withdrew, since the cluster version is 3: a key held once is
+          never admitted again under another id. Empty below version 3.
+        name: RetiredKeys
+        type: "[][32]byte"
     kind: struct
     methods:
       - name: Member
@@ -533,6 +547,10 @@ types:
         results: MemberValue, bool
       - name: IsRetired
         params: id NodeID
+        recv: m MembershipValue
+        results: bool
+      - name: IsRetiredKey
+        params: spki [32]byte
         recv: m MembershipValue
         results: bool
       - name: Voters

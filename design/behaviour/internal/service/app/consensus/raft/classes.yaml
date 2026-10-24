@@ -259,6 +259,19 @@ constants:
           mutAskCampaigns asks for the leader's record by campaigning: a learner
           becomes a pre-candidate and counts the grants (#639).
         name: mutAskCampaigns
+      - doc: |-
+          mutRetiredKeyAdmitted adds a learner over a key retired with a
+          member, as before #648: the key is taken again under a new id.
+        name: mutRetiredKeyAdmitted
+      - doc: |-
+          mutKeyNotRetired removes a member, or denies its pin, without keeping
+          its key at protocol 3 (#648).
+        name: mutKeyNotRetired
+      - doc: |-
+          mutProtocol3BelowRaise writes protocol 3's formats below the raise:
+          the retired keys, in an entry of payload version 3, which a node of
+          protocol 2 cannot read (#648, D18).
+        name: mutProtocol3BelowRaise
     name: mutAckBeforeSync
   - doc: The facts a PeerStatValue carries.
     grouped: true
@@ -295,6 +308,10 @@ constants:
           peerProtocol2 is set while the peer's last message of the term
           carried FlagProtocol2.
         name: peerProtocol2
+      - doc: |-
+          peerProtocol3 is set while the peer's last message of the term
+          carried FlagProtocol3.
+        name: peerProtocol3
     name: peerProbeSent
   - grouped: true
     items:
@@ -335,11 +352,12 @@ constants:
       version above it is refused, and stops a node that finds it committed.
       Version 2 adds the snapshot metadata's checksum, the admin payload's
       Origin and the log identity's AdoptedFrom, each written only once the
-      committed cluster version is 2 (lot S3).
+      committed cluster version is 2 (lot S3). Version 3 adds the retired keys
+      of the configuration, written only once it is 3 (#648).
     items:
       - name: ProtocolMax
         type: uint32
-        value: "2"
+        value: "3"
     name: ProtocolMax
   - doc: |-
       Protocol2 is the protocol version whose formats a node writes once the
@@ -349,6 +367,15 @@ constants:
         type: uint32
         value: "2"
     name: Protocol2
+  - doc: |-
+      Protocol3 is the protocol version from which a configuration keeps the
+      key of every member removed, and of every pin denied, and refuses it to
+      any new member (#648).
+    items:
+      - name: Protocol3
+        type: uint32
+        value: "3"
+    name: Protocol3
 files:
   - decls:
       - (*Raft).Debug
@@ -386,6 +413,9 @@ files:
       - (*Raft).checkTimingContract
       - (*Raft).checkClusterVersion
       - (*Raft).checkAnnounced
+      - announcementOf
+      - (*Raft).announces
+      - announced
       - (*Raft).checkNoSpaceClear
       - (*Raft).checkTransfer
       - (*Raft).nextConf
@@ -402,6 +432,8 @@ files:
       - vouched
       - (*Raft).updateAddress
       - (*Raft).denyPin
+      - (*Raft).retireKey
+      - (*Raft).atProtocol3
       - (*Raft).activeMajority
       - (*Raft).activeMajorityWithout
       - fwdKey
@@ -497,6 +529,7 @@ files:
       - raftSelfVoteDurable
       - ProtocolMax
       - Protocol2
+      - Protocol3
       - raftFacts
       - Config
       - fwdEntry
@@ -622,6 +655,17 @@ files:
       - (*Raft).maybeEndSilence
     name: step.go
 functions:
+  - doc: |-
+      announcementOf is the announcement every frame of a node speaking
+      protocol version v carries: FlagProtocol2 from 2, and FlagProtocol3 beside
+      it from 3 (D18, #648).
+    name: announcementOf
+    params: v uint32
+    results: core.MessageFlags
+  - doc: announced is the announcement a message's flags carry.
+    name: announced
+    params: flags core.MessageFlags
+    results: peerFacts
   - doc: |-
       listedBefore reports whether first comes before then in next's members,
       the order members were added in.
@@ -1593,7 +1637,9 @@ types:
           it received the operation from, overwriting whatever the proposer wrote:
           the ORIGIN of D8 is the TLS identity of the forwarding connection, never
           a field the forwarder wrote. Before, the entry is of payload version 0,
-          which carries none, so a node of protocol 1 still reads it (#561).
+          which carries none, so a node of protocol 1 still reads it (#561). Once
+          it is 3 the entry is of payload version 3, which carries the
+          configuration's retired keys as well (#648).
         name: validateAdmin
         params: e *core.EntryValue, index uint64, origin core.NodeID
         recv: r *Raft
@@ -1634,12 +1680,18 @@ types:
           checkAnnounced refuses a raise to v while a member of the latest
           configuration, voter or learner, was not heard in this term announcing
           it: the operation is refused while any member does not speak the version
-          (D18). A member of the previous release would stop on the raise, and on
-          every format written after it.
+          (D18). A member of a previous release would stop on the raise, and on
+          every format written after it. A node of protocol 3 announces 2 as well.
         name: checkAnnounced
         params: v uint32
         recv: r *Raft
         results: errs.Code
+      - doc: |-
+          announces is the announcement this node's own frames carry, as the facts
+          a leader keeps of a peer that sent them.
+        name: announces
+        recv: r *Raft
+        results: peerFacts
       - doc: |-
           checkNoSpaceClear admits clearing only the alarm that is raised now, so a
           late clear cannot end a newer alarm.
@@ -1662,8 +1714,8 @@ types:
         results: core.MembershipValue, errs.Code
       - doc: |-
           addLearner adds the one member admin carries as a learner: a new id with
-          a key no member holds, never retired, with a pin, and only while a quorum
-          answers so the change can commit.
+          a key no member holds and none held before it, never retired, with a pin,
+          and only while a quorum answers so the change can commit.
         name: addLearner
         params: cur *core.MembershipValue, admin *wire.AdminValue
         recv: r *Raft
@@ -1677,8 +1729,8 @@ types:
         results: errs.Code
       - doc: |-
           removeMember removes the member at idx, never this leader, and retires
-          its id; a voter's removal may not cross MinVoters nor leave a voter set
-          without an answering majority.
+          its id, and from protocol 3 its key; a voter's removal may not cross
+          MinVoters nor leave a voter set without an answering majority.
         name: removeMember
         params: cur *core.MembershipValue, target core.NodeID, idx int
         recv: r *Raft
@@ -1767,6 +1819,23 @@ types:
         params: cur *core.MembershipValue, target core.NodeID, idx int
         recv: r *Raft
         results: errs.Code
+      - doc: |-
+          retireKey keeps spki, the key of a member that leaves the configuration's
+          pins — removed, or its pin denied — once the committed cluster version is
+          3, so that no new member takes it (#648). Below 3 the configuration
+          carries no retired key, a format a node of protocol 2 cannot read; and
+          the zero pin a DenyPin left is no key.
+        name: retireKey
+        params: cur *core.MembershipValue, spki [32]byte
+        recv: r *Raft
+      - doc: |-
+          atProtocol3 reports whether the committed cluster version admits the
+          formats of protocol 3: every member announced it before the raise
+          committed, and a node of protocol 2 stops on the raise instead of meeting
+          them (D18).
+        name: atProtocol3
+        recv: r *Raft
+        results: bool
       - doc: |-
           activeMajority is etcd's strict reconfiguration check: the voters of m
           that answer the leader NOW form a majority of m (R2-27).

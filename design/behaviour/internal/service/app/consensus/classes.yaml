@@ -2574,9 +2574,10 @@ functions:
       restoredMeta is the metadata the restored snapshot is published under:
       the expected one, in a new history that records the old cluster as its
       predecessor and the snapshot's index as the last it kept, with the new
-      members. Every entry a snapshot covers was committed: at protocol version
-      2 the identity records the whole kept range as adopted from a commit, in
-      the stamp the restore writes; the meta does not carry it (#509).
+      members, the retired IDs and the retired keys. Every entry a snapshot
+      covers was committed: at protocol version 2 the identity records the
+      whole kept range as adopted from a commit, in the stamp the restore
+      writes; the meta does not carry it (#509).
     name: restoredMeta
     params: exp *coreconsensus.SnapshotMetaValue, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue
     results: coreconsensus.SnapshotMetaValue
@@ -3552,7 +3553,9 @@ types:
           appendForced cuts the log back to hard.Commit, the last index Recover
           adopts, and appends, synced, the forced configuration entry of the new
           history, chained to the entry it follows and one term past any the log
-          knew.
+          knew. It keeps the old configuration's retired IDs and, in a history at
+          protocol version 3, its retired keys, in an entry of payload version 3:
+          below, the entry is of version 0, as it always was (#648).
         name: appendForced
         params: hard *coreconsensus.HardState, members []coreconsensus.MemberValue, old *coreconsensus.MembershipValue, operator coreconsensus.Operator
         recv: d DataDir
@@ -8121,7 +8124,8 @@ types:
           The offer is read under MaxFrameBytes, the data lane's bound, never the
           control lane's: its metadata carries the configuration at the snapshot's
           index, Retired included, which every Remove grows by an ID for the life of
-          the cluster. Read under MaxControlFrameBytes (64 KiB by default), past
+          the cluster, and from protocol 3 RetiredKeys, which it grows by a key
+          (#648). Read under MaxControlFrameBytes (64 KiB by default), past
           about 8 100 removals no snapshot was ever installed again, and the
           receiver ended each stream without a word (#634). A configuration already
           reaches every member in a membership entry under MaxFrameBytes. An offer

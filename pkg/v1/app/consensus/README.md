@@ -133,6 +133,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [type MembershipValue](<#MembershipValue>)
   - [func \(MembershipValue\) Clone\(\) MembershipValue](<#MembershipValue.Clone>)
   - [func \(MembershipValue\) IsRetired\(id NodeID\) bool](<#MembershipValue.IsRetired>)
+  - [func \(MembershipValue\) IsRetiredKey\(spki \[32\]byte\) bool](<#MembershipValue.IsRetiredKey>)
   - [func \(MembershipValue\) Member\(id NodeID\) \(MemberValue, bool\)](<#MembershipValue.Member>)
   - [func \(MembershipValue\) Voters\(\) \[\]NodeID](<#MembershipValue.Voters>)
 - [type MemoryLog](<#MemoryLog>)
@@ -324,6 +325,15 @@ const FlagProtocol2 coreconsensus.MessageFlags = 16
 The read modes and durabilities.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.FlagProtocol2`.
+
+<a name="FlagProtocol3"></a>
+```go
+const FlagProtocol3 coreconsensus.MessageFlags = 32
+```
+
+The read modes and durabilities.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.FlagProtocol3`.
 
 <a name="FlagTransfer"></a>
 ```go
@@ -1364,7 +1374,7 @@ ParseMessage decodes a frame: FRAME\_INVALID, VERSION\_UNSUPPORTED.
 func ParseSnapshotMeta(b []byte, m *SnapshotMetaValue) error
 ```
 
-ParseSnapshotMeta decodes a SnapshotMeta: version 1, or version 2 once its trailing CRC-32C holds.
+ParseSnapshotMeta decodes a SnapshotMeta: version 1, or version 2 or 3 once its trailing CRC-32C holds.
 
 <a name="ParseToken"></a>
 ## func [ParseToken](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
@@ -2544,11 +2554,15 @@ MembershipValue is an alias of `github.com/kitsunium/sdk/internal/core/app/conse
 ```go
 type MembershipValue struct {
 	// Index is the index of the entry that produced it, 0 at founding.
-	Index   uint64
+	Index       uint64
 	// Members lists every voter and learner.
-	Members []MemberValue
+	Members     []MemberValue
 	// Retired lists every removed NodeID.
-	Retired []NodeID
+	Retired     []NodeID
+	// RetiredKeys lists the SPKI pin of every member removed, and every pin
+	// DenyPin withdrew, since the cluster version is 3: a key held once is
+	// never admitted again under another id. Empty below version 3.
+	RetiredKeys [][32]byte
 }
 ```
 
@@ -2569,6 +2583,15 @@ func (MembershipValue) IsRetired(id NodeID) bool
 ```
 
 IsRetired reports whether the id was removed.
+
+<a name="MembershipValue.IsRetiredKey"></a>
+### func \(MembershipValue\) [IsRetiredKey](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/membership.go>)
+
+```go
+func (MembershipValue) IsRetiredKey(spki [32]byte) bool
+```
+
+IsRetiredKey reports whether the key was retired with a member removed, or with a pin denied.
 
 <a name="MembershipValue.Member"></a>
 ### func \(MembershipValue\) [Member](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/membership.go>)

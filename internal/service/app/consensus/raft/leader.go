@@ -52,10 +52,7 @@ func (r *Raft) becomeLeader() {
 	}
 	if pr := r.prs[r.id]; pr != nil {
 		pr.match = r.log.stable
-		pr.facts |= peerHeard
-		if r.speaks() >= Protocol2 {
-			pr.facts |= peerProtocol2
-		}
+		pr.facts |= peerHeard | r.announces()
 	}
 	r.facts &^= raftLeaseDropped
 	r.leaseStart = time.Time{}
@@ -327,12 +324,8 @@ func (r *Raft) stepLeader(now time.Time, m core.MessageValue) {
 	pr.lastHeard = now
 	pr.facts |= peerHeard
 	// The announcement follows the peer's last message: a member rolled
-	// back to the previous release stops carrying it at once.
-	if m.Flags&core.FlagProtocol2 != 0 {
-		pr.facts |= peerProtocol2
-	} else {
-		pr.facts &^= peerProtocol2
-	}
+	// back to a previous release stops carrying it at once.
+	pr.facts = pr.facts&^(peerProtocol2|peerProtocol3) | announced(m.Flags)
 	switch m.Kind {
 	case core.MsgAppResp:
 		r.handleAppResp(pr, m)
@@ -569,7 +562,9 @@ func (r *Raft) checkProposed(e *core.EntryValue, index uint64, origin core.NodeI
 // it received the operation from, overwriting whatever the proposer wrote:
 // the ORIGIN of D8 is the TLS identity of the forwarding connection, never
 // a field the forwarder wrote. Before, the entry is of payload version 0,
-// which carries none, so a node of protocol 1 still reads it (#561).
+// which carries none, so a node of protocol 1 still reads it (#561). Once
+// it is 3 the entry is of payload version 3, which carries the
+// configuration's retired keys as well (#648).
 func (r *Raft) validateAdmin(e *core.EntryValue, index uint64, origin core.NodeID) (core.NodeID, errs.Code) {
 	admin, err := wire.ParseAdminAt(e.Version, e.Data)
 	if err != nil {
@@ -582,6 +577,8 @@ func (r *Raft) validateAdmin(e *core.EntryValue, index uint64, origin core.NodeI
 	switch {
 	case r.mutated(mutOriginAsWritten):
 		// The payload stays as the proposer wrote it.
+	case r.atProtocol3():
+		e.Version, admin.Origin = wire.AdminVersion3, origin
 	case r.clusterVer >= Protocol2:
 		e.Version, admin.Origin = wire.AdminVersion2, origin
 	default:
@@ -662,25 +659,63 @@ func (r *Raft) checkClusterVersion(admin *wire.AdminValue) errs.Code {
 	if !admin.Pre.Log.Same(r.cfg.Log) || admin.Pre.Generation != r.clusterGen || admin.ClusterVersion <= r.clusterVer {
 		return codePrecondition
 	}
+	if r.mutated(mutRaiseUnannounced) {
+		return 0
+	}
 	return r.checkAnnounced(admin.ClusterVersion)
 }
 
 // checkAnnounced refuses a raise to v while a member of the latest
 // configuration, voter or learner, was not heard in this term announcing
 // it: the operation is refused while any member does not speak the version
-// (D18). A member of the previous release would stop on the raise, and on
-// every format written after it.
+// (D18). A member of a previous release would stop on the raise, and on
+// every format written after it. A node of protocol 3 announces 2 as well.
 func (r *Raft) checkAnnounced(v uint32) errs.Code {
-	if v < Protocol2 || r.mutated(mutRaiseUnannounced) {
+	if v < Protocol2 {
 		return 0
 	}
+	want := peerHeard | peerProtocol2
+	if v >= Protocol3 {
+		want |= peerProtocol3
+	}
 	for _, m := range r.conf().Members {
-		pr := r.prs[m.ID]
-		if pr == nil || pr.facts&peerHeard == 0 || pr.facts&peerProtocol2 == 0 {
+		if pr := r.prs[m.ID]; pr == nil || pr.facts&want != want {
 			return codeVersion
 		}
 	}
 	return 0
+}
+
+// announcementOf is the announcement every frame of a node speaking
+// protocol version v carries: FlagProtocol2 from 2, and FlagProtocol3 beside
+// it from 3 (D18, #648).
+func announcementOf(v uint32) core.MessageFlags {
+	var f core.MessageFlags
+	if v >= Protocol2 {
+		f |= core.FlagProtocol2
+	}
+	if v >= Protocol3 {
+		f |= core.FlagProtocol3
+	}
+	return f
+}
+
+// announces is the announcement this node's own frames carry, as the facts
+// a leader keeps of a peer that sent them.
+func (r *Raft) announces() peerFacts {
+	return announced(announcementOf(r.speaks()))
+}
+
+// announced is the announcement a message's flags carry.
+func announced(flags core.MessageFlags) peerFacts {
+	var f peerFacts
+	if flags&core.FlagProtocol2 != 0 {
+		f |= peerProtocol2
+	}
+	if flags&core.FlagProtocol3 != 0 {
+		f |= peerProtocol3
+	}
+	return f
 }
 
 // checkNoSpaceClear admits clearing only the alarm that is raised now, so a
@@ -725,8 +760,8 @@ func (r *Raft) nextConf(admin wire.AdminValue) (core.MembershipValue, errs.Code)
 }
 
 // addLearner adds the one member admin carries as a learner: a new id with
-// a key no member holds, never retired, with a pin, and only while a quorum
-// answers so the change can commit.
+// a key no member holds and none held before it, never retired, with a pin,
+// and only while a quorum answers so the change can commit.
 func (r *Raft) addLearner(cur *core.MembershipValue, admin *wire.AdminValue) errs.Code {
 	if len(admin.Membership.Members) != 1 {
 		return codeMembershipInvalid
@@ -740,8 +775,13 @@ func (r *Raft) addLearner(cur *core.MembershipValue, admin *wire.AdminValue) err
 		return codeMembershipInvalid
 	}
 	// One id, one member; and one key, one member, since the transport
-	// admits by key (review M5).
-	if _, ok := cur.Member(nm.ID); ok || slices.ContainsFunc(cur.Members, func(m core.MemberValue) bool { return m.SPKI == nm.SPKI }) {
+	// admits by key (review M5). And one key, one id for the cluster's
+	// whole life: a key retired with a member is never taken again under a
+	// new id. A node whose configuration still listed the old member under
+	// it refused the new one as leader, a stale voter as a joiner, for as
+	// long as it led (#648).
+	if _, ok := cur.Member(nm.ID); ok || slices.ContainsFunc(cur.Members, func(m core.MemberValue) bool { return m.SPKI == nm.SPKI }) ||
+		(cur.IsRetiredKey(nm.SPKI) && !r.mutated(mutRetiredKeyAdmitted)) {
 		return codeMembershipInvalid
 	}
 	if !r.quorumActive(r.now, r.voteWindow) {
@@ -777,13 +817,14 @@ func (r *Raft) promote(cur *core.MembershipValue, target core.NodeID, idx int) e
 }
 
 // removeMember removes the member at idx, never this leader, and retires
-// its id; a voter's removal may not cross MinVoters nor leave a voter set
-// without an answering majority.
+// its id, and from protocol 3 its key; a voter's removal may not cross
+// MinVoters nor leave a voter set without an answering majority.
 func (r *Raft) removeMember(cur *core.MembershipValue, target core.NodeID, idx int) errs.Code {
 	if idx < 0 || target == r.id {
 		return codeMembershipInvalid
 	}
 	wasVoter := cur.Members[idx].Voter
+	r.retireKey(cur, cur.Members[idx].SPKI)
 	cur.Members = slices.Delete(cur.Members, idx, idx+1)
 	cur.Retired = append(cur.Retired, target)
 	if wasVoter {
@@ -948,8 +989,34 @@ func (r *Raft) denyPin(cur *core.MembershipValue, target core.NodeID, idx int) e
 	if idx < 0 || (!r.mutated(mutDenyPinUnchecked) && (target == r.id || !r.activeMajorityWithout(*cur, target))) {
 		return codeMembershipInvalid
 	}
+	r.retireKey(cur, cur.Members[idx].SPKI)
 	clear(cur.Members[idx].SPKI[:])
 	return 0
+}
+
+// retireKey keeps spki, the key of a member that leaves the configuration's
+// pins — removed, or its pin denied — once the committed cluster version is
+// 3, so that no new member takes it (#648). Below 3 the configuration
+// carries no retired key, a format a node of protocol 2 cannot read; and
+// the zero pin a DenyPin left is no key.
+func (r *Raft) retireKey(cur *core.MembershipValue, spki [32]byte) {
+	var unpinned [32]byte
+	switch {
+	case r.mutated(mutKeyNotRetired), spki == unpinned, cur.IsRetiredKey(spki):
+		return
+	case r.atProtocol3():
+		cur.RetiredKeys = append(cur.RetiredKeys, spki)
+	default:
+		// Below protocol 3 nothing new is written.
+	}
+}
+
+// atProtocol3 reports whether the committed cluster version admits the
+// formats of protocol 3: every member announced it before the raise
+// committed, and a node of protocol 2 stops on the raise instead of meeting
+// them (D18).
+func (r *Raft) atProtocol3() bool {
+	return r.clusterVer >= Protocol3 || r.mutated(mutProtocol3BelowRaise)
 }
 
 // activeMajority is etcd's strict reconfiguration check: the voters of m

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T15:36:41Z -->
+<!-- updated: 2026-10-24T23:30:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -13,7 +13,14 @@ write leave in `Ready.AfterSync`.
 The deterministic simulator (`sim_internal_test.go`), the constructed checks
 and `TestMutationsAreCaught` (one mutation per cited bug, behind the
 unexported `Config.mut`), and the linearizability checker with its negative
-control (`lincheck_internal_test.go`).
+control (`lincheck_internal_test.go`). `simOptions.speaks` runs a node of a
+previous release in a mixed cluster, read at each start so a restart
+upgrades it (`TestAMixedClusterRaisesTo3OnceEveryMemberSpeaksIt`).
+
+Bazel deals top-level tests to shards by their index, so a new test file
+whose name sorts before the simulator's (`sim_*`, `soak_*`) moves every
+seed part to another shard: name it after them, or measure the shards
+again.
 
 The suites cost ~300 CPU-seconds under race and coverage against a 60 s cap
 per target, so `raft_test` has 26 shards and Bazel deals them TOP-LEVEL tests:
@@ -91,8 +98,20 @@ under coverage before touching `shard_count`.
   `checkMembershipPublishedOnChange`).
 - Raise the cluster version to 2 while a member of the latest
   configuration was not heard in the term announcing it (FlagProtocol2), or
-  apply a raise above the version this node speaks: D18 refuses the raise
-  while any member does not speak it (lot S3, `mutRaiseUnannounced`).
+  to 3 while one was not heard announcing FlagProtocol3, or apply a raise
+  above the version this node speaks: D18 refuses the raise while any
+  member does not speak it (lot S3, #648, `mutRaiseUnannounced`,
+  `checkRaise3Announced`). A node of protocol 3 announces both flags.
+- Add a learner over a key the configuration retired, or remove a member,
+  or deny its pin, without retiring its key, at protocol 3: one key, one id
+  for the cluster's whole life, or a node whose configuration still listed
+  the removed member under the key refused the new one as leader (#648,
+  `mutRetiredKeyAdmitted`, `mutKeyNotRetired`, `checkRetiredKeyRefused`).
+  Below protocol 3, retire no key and write no entry of payload version 3
+  (`mutProtocol3BelowRaise`, `checkNothingNewBelowProtocol3`); and read the
+  retired keys in `addLearner` alone, never in the admission set or a
+  leader record, so a retired key never cuts a live member
+  (`TestARetiredKeyNeverCutsALiveMember`).
 - Keep the origin a proposer wrote in an engine entry: at protocol 2 the
   leader writes the authenticated sender, a forwarder or itself (#561,
   `mutOriginAsWritten`). Skip an engine entry whose payload version this

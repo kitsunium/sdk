@@ -32,12 +32,18 @@ const (
 // version above it is refused, and stops a node that finds it committed.
 // Version 2 adds the snapshot metadata's checksum, the admin payload's
 // Origin and the log identity's AdoptedFrom, each written only once the
-// committed cluster version is 2 (lot S3).
-const ProtocolMax uint32 = 2
+// committed cluster version is 2 (lot S3). Version 3 adds the retired keys
+// of the configuration, written only once it is 3 (#648).
+const ProtocolMax uint32 = 3
 
 // Protocol2 is the protocol version whose formats a node writes once the
 // cluster version is raised to it.
 const Protocol2 uint32 = 2
+
+// Protocol3 is the protocol version from which a configuration keeps the
+// key of every member removed, and of every pin denied, and refuses it to
+// any new member (#648).
+const Protocol3 uint32 = 3
 
 // raftFacts are the step function's own yes/no state, one bit each.
 type raftFacts uint8
@@ -824,9 +830,7 @@ func (r *Raft) send(m core.MessageValue) {
 	m.Version = 1
 	m.Group = r.cfg.Group
 	m.From = r.id
-	if r.speaks() >= Protocol2 {
-		m.Flags |= core.FlagProtocol2
-	}
+	m.Flags |= announcementOf(r.speaks())
 	if m.Term == 0 && m.Kind != core.MsgPreVote && m.Kind != core.MsgPreVoteResp {
 		m.Term = r.term
 	}
