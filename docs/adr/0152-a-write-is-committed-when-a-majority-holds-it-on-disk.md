@@ -3029,7 +3029,12 @@ node, under the directory lock.
     recovered cluster can grow back to three voters (R3-02). **They enter as
     LEARNERS, and are promoted through the normal `Promote` catch-up, never
     as empty voters (R4-04).** `Init` for them takes the NEW `ClusterID`,
-    chosen before `Recover` runs.
+    chosen before `Recover` runs. `Recover` refuses `RECOVER_REFUSED` a
+    voter other than the survivor (2026-10-24,
+    [#642](https://github.com/kitsunium/sdk/issues/642)): accepted, a
+    member `Init` only prepared could not vote before a leader admitted it,
+    and the cluster never elected one. `RestoreSnapshot` keeps every voter
+    it is given: it runs on every node it names.
   - **Which node:** the one with the highest `(lastLogTerm, lastLogIndex)`,
     compared in that order, not "the highest committed index", which no
     surviving node can know for certain.

@@ -13324,6 +13324,11 @@ sequences:
                 when: isZeroDigest(m.SPKI) || m.ID == 0
             - opt:
                 do:
+                  - return: "recoverRefused(\"a voter other than this node: the other members enter as learners\")"
+                    to: recoverRefused
+                when: m.ID != stamp.ID && m.Voter
+            - opt:
+                do:
                   - set: self
                     value: m.Incarnation == stamp.Incarnation
                 when: m.ID == stamp.ID && m.Voter

@@ -285,6 +285,15 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
 - Stream again a snapshot a peer refused SNAPSHOT_CORRUPT without reading
   it back: `sentCorrupt` verifies the sender's copy and replaces one that
   fails (#525, `TestALeaderReplacesASnapshotItsPeerFindsCorrupt`).
+- Let `Recover` name a voter other than the survivor: a member `Init` only
+  prepared cannot vote before a leader admits it, so the forced
+  configuration that needed its vote never elected a leader, and two
+  survivors naming each other recovered two histories into one identity.
+  `checkRecoverMembers` refuses it RECOVER_REFUSED; the others enter as
+  learners (R4-04, #642, `TestRecoverRefusesAMemberInitPreparedAsAVoter`,
+  `TestTwoSurvivorsNamingEachOtherAVoterAreRefused`). `RestoreSnapshot`
+  keeps every voter it is given: it runs on every node it names
+  (`TestARestoreOnEveryNodeWithTheSameMembersElects`).
 - Plan `Recover` from the log's bounds alone: an install a crash
   interrupted after its publication left the snapshot past the log, and
   the forced entry written after the short log was erased at the next

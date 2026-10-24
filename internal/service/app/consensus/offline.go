@@ -747,13 +747,21 @@ func checkRecover(stamp *coreconsensus.StampValue, newCluster coreconsensus.Clus
 	return nil
 }
 
-// checkRecoverMembers refuses new members that are not all pinned, or
-// among which this node, at its incarnation, is not a voter.
+// checkRecoverMembers refuses new members that are not all pinned, among
+// which this node, at its incarnation, is not a voter, or which name
+// another voter. The others enter as learners and are promoted through
+// Promote, never as empty voters (R3-02, R4-04): a member Init only
+// prepared cannot vote before a leader admits it, so a forced configuration
+// that needed its vote never elected one, and two survivors naming each
+// other recovered two histories into one identity (#642).
 func checkRecoverMembers(stamp *coreconsensus.StampValue, members []coreconsensus.MemberValue) error {
 	self := false
 	for _, m := range members {
 		if isZeroDigest(m.SPKI) || m.ID == 0 {
 			return recoverRefused("a member without an SPKI pin")
+		}
+		if m.ID != stamp.ID && m.Voter {
+			return recoverRefused("a voter other than this node: the other members enter as learners")
 		}
 		if m.ID == stamp.ID && m.Voter {
 			self = m.Incarnation == stamp.Incarnation
