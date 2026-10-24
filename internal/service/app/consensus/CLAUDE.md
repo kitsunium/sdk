@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T17:51:17Z -->
+<!-- updated: 2026-10-24T20:23:47Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -154,7 +154,15 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   `TestARetentionWhoseRemoveFailsStopsTheNode`).
 - Convert a length read off the wire or the disk to `int` before bounding
   it: on 32 bits it turns negative and passes the bound (#422,
-  `TestReadChunkRefusesALengthAboveTheLimit`, run by `test-386`).
+  `TestReadChunkRefusesALengthAboveTheLimit`, run by `test-386`). Nor add
+  to it as an int, nor make a buffer of an int64 size an int may not hold:
+  near 2^31 the sum wraps negative, and the bound passes or make panics.
+  A torn log tail stopped every open, a member's frame the node, and an
+  offer's chunk size the node verifying the snapshot (#630,
+  `TestARecordOfLength2To31IsAHole`,
+  `TestReadFrameRefusesALengthThatWrapsOn32Bits`,
+  `TestASegmentAnIntDoesNotHoldIsRefusedOn32Bits`,
+  `TestASnapshotChunkAnIntDoesNotHoldIsRefused`).
 - Keep `Recover`'s index at a persisted commit below the log's base: the
   forced entry cannot be appended there, and every rerun failed the same
   way. `adoptedPastTheBase` adopts from the base, and refuses with a reason

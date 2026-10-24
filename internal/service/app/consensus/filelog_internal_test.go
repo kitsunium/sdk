@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"hash/crc32"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -924,6 +926,94 @@ func TestASealedSegmentIsReadUpToItsSeal(t *testing.T) {
 	checkEntries(t, d.Log(), 1, 3, 1)
 	if n := len(d.d.log.segs); n != 2 {
 		t.Fatalf("%d segments after the open, want the next one published", n)
+	}
+}
+
+// A record whose length field is near 2^31 is a hole, never a panic: on 32
+// bits sealedBody added it to the header as an int, the sum wrapped
+// negative, passed the bound, and the slice panicked the open of a log
+// whose tail held such a torn or damaged header, so the node could not
+// restart (FuzzScanSegment/seed#6 on linux/386). The open truncates it as
+// the garbage after a complete batch it is. The test-386 lane runs this.
+func TestARecordOfLength2To31IsAHole(t *testing.T) {
+	for _, n := range []uint32{0x7FFFFFF8, 0x7FFFFFFF, 1 << 31, 0xFFFFFFFF} {
+		b := make([]byte, 256)
+		binary.LittleEndian.PutUint32(b, n)
+		if body := sealedBody(b); body != nil {
+			t.Fatalf("length %#x: a body of %d bytes out of %d", n, len(body), len(b))
+		}
+		if _, ok := parseRecord(b); ok {
+			t.Fatalf("length %#x parsed as a record", n)
+		}
+		if err := unknownVersionAt(b, 1, 0); err != nil {
+			t.Fatalf("length %#x: %v", n, err)
+		}
+	}
+	dir, d := base(t)
+	tail(t, d, []byte{0xff, 0xff, 0xff, 0x7f}, 0)
+	nd := reopenExpect(t, dir, d, false)
+	defer nd.Close()
+	if _, la := nd.Log().Bounds(); la != 3 {
+		t.Fatalf("last %d, want 3", la)
+	}
+	checkEntries(t, nd.Log(), 1, 3, 1)
+}
+
+// On 32 bits a segment larger than an int holds is refused, never a panic:
+// the scan's buffer is the file's size, and make panicked on it. A length
+// in such a segment that an int does not hold is LOG_CORRUPT, where make
+// panicked on its negative conversion. The segment is sparse.
+func TestASegmentAnIntDoesNotHoldIsRefusedOn32Bits(t *testing.T) {
+	if strconv.IntSize != 32 {
+		t.Skip("an int holds every segment size on 64 bits")
+	}
+	const size int64 = 3 << 30
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "log"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "log", segName(1)), os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	var h [recHeader]byte
+	binary.LittleEndian.PutUint32(h[:], 1<<31)
+	if _, err := f.WriteAt(h[:], 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(size); err != nil {
+		t.Skipf("no sparse file of %d bytes here: %v", size, err)
+	}
+	if _, err := (&fileLog{dir: dir}).scanSegment(1, &scanBufs{}); !errors.Is(err, coreconsensus.StorageFailed) {
+		t.Fatalf("scan of a segment of %d bytes: %v, want STORAGE_FAILED", size, err)
+	}
+	l := &fileLog{segs: []*segment{{n: 1, f: f, size: size}}}
+	if _, err := l.readEntry(slot{seg: 1}); !errors.Is(err, coreconsensus.LogCorrupt) {
+		t.Fatalf("an entry of 2^31 bytes: %v, want LOG_CORRUPT", err)
+	}
+}
+
+// A snapshot chunk an int does not hold is refused, never a panic: an
+// offer's chunk size comes from the leader, and on 32 bits one near 2^31
+// let an encoded length of 2^31 through the stream's bound and the
+// resume's, and make panicked on either. The bound is checked everywhere;
+// the stream only on 32 bits, where it is refused before anything is
+// allocated.
+func TestASnapshotChunkAnIntDoesNotHoldIsRefused(t *testing.T) {
+	for _, chunk := range []int64{1 << 31, math.MaxUint32, math.MaxInt64} {
+		if got := maxEncodedChunk(chunk); got <= 0 || got > math.MaxInt {
+			t.Fatalf("encoded bound %d for chunks of %d bytes", got, chunk)
+		}
+	}
+	if strconv.IntSize != 32 {
+		return
+	}
+	var h [chunkHeaderLen]byte
+	binary.LittleEndian.PutUint32(h[0:], 1<<31)
+	cr := newChunkReader(bytes.NewReader(h[:]), nil, 1<<31, 1<<40)
+	if err := cr.next(); !errors.Is(err, coreconsensus.SnapshotTooLarge) {
+		t.Fatalf("a chunk of 2^31 encoded bytes: %v, want SNAPSHOT_TOO_LARGE", err)
 	}
 }
 

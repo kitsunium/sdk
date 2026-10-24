@@ -8,6 +8,7 @@ import (
 	"hash/crc32"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -115,23 +116,28 @@ func boolByte(v bool) byte {
 	return 0
 }
 
-// sealRecord recomputes a record's crc over its body.
+// sealRecord recomputes a record's crc over its body. The body's end is
+// summed in uint64, where a length near 2^31 cannot wrap as an int sum does
+// on 32 bits.
 func sealRecord(b []byte) {
 	n := binary.LittleEndian.Uint32(b)
-	binary.LittleEndian.PutUint32(b[4:], crc32.Checksum(b[recHeader:recHeader+int(n)], castagnoli))
+	binary.LittleEndian.PutUint32(b[4:], crc32.Checksum(b[recHeader:uint64(recHeader)+uint64(n)], castagnoli))
 }
 
 // sealedBody is the body of the record at b[0:] when its length is in range
-// and its crc holds, whatever version it carries; nil otherwise.
+// and its crc holds, whatever version it carries; nil otherwise. The length
+// is bounded as the u32 it is, before any int sum: on 32 bits one near 2^31
+// wrapped recHeader+n negative, passed the bound, and the slice panicked
+// the open of a log whose tail held a torn or damaged header.
 func sealedBody(b []byte) []byte {
 	if len(b) < recHeader+recFixed {
 		return nil
 	}
-	n := int(binary.LittleEndian.Uint32(b))
-	if n < recFixed || recHeader+n > len(b) {
+	n := binary.LittleEndian.Uint32(b)
+	if n < uint32(recFixed) || uint64(n) > uint64(len(b)-recHeader) {
 		return nil
 	}
-	body := b[recHeader : recHeader+n]
+	body := b[recHeader : recHeader+int(n)]
 	if crc32.Checksum(body, castagnoli) != binary.LittleEndian.Uint32(b[4:]) {
 		return nil
 	}
@@ -598,13 +604,17 @@ type scanBufs struct {
 }
 
 // reader is the read of segment file f into sb's buffer, grown when the
-// file is larger than any before it.
+// file is larger than any before it. A file larger than an int holds is
+// refused before the buffer is made: on 32 bits make panicked on it.
 func (sb *scanBufs) reader(f *os.File) (*segRead, error) {
 	st, err := f.Stat()
 	if err != nil {
 		return nil, err
 	}
 	size := st.Size()
+	if size > math.MaxInt {
+		return nil, errSegmentTooLarge
+	}
 	if int64(cap(sb.b)) < size {
 		sb.b = make([]byte, 0, size)
 	}
@@ -1430,10 +1440,12 @@ func (l *fileLog) readEntry(s slot) (coreconsensus.EntryValue, error) {
 	if _, err := seg.f.ReadAt(h[:], s.off); err != nil {
 		return coreconsensus.EntryValue{}, storageFailed("read", err)
 	}
-	// Bounded by the segment before the conversion: a damaged length must
-	// not turn negative on 32 bits nor allocate past the file (#422).
+	// Bounded by the segment, and by what an int holds, before the
+	// conversion: a damaged length must not turn negative on 32 bits nor
+	// allocate past the file (#422). The segment alone did not bound it on
+	// 32 bits once the segment was larger than an int holds.
 	ln := binary.LittleEndian.Uint32(h[:])
-	if int64(ln) > seg.size-s.off-int64(recHeader) {
+	if int64(ln) > min(seg.size-s.off, math.MaxInt)-int64(recHeader) {
 		return coreconsensus.EntryValue{}, origin(coreconsensus.LogCorrupt, errs.String("segment", segName(s.seg)), errs.Int64("offset", s.off))
 	}
 	b := make([]byte, recHeader+int(ln))

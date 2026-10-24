@@ -752,6 +752,20 @@ func TestReadChunkRefusesALengthAboveTheLimit(t *testing.T) {
 	}
 }
 
+// A frame length is bounded before the header's 4 bytes are added to it as
+// an int: on 32 bits a length within 4 of 2^31 wrapped the sum negative,
+// passed the limit, and the slice panicked the reader of a member's
+// connection, and the node with it. The test-386 lane runs this.
+func TestReadFrameRefusesALengthThatWrapsOn32Bits(t *testing.T) {
+	for _, ln := range []uint32{0x7FFFFFFC, 0x7FFFFFFF, 1 << 31, 0xFFFFFFFF} {
+		var h [4]byte
+		binary.LittleEndian.PutUint32(h[:], ln)
+		if _, ok := readFrame(bytes.NewReader(h[:]), nil, 1<<20); ok {
+			t.Fatalf("length %#x read under a limit of 1 MiB", ln)
+		}
+	}
+}
+
 // failingListener fails its first fails Accepts the way an exhausted
 // descriptor table does, then accepts from the listener it wraps.
 type failingListener struct {
