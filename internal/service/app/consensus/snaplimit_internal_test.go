@@ -41,7 +41,7 @@ func TestNoSnapshotPastMaxSnapshotBytesIsPublished(t *testing.T) {
 	for i, tn := range c.nodes {
 		c.kill(tn)
 		c.start(tn)
-		if tn.node.r.NoTable() {
+		if holdsNoTable(t, tn) {
 			t.Fatalf("restart %d: node %d started with no table", i, tn.id)
 		}
 		tok = proposeOnLeader(t, c, fmt.Sprintf("restart%d=1", i))
@@ -80,7 +80,7 @@ func TestALogFromIndexOneIsReplayedWhenNoSnapshotRestores(t *testing.T) {
 	}
 	tn.snaps.mu.Unlock()
 	c.start(tn)
-	if tn.node.r.NoTable() {
+	if holdsNoTable(t, tn) {
 		t.Fatal("a node holding its log from index 1 started with no table")
 	}
 	c.waitApplied(tok.Index, 10*time.Second)

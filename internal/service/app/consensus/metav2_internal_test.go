@@ -62,7 +62,7 @@ func TestASnapshotMetaOfVersion2IsRestored(t *testing.T) {
 		}
 	}
 	c.start(tn)
-	if tn.node.r.NoTable() {
+	if holdsNoTable(t, tn) {
 		t.Fatal("a node of this release skipped every version 2 metadata and started with no table")
 	}
 	if got := must(snaps.List())(t); len(got) != len(metas) || got[0].ID != metas[0].ID {
