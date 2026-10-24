@@ -398,8 +398,11 @@ func TestConformance_closeTargetOnly(t *testing.T) {
 		c1 := dial(t, addr)
 		waitFor(t, "two opens", func() bool { o, _ := h.counts(); return o == 2 })
 		_, _ = c0.Write([]byte("CLOSE\n"))
-		if _, err := c0.Read(make([]byte, 1)); err == nil {
-			t.Fatal("the closed connection still answers")
+		// The peer must see the end itself, promptly: a socket the kernel
+		// keeps after the close would time out here instead.
+		_ = c0.SetReadDeadline(time.Now().Add(2 * time.Second))
+		if _, err := c0.Read(make([]byte, 1)); !errors.Is(err, io.EOF) && !errors.Is(err, syscall.ECONNRESET) {
+			t.Fatalf("the closed connection's peer read %v, want the end of the stream", err)
 		}
 		_, _ = c1.Write([]byte("alive\n"))
 		got := make([]byte, 6)
@@ -669,115 +672,107 @@ func TestConformance_highWaterGC(t *testing.T) {
 	})
 }
 
-// TestConformance_emfile runs the RLIMIT_NOFILE=64 case in a re-executed
-// child: the loop never crashes on EMFILE, backs off, and serves again once
-// descriptors come back.
+// TestConformance_emfile serves from a re-executed child under
+// RLIMIT_NOFILE=64 while this process, under its own limit, opens 80
+// connections: the loop never crashes at the limit, pauses its accepts and
+// says so — on EMFILE for epoll and io_uring on process descriptors, at its
+// one ring's full table for io_uring on direct descriptors (no MaxConns
+// derives a second ring here) — and once the connections close, a new one is
+// served.
 func TestConformance_emfile(t *testing.T) {
 	eachBackend(t, func(t *testing.T, b backendCase) {
-		cmd := exec.Command(os.Args[0], "-test.run=^$")
-		cmd.Env = append(os.Environ(), childEnv+"=emfile:"+b.name)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("child: %v\n%s", err, out)
+		child := startServeChild(t, b, 64, 0)
+		var conns []stdnet.Conn
+		served := 0
+		for range 80 {
+			c, err := stdnet.DialTimeout("tcp", child.addr, time.Second)
+			if err != nil {
+				continue
+			}
+			conns = append(conns, c)
+			_ = c.SetDeadline(time.Now().Add(300 * time.Millisecond))
+			_, _ = c.Write([]byte("x\n"))
+			if _, err := io.ReadFull(c, make([]byte, 2)); err == nil {
+				served++
+			}
 		}
-		if !bytes.Contains(out, []byte("emfile ok")) {
-			t.Fatalf("child did not finish:\n%s", out)
+		for _, c := range conns {
+			_ = c.Close()
+		}
+		deadline := time.Now().Add(5 * time.Second)
+		back := false
+		for !back && time.Now().Before(deadline) {
+			c, err := stdnet.DialTimeout("tcp", child.addr, time.Second)
+			if err == nil {
+				_ = c.SetDeadline(time.Now().Add(time.Second))
+				_, _ = c.Write([]byte("back\n"))
+				got := make([]byte, 5)
+				_, err = io.ReadFull(c, got)
+				back = err == nil && string(got) == "back\n"
+				_ = c.Close()
+			}
+			if !back {
+				time.Sleep(20 * time.Millisecond)
+			}
+		}
+		report := child.stop(t)
+		t.Logf("served %d of 80 under RLIMIT 64; child: %s", served, report)
+		if !back {
+			t.Fatal("never served again once the connections closed")
+		}
+		if !strings.Contains(report, "paused=true") {
+			t.Fatal("the loop never paused its accept at the limit")
 		}
 	})
 }
 
+// serveChild is a re-executed child serving a loop group.
+type serveChild struct {
+	cmd   *exec.Cmd
+	stdin io.WriteCloser
+	out   *bufio.Reader
+	addr  string
+}
+
+// startServeChild starts a child serving on b under RLIMIT_NOFILE=rlimit and
+// MaxConns=maxConns, and reads the address it listens on.
+func startServeChild(t *testing.T, b backendCase, rlimit, maxConns int) *serveChild {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^$")
+	cmd.Env = append(os.Environ(), fmt.Sprintf("%s=serve:%s:%d:%d", childEnv, b.name, rlimit, maxConns))
+	stdin, _ := cmd.StdinPipe()
+	stdout, _ := cmd.StdoutPipe()
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	r := bufio.NewReader(stdout)
+	addr, err := r.ReadString('\n')
+	if err != nil {
+		t.Fatalf("child: %v", err)
+	}
+	return &serveChild{cmd: cmd, stdin: stdin, out: r, addr: strings.TrimSpace(addr)}
+}
+
+// stop closes the child's standard input and returns its report.
+func (c *serveChild) stop(t *testing.T) string {
+	t.Helper()
+	_ = c.stdin.Close()
+	report, _ := io.ReadAll(c.out)
+	if err := c.cmd.Wait(); err != nil {
+		t.Fatalf("child: %v: %s", err, report)
+	}
+	return strings.TrimSpace(string(report))
+}
+
 // runChild runs a re-executed case and returns its exit status.
 func runChild(c string) int {
-	name, backend, _ := strings.Cut(c, ":")
-	var b corenet.LoopBackend
-	for _, x := range backendsPresent() {
-		if x.name == backend {
-			b = x.backend
-		}
-	}
-	switch name {
-	case "overlimit":
-		return childOverLimit(b)
-	case "emfile":
-		if err := childEMFILE(b); err != nil {
-			fmt.Println("emfile failed:", err)
-			return 1
-		}
-		fmt.Println("emfile ok")
-		return 0
+	name, spec, _ := strings.Cut(c, ":")
+	if name == "serve" {
+		return childServe(spec)
 	}
 	fmt.Println("unknown child case", c)
 	return 2
-}
-
-// childEMFILE lowers RLIMIT_NOFILE to 64, then opens more connections than
-// descriptors remain.
-func childEMFILE(b corenet.LoopBackend) error {
-	if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &syscall.Rlimit{Cur: 64, Max: 64}); err != nil {
-		return err
-	}
-	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM|syscall.SOCK_NONBLOCK|syscall.SOCK_CLOEXEC, 0)
-	if err != nil {
-		return err
-	}
-	if err := syscall.Bind(fd, &syscall.SockaddrInet4{Addr: [4]byte{127, 0, 0, 1}}); err != nil {
-		return err
-	}
-	if err := syscall.Listen(fd, 1024); err != nil {
-		return err
-	}
-	sa, _ := syscall.Getsockname(fd)
-	addr := fmt.Sprintf("127.0.0.1:%d", sa.(*syscall.SockaddrInet4).Port)
-	h := &lineH{}
-	g, err := Start(Config{Group: "emfile", Value: corenet.LoopValue{Backend: b}, Handler: h, Listeners: []Listener{{FD: fd}}, Log: io.Discard})
-	if err != nil {
-		return err
-	}
-	defer g.Close()
-	// The client half lives in this process too: each dial costs one
-	// descriptor here and one in the loop, so the loop runs out first or
-	// together, and the dial errors are expected.
-	var conns []stdnet.Conn
-	for range 80 {
-		c, err := stdnet.DialTimeout("tcp", addr, 200*time.Millisecond)
-		if err != nil {
-			break
-		}
-		conns = append(conns, c)
-	}
-	time.Sleep(100 * time.Millisecond)
-	paused := false
-	for _, r := range g.State().RingStates {
-		paused = paused || r.AcceptPauses > 0
-	}
-	for _, c := range conns {
-		_ = c.Close()
-	}
-	conns = nil
-	// Descriptors are back: a new connection is served.
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		c, err := stdnet.DialTimeout("tcp", addr, time.Second)
-		if err != nil {
-			time.Sleep(20 * time.Millisecond)
-			continue
-		}
-		_ = c.SetDeadline(time.Now().Add(time.Second))
-		_, _ = c.Write([]byte("back\n"))
-		got := make([]byte, 5)
-		_, err = io.ReadFull(c, got)
-		_ = c.Close()
-		if err == nil && string(got) == "back\n" {
-			// io_uring's connections are direct descriptors the process
-			// table does not count, so only epoll has to pause here.
-			if !paused && b == corenet.LoopBackendEpoll {
-				return errors.New("the loop never paused its accept")
-			}
-			return nil
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	return errors.New("never served again after EMFILE")
 }
 
 // countFDs counts the process's open descriptors.
@@ -841,23 +836,13 @@ func TestConformance_overRLimit(t *testing.T) {
 		if b.backend != corenet.LoopBackendIOURing {
 			t.Skip("only io_uring holds connections past RLIMIT_NOFILE")
 		}
-		cmd := exec.Command(os.Args[0], "-test.run=^$")
-		cmd.Env = append(os.Environ(), childEnv+"=overlimit:"+b.name)
-		stdin, _ := cmd.StdinPipe()
-		stdout, _ := cmd.StdoutPipe()
-		cmd.Stderr = os.Stderr
-		if err := cmd.Start(); err != nil {
-			t.Fatal(err)
+		if !uringDirect(t) {
+			t.Skip("this kernel keeps a closed direct descriptor's socket (before 6.13): io_uring serves on process descriptors, within RLIMIT_NOFILE")
 		}
-		r := bufio.NewReader(stdout)
-		addr, err := r.ReadString('\n')
-		if err != nil {
-			t.Fatalf("child: %v", err)
-		}
-		addr = strings.TrimSpace(addr)
+		child := startServeChild(t, b, 128, 300)
 		var conns []stdnet.Conn
 		for i := range 300 {
-			c, err := stdnet.DialTimeout("tcp", addr, 3*time.Second)
+			c, err := stdnet.DialTimeout("tcp", child.addr, 3*time.Second)
 			if err != nil {
 				t.Fatalf("dial %d: %v", i, err)
 			}
@@ -872,23 +857,30 @@ func TestConformance_overRLimit(t *testing.T) {
 				t.Fatalf("connection %d = %q, %v", i, got, err)
 			}
 		}
-		_ = stdin.Close()
-		report, _ := io.ReadAll(r)
-		_ = cmd.Wait()
+		report := child.stop(t)
 		for _, c := range conns {
 			_ = c.Close()
 		}
 		t.Logf("child: %s", report)
-		if !bytes.Contains(report, []byte("rings=3")) {
+		if !strings.Contains(report, "rings=3") {
 			t.Fatalf("child report: %s", report)
 		}
 	})
 }
 
-// childOverLimit serves under RLIMIT_NOFILE=128 with MaxConns 300 until its
-// standard input closes, then reports its rings.
-func childOverLimit(b corenet.LoopBackend) int {
-	if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &syscall.Rlimit{Cur: 128, Max: 128}); err != nil {
+// childServe serves under the RLIMIT_NOFILE and MaxConns its marker names
+// until its standard input closes, then reports its rings.
+func childServe(spec string) int {
+	parts := strings.Split(spec, ":")
+	var b corenet.LoopBackend
+	for _, x := range backendsPresent() {
+		if x.name == parts[0] {
+			b = x.backend
+		}
+	}
+	rlimit, _ := strconv.Atoi(parts[1])
+	maxConns, _ := strconv.Atoi(parts[2])
+	if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &syscall.Rlimit{Cur: uint64(rlimit), Max: uint64(rlimit)}); err != nil {
 		fmt.Println("setrlimit:", err)
 		return 1
 	}
@@ -900,7 +892,7 @@ func childOverLimit(b corenet.LoopBackend) int {
 	_ = syscall.Listen(fd, 1024)
 	sa, _ := syscall.Getsockname(fd)
 	h := &lineH{}
-	g, err := Start(Config{Group: "overlimit", Value: corenet.LoopValue{Backend: b}, MaxConns: 300, Handler: h, Listeners: []Listener{{FD: fd}}, Log: io.Discard})
+	g, err := Start(Config{Group: "child", Value: corenet.LoopValue{Backend: b}, MaxConns: maxConns, Handler: h, Listeners: []Listener{{FD: fd}}, Log: io.Discard})
 	if err != nil {
 		fmt.Println("start:", err)
 		return 1
@@ -908,11 +900,13 @@ func childOverLimit(b corenet.LoopBackend) int {
 	fmt.Printf("127.0.0.1:%d\n", sa.(*syscall.SockaddrInet4).Port)
 	_, _ = io.Copy(io.Discard, os.Stdin)
 	st := g.State()
-	var conns []uint64
+	var accepted []uint64
+	paused := false
 	for _, r := range st.RingStates {
-		conns = append(conns, r.Accepted)
+		accepted = append(accepted, r.Accepted)
+		paused = paused || r.AcceptPauses > 0
 	}
-	fmt.Printf("rings=%d source=%s accepted=%v rlimit=%d\n", st.Rings, st.RingsSource, conns, st.RLimitNoFile)
+	fmt.Printf("rings=%d source=%s accepted=%v paused=%v rlimit=%d stage=%s\n", st.Rings, st.RingsSource, accepted, paused, st.RLimitNoFile, st.ProbeStage)
 	_ = g.Close()
 	return 0
 }
@@ -1107,4 +1101,15 @@ func dumpGroup(g *Group) string {
 	case <-time.After(2 * time.Second):
 		return "dump: the loop did not run the post within 2 s"
 	}
+}
+
+// uringDirect reports whether io_uring serves on direct descriptors here.
+func uringDirect(t *testing.T) bool {
+	t.Helper()
+	g, err := Start(Config{Group: "mode", Value: corenet.LoopValue{Backend: corenet.LoopBackendIOURing}, Handler: &lineH{}, Log: io.Discard})
+	if err != nil {
+		t.Fatalf("io_uring: %v", err)
+	}
+	defer g.Close()
+	return strings.HasSuffix(g.State().ProbeStage, "+direct")
 }

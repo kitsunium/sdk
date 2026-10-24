@@ -44,6 +44,9 @@ const (
 	// staleFill is the byte a provided buffer is overwritten with under the
 	// fill hook: a stale byte read back shows as it.
 	staleFill byte = 0xAA
+	// maxProcessFDs bounds slotOf on process descriptors, whatever
+	// RLIMIT_NOFILE says.
+	maxProcessFDs uint64 = 1 << 22
 	// genMask keeps the 24 bits of a generation user_data carries.
 	genMask uint32 = 1<<24 - 1
 )
@@ -96,6 +99,10 @@ type uRing struct {
 	// counts the watchdog's re-arms.
 	lastAccept int64
 	stalls     int
+	// resumeAt and backoff pace the accepts of a ring on process descriptors
+	// after EMFILE or ENFILE, as epoll paces its listeners.
+	resumeAt int64
+	backoff  int64
 }
 
 // uLoop is one loop on io_uring: one thread owns every ring.
@@ -117,6 +124,9 @@ type uLoop struct {
 	// flags is the setup flags the probe settled on; stage the stage reached.
 	flags uint32
 	stage string
+	// direct is whether connections live in the rings' direct-descriptor
+	// tables (the probe's release check passed) or in the process table.
+	direct bool
 }
 
 // uringRunner runs the group's io_uring loops.
@@ -260,11 +270,18 @@ func (ul *uLoop) setup(rings int) error {
 		return err
 	}
 	//: stage 4 and 5 run on every ring as it is built, the self-test once.
-	if err := ul.selfTest(flags); err != nil {
+	direct, err := ul.selfTest(flags)
+	//: the self-test refused.
+	if err != nil {
 		//: named by the test.
 		return err
 	}
-	ul.stage = "self_test"
+	ul.direct = direct
+	ul.stage = "self_test+fds"
+	//: the release check passed: connections are direct descriptors.
+	if direct {
+		ul.stage = "self_test+direct"
+	}
 	//: built, or refused by the ring that could not be.
 	return ul.build(rings, flags)
 }
@@ -380,7 +397,7 @@ func (ul *uLoop) newRing(i int, flags uint32) (*uRing, error) {
 		return nil, probeError(step, errno)
 	}
 	lp := ul.lp
-	rr := &uRing{ul: ul, u: u, armed: make([]int, len(ul.lfds))}
+	rr := &uRing{ul: ul, u: u, armed: make([]int, len(ul.lfds)), backoff: backoffMin}
 	rr.r = newRing(lp, i, rr)
 	bufs, size := ul.bufShape()
 	//: stage 4: provided buffers and the sparse table.
@@ -390,14 +407,14 @@ func (ul *uLoop) newRing(i int, flags uint32) (*uRing, error) {
 		return nil, probeError("buf_ring", orErrno(errno, syscall.EOPNOTSUPP))
 	}
 	table := uint32(lp.sz.tableSize)
-	//: the table the accepts allocate into.
-	if errno := u.registerSparse(table); errno != 0 || ul.hooks.failStage == "sparse_files" {
+	//: the table the accepts allocate into, when connections are direct.
+	if err := ul.registerTable(u, table); err != nil {
 		u.close()
 		//: named.
-		return nil, probeError("sparse_files", orErrno(errno, syscall.EOPNOTSUPP))
+		return nil, err
 	}
 	rr.inRing = int(bufs)
-	rr.slotOf = slices.Repeat([]int32{-1}, int(table))
+	rr.slotOf = slices.Repeat([]int32{-1}, ul.slotSpace(table))
 	//: a secondary's completions wake the primary.
 	if err := ul.registerFan(i, u); err != nil {
 		u.close()
@@ -439,6 +456,44 @@ func (ul *uLoop) registerFan(i int, u *uring) error {
 	return nil
 }
 
+// registerTable registers ring u's sparse direct-descriptor table of n
+// entries, when connections are direct descriptors.
+func (ul *uLoop) registerTable(u *uring, n uint32) error {
+	//: process descriptors need no table.
+	if !ul.direct && ul.hooks.failStage != "sparse_files" {
+		//: none.
+		return nil
+	}
+	errno := u.registerSparse(n)
+	//: refused, or the test fails the stage.
+	if errno != 0 || ul.hooks.failStage == "sparse_files" {
+		//: named.
+		return probeError("sparse_files", orErrno(errno, syscall.EOPNOTSUPP))
+	}
+	//: registered.
+	return nil
+}
+
+// slotSpace is how many numbers slotOf maps: the table's entries for direct
+// descriptors, every process descriptor below RLIMIT_NOFILE otherwise.
+func (ul *uLoop) slotSpace(table uint32) int {
+	//: the table's entries.
+	if ul.direct {
+		//: as registered.
+		return int(table)
+	}
+	//: the process table, bounded.
+	return int(min(ul.lp.sz.rlimit, maxProcessFDs))
+}
+
+// onFD adapts an SQE filled for a direct descriptor to the loop's mode.
+func (ul *uLoop) onFD(s *sqe) {
+	//: process descriptors: no fixed-file flag.
+	if !ul.direct {
+		onProcessFD(s)
+	}
+}
+
 // pollFD arms a multishot POLLIN on fd, tagged op.
 func (rr *uRing) pollFD(fd int, op uint64) {
 	s := rr.u.get()
@@ -477,6 +532,7 @@ func (rr *uRing) armAccepts() {
 				return
 			}
 			prepAccept(s, fd, udPack(udAccept, 0, uint32(i)), false)
+			rr.ul.onFD(s)
 			rr.armed[i]++
 			room--
 		}
@@ -539,9 +595,13 @@ func (rr *uRing) pace() {
 		//: paused.
 		return
 	}
-	//: twice the reserve: resume.
-	if rr.paused && free >= max(2*reserve, 1) {
+	//: twice the reserve, and past any EMFILE backoff: resume.
+	if rr.paused && free >= max(2*reserve, 1) && rr.ul.lp.tick >= rr.resumeAt {
 		rr.paused = false
+	}
+	//: under hard pressure, paced eviction makes room.
+	if rr.ul.lp.hard && !rr.ul.direct {
+		rr.r.evict()
 	}
 	rr.armAccepts()
 }
@@ -699,6 +759,7 @@ func (rr *uRing) onAccept(li int, c *cqe) {
 		return
 	}
 	rr.slotOf[index] = slot
+	rr.backoff = backoffMin
 	rr.armRecv(slot)
 	r.opened(slot)
 }
@@ -710,6 +771,13 @@ func (rr *uRing) acceptFailed(res int32) {
 	if res == -int32(syscall.ENFILE) || res == -int32(syscall.EMFILE) {
 		rr.paused = true
 		rr.r.st.pauses++
+		//: out of process descriptors: closes make room, so the ring waits a
+		//: backoff before it tries again, and evicts meanwhile.
+		if !rr.ul.direct {
+			rr.resumeAt = rr.ul.lp.tick + rr.backoff
+			rr.backoff = min(rr.backoff*2, backoffMax)
+			rr.ul.lp.hard = true
+		}
 	}
 }
 
@@ -724,6 +792,12 @@ func (rr *uRing) refuses(index uint32) bool {
 
 // orphanClose closes a direct descriptor no slot owns.
 func (rr *uRing) orphanClose(index uint32) {
+	//: a process descriptor closes at once.
+	if !rr.ul.direct {
+		closeFDs([]int{int(index)})
+		//: closed.
+		return
+	}
 	s := rr.u.get()
 	//: no room: the entry leaks until the ring closes, counted.
 	if s == nil {
@@ -746,6 +820,7 @@ func (rr *uRing) armRecv(slot int32) {
 		return
 	}
 	prepRecv(s, uint32(c.fd), udPack(udRecv, c.gen, uint32(slot)))
+	rr.ul.onFD(s)
 	c.ops++
 }
 
@@ -934,6 +1009,13 @@ func (rr *uRing) maybeClose(slot int32) {
 		//: later.
 		return
 	}
+	//: a process descriptor closes now, nothing of it left in flight.
+	if !rr.ul.direct {
+		closeFDs([]int{int(c.fd)})
+		rr.onClose(slot, c.gen&genMask)
+		//: released.
+		return
+	}
 	s := rr.u.get()
 	//: no room: retried at the next settle of the slot.
 	if s == nil {
@@ -1073,6 +1155,7 @@ func (rr *uRing) sendFlight(slot int32) {
 		return
 	}
 	prepSend(s, uint32(c.fd), rr.ul.lp.slab.data(c.flight), udPack(udSend, c.gen, uint32(slot)))
+	rr.ul.onFD(s)
 	c.ops++
 	c.flags |= fSending
 }
@@ -1095,14 +1178,23 @@ func (rr *uRing) shutdown(r *ring, slot int32) {
 		return
 	}
 	prepCancelFixed(s, uint32(c.fd), udPack(udCancel, c.gen, uint32(slot)))
+	rr.ul.onFD(s)
 	c.ops++
 }
 
 // unread implements driver. A direct descriptor has no process descriptor
-// to ask SIOCINQ of, so io_uring never evicts blind: it reports unread.
-func (rr *uRing) unread(_ *ring, _ int32) bool {
-	//: conservative.
-	return true
+// to ask SIOCINQ of, so it is never evicted blind: it reports unread. A
+// process descriptor is asked, as epoll asks it.
+func (rr *uRing) unread(r *ring, slot int32) bool {
+	//: a direct descriptor: never evicted blind.
+	if rr.ul.direct {
+		//: conservative.
+		return true
+	}
+	var n int32
+	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(r.conns[slot].fd), siocinq, uintptr(unsafe.Pointer(&n)))
+	//: unknown counts as unread.
+	return errno != 0 || n > 0
 }
 
 // watchdog re-arms an accept that looks stalled, and drains a ring whose
