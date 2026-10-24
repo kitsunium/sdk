@@ -55,7 +55,7 @@ const (
 	opShutdown    uint8 = 34
 
 	// SQE flags.
-	sqeFixedFile    uint8 = 1 << 0
+	sqeFixedFile uint8 = 1 << 0
 	// sqeIOHardlink is IOSQE_IO_HARDLINK: the next SQE starts once this one
 	// completed, whatever its result.
 	sqeIOHardlink   uint8 = 1 << 3

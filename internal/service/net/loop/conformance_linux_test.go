@@ -1113,4 +1113,3 @@ func uringDirect(t *testing.T) bool {
 	defer g.Close()
 	return strings.HasSuffix(g.State().ProbeStage, "+direct")
 }
-
