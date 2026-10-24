@@ -519,11 +519,25 @@ constants:
         name: staleFill
         type: byte
         value: "0xAA"
+      - doc: |-
+          maxProcessFDs bounds slotOf on process descriptors, whatever
+          RLIMIT_NOFILE says.
+        name: maxProcessFDs
+        type: uint64
+        value: 1 << 22
       - doc: genMask keeps the 24 bits of a generation user_data carries.
         name: genMask
         type: uint32
         value: 1<<24 - 1
     name: acceptDepth
+  - doc: |-
+      peerPeekBytes is the release check's read buffer: any read will do, the
+      check only waits for the end of the stream.
+    items:
+      - name: peerPeekBytes
+        type: int
+        value: "64"
+    name: peerPeekBytes
   - grouped: true
     items:
       - doc: |-
@@ -792,6 +806,9 @@ files:
       - (*uLoop).newRing
       - (*uLoop).bufShape
       - (*uLoop).registerFan
+      - (*uLoop).registerTable
+      - (*uLoop).slotSpace
+      - (*uLoop).onFD
       - (*uRing).pollFD
       - (*uRing).armAccepts
       - (*uRing).acceptRoom
@@ -811,6 +828,7 @@ files:
       - (*uRing).armRecv
       - (*uRing).owns
       - (*uRing).onRecv
+      - (*uRing).recvCancelled
       - (*uRing).recvBytes
       - (*uRing).recvStarved
       - (*uRing).recvEOF
@@ -837,13 +855,18 @@ files:
       - (*uLoop).teardown
     name: uring_loop_linux.go
   - decls:
+      - peerPeekBytes
       - selfTestPayload
       - (*uLoop).selfTest
+      - (*selfTestRun).releases
+      - peerSeesEnd
       - selfTestRing
       - selfTestClient
       - selfTestRun
+      - (*selfTestRun).pump
       - (*selfTestRun).exchange
       - (*selfTestRun).onCQE
+      - (*selfTestRun).onAccept
       - (*selfTestRun).verdict
       - loopbackListener
     name: uring_probe_linux.go
@@ -865,6 +888,7 @@ files:
       - (*uring).overflowed
       - (*uring).setupBuffers
       - (*uring).mapBufRing
+      - registerBufRing
       - (*uring).bufEntries
       - (*uring).buf
       - (*uring).addBuf
@@ -875,6 +899,7 @@ files:
       - prepRecv
       - prepSend
       - prepCancelFixed
+      - onProcessFD
       - prepCloseDirect
       - prepCancelUserData
       - prepPollMulti
@@ -1078,6 +1103,10 @@ functions:
     name: listenerQueue
     params: fd int
     results: uint32
+  - doc: peerSeesEnd reports whether fd reads end-of-stream within 200 ms.
+    name: peerSeesEnd
+    params: fd int
+    results: bool
   - doc: |-
       selfTestRing opens the self-test's ring with flags, and gives it buffers
       and a table as a serving ring has them. A failure closes it.
@@ -1089,7 +1118,7 @@ functions:
       writes the payload, which waits in the socket before the recv is armed. A
       failure closes the socket.
     name: selfTestClient
-    params: port int
+    params: port int, payload []byte
     results: int, error
   - doc: |-
       loopbackListener binds a listening socket on 127.0.0.1, port chosen by the
@@ -1105,6 +1134,16 @@ functions:
   - doc: errnoOfErr extracts an errno, EIO otherwise.
     name: errnoOfErr
     params: err error
+    results: syscall.Errno
+  - doc: |-
+      registerBufRing is IORING_REGISTER_PBUF_RING with reg, resv zero as the
+      uapi requires. Ubuntu's noble kernel 6.8.0-147 inverts that check
+      (io_uring/kbuf.c: `if (!memchr_inv(reg.resv, 0, sizeof(reg.resv)))
+      return -EINVAL;`, Ubuntu-6.8.0-147.147) and refuses every zero resv; on
+      EINVAL the registration is tried once more with one resv byte set, which
+      that kernel accepts and a correct one refuses again with EINVAL.
+    name: registerBufRing
+    params: fd int, reg *bufReg
     results: syscall.Errno
   - doc: |-
       prepAccept fills s as an accept on lfd into a kernel-allocated direct
@@ -1125,6 +1164,13 @@ functions:
       index. It is never linked to the close: the close waits for the count.
     name: prepCancelFixed
     params: s *sqe, index uint32, ud uint64
+  - doc: |-
+      onProcessFD turns an SQE filled for a direct descriptor into the same
+      operation on the process descriptor of the same number: no fixed-file
+      flag, a cancel that looks the number up in the process table, an accept
+      that installs into it, close-on-exec.
+    name: onProcessFD
+    params: s *sqe
   - doc: prepCloseDirect fills s as the close of direct descriptor index.
     name: prepCloseDirect
     params: s *sqe, index uint32, ud uint64
@@ -2380,6 +2426,13 @@ types:
         type: int64
       - name: stalls
         type: int
+      - doc: |-
+          resumeAt and backoff pace the accepts of a ring on process descriptors
+          after EMFILE or ENFILE, as epoll paces its listeners.
+        name: resumeAt
+        type: int64
+      - name: backoff
+        type: int64
     kind: struct
     methods:
       - doc: pollFD arms a multishot POLLIN on fd, tagged op.
@@ -2466,6 +2519,12 @@ types:
       - doc: onRecv delivers received bytes and keeps the multishot armed.
         name: onRecv
         params: slot int32, gen uint32, c *cqe
+        recv: rr *uRing
+      - doc: |-
+          recvCancelled re-arms the recv of a connection still open whose recv was
+          cancelled and ended.
+        name: recvCancelled
+        params: slot int32, more bool
         recv: rr *uRing
       - doc: |-
           recvBytes delivers n bytes of buffer bid to an open connection, and
@@ -2557,9 +2616,10 @@ types:
         recv: rr *uRing
       - doc: |-
           unread implements driver. A direct descriptor has no process descriptor
-          to ask SIOCINQ of, so io_uring never evicts blind: it reports unread.
+          to ask SIOCINQ of, so it is never evicted blind: it reports unread. A
+          process descriptor is asked, as epoll asks it.
         name: unread
-        params: _ *ring, _ int32
+        params: r *ring, slot int32
         recv: rr *uRing
         results: bool
       - doc: |-
@@ -2603,6 +2663,11 @@ types:
         type: uint32
       - name: stage
         type: string
+      - doc: |-
+          direct is whether connections live in the rings' direct-descriptor
+          tables (the probe's release check passed) or in the process table.
+        name: direct
+        type: bool
     kind: struct
     methods:
       - doc: wake writes the Post eventfd.
@@ -2665,6 +2730,24 @@ types:
         params: i int, u *uring
         recv: ul *uLoop
         results: error
+      - doc: |-
+          registerTable registers ring u's sparse direct-descriptor table of n
+          entries, when connections are direct descriptors.
+        name: registerTable
+        params: u *uring, n uint32
+        recv: ul *uLoop
+        results: error
+      - doc: |-
+          slotSpace is how many numbers slotOf maps: the table's entries for direct
+          descriptors, every process descriptor below RLIMIT_NOFILE otherwise.
+        name: slotSpace
+        params: table uint32
+        recv: ul *uLoop
+        results: int
+      - doc: onFD adapts an SQE filled for a direct descriptor to the loop's mode.
+        name: onFD
+        params: s *sqe
+        recv: ul *uLoop
       - doc: "serve is the loop: one wait on the primary, every ring reaped, one batch."
         name: serve
         recv: ul *uLoop
@@ -2694,10 +2777,19 @@ types:
           accept into a direct descriptor on a loopback listener, a connection, and
           a multishot recv that must deliver the payload through the buffer ring.
           Any failure, or a second without the completions, falls back to epoll.
+
+          It then reports whether closing a direct descriptor releases its socket
+          while another connection's recv, issued before the close, is still armed.
+          Before 6.13 a fixed file removed from the table is put only once every
+          request issued under the table's previous resource node has completed, and
+          a multishot recv on an idle connection never does: closed sockets would
+          stay allocated, their peers never told, for as long as the oldest
+          connection lives (rsrc.c's io_rsrc_node, reworked in 6.13). Where that
+          holds, the loop serves on process descriptors instead.
         name: selfTest
         params: flags uint32
         recv: ul *uLoop
-        results: error
+        results: bool, error
     name: uLoop
   - doc: uringRunner runs the group's io_uring loops.
     fields:
@@ -2738,8 +2830,29 @@ types:
       - doc: got is what the recv delivered so far.
         name: got
         type: "[]byte"
+      - doc: second is the release check's second connection, -1 before it.
+        name: second
+        type: int32
+      - doc: cancelled and closed are the release check's completions.
+        name: cancelled
+        type: bool
+      - name: closed
+        type: bool
     kind: struct
     methods:
+      - doc: |-
+          releases reports whether a direct descriptor closed with another
+          connection's recv still armed lets its peer see the end at once.
+        name: releases
+        params: port, first int
+        recv: st *selfTestRun
+        results: bool
+      - doc: |-
+          pump reaps the self-test's completions until done reports true or 500 ms
+          are up.
+        name: pump
+        params: done func() bool
+        recv: st *selfTestRun
       - doc: |-
           exchange reaps the self-test's completions until the payload came back
           whole, or a second is up.
@@ -2750,6 +2863,10 @@ types:
           index, the recv appends the bytes of its provided buffer.
         name: onCQE
         params: c *cqe
+        recv: st *selfTestRun
+      - doc: onAccept arms a recv on the first and the second accepted index.
+        name: onAccept
+        params: res int32
         recv: st *selfTestRun
       - doc: |-
           verdict is nil once the payload came back whole, otherwise the stage that
