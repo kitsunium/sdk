@@ -254,6 +254,14 @@ constants:
         value: "32"
     name: maxSlotLen
   - doc: |-
+      joinRefreshTimeout bounds one JOIN sent again, every address included
+      (#632).
+    items:
+      - name: joinRefreshTimeout
+        type: time.Duration
+        value: 30 * time.Second
+    name: joinRefreshTimeout
+  - doc: |-
       memQueueFrames is the depth of each per-lane queue of the memory double:
       deep enough that a test's burst is not dropped by accident, finite so a
       stalled receiver still loses frames the way a real lane does (D2).
@@ -641,7 +649,9 @@ constants:
           answer, and a leader admitted after that configuration was cut and
           refused for as long as it led (#552). The answer stays until the
           joiner's own committed configuration lists it: every member admitted
-          before its AddLearner is in its log by then.
+          before its AddLearner is in its log by then. A member admitted after
+          the answer is in none of them: a joiner that hears no leader sends its
+          JOIN again and the fresh answer replaces this one (#632, refreshJoin).
         name: joinGroup
         type: coreconsensus.GroupID
         value: "0"
@@ -955,6 +965,7 @@ files:
       - (*Node).installed
     name: install.go
   - decls:
+      - joinRefreshTimeout
       - (*Node).join
       - (*Node).joinReason
       - (*Node).screenJoin
@@ -962,6 +973,16 @@ files:
       - (*Node).alreadyJoined
       - (*Node).slotTaken
       - (*Node).addJoiner
+      - joinHold
+      - (*joinHold).begin
+      - (*joinHold).keep
+      - (*joinHold).again
+      - (*joinHold).install
+      - (*joinHold).release
+      - sameAnswer
+      - refreshJoiner
+      - (*Node).refreshJoin
+      - (*Node).runJoinRefresh
     name: join.go
   - decls:
       - MemoryLog
@@ -1019,6 +1040,8 @@ files:
       - (*MemoryTransport).releaseJoinAnswer
       - (*MemoryNetwork).admitted
       - (*MemoryTransport).Join
+      - (*MemoryTransport).refreshJoin
+      - (*MemoryTransport).joinVia
       - (*MemoryNetwork).othersThan
       - memSPKI
       - MemorySPKI
@@ -1491,6 +1514,8 @@ files:
       - decodeJoinOn
       - (*TCPTransport).serveJoin
       - (*TCPTransport).Join
+      - (*TCPTransport).refreshJoin
+      - (*TCPTransport).joinVia
       - (*TCPTransport).joinOne
       - (*TCPTransport).joinOnLane
       - endedUnanswered
@@ -2119,6 +2144,12 @@ functions:
       when the store's sink can; a sink that cannot keeps nothing open.
     name: releaseSink
     params: sink coreconsensus.SnapshotSink
+  - doc: |-
+      sameAnswer reports whether two JOIN answers admit the same members under
+      the same keys.
+    name: sameAnswer
+    params: a, b []coreconsensus.MemberValue
+    results: bool
   - name: NewMemoryLog
     results: "*MemoryLog"
   - doc: |-
@@ -2973,6 +3004,7 @@ imports:
   bufio: bufio
   bytes: bytes
   clock: github.com/kitsunium/sdk/internal/kernel/clock
+  cmp: cmp
   context: context
   coreconsensus: github.com/kitsunium/sdk/internal/core/app/consensus
   corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
@@ -4628,6 +4660,60 @@ types:
         params: commit, applied uint64, now time.Time
         recv: p *applyProgress
     name: applyProgress
+  - doc: |-
+      joinHold is a transport's hold on its JOIN answer: the configuration it
+      last joined with, kept so that a joining node that hears no leader can
+      send its JOIN again (#632), and whether the node's admission released the
+      answer. A released answer is installed again by a new Join only, never by
+      a JOIN sent again: the configuration admits from then on (#552).
+    fields:
+      - name: mu
+        type: sync.Mutex
+      - name: cfg
+        type: "*coreconsensus.JoinConfig"
+      - name: released
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          begin opens an explicit Join: its answer is installed even after a
+          release.
+        name: begin
+        recv: h *joinHold
+      - doc: keep records the configuration of a Join that succeeded.
+        name: keep
+        params: cfg *coreconsensus.JoinConfig
+        recv: h *joinHold
+      - doc: |-
+          again is the configuration to send the JOIN again with; ok is false
+          when no Join succeeded or the answer was released.
+        name: again
+        recv: h *joinHold
+        results: cfg coreconsensus.JoinConfig, ok bool
+      - doc: |-
+          install runs set, which installs an answer, unless the answer was
+          released: a JOIN sent again that is answered after the node's admission
+          would otherwise keep admitting members its configuration no longer lists.
+        name: install
+        params: set func()
+        recv: h *joinHold
+      - doc: |-
+          release runs drop, which drops the answer, and keeps any later JOIN sent
+          again from installing one.
+        name: release
+        params: drop func()
+        recv: h *joinHold
+    name: joinHold
+  - doc: |-
+      refreshJoiner is a transport that sends its JOIN again with the
+      configuration it last joined with, replacing a held answer, and reports
+      whether the answer changed (#632).
+    kind: named
+    name: refreshJoiner
+    underlying: |-
+      interface {
+      	refreshJoin(ctx context.Context) (changed bool, err error)
+      }
   - fields:
       - name: mu
         type: sync.RWMutex
@@ -4872,6 +4958,9 @@ types:
         type: map[coreconsensus.GroupID][]coreconsensus.MemberValue
       - name: members
         type: "[]coreconsensus.MemberValue"
+      - doc: hold keeps the JOIN answer's configuration and release (#632).
+        name: hold
+        type: joinHold
     kind: struct
     methods:
       - name: Send
@@ -4918,6 +5007,18 @@ types:
         recv: t *MemoryTransport
       - name: Join
         params: ctx context.Context, cfg coreconsensus.JoinConfig
+        recv: t *MemoryTransport
+        results: coreconsensus.PositionValue, error
+      - doc: refreshJoin sends the JOIN again as the TCP transport does (#632).
+        name: refreshJoin
+        params: ctx context.Context
+        recv: t *MemoryTransport
+        results: bool, error
+      - doc: |-
+          joinVia sends the JOIN of cfg to every other transport of the network in
+          turn.
+        name: joinVia
+        params: ctx context.Context, cfg *coreconsensus.JoinConfig
         recv: t *MemoryTransport
         results: coreconsensus.PositionValue, error
       - name: Close
@@ -5096,6 +5197,9 @@ types:
       - name: stopReason
         type: "*coreconsensus.StopReasonValue"
       - name: stopped
+        type: atomic.Bool
+      - doc: rejoining is set while a JOIN sent again is in flight (#632).
+        name: rejoining
         type: atomic.Bool
       - name: closeOnce
         type: sync.Once
@@ -5488,6 +5592,27 @@ types:
         params: ctx context.Context, op coreconsensus.Operator, r *coreconsensus.JoinRequestValue
         recv: n *Node
         results: coreconsensus.PositionValue, errs.Code, string
+      - doc: |-
+          refreshJoin sends this node's JOIN again, off the event loop, when raft
+          reports it heard no leader while the node is still joining (#632). Its
+          transport admits, apart from the engine's configuration, only the members
+          its JOIN answer listed: a leader admitted after that answer was refused at
+          every connection, and a learner, which never campaigns, had no other way
+          to learn of it, so the joiner was never fed while that leader led. A
+          member answers a node its configuration already lists without proposing
+          anything or counting it against the slot (#533), and the fresh answer
+          replaces the held one.
+
+          The JOIN runs on a goroutine counted in n.wg, one at a time, which ends
+          once the JOIN is answered or refused, at joinRefreshTimeout, or once the
+          node stops, which cancels it.
+        name: refreshJoin
+        params: rd *raft.ReadyValue
+        recv: n *Node
+      - doc: runJoinRefresh is refreshJoin's goroutine.
+        name: runJoinRefresh
+        params: j refreshJoiner
+        recv: n *Node
       - doc: lineage is the node's log identity as it stands.
         name: lineage
         recv: n *Node
@@ -7547,6 +7672,9 @@ types:
           the connection ends unanswered. Set by the package's own tests only.
         name: predatesJoinV2
         type: atomic.Bool
+      - doc: hold keeps the JOIN answer's configuration and release (#632).
+        name: hold
+        type: joinHold
     kind: struct
     methods:
       - name: Addr
@@ -7778,6 +7906,18 @@ types:
         recv: t *TCPTransport
         results: coreconsensus.PositionValue, error
       - doc: |-
+          refreshJoin sends the JOIN again with the configuration last answered,
+          while its answer is held, and reports whether the answer changed (#632).
+        name: refreshJoin
+        params: ctx context.Context
+        recv: t *TCPTransport
+        results: bool, error
+      - doc: joinVia sends the JOIN of cfg to each address in turn.
+        name: joinVia
+        params: ctx context.Context, cfg *coreconsensus.JoinConfig
+        recv: t *TCPTransport
+        results: coreconsensus.PositionValue, error
+      - doc: |-
           joinOne sends the JOIN to one address, to a peer presenting one of pins,
           and installs the membership it answers once that membership lists the
           peer under its key. refused is set when the peer answered with a refusal.
@@ -7804,7 +7944,8 @@ types:
         results: pos coreconsensus.PositionValue, refused bool, err error
       - doc: |-
           releaseJoinAnswer drops the JOIN answer's admission group once the node
-          is admitted: from then on the engine's configuration alone admits.
+          is admitted: from then on the engine's configuration alone admits, and a
+          JOIN sent again installs nothing.
         name: releaseJoinAnswer
         recv: t *TCPTransport
       - name: BindJoinReason
@@ -7997,6 +8138,12 @@ vars:
         value: (*TCPTransport)(nil)
       - name: _
         type: joinReleaser
+        value: (*MemoryTransport)(nil)
+      - name: _
+        type: refreshJoiner
+        value: (*TCPTransport)(nil)
+      - name: _
+        type: refreshJoiner
         value: (*MemoryTransport)(nil)
       - name: _
         type: |-

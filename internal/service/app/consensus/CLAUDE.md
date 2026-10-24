@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T15:36:41Z -->
+<!-- updated: 2026-10-24T16:07:05Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -538,6 +538,13 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   whose configuration does not list the leader: the joiner's first older
   configuration cut its leader (#552, `joinGroup`,
   `TestAJoinerKeepsALeaderNewerThanTheConfigurationItReplays`).
+- Keep a joiner on the JOIN answer it got first while it hears no leader:
+  a leader admitted after that answer was refused at every connection, and
+  the joiner was never fed while it led. Raft's `LeaderUnheard` sends the
+  JOIN again with the kept configuration (#632, `refreshJoin`,
+  `TestAJoinerHearsALeaderAdmittedAfterItsJoinAnswer`); never once the
+  admission released the answer (`joinHold`,
+  `TestAJoinSentAgainReplacesOnlyAHeldAnswer`).
 - Report a leader known from heartbeats alone: a leader answered one of the
   node's reads within `ElectionTimeoutMax`, or the node leads (#541, #540,
   `probeLeader`). Keep a leader whose sync or apply has not moved for

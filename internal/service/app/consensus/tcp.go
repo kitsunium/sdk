@@ -92,7 +92,9 @@ const (
 	// answer, and a leader admitted after that configuration was cut and
 	// refused for as long as it led (#552). The answer stays until the
 	// joiner's own committed configuration lists it: every member admitted
-	// before its AddLearner is in its log by then.
+	// before its AddLearner is in its log by then. A member admitted after
+	// the answer is in none of them: a joiner that hears no leader sends its
+	// JOIN again and the fresh answer replaces this one (#632, refreshJoin).
 	joinGroup coreconsensus.GroupID = 0
 )
 
@@ -281,6 +283,8 @@ type TCPTransport struct {
 	// predatesJoinV2 serves laneJoinV2 as a member built before it does:
 	// the connection ends unanswered. Set by the package's own tests only.
 	predatesJoinV2 atomic.Bool
+	// hold keeps the JOIN answer's configuration and release (#632).
+	hold joinHold
 }
 
 type outKey struct {
@@ -1496,6 +1500,35 @@ func (t *TCPTransport) serveJoin(c net.Conn, peer coreconsensus.AuthenticatedPee
 // Join implements Joiner: the JOIN goes to each address in turn until one
 // member answers JOIN_ACK with the position its AddLearner was appended at.
 func (t *TCPTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (coreconsensus.PositionValue, error) {
+	t.hold.begin()
+	pos, err := t.joinVia(ctx, &cfg)
+	if err == nil {
+		// Kept for a JOIN sent again while no leader is heard (#632).
+		t.hold.keep(&cfg)
+	}
+	return pos, err
+}
+
+// refreshJoin sends the JOIN again with the configuration last answered,
+// while its answer is held, and reports whether the answer changed (#632).
+func (t *TCPTransport) refreshJoin(ctx context.Context) (bool, error) {
+	cfg, ok := t.hold.again()
+	if !ok {
+		return false, nil
+	}
+	t.mu.Lock()
+	before := slices.Clone(t.members[joinGroup])
+	t.mu.Unlock()
+	if _, err := t.joinVia(ctx, &cfg); err != nil {
+		return false, err
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return !sameAnswer(before, t.members[joinGroup]), nil
+}
+
+// joinVia sends the JOIN of cfg to each address in turn.
+func (t *TCPTransport) joinVia(ctx context.Context, cfg *coreconsensus.JoinConfig) (coreconsensus.PositionValue, error) {
 	req := coreconsensus.JoinRequestValue{
 		Cluster: cfg.Stamp.Log.Cluster, ID: cfg.Stamp.ID, Incarnation: cfg.Stamp.Incarnation,
 		Slot: t.slot, Address: cfg.Address, MaxSnapshotBytes: max(cfg.MaxSnapshotBytes, 0),
@@ -1553,8 +1586,10 @@ func (t *TCPTransport) joinOnLane(ctx context.Context, addr string, lane byte, r
 	if derr != nil {
 		return coreconsensus.PositionValue{}, false, false, derr
 	}
-	// The answer is read, or its failure is: the socket has served.
+	// The answer is read, or its failure is: the socket has served. A
+	// caller that gives up ends the JOIN at once, not at its deadline.
 	defer func() { abandon(c.Close()) }()
+	defer context.AfterFunc(ctx, func() { abandon(c.Close()) })()
 	peer, verified := tlsid.PeerOf(c.ConnectionState())
 	if !verified {
 		return coreconsensus.PositionValue{}, false, false, peerRejected("no verified peer")
@@ -1611,22 +1646,25 @@ func (t *TCPTransport) joinAnswered(b []byte, rerr error, spki [32]byte) (pos co
 	if !joinAnswerListsPeer(m, spki) {
 		return coreconsensus.PositionValue{}, false, peerRejected("the answer does not list its own sender")
 	}
-	t.SetMembership(joinGroup, m.Members)
+	t.hold.install(func() { t.SetMembership(joinGroup, m.Members) })
 	return coreconsensus.PositionValue{Term: binary.LittleEndian.Uint64(b[4:]), Index: binary.LittleEndian.Uint64(b[12:])}, false, nil
 }
 
 // releaseJoinAnswer drops the JOIN answer's admission group once the node
-// is admitted: from then on the engine's configuration alone admits.
+// is admitted: from then on the engine's configuration alone admits, and a
+// JOIN sent again installs nothing.
 func (t *TCPTransport) releaseJoinAnswer() {
-	t.mu.Lock()
-	_, held := t.members[joinGroup]
-	t.mu.Unlock()
-	if held {
-		t.SetMembership(joinGroup, nil)
+	t.hold.release(func() {
 		t.mu.Lock()
-		delete(t.members, joinGroup)
+		_, held := t.members[joinGroup]
 		t.mu.Unlock()
-	}
+		if held {
+			t.SetMembership(joinGroup, nil)
+			t.mu.Lock()
+			delete(t.members, joinGroup)
+			t.mu.Unlock()
+		}
+	})
 }
 
 // joinAnswerListsPeer reports whether a JOIN answer's membership lists the

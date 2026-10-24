@@ -1198,6 +1198,23 @@ open ONE control connection to any member.
   `TRANSPORT_MISCONFIGURED`. An answer counts only from a peer presenting
   one of them, and only when the membership it returns lists that peer
   under that key.
+- **A joiner that hears no leader sends its JOIN again (amendment of
+  2026-10-24, [#632](https://github.com/kitsunium/sdk/issues/632)).** The
+  answer covers every member admitted before the joiner's `AddLearner`, and
+  stays admitted until the joiner's own committed configuration lists it
+  (#552). A member admitted after the answer, then promoted and handed the
+  leadership before the joiner replayed its `AddLearner`, was in no group of
+  the joiner's transport: every connection of that leader was refused, and a
+  learner, which never campaigns, had no record to learn of it from either,
+  so the joiner was never fed while that leader led. While the answer is
+  held and the joiner has heard no leader for two maximum election timeouts
+  (the same question as a learner's, #639), its transport sends the JOIN
+  again with the configuration of the last one answered, and the fresh
+  answer replaces the held one. A member answers a node it already lists
+  without proposing anything or counting it against the slot's rate (#533).
+  A JOIN sent again that is answered after the node's admission released the
+  answer installs nothing; only an explicit `Join` installs one again. No
+  frame changes: it is the existing JOIN.
 
 **Batching on the wire, from raft-sql-poc.** Every frame queued for a peer
 on one connection during one turn of its sender leaves in one write

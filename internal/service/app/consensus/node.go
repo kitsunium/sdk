@@ -154,9 +154,11 @@ type Node struct {
 	watchMu  sync.Mutex
 	watchers map[chan coreconsensus.StatusValue]struct{}
 
-	stopMu      sync.Mutex
-	stopReason  *coreconsensus.StopReasonValue
-	stopped     atomic.Bool
+	stopMu     sync.Mutex
+	stopReason *coreconsensus.StopReasonValue
+	stopped    atomic.Bool
+	// rejoining is set while a JOIN sent again is in flight (#632).
+	rejoining   atomic.Bool
 	closeOnce   sync.Once
 	releaseOnce sync.Once
 	wg          sync.WaitGroup
@@ -1294,6 +1296,7 @@ func (n *Node) handleOne(rd *raft.ReadyValue) {
 	}
 	n.answerReady(rd)
 	n.checkAdmission()
+	n.refreshJoin(rd)
 }
 
 // reportNotices acts on the Ready's notices that change no state of the

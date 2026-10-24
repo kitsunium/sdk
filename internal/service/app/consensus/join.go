@@ -1,13 +1,21 @@
 package consensus
 
 import (
+	"cmp"
 	"context"
+	"slices"
+	"sync"
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/app/consensus/raft"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
+
+// joinRefreshTimeout bounds one JOIN sent again, every address included
+// (#632).
+const joinRefreshTimeout time.Duration = 30 * time.Second
 
 // ---- pre-admission JOIN (D4, R8-09) ----
 
@@ -149,4 +157,120 @@ func (n *Node) addJoiner(ctx context.Context, op coreconsensus.Operator, r *core
 		return coreconsensus.PositionValue{}, c, reason
 	}
 	return tok.Position(), 0, ""
+}
+
+// ---- a joining node's JOIN sent again (#632) ----
+
+// joinHold is a transport's hold on its JOIN answer: the configuration it
+// last joined with, kept so that a joining node that hears no leader can
+// send its JOIN again (#632), and whether the node's admission released the
+// answer. A released answer is installed again by a new Join only, never by
+// a JOIN sent again: the configuration admits from then on (#552).
+type joinHold struct {
+	mu       sync.Mutex
+	cfg      *coreconsensus.JoinConfig
+	released bool
+}
+
+// begin opens an explicit Join: its answer is installed even after a
+// release.
+func (h *joinHold) begin() {
+	h.mu.Lock()
+	h.released = false
+	h.mu.Unlock()
+}
+
+// keep records the configuration of a Join that succeeded.
+func (h *joinHold) keep(cfg *coreconsensus.JoinConfig) {
+	c := *cfg
+	c.Addresses, c.Pins = slices.Clone(cfg.Addresses), slices.Clone(cfg.Pins)
+	h.mu.Lock()
+	h.cfg = &c
+	h.mu.Unlock()
+}
+
+// again is the configuration to send the JOIN again with; ok is false
+// when no Join succeeded or the answer was released.
+func (h *joinHold) again() (cfg coreconsensus.JoinConfig, ok bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.cfg == nil || h.released {
+		return coreconsensus.JoinConfig{}, false
+	}
+	return *h.cfg, true
+}
+
+// install runs set, which installs an answer, unless the answer was
+// released: a JOIN sent again that is answered after the node's admission
+// would otherwise keep admitting members its configuration no longer lists.
+func (h *joinHold) install(set func()) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !h.released {
+		set()
+	}
+}
+
+// release runs drop, which drops the answer, and keeps any later JOIN sent
+// again from installing one.
+func (h *joinHold) release(drop func()) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.released = true
+	drop()
+}
+
+// sameAnswer reports whether two JOIN answers admit the same members under
+// the same keys.
+func sameAnswer(a, b []coreconsensus.MemberValue) bool {
+	byID := func(x, y coreconsensus.MemberValue) int { return cmp.Compare(x.ID, y.ID) }
+	return slices.EqualFunc(slices.SortedFunc(slices.Values(a), byID), slices.SortedFunc(slices.Values(b), byID),
+		func(x, y coreconsensus.MemberValue) bool { return x.ID == y.ID && x.SPKI == y.SPKI })
+}
+
+// refreshJoiner is a transport that sends its JOIN again with the
+// configuration it last joined with, replacing a held answer, and reports
+// whether the answer changed (#632).
+type refreshJoiner interface {
+	refreshJoin(ctx context.Context) (changed bool, err error)
+}
+
+// refreshJoin sends this node's JOIN again, off the event loop, when raft
+// reports it heard no leader while the node is still joining (#632). Its
+// transport admits, apart from the engine's configuration, only the members
+// its JOIN answer listed: a leader admitted after that answer was refused at
+// every connection, and a learner, which never campaigns, had no other way
+// to learn of it, so the joiner was never fed while that leader led. A
+// member answers a node its configuration already lists without proposing
+// anything or counting it against the slot (#533), and the fresh answer
+// replaces the held one.
+//
+// The JOIN runs on a goroutine counted in n.wg, one at a time, which ends
+// once the JOIN is answered or refused, at joinRefreshTimeout, or once the
+// node stops, which cancels it.
+func (n *Node) refreshJoin(rd *raft.ReadyValue) {
+	j, ok := n.cfg.Transport.(refreshJoiner)
+	if !rd.LeaderUnheard || n.canVote || !ok || !n.rejoining.CompareAndSwap(false, true) {
+		return
+	}
+	n.wg.Add(1)
+	go n.runJoinRefresh(j)
+}
+
+// runJoinRefresh is refreshJoin's goroutine.
+func (n *Node) runJoinRefresh(j refreshJoiner) {
+	defer n.wg.Done()
+	defer n.rejoining.Store(false)
+	ctx, cancel := context.WithTimeout(context.Background(), joinRefreshTimeout)
+	defer cancel()
+	go func() {
+		select {
+		case <-n.stopc:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	if changed, err := j.refreshJoin(ctx); err == nil && changed {
+		n.obs.info("consensus: no leader heard while joining; the JOIN sent again admits a new answer")
+	}
 }

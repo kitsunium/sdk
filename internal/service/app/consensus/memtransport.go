@@ -114,6 +114,8 @@ type MemoryTransport struct {
 	// groups are the admitted members per group, members their union.
 	groups  map[coreconsensus.GroupID][]coreconsensus.MemberValue
 	members []coreconsensus.MemberValue
+	// hold keeps the JOIN answer's configuration and release (#632).
+	hold joinHold
 }
 
 // memRun is one delivery goroutine's life: Close closes stop, once, and
@@ -272,7 +274,7 @@ func (t *MemoryTransport) SetMembership(group coreconsensus.GroupID, admitted []
 // releaseJoinAnswer drops the JOIN answer's group once the node is
 // admitted, as the TCP transport does (#552).
 func (t *MemoryTransport) releaseJoinAnswer() {
-	t.SetMembership(joinGroup, nil)
+	t.hold.release(func() { t.SetMembership(joinGroup, nil) })
 }
 
 // admitted reports whether at admits peer: always without the admission
@@ -293,6 +295,34 @@ func (n *MemoryNetwork) admitted(at *MemoryTransport, peer coreconsensus.NodeID)
 
 // Join implements Joiner over the network, as the TCP transport does.
 func (t *MemoryTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (coreconsensus.PositionValue, error) {
+	t.hold.begin()
+	pos, err := t.joinVia(ctx, &cfg)
+	if err == nil {
+		t.hold.keep(&cfg)
+	}
+	return pos, err
+}
+
+// refreshJoin sends the JOIN again as the TCP transport does (#632).
+func (t *MemoryTransport) refreshJoin(ctx context.Context) (bool, error) {
+	cfg, ok := t.hold.again()
+	if !ok {
+		return false, nil
+	}
+	t.mu.Lock()
+	before := slices.Clone(t.groups[joinGroup])
+	t.mu.Unlock()
+	if _, err := t.joinVia(ctx, &cfg); err != nil {
+		return false, err
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return !sameAnswer(before, t.groups[joinGroup]), nil
+}
+
+// joinVia sends the JOIN of cfg to every other transport of the network in
+// turn.
+func (t *MemoryTransport) joinVia(ctx context.Context, cfg *coreconsensus.JoinConfig) (coreconsensus.PositionValue, error) {
 	targets := t.net.othersThan(t.id)
 	req := coreconsensus.JoinRequestValue{
 		Cluster: cfg.Stamp.Log.Cluster, ID: cfg.Stamp.ID, Incarnation: cfg.Stamp.Incarnation,
@@ -323,7 +353,7 @@ func (t *MemoryTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig
 			x.mu.Lock()
 			answer := slices.Clone(x.members)
 			x.mu.Unlock()
-			t.SetMembership(joinGroup, answer)
+			t.hold.install(func() { t.SetMembership(joinGroup, answer) })
 			return pos, nil
 		}
 		last = joinRefused(code, reason)

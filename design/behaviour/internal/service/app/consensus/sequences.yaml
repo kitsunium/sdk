@@ -6947,6 +6947,154 @@ sequences:
           when: err != nil
       - return: tok.Position(), 0, ""
         to: tok.Position
+  - of: (*joinHold).begin
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*joinHold).begin
+        kind: self
+      - id: h.mu.Lock
+        kind: value
+      - id: h.mu.Unlock
+        kind: value
+    steps:
+      - eval: h.mu.Lock()
+        to: h.mu.Lock
+      - set: h.released
+        value: "false"
+      - eval: h.mu.Unlock()
+        to: h.mu.Unlock
+  - of: (*joinHold).keep
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*joinHold).keep
+        kind: self
+      - id: h.mu.Lock
+        kind: value
+      - id: h.mu.Unlock
+        kind: value
+    steps:
+      - bind: c
+        eval: "*cfg"
+      - set: c.Addresses, c.Pins
+        value: slices.Clone(cfg.Addresses), slices.Clone(cfg.Pins)
+      - eval: h.mu.Lock()
+        to: h.mu.Lock
+      - set: h.cfg
+        value: "&c"
+      - eval: h.mu.Unlock()
+        to: h.mu.Unlock
+  - of: (*joinHold).again
+    steps:
+      - lock:
+          mutex: h.mu
+      - opt:
+          do:
+            - return: coreconsensus.JoinConfig{}, false
+          when: h.cfg == nil || h.released
+      - return: "*h.cfg, true"
+  - of: (*joinHold).install
+    steps:
+      - lock:
+          mutex: h.mu
+      - opt:
+          do:
+            - eval: set()
+          when: "!h.released"
+  - of: (*joinHold).release
+    steps:
+      - lock:
+          mutex: h.mu
+      - set: h.released
+        value: "true"
+      - eval: drop()
+  - of: sameAnswer
+    participants:
+      - id: caller
+        kind: actor
+      - id: sameAnswer
+        kind: self
+      - id: cmp
+        kind: stdlib
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: byID
+        eval:
+          closure:
+            params: x, y coreconsensus.MemberValue
+            results: int
+            steps:
+              - return: cmp.Compare(x.ID, y.ID)
+                to: cmp
+      - return: |-
+          slices.EqualFunc(slices.SortedFunc(slices.Values(a), byID), slices.SortedFunc(slices.Values(b), byID),
+          		func(x, y coreconsensus.MemberValue) bool { return x.ID == y.ID && x.SPKI == y.SPKI })
+        to: slices
+  - of: (*Node).refreshJoin
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).refreshJoin
+        kind: self
+      - id: n.wg.Add
+        kind: value
+      - id: n.runJoinRefresh
+        kind: internal
+    steps:
+      - bind: j, ok
+        eval: n.cfg.Transport.(refreshJoiner)
+      - opt:
+          do:
+            - return: ""
+          when: "!rd.LeaderUnheard || n.canVote || !ok || !n.rejoining.CompareAndSwap(false, true)"
+      - eval: n.wg.Add(1)
+        to: n.wg.Add
+      - go: n.runJoinRefresh(j)
+        to: n.runJoinRefresh
+  - of: (*Node).runJoinRefresh
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).runJoinRefresh
+        kind: self
+      - id: n.wg.Done
+        kind: value
+      - id: n.rejoining.Store
+        kind: value
+      - id: context
+        kind: stdlib
+      - id: j.refreshJoin
+        kind: internal
+      - id: n.obs.info
+        kind: internal
+    steps:
+      - defer: n.wg.Done()
+        to: n.wg.Done
+      - defer: n.rejoining.Store(false)
+        to: n.rejoining.Store
+      - bind: ctx, cancel
+        eval: context.WithTimeout(context.Background(), joinRefreshTimeout)
+        to: context
+      - defer: cancel()
+      - go: |-
+          func() {
+          		select {
+          		case <-n.stopc:
+          			cancel()
+          		case <-ctx.Done():
+          		}
+          	}()
+      - opt:
+          do:
+            - eval: "n.obs.info(\"consensus: no leader heard while joining; the JOIN sent again admits a new answer\")"
+              to: n.obs.info
+          init:
+            bind: changed, err
+            eval: j.refreshJoin(ctx)
+            to: j.refreshJoin
+          when: err == nil && changed
   - of: NewMemoryLog
     steps:
       - return: "&MemoryLog{first: 1}"
@@ -7668,11 +7816,11 @@ sequences:
         kind: actor
       - id: (*MemoryTransport).releaseJoinAnswer
         kind: self
-      - id: t.SetMembership
+      - id: t.hold.release
         kind: internal
     steps:
-      - eval: t.SetMembership(joinGroup, nil)
-        to: t.SetMembership
+      - eval: t.hold.release(func() { t.SetMembership(joinGroup, nil) })
+        to: t.hold.release
   - of: (*MemoryNetwork).admitted
     participants:
       - id: caller
@@ -7709,6 +7857,75 @@ sequences:
         kind: actor
       - id: (*MemoryTransport).Join
         kind: self
+      - id: t.hold.begin
+        kind: internal
+      - id: t.joinVia
+        kind: internal
+      - id: t.hold.keep
+        kind: internal
+    steps:
+      - eval: t.hold.begin()
+        to: t.hold.begin
+      - bind: pos, err
+        eval: t.joinVia(ctx, &cfg)
+        to: t.joinVia
+      - opt:
+          do:
+            - eval: t.hold.keep(&cfg)
+              to: t.hold.keep
+          when: err == nil
+      - return: pos, err
+  - of: (*MemoryTransport).refreshJoin
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*MemoryTransport).refreshJoin
+        kind: self
+      - id: t.hold.again
+        kind: internal
+      - id: t.mu.Lock
+        kind: value
+      - id: slices
+        kind: stdlib
+      - id: t.mu.Unlock
+        kind: value
+      - id: t.joinVia
+        kind: internal
+      - id: sameAnswer
+        kind: internal
+    steps:
+      - bind: cfg, ok
+        eval: t.hold.again()
+        to: t.hold.again
+      - opt:
+          do:
+            - return: false, nil
+          when: "!ok"
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - bind: before
+        eval: slices.Clone(t.groups[joinGroup])
+        to: slices
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
+      - opt:
+          do:
+            - return: false, err
+          init:
+            bind: _, err
+            eval: t.joinVia(ctx, &cfg)
+            to: t.joinVia
+          when: err != nil
+      - lock:
+          mutex: t.mu
+      - return: "!sameAnswer(before, t.groups[joinGroup]), nil"
+        to: sameAnswer
+  - of: (*MemoryTransport).joinVia
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*MemoryTransport).joinVia
+        kind: self
       - id: t.net.othersThan
         kind: internal
       - id: origin
@@ -7719,7 +7936,7 @@ sequences:
         kind: value
       - id: slices
         kind: stdlib
-      - id: t.SetMembership
+      - id: t.hold.install
         kind: internal
       - id: joinRefused
         kind: internal
@@ -7779,8 +7996,8 @@ sequences:
                     to: slices
                   - eval: x.mu.Unlock()
                     to: x.mu.Unlock
-                  - eval: t.SetMembership(joinGroup, answer)
-                    to: t.SetMembership
+                  - eval: t.hold.install(func() { t.SetMembership(joinGroup, answer) })
+                    to: t.hold.install
                   - return: pos, nil
                 when: code == 0
             - set: last
@@ -9563,6 +9780,8 @@ sequences:
         kind: internal
       - id: n.checkAdmission
         kind: internal
+      - id: n.refreshJoin
+        kind: internal
     steps:
       - eval: n.sendMessages(rd.Messages)
         to: n.sendMessages
@@ -9618,6 +9837,8 @@ sequences:
         to: n.answerReady
       - eval: n.checkAdmission()
         to: n.checkAdmission
+      - eval: n.refreshJoin(rd)
+        to: n.refreshJoin
   - of: (*Node).reportNotices
     participants:
       - id: caller
@@ -20770,6 +20991,75 @@ sequences:
         kind: actor
       - id: (*TCPTransport).Join
         kind: self
+      - id: t.hold.begin
+        kind: internal
+      - id: t.joinVia
+        kind: internal
+      - id: t.hold.keep
+        kind: internal
+    steps:
+      - eval: t.hold.begin()
+        to: t.hold.begin
+      - bind: pos, err
+        eval: t.joinVia(ctx, &cfg)
+        to: t.joinVia
+      - opt:
+          do:
+            - eval: t.hold.keep(&cfg)
+              to: t.hold.keep
+          when: err == nil
+      - return: pos, err
+  - of: (*TCPTransport).refreshJoin
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).refreshJoin
+        kind: self
+      - id: t.hold.again
+        kind: internal
+      - id: t.mu.Lock
+        kind: value
+      - id: slices
+        kind: stdlib
+      - id: t.mu.Unlock
+        kind: value
+      - id: t.joinVia
+        kind: internal
+      - id: sameAnswer
+        kind: internal
+    steps:
+      - bind: cfg, ok
+        eval: t.hold.again()
+        to: t.hold.again
+      - opt:
+          do:
+            - return: false, nil
+          when: "!ok"
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - bind: before
+        eval: slices.Clone(t.members[joinGroup])
+        to: slices
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
+      - opt:
+          do:
+            - return: false, err
+          init:
+            bind: _, err
+            eval: t.joinVia(ctx, &cfg)
+            to: t.joinVia
+          when: err != nil
+      - lock:
+          mutex: t.mu
+      - return: "!sameAnswer(before, t.members[joinGroup]), nil"
+        to: sameAnswer
+  - of: (*TCPTransport).joinVia
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).joinVia
+        kind: self
       - id: origin
         kind: internal
       - id: t.joinOne
@@ -20877,6 +21167,7 @@ sequences:
             - return: coreconsensus.PositionValue{}, false, false, derr
           when: derr != nil
       - defer: func() { abandon(c.Close()) }()
+      - defer: context.AfterFunc(ctx, func() { abandon(c.Close()) })()
       - bind: peer, verified
         eval: tlsid.PeerOf(c.ConnectionState())
         to: tlsid
@@ -20956,7 +21247,7 @@ sequences:
         kind: internal
       - id: wire
         kind: package
-      - id: t.SetMembership
+      - id: t.hold.install
         kind: internal
     steps:
       - opt:
@@ -20985,8 +21276,8 @@ sequences:
           do:
             - return: coreconsensus.PositionValue{}, false, peerRejected("the answer does not list its own sender")
           when: "!joinAnswerListsPeer(m, spki)"
-      - eval: t.SetMembership(joinGroup, m.Members)
-        to: t.SetMembership
+      - eval: t.hold.install(func() { t.SetMembership(joinGroup, m.Members) })
+        to: t.hold.install
       - return: "coreconsensus.PositionValue{Term: binary.LittleEndian.Uint64(b[4:]), Index: binary.LittleEndian.Uint64(b[12:])}, false, nil"
   - of: (*TCPTransport).releaseJoinAnswer
     participants:
@@ -20994,29 +21285,22 @@ sequences:
         kind: actor
       - id: (*TCPTransport).releaseJoinAnswer
         kind: self
-      - id: t.mu.Lock
-        kind: value
-      - id: t.mu.Unlock
-        kind: value
-      - id: t.SetMembership
+      - id: t.hold.release
         kind: internal
     steps:
-      - eval: t.mu.Lock()
-        to: t.mu.Lock
-      - bind: _, held
-        eval: t.members[joinGroup]
-      - eval: t.mu.Unlock()
-        to: t.mu.Unlock
-      - opt:
-          do:
-            - eval: t.SetMembership(joinGroup, nil)
-              to: t.SetMembership
-            - eval: t.mu.Lock()
-              to: t.mu.Lock
-            - eval: delete(t.members, joinGroup)
-            - eval: t.mu.Unlock()
-              to: t.mu.Unlock
-          when: held
+      - eval: |-
+          t.hold.release(func() {
+          		t.mu.Lock()
+          		_, held := t.members[joinGroup]
+          		t.mu.Unlock()
+          		if held {
+          			t.SetMembership(joinGroup, nil)
+          			t.mu.Lock()
+          			delete(t.members, joinGroup)
+          			t.mu.Unlock()
+          		}
+          	})
+        to: t.hold.release
   - of: joinAnswerListsPeer
     participants:
       - id: caller
