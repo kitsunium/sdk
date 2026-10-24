@@ -1,0 +1,45 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: (*uRing).sweep
+    steps:
+      - bind: lp
+        eval: rr.ul.lp
+      - opt:
+          do:
+            - return: ""
+          when: "!rr.sweepOn || lp.tick == rr.sweepTick"
+      - set: rr.sweepTick
+        value: lp.tick
+      - opt:
+          do:
+            - return: ""
+          when: rr.sweepAt < 0 && !rr.sweepDue(lp.tick)
+      - opt:
+          do:
+            - set: rr.sweepAt, rr.sweepEpoch
+              value: 0, rr.closes
+          when: rr.sweepAt < 0
+      - bind: conns
+        eval: rr.r.conns
+      - bind: end
+        eval: min(rr.sweepAt+sweepScan, len(conns))
+      - loop:
+          cond: rr.sweepAt < end
+          do:
+            - opt:
+                do:
+                  - return: ""
+                when: "!rr.cancelOld(int32(rr.sweepAt))"
+          post: rr.sweepAt++
+      - opt:
+          do:
+            - set: rr.sweepAt
+              value: "-1"
+            - set: rr.sweptCloses
+              value: rr.sweepEpoch
+            - set: rr.lastSweep
+              value: lp.tick
+            - op: ++
+              set: rr.sweeps
+          when: rr.sweepAt >= len(conns)

@@ -5,6 +5,7 @@ package loop
 
 import (
 	"encoding/binary"
+	"syscall"
 	"testing"
 	"unsafe"
 )
@@ -72,7 +73,8 @@ func TestURingABI(t *testing.T) {
 // io_uring_prep_multishot_accept_direct, io_uring_prep_recv_multishot with
 // IOSQE_FIXED_FILE|IOSQE_BUFFER_SELECT, io_uring_prep_send,
 // io_uring_prep_close_direct, io_uring_prep_cancel_fd with
-// IORING_ASYNC_CANCEL_FD_FIXED|ALL): the fixed descriptor 0-based in fd, the
+// IORING_ASYNC_CANCEL_FD_FIXED|ALL, io_uring_prep_shutdown with
+// IOSQE_FIXED_FILE): the fixed descriptor 0-based in fd, the
 // file_index target one-based, ALLOC raw.
 func TestURingEncoders(t *testing.T) {
 	type field struct {
@@ -122,6 +124,12 @@ func TestURingEncoders(t *testing.T) {
 		}},
 		{"cancel fixed index 2, all", func(s *sqe) { prepCancelFixed(s, 2, 9) }, []field{
 			{0, 1, uint64(opAsyncCancel)}, {4, 4, 2}, {28, 4, uint64(cancelFD | cancelFDFixed | cancelAll)}, {32, 8, 9},
+		}},
+		{"shutdown RDWR on fixed index 4", func(s *sqe) { prepShutdownFixed(s, 4, syscall.SHUT_RDWR, 11) }, []field{
+			{0, 1, uint64(opShutdown)}, {1, 1, uint64(sqeFixedFile)}, {4, 4, 4}, {8, 8, 0}, {16, 8, 0}, {24, 4, uint64(syscall.SHUT_RDWR)}, {28, 4, 0}, {32, 8, 11},
+		}},
+		{"shutdown on process descriptor 4", func(s *sqe) { prepShutdownFixed(s, 4, syscall.SHUT_RDWR, 11); onProcessFD(s) }, []field{
+			{0, 1, uint64(opShutdown)}, {1, 1, 0}, {4, 4, 4}, {24, 4, uint64(syscall.SHUT_RDWR)},
 		}},
 	}
 	for _, c := range tests {

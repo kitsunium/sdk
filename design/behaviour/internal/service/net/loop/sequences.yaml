@@ -3202,7 +3202,7 @@ sequences:
           do:
             - return: err
           when: err != nil
-      - bind: direct, err
+      - bind: direct, deferred, err
         eval: ul.selfTest(flags)
         to: ul.selfTest
       - opt:
@@ -3218,7 +3218,7 @@ sequences:
             - set: ul.stage
               value: "\"self_test+direct\""
           when: direct
-      - return: ul.build(rings, flags)
+      - return: ul.build(rings, flags, direct && deferred)
         to: ul.build
   - of: (*uLoop).setupFlags
     steps:
@@ -3252,7 +3252,7 @@ sequences:
       - set: ul.stage
         value: "\"setup\""
       - bind: ok, perr
-        eval: probed.supports(opAccept, opRecv, opSend, opAsyncCancel, opClose, opPollAdd, opRead, opNop)
+        eval: probed.supports(opAccept, opRecv, opSend, opAsyncCancel, opClose, opPollAdd, opRead, opNop, opShutdown)
         to: probed.supports
       - opt:
           do:
@@ -3332,7 +3332,7 @@ sequences:
       - loop:
           do:
             - bind: rr, err
-              eval: ul.newRing(i, flags)
+              eval: ul.newRing(i, flags, sweep)
               to: ul.newRing
             - opt:
                 do:
@@ -3391,7 +3391,7 @@ sequences:
       - bind: lp
         eval: ul.lp
       - bind: rr
-        eval: "&uRing{ul: ul, u: u, armed: make([]int, len(ul.lfds)), backoff: backoffMin}"
+        eval: "&uRing{ul: ul, u: u, armed: make([]int, len(ul.lfds)), backoff: backoffMin, sweepOn: sweep, sweepAt: -1}"
       - set: rr.r
         to: newRing
         value: newRing(lp, i, rr)
@@ -3728,6 +3728,8 @@ sequences:
         kind: internal
       - id: rr.watchdog
         kind: internal
+      - id: rr.sweep
+        kind: internal
       - id: lp.h.OnBatchEnd
         kind: value
       - id: lp.endBatch
@@ -3769,6 +3771,8 @@ sequences:
               to: rr.pace
             - eval: rr.watchdog()
               to: rr.watchdog
+            - eval: rr.sweep()
+              to: rr.sweep
           key: _
           range: ul.rings
           value: rr
@@ -3861,7 +3865,7 @@ sequences:
               do:
                 - eval: rr.onAccept(int(udSlot(ud)), c)
                   to: rr.onAccept
-            - case: udRecv, udSend, udCancel, udClose
+            - case: udRecv, udSend, udCancel, udClose, udShutdown
               do:
                 - eval: rr.onConnOp(op, int32(udSlot(ud)), udGen(ud), c)
                   to: rr.onConnOp
@@ -3904,7 +3908,7 @@ sequences:
               do:
                 - eval: rr.onSend(slot, gen, c)
                   to: rr.onSend
-            - case: udCancel
+            - case: udCancel, udShutdown
               do:
                 - eval: rr.opDone(slot, gen)
                   to: rr.opDone
@@ -4049,6 +4053,8 @@ sequences:
         kind: internal
       - id: rr.ul.onFD
         kind: internal
+      - id: rr.setEpoch
+        kind: internal
     steps:
       - bind: c
         eval: "&rr.r.conns[slot]"
@@ -4069,6 +4075,21 @@ sequences:
         to: rr.ul.onFD
       - op: ++
         set: c.ops
+      - eval: rr.setEpoch(slot, rr.closes)
+        to: rr.setEpoch
+  - of: (*uRing).setEpoch
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!rr.sweepOn"
+      - loop:
+          cond: int(slot) >= len(rr.armEpoch)
+          do:
+            - set: rr.armEpoch
+              value: append(rr.armEpoch, noEpoch)
+      - set: rr.armEpoch[slot]
+        value: epoch
   - of: (*uRing).owns
     steps:
       - return: int(slot) < len(rr.r.conns) && rr.r.conns[slot].gen&genMask == gen
@@ -4078,6 +4099,8 @@ sequences:
         kind: actor
       - id: (*uRing).onRecv
         kind: self
+      - id: rr.setEpoch
+        kind: internal
       - id: rr.recvBytes
         kind: internal
       - id: rr.recvStarved
@@ -4108,6 +4131,8 @@ sequences:
           do:
             - op: "--"
               set: rr.r.conns[slot].ops
+            - eval: rr.setEpoch(slot, noEpoch)
+              to: rr.setEpoch
           when: "!more"
       - switch:
           cases:
@@ -4380,6 +4405,8 @@ sequences:
         value: "1"
       - set: c.state
         value: stFree
+      - op: ++
+        set: rr.closes
   - of: (*uRing).onClose
     participants:
       - id: caller
@@ -4624,34 +4651,91 @@ sequences:
         kind: internal
       - id: rr.u.get
         kind: internal
-      - id: prepCancelFixed
+      - id: prepShutdownFixed
         kind: internal
       - id: rr.ul.onFD
+        kind: internal
+      - id: prepCancelFixed
         kind: internal
     steps:
       - bind: c
         eval: "&r.conns[slot]"
       - opt:
           do:
+            - op: ++
+              set: r.st.retries
             - eval: rr.maybeClose(slot)
               to: rr.maybeClose
             - return: ""
-          when: c.ops == 0
+          when: "!rr.u.reserve(2)"
+      - bind: s
+        eval: rr.u.get()
+        to: rr.u.get
+      - eval: prepShutdownFixed(s, uint32(c.fd), syscall.SHUT_RDWR, udPack(udShutdown, c.gen, uint32(slot)))
+        to: prepShutdownFixed
+      - eval: rr.ul.onFD(s)
+        to: rr.ul.onFD
+      - op: "|="
+        set: s.flags
+        value: sqeIOHardlink
+      - set: s
+        to: rr.u.get
+        value: rr.u.get()
+      - eval: prepCancelFixed(s, uint32(c.fd), udPack(udCancel, c.gen, uint32(slot)))
+        to: prepCancelFixed
+      - eval: rr.ul.onFD(s)
+        to: rr.ul.onFD
+      - op: +=
+        set: c.ops
+        value: "2"
+  - of: (*uRing).sweepDue
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).sweepDue
+        kind: self
+      - id: cmp
+        kind: stdlib
+    steps:
+      - bind: since
+        eval: rr.closes - rr.sweptCloses
+      - bind: every
+        eval: cmp.Or(rr.ul.hooks.sweepEvery, sweepEvery)
+        to: cmp
+      - return: since >= sweepCloses || (since > 0 && tick-rr.lastSweep >= every)
+  - of: (*uRing).cancelOld
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).cancelOld
+        kind: self
+      - id: rr.u.get
+        kind: internal
+      - id: prepCancelUserData
+        kind: internal
+    steps:
+      - bind: c
+        eval: "&rr.r.conns[slot]"
+      - opt:
+          do:
+            - return: "true"
+          when: c.state != stOpen || int(slot) >= len(rr.armEpoch) || rr.armEpoch[slot] >= rr.sweepEpoch
       - bind: s
         eval: rr.u.get()
         to: rr.u.get
       - opt:
           do:
             - op: ++
-              set: r.st.retries
-            - return: ""
+              set: rr.r.st.retries
+            - return: "false"
           when: s == nil
-      - eval: prepCancelFixed(s, uint32(c.fd), udPack(udCancel, c.gen, uint32(slot)))
-        to: prepCancelFixed
-      - eval: rr.ul.onFD(s)
-        to: rr.ul.onFD
+      - eval: prepCancelUserData(s, udPack(udRecv, c.gen, uint32(slot)), udPack(udCancel, c.gen, uint32(slot)))
+        to: prepCancelUserData
       - op: ++
         set: c.ops
+      - set: rr.armEpoch[slot]
+        value: noEpoch
+      - return: "true"
   - of: (*uRing).unread
     participants:
       - id: caller
@@ -4934,14 +5018,14 @@ sequences:
     steps:
       - opt:
           do:
-            - return: false, probeError("self_test", syscall.EIO)
+            - return: false, false, probeError("self_test", syscall.EIO)
           when: ul.hooks.failStage == "self_test"
       - bind: rg, err
         eval: selfTestRing(flags)
         to: selfTestRing
       - opt:
           do:
-            - return: false, err
+            - return: false, false, err
           when: err != nil
       - defer: rg.close()
         to: rg.close
@@ -4950,7 +5034,7 @@ sequences:
         to: loopbackListener
       - opt:
           do:
-            - return: false, probeError("self_test listen", errnoOfErr(err))
+            - return: false, false, probeError("self_test listen", errnoOfErr(err))
           when: err != nil
       - defer: closeFDs([]int{lfd})
         to: closeFDs
@@ -4963,29 +5047,55 @@ sequences:
         to: selfTestClient
       - opt:
           do:
-            - return: false, err
+            - return: false, false, err
           when: err != nil
       - defer: closeFDs([]int{cfd})
         to: closeFDs
       - bind: run
-        eval: "&selfTestRun{u: rg, index: -1, second: -1}"
+        eval: "&selfTestRun{u: rg, index: -1}"
       - eval: run.exchange()
         to: run.exchange
       - opt:
           do:
-            - return: false, err
+            - return: false, false, err
           init:
             bind: err
             eval: run.verdict()
             to: run.verdict
           when: err != nil
-      - return: run.releases(port, cfd), nil
+      - set: direct, deferred
         to: run.releases
+        value: run.releases(port)
+      - return: direct, deferred, nil
   - of: (*selfTestRun).releases
     participants:
       - id: caller
         kind: actor
       - id: (*selfTestRun).releases
+        kind: self
+      - id: st.victim
+        kind: internal
+    steps:
+      - bind: shut, ok
+        eval: st.victim(port, true)
+        to: st.victim
+      - opt:
+          do:
+            - return: false, false
+          when: "!ok || !shut"
+      - bind: plain, ok
+        eval: st.victim(port, false)
+        to: st.victim
+      - opt:
+          do:
+            - return: true, true
+          when: "!ok"
+      - return: true, !plain
+  - of: (*selfTestRun).victim
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*selfTestRun).victim
         kind: self
       - id: selfTestClient
         kind: internal
@@ -4993,35 +5103,73 @@ sequences:
         kind: internal
       - id: st.pump
         kind: internal
+      - id: st.u.get
+        kind: internal
+      - id: prepShutdownFixed
+        kind: internal
       - id: prepCancelFixed
         kind: internal
       - id: prepCloseDirect
         kind: internal
+      - id: peerSeesEnd
+        kind: internal
     steps:
-      - bind: other, err
+      - bind: cfd, err
         eval: selfTestClient(port, nil)
         to: selfTestClient
       - opt:
           do:
-            - return: "false"
+            - return: false, false
           when: err != nil
-      - defer: closeFDs([]int{other})
+      - defer: closeFDs([]int{cfd})
         to: closeFDs
-      - eval: st.pump(func() bool { return st.second >= 0 })
+      - bind: want
+        eval: len(st.accepted) + 1
+      - eval: st.pump(func() bool { return len(st.accepted) >= want })
         to: st.pump
       - opt:
           do:
-            - return: "false"
-          when: st.second < 0
-      - eval: prepCancelFixed(st.u.get(), uint32(st.index), udPack(udCancel, 0, 0))
+            - return: false, false
+          when: len(st.accepted) < want
+      - bind: index
+        eval: uint32(st.accepted[want-1])
+      - opt:
+          do:
+            - return: false, false
+          when: "!st.u.reserve(2)"
+      - set: st.done
+        value: "0"
+      - bind: ops
+        eval: "1"
+      - opt:
+          do:
+            - bind: s
+              eval: st.u.get()
+              to: st.u.get
+            - eval: prepShutdownFixed(s, index, syscall.SHUT_RDWR, udPack(udShutdown, 0, 0))
+              to: prepShutdownFixed
+            - op: "|="
+              set: s.flags
+              value: sqeIOHardlink
+            - set: ops
+              value: "2"
+          when: shut
+      - eval: prepCancelFixed(st.u.get(), index, udPack(udCancel, 0, 0))
         to: prepCancelFixed
-      - eval: st.pump(func() bool { return st.cancelled })
+      - eval: st.pump(func() bool { return st.done >= ops })
         to: st.pump
-      - eval: prepCloseDirect(st.u.get(), uint32(st.index), udPack(udClose, 0, 0))
+      - set: st.closed
+        value: "false"
+      - eval: prepCloseDirect(st.u.get(), index, udPack(udClose, 0, 0))
         to: prepCloseDirect
       - eval: st.pump(func() bool { return st.closed })
         to: st.pump
-      - return: st.closed && peerSeesEnd(first)
+      - opt:
+          do:
+            - return: false, false
+          when: "!st.closed"
+      - return: peerSeesEnd(cfd), true
+        to: peerSeesEnd
   - of: peerSeesEnd
     participants:
       - id: caller
@@ -5093,7 +5241,7 @@ sequences:
             - return: nil, probeError("self_test sparse_files", errno)
           init:
             bind: errno
-            eval: rg.registerSparse(2)
+            eval: rg.registerSparse(4)
             to: rg.registerSparse
           when: errno != 0
       - return: rg, nil
@@ -5205,10 +5353,10 @@ sequences:
               do:
                 - eval: st.onAccept(c.res)
                   to: st.onAccept
-            - case: udCancel
+            - case: udShutdown, udCancel
               do:
-                - set: st.cancelled
-                  value: "true"
+                - op: ++
+                  set: st.done
             - case: udClose
               do:
                 - set: st.closed
@@ -5230,21 +5378,21 @@ sequences:
       - id: prepRecv
         kind: internal
     steps:
-      - switch:
-          cases:
-            - case: res < 0
-            - case: st.index < 0
-              do:
-                - set: st.index
-                  value: res
-                - eval: prepRecv(st.u.get(), uint32(res), udPack(udRecv, 0, 0))
-                  to: prepRecv
-            - case: st.second < 0
-              do:
-                - set: st.second
-                  value: res
-                - eval: prepRecv(st.u.get(), uint32(res), udPack(udRecv, 0, 1))
-                  to: prepRecv
+      - opt:
+          do:
+            - return: ""
+          when: res < 0
+      - alt:
+          - do:
+              - set: st.index
+                value: res
+            when: st.index < 0
+          - do:
+              - set: st.accepted
+                value: append(st.accepted, res)
+            else: true
+      - eval: prepRecv(st.u.get(), uint32(res), udPack(udRecv, 0, uint32(len(st.accepted))))
+        to: prepRecv
   - of: (*selfTestRun).verdict
     participants:
       - id: caller
@@ -5529,6 +5677,27 @@ sequences:
       - op: ++
         set: u.tail
       - return: s
+  - of: (*uring).reserve
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uring).reserve
+        kind: self
+      - id: u.submit
+        kind: internal
+    steps:
+      - loop:
+          cond: u.tail-atomic.LoadUint32(u.sqHead)+n > u.sqLen
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: i >= enterRetries
+            - eval: u.submit()
+              to: u.submit
+          init: i := 0
+          post: i++
+      - return: "true"
   - of: (*uring).publish
     participants:
       - id: caller
@@ -5942,6 +6111,26 @@ sequences:
         value: fixedFd(index)
       - set: s.opFlags
         value: cancelFD | cancelFDFixed | cancelAll
+      - set: s.userData
+        value: ud
+  - of: prepShutdownFixed
+    participants:
+      - id: caller
+        kind: actor
+      - id: prepShutdownFixed
+        kind: self
+      - id: fixedFd
+        kind: internal
+    steps:
+      - set: s.opcode
+        value: opShutdown
+      - set: s.fd
+        to: fixedFd
+        value: fixedFd(index)
+      - set: s.flags
+        value: sqeFixedFile
+      - set: s.len
+        value: uint32(how)
       - set: s.userData
         value: ud
   - of: onProcessFD
