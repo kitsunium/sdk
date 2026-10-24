@@ -818,6 +818,282 @@ func TestTruncateAndStaySilentRejoins(t *testing.T) {
 	}
 }
 
+// kindFilter is a memory transport whose inbound frames a test may drop by
+// content: the data lane of a slow link while the control lane flows (the
+// memory and TCP transports both serve the control lane first).
+type kindFilter struct {
+	*MemoryTransport
+	mu   sync.Mutex
+	drop func(m *coreconsensus.MessageValue) bool
+}
+
+func (l *kindFilter) setDrop(f func(m *coreconsensus.MessageValue) bool) {
+	l.mu.Lock()
+	l.drop = f
+	l.mu.Unlock()
+}
+
+func (l *kindFilter) Bind(g coreconsensus.GroupID, deliver func(coreconsensus.AuthenticatedPeerValue, []byte),
+	offer func(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue) coreconsensus.InstallAcceptValue,
+	install func(coreconsensus.InstallParams) error,
+	join func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code),
+) error {
+	wrapped := func(from coreconsensus.AuthenticatedPeerValue, frame []byte) {
+		l.mu.Lock()
+		f := l.drop
+		l.mu.Unlock()
+		if f != nil {
+			var m coreconsensus.MessageValue
+			if wire.ParseMessage(bytes.Clone(frame), &m) == nil && f(&m) {
+				return
+			}
+		}
+		deliver(from, frame)
+	}
+	return l.MemoryTransport.Bind(g, wrapped, offer, install, join)
+}
+
+// silencedUnderItsLeaderOnDisk is #636 on disk, up to the victim's restart.
+// Three voters: the lagger is slow (heartbeats reach it, no append does), so
+// the leader keeps its quorum contact and its term while it commits 30
+// acknowledged writes with the victim. The victim's synced record of ack03
+// then rots, it is quarantined and takes TruncateAndStaySilent, and it is
+// left down, isolated, for the test to restart under the same leader.
+// Batches are small: several per truncated range.
+type silencedOnDisk struct {
+	c                    *cluster
+	nodes                []*diskNode
+	lead, victim, lagger *diskNode
+	trs                  map[coreconsensus.NodeID]*kindFilter
+	acked                map[string]uint64
+	// oldLast is the leader's last index once the writes were committed,
+	// hint the victim's last index after the truncation.
+	oldLast, hint uint64
+}
+
+func silenceUnderItsLeaderOnDisk(t *testing.T) *silencedOnDisk {
+	t.Helper()
+	s := &silencedOnDisk{c: &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{5}}, trs: map[coreconsensus.NodeID]*kindFilter{}, acked: map[string]uint64{}}
+	var members []coreconsensus.MemberValue
+	for i := range 3 {
+		dn := &diskNode{dir: t.TempDir()}
+		dn.dd = openDir(t, dn.dir, 16<<10)
+		slot := fmt.Sprintf("r%d", i)
+		id, inc, err := Init(dn.dd, s.c.cid, slot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dn.id = id
+		s.trs[id] = &kindFilter{MemoryTransport: NewMemoryTransport(s.c.net, id)}
+		s.nodes = append(s.nodes, dn)
+		members = append(members, coreconsensus.MemberValue{ID: id, Incarnation: inc, Slot: slot, SPKI: MemorySPKI(id), Voter: true})
+	}
+	for _, dn := range s.nodes {
+		dn.sm = newKV()
+		if err := Bootstrap(context.Background(), new(s.config(dn)), members); err != nil {
+			t.Fatal(err)
+		}
+		s.start(t, dn)
+	}
+	t.Cleanup(func() {
+		for _, dn := range s.nodes {
+			if dn.node != nil {
+				dn.crash(t, s.c)
+			}
+		}
+	})
+	s.lead = leaderOf(t, s.nodes)
+	for _, dn := range s.nodes {
+		switch {
+		case dn == s.lead:
+		case s.victim == nil:
+			s.victim = dn
+		default:
+			s.lagger = dn
+		}
+	}
+	tok := propose(t, s.lead.node, "warm=up")
+	s.c.waitAppliedDisk(s.nodes, tok.Index)
+	term := s.lead.node.Status().Term
+	s.trs[s.lagger.id].setDrop(func(m *coreconsensus.MessageValue) bool { return m.Kind == coreconsensus.MsgApp })
+	for i := range 30 {
+		key := fmt.Sprintf("ack%02d", i)
+		tok = propose(t, s.lead.node, key+"="+strings.Repeat("v", 1024))
+		s.acked[key] = tok.Index
+	}
+	waitAppliedOnly(t, s.victim, tok.Index)
+	if st := s.lead.node.Status(); st.Role != coreconsensus.RoleLeader || st.Term != term {
+		t.Skipf("setup: leadership changed during the writes (%+v)", st)
+	}
+	_, s.oldLast = s.lead.dd.Log().Bounds()
+	s.c.net.Isolate(s.victim.id, true)
+	s.victim.crash(t, s.c)
+	dd := openDir(t, s.victim.dir, 16<<10)
+	l := dd.d.log
+	l.mu.RLock()
+	slot := l.slots[s.acked["ack03"]-l.first]
+	l.mu.RUnlock()
+	if err := dd.Close(); err != nil {
+		t.Fatal(err)
+	}
+	segPath := filepath.Join(s.victim.dir, "log", segName(slot.seg))
+	b := must(os.ReadFile(segPath))(t)
+	b[slot.off+int64(recHeader+recFixed)] ^= 0xff
+	if err := os.WriteFile(segPath, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s.victim.dd = openDir(t, s.victim.dir, 16<<10)
+	s.victim.sm = newKV()
+	if _, err := NewNode(s.config(s.victim)); !errors.Is(err, coreconsensus.LogQuarantined) {
+		t.Fatalf("damaged log: %v", err)
+	}
+	if err := ClearQuarantine(s.victim.dd, TruncateAndStaySilent, "op:silent"); err != nil {
+		t.Fatal(err)
+	}
+	_, s.hint = s.victim.dd.Log().Bounds()
+	t.Logf("leader %d term %d last %d; victim truncated to %d", s.lead.id, term, s.oldLast, s.hint)
+	return s
+}
+
+// config is diskConfig with small batches, no cut, and the node's
+// filtering transport.
+func (s *silencedOnDisk) config(dn *diskNode) Config {
+	cfg := diskConfig(s.c, dn)
+	cfg.Transport = s.trs[dn.id]
+	cfg.MaxBatchBytes, cfg.MaxEntryBytes = 4<<10, 2<<10
+	cfg.SnapshotEvery, cfg.SnapshotEveryBytes = 1<<30, 1<<29
+	return cfg
+}
+
+func (s *silencedOnDisk) start(t *testing.T, dn *diskNode) {
+	t.Helper()
+	dn.sm = newKV()
+	dn.node = must(NewNode(s.config(dn)))(t)
+}
+
+// failOver crashes the leader, mends the lagger's link, and returns the
+// leader the victim and the lagger elect, nil when none is elected within
+// six election timeouts.
+func (s *silencedOnDisk) failOver(t *testing.T) *diskNode {
+	t.Helper()
+	s.c.net.Isolate(s.lead.id, true)
+	s.lead.crash(t, s.c)
+	s.trs[s.lagger.id].setDrop(nil)
+	for deadline := time.Now().Add(6 * testTimingDisk().ElectionTimeoutMax); time.Now().Before(deadline); {
+		for _, dn := range []*diskNode{s.victim, s.lagger} {
+			if dn.node.Status().Role == coreconsensus.RoleLeader {
+				return dn
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return nil
+}
+
+// lost lists the acknowledged writes the state machine of dn lacks.
+func (s *silencedOnDisk) lost(dn *diskNode) []string {
+	var out []string
+	for i := range 30 {
+		key := fmt.Sprintf("ack%02d", i)
+		if _, ok := dn.sm.get(key); !ok {
+			out = append(out, key)
+		}
+	}
+	return out
+}
+
+// #636: the victim restarts while the leader of its SilentTerm still leads.
+// That leader re-sends ONE batch past the truncation point, then fails: the
+// victim committed an entry of the leader's term past the truncation point
+// and its silence ended, though it lacked most of the writes it had
+// acknowledged. It and the lagger then elected a leader without them. Now
+// the victim stays silent until it holds the leader's commit, and the
+// lagger alone elects no one.
+func TestASilentNodeVotesAgainOnlyWithTheWritesItAcknowledged(t *testing.T) {
+	s := silenceUnderItsLeaderOnDisk(t)
+	// The victim's link carries the append it refuses at the leader's old
+	// next and the probe at the truncation point, nothing else below the
+	// old last index: the leader is about to fail.
+	var probe sync.Once
+	s.trs[s.victim.id].setDrop(func(m *coreconsensus.MessageValue) bool {
+		if m.Kind != coreconsensus.MsgApp || m.Index >= s.oldLast {
+			return false
+		}
+		pass := false
+		if m.Index == s.hint {
+			probe.Do(func() { pass = true })
+		}
+		return !pass
+	})
+	s.start(t, s.victim)
+	s.c.net.Isolate(s.victim.id, false)
+	go func() { _, _, _ = s.lead.node.Propose(context.Background(), []byte("trigger=1")) }()
+	for deadline := time.Now().Add(20 * time.Second); ; {
+		if _, last := s.victim.dd.Log().Bounds(); last > s.hint {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the probe batch never reached the victim (status %+v)", s.victim.node.Status())
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	// Time for the victim's loop to judge the batch and, unfixed, persist
+	// the end of its silence.
+	time.Sleep(300 * time.Millisecond)
+	_, vLast := s.victim.dd.Log().Bounds()
+	_, statErr := os.Stat(filepath.Join(s.victim.dir, fileSilent))
+	t.Logf("victim at last %d after the probe batch (it acknowledged through %d); still silent: %v", vLast, s.oldLast, statErr == nil)
+	nl := s.failOver(t)
+	if nl == nil {
+		t.Logf("no leader among the victim and the lagger while the old leader is down: safe")
+		return
+	}
+	tok := propose(t, nl.node, "after=loss")
+	waitAppliedOnly(t, s.victim, tok.Index)
+	waitAppliedOnly(t, s.lagger, tok.Index)
+	if lost := s.lost(nl); len(lost) > 0 {
+		t.Fatalf("acknowledged writes lost: node %d (victim %v) leads term %d; %d of 30 acknowledged writes are missing, first %s (index %d)",
+			nl.id, nl == s.victim, nl.node.Status().Term, len(lost), lost[0], s.acked[lost[0]])
+	}
+}
+
+// #636, the liveness half on disk: under the same leader, with every batch
+// delivered, the victim catches up across the batches past its truncation
+// point, though it acknowledges none of them, ends its silence once it holds
+// the leader's commit, and acknowledges again: the write the slow lagger
+// could not commit commits. The leader then fails, and the victim and the
+// lagger elect a leader that holds every acknowledged write.
+func TestASilentNodeRejoinsUnderItsLeaderWithTheWritesItAcknowledged(t *testing.T) {
+	s := silenceUnderItsLeaderOnDisk(t)
+	s.start(t, s.victim)
+	s.c.net.Isolate(s.victim.id, false)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	tok, _, err := s.lead.node.Propose(ctx, []byte("trigger=1"))
+	if err != nil {
+		t.Fatalf("the write the victim's silence held back: %v (victim %+v)", err, s.victim.node.Status())
+	}
+	waitAppliedOnly(t, s.victim, tok.Index)
+	if _, err := os.Stat(filepath.Join(s.victim.dir, fileSilent)); !os.IsNotExist(err) {
+		t.Fatalf("the silence condition outlived the victim's rejoin: %v", err)
+	}
+	if lost := s.lost(s.victim); len(lost) > 0 {
+		t.Fatalf("the victim rejoined without %d acknowledged writes, first %s", len(lost), lost[0])
+	}
+	nl := s.failOver(t)
+	if nl == nil {
+		t.Fatal("no leader among the victim and the lagger once the old leader failed")
+	}
+	tok = propose(t, nl.node, "after=failover")
+	waitAppliedOnly(t, s.victim, tok.Index)
+	waitAppliedOnly(t, s.lagger, tok.Index)
+	for _, dn := range []*diskNode{s.victim, s.lagger} {
+		if lost := s.lost(dn); len(lost) > 0 {
+			t.Fatalf("node %d lacks %d acknowledged writes after the failover, first %s", dn.id, len(lost), lost[0])
+		}
+	}
+}
+
 // Two founders given the same members in another order write the same entry
 // 1: the guard compares the sorted list, so the entry must be sorted too,
 // or the chain refuses every append from the first leader (review M1).

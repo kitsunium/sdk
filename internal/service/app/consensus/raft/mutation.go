@@ -123,6 +123,27 @@ const (
 	// mutHintEndsWhileHeard ends a leader record its delay after it was
 	// taken, while the vouched-for leader is still heard (#618).
 	mutHintEndsWhileHeard
+	// mutSilenceEndsBeforeCommit ends the silence under the
+	// leader of the node's own SilentTerm before the node holds that
+	// leader's commit (#636).
+	mutSilenceEndsBeforeCommit
+	// mutSilenceEndsOnARefusal ends the silence on an append the node
+	// refused (#636).
+	mutSilenceEndsOnARefusal
+	// mutSilenceIndexBelowSnapshot keeps a SilentIndex the node's own
+	// snapshot covers at start, so that snapshot's commit ends the silence
+	// (#636).
+	mutSilenceIndexBelowSnapshot
+	// mutSilentReportIgnored ignores the report a silent node's heartbeat
+	// answer carries: a stale match is not lowered and the probe never
+	// moves past the first batch (#636).
+	mutSilentReportIgnored
+	// mutRecordAtClusterVersion sends the leader record by the cluster
+	// version, as before #638: below 2 never, at 2 to any PreVote.
+	mutRecordAtClusterVersion
+	// mutRecordUnannounced answers with a leader record a PreVote that does
+	// not announce protocol 2 (#638).
+	mutRecordUnannounced
 )
 
 // mutated reports whether a test switched mutation m on; it is false in every

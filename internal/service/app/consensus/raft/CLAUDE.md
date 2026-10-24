@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T02:00:00Z -->
+<!-- updated: 2026-10-24T05:41:53Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -102,3 +102,21 @@ under coverage before touching `shard_count`.
   sends no PreVote that could bring a new record (#618,
   `mutHintEndsWhileHeard`, `checkVouchedLeaderAdmittedWhileHeard`,
   `TestAVouchedLeaderEndsItsDelayAfterTheLastContact`).
+- End a silence under the leader of the node's own SilentTerm before the
+  node's commit reaches the one the append carries, on an append the node
+  refused, or on the commit of the snapshot it started from: that leader
+  committed the entries the truncation dropped with the node's own
+  acknowledgements, and the node voted again without them (#636,
+  `mutSilenceEndsBeforeCommit`, `mutSilenceEndsOnARefusal`,
+  `mutSilenceIndexBelowSnapshot`,
+  `TestTheSilenceHoldsUntilTheSameTermLeadersCommit`,
+  `TestTheSilenceNeverEndsOnARefusedAppendOverASnapshot`). Nor ignore
+  the FlagTruncated heartbeat answer of a silent node: it acknowledges no
+  append, the probe never moved past its first batch, and the node stayed
+  silent for as long as its leader led (`mutSilentReportIgnored`,
+  `TestTheSilenceEndsOnceTheSameTermLeadersCommitIsHeld`).
+- Answer with a leader record a PreVote that does not carry FlagProtocol2,
+  or wait for the cluster version 2 to send one: a node of protocol 1 does
+  not know the kind, and the raise is refused while the stale voter the
+  record is for stays unheard (#638, `mutRecordAtClusterVersion`,
+  `mutRecordUnannounced`, `checkLeaderRecordFollowsTheAnnouncement`).
