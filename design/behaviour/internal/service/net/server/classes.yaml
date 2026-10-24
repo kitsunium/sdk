@@ -300,6 +300,7 @@ files:
       - Option
       - GroupOption
       - WithDrainTimeout
+      - Loop
       - Listen
       - TLS
       - ReadTimeout
@@ -592,8 +593,9 @@ functions:
     params: dst *T, n int
     typeParams: T ~uint32 | ~uint64
   - doc: |-
-      groupDeclErr returns the first declaration error recorded on a group, in
-      declaration order, or nil when every group was declared cleanly.
+      groupDeclErr returns the first declaration error recorded on a group, or the
+      first option a group cannot honour, in declaration order, or nil when every
+      group was declared cleanly. It runs before anything is bound.
     name: groupDeclErr
     params: groups []*StreamGroup
     results: error
@@ -696,6 +698,9 @@ functions:
   - name: WithDrainTimeout
     params: d time.Duration
     results: Option
+  - name: Loop
+    params: v corenet.LoopValue
+    results: GroupOption
   - name: Listen
     params: network, addr string
     results: GroupOption
@@ -2133,6 +2138,14 @@ types:
           declared records that a handler was declared, even a nil one, so a
           second declaration is caught whatever the first one passed.
         name: declared
+        type: bool
+      - doc: |-
+          loop is the Loop option's value; loopSet records that the option was
+          given, a zero value included, so Start can refuse it on a group whose
+          handler is not a loop handler (ADR 0186 §D1).
+        name: loop
+        type: corenet.LoopValue
+      - name: loopSet
         type: bool
     kind: struct
     methods:
