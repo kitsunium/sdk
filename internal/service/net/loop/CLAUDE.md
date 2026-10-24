@@ -96,6 +96,40 @@ the Ubuntu lane name both Linux backends (§D9 step 11). Until then
   reaped" check are not built: this loop always reaps every ring. An
   io_uring connection is never evicted, because a direct descriptor has no
   process descriptor to ask `SIOCINQ` of, so `unread` answers yes.
+- **Direct descriptors only where a close releases the socket.** Before 6.13
+  a file removed from the direct table is put only once every request issued
+  under the table's previous resource node has completed. A multishot recv on
+  an idle connection never does, so a closed connection's socket stays open:
+  the peer never sees the end, and the memory grows with the churn for as long
+  as the oldest connection lives. Debian's 6.12 and Ubuntu's 6.8 both behave
+  this way (CI, and local QEMU arm64 VMs). The self-test therefore ends with a
+  release check: a second connection's recv armed, the first cancelled and
+  closed, and its peer must read the end within 200 ms. Where it does not,
+  the loop serves on **process descriptors** (`ProbeStage` ends in `+fds`
+  rather than `+direct`). It is the same machine without `IOSQE_FIXED_FILE`,
+  bound by `RLIMIT_NOFILE` like epoll, closing with `close(2)` at count zero,
+  backing off on EMFILE, and allowed to evict, since `SIOCINQ` works. Capacity
+  past the limit is io_uring's on 6.13 and later only.
+- **Rings an unprivileged process can afford.** Without `CAP_IPC_LOCK` the
+  kernel charges each ring's SQ and CQ to `RLIMIT_MEMLOCK` (8 MiB by
+  default). A serving ring asks for 1024 SQEs and a 4096-entry CQ, the
+  probe's rings for 16. The buffer ring is the kernel's
+  (`IOU_PBUF_RING_MMAP`, 6.4), user pages before that. With 4096 SQEs and
+  16384 CQEs, CI's non-root lane ran out after a few groups (`ENOMEM` at setup).
+- **Ubuntu 6.8.0-147 refuses every well-formed buffer ring.** Its
+  `io_register_pbuf_ring` inverts the reserved-field check (`if
+  (!memchr_inv(reg.resv, 0, ...)) return -EINVAL`), so a zero `resv` is
+  refused. `registerBufRing` retries once with one `resv` byte set: that kernel
+  accepts it, and a correct kernel refuses it again with the same EINVAL.
+- **Serving accepts are single-shot.** A multishot accept into the direct
+  table keeps accepting the whole backlog before the loop sees the reserve
+  reached. Past the last entry the kernel accepts, cannot install, and drops
+  the connection. At most 32 single-shot accepts are in flight per listener,
+  never more than the free entries above the reserve. The probe keeps a
+  multishot accept.
+- **A cancel the slot never asked for re-arms.** An open connection whose recv
+  ends with `-ECANCELED` re-arms it, and one whose send was cancelled sends
+  the same flight again.
 - **The probe is staged, and any failure is epoll.** setup with
   `COOP_TASKRUN|SINGLE_ISSUER|SUBMIT_ALL` (EINVAL: again without
   `SINGLE_ISSUER`), features (`EXT_ARG`, `NODROP`, `SINGLE_MMAP`),

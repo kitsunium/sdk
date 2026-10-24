@@ -321,8 +321,7 @@ func (u *uring) setupBuffers(count, size uint32) syscall.Errno {
 // that does not know the flag (EINVAL) gets the ring in user pages.
 func (u *uring) mapBufRing(count uint32) syscall.Errno {
 	ringBytes := max(int(count)*int(unsafe.Sizeof(uringBuf{})), syscall.Getpagesize())
-	reg := new(bufReg{ringEntries: count, bgid: bufGroup, flags: pbufRingMmap})
-	errno := uringRegister(u.fd, regPbufRing, unsafe.Pointer(reg), 1)
+	errno := registerBufRing(u.fd, &bufReg{ringEntries: count, bgid: bufGroup, flags: pbufRingMmap})
 	//: the kernel's pages: mapped at the group's offset.
 	if errno == 0 {
 		off := offPbufRing | uintptr(bufGroup)<<offPbufShift
@@ -348,9 +347,27 @@ func (u *uring) mapBufRing(count uint32) syscall.Errno {
 		return errnoOfErr(err)
 	}
 	u.bufRing = rm
-	reg = new(bufReg{ringAddr: uint64(uintptr(unsafe.Pointer(&rm[0]))), ringEntries: count, bgid: bufGroup})
 	//: the kernel learns the ring in user pages.
-	return uringRegister(u.fd, regPbufRing, unsafe.Pointer(reg), 1)
+	return registerBufRing(u.fd, &bufReg{ringAddr: uint64(uintptr(unsafe.Pointer(&rm[0]))), ringEntries: count, bgid: bufGroup})
+}
+
+// registerBufRing is IORING_REGISTER_PBUF_RING with reg, resv zero as the
+// uapi requires. Ubuntu's noble kernel 6.8.0-147 inverts that check
+// (io_uring/kbuf.c: `if (!memchr_inv(reg.resv, 0, sizeof(reg.resv)))
+// return -EINVAL;`, Ubuntu-6.8.0-147.147) and refuses every zero resv; on
+// EINVAL the registration is tried once more with one resv byte set, which
+// that kernel accepts and a correct one refuses again with EINVAL.
+func registerBufRing(fd int, reg *bufReg) syscall.Errno {
+	errno := uringRegister(fd, regPbufRing, unsafe.Pointer(reg), 1)
+	//: accepted, or refused for another reason.
+	if errno != syscall.EINVAL {
+		//: as answered.
+		return errno
+	}
+	quirk := *reg
+	quirk.resv[2] = 1
+	//: the inverted check's one way through.
+	return uringRegister(fd, regPbufRing, unsafe.Pointer(&quirk), 1)
 }
 
 // bufEntries views the buffer ring.
@@ -464,6 +481,24 @@ func prepCancelFixed(s *sqe, index uint32, ud uint64) {
 	s.fd = fixedFd(index)
 	s.opFlags = cancelFD | cancelFDFixed | cancelAll
 	s.userData = ud
+}
+
+// onProcessFD turns an SQE filled for a direct descriptor into the same
+// operation on the process descriptor of the same number: no fixed-file
+// flag, a cancel that looks the number up in the process table, an accept
+// that installs into it, close-on-exec.
+func onProcessFD(s *sqe) {
+	s.flags &^= sqeFixedFile
+	//: by operation.
+	switch s.opcode {
+	//: into the process table.
+	case opAccept:
+		s.fileIdx = 0
+		s.opFlags = syscall.SOCK_CLOEXEC
+	//: the number is a process descriptor.
+	case opAsyncCancel:
+		s.opFlags &^= cancelFDFixed
+	}
 }
 
 // prepCloseDirect fills s as the close of direct descriptor index.
