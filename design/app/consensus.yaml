@@ -849,8 +849,10 @@ packages:
               - type: error
           - doc: |-
               Bind registers the group's callbacks. deliver gets the frame and the
-              peer TLS authenticated, valid until deliver returns; offer is answered
-              on the event loop; join is answered off it, under a deadline.
+              peer TLS authenticated, valid until deliver returns; offer is judged
+              on the event loop and its spool then positioned off it, and the
+              shipped transport reads its answer under JoinTimeout; join is
+              answered off the loop, under a deadline.
             in:
               - name: group
                 type: GroupID
