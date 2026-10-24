@@ -30,6 +30,9 @@ const (
 )
 
 const (
+	// acceptDepth is how many single-shot accepts a ring keeps in flight per
+	// listener.
+	acceptDepth int = 32
 	// acceptReserve is the free direct-descriptor entries a ring keeps: under
 	// it the ring stops accepting, and it resumes at twice as many.
 	acceptReserve int = 16
@@ -76,9 +79,10 @@ type uRing struct {
 	r  *ring
 	// slotOf maps a direct-descriptor index to its slot, -1 when none.
 	slotOf []int32
-	// armed is whether each listener's multishot accept is armed; paused a
+	// armed is how many single-shot accepts each listener has in flight;
+	// paused a
 	// ring that stopped accepting under its reserve.
-	armed  []bool
+	armed  []int
 	paused bool
 	// starved are slots whose recv ran out of buffers, re-armed as buffers
 	// come back; recycle the buffers the batch handed out.
@@ -311,11 +315,11 @@ func (ul *uLoop) openStaged(flags uint32) (*uring, uint32, error) {
 		//: injected.
 		return nil, 0, probeError("setup", syscall.EPERM)
 	}
-	opened, step, errno := openURing(flags)
+	opened, step, errno := openURing(probeEntries, flags)
 	//: stage 2: an older kernel refuses a flag it does not know.
 	if errno == syscall.EINVAL && step == "setup" && !ul.hooks.deferTaskrun {
 		flags = setupCoopTaskrun | setupSubmitAll
-		opened, step, errno = openURing(flags)
+		opened, step, errno = openURing(probeEntries, flags)
 	}
 	//: no ring at all.
 	if errno != 0 {
@@ -369,14 +373,14 @@ func orErrno(a, b syscall.Errno) syscall.Errno {
 // newRing builds ring i: its io_uring, its sparse table, its buffers, and
 // its accepts.
 func (ul *uLoop) newRing(i int, flags uint32) (*uRing, error) {
-	u, step, errno := openURing(flags)
+	u, step, errno := openURing(uringEntries, flags)
 	//: refused.
 	if errno != 0 {
 		//: named.
 		return nil, probeError(step, errno)
 	}
 	lp := ul.lp
-	rr := &uRing{ul: ul, u: u, armed: make([]bool, len(ul.lfds))}
+	rr := &uRing{ul: ul, u: u, armed: make([]int, len(ul.lfds))}
 	rr.r = newRing(lp, i, rr)
 	bufs, size := ul.bufShape()
 	//: stage 4: provided buffers and the sparse table.
@@ -447,37 +451,59 @@ func (rr *uRing) pollFD(fd int, op uint64) {
 	prepPollMulti(s, fd, udPack(op, 0, 0))
 }
 
-// armAccepts arms every listener's multishot accept not already armed.
+// armAccepts keeps up to acceptDepth single-shot accepts in flight per
+// listener, never more than the entries left above the reserve. A multishot
+// accept into a direct-descriptor table keeps accepting the whole listen
+// backlog before the loop can see the reserve reached: past the table's last
+// entry the kernel accepts the connection, cannot install it, and drops it
+// (ENFILE), which CI saw on a 6.11 kernel. Single-shot accepts, each holding
+// one entry until it completes, cannot overshoot.
 func (rr *uRing) armAccepts() {
 	//: a paused or draining ring accepts nothing.
 	if rr.paused || rr.r.draining || rr.ul.lp.draining {
 		//: nothing.
 		return
 	}
-	//: each listener.
+	room := rr.acceptRoom()
+	//: each listener, up to its depth, within the room.
 	for i, fd := range rr.ul.lfds {
-		//: already armed.
-		if rr.armed[i] {
-			continue
+		//: topped up one SQE at a time.
+		for rr.armed[i] < acceptDepth && room > 0 {
+			s := rr.u.get()
+			//: no room in the SQ.
+			if s == nil {
+				rr.r.st.retries++
+				//: next time.
+				return
+			}
+			prepAccept(s, fd, udPack(udAccept, 0, uint32(i)), false)
+			rr.armed[i]++
+			room--
 		}
-		s := rr.u.get()
-		//: no room in the SQ.
-		if s == nil {
-			rr.r.st.retries++
-			//: next time.
-			return
-		}
-		prepAccept(s, fd, udPack(udAccept, 0, uint32(i)))
-		rr.armed[i] = true
 	}
 }
 
-// cancelAccepts cancels every armed accept; their final CQEs disarm them.
+// acceptRoom is how many more accepts may be in flight: the free entries
+// above the reserve, less those the accepts in flight will take.
+func (rr *uRing) acceptRoom() int {
+	table := rr.ul.lp.sz.tableSize
+	reserve := max(min(acceptReserve, table/8), 1)
+	inFlight := 0
+	//: every listener's.
+	for _, n := range rr.armed {
+		inFlight += n
+	}
+	//: never negative.
+	return max(table-rr.used()-reserve-inFlight+1, 0)
+}
+
+// cancelAccepts cancels every accept in flight; their completions disarm
+// them.
 func (rr *uRing) cancelAccepts() {
-	//: each armed listener.
-	for i, on := range rr.armed {
-		//: not armed.
-		if !on {
+	//: each listener with an accept in flight.
+	for i, n := range rr.armed {
+		//: none.
+		if n == 0 {
 			continue
 		}
 		s := rr.u.get()
@@ -644,10 +670,11 @@ func (rr *uRing) onAccept(li int, c *cqe) {
 	r, lp := rr.r, rr.ul.lp
 	rr.lastAccept = lp.tick
 	rr.stalls = 0
-	//: the multishot ended: re-armed by pace unless paused.
-	if c.flags&cqeFMore == 0 && li < len(rr.armed) {
-		rr.armed[li] = false
+	//: a single-shot accept is final: one less in flight, topped up below.
+	if c.flags&cqeFMore == 0 && li < len(rr.armed) && rr.armed[li] > 0 {
+		rr.armed[li]--
 	}
+	defer rr.armAccepts()
 	//: an error: the table is full, or the listener failed.
 	if c.res < 0 {
 		rr.acceptFailed(c.res)
@@ -1073,7 +1100,7 @@ func (rr *uRing) watchdog() {
 	//: any listener with a queue and an armed accept.
 	for i, fd := range rr.ul.lfds {
 		//: unarmed accepts are pace's.
-		if !rr.armed[i] || listenerQueue(fd) == 0 {
+		if rr.armed[i] == 0 || listenerQueue(fd) == 0 {
 			continue
 		}
 		rr.r.st.watchdog++

@@ -9,9 +9,15 @@ import (
 )
 
 const (
-	// uringEntries is the SQ size asked for; CLAMP lets the kernel lower it,
-	// and the size it grants is read back from the params.
-	uringEntries uint32 = 4096
+	// uringEntries is a serving ring's SQ size; CLAMP lets the kernel lower
+	// it, and the size it grants is read back from the params. A ring's SQ and
+	// CQ are charged to RLIMIT_MEMLOCK for a process without CAP_IPC_LOCK
+	// (an 8 MiB default on most distributions), so they are sized to keep a
+	// few rings within it rather than to the largest burst: a full SQ submits
+	// inline, a full CQ overflows into the kernel's list (NODROP).
+	uringEntries uint32 = 1024
+	// probeEntries sizes the probe's short-lived rings.
+	probeEntries uint32 = 16
 	// cqFactor is how many times uringEntries CQSIZE asks for the CQ.
 	cqFactor uint32 = 4
 	// bufGroup is the provided-buffer group every recv selects from.
@@ -60,13 +66,13 @@ type uring struct {
 	retries uint64
 }
 
-// openURing sets an io_uring up with flags, mapping it and building the
+// openURing sets an io_uring of entries SQEs up with flags, mapping it and building the
 // views. It returns the errno of the step that failed.
-func openURing(flags uint32) (*uring, string, syscall.Errno) {
+func openURing(entries, flags uint32) (*uring, string, syscall.Errno) {
 	u := &uring{fd: -1}
 	u.params.flags = flags | setupCQSize | setupClamp
-	u.params.cqEntries = uringEntries * cqFactor
-	fd, errno := uringSetup(uringEntries, &u.params)
+	u.params.cqEntries = entries * cqFactor
+	fd, errno := uringSetup(entries, &u.params)
 	//: the kernel refused the setup.
 	if errno != 0 {
 		//: the caller decides whether to retry with fewer flags.
@@ -287,14 +293,6 @@ func (u *uring) overflowed() bool {
 // setupBuffers maps count buffers of size bytes and registers their ring as
 // group bufGroup. count must be a power of two.
 func (u *uring) setupBuffers(count, size uint32) syscall.Errno {
-	ringBytes := int(count) * int(unsafe.Sizeof(uringBuf{}))
-	rm, err := syscall.Mmap(-1, 0, max(ringBytes, 4096), syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS)
-	//: no ring memory.
-	if err != nil {
-		//: refused.
-		return errnoOfErr(err)
-	}
-	u.bufRing = rm
 	bm, err := syscall.Mmap(-1, 0, int(count)*int(size), syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS)
 	//: no buffer memory.
 	if err != nil {
@@ -302,9 +300,8 @@ func (u *uring) setupBuffers(count, size uint32) syscall.Errno {
 		return errnoOfErr(err)
 	}
 	u.bufMem, u.bufCount, u.bufSize = bm, count, size
-	reg := new(bufReg{ringAddr: uint64(uintptr(unsafe.Pointer(&rm[0]))), ringEntries: count, bgid: bufGroup})
-	//: the kernel learns the ring.
-	if errno := uringRegister(u.fd, regPbufRing, unsafe.Pointer(reg), 1); errno != 0 {
+	//: the ring itself: the kernel's own pages first, user pages before 6.4.
+	if errno := u.mapBufRing(count); errno != 0 {
 		//: refused.
 		return errno
 	}
@@ -315,6 +312,45 @@ func (u *uring) setupBuffers(count, size uint32) syscall.Errno {
 	u.publishBufs()
 	//: provided.
 	return 0
+}
+
+// mapBufRing registers group bufGroup's ring of count entries and maps it.
+// It asks the kernel to allocate it (IOU_PBUF_RING_MMAP, 6.4): a ring in user
+// pages is pinned and charged to RLIMIT_MEMLOCK, which an unprivileged
+// process runs out of after a few rings (CI's non-root lane did). A kernel
+// that does not know the flag (EINVAL) gets the ring in user pages.
+func (u *uring) mapBufRing(count uint32) syscall.Errno {
+	ringBytes := max(int(count)*int(unsafe.Sizeof(uringBuf{})), syscall.Getpagesize())
+	reg := new(bufReg{ringEntries: count, bgid: bufGroup, flags: pbufRingMmap})
+	errno := uringRegister(u.fd, regPbufRing, unsafe.Pointer(reg), 1)
+	//: the kernel's pages: mapped at the group's offset.
+	if errno == 0 {
+		off := offPbufRing | uintptr(bufGroup)<<offPbufShift
+		rm, err := syscall.Mmap(u.fd, int64(off), ringBytes, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED|syscall.MAP_POPULATE)
+		//: registered but not mappable.
+		if err != nil {
+			//: refused.
+			return errnoOfErr(err)
+		}
+		u.bufRing = rm
+		//: mapped.
+		return 0
+	}
+	//: a refusal other than an unknown flag is final.
+	if errno != syscall.EINVAL {
+		//: refused.
+		return errno
+	}
+	rm, err := syscall.Mmap(-1, 0, ringBytes, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS)
+	//: no ring memory.
+	if err != nil {
+		//: refused.
+		return errnoOfErr(err)
+	}
+	u.bufRing = rm
+	reg = new(bufReg{ringAddr: uint64(uintptr(unsafe.Pointer(&rm[0]))), ringEntries: count, bgid: bufGroup})
+	//: the kernel learns the ring in user pages.
+	return uringRegister(u.fd, regPbufRing, unsafe.Pointer(reg), 1)
 }
 
 // bufEntries views the buffer ring.
@@ -383,12 +419,16 @@ func (u *uring) supports(ops ...uint8) (bool, syscall.Errno) {
 	return true, 0
 }
 
-// prepAccept fills s as a multishot accept on lfd into a kernel-allocated
-// direct descriptor.
-func prepAccept(s *sqe, lfd int, ud uint64) {
+// prepAccept fills s as an accept on lfd into a kernel-allocated direct
+// descriptor: multishot for the probe's self-test, single-shot for serving
+// (uRing.armAccepts says why).
+func prepAccept(s *sqe, lfd int, ud uint64, multishot bool) {
 	s.opcode = opAccept
 	s.fd = int32(lfd)
-	s.ioprio = acceptMultishot
+	//: one completion per connection until cancelled, or exactly one.
+	if multishot {
+		s.ioprio = acceptMultishot
+	}
 	// No SOCK_CLOEXEC: a direct descriptor is in no process table, and the
 	// kernel refuses the flag with a file slot (EINVAL, io_accept_prep).
 	s.fileIdx = fileIndexAlloc
@@ -433,10 +473,11 @@ func prepCloseDirect(s *sqe, index uint32, ud uint64) {
 	s.userData = ud
 }
 
-// prepCancelUserData fills s as a cancel of the operation carrying target.
+// prepCancelUserData fills s as a cancel of every operation carrying target.
 func prepCancelUserData(s *sqe, target, ud uint64) {
 	s.opcode = opAsyncCancel
 	s.addr = target
+	s.opFlags = cancelAll
 	s.userData = ud
 }
 

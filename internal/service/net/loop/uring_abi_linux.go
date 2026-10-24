@@ -85,6 +85,12 @@ const (
 	regFiles2     uintptr = 13
 	regPbufRing   uintptr = 22
 	unregPbufRing uintptr = 23
+	// pbufRingMmap is IOU_PBUF_RING_MMAP (6.4): the kernel allocates the
+	// buffer ring and the loop maps it, at offPbufRing | bgid << offPbufShift,
+	// so no user page is pinned against RLIMIT_MEMLOCK.
+	pbufRingMmap uint16  = 1
+	offPbufRing  uintptr = 0x80000000
+	offPbufShift uintptr = 16
 
 	// rsrcRegisterSparse is IORING_RSRC_REGISTER_SPARSE.
 	rsrcRegisterSparse uint32 = 1 << 0
