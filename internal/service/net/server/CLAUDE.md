@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-23T12:00:00Z -->
+<!-- updated: 2026-10-24T12:00:00Z -->
 # internal/service/net/server/
 
 ## Purpose
@@ -15,7 +15,7 @@ Public façade: `pkg/v1/net/server`.
 |---|---|
 | `server.go` | `Server`, `New`, `Group`, `State` |
 | `lifecycle.go` | `Start`, `Serve`, `Shutdown`, `Close`, the accept loop and its backoff (`acceptDelay`, `backOff`), the drain |
-| `stream_group.go` | `StreamGroup` — `Handle`, `HandleFunc`, `HandleHTTP`, `Use` |
+| `stream_group.go` | `StreamGroup` — `Handle`, `HandleFunc`, `HandleHTTP`, `Use`; `claimHandler`, the one-handler rule every declaration takes |
 | `listen.go` | listener construction; TLS/mTLS wrapping; family validation |
 | `conn.go` | the pooled `corenet.Conn` implementation, and the `hijacked` hand-over flag |
 | `pool.go` | per-connection recycling + the live-socket registry |
@@ -64,6 +64,17 @@ Public façade: `pkg/v1/net/server`.
   recorded in `declErr` and surfaced by `Start`. This is the trade that keeps
   wiring a server to five statements; it is only acceptable because `Start`
   reports every recorded error, and `TestServer_Start` pins that it does.
+- **A stream group declares one handler, once** (ADR 0186 §D1). `Handle`,
+  `HandleFunc` and `HandleHTTP` each claim the group through `claimHandler`; a
+  second claim, of any of them and in any order — a `nil` handler included —
+  keeps the first handler, records `HandlerAlreadySet` naming the group on the
+  group's own `declErr`, and `Start` returns it before binding anything. The
+  group records it, not the server, because a handler is declared on the group
+  after `Group` has released the server's lock. Replacing used to be the rule,
+  and `HandleHTTP` followed by `Handle` left the HTTP adapter installed beside
+  the new handler, so the group served neither cleanly; `HandleHTTP` now claims
+  before it builds its adapter. `HandleHTTP`'s body is `mountHTTP`'s so the
+  method stays inlinable. A `PacketGroup` keeps its replacing `Handle`.
 - **TLS is applied at the listener, not in the accept loop.** `tls.NewListener`
   defers the handshake to the connection's own goroutine, so a slow or hostile
   peer stalls only itself. Doing the handshake inline in `Accept` would let one

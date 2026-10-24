@@ -252,7 +252,170 @@ packages:
             name: CodeStaticMisconfigured
             value: "0x00_02_0B_22"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeLoopTLSUnsupported identifies a loop group given a TLS identity: the
+              loop engine speaks plaintext only, and the SDK owns no TLS stack it could
+              drive without a blocking net.Conn (ADR 0186 §D2).
+            name: CodeLoopTLSUnsupported
+            value: "0x00_02_0B_23"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeLoopOptionUnsupported identifies an option a group cannot honour on its
+              engine: Loop on a group not served by a loop handler, or, on a loop group,
+              Use or an option neither the engine nor the handler honours (ADR 0186 §D1).
+            name: CodeLoopOptionUnsupported
+            value: "0x00_02_0B_24"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeLoopBackendUnavailable identifies an explicit loop backend the running
+              kernel's probe refused, on a platform that has the mechanic (ADR 0186 §D5).
+            name: CodeLoopBackendUnavailable
+            value: "0x00_02_0B_25"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeLoopNoDescriptors identifies a loop group refused at Start because the
+              effective RLIMIT_NOFILE is zero or unreadable, which leaves no descriptor
+              for a ring's table or a connection (ADR 0186 §D5).
+            name: CodeLoopNoDescriptors
+            value: "0x00_02_0B_26"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeLoopStaleRef identifies an operation on a connection reference whose
+              generation has ended: the connection closed, and its slot may already
+              serve another one.
+            name: CodeLoopStaleRef
+            value: "0x00_02_0B_27"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeLoopOutputFull identifies a write refused because the connection's
+              output, or the loop's global output budget, is at its ceiling.
+            name: CodeLoopOutputFull
+            value: "0x00_02_0B_28"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeLoopSpillFull identifies an unconsumed tail that does not fit the
+              connection's spill, or the loop's global spill budget.
+            name: CodeLoopSpillFull
+            value: "0x00_02_0B_29"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeLoopPostQueueFull identifies a Post refused because the loop's
+              preallocated queue of posted operations is full.
+            name: CodeLoopPostQueueFull
+            value: "0x00_02_0B_2A"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeLoopWrongThread identifies a loop operation called from a thread other
+              than the loop's own, detected under the loopdebug build tag.
+            name: CodeLoopWrongThread
+            value: "0x00_02_0B_2B"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeHandlerAlreadySet identifies a second handler declaration on one stream
+              group — Handle, HandleFunc, HandleHTTP or HandleLoop, in any order — which
+              does not replace the first (ADR 0186 §D1).
+            name: CodeHandlerAlreadySet
+            value: "0x00_02_0B_2C"
+        type: errs.Code
     constants:
+      - blockDoc: The group options a loop group judges at Start, by kind.
+        doc: OptionNone names no option; it is the zero value.
+        name: OptionNone
+        type: OptionKind
+        value: "0"
+      - blockDoc: The group options a loop group judges at Start, by kind.
+        doc: OptionTLS is TLS. A loop group always refuses it, with LoopTLSUnsupported.
+        name: OptionTLS
+        type: OptionKind
+        value: "1"
+      - blockDoc: The group options a loop group judges at Start, by kind.
+        doc: |-
+          OptionMiddleware is Use. A loop group always refuses it: there is no
+          ConnHandler to decorate.
+        name: OptionMiddleware
+        type: OptionKind
+        value: "2"
+      - blockDoc: The group options a loop group judges at Start, by kind.
+        doc: OptionReadTimeout is ReadTimeout.
+        name: OptionReadTimeout
+        type: OptionKind
+        value: "3"
+      - blockDoc: The group options a loop group judges at Start, by kind.
+        doc: OptionWriteTimeout is WriteTimeout.
+        name: OptionWriteTimeout
+        type: OptionKind
+        value: "4"
+      - blockDoc: The group options a loop group judges at Start, by kind.
+        doc: OptionIdleTimeout is IdleTimeout. The loop engine honours it.
+        name: OptionIdleTimeout
+        type: OptionKind
+        value: "5"
+      - blockDoc: The group options a loop group judges at Start, by kind.
+        doc: |-
+          OptionReadHeaderTimeout is ReadHeaderTimeout, which only a protocol adapter
+          can honour.
+        name: OptionReadHeaderTimeout
+        type: OptionKind
+        value: "6"
+      - blockDoc: The group options a loop group judges at Start, by kind.
+        doc: |-
+          OptionMaxHeaderBytes is MaxHeaderBytes, which only a protocol adapter can
+          honour.
+        name: OptionMaxHeaderBytes
+        type: OptionKind
+        value: "7"
+      - blockDoc: The group options a loop group judges at Start, by kind.
+        doc: OptionHandshakeTimeout is HandshakeTimeout.
+        name: OptionHandshakeTimeout
+        type: OptionKind
+        value: "8"
+      - blockDoc: The group options a loop group judges at Start, by kind.
+        doc: OptionReadBufferSize is ReadBufferSize.
+        name: OptionReadBufferSize
+        type: OptionKind
+        value: "9"
+      - blockDoc: The group options a loop group judges at Start, by kind.
+        doc: OptionMaxPacketSize is MaxPacketSize.
+        name: OptionMaxPacketSize
+        type: OptionKind
+        value: "10"
+      - blockDoc: The group options a loop group judges at Start, by kind.
+        doc: OptionBatchSize is BatchSize.
+        name: OptionBatchSize
+        type: OptionKind
+        value: "11"
+      - blockDoc: The group options a loop group judges at Start, by kind.
+        doc: OptionShards is Shards.
+        name: OptionShards
+        type: OptionKind
+        value: "12"
+      - blockDoc: The group options a loop group judges at Start, by kind.
+        doc: |-
+          OptionMaxConns is MaxConns. The loop engine honours it, refusing with
+          ConnLimitReached.
+        name: OptionMaxConns
+        type: OptionKind
+        value: "13"
+      - blockDoc: The group options a loop group judges at Start, by kind.
+        doc: OptionAdopt is Adopt. The loop engine honours it.
+        name: OptionAdopt
+        type: OptionKind
+        value: "14"
+      - blockDoc: The group options a loop group judges at Start, by kind.
+        doc: OptionPreHandshake is PreHandshake.
+        name: OptionPreHandshake
+        type: OptionKind
+        value: "15"
       - blockDoc: The lifecycle phases, in the order a server passes through them.
         doc: PhaseNew is a constructed server that has not bound anything yet.
         name: PhaseNew
@@ -591,6 +754,10 @@ packages:
 
       Package net — the per-group resource ceilings.
 
+      Package net — the loop engine's contract: the connection reference, the
+      posted operation, the option kinds a loop group judges, and the ports a loop
+      and its handler implement (ADR 0186 §D4).
+
       Package net — TLS material parsing helpers shared by NewIdentity.
 
       Package net — the generic handler decorator.
@@ -761,6 +928,185 @@ packages:
             out:
               - type: error
         name: ConnHandler
+      - doc: |-
+          LoopHandler is the port a consumer implements to be served by a loop group
+          (ADR 0186 §D4).
+
+          One thread calls it: every callback of one loop runs on that loop's thread,
+          one at a time, so a handler needs no lock for state it keeps per loop. It
+          MUST NOT block: a blocking callback stalls every connection of its loop. A
+          callback receives the LoopIO of the loop that calls it and the reference of
+          the connection concerned; neither is valid past the loop's life, and a
+          reference past its connection's OnClose is stale.
+
+          IFACE-PLUGIN: the engines live in internal/service/net/loop and
+          internal/service/net/server; this port is what a consumer writes.
+        methods:
+          - doc: |-
+              OnOpen is called once per accepted connection, before any OnData for it.
+              Pressure(ref) already answers for this connection.
+            in:
+              - name: io
+                type: LoopIO
+              - name: ref
+                type: LoopConnRef
+            name: OnOpen
+          - doc: |-
+              OnData hands the handler the bytes received on ref and returns how many of
+              them it consumed, from 0 to len(buf). buf stays valid until the next
+              OnBatchEnd returns, never later, and the handler must not write to it.
+              The unconsumed tail is kept in the connection's spill and handed back
+              first, followed by the next bytes, on the next OnData; a tail past the
+              spill ceiling closes the connection with LoopSpillFull. A value outside
+              0 to len(buf) is treated as len(buf).
+            in:
+              - name: io
+                type: LoopIO
+              - name: ref
+                type: LoopConnRef
+              - name: buf
+                type: "[]byte"
+            name: OnData
+            out:
+              - type: int
+          - doc: |-
+              OnTimeout is called when the deadline set by SetDeadline on ref expires.
+              The connection stays open: closing it is the handler's choice.
+            in:
+              - name: io
+                type: LoopIO
+              - name: ref
+                type: LoopConnRef
+            name: OnTimeout
+          - doc: |-
+              OnWritable is called when ref's pending output falls below the loop's
+              low-water mark after a Write was refused with LoopOutputFull or left output
+              pending past the mark, so a producer that paused can resume.
+            in:
+              - name: io
+                type: LoopIO
+              - name: ref
+                type: LoopConnRef
+            name: OnWritable
+          - doc: |-
+              OnBatchEnd is called once per loop iteration, after the OnData calls of
+              every ring of the loop, and before any buffer handed to them returns to the
+              kernel. It is where a handler flushes work it batched — one database
+              commit for every request of the batch, say — before writing the answers.
+            in:
+              - name: io
+                type: LoopIO
+            name: OnBatchEnd
+          - doc: |-
+              OnClose is called once per connection, last. err is nil when the peer
+              closed cleanly or the handler called Close, and otherwise names why the
+              loop closed it — LoopSpillFull, an idle timeout, the drain, a socket
+              error. ref is stale once OnClose returns.
+            in:
+              - name: io
+                type: LoopIO
+              - name: ref
+                type: LoopConnRef
+              - name: err
+                type: error
+            name: OnClose
+        name: LoopHandler
+      - doc: |-
+          LoopIO is what a loop offers its handler: the operations on its connections
+          (ADR 0186 §D4). Each loop implements it with a pointer of its own, handed to
+          every callback.
+
+          Write, Close and SetDeadline belong to the loop's thread: they are called from
+          a callback, never from another goroutine, which is what lets them take no
+          lock. Under the loopdebug build tag a call from another thread is refused with
+          LoopWrongThread. Post is the one operation another goroutine may call. Every
+          error is a preallocated sentinel; none of the calls allocates when p belongs
+          to the caller's heap or mapping.
+
+          IFACE-PLUGIN: the concrete loops stay unexported in
+          internal/service/net/loop and internal/service/net/server.
+        methods:
+          - doc: |-
+              Write copies p into ref's output and returns. Writes on one reference leave
+              in the order they were made, and p may be reused once Write returns. It is
+              refused with LoopOutputFull, copying nothing, when p would pass the
+              connection's output ceiling or the loop's global output budget, and with
+              LoopStaleRef when ref's connection has closed.
+            in:
+              - name: ref
+                type: LoopConnRef
+              - name: p
+                type: "[]byte"
+            name: Write
+            out:
+              - type: error
+          - doc: |-
+              Close closes ref's connection once the output already written has left,
+              and calls OnClose. A second Close, or a Close on a stale reference, returns
+              LoopStaleRef and does nothing.
+            in:
+              - name: ref
+                type: LoopConnRef
+            name: Close
+            out:
+              - type: error
+          - doc: |-
+              SetDeadline arms ref's timer to fire OnTimeout after d, on the loop's
+              coarse timer wheel: it fires no earlier than d and at most one wheel tick
+              late. A d of zero or less disarms it. Arming again replaces the previous
+              deadline.
+            in:
+              - name: ref
+                type: LoopConnRef
+              - name: d
+                type: time.Duration
+            name: SetDeadline
+            out:
+              - type: error
+          - doc: |-
+              Pressure reports whether ref's connection was accepted, or has since come,
+              under the loop's soft pressure: the group serves more connections than its
+              soft bound. It is a primitive; what a protocol makes of it — HTTP/1.1
+              answers Connection: close — is the protocol adapter's. A stale reference
+              reports false.
+            in:
+              - name: ref
+                type: LoopConnRef
+            name: Pressure
+            out:
+              - type: bool
+          - doc: |-
+              Post queues op to run once on the loop's thread with arg, and wakes the
+              loop. It is the one operation any goroutine may call. The queue is
+              preallocated and holds no closure: op is a plain function and arg an
+              integer the caller gives meaning to. Each posted operation runs exactly
+              once, in the order posted; a full queue refuses with LoopPostQueueFull, and
+              a loop that has stopped with ServerClosed.
+            in:
+              - name: op
+                type: PostFunc
+              - name: arg
+                type: uintptr
+            name: Post
+            out:
+              - type: error
+        name: LoopIO
+      - doc: |-
+          LoopOptionHonourer is the optional capability of a LoopHandler that honours
+          group options the loop engine does not: a protocol adapter that applies a
+          header deadline, say. At Start, server refuses with LoopOptionUnsupported
+          every option set on a loop group that neither the engine nor the handler
+          honours (ADR 0186 §D1). A handler without it honours nothing of its own.
+        methods:
+          - doc: |-
+              Honours reports whether the handler applies the option of kind k itself.
+            in:
+              - name: k
+                type: OptionKind
+            name: Honours
+            out:
+              - type: bool
+        name: LoopOptionHonourer
       - doc: |-
           Packet is one received datagram.
 
@@ -1151,6 +1497,110 @@ packages:
             private: "core/net: a nil file tree, a header value with a control character, or an unknown Referrer-Policy token"
             public: The static file handler configuration is not valid
             reason: STATIC_MISCONFIGURED
+          - code: CodeLoopTLSUnsupported
+            doc: |-
+              LoopTLSUnsupported is returned by Start for a loop group given TLS. The loop
+              engine is plaintext only (ADR 0186 §D2); a group that needs TLS is served by
+              Handle or HandleHTTP on the default engine.
+            exit: CONFIG
+            name: LoopTLSUnsupported
+            private: "core/net: a loop group was given a TLS identity; the loop engine is plaintext only"
+            public: The loop engine does not serve TLS
+            reason: LOOP_TLS_UNSUPPORTED
+          - code: CodeLoopOptionUnsupported
+            doc: |-
+              LoopOptionUnsupported is returned by Start for an option a group cannot honour
+              on its engine: Loop on a group served by Handle, HandleFunc or HandleHTTP, or
+              on one with no handler; Use on a loop group; or an option neither the loop
+              engine nor its handler honours. The "option" field names it. It is judged at
+              Start, once the handler is known, whatever order the declarations came in.
+            exit: CONFIG
+            name: LoopOptionUnsupported
+            private: "core/net: an option the group's engine or its loop handler cannot honour"
+            public: The group option is not supported by its engine
+            reason: LOOP_OPTION_UNSUPPORTED
+          - code: CodeLoopBackendUnavailable
+            doc: |-
+              LoopBackendUnavailable is returned by Start for an explicit loop backend the
+              running kernel's probe refused. The "stage" and "reason" fields name the probe
+              step that failed. A GOOS that has no such mechanic at all returns the shared
+              UnsupportedPlatform instead (ADR 0018 §(a)).
+            exit: UNAVAILABLE
+            name: LoopBackendUnavailable
+            private: "core/net: the kernel probe refused the requested loop backend"
+            public: The requested loop backend is not available on this kernel
+            reason: LOOP_BACKEND_UNAVAILABLE
+          - code: CodeLoopNoDescriptors
+            doc: |-
+              LoopNoDescriptors is returned by Start for a loop group when the effective
+              RLIMIT_NOFILE soft limit is zero or cannot be read: no ring table and no
+              connection could hold a descriptor. It is checked before the ring count is
+              derived, so it is never a division by zero.
+            exit: OSERR
+            name: LoopNoDescriptors
+            private: "core/net: RLIMIT_NOFILE is zero or unreadable; the loop has no descriptor to use"
+            public: The process has no file descriptor available for the loop
+            reason: LOOP_NO_DESCRIPTORS
+          - code: CodeLoopStaleRef
+            doc: |-
+              LoopStaleRef is returned by a loop operation on a reference whose connection
+              has closed. The operation does nothing: the slot may already name another
+              connection, and the generation is what tells the two apart.
+            exit: SOFTWARE
+            name: LoopStaleRef
+            private: "core/net: the connection reference's generation has ended"
+            public: The connection is closed
+            reason: LOOP_STALE_REF
+          - code: CodeLoopOutputFull
+            doc: |-
+              LoopOutputFull is returned by Write when the bytes would pass the connection's
+              output ceiling or the loop's global output budget. Nothing is copied; the
+              caller waits for OnWritable or closes.
+            exit: TEMPFAIL
+            name: LoopOutputFull
+            private: "core/net: the connection's output or the loop's output budget is at its ceiling"
+            public: The connection cannot take more output now
+            reason: LOOP_OUTPUT_FULL
+          - code: CodeLoopSpillFull
+            doc: |-
+              LoopSpillFull is the error OnClose receives for a connection whose unconsumed
+              input passed its spill ceiling or the loop's global spill budget. The loop
+              closes it rather than read further.
+            exit: TEMPFAIL
+            name: LoopSpillFull
+            private: "core/net: the unconsumed input passed the spill ceiling"
+            public: The connection sent more than it may hold unread
+            reason: LOOP_SPILL_FULL
+          - code: CodeLoopPostQueueFull
+            doc: |-
+              LoopPostQueueFull is returned by Post when the loop's preallocated queue is
+              full. The operation is not queued and will not run.
+            exit: TEMPFAIL
+            name: LoopPostQueueFull
+            private: "core/net: the loop's post queue is full"
+            public: The loop cannot take more posted work now
+            reason: LOOP_POST_QUEUE_FULL
+          - code: CodeLoopWrongThread
+            doc: |-
+              LoopWrongThread is returned under the loopdebug build tag by Write, Close or
+              SetDeadline called from a thread other than the loop's own. Without the tag
+              the check is not compiled; the call is a contract violation either way.
+            exit: SOFTWARE
+            name: LoopWrongThread
+            private: "core/net: a loop-thread operation was called from another thread"
+            public: The operation was called outside its loop
+            reason: LOOP_WRONG_THREAD
+          - code: CodeHandlerAlreadySet
+            doc: |-
+              HandlerAlreadySet is returned by Start for a stream group whose handler was
+              declared twice — by Handle, HandleFunc, HandleHTTP or HandleLoop, in any
+              order. The second declaration does not replace the first; the "group" field
+              names the group.
+            exit: USAGE
+            name: HandlerAlreadySet
+            private: "core/net: a second handler declaration on one stream group"
+            public: The listener group already has a handler
+            reason: HANDLER_ALREADY_SET
     types:
       - doc: |-
           AddressValue names one socket to bind. It is a value type so a group's listen
@@ -1578,6 +2028,31 @@ packages:
               tag: json:"batch_size"
               type: int
       - doc: |-
+          LoopConnRef names one connection of a loop: the ring it lives on, its slot
+          in that ring's table and the generation of that slot. It is a comparable value
+          with no behaviour, so a handler can key a map with it and hold it without
+          holding anything of the engine.
+
+          A slot is reused only once every operation of its previous generation has
+          completed, and the generation then moves on, so an operation on a reference
+          whose connection closed does nothing and returns LoopStaleRef — it can never
+          reach the connection that took the slot since. The zero value names no
+          connection.
+        name: LoopConnRef
+        struct:
+          fields:
+            - doc: Ring is the ring, inside its loop, that holds the connection.
+              name: Ring
+              type: uint32
+            - doc: Slot is the connection's index in the ring's table.
+              name: Slot
+              type: uint32
+            - doc: |-
+                Gen is the slot's generation. It is never zero for a live connection, so
+                the zero LoopConnRef is stale on every loop.
+              name: Gen
+              type: uint32
+      - doc: |-
           Middleware decorates a handler with another of the same type.
 
           It is generic over the handler type so stream and datagram handlers share one
@@ -1588,6 +2063,18 @@ packages:
           - constraint: any
             name: H
         underlying: func(next H) H
+      - doc: |-
+          OptionKind names a group option, for the one question a loop group asks of
+          its options at Start: is this one honoured (LoopOptionHonourer)? It names
+          options, not their values.
+        methods:
+          - doc: String renders the option's name, as its constructor spells it.
+            name: String
+            out:
+              - type: string
+            recv: value
+        name: OptionKind
+        underlying: uint8
       - doc: PacketHandlerFunc adapts a plain function to PacketHandler.
         methods:
           - doc: ServePacket implements PacketHandler by calling f.
@@ -1626,6 +2113,14 @@ packages:
             recv: value
         name: PolicyFunc
         underlying: func(req RequestValue) error
+      - doc: |-
+          PostFunc is an operation posted to a loop with LoopIO.Post. It runs once, on
+          the loop's thread, with the loop's LoopIO and the integer it was posted with.
+          It is a plain function rather than a closure so the queue holds no pointer the
+          poster built: a top-level function and an index into the caller's own table
+          post without allocating.
+        name: PostFunc
+        underlying: func(io LoopIO, arg uintptr)
       - doc: |-
           ResponseValue is a fully-read outbound response.
 
@@ -2614,7 +3109,11 @@ packages:
             out:
               - type: string
             recv: pointer
-          - doc: Handle sets the group's handler, replacing any previous one.
+          - doc: |-
+              Handle sets the group's handler. A group declares one handler, once: a
+              second declaration on the same group — Handle, HandleFunc or HandleHTTP, in
+              any order — does not replace the first, and Start returns HandlerAlreadySet
+              naming the group (ADR 0186 §D1).
             in:
               - name: h
                 type: corenet.ConnHandler

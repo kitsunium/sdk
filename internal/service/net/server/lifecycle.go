@@ -35,6 +35,13 @@ func (s *Server) Start(ctx context.Context) error {
 		//: surface the first recorded declaration mistake.
 		return s.declErr
 	}
+	//: a group's own declaration mistake — a second handler — is reported
+	//: before anything is bound, in declaration order.
+	if err := groupDeclErr(s.groups); err != nil {
+		s.mu.Unlock()
+		//: surface the first group's recorded mistake.
+		return err
+	}
 	s.phase.Store(uint32(corenet.PhaseStarting))
 	groups := slices.Clone(s.groups)
 	packetGroups := slices.Clone(s.packetGroups)
@@ -58,6 +65,21 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 	s.phase.Store(uint32(corenet.PhaseServing))
 	//: every listener is bound and accepting.
+	return nil
+}
+
+// groupDeclErr returns the first declaration error recorded on a group, in
+// declaration order, or nil when every group was declared cleanly.
+func groupDeclErr(groups []*StreamGroup) error {
+	//: declaration order, so the error reported is reproducible.
+	for _, group := range groups {
+		//: the group's first mistake explains the rest of it.
+		if group.declErr != nil {
+			//: the first one found is the one reported.
+			return group.declErr
+		}
+	}
+	//: no group recorded a mistake.
 	return nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // StreamGroup is a set of listeners sharing one handler, one middleware chain
@@ -40,6 +41,14 @@ type StreamGroup struct {
 	// admission counts connections against their address before their
 	// handshake; nil when the group has none (ADR 0174).
 	admission *Admission
+	// declErr is the group's first declaration error — a second handler,
+	// HandlerAlreadySet — surfaced by Start like the server's own (ADR 0186
+	// §D1). The group records it because a handler is declared on the group,
+	// after Group has returned and released the server's lock.
+	declErr error
+	// declared records that a handler was declared, even a nil one, so a
+	// second declaration is caught whatever the first one passed.
+	declared bool
 }
 
 // Name returns the group's name.
@@ -48,11 +57,39 @@ func (g *StreamGroup) Name() string {
 	return g.name
 }
 
-// Handle sets the group's handler, replacing any previous one.
+// Handle sets the group's handler. A group declares one handler, once: a
+// second declaration on the same group — Handle, HandleFunc or HandleHTTP, in
+// any order — does not replace the first, and Start returns HandlerAlreadySet
+// naming the group (ADR 0186 §D1).
 func (g *StreamGroup) Handle(h corenet.ConnHandler) *StreamGroup {
+	//: a second declaration keeps the first handler and is reported by Start.
+	if !g.claimHandler() {
+		//: returned for chaining; the recorded error is what Start reports.
+		return g
+	}
 	g.handler = h
 	//: returned for chaining, so declaring a group stays a single expression.
 	return g
+}
+
+// claimHandler reports whether the group may take its handler now, and
+// records HandlerAlreadySet when it already has one. It is the one check every
+// declaration takes, so Handle, HandleFunc and HandleHTTP cannot disagree on
+// what a second declaration means.
+func (g *StreamGroup) claimHandler() bool {
+	//: the first declaration claims the group.
+	if !g.declared {
+		g.declared = true
+		//: nothing declared yet.
+		return true
+	}
+	//: the first error is the one that explains the others.
+	if g.declErr == nil {
+		g.declErr = errs.Wrap(corenet.HandlerAlreadySet, errs.WrapParams{},
+			errs.String("group", g.name))
+	}
+	//: the group keeps the handler it was given first.
+	return false
 }
 
 // HandleFunc sets the group's handler from a plain function. It exists because
@@ -70,10 +107,26 @@ func (g *StreamGroup) HandleFunc(f corenet.ConnHandlerFunc) *StreamGroup {
 // owning request smuggling defences, HTTP/2 flow control and HPACK to lose,
 // not gain, throughput.
 func (g *StreamGroup) HandleHTTP(h http.Handler) *StreamGroup {
+	//: the body lives in mountHTTP so this method stays within the inliner's
+	//: budget at every call site.
+	return g.mountHTTP(h)
+}
+
+// mountHTTP installs the net/http adapter as the group's handler, unless the
+// group already has one.
+func (g *StreamGroup) mountHTTP(h http.Handler) *StreamGroup {
+	//: checked before the adapter is installed, so a second declaration never
+	//: leaves an HTTP adapter beside the first handler.
+	if !g.claimHandler() {
+		//: returned for chaining; the recorded error is what Start reports.
+		return g
+	}
 	adapter := newHTTPAdapter(h)
 	g.httpAdapter = adapter
-	//: the adapter IS a ConnHandler, so the rest of the engine is unchanged.
-	return g.Handle(adapter)
+	g.handler = adapter
+	//: returned for chaining; the adapter IS a ConnHandler, so the rest of the
+	//: engine is unchanged.
+	return g
 }
 
 // tracksCloses reports whether the group's sockets must report their own

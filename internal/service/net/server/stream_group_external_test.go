@@ -11,6 +11,7 @@ import (
 	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/net/server"
 )
 
@@ -84,50 +85,72 @@ func TestStreamGroup_Name(t *testing.T) {
 	}
 }
 
-// TestStreamGroup_Handle pins that the LAST handler wins and that the call
-// chains.
+// TestStreamGroup_Handle pins that a group declares one handler, once, and
+// that the call chains (ADR 0186 §D1).
 //
-// Replacing rather than appending is what makes a group's handler unambiguous:
-// two handlers would need a rule for which one runs, and any such rule is a
-// worse answer than "the one you set last".
+// A second declaration does not replace the first: Start refuses it with
+// HandlerAlreadySet naming the group, and binds nothing. Replacing used to be
+// the rule, and HandleHTTP followed by Handle left the HTTP adapter installed
+// beside the new handler, so the group served neither cleanly.
 func TestStreamGroup_Handle(t *testing.T) {
 	t.Parallel()
+	type declare func(g *server.StreamGroup) *server.StreamGroup
+	handle := func(g *server.StreamGroup) *server.StreamGroup { return g.Handle(echoConnHandler{}) }
+	handleFunc := func(g *server.StreamGroup) *server.StreamGroup { return g.HandleFunc(echoHandler) }
+	handleHTTP := func(g *server.StreamGroup) *server.StreamGroup { return g.HandleHTTP(http.NotFoundHandler()) }
+	handleNil := func(g *server.StreamGroup) *server.StreamGroup { return g.Handle(nil) }
 	type tc struct {
 		// name describes the case.
 		name string
-		// replacements is how many times the handler is replaced before the
-		// echo handler is installed.
-		replacements int
+		// declarations are applied to the group in order.
+		declarations []declare
+		// wantRefused is whether Start must refuse with HandlerAlreadySet.
+		wantRefused bool
 	}
 	tests := []tc{
-		{name: "one handler"},
-		{name: "a replaced handler", replacements: 1},
-		{name: "several replacements", replacements: 3},
+		{name: "one handler", declarations: []declare{handle}},
+		{name: "Handle twice", declarations: []declare{handle, handle}, wantRefused: true},
+		{name: "several declarations", declarations: []declare{handle, handle, handle, handle}, wantRefused: true},
+		{name: "Handle then HandleFunc", declarations: []declare{handle, handleFunc}, wantRefused: true},
+		{name: "HandleFunc then Handle", declarations: []declare{handleFunc, handle}, wantRefused: true},
+		{name: "HandleHTTP then Handle", declarations: []declare{handleHTTP, handle}, wantRefused: true},
+		{name: "Handle then HandleHTTP", declarations: []declare{handle, handleHTTP}, wantRefused: true},
+		{name: "HandleHTTP twice", declarations: []declare{handleHTTP, handleHTTP}, wantRefused: true},
+		{name: "a nil handler then one", declarations: []declare{handleNil, handle}, wantRefused: true},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		srv := server.New()
 		t.Cleanup(func() { closeOrFail(t, srv) })
 		group := srv.Group("echo", server.Listen("tcp", "127.0.0.1:0"))
-		for range c.replacements {
-			group.Handle(corenet.ConnHandlerFunc(func(context.Context, corenet.Conn) error {
-				return nil
-			}))
+		for _, d := range c.declarations {
+			//: returned for chaining, so declaring a group stays one expression,
+			//: a refused declaration included.
+			if chained := d(group); chained != group {
+				t.Fatal("the declaration did not return the group for chaining")
+			}
 		}
-
-		chained := group.Handle(echoConnHandler{})
-
-		//: returned for chaining, so declaring a group stays one expression.
-		if chained != group {
-			t.Fatal("Handle did not return the group for chaining")
+		err := srv.Start(t.Context())
+		if c.wantRefused {
+			if !errs.HasCode(err, corenet.CodeHandlerAlreadySet) {
+				t.Fatalf("Start = %v, want HandlerAlreadySet", err)
+			}
+			if !slices.ContainsFunc(errs.FieldsOf(err), func(f errs.FieldValue) bool {
+				return f.Key() == "group" && f.StringValue() == "echo"
+			}) {
+				t.Fatalf("HandlerAlreadySet fields = %v, want group=echo", errs.FieldsOf(err))
+			}
+			if n := len(srv.State().Listeners); n != 0 {
+				t.Fatalf("a refused Start bound %d listeners, want none", n)
+			}
+			return
 		}
-		if err := srv.Start(t.Context()); err != nil {
+		if err != nil {
 			t.Fatalf("start: %v", err)
 		}
-		//: the last handler is the one that serves.
 		addr := srv.State().Listeners[0].Address
 		if got := roundTrip(t, addr, "hello"); got != "hello\n" {
-			t.Fatalf("echo = %q, want %q — an earlier handler is still installed", got, "hello\n")
+			t.Fatalf("echo = %q, want %q", got, "hello\n")
 		}
 	}
 	for _, c := range tests {

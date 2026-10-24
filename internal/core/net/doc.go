@@ -28,6 +28,10 @@
 //
 // Package net — the per-group resource ceilings.
 //
+// Package net — the loop engine's contract: the connection reference, the
+// posted operation, the option kinds a loop group judges, and the ports a loop
+// and its handler implement (ADR 0186 §D4).
+//
 // Package net — TLS material parsing helpers shared by NewIdentity.
 //
 // Package net — the generic handler decorator.

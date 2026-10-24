@@ -561,7 +561,7 @@ type Group struct{}
 func (*Group) Handle(h corenet.ConnHandler) *StreamGroup
 ```
 
-Handle sets the group's handler, replacing any previous one.
+Handle sets the group's handler. A group declares one handler, once: a second declaration on the same group — Handle, HandleFunc or HandleHTTP, in any order — does not replace the first, and Start returns HandlerAlreadySet naming the group (ADR 0186 §D1).
 
 <a name="Group.HandleFunc"></a>
 ### func \(Group\) [HandleFunc](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/server/stream_group.go>)
