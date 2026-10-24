@@ -484,6 +484,10 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   to the limit it announced, and once the state outgrew it its log reached
   its quota and the alarm refused every write of the cluster (#600,
   `guardSpace`, `TestALearnerTheStateOutgrewDoesNotRaiseTheClusterNoSpace`).
+  Nor a node the configuration it holds does not name: a joiner offered no
+  snapshot hears its leader and holds none, and its alarm refused every
+  write of the cluster (#619,
+  `TestAJoiningNodeOnAShortDiskDoesNotRaiseTheClusterNoSpace`).
 - Write a caller's writer on the apply goroutine: an abandoned
   `SaveSnapshot` into a writer that stopped reading froze the node (#601,
   `copySaved`, `TestASaveSnapshotWriterThatStopsReadingDoesNotFreezeApply`).
