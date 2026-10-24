@@ -533,6 +533,46 @@ codes:
     const: CodeStaticMisconfigured
     hex: "0x00_02_0B_22"
     package: internal/core/net
+  - code: "0.2.11.35"
+    const: CodeLoopTLSUnsupported
+    hex: "0x00_02_0B_23"
+    package: internal/core/net
+  - code: "0.2.11.36"
+    const: CodeLoopOptionUnsupported
+    hex: "0x00_02_0B_24"
+    package: internal/core/net
+  - code: "0.2.11.37"
+    const: CodeLoopBackendUnavailable
+    hex: "0x00_02_0B_25"
+    package: internal/core/net
+  - code: "0.2.11.38"
+    const: CodeLoopNoDescriptors
+    hex: "0x00_02_0B_26"
+    package: internal/core/net
+  - code: "0.2.11.39"
+    const: CodeLoopStaleRef
+    hex: "0x00_02_0B_27"
+    package: internal/core/net
+  - code: "0.2.11.40"
+    const: CodeLoopOutputFull
+    hex: "0x00_02_0B_28"
+    package: internal/core/net
+  - code: "0.2.11.41"
+    const: CodeLoopSpillFull
+    hex: "0x00_02_0B_29"
+    package: internal/core/net
+  - code: "0.2.11.42"
+    const: CodeLoopPostQueueFull
+    hex: "0x00_02_0B_2A"
+    package: internal/core/net
+  - code: "0.2.11.43"
+    const: CodeLoopWrongThread
+    hex: "0x00_02_0B_2B"
+    package: internal/core/net
+  - code: "0.2.11.44"
+    const: CodeHandlerAlreadySet
+    hex: "0x00_02_0B_2C"
+    package: internal/core/net
   - code: "0.2.12.1"
     const: CodeInvalidEntry
     hex: "0x00_02_0C_01"

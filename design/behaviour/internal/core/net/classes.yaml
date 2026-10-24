@@ -26,6 +26,52 @@ constants:
         type: uint16
         value: tls.VersionTLS12 + 1
     name: defaultMinVersion
+  - doc: The group options a loop group judges at Start, by kind.
+    grouped: true
+    items:
+      - doc: OptionNone names no option; it is the zero value.
+        name: OptionNone
+        type: OptionKind
+        value: iota
+      - doc: OptionTLS is TLS. A loop group always refuses it, with LoopTLSUnsupported.
+        name: OptionTLS
+      - doc: |-
+          OptionMiddleware is Use. A loop group always refuses it: there is no
+          ConnHandler to decorate.
+        name: OptionMiddleware
+      - doc: OptionReadTimeout is ReadTimeout.
+        name: OptionReadTimeout
+      - doc: OptionWriteTimeout is WriteTimeout.
+        name: OptionWriteTimeout
+      - doc: OptionIdleTimeout is IdleTimeout. The loop engine honours it.
+        name: OptionIdleTimeout
+      - doc: |-
+          OptionReadHeaderTimeout is ReadHeaderTimeout, which only a protocol adapter
+          can honour.
+        name: OptionReadHeaderTimeout
+      - doc: |-
+          OptionMaxHeaderBytes is MaxHeaderBytes, which only a protocol adapter can
+          honour.
+        name: OptionMaxHeaderBytes
+      - doc: OptionHandshakeTimeout is HandshakeTimeout.
+        name: OptionHandshakeTimeout
+      - doc: OptionReadBufferSize is ReadBufferSize.
+        name: OptionReadBufferSize
+      - doc: OptionMaxPacketSize is MaxPacketSize.
+        name: OptionMaxPacketSize
+      - doc: OptionBatchSize is BatchSize.
+        name: OptionBatchSize
+      - doc: OptionShards is Shards.
+        name: OptionShards
+      - doc: |-
+          OptionMaxConns is MaxConns. The loop engine honours it, refusing with
+          ConnLimitReached.
+        name: OptionMaxConns
+      - doc: OptionAdopt is Adopt. The loop engine honours it.
+        name: OptionAdopt
+      - doc: OptionPreHandshake is PreHandshake.
+        name: OptionPreHandshake
+    name: OptionNone
   - doc: |-
       minAcceptedVersion is the oldest TLS version the domain will serve or dial.
       TLS 1.0 and 1.1 are deprecated by RFC 8996 and are refused, not warned about.
@@ -349,6 +395,14 @@ files:
   - decls:
       - LimitsValue
     name: limits.go
+  - decls:
+      - LoopConnRef
+      - PostFunc
+      - OptionKind
+      - OptionNone
+      - optionNames
+      - OptionKind.String
+    name: loop.go
   - decls:
       - minAcceptedVersion
       - parseKeyPair
@@ -813,6 +867,30 @@ types:
         type: int
     kind: struct
     name: LimitsValue
+  - fields:
+      - doc: Ring is the ring, inside its loop, that holds the connection.
+        name: Ring
+        type: uint32
+      - doc: Slot is the connection's index in the ring's table.
+        name: Slot
+        type: uint32
+      - doc: |-
+          Gen is the slot's generation. It is never zero for a live connection, so
+          the zero LoopConnRef is stale on every loop.
+        name: Gen
+        type: uint32
+    kind: struct
+    name: LoopConnRef
+  - kind: named
+    name: PostFunc
+    underlying: func(io LoopIO, arg uintptr)
+  - kind: named
+    methods:
+      - name: String
+        recv: k OptionKind
+        results: string
+    name: OptionKind
+    underlying: uint8
   - kind: named
     name: Middleware
     typeParams: H any
@@ -1062,6 +1140,32 @@ vars:
         type: PacketHandler
         value: PacketHandlerFunc(nil)
     name: _
+  - doc: |-
+      optionNames holds each kind's constructor name, indexed by kind. Its length
+      is pinned to the constant block by Test_OptionKind_String, so the two cannot fall
+      out of step silently.
+    items:
+      - name: optionNames
+        value: |-
+          [...]string{
+          	OptionNone:              "none",
+          	OptionTLS:               "TLS",
+          	OptionMiddleware:        "Use",
+          	OptionReadTimeout:       "ReadTimeout",
+          	OptionWriteTimeout:      "WriteTimeout",
+          	OptionIdleTimeout:       "IdleTimeout",
+          	OptionReadHeaderTimeout: "ReadHeaderTimeout",
+          	OptionMaxHeaderBytes:    "MaxHeaderBytes",
+          	OptionHandshakeTimeout:  "HandshakeTimeout",
+          	OptionReadBufferSize:    "ReadBufferSize",
+          	OptionMaxPacketSize:     "MaxPacketSize",
+          	OptionBatchSize:         "BatchSize",
+          	OptionShards:            "Shards",
+          	OptionMaxConns:          "MaxConns",
+          	OptionAdopt:             "Adopt",
+          	OptionPreHandshake:      "PreHandshake",
+          }
+    name: optionNames
   - doc: |-
       PolicyFunc must satisfy Policy: the adapter is useless if it drifts from the
       port it exists to adapt.
