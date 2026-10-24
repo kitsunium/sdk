@@ -6241,6 +6241,8 @@ sequences:
         kind: internal
       - id: snapshotCorrupt
         kind: internal
+      - id: n.markRestoring
+        kind: internal
       - id: n.stillFresh
         kind: internal
       - id: sink.Commit
@@ -6250,8 +6252,6 @@ sequences:
       - id: n.HardClose
         kind: internal
       - id: n.stoppedErr
-        kind: internal
-      - id: n.markRestoring
         kind: internal
       - id: n.aq.push
         kind: internal
@@ -6288,6 +6288,10 @@ sequences:
             - return: snapshotCorrupt("stream ended early")
               to: snapshotCorrupt
           when: err != nil || k != want
+      - eval: n.markRestoring(snapID, 1)
+        to: n.markRestoring
+      - defer: n.markRestoring(snapID, -1)
+        to: n.markRestoring
       - opt:
           do:
             - return: err
@@ -6316,10 +6320,6 @@ sequences:
             - return: n.stoppedErr()
               to: n.stoppedErr
           when: n.crashAfterPublish.Load()
-      - eval: n.markRestoring(snapID, 1)
-        to: n.markRestoring
-      - defer: n.markRestoring(snapID, -1)
-        to: n.markRestoring
       - bind: done
         eval: make(chan error, 1)
       - eval: "n.aq.push(applyItem{restore: &restoreReq{meta: meta, done: done}})"
@@ -10832,17 +10832,18 @@ sequences:
         kind: actor
       - id: (*Node).streamDue
         kind: self
-      - id: pin.sent.Load
+      - id: n.r.Progress
         kind: value
     steps:
       - opt:
           do:
-            - return: "false"
-          when: pin.sent == nil
-      - bind: at
-        eval: pin.sent.Load()
-        to: pin.sent.Load
-      - return: at != 0 && now.Sub(time.Unix(0, at)) > n.pinBound(to)
+            - return: "true"
+          init:
+            bind: _, _, ok
+            eval: n.r.Progress(to)
+            to: n.r.Progress
+          when: "!ok"
+      - return: pin.moved != nil && now.Sub(time.Unix(0, pin.moved.Load())) > n.pinBound(to)
   - of: (*Node).logTight
     participants:
       - id: caller
@@ -11014,15 +11015,24 @@ sequences:
         kind: self
       - id: s.r.Read
         kind: value
+      - id: s.n.clk.Now().UnixNano
+        kind: value
+      - id: s.moved.Store
+        kind: value
       - id: s.sent.CompareAndSwap
         kind: value
     steps:
       - bind: k, err
         eval: s.r.Read(p)
         to: s.r.Read
+      - bind: now
+        eval: s.n.clk.Now().UnixNano()
+        to: s.n.clk.Now().UnixNano
+      - eval: s.moved.Store(now)
+        to: s.moved.Store
       - opt:
           do:
-            - eval: s.sent.CompareAndSwap(0, s.n.clk.Now().UnixNano())
+            - eval: s.sent.CompareAndSwap(0, now)
               to: s.sent.CompareAndSwap
           when: err == io.EOF
       - return: k, err
@@ -17577,6 +17587,8 @@ sequences:
         kind: value
       - id: n.cfg.Snapshots.Open
         kind: value
+      - id: moved.Store
+        kind: value
       - id: context
         kind: stdlib
       - id: n.wg.Add
@@ -17615,10 +17627,12 @@ sequences:
               to: n.r.SnapshotDone
             - return: ""
           when: err != nil
-      - bind: sent
-        eval: new(atomic.Int64)
+      - bind: sent, moved
+        eval: new(atomic.Int64), new(atomic.Int64)
+      - eval: moved.Store(n.clk.Now().UnixNano())
+        to: moved.Store
       - set: n.sending[to]
-        value: "sendPin{index: meta.Position.Index, sent: sent}"
+        value: "sendPin{index: meta.Position.Index, sent: sent, moved: moved}"
       - bind: offer
         eval: "coreconsensus.InstallOfferValue{Term: n.r.Status().Term, SnapshotID: meta.ID, Meta: meta}"
       - bind: ctx, cancel
@@ -17644,7 +17658,9 @@ sequences:
           			if off < 0 || off > meta.EncodedSize {
           				return nil, origin(coreconsensus.FrameInvalid, errs.Int64("offset", off))
           			}
-          			return io.NopCloser(&sentReader{r: io.NewSectionReader(h, off, meta.EncodedSize-off), n: n, sent: sent}), nil
+          			// The offer was accepted: the stream moved.
+          			moved.Store(n.clk.Now().UnixNano())
+          			return io.NopCloser(&sentReader{r: io.NewSectionReader(h, off, meta.EncodedSize-off), n: n, sent: sent, moved: moved}), nil
           		})
           		cancel()
           		if cerr := h.Close(); cerr != nil {
@@ -19851,12 +19867,12 @@ sequences:
         kind: internal
       - id: writeChunk
         kind: internal
-      - id: readChunk
-        kind: internal
-      - id: origin
+      - id: readAccept
         kind: internal
       - id: errs
         kind: package
+      - id: origin
+        kind: internal
       - id: streamFrom
         kind: internal
       - id: installResult
@@ -19901,13 +19917,12 @@ sequences:
             to: writeChunk
           when: err != nil
       - bind: acc, err
-        eval: readChunk(c, 64)
-        to: readChunk
+        eval: readAccept(c, t.cfg.JoinTimeout)
+        to: readAccept
       - opt:
           do:
-            - return: origin(coreconsensus.FrameInvalid, errs.String("what", "install accept"))
-              to: origin
-          when: err != nil || len(acc) != 13
+            - return: err
+          when: err != nil
       - bind: "off"
         eval: int64(binary.LittleEndian.Uint64(acc))
       - bind: code
@@ -19932,6 +19947,33 @@ sequences:
           when: err != nil
       - return: installResult(c)
         to: installResult
+  - of: readAccept
+    participants:
+      - id: caller
+        kind: actor
+      - id: readAccept
+        kind: self
+      - id: c.SetReadDeadline
+        kind: value
+      - id: readChunk
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, err
+          init:
+            bind: err
+            eval: c.SetReadDeadline(time.Now().Add(d))
+            to: c.SetReadDeadline
+          when: err != nil
+      - bind: acc, err
+        eval: readChunk(c, 64)
+        to: readChunk
+      - opt:
+          do:
+            - return: nil, origin(coreconsensus.FrameInvalid, errs.String("what", "install accept"))
+          when: err != nil || len(acc) != 13
+      - return: acc, c.SetReadDeadline(time.Time{})
   - of: streamFrom
     participants:
       - id: caller

@@ -1498,6 +1498,17 @@ is refused with `OVERLOADED`. Nothing is appended in either case.
     and under a quota of at most twice the reserve, which the configuration
     accepts, the band covered the whole quota: no pin ever held, and no
     peer behind the compacted log was ever installed.
+  - A transfer is cancelled once it has not moved for its peer's pin bound
+    — from its offer, through the accept and each read of the snapshot, to
+    the verdict after its last byte — and once its peer leaves the
+    configuration (amendment of 2026-10-24, #623), as well as when the
+    leader loses its leadership or its term (#547). Bounded from the last
+    byte only, a transfer whose offer was never answered held the leader's
+    compaction for as long as it led. The shipped transport reads the
+    accept under `JoinTimeout`, as a JOIN's answer. A receiver refuses
+    `OVERLOADED`, an existing code, an offer of a snapshot it is committing
+    or restoring: during the `Commit`, the offer's `Create` of the same id
+    waited for it on the event loop.
   - On the receiving side, an install from a higher term, or of a newer
     snapshot id, replaces a stale receive spool.
   - A simulator case makes a transfer last longer than the cut interval,

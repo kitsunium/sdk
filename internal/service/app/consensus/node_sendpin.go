@@ -10,8 +10,9 @@ import (
 
 // pinAfterStream bounds the pin of a streamed snapshot, in maximum
 // election timeouts: a peer that stopped after its install no longer holds
-// the log back once it passes. It bounds the wait for the install's
-// verdict as well, from the moment the transport read the last byte.
+// the log back once it passes. It bounds a stream that stopped moving as
+// well: the wait for the accept of its offer, and for the install's
+// verdict from the moment the transport read the last byte.
 const pinAfterStream int64 = 10
 
 // pinScaleMax caps the doublings of a peer's pin bound: at most 64 times
@@ -20,10 +21,12 @@ const pinAfterStream int64 = 10
 const pinScaleMax uint8 = 6
 
 // sendPin is a snapshot that pins compaction for a peer. While it streams,
-// until is zero, sent is when the transport read the snapshot's last byte,
-// in Unix nanoseconds of n.clk, 0 before, and lifted is set once the log
-// was tight during the stream: the pin holds compaction back no more, for
-// good, and the stream goes on (#622). Once streamed, the pin follows the
+// until is zero; moved is when the stream last moved, in Unix nanoseconds
+// of n.clk: its offer, then the accept, which opens the snapshot, then each
+// read of it by the transport; sent is when the transport read the
+// snapshot's last byte, 0 before; and lifted is set once the log was tight
+// during the stream: the pin holds compaction back no more, for good, and
+// the stream goes on (#622). Once streamed, the pin follows the
 // peer's match until the peer catches up or until passes: the leader only
 // probes the peer after an install, and a cut that landed in that window
 // compacted past the entries the peer needed next, so it was offered
@@ -32,6 +35,7 @@ type sendPin struct {
 	index  uint64
 	until  time.Time
 	sent   *atomic.Int64
+	moved  *atomic.Int64
 	lifted bool
 }
 
@@ -57,8 +61,9 @@ func (n *Node) pinAt(to coreconsensus.NodeID, pin sendPin, now time.Time) (uint6
 	return max(pin.index, match), true
 }
 
-// pinBound is how long a pin to peer to holds once its stream read the
-// last byte, and once its stream ended: pinAfterStream maximum election
+// pinBound is how long a stream's pin to peer to holds once its stream
+// stopped moving, and a streamed snapshot's pin once its stream ended:
+// pinAfterStream maximum election
 // timeouts, doubled each time a stream's pin to that peer fell due while
 // the peer still answered, up to pinScaleMax times. The bound alone could
 // not tell a receiver stuck in its install from one only slow to restore:
@@ -72,18 +77,20 @@ func (n *Node) pinBound(to coreconsensus.NodeID) time.Duration {
 }
 
 // streamDue reports whether the stream of pin to peer to is to be
-// cancelled at now: its verdict is overdue, pinBound after the transport
-// read its last byte. A receiver that is sent every byte and never answers
-// — a stuck disk under its spool's sync, a stuck Restore, an apply
-// goroutine held by an abandoned SaveSnapshot — pinned this node's
-// compaction for good, and its log grew to the NO_SPACE alarm (#602). It
-// runs on the loop.
+// cancelled at now: it has not moved for pinBound, or this node no longer
+// leads the peer, which left the configuration. A receiver that is sent
+// every byte and never answers — a stuck disk under its spool's sync, a
+// stuck Restore, an apply goroutine held by an abandoned SaveSnapshot —
+// pinned this node's compaction for good, and its log grew to the
+// NO_SPACE alarm (#602). So did one that never answered the offer, its
+// loop standing still in its judgment, since the bound ran from the last
+// byte only, and one removed while it was sent the snapshot, whose stream
+// only its end released (#623). It runs on the loop.
 func (n *Node) streamDue(to coreconsensus.NodeID, pin sendPin, now time.Time) bool {
-	if pin.sent == nil {
-		return false
+	if _, _, ok := n.r.Progress(to); !ok {
+		return true
 	}
-	at := pin.sent.Load()
-	return at != 0 && now.Sub(time.Unix(0, at)) > n.pinBound(to)
+	return pin.moved != nil && now.Sub(time.Unix(0, pin.moved.Load())) > n.pinBound(to)
 }
 
 // logTight reports whether the log is past both of two thresholds: within
@@ -199,19 +206,22 @@ func (n *Node) dropPin(to coreconsensus.NodeID) {
 	delete(n.sending, to)
 }
 
-// sentReader marks sent with n.clk's time once r reads to its end: the
-// transport read the snapshot's last byte.
+// sentReader marks moved with n.clk's time at each read of r, and sent
+// once r reads to its end: the transport read the snapshot's last byte.
 type sentReader struct {
-	r    io.Reader
-	n    *Node
-	sent *atomic.Int64
+	r     io.Reader
+	n     *Node
+	sent  *atomic.Int64
+	moved *atomic.Int64
 }
 
-// Read reads r and marks the end of the stream.
+// Read reads r, and marks the stream moving and its end.
 func (s *sentReader) Read(p []byte) (int, error) {
 	k, err := s.r.Read(p)
+	now := s.n.clk.Now().UnixNano()
+	s.moved.Store(now)
 	if err == io.EOF {
-		s.sent.CompareAndSwap(0, s.n.clk.Now().UnixNano())
+		s.sent.CompareAndSwap(0, now)
 	}
 	return k, err
 }
