@@ -84,8 +84,10 @@ alias(
 
 # The suite runs under the loopdebug build tag (the thread check compiled in)
 # and with the backends it must find compiled in, failing closed on Linux
-# (ADR 0186): a backend missing on a lane fails the target. io_uring joins the
-# list with its backend.
+# (ADR 0186): a backend missing on a lane fails the target. This lane asks for
+# epoll alone: Bazel runs on the hosted runner, whose kernel's io_uring this
+# repository does not control, and the required check must not hang on it.
+# e2e-cross's linux-init lanes, on kernels they pin, require iouring,epoll.
 go_test(
     name = "loop_test",
     srcs = [

@@ -55,6 +55,23 @@ type Config struct {
 	// tableCap, when positive, caps every ring's table below the descriptor
 	// limit: the conformance suite's tiny slot table.
 	tableCap int
+	// hooks are the conformance suite's other fault injections.
+	hooks loopHooks
+}
+
+// loopHooks are the conformance suite's fault injections; zero in
+// production.
+type loopHooks struct {
+	// bufs and bufSize override io_uring's provided buffers: a two-entry ring.
+	bufs, bufSize uint32
+	// fill writes 0xAA over a provided buffer before it returns to the ring.
+	fill bool
+	// shuffle returns a batch's buffers in a scrambled order.
+	shuffle bool
+	// failStage fails the io_uring probe at the named stage.
+	failStage string
+	// deferTaskrun sets IORING_SETUP_DEFER_TASKRUN instead of COOP_TASKRUN.
+	deferTaskrun bool
 }
 
 // Group is a running loop group: its loops, their threads and their rings.

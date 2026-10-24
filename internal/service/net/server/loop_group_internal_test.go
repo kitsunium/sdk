@@ -182,15 +182,24 @@ func TestLoopGroup_serves(t *testing.T) {
 			if len(st.Loops) != 1 {
 				t.Fatalf("State.Loops = %+v", st.Loops)
 			}
-			want := b
-			if b == corenet.LoopBackendAuto {
-				want = corenet.LoopBackendEpoll
-				if runtime.GOOS != "linux" {
-					want = corenet.LoopBackendPortable
+			ls := st.Loops[0]
+			switch {
+			case b != corenet.LoopBackendAuto:
+				if ls.Backend != b || ls.Degraded {
+					t.Fatalf("backend %v degraded %v, want %v", ls.Backend, ls.Degraded, b)
 				}
-			}
-			if st.Loops[0].Backend != want || st.Loops[0].Degraded {
-				t.Fatalf("backend %v degraded %v, want %v", st.Loops[0].Backend, st.Loops[0].Degraded, want)
+			case runtime.GOOS != "linux":
+				// Off Linux the portable backend is the best there is.
+				if ls.Backend != corenet.LoopBackendPortable || ls.Degraded {
+					t.Fatalf("auto = %v degraded %v", ls.Backend, ls.Degraded)
+				}
+			default:
+				// io_uring when the probe passes; epoll otherwise, saying why.
+				ok := ls.Backend == corenet.LoopBackendIOURing && !ls.Degraded ||
+					ls.Backend == corenet.LoopBackendEpoll && ls.Degraded && ls.DegradedReason != ""
+				if !ok {
+					t.Fatalf("auto = %v degraded %v %q", ls.Backend, ls.Degraded, ls.DegradedReason)
+				}
 			}
 		})
 	}
