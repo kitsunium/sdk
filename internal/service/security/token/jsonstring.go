@@ -2,6 +2,10 @@ package token
 
 import "github.com/kitsunium/sdk/internal/kernel/jsonenc"
 
+// firstPrintable is the lowest byte JSON may carry unescaped in a string;
+// everything below it needs the \u00XX form (RFC 8259 §7).
+const firstPrintable byte = 0x20
+
 // quoteScratch is the stack buffer a literal is built in: an issuer, an
 // audience or a key id fits, so the one allocation is the string returned.
 const quoteScratch int = 128
