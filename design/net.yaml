@@ -2951,6 +2951,8 @@ packages:
               type: io.Writer
       - doc: |-
           Group is a running loop group: its loops, their threads and their rings.
+          Start is the one way to get one, so a Group always runs, or ran and was
+          stopped by Shutdown or Close.
         methods:
           - doc: |-
               Shutdown stops accepting and waits for every connection to settle, its

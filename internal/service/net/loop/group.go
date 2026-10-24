@@ -75,6 +75,8 @@ type loopHooks struct {
 }
 
 // Group is a running loop group: its loops, their threads and their rings.
+// Start is the one way to get one, so a Group always runs, or ran and was
+// stopped by Shutdown or Close.
 type Group struct {
 	// name is the group's name.
 	name string

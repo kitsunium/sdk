@@ -35,7 +35,7 @@ machine is the proc family's (`ipc`, ADR 0148).
 | `sse/` | an HTTP response held open and written one `text/event-stream` frame at a time, on `net/http`'s own interfaces, and the frame's wire form (`AppendEvent`, `AppendComment` — ADR 0029, ADR 0043, ADR 0160) | `core/net` | none (core `0.2.11.*`) | `pkg/v1/net/sse` |
 | `websocket/` | RFC 6455 in the stdlib — the handshake, the frame codec, the close payload and the UTF-8 check included — every MUST-fail enforced, the origin checked by default (ADR 0047, ADR 0069, ADR 0160) | `core/net` | none (core `0.2.11.*`) | `pkg/v1/net/websocket` |
 | `static/` | an `http.Handler` over an `io/fs.FS` that never lists a directory and sends the security headers on every response (ADR 0130) | `core/net` | none (core sentinel `0.2.11.34`) | `pkg/v1/net/static` |
-| `loop/` | the opt-in plaintext event-loop engine's native backends — epoll on every Linux architecture, io_uring to come — one locked thread per loop, a pointer-free connection table and mmap'd payloads; a leaf below `server`, which hands it duplicated listener descriptors (ADR 0186) | `core/net` | none (core `0.2.11.35`–`.44`) | none yet: `server.Group.HandleLoop` publishes it (§D9 step 11) |
+| `loop/` | the opt-in plaintext event-loop engine's native backends — io_uring after a staged probe, epoll on every Linux architecture — one locked thread per loop, a pointer-free connection table and mmap'd payloads; a leaf below `server`, which hands it duplicated listener descriptors (ADR 0186) | `core/net` | none (core `0.2.11.35`–`.44`) | none yet: `server.Group.HandleLoop` publishes it (§D9 step 11) |
 
 No member imports another but `server`, which imports `loop` (below); each composes `internal/core/net` and the kernel,
 and `server` alone reaches another family — `proc`, for socket activation
@@ -51,7 +51,7 @@ keeps the portable backend (it needs the netpoller), and hands `loop` a
 duplicated descriptor per listener through `loop.Listener`. `loop` is a leaf: it
 imports `internal/core/net`, `internal/core/proc` (the shared
 `UnsupportedPlatform`, wrapped) and the kernel, never `server`. Still to come:
-io_uring in `loop`, and `http1/`, the restricted HTTP/1.1 profile, which
+`http1/`, the restricted HTTP/1.1 profile, which
 implements `core/net`'s loop handler port and imports no member. Neither
 declares a code.
 
