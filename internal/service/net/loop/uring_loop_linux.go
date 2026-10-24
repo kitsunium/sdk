@@ -784,13 +784,25 @@ func (rr *uRing) onRecv(slot int32, gen uint32, c *cqe) {
 	//: the peer finished sending: what is written still leaves.
 	case c.res == 0:
 		rr.recvEOF(slot)
-	//: cancelled by a close.
+	//: cancelled: by this slot's close, or by nobody this loop asked. A
+	//: connection still open re-arms, so a cancel it never asked for cannot
+	//: leave it deaf.
 	case c.res == -int32(errnoECANCELED):
+		rr.recvCancelled(slot, more)
 	//: the socket failed.
 	default:
 		rr.failLive(slot, -c.res)
 	}
 	rr.maybeClose(slot)
+}
+
+// recvCancelled re-arms the recv of a connection still open whose recv was
+// cancelled and ended.
+func (rr *uRing) recvCancelled(slot int32, more bool) {
+	//: open, and the recv ended: armed again.
+	if !more && rr.r.conns[slot].state == stOpen {
+		rr.armRecv(slot)
+	}
 }
 
 // recvBytes delivers n bytes of buffer bid to an open connection, and
@@ -857,9 +869,16 @@ func (rr *uRing) onSend(slot int32, gen uint32, c *cqe) {
 			//: in flight again.
 			return
 		}
-	//: cancelled by a close.
+	//: cancelled: a closing slot is done with it; one still alive sends the
+	//: same flight again, so a cancel it never asked for loses no byte.
 	case c.res == -int32(errnoECANCELED):
 		cc.flags &^= fSending
+		//: alive: resubmitted, in flight again.
+		if cc.state == stOpen || cc.state == stClosing {
+			rr.sendFlight(slot)
+			//: in flight.
+			return
+		}
 	//: the socket failed.
 	default:
 		cc.flags &^= fSending
