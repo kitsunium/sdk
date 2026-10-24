@@ -26,7 +26,6 @@ type stuckSyncSnapshots struct {
 	release chan struct{}
 	mu      sync.Mutex
 	syncing map[string]chan struct{}
-	metas   map[string]coreconsensus.SnapshotMetaValue
 	commits atomic.Int32
 	waited  atomic.Int32
 }
@@ -34,14 +33,13 @@ type stuckSyncSnapshots struct {
 func newStuckSyncSnapshots(s *MemorySnapshots) *stuckSyncSnapshots {
 	return &stuckSyncSnapshots{
 		MemorySnapshots: s, release: make(chan struct{}),
-		syncing: map[string]chan struct{}{}, metas: map[string]coreconsensus.SnapshotMetaValue{},
+		syncing: map[string]chan struct{}{},
 	}
 }
 
 func (s *stuckSyncSnapshots) Create(id string, meta coreconsensus.SnapshotMetaValue) (coreconsensus.SnapshotSink, int64, error) {
 	s.mu.Lock()
 	ch := s.syncing[id]
-	s.metas[id] = meta
 	s.mu.Unlock()
 	if ch != nil {
 		s.waited.Add(1)
@@ -52,17 +50,6 @@ func (s *stuckSyncSnapshots) Create(id string, meta coreconsensus.SnapshotMetaVa
 		return nil, 0, err
 	}
 	return &stuckSyncSink{SnapshotSink: sink, s: s, id: id}, off, nil
-}
-
-// committing is an id whose Commit hangs, and the metadata it was offered
-// with.
-func (s *stuckSyncSnapshots) committing() (string, coreconsensus.SnapshotMetaValue, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for id := range s.syncing {
-		return id, s.metas[id], true
-	}
-	return "", coreconsensus.SnapshotMetaValue{}, false
 }
 
 type stuckSyncSink struct {
@@ -113,49 +100,53 @@ func (s *hungCreate) Create(id string, meta coreconsensus.SnapshotMetaValue) (co
 // waited for that Commit: the loop stood still, the offer was never
 // answered, and the leader's pin on it held its compaction for as long as
 // it led (#623). The install counts as restoring from before its Commit,
-// and the offer is refused OVERLOADED at once.
+// and the offer is refused OVERLOADED at once. The offers and the install
+// are the transport's calls, made by the test, so the follower is offered
+// the snapshot whatever its log: restarted behind a compacted leader, it
+// was caught up by appends from the leader's recent entries on a loaded
+// runner, and the Commit that hung was its own cut's.
 func TestAnOfferOfTheSnapshotBeingCommittedIsRefused(t *testing.T) {
-	var stuck *stuckSyncSnapshots
-	var fid coreconsensus.NodeID
-	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{1, 2, 8}, every: 20, size: 3}
+	stores := map[coreconsensus.NodeID]*stuckSyncSnapshots{}
+	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{1, 2, 8}, every: 1 << 20, size: 3}
 	c.configure = func(tn *testNode, cfg *Config) {
-		// The leader keeps its leadership: a new one whose log still held
-		// the entries caught the follower up by appends, and the Commit
-		// that hung was the follower's own cut (macOS CI).
-		cfg.InitialTiming = steadyTiming()
-		if fid != 0 && tn.id == fid {
-			cfg.Snapshots = stuck
+		if stores[tn.id] == nil {
+			stores[tn.id] = newStuckSyncSnapshots(tn.snaps)
 		}
+		cfg.Snapshots = stores[tn.id]
 	}
 	newClusterWith(t, c)
 	l := c.settledLeader(5 * time.Second)
 	f := c.otherThan(l)
-	stuck = newStuckSyncSnapshots(f.snaps)
+	stuck := stores[f.id]
 	var once sync.Once
 	release := func() { once.Do(func() { close(stuck.release) }) }
 	t.Cleanup(release)
-	c.kill(f)
-	for i := range 100 {
-		propose(t, l.node, fmt.Sprintf("a%03d=v", i))
+	waitFor(t, "the follower following the leader", func() bool {
+		st, ls := f.node.Status(), l.node.Status()
+		return st.Leader == l.id && st.Term == ls.Term && ls.Role == coreconsensus.RoleLeader
+	})
+	st := f.node.Status()
+	// An offer past the follower's commit, as the leader sends a lagging
+	// follower its newest snapshot.
+	idx, term := st.Commit+1000, st.Term
+	const size = 4096
+	meta := coreconsensus.SnapshotMetaValue{
+		ID: snapshotID(idx, term), Version: 1, Position: coreconsensus.PositionValue{Term: term, Index: idx},
+		Log: f.node.lineage(), ChunkSize: defaultChunkSize, EncodedSize: size, DecodedSize: size,
 	}
-	compactedPastItsEnd(t, l, f)
+	offer := coreconsensus.InstallOfferValue{Term: term, SnapshotID: meta.ID, Meta: meta}
+	from := coreconsensus.AuthenticatedPeerValue{ID: l.id}
+	if acc := f.node.offer(from, offer); acc.Refused != 0 || acc.Held || acc.Offset != 0 {
+		t.Fatalf("setup: the first offer was answered %+v", acc)
+	}
 	stuck.armed.Store(true)
-	fid = f.id
-	hearOnlyTheLeader(c, l, f)
-	c.start(f)
-	waitFor(t, "the follower's install stuck in its spool's fsync", func() bool { return stuck.commits.Load() > 0 })
-	id, meta, ok := stuck.committing()
-	if !ok {
-		t.Fatal("setup: no install committing")
-	}
-	if st := f.node.Status(); st.Commit >= meta.Position.Index || l.node.Status().Role != coreconsensus.RoleLeader {
-		t.Fatalf("setup: the follower committed %d, past the snapshot %s it is committing, or the leader lost its leadership", st.Commit, id)
-	}
-	answered := make(chan coreconsensus.InstallAcceptValue, 1)
+	installed := make(chan error, 1)
 	go func() {
-		answered <- f.node.offer(coreconsensus.AuthenticatedPeerValue{ID: l.id},
-			coreconsensus.InstallOfferValue{Term: l.node.Status().Term, SnapshotID: id, Meta: meta})
+		installed <- f.node.install(coreconsensus.InstallParams{Ctx: context.Background(), From: from, Offer: offer, Body: bytes.NewReader(make([]byte, size))})
 	}()
+	waitFor(t, "the follower's install stuck in its spool's fsync", func() bool { return stuck.commits.Load() > 0 })
+	answered := make(chan coreconsensus.InstallAcceptValue, 1)
+	go func() { answered <- f.node.offer(from, offer) }()
 	select {
 	case acc := <-answered:
 		if acc.Refused != coreconsensus.CodeOverloaded {
@@ -163,9 +154,11 @@ func TestAnOfferOfTheSnapshotBeingCommittedIsRefused(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Errorf("an offer of the snapshot the follower is committing is still unanswered 2 s later: its loop waits in Create for that Commit (Create waits %d)", stuck.waited.Load())
+		release()
+		<-answered
 	}
 	release()
-	c.waitApplied(l.node.Status().Applied, 10*time.Second)
+	t.Logf("the first install returned %v (its body is no snapshot)", <-installed)
 }
 
 // #602's scenario over TCP, the issue's proof of #623: a follower F is sent
