@@ -123,7 +123,12 @@ env:
   # can lock.
   KERNEL_PKGS: "./fs/flock ./fs/pathchain ./fs/winacl"
   CORE_PKGS: "./proc"
-  SERVICE_PKGS: "./app/lock ./proc/childwait ./proc/exec ./proc/cgroup ./proc/internal/rlim ./proc/ipc ./proc/reaper ./proc/rlimit ./proc/self ./proc/signal ./proc/systemd/listen ./proc/systemd/notify ./security/session"
+  # `net/loop` joins them because its backends ARE the kernel: epoll here, and
+  # io_uring after a staged probe of the running kernel (ADR 0186). Its suite
+  # fails closed on Linux: LOOP_GOFLAGS compiles in the backends each lane
+  # must find, and the loopdebug thread check; a backend missing fails the
+  # lane, and the binary's log names the backends, the kernel included.
+  SERVICE_PKGS: "./app/lock ./net/loop ./proc/childwait ./proc/exec ./proc/cgroup ./proc/internal/rlim ./proc/ipc ./proc/reaper ./proc/rlimit ./proc/self ./proc/signal ./proc/systemd/listen ./proc/systemd/notify ./security/session"
   # Unix file-security packages: their suites assert 0600 perms and inject
   # failures by chmod-freezing a directory — both are Unix mechanics. The
   # shared hardened open both sinks call, internal/logfile, carries the one
@@ -138,6 +143,7 @@ env:
   # above. Relative to framework/, a directory of the SDK module (ADR 0162),
   # as the three lists above are relative to the layer directories.
   FRAMEWORK_PKGS: "./internal/service/entitlement"
+  LOOP_GOFLAGS: "-tags=loopdebug -ldflags=-X=github.com/kitsunium/sdk/internal/service/net/loop.requiredBackends=epoll"
 
 jobs:
   # ── Native hosted runners: Go runs in place, no cross-compile ──────────────
@@ -209,6 +215,7 @@ jobs:
         env:
           GOWORK: "off"
           CGO_ENABLED: "0"
+          GOFLAGS: ${{ env.LOOP_GOFLAGS }}
         run: |
           set -uo pipefail
           fail=0
@@ -340,6 +347,18 @@ jobs:
             url: https://dl.fedoraproject.org/pub/archive/fedora/linux/releases/42/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-42-1.1.x86_64.qcow2
             algo: sha256
             sum: e401a4db2e5e04d1967b6729774faa96da629bcf3ba90b67d8d9cce9906bec0f
+          # Ubuntu noble at its own kernel, the one the loop engine's io_uring is
+          # sized against (ADR 0186): serial 20261017 ships 6.8.0-147-generic
+          # (its .manifest), at or past the 6.8.0-117 floor; the run prints
+          # `uname -r` of the guest.
+          - name: ubuntu-kernel
+            kind: vm
+            init: systemd
+            user: root
+            pre: ""
+            url: https://cloud-images.ubuntu.com/noble/20261017/noble-server-cloudimg-amd64.img
+            algo: sha256
+            sum: 04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94
           - name: alpine-kernel
             kind: vm
             init: openrc
@@ -364,6 +383,7 @@ jobs:
           GOARCH: amd64
           GOWORK: "off"
           CGO_ENABLED: "0"
+          GOFLAGS: ${{ env.LOOP_GOFLAGS }}
         run: |
           set -euo pipefail
           mkdir -p bins

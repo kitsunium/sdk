@@ -290,7 +290,8 @@ cd internal/core && GOWORK=off go test -race -cover ./net/...
 - ADR 0186 — the loop engine's ports and values (`LoopConnRef`, `LoopIO`,
   `LoopHandler`, `PostFunc`, `OptionKind`) and its sentinels `0.2.11.35` –
   `0.2.11.44`, `LoopValue`, `LoopBackend` and the loop `State` fields, declared;
-  the engines are still to come — `docs/adr/0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md`
+  the engines are `internal/service/net/loop` (epoll; io_uring to come) and
+  `server`'s portable backend, internal until `HandleLoop` — `docs/adr/0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md`
 - ADR 0043 (drain is a signal), ADR 0016 (one-sibling/many-facades),
   ADR 0018 (portability, `x/sys` ban), ADR 0013 (the redacting `Key`
   precedent), ADR 0028 (config decode shape)

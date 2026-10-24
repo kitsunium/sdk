@@ -554,6 +554,9 @@ jobs:
           GOARCH: "386"
           GOWORK: "off"
           CGO_ENABLED: "0"
+          # net/loop's suite fails closed on Linux without the backends it must
+          # find compiled in (ADR 0186); epoll is every Linux architecture's.
+          GOFLAGS: "-ldflags=-X=github.com/kitsunium/sdk/internal/service/net/loop.requiredBackends=epoll"
         run: |
           set -euo pipefail
           fail=0
