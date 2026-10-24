@@ -685,6 +685,7 @@ files:
       - (*loop).SetDeadline
       - (*loop).Pressure
       - (*loop).Post
+      - (*loop).Loop
     name: core.go
   - decls:
       - loopDebug
@@ -1711,6 +1712,12 @@ types:
         params: op corenet.PostFunc, arg uintptr
         recv: lp *loop
         results: error
+      - doc: |-
+          Loop implements corenet.LoopIO: the loop's index in its group, set at build
+          and never written again, so any goroutine may read it.
+        name: Loop
+        recv: lp *loop
+        results: int
     name: loop
   - doc: epollRunner runs one epoll loop per thread.
     fields:

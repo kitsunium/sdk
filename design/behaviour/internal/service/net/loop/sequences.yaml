@@ -1060,6 +1060,9 @@ sequences:
     steps:
       - return: lp.post.post(op, arg)
         to: lp.post.post
+  - of: (*loop).Loop
+    steps:
+      - return: lp.index
   - of: threadCheck
     steps:
       - return: nil

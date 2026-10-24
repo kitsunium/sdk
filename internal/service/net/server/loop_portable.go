@@ -728,6 +728,12 @@ func (pl *portableLoop) Pressure(ref corenet.LoopConnRef) bool {
 	return pc != nil && pc.pressure
 }
 
+// Loop implements corenet.LoopIO: the portable backend is one loop, index 0.
+func (pl *portableLoop) Loop() int {
+	//: one handler goroutine, so one loop.
+	return 0
+}
+
 // Post implements corenet.LoopIO.
 func (pl *portableLoop) Post(op corenet.PostFunc, arg uintptr) error {
 	pl.postMu.Lock()

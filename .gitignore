@@ -153,3 +153,7 @@ ROADMAP.md
 # Kernel bench artifacts (`make sdk-bench` / `sdk-bench-profile`).
 # .bench.out is already covered by *.out above; profiles/ is the pprof dir.
 /profiles/
+
+# The cross-platform audit builds the e2e module's main package in place
+# (`go build` of a single main package writes its binary to the working directory).
+/e2e/e2e

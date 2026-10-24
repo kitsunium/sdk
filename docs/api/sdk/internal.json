@@ -1263,7 +1263,7 @@
       "dir": "service/net/server",
       "layer": "service",
       "family": "net",
-      "doc": "Package server — adoption of listeners inherited from a supervisor.\n\nPackage server — the datagram batch-read abstraction.\n\nPackage server — compile-time interface assertions, kept out of the\nproduction source per KTN-IFACE-ASSERT-PLACEMENT.\n\nPackage server — the portable datagram reader.\n\nPackage server — the pooled stream connection.\n\nPackage server — compile-time interface assertions, kept out of the\nproduction source per KTN-IFACE-ASSERT-PLACEMENT.\n\nPackage server — the socket that holds its connection slot until it closes.\n\nPackage server — the completion state of one connection handed to net/http.\n\nPackage server — batch-reader selection on Linux.\n\nPackage server — batch-reader selection on platforms without recvmmsg.\n\nPackage server — every served socket family is left to the kernel here.\n\nPackage server — the two socket families Windows cannot open at all.\n\nPackage server — the bounded TLS handshake.\n\nPackage server — the net/http adapter.\n\nPackage server — the bounds only an HTTP group has.\n\nPackage server — the listener bridge that lets net/http consume our accepts.\n\nPackage server — the width-correct kernel length assignment.\n\nPackage server — the start, accept and drain lifecycle.\n\nPackage server — compile-time interface assertions, kept out of the\nproduction source per KTN-IFACE-ASSERT-PLACEMENT.\n\nPackage server — listener construction.\n\nPackage server — the listener that hands out close-tracking sockets.\n\nPackage server — a loop group's engine on Linux: the leaf's native backends,\nhanded duplicated listener descriptors, or the portable backend.\n\nPackage server — a loop group's engine off Linux: the portable backend.\n\nPackage server — loop groups: the handler declaration kept unexported until\nHandleLoop is published, the options a loop group refuses at Start, its\nlisteners and its engine in the server's lifecycle (ADR 0186).\n\nPackage server — the portable loop backend: the default engine's accept\npath and goroutines, every handler callback serialised onto one handler\ngoroutine (ADR 0186 §D3, §D7).\n\nPackage server — the recvmmsg batched datagram reader.\n\nPackage server — the recvmmsg message header layout.\n\nPackage server — the functional options.\n\nPackage server — the pooled datagram.\n\nPackage server — a group of datagram listeners.\n\nPackage server — datagram listener construction and the read loop.\n\nPackage server — the datagram read loop.\n\nPackage server — per-connection state recycling.\n\nPackage server — the descriptor-bearing socket contract.\n\nPackage server — SO_REUSEPORT support on the BSD family.\n\nPackage server — SO_REUSEPORT support on Linux.\n\nPackage server — the SO_REUSEPORT floor for platforms without it.\n\nPackage server is the inbound half of the SDK's network domain (ADR 0029):\none unified listener engine for TCP, Unix, TLS and mutual TLS, serving\npluggable handlers grouped behind shared middlewares and policies.\n\nPackage server — kernel sockaddr decoding for the batched reader.\n\nPackage server — a group of listeners sharing one handler and policy.\n\nPackage server — the per-group connection ceiling.\n\nPackage server — deliberate discard of non-actionable cleanup errors.\n\nPackage server — how a Unix kernel reports a datagram longer than the read\nbuffer: by truncating it, which is not an error at all.\n\nPackage server — how Windows reports a datagram longer than the read buffer.\n"
+      "doc": "Package server — adoption of listeners inherited from a supervisor.\n\nPackage server — the datagram batch-read abstraction.\n\nPackage server — compile-time interface assertions, kept out of the\nproduction source per KTN-IFACE-ASSERT-PLACEMENT.\n\nPackage server — the portable datagram reader.\n\nPackage server — the pooled stream connection.\n\nPackage server — compile-time interface assertions, kept out of the\nproduction source per KTN-IFACE-ASSERT-PLACEMENT.\n\nPackage server — the socket that holds its connection slot until it closes.\n\nPackage server — the completion state of one connection handed to net/http.\n\nPackage server — batch-reader selection on Linux.\n\nPackage server — batch-reader selection on platforms without recvmmsg.\n\nPackage server — every served socket family is left to the kernel here.\n\nPackage server — the two socket families Windows cannot open at all.\n\nPackage server — the bounded TLS handshake.\n\nPackage server — the net/http adapter.\n\nPackage server — the bounds only an HTTP group has.\n\nPackage server — the listener bridge that lets net/http consume our accepts.\n\nPackage server — the width-correct kernel length assignment.\n\nPackage server — the start, accept and drain lifecycle.\n\nPackage server — compile-time interface assertions, kept out of the\nproduction source per KTN-IFACE-ASSERT-PLACEMENT.\n\nPackage server — listener construction.\n\nPackage server — the listener that hands out close-tracking sockets.\n\nPackage server — a loop group's engine on Linux: the leaf's native backends,\nhanded duplicated listener descriptors, or the portable backend.\n\nPackage server — a loop group's engine off Linux: the portable backend.\n\nPackage server — loop groups: HandleLoop, the options a loop group refuses\nat Start, its listeners and its engine in the server's lifecycle (ADR 0186).\n\nPackage server — the portable loop backend: the default engine's accept\npath and goroutines, every handler callback serialised onto one handler\ngoroutine (ADR 0186 §D3, §D7).\n\nPackage server — the recvmmsg batched datagram reader.\n\nPackage server — the recvmmsg message header layout.\n\nPackage server — the functional options.\n\nPackage server — the pooled datagram.\n\nPackage server — a group of datagram listeners.\n\nPackage server — datagram listener construction and the read loop.\n\nPackage server — the datagram read loop.\n\nPackage server — per-connection state recycling.\n\nPackage server — the descriptor-bearing socket contract.\n\nPackage server — SO_REUSEPORT support on the BSD family.\n\nPackage server — SO_REUSEPORT support on Linux.\n\nPackage server — the SO_REUSEPORT floor for platforms without it.\n\nPackage server is the inbound half of the SDK's network domain (ADR 0029):\none unified listener engine for TCP, Unix, TLS and mutual TLS, serving\npluggable handlers grouped behind shared middlewares and policies.\n\nPackage server — kernel sockaddr decoding for the batched reader.\n\nPackage server — a group of listeners sharing one handler and policy.\n\nPackage server — the per-group connection ceiling.\n\nPackage server — deliberate discard of non-actionable cleanup errors.\n\nPackage server — how a Unix kernel reports a datagram longer than the read\nbuffer: by truncating it, which is not an error at all.\n\nPackage server — how Windows reports a datagram longer than the read buffer.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/service/net/sse",
@@ -27634,8 +27634,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/net",
       "name": "LoopIO",
-      "spelled": "interface{Close(ref LoopConnRef) error; Post(op PostFunc, arg uintptr) error; Pressure(ref LoopConnRef) bool; SetDeadline(ref LoopConnRef, d time.Duration) error; Write(ref LoopConnRef, p []byte) error}",
-      "canonical": "interface{Close(ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef) error; Post(op github.com/kitsunium/sdk/internal/core/net.PostFunc, arg uintptr) error; Pressure(ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef) bool; SetDeadline(ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef, d time.Duration) error; Write(ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef, p []byte) error}",
+      "spelled": "interface{Close(ref LoopConnRef) error; Loop() int; Post(op PostFunc, arg uintptr) error; Pressure(ref LoopConnRef) bool; SetDeadline(ref LoopConnRef, d time.Duration) error; Write(ref LoopConnRef, p []byte) error}",
+      "canonical": "interface{Close(ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef) error; Loop() int; Post(op github.com/kitsunium/sdk/internal/core/net.PostFunc, arg uintptr) error; Pressure(ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef) bool; SetDeadline(ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef, d time.Duration) error; Write(ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef, p []byte) error}",
       "doc": "LoopIO is what a loop offers its handler: the operations on its connections\n(ADR 0186 §D4). Each loop implements it with a pointer of its own, handed to\nevery callback.\n\nWrite, Close and SetDeadline belong to the loop's thread: they are called from\na callback, never from another goroutine, which is what lets them take no\nlock. Under the loopdebug build tag a call from another thread is refused with\nLoopWrongThread. Post is the one operation another goroutine may call. Every\nerror is a preallocated sentinel; none of the calls allocates when p belongs\nto the caller's heap or mapping.\n\nIFACE-PLUGIN: the concrete loops stay unexported in\ninternal/service/net/loop and internal/service/net/server.\n",
       "file": "core/net/gen_ports.go",
       "layer": "core",
@@ -27650,6 +27650,19 @@
       "spelled": "func(ref LoopConnRef) error",
       "canonical": "func(ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef) error",
       "doc": "Close closes ref's connection once the output already written has left,\nand calls OnClose. A second Close, or a Close on a stale reference, returns\nLoopStaleRef and does nothing.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopIO.Loop",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "Loop",
+      "recv": "LoopIO",
+      "spelled": "func() int",
+      "canonical": "func() int",
+      "doc": "Loop returns the index of the loop this LoopIO belongs to, from 0 to the\ngroup's loop count less one, fixed for the loop's life. A handler keeps\nits per-loop state — a scratch, a batch, a buffer — in a slice indexed by\nit, so a callback finds its own with no lock and no map. The portable\nbackend runs one loop, index 0. Any goroutine may call it.\n",
       "file": "core/net/gen_ports.go",
       "layer": "core",
       "family": "net"
@@ -62887,7 +62900,7 @@
       "name": "Loop",
       "spelled": "func(v corenet.LoopValue) GroupOption",
       "canonical": "func(v github.com/kitsunium/sdk/internal/core/net.LoopValue) github.com/kitsunium/sdk/internal/service/net/server.GroupOption",
-      "doc": "Loop configures a group's loop engine (ADR 0186 §D5): its backend, its loops\nand rings, and its per-connection and pressure bounds. It is judged at Start,\nonce the group's handler is known: a group served by Handle, HandleFunc or\nHandleHTTP refuses it with LoopOptionUnsupported, whichever order the\ndeclarations came in. A group with no handler fails with HandlerMissing\ninstead, and one given a second handler with HandlerAlreadySet. A datagram\ngroup refuses it with LoopOptionUnsupported too. No group is served by a loop\nyet, so every group refuses it until the loop engine's entry is published.\n",
+      "doc": "Loop configures a group's loop engine (ADR 0186 §D5): its backend, its loops\nand rings, and its per-connection and pressure bounds. It is judged at Start,\nonce the group's handler is known: a group served by HandleLoop runs on it,\nand a group served by Handle, HandleFunc or HandleHTTP refuses it with\nLoopOptionUnsupported, whichever order the declarations came in. A group with\nno handler fails with HandlerMissing instead, and one given a second handler\nwith HandlerAlreadySet. A datagram group refuses it with LoopOptionUnsupported\ntoo. A group served by HandleLoop without it runs on the zero LoopValue.\n",
       "file": "service/net/server/options.go",
       "layer": "service",
       "family": "net"
@@ -63211,7 +63224,7 @@
       "recv": "StreamGroup",
       "spelled": "func(h corenet.ConnHandler) *StreamGroup",
       "canonical": "func(h github.com/kitsunium/sdk/internal/core/net.ConnHandler) *github.com/kitsunium/sdk/internal/service/net/server.StreamGroup",
-      "doc": "Handle sets the group's handler. A group declares one handler, once: a\nsecond declaration on the same group — Handle, HandleFunc or HandleHTTP, in\nany order — does not replace the first, and Start returns HandlerAlreadySet\nnaming the group (ADR 0186 §D1).\n",
+      "doc": "Handle sets the group's handler. A group declares one handler, once: a\nsecond declaration on the same group — Handle, HandleFunc, HandleHTTP or\nHandleLoop, in any order — does not replace the first, and Start returns\nHandlerAlreadySet naming the group (ADR 0186 §D1).\n",
       "file": "service/net/server/stream_group.go",
       "layer": "service",
       "family": "net"
@@ -63239,6 +63252,19 @@
       "canonical": "func(h net/http.Handler) *github.com/kitsunium/sdk/internal/service/net/server.StreamGroup",
       "doc": "HandleHTTP serves an http.Handler over this group's listeners.\n\nThe group keeps its own limits, TLS identity and drain; net/http only does\nthe protocol. That split is ADR 0029 D3: reimplementing HTTP would mean\nowning request smuggling defences, HTTP/2 flow control and HPACK to lose,\nnot gain, throughput.\n",
       "file": "service/net/server/stream_group.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/server.(*StreamGroup).HandleLoop",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/server",
+      "name": "HandleLoop",
+      "recv": "StreamGroup",
+      "spelled": "func(h corenet.LoopHandler) *StreamGroup",
+      "canonical": "func(h github.com/kitsunium/sdk/internal/core/net.LoopHandler) *github.com/kitsunium/sdk/internal/service/net/server.StreamGroup",
+      "doc": "HandleLoop serves the group on the loop engine (ADR 0186): h is called on\nthe loop's own thread for every connection of the group, with the bytes\neach one receives, instead of a goroutine per connection. It is opt-in, and\nplaintext only.\n\nThe group keeps the server's lifecycle — the bind, the adoption of\ninherited sockets, MaxConns, the drain, State — and Loop(v) sizes and\nplaces the engine: io_uring after a probe of the running kernel, then epoll,\non Linux, and the portable backend, the default engine's accept path\nserialised onto one handler goroutine, everywhere else. Start refuses a loop\ngroup given TLS with LoopTLSUnsupported, one given Use or an option neither\nthe engine (IdleTimeout, MaxConns, Adopt) nor h, through\nLoopOptionHonourer, honours with LoopOptionUnsupported, and an explicit\nbackend the platform or the kernel cannot run with UnsupportedPlatform or\nLoopBackendUnavailable.\n\nA callback of h runs on the loop's thread and must not block it: a blocking\ncall stalls every connection of its loop. h is declared once, like every\nhandler: a second declaration of any kind makes Start return\nHandlerAlreadySet.\n",
+      "file": "service/net/server/loop_group.go",
       "layer": "service",
       "family": "net"
     },

@@ -334,7 +334,7 @@ files:
     name: loop_engine_linux.go
   - decls:
       - loopEngine
-      - (*StreamGroup).handleLoop
+      - (*StreamGroup).HandleLoop
       - (*StreamGroup).loopRefusal
       - loopHonours
       - (*StreamGroup).loopOptionsSet
@@ -381,6 +381,7 @@ files:
       - (*portableLoop).Close
       - (*portableLoop).SetDeadline
       - (*portableLoop).Pressure
+      - (*portableLoop).Loop
       - (*portableLoop).Post
       - portableEngine
       - portableEngine.Shutdown
@@ -1945,6 +1946,10 @@ types:
         params: ref corenet.LoopConnRef
         recv: pl *portableLoop
         results: bool
+      - doc: "Loop implements corenet.LoopIO: the portable backend is one loop, index 0."
+        name: Loop
+        recv: pl *portableLoop
+        results: int
       - doc: Post implements corenet.LoopIO.
         name: Post
         params: op corenet.PostFunc, arg uintptr
@@ -2646,18 +2651,13 @@ types:
       - name: loopSet
         type: bool
       - doc: |-
-          loopHandler is the group's loop handler, set by handleLoop; a group
+          loopHandler is the group's loop handler, set by HandleLoop; a group
           with one is served by the loop engine (ADR 0186 §D1).
         name: loopHandler
         type: corenet.LoopHandler
     kind: struct
     methods:
-      - doc: |-
-          handleLoop declares h as the group's loop handler (ADR 0186 §D1). It stays
-          unexported until StreamGroup.HandleLoop is published, after every
-          linux-init lane and the Ubuntu lane name both Linux backends (§D9 step 11):
-          until then only this package's tests reach it.
-        name: handleLoop
+      - name: HandleLoop
         params: h corenet.LoopHandler
         recv: g *StreamGroup
         results: "*StreamGroup"

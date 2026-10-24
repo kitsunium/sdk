@@ -155,7 +155,10 @@ must honour:
   coarse per-loop timer wheel; `Pressure()`; and `Post(op PostFunc, arg
   uintptr)`, the one call another goroutine may make, through a preallocated
   queue and no closure, each posted operation run exactly once on the loop,
-  refused with `LoopPostQueueFull` when the queue is full. `Write`, `Close` and
+  refused with `LoopPostQueueFull` when the queue is full; and `Loop()`, the
+  loop's index in its group, added with step 11 so a handler — the `http1`
+  adapter first — keeps its per-loop state in a slice, with no lock and no
+  map. `Write`, `Close` and
   `SetDeadline` belong to the loop's thread; under the `loopdebug` build tag a
   call from another thread is refused with `LoopWrongThread`.
 - **`LoopHandler`**, the port the consumer implements: `OnOpen(io, ref)`,

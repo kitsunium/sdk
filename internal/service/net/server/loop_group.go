@@ -20,11 +20,27 @@ type loopEngine interface {
 	State() corenet.LoopStateValue
 }
 
-// handleLoop declares h as the group's loop handler (ADR 0186 §D1). It stays
-// unexported until StreamGroup.HandleLoop is published, after every
-// linux-init lane and the Ubuntu lane name both Linux backends (§D9 step 11):
-// until then only this package's tests reach it.
-func (g *StreamGroup) handleLoop(h corenet.LoopHandler) *StreamGroup {
+// HandleLoop serves the group on the loop engine (ADR 0186): h is called on
+// the loop's own thread for every connection of the group, with the bytes
+// each one receives, instead of a goroutine per connection. It is opt-in, and
+// plaintext only.
+//
+// The group keeps the server's lifecycle — the bind, the adoption of
+// inherited sockets, MaxConns, the drain, State — and Loop(v) sizes and
+// places the engine: io_uring after a probe of the running kernel, then epoll,
+// on Linux, and the portable backend, the default engine's accept path
+// serialised onto one handler goroutine, everywhere else. Start refuses a loop
+// group given TLS with LoopTLSUnsupported, one given Use or an option neither
+// the engine (IdleTimeout, MaxConns, Adopt) nor h, through
+// LoopOptionHonourer, honours with LoopOptionUnsupported, and an explicit
+// backend the platform or the kernel cannot run with UnsupportedPlatform or
+// LoopBackendUnavailable.
+//
+// A callback of h runs on the loop's thread and must not block it: a blocking
+// call stalls every connection of its loop. h is declared once, like every
+// handler: a second declaration of any kind makes Start return
+// HandlerAlreadySet.
+func (g *StreamGroup) HandleLoop(h corenet.LoopHandler) *StreamGroup {
 	//: one handler per group, whatever kind.
 	if !g.claimHandler() {
 		//: returned for chaining; Start reports the second declaration.
