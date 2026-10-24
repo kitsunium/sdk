@@ -48342,12 +48342,12 @@
         {
           "name": "SilentTerm",
           "type": "uint64",
-          "doc": "SilentTerm and SilentIndex are the silence condition\nTruncateAndStaySilent persisted (R3-09, R4-03): while SilentIndex is\nnot 0 the node grants no vote and acknowledges no append, until a\nleader of a term at least SilentTerm has rewritten its log past\nSilentIndex and committed an entry of its own term.\n"
+          "doc": "SilentTerm and SilentIndex are the silence condition\nTruncateAndStaySilent persisted (R3-09, R4-03): while SilentIndex is\nnot 0 the node grants no vote and acknowledges no append, until a\nleader of a term at least SilentTerm has rewritten its log past\nSilentIndex and committed an entry of its own term, in an append the\nnode accepted. Under a leader of SilentTerm itself, the node must\nalso hold that leader's commit (#636). An index the start's snapshot\ncovers is raised past it.\n"
         },
         {
           "name": "SilentIndex",
           "type": "uint64",
-          "doc": "SilentTerm and SilentIndex are the silence condition\nTruncateAndStaySilent persisted (R3-09, R4-03): while SilentIndex is\nnot 0 the node grants no vote and acknowledges no append, until a\nleader of a term at least SilentTerm has rewritten its log past\nSilentIndex and committed an entry of its own term.\n"
+          "doc": "SilentTerm and SilentIndex are the silence condition\nTruncateAndStaySilent persisted (R3-09, R4-03): while SilentIndex is\nnot 0 the node grants no vote and acknowledges no append, until a\nleader of a term at least SilentTerm has rewritten its log past\nSilentIndex and committed an entry of its own term, in an append the\nnode accepted. Under a leader of SilentTerm itself, the node must\nalso hold that leader's commit (#636). An index the start's snapshot\ncovers is raised past it.\n"
         },
         {
           "name": "RecentEntriesBytes",

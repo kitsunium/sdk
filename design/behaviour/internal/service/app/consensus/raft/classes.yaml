@@ -215,6 +215,25 @@ constants:
           mutHintEndsWhileHeard ends a leader record its delay after it was
           taken, while the vouched-for leader is still heard (#618).
         name: mutHintEndsWhileHeard
+      - doc: |-
+          mutSilenceEndsBeforeTheLeadersCommit ends the silence under the
+          leader of the node's own SilentTerm before the node holds that
+          leader's commit (#636).
+        name: mutSilenceEndsBeforeTheLeadersCommit
+      - doc: |-
+          mutSilenceEndsOnARefusal ends the silence on an append the node
+          refused (#636).
+        name: mutSilenceEndsOnARefusal
+      - doc: |-
+          mutSilenceIndexUnderTheSnapshot keeps a SilentIndex the node's own
+          snapshot covers at start, so that snapshot's commit ends the silence
+          (#636).
+        name: mutSilenceIndexUnderTheSnapshot
+      - doc: |-
+          mutSilentReportIgnored ignores the report a silent node's heartbeat
+          answer carries: a stale match is not lowered and the probe never
+          moves past the first batch (#636).
+        name: mutSilentReportIgnored
     name: mutAckBeforeSync
   - doc: The facts a PeerStatValue carries.
     grouped: true
@@ -327,6 +346,7 @@ files:
       - (*Raft).maybeCommit
       - (*Raft).stepLeader
       - (*Raft).handleHeartbeatResp
+      - (*Raft).followSilentReport
       - (*Raft).probeIfLost
       - (*Raft).ackRounds
       - (*Raft).handleAppResp
@@ -553,6 +573,7 @@ files:
       - (*Raft).stepFollower
       - (*Raft).followHeartbeat
       - (*Raft).heldOfTerm
+      - (*Raft).reportSilence
       - (*Raft).reportedContract
       - (*Raft).followTimeoutNow
       - (*Raft).handleAppend
@@ -975,7 +996,10 @@ types:
           TruncateAndStaySilent persisted (R3-09, R4-03): while SilentIndex is
           not 0 the node grants no vote and acknowledges no append, until a
           leader of a term at least SilentTerm has rewritten its log past
-          SilentIndex and committed an entry of its own term.
+          SilentIndex and committed an entry of its own term, in an append the
+          node accepted. Under a leader of SilentTerm itself, the node must
+          also hold that leader's commit (#636). An index the start's snapshot
+          covers is raised past it.
         name: SilentTerm
         type: uint64
       - doc: |-
@@ -983,7 +1007,10 @@ types:
           TruncateAndStaySilent persisted (R3-09, R4-03): while SilentIndex is
           not 0 the node grants no vote and acknowledges no append, until a
           leader of a term at least SilentTerm has rewritten its log past
-          SilentIndex and committed an entry of its own term.
+          SilentIndex and committed an entry of its own term, in an append the
+          node accepted. Under a leader of SilentTerm itself, the node must
+          also hold that leader's commit (#636). An index the start's snapshot
+          covers is raised past it.
         name: SilentIndex
         type: uint64
       - doc: |-
@@ -1422,9 +1449,22 @@ types:
         recv: r *Raft
       - doc: |-
           handleHeartbeatResp acknowledges every round up to the one answered,
-          recording the contract generation the peer applied, and refills a window
-          that a lost append left stalled.
+          recording the contract generation the peer applied, follows a silent
+          peer's report, and refills a window that a lost append left stalled.
         name: handleHeartbeatResp
+        params: pr *progress, m core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          followSilentReport takes the heartbeat answer of a peer that truncated
+          acknowledged entries and stays silent (#636). Its match is lowered to the
+          durable log the answer reports, as on its refusal of an append: a match
+          that still counts the entries the truncation dropped is not counted again.
+          A probe then resumes past the commit the answer reports, through which the
+          peer holds this leader's log. The peer acknowledges no append while
+          silent, so nothing else moves its probe, and it needs this leader's
+          commit to vote again: resent the same batch at every heartbeat, it stayed
+          silent for as long as this leader led. Neither field ever raises match.
+        name: followSilentReport
         params: pr *progress, m core.MessageValue
         recv: r *Raft
       - doc: |-
@@ -2403,6 +2443,21 @@ types:
         recv: r *Raft
         results: uint64
       - doc: |-
+          reportSilence marks the heartbeat answer of a silent node with
+          FlagTruncated (#636). RejectHint is the end of its durable log: the
+          leader lowers its match to it, as on a refused append, so a match that
+          still counts entries the truncation dropped is lowered at the first
+          answer, before any append. Commit is its commit, through which it holds
+          the leader's log: a leader probing it resumes past that index. A silent
+          node acknowledges no append, so the probe never moved and the leader
+          resent the batch after the truncation point at every heartbeat; the node,
+          which needs the commit of a leader of its own term to vote again, never
+          got past that batch. A leader of a release that does not read them
+          ignores the flag and both fields on a heartbeat answer.
+        name: reportSilence
+        params: m *core.MessageValue
+        recv: r *Raft
+      - doc: |-
           reportedContract is the contract generation a heartbeat answer reports:
           the one the committed entries this node holds durably put in force, the
           one a restart rebuilds. The leader sizes its lease on the window of that
@@ -2423,10 +2478,14 @@ types:
         recv: r *Raft
       - doc: |-
           handleAppend is the follower's side of AppendEntries, with the three rules
-          raft-sql-poc learned as safety bugs (D6).
+          raft-sql-poc learned as safety bugs (D6). It reports whether the append
+          was accepted: its prefix matched this log, verified, and was acknowledged.
+          A refused or dropped append proves nothing about this log, and only an
+          accepted one may end a silence (#636).
         name: handleAppend
         params: m core.MessageValue
         recv: r *Raft
+        results: bool
       - doc: |-
           rebaseOnCommit handles an append that starts below the commit. Its
           entries past the commit are still news: it is re-based on the committed
@@ -2494,9 +2553,25 @@ types:
         recv: r *Raft
         results: bool
       - doc: |-
-          maybeEndSilence lifts the silence condition once a leader of a term at
-          least the node's own has rewritten its log past the truncation point and
-          committed an entry of its current term (R3-09).
+          maybeEndSilence lifts the silence condition, on an append this node
+          accepted, once a leader of a term at least the node's own has rewritten
+          its log past the truncation point and committed an entry of its current
+          term (R3-09), and, when that term is the node's own SilentTerm, once the
+          node holds that leader's commit (#636).
+
+          A leader of a later term was elected without this node, which granted no
+          vote while silent and named no later term before the damage: every entry
+          committed before that term, those this node acknowledged and lost
+          included, is in that leader's log before its first entry of its term, so
+          committing an entry of that term proves the node holds them all. The
+          leader of the node's own term is the one that committed the lost entries
+          with this node's acknowledgements, so its first entries past the
+          truncation point prove nothing: one batch committed an entry of its term
+          while entries the node had acknowledged, and that leader had committed,
+          were still missing, the node voted again without them, and one more
+          failure of that leader elected a log that lacked them. Holding m.Commit,
+          the node holds everything that leader had committed when it sent m, and
+          the election restriction then refuses any candidate that lacks it.
         name: maybeEndSilence
         params: m core.MessageValue
         recv: r *Raft

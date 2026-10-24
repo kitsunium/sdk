@@ -3893,14 +3893,20 @@ packages:
                 TruncateAndStaySilent persisted (R3-09, R4-03): while SilentIndex is
                 not 0 the node grants no vote and acknowledges no append, until a
                 leader of a term at least SilentTerm has rewritten its log past
-                SilentIndex and committed an entry of its own term.
+                SilentIndex and committed an entry of its own term, in an append the
+                node accepted. Under a leader of SilentTerm itself, the node must
+                also hold that leader's commit (#636). An index the start's snapshot
+                covers is raised past it.
               name: SilentTerm
             - doc: |-
                 SilentTerm and SilentIndex are the silence condition
                 TruncateAndStaySilent persisted (R3-09, R4-03): while SilentIndex is
                 not 0 the node grants no vote and acknowledges no append, until a
                 leader of a term at least SilentTerm has rewritten its log past
-                SilentIndex and committed an entry of its own term.
+                SilentIndex and committed an entry of its own term, in an append the
+                node accepted. Under a leader of SilentTerm itself, the node must
+                also hold that leader's commit (#636). An index the start's snapshot
+                covers is raised past it.
               name: SilentIndex
               type: uint64
             - doc: |-

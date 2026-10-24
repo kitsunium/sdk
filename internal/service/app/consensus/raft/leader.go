@@ -345,11 +345,14 @@ func (r *Raft) stepLeader(now time.Time, m core.MessageValue) {
 }
 
 // handleHeartbeatResp acknowledges every round up to the one answered,
-// recording the contract generation the peer applied, and refills a window
-// that a lost append left stalled.
+// recording the contract generation the peer applied, follows a silent
+// peer's report, and refills a window that a lost append left stalled.
 func (r *Raft) handleHeartbeatResp(pr *progress, m core.MessageValue) {
 	r.ackRounds(m.From, m.Context, m.Contract)
 	r.confirmRounds()
+	if m.Flags&core.FlagTruncated != 0 && !r.mutated(mutSilentReportIgnored) {
+		r.followSilentReport(pr, m)
+	}
 	if pr.state == stateProbe {
 		pr.facts &^= peerProbeSent
 	}
@@ -361,6 +364,28 @@ func (r *Raft) handleHeartbeatResp(pr *progress, m core.MessageValue) {
 	pr.hbMatch = pr.match
 	if pr.match < r.log.lastIndex() {
 		r.sendAppend(m.From, false)
+	}
+}
+
+// followSilentReport takes the heartbeat answer of a peer that truncated
+// acknowledged entries and stays silent (#636). Its match is lowered to the
+// durable log the answer reports, as on its refusal of an append: a match
+// that still counts the entries the truncation dropped is not counted again.
+// A probe then resumes past the commit the answer reports, through which the
+// peer holds this leader's log. The peer acknowledges no append while
+// silent, so nothing else moves its probe, and it needs this leader's
+// commit to vote again: resent the same batch at every heartbeat, it stayed
+// silent for as long as this leader led. Neither field ever raises match.
+func (r *Raft) followSilentReport(pr *progress, m core.MessageValue) {
+	if pr.state == stateSnapshot {
+		return
+	}
+	if m.RejectHint < pr.match {
+		pr.match = m.RejectHint
+		pr.becomeProbe()
+	}
+	if pr.state == stateProbe && m.Commit >= pr.next && m.Commit <= r.log.lastIndex() {
+		pr.next = m.Commit + 1
 	}
 }
 

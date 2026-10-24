@@ -384,8 +384,9 @@ func (r *Raft) stepFollower(now time.Time, m core.MessageValue) {
 		r.lastLeaderContact = now
 		r.extendHint(now, m.From)
 		r.resetElection(now)
-		r.handleAppend(m)
-		r.maybeEndSilence(m)
+		if r.handleAppend(m) || r.mutated(mutSilenceEndsOnARefusal) {
+			r.maybeEndSilence(m)
+		}
 	case core.MsgHeartbeat:
 		r.followHeartbeat(now, m)
 	case core.MsgTimeoutNow:
@@ -407,10 +408,12 @@ func (r *Raft) followHeartbeat(now time.Time, m core.MessageValue) {
 	if c := min(m.Commit, r.log.lastIndex()); c > r.log.committed {
 		r.commitTo(c)
 	}
-	r.send(core.MessageValue{
+	resp := core.MessageValue{
 		Kind: core.MsgHeartbeatResp, To: m.From, Context: m.Context, Contract: r.reportedContract(),
 		Index: r.heldOfTerm(),
-	})
+	}
+	r.reportSilence(&resp)
+	r.send(resp)
 	if r.cfg.NoTable {
 		// A node with no table asks for a snapshot on every heartbeat, as
 		// on an append (D7, R7-18): a leader with nothing to append to it
@@ -435,6 +438,26 @@ func (r *Raft) heldOfTerm() uint64 {
 		return last
 	}
 	return 0
+}
+
+// reportSilence marks the heartbeat answer of a silent node with
+// FlagTruncated (#636). RejectHint is the end of its durable log: the
+// leader lowers its match to it, as on a refused append, so a match that
+// still counts entries the truncation dropped is lowered at the first
+// answer, before any append. Commit is its commit, through which it holds
+// the leader's log: a leader probing it resumes past that index. A silent
+// node acknowledges no append, so the probe never moved and the leader
+// resent the batch after the truncation point at every heartbeat; the node,
+// which needs the commit of a leader of its own term to vote again, never
+// got past that batch. A leader of a release that does not read them
+// ignores the flag and both fields on a heartbeat answer.
+func (r *Raft) reportSilence(m *core.MessageValue) {
+	if r.cfg.SilentIndex == 0 {
+		return
+	}
+	m.Flags |= core.FlagTruncated
+	m.RejectHint = min(r.log.lastIndex(), r.log.stable)
+	m.Commit = r.log.committed
 }
 
 // reportedContract is the contract generation a heartbeat answer reports:
@@ -466,8 +489,11 @@ func (r *Raft) followTimeoutNow(m core.MessageValue) {
 }
 
 // handleAppend is the follower's side of AppendEntries, with the three rules
-// raft-sql-poc learned as safety bugs (D6).
-func (r *Raft) handleAppend(m core.MessageValue) {
+// raft-sql-poc learned as safety bugs (D6). It reports whether the append
+// was accepted: its prefix matched this log, verified, and was acknowledged.
+// A refused or dropped append proves nothing about this log, and only an
+// accepted one may end a silence (#636).
+func (r *Raft) handleAppend(m core.MessageValue) bool {
 	if r.cfg.NoTable {
 		// No usable snapshot: it asks for one instead of storing entries it
 		// could never apply (D7, R7-18).
@@ -475,22 +501,23 @@ func (r *Raft) handleAppend(m core.MessageValue) {
 			Kind: core.MsgAppResp, To: m.From, Index: m.Index, Reject: true,
 			RejectHint: r.log.lastIndex(), Flags: core.FlagNeedSnapshot,
 		})
-		return
+		return false
 	}
 	if !r.rebaseOnCommit(&m) {
-		return
+		return false
 	}
 	if !r.log.matchTerm(m.Index, m.LogTerm) {
 		hint := min(m.Index, r.log.lastIndex())
 		r.send(core.MessageValue{Kind: core.MsgAppResp, To: m.From, Index: m.Index, Reject: true, RejectHint: hint})
-		return
+		return false
 	}
 	r.dropUnknownKinds(&m)
 	start, prevChain, ok := r.firstNewEntry(&m)
 	if !ok || (start >= 0 && !r.appendNew(&m, start, prevChain)) {
-		return
+		return false
 	}
 	r.acknowledgeAppend(&m)
+	return true
 }
 
 // rebaseOnCommit handles an append that starts below the commit. Its
@@ -629,14 +656,33 @@ func (r *Raft) refuses(from core.NodeID) bool {
 	return r.refusedLead != 0 && r.refusedLead == from && r.refusedTerm == r.term && !r.mutated(mutRefusedLeadHeard)
 }
 
-// maybeEndSilence lifts the silence condition once a leader of a term at
-// least the node's own has rewritten its log past the truncation point and
-// committed an entry of its current term (R3-09).
+// maybeEndSilence lifts the silence condition, on an append this node
+// accepted, once a leader of a term at least the node's own has rewritten
+// its log past the truncation point and committed an entry of its current
+// term (R3-09), and, when that term is the node's own SilentTerm, once the
+// node holds that leader's commit (#636).
+//
+// A leader of a later term was elected without this node, which granted no
+// vote while silent and named no later term before the damage: every entry
+// committed before that term, those this node acknowledged and lost
+// included, is in that leader's log before its first entry of its term, so
+// committing an entry of that term proves the node holds them all. The
+// leader of the node's own term is the one that committed the lost entries
+// with this node's acknowledgements, so its first entries past the
+// truncation point prove nothing: one batch committed an entry of its term
+// while entries the node had acknowledged, and that leader had committed,
+// were still missing, the node voted again without them, and one more
+// failure of that leader elected a log that lacked them. Holding m.Commit,
+// the node holds everything that leader had committed when it sent m, and
+// the election restriction then refuses any candidate that lacks it.
 func (r *Raft) maybeEndSilence(m core.MessageValue) {
 	if r.cfg.SilentIndex == 0 || m.Term < r.cfg.SilentTerm || r.log.lastIndex() < r.cfg.SilentIndex {
 		return
 	}
 	if t, ok := r.log.term(r.log.committed); !ok || t != m.Term || r.log.committed < r.cfg.SilentIndex {
+		return
+	}
+	if m.Term == r.cfg.SilentTerm && r.log.committed < m.Commit && !r.mutated(mutSilenceEndsBeforeTheLeadersCommit) {
 		return
 	}
 	r.cfg.SilentIndex, r.cfg.SilentTerm = 0, 0

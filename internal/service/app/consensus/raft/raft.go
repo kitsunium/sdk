@@ -79,7 +79,10 @@ type Config struct {
 	// TruncateAndStaySilent persisted (R3-09, R4-03): while SilentIndex is
 	// not 0 the node grants no vote and acknowledges no append, until a
 	// leader of a term at least SilentTerm has rewritten its log past
-	// SilentIndex and committed an entry of its own term.
+	// SilentIndex and committed an entry of its own term, in an append the
+	// node accepted. Under a leader of SilentTerm itself, the node must
+	// also hold that leader's commit (#636). An index the start's snapshot
+	// covers is raised past it.
 	SilentTerm, SilentIndex uint64
 	// RecentEntriesBytes bounds the payloads held in memory; 0 holds them
 	// all. Older ones are fetched from the store when a peer needs them.
@@ -371,6 +374,16 @@ func NewRaft(cfg *Config, st *StartState) *Raft {
 		node.noteAppended(&e)
 	}
 	node.log.stable = node.log.lastIndex()
+	if node.cfg.SilentIndex != 0 && node.cfg.SilentIndex <= node.log.snapIndex && !node.mutated(mutSilenceIndexUnderTheSnapshot) {
+		// TruncateAndStaySilent set the index at the truncated log's end,
+		// before the start moved the log onto a newer snapshot of this
+		// node's own. That snapshot's commit is a past the node may have
+		// acknowledged beyond, and taken as an entry of the leader's term
+		// past the truncation point it ended the silence on the first
+		// append of the leader of SilentTerm, a refused one included. The
+		// leader's rewrite must pass the log's start (#636).
+		node.cfg.SilentIndex = node.log.snapIndex + 1
+	}
 	node.log.committed = min(max(st.HardState.Commit, node.log.snapIndex), node.log.lastIndex())
 	node.log.applied = max(st.Applied, node.log.snapIndex)
 	node.log.applied = min(node.log.applied, node.log.committed)
