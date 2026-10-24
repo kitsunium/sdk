@@ -464,6 +464,13 @@ packages:
         out:
           - type: ClaimsValue
       - doc: |-
+          NewScratchOwner returns a fresh owner token, distinct from every other. A
+          [VerifierInto] implementation makes one at construction and keeps it
+          unexported, so no caller can present it.
+        name: NewScratchOwner
+        out:
+          - type: "*ScratchOwner"
+      - doc: |-
           NewVerifyScratch returns a scratch around mac for the verifier whose token
           is owner. It is the constructor a [VerifierInto] implementation calls from
           NewScratch; a caller asks the verifier, never this function, because only
@@ -471,7 +478,7 @@ packages:
           verification pays nothing the later ones do not.
         in:
           - name: owner
-            type: any
+            type: "*ScratchOwner"
           - name: mac
             type: hash.Hash
         name: NewVerifyScratch
@@ -1288,8 +1295,32 @@ packages:
         struct:
           unexported: true
       - doc: |-
+          ScratchOwner is the identity a [VerifyScratch] is bound to: the token of the
+          verifier that made it, compared by address and never read. It has a size,
+          so two of them are never one address (a pointer to a zero-sized value may
+          be). Make one with [NewScratchOwner].
+        methods:
+          - doc: |-
+              String implements fmt.Stringer and renders the type alone,
+              "token.ScratchOwner": an owner is an identity, and nothing of it is
+              meant to be read.
+            name: String
+            out:
+              - type: string
+            recv: pointer
+          - doc: |-
+              GoString implements fmt.GoStringer so %#v renders the same as %v.
+            name: GoString
+            out:
+              - type: string
+            recv: pointer
+        name: ScratchOwner
+        struct:
+          unexported: true
+      - doc: |-
           VerifyScratch is the mutable MAC state of one [VerifierInto] caller: a keyed
-          stdlib hash.Hash and the token of the verifier that made it, nothing else.
+          stdlib hash.Hash and the [ScratchOwner] of the verifier that made it, nothing
+          else.
           It exists so a verifier can stay immutable and concurrent while a caller
           that verifies on one thread — an event loop — reuses one keyed MAC instead
           of building a new one per token.
@@ -1310,7 +1341,7 @@ packages:
               exactly one [VerifyScratch.Leave].
             in:
               - name: owner
-                type: any
+                type: "*ScratchOwner"
             name: Enter
             out:
               - type: error

@@ -138,6 +138,26 @@ constants:
         name: exponentSaturation
         type: int
         value: 1 << 20
+      - doc: |-
+          highSurrogateFirst is the first UTF-16 code unit that opens a surrogate
+          pair, U+D800.
+        name: highSurrogateFirst
+        type: rune
+        value: "0xD800"
+      - doc: highSurrogateLast is the last one, U+DBFF.
+        name: highSurrogateLast
+        type: rune
+        value: "0xDBFF"
+      - doc: |-
+          lowSurrogateFirst is the first UTF-16 code unit that closes a surrogate
+          pair, U+DC00.
+        name: lowSurrogateFirst
+        type: rune
+        value: "0xDC00"
+      - doc: lowSurrogateLast is the last one, U+DFFF.
+        name: lowSurrogateLast
+        type: rune
+        value: "0xDFFF"
     name: maxIndexedMembers
   - grouped: true
     items:
@@ -234,6 +254,21 @@ constants:
         type: string
         value: "\"none\""
     name: jwsSegments
+  - grouped: true
+    items:
+      - doc: "factUnsecured: alg is \"none\" in some capitalisation."
+        name: factUnsecured
+        type: headerFacts
+        value: 1 << iota
+      - doc: "factAlgEmpty: alg is absent, null or \"\"."
+        name: factAlgEmpty
+      - doc: "factAlgBound: alg names the bound algorithm exactly."
+        name: factAlgBound
+      - doc: "factCritical: a \"crit\" member was present."
+        name: factCritical
+      - doc: "factTypeOK: no type is required, or typ is exactly the required one."
+        name: factTypeOK
+    name: factUnsecured
   - grouped: true
     items:
       - doc: |-
@@ -388,6 +423,7 @@ files:
       - registeredValue
       - readClaims
       - readRegistered
+      - checkRegisteredKinds
       - readInstants
       - readInstant
       - decodeTimeIn
@@ -397,6 +433,7 @@ files:
       - checkPrivateMembers
       - decodeClaims
       - attachPrivate
+      - withPrivateMember
       - memberValue
       - memberText
       - encodeClaims
@@ -454,7 +491,6 @@ files:
   - decls:
       - headerStackLen
       - hs256Verifier
-      - scratchOwner
       - newHS256Verifier
       - (*hs256Verifier).NewScratch
       - (*hs256Verifier).VerifyInto
@@ -500,10 +536,12 @@ files:
       - (*jsonScan).topMember
       - (*objectIndex).hasName
       - (*jsonScan).value
+      - (*jsonScan).literalValue
       - (*jsonScan).container
       - (*jsonScan).element
       - (*jsonScan).str
       - escapeLen
+      - isLowSurrogate
       - hexUnit
       - hexValue
       - (*jsonScan).number
@@ -551,6 +589,7 @@ files:
     name: jwkbridge.go
   - decls:
       - jwsSegments
+      - factUnsecured
       - headerValue
       - headerView
       - readJOSEHeader
@@ -560,6 +599,8 @@ files:
       - policyValue.checkHeader
       - policyValue.checkHeaderView
       - headerFacts
+      - factIf
+      - headerFacts.has
       - policyValue.judgeHeader
       - literalEqual
       - literalIsNone
@@ -704,6 +745,12 @@ functions:
     name: readRegistered
     params: raw []byte, idx *objectIndex, shape claimShape
     results: reg registeredValue, err error
+  - doc: |-
+      checkRegisteredKinds refuses a registered claim that is null, then a string
+      claim — iss, sub, jti — of any other JSON type.
+    name: checkRegisteredKinds
+    params: idx *objectIndex, at *[registeredSlots]int
+    results: error
   - doc: readInstants decodes exp, nbf and iat onto reg.
     name: readInstants
     params: raw []byte, idx *objectIndex, reg registeredValue, shape claimShape
@@ -735,7 +782,7 @@ functions:
       the claim is absent. Names are unique, so each slot is set at most once.
     name: locateRegistered
     params: raw []byte, idx *objectIndex
-    results: at [registeredSlots]int
+    results: "[registeredSlots]int"
   - doc: registeredSlot returns the slot of a registered name, or -1.
     name: registeredSlot
     params: name []byte
@@ -760,11 +807,19 @@ functions:
     name: attachPrivate
     params: base coretoken.ClaimsValue, raw []byte, idx *objectIndex
     results: claims coretoken.ClaimsValue, err error
+  - doc: |-
+      withPrivateMember returns claims with member i attached as a raw private
+      claim, or claims unchanged when member i is a registered claim.
+    name: withPrivateMember
+    params: claims coretoken.ClaimsValue, raw []byte, idx *objectIndex, i int
+    results: coretoken.ClaimsValue, error
   - doc: memberValue returns the value of member at, nil when absent.
     name: memberValue
     params: raw []byte, idx *objectIndex, at int
     results: "[]byte"
-  - doc: memberText decodes the string member at, "" when absent.
+  - doc: |-
+      memberText decodes the string member at. An absent member leaves the zero
+      string, which is what ClaimsValue's With* methods read as "no claim".
     name: memberText
     params: raw []byte, idx *objectIndex, at int
     results: string
@@ -970,6 +1025,12 @@ functions:
     name: escapeLen
     params: esc []byte
     results: n int, err error
+  - doc: |-
+      isLowSurrogate reports whether unit is the UTF-16 code unit that closes a
+      surrogate pair.
+    name: isLowSurrogate
+    params: unit rune
+    results: bool
   - doc: hexUnit reads the \uXXXX escape at the start of esc.
     name: hexUnit
     params: esc []byte
@@ -991,7 +1052,7 @@ functions:
   - doc: decodeEscape decodes the validated escape at the start of esc.
     name: decodeEscape
     params: esc []byte
-    results: r rune, n int
+    results: decoded rune, n int
   - doc: |-
       jsonStringEqual reports whether the validated string literal lit decodes to
       want, without decoding it anywhere: it compares as it reads, so a literal of
@@ -1148,6 +1209,10 @@ functions:
     name: headerText
     params: lit []byte
     results: string
+  - doc: factIf returns fact when held is true, and no fact otherwise.
+    name: factIf
+    params: held bool, fact headerFacts
+    results: headerFacts
   - doc: |-
       literalEqual reports whether a header member's literal decodes to want; an
       absent or null member decodes to "".
@@ -1454,7 +1519,7 @@ types:
         name: instant
         params: slot int
         recv: r *registeredValue
-        results: instant time.Time
+        results: time.Time
     name: registeredValue
   - doc: |-
       depthScan is the state a linear nesting scan needs: how deep it currently
@@ -1649,7 +1714,7 @@ types:
           owner is this verifier's scratch token: a pointer no caller can reach,
           so a scratch can only claim this verifier by being made by it.
         name: owner
-        type: "*scratchOwner"
+        type: "*coretoken.ScratchOwner"
     kind: struct
     methods:
       - doc: |-
@@ -1685,15 +1750,6 @@ types:
         recv: v *hs256Verifier
         results: error
     name: hs256Verifier
-  - doc: |-
-      scratchOwner is the identity a VerifyScratch is bound to. It has a size, so
-      two of them are never one address.
-    fields:
-      - doc: mark is never read; it keeps the type from being zero-sized.
-        name: mark
-        type: byte
-    kind: struct
-    name: scratchOwner
   - fields:
       - doc: Issuer, when non-empty, is stamped as "iss" on claims that carry none.
         name: Issuer
@@ -1836,7 +1892,7 @@ types:
         results: int
       - doc: hasName reports whether an indexed member is already called name.
         name: hasName
-        params: raw []byte, name []byte
+        params: raw, name []byte
         recv: x *objectIndex
         results: bool
     name: objectIndex
@@ -1873,6 +1929,11 @@ types:
       - doc: value reads one value at depth and reports its kind.
         name: value
         params: depth int
+        recv: s *jsonScan
+        results: kind valueKind, err error
+      - doc: literalValue reads the literal that c opens and reports its kind.
+        name: literalValue
+        params: c byte
         recv: s *jsonScan
         results: kind valueKind, err error
       - doc: |-
@@ -2039,25 +2100,18 @@ types:
         type: bool
     kind: struct
     name: headerView
-  - doc: headerFacts is what the header judgement needs, whichever reader produced it.
-    fields:
-      - doc: "unsecured: alg is \"none\" in some capitalisation."
-        name: unsecured
-        type: bool
-      - doc: "algEmpty: alg is absent, null or \"\"."
-        name: algEmpty
-        type: bool
-      - doc: "algBound: alg names the bound algorithm exactly."
-        name: algBound
-        type: bool
-      - doc: "critical: a \"crit\" member was present."
-        name: critical
-        type: bool
-      - doc: "typeOK: no type is required, or typ is exactly the required one."
-        name: typeOK
-        type: bool
-    kind: struct
+  - doc: |-
+      headerFacts is what the header judgement needs, whichever reader produced
+      it: one bit per fact, set when the fact holds.
+    kind: named
+    methods:
+      - doc: has reports whether every bit of fact is set in facts.
+        name: has
+        params: fact headerFacts
+        recv: h headerFacts
+        results: bool
     name: headerFacts
+    underlying: uint8
   - doc: jwsIssuer mints JWS compact tokens under one algorithm-bound key.
     fields:
       - doc: bound is the signing key; its algorithm is fixed at construction.

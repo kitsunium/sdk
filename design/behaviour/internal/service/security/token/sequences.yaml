@@ -108,6 +108,8 @@ sequences:
         kind: self
       - id: locateRegistered
         kind: internal
+      - id: checkRegisteredKinds
+        kind: internal
       - id: checkAudienceIn
         kind: internal
       - id: readInstants
@@ -116,27 +118,14 @@ sequences:
       - set: reg.at
         to: locateRegistered
         value: locateRegistered(raw, idx)
-      - loop:
+      - opt:
           do:
-            - opt:
-                do:
-                  - return: registeredValue{}, malformed("registered claim " + registeredNames[slot] + " is null")
-                when: at >= 0 && idx.member[at].kind == kindNull
-          key: slot
-          range: reg.at
-          value: at
-      - loop:
-          do:
-            - opt:
-                do:
-                  - return: registeredValue{}, malformed("registered claim " + registeredNames[slot] + " is not a string")
-                init:
-                  bind: at
-                  eval: reg.at[slot]
-                when: at >= 0 && idx.member[at].kind != kindString
-          key: _
-          range: "[...]int{slotIssuer, slotSubject, slotID}"
-          value: slot
+            - return: registeredValue{}, kerr
+          init:
+            bind: kerr
+            eval: checkRegisteredKinds(idx, &reg.at)
+            to: checkRegisteredKinds
+          when: kerr != nil
       - opt:
           do:
             - opt:
@@ -153,6 +142,39 @@ sequences:
           when: at >= 0
       - return: readInstants(raw, idx, reg, shape)
         to: readInstants
+  - of: checkRegisteredKinds
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkRegisteredKinds
+        kind: self
+      - id: malformed
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: malformed("registered claim " + registeredNames[slot] + " is null")
+                    to: malformed
+                when: member >= 0 && idx.member[member].kind == kindNull
+          key: slot
+          range: at
+          value: member
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: malformed("registered claim " + registeredNames[slot] + " is not a string")
+                    to: malformed
+                init:
+                  bind: member
+                  eval: at[slot]
+                when: member >= 0 && idx.member[member].kind != kindString
+          key: _
+          range: "[...]int{slotIssuer, slotSubject, slotID}"
+          value: slot
+      - return: nil
   - of: readInstants
     participants:
       - id: caller
@@ -274,8 +296,8 @@ sequences:
       - id: registeredSlot
         kind: internal
     steps:
-      - set: at
-        value: "[registeredSlots]int{-1, -1, -1, -1, -1, -1, -1}"
+      - bind: at
+        eval: "[registeredSlots]int{-1, -1, -1, -1, -1, -1, -1}"
       - loop:
           do:
             - opt:
@@ -413,25 +435,16 @@ sequences:
         kind: actor
       - id: attachPrivate
         kind: self
-      - id: idx.name
+      - id: withPrivateMember
         kind: internal
-      - id: claims.WithPrivateRaw
-        kind: value
     steps:
       - set: claims
         value: base
       - loop:
           do:
-            - bind: name
-              eval: idx.name(raw, i)
-              to: idx.name
-            - opt:
-                do:
-                  - continue: true
-                when: registeredSlot(name) >= 0
             - bind: next, aerr
-              eval: claims.WithPrivateRaw(string(name), idx.value(raw, i))
-              to: claims.WithPrivateRaw
+              eval: withPrivateMember(claims, raw, idx, i)
+              to: withPrivateMember
             - opt:
                 do:
                   - return: coretoken.ClaimsValue{}, aerr
@@ -441,6 +454,26 @@ sequences:
           key: i
           range: idx.count
       - return: claims, nil
+  - of: withPrivateMember
+    participants:
+      - id: caller
+        kind: actor
+      - id: withPrivateMember
+        kind: self
+      - id: idx.name
+        kind: internal
+      - id: claims.WithPrivateRaw
+        kind: value
+    steps:
+      - bind: name
+        eval: idx.name(raw, i)
+        to: idx.name
+      - opt:
+          do:
+            - return: claims, nil
+          when: registeredSlot(name) >= 0
+      - return: claims.WithPrivateRaw(string(name), idx.value(raw, i))
+        to: claims.WithPrivateRaw
   - of: memberValue
     participants:
       - id: caller
@@ -465,12 +498,16 @@ sequences:
       - id: decodeText
         kind: internal
     steps:
+      - var:
+          name: text
+          type: string
       - opt:
           do:
-            - return: "\"\""
-          when: at < 0
-      - return: decodeText(idx.value(raw, at))
-        to: decodeText
+            - set: text
+              to: decodeText
+              value: decodeText(idx.value(raw, at))
+          when: at >= 0
+      - return: text
   - of: encodeClaims
     participants:
       - id: caller
@@ -1071,11 +1108,11 @@ sequences:
         to: hmacsha2.MAC.Verify
   - of: newHS256Verifier
     steps:
-      - return: |-
-          &hs256Verifier{
-          		jwsVerifier: jwsVerifier{bound: binding, policy: policy},
-          		secret:      binding, owner: &scratchOwner{},
-          	}
+      - bind: v
+        eval: "&hs256Verifier{secret: binding, owner: coretoken.NewScratchOwner()}"
+      - set: v.bound, v.policy
+        value: binding, policy
+      - return: v
   - of: (*hs256Verifier).NewScratch
     participants:
       - id: caller
@@ -1168,13 +1205,13 @@ sequences:
           do:
             - return: herr
           when: herr != nil
-      - bind: view, rerr
+      - bind: view, err
         eval: readJOSEHeader(header)
         to: readJOSEHeader
       - opt:
           do:
-            - return: rerr
-          when: rerr != nil
+            - return: err
+          when: err != nil
       - return: v.authenticate(s, token, &seg, &view, dst)
         to: v.authenticate
   - of: (*hs256Verifier).authenticate
@@ -1680,7 +1717,7 @@ sequences:
             - return: "[]string{decodeText(raw)}, nil"
           when: raw[0] == '"'
       - set: audience
-        value: "[]string{}"
+        value: make([]string, 0, coretoken.ClaimsBufAudienceCap)
       - bind: walk
         eval: newArrayStrings(raw)
         to: newArrayStrings
@@ -1893,6 +1930,8 @@ sequences:
         kind: internal
       - id: s.str
         kind: internal
+      - id: s.literalValue
+        kind: internal
     steps:
       - switch:
           cases:
@@ -1911,22 +1950,31 @@ sequences:
             - case: c == '-' || isDigit(c)
               do:
                 - return: kindNumber, s.number()
-            - case: c == 't'
+            - default: true
+              do:
+                - return: s.literalValue(c)
+                  to: s.literalValue
+          init:
+            bind: c
+            eval: s.peek()
+            to: s.peek
+  - of: (*jsonScan).literalValue
+    steps:
+      - switch:
+          cases:
+            - case: "'t'"
               do:
                 - return: kindTrue, s.literal("true")
-            - case: c == 'f'
+            - case: "'f'"
               do:
                 - return: kindFalse, s.literal("false")
-            - case: c == 'n'
+            - case: "'n'"
               do:
                 - return: kindNull, s.literal("null")
             - default: true
               do:
                 - return: 0, coretoken.Malformed
-          init:
-            bind: c
-            eval: s.peek()
-            to: s.peek
+          "on": c
   - of: (*jsonScan).container
     participants:
       - id: caller
@@ -2093,15 +2141,11 @@ sequences:
       - opt:
           do:
             - return: 0, coretoken.Malformed
-          when: "!ok"
-      - opt:
-          do:
-            - return: 0, coretoken.Malformed
-          when: unit >= 0xDC00 && unit <= 0xDFFF
+          when: "!ok || isLowSurrogate(unit)"
       - opt:
           do:
             - return: unicodeEscapeLen, nil
-          when: unit < 0xD800 || unit > 0xDBFF
+          when: unit < highSurrogateFirst || unit > highSurrogateLast
       - opt:
           do:
             - return: 0, coretoken.Malformed
@@ -2112,8 +2156,11 @@ sequences:
       - opt:
           do:
             - return: 0, coretoken.Malformed
-          when: "!lok || low < 0xDC00 || low > 0xDFFF"
+          when: "!lok || !isLowSurrogate(low)"
       - return: 2 * unicodeEscapeLen, nil
+  - of: isLowSurrogate
+    steps:
+      - return: unit >= lowSurrogateFirst && unit <= lowSurrogateLast
   - of: hexUnit
     participants:
       - id: caller
@@ -2196,13 +2243,13 @@ sequences:
             - set: fracEnd
               value: s.pos
           when: s.consume('.')
-      - bind: exponent, eerr
+      - bind: exponent, err
         eval: s.exponent()
         to: s.exponent
       - opt:
           do:
-            - return: eerr
-          when: eerr != nil
+            - return: err
+          when: err != nil
       - return: s.checkMagnitude(start, intStart, intDigits, s.raw[fracStart:fracEnd], exponent)
         to: s.checkMagnitude
   - of: (*jsonScan).exponent
@@ -2314,7 +2361,7 @@ sequences:
       - opt:
           do:
             - return: coretoken.Malformed
-          when: len(s.raw)-s.pos < len(word) || string(s.raw[s.pos:s.pos+len(word)]) != word
+          when: len(s.raw)-s.pos < len(word) || !bytes.Equal(s.raw[s.pos:s.pos+len(word)], []byte(word))
       - op: +=
         set: s.pos
         value: len(word)
@@ -2465,7 +2512,7 @@ sequences:
             - opt:
                 do:
                   - return: "false"
-                when: len(want)-w < len(piece) || want[w:w+len(piece)] != string(piece)
+                when: len(want)-w < len(piece) || !bytes.Equal(piece, []byte(want[w:w+len(piece)]))
             - op: +=
               set: w
               value: len(piece)
@@ -3234,16 +3281,21 @@ sequences:
       - id: decodeText
         kind: internal
     steps:
+      - var:
+          name: text
+          type: string
       - opt:
           do:
-            - return: "\"\""
+            - return: text
           when: lit == nil
+      - bind: body
+        eval: "lit[1 : len(lit)-1]"
       - loop:
           do:
             - opt:
                 do:
                   - return: known
-                when: string(lit[1:len(lit)-1]) == known
+                when: bytes.Equal(body, []byte(known))
           key: _
           range: "[...]string{\"HS256\", \"ES256\", \"EdDSA\", defaultType}"
           value: known
@@ -3259,11 +3311,11 @@ sequences:
         kind: internal
     steps:
       - return: |-
-          p.judgeHeader(headerFacts{
-          		unsecured: strings.EqualFold(header.alg, algNone), algEmpty: header.alg == "",
-          		algBound: header.alg == bound.String(), critical: header.critical,
-          		typeOK: p.requireType == "" || header.typ == p.requireType,
-          	}, bound)
+          p.judgeHeader(factIf(strings.EqualFold(header.alg, algNone), factUnsecured)|
+          		factIf(header.alg == "", factAlgEmpty)|
+          		factIf(header.alg == bound.String(), factAlgBound)|
+          		factIf(header.critical, factCritical)|
+          		factIf(p.requireType == "" || header.typ == p.requireType, factTypeOK), bound)
         to: p.judgeHeader
   - of: policyValue.checkHeaderView
     participants:
@@ -3275,12 +3327,22 @@ sequences:
         kind: internal
     steps:
       - return: |-
-          p.judgeHeader(headerFacts{
-          		unsecured: literalIsNone(view.alg), algEmpty: literalEqual(view.alg, ""),
-          		algBound: literalEqual(view.alg, bound.String()), critical: view.critical,
-          		typeOK: p.requireType == "" || literalEqual(view.typ, p.requireType),
-          	}, bound)
+          p.judgeHeader(factIf(literalIsNone(view.alg), factUnsecured)|
+          		factIf(literalEqual(view.alg, ""), factAlgEmpty)|
+          		factIf(literalEqual(view.alg, bound.String()), factAlgBound)|
+          		factIf(view.critical, factCritical)|
+          		factIf(p.requireType == "" || literalEqual(view.typ, p.requireType), factTypeOK), bound)
         to: p.judgeHeader
+  - of: factIf
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: "!held"
+      - return: fact
+  - of: headerFacts.has
+    steps:
+      - return: h&fact == fact
   - of: policyValue.judgeHeader
     participants:
       - id: caller
@@ -3293,29 +3355,29 @@ sequences:
       - opt:
           do:
             - return: coretoken.AlgorithmNone
-          when: facts.unsecured
+          when: facts.has(factUnsecured)
       - opt:
           do:
             - return: coretoken.Malformed
-          when: facts.algEmpty
+          when: facts.has(factAlgEmpty)
       - opt:
           do:
             - return: |-
                 errs.Wrap(coretoken.AlgorithmMismatch, errs.WrapParams{},
                 			errs.String("expected", bound.String()))
               to: errs
-          when: "!facts.algBound"
+          when: "!facts.has(factAlgBound)"
       - opt:
           do:
             - return: coretoken.HeaderUnsupported
-          when: facts.critical
+          when: facts.has(factCritical)
       - opt:
           do:
             - return: |-
                 errs.Wrap(coretoken.HeaderUnsupported, errs.WrapParams{},
                 			errs.String("expected_typ", p.requireType))
               to: errs
-          when: "!facts.typeOK"
+          when: "!facts.has(factTypeOK)"
       - return: nil
   - of: literalEqual
     participants:

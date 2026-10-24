@@ -115,7 +115,7 @@ func TestClaimsBufShortValueLeavesNoTail(t *testing.T) {
 func TestScratchRedactsAndGuards(t *testing.T) {
 	t.Parallel()
 	key := []byte("0123456789abcdef0123456789abcdef")
-	owner := new(int)
+	owner := token.NewScratchOwner()
 	scratch := token.NewVerifyScratch(owner, hmac.New(sha256.New, key))
 	mac := hmac.New(sha256.New, key)
 	mac.Write([]byte("input"))
@@ -125,7 +125,7 @@ func TestScratchRedactsAndGuards(t *testing.T) {
 		t.Fatalf("MACEqual on a scratch nobody entered reported true")
 	}
 	//: another owner is foreign.
-	if err := scratch.Enter(new(int)); !errs.HasCode(err, token.CodeScratchForeign) {
+	if err := scratch.Enter(token.NewScratchOwner()); !errs.HasCode(err, token.CodeScratchForeign) {
 		t.Fatalf("Enter(other owner) = %v", err)
 	}
 	//: the owner enters.

@@ -1,6 +1,8 @@
 package token
 
 import (
+	"bytes"
+	"slices"
 	"strconv"
 	"unicode/utf8"
 )
@@ -19,6 +21,13 @@ const (
 	// ClaimsBufPrivateCap is how many private claim names a ClaimsBuf may
 	// declare.
 	ClaimsBufPrivateCap int = 8
+)
+
+const (
+	// textClaims is how many TextClaim values exist.
+	textClaims int = 3
+	// timeClaims is how many TimeClaim values exist.
+	timeClaims int = 3
 )
 
 // ClaimState is what a [ClaimsBuf] knows about one claim after a
@@ -40,33 +49,6 @@ const (
 	ClaimOK
 )
 
-// String reports the state's name: "absent", "wrong_type", "invalid" or "ok".
-func (s ClaimState) String() string {
-	//: closed switch — every state has one spelling.
-	switch s {
-	//: the zero value.
-	case ClaimAbsent:
-		//: not carried.
-		return "absent"
-	//: present, not a string.
-	case ClaimWrongType:
-		//: wrong JSON type.
-		return "wrong_type"
-	//: present, empty.
-	case ClaimInvalid:
-		//: present but unusable.
-		return "invalid"
-	//: present and usable.
-	case ClaimOK:
-		//: usable.
-		return "ok"
-	//: any out-of-range value.
-	default:
-		//: a name no state uses.
-		return "unknown"
-	}
-}
-
 // TextClaim names one registered claim a [ClaimsBuf] stores as text.
 type TextClaim uint8
 
@@ -79,9 +61,6 @@ const (
 	TextID
 )
 
-// textClaims is how many TextClaim values exist.
-const textClaims int = 3
-
 // TimeClaim names one registered claim a [ClaimsBuf] stores as an instant.
 type TimeClaim uint8
 
@@ -93,9 +72,6 @@ const (
 	// TimeIssuedAt is the "iat" claim.
 	TimeIssuedAt
 )
-
-// timeClaims is how many TimeClaim values exist.
-const timeClaims int = 3
 
 // textSlot is one fixed-capacity text claim.
 type textSlot struct {
@@ -151,6 +127,33 @@ type ClaimsBuf struct {
 	private [ClaimsBufPrivateCap]textSlot
 }
 
+// String reports the state's name: "absent", "wrong_type", "invalid" or "ok".
+func (s ClaimState) String() string {
+	//: closed switch — every state has one spelling.
+	switch s {
+	//: the zero value.
+	case ClaimAbsent:
+		//: not carried.
+		return "absent"
+	//: present, not a string.
+	case ClaimWrongType:
+		//: wrong JSON type.
+		return "wrong_type"
+	//: present, empty.
+	case ClaimInvalid:
+		//: present but unusable.
+		return "invalid"
+	//: present and usable.
+	case ClaimOK:
+		//: usable.
+		return "ok"
+	//: any out-of-range value.
+	default:
+		//: a name no state uses.
+		return "unknown"
+	}
+}
+
 // NewClaimsBuf returns an empty buffer declaring the private claim names
 // private, in order. It refuses an empty name, a registered one, a repeated
 // one, or one a token could only spell with an escape — a quote, a backslash,
@@ -183,18 +186,12 @@ func (b *ClaimsBuf) declare(name string) error {
 		//: a bound, named as one.
 		return ClaimsBufOverflow
 	}
-	//: the empty, the registered and the unspellable are not claim names.
-	if name == "" || IsRegisteredClaim(name) || !plainMemberName(name) {
+	//: the empty, the registered and the unspellable are not claim names, and
+	//: a repeated name would be two slots for one claim.
+	if name == "" || IsRegisteredClaim(name) || !plainMemberName(name) ||
+		slices.Contains(b.names[:b.declared], name) {
 		//: the same verdict WithPrivateRaw gives.
 		return ClaimNameInvalid
-	}
-	//: a repeated name would be two slots for one claim.
-	for _, declared := range b.names[:b.declared] {
-		//: compared exactly.
-		if declared == name {
-			//: refuse the duplicate.
-			return ClaimNameInvalid
-		}
 	}
 	b.names[b.declared] = name
 	b.declared++
@@ -221,11 +218,11 @@ func plainMemberName(name string) bool {
 // Reset clears every value and state of b, keeping its declared names.
 func (b *ClaimsBuf) Reset() {
 	//: every value octet, not only the lengths: nothing survives a reset.
-	b.text = [textClaims]textSlot{}
-	b.times = [timeClaims]timeSlot{}
-	b.audience = [ClaimsBufAudienceCap]textSlot{}
+	clear(b.text[:])
+	clear(b.times[:])
+	clear(b.audience[:])
 	b.audienceLen = 0
-	b.private = [ClaimsBufPrivateCap]textSlot{}
+	clear(b.private[:])
 }
 
 // Text returns a view of the registered text claim c and its state. The view
@@ -328,8 +325,8 @@ func (b *ClaimsBuf) Declared() int {
 func (b *ClaimsBuf) PrivateIndex(name []byte) int {
 	//: at most ClaimsBufPrivateCap names: a scan beats any index.
 	for i, declared := range b.names[:b.declared] {
-		//: compared without converting: no allocation.
-		if declared == string(name) {
+		//: the conversion does not escape, so it is zero-copy: no allocation.
+		if bytes.Equal(name, []byte(declared)) {
 			//: declared here.
 			return i
 		}

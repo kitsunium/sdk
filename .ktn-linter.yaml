@@ -1874,8 +1874,19 @@ rules:
   # MarshalJSON — the record as it rests — must be a value method, while its
   # UnmarshalJSON keeps what it reads and must take a pointer. Scoped to the
   # one file.
+  #
+  # core/security/token.ClaimsBuf (claims_buf.go, ADR 0186) is the secret.Value
+  # case: String and GoString are its redaction, and they must be in the
+  # method set of the VALUE, or a ClaimsBuf formatted by value — %v of a struct
+  # that holds one, a copy passed to a logger — would be printed by reflection,
+  # every claim slot with it. Its writers (SetText, AppendAudience, Reset...)
+  # mutate a fixed buffer of about 4 KiB the caller reuses, and must take a
+  # pointer.
+  # Scoped to the one file.
   KTN-RECEIVER-MIXPTR:
     exclude:
+      - "**/internal/core/security/token/claims_buf.go"
+      - "internal/core/security/token/claims_buf.go"
       - "**/internal/core/net/**"
       - "internal/core/net/**"
       - "**/internal/core/security/secret/**"
@@ -1891,6 +1902,8 @@ rules:
   # the three files.
   KTN-VAR-RECVCONS:
     exclude:
+      - "**/internal/core/security/token/claims_buf.go"
+      - "internal/core/security/token/claims_buf.go"
       - "**/internal/core/net/**"
       - "internal/core/net/**"
       - "**/internal/core/security/secret/**"

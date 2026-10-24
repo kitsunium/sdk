@@ -144,6 +144,23 @@ sequences:
           range: private
           value: name
       - return: buf, nil
+  - of: (*ClaimsBuf).declare
+    steps:
+      - opt:
+          do:
+            - return: ClaimsBufOverflow
+          when: len(name) > ClaimsBufTextCap
+      - opt:
+          do:
+            - return: ClaimNameInvalid
+          when: |-
+            name == "" || IsRegisteredClaim(name) || !plainMemberName(name) ||
+            		slices.Contains(b.names[:b.declared], name)
+      - set: b.names[b.declared]
+        value: name
+      - op: ++
+        set: b.declared
+      - return: nil
   - of: plainMemberName
     participants:
       - id: caller
@@ -168,16 +185,12 @@ sequences:
         to: utf8
   - of: (*ClaimsBuf).Reset
     steps:
-      - set: b.text
-        value: "[textClaims]textSlot{}"
-      - set: b.times
-        value: "[timeClaims]timeSlot{}"
-      - set: b.audience
-        value: "[ClaimsBufAudienceCap]textSlot{}"
+      - eval: clear(b.text[:])
+      - eval: clear(b.times[:])
+      - eval: clear(b.audience[:])
       - set: b.audienceLen
         value: "0"
-      - set: b.private
-        value: "[ClaimsBufPrivateCap]textSlot{}"
+      - eval: clear(b.private[:])
   - of: (*ClaimsBuf).Text
     participants:
       - id: caller
@@ -428,6 +441,23 @@ sequences:
         to: slices
         value: slices.Clone(raw)
       - return: c, nil
+  - of: NewScratchOwner
+    steps:
+      - return: "&ScratchOwner{}"
+  - of: (*ScratchOwner).String
+    steps:
+      - return: "\"token.ScratchOwner\""
+  - of: (*ScratchOwner).GoString
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ScratchOwner).GoString
+        kind: self
+      - id: o.String
+        kind: internal
+    steps:
+      - return: o.String()
+        to: o.String
   - of: NewVerifyScratch
     participants:
       - id: caller

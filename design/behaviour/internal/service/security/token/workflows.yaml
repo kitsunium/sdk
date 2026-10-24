@@ -40,7 +40,7 @@ workflows:
             - opt:
                 do:
                   - return: i
-                when: string(x.name(raw, i)) == name
+                when: bytes.Equal(x.name(raw, i), []byte(name))
           key: i
           range: x.count
       - return: "-1"
@@ -51,7 +51,7 @@ workflows:
             - opt:
                 do:
                   - return: "true"
-                when: string(x.name(raw, i)) == string(name)
+                when: bytes.Equal(x.name(raw, i), name)
           key: i
           range: x.count
       - return: "false"

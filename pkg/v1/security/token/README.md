@@ -229,7 +229,7 @@ Move it between calls, or guard it with a mutex if a verifier reads it from anot
   - [func \(VerifierInto\) NewScratch\(\) \*VerifyScratch](<#VerifierInto.NewScratch>)
   - [func \(VerifierInto\) VerifyInto\(s \*VerifyScratch, token \[\]byte, dst \*ClaimsBuf\) error](<#VerifierInto.VerifyInto>)
 - [type VerifyScratch](<#VerifyScratch>)
-  - [func \(\*VerifyScratch\) Enter\(owner any\) error](<#VerifyScratch.Enter>)
+  - [func \(\*VerifyScratch\) Enter\(owner \*ScratchOwner\) error](<#VerifyScratch.Enter>)
   - [func \(\*VerifyScratch\) GoString\(\) string](<#VerifyScratch.GoString>)
   - [func \(\*VerifyScratch\) Leave\(\)](<#VerifyScratch.Leave>)
   - [func \(\*VerifyScratch\) MACEqual\(input \[\]byte, tag \[\]byte\) bool](<#VerifyScratch.MACEqual>)
@@ -2618,7 +2618,7 @@ type VerifyScratch struct{}
 ### func \(VerifyScratch\) [Enter](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/scratch.go>)
 
 ```go
-func (*VerifyScratch) Enter(owner any) error
+func (*VerifyScratch) Enter(owner *ScratchOwner) error
 ```
 
 Enter claims s for one verification by the verifier whose token is owner. It refuses a nil scratch, the zero scratch and one made for another owner with [ScratchForeign](#ScratchForeign), and a scratch another call holds with [ScratchBusy](#ScratchBusy) — in every case before any MAC is computed. A nil error must be paired with exactly one [VerifyScratch.Leave](#VerifyScratch.Leave).

@@ -160,7 +160,9 @@ func (joseShape) decodeAudience(raw []byte) (audience []string, err error) {
 		//: one audience.
 		return []string{decodeText(raw)}, nil
 	}
-	audience = []string{}
+	//: non-nil even when empty, as encoding/json decoded "[]"; sized for the
+	//: audiences a ClaimsBuf holds, and grown past them.
+	audience = make([]string, 0, coretoken.ClaimsBufAudienceCap)
 	walk := newArrayStrings(raw)
 	//: the array as sent, order preserved.
 	for {

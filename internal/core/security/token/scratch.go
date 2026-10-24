@@ -11,8 +11,18 @@ import (
 // so a scratch is never the reason a wider MAC cannot be carried.
 const scratchSumLen int = 64
 
+// ScratchOwner is the identity a [VerifyScratch] is bound to: the token of the
+// verifier that made it, compared by address and never read. It has a size,
+// so two of them are never one address (a pointer to a zero-sized value may
+// be). Make one with [NewScratchOwner].
+type ScratchOwner struct {
+	// mark is never read; it keeps the type from being zero-sized.
+	mark byte
+}
+
 // VerifyScratch is the mutable MAC state of one [VerifierInto] caller: a keyed
-// stdlib hash.Hash and the token of the verifier that made it, nothing else.
+// stdlib hash.Hash and the [ScratchOwner] of the verifier that made it, nothing
+// else.
 // It exists so a verifier can stay immutable and concurrent while a caller
 // that verifies on one thread — an event loop — reuses one keyed MAC instead
 // of building a new one per token.
@@ -28,8 +38,8 @@ type VerifyScratch struct {
 	// mac is the keyed MAC this scratch reuses, Reset before every use.
 	mac hash.Hash
 	// owner is the token of the verifier that made the scratch; compared by
-	// identity, never read.
-	owner any
+	// address, never read.
+	owner *ScratchOwner
 	// inUse is 1 while a verification holds the scratch: entered by a CAS
 	// from 0, left by a store of 0.
 	inUse atomic.Uint32
@@ -37,12 +47,34 @@ type VerifyScratch struct {
 	sum [scratchSumLen]byte
 }
 
+// NewScratchOwner returns a fresh owner token, distinct from every other. A
+// [VerifierInto] implementation makes one at construction and keeps it
+// unexported, so no caller can present it.
+func NewScratchOwner() *ScratchOwner {
+	//: a new address, never shared.
+	return &ScratchOwner{}
+}
+
+// String implements fmt.Stringer and renders the type alone,
+// "token.ScratchOwner": an owner is an identity, and nothing of it is
+// meant to be read.
+func (o *ScratchOwner) String() string {
+	//: no field is rendered.
+	return "token.ScratchOwner"
+}
+
+// GoString implements fmt.GoStringer so %#v renders the same as %v.
+func (o *ScratchOwner) GoString() string {
+	//: same rendering as String.
+	return o.String()
+}
+
 // NewVerifyScratch returns a scratch around mac for the verifier whose token
 // is owner. It is the constructor a [VerifierInto] implementation calls from
 // NewScratch; a caller asks the verifier, never this function, because only
 // the verifier knows its owner token. mac is Reset once here, so the first
 // verification pays nothing the later ones do not.
-func NewVerifyScratch(owner any, mac hash.Hash) *VerifyScratch {
+func NewVerifyScratch(owner *ScratchOwner, mac hash.Hash) *VerifyScratch {
 	//: prime the keyed state once, at construction.
 	mac.Reset()
 	//: a fresh scratch, idle.
@@ -54,7 +86,7 @@ func NewVerifyScratch(owner any, mac hash.Hash) *VerifyScratch {
 // with [ScratchForeign], and a scratch another call holds with [ScratchBusy] —
 // in every case before any MAC is computed. A nil error must be paired with
 // exactly one [VerifyScratch.Leave].
-func (s *VerifyScratch) Enter(owner any) error {
+func (s *VerifyScratch) Enter(owner *ScratchOwner) error {
 	//: a scratch nobody made, or another verifier made, is not this one's.
 	if s == nil || s.owner == nil || s.owner != owner {
 		//: refuse without touching the MAC.

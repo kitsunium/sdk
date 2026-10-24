@@ -35,6 +35,19 @@ const (
 	algNone string = "none"
 )
 
+const (
+	// factUnsecured: alg is "none" in some capitalisation.
+	factUnsecured headerFacts = 1 << iota
+	// factAlgEmpty: alg is absent, null or "".
+	factAlgEmpty
+	// factAlgBound: alg names the bound algorithm exactly.
+	factAlgBound
+	// factCritical: a "crit" member was present.
+	factCritical
+	// factTypeOK: no type is required, or typ is exactly the required one.
+	factTypeOK
+)
+
 // headerValue is the subset of the JOSE header this package acts on. Every
 // other member is IGNORED on the way in (RFC 7515 allows unknown parameters)
 // and not carried on the way out — re-emitting a parameter we never understood
@@ -150,15 +163,17 @@ func parseJOSEHeader(raw []byte) (header headerValue, err error) {
 // headerText decodes a header member's literal, "" when it was absent or
 // null. The spellings nearly every header carries come back as constants.
 func headerText(lit []byte) string {
-	//: absent or null.
+	var text string
+	//: absent or null leaves the zero string, this domain's "absent".
 	if lit == nil {
-		//: this domain's "absent".
-		return ""
+		//: nothing to decode.
+		return text
 	}
+	body := lit[1 : len(lit)-1]
 	//: the names this package itself writes, interned.
 	for _, known := range [...]string{"HS256", "ES256", "EdDSA", defaultType} {
-		//: compared without converting.
-		if string(lit[1:len(lit)-1]) == known {
+		//: the conversion does not escape, so it is zero-copy.
+		if bytes.Equal(body, []byte(known)) {
 			//: no allocation.
 			return known
 		}
@@ -175,64 +190,71 @@ func headerText(lit []byte) string {
 // reaches any primitive.
 func (p policyValue) checkHeader(header headerValue, bound coretoken.Algorithm) error {
 	//: the same judgement the scanner's view gets, from decoded strings.
-	return p.judgeHeader(headerFacts{
-		unsecured: strings.EqualFold(header.alg, algNone), algEmpty: header.alg == "",
-		algBound: header.alg == bound.String(), critical: header.critical,
-		typeOK: p.requireType == "" || header.typ == p.requireType,
-	}, bound)
+	return p.judgeHeader(factIf(strings.EqualFold(header.alg, algNone), factUnsecured)|
+		factIf(header.alg == "", factAlgEmpty)|
+		factIf(header.alg == bound.String(), factAlgBound)|
+		factIf(header.critical, factCritical)|
+		factIf(p.requireType == "" || header.typ == p.requireType, factTypeOK), bound)
 }
 
 // checkHeaderView is checkHeader over a header the scanner read, compared
 // literal against expectation without decoding anything.
 func (p policyValue) checkHeaderView(view *headerView, bound coretoken.Algorithm) error {
 	//: the same judgement checkHeader makes.
-	return p.judgeHeader(headerFacts{
-		unsecured: literalIsNone(view.alg), algEmpty: literalEqual(view.alg, ""),
-		algBound: literalEqual(view.alg, bound.String()), critical: view.critical,
-		typeOK: p.requireType == "" || literalEqual(view.typ, p.requireType),
-	}, bound)
+	return p.judgeHeader(factIf(literalIsNone(view.alg), factUnsecured)|
+		factIf(literalEqual(view.alg, ""), factAlgEmpty)|
+		factIf(literalEqual(view.alg, bound.String()), factAlgBound)|
+		factIf(view.critical, factCritical)|
+		factIf(p.requireType == "" || literalEqual(view.typ, p.requireType), factTypeOK), bound)
 }
 
-// headerFacts is what the header judgement needs, whichever reader produced it.
-type headerFacts struct {
-	// unsecured: alg is "none" in some capitalisation.
-	unsecured bool
-	// algEmpty: alg is absent, null or "".
-	algEmpty bool
-	// algBound: alg names the bound algorithm exactly.
-	algBound bool
-	// critical: a "crit" member was present.
-	critical bool
-	// typeOK: no type is required, or typ is exactly the required one.
-	typeOK bool
+// headerFacts is what the header judgement needs, whichever reader produced
+// it: one bit per fact, set when the fact holds.
+type headerFacts uint8
+
+// factIf returns fact when held is true, and no fact otherwise.
+func factIf(held bool, fact headerFacts) headerFacts {
+	//: a fact that does not hold sets no bit.
+	if !held {
+		//: none.
+		return 0
+	}
+	//: the fact's bit.
+	return fact
+}
+
+// has reports whether every bit of fact is set in facts.
+func (h headerFacts) has(fact headerFacts) bool {
+	//: a mask test.
+	return h&fact == fact
 }
 
 // judgeHeader returns the first verdict facts earn, in the one order every
 // path applies.
 func (p policyValue) judgeHeader(facts headerFacts, bound coretoken.Algorithm) error {
 	//: an unsecured token is refused by name, so the log says what happened.
-	if facts.unsecured {
+	if facts.has(factUnsecured) {
 		//: unconditional — no configuration accepts it.
 		return coretoken.AlgorithmNone
 	}
 	//: a header with no alg at all is not a JWS.
-	if facts.algEmpty {
+	if facts.has(factAlgEmpty) {
 		//: structural failure.
 		return coretoken.Malformed
 	}
 	//: the comparison. A mismatch is a refusal, never a re-selection.
-	if !facts.algBound {
+	if !facts.has(factAlgBound) {
 		//: the verdict an algorithm-confusion attempt produces.
 		return errs.Wrap(coretoken.AlgorithmMismatch, errs.WrapParams{},
 			errs.String("expected", bound.String()))
 	}
 	//: an unrecognised critical parameter is a mandatory rejection.
-	if facts.critical {
+	if facts.has(factCritical) {
 		//: refuse rather than ignore.
 		return coretoken.HeaderUnsupported
 	}
 	//: explicit typing, when the recipient asked for it (RFC 8725 §3.11/§3.12).
-	if !facts.typeOK {
+	if !facts.has(factTypeOK) {
 		//: refuse a token of the wrong kind from the right issuer.
 		return errs.Wrap(coretoken.HeaderUnsupported, errs.WrapParams{},
 			errs.String("expected_typ", p.requireType))

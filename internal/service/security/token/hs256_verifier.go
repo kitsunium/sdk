@@ -30,23 +30,15 @@ type hs256Verifier struct {
 	secret hs256Binding
 	// owner is this verifier's scratch token: a pointer no caller can reach,
 	// so a scratch can only claim this verifier by being made by it.
-	owner *scratchOwner
-}
-
-// scratchOwner is the identity a VerifyScratch is bound to. It has a size, so
-// two of them are never one address.
-type scratchOwner struct {
-	// mark is never read; it keeps the type from being zero-sized.
-	mark byte
+	owner *coretoken.ScratchOwner
 }
 
 // newHS256Verifier returns the HS256 verifier around binding and policy.
 func newHS256Verifier(binding hs256Binding, policy policyValue) *hs256Verifier {
+	v := &hs256Verifier{secret: binding, owner: coretoken.NewScratchOwner()}
+	v.bound, v.policy = binding, policy
 	//: bound for life, with an owner token of its own.
-	return &hs256Verifier{
-		jwsVerifier: jwsVerifier{bound: binding, policy: policy},
-		secret:      binding, owner: &scratchOwner{},
-	}
+	return v
 }
 
 // NewScratch returns a fresh scratch bound to this verifier, its MAC keyed
@@ -108,11 +100,11 @@ func (v *hs256Verifier) verifyInto(s *coretoken.VerifyScratch, token []byte, dst
 		//: propagate.
 		return herr
 	}
-	view, rerr := readJOSEHeader(header)
+	view, err := readJOSEHeader(header)
 	//: the one header reader.
-	if rerr != nil {
+	if err != nil {
 		//: propagate.
-		return rerr
+		return err
 	}
 	//: the signature is decoded before the header is judged, as parseJWS does.
 	return v.authenticate(s, token, &seg, &view, dst)
@@ -346,7 +338,7 @@ func storePrivate(raw []byte, idx *objectIndex, buf []byte, dst *coretoken.Claim
 }
 
 // instant returns the decoded instant of a time slot.
-func (r *registeredValue) instant(slot int) (instant time.Time) {
+func (r *registeredValue) instant(slot int) time.Time {
 	//: the three time slots.
 	switch slot {
 	//: exp.

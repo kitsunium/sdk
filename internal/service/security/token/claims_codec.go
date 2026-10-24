@@ -124,21 +124,10 @@ func readClaims(raw []byte, maxDepth int, shape claimShape, idx *objectIndex) (r
 // token could say "null" and be read as absent, empty or 1970.
 func readRegistered(raw []byte, idx *objectIndex, shape claimShape) (reg registeredValue, err error) {
 	reg.at = locateRegistered(raw, idx)
-	//: null first, in RFC 7519 §4.1 order so the refusal is deterministic.
-	for slot, at := range reg.at {
-		//: a present claim whose value is the null literal.
-		if at >= 0 && idx.member[at].kind == kindNull {
-			//: name the claim, which is the domain's vocabulary, never its value.
-			return registeredValue{}, malformed("registered claim " + registeredNames[slot] + " is null")
-		}
-	}
-	//: the three string claims: present but not a string is malformed.
-	for _, slot := range [...]int{slotIssuer, slotSubject, slotID} {
-		//: never coerced.
-		if at := reg.at[slot]; at >= 0 && idx.member[at].kind != kindString {
-			//: name the claim, not its contents.
-			return registeredValue{}, malformed("registered claim " + registeredNames[slot] + " is not a string")
-		}
+	//: null, then a string claim of another type.
+	if kerr := checkRegisteredKinds(idx, &reg.at); kerr != nil {
+		//: propagate Malformed.
+		return registeredValue{}, kerr
 	}
 	//: the format's own audience rule.
 	if at := reg.at[slotAudience]; at >= 0 {
@@ -150,6 +139,29 @@ func readRegistered(raw []byte, idx *objectIndex, shape claimShape) (reg registe
 	}
 	//: the three instants, each the one claim we must never guess at.
 	return readInstants(raw, idx, reg, shape)
+}
+
+// checkRegisteredKinds refuses a registered claim that is null, then a string
+// claim — iss, sub, jti — of any other JSON type.
+func checkRegisteredKinds(idx *objectIndex, at *[registeredSlots]int) error {
+	//: null first, in RFC 7519 §4.1 order so the refusal is deterministic.
+	for slot, member := range at {
+		//: a present claim whose value is the null literal.
+		if member >= 0 && idx.member[member].kind == kindNull {
+			//: name the claim, which is the domain's vocabulary, never its value.
+			return malformed("registered claim " + registeredNames[slot] + " is null")
+		}
+	}
+	//: the three string claims: present but not a string is malformed.
+	for _, slot := range [...]int{slotIssuer, slotSubject, slotID} {
+		//: never coerced.
+		if member := at[slot]; member >= 0 && idx.member[member].kind != kindString {
+			//: name the claim, not its contents.
+			return malformed("registered claim " + registeredNames[slot] + " is not a string")
+		}
+	}
+	//: every kind held.
+	return nil
 }
 
 // readInstants decodes exp, nbf and iat onto reg.
@@ -250,8 +262,8 @@ func checkAudienceIn(shape claimShape, raw []byte) error {
 
 // locateRegistered maps each registered slot to its member index, -1 when
 // the claim is absent. Names are unique, so each slot is set at most once.
-func locateRegistered(raw []byte, idx *objectIndex) (at [registeredSlots]int) {
-	at = [registeredSlots]int{-1, -1, -1, -1, -1, -1, -1}
+func locateRegistered(raw []byte, idx *objectIndex) [registeredSlots]int {
+	at := [registeredSlots]int{-1, -1, -1, -1, -1, -1, -1}
 	//: one pass over the members.
 	for i := range idx.count {
 		//: a registered member takes its slot.
@@ -363,12 +375,7 @@ func attachPrivate(base coretoken.ClaimsValue, raw []byte, idx *objectIndex) (cl
 	claims = base
 	//: everything the domain does not model travels through verbatim.
 	for i := range idx.count {
-		name := idx.name(raw, i)
-		//: the registered claims already have typed homes.
-		if registeredSlot(name) >= 0 {
-			continue
-		}
-		next, aerr := claims.WithPrivateRaw(string(name), idx.value(raw, i))
+		next, aerr := withPrivateMember(claims, raw, idx, i)
 		//: checkPrivateMembers already held these rules; kept typed anyway.
 		if aerr != nil {
 			//: propagate ClaimNameInvalid / TooLarge unchanged.
@@ -378,6 +385,19 @@ func attachPrivate(base coretoken.ClaimsValue, raw []byte, idx *objectIndex) (cl
 	}
 	//: the complete claim set.
 	return claims, nil
+}
+
+// withPrivateMember returns claims with member i attached as a raw private
+// claim, or claims unchanged when member i is a registered claim.
+func withPrivateMember(claims coretoken.ClaimsValue, raw []byte, idx *objectIndex, i int) (coretoken.ClaimsValue, error) {
+	name := idx.name(raw, i)
+	//: the registered claims already have typed homes.
+	if registeredSlot(name) >= 0 {
+		//: nothing to attach.
+		return claims, nil
+	}
+	//: the key is the one copy of the name the claim set keeps.
+	return claims.WithPrivateRaw(string(name), idx.value(raw, i))
 }
 
 // memberValue returns the value of member at, nil when absent.
@@ -391,15 +411,16 @@ func memberValue(raw []byte, idx *objectIndex, at int) []byte {
 	return idx.value(raw, at)
 }
 
-// memberText decodes the string member at, "" when absent.
+// memberText decodes the string member at. An absent member leaves the zero
+// string, which is what ClaimsValue's With* methods read as "no claim".
 func memberText(raw []byte, idx *objectIndex, at int) string {
-	//: the empty string is this domain's "absent".
-	if at < 0 {
-		//: absent.
-		return ""
+	var text string
+	//: only a present member has text to decode.
+	if at >= 0 {
+		text = decodeText(idx.value(raw, at))
 	}
-	//: the decoded string.
-	return decodeText(idx.value(raw, at))
+	//: the decoded string, or none.
+	return text
 }
 
 // encodeClaims renders claims under shape. The member map marshals with sorted

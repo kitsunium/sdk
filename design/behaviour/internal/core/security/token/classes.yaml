@@ -81,6 +81,17 @@ constants:
     name: ClaimsBufTextCap
   - grouped: true
     items:
+      - doc: textClaims is how many TextClaim values exist.
+        name: textClaims
+        type: int
+        value: "3"
+      - doc: timeClaims is how many TimeClaim values exist.
+        name: timeClaims
+        type: int
+        value: "3"
+    name: textClaims
+  - grouped: true
+    items:
       - doc: |-
           ClaimAbsent is the state of a claim the token did not carry — and of
           every claim of a ClaimsBuf that was reset or whose verification failed.
@@ -108,12 +119,6 @@ constants:
       - doc: TextID is the "jti" claim.
         name: TextID
     name: TextIssuer
-  - doc: textClaims is how many TextClaim values exist.
-    items:
-      - name: textClaims
-        type: int
-        value: "3"
-    name: textClaims
   - grouped: true
     items:
       - doc: TimeExpiry is the "exp" claim.
@@ -125,12 +130,6 @@ constants:
       - doc: TimeIssuedAt is the "iat" claim.
         name: TimeIssuedAt
     name: TimeExpiry
-  - doc: timeClaims is how many TimeClaim values exist.
-    items:
-      - name: timeClaims
-        type: int
-        value: "3"
-    name: timeClaims
   - doc: |-
       scratchSumLen is the widest tag a scratch sums into: SHA-512's 64 octets,
       so a scratch is never the reason a wider MAC cannot be carried.
@@ -191,18 +190,17 @@ files:
     name: claims.go
   - decls:
       - ClaimsBufTextCap
+      - textClaims
       - ClaimState
       - ClaimAbsent
-      - ClaimState.String
       - TextClaim
       - TextIssuer
-      - textClaims
       - TimeClaim
       - TimeExpiry
-      - timeClaims
       - textSlot
       - timeSlot
       - ClaimsBuf
+      - ClaimState.String
       - NewClaimsBuf
       - (*ClaimsBuf).declare
       - plainMemberName
@@ -238,7 +236,11 @@ files:
     name: doc.go
   - decls:
       - scratchSumLen
+      - ScratchOwner
       - VerifyScratch
+      - NewScratchOwner
+      - (*ScratchOwner).String
+      - (*ScratchOwner).GoString
       - NewVerifyScratch
       - (*VerifyScratch).Enter
       - (*VerifyScratch).Leave
@@ -267,11 +269,14 @@ functions:
     name: plainMemberName
     params: name string
     results: bool
+  - name: NewScratchOwner
+    results: "*ScratchOwner"
   - name: NewVerifyScratch
-    params: owner any, mac hash.Hash
+    params: owner *ScratchOwner, mac hash.Hash
     results: "*VerifyScratch"
 imports:
   atomic: sync/atomic
+  bytes: bytes
   hash: hash
   hmac: crypto/hmac
   maps: maps
@@ -527,14 +532,27 @@ types:
         results: string
     name: ClaimsBuf
   - fields:
+      - doc: mark is never read; it keeps the type from being zero-sized.
+        name: mark
+        type: byte
+    kind: struct
+    methods:
+      - name: String
+        recv: o *ScratchOwner
+        results: string
+      - name: GoString
+        recv: o *ScratchOwner
+        results: string
+    name: ScratchOwner
+  - fields:
       - doc: mac is the keyed MAC this scratch reuses, Reset before every use.
         name: mac
         type: hash.Hash
       - doc: |-
           owner is the token of the verifier that made the scratch; compared by
-          identity, never read.
+          address, never read.
         name: owner
-        type: any
+        type: "*ScratchOwner"
       - doc: |-
           inUse is 1 while a verification holds the scratch: entered by a CAS
           from 0, left by a store of 0.
@@ -546,7 +564,7 @@ types:
     kind: struct
     methods:
       - name: Enter
-        params: owner any
+        params: owner *ScratchOwner
         recv: s *VerifyScratch
         results: error
       - name: Leave

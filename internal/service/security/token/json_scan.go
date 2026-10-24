@@ -30,6 +30,16 @@ const (
 	// exponentSaturation is where an exponent stops being accumulated: far
 	// past every order a float64 can hold or round to zero.
 	exponentSaturation int = 1 << 20
+	// highSurrogateFirst is the first UTF-16 code unit that opens a surrogate
+	// pair, U+D800.
+	highSurrogateFirst rune = 0xD800
+	// highSurrogateLast is the last one, U+DBFF.
+	highSurrogateLast rune = 0xDBFF
+	// lowSurrogateFirst is the first UTF-16 code unit that closes a surrogate
+	// pair, U+DC00.
+	lowSurrogateFirst rune = 0xDC00
+	// lowSurrogateLast is the last one, U+DFFF.
+	lowSurrogateLast rune = 0xDFFF
 )
 
 // valueKind is the JSON type of one scanned value. The zero value is no
@@ -94,8 +104,8 @@ func (x *objectIndex) value(raw []byte, i int) []byte {
 func (x *objectIndex) lookup(raw []byte, name string) int {
 	//: the index is small and its names unescaped: a scan is exact.
 	for i := range x.count {
-		//: compared without converting, so nothing is allocated.
-		if string(x.name(raw, i)) == name {
+		//: the conversion does not escape, so it is zero-copy: no allocation.
+		if bytes.Equal(x.name(raw, i), []byte(name)) {
 			//: names are unique, so the first is the only one.
 			return i
 		}
@@ -244,11 +254,11 @@ func (s *jsonScan) topMember(idx *objectIndex) error {
 }
 
 // hasName reports whether an indexed member is already called name.
-func (x *objectIndex) hasName(raw []byte, name []byte) bool {
+func (x *objectIndex) hasName(raw, name []byte) bool {
 	//: at most maxIndexedMembers comparisons, most ending at the length.
 	for i := range x.count {
 		//: exact bytes; names carry no escape, so bytes are names.
-		if string(x.name(raw, i)) == string(name) {
+		if bytes.Equal(x.name(raw, i), name) {
 			//: seen.
 			return true
 		}
@@ -278,17 +288,28 @@ func (s *jsonScan) value(depth int) (kind valueKind, err error) {
 	case c == '-' || isDigit(c):
 		//: the RFC 8259 §6 grammar, checked before anybody parses it.
 		return kindNumber, s.number()
+	//: the three literals, or nothing JSON.
+	default:
+		//: true, false, null, or refused.
+		return s.literalValue(c)
+	}
+}
+
+// literalValue reads the literal that c opens and reports its kind.
+func (s *jsonScan) literalValue(c byte) (kind valueKind, err error) {
 	//: the three literals.
-	case c == 't':
-		//: true.
+	switch c {
+	//: true.
+	case 't':
+		//: the whole word.
 		return kindTrue, s.literal("true")
-	//: the three literals.
-	case c == 'f':
-		//: false.
+	//: false.
+	case 'f':
+		//: the whole word.
 		return kindFalse, s.literal("false")
-	//: the three literals.
-	case c == 'n':
-		//: null.
+	//: null.
+	case 'n':
+		//: the whole word.
 		return kindNull, s.literal("null")
 	//: nothing else starts a value.
 	default:
@@ -427,18 +448,13 @@ func escapeLen(esc []byte) (n int, err error) {
 		return 0, coretoken.Malformed
 	}
 	unit, ok := hexUnit(esc)
-	//: four hex digits are required.
-	if !ok {
-		//: refused.
-		return 0, coretoken.Malformed
-	}
-	//: a low surrogate cannot open a pair.
-	if unit >= 0xDC00 && unit <= 0xDFFF {
-		//: lone low half.
+	//: four hex digits are required, and a low surrogate cannot open a pair.
+	if !ok || isLowSurrogate(unit) {
+		//: refused, or a lone low half.
 		return 0, coretoken.Malformed
 	}
 	//: anything but a high surrogate stands alone.
-	if unit < 0xD800 || unit > 0xDBFF {
+	if unit < highSurrogateFirst || unit > highSurrogateLast {
 		//: one code unit.
 		return unicodeEscapeLen, nil
 	}
@@ -449,12 +465,19 @@ func escapeLen(esc []byte) (n int, err error) {
 	}
 	low, lok := hexUnit(esc[unicodeEscapeLen:])
 	//: the second escape must be a low surrogate.
-	if !lok || low < 0xDC00 || low > 0xDFFF {
+	if !lok || !isLowSurrogate(low) {
 		//: lone high half.
 		return 0, coretoken.Malformed
 	}
 	//: a pair.
 	return 2 * unicodeEscapeLen, nil
+}
+
+// isLowSurrogate reports whether unit is the UTF-16 code unit that closes a
+// surrogate pair.
+func isLowSurrogate(unit rune) bool {
+	//: U+DC00 to U+DFFF.
+	return unit >= lowSurrogateFirst && unit <= lowSurrogateLast
 }
 
 // hexUnit reads the \uXXXX escape at the start of esc.
@@ -531,11 +554,11 @@ func (s *jsonScan) number() error {
 		}
 		fracEnd = s.pos
 	}
-	exponent, eerr := s.exponent()
+	exponent, err := s.exponent()
 	//: "1e" is not a number.
-	if eerr != nil {
+	if err != nil {
 		//: refused.
-		return eerr
+		return err
 	}
 	//: the range, as a float64 would see it.
 	return s.checkMagnitude(start, intStart, intDigits, s.raw[fracStart:fracEnd], exponent)
@@ -633,7 +656,7 @@ func (s *jsonScan) digits() bool {
 // literal consumes word, or refuses.
 func (s *jsonScan) literal(word string) error {
 	//: the exact bytes, nothing else.
-	if len(s.raw)-s.pos < len(word) || string(s.raw[s.pos:s.pos+len(word)]) != word {
+	if len(s.raw)-s.pos < len(word) || !bytes.Equal(s.raw[s.pos:s.pos+len(word)], []byte(word)) {
 		//: refused.
 		return coretoken.Malformed
 	}
@@ -714,7 +737,7 @@ func appendJSONString(dst, lit []byte) []byte {
 }
 
 // decodeEscape decodes the validated escape at the start of esc.
-func decodeEscape(esc []byte) (r rune, n int) {
+func decodeEscape(esc []byte) (decoded rune, n int) {
 	//: the two-byte escapes map to one byte each.
 	switch esc[1] {
 	//: backspace.
@@ -775,7 +798,7 @@ func jsonStringEqual(lit []byte, want string) bool {
 			consumed = n
 		}
 		//: the next octets of want must be exactly these.
-		if len(want)-w < len(piece) || want[w:w+len(piece)] != string(piece) {
+		if len(want)-w < len(piece) || !bytes.Equal(piece, []byte(want[w:w+len(piece)])) {
 			//: a difference, or want ran out.
 			return false
 		}

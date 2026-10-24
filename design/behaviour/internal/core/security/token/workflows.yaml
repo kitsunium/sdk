@@ -22,30 +22,6 @@ workflows:
           range: present
           value: set
       - return: count
-  - of: (*ClaimsBuf).declare
-    steps:
-      - opt:
-          do:
-            - return: ClaimsBufOverflow
-          when: len(name) > ClaimsBufTextCap
-      - opt:
-          do:
-            - return: ClaimNameInvalid
-          when: name == "" || IsRegisteredClaim(name) || !plainMemberName(name)
-      - loop:
-          do:
-            - opt:
-                do:
-                  - return: ClaimNameInvalid
-                when: declared == name
-          key: _
-          range: b.names[:b.declared]
-          value: declared
-      - set: b.names[b.declared]
-        value: name
-      - op: ++
-        set: b.declared
-      - return: nil
   - of: (*ClaimsBuf).PrivateIndex
     steps:
       - loop:
@@ -53,7 +29,7 @@ workflows:
             - opt:
                 do:
                   - return: i
-                when: declared == string(name)
+                when: bytes.Equal(name, []byte(declared))
           key: i
           range: b.names[:b.declared]
           value: declared
