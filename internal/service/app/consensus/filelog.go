@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -327,7 +328,9 @@ func openFileLog(dd *dataDir, segBytes int64) (*fileLog, error) {
 			l.refuse = err
 			return l, nil
 		}
-		return nil, err
+		// The segments recovery opened are closed: dropped with l, they
+		// leaked one descriptor each at every retry in the process (#637).
+		return nil, alsoFailed(err, "close log", l.Close())
 	}
 	return l, nil
 }
@@ -749,21 +752,64 @@ func (l *fileLog) openSegments(segs []*scanned) error {
 // crash recovery for this reason (SyncDataDirectory). A write-back that
 // failed after the process died is reported to this fresh descriptor too
 // (errseq, Linux 4.13), so a failure here is STORAGE_FAILED, never a log
-// trusted from pages the disk refused.
+// trusted from pages the disk refused, and it writes the markers: the error
+// is reported once, so the next open in the same boot would sync clean
+// (#637).
 func (l *fileLog) syncAtOpen() error {
 	for _, s := range l.segs {
-		if err := datasync(s.f); err != nil {
-			return storageFailed("sync at open", err)
+		if err := syncFileAtOpen(s.f); err != nil {
+			return l.syncFailedAtOpen("sync at open", err)
 		}
 		l.syncedAtOpen++
 	}
 	for _, dir := range []string{l.logDir(), l.dir} {
-		if err := syncDir(dir); err != nil {
-			return storageFailed("sync at open", err)
+		if err := syncDirAtOpen(dir); err != nil {
+			return l.syncFailedAtOpen("sync at open", err)
 		}
 	}
 	return nil
 }
+
+// syncFailedAtOpen is the STORAGE_FAILED of a sync an open could not make,
+// its markers written first, as a running node's stop writes them (R9-05).
+// The kernel reports a failed write-back once, to the first descriptor that
+// syncs after it (errseq, Linux 4.13): this open consumed it, and the next
+// one in the same boot synced clean and trusted the pages the disk had
+// refused (#637). Only a sync's failure writes them: a failed read, or a
+// directory that could not be opened to be synced (a descriptor table
+// full), consumes no write-back error, and a marker would refuse every
+// start until the reboot. A data directory neither marker could be written
+// for is refused to any later open in the process (noteUnmarked), and the
+// places that could not be written travel with the error.
+func (l *fileLog) syncFailedAtOpen(op string, cause error) error {
+	err := storageFailed(op, cause)
+	if !syncRan(cause) {
+		return err
+	}
+	dirErr, runErr := l.markStopEach(coreconsensus.CodeStorageFailed, err.Error())
+	if dirErr != nil && runErr != nil {
+		noteUnmarked(l.dir)
+	}
+	err = alsoFailed(err, "data_dir_marker", dirErr)
+	return alsoFailed(err, "boot_marker", runErr)
+}
+
+// syncRan reports whether cause is the failure of a sync that ran, and not
+// that of opening the directory syncDir syncs: os.Open fails with the
+// PathError of op "open" before any sync was asked for.
+func syncRan(cause error) bool {
+	pe, ok := errors.AsType[*fs.PathError](cause)
+	return !ok || pe.Op != "open"
+}
+
+// syncFileAtOpen and syncDirAtOpen are the syncs an open makes of what it
+// read before it trusts it: datasync and syncDir, unless a test replaces one
+// to fail as a write-back error reported at open does (#637). Only the
+// open's own goroutine reads them.
+var (
+	syncFileAtOpen = datasync
+	syncDirAtOpen  = syncDir
+)
 
 // positionTail sets the write offset in the last segment: at the torn
 // tail's truncation point, zeroing and syncing what lies past it unless it
@@ -773,8 +819,13 @@ func (l *fileLog) positionTail(last *scanned, tail *segment) error {
 	case last.trimmed >= 0:
 		l.off = last.trimmed
 		if !allZero(last.data[l.off:]) {
-			if err := zeroFrom(tail.f, l.off, tail.size); err != nil {
+			if err := zeroRange(tail.f, l.off, tail.size); err != nil {
 				return storageFailed("zero tail", err)
+			}
+			// A sync of the open, as syncAtOpen's: its failure writes the
+			// markers (#637).
+			if err := syncFileAtOpen(tail.f); err != nil {
+				return l.syncFailedAtOpen("zero tail", err)
 			}
 		}
 	case len(last.recs) > 0:
@@ -863,8 +914,17 @@ func allZero(b []byte) bool {
 // sync runs even when there is nothing to zero, so the caller may rely on
 // the range being durable zeros on return.
 func zeroFrom(f *os.File, off, size int64) error {
+	if err := zeroRange(f, off, size); err != nil {
+		return err
+	}
+	return datasync(f)
+}
+
+// zeroRange writes zeros over f from off to size, 1 MiB at a time, and
+// syncs nothing.
+func zeroRange(f io.WriterAt, off, size int64) error {
 	if off >= size {
-		return datasync(f)
+		return nil
 	}
 	zero := make([]byte, min(size-off, 1<<20))
 	for p := off; p < size; {
@@ -874,7 +934,7 @@ func zeroFrom(f *os.File, off, size int64) error {
 		}
 		p += n
 	}
-	return datasync(f)
+	return nil
 }
 
 // quarantine writes and syncs the marker FIRST and modifies nothing else.

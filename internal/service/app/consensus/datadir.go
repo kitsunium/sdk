@@ -111,13 +111,14 @@ func NewDataDirWith(dir string, opts DataDirOptions) (DataDir, error) {
 
 // open opens the log, then the snapshots; when the snapshots fail the log
 // just opened is closed again, so a failed open holds nothing but the lock
-// its caller releases.
+// its caller releases. A failed sync of the snapshot directory writes the
+// log's markers, as the log's own syncs at open do (#637).
 func (d *dataDir) open() error {
 	l, err := openFileLog(d, d.opts.SegmentBytes)
 	if err != nil {
 		return err
 	}
-	s, err := newFileSnapshots(filepath.Join(d.dir, "snap"))
+	s, err := newFileSnapshots(filepath.Join(d.dir, "snap"), l.syncFailedAtOpen)
 	if err != nil {
 		return alsoFailed(err, "close log", l.Close())
 	}
@@ -203,17 +204,19 @@ func (l *fileLog) runtimeMarker(reason string) string {
 // stops in the data directory only. It returns the failure of each place:
 // the data directory's, and the boot-scoped one's (nil for a stop that writes no
 // boot-scoped marker). R9-05 lets a node stop with one marker of the two,
-// but not silently: the caller reports the place it could not write.
+// but not silently: the caller reports the place it could not write. The
+// boot-scoped marker is written first: it sits on a tmpfs, refuses a
+// restart in this boot alone, and a data directory whose device hangs or
+// refuses the write cannot keep it from being written (#637).
 func (l *fileLog) markStopEach(code errs.Code, detail string) (dirErr, runErr error) {
 	reason := reasonOf(code)
 	body := []byte(fmt.Sprintf("boot=%s\n%s\n", bootID(), detail))
+	if code == coreconsensus.CodeStorageFailed {
+		if runErr = os.MkdirAll(l.runDir, 0o700); runErr == nil {
+			runErr = writeFileSync(l.runtimeMarker(reason), body)
+		}
+	}
 	dirErr = writeFileSync(filepath.Join(l.dir, markerStopPrefix+reason), body)
-	if code != coreconsensus.CodeStorageFailed {
-		return dirErr, nil
-	}
-	if runErr = os.MkdirAll(l.runDir, 0o700); runErr == nil {
-		runErr = writeFileSync(l.runtimeMarker(reason), body)
-	}
 	return dirErr, runErr
 }
 

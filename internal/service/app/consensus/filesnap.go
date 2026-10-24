@@ -43,7 +43,10 @@ type fileSnapshots struct {
 // nor resumable. Of the receive spools only the newest stays, the one a
 // resume may still continue (#527). A directory that cannot be created, listed or cleaned is a
 // STORAGE_FAILED, so a store never opens over a state it could not read.
-func newFileSnapshots(dir string) (*fileSnapshots, error) {
+// syncFailed builds the STORAGE_FAILED of a failed directory sync: a data
+// directory's open passes its log's syncFailedAtOpen, which writes the
+// markers first (#637), and a store opened alone passes storageFailed.
+func newFileSnapshots(dir string, syncFailed func(op string, cause error) error) (*fileSnapshots, error) {
 	if err := mkdirDurable(dir); err != nil {
 		return nil, err
 	}
@@ -72,8 +75,8 @@ func newFileSnapshots(dir string) (*fileSnapshots, error) {
 	// directory sync leaves a snapshot the listing reads and the disk may
 	// not hold: the directory is made durable before anything is restored
 	// or offered from it, as the log's segments are (syncAtOpen).
-	if err := syncDir(dir); err != nil {
-		return nil, storageFailed("sync snapshots at open", err)
+	if err := syncDirAtOpen(dir); err != nil {
+		return nil, syncFailed("sync snapshots at open", err)
 	}
 	return s, nil
 }

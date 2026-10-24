@@ -33,7 +33,7 @@ func TestAMetadataWhosePositionRottedIsNotRestored(t *testing.T) {
 		if !ok {
 			dirs[tn.id] = filepath.Join(root, fmt.Sprint(tn.id))
 			var err error
-			if s, err = newFileSnapshots(dirs[tn.id]); err != nil {
+			if s, err = newFileSnapshots(dirs[tn.id], storageFailed); err != nil {
 				t.Fatal(err)
 			}
 			stores[tn.id] = s

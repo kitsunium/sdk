@@ -142,6 +142,8 @@ go_test(
         "storagefailed_open_internal_test.go",
         "stuckinstall_internal_test.go",
         "stuckleader_internal_test.go",
+        "syncatopen_internal_test.go",
+        "syncatopen_unix_internal_test.go",
         "tcp_internal_test.go",
         "tcp_joiner_internal_test.go",
         "tcp_link_internal_test.go",
