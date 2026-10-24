@@ -68,8 +68,9 @@ func (s *Server) Start(ctx context.Context) error {
 	return nil
 }
 
-// groupDeclErr returns the first declaration error recorded on a group, in
-// declaration order, or nil when every group was declared cleanly.
+// groupDeclErr returns the first declaration error recorded on a group, or the
+// first option a group cannot honour, in declaration order, or nil when every
+// group was declared cleanly. It runs before anything is bound.
 func groupDeclErr(groups []*StreamGroup) error {
 	//: declaration order, so the error reported is reproducible.
 	for _, group := range groups {
@@ -77,6 +78,14 @@ func groupDeclErr(groups []*StreamGroup) error {
 		if group.declErr != nil {
 			//: the first one found is the one reported.
 			return group.declErr
+		}
+		//: no stream group is served by a loop handler yet, so the Loop option
+		//: is one no group can honour. A missing handler wins, because it
+		//: explains the refusal; bindAll reports it.
+		if group.loopSet && group.handler != nil {
+			//: refuse rather than ignore a configuration the group cannot apply.
+			return errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
+				errs.String("group", group.name), errs.String("option", "Loop"))
 		}
 	}
 	//: no group recorded a mistake.

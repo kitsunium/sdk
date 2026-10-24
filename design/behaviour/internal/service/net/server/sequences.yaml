@@ -1329,6 +1329,32 @@ sequences:
       - eval: s.phase.Store(uint32(corenet.PhaseServing))
         to: s.phase.Store
       - return: nil
+  - of: groupDeclErr
+    participants:
+      - id: caller
+        kind: actor
+      - id: groupDeclErr
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: group.declErr
+                when: group.declErr != nil
+            - opt:
+                do:
+                  - return: |-
+                      errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
+                      				errs.String("group", group.name), errs.String("option", "Loop"))
+                    to: errs
+                when: group.loopSet && group.handler != nil
+          key: _
+          range: groups
+          value: group
+      - return: nil
   - of: (*Server).bindEverything
     participants:
       - id: caller
@@ -2490,6 +2516,16 @@ sequences:
             steps:
               - set: s.drainTimeout
                 value: d
+  - of: Loop
+    steps:
+      - return:
+          closure:
+            params: g *StreamGroup
+            steps:
+              - set: g.loop
+                value: v
+              - set: g.loopSet
+                value: "true"
   - of: Listen
     steps:
       - return:
@@ -3142,6 +3178,13 @@ sequences:
           key: _
           range: opts
           value: opt
+      - opt:
+          do:
+            - eval: |-
+                s.recordDeclError(errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
+                			errs.String("group", name), errs.String("option", "Loop")))
+              to: s.recordDeclError
+          when: shim.loopSet
       - set: group.addrs
         value: shim.addrs
       - set: group.limits

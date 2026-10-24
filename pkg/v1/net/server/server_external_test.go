@@ -315,6 +315,20 @@ func TestSentinelsAreMatchableThroughTheFacade(t *testing.T) {
 			build: func(s *server.Server) { s.Group("api", server.Listen("smoke", "signal")).HandleFunc(noop) },
 			want:  server.UnsupportedNetwork,
 		},
+		{
+			name: "two handlers",
+			build: func(s *server.Server) {
+				s.Group("api", server.Listen("tcp", "127.0.0.1:0")).HandleFunc(noop).HandleFunc(noop)
+			},
+			want: server.HandlerAlreadySet,
+		},
+		{
+			name: "loop on a handled group",
+			build: func(s *server.Server) {
+				s.Group("api", server.Listen("tcp", "127.0.0.1:0"), server.Loop(server.LoopValue{})).HandleFunc(noop)
+			},
+			want: server.LoopOptionUnsupported,
+		},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()

@@ -20,6 +20,8 @@ go_library(
         "identity_params.go",
         "limits.go",
         "loop.go",
+        "loop_state.go",
+        "loop_value.go",
         "material.go",
         "middleware.go",
         "packet.go",

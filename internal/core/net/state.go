@@ -28,11 +28,14 @@ type StateValue struct {
 	// 5 ms, doubling to 1 s, and the next accepted connection starts the curve
 	// over. A count that keeps rising is a server that cannot accept.
 	AcceptBackoffs uint64 `json:"accept_backoffs"`
+	// Loops reports every loop group (ADR 0186 §D8). It is empty while the
+	// server serves none.
+	Loops []LoopStateValue `json:"loops,omitempty"`
 }
 
-// Degraded reports whether any listener fell back from a requested
-// optimisation, so a caller can assert "no silent degradation" in one call
-// instead of walking the slice.
+// Degraded reports whether any listener or loop group fell back from a
+// requested optimisation, so a caller can assert "no silent degradation" in
+// one call instead of walking the slices.
 func (s StateValue) Degraded() bool {
 	//: any degraded listener degrades the whole server's answer.
 	for _, listener := range s.Listeners {
@@ -42,7 +45,16 @@ func (s StateValue) Degraded() bool {
 			return true
 		}
 	}
-	//: every listener got what it asked for.
+	//: a loop group that fell back from the backend it asked for degrades it
+	//: the same way.
+	for _, loop := range s.Loops {
+		//: the first degraded loop group settles it.
+		if loop.Degraded {
+			//: one degraded loop group settles the whole answer.
+			return true
+		}
+	}
+	//: every listener and loop group got what it asked for.
 	return false
 }
 

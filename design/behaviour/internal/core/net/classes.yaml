@@ -72,6 +72,26 @@ constants:
       - doc: OptionPreHandshake is PreHandshake.
         name: OptionPreHandshake
     name: OptionNone
+  - doc: The loop backends. The zero value is LoopBackendAuto.
+    grouped: true
+    items:
+      - doc: |-
+          LoopBackendAuto takes the best backend the platform's probe reaches:
+          io_uring, then epoll on Linux, the portable backend elsewhere.
+        name: LoopBackendAuto
+        type: LoopBackend
+        value: iota
+      - doc: |-
+          LoopBackendIOURing is io_uring, on linux/amd64, arm64, riscv64 and loong64,
+          after the kernel's staged probe.
+        name: LoopBackendIOURing
+      - doc: LoopBackendEpoll is epoll, on every Linux architecture.
+        name: LoopBackendEpoll
+      - doc: |-
+          LoopBackendPortable is the default engine's accept path and goroutines,
+          serialised onto one handler goroutine, on every platform.
+        name: LoopBackendPortable
+    name: LoopBackendAuto
   - doc: |-
       minAcceptedVersion is the oldest TLS version the domain will serve or dial.
       TLS 1.0 and 1.1 are deprecated by RFC 8996 and are refused, not warned about.
@@ -403,6 +423,16 @@ files:
       - optionNames
       - OptionKind.String
     name: loop.go
+  - decls:
+      - LoopRingStateValue
+      - LoopStateValue
+    name: loop_state.go
+  - decls:
+      - LoopBackend
+      - LoopBackendAuto
+      - LoopBackend.String
+      - LoopValue
+    name: loop_value.go
   - decls:
       - minAcceptedVersion
       - parseKeyPair
@@ -891,6 +921,173 @@ types:
         results: string
     name: OptionKind
     underlying: uint8
+  - fields:
+      - doc: Loop is the loop's index in its group.
+        name: Loop
+        type: int
+      - doc: Ring is the ring's index in its loop.
+        name: Ring
+        type: int
+      - doc: Conns is the number of connections the ring holds now.
+        name: Conns
+        type: int64
+      - doc: Accepted is the number of connections the ring accepted.
+        name: Accepted
+        type: uint64
+      - doc: Closed is the number of connections the ring closed.
+        name: Closed
+        type: uint64
+      - doc: Batches is the number of loop iterations that reaped this ring.
+        name: Batches
+        type: uint64
+      - doc: Completions is the number of completions or events the ring reaped.
+        name: Completions
+        type: uint64
+      - doc: |-
+          BufferStarved is the number of receives that found no provided buffer
+          (ENOBUFS) and waited for one to come back.
+        name: BufferStarved
+        type: uint64
+      - doc: |-
+          EnterRetries is the number of times submitting to the kernel was retried
+          after it was busy — the completion queue full, typically.
+        name: EnterRetries
+        type: uint64
+      - doc: |-
+          AcceptPauses is the number of times the ring stopped accepting: the
+          descriptor reserve reached, or the process out of descriptors.
+        name: AcceptPauses
+        type: uint64
+      - doc: Evicted is the number of idle connections closed to admit others.
+        name: Evicted
+        type: uint64
+      - doc: |-
+          WatchdogFires is the number of times the liveness watchdog saw a stall it
+          could observe and acted on it.
+        name: WatchdogFires
+        type: uint64
+      - doc: |-
+          Draining reports a ring the watchdog judged sick: it accepts nothing new
+          and closes its connections as they fall idle.
+        name: Draining
+        type: bool
+    kind: struct
+    name: LoopRingStateValue
+  - fields:
+      - doc: Group is the loop group's name.
+        name: Group
+        type: string
+      - doc: Backend is the backend in use.
+        name: Backend
+        type: LoopBackend
+      - doc: |-
+          ProbeStage names the last stage of the kernel probe the backend passed,
+          or the stage that failed when the group fell back.
+        name: ProbeStage
+        type: string
+      - doc: |-
+          Degraded reports that the group runs on a backend other than the best one
+          it asked for: auto fell back from io_uring, say.
+        name: Degraded
+        type: bool
+      - doc: DegradedReason names the fallback and its cause when Degraded is set.
+        name: DegradedReason
+        type: string
+      - doc: Loops is the number of loops running.
+        name: Loops
+        type: int
+      - doc: Rings is the number of rings per loop.
+        name: Rings
+        type: int
+      - doc: |-
+          RingsSource says where Rings came from: "explicit", "derived" from the
+          connection bounds and the descriptor limit, or "single" when no bound was
+          set or the backend runs one ring.
+        name: RingsSource
+        type: string
+      - doc: |-
+          RLimitNoFile is the effective RLIMIT_NOFILE soft limit read at Start. The
+          SDK never raises it; the Go runtime already lifts the soft limit to the
+          hard one.
+        name: RLimitNoFile
+        type: uint64
+      - doc: GOMAXPROCS is runtime.GOMAXPROCS(0) read at Start. The SDK never sets it.
+        name: GOMAXPROCS
+        type: int
+      - doc: |-
+          BatchP99 is the 99th percentile of one loop iteration's duration, over the
+          loops' recent batches.
+        name: BatchP99
+        type: DurationValue
+      - doc: RingStates reports every ring of every loop, loop by loop.
+        name: RingStates
+        type: "[]LoopRingStateValue"
+    kind: struct
+    name: LoopStateValue
+  - kind: named
+    methods:
+      - name: String
+        recv: b LoopBackend
+        results: string
+    name: LoopBackend
+    underlying: uint8
+  - fields:
+      - doc: |-
+          Backend is the mechanic to run on. LoopBackendAuto takes the best one the
+          platform's probe reaches and reports any fallback in State; an explicit
+          backend the platform cannot run is refused at Start.
+        name: Backend
+        type: LoopBackend
+      - doc: |-
+          Loops is the number of loops, each one goroutine locked to its OS thread
+          on a native backend. Zero selects one. The SDK never sets GOMAXPROCS:
+          sizing the process against its loops is the consumer's policy, and State
+          reports both.
+        name: Loops
+        type: int
+      - doc: |-
+          Rings is the number of descriptor shards inside one loop, each with its
+          own table of at most min(RLIMIT_NOFILE, IORING_MAX_FIXED_FILES) entries:
+          what lets io_uring serve more connections than RLIMIT_NOFILE. Zero
+          derives it, ⌈max(MaxConns, SoftConns) / min(RLIMIT_NOFILE,
+          IORING_MAX_FIXED_FILES)⌉, and one when both are zero; that is the only
+          formula, and State says where the value came from. epoll and the portable
+          backend run one ring whatever it says.
+        name: Rings
+        type: int
+      - doc: |-
+          CQBatch bounds the completions or events one loop iteration reaps before
+          it calls OnBatchEnd. Zero selects the domain default.
+        name: CQBatch
+        type: int
+      - doc: |-
+          SpillCap is the most unconsumed input, in bytes, one connection may hold
+          between OnData calls. Past it the connection is closed with
+          LoopSpillFull. Zero selects the domain default.
+        name: SpillCap
+        type: int
+      - doc: |-
+          OutputCap is the most written and unsent output, in bytes, one
+          connection may hold. A Write past it is refused with LoopOutputFull. Zero
+          selects the domain default.
+        name: OutputCap
+        type: int
+      - doc: |-
+          SoftConns is the soft connection bound: a connection accepted while the
+          group serves more is flagged under pressure (LoopIO.Pressure), so a
+          protocol can ask its peer to leave. It refuses nothing; MaxConns does.
+          Zero sets no soft bound.
+        name: SoftConns
+        type: int
+      - doc: |-
+          EvictIdle is how long a connection must have been idle before the loop
+          may close it to admit another under hard pressure — the process out of
+          descriptors, or MaxConns reached. A connection with unread bytes is
+          never evicted. Zero evicts nothing.
+        name: EvictIdle
+        type: DurationValue
+    kind: struct
+    name: LoopValue
   - kind: named
     name: Middleware
     typeParams: H any
@@ -1029,6 +1226,11 @@ types:
           over. A count that keeps rising is a server that cannot accept.
         name: AcceptBackoffs
         type: uint64
+      - doc: |-
+          Loops reports every loop group (ADR 0186 §D8). It is empty while the
+          server serves none.
+        name: Loops
+        type: "[]LoopStateValue"
     kind: struct
     methods:
       - name: Degraded

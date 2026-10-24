@@ -101,6 +101,7 @@ go_test(
         "lifecycle_internal_test.go",
         "listen_internal_test.go",
         "listen_tracked_internal_test.go",
+        "loop_option_external_test.go",
         "multireader_linux_internal_test.go",
         "options_external_test.go",
         "packet_group_external_test.go",
