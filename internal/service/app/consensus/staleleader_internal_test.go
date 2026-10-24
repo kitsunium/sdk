@@ -426,20 +426,22 @@ func retryAdmin(t *testing.T, what string, op func() error) {
 // record of the leader they follow, with a PreVote it never counts. The
 // control, without the admission model, feeds it either way.
 func TestALearnerDownWhileANewLeaderWasAdmittedIsFed(t *testing.T) {
-	for _, tc := range []struct {
+	type tc struct {
 		name             string
 		admission, raise bool
 		cid              coreconsensus.ClusterID
-	}{
+	}
+	runCase := func(t *testing.T, c tc) {
+		if fed, st := staleLearner(t, c.admission, c.raise, c.cid); !fed {
+			t.Fatalf("the returned learner never applied D's write: %+v", st)
+		}
+	}
+	for _, c := range []tc{
 		{"cluster version 2", true, true, coreconsensus.ClusterID{5, 4, 10}},
 		{"cluster version 0", true, false, coreconsensus.ClusterID{5, 4, 12}},
 		{"control: every sender admitted", false, true, coreconsensus.ClusterID{5, 4, 11}},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if fed, st := staleLearner(t, tc.admission, tc.raise, tc.cid); !fed {
-				t.Fatalf("the returned learner never applied D's write: %+v", st)
-			}
-		})
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 

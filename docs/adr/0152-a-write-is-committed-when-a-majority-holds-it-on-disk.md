@@ -1236,8 +1236,11 @@ open ONE control connection to any member.
   answer replaces the held one. A member answers a node it already lists
   without proposing anything or counting it against the slot's rate (#533).
   A JOIN sent again that is answered after the node's admission released the
-  answer installs nothing; only an explicit `Join` installs one again. No
-  frame changes: it is the existing JOIN.
+  answer installs nothing; only an explicit `Join` installs one again. Each
+  explicit `Join` opens a new generation of the hold, and an answer installs
+  only in the generation its JOIN began in: a JOIN sent again still in
+  flight across a release and a later `Join` never replaces that `Join`'s
+  answer with its older one. No frame changes: it is the existing JOIN.
 
 **Batching on the wire, from raft-sql-poc.** Every frame queued for a peer
 on one connection during one turn of its sender leaves in one write

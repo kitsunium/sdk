@@ -1525,6 +1525,7 @@ files:
       - (*TCPTransport).serveJoin
       - (*TCPTransport).Join
       - (*TCPTransport).refreshJoin
+      - joinTry
       - (*TCPTransport).joinVia
       - (*TCPTransport).joinOne
       - (*TCPTransport).joinOnLane
@@ -4680,9 +4681,10 @@ types:
   - doc: |-
       joinHold is a transport's hold on its JOIN answer: the configuration it
       last joined with, kept so that a joining node that hears no leader can
-      send its JOIN again (#632), and whether the node's admission released the
-      answer. A released answer is installed again by a new Join only, never by
-      a JOIN sent again: the configuration admits from then on (#552).
+      send its JOIN again (#632), whether the node's admission released the
+      answer, and the generation of the explicit Join the hold is in. A released
+      answer is installed again by a new Join only, never by a JOIN sent again:
+      the configuration admits from then on (#552).
     fields:
       - name: mu
         type: sync.Mutex
@@ -4690,29 +4692,43 @@ types:
         type: "*coreconsensus.JoinConfig"
       - name: released
         type: bool
+      - doc: |-
+          gen counts the explicit Joins; an answer installs only in the
+          generation its JOIN began in.
+        name: gen
+        type: uint64
     kind: struct
     methods:
       - doc: |-
-          begin opens an explicit Join: its answer is installed even after a
-          release.
+          begin opens an explicit Join, a new generation of the hold, and returns
+          it: its answer is installed even after a release, and the answer of a
+          JOIN of an older generation, still in flight, no longer is.
         name: begin
         recv: h *joinHold
-      - doc: keep records the configuration of a Join that succeeded.
+        results: uint64
+      - doc: |-
+          keep records the configuration of a Join of generation gen that
+          succeeded, unless a later Join began meanwhile.
         name: keep
-        params: cfg *coreconsensus.JoinConfig
+        params: gen uint64, cfg *coreconsensus.JoinConfig
         recv: h *joinHold
       - doc: |-
-          again is the configuration to send the JOIN again with; ok is false
-          when no Join succeeded or the answer was released.
+          again is the configuration to send the JOIN again with, and the
+          generation it is sent in; ok is false when no Join succeeded or the
+          answer was released.
         name: again
         recv: h *joinHold
-        results: cfg coreconsensus.JoinConfig, ok bool
+        results: cfg coreconsensus.JoinConfig, gen uint64, ok bool
       - doc: |-
-          install runs set, which installs an answer, unless the answer was
-          released: a JOIN sent again that is answered after the node's admission
-          would otherwise keep admitting members its configuration no longer lists.
+          install runs set, which installs an answer to a JOIN of generation gen,
+          unless the answer was released or a later Join began. Released, a JOIN
+          sent again that is answered after the node's admission would keep
+          admitting members its configuration no longer lists; and a JOIN sent
+          again still in flight across a release and a later explicit Join, which
+          reopens the hold, replaced that Join's answer with an older one, the
+          transport then admitting members the newer answer did not list.
         name: install
-        params: set func()
+        params: gen uint64, set func()
         recv: h *joinHold
       - doc: |-
           release runs drop, which drops the answer, and keeps any later JOIN sent
@@ -5048,9 +5064,9 @@ types:
         results: bool, error
       - doc: |-
           joinVia sends the JOIN of cfg to every other transport of the network in
-          turn.
+          turn, and installs the answer in the hold's generation gen.
         name: joinVia
-        params: ctx context.Context, cfg *coreconsensus.JoinConfig
+        params: ctx context.Context, cfg *coreconsensus.JoinConfig, gen uint64
         recv: t *MemoryTransport
         results: coreconsensus.PositionValue, error
       - name: Close
@@ -7972,34 +7988,37 @@ types:
         params: ctx context.Context
         recv: t *TCPTransport
         results: bool, error
-      - doc: joinVia sends the JOIN of cfg to each address in turn.
+      - doc: |-
+          joinVia sends the JOIN of cfg to each address in turn, and installs the
+          answer in the hold's generation gen.
         name: joinVia
-        params: ctx context.Context, cfg *coreconsensus.JoinConfig
+        params: ctx context.Context, cfg *coreconsensus.JoinConfig, gen uint64
         recv: t *TCPTransport
         results: coreconsensus.PositionValue, error
       - doc: |-
-          joinOne sends the JOIN to one address, to a peer presenting one of pins,
-          and installs the membership it answers once that membership lists the
-          peer under its key. refused is set when the peer answered with a refusal.
+          joinOne sends try's JOIN to one address, to a peer presenting one of its
+          pins, and installs the membership it answers, in try's generation of the
+          hold, once that membership lists the peer under its key. refused is set when the peer answered with a refusal.
           A JOIN that announces a limit goes on laneJoinV2 first; a peer that ends
           that connection without a word predates the lane, and the JOIN goes again
           on laneJoin, announcing nothing, as it did before (#556).
         name: joinOne
-        params: ctx context.Context, addr string, req coreconsensus.JoinRequestValue, pins [][32]byte
+        params: ctx context.Context, addr string, try *joinTry
         recv: t *TCPTransport
         results: pos coreconsensus.PositionValue, refused bool, err error
       - doc: |-
           joinOnLane is one JOIN on lane. silent is set when the peer, verified,
           ended the connection before any byte of an answer.
         name: joinOnLane
-        params: ctx context.Context, addr string, lane byte, req coreconsensus.JoinRequestValue, pins [][32]byte
+        params: ctx context.Context, addr string, lane byte, try *joinTry
         recv: t *TCPTransport
         results: pos coreconsensus.PositionValue, refused, silent bool, err error
       - doc: |-
           joinAnswered reads a JOIN's answer b, or the failure rerr to read it, from
-          the peer that presented spki, and installs the membership it carries.
+          the peer that presented spki, and installs the membership it carries in
+          the hold's generation gen.
         name: joinAnswered
-        params: b []byte, rerr error, spki [32]byte
+        params: b []byte, rerr error, spki [32]byte, gen uint64
         recv: t *TCPTransport
         results: pos coreconsensus.PositionValue, refused bool, err error
       - doc: |-
@@ -8111,6 +8130,18 @@ types:
         recv: w boundedWriter
         results: error
     name: boundedWriter
+  - doc: |-
+      joinTry is one JOIN to send: the request, the keys an answer is taken
+      from, and the generation of the hold its answer installs in (#632).
+    fields:
+      - name: req
+        type: coreconsensus.JoinRequestValue
+      - name: pins
+        type: "[][32]byte"
+      - name: gen
+        type: uint64
+    kind: struct
+    name: joinTry
 vars:
   - doc: |-
       The engine reaches every interface below by TYPE ASSERTION, on the ports it

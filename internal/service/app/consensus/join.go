@@ -163,50 +163,65 @@ func (n *Node) addJoiner(ctx context.Context, op coreconsensus.Operator, r *core
 
 // joinHold is a transport's hold on its JOIN answer: the configuration it
 // last joined with, kept so that a joining node that hears no leader can
-// send its JOIN again (#632), and whether the node's admission released the
-// answer. A released answer is installed again by a new Join only, never by
-// a JOIN sent again: the configuration admits from then on (#552).
+// send its JOIN again (#632), whether the node's admission released the
+// answer, and the generation of the explicit Join the hold is in. A released
+// answer is installed again by a new Join only, never by a JOIN sent again:
+// the configuration admits from then on (#552).
 type joinHold struct {
 	mu       sync.Mutex
 	cfg      *coreconsensus.JoinConfig
 	released bool
+	// gen counts the explicit Joins; an answer installs only in the
+	// generation its JOIN began in.
+	gen uint64
 }
 
-// begin opens an explicit Join: its answer is installed even after a
-// release.
-func (h *joinHold) begin() {
+// begin opens an explicit Join, a new generation of the hold, and returns
+// it: its answer is installed even after a release, and the answer of a
+// JOIN of an older generation, still in flight, no longer is.
+func (h *joinHold) begin() uint64 {
 	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.released = false
-	h.mu.Unlock()
+	h.gen++
+	return h.gen
 }
 
-// keep records the configuration of a Join that succeeded.
-func (h *joinHold) keep(cfg *coreconsensus.JoinConfig) {
+// keep records the configuration of a Join of generation gen that
+// succeeded, unless a later Join began meanwhile.
+func (h *joinHold) keep(gen uint64, cfg *coreconsensus.JoinConfig) {
 	c := *cfg
 	c.Addresses, c.Pins = slices.Clone(cfg.Addresses), slices.Clone(cfg.Pins)
 	h.mu.Lock()
-	h.cfg = &c
-	h.mu.Unlock()
+	defer h.mu.Unlock()
+	if gen == h.gen {
+		h.cfg = &c
+	}
 }
 
-// again is the configuration to send the JOIN again with; ok is false
-// when no Join succeeded or the answer was released.
-func (h *joinHold) again() (cfg coreconsensus.JoinConfig, ok bool) {
+// again is the configuration to send the JOIN again with, and the
+// generation it is sent in; ok is false when no Join succeeded or the
+// answer was released.
+func (h *joinHold) again() (cfg coreconsensus.JoinConfig, gen uint64, ok bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.cfg == nil || h.released {
-		return coreconsensus.JoinConfig{}, false
+		return coreconsensus.JoinConfig{}, 0, false
 	}
-	return *h.cfg, true
+	return *h.cfg, h.gen, true
 }
 
-// install runs set, which installs an answer, unless the answer was
-// released: a JOIN sent again that is answered after the node's admission
-// would otherwise keep admitting members its configuration no longer lists.
-func (h *joinHold) install(set func()) {
+// install runs set, which installs an answer to a JOIN of generation gen,
+// unless the answer was released or a later Join began. Released, a JOIN
+// sent again that is answered after the node's admission would keep
+// admitting members its configuration no longer lists; and a JOIN sent
+// again still in flight across a release and a later explicit Join, which
+// reopens the hold, replaced that Join's answer with an older one, the
+// transport then admitting members the newer answer did not list.
+func (h *joinHold) install(gen uint64, set func()) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if !h.released {
+	if !h.released && gen == h.gen {
 		set()
 	}
 }

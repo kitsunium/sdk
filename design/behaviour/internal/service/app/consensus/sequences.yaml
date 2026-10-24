@@ -6948,52 +6948,36 @@ sequences:
       - return: tok.Position(), 0, ""
         to: tok.Position
   - of: (*joinHold).begin
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*joinHold).begin
-        kind: self
-      - id: h.mu.Lock
-        kind: value
-      - id: h.mu.Unlock
-        kind: value
     steps:
-      - eval: h.mu.Lock()
-        to: h.mu.Lock
+      - lock:
+          mutex: h.mu
       - set: h.released
         value: "false"
-      - eval: h.mu.Unlock()
-        to: h.mu.Unlock
+      - op: ++
+        set: h.gen
+      - return: h.gen
   - of: (*joinHold).keep
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*joinHold).keep
-        kind: self
-      - id: h.mu.Lock
-        kind: value
-      - id: h.mu.Unlock
-        kind: value
     steps:
       - bind: c
         eval: "*cfg"
       - set: c.Addresses, c.Pins
         value: slices.Clone(cfg.Addresses), slices.Clone(cfg.Pins)
-      - eval: h.mu.Lock()
-        to: h.mu.Lock
-      - set: h.cfg
-        value: "&c"
-      - eval: h.mu.Unlock()
-        to: h.mu.Unlock
+      - lock:
+          mutex: h.mu
+      - opt:
+          do:
+            - set: h.cfg
+              value: "&c"
+          when: gen == h.gen
   - of: (*joinHold).again
     steps:
       - lock:
           mutex: h.mu
       - opt:
           do:
-            - return: coreconsensus.JoinConfig{}, false
+            - return: coreconsensus.JoinConfig{}, 0, false
           when: h.cfg == nil || h.released
-      - return: "*h.cfg, true"
+      - return: "*h.cfg, h.gen, true"
   - of: (*joinHold).install
     steps:
       - lock:
@@ -7001,7 +6985,7 @@ sequences:
       - opt:
           do:
             - eval: set()
-          when: "!h.released"
+          when: "!h.released && gen == h.gen"
   - of: (*joinHold).release
     steps:
       - lock:
@@ -7898,14 +7882,15 @@ sequences:
       - id: t.hold.keep
         kind: internal
     steps:
-      - eval: t.hold.begin()
+      - bind: gen
+        eval: t.hold.begin()
         to: t.hold.begin
       - bind: pos, err
-        eval: t.joinVia(ctx, &cfg)
+        eval: t.joinVia(ctx, &cfg, gen)
         to: t.joinVia
       - opt:
           do:
-            - eval: t.hold.keep(&cfg)
+            - eval: t.hold.keep(gen, &cfg)
               to: t.hold.keep
           when: err == nil
       - return: pos, err
@@ -7928,7 +7913,7 @@ sequences:
       - id: sameAnswer
         kind: internal
     steps:
-      - bind: cfg, ok
+      - bind: cfg, gen, ok
         eval: t.hold.again()
         to: t.hold.again
       - opt:
@@ -7947,7 +7932,7 @@ sequences:
             - return: false, err
           init:
             bind: _, err
-            eval: t.joinVia(ctx, &cfg)
+            eval: t.joinVia(ctx, &cfg, gen)
             to: t.joinVia
           when: err != nil
       - lock:
@@ -8030,7 +8015,7 @@ sequences:
                     to: slices
                   - eval: x.mu.Unlock()
                     to: x.mu.Unlock
-                  - eval: t.hold.install(func() { t.SetMembership(joinGroup, answer) })
+                  - eval: t.hold.install(gen, func() { t.SetMembership(joinGroup, answer) })
                     to: t.hold.install
                   - return: pos, nil
                 when: code == 0
@@ -21105,14 +21090,15 @@ sequences:
       - id: t.hold.keep
         kind: internal
     steps:
-      - eval: t.hold.begin()
+      - bind: gen
+        eval: t.hold.begin()
         to: t.hold.begin
       - bind: pos, err
-        eval: t.joinVia(ctx, &cfg)
+        eval: t.joinVia(ctx, &cfg, gen)
         to: t.joinVia
       - opt:
           do:
-            - eval: t.hold.keep(&cfg)
+            - eval: t.hold.keep(gen, &cfg)
               to: t.hold.keep
           when: err == nil
       - return: pos, err
@@ -21135,7 +21121,7 @@ sequences:
       - id: sameAnswer
         kind: internal
     steps:
-      - bind: cfg, ok
+      - bind: cfg, gen, ok
         eval: t.hold.again()
         to: t.hold.again
       - opt:
@@ -21154,7 +21140,7 @@ sequences:
             - return: false, err
           init:
             bind: _, err
-            eval: t.joinVia(ctx, &cfg)
+            eval: t.joinVia(ctx, &cfg, gen)
             to: t.joinVia
           when: err != nil
       - lock:
@@ -21197,7 +21183,7 @@ sequences:
       - loop:
           do:
             - bind: pos, answered, err
-              eval: t.joinOne(ctx, addr, req, cfg.Pins)
+              eval: "t.joinOne(ctx, addr, &joinTry{req: req, pins: cfg.Pins, gen: gen})"
               to: t.joinOne
             - switch:
                 cases:
@@ -21232,16 +21218,16 @@ sequences:
       - opt:
           do:
             - bind: pos, refused, silent, err
-              eval: t.joinOnLane(ctx, addr, laneJoinV2, req, pins)
+              eval: t.joinOnLane(ctx, addr, laneJoinV2, try)
               to: t.joinOnLane
             - opt:
                 do:
                   - return: pos, refused, err
                 when: "!silent"
-          when: req.MaxSnapshotBytes > 0
+          when: try.req.MaxSnapshotBytes > 0
       - set: pos, refused, _, err
         to: t.joinOnLane
-        value: t.joinOnLane(ctx, addr, laneJoin, req, pins)
+        value: t.joinOnLane(ctx, addr, laneJoin, try)
       - return: pos, refused, err
   - of: (*TCPTransport).joinOnLane
     participants:
@@ -21267,7 +21253,7 @@ sequences:
         kind: internal
     steps:
       - bind: c, derr
-        eval: t.dialAny(ctx, addr, lane, pins)
+        eval: t.dialAny(ctx, addr, lane, try.pins)
         to: t.dialAny
       - opt:
           do:
@@ -21291,13 +21277,13 @@ sequences:
             to: c.SetDeadline
           when: err != nil
       - bind: body
-        eval: encodeJoin(req)
+        eval: encodeJoin(try.req)
         to: encodeJoin
       - opt:
           do:
             - set: body
               to: encodeJoinV2
-              value: encodeJoinV2(req)
+              value: encodeJoinV2(try.req)
           when: lane == laneJoinV2
       - opt:
           do:
@@ -21316,7 +21302,7 @@ sequences:
           when: b == nil && endedUnanswered(rerr)
       - set: pos, refused, err
         to: t.joinAnswered
-        value: t.joinAnswered(b, rerr, peer.SPKI)
+        value: t.joinAnswered(b, rerr, peer.SPKI, try.gen)
       - return: pos, refused, false, err
   - of: endedUnanswered
     participants:
@@ -21383,7 +21369,7 @@ sequences:
           do:
             - return: coreconsensus.PositionValue{}, false, peerRejected("the answer does not list its own sender")
           when: "!joinAnswerListsPeer(m, spki)"
-      - eval: t.hold.install(func() { t.SetMembership(joinGroup, m.Members) })
+      - eval: t.hold.install(gen, func() { t.SetMembership(joinGroup, m.Members) })
         to: t.hold.install
       - return: "coreconsensus.PositionValue{Term: binary.LittleEndian.Uint64(b[4:]), Index: binary.LittleEndian.Uint64(b[12:])}, false, nil"
   - of: (*TCPTransport).releaseJoinAnswer

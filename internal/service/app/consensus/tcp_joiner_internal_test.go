@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -231,5 +232,62 @@ func TestAJoinSentAgainReplacesOnlyAHeldAnswer(t *testing.T) {
 	}
 	if _, err := j.Join(ctx, cfg); err != nil || len(held()) != 2 {
 		t.Fatalf("an explicit Join after the release: %v, answer %+v", err, held())
+	}
+}
+
+// #632: a JOIN sent again still in flight when the node's admission
+// releases the answer, then an explicit Join that reopens the hold: the
+// late answer of the JOIN sent again never replaces the explicit Join's. The
+// hold counts its Joins, and an answer installs only in the one it began in.
+// Without the count, the reopened hold took the stale answer, and the
+// transport admitted members the newer answer did not list.
+func TestAJoinSentAgainNeverInstallsOverALaterJoin(t *testing.T) {
+	net := NewMemoryNetwork()
+	a := NewMemoryTransport(net, 1)
+	a.SetMembership(1, []coreconsensus.MemberValue{{ID: 1, SPKI: MemorySPKI(1)}})
+	entered, release := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	if err := a.Bind(1, func(coreconsensus.AuthenticatedPeerValue, []byte) {}, nil, nil,
+		func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code) {
+			if calls.Add(1) == 2 {
+				// The JOIN sent again is answered only once the test lets it.
+				close(entered)
+				<-release
+			}
+			return coreconsensus.PositionValue{Term: 1, Index: 1}, 0
+		}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	j := NewMemoryTransport(net, 2)
+	ctx := context.Background()
+	cfg := coreconsensus.JoinConfig{Stamp: coreconsensus.StampValue{ID: 2, Slot: "j"}, Pins: [][32]byte{MemorySPKI(1)}}
+	if _, err := j.Join(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	refreshed := make(chan error, 1)
+	go func() {
+		_, err := j.refreshJoin(ctx)
+		refreshed <- err
+	}()
+	<-entered
+	j.releaseJoinAnswer()
+	a.SetMembership(1, []coreconsensus.MemberValue{{ID: 1, SPKI: MemorySPKI(1)}, {ID: 3, SPKI: MemorySPKI(3)}})
+	if _, err := j.Join(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	// What the late answer reads differs from the explicit Join's, so that
+	// installing it shows.
+	a.SetMembership(1, []coreconsensus.MemberValue{{ID: 1, SPKI: MemorySPKI(1)}, {ID: 4, SPKI: MemorySPKI(4)}})
+	close(release)
+	if err := <-refreshed; err != nil {
+		t.Fatal(err)
+	}
+	j.mu.Lock()
+	held := slices.Clone(j.groups[joinGroup])
+	j.mu.Unlock()
+	want := []coreconsensus.MemberValue{{ID: 1, SPKI: MemorySPKI(1)}, {ID: 3, SPKI: MemorySPKI(3)}}
+	if !sameAnswer(held, want) {
+		t.Fatalf("the answer held after a late JOIN sent again: %+v, want the explicit Join's %+v", held, want)
 	}
 }

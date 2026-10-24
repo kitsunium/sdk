@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T16:10:55Z -->
+<!-- updated: 2026-10-24T16:59:26Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -544,7 +544,9 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   JOIN again with the kept configuration (#632, `refreshJoin`,
   `TestAJoinerHearsALeaderAdmittedAfterItsJoinAnswer`); never once the
   admission released the answer (`joinHold`,
-  `TestAJoinSentAgainReplacesOnlyAHeldAnswer`).
+  `TestAJoinSentAgainReplacesOnlyAHeldAnswer`), nor over a later explicit
+  Join: an answer installs only in the hold's generation its JOIN began in
+  (`joinHold.gen`, `TestAJoinSentAgainNeverInstallsOverALaterJoin`).
 - Read a snapshot offer under `MaxControlFrameBytes`, or end a refused one
   without a line: its metadata carries the configuration, `Retired`
   included, which every Remove grows for good, and past about 8 100

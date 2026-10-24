@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"slices"
 	"strings"
@@ -144,14 +145,17 @@ func whatOf(err error) string {
 // the bound a membership entry already meets.
 func TestASnapshotOfferCarryingManyRetiredIDsIsInstalledOverTCP(t *testing.T) {
 	p := newOfferPair(t, 0, 0)
-	threshold := (64<<10 - len(encodeOffer(retiredOffer(p.members, 0)))) / 8
-	for _, n := range []int{10, threshold, threshold + 1, 9000} {
+	runCase := func(t *testing.T, n int) {
 		o := retiredOffer(p.members, n)
 		err := p.stream(o)
 		if err != nil || p.offered.Load() != 1 || p.installed.Load() != 1 {
 			t.Errorf("TCP Stream, %d retired IDs (offer %d bytes, control bound %d): %v %q, offered %d, installed %d",
 				n, len(encodeOffer(o)), 64<<10, err, whatOf(err), p.offered.Load(), p.installed.Load())
 		}
+	}
+	threshold := (64<<10 - len(encodeOffer(retiredOffer(p.members, 0)))) / 8
+	for _, n := range []int{10, threshold, threshold + 1, 9000} {
+		t.Run(fmt.Sprintf("%d retired IDs", n), func(t *testing.T) { runCase(t, n) })
 	}
 	if p.log.logged("snapshot offer refused") {
 		t.Errorf("an offer under MaxFrameBytes was logged as refused: %v", p.log.lines)

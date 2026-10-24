@@ -319,24 +319,24 @@ func (n *MemoryNetwork) admitted(at *MemoryTransport, peer coreconsensus.NodeID)
 
 // Join implements Joiner over the network, as the TCP transport does.
 func (t *MemoryTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (coreconsensus.PositionValue, error) {
-	t.hold.begin()
-	pos, err := t.joinVia(ctx, &cfg)
+	gen := t.hold.begin()
+	pos, err := t.joinVia(ctx, &cfg, gen)
 	if err == nil {
-		t.hold.keep(&cfg)
+		t.hold.keep(gen, &cfg)
 	}
 	return pos, err
 }
 
 // refreshJoin sends the JOIN again as the TCP transport does (#632).
 func (t *MemoryTransport) refreshJoin(ctx context.Context) (bool, error) {
-	cfg, ok := t.hold.again()
+	cfg, gen, ok := t.hold.again()
 	if !ok {
 		return false, nil
 	}
 	t.mu.Lock()
 	before := slices.Clone(t.groups[joinGroup])
 	t.mu.Unlock()
-	if _, err := t.joinVia(ctx, &cfg); err != nil {
+	if _, err := t.joinVia(ctx, &cfg, gen); err != nil {
 		return false, err
 	}
 	t.mu.Lock()
@@ -345,8 +345,8 @@ func (t *MemoryTransport) refreshJoin(ctx context.Context) (bool, error) {
 }
 
 // joinVia sends the JOIN of cfg to every other transport of the network in
-// turn.
-func (t *MemoryTransport) joinVia(ctx context.Context, cfg *coreconsensus.JoinConfig) (coreconsensus.PositionValue, error) {
+// turn, and installs the answer in the hold's generation gen.
+func (t *MemoryTransport) joinVia(ctx context.Context, cfg *coreconsensus.JoinConfig, gen uint64) (coreconsensus.PositionValue, error) {
 	targets := t.net.othersThan(t.id)
 	req := coreconsensus.JoinRequestValue{
 		Cluster: cfg.Stamp.Log.Cluster, ID: cfg.Stamp.ID, Incarnation: cfg.Stamp.Incarnation,
@@ -377,7 +377,7 @@ func (t *MemoryTransport) joinVia(ctx context.Context, cfg *coreconsensus.JoinCo
 			x.mu.Lock()
 			answer := slices.Clone(x.members)
 			x.mu.Unlock()
-			t.hold.install(func() { t.SetMembership(joinGroup, answer) })
+			t.hold.install(gen, func() { t.SetMembership(joinGroup, answer) })
 			return pos, nil
 		}
 		last = joinRefused(code, reason)
