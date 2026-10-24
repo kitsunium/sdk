@@ -3202,16 +3202,22 @@ sequences:
           do:
             - return: err
           when: err != nil
+      - bind: direct, err
+        eval: ul.selfTest(flags)
+        to: ul.selfTest
       - opt:
           do:
             - return: err
-          init:
-            bind: err
-            eval: ul.selfTest(flags)
-            to: ul.selfTest
           when: err != nil
+      - set: ul.direct
+        value: direct
       - set: ul.stage
-        value: "\"self_test\""
+        value: "\"self_test+fds\""
+      - opt:
+          do:
+            - set: ul.stage
+              value: "\"self_test+direct\""
+          when: direct
       - return: ul.build(rings, flags)
         to: ul.build
   - of: (*uLoop).setupFlags
@@ -3366,7 +3372,7 @@ sequences:
         kind: internal
       - id: u.close
         kind: internal
-      - id: u.registerSparse
+      - id: ul.registerTable
         kind: internal
       - id: slices
         kind: stdlib
@@ -3385,7 +3391,7 @@ sequences:
       - bind: lp
         eval: ul.lp
       - bind: rr
-        eval: "&uRing{ul: ul, u: u, armed: make([]int, len(ul.lfds))}"
+        eval: "&uRing{ul: ul, u: u, armed: make([]int, len(ul.lfds)), backoff: backoffMin}"
       - set: rr.r
         to: newRing
         value: newRing(lp, i, rr)
@@ -3408,17 +3414,17 @@ sequences:
           do:
             - eval: u.close()
               to: u.close
-            - return: nil, probeError("sparse_files", orErrno(errno, syscall.EOPNOTSUPP))
+            - return: nil, err
           init:
-            bind: errno
-            eval: u.registerSparse(table)
-            to: u.registerSparse
-          when: errno != 0 || ul.hooks.failStage == "sparse_files"
+            bind: err
+            eval: ul.registerTable(u, table)
+            to: ul.registerTable
+          when: err != nil
       - set: rr.inRing
         value: int(bufs)
       - set: rr.slotOf
         to: slices
-        value: slices.Repeat([]int32{-1}, int(table))
+        value: slices.Repeat([]int32{-1}, ul.slotSpace(table))
       - opt:
           do:
             - eval: u.close()
@@ -3466,6 +3472,51 @@ sequences:
             to: uringRegister
           when: errno != 0
       - return: nil
+  - of: (*uLoop).registerTable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).registerTable
+        kind: self
+      - id: u.registerSparse
+        kind: internal
+      - id: probeError
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!ul.direct && ul.hooks.failStage != \"sparse_files\""
+      - bind: errno
+        eval: u.registerSparse(n)
+        to: u.registerSparse
+      - opt:
+          do:
+            - return: probeError("sparse_files", orErrno(errno, syscall.EOPNOTSUPP))
+              to: probeError
+          when: errno != 0 || ul.hooks.failStage == "sparse_files"
+      - return: nil
+  - of: (*uLoop).slotSpace
+    steps:
+      - opt:
+          do:
+            - return: int(table)
+          when: ul.direct
+      - return: int(min(ul.lp.sz.rlimit, maxProcessFDs))
+  - of: (*uLoop).onFD
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).onFD
+        kind: self
+      - id: onProcessFD
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: onProcessFD(s)
+              to: onProcessFD
+          when: "!ul.direct"
   - of: (*uRing).pollFD
     participants:
       - id: caller
@@ -3500,6 +3551,8 @@ sequences:
         kind: internal
       - id: prepAccept
         kind: internal
+      - id: rr.ul.onFD
+        kind: internal
     steps:
       - opt:
           do:
@@ -3524,6 +3577,8 @@ sequences:
                       when: s == nil
                   - eval: prepAccept(s, fd, udPack(udAccept, 0, uint32(i)), false)
                     to: prepAccept
+                  - eval: rr.ul.onFD(s)
+                    to: rr.ul.onFD
                   - op: ++
                     set: rr.armed[i]
                   - op: "--"
@@ -3590,6 +3645,8 @@ sequences:
         kind: self
       - id: rr.cancelAccepts
         kind: internal
+      - id: rr.r.evict
+        kind: internal
       - id: rr.armAccepts
         kind: internal
     steps:
@@ -3613,7 +3670,12 @@ sequences:
           do:
             - set: rr.paused
               value: "false"
-          when: rr.paused && free >= max(2*reserve, 1)
+          when: rr.paused && free >= max(2*reserve, 1) && rr.ul.lp.tick >= rr.resumeAt
+      - opt:
+          do:
+            - eval: rr.r.evict()
+              to: rr.r.evict
+          when: rr.ul.lp.hard && !rr.ul.direct
       - eval: rr.armAccepts()
         to: rr.armAccepts
   - of: (*uLoop).serve
@@ -3914,6 +3976,8 @@ sequences:
           when: "!ok"
       - set: rr.slotOf[index]
         value: slot
+      - set: rr.backoff
+        value: backoffMin
       - eval: rr.armRecv(slot)
         to: rr.armRecv
       - eval: r.opened(slot)
@@ -3926,6 +3990,15 @@ sequences:
               value: "true"
             - op: ++
               set: rr.r.st.pauses
+            - opt:
+                do:
+                  - set: rr.resumeAt
+                    value: rr.ul.lp.tick + rr.backoff
+                  - set: rr.backoff
+                    value: min(rr.backoff*2, backoffMax)
+                  - set: rr.ul.lp.hard
+                    value: "true"
+                when: "!rr.ul.direct"
           when: res == -int32(syscall.ENFILE) || res == -int32(syscall.EMFILE)
   - of: (*uRing).refuses
     steps:
@@ -3938,11 +4011,19 @@ sequences:
         kind: actor
       - id: (*uRing).orphanClose
         kind: self
+      - id: closeFDs
+        kind: internal
       - id: rr.u.get
         kind: internal
       - id: prepCloseDirect
         kind: internal
     steps:
+      - opt:
+          do:
+            - eval: closeFDs([]int{int(index)})
+              to: closeFDs
+            - return: ""
+          when: "!rr.ul.direct"
       - bind: s
         eval: rr.u.get()
         to: rr.u.get
@@ -3966,6 +4047,8 @@ sequences:
         kind: internal
       - id: prepRecv
         kind: internal
+      - id: rr.ul.onFD
+        kind: internal
     steps:
       - bind: c
         eval: "&rr.r.conns[slot]"
@@ -3982,6 +4065,8 @@ sequences:
           when: s == nil
       - eval: prepRecv(s, uint32(c.fd), udPack(udRecv, c.gen, uint32(slot)))
         to: prepRecv
+      - eval: rr.ul.onFD(s)
+        to: rr.ul.onFD
       - op: ++
         set: c.ops
   - of: (*uRing).owns
@@ -3998,6 +4083,8 @@ sequences:
       - id: rr.recvStarved
         kind: internal
       - id: rr.recvEOF
+        kind: internal
+      - id: rr.recvCancelled
         kind: internal
       - id: rr.failLive
         kind: internal
@@ -4037,12 +4124,29 @@ sequences:
                 - eval: rr.recvEOF(slot)
                   to: rr.recvEOF
             - case: c.res == -int32(errnoECANCELED)
+              do:
+                - eval: rr.recvCancelled(slot, more)
+                  to: rr.recvCancelled
             - default: true
               do:
                 - eval: rr.failLive(slot, -c.res)
                   to: rr.failLive
       - eval: rr.maybeClose(slot)
         to: rr.maybeClose
+  - of: (*uRing).recvCancelled
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).recvCancelled
+        kind: self
+      - id: rr.armRecv
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: rr.armRecv(slot)
+              to: rr.armRecv
+          when: "!more && rr.r.conns[slot].state == stOpen"
   - of: (*uRing).recvBytes
     participants:
       - id: caller
@@ -4127,6 +4231,8 @@ sequences:
         kind: actor
       - id: (*uRing).onSend
         kind: self
+      - id: rr.sendFlight
+        kind: internal
       - id: rr.failLive
         kind: internal
       - id: rr.maybeClose
@@ -4153,6 +4259,12 @@ sequences:
                 - op: "&^="
                   set: cc.flags
                   value: fSending
+                - opt:
+                    do:
+                      - eval: rr.sendFlight(slot)
+                        to: rr.sendFlight
+                      - return: ""
+                    when: cc.state == stOpen || cc.state == stClosing
             - default: true
               do:
                 - op: "&^="
@@ -4230,6 +4342,10 @@ sequences:
         kind: actor
       - id: (*uRing).maybeClose
         kind: self
+      - id: closeFDs
+        kind: internal
+      - id: rr.onClose
+        kind: internal
       - id: rr.u.get
         kind: internal
       - id: prepCloseDirect
@@ -4241,6 +4357,14 @@ sequences:
           do:
             - return: ""
           when: c.state != stDead || c.ops != 0
+      - opt:
+          do:
+            - eval: closeFDs([]int{int(c.fd)})
+              to: closeFDs
+            - eval: rr.onClose(slot, c.gen&genMask)
+              to: rr.onClose
+            - return: ""
+          when: "!rr.ul.direct"
       - bind: s
         eval: rr.u.get()
         to: rr.u.get
@@ -4465,6 +4589,8 @@ sequences:
         kind: internal
       - id: prepSend
         kind: internal
+      - id: rr.ul.onFD
+        kind: internal
     steps:
       - bind: c
         eval: "&rr.r.conns[slot]"
@@ -4481,6 +4607,8 @@ sequences:
           when: s == nil
       - eval: prepSend(s, uint32(c.fd), rr.ul.lp.slab.data(c.flight), udPack(udSend, c.gen, uint32(slot)))
         to: prepSend
+      - eval: rr.ul.onFD(s)
+        to: rr.ul.onFD
       - op: ++
         set: c.ops
       - op: "|="
@@ -4497,6 +4625,8 @@ sequences:
       - id: rr.u.get
         kind: internal
       - id: prepCancelFixed
+        kind: internal
+      - id: rr.ul.onFD
         kind: internal
     steps:
       - bind: c
@@ -4518,11 +4648,30 @@ sequences:
           when: s == nil
       - eval: prepCancelFixed(s, uint32(c.fd), udPack(udCancel, c.gen, uint32(slot)))
         to: prepCancelFixed
+      - eval: rr.ul.onFD(s)
+        to: rr.ul.onFD
       - op: ++
         set: c.ops
   - of: (*uRing).unread
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uRing).unread
+        kind: self
+      - id: syscall
+        kind: stdlib
     steps:
-      - return: "true"
+      - opt:
+          do:
+            - return: "true"
+          when: rr.ul.direct
+      - var:
+          name: "n"
+          type: int32
+      - bind: _, _, errno
+        eval: syscall.Syscall(syscall.SYS_IOCTL, uintptr(r.conns[slot].fd), siocinq, uintptr(unsafe.Pointer(&n)))
+        to: syscall
+      - return: errno != 0 || n > 0
   - of: (*uRing).watchdog
     participants:
       - id: caller
@@ -4762,8 +4911,6 @@ sequences:
         kind: actor
       - id: (*uLoop).selfTest
         kind: self
-      - id: probeError
-        kind: internal
       - id: selfTestRing
         kind: internal
       - id: rg.close
@@ -4782,18 +4929,19 @@ sequences:
         kind: internal
       - id: run.verdict
         kind: internal
+      - id: run.releases
+        kind: internal
     steps:
       - opt:
           do:
-            - return: probeError("self_test", syscall.EIO)
-              to: probeError
+            - return: false, probeError("self_test", syscall.EIO)
           when: ul.hooks.failStage == "self_test"
       - bind: rg, err
         eval: selfTestRing(flags)
         to: selfTestRing
       - opt:
           do:
-            - return: err
+            - return: false, err
           when: err != nil
       - defer: rg.close()
         to: rg.close
@@ -4802,8 +4950,7 @@ sequences:
         to: loopbackListener
       - opt:
           do:
-            - return: probeError("self_test listen", errnoOfErr(err))
-              to: probeError
+            - return: false, probeError("self_test listen", errnoOfErr(err))
           when: err != nil
       - defer: closeFDs([]int{lfd})
         to: closeFDs
@@ -4812,20 +4959,101 @@ sequences:
       - eval: rg.submit()
         to: rg.submit
       - bind: cfd, err
-        eval: selfTestClient(port)
+        eval: selfTestClient(port, selfTestPayload)
         to: selfTestClient
       - opt:
           do:
-            - return: err
+            - return: false, err
           when: err != nil
       - defer: closeFDs([]int{cfd})
         to: closeFDs
       - bind: run
-        eval: "&selfTestRun{u: rg, index: -1}"
+        eval: "&selfTestRun{u: rg, index: -1, second: -1}"
       - eval: run.exchange()
         to: run.exchange
-      - return: run.verdict()
-        to: run.verdict
+      - opt:
+          do:
+            - return: false, err
+          init:
+            bind: err
+            eval: run.verdict()
+            to: run.verdict
+          when: err != nil
+      - return: run.releases(port, cfd), nil
+        to: run.releases
+  - of: (*selfTestRun).releases
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*selfTestRun).releases
+        kind: self
+      - id: selfTestClient
+        kind: internal
+      - id: closeFDs
+        kind: internal
+      - id: st.pump
+        kind: internal
+      - id: prepCancelFixed
+        kind: internal
+      - id: prepCloseDirect
+        kind: internal
+    steps:
+      - bind: other, err
+        eval: selfTestClient(port, nil)
+        to: selfTestClient
+      - opt:
+          do:
+            - return: "false"
+          when: err != nil
+      - defer: closeFDs([]int{other})
+        to: closeFDs
+      - eval: st.pump(func() bool { return st.second >= 0 })
+        to: st.pump
+      - opt:
+          do:
+            - return: "false"
+          when: st.second < 0
+      - eval: prepCancelFixed(st.u.get(), uint32(st.index), udPack(udCancel, 0, 0))
+        to: prepCancelFixed
+      - eval: st.pump(func() bool { return st.cancelled })
+        to: st.pump
+      - eval: prepCloseDirect(st.u.get(), uint32(st.index), udPack(udClose, 0, 0))
+        to: prepCloseDirect
+      - eval: st.pump(func() bool { return st.closed })
+        to: st.pump
+      - return: st.closed && peerSeesEnd(first)
+  - of: peerSeesEnd
+    participants:
+      - id: caller
+        kind: actor
+      - id: peerSeesEnd
+        kind: self
+      - id: time.Now().Add
+        kind: value
+      - id: syscall
+        kind: stdlib
+      - id: time
+        kind: stdlib
+    steps:
+      - var:
+          name: buf
+          type: "[peerPeekBytes]byte"
+      - bind: deadline
+        eval: time.Now().Add(200 * time.Millisecond)
+        to: time.Now().Add
+      - loop:
+          cond: time.Now().Before(deadline)
+          do:
+            - bind: n, _, err
+              eval: syscall.Recvfrom(fd, buf[:], syscall.MSG_DONTWAIT)
+              to: syscall
+            - opt:
+                do:
+                  - return: "true"
+                when: n == 0 && err == nil
+            - eval: time.Sleep(5 * time.Millisecond)
+              to: time
+      - return: "false"
   - of: selfTestRing
     participants:
       - id: caller
@@ -4899,15 +5127,44 @@ sequences:
           when: err != nil
       - opt:
           do:
+            - return: cfd, nil
+          when: payload == nil
+      - opt:
+          do:
             - eval: closeFDs([]int{cfd})
               to: closeFDs
             - return: "-1, probeError(\"self_test write\", errnoOfErr(err))"
           init:
             bind: _, err
-            eval: syscall.Write(cfd, selfTestPayload)
+            eval: syscall.Write(cfd, payload)
             to: syscall
           when: err != nil
       - return: cfd, nil
+  - of: (*selfTestRun).pump
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*selfTestRun).pump
+        kind: self
+      - id: time.Now().Add
+        kind: value
+      - id: st.u.wait
+        kind: internal
+      - id: st.u.reap
+        kind: internal
+    steps:
+      - bind: deadline
+        eval: time.Now().Add(500 * time.Millisecond)
+        to: time.Now().Add
+      - bind: tick
+        eval: "kernelTimespec{nsec: int64(tickEvery)}"
+      - loop:
+          cond: "!done() && time.Now().Before(deadline)"
+          do:
+            - eval: st.u.wait(&tick)
+              to: st.u.wait
+            - eval: st.u.reap(64, st.onCQE)
+              to: st.u.reap
   - of: (*selfTestRun).exchange
     participants:
       - id: caller
@@ -4939,20 +5196,23 @@ sequences:
         kind: actor
       - id: (*selfTestRun).onCQE
         kind: self
-      - id: prepRecv
+      - id: st.onAccept
         kind: internal
     steps:
       - switch:
           cases:
             - case: udAccept
               do:
-                - opt:
-                    do:
-                      - set: st.index
-                        value: c.res
-                      - eval: prepRecv(st.u.get(), uint32(st.index), udPack(udRecv, 0, 0))
-                        to: prepRecv
-                    when: c.res >= 0 && st.index < 0
+                - eval: st.onAccept(c.res)
+                  to: st.onAccept
+            - case: udCancel
+              do:
+                - set: st.cancelled
+                  value: "true"
+            - case: udClose
+              do:
+                - set: st.closed
+                  value: "true"
             - case: udRecv
               do:
                 - opt:
@@ -4961,6 +5221,30 @@ sequences:
                         value: append(st.got, st.u.buf(uint16(c.flags >> cqeBufferShift))[:c.res]...)
                     when: c.res > 0 && c.flags&cqeFBuffer != 0
           "on": udOp(c.userData)
+  - of: (*selfTestRun).onAccept
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*selfTestRun).onAccept
+        kind: self
+      - id: prepRecv
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: res < 0
+            - case: st.index < 0
+              do:
+                - set: st.index
+                  value: res
+                - eval: prepRecv(st.u.get(), uint32(res), udPack(udRecv, 0, 0))
+                  to: prepRecv
+            - case: st.second < 0
+              do:
+                - set: st.second
+                  value: res
+                - eval: prepRecv(st.u.get(), uint32(res), udPack(udRecv, 0, 1))
+                  to: prepRecv
   - of: (*selfTestRun).verdict
     participants:
       - id: caller
@@ -5422,7 +5706,7 @@ sequences:
         kind: actor
       - id: (*uring).mapBufRing
         kind: self
-      - id: uringRegister
+      - id: registerBufRing
         kind: internal
       - id: syscall
         kind: stdlib
@@ -5431,11 +5715,9 @@ sequences:
     steps:
       - bind: ringBytes
         eval: max(int(count)*int(unsafe.Sizeof(uringBuf{})), syscall.Getpagesize())
-      - bind: reg
-        eval: "new(bufReg{ringEntries: count, bgid: bufGroup, flags: pbufRingMmap})"
       - bind: errno
-        eval: uringRegister(u.fd, regPbufRing, unsafe.Pointer(reg), 1)
-        to: uringRegister
+        eval: "registerBufRing(u.fd, &bufReg{ringEntries: count, bgid: bufGroup, flags: pbufRingMmap})"
+        to: registerBufRing
       - opt:
           do:
             - bind: "off"
@@ -5466,9 +5748,29 @@ sequences:
           when: err != nil
       - set: u.bufRing
         value: rm
-      - set: reg
-        value: "new(bufReg{ringAddr: uint64(uintptr(unsafe.Pointer(&rm[0]))), ringEntries: count, bgid: bufGroup})"
-      - return: uringRegister(u.fd, regPbufRing, unsafe.Pointer(reg), 1)
+      - return: "registerBufRing(u.fd, &bufReg{ringAddr: uint64(uintptr(unsafe.Pointer(&rm[0]))), ringEntries: count, bgid: bufGroup})"
+        to: registerBufRing
+  - of: registerBufRing
+    participants:
+      - id: caller
+        kind: actor
+      - id: registerBufRing
+        kind: self
+      - id: uringRegister
+        kind: internal
+    steps:
+      - bind: errno
+        eval: uringRegister(fd, regPbufRing, unsafe.Pointer(reg), 1)
+        to: uringRegister
+      - opt:
+          do:
+            - return: errno
+          when: errno != syscall.EINVAL
+      - bind: quirk
+        eval: "*reg"
+      - set: quirk.resv[2]
+        value: "1"
+      - return: uringRegister(fd, regPbufRing, unsafe.Pointer(&quirk), 1)
         to: uringRegister
   - of: (*uring).bufEntries
     participants:
@@ -5642,6 +5944,25 @@ sequences:
         value: cancelFD | cancelFDFixed | cancelAll
       - set: s.userData
         value: ud
+  - of: onProcessFD
+    steps:
+      - op: "&^="
+        set: s.flags
+        value: sqeFixedFile
+      - switch:
+          cases:
+            - case: opAccept
+              do:
+                - set: s.fileIdx
+                  value: "0"
+                - set: s.opFlags
+                  value: syscall.SOCK_CLOEXEC
+            - case: opAsyncCancel
+              do:
+                - op: "&^="
+                  set: s.opFlags
+                  value: cancelFDFixed
+          "on": s.opcode
   - of: prepCloseDirect
     participants:
       - id: caller
