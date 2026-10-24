@@ -43,6 +43,7 @@ go_test(
     deps = [
         "//internal/core/data/codec",
         "//internal/kernel/errs",
+        "//internal/kernel/jsonenc",
     ],
 )
 

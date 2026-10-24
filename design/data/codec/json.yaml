@@ -174,7 +174,7 @@ packages:
       		String("level", "info").
       		Int("n", 7).
       		End()
-      	out = json.AppendString(out, "a \"quoted\" word")
+      	stringOut := json.AppendString(nil, "a \"quoted\" word")
 
       A string is escaped as encoding/json escapes it — U+2028 and U+2029
       included, an invalid UTF-8 byte written as U+FFFD — with one difference:

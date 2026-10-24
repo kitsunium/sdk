@@ -25,7 +25,7 @@ out := json.BeginObject(buf[:0]).
 	String("level", "info").
 	Int("n", 7).
 	End()
-out = json.AppendString(out, "a \"quoted\" word")
+stringOut := json.AppendString(nil, "a \"quoted\" word")
 ```
 
 A string is escaped as encoding/json escapes it — U+2028 and U+2029 included, an invalid UTF-8 byte written as U+FFFD — with one difference: '\<', '>' and '&' are NOT escaped, so the literal is not safe to embed in HTML as it is. The appenders register no codec and read no value by reflection, and Marshal is unchanged.
