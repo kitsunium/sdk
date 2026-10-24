@@ -44,9 +44,16 @@ func TestASnapshotReceiverEndsTheStreamWithoutAReset(t *testing.T) {
 		if err := installResult(c); err != nil {
 			t.Fatalf("stream %d: the verdict of an install that succeeded: %v", i, err)
 		}
+		// The receiver sends nothing after its verdict, no close_notify
+		// either: the socket under the TLS layer reads io.EOF on a FIN and
+		// ECONNRESET on a RST, which a TLS read could hide behind an alert.
+		raw := c.NetConn()
+		if err := raw.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+			t.Fatal(err)
+		}
 		var b [1]byte
-		if _, err := c.Read(b[:]); !errors.Is(err, io.EOF) {
-			t.Fatalf("stream %d: the receiver ended the connection with %v, want a clean end (io.EOF)", i, err)
+		if _, err := raw.Read(b[:]); !errors.Is(err, io.EOF) {
+			t.Fatalf("stream %d: the receiver ended the connection with %v, want a FIN (io.EOF)", i, err)
 		}
 		abandon(c.Close())
 	}
