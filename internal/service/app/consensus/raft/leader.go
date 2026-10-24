@@ -1343,6 +1343,11 @@ func (r *Raft) CheckOffer(from core.NodeID, o core.InstallOfferValue, needTable 
 	if o.Term != r.term || from != r.lead || r.role == core.RoleLeader {
 		return codeNotLeader
 	}
+	if o.Meta.ClusterVersion > r.speaks() {
+		// A raise past what this node speaks: the driver stops the node on
+		// this refusal, held or not (D18, #640).
+		return codeVersion
+	}
 	if o.Meta.Position.Index <= r.log.committed && !needTable {
 		return codePrecondition
 	}
@@ -1360,7 +1365,9 @@ func (r *Raft) CheckOffer(from core.NodeID, o core.InstallOfferValue, needTable 
 // (D7).
 func (r *Raft) InstallSnapshot(meta core.SnapshotMetaValue) {
 	idx, t := meta.Position.Index, meta.Position.Term
-	if r.ignoresInstall(idx) {
+	// A snapshot above the protocol this node speaks installs nothing: the
+	// node stops on the Ready (#640).
+	if r.refusesClusterVersion(&meta) || r.ignoresInstall(idx) {
 		return
 	}
 	if r.log.matchTerm(idx, t) && idx <= r.log.lastIndex() {

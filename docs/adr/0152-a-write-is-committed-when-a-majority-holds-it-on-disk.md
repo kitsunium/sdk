@@ -1598,6 +1598,20 @@ is refused with `OVERLOADED`. Nothing is appended in either case.
   - the RECEIVER chooses the resume offset, from what it has durably spooled.
     `Transport.Stream` takes a function that opens the snapshot at an offset,
     so the sender can resume where the receiver says;
+  - **the offer is screened on the event loop, and its spool positioned off
+    it (amendment of 2026-10-24, #643).** The loop screens the offer, answers
+    it held, or refuses it, including `OVERLOADED` while that snapshot is
+    being installed or another offer's spool is being positioned. The
+    caller's goroutine then opens and positions the spool, and the node's
+    stop waits for it. Finding a resume offset reads the spool back chunk by
+    chunk. On the loop, a cold 1 GiB spool held the node from acknowledging
+    and voting for longer than the sender waits for the accept (`JoinTimeout`,
+    #623), and every later offer read the spool back again. A spool
+    positioned and then released with nothing written resumes from the
+    offset kept in memory, so the offer after a judgment that outlasted the
+    bound is answered at once. A resume offset past the snapshot's encoded
+    size is never accepted: the spool is discarded and the snapshot accepted
+    from its start;
   - **freshness is checked again on the event loop, right before the install
     is accepted.** A snapshot whose index is not beyond the receiver's commit
     index is refused, even from the same leader in the same term. Then the
@@ -3046,7 +3060,12 @@ node, under the directory lock.
     recovered cluster can grow back to three voters (R3-02). **They enter as
     LEARNERS, and are promoted through the normal `Promote` catch-up, never
     as empty voters (R4-04).** `Init` for them takes the NEW `ClusterID`,
-    chosen before `Recover` runs.
+    chosen before `Recover` runs. `Recover` refuses `RECOVER_REFUSED` a
+    voter other than the survivor (2026-10-24,
+    [#642](https://github.com/kitsunium/sdk/issues/642)): accepted, a
+    member `Init` only prepared could not vote before a leader admitted it,
+    and the cluster never elected one. `RestoreSnapshot` keeps every voter
+    it is given: it runs on every node it names.
   - **Which node:** the one with the highest `(lastLogTerm, lastLogIndex)`,
     compared in that order, not "the highest committed index", which no
     surviving node can know for certain.
@@ -4095,8 +4114,13 @@ completed:
   `VERSION_UNSUPPORTED` while any member of the latest configuration, voter
   or learner, was not heard in the term announcing protocol 2. A member
   rolled back stops announcing at its next message. A node of protocol 1
-  that finds the raise committed stops (`VERSION_UNSUPPORTED`): the rollback
-  after the raise is refused cleanly, never run on the formats below.
+  that replays the raise from its log stops (`VERSION_UNSUPPORTED`). The
+  rollback after the raise is refused cleanly only while the raise entry is
+  in the log: a build of protocol 1 reads a snapshot cut after the raise
+  without comparing its cluster version, and runs at version 2 once the
+  log is compacted past the entry. Do not roll back past a raise. Builds
+  from the amendment of 2026-10-24 (#640) refuse such a snapshot too
+  (corrected 2026-10-24, #640).
 - **What protocol 2 writes**, each chosen by the committed cluster version,
   never before the raise, and each older form still read:
   - the snapshot metadata in version 2, exactly as the amendment of
@@ -4159,6 +4183,36 @@ refused, and the node acknowledged and voted on them
   retrying in the process leaked at every try.
 
 Nothing published changes: no frame, no payload, no record format.
+
+## Amendment — a snapshot above the protocol a node speaks stops it (2026-10-24, #640)
+
+D18's "unknown means stop" held for a raise replayed from the log alone
+(`commitClusterVersion`). Once a snapshot cut after a raise is the base and
+the log is compacted past the raise entry, the raise reaches a node only as
+the snapshot's `ClusterVersion`, and nothing compared it with what the node
+speaks: a node rolled back, or this build under a raise to a later protocol,
+started or installed such a snapshot and ran at a version whose formats it
+cannot read back ([#640](https://github.com/kitsunium/sdk/issues/640)).
+
+- **A start is refused `VERSION_UNSUPPORTED`** when the snapshot it would
+  restore names a cluster version above `ProtocolMax`, before the state
+  machine restores it, as for a metadata version or a codec this build does
+  not know (#513). The step function flags the same base in its first
+  Ready, and the driver stops the node, as on the raise replayed from the
+  log.
+- **An offer is refused `VERSION_UNSUPPORTED`** and the node stops, as for an
+  unknown metadata version. An install of such a snapshot changes nothing
+  and stops the node.
+- **Offline**, `RestoreSnapshot`, `OpenSnapshot` and `ImportObserved` refuse
+  `VERSION_UNSUPPORTED` an `Expected` metadata above `ProtocolMax` before
+  any byte is read or written. `Recover` refuses `VERSION_UNSUPPORTED`, before
+  anything is written, a directory whose newest snapshot it reads back names
+  a version, a codec or a cluster version this build does not know, as a
+  start does: skipped as a snapshot that fails its checksums, an interrupted
+  install above the protocol let it plan from the older log below it and
+  write a new history from an older state.
+- It is a refusal, never a new format: no frame, payload or record changes,
+  and nothing is written at another version.
 
 ## Revision history
 

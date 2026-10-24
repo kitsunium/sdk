@@ -369,7 +369,8 @@ func NewRaft(cfg *Config, st *StartState) *Raft {
 	} else {
 		node.ownTiming = node.timing.Generation
 	}
-	node.clusterVer, node.clusterGen, node.noSpace = sm.ClusterVersion, sm.ClusterGeneration, sm.NoSpace
+	node.noSpace = sm.NoSpace
+	node.adoptClusterVersion(&sm)
 	node.voteWindow = node.timing.ElectionTimeoutMin
 	node.contracts = map[uint64]core.TimingContractSpec{node.timing.Generation: node.timing}
 	node.engBase = node.engine()
@@ -395,6 +396,31 @@ func NewRaft(cfg *Config, st *StartState) *Raft {
 	node.admittedPub = node.admitted()
 	node.rd.Membership = node.admittedPub
 	return node
+}
+
+// adoptClusterVersion takes the start's snapshot's cluster version, unless
+// it is above the protocol this node speaks: the node then stops on its
+// first Ready, as on the raise replayed from the log (D18). Once a snapshot
+// cut after a raise is the base and the log is compacted past the raise
+// entry, the raise reaches a node rolled back only as that snapshot's
+// ClusterVersion; taken as it was, the node ran at a version whose formats
+// it cannot read back (#640).
+func (r *Raft) adoptClusterVersion(sm *core.SnapshotMetaValue) {
+	if r.refusesClusterVersion(sm) {
+		return
+	}
+	r.clusterVer, r.clusterGen = sm.ClusterVersion, sm.ClusterGeneration
+}
+
+// refusesClusterVersion names a snapshot whose cluster version is above the
+// protocol this node speaks in the Ready, for the driver to stop the node
+// with VERSION_UNSUPPORTED, and reports whether it did.
+func (r *Raft) refusesClusterVersion(sm *core.SnapshotMetaValue) bool {
+	if sm.ClusterVersion <= r.speaks() {
+		return false
+	}
+	r.rd.Unsupported = UnsupportedEntryValue{Index: max(sm.Position.Index, 1), Kind: core.EntryClusterVersion}
+	return true
 }
 
 // loadEntries appends the start's entries past the snapshot to the log,

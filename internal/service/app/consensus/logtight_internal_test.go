@@ -251,8 +251,12 @@ func TestAStreamSurvivesATightLogOverTCP(t *testing.T) {
 // compaction, and the stream is cancelled at its own bound, never before.
 // The follower's apply goroutine hangs at the restore of the snapshot it is
 // sent; the leader's log is brought into the band once the last byte was
-// read.
+// read. The leader keeps its leadership throughout: one that stepped down
+// cancelled the stream for that reason, and testTimingFast's 100 ms
+// CheckQuorum window stepped it down on a loaded macOS runner.
 func TestTheVerdictBoundStillEndsAStreamOnATightLog(t *testing.T) {
+	timing := testTimingFast()
+	timing.ElectionTimeoutMin, timing.ElectionTimeoutMax = 400*time.Millisecond, 450*time.Millisecond
 	var mu sync.Mutex
 	extras := map[coreconsensus.NodeID]*atomic.Int64{}
 	watches := map[coreconsensus.NodeID]*cancelWatch{}
@@ -267,6 +271,7 @@ func TestTheVerdictBoundStillEndsAStreamOnATightLog(t *testing.T) {
 		cfg.MaxLogBytes, cfg.LogReserveBytes = 1<<20, 600<<10
 		watches[tn.id] = &cancelWatch{MemoryTransport: cfg.Transport.(*MemoryTransport)}
 		cfg.Transport = watches[tn.id]
+		cfg.InitialTiming = timing
 	}
 	newClusterWith(t, c)
 	l := c.settledLeader(5 * time.Second)
@@ -310,10 +315,14 @@ func TestTheVerdictBoundStillEndsAStreamOnATightLog(t *testing.T) {
 	if !tight {
 		t.Fatal("setup: the leader's log is not tight")
 	}
-	bound := time.Duration(pinAfterStream) * testTimingFast().ElectionTimeoutMax
+	bound := time.Duration(pinAfterStream) * timing.ElectionTimeoutMax
+	term := l.node.Status().Term
 	time.Sleep(100 * time.Millisecond)
 	if time.Since(time.Unix(0, sentAt)) < bound-200*time.Millisecond {
 		if n := w.cancelled.Load(); n != 0 {
+			if st := l.node.Status(); st.Role != coreconsensus.RoleLeader || st.Term != term {
+				t.Fatalf("setup: the leader lost its leadership during the measure (term %d -> %d, role %v), which cancels its streams", term, st.Term, st.Role)
+			}
 			t.Fatalf("a tight log cancelled the stream %v after its last byte, before its %v bound", time.Since(time.Unix(0, sentAt)), bound)
 		}
 	} else {
@@ -323,6 +332,14 @@ func TestTheVerdictBoundStillEndsAStreamOnATightLog(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatalf("a stream whose receiver never answers its verdict was not cancelled %v after its last byte, its bound %v, with the log tight", time.Since(time.Unix(0, sentAt)), bound)
 		}
+	}
+	// A leader that stepped down cancelled the stream for that reason, not
+	// its bound: that is no pass.
+	if st := l.node.Status(); st.Role != coreconsensus.RoleLeader || st.Term != term {
+		t.Fatalf("setup: the leader lost its leadership before the stream was cancelled (term %d -> %d, role %v), which cancels its streams", term, st.Term, st.Role)
+	}
+	if since := time.Since(time.Unix(0, sentAt)); since < bound {
+		t.Fatalf("the stream was cancelled %v after its last byte, before its %v bound, with the log tight", since, bound)
 	}
 	var scale uint8
 	l.node.exec(func() { scale = l.node.pinScale[f.id] })

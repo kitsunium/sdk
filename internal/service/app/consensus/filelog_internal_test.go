@@ -422,8 +422,10 @@ func (k countingSink) release() { *k.released++ }
 func TestSecondOfferReleasesTheFirstSpoolHandle(t *testing.T) {
 	var n Node
 	released := 0
+	n.snapState.mu.Lock()
 	n.keepSpool("s1", countingSink{released: &released})
 	n.keepSpool("s1", countingSink{released: &released})
+	n.snapState.mu.Unlock()
 	if released != 1 {
 		t.Fatalf("released %d handles, want 1", released)
 	}

@@ -137,6 +137,12 @@ func ImportObserved(d DataDir, p *ImportParams, newCluster coreconsensus.Cluster
 	if len(p.Tail) == 0 {
 		return RestoreSnapshot(d, p.Snapshot, newCluster, members, opt)
 	}
+	// Before the tail is judged or replayed: a snapshot at a cluster
+	// version this build does not speak is refused whatever follows it
+	// (#640).
+	if err := knownClusterVersion(&opt.Expected); err != nil {
+		return coreconsensus.SnapshotMetaValue{}, err
+	}
 	if err := checkObservedTail(&opt.Expected, p.Tail); err != nil {
 		return coreconsensus.SnapshotMetaValue{}, err
 	}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -493,5 +494,302 @@ func TestAReofferDuringTheCommitIsRefusedWithoutHoldingTheLoop(t *testing.T) {
 	}
 	if acc2.Refused != coreconsensus.CodeOverloaded {
 		t.Errorf("an offer of the snapshot being committed was answered %+v: accepted at offset %d, a whole second stream, instead of refused OVERLOADED", acc2, acc2.Offset)
+	}
+}
+
+// repeatAt is an io.ReaderAt over size bytes of c repeated: the sender's
+// snapshot, without holding it in memory.
+type repeatAt struct {
+	c    []byte
+	size int64
+}
+
+func (r repeatAt) ReadAt(p []byte, off int64) (int, error) {
+	n := 0
+	for n < len(p) && off < r.size {
+		k := copy(p[n:], r.c[off%int64(len(r.c)):])
+		if rem := r.size - off; int64(k) > rem {
+			k = int(rem)
+		}
+		n += k
+		off += int64(k)
+	}
+	if n < len(p) {
+		return n, io.EOF
+	}
+	return n, nil
+}
+
+// streamPair is a sender and a receiver over TCP, the sender's accept read
+// under join.
+func streamPair(t *testing.T, join time.Duration,
+	accept func(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue) coreconsensus.InstallAcceptValue,
+	install func(coreconsensus.InstallParams) error,
+) (*TCPTransport, coreconsensus.NodeID) {
+	t.Helper()
+	ca := newTestCA(t)
+	cid := coreconsensus.ClusterID{0x5d, 0x6b, 0x67}
+	a, b := &tcpNode{id: 1, slot: "a"}, &tcpNode{id: 2, slot: "b"}
+	var members []coreconsensus.MemberValue
+	for _, tn := range []*tcpNode{a, b} {
+		tn.cert, tn.spki = ca.issue(t, SAN(cid, tn.slot), nil)
+		tr, err := NewTCPTransport(&TransportConfig{Certificate: tn.cert, Roots: ca.pool, ListenAddress: "127.0.0.1:0", JoinTimeout: join})
+		if err != nil {
+			t.Fatal(err)
+		}
+		tn.tr, tn.addr = tr, tr.Addr()
+		t.Cleanup(func() { _ = tn.tr.Close() })
+		members = append(members, coreconsensus.MemberValue{ID: tn.id, Slot: tn.slot, SPKI: tn.spki, Address: tn.addr, Voter: true})
+	}
+	if err := b.tr.Bind(1, func(coreconsensus.AuthenticatedPeerValue, []byte) {}, accept, install, nil); err != nil {
+		t.Fatal(err)
+	}
+	a.tr.SetMembership(1, members)
+	b.tr.SetMembership(1, members)
+	return a.tr, b.id
+}
+
+// A transfer cut mid-stream keeps its spool so that the same offer resumes
+// (R8-21), and the store finds where by reading the spool back, chunk by
+// chunk (filesnap.go Create, resumeOffset, alignedOffsetAt): its time grows
+// with the spool, a cold 1 GiB one past the 10 s JoinTimeout the sender
+// reads the accept under since #635. The judgment was cut, the spool left as
+// it was, and every later offer read it back again: the resume never
+// completed (#643). A spool positioned and released with nothing written
+// to it now resumes from the offset kept in memory, so the offer after a
+// judgment that outlasted the bound is answered at once. The receiver's
+// judgment here is judgeOffer's — releaseKept, the store's Create, the sink
+// kept — over a real 96 MiB spool in t.TempDir(), and the bound is a
+// quarter of one measured resume.
+func TestAResumeWhoseJudgmentOutlastsTheAcceptBoundCompletes(t *testing.T) {
+	dir := t.TempDir()
+	s := must(newFileSnapshots(dir, storageFailed))(t)
+	id := "00000000000000000333-00000000000000000002"
+	payload := make([]byte, defaultChunkSize)
+	for i := range payload {
+		payload[i] = byte(i*7 + i>>9)
+	}
+	c := chunk(payload)
+	const whole, total = 96, 104
+	f := must(os.Create(filepath.Join(dir, id+".spool")))(t)
+	for range whole {
+		if _, err := f.Write(c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := f.Write(c[:len(c)/2]); err != nil { // the transfer broke mid-chunk
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	size := int64(total * len(c))
+	meta := coreconsensus.SnapshotMetaValue{ID: id, Version: 1, EncodedSize: size, ChunkSize: defaultChunkSize}
+	offer := coreconsensus.InstallOfferValue{Term: 2, SnapshotID: id, Meta: meta}
+
+	var mu sync.Mutex
+	var kept coreconsensus.SnapshotSink
+	var judgments []time.Duration
+	judged := make(chan struct{}, 16)
+	accept := func(_ coreconsensus.AuthenticatedPeerValue, o coreconsensus.InstallOfferValue) coreconsensus.InstallAcceptValue {
+		defer func() { judged <- struct{}{} }()
+		mu.Lock()
+		if kept != nil {
+			releaseSink(kept)
+			kept = nil
+		}
+		mu.Unlock()
+		start := time.Now()
+		sink, off, err := s.Create(o.SnapshotID, o.Meta)
+		d := time.Since(start)
+		mu.Lock()
+		judgments = append(judgments, d)
+		mu.Unlock()
+		if err != nil {
+			return coreconsensus.InstallAcceptValue{SnapshotID: o.SnapshotID, Refused: coreconsensus.CodeStorageFailed}
+		}
+		mu.Lock()
+		kept = sink
+		mu.Unlock()
+		return coreconsensus.InstallAcceptValue{SnapshotID: o.SnapshotID, Offset: off}
+	}
+	install := func(p coreconsensus.InstallParams) error {
+		mu.Lock()
+		sink := kept
+		kept = nil
+		mu.Unlock()
+		if sink == nil {
+			return snapshotCorrupt("no accepted offer")
+		}
+		want := p.Offer.Meta.EncodedSize - p.Offset
+		k, err := io.Copy(sink, io.LimitReader(p.Body, want+1))
+		if err != nil || k != want {
+			releaseSink(sink)
+			return snapshotCorrupt("stream ended early")
+		}
+		return sink.Commit(p.Offer.Meta)
+	}
+	open := func(off int64) (io.ReadCloser, error) {
+		return io.NopCloser(io.NewSectionReader(repeatAt{c: c, size: size}, off, size-off)), nil
+	}
+	published := func() bool {
+		_, err := os.Stat(filepath.Join(dir, id+".meta"))
+		return err == nil
+	}
+
+	// The scale: one judgment of this resume, read back from the spool.
+	start := time.Now()
+	sink, off, err := s.Create(id, meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scan := time.Since(start)
+	if err := sink.Abort(); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("one judgment (Create resuming a %d MiB spool, offset %d) took %v", whole, off, scan)
+	join := scan / 4
+	if join < time.Millisecond {
+		t.Skipf("the resume took %v, too fast to scale JoinTimeout below it", scan)
+	}
+	// The spool again, as the broken transfer left it: Abort removed it.
+	f = must(os.Create(filepath.Join(dir, id+".spool")))(t)
+	for range whole {
+		if _, err := f.Write(c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	sender, to := streamPair(t, join, accept, install)
+	const attempts = 6
+	for i := range attempts {
+		err := sender.Stream(context.Background(), to, offer, open)
+		<-judged
+		mu.Lock()
+		d := judgments[len(judgments)-1]
+		mu.Unlock()
+		t.Logf("attempt %d (JoinTimeout %v): Stream=%v; judgment %v; published %v", i+1, join, err, d, published())
+		if err == nil && published() {
+			return
+		}
+	}
+	t.Errorf("%d offers of a resumable snapshot failed and none installed it: each judgment (%v and more) outlasted the %v bound the accept is read under, and every new offer read the spool back again",
+		attempts, scan, join)
+}
+
+// The judgment of an offer ran on the event loop whole: the store's Create,
+// which sweeps, opens and positions the spool — reading a resumable one back
+// in full — held the loop for as long, and the node neither acknowledged
+// nor voted meanwhile (D5b, #643). The offer is screened on the loop, and
+// its spool positioned off it: the loop runs, the follower goes on applying
+// the leader's entries, and another offer is refused OVERLOADED until the
+// one being positioned is answered.
+func TestTheLoopRunsWhileAnOfferIsPositioned(t *testing.T) {
+	stores := map[coreconsensus.NodeID]*hungCreate{}
+	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{1, 2, 10}, every: 1 << 20, size: 3}
+	c.configure = func(tn *testNode, cfg *Config) {
+		if stores[tn.id] == nil {
+			stores[tn.id] = &hungCreate{MemorySnapshots: tn.snaps, release: make(chan struct{})}
+		}
+		cfg.Snapshots = stores[tn.id]
+	}
+	newClusterWith(t, c)
+	l := c.settledLeader(5 * time.Second)
+	f := c.otherThan(l)
+	hung := stores[f.id]
+	var once sync.Once
+	release := func() { once.Do(func() { close(hung.release) }) }
+	t.Cleanup(release)
+	waitFor(t, "the follower following the leader", func() bool {
+		st, ls := f.node.Status(), l.node.Status()
+		return st.Leader == l.id && st.Term == ls.Term && ls.Role == coreconsensus.RoleLeader
+	})
+	st := f.node.Status()
+	idx, term := st.Commit+1000, st.Term
+	meta := coreconsensus.SnapshotMetaValue{
+		ID: snapshotID(idx, term), Version: 1, Position: coreconsensus.PositionValue{Term: term, Index: idx},
+		Log: f.node.lineage(), ChunkSize: defaultChunkSize, EncodedSize: 4096, DecodedSize: 4096,
+	}
+	offer := coreconsensus.InstallOfferValue{Term: term, SnapshotID: meta.ID, Meta: meta}
+	from := coreconsensus.AuthenticatedPeerValue{ID: l.id}
+	hung.armed.Store(true)
+	first := make(chan coreconsensus.InstallAcceptValue, 1)
+	go func() { first <- f.node.offer(from, offer) }()
+	waitFor(t, "the offer's spool being positioned", func() bool { return hung.waiting.Load() > 0 })
+
+	looped := make(chan struct{})
+	go func() {
+		f.node.exec(func() {})
+		close(looped)
+	}()
+	select {
+	case <-looped:
+	case <-time.After(time.Second):
+		t.Errorf("the follower's event loop is held 1 s by an offer whose spool is being positioned (D5b)")
+	}
+	tok := propose(t, l.node, "during=1")
+	for deadline := time.Now().Add(2 * time.Second); f.node.Status().Applied < tok.Index; time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Errorf("the follower applied %d, not the leader's entry %d, while an offer's spool was positioned", f.node.Status().Applied, tok.Index)
+			break
+		}
+	}
+	second := make(chan coreconsensus.InstallAcceptValue, 1)
+	go func() { second <- f.node.offer(from, offer) }()
+	select {
+	case acc := <-second:
+		if acc.Refused != coreconsensus.CodeOverloaded {
+			t.Errorf("an offer while another's spool is positioned was answered %+v, not refused OVERLOADED", acc)
+		}
+	case <-time.After(time.Second):
+		t.Errorf("an offer while another's spool is positioned is unanswered 1 s later")
+	}
+	release()
+	if acc := <-first; acc.Refused != 0 || acc.Held || acc.Offset != 0 {
+		t.Errorf("the offer whose spool was positioned was answered %+v, want accepted at offset 0", acc)
+	}
+	<-looped
+}
+
+// A resumable spool of the offered id that holds more than the snapshot's
+// encoded size — streamed by another leader, whose encoding of the same
+// position differs — was accepted at an offset past the snapshot's end:
+// the sender's open refuses it FRAME_INVALID, and every later offer was
+// accepted at the same offset (#643). The spool is discarded and the offer
+// accepted from its start.
+func TestAResumeIsNeverAcceptedPastTheSnapshotsEnd(t *testing.T) {
+	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{1, 2, 11}, every: 1 << 20, size: 3}
+	newClusterWith(t, c)
+	l := c.settledLeader(5 * time.Second)
+	f := c.otherThan(l)
+	waitFor(t, "the follower following the leader", func() bool {
+		st, ls := f.node.Status(), l.node.Status()
+		return st.Leader == l.id && st.Term == ls.Term && ls.Role == coreconsensus.RoleLeader
+	})
+	st := f.node.Status()
+	idx, term := st.Commit+1000, st.Term
+	ck := chunk(bytes.Repeat([]byte("x"), 100))
+	meta := coreconsensus.SnapshotMetaValue{
+		ID: snapshotID(idx, term), Version: 1, Position: coreconsensus.PositionValue{Term: term, Index: idx},
+		Log: f.node.lineage(), ChunkSize: defaultChunkSize, EncodedSize: int64(3 * len(ck)), DecodedSize: 300,
+	}
+	from := coreconsensus.AuthenticatedPeerValue{ID: l.id}
+	offer := coreconsensus.InstallOfferValue{Term: term, SnapshotID: meta.ID, Meta: meta}
+	if acc := f.node.offer(from, offer); acc.Refused != 0 || acc.Held || acc.Offset != 0 {
+		t.Fatalf("setup: the first offer was answered %+v", acc)
+	}
+	// Two of its three chunks, then the stream breaks: the spool stays.
+	body := bytes.NewReader(append(append([]byte(nil), ck...), ck...))
+	if err := f.node.install(coreconsensus.InstallParams{Ctx: context.Background(), From: from, Offer: offer, Body: body}); err == nil {
+		t.Fatal("setup: a short stream installed")
+	}
+	shorter := meta
+	shorter.EncodedSize, shorter.DecodedSize = int64(len(ck)), 100
+	acc := f.node.offer(from, coreconsensus.InstallOfferValue{Term: term, SnapshotID: shorter.ID, Meta: shorter})
+	if acc.Refused != 0 || acc.Held || acc.Offset < 0 || acc.Offset > shorter.EncodedSize {
+		t.Errorf("an offer of %d encoded bytes over a spool of %d was answered %+v: past the snapshot's end", shorter.EncodedSize, 2*len(ck), acc)
 	}
 }

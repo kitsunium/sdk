@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T11:39:20Z -->
+<!-- updated: 2026-10-24T15:36:41Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -30,6 +30,12 @@ under coverage before touching `shard_count`.
   `mutSnapshotAckLastIndex`).
 - Append, acknowledge or skip an entry kind `Known` refuses: report it in
   `Ready.Unsupported` (review M3).
+- Adopt a snapshot's cluster version above what the node speaks, at a
+  start or an install: report it in `Ready.Unsupported` and leave the
+  version as it was (`adoptClusterVersion`, `refusesClusterVersion`), and
+  refuse such an offer VERSION_UNSUPPORTED in `CheckOffer`. The raise
+  replayed from the log was the only one that stopped a node (#640,
+  `TestASnapshotAboveTheProtocolStopsTheNode`).
 - Admit a forwarded command without the bounds of a local one
   (`admitForward`, review M2).
 - Answer a past index from the engine state as it stands: `EngineAt` reads
