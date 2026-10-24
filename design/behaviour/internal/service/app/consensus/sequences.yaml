@@ -4844,7 +4844,7 @@ sequences:
           range: ents
           value: e
       - bind: s
-        eval: "&fileSnapshots{dir: dir, pins: map[string]int{}, writing: map[string]int{}, owners: map[string]*fileSink{}}"
+        eval: "&fileSnapshots{dir: dir, pins: map[string]int{}, writing: map[string]int{}, owners: map[string]*fileSink{}, resume: map[string]resumePoint{}}"
       - opt:
           do:
             - return: nil, err
@@ -4926,6 +4926,7 @@ sequences:
                   eval: os.Remove(filepath.Join(s.dir, name))
                   to: os
                 when: err != nil && !errors.Is(err, os.ErrNotExist)
+            - eval: delete(s.resume, strings.TrimSuffix(name, ".spool"))
           key: _
           range: orphans
           value: name
@@ -4989,7 +4990,7 @@ sequences:
         kind: internal
       - id: sink.mu.Lock
         kind: value
-      - id: s.claim
+      - id: s.claimSpool
         kind: internal
       - id: old.supersede
         kind: internal
@@ -4997,9 +4998,7 @@ sequences:
         kind: stdlib
       - id: sink.mu.Unlock
         kind: value
-      - id: f.Truncate
-        kind: value
-      - id: resumeOffset
+      - id: positionSpool
         kind: internal
       - id: alsoFailed
         kind: internal
@@ -5028,13 +5027,9 @@ sequences:
           when: err != nil
       - eval: sink.mu.Lock()
         to: sink.mu.Lock
-      - eval: s.mu.Lock()
-        to: s.mu.Lock
-      - bind: old
-        eval: s.claim(sink)
-        to: s.claim
-      - eval: s.mu.Unlock()
-        to: s.mu.Unlock
+      - bind: old, at, kept
+        eval: s.claimSpool(sink)
+        to: s.claimSpool
       - opt:
           do:
             - eval: s.afterPublish(id)
@@ -5057,20 +5052,9 @@ sequences:
           when: err != nil
       - set: sink.f
         value: f
-      - var:
-          name: "off"
-          type: int64
-      - alt:
-          - do:
-              - set: err
-                to: f.Truncate
-                value: f.Truncate(0)
-            when: old != nil
-          - do:
-              - set: off, err
-                to: resumeOffset
-                value: resumeOffset(f, meta.ChunkSize)
-            else: true
+      - bind: off, err
+        eval: positionSpool(f, old != nil, at, kept, &meta)
+        to: positionSpool
       - opt:
           do:
             - set: err
@@ -5084,9 +5068,53 @@ sequences:
               to: sink.closed
             - return: nil, 0, err
           when: err != nil
+      - set: sink.start
+        value: "off"
       - eval: sink.mu.Unlock()
         to: sink.mu.Unlock
       - return: sink, off, nil
+  - of: (*fileSnapshots).claimSpool
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileSnapshots).claimSpool
+        kind: self
+      - id: s.claim
+        kind: internal
+    steps:
+      - lock:
+          mutex: s.mu
+      - set: old
+        to: s.claim
+        value: s.claim(sink)
+      - set: at, kept
+        value: s.resume[sink.id]
+      - eval: delete(s.resume, sink.id)
+      - return: old, at, kept
+  - of: positionSpool
+    participants:
+      - id: caller
+        kind: actor
+      - id: positionSpool
+        kind: self
+      - id: resumeAt
+        kind: internal
+      - id: resumeOffset
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: superseding
+              do:
+                - return: 0, f.Truncate(0)
+            - case: kept && at.chunk == meta.ChunkSize && at.size == meta.EncodedSize
+              do:
+                - return: resumeAt(f, at.off, meta.ChunkSize)
+                  to: resumeAt
+            - default: true
+              do:
+                - return: resumeOffset(f, meta.ChunkSize)
+                  to: resumeOffset
   - of: (*fileSnapshots).claim
     steps:
       - bind: old
@@ -5156,6 +5184,61 @@ sequences:
         to: f.Seek
         value: f.Seek(off, io.SeekStart)
       - return: off, err
+  - of: resumeAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: resumeAt
+        kind: self
+      - id: f.Stat
+        kind: internal
+      - id: resumeOffset
+        kind: internal
+      - id: f.Truncate
+        kind: internal
+      - id: f.Seek
+        kind: value
+    steps:
+      - bind: st, err
+        eval: f.Stat()
+        to: f.Stat
+      - opt:
+          do:
+            - return: 0, err
+          when: err != nil
+      - opt:
+          do:
+            - return: resumeOffset(f, chunk)
+              to: resumeOffset
+          when: off < 0 || off > st.Size()
+      - opt:
+          do:
+            - return: 0, err
+          init:
+            bind: err
+            eval: f.Truncate(off)
+            to: f.Truncate
+          when: err != nil
+      - set: _, err
+        to: f.Seek
+        value: f.Seek(off, io.SeekStart)
+      - return: off, err
+  - of: (*fileSnapshots).forget
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*fileSnapshots).forget
+        kind: self
+      - id: s.mu.Lock
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+    steps:
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - eval: delete(s.resume, id)
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
   - of: (*fileSink).closed
     participants:
       - id: caller
@@ -5192,6 +5275,11 @@ sequences:
           do:
             - return: 0, snapshotCorrupt(supersededWhy)
           when: k.superseded
+      - opt:
+          do:
+            - set: k.wrote
+              value: "true"
+          when: len(p) > 0
       - return: k.f.Write(p)
         to: k.f.Write
   - of: (*fileSink).Commit
@@ -5213,6 +5301,8 @@ sequences:
       - id: k.f.Close
         kind: value
       - id: storageFailed
+        kind: internal
+      - id: k.s.forget
         kind: internal
       - id: os
         kind: stdlib
@@ -5261,6 +5351,8 @@ sequences:
             eval: k.f.Close()
             to: k.f.Close
           when: err != nil
+      - eval: k.s.forget(k.id)
+        to: k.s.forget
       - opt:
           do:
             - opt:
@@ -5344,6 +5436,10 @@ sequences:
         kind: internal
       - id: abandon
         kind: internal
+      - id: k.s.mu.Lock
+        kind: value
+      - id: k.s.mu.Unlock
+        kind: value
     steps:
       - defer: k.closed()
         to: k.closed
@@ -5351,9 +5447,19 @@ sequences:
           mutex: k.mu
       - opt:
           do:
-            - eval: abandon(k.f.Close())
-              to: abandon
-          when: "!k.superseded"
+            - return: ""
+          when: k.superseded
+      - eval: abandon(k.f.Close())
+        to: abandon
+      - opt:
+          do:
+            - eval: k.s.mu.Lock()
+              to: k.s.mu.Lock
+            - set: k.s.resume[k.id]
+              value: "resumePoint{off: k.start, chunk: k.meta.ChunkSize, size: k.meta.EncodedSize}"
+            - eval: k.s.mu.Unlock()
+              to: k.s.mu.Unlock
+          when: "!k.wrote"
   - of: (*fileSink).Abort
     participants:
       - id: caller
@@ -5363,6 +5469,8 @@ sequences:
       - id: k.closed
         kind: internal
       - id: abandon
+        kind: internal
+      - id: k.s.forget
         kind: internal
       - id: os
         kind: stdlib
@@ -5379,6 +5487,8 @@ sequences:
           when: k.superseded
       - eval: abandon(k.f.Close())
         to: abandon
+      - eval: k.s.forget(k.id)
+        to: k.s.forget
       - opt:
           do:
             - return: storageFailed("abort spool", err)
@@ -5982,19 +6092,28 @@ sequences:
         kind: self
       - id: n.exec
         kind: internal
+      - id: n.positionOffer
+        kind: internal
       - id: n.stop
         kind: internal
     steps:
       - bind: acc
         eval: "coreconsensus.InstallAcceptValue{SnapshotID: o.SnapshotID}"
+      - bind: position
+        eval: "false"
       - bind: ok
-        eval: n.exec(func() { n.judgeOffer(from.ID, &o, &acc) })
+        eval: n.exec(func() { position = n.judgeOffer(from.ID, &o, &acc) })
         to: n.exec
-      - opt:
-          do:
-            - set: acc.Refused
-              value: coreconsensus.CodeNodeStopped
-          when: "!ok"
+      - switch:
+          cases:
+            - case: position
+              do:
+                - eval: n.positionOffer(&o, &acc)
+                  to: n.positionOffer
+            - case: "!ok"
+              do:
+                - set: acc.Refused
+                  value: coreconsensus.CodeNodeStopped
       - opt:
           do:
             - eval: |-
@@ -6009,19 +6128,118 @@ sequences:
         kind: actor
       - id: (*Node).judgeOffer
         kind: self
+      - id: n.reservePosition
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: n.screenOffer(from, o, acc) || n.answerFromHeld(o, acc) || n.answerRestoring(o, acc)
+      - return: n.reservePosition(o.SnapshotID, acc)
+        to: n.reservePosition
+  - of: (*Node).reservePosition
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).reservePosition
+        kind: self
+      - id: n.wg.Add
+        kind: value
+    steps:
+      - lock:
+          mutex: n.snapState.mu
+      - opt:
+          do:
+            - set: acc.Refused
+              value: coreconsensus.CodeOverloaded
+            - return: "false"
+          when: n.snapState.positioning != ""
+      - set: n.snapState.positioning
+        value: id
+      - eval: n.wg.Add(1)
+        to: n.wg.Add
+      - return: "true"
+  - of: (*Node).positionOffer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).positionOffer
+        kind: self
+      - id: n.wg.Done
+        kind: value
+      - id: n.keepPositioned
+        kind: internal
+      - id: n.openSpool
+        kind: internal
+      - id: abandon
+        kind: internal
+    steps:
+      - defer: n.wg.Done()
+        to: n.wg.Done
+      - opt:
+          do:
+            - eval: n.keepPositioned(o.SnapshotID, nil)
+              to: n.keepPositioned
+            - set: acc.Refused
+              value: coreconsensus.CodeNodeStopped
+            - return: ""
+          when: n.stopped.Load()
+      - bind: sink, off, err
+        eval: n.openSpool(o)
+        to: n.openSpool
+      - opt:
+          do:
+            - eval: n.keepPositioned(o.SnapshotID, nil)
+              to: n.keepPositioned
+            - set: acc.Refused
+              value: coreconsensus.CodeStorageFailed
+            - return: ""
+          when: err != nil
+      - opt:
+          do:
+            - eval: abandon(sink.Abort())
+              to: abandon
+            - set: acc.Refused
+              value: coreconsensus.CodeOverloaded
+            - return: ""
+          when: "!n.keepPositioned(o.SnapshotID, sink)"
+      - set: acc.Offset
+        value: "off"
+  - of: (*Node).keepPositioned
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).keepPositioned
+        kind: self
+      - id: n.keepSpool
+        kind: internal
+    steps:
+      - lock:
+          mutex: n.snapState.mu
+      - set: n.snapState.positioning
+        value: "\"\""
+      - opt:
+          do:
+            - return: "false"
+          when: sink == nil || n.snapState.restoring[id] > 0
+      - eval: n.keepSpool(id, sink)
+        to: n.keepSpool
+      - return: "true"
+  - of: (*Node).openSpool
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).openSpool
+        kind: self
       - id: n.dropOtherSpools
         kind: internal
       - id: n.releaseKept
         kind: internal
       - id: n.cfg.Snapshots.Create
         kind: value
-      - id: n.keepSpool
+      - id: abandon
         kind: internal
     steps:
-      - opt:
-          do:
-            - return: ""
-          when: n.screenOffer(from, o, acc) || n.answerFromHeld(o, acc) || n.answerRestoring(o, acc)
       - eval: n.dropOtherSpools(o.SnapshotID)
         to: n.dropOtherSpools
       - eval: n.releaseKept(o.SnapshotID)
@@ -6031,14 +6249,20 @@ sequences:
         to: n.cfg.Snapshots.Create
       - opt:
           do:
-            - set: acc.Refused
-              value: coreconsensus.CodeStorageFailed
-            - return: ""
-          when: err != nil
-      - eval: n.keepSpool(o.SnapshotID, sink)
-        to: n.keepSpool
-      - set: acc.Offset
-        value: "off"
+            - return: sink, off, err
+          when: err != nil || (off >= 0 && off <= o.Meta.EncodedSize)
+      - eval: abandon(sink.Abort())
+        to: abandon
+      - set: sink, off, err
+        to: n.cfg.Snapshots.Create
+        value: n.cfg.Snapshots.Create(o.SnapshotID, o.Meta)
+      - opt:
+          do:
+            - eval: abandon(sink.Abort())
+              to: abandon
+            - return: nil, 0, snapshotCorrupt("a new spool resumes past the snapshot's end")
+          when: err == nil && (off < 0 || off > o.Meta.EncodedSize)
+      - return: sink, off, err
   - of: (*Node).screenOffer
     participants:
       - id: caller
@@ -6183,8 +6407,6 @@ sequences:
       - id: releaseSink
         kind: internal
     steps:
-      - lock:
-          mutex: n.snapState.mu
       - opt:
           do:
             - set: n.snapState.spools
