@@ -1,12 +1,12 @@
 package tlsid
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -56,16 +56,29 @@ type Identity struct {
 	roots    atomic.Pointer[x509.CertPool]
 	failures atomic.Int64
 
-	// For an identity read from files.
+	// For an identity read from files. A look decides by the files' bytes,
+	// never by their times (#633): pairLast and rootsLast are the digests of
+	// the bytes the last look decided on, rootsSeen those of every roots
+	// file merged.
 	mu        sync.Mutex
 	files     *FilesConfig
 	cur       *tls.Certificate
 	spki      [32]byte
 	san       string
-	stamp     time.Time
-	refusedAt time.Time
+	pairLast  pairSum
+	rootsLast [32]byte
 	checked   time.Time
-	rootsSeen [][]byte
+	rootsSeen [][32]byte
+}
+
+// pairSum is what a look compares a pair with: the SHA-256 of each file's
+// bytes, kept apart so that bytes moved from one file to the other are a
+// change too. A digest, not the bytes, so the key's PEM is not kept.
+type pairSum struct{ cert, key [32]byte }
+
+// sumPair is the pairSum of a certificate's and a key's bytes.
+func sumPair(certPEM, keyPEM []byte) pairSum {
+	return pairSum{cert: sha256.Sum256(certPEM), key: sha256.Sum256(keyPEM)}
 }
 
 // FilesConfig names the PEM files of a reloadable identity. They are looked
@@ -117,7 +130,15 @@ func LoadReloadable(f FilesConfig) (*Identity, error) {
 		f.Every = time.Second
 	}
 	id := &Identity{files: &f}
-	c, leaf, err := readPair(f.CertFile, f.KeyFile)
+	certPEM, err := os.ReadFile(f.CertFile)
+	if err != nil {
+		return nil, materialInvalid("cert_file", err.Error())
+	}
+	keyPEM, err := os.ReadFile(f.KeyFile)
+	if err != nil {
+		return nil, materialInvalid("key_file", err.Error())
+	}
+	c, leaf, err := parsePair(certPEM, keyPEM)
 	if err != nil {
 		return nil, err
 	}
@@ -130,9 +151,10 @@ func LoadReloadable(f FilesConfig) (*Identity, error) {
 		return nil, materialInvalid("roots_file", "no certificate")
 	}
 	id.roots.Store(pool)
-	id.rootsSeen = [][]byte{pemRoots}
+	id.rootsLast = sha256.Sum256(pemRoots)
+	id.rootsSeen = [][32]byte{id.rootsLast}
 	id.cur, id.spki, id.san = c, SPKI(leaf), sanOf(leaf)
-	id.stamp = modTime(f.CertFile, f.KeyFile, f.RootsFile)
+	id.pairLast = sumPair(certPEM, keyPEM)
 	id.checked = time.Now()
 	id.get = id.reload
 	return id, nil
@@ -153,24 +175,13 @@ func sanOf(c *x509.Certificate) string {
 	return b.String()
 }
 
-// modTime is the newest modification time among files; a file that cannot
-// be stated does not count, so a transient absence never triggers a reload.
-func modTime(files ...string) time.Time {
-	var t time.Time
-	for _, f := range files {
-		if st, err := os.Stat(f); err == nil && st.ModTime().After(t) {
-			t = st.ModTime()
-		}
-	}
-	return t
-}
-
-// readPair loads a certificate and its key and parses the leaf, refusing a
-// pair that does not match.
-func readPair(certFile, keyFile string) (*tls.Certificate, *x509.Certificate, error) {
-	c, err := tls.LoadX509KeyPair(certFile, keyFile)
+// parsePair builds a certificate from its PEM and its key's, refusing a pair
+// that does not match, and parses the leaf. It takes the very bytes a look
+// compared, never the files read a second time.
+func parsePair(certPEM, keyPEM []byte) (*tls.Certificate, *x509.Certificate, error) {
+	c, err := tls.X509KeyPair(certPEM, keyPEM)
 	if err != nil {
-		// LoadX509KeyPair also refuses a key that does not match the
+		// X509KeyPair also refuses a key that does not match the
 		// certificate.
 		return nil, nil, materialInvalid("cert_file", err.Error())
 	}
@@ -184,6 +195,15 @@ func readPair(certFile, keyFile string) (*tls.Certificate, *x509.Certificate, er
 
 // reload is the file identity's source: at most every Files.Every it looks
 // at the files, and swaps in a renewal that keeps the key and the SAN.
+//
+// A look reads the three files and decides by their bytes, never by their
+// times (#633). A copy that keeps its source's time (cp -p, rsync -a, tar
+// x), a filesystem of a coarse granularity, or a clock set back, gives a new
+// file a time older than, or the same as, the one a look last saw, and a
+// rule of "newer than the last look" never read it: a CA rollover's bundle
+// was never trusted, a renewal never served. The files are a few KiB of PEM,
+// read at most once per Every; bytes the last look already decided on are
+// not parsed again.
 func (id *Identity) reload() (*tls.Certificate, error) {
 	id.mu.Lock()
 	defer id.mu.Unlock()
@@ -191,49 +211,65 @@ func (id *Identity) reload() (*tls.Certificate, error) {
 		return id.cur, nil
 	}
 	id.checked = time.Now()
-	m := modTime(id.files.CertFile, id.files.KeyFile, id.files.RootsFile)
-	if !m.After(id.stamp) {
-		return id.cur, nil
-	}
-	c, leaf, err := readPair(id.files.CertFile, id.files.KeyFile)
-	pairOK := false
-	switch {
-	case err != nil, SPKI(leaf) != id.spki, sanOf(leaf) != id.san:
-		// A refused pair is read again at the next look, even under the
-		// same mtime: its key may land within the same granularity as the
-		// certificate (review of PR #301, L3). It is counted once.
-		if !m.Equal(id.refusedAt) {
-			id.failures.Add(1)
-			id.refusedAt = m
-		}
-	default:
-		id.cur = c
-		pairOK = true
-	}
-	if pemRoots, err := os.ReadFile(id.files.RootsFile); err == nil && !seen(id.rootsSeen, pemRoots) {
-		pool := id.roots.Load().Clone()
-		if pool.AppendCertsFromPEM(pemRoots) {
-			id.rootsSeen = append(id.rootsSeen, pemRoots)
-			id.roots.Store(pool)
-		} else {
-			id.failures.Add(1)
-		}
-	}
-	if pairOK {
-		id.stamp = m
-	}
+	id.reloadPair()
+	id.reloadRoots()
 	return id.cur, nil
 }
 
-// seen reports whether a roots file's bytes were already merged, so the
-// same file read again does not grow the pool.
-func seen(all [][]byte, b []byte) bool {
-	for _, x := range all {
-		if bytes.Equal(x, b) {
-			return true
-		}
+// reloadPair swaps in a pair whose bytes changed when it keeps the key and
+// the SAN. A file that cannot be read is no change, so a transient absence,
+// between an unlink and its replacement, neither swaps nor counts. A refused
+// pair is counted once and read again at every look, so a key landing after
+// its certificate is taken whatever the two files' times (review of PR
+// #301, L3); bytes equal to the refused ones are not parsed again, since
+// they would be refused again.
+func (id *Identity) reloadPair() {
+	certPEM, err := os.ReadFile(id.files.CertFile)
+	if err != nil {
+		return
 	}
-	return false
+	keyPEM, err := os.ReadFile(id.files.KeyFile)
+	if err != nil {
+		return
+	}
+	sum := sumPair(certPEM, keyPEM)
+	if sum == id.pairLast {
+		return
+	}
+	id.pairLast = sum
+	c, leaf, err := parsePair(certPEM, keyPEM)
+	if err != nil || SPKI(leaf) != id.spki || sanOf(leaf) != id.san {
+		id.failures.Add(1)
+		return
+	}
+	id.cur = c
+}
+
+// reloadRoots adds a roots file whose bytes changed to the roots, which only
+// grow until the process restarts (ADR 0174 D1, review of PR #301, L2). A
+// file that cannot be read is no change; one that names no certificate,
+// an empty one included, is counted once and never replaces nor narrows the
+// roots. Bytes already merged do not grow the pool again.
+func (id *Identity) reloadRoots() {
+	pemRoots, err := os.ReadFile(id.files.RootsFile)
+	if err != nil {
+		return
+	}
+	sum := sha256.Sum256(pemRoots)
+	if sum == id.rootsLast {
+		return
+	}
+	id.rootsLast = sum
+	if slices.Contains(id.rootsSeen, sum) {
+		return
+	}
+	pool := id.roots.Load().Clone()
+	if !pool.AppendCertsFromPEM(pemRoots) {
+		id.failures.Add(1)
+		return
+	}
+	id.rootsSeen = append(id.rootsSeen, sum)
+	id.roots.Store(pool)
 }
 
 // Certificate returns the identity's current certificate.

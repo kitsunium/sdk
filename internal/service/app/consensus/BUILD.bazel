@@ -143,6 +143,7 @@ go_test(
         "tcp_internal_test.go",
         "tcp_joiner_internal_test.go",
         "tcp_link_internal_test.go",
+        "tcp_pemrollover_internal_test.go",
         "tcp_senderrelease_internal_test.go",
         "tcp_streamstall_internal_test.go",
         "transferpin_internal_test.go",

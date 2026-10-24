@@ -325,3 +325,278 @@ func TestIdentityRereadsARefusedRenewal(t *testing.T) {
 		t.Fatal("the renewal was never read again after a refused first look")
 	}
 }
+
+// look waits past the identity's Every (the files helper sets a millisecond)
+// and asks for the certificate, as every handshake does, so the identity
+// looks at its files.
+func look(t *testing.T, id *tlsid.Identity) *tls.Certificate {
+	t.Helper()
+	time.Sleep(10 * time.Millisecond)
+	return must(id.Certificate())(t)
+}
+
+// writeAt writes b to path and gives it the modification time at, as a copy
+// that keeps its source's time (cp -p, rsync -a, tar x) or a filesystem of a
+// coarse granularity leaves it.
+func writeAt(t *testing.T, path string, b []byte, at time.Time) {
+	t.Helper()
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, at, at); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// stampAll gives every file of f the one modification time at, so the
+// newest of them, the time a look kept, is at.
+func stampAll(t *testing.T, f tlsid.FilesConfig, at time.Time) {
+	t.Helper()
+	for _, p := range []string{f.CertFile, f.KeyFile, f.RootsFile} {
+		if err := os.Chtimes(p, at, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// trusts reports whether the identity's roots verify a client certificate.
+func trusts(t *testing.T, id *tlsid.Identity, certPEM []byte) error {
+	t.Helper()
+	b, _ := pem.Decode(certPEM)
+	if b == nil {
+		t.Fatal("no PEM block")
+	}
+	leaf := must(x509.ParseCertificate(b.Bytes))(t)
+	_, err := leaf.Verify(x509.VerifyOptions{Roots: id.Roots(), KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}})
+	return err
+}
+
+// A CA rollover's bundle copied with its source's modification time kept
+// (cp -p, rsync -a, tar x, a package), older than the certificate's, is read
+// at the next look: a look decides by the files' bytes, not their times
+// (#633). Before, a look read nothing unless the newest time of the three
+// files was after the one it last kept, so the running node refused every
+// peer of the new CA until it restarted.
+func TestIdentityTrustsARolloverBundleCopiedWithItsTimeKept(t *testing.T) {
+	c := newCA(t, "ca")
+	f := files(t, c, "kitsunium-consensus://aa/slot/s", nil)
+	id := must(tlsid.LoadReloadable(f))(t)
+	next := newCA(t, "next")
+	bundle := append(slices.Clone(c.pem), next.pem...)
+	writeAt(t, f.RootsFile, bundle, time.Now().Add(-24*time.Hour))
+	look(t, id)
+	// The peer of the new CA trusts both, as the rollover deploys.
+	nf := files(t, next, "kitsunium-consensus://aa/slot/n", nil)
+	writeAt(t, nf.RootsFile, bundle, time.Now())
+	nb := must(tlsid.LoadReloadable(nf))(t)
+	if hs := handshake(id, nb, nil, nil); hs.server != nil {
+		t.Fatalf("the new CA of a bundle copied with an older time is not trusted: %v", hs.server)
+	}
+	ob := must(tlsid.LoadReloadable(files(t, c, "kitsunium-consensus://aa/slot/o", nil)))(t)
+	if hs := handshake(id, ob, nil, nil); hs.server != nil {
+		t.Fatalf("the old CA is no longer trusted during the rollover: %v", hs.server)
+	}
+	if n := id.ReloadFailures(); n != 0 {
+		t.Fatalf("reload failures %d, want 0", n)
+	}
+}
+
+// A renewal whose files carry the very time a look kept is served at the
+// next look (#633): a filesystem of a one-second granularity (ext3, HFS+,
+// FAT, many NFS servers) or a copy that keeps times lands it there. Before,
+// the roots file rewritten at T made a look keep T, and a renewal landing at
+// T was never read: the node kept presenting the old certificate until it
+// expired, and every peer refused it from then on, ReloadFailures still 0.
+func TestIdentityServesARenewalLandingAtTheTimeALookKept(t *testing.T) {
+	c := newCA(t, "ca")
+	key := must(ecdsa.GenerateKey(elliptic.P256(), rand.Reader))(t)
+	f := files(t, c, "kitsunium-consensus://aa/slot/s", key)
+	id := must(tlsid.LoadReloadable(f))(t)
+	first := must(id.Leaf())(t)
+	// The roots file is rewritten at T, later than the pair, and a look
+	// keeps T.
+	at := time.Now().Add(time.Minute).Truncate(time.Second)
+	writeAt(t, f.RootsFile, c.pem, at)
+	look(t, id)
+	// The renewal, same key and SAN, lands at T.
+	cp, kp := c.issue(t, "kitsunium-consensus://aa/slot/s", key)
+	writeAt(t, f.CertFile, cp, at)
+	writeAt(t, f.KeyFile, kp, at)
+	look(t, id)
+	if renewed := must(id.Leaf())(t); renewed.SerialNumber.Cmp(first.SerialNumber) == 0 {
+		t.Fatal("the renewal on disk is not served: the look kept the certificate it already had")
+	}
+	if n := id.ReloadFailures(); n != 0 {
+		t.Fatalf("reload failures %d, want 0", n)
+	}
+}
+
+// Whatever time a changed file carries, older than the one the last look
+// kept or the same, the next look reads it: the roots file as the pair
+// (#633).
+func TestIdentityReadsAChangedFileWhateverItsTime(t *testing.T) {
+	const san = "kitsunium-consensus://aa/slot/s"
+	cases := []struct {
+		name  string
+		roots bool
+		shift time.Duration
+	}{
+		{name: "roots, older", roots: true, shift: -24 * time.Hour},
+		{name: "roots, same", roots: true},
+		{name: "pair, older", shift: -24 * time.Hour},
+		{name: "pair, same"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newCA(t, "ca")
+			key := must(ecdsa.GenerateKey(elliptic.P256(), rand.Reader))(t)
+			f := files(t, c, san, key)
+			at := time.Now().Truncate(time.Second)
+			stampAll(t, f, at)
+			id := must(tlsid.LoadReloadable(f))(t)
+			first := must(id.Leaf())(t)
+			when := at.Add(tc.shift)
+			if tc.roots {
+				next := newCA(t, "next")
+				writeAt(t, f.RootsFile, append(slices.Clone(c.pem), next.pem...), when)
+				look(t, id)
+				peer, _ := next.issue(t, "kitsunium-consensus://aa/slot/n", nil)
+				if err := trusts(t, id, peer); err != nil {
+					t.Fatalf("the new roots are not read: %v", err)
+				}
+			} else {
+				cp, kp := c.issue(t, san, key)
+				writeAt(t, f.CertFile, cp, when)
+				writeAt(t, f.KeyFile, kp, when)
+				look(t, id)
+				if renewed := must(id.Leaf())(t); renewed.SerialNumber.Cmp(first.SerialNumber) == 0 {
+					t.Fatal("the renewal is not read")
+				}
+			}
+			if n := id.ReloadFailures(); n != 0 {
+				t.Fatalf("reload failures %d, want 0", n)
+			}
+		})
+	}
+}
+
+// A look over files whose bytes did not change swaps nothing and parses
+// nothing, even after every time moved forward (a touch, a backup tool, a
+// copy over itself): the certificate and the roots stay the very same values,
+// and nothing is counted. Within Every the files are not looked at at all.
+func TestIdentityLookWithoutAChangeReloadsNothing(t *testing.T) {
+	c := newCA(t, "ca")
+	f := files(t, c, "kitsunium-consensus://aa/slot/s", nil)
+	id := must(tlsid.LoadReloadable(f))(t)
+	cert, roots := must(id.Certificate())(t), id.Roots()
+	if got := look(t, id); got != cert || id.Roots() != roots {
+		t.Fatal("a look over unchanged files reloaded them")
+	}
+	stampAll(t, f, time.Now().Add(time.Hour))
+	if got := look(t, id); got != cert || id.Roots() != roots {
+		t.Fatal("a look reloaded files whose times moved but bytes did not")
+	}
+	for _, p := range []string{f.CertFile, f.KeyFile, f.RootsFile} {
+		writeAt(t, p, must(os.ReadFile(p))(t), time.Now().Add(2*time.Hour))
+	}
+	if got := look(t, id); got != cert || id.Roots() != roots {
+		t.Fatal("a look reloaded files written again with the same bytes")
+	}
+	if n := id.ReloadFailures(); n != 0 {
+		t.Fatalf("reload failures %d, want 0", n)
+	}
+
+	// Within Every, a renewal is not even looked at.
+	key := must(ecdsa.GenerateKey(elliptic.P256(), rand.Reader))(t)
+	slow := files(t, c, "kitsunium-consensus://aa/slot/s", key)
+	slow.Every = time.Hour
+	sid := must(tlsid.LoadReloadable(slow))(t)
+	held := must(sid.Certificate())(t)
+	cp, kp := c.issue(t, "kitsunium-consensus://aa/slot/s", key)
+	writeAt(t, slow.CertFile, cp, time.Now().Add(time.Hour))
+	writeAt(t, slow.KeyFile, kp, time.Now().Add(time.Hour))
+	if got := look(t, sid); got != held {
+		t.Fatal("the files were looked at before Every passed")
+	}
+}
+
+// A pair caught mid-write, its certificate cut short as a writer that
+// truncates then writes leaves it, is refused, counted once however many
+// looks see it, and the old certificate is served meanwhile; once whole, it
+// is taken at the next look, whatever its time (review of PR #301, L3;
+// #633).
+func TestIdentityRefusesATornPairOnceAndTakesItWhole(t *testing.T) {
+	const san = "kitsunium-consensus://aa/slot/s"
+	c := newCA(t, "ca")
+	key := must(ecdsa.GenerateKey(elliptic.P256(), rand.Reader))(t)
+	f := files(t, c, san, key)
+	at := time.Now().Truncate(time.Second)
+	stampAll(t, f, at)
+	id := must(tlsid.LoadReloadable(f))(t)
+	first := must(id.Certificate())(t)
+	cp, _ := c.issue(t, san, key)
+	writeAt(t, f.CertFile, cp[:len(cp)/2], at)
+	for range 3 {
+		if got := look(t, id); got != first {
+			t.Fatal("a torn certificate replaced the one served")
+		}
+	}
+	if n := id.ReloadFailures(); n != 1 {
+		t.Fatalf("reload failures %d, want the torn pair counted once", n)
+	}
+	writeAt(t, f.CertFile, cp, at)
+	look(t, id)
+	if renewed := must(id.Leaf())(t); renewed.SerialNumber.Cmp(first.Leaf.SerialNumber) == 0 {
+		t.Fatal("the pair, once whole, is not taken")
+	}
+	if n := id.ReloadFailures(); n != 1 {
+		t.Fatalf("reload failures %d, want 1", n)
+	}
+}
+
+// A roots file that names no certificate, emptied or garbage, is counted
+// once however many looks see it, and never replaces the roots; one that
+// cannot be read is no change and is not counted. Throughout, the roots
+// still trust their CA, and a valid bundle afterwards is added to them
+// (ADR 0174 D1, review of PR #301, L2).
+func TestIdentityNeverNarrowsTheRootsOnAnUnusableRootsFile(t *testing.T) {
+	c := newCA(t, "ca")
+	f := files(t, c, "kitsunium-consensus://aa/slot/s", nil)
+	id := must(tlsid.LoadReloadable(f))(t)
+	peer, _ := c.issue(t, "kitsunium-consensus://aa/slot/p", nil)
+	steps := []struct {
+		name     string
+		write    func()
+		failures int64
+	}{
+		{name: "emptied", write: func() { writeAt(t, f.RootsFile, nil, time.Now().Add(time.Hour)) }, failures: 1},
+		{name: "garbage", write: func() { writeAt(t, f.RootsFile, []byte("not a PEM"), time.Now().Add(2*time.Hour)) }, failures: 2},
+		{name: "removed", write: func() {
+			if err := os.Remove(f.RootsFile); err != nil {
+				t.Fatal(err)
+			}
+		}, failures: 2},
+	}
+	for _, s := range steps {
+		s.write()
+		for range 3 {
+			look(t, id)
+		}
+		if n := id.ReloadFailures(); n != s.failures {
+			t.Fatalf("%s: reload failures %d, want %d", s.name, n, s.failures)
+		}
+		if err := trusts(t, id, peer); err != nil {
+			t.Fatalf("%s: the roots no longer trust their CA: %v", s.name, err)
+		}
+	}
+	next := newCA(t, "next")
+	writeAt(t, f.RootsFile, append(slices.Clone(c.pem), next.pem...), time.Now().Add(-time.Hour))
+	look(t, id)
+	np, _ := next.issue(t, "kitsunium-consensus://aa/slot/n", nil)
+	if err := trusts(t, id, np); err != nil {
+		t.Fatalf("a valid bundle after an unusable one is not added: %v", err)
+	}
+	if err := trusts(t, id, peer); err != nil {
+		t.Fatalf("the old CA is no longer trusted: %v", err)
+	}
+}
