@@ -1,7 +1,7 @@
 package token
 
 import (
-	"encoding/json"
+	"bytes"
 	"strings"
 	"unicode/utf8"
 
@@ -35,6 +35,19 @@ const (
 	algNone string = "none"
 )
 
+const (
+	// factUnsecured: alg is "none" in some capitalisation.
+	factUnsecured headerFacts = 1 << iota
+	// factAlgEmpty: alg is absent, null or "".
+	factAlgEmpty
+	// factAlgBound: alg names the bound algorithm exactly.
+	factAlgBound
+	// factCritical: a "crit" member was present.
+	factCritical
+	// factTypeOK: no type is required, or typ is exactly the required one.
+	factTypeOK
+)
+
 // headerValue is the subset of the JOSE header this package acts on. Every
 // other member is IGNORED on the way in (RFC 7515 allows unknown parameters)
 // and not carried on the way out — re-emitting a parameter we never understood
@@ -52,61 +65,121 @@ type headerValue struct {
 	critical bool
 }
 
-// parseJOSEHeader reads a decoded JOSE header object.
-func parseJOSEHeader(raw []byte) (header headerValue, err error) {
-	//: encoding/json would turn invalid UTF-8 into U+FFFD rather than refuse
-	//: it, so the header is held to UTF-8 before it is read, as the claims are.
+// headerView is a JOSE header as the scanner read it: each member this
+// package acts on as its string literal inside the decoded header, nil when
+// absent or null. It decodes nothing, so reading it allocates nothing.
+type headerView struct {
+	// alg / typ / kid are the members' literals, quotes included.
+	alg, typ, kid []byte
+	// critical reports whether a "crit" member was present.
+	critical bool
+}
+
+// readJOSEHeader reads a decoded JOSE header object, under the same rules as a
+// claims object: UTF-8, a depth bound, and the one strict scan that refuses
+// malformed text and a duplicate or escaped member name (RFC 8725 §2.6).
+//
+// The view is returned by value: a view written through a pointer would make
+// raw escape, and a VerifyInto decodes raw on its stack.
+func readJOSEHeader(raw []byte) (view headerView, err error) {
+	//: a reader that repairs invalid UTF-8 would make two headers one, so the
+	//: header is held to UTF-8 before it is read, as the claims are.
 	if !utf8.Valid(raw) {
 		//: refused, never repaired.
-		return headerValue{}, malformed("JOSE header is not UTF-8")
+		return headerView{}, malformed("JOSE header is not UTF-8")
 	}
 	//: bound the nesting first — the header is small and flat.
 	if derr := checkJSONDepth(raw, maxHeaderDepth); derr != nil {
 		//: propagate TooDeep.
-		return headerValue{}, derr
+		return headerView{}, derr
 	}
-	//: a header that says two things is refused (RFC 8725 §2.6).
-	if derr := checkNoDuplicateMembers(raw); derr != nil {
-		//: propagate DuplicateMember or Malformed.
-		return headerValue{}, derr
+	var idx objectIndex
+	//: a header that says two things is refused, and so is one that is not
+	//: a JSON object.
+	if serr := scanObject(raw, maxHeaderDepth, &idx); serr != nil {
+		//: propagate Malformed, DuplicateMember or TooLarge.
+		return headerView{}, serr
 	}
-	var members map[string]json.RawMessage
-	//: only now build the member map.
-	if json.Unmarshal(raw, &members) != nil {
-		//: not a JSON object.
-		return headerValue{}, malformed("JOSE header is not a JSON object")
+	var merr error
+	//: the three string members, in the order the legacy reader judged them.
+	if view.alg, merr = headerMember(raw, &idx, "alg"); merr != nil {
+		//: a non-string alg is malformed.
+		return headerView{}, merr
 	}
-	alg, aerr := decodeStringClaim(members, "alg")
-	//: a non-string alg is malformed.
-	if aerr != nil {
-		//: propagate.
-		return headerValue{}, aerr
+	//: then typ.
+	if view.typ, merr = headerMember(raw, &idx, "typ"); merr != nil {
+		//: a non-string typ is malformed.
+		return headerView{}, merr
 	}
-	//: the remaining members this package acts on.
-	return finishHeader(members, alg)
-}
-
-// finishHeader reads the remaining members this package acts on.
-func finishHeader(members map[string]json.RawMessage, alg string) (header headerValue, err error) {
-	typ, terr := decodeStringClaim(members, "typ")
-	//: a non-string typ is malformed.
-	if terr != nil {
-		//: propagate.
-		return headerValue{}, terr
-	}
-	kid, kerr := decodeStringClaim(members, "kid")
-	//: a non-string kid is malformed.
-	if kerr != nil {
-		//: propagate.
-		return headerValue{}, kerr
+	//: then kid.
+	if view.kid, merr = headerMember(raw, &idx, "kid"); merr != nil {
+		//: a non-string kid is malformed.
+		return headerView{}, merr
 	}
 	//: "crit" names header parameters that MUST be understood (RFC 7515
 	//: §4.1.11). This package understands none of them, so its mere presence
 	//: is a rejection — "ignore what you do not understand" is exactly how a
 	//: security-relevant extension gets silently dropped.
-	_, critical := members["crit"]
+	view.critical = idx.lookup(raw, "crit") >= 0
 	//: the four members this package acts on; the rest are ignored.
-	return headerValue{alg: alg, typ: typ, kid: kid, critical: critical}, nil
+	return view, nil
+}
+
+// headerMember returns the literal of the string member name, nil when it is
+// absent or null — which a header has always read as absent — and Malformed
+// when it is present as anything else.
+func headerMember(raw []byte, idx *objectIndex, name string) (lit []byte, err error) {
+	at := idx.lookup(raw, name)
+	//: absent, or null.
+	if at < 0 || idx.member[at].kind == kindNull {
+		//: absent.
+		return nil, nil
+	}
+	//: present but not a string is malformed.
+	if idx.member[at].kind != kindString {
+		//: the legacy reader's wording, kept.
+		return nil, malformed("registered claim " + name + " is not a string")
+	}
+	//: a view of the literal.
+	return idx.value(raw, at), nil
+}
+
+// parseJOSEHeader reads a decoded JOSE header object into the string form the
+// set verifier selects a key with.
+func parseJOSEHeader(raw []byte) (header headerValue, err error) {
+	view, rerr := readJOSEHeader(raw)
+	//: the one reader.
+	if rerr != nil {
+		//: propagate.
+		return headerValue{}, rerr
+	}
+	//: decoded once, the common spellings without an allocation.
+	return headerValue{
+		alg: headerText(view.alg), typ: headerText(view.typ),
+		kid: headerText(view.kid), critical: view.critical,
+	}, nil
+}
+
+// headerText decodes a header member's literal, "" when it was absent or
+// null. The spellings nearly every header carries come back as constants.
+func headerText(lit []byte) string {
+	var text string
+	//: absent or null leaves the zero string, this domain's "absent".
+	if lit == nil {
+		//: nothing to decode.
+		return text
+	}
+	body := lit[1 : len(lit)-1]
+	//: the names this package itself writes, interned.
+	for _, known := range [...]string{"HS256", "ES256", "EdDSA", defaultType} {
+		//: the conversion does not escape, so it is zero-copy.
+		if bytes.Equal(body, []byte(known)) {
+			//: no allocation.
+			return known
+		}
+	}
+	//: anything else, decoded.
+	return decodeText(lit)
 }
 
 // checkHeader enforces the algorithm binding and the typing policy.
@@ -116,35 +189,106 @@ func finishHeader(members map[string]json.RawMessage, alg string) (header header
 // choose a key, an algorithm or a branch. It runs before any key material
 // reaches any primitive.
 func (p policyValue) checkHeader(header headerValue, bound coretoken.Algorithm) error {
+	//: the same judgement the scanner's view gets, from decoded strings.
+	return p.judgeHeader(factIf(strings.EqualFold(header.alg, algNone), factUnsecured)|
+		factIf(header.alg == "", factAlgEmpty)|
+		factIf(header.alg == bound.String(), factAlgBound)|
+		factIf(header.critical, factCritical)|
+		factIf(p.requireType == "" || header.typ == p.requireType, factTypeOK), bound)
+}
+
+// checkHeaderView is checkHeader over a header the scanner read, compared
+// literal against expectation without decoding anything.
+func (p policyValue) checkHeaderView(view *headerView, bound coretoken.Algorithm) error {
+	//: the same judgement checkHeader makes.
+	return p.judgeHeader(factIf(literalIsNone(view.alg), factUnsecured)|
+		factIf(literalEqual(view.alg, ""), factAlgEmpty)|
+		factIf(literalEqual(view.alg, bound.String()), factAlgBound)|
+		factIf(view.critical, factCritical)|
+		factIf(p.requireType == "" || literalEqual(view.typ, p.requireType), factTypeOK), bound)
+}
+
+// headerFacts is what the header judgement needs, whichever reader produced
+// it: one bit per fact, set when the fact holds.
+type headerFacts uint8
+
+// factIf returns fact when held is true, and no fact otherwise.
+func factIf(held bool, fact headerFacts) headerFacts {
+	//: a fact that does not hold sets no bit.
+	if !held {
+		//: none.
+		return 0
+	}
+	//: the fact's bit.
+	return fact
+}
+
+// has reports whether every bit of fact is set in facts.
+func (h headerFacts) has(fact headerFacts) bool {
+	//: a mask test.
+	return h&fact == fact
+}
+
+// judgeHeader returns the first verdict facts earn, in the one order every
+// path applies.
+func (p policyValue) judgeHeader(facts headerFacts, bound coretoken.Algorithm) error {
 	//: an unsecured token is refused by name, so the log says what happened.
-	if uerr := refuseUnsecured(header); uerr != nil {
+	if facts.has(factUnsecured) {
 		//: unconditional — no configuration accepts it.
-		return uerr
+		return coretoken.AlgorithmNone
 	}
 	//: a header with no alg at all is not a JWS.
-	if header.alg == "" {
+	if facts.has(factAlgEmpty) {
 		//: structural failure.
 		return coretoken.Malformed
 	}
 	//: the comparison. A mismatch is a refusal, never a re-selection.
-	if header.alg != bound.String() {
+	if !facts.has(factAlgBound) {
 		//: the verdict an algorithm-confusion attempt produces.
 		return errs.Wrap(coretoken.AlgorithmMismatch, errs.WrapParams{},
 			errs.String("expected", bound.String()))
 	}
 	//: an unrecognised critical parameter is a mandatory rejection.
-	if header.critical {
+	if facts.has(factCritical) {
 		//: refuse rather than ignore.
 		return coretoken.HeaderUnsupported
 	}
 	//: explicit typing, when the recipient asked for it (RFC 8725 §3.11/§3.12).
-	if p.requireType != "" && header.typ != p.requireType {
+	if !facts.has(factTypeOK) {
 		//: refuse a token of the wrong kind from the right issuer.
 		return errs.Wrap(coretoken.HeaderUnsupported, errs.WrapParams{},
 			errs.String("expected_typ", p.requireType))
 	}
 	//: header accepted.
 	return nil
+}
+
+// literalEqual reports whether a header member's literal decodes to want; an
+// absent or null member decodes to "".
+func literalEqual(lit []byte, want string) bool {
+	//: absent or null.
+	if lit == nil {
+		//: equal only to the empty string.
+		return want == ""
+	}
+	//: compared as it is read.
+	return jsonStringEqual(lit, want)
+}
+
+// literalIsNone reports whether a header member's literal decodes to "none"
+// in any capitalisation, folded as strings.EqualFold folds. No letter of
+// "none" has a case partner outside ASCII, so every spelling of it decodes to
+// four octets, and a longer literal is not one.
+func literalIsNone(lit []byte) bool {
+	//: absent, null, or longer than any spelling of four characters.
+	if lit == nil || len(lit) > 2+4*unicodeEscapeLen {
+		//: not "none".
+		return false
+	}
+	var buf [4 * unicodeEscapeLen]byte
+	n, ok := decodeTextInto(buf[:], lit)
+	//: the same folding the string path applies.
+	return ok && n == len(algNone) && bytes.EqualFold(buf[:n], []byte(algNone))
 }
 
 // decodeAndValidate turns an AUTHENTICATED payload segment into claims and

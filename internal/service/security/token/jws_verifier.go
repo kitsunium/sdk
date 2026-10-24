@@ -19,6 +19,12 @@ func newJWSVerifier(bound verifyingKey, cfg VerifierConfig) (verifier coretoken.
 		//: propagate PolicyMisconfigured.
 		return nil, perr
 	}
+	//: an HS256 binding, however it was reached — a Key or an oct JWK —
+	//: gets the verifier that also verifies into a caller's buffer.
+	if secret, symmetric := bound.(hs256Binding); symmetric {
+		//: bound for life, VerifierInto included.
+		return newHS256Verifier(secret, policy), nil
+	}
 	//: bound for life.
 	return &jwsVerifier{bound: bound, policy: policy}, nil
 }

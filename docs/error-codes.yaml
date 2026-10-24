@@ -653,6 +653,18 @@ codes:
     const: CodeLifetimeTooLong
     hex: "0x00_02_0D_10"
     package: internal/core/security/token
+  - code: "0.2.13.17"
+    const: CodeScratchBusy
+    hex: "0x00_02_0D_11"
+    package: internal/core/security/token
+  - code: "0.2.13.18"
+    const: CodeScratchForeign
+    hex: "0x00_02_0D_12"
+    package: internal/core/security/token
+  - code: "0.2.13.19"
+    const: CodeClaimsBufOverflow
+    hex: "0x00_02_0D_13"
+    package: internal/core/security/token
   - code: "0.2.14.1"
     const: CodeNotFound
     hex: "0x00_02_0E_01"

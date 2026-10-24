@@ -9,6 +9,30 @@ constants:
         type: int
         value: 7 + coretoken.MaxPrivateClaims
     name: maxClaimMembers
+  - doc: |-
+      The registered claims, as slots of registeredValue, in RFC 7519 §4.1 order —
+      the order a refusal names the first offender in.
+    grouped: true
+    items:
+      - doc: slotIssuer is "iss".
+        name: slotIssuer
+        type: int
+        value: iota
+      - doc: slotSubject is "sub".
+        name: slotSubject
+      - doc: slotAudience is "aud".
+        name: slotAudience
+      - doc: slotExpiry is "exp".
+        name: slotExpiry
+      - doc: slotNotBefore is "nbf".
+        name: slotNotBefore
+      - doc: slotIssuedAt is "iat".
+        name: slotIssuedAt
+      - doc: slotID is "jti".
+        name: slotID
+      - doc: registeredSlots is how many registered claims there are.
+        name: registeredSlots
+    name: slotIssuer
   - grouped: true
     items:
       - doc: |-
@@ -39,6 +63,23 @@ constants:
         type: int
         value: "78"
     name: exitConfigFault
+  - grouped: true
+    items:
+      - doc: |-
+          headerStackLen is the decoded header a VerifyInto holds on its stack: an
+          alg, a typ and a kid fit many times over. A larger header, still inside
+          maxHeaderLen, is decoded into a buffer of its own.
+        name: headerStackLen
+        type: int
+        value: "512"
+      - doc: |-
+          payloadStackLen is the decoded claims object a VerifyInto holds on its
+          stack. A larger one, still inside MaxTokenLen, is decoded into a buffer
+          of its own: correct, and one allocation.
+        name: payloadStackLen
+        type: int
+        value: 4 << 10
+    name: headerStackLen
   - doc: |-
       maxNumericDate bounds a JWT NumericDate, in seconds since the epoch. It is
       roughly the year 5138 — far past any legitimate expiry, and far short of the
@@ -50,6 +91,93 @@ constants:
         type: float64
         value: "1e11"
     name: maxNumericDate
+  - doc: |-
+      maxIntegerDigits is the longest integer NumericDate read without strconv:
+      eighteen digits never overflow an int64, and every one of them past twelve
+      is out of range anyway.
+    items:
+      - name: maxIntegerDigits
+        type: int
+        value: "18"
+    name: maxIntegerDigits
+  - grouped: true
+    items:
+      - doc: |-
+          maxIndexedMembers is how many top-level members an object index holds:
+          the claims cap, which bounds the JOSE header too. A header carrying more
+          is refused with TooLarge — the legacy reader had no such bound, and the
+          divergence is listed in CLAUDE.md.
+        name: maxIndexedMembers
+        type: int
+        value: maxClaimMembers
+      - doc: hexDigitsPerEscape is the four hex digits of a \uXXXX escape.
+        name: hexDigitsPerEscape
+        type: int
+        value: "4"
+      - doc: unicodeEscapeLen is the six bytes of a \uXXXX escape.
+        name: unicodeEscapeLen
+        type: int
+        value: 2 + hexDigitsPerEscape
+      - doc: hexLetterOffset is where 'a' and 'A' sit past the ten decimal digits.
+        name: hexLetterOffset
+        type: rune
+        value: "10"
+      - doc: hexRadixBits is the bits one hex digit carries.
+        name: hexRadixBits
+        type: uint
+        value: "4"
+      - doc: |-
+          maxFloat64Order is the decimal order of the largest float64,
+          1.7976931348623157e308.
+        name: maxFloat64Order
+        type: int
+        value: "308"
+      - doc: |-
+          exponentSaturation is where an exponent stops being accumulated: far
+          past every order a float64 can hold or round to zero.
+        name: exponentSaturation
+        type: int
+        value: 1 << 20
+      - doc: |-
+          highSurrogateFirst is the first UTF-16 code unit that opens a surrogate
+          pair, U+D800.
+        name: highSurrogateFirst
+        type: rune
+        value: "0xD800"
+      - doc: highSurrogateLast is the last one, U+DBFF.
+        name: highSurrogateLast
+        type: rune
+        value: "0xDBFF"
+      - doc: |-
+          lowSurrogateFirst is the first UTF-16 code unit that closes a surrogate
+          pair, U+DC00.
+        name: lowSurrogateFirst
+        type: rune
+        value: "0xDC00"
+      - doc: lowSurrogateLast is the last one, U+DFFF.
+        name: lowSurrogateLast
+        type: rune
+        value: "0xDFFF"
+    name: maxIndexedMembers
+  - grouped: true
+    items:
+      - doc: kindNull is the literal null.
+        name: kindNull
+        type: valueKind
+        value: iota + 1
+      - doc: kindFalse is the literal false.
+        name: kindFalse
+      - doc: kindTrue is the literal true.
+        name: kindTrue
+      - doc: kindNumber is a number in the RFC 8259 §6 grammar.
+        name: kindNumber
+      - doc: kindString is a string literal.
+        name: kindString
+      - doc: kindArray is an array.
+        name: kindArray
+      - doc: kindObject is an object.
+        name: kindObject
+    name: kindNull
   - grouped: true
     items:
       - doc: |-
@@ -126,6 +254,21 @@ constants:
         type: string
         value: "\"none\""
     name: jwsSegments
+  - grouped: true
+    items:
+      - doc: "factUnsecured: alg is \"none\" in some capitalisation."
+        name: factUnsecured
+        type: headerFacts
+        value: 1 << iota
+      - doc: "factAlgEmpty: alg is absent, null or \"\"."
+        name: factAlgEmpty
+      - doc: "factAlgBound: alg names the bound algorithm exactly."
+        name: factAlgBound
+      - doc: "factCritical: a \"crit\" member was present."
+        name: factCritical
+      - doc: "factTypeOK: no type is required, or typ is exactly the required one."
+        name: factTypeOK
+    name: factUnsecured
   - grouped: true
     items:
       - doc: |-
@@ -274,14 +417,25 @@ files:
     name: bounds_value.go
   - decls:
       - maxClaimMembers
+      - slotIssuer
+      - registeredNames
       - claimShape
+      - registeredValue
+      - readClaims
+      - readRegistered
+      - checkRegisteredKinds
+      - readInstants
+      - readInstant
+      - decodeTimeIn
+      - checkAudienceIn
+      - locateRegistered
+      - registeredSlot
+      - checkPrivateMembers
       - decodeClaims
-      - decodeRegistered
-      - nullRegisteredClaim
-      - decodeTimeClaims
       - attachPrivate
-      - decodeStringClaim
-      - decodeTimeClaim
+      - withPrivateMember
+      - memberValue
+      - memberText
       - encodeClaims
       - checkClaimText
       - putPrivate
@@ -311,9 +465,10 @@ files:
       - segmentsValue
       - splitCompact
       - decodeSegment
+      - splitCompactBytes
+      - segmentsBytes
+      - decodeSegmentInto
       - checkJSONDepth
-      - checkNoDuplicateMembers
-      - skipValue
       - preAuthEncode
       - appendLE64
     name: encoding.go
@@ -334,16 +489,79 @@ files:
       - hs256Binding.verify
     name: hs256_binding.go
   - decls:
+      - headerStackLen
+      - hs256Verifier
+      - newHS256Verifier
+      - (*hs256Verifier).NewScratch
+      - (*hs256Verifier).VerifyInto
+      - (*hs256Verifier).verifyInto
+      - (*hs256Verifier).authenticate
+      - policyValue.judgeInto
+      - audienceContains
+      - storeClaims
+      - storeText
+      - storeInstants
+      - storeAudience
+      - storeMember
+      - storePrivate
+      - (*registeredValue).instant
+    name: hs256_verifier.go
+  - decls:
       - IssuerConfig
     name: issuer_config.go
   - decls:
       - maxNumericDate
+      - maxIntegerDigits
       - joseShape
       - joseShape.decodeTime
+      - numericInteger
+      - numericDateOutOfRange
       - joseShape.encodeTime
+      - joseShape.checkAudience
       - joseShape.decodeAudience
       - joseShape.encodeAudience
     name: jose_shape.go
+  - decls:
+      - maxIndexedMembers
+      - valueKind
+      - kindNull
+      - memberSpan
+      - objectIndex
+      - (*objectIndex).name
+      - (*objectIndex).value
+      - (*objectIndex).lookup
+      - jsonScan
+      - scanObject
+      - (*jsonScan).topMembers
+      - (*jsonScan).topMember
+      - (*objectIndex).hasName
+      - (*jsonScan).value
+      - (*jsonScan).literalValue
+      - (*jsonScan).container
+      - (*jsonScan).element
+      - (*jsonScan).str
+      - escapeLen
+      - isLowSurrogate
+      - hexUnit
+      - hexValue
+      - (*jsonScan).number
+      - (*jsonScan).exponent
+      - (*jsonScan).checkMagnitude
+      - (*jsonScan).digits
+      - (*jsonScan).literal
+      - (*jsonScan).skipSpace
+      - (*jsonScan).peek
+      - (*jsonScan).consume
+      - isDigit
+      - appendJSONString
+      - decodeEscape
+      - jsonStringEqual
+      - arrayStrings
+      - newArrayStrings
+      - (*arrayStrings).next
+      - decodeText
+      - decodeTextInto
+    name: json_scan.go
   - decls:
       - firstPrintable
       - quoteJSONString
@@ -371,10 +589,21 @@ files:
     name: jwkbridge.go
   - decls:
       - jwsSegments
+      - factUnsecured
       - headerValue
+      - headerView
+      - readJOSEHeader
+      - headerMember
       - parseJOSEHeader
-      - finishHeader
+      - headerText
       - policyValue.checkHeader
+      - policyValue.checkHeaderView
+      - headerFacts
+      - factIf
+      - headerFacts.has
+      - policyValue.judgeHeader
+      - literalEqual
+      - literalIsNone
       - policyValue.decodeAndValidate
       - refuseUnsecured
     name: jws.go
@@ -433,6 +662,7 @@ files:
       - pasetoShape
       - pasetoShape.decodeTime
       - pasetoShape.encodeTime
+      - pasetoShape.checkAudience
       - pasetoShape.decodeAudience
       - pasetoShape.encodeAudience
     name: paseto_shape.go
@@ -463,8 +693,9 @@ files:
   - decls:
       - validateIssuerConfig
       - nonUTF8Knob
+      - claimFacts
       - policyValue.validateClaims
-      - policyValue.checkIdentity
+      - policyValue.judgeClaims
       - policyValue.checkExpiry
       - policyValue.checkLifetime
       - stampIssuedClaims
@@ -486,51 +717,112 @@ functions:
     params: configured, fallback, low, high int, knob string
     results: value int, err error
   - doc: |-
-      decodeClaims turns a raw claims object into a ClaimsValue under shape.
+      readClaims holds raw to every rule a claims object answers to, and indexes
+      it into idx. It is the ONE refusal set: Verify, every format and
+      VerifyInto go through it, so no path accepts what another refuses.
 
-      The refusals happen in cost order, cheapest first: text that is not UTF-8
-      and nesting depth (two linear scans), duplicate members (one streaming pass),
-      then member count. Only after all of them does encoding/json build anything.
+      The refusals happen in cost order, cheapest first, and in the legacy
+      reader's order, so a token refused for two reasons is refused for the same
+      one: text that is not UTF-8, nesting depth (two linear scans), then one
+      strict RFC 8259 pass that refuses malformed text, a duplicate or escaped
+      member name, and a member count past the cap; then the registered claims,
+      then the private names.
 
-      UTF-8 is checked because encoding/json does not refuse invalid bytes — it
-      replaces each with U+FFFD — so without it "a\xff" and "a\xfe" from a careless
-      or hostile issuer would verify as one subject. RFC 8259 §8.1 makes JSON
-      exchanged between systems UTF-8, and RFC 8725 §3.7 asks the reader to hold
-      the writer to it.
+      UTF-8 is checked because a reader that repairs invalid bytes — encoding/json
+      replaces each with U+FFFD — would verify "a\xff" and "a\xfe" from a careless
+      or hostile issuer as one subject. RFC 8259 §8.1 makes JSON exchanged between
+      systems UTF-8, and RFC 8725 §3.7 asks the reader to hold the writer to it.
+    name: readClaims
+    params: raw []byte, maxDepth int, shape claimShape, idx *objectIndex
+    results: reg registeredValue, err error
+  - doc: |-
+      readRegistered locates and judges the seven registered claims.
+
+      A registered claim present as JSON null is no value of its type, and a
+      lenient reader would decode it as one anyway — "" for iss, sub and jti, an
+      audience of [""] for aud, the Unix epoch for exp, nbf and iat — so a signed
+      token could say "null" and be read as absent, empty or 1970.
+    name: readRegistered
+    params: raw []byte, idx *objectIndex, shape claimShape
+    results: reg registeredValue, err error
+  - doc: |-
+      checkRegisteredKinds refuses a registered claim that is null, then a string
+      claim — iss, sub, jti — of any other JSON type.
+    name: checkRegisteredKinds
+    params: idx *objectIndex, at *[registeredSlots]int
+    results: error
+  - doc: readInstants decodes exp, nbf and iat onto reg.
+    name: readInstants
+    params: raw []byte, idx *objectIndex, reg registeredValue, shape claimShape
+    results: registeredValue, error
+  - doc: |-
+      readInstant decodes the registered time claim at member index at under
+      shape, treating absence (at < 0) as the zero Time.
+    name: readInstant
+    params: raw []byte, idx *objectIndex, at int, name string, shape claimShape
+    results: instant time.Time, err error
+  - doc: |-
+      decodeTimeIn is shape.decodeTime, dispatched over the closed set of shapes.
+
+      The switch is the point: a call through the interface makes its argument
+      escape, which would move the claims a VerifyInto decodes on its stack onto
+      the heap — one allocation per token. A concrete call keeps them where they
+      are.
+    name: decodeTimeIn
+    params: shape claimShape, raw []byte
+    results: time.Time, error
+  - doc: |-
+      checkAudienceIn is shape.checkAudience, dispatched as decodeTimeIn is and
+      for the same reason.
+    name: checkAudienceIn
+    params: shape claimShape, raw []byte
+    results: error
+  - doc: |-
+      locateRegistered maps each registered slot to its member index, -1 when
+      the claim is absent. Names are unique, so each slot is set at most once.
+    name: locateRegistered
+    params: raw []byte, idx *objectIndex
+    results: "[registeredSlots]int"
+  - doc: registeredSlot returns the slot of a registered name, or -1.
+    name: registeredSlot
+    params: name []byte
+    results: int
+  - doc: |-
+      checkPrivateMembers holds the private members to the rules
+      ClaimsValue.WithPrivateRaw enforces — no empty name, at most
+      MaxPrivateClaims of them — in member order.
+    name: checkPrivateMembers
+    params: raw []byte, idx *objectIndex
+    results: error
+  - doc: |-
+      decodeClaims turns a raw claims object into a ClaimsValue under shape: the
+      one refusal set of readClaims, then the value, built from the index.
     name: decodeClaims
     params: raw []byte, maxDepth int, shape claimShape
     results: claims coretoken.ClaimsValue, err error
-  - doc: decodeRegistered reads the seven registered claims out of members.
-    name: decodeRegistered
-    params: members map[string]json.RawMessage, shape claimShape
-    results: claims coretoken.ClaimsValue, err error
-  - doc: |-
-      nullRegisteredClaim reports the first registered claim members carries as
-      JSON null, in RFC 7519 §4.1 order so the refusal is deterministic.
-    name: nullRegisteredClaim
-    params: members map[string]json.RawMessage
-    results: name string, found bool
-  - doc: decodeTimeClaims reads exp / nbf / iat under shape onto base.
-    name: decodeTimeClaims
-    params: base coretoken.ClaimsValue, members map[string]json.RawMessage, shape claimShape
-    results: claims coretoken.ClaimsValue, err error
   - doc: |-
       attachPrivate copies every non-registered member onto base as a raw private
-      claim, in whatever order the map yields — the core value stores them keyed,
-      and PrivateNames sorts on the way out.
+      claim, in member order — the core value stores them keyed, and PrivateNames
+      sorts on the way out. The bytes are the value exactly as the issuer signed it.
     name: attachPrivate
-    params: base coretoken.ClaimsValue, members map[string]json.RawMessage
+    params: base coretoken.ClaimsValue, raw []byte, idx *objectIndex
     results: claims coretoken.ClaimsValue, err error
-  - doc: decodeStringClaim reads a registered string claim, treating absence as "".
-    name: decodeStringClaim
-    params: members map[string]json.RawMessage, name string
-    results: value string, err error
   - doc: |-
-      decodeTimeClaim reads a registered time claim under shape, treating absence
-      as the zero Time.
-    name: decodeTimeClaim
-    params: members map[string]json.RawMessage, name string, shape claimShape
-    results: instant time.Time, err error
+      withPrivateMember returns claims with member i attached as a raw private
+      claim, or claims unchanged when member i is a registered claim.
+    name: withPrivateMember
+    params: claims coretoken.ClaimsValue, raw []byte, idx *objectIndex, i int
+    results: coretoken.ClaimsValue, error
+  - doc: memberValue returns the value of member at, nil when absent.
+    name: memberValue
+    params: raw []byte, idx *objectIndex, at int
+    results: "[]byte"
+  - doc: |-
+      memberText decodes the string member at. An absent member leaves the zero
+      string, which is what ClaimsValue's With* methods read as "no claim".
+    name: memberText
+    params: raw []byte, idx *objectIndex, at int
+    results: string
   - doc: |-
       encodeClaims renders claims under shape. The member map marshals with sorted
       keys, so the same claim set always produces the same bytes — which is what
@@ -619,50 +911,33 @@ functions:
     params: segment string, maxLen int
     results: raw []byte, err error
   - doc: |-
+      splitCompactBytes is splitCompact over a token held as bytes — the form a
+      caller verifying straight out of a receive buffer has. It refuses exactly
+      what splitCompact refuses, in the same order, and its parts are views of
+      tok: the split allocates nothing.
+    name: splitCompactBytes
+    params: tok []byte, maxLen int
+    results: seg segmentsBytes, err error
+  - doc: |-
+      decodeSegmentInto is decodeSegment into the caller's buffer: the same
+      bounds and the same strict alphabet, refused in the same order. dst is used
+      when the decoded segment fits it, so a caller handing a stack array decodes
+      without allocating; a larger segment — still inside maxLen — gets a buffer
+      of its own.
+    name: decodeSegmentInto
+    params: dst, segment []byte, maxLen int
+    results: raw []byte, err error
+  - doc: |-
       checkJSONDepth refuses raw when its bracket nesting exceeds maxDepth.
 
-      It runs BEFORE encoding/json sees the bytes, because the cheapest place to
+      It runs BEFORE the scanner descends a level, because the cheapest place to
       refuse a payload of ten thousand open brackets is a linear scan with one
-      integer of state — not a decoder that has already built ten thousand frames.
+      integer of state — not a reader that has already recursed ten thousand
+      times. It also fixes which verdict a too-deep payload gets: TooDeep, before
+      anything the scan would refuse later in the bytes.
       The scan is string-aware so a '{' inside a claim value is data, not depth.
     name: checkJSONDepth
     params: raw []byte, maxDepth int
-    results: error
-  - doc: |-
-      checkNoDuplicateMembers refuses a top-level JSON object that names the same
-      member twice.
-
-      encoding/json keeps the LAST occurrence and reports success, so a token with
-      two "aud" members says one thing to a Go reader and potentially another to a
-      reader written in a language that keeps the first. RFC 8725 §2.6 calls that
-      out as a substitution vector; refusing is the only reading that cannot
-      disagree with anybody.
-    name: checkNoDuplicateMembers
-    params: raw []byte
-    results: error
-  - doc: |-
-      skipValue consumes exactly one JSON value from dec without interpreting it
-      and without copying its bytes.
-
-      The obvious spelling — decoding into a json.RawMessage — COPIES the whole
-      value only for it to be discarded, and this is the duplicate-member pass, so
-      every byte copied is waste.
-
-      Both implementations are benchmarked side by side over the exact two
-      payloads one verification scans (BenchmarkDuplicateScanRealistic); the
-      copying one lives in the benchmark file and nothing in production calls it.
-      The saving is 919 ns on the header and 3 909 ns on the claims — together
-      16.8 % of one HS256 verification — plus 832 B on a single 4 KiB claim value,
-      a gap that grows with the value. See BENCH.md §12.
-
-      The OBJECT count is not the reason and must not be quoted as one: on Go
-      1.27, whose encoding/json is backed by json/v2, the copying implementation
-      allocates two FEWER objects on a claim set containing an array, because
-      json.Decoder.Token boxes every scalar it walks past while Decode takes the
-      value in one grab. pkg/v1/security/token/BENCH.md's "two allocations" predates that
-      toolchain; the time saving it also reports does reproduce.
-    name: skipValue
-    params: dec *json.Decoder
     results: error
   - doc: |-
       preAuthEncode implements PASETO's PAE (pre-authentication encoding): the
@@ -681,6 +956,131 @@ functions:
     name: appendLE64
     params: dst []byte, n uint64
     results: "[]byte"
+  - doc: newHS256Verifier returns the HS256 verifier around binding and policy.
+    name: newHS256Verifier
+    params: binding hs256Binding, policy policyValue
+    results: "*hs256Verifier"
+  - doc: audienceContains reports whether an "aud" checkAudience accepted names want.
+    name: audienceContains
+    params: raw []byte, want string
+    results: bool
+  - doc: |-
+      storeClaims copies an accepted claims object into dst: the registered
+      claims decoded, and each private claim dst declares — decoded when it is a
+      string, marked wrong-typed otherwise. Nothing is truncated: a claim that
+      does not fit is ClaimsBufOverflow.
+    name: storeClaims
+    params: raw []byte, idx *objectIndex, reg *registeredValue, dst *coretoken.ClaimsBuf
+    results: error
+  - doc: storeText decodes lit through buf into dst's text claim.
+    name: storeText
+    params: dst *coretoken.ClaimsBuf, claim coretoken.TextClaim, buf, lit []byte
+    results: error
+  - doc: storeInstants copies the three registered instants into dst.
+    name: storeInstants
+    params: reg *registeredValue, dst *coretoken.ClaimsBuf
+  - doc: storeAudience copies each "aud" member into dst.
+    name: storeAudience
+    params: raw, buf []byte, dst *coretoken.ClaimsBuf
+    results: error
+  - doc: storeMember decodes one audience member through buf and appends it.
+    name: storeMember
+    params: lit, buf []byte, dst *coretoken.ClaimsBuf
+    results: error
+  - doc: storePrivate copies each private member dst declares.
+    name: storePrivate
+    params: raw []byte, idx *objectIndex, buf []byte, dst *coretoken.ClaimsBuf
+    results: error
+  - doc: |-
+      numericInteger reads raw, a number the scanner validated, when it is an
+      integer of at most maxIntegerDigits digits; ok is false otherwise, and the
+      caller takes the general path.
+    name: numericInteger
+    params: raw []byte
+    results: value int64, ok bool
+  - doc: numericDateOutOfRange returns the verdict for a NumericDate past the bound.
+    name: numericDateOutOfRange
+    results: error
+  - doc: |-
+      scanObject validates raw as exactly one JSON object and indexes its
+      top-level members into idx.
+
+      It is the one reader every claims object and every JOSE header goes through,
+      so the refusal set is one set. A top-level member name carrying a backslash
+      is refused with Malformed: an escape is a second spelling of a name, and
+      "\u0065xp" read as "exp" is how a duplicate slips past a check made on the
+      spelling. A repeated top-level name is refused with DuplicateMember the
+      moment it is read (RFC 8725 §2.6). Past the member cap, the object is still
+      read to its end, so malformed text is still Malformed, and is then refused
+      with TooLarge; duplicates are not looked for past the cap, which is what
+      bounds the cost of a hostile payload.
+    name: scanObject
+    params: raw []byte, maxDepth int, idx *objectIndex
+    results: error
+  - doc: |-
+      escapeLen validates the escape at the start of esc and returns its length.
+      A high surrogate must be followed at once by an escaped low one; a lone
+      surrogate of either half is refused, where encoding/json would have
+      replaced it with U+FFFD — two spellings of one string.
+    name: escapeLen
+    params: esc []byte
+    results: n int, err error
+  - doc: |-
+      isLowSurrogate reports whether unit is the UTF-16 code unit that closes a
+      surrogate pair.
+    name: isLowSurrogate
+    params: unit rune
+    results: bool
+  - doc: hexUnit reads the \uXXXX escape at the start of esc.
+    name: hexUnit
+    params: esc []byte
+    results: unit rune, ok bool
+  - doc: hexValue reads one hex digit, in either case.
+    name: hexValue
+    params: c byte
+    results: digit rune, ok bool
+  - doc: isDigit reports whether c is a decimal digit.
+    name: isDigit
+    params: c byte
+    results: bool
+  - doc: |-
+      appendJSONString appends the decoded content of lit, a string literal the
+      scanner already validated, quotes included.
+    name: appendJSONString
+    params: dst, lit []byte
+    results: "[]byte"
+  - doc: decodeEscape decodes the validated escape at the start of esc.
+    name: decodeEscape
+    params: esc []byte
+    results: decoded rune, n int
+  - doc: |-
+      jsonStringEqual reports whether the validated string literal lit decodes to
+      want, without decoding it anywhere: it compares as it reads, so a literal of
+      any length is compared without a buffer and without an allocation. It is
+      not constant-time; the strings it compares are a configured issuer or
+      audience, never a secret.
+    name: jsonStringEqual
+    params: lit []byte, want string
+    results: bool
+  - doc: newArrayStrings starts a walk over the validated array arr.
+    name: newArrayStrings
+    params: arr []byte
+    results: arrayStrings
+  - doc: |-
+      decodeText returns the decoded content of the validated string literal lit
+      as a string. A literal without an escape is converted once; one with
+      escapes is decoded into a stack buffer first.
+    name: decodeText
+    params: lit []byte
+    results: string
+  - doc: |-
+      decodeTextInto decodes the validated string literal lit into dst, and
+      reports how many octets it wrote. ok is false when the decoded text does not
+      fit dst — which is never written past, never truncated into, and never
+      grown.
+    name: decodeTextInto
+    params: dst, lit []byte
+    results: n int, ok bool
   - doc: |-
       quoteJSONString renders s as a JSON string literal.
 
@@ -780,14 +1180,53 @@ functions:
     name: impliedAlg
     params: key jwk.KeyValue
     results: alg string, known bool
-  - doc: parseJOSEHeader reads a decoded JOSE header object.
+  - doc: |-
+      readJOSEHeader reads a decoded JOSE header object, under the same rules as a
+      claims object: UTF-8, a depth bound, and the one strict scan that refuses
+      malformed text and a duplicate or escaped member name (RFC 8725 §2.6).
+
+      The view is returned by value: a view written through a pointer would make
+      raw escape, and a VerifyInto decodes raw on its stack.
+    name: readJOSEHeader
+    params: raw []byte
+    results: view headerView, err error
+  - doc: |-
+      headerMember returns the literal of the string member name, nil when it is
+      absent or null — which a header has always read as absent — and Malformed
+      when it is present as anything else.
+    name: headerMember
+    params: raw []byte, idx *objectIndex, name string
+    results: lit []byte, err error
+  - doc: |-
+      parseJOSEHeader reads a decoded JOSE header object into the string form the
+      set verifier selects a key with.
     name: parseJOSEHeader
     params: raw []byte
     results: header headerValue, err error
-  - doc: finishHeader reads the remaining members this package acts on.
-    name: finishHeader
-    params: members map[string]json.RawMessage, alg string
-    results: header headerValue, err error
+  - doc: |-
+      headerText decodes a header member's literal, "" when it was absent or
+      null. The spellings nearly every header carries come back as constants.
+    name: headerText
+    params: lit []byte
+    results: string
+  - doc: factIf returns fact when held is true, and no fact otherwise.
+    name: factIf
+    params: held bool, fact headerFacts
+    results: headerFacts
+  - doc: |-
+      literalEqual reports whether a header member's literal decodes to want; an
+      absent or null member decodes to "".
+    name: literalEqual
+    params: lit []byte, want string
+    results: bool
+  - doc: |-
+      literalIsNone reports whether a header member's literal decodes to "none"
+      in any capitalisation, folded as strings.EqualFold folds. No letter of
+      "none" has a case partner outside ASCII, so every spelling of it decodes to
+      four octets, and a longer literal is not one.
+    name: literalIsNone
+    params: lit []byte
+    results: bool
   - doc: |-
       refuseUnsecured refuses an unsecured token — "alg": "none", in any case — by
       name. It needs no key, so a verifier that selects among several runs it
@@ -979,6 +1418,7 @@ imports:
   strings: strings
   subtle: crypto/subtle
   time: time
+  utf16: unicode/utf16
   utf8: unicode/utf8
   x509: crypto/x509
 package:
@@ -1037,20 +1477,50 @@ types:
     name: boundsValue
   - doc: |-
       claimShape is the per-format encoding of the claim values whose spelling the
-      two formats disagree about.
+      two formats disagree about. Every decode method reads a value the scanner
+      already validated as JSON.
     kind: named
     name: claimShape
     underlying: |-
       interface {
       	// decodeTime reads one registered time claim.
-      	decodeTime(raw json.RawMessage) (time.Time, error)
+      	decodeTime(raw []byte) (time.Time, error)
       	// encodeTime renders one registered time claim.
       	encodeTime(instant time.Time) json.RawMessage
-      	// decodeAudience reads the "aud" claim into its general slice form.
-      	decodeAudience(raw json.RawMessage) ([]string, error)
+      	// checkAudience refuses an "aud" value the format cannot carry, without
+      	// building anything.
+      	checkAudience(raw []byte) error
+      	// decodeAudience reads an "aud" value checkAudience accepted into its
+      	// general slice form; nil raw is no audience.
+      	decodeAudience(raw []byte) ([]string, error)
       	// encodeAudience renders "aud", or nil to omit the member entirely.
       	encodeAudience(audience []string) (json.RawMessage, error)
       }
+  - doc: |-
+      registeredValue is what one claims object says through its registered
+      claims: where each one sits in the object index, and the three instants,
+      decoded once.
+    fields:
+      - doc: at is each slot's member index, -1 when the claim is absent.
+        name: at
+        type: "[registeredSlots]int"
+      - doc: expiry / notBefore / issuedAt are the decoded instants, zero when absent.
+        name: expiry
+        type: time.Time
+      - doc: expiry / notBefore / issuedAt are the decoded instants, zero when absent.
+        name: notBefore
+        type: time.Time
+      - doc: expiry / notBefore / issuedAt are the decoded instants, zero when absent.
+        name: issuedAt
+        type: time.Time
+    kind: struct
+    methods:
+      - doc: instant returns the decoded instant of a time slot.
+        name: instant
+        params: slot int
+        recv: r *registeredValue
+        results: time.Time
+    name: registeredValue
   - doc: |-
       depthScan is the state a linear nesting scan needs: how deep it currently
       is, and whether it is inside a JSON string (where a brace is data, not
@@ -1147,6 +1617,16 @@ types:
         type: int
     kind: struct
     name: segmentsValue
+  - doc: segmentsBytes is segmentsValue over a token held as bytes.
+    fields:
+      - doc: part holds up to maxSegments views into the original token.
+        name: part
+        type: "[maxSegments][]byte"
+      - doc: count is how many entries of part are populated.
+        name: count
+        type: int
+    kind: struct
+    name: segmentsBytes
   - doc: es256Signing is ECDSA P-256 signing with the RFC 7518 §3.4 R||S encoding.
     fields:
       - doc: key is the private key; its curve and point are checked at construction.
@@ -1217,6 +1697,59 @@ types:
         recv: b hs256Binding
         results: bool
     name: hs256Binding
+  - doc: |-
+      hs256Verifier is the JWS verifier bound to HMAC-SHA-256, and the one
+      verifier that also implements coretoken.VerifierInto. Its own state is
+      immutable like every verifier's; the mutable MAC state lives in the
+      VerifyScratch each caller thread owns.
+    fields:
+      - doc: jwsVerifier is the binding and the policy, and Verify.
+        name: ""
+        role: embedded
+        type: jwsVerifier
+      - doc: secret is the key NewScratch keys each scratch's MAC with.
+        name: secret
+        type: hs256Binding
+      - doc: |-
+          owner is this verifier's scratch token: a pointer no caller can reach,
+          so a scratch can only claim this verifier by being made by it.
+        name: owner
+        type: "*coretoken.ScratchOwner"
+    kind: struct
+    methods:
+      - doc: |-
+          NewScratch returns a fresh scratch bound to this verifier, its MAC keyed
+          and primed. Make one per thread, once, and reuse it.
+        name: NewScratch
+        recv: v *hs256Verifier
+        results: "*coretoken.VerifyScratch"
+      - doc: |-
+          VerifyInto authenticates token with the scratch s and stores its claims in
+          dst, which it overwrites on entry. It refuses what Verify refuses, in the
+          same order, and then a claim past dst's capacity.
+
+          dst is reset before the scratch is entered, so even a busy or foreign
+          scratch leaves no previous request's claims behind, and reset again on any
+          refusal.
+        name: VerifyInto
+        params: s *coretoken.VerifyScratch, token []byte, dst *coretoken.ClaimsBuf
+        recv: v *hs256Verifier
+        results: error
+      - doc: |-
+          verifyInto is VerifyInto once the scratch is held: structure, alg, MAC,
+          then the claims.
+        name: verifyInto
+        params: s *coretoken.VerifyScratch, token []byte, dst *coretoken.ClaimsBuf
+        recv: v *hs256Verifier
+        results: error
+      - doc: |-
+          authenticate decodes the signature, judges the header, checks the MAC and,
+          only then, reads the claims.
+        name: authenticate
+        params: s *coretoken.VerifyScratch, token []byte, seg *segmentsBytes, view *headerView, dst *coretoken.ClaimsBuf
+        recv: v *hs256Verifier
+        results: error
+    name: hs256Verifier
   - fields:
       - doc: Issuer, when non-empty, is stamped as "iss" on claims that carry none.
         name: Issuer
@@ -1262,8 +1795,13 @@ types:
       - doc: |-
           decodeTime reads a NumericDate. It accepts a fractional value because the
           RFC defines one, and keeps it to nanosecond resolution.
+
+          An integer of up to maxIntegerDigits digits — every real exp, nbf and iat —
+          is read exactly, without strconv and without an allocation; anything else
+          goes through strconv.ParseFloat, once the scanner has held it to the RFC
+          8259 grammar, which ParseFloat alone is not ("0x1p3", "Inf", "1_0").
         name: decodeTime
-        params: raw json.RawMessage
+        params: raw []byte
         recv: joseShape
         results: instant time.Time, err error
       - doc: encodeTime renders a NumericDate as whole seconds.
@@ -1272,10 +1810,18 @@ types:
         recv: joseShape
         results: json.RawMessage
       - doc: |-
-          decodeAudience accepts the one-string and the array-of-strings forms, and
-          nothing else. An empty array decodes to no audience at all.
+          checkAudience accepts the one-string and the array-of-strings forms, and
+          nothing else — a null member of the array included, which a lenient reader
+          decodes as "".
+        name: checkAudience
+        params: raw []byte
+        recv: joseShape
+        results: error
+      - doc: |-
+          decodeAudience reads an "aud" checkAudience accepted. An empty array decodes
+          to no audience at all.
         name: decodeAudience
-        params: raw json.RawMessage
+        params: raw []byte
         recv: joseShape
         results: audience []string, err error
       - doc: |-
@@ -1286,6 +1832,198 @@ types:
         recv: joseShape
         results: raw json.RawMessage, err error
     name: joseShape
+  - doc: |-
+      valueKind is the JSON type of one scanned value. The zero value is no
+      value at all, which no successful scan reports.
+    kind: named
+    name: valueKind
+    underlying: uint8
+  - doc: |-
+      memberSpan locates one top-level member of a scanned object inside the
+      scanned bytes: the name without its quotes, and the value as written.
+    fields:
+      - doc: nameStart / nameEnd delimit the name, quotes excluded.
+        name: nameStart
+        type: int32
+      - doc: nameStart / nameEnd delimit the name, quotes excluded.
+        name: nameEnd
+        type: int32
+      - doc: valueStart / valueEnd delimit the value, whitespace excluded.
+        name: valueStart
+        type: int32
+      - doc: valueStart / valueEnd delimit the value, whitespace excluded.
+        name: valueEnd
+        type: int32
+      - doc: kind is the value's JSON type.
+        name: kind
+        type: valueKind
+    kind: struct
+    name: memberSpan
+  - doc: |-
+      objectIndex is the top-level members of one scanned object, in order. It is
+      an ARRAY, sized by the member cap, so indexing allocates nothing; total
+      keeps counting past the cap so the refusal can name it.
+    fields:
+      - doc: member holds the first count members.
+        name: member
+        type: "[maxIndexedMembers]memberSpan"
+      - doc: count is how many entries of member are populated.
+        name: count
+        type: int
+      - doc: total is how many members the object carries, indexed or not.
+        name: total
+        type: int
+    kind: struct
+    methods:
+      - doc: name returns the bytes of member i's name inside raw.
+        name: name
+        params: raw []byte, i int
+        recv: x *objectIndex
+        results: "[]byte"
+      - doc: value returns the bytes of member i's value inside raw.
+        name: value
+        params: raw []byte, i int
+        recv: x *objectIndex
+        results: "[]byte"
+      - doc: lookup returns the index of the member called name, or -1.
+        name: lookup
+        params: raw []byte, name string
+        recv: x *objectIndex
+        results: int
+      - doc: hasName reports whether an indexed member is already called name.
+        name: hasName
+        params: raw, name []byte
+        recv: x *objectIndex
+        results: bool
+    name: objectIndex
+  - doc: |-
+      jsonScan is a strict RFC 8259 reader over one byte slice, with one integer
+      of position. It decodes nothing and allocates nothing: it validates, and
+      reports where things are.
+    fields:
+      - doc: raw is the text being scanned.
+        name: raw
+        type: "[]byte"
+      - doc: pos is the offset of the next unread byte.
+        name: pos
+        type: int
+      - doc: |-
+          maxDepth bounds nesting; the depth pre-pass already enforced it, and
+          this is the scanner's own guard against a pre-pass it does not trust.
+        name: maxDepth
+        type: int
+    kind: struct
+    methods:
+      - doc: |-
+          topMembers reads the top-level members after the opening brace, through
+          the closing one.
+        name: topMembers
+        params: idx *objectIndex
+        recv: s *jsonScan
+        results: error
+      - doc: topMember reads one top-level member and indexes it.
+        name: topMember
+        params: idx *objectIndex
+        recv: s *jsonScan
+        results: error
+      - doc: value reads one value at depth and reports its kind.
+        name: value
+        params: depth int
+        recv: s *jsonScan
+        results: kind valueKind, err error
+      - doc: literalValue reads the literal that c opens and reports its kind.
+        name: literalValue
+        params: c byte
+        recv: s *jsonScan
+        results: kind valueKind, err error
+      - doc: |-
+          container reads a nested object or array whose opening byte is at pos,
+          through closer. Names inside it are read as strings: escapes and repeats
+          are the top level's concern, as they were for the legacy reader.
+        name: container
+        params: depth int, closer byte
+        recv: s *jsonScan
+        results: error
+      - doc: element reads one array element, or one object member when member is set.
+        name: element
+        params: depth int, member bool
+        recv: s *jsonScan
+        results: error
+      - doc: |-
+          str reads a string literal whose opening quote is at pos, through its
+          closing quote, and reports whether it carried an escape. It refuses an
+          unescaped control byte, an unknown escape, and a lone surrogate.
+        name: str
+        recv: s *jsonScan
+        results: escaped bool, err error
+      - doc: |-
+          number reads a number in the RFC 8259 §6 grammar: an optional minus, an
+          integer part without a leading zero, an optional fraction and exponent,
+          each with at least one digit. strconv would accept more — "0x1p3", "Inf",
+          "1_0" — which is why nothing reaches it unchecked.
+
+          A number whose magnitude a float64 cannot hold is refused too, wherever it
+          sits: the legacy reader walked every token with encoding/json, which reads
+          each number as a float64 and refused "1e400" at any depth. Underflow is not
+          refused — strconv rounds it to zero without an error, as encoding/json did.
+        name: number
+        recv: s *jsonScan
+        results: error
+      - doc: |-
+          exponent reads an optional exponent and returns its value, saturated far
+          past any float64's range so a thousand-digit exponent cannot overflow it.
+        name: exponent
+        recv: s *jsonScan
+        results: value int, err error
+      - doc: |-
+          checkMagnitude refuses a number whose magnitude is past the largest
+          float64. The number is d.ddd × 10^order with 1 ≤ d.ddd < 10: an order up to
+          307 always fits, one from 309 never does, and only order 308 is close
+          enough to need strconv's own verdict.
+        name: checkMagnitude
+        params: start, intStart, intDigits int, frac []byte, exponent int
+        recv: s *jsonScan
+        results: error
+      - doc: digits consumes a run of decimal digits and reports whether there was one.
+        name: digits
+        recv: s *jsonScan
+        results: bool
+      - doc: literal consumes word, or refuses.
+        name: literal
+        params: word string
+        recv: s *jsonScan
+        results: error
+      - doc: skipSpace consumes the four whitespace bytes of RFC 8259 §2.
+        name: skipSpace
+        recv: s *jsonScan
+      - doc: peek returns the next byte, or 0 at the end.
+        name: peek
+        recv: s *jsonScan
+        results: byte
+      - doc: consume advances past c when it is the next byte.
+        name: consume
+        params: c byte
+        recv: s *jsonScan
+        results: bool
+    name: jsonScan
+  - doc: |-
+      arrayStrings walks the elements of a validated JSON array, each of which
+      must be a string. It allocates nothing: each call to next reports a view of
+      the next element's literal, quotes included.
+    fields:
+      - doc: s reads the array's bytes.
+        name: s
+        type: jsonScan
+    kind: struct
+    methods:
+      - doc: |-
+          next returns the next element's literal. ok is false at the end of the
+          array; err is Malformed for an element that is not a string — a null
+          included, where the legacy reader decoded one as "".
+        name: next
+        recv: a *arrayStrings
+        results: lit []byte, ok bool, err error
+    name: arrayStrings
   - doc: setVerifier authenticates JWS compact tokens against a JWK Set.
     fields:
       - doc: |-
@@ -1343,6 +2081,37 @@ types:
         type: bool
     kind: struct
     name: headerValue
+  - doc: |-
+      headerView is a JOSE header as the scanner read it: each member this
+      package acts on as its string literal inside the decoded header, nil when
+      absent or null. It decodes nothing, so reading it allocates nothing.
+    fields:
+      - doc: alg / typ / kid are the members' literals, quotes included.
+        name: alg
+        type: "[]byte"
+      - doc: alg / typ / kid are the members' literals, quotes included.
+        name: typ
+        type: "[]byte"
+      - doc: alg / typ / kid are the members' literals, quotes included.
+        name: kid
+        type: "[]byte"
+      - doc: critical reports whether a "crit" member was present.
+        name: critical
+        type: bool
+    kind: struct
+    name: headerView
+  - doc: |-
+      headerFacts is what the header judgement needs, whichever reader produced
+      it: one bit per fact, set when the fact holds.
+    kind: named
+    methods:
+      - doc: has reports whether every bit of fact is set in facts.
+        name: has
+        params: fact headerFacts
+        recv: h headerFacts
+        results: bool
+    name: headerFacts
+    underlying: uint8
   - doc: jwsIssuer mints JWS compact tokens under one algorithm-bound key.
     fields:
       - doc: bound is the signing key; its algorithm is fixed at construction.
@@ -1507,7 +2276,7 @@ types:
     methods:
       - doc: decodeTime reads an RFC 3339 timestamp.
         name: decodeTime
-        params: raw json.RawMessage
+        params: raw []byte
         recv: pasetoShape
         results: instant time.Time, err error
       - doc: encodeTime renders an RFC 3339 timestamp in UTC.
@@ -1515,9 +2284,14 @@ types:
         params: instant time.Time
         recv: pasetoShape
         results: json.RawMessage
-      - doc: decodeAudience accepts a single string only.
+      - doc: checkAudience accepts a single string only.
+        name: checkAudience
+        params: raw []byte
+        recv: pasetoShape
+        results: error
+      - doc: decodeAudience reads an "aud" checkAudience accepted.
         name: decodeAudience
-        params: raw json.RawMessage
+        params: raw []byte
         recv: pasetoShape
         results: audience []string, err error
       - doc: |-
@@ -1657,6 +2431,14 @@ types:
     kind: struct
     methods:
       - doc: |-
+          judgeInto holds an AUTHENTICATED claims object to the one refusal set, then
+          to the policy, then stores it in dst: the caller's claims come last, so an
+          overflow never hides a policy verdict.
+        name: judgeInto
+        params: raw []byte, dst *coretoken.ClaimsBuf
+        recv: p policyValue
+        results: error
+      - doc: |-
           checkHeader enforces the algorithm binding and the typing policy.
 
           This is the algorithm-confusion gate. It COMPARES the header against the
@@ -1665,6 +2447,20 @@ types:
           reaches any primitive.
         name: checkHeader
         params: header headerValue, bound coretoken.Algorithm
+        recv: p policyValue
+        results: error
+      - doc: |-
+          checkHeaderView is checkHeader over a header the scanner read, compared
+          literal against expectation without decoding anything.
+        name: checkHeaderView
+        params: view *headerView, bound coretoken.Algorithm
+        recv: p policyValue
+        results: error
+      - doc: |-
+          judgeHeader returns the first verdict facts earn, in the one order every
+          path applies.
+        name: judgeHeader
+        params: facts headerFacts, bound coretoken.Algorithm
         recv: p policyValue
         results: error
       - doc: |-
@@ -1682,19 +2478,17 @@ types:
       - doc: |-
           validateClaims applies the policy's temporal and identity checks to an
           already-authenticated claim set, returning the first verdict that refuses it.
-
-          The order is cheapest-and-most-common first: a token is far more often
-          expired than addressed to the wrong service.
         name: validateClaims
         params: claims coretoken.ClaimsValue
         recv: p policyValue
         results: error
       - doc: |-
-          checkIdentity enforces the issuer and audience expectations, each only when
-          the caller named one — this package has no opinion about who should have
-          minted a token, only about whether it matches what the caller said.
-        name: checkIdentity
-        params: claims coretoken.ClaimsValue
+          judgeClaims returns the first verdict facts earn.
+
+          The order is cheapest-and-most-common first: a token is far more often
+          expired than addressed to the wrong service.
+        name: judgeClaims
+        params: facts claimFacts
         recv: p policyValue
         results: error
       - doc: |-
@@ -1706,7 +2500,7 @@ types:
           rotation story, so the default here inverts the RFC's optionality — and the
           opt-out is a named field rather than a silent absence.
         name: checkExpiry
-        params: claims coretoken.ClaimsValue, now time.Time
+        params: exp, now time.Time
         recv: p policyValue
         results: error
       - doc: |-
@@ -1717,10 +2511,38 @@ types:
           reason to accept it — the whole point of the cap is to refuse a credential
           that outlives the recipient's tolerance for one it cannot revoke.
         name: checkLifetime
-        params: claims coretoken.ClaimsValue
+        params: exp, iat time.Time
         recv: p policyValue
         results: error
     name: policyValue
+  - doc: |-
+      claimFacts is what the policy judges, whichever reader produced it: the
+      three instants, and whether the issuer and the audience matched what the
+      recipient configured.
+    fields:
+      - doc: |-
+          expiry / notBefore / issuedAt are the registered instants, zero when
+          absent.
+        name: expiry
+        type: time.Time
+      - doc: |-
+          expiry / notBefore / issuedAt are the registered instants, zero when
+          absent.
+        name: notBefore
+        type: time.Time
+      - doc: |-
+          expiry / notBefore / issuedAt are the registered instants, zero when
+          absent.
+        name: issuedAt
+        type: time.Time
+      - doc: "issuerOK: no issuer is configured, or \"iss\" equals it."
+        name: issuerOK
+        type: bool
+      - doc: "audienceOK: no audience is configured, or \"aud\" contains it."
+        name: audienceOK
+        type: bool
+    kind: struct
+    name: claimFacts
   - fields:
       - doc: Issuer, when non-empty, must equal the token's "iss" (RFC 8725 §3.8).
         name: Issuer
@@ -1779,6 +2601,16 @@ types:
     kind: struct
     name: VerifierConfig
 vars:
+  - doc: registeredNames spells each slot.
+    items:
+      - name: registeredNames
+        value: |-
+          [registeredSlots]string{
+          	coretoken.ClaimIssuer, coretoken.ClaimSubject, coretoken.ClaimAudience,
+          	coretoken.ClaimExpiry, coretoken.ClaimNotBefore, coretoken.ClaimIssuedAt,
+          	coretoken.ClaimID,
+          }
+    name: registeredNames
   - doc: |-
       b64 is the ONLY base64 alphabet this package accepts: unpadded base64url
       (RFC 7515 §2), in Strict mode.
@@ -1859,4 +2691,10 @@ vars:
       - name: _
         type: coretoken.Verifier
         value: (*setVerifier)(nil)
+      - name: _
+        type: coretoken.Verifier
+        value: (*hs256Verifier)(nil)
+      - name: _
+        type: coretoken.VerifierInto
+        value: (*hs256Verifier)(nil)
     name: _

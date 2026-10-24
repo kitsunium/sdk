@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/json"
 	"strings"
 
 	coretoken "github.com/kitsunium/sdk/internal/core/security/token"
@@ -109,11 +108,84 @@ func decodeSegment(segment string, maxLen int) (raw []byte, err error) {
 	return decoded, nil
 }
 
+// splitCompactBytes is splitCompact over a token held as bytes — the form a
+// caller verifying straight out of a receive buffer has. It refuses exactly
+// what splitCompact refuses, in the same order, and its parts are views of
+// tok: the split allocates nothing.
+func splitCompactBytes(tok []byte, maxLen int) (seg segmentsBytes, err error) {
+	//: the size bound comes first — everything below is work this check funds.
+	if len(tok) > maxLen {
+		//: refuse without looking at a single byte of the payload.
+		return segmentsBytes{}, errs.Wrap(coretoken.TooLarge, errs.WrapParams{},
+			errs.Int("limit", maxLen))
+	}
+	rest := tok
+	//: walk separator to separator; each iteration consumes at least one byte.
+	for {
+		idx := bytes.IndexByte(rest, '.')
+		//: no separator left — the remainder is the final segment.
+		if idx < 0 {
+			//: room for the last part is guaranteed by the check below.
+			seg.part[seg.count] = rest
+			seg.count++
+			//: a complete, bounded split.
+			return seg, nil
+		}
+		//: one more separator than the format allows.
+		if seg.count == maxSegments-1 {
+			//: too many parts is a structural failure, not a size one.
+			return segmentsBytes{}, coretoken.Malformed
+		}
+		//: store the view and advance past the separator.
+		seg.part[seg.count] = rest[:idx]
+		seg.count++
+		rest = rest[idx+1:]
+	}
+}
+
+// segmentsBytes is segmentsValue over a token held as bytes.
+type segmentsBytes struct {
+	// part holds up to maxSegments views into the original token.
+	part [maxSegments][]byte
+	// count is how many entries of part are populated.
+	count int
+}
+
+// decodeSegmentInto is decodeSegment into the caller's buffer: the same
+// bounds and the same strict alphabet, refused in the same order. dst is used
+// when the decoded segment fits it, so a caller handing a stack array decodes
+// without allocating; a larger segment — still inside maxLen — gets a buffer
+// of its own.
+func decodeSegmentInto(dst, segment []byte, maxLen int) (raw []byte, err error) {
+	size := b64.DecodedLen(len(segment))
+	//: DecodedLen is exact for RawURLEncoding: refuse before decoding.
+	if size > maxLen {
+		//: refuse before allocating anything the size of the answer.
+		return nil, errs.Wrap(coretoken.TooLarge, errs.WrapParams{},
+			errs.Int("limit", maxLen))
+	}
+	//: the caller's buffer when it is large enough.
+	if size > len(dst) {
+		dst = make([]byte, size)
+	}
+	n, derr := b64.Decode(dst[:size], segment)
+	//: any decode fault makes this not a token.
+	if derr != nil {
+		//: base64.CorruptInputError names a position in attacker-controlled
+		//: bytes, so it is not carried.
+		return nil, malformed("segment is not strict unpadded base64url")
+	}
+	//: exactly the decoded octets.
+	return dst[:n], nil
+}
+
 // checkJSONDepth refuses raw when its bracket nesting exceeds maxDepth.
 //
-// It runs BEFORE encoding/json sees the bytes, because the cheapest place to
+// It runs BEFORE the scanner descends a level, because the cheapest place to
 // refuse a payload of ten thousand open brackets is a linear scan with one
-// integer of state — not a decoder that has already built ten thousand frames.
+// integer of state — not a reader that has already recursed ten thousand
+// times. It also fixes which verdict a too-deep payload gets: TooDeep, before
+// anything the scan would refuse later in the bytes.
 // The scan is string-aware so a '{' inside a claim value is data, not depth.
 func checkJSONDepth(raw []byte, maxDepth int) error {
 	scan := depthScan{}
@@ -135,109 +207,6 @@ func checkJSONDepth(raw []byte, maxDepth int) error {
 	}
 	//: nesting stayed inside the bound.
 	return nil
-}
-
-// checkNoDuplicateMembers refuses a top-level JSON object that names the same
-// member twice.
-//
-// encoding/json keeps the LAST occurrence and reports success, so a token with
-// two "aud" members says one thing to a Go reader and potentially another to a
-// reader written in a language that keeps the first. RFC 8725 §2.6 calls that
-// out as a substitution vector; refusing is the only reading that cannot
-// disagree with anybody.
-func checkNoDuplicateMembers(raw []byte) error {
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	open, terr := dec.Token()
-	//: consume the opening brace; a non-object payload is caught here.
-	if terr != nil || open != json.Delim('{') {
-		//: not a JSON object at all.
-		return coretoken.Malformed
-	}
-	seen := map[string]struct{}{}
-	//: walk member names, skipping each value wholesale.
-	for dec.More() {
-		name, nerr := dec.Token()
-		key, isString := name.(string)
-		//: a member name is always a string; anything else is malformed.
-		if nerr != nil || !isString {
-			//: structural failure.
-			return coretoken.Malformed
-		}
-		//: the check this function exists for.
-		if _, dup := seen[key]; dup {
-			//: refuse; never "keep the last one".
-			return coretoken.DuplicateMember
-		}
-		seen[key] = struct{}{}
-		//: skip the value without interpreting it (depth is already bounded).
-		if serr := skipValue(dec); serr != nil {
-			//: structural failure inside a value.
-			return coretoken.Malformed
-		}
-	}
-	//: every member name was distinct.
-	return nil
-}
-
-// skipValue consumes exactly one JSON value from dec without interpreting it
-// and without copying its bytes.
-//
-// The obvious spelling — decoding into a json.RawMessage — COPIES the whole
-// value only for it to be discarded, and this is the duplicate-member pass, so
-// every byte copied is waste.
-//
-// Both implementations are benchmarked side by side over the exact two
-// payloads one verification scans (BenchmarkDuplicateScanRealistic); the
-// copying one lives in the benchmark file and nothing in production calls it.
-// The saving is 919 ns on the header and 3 909 ns on the claims — together
-// 16.8 % of one HS256 verification — plus 832 B on a single 4 KiB claim value,
-// a gap that grows with the value. See BENCH.md §12.
-//
-// The OBJECT count is not the reason and must not be quoted as one: on Go
-// 1.27, whose encoding/json is backed by json/v2, the copying implementation
-// allocates two FEWER objects on a claim set containing an array, because
-// json.Decoder.Token boxes every scalar it walks past while Decode takes the
-// value in one grab. pkg/v1/security/token/BENCH.md's "two allocations" predates that
-// toolchain; the time saving it also reports does reproduce.
-func skipValue(dec *json.Decoder) error {
-	//: 0 means "no container open yet"; a scalar therefore ends immediately.
-	depth := 0
-	//: walk tokens until the value this call was asked to skip is fully read.
-	for {
-		tok, terr := dec.Token()
-		//: propagate the decoder's own verdict, including a truncation.
-		if terr != nil {
-			//: the caller turns this into Malformed.
-			return terr
-		}
-		delim, isDelim := tok.(json.Delim)
-		//: a scalar at the top of this value IS the whole value.
-		if !isDelim {
-			//: inside a container, scalars and member names are just consumed.
-			if depth == 0 {
-				//: the value was a single token.
-				return nil
-			}
-			//: keep walking the container.
-			continue
-		}
-		//: only the delimiter kind matters; the value itself is discarded.
-		switch delim {
-		//: an opening delimiter descends one level.
-		case '{', '[':
-			//: track it so the matching close can be recognised.
-			depth++
-		//: a closing delimiter ascends one.
-		default:
-			//: back up one level.
-			depth--
-			//: reaching zero closes the value this call was asked to skip.
-			if depth == 0 {
-				//: the container is fully consumed.
-				return nil
-			}
-		}
-	}
 }
 
 // preAuthEncode implements PASETO's PAE (pre-authentication encoding): the

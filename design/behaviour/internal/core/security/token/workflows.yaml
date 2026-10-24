@@ -22,3 +22,52 @@ workflows:
           range: present
           value: set
       - return: count
+  - of: (*ClaimsBuf).PrivateIndex
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: i
+                when: bytes.Equal(name, []byte(declared))
+          key: i
+          range: b.names[:b.declared]
+          value: declared
+      - return: "-1"
+  - of: ClaimsBuf.String
+    steps:
+      - bind: registered
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - op: ++
+                    set: registered
+                when: b.text[i].state == ClaimOK
+          key: i
+          range: b.text
+      - loop:
+          do:
+            - opt:
+                do:
+                  - op: ++
+                    set: registered
+                when: b.times[i].state == ClaimOK
+          key: i
+          range: b.times
+      - bind: usable
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - op: ++
+                    set: usable
+                when: b.private[i].state == ClaimOK
+          key: i
+          range: b.private[:b.declared]
+      - return: |-
+          "token.ClaimsBuf{registered:" + strconv.Itoa(registered) +
+          		" aud:" + strconv.Itoa(int(b.audienceLen)) +
+          		" private:" + strconv.Itoa(usable) + "/" + strconv.Itoa(int(b.declared)) + "}"

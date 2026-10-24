@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-05T00:00:00Z -->
+<!-- updated: 2026-10-24T00:00:00Z -->
 # internal/service/security/token/
 
 ## Purpose
@@ -54,11 +54,15 @@ exactly as trustworthy as the key itself.
 | `paseto_issuer_config.go` / `paseto_verifier_config.go` | the FLAT PASETO configs + their projections onto the shared policy |
 | `policy.go` / `bounds_value.go` | `policyValue` — the validated, defaults-applied verification policy |
 | `validate.go` | the shared post-authentication claim checks + `stampIssuedClaims` |
-| `encoding.go` / `depth_scan.go` | bounded segment split, strict base64url, JSON depth + duplicate-member checks, PASETO `PAE` |
+| `encoding.go` / `depth_scan.go` | bounded segment split (`splitCompact`, and `splitCompactBytes` for a token held as bytes), strict base64url (`decodeSegment`, and `decodeSegmentInto` a caller's buffer), the JSON depth pre-pass, PASETO `PAE` |
+| `json_scan.go` | the reflection-free strict RFC 8259 reader every claims object and every JOSE header goes through — `scanObject` indexes the top-level members into a fixed array and refuses malformed text, a duplicate or escaped member name, a lone surrogate, a number a float64 cannot hold and a member count past the cap; `appendJSONString` / `decodeTextInto` / `jsonStringEqual` decode or compare a validated literal without allocating; see §One refusal set |
 | `jsonstring.go` | `quoteJSONString` / `quoteJSONStrings` — JSON string rendering with no error channel |
-| `claims_codec.go` | the shared claims traversal + the `claimShape` contract + the issue-side UTF-8 refusal (`checkClaimText`, `putPrivate`) + the verify-side refusals of text that is not UTF-8 and of a registered claim sent as JSON null (`nullRegisteredClaim` — `encoding/json` would decode `"aud": null` as an audience of `[""]` and `"nbf": null` as 1970; a private claim may still be null) |
+| `claims_codec.go` | `readClaims` — THE refusal set: UTF-8, depth, the scan, the registered claims (`readRegistered`: a registered claim sent as JSON null is refused — a lenient reader decodes `"aud": null` as an audience of `[""]` and `"nbf": null` as 1970; a private claim may still be null), the private names (`checkPrivateMembers`) — then `decodeClaims` builds the `ClaimsValue` from the index; the `claimShape` contract and its closed dispatch (`decodeTimeIn`, `checkAudienceIn`); the issue-side UTF-8 refusal (`checkClaimText`, `putPrivate`) |
 | `jose_shape.go` / `paseto_shape.go` | the two claim-value encodings (NumericDate vs RFC 3339) |
-| `jws.go` / `jws_parts.go` | `headerValue`, the JOSE header parse, `checkHeader` (the algorithm gate), `jwsPartsValue` |
+| `jws.go` / `jws_parts.go` | `headerView` / `readJOSEHeader` (the header through the same scan), `headerValue`, `checkHeader` and `checkHeaderView` — two readers, one `judgeHeader` (the algorithm gate) — `jwsPartsValue` |
+| `hs256_verifier.go` | `hs256Verifier` — every HS256 verifier, built from a `Key` or an oct JWK — and its `VerifierInto`: `NewScratch`, `VerifyInto` (structure, alg, MAC through the caller's scratch, then `judgeInto`: the one refusal set, the policy, and the copy into the `ClaimsBuf`); header, signature and claims decoded into stack arrays |
+| `verify_into_*_test.go` / `scratch_shared_external_test.go` | `VerifyInto` against `Verify`, the check order, the buffer reused across six requests with its whole memory scanned, the foreign and busy scratch (no MAC computed), the redaction under every verb; the race-off zero-allocation gate; and one scratch shared across goroutines with forged tokens carrying copied signatures — none accepted |
+| `legacy_reader_test.go` / `legacy_differential_test.go` | the encoding/json reader the scanner replaced, kept as the ORACLE, and the four-case differential test and `FuzzClaimsReader` that judge the scanner against it |
 | `jws_issuer.go` / `jws_verifier.go` | the JWS issuer and single-key verifier |
 | `jwt.go` | the six JWT constructors |
 | `keys.go` + `hs256_binding.go` / `es256.go` / `ed25519.go` | the algorithm-bound key contracts and their five implementations (each curve's signing and verifying halves share one file) |
@@ -103,6 +107,45 @@ exactly as trustworthy as the key itself.
 - **`sub` semantics, and claim-value sanitisation** (§3.8, §3.10) — see the
   table. Both need vocabulary this package does not have.
 
+## One refusal set — the claims reader
+
+`decodeClaims` used to be `json.Unmarshal` into a `map[string]json.RawMessage`,
+behind a duplicate-member pass over `json.Decoder.Token` — 95.5 % of an HS256
+verification. It is now `readClaims`: one strict RFC 8259 pass with no
+reflection, shared by `Verify` on every format, PASETO, the set verifier and
+`VerifyInto`. Every refusal the legacy reader made is kept, in its order:
+UTF-8, depth, then (one scan) malformed text, `DuplicateMember`, the member
+cap (`TooLarge`), then the registered claims — null, a non-string `iss`/`sub`/
+`jti`, a shape-illegal `aud`, a NumericDate that is NaN, Inf, past 1e11 or the
+zero instant — then the private names (`ClaimNameInvalid`, `TooLarge`). Claims
+are still read only AFTER the signature; base64url is still strict.
+
+The legacy reader also refused, without saying so, every number a float64
+cannot hold — `json.Decoder.Token` reads each number as one — at any depth,
+header included; the scanner keeps that refusal (`checkMagnitude`). The RFC
+8259 number grammar is checked before any number reaches `strconv`.
+
+**Deliberate divergences** — inputs the legacy reader accepted and the scanner
+refuses. They are the only ones `legacy_differential_test.go` admits; a
+refusal outside them fails the oracle, and an input the legacy reader refused
+and the scanner accepts fails it always:
+
+| Class | Example | Legacy | Scanner |
+|---|---|---|---|
+| escaped top-level member name | `{"\u0065xp":1}` | read as `exp` | `MALFORMED` — a second spelling of a name is how a duplicate slips past |
+| lone surrogate escape, anywhere | `"\ud800"`, `"\udbff"` | both U+FFFD: one string | `MALFORMED` |
+| `null` inside an `aud` array | `{"aud":["a",null]}` | `["a",""]` | `MALFORMED` |
+| JOSE header past 71 members | — | no bound | `TOO_LARGE` |
+
+When both refuse, the codes are equal, or differ as the written precedence
+permits (`precedenceAllows`): the scanner may answer `MALFORMED` for an input
+carrying a listed class (it refuses the class where it meets it); `TOO_LARGE`
+where the legacy reader found a duplicate or an empty name past the member cap
+(duplicates are not searched past it); and `CLAIM_NAME_INVALID` and
+`TOO_LARGE` may swap, since the legacy reader walked the private claims in map
+order. `VerifyInto` adds one refusal of its own, `CLAIMS_BUF_OVERFLOW`, after
+every other.
+
 ## Bounds — the CVE-2025-30204 class
 
 Every function that touches an unauthenticated token is `O(len(input))` with a
@@ -115,7 +158,10 @@ chooses.
   that call, on a token of a few megabytes of `.`, is what CVE-2025-30204 was.
 - `decodeSegment` checks `DecodedLen` before decoding.
 - `checkJSONDepth` is a linear, string-aware scan with three fields of state,
-  run **before** `encoding/json` builds a frame per level.
+  run **before** the scanner descends a level.
+- `scanObject` indexes at most `maxClaimMembers` (71) members into a fixed
+  array, and looks for duplicates only among those: the comparison is bounded
+  by the cap, never by what the attacker sent.
 - `MaxPrivateClaims` (in `core/security/token`) caps the member count.
 - `NewSetVerifier` caps how many candidate keys one `kid` may cost.
 
@@ -133,8 +179,15 @@ three an issuer stamps on its own.
 | EdDSA | 104 459 ns | 119 406 ns · 6 610 B · 114 allocs |
 | ES256 | 126 140 ns | 142 029 ns · 7 796 B · 134 allocs |
 
-Issuing costs **2.1–2.4× less** than verifying, on all four. `Verify`
-allocates on every call; there is no zero-allocation claim here to hold.
+Issuing costs **2.1–2.4× less** than verifying, on all four. The table is the
+legacy reader's (§1–§15 of `BENCH.md`); since the scanner (§17) HS256 realistic
+allocates **29** times instead of 121, every format gains likewise, and the
+time fell about 3.5× on an M1 under heavy load — re-measure before quoting it.
+`Verify` still allocates on every call (the `ClaimsValue` is built of strings
+and a map). **`VerifyInto` allocates nothing**, held race-off by
+`verify_into_alloc_internal_test.go` (a hand-written gate: kit v0.1.0-rc.15
+cannot carry the budget — the port is designed in core, whose fixture may not
+import this layer, and the facade's alias is not a designed symbol).
 
 **A JWK Set verification costs what a single-key one costs, plus the `kid`
 header.** `NewSetVerifier` derives every member's binding ONCE at construction,

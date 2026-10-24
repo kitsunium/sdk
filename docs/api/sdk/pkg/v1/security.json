@@ -55,7 +55,7 @@
       "dir": "token",
       "layer": "public",
       "family": "security",
-      "doc": "Package token — the dotted-quad codes a consumer routes on.\n\nThese are RE-EXPORTS, not declarations: the ranges 0.2.13.* and 0.3.44.* are\nowned by internal/core/security/token, where every code of the token domain\nis declared (ADR 0160), and 0.3.42.* by internal/core/crypto/key/jwk; the\nerrs ownership audit skips a cross-package selector for exactly this reason\n(ADR 0035). Matching on a code\nrather than on a reason string is the stronger contract — a code is a number\nin docs/error-codes.yaml, a reason is a spelling.\n\n\tswitch {\n\tcase errs.HasCode(err, token.CodeExpired):          // 401, refresh\n\tcase errs.HasCode(err, token.CodeAudienceMismatch): // 401, wrong service\n\tcase errs.HasCode(err, token.CodeSignatureInvalid): // 401, and alert\n\t}\n\nAll three answer 401, and a token addressed to another service is no\nexception: RFC 6750 §3.1 spends invalid_token — and 401 — on a token that is\n\"invalid for other reasons\", while 403 (insufficient_scope) says the token\nis valid HERE and merely too weak, which an audience mismatch is not. What\ndiffers between the rows is what the caller does next, not the status.\n\nPackage token — the algorithm, registered-claim and JWK key vocabulary.\n\nPackage token — the constructor set, one per algorithm, plus the JWK\nloaders and bridges. Each constructor accepts only the Go key type its\nalgorithm can use, which is what makes algorithm confusion a call that does\nnot compile.\n\nPackage token — the typed verdicts an issuer, a verifier or a key loader\nreturns.\n\nMatch them with errs.HasCode (the codes are re-exported in gen_facade.go) or\nerrs.HasReason. Their Public halves name WHICH check refused a token and\nnever echo a value out of it — not an audience, not an issuer, not a key id,\nnot a claim. The JWK* verdicts are the key loaders' — ParseJWK and\nParseJWKSet — and hold a key document to the same rule: they name the rule a\nmember broke, never the member's value.\n\nPackage token is the public facade for the SDK's security-token domain:\nJSON Web Tokens over JWS Compact Serialization (RFC 7519) and PASETO\nv4.public. It is stdlib-only and composes the SDK's own crypto schemes, so\nit adds no dependency to a consumer's build.\n\n\tiss, err := token.NewES256Issuer(privateKey, token.IssuerConfig{\n\t    Issuer:   \"https://auth.example.com\",\n\t    Lifetime: 15 * time.Minute,\n\t})\n\tjwt, err := iss.Issue(token.NewClaims().WithSubject(\"user-42\").WithAudience(\"api\"))\n\n\tver, err := token.NewES256Verifier(&privateKey.PublicKey, token.VerifierConfig{\n\t    Issuer:   \"https://auth.example.com\",\n\t    Audience: \"api\",\n\t    Leeway:   30 * time.Second,\n\t})\n\tclaims, err := ver.Verify(jwt)\n\n# Algorithm confusion is a call you cannot write\n\nThere is no NewVerifier(algorithm, key), and no verifier reads the token's\n\"alg\" header to decide what to do with it. There is one constructor per\nalgorithm, and each accepts only the Go type that algorithm can use:\n\n\tNewHS256Verifier(secret crypto.Key,      cfg VerifierConfig)\n\tNewES256Verifier(pub *ecdsa.PublicKey,   cfg VerifierConfig)\n\tNewEdDSAVerifier(pub ed25519.PublicKey,  cfg VerifierConfig)\n\nThe textbook attack — take the RSA or EC public key the server publishes,\nuse it as an HMAC shared secret, mint tokens with it, and let a verifier\nthat trusts the header do the rest — needs a call that hands a public key to\nthe HMAC path. Here that call does not compile: crypto.Key is a struct with\nan unexported field, and no *ecdsa.PublicKey converts to it. Verification\nthen COMPARES the header against the binding and refuses a mismatch with\nAlgorithmMismatch, before any key reaches any primitive.\n\n[NewVerifierFromJWK] and [NewSetVerifier] are the only places an algorithm\nis selected at run time, and they select it from the KEY's kty/crv — the\nmaterial a relying party fetched from a publisher it trusts — never from the\ntoken.\n\n# Loading a published key\n\nA relying party that verifies against an issuer's published keys fetches the\nkey document itself — this package performs no I/O, follows no jwks_uri and\ncaches nothing (ADR 0042) — and hands the bytes to [ParseJWKSet], or to\n[ParseJWK] for a single key:\n\n\tset, err := token.ParseJWKSet(body) // the issuer's JWK Set, as fetched\n\tver, err := token.NewSetVerifier(set, token.VerifierConfig{\n\t    Issuer:   \"https://auth.example.com\",\n\t    Audience: \"api\",\n\t})\n\nParsing is the only way to obtain a [JWK]: the type has no exported field\nand no UnmarshalJSON, so its validation — strict base64url, coordinates at\nthe curve's fixed length, the point on its curve, a private \"d\" deriving\nexactly the declared public key — is not a step a caller can skip by\ndecoding some other way. [NewJWKSet] assembles a set from keys already\nparsed. A refusal carries one of the CodeJWK* codes, matchable with\nerrs.HasCode; a set is accepted whole or not at all, so one RSA member —\nthe SDK verifies nothing with RSA — refuses the document.\n\n# What is always refused\n\n  - \"alg\":\"none\" in any capitalisation (RFC 7519 §6). [Algorithm] is an enum\n    with no value that spells it, so no configuration can enable it.\n  - a non-empty \"crit\" header (RFC 7515 §4.1.11).\n  - a token with no \"exp\", unless VerifierConfig.AllowMissingExpiry says\n    otherwise. RFC 7519 §4.1.4 makes exp OPTIONAL; a bearer token that never\n    expires is a password with a worse rotation story, so the default here\n    inverts that and the opt-out has a name.\n  - a token past MaxTokenLen, or claims past MaxClaimDepth — both checked\n    before any decode allocates.\n  - a repeated JSON member in the header or the claims (RFC 8725 §2.6).\n\n# Testing time without sleeping\n\nEvery config has a Clock field, and it takes any value with the two methods\nNow and Since — so the fake is one a test writes itself, and an expiry test\nmoves time by assignment instead of by sleeping:\n\n\ttype fakeClock struct{ now time.Time }\n\n\tfunc (c *fakeClock) Now() time.Time                  { return c.now }\n\tfunc (c *fakeClock) Since(t time.Time) time.Duration { return c.now.Sub(t) }\n\n\tfake := &fakeClock{now: time.Unix(1000, 0)}\n\tver, _ := token.NewHS256Verifier(secret, token.VerifierConfig{Clock: fake})\n\tfake.now = fake.now.Add(2 * time.Hour) // now the token is expired, deterministically\n\nMove it between calls, or guard it with a mutex if a verifier reads it from\nanother goroutine at the same time.\n\n# Claims are not printable\n\n[Claims] renders its SHAPE under %v / %s / %#v — \"token.Claims{registered:3\naud:1 private:2}\" — and never a value. A claim set is the output of an\nauthentication decision and routinely holds a subject id, an email or a\ntenant; the counts are enough to tell \"no audience was sent\" from \"the\naudience did not match\", which is what a %v is usually reaching for.\n"
+      "doc": "Package token — the dotted-quad codes a consumer routes on.\n\nThese are RE-EXPORTS, not declarations: the ranges 0.2.13.* and 0.3.44.* are\nowned by internal/core/security/token, where every code of the token domain\nis declared (ADR 0160), and 0.3.42.* by internal/core/crypto/key/jwk; the\nerrs ownership audit skips a cross-package selector for exactly this reason\n(ADR 0035). Matching on a code\nrather than on a reason string is the stronger contract — a code is a number\nin docs/error-codes.yaml, a reason is a spelling.\n\n\tswitch {\n\tcase errs.HasCode(err, token.CodeExpired):          // 401, refresh\n\tcase errs.HasCode(err, token.CodeAudienceMismatch): // 401, wrong service\n\tcase errs.HasCode(err, token.CodeSignatureInvalid): // 401, and alert\n\t}\n\nAll three answer 401, and a token addressed to another service is no\nexception: RFC 6750 §3.1 spends invalid_token — and 401 — on a token that is\n\"invalid for other reasons\", while 403 (insufficient_scope) says the token\nis valid HERE and merely too weak, which an audience mismatch is not. What\ndiffers between the rows is what the caller does next, not the status.\n\nPackage token — the algorithm, registered-claim and JWK key vocabulary.\n\nPackage token — the constructor set, one per algorithm, plus the JWK\nloaders and bridges. Each constructor accepts only the Go key type its\nalgorithm can use, which is what makes algorithm confusion a call that does\nnot compile.\n\nPackage token — the typed verdicts an issuer, a verifier or a key loader\nreturns.\n\nMatch them with errs.HasCode (the codes are re-exported in gen_facade.go) or\nerrs.HasReason. Their Public halves name WHICH check refused a token and\nnever echo a value out of it — not an audience, not an issuer, not a key id,\nnot a claim. The JWK* verdicts are the key loaders' — ParseJWK and\nParseJWKSet — and hold a key document to the same rule: they name the rule a\nmember broke, never the member's value.\n\nPackage token is the public facade for the SDK's security-token domain:\nJSON Web Tokens over JWS Compact Serialization (RFC 7519) and PASETO\nv4.public. It is stdlib-only and composes the SDK's own crypto schemes, so\nit adds no dependency to a consumer's build.\n\n\tiss, err := token.NewES256Issuer(privateKey, token.IssuerConfig{\n\t    Issuer:   \"https://auth.example.com\",\n\t    Lifetime: 15 * time.Minute,\n\t})\n\tjwt, err := iss.Issue(token.NewClaims().WithSubject(\"user-42\").WithAudience(\"api\"))\n\n\tver, err := token.NewES256Verifier(&privateKey.PublicKey, token.VerifierConfig{\n\t    Issuer:   \"https://auth.example.com\",\n\t    Audience: \"api\",\n\t    Leeway:   30 * time.Second,\n\t})\n\tclaims, err := ver.Verify(jwt)\n\n# Algorithm confusion is a call you cannot write\n\nThere is no NewVerifier(algorithm, key), and no verifier reads the token's\n\"alg\" header to decide what to do with it. There is one constructor per\nalgorithm, and each accepts only the Go type that algorithm can use:\n\n\tNewHS256Verifier(secret crypto.Key,      cfg VerifierConfig)\n\tNewES256Verifier(pub *ecdsa.PublicKey,   cfg VerifierConfig)\n\tNewEdDSAVerifier(pub ed25519.PublicKey,  cfg VerifierConfig)\n\nThe textbook attack — take the RSA or EC public key the server publishes,\nuse it as an HMAC shared secret, mint tokens with it, and let a verifier\nthat trusts the header do the rest — needs a call that hands a public key to\nthe HMAC path. Here that call does not compile: crypto.Key is a struct with\nan unexported field, and no *ecdsa.PublicKey converts to it. Verification\nthen COMPARES the header against the binding and refuses a mismatch with\nAlgorithmMismatch, before any key reaches any primitive.\n\n[NewVerifierFromJWK] and [NewSetVerifier] are the only places an algorithm\nis selected at run time, and they select it from the KEY's kty/crv — the\nmaterial a relying party fetched from a publisher it trusts — never from the\ntoken.\n\n# Loading a published key\n\nA relying party that verifies against an issuer's published keys fetches the\nkey document itself — this package performs no I/O, follows no jwks_uri and\ncaches nothing (ADR 0042) — and hands the bytes to [ParseJWKSet], or to\n[ParseJWK] for a single key:\n\n\tset, err := token.ParseJWKSet(body) // the issuer's JWK Set, as fetched\n\tver, err := token.NewSetVerifier(set, token.VerifierConfig{\n\t    Issuer:   \"https://auth.example.com\",\n\t    Audience: \"api\",\n\t})\n\nParsing is the only way to obtain a [JWK]: the type has no exported field\nand no UnmarshalJSON, so its validation — strict base64url, coordinates at\nthe curve's fixed length, the point on its curve, a private \"d\" deriving\nexactly the declared public key — is not a step a caller can skip by\ndecoding some other way. [NewJWKSet] assembles a set from keys already\nparsed. A refusal carries one of the CodeJWK* codes, matchable with\nerrs.HasCode; a set is accepted whole or not at all, so one RSA member —\nthe SDK verifies nothing with RSA — refuses the document.\n\n# What is always refused\n\n  - \"alg\":\"none\" in any capitalisation (RFC 7519 §6). [Algorithm] is an enum\n    with no value that spells it, so no configuration can enable it.\n  - a non-empty \"crit\" header (RFC 7515 §4.1.11).\n  - a token with no \"exp\", unless VerifierConfig.AllowMissingExpiry says\n    otherwise. RFC 7519 §4.1.4 makes exp OPTIONAL; a bearer token that never\n    expires is a password with a worse rotation story, so the default here\n    inverts that and the opt-out has a name.\n  - a token past MaxTokenLen, or claims past MaxClaimDepth — both checked\n    before any decode allocates.\n  - a repeated JSON member in the header or the claims (RFC 8725 §2.6).\n\n# Verifying on an event loop without allocating\n\nThe HS256 verifier also implements [VerifierInto], reached by a type\nassertion. Each thread makes one [VerifyScratch] (VerifierInto.NewScratch)\nand one [ClaimsBuf] ([NewClaimsBuf], declaring the private claims it reads),\nonce, and reuses both for every request: the token is read straight out of\nthe receive buffer as a []byte, and nothing is allocated per call. The\nrefusals are Verify's, in Verify's order, plus [ClaimsBufOverflow] for a\nclaim larger than the buffer's fixed slots — never truncated. A scratch is\nnot shareable: a second concurrent use is refused with [ScratchBusy] before\nany MAC is computed, and another verifier's with [ScratchForeign].\n\n# Testing time without sleeping\n\nEvery config has a Clock field, and it takes any value with the two methods\nNow and Since — so the fake is one a test writes itself, and an expiry test\nmoves time by assignment instead of by sleeping:\n\n\ttype fakeClock struct{ now time.Time }\n\n\tfunc (c *fakeClock) Now() time.Time                  { return c.now }\n\tfunc (c *fakeClock) Since(t time.Time) time.Duration { return c.now.Sub(t) }\n\n\tfake := &fakeClock{now: time.Unix(1000, 0)}\n\tver, _ := token.NewHS256Verifier(secret, token.VerifierConfig{Clock: fake})\n\tfake.now = fake.now.Add(2 * time.Hour) // now the token is expired, deterministically\n\nMove it between calls, or guard it with a mutex if a verifier reads it from\nanother goroutine at the same time.\n\n# Claims are not printable\n\n[Claims] renders its SHAPE under %v / %s / %#v — \"token.Claims{registered:3\naud:1 private:2}\" — and never a value. A claim set is the output of an\nauthentication decision and routinely holds a subject id, an email or a\ntenant; the counts are enough to tell \"no audience was sent\" from \"the\naudience did not match\", which is what a %v is usually reaching for.\n"
     }
   ],
   "symbols": [
@@ -2307,6 +2307,20 @@
       "family": "security"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.ClaimAbsent",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
+      "name": "ClaimAbsent",
+      "spelled": "ClaimState",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/security/token.ClaimState",
+      "value": "0",
+      "init": "go:github.com/kitsunium/sdk/internal/core/security/token.ClaimAbsent",
+      "doc": "ClaimAbsent is the state of a claim the token did not carry, and of every\nclaim of a reset [ClaimsBuf].\n",
+      "file": "token/gen_facade.go",
+      "layer": "public",
+      "family": "security"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.ClaimAudience",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
@@ -2344,6 +2358,20 @@
       "value": "\"jti\"",
       "init": "go:github.com/kitsunium/sdk/internal/core/security/token.ClaimID",
       "doc": "ClaimID is the registered claim \"jti\" (RFC 7519 §4.1.7).\n",
+      "file": "token/gen_facade.go",
+      "layer": "public",
+      "family": "security"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.ClaimInvalid",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
+      "name": "ClaimInvalid",
+      "spelled": "ClaimState",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/security/token.ClaimState",
+      "value": "2",
+      "init": "go:github.com/kitsunium/sdk/internal/core/security/token.ClaimInvalid",
+      "doc": "ClaimInvalid is the state of a text claim that is the empty string.\n",
       "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
@@ -2409,6 +2437,33 @@
       "family": "security"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.ClaimOK",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
+      "name": "ClaimOK",
+      "spelled": "ClaimState",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/security/token.ClaimState",
+      "value": "3",
+      "init": "go:github.com/kitsunium/sdk/internal/core/security/token.ClaimOK",
+      "doc": "ClaimOK is the state of a claim present with a usable value.\n",
+      "file": "token/gen_facade.go",
+      "layer": "public",
+      "family": "security"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.ClaimState",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
+      "name": "ClaimState",
+      "spelled": "coretoken.ClaimState",
+      "canonical": "github.com/kitsunium/sdk/internal/core/security/token.ClaimState",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/security/token.ClaimState",
+      "doc": "ClaimState is the public alias for what a [ClaimsBuf] knows about one claim.\n",
+      "file": "token/gen_facade.go",
+      "layer": "public",
+      "family": "security"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.ClaimSubject",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
@@ -2423,6 +2478,20 @@
       "family": "security"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.ClaimWrongType",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
+      "name": "ClaimWrongType",
+      "spelled": "ClaimState",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/security/token.ClaimState",
+      "value": "1",
+      "init": "go:github.com/kitsunium/sdk/internal/core/security/token.ClaimWrongType",
+      "doc": "ClaimWrongType is the state of a declared private claim that is not a JSON\nstring.\n",
+      "file": "token/gen_facade.go",
+      "layer": "public",
+      "family": "security"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.Claims",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
@@ -2431,6 +2500,79 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/security/token.ClaimsValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/security/token.ClaimsValue",
       "doc": "Claims is the public alias for a token's immutable claim set.\n",
+      "file": "token/gen_facade.go",
+      "layer": "public",
+      "family": "security"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.ClaimsBuf",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
+      "name": "ClaimsBuf",
+      "spelled": "coretoken.ClaimsBuf",
+      "canonical": "github.com/kitsunium/sdk/internal/core/security/token.ClaimsBuf",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/security/token.ClaimsBuf",
+      "doc": "ClaimsBuf is the public alias for the caller-owned, fixed-capacity claim\nset a [VerifierInto] fills without allocating.\n",
+      "file": "token/gen_facade.go",
+      "layer": "public",
+      "family": "security"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.ClaimsBufAudienceCap",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
+      "name": "ClaimsBufAudienceCap",
+      "spelled": "int",
+      "canonical": "int",
+      "value": "4",
+      "init": "go:github.com/kitsunium/sdk/internal/core/security/token.ClaimsBufAudienceCap",
+      "doc": "ClaimsBufAudienceCap is how many \"aud\" members a [ClaimsBuf] holds.\n",
+      "file": "token/gen_facade.go",
+      "layer": "public",
+      "family": "security"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.ClaimsBufOverflow",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
+      "name": "ClaimsBufOverflow",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/security/token.ClaimsBufOverflow",
+      "code": {
+        "value": "0.2.13.19",
+        "reason": "CLAIMS_BUF_OVERFLOW",
+        "public": "The token carries a claim larger than this recipient accepts"
+      },
+      "doc": "ClaimsBufOverflow is returned when a claim does not fit a [ClaimsBuf]. The\nclaim is refused, never truncated.\n",
+      "file": "token/gen_facade.go",
+      "layer": "public",
+      "family": "security"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.ClaimsBufPrivateCap",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
+      "name": "ClaimsBufPrivateCap",
+      "spelled": "int",
+      "canonical": "int",
+      "value": "8",
+      "init": "go:github.com/kitsunium/sdk/internal/core/security/token.ClaimsBufPrivateCap",
+      "doc": "ClaimsBufPrivateCap is how many private claim names a [ClaimsBuf] may declare.\n",
+      "file": "token/gen_facade.go",
+      "layer": "public",
+      "family": "security"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.ClaimsBufTextCap",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
+      "name": "ClaimsBufTextCap",
+      "spelled": "int",
+      "canonical": "int",
+      "value": "256",
+      "init": "go:github.com/kitsunium/sdk/internal/core/security/token.ClaimsBufTextCap",
+      "doc": "ClaimsBufTextCap is the capacity, in octets, of every text slot of a\n[ClaimsBuf].\n",
       "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
@@ -2499,6 +2641,23 @@
         "value": "0.2.13.15"
       },
       "doc": "CodeClaimNameInvalid identifies an empty or reserved private-claim name\n(0.2.13.15).\n",
+      "file": "token/gen_facade.go",
+      "layer": "public",
+      "family": "security"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.CodeClaimsBufOverflow",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
+      "name": "CodeClaimsBufOverflow",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "134419",
+      "init": "go:github.com/kitsunium/sdk/internal/core/security/token.CodeClaimsBufOverflow",
+      "code": {
+        "value": "0.2.13.19"
+      },
+      "doc": "CodeClaimsBufOverflow identifies a claim past the fixed capacity of a\n[ClaimsBuf] (0.2.13.19).\n",
       "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
@@ -2873,6 +3032,40 @@
         "value": "0.3.44.6"
       },
       "doc": "CodeSchemeUnsupported identifies a PASETO version+purpose that is not\nv4.public (0.3.44.6).\n",
+      "file": "token/gen_facade.go",
+      "layer": "public",
+      "family": "security"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.CodeScratchBusy",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
+      "name": "CodeScratchBusy",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "134417",
+      "init": "go:github.com/kitsunium/sdk/internal/core/security/token.CodeScratchBusy",
+      "code": {
+        "value": "0.2.13.17"
+      },
+      "doc": "CodeScratchBusy identifies a [VerifyScratch] entered while another\nverification held it (0.2.13.17).\n",
+      "file": "token/gen_facade.go",
+      "layer": "public",
+      "family": "security"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.CodeScratchForeign",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
+      "name": "CodeScratchForeign",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "134418",
+      "init": "go:github.com/kitsunium/sdk/internal/core/security/token.CodeScratchForeign",
+      "code": {
+        "value": "0.2.13.18"
+      },
+      "doc": "CodeScratchForeign identifies a [VerifyScratch] the verifier did not make\n(0.2.13.18).\n",
       "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
@@ -3472,6 +3665,18 @@
       "family": "security"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.NewClaimsBuf",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
+      "name": "NewClaimsBuf",
+      "spelled": "func(private ...string) (buf *ClaimsBuf, err error)",
+      "canonical": "func(private ...string) (buf *github.com/kitsunium/sdk/pkg/v1/security/token.ClaimsBuf, err error)",
+      "doc": "NewClaimsBuf returns an empty [ClaimsBuf] declaring the private claim names\nprivate: the claims a [VerifierInto] copies, decoded, when they are JSON\nstrings. A bad name is refused with [ClaimNameInvalid], too many with\n[ClaimsBufOverflow].\n",
+      "file": "token/gen_facade.go",
+      "layer": "public",
+      "family": "security"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.NewES256Issuer",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
@@ -3720,6 +3925,42 @@
       "family": "security"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.ScratchBusy",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
+      "name": "ScratchBusy",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/security/token.ScratchBusy",
+      "code": {
+        "value": "0.2.13.17",
+        "reason": "SCRATCH_BUSY",
+        "public": "The token could not be verified"
+      },
+      "doc": "ScratchBusy is returned by [VerifierInto] when the scratch it was given is\nheld by another verification — one scratch shared across threads. No MAC\nwas computed.\n",
+      "file": "token/gen_facade.go",
+      "layer": "public",
+      "family": "security"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.ScratchForeign",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
+      "name": "ScratchForeign",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/security/token.ScratchForeign",
+      "code": {
+        "value": "0.2.13.18",
+        "reason": "SCRATCH_FOREIGN",
+        "public": "The token could not be verified"
+      },
+      "doc": "ScratchForeign is returned by [VerifierInto] for a scratch the verifier did\nnot make: nil, the zero scratch, or another verifier's.\n",
+      "file": "token/gen_facade.go",
+      "layer": "public",
+      "family": "security"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.SetPrivateClaim[...]",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
@@ -3745,6 +3986,116 @@
         "public": "The token signature is not valid"
       },
       "doc": "SignatureInvalid is returned when the signature or MAC tag did not\nauthenticate under the bound key — the same verdict for a wrong key and\nfor tampered bytes, because they are the same event.\n",
+      "file": "token/gen_facade.go",
+      "layer": "public",
+      "family": "security"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.TextClaim",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
+      "name": "TextClaim",
+      "spelled": "coretoken.TextClaim",
+      "canonical": "github.com/kitsunium/sdk/internal/core/security/token.TextClaim",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/security/token.TextClaim",
+      "doc": "TextClaim is the public alias naming a registered text claim of a [ClaimsBuf].\n",
+      "file": "token/gen_facade.go",
+      "layer": "public",
+      "family": "security"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.TextID",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
+      "name": "TextID",
+      "spelled": "TextClaim",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/security/token.TextClaim",
+      "value": "2",
+      "init": "go:github.com/kitsunium/sdk/internal/core/security/token.TextID",
+      "doc": "TextID is the \"jti\" claim of a [ClaimsBuf].\n",
+      "file": "token/gen_facade.go",
+      "layer": "public",
+      "family": "security"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.TextIssuer",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
+      "name": "TextIssuer",
+      "spelled": "TextClaim",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/security/token.TextClaim",
+      "value": "0",
+      "init": "go:github.com/kitsunium/sdk/internal/core/security/token.TextIssuer",
+      "doc": "TextIssuer is the \"iss\" claim of a [ClaimsBuf].\n",
+      "file": "token/gen_facade.go",
+      "layer": "public",
+      "family": "security"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.TextSubject",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
+      "name": "TextSubject",
+      "spelled": "TextClaim",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/security/token.TextClaim",
+      "value": "1",
+      "init": "go:github.com/kitsunium/sdk/internal/core/security/token.TextSubject",
+      "doc": "TextSubject is the \"sub\" claim of a [ClaimsBuf].\n",
+      "file": "token/gen_facade.go",
+      "layer": "public",
+      "family": "security"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.TimeClaim",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
+      "name": "TimeClaim",
+      "spelled": "coretoken.TimeClaim",
+      "canonical": "github.com/kitsunium/sdk/internal/core/security/token.TimeClaim",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/security/token.TimeClaim",
+      "doc": "TimeClaim is the public alias naming a registered instant of a [ClaimsBuf].\n",
+      "file": "token/gen_facade.go",
+      "layer": "public",
+      "family": "security"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.TimeExpiry",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
+      "name": "TimeExpiry",
+      "spelled": "TimeClaim",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/security/token.TimeClaim",
+      "value": "0",
+      "init": "go:github.com/kitsunium/sdk/internal/core/security/token.TimeExpiry",
+      "doc": "TimeExpiry is the \"exp\" claim of a [ClaimsBuf].\n",
+      "file": "token/gen_facade.go",
+      "layer": "public",
+      "family": "security"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.TimeIssuedAt",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
+      "name": "TimeIssuedAt",
+      "spelled": "TimeClaim",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/security/token.TimeClaim",
+      "value": "2",
+      "init": "go:github.com/kitsunium/sdk/internal/core/security/token.TimeIssuedAt",
+      "doc": "TimeIssuedAt is the \"iat\" claim of a [ClaimsBuf].\n",
+      "file": "token/gen_facade.go",
+      "layer": "public",
+      "family": "security"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.TimeNotBefore",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
+      "name": "TimeNotBefore",
+      "spelled": "TimeClaim",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/security/token.TimeClaim",
+      "value": "1",
+      "init": "go:github.com/kitsunium/sdk/internal/core/security/token.TimeNotBefore",
+      "doc": "TimeNotBefore is the \"nbf\" claim of a [ClaimsBuf].\n",
       "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
@@ -3807,6 +4158,32 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/security/token.VerifierConfig",
       "owner": "go:github.com/kitsunium/sdk/internal/service/security/token.VerifierConfig",
       "doc": "VerifierConfig is the public alias for the JWT verification policy.\n",
+      "file": "token/gen_facade.go",
+      "layer": "public",
+      "family": "security"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.VerifierInto",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
+      "name": "VerifierInto",
+      "spelled": "coretoken.VerifierInto",
+      "canonical": "github.com/kitsunium/sdk/internal/core/security/token.VerifierInto",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/security/token.VerifierInto",
+      "doc": "VerifierInto is the public alias for the allocation-free verifying port,\nreached by a type assertion on a [Verifier]: the HS256 verifier implements\nit. It verifies into a [ClaimsBuf] through a [VerifyScratch], both owned by\nthe caller, and it is the SDK's only port that is not safe for concurrent\nuse through one scratch — make one scratch per thread.\n",
+      "file": "token/gen_facade.go",
+      "layer": "public",
+      "family": "security"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/security/token.VerifyScratch",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/security/token",
+      "name": "VerifyScratch",
+      "spelled": "coretoken.VerifyScratch",
+      "canonical": "github.com/kitsunium/sdk/internal/core/security/token.VerifyScratch",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/security/token.VerifyScratch",
+      "doc": "VerifyScratch is the public alias for a [VerifierInto] caller's mutable MAC\nstate: one per thread, refused when shared or foreign.\n",
       "file": "token/gen_facade.go",
       "layer": "public",
       "family": "security"
