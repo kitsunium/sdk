@@ -1075,6 +1075,15 @@ rules:
   # jobs subsystem (issue #483 part 4), the same three facts by the same names.
   KTN-STRUCT-FLAGS:
     exclude:
+      # service/net/loop's loopHooks are the conformance suite's fault
+      # injections, zero in production: fill, shuffle and deferTaskrun are
+      # three independent knobs the suite sets BY NAME in a composite literal
+      # (loopHooks{bufs: 2, bufSize: 64, fill: true, shuffle: true}). A
+      # bitfield would turn each test case's declaration into a mask of an
+      # SDK-private layout, the readability a table test exists for — the
+      # health probe_external_test.go case above. Scoped to the one file.
+      - "**/internal/service/net/loop/group.go"
+      - "internal/service/net/loop/group.go"
       # service/net/server's portableConn (the portable loop backend) carries
       # six bools that are not one kind: closing is written by the handler
       # goroutine UNDER mu and read by the connection's writer goroutine, while
@@ -1157,6 +1166,14 @@ rules:
   # this entry needs (Makefile KTN_LINTER_VERSION).
   KTN-FUNC-MAXPARAM:
     exclude_functions:
+      # uringEnterWait(fd, submit, minComplete, flags, arg, argSz) is
+      # io_uring_enter(2) itself: the syscall takes six arguments, and the
+      # wrapper passes them straight to one Syscall6. A struct would put a
+      # second copy of the kernel's argument list between the loop and the
+      # call on every batch, for a function whose whole job is to be that
+      # argument list. Only this function.
+      - "**/internal/service/net/loop/uring_abi_linux.go:uringEnterWait"
+      - "internal/service/net/loop/uring_abi_linux.go:uringEnterWait"
       - "**/internal/kernel/errs/error.go:Static"
       - "internal/kernel/errs/error.go:Static"
 
@@ -2055,6 +2072,17 @@ rules:
 
   KTN-CONST-UNUSED:
     exclude:
+      # service/net/loop's uring_abi_linux.go is a transcription of Linux
+      # include/uapi/linux/io_uring.h (ADR 0018 bans golang.org/x/sys), read
+      # side by side with the header. IORING_OFF_CQ_RING, IOSQE_ASYNC and
+      # IORING_UNREGISTER_PBUF_RING are kept although the backend issues none
+      # of them: the CQ ring shares the SQ mapping under FEAT_SINGLE_MMAP, no
+      # SQE is forced async, and closing the ring unregisters the buffer ring.
+      # Dropping them would leave holes in a table whose value is that it can
+      # be checked line by line against the uapi header. Scoped to the one
+      # file; every other constant of the package stays bound by the rule.
+      - "**/internal/service/net/loop/uring_abi_linux.go"
+      - "internal/service/net/loop/uring_abi_linux.go"
       - "**/internal/service/proc/systemd/notify/sdnotify.go"
       - "internal/service/proc/systemd/notify/sdnotify.go"
 

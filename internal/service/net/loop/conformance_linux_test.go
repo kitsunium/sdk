@@ -27,6 +27,7 @@ import (
 	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // requiredBackends is the comma-separated list of backends this test binary
@@ -53,7 +54,7 @@ type backendCase struct {
 // backendsPresent lists the backends this binary can run, in the order
 // the suite runs them.
 func backendsPresent() []backendCase {
-	return []backendCase{{"epoll", corenet.LoopBackendEpoll}}
+	return []backendCase{{"iouring", corenet.LoopBackendIOURing}, {"epoll", corenet.LoopBackendEpoll}}
 }
 
 // TestMain runs a re-executed child's case when one is marked, and checks the
@@ -414,8 +415,16 @@ func TestConformance_slotReuseStaleWrite(t *testing.T) {
 		var staleErr error
 		var once sync.Once
 		h.onData = func(io corenet.LoopIO, ref corenet.LoopConnRef, buf []byte) {
-			if bytes.HasPrefix(buf, []byte("probe")) && stale.Gen != 0 {
-				once.Do(func() { staleErr = io.Write(stale, []byte("LEAK\n")) })
+			h.mu.Lock()
+			old := stale
+			h.mu.Unlock()
+			if bytes.HasPrefix(buf, []byte("probe")) && old.Gen != 0 {
+				once.Do(func() {
+					err := io.Write(old, []byte("LEAK\n"))
+					h.mu.Lock()
+					staleErr = err
+					h.mu.Unlock()
+				})
 			}
 		}
 		_, addr := serve(t, b, h, func(c *Config) { c.tableCap = 1 })
@@ -439,14 +448,19 @@ func TestConformance_slotReuseStaleWrite(t *testing.T) {
 		if _, err := io.ReadFull(c1, got); err != nil || string(got) != "probe\n" {
 			t.Fatalf("got %q, %v: the stale write reached the new connection", got, err)
 		}
-		if !errors.Is(staleErr, corenet.LoopStaleRef) {
-			t.Fatalf("stale Write = %v", staleErr)
+		h.mu.Lock()
+		got2 := staleErr
+		h.mu.Unlock()
+		if !errors.Is(got2, corenet.LoopStaleRef) {
+			t.Fatalf("stale Write = %v", got2)
 		}
 	})
 }
 
-// TestConformance_tinyTable fills a table of 2 slots: a third connection is
-// accepted and closed, the two served keep working.
+// TestConformance_tinyTable fills a table of 2 slots. The two served keep
+// working. epoll accepts a third and closes it, counted; io_uring stops
+// accepting at a full table, so the third waits in the listen queue and is
+// served once a close makes room.
 func TestConformance_tinyTable(t *testing.T) {
 	eachBackend(t, func(t *testing.T, b backendCase) {
 		h := &lineH{}
@@ -454,9 +468,6 @@ func TestConformance_tinyTable(t *testing.T) {
 		a, bb := dial(t, addr), dial(t, addr)
 		waitFor(t, "two opens", func() bool { o, _ := h.counts(); return o == 2 })
 		c := dial(t, addr)
-		if _, err := c.Read(make([]byte, 1)); err == nil {
-			t.Fatal("a connection past the table was served")
-		}
 		for _, x := range []stdnet.Conn{a, bb} {
 			_, _ = x.Write([]byte("ok\n"))
 			got := make([]byte, 3)
@@ -464,8 +475,25 @@ func TestConformance_tinyTable(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if g.Rejected() == 0 {
-			t.Fatal("the refused connection was not counted")
+		if b.backend == corenet.LoopBackendEpoll {
+			if _, err := c.Read(make([]byte, 1)); err == nil {
+				t.Fatal("a connection past the table was served")
+			}
+			if g.Rejected() == 0 {
+				t.Fatal("the refused connection was not counted")
+			}
+			return
+		}
+		_ = c.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+		_, _ = c.Write([]byte("third\n"))
+		if _, err := c.Read(make([]byte, 1)); err == nil {
+			t.Fatal("a connection past the table was served while it was full")
+		}
+		_ = a.Close()
+		_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
+		got := make([]byte, 6)
+		if _, err := io.ReadFull(c, got); err != nil || string(got) != "third\n" {
+			t.Fatalf("the third connection after a close = %q, %v", got, err)
 		}
 	})
 }
@@ -664,6 +692,8 @@ func runChild(c string) int {
 		}
 	}
 	switch name {
+	case "overlimit":
+		return childOverLimit(b)
 	case "emfile":
 		if err := childEMFILE(b); err != nil {
 			fmt.Println("emfile failed:", err)
@@ -734,7 +764,9 @@ func childEMFILE(b corenet.LoopBackend) error {
 		_, err = io.ReadFull(c, got)
 		_ = c.Close()
 		if err == nil && string(got) == "back\n" {
-			if !paused {
+			// io_uring's connections are direct descriptors the process
+			// table does not count, so only epoll has to pause here.
+			if !paused && b == corenet.LoopBackendEpoll {
 				return errors.New("the loop never paused its accept")
 			}
 			return nil
@@ -795,3 +827,249 @@ func TestConformance_foreignThread(t *testing.T) {
 
 // io2ReadFull is io.ReadFull, named apart from the LoopIO variables.
 func io2ReadFull(r io.Reader, b []byte) (int, error) { return io.ReadFull(r, b) }
+
+// TestConformance_overRLimit is io_uring's capacity past the descriptor limit
+// (ADR 0186 §D5): a child serving under RLIMIT_NOFILE=128 with MaxConns 300
+// derives three rings, and holds 300 connections the parent opens, the last
+// ring's included, each echoing.
+func TestConformance_overRLimit(t *testing.T) {
+	eachBackend(t, func(t *testing.T, b backendCase) {
+		if b.backend != corenet.LoopBackendIOURing {
+			t.Skip("only io_uring holds connections past RLIMIT_NOFILE")
+		}
+		cmd := exec.Command(os.Args[0], "-test.run=^$")
+		cmd.Env = append(os.Environ(), childEnv+"=overlimit:"+b.name)
+		stdin, _ := cmd.StdinPipe()
+		stdout, _ := cmd.StdoutPipe()
+		cmd.Stderr = os.Stderr
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		r := bufio.NewReader(stdout)
+		addr, err := r.ReadString('\n')
+		if err != nil {
+			t.Fatalf("child: %v", err)
+		}
+		addr = strings.TrimSpace(addr)
+		var conns []stdnet.Conn
+		for i := range 300 {
+			c, err := stdnet.DialTimeout("tcp", addr, 3*time.Second)
+			if err != nil {
+				t.Fatalf("dial %d: %v", i, err)
+			}
+			_ = c.SetDeadline(time.Now().Add(10 * time.Second))
+			conns = append(conns, c)
+		}
+		for i, c := range conns {
+			msg := fmt.Sprintf("c%03d\n", i)
+			_, _ = c.Write([]byte(msg))
+			got := make([]byte, len(msg))
+			if _, err := io.ReadFull(c, got); err != nil || string(got) != msg {
+				t.Fatalf("connection %d = %q, %v", i, got, err)
+			}
+		}
+		_ = stdin.Close()
+		report, _ := io.ReadAll(r)
+		_ = cmd.Wait()
+		for _, c := range conns {
+			_ = c.Close()
+		}
+		t.Logf("child: %s", report)
+		if !bytes.Contains(report, []byte("rings=3")) {
+			t.Fatalf("child report: %s", report)
+		}
+	})
+}
+
+// childOverLimit serves under RLIMIT_NOFILE=128 with MaxConns 300 until its
+// standard input closes, then reports its rings.
+func childOverLimit(b corenet.LoopBackend) int {
+	if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &syscall.Rlimit{Cur: 128, Max: 128}); err != nil {
+		fmt.Println("setrlimit:", err)
+		return 1
+	}
+	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM|syscall.SOCK_NONBLOCK|syscall.SOCK_CLOEXEC, 0)
+	if err != nil {
+		return 1
+	}
+	_ = syscall.Bind(fd, &syscall.SockaddrInet4{Addr: [4]byte{127, 0, 0, 1}})
+	_ = syscall.Listen(fd, 1024)
+	sa, _ := syscall.Getsockname(fd)
+	h := &lineH{}
+	g, err := Start(Config{Group: "overlimit", Value: corenet.LoopValue{Backend: b}, MaxConns: 300, Handler: h, Listeners: []Listener{{FD: fd}}, Log: io.Discard})
+	if err != nil {
+		fmt.Println("start:", err)
+		return 1
+	}
+	fmt.Printf("127.0.0.1:%d\n", sa.(*syscall.SockaddrInet4).Port)
+	_, _ = io.Copy(io.Discard, os.Stdin)
+	st := g.State()
+	var conns []uint64
+	for _, r := range st.RingStates {
+		conns = append(conns, r.Accepted)
+	}
+	fmt.Printf("rings=%d source=%s accepted=%v rlimit=%d\n", st.Rings, st.RingsSource, conns, st.RLimitNoFile)
+	_ = g.Close()
+	return 0
+}
+
+// onlyIOURing skips a case that injects io_uring's own faults.
+func onlyIOURing(t *testing.T, b backendCase) {
+	t.Helper()
+	if b.backend != corenet.LoopBackendIOURing {
+		t.Skip("an io_uring fault")
+	}
+}
+
+// TestConformance_bufferFaults runs io_uring on a two-entry provided-buffer
+// ring of 64-byte buffers, recycled in a scrambled order and filled with 0xAA
+// before each return: every recv runs out of buffers (ENOBUFS, re-armed once
+// one comes back), and every byte echoed must be the byte sent, so a bid that
+// did not match its buffer's content, or a buffer read after its return,
+// shows as 0xAA or as another connection's bytes.
+func TestConformance_bufferFaults(t *testing.T) {
+	eachBackend(t, func(t *testing.T, b backendCase) {
+		onlyIOURing(t, b)
+		h := &lineH{}
+		g, addr := serve(t, b, h, func(c *Config) {
+			c.hooks = loopHooks{bufs: 2, bufSize: 64, fill: true, shuffle: true}
+		})
+		var wg sync.WaitGroup
+		for k := range 8 {
+			wg.Go(func() {
+				c, err := stdnet.DialTimeout("tcp", addr, time.Second)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				defer c.Close()
+				_ = c.SetDeadline(time.Now().Add(20 * time.Second))
+				r := bufio.NewReader(c)
+				for i := range 100 {
+					n := 1 + (i*37+k*101)%300
+					line := bytes.Repeat([]byte{byte('a' + k)}, n)
+					line = append(line, '\n')
+					if _, err := c.Write(line); err != nil {
+						t.Error(err)
+						return
+					}
+					got, err := r.ReadBytes('\n')
+					if err != nil || !bytes.Equal(got, line) {
+						t.Errorf("client %d line %d: %d bytes back, %v", k, i, len(got), err)
+						return
+					}
+				}
+			})
+		}
+		wg.Wait()
+		var starved uint64
+		for _, r := range g.State().RingStates {
+			starved += r.BufferStarved
+		}
+		t.Logf("ENOBUFS re-arms: %d", starved)
+		if starved == 0 {
+			t.Fatal("a two-entry buffer ring never ran out: the fault was not injected")
+		}
+	})
+}
+
+// TestConformance_probeStages fails each stage of the io_uring probe in turn:
+// an explicit io_uring is refused with LoopBackendUnavailable naming the
+// stage, and auto falls back to epoll, degraded, with the reason.
+func TestConformance_probeStages(t *testing.T) {
+	eachBackend(t, func(t *testing.T, b backendCase) {
+		onlyIOURing(t, b)
+		for _, stage := range []string{"setup", "probe", "self_test", "buf_ring", "sparse_files"} {
+			t.Run(stage, func(t *testing.T) {
+				fd, _ := listenFD(t)
+				_, err := Start(Config{Group: "probe", Value: corenet.LoopValue{Backend: corenet.LoopBackendIOURing}, Handler: &lineH{}, Listeners: []Listener{{FD: fd}}, Log: io.Discard, hooks: loopHooks{failStage: stage}})
+				if !errs.HasCode(err, corenet.CodeLoopBackendUnavailable) {
+					t.Fatalf("explicit io_uring = %v", err)
+				}
+				fd2, addr := listenFD(t)
+				g, err := Start(Config{Group: "probe", Value: corenet.LoopValue{}, Handler: &lineH{}, Listeners: []Listener{{FD: fd2}}, Log: io.Discard, hooks: loopHooks{failStage: stage}})
+				if err != nil {
+					t.Fatalf("auto: %v", err)
+				}
+				defer g.Close()
+				st := g.State()
+				if st.Backend != corenet.LoopBackendEpoll || !st.Degraded || !strings.Contains(st.DegradedReason, "io_uring") {
+					t.Fatalf("auto fell back to %v degraded=%v %q", st.Backend, st.Degraded, st.DegradedReason)
+				}
+				c := dial(t, addr)
+				_, _ = c.Write([]byte("fallback\n"))
+				got := make([]byte, 9)
+				if _, err := io.ReadFull(c, got); err != nil {
+					t.Fatalf("the fallback does not serve: %v", err)
+				}
+			})
+		}
+	})
+}
+
+// TestConformance_deferTaskrun runs the echo, the large response and the
+// close under IORING_SETUP_DEFER_TASKRUN, the option that must pass the
+// suite before it may become the default (ADR 0186 §Deferred).
+func TestConformance_deferTaskrun(t *testing.T) {
+	eachBackend(t, func(t *testing.T, b backendCase) {
+		onlyIOURing(t, b)
+		h := &lineH{}
+		_, addr := serve(t, b, h, func(c *Config) {
+			c.hooks = loopHooks{deferTaskrun: true}
+			c.Value.OutputCap = 256 << 10
+		})
+		c := dial(t, addr)
+		const n = 2 << 20
+		_, _ = c.Write([]byte("hi\nBIG " + strconv.Itoa(n) + "\n"))
+		r := bufio.NewReader(c)
+		if line, err := r.ReadString('\n'); err != nil || line != "hi\n" {
+			t.Fatalf("echo = %q, %v", line, err)
+		}
+		got := make([]byte, n)
+		if _, err := io.ReadFull(r, got); err != nil || !bytes.Equal(got, pattern(n)) {
+			t.Fatalf("large response: %v", err)
+		}
+		_, _ = c.Write([]byte("CLOSE\n"))
+		if _, err := r.ReadByte(); err != io.EOF {
+			t.Fatalf("after CLOSE = %v, want EOF", err)
+		}
+	})
+}
+
+// TestConformance_idleNoWatchdog holds 10 000 idle connections for longer
+// than the watchdog's re-arms take: an armed recv on an empty socket is
+// healthy, so the watchdog fires zero times and nothing falls back.
+func TestConformance_idleNoWatchdog(t *testing.T) {
+	if lim := descriptorLimit(); lim < 2*10000+256 {
+		t.Skipf("RLIMIT_NOFILE %d is too low", lim)
+	}
+	eachBackend(t, func(t *testing.T, b backendCase) {
+		onlyIOURing(t, b)
+		h := &lineH{}
+		g, addr := serve(t, b, h, nil)
+		var conns []stdnet.Conn
+		for range 10000 {
+			c, err := stdnet.DialTimeout("tcp", addr, 3*time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			conns = append(conns, c)
+		}
+		defer func() {
+			for _, c := range conns {
+				_ = c.Close()
+			}
+		}()
+		waitFor(t, "every open", func() bool { return g.Live() == 10000 })
+		time.Sleep(time.Duration(watchdogFires+1) * time.Duration(watchdogTicks) * tickEvery)
+		st := g.State()
+		for _, r := range st.RingStates {
+			if r.WatchdogFires != 0 || r.Draining {
+				t.Fatalf("ring %d: %d watchdog fires, draining %v", r.Ring, r.WatchdogFires, r.Draining)
+			}
+		}
+		if st.Degraded {
+			t.Fatalf("degraded: %s", st.DegradedReason)
+		}
+	})
+}
