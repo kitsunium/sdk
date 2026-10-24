@@ -99,6 +99,7 @@ go_test(
     name = "loop_test",
     srcs = [
         "conformance_linux_test.go",
+        "conformance_uring_linux_test.go",
         "core_internal_test.go",
         "gen_api_test.go",
         "memory_linux_test.go",
