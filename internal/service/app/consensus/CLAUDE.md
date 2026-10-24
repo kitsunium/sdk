@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T00:00:00Z -->
+<!-- updated: 2026-10-24T02:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -448,9 +448,14 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   list with no way to hear it: a follower of a live leader answers its
   PreVote with that leader's committed record, which it admits for
   replication only until its configuration lists or retires it, or four
-  election timeouts pass (#542, `TestHuntR4ProveStaleVoterNewLeader`,
+  maximum election timeouts pass without that leader's contact (#542,
+  `TestHuntR4ProveStaleVoterNewLeader`,
   `TestHuntR4ProveStaleVoterReplacementThenFailure`, raft's
-  `checkLeaderRecordReplicationOnly`).
+  `checkLeaderRecordReplicationOnly`). Counted from the record alone, the
+  delay cut a leader still heard, its snapshot stream included, and a
+  voter whose install outlasted it never caught up under writes (#618,
+  `TestAStaleVoterWhoseInstallOutlastsTheRecordCatchesUp`, raft's
+  `checkVouchedLeaderAdmittedWhileHeard`).
 - Trust a predecessor's token by its index above the identity's
   AdoptedFrom once its term can no longer be read: that part of the kept
   range is the suffix Recover adopted past the persisted commit (#509,

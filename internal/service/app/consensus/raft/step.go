@@ -365,8 +365,9 @@ func (r *Raft) followWinner(now time.Time, m core.MessageValue) {
 }
 
 // stepFollower handles a message of the leader's term at a follower or a
-// learner; an append or a heartbeat is contact with the leader, unless this
-// node refused that leader for the term.
+// learner; an append or a heartbeat is contact with the leader, and extends
+// the record of a vouched-for one (#618), unless this node refused that
+// leader for the term.
 func (r *Raft) stepFollower(now time.Time, m core.MessageValue) {
 	if (m.Kind == core.MsgApp || m.Kind == core.MsgHeartbeat) && r.refuses(m.From) {
 		// After N chain refusals the leader's appends and heartbeats are
@@ -381,6 +382,7 @@ func (r *Raft) stepFollower(now time.Time, m core.MessageValue) {
 	case core.MsgApp:
 		r.lead = m.From
 		r.lastLeaderContact = now
+		r.extendHint(now, m.From)
 		r.resetElection(now)
 		r.handleAppend(m)
 		r.maybeEndSilence(m)
@@ -400,6 +402,7 @@ func (r *Raft) stepFollower(now time.Time, m core.MessageValue) {
 func (r *Raft) followHeartbeat(now time.Time, m core.MessageValue) {
 	r.lead = m.From
 	r.lastLeaderContact = now
+	r.extendHint(now, m.From)
 	r.resetElection(now)
 	if c := min(m.Commit, r.log.lastIndex()); c > r.log.committed {
 		r.commitTo(c)

@@ -506,6 +506,7 @@ var checks = map[string]func(mutation) error{
 	"origin authenticated":            checkOriginAuthenticated,
 	"leader record replication only":  checkLeaderRecordReplicationOnly,
 	"removal keeps a stale voter":     checkRemoveKeepsAStaleVoterReachable,
+	"vouched leader kept while heard": checkVouchedLeaderAdmittedWhileHeard,
 }
 
 func TestChecksPassUnmutated(t *testing.T) {
@@ -567,6 +568,7 @@ func TestMutationsAreCaught(t *testing.T) {
 		"origin as written":               mutOriginAsWritten,
 		"hinted leader any kind":          mutHintAnyKind,
 		"removal strands a voter":         mutRemoveStrands,
+		"hinted leader cut while heard":   mutHintEndsWhileHeard,
 	}
 	for name, m := range muts {
 		caught := ""

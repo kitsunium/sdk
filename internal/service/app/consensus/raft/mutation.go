@@ -120,6 +120,9 @@ const (
 	// mutRemoveStrands removes an answering member even when a voter may
 	// then know no one left to vouch for this leader (#603).
 	mutRemoveStrands
+	// mutHintEndsWhileHeard ends a leader record its delay after it was
+	// taken, while the vouched-for leader is still heard (#618).
+	mutHintEndsWhileHeard
 )
 
 // mutated reports whether a test switched mutation m on; it is false in every
