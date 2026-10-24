@@ -63,6 +63,15 @@ constants:
         type: time.Duration
         value: "4"
     name: hintElectionTimeouts
+  - doc: |-
+      askElectionTimeouts is how many maximum election timeouts a learner goes
+      without hearing a leader before it asks its members for the record of the
+      one they follow, and then between two questions (#639).
+    items:
+      - name: askElectionTimeouts
+        type: time.Duration
+        value: "2"
+    name: askElectionTimeouts
   - grouped: true
     items:
       - doc: |-
@@ -242,6 +251,14 @@ constants:
           mutRecordUnannounced answers with a leader record a PreVote that does
           not announce protocol 2 (#638).
         name: mutRecordUnannounced
+      - doc: |-
+          mutLearnerNeverAsks leaves a learner that hears no leader silent: it
+          never asks its members for the leader's record (#639).
+        name: mutLearnerNeverAsks
+      - doc: |-
+          mutAskCampaigns asks for the leader's record by campaigning: a learner
+          becomes a pre-candidate and counts the grants (#639).
+        name: mutAskCampaigns
     name: mutAckBeforeSync
   - doc: The facts a PeerStatValue carries.
     grouped: true
@@ -419,9 +436,11 @@ files:
     name: leader.go
   - decls:
       - hintElectionTimeouts
+      - askElectionTimeouts
       - (*Raft).stepLeaderRecord
       - (*Raft).sendLeaderRecord
       - (*Raft).mayRecordTo
+      - (*Raft).askForLeader
       - (*Raft).takeLeaderRecord
       - (*Raft).mayTakeRecord
       - (*Raft).hearsLeader
@@ -519,6 +538,7 @@ files:
       - (*Raft).HasReady
       - (*ReadyValue).hasLogWork
       - (*ReadyValue).hasNotices
+      - (*ReadyValue).hasStateNotice
       - (*Raft).Ready
       - (*Raft).numberWrite
       - (*Raft).conf
@@ -1143,6 +1163,13 @@ types:
         name: SilenceEnded
         type: bool
       - doc: |-
+          LeaderUnheard is set when this learner, which never campaigns, heard
+          no leader for askElectionTimeouts maximum election timeouts and asked
+          its members for the leader's record: the driver of a joining node
+          sends its JOIN again (#632, #639).
+        name: LeaderUnheard
+        type: bool
+      - doc: |-
           Fetch asks the driver to read entries the step function no longer
           holds, off the event loop, and hand them back with Fetched.
         name: Fetch
@@ -1177,9 +1204,16 @@ types:
         results: bool
       - doc: |-
           hasNotices reports whether the Ready queues anything else for the
-          driver: snapshots to send, answers, a membership, fetches, the end of the
-          silence, an entry this version cannot apply.
+          driver: snapshots to send, answers, a membership, fetches, or a state
+          notice.
         name: hasNotices
+        recv: rd *ReadyValue
+        results: bool
+      - doc: |-
+          hasStateNotice reports whether the Ready tells the driver of a state: the
+          end of the silence, an entry this version cannot apply, or a learner that
+          hears no leader.
+        name: hasStateNotice
         recv: rd *ReadyValue
         results: bool
     name: ReadyValue
@@ -1286,6 +1320,11 @@ types:
         name: hint
         type: core.MemberValue
       - name: hintUntil
+        type: time.Time
+      - doc: |-
+          askedAt is when this learner last asked its members for the record
+          of the leader they follow (#639).
+        name: askedAt
         type: time.Time
       - name: prs
         type: map[core.NodeID]*progress
@@ -1943,6 +1982,28 @@ types:
         params: m core.MessageValue
         recv: r *Raft
         results: bool
+      - doc: |-
+          askForLeader asks every other member of this node's configuration for
+          the record of the leader it follows, when this node is a learner that
+          heard no leader for askElectionTimeouts maximum election timeouts, at most
+          once in that time (#639). The record answers a PreVote (#542), and a
+          learner never campaigns: one down while a member was admitted and made
+          leader came back with a configuration that does not list that leader, its
+          transport refused the leader's key, and nothing vouched for it, so it was
+          never fed while that leader led and kept every raise of the cluster
+          version refused (#638).
+
+          The question is a PreVote, the kind a follower answers with the record,
+          asked and never campaigned: the learner does not become a candidate,
+          counts no answer and moves no term of its own, and a PreVote binds no
+          receiver, which raises no term on it and records nothing (R2-03). A
+          follower of a live leader drops it, a leader that hears a majority does
+          too, and a grant reaches a learner, which drops it. The Ready's
+          LeaderUnheard tells the driver, which sends a joining node's JOIN again
+          (#632).
+        name: askForLeader
+        params: now time.Time
+        recv: r *Raft
       - doc: |-
           takeLeaderRecord admits the leader a member vouched for, provisionally:
           only while this node knows no live leader, from a member of its own

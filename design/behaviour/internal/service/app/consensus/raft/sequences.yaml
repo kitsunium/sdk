@@ -2208,6 +2208,49 @@ sequences:
             - default: true
               do:
                 - return: r.speaks() >= Protocol2 && m.Flags&core.FlagProtocol2 != 0
+  - of: (*Raft).askForLeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).askForLeader
+        kind: self
+      - id: r.campaign
+        kind: internal
+      - id: r.send
+        kind: internal
+    steps:
+      - bind: wait
+        eval: askElectionTimeouts * r.timing.ElectionTimeoutMax
+      - opt:
+          do:
+            - return: ""
+          when: |-
+            r.role != core.RoleLearner || r.speaks() < Protocol2 || r.mutated(mutLearnerNeverAsks) ||
+            		now.Sub(r.lastLeaderContact) < wait || (!r.askedAt.IsZero() && now.Sub(r.askedAt) < wait)
+      - set: r.askedAt
+        value: now
+      - set: r.rd.LeaderUnheard
+        value: "true"
+      - opt:
+          do:
+            - eval: r.campaign(true, 0, 0)
+              to: r.campaign
+            - return: ""
+          when: r.mutated(mutAskCampaigns)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: |-
+                      r.send(core.MessageValue{
+                      				Kind: core.MsgPreVote, To: m.ID, Term: r.term + 1,
+                      				LogTerm: r.log.lastTerm(), Index: r.log.lastIndex(),
+                      			})
+                    to: r.send
+                when: m.ID != r.id
+          key: _
+          range: r.conf().Members
+          value: m
   - of: (*Raft).takeLeaderRecord
     participants:
       - id: caller
@@ -2870,6 +2913,8 @@ sequences:
         kind: internal
       - id: r.tickLeader
         kind: internal
+      - id: r.askForLeader
+        kind: internal
       - id: r.resetElection
         kind: internal
       - id: r.campaign
@@ -2885,6 +2930,8 @@ sequences:
               to: r.tickLeader
             - return: ""
           when: r.role == core.RoleLeader
+      - eval: r.askForLeader(now)
+        to: r.askForLeader
       - opt:
           do:
             - eval: r.resetElection(now)
@@ -3173,8 +3220,10 @@ sequences:
     steps:
       - return: |-
           len(rd.SendSnapshot) != 0 || len(rd.ReadStates) != 0 || len(rd.Forwarded) != 0 ||
-          		len(rd.Transfers) != 0 || rd.Membership != nil || len(rd.Fetch) != 0 || rd.SilenceEnded ||
-          		rd.Unsupported.Index != 0
+          		len(rd.Transfers) != 0 || rd.Membership != nil || len(rd.Fetch) != 0 || rd.hasStateNotice()
+  - of: (*ReadyValue).hasStateNotice
+    steps:
+      - return: rd.SilenceEnded || rd.Unsupported.Index != 0 || rd.LeaderUnheard
   - of: (*Raft).Ready
     participants:
       - id: caller

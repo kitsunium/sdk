@@ -144,6 +144,12 @@ const (
 	// mutRecordUnannounced answers with a leader record a PreVote that does
 	// not announce protocol 2 (#638).
 	mutRecordUnannounced
+	// mutLearnerNeverAsks leaves a learner that hears no leader silent: it
+	// never asks its members for the leader's record (#639).
+	mutLearnerNeverAsks
+	// mutAskCampaigns asks for the leader's record by campaigning: a learner
+	// becomes a pre-candidate and counts the grants (#639).
+	mutAskCampaigns
 )
 
 // mutated reports whether a test switched mutation m on; it is false in every

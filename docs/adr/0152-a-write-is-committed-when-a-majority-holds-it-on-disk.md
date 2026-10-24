@@ -1090,6 +1090,23 @@ followers and sent it nothing. From protocol 2:
   peer that has no leader, for replication only. Raft is crash-fault
   tolerant here, a compromised member can already forge far more, and the
   key must still be one the cluster CA signed.
+- **A learner asks for the record (amendment of 2026-10-24,
+  [#639](https://github.com/kitsunium/sdk/issues/639)).** The record
+  answers a PreVote, and a learner never campaigns: a learner down while a
+  member was admitted and made leader came back in the same state as the
+  stale voter, and nothing ever vouched for that leader, at cluster version
+  2 too, while it also kept every raise refused (#638). A learner that has
+  heard no leader for two maximum election timeouts now sends a PreVote to
+  every other member of its configuration, then again every two maximum
+  election timeouts while it hears none. It is a question, never a
+  campaign: the learner does not become a pre-candidate, counts no answer
+  and keeps its term, and a PreVote binds its receiver to nothing, raising
+  no term and recording no vote (R2-03); a follower of a live leader, and a
+  leader that hears a majority, drop it, and a grant that reaches the
+  learner is dropped. A follower answers it with the record under the rules
+  above, which the learner takes under the same bounds as a voter. No frame
+  or format is added: the PreVote is protocol 1's, and the record is still
+  sent only to a PreVote carrying `FlagProtocol2`.
 
 **A removal never leaves a voter with no known member to vouch for the
 leader (amendment of 2026-10-23, #603).** The record above needs a member of

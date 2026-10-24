@@ -416,3 +416,69 @@ func retryAdmin(t *testing.T, what string, op func() error) {
 		time.Sleep(50 * time.Millisecond)
 	}
 }
+
+// #639: a learner down while D was admitted, promoted and handed the
+// leadership comes back with a configuration that does not list D, and its
+// transport refuses D's key. #542's record went out only in answer to a
+// PreVote, and a learner never campaigns: nothing vouched for D, and the
+// learner was never fed while D led, at cluster version 2 too. A learner
+// that hears no leader now asks the members of its configuration for the
+// record of the leader they follow, with a PreVote it never counts. The
+// control, without the admission model, feeds it either way.
+func TestALearnerDownWhileANewLeaderWasAdmittedIsFed(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		admission, raise bool
+		cid              coreconsensus.ClusterID
+	}{
+		{"cluster version 2", true, true, coreconsensus.ClusterID{5, 4, 10}},
+		{"cluster version 0", true, false, coreconsensus.ClusterID{5, 4, 12}},
+		{"control: every sender admitted", false, true, coreconsensus.ClusterID{5, 4, 11}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if fed, st := staleLearner(t, tc.admission, tc.raise, tc.cid); !fed {
+				t.Fatalf("the returned learner never applied D's write: %+v", st)
+			}
+		})
+	}
+}
+
+// staleLearner runs #639's scenario and reports whether the learner applied
+// D's write within four maximum election timeouts and five seconds.
+func staleLearner(t *testing.T, admission, raise bool, cid coreconsensus.ClusterID) (bool, coreconsensus.StatusValue) {
+	t.Helper()
+	net := NewMemoryNetwork()
+	net.admission = admission
+	c := newClusterWith(t, &cluster{t: t, net: net, cid: cid, size: 3})
+	if raise {
+		raiseToProtocol2(t, c)
+	}
+	l := c.settledLeader(5 * time.Second)
+	x := c.join(t, "slot-x")
+	tok := propose(t, l.node, "a=1")
+	for deadline := time.Now().Add(10 * time.Second); x.node.Status().Applied < tok.Index; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("setup: the learner never caught up: %+v", x.node.Status())
+		}
+	}
+	c.kill(x)
+	net.Isolate(x.id, true)
+	d := c.join(t, "slot-d")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	retryAdmin(t, "promote D", func() error { return c.leader(5*time.Second).node.Promote(ctx, "op:test", d.id) })
+	retryAdmin(t, "transfer to D", func() error { return c.leader(5*time.Second).node.TransferLeadership(ctx, "op:test", d.id) })
+	if ld := c.leader(5 * time.Second); ld != d {
+		t.Fatalf("setup: D does not lead: %d does", ld.id)
+	}
+	net.Isolate(x.id, false)
+	c.start(x)
+	tok = propose(t, d.node, "b=2")
+	wait := 4*testTimingFast().ElectionTimeoutMax + 5*time.Second
+	for deadline := time.Now().Add(wait); x.node.Status().Applied < tok.Index; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			return false, x.node.Status()
+		}
+	}
+	return true, x.node.Status()
+}

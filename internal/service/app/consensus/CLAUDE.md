@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T07:19:32Z -->
+<!-- updated: 2026-10-24T11:39:20Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -486,6 +486,11 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   (#638, `TestAStaleVoterHearsTheNewLeaderBeforeTheRaise`, raft's
   `checkLeaderRecordFollowsTheAnnouncement`). The record follows the
   PreVote's own `FlagProtocol2`, never an older state of its sender.
+- Leave a learner whose configuration does not list the leader with no
+  way to hear it: it never campaigns, so it asks the members of its
+  configuration for the leader's record with a PreVote it never counts
+  (#639, `TestALearnerDownWhileANewLeaderWasAdmittedIsFed`, raft's
+  `checkStrandedLearnerAsks`).
 - Trust a predecessor's token by its index above the identity's
   AdoptedFrom once its term can no longer be read: that part of the kept
   range is the suffix Recover adopted past the persisted commit (#509,
