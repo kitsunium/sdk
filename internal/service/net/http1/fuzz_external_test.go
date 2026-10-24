@@ -107,7 +107,11 @@ func FuzzParseProperties(f *testing.F) {
 
 // TestMutations is the C reference's deterministic mutation fuzz (xorshift,
 // the same seed and the same interesting bytes), run on every test pass so the
-// properties hold without -fuzz.
+// properties hold without -fuzz. A coverage build runs a tenth of the
+// mutations: checkProperties parses every prefix of each input, and under
+// `bazel coverage` the full 20000 took 15 s on a workstation and past the 60 s
+// .bazelrc gives the target on CI. The race suite, the alloc lane and `go test`
+// run them all; the tenth still reaches every statement.
 func TestMutations(t *testing.T) {
 	t.Parallel()
 	state := uint64(0x2545f4914f6cdd1d)
@@ -121,7 +125,7 @@ func TestMutations(t *testing.T) {
 	interesting := []byte{'\r', '\n', 0, ' ', '\t', ':', 'a', '0', 0x7f, 0x80, 0xff}
 	var p http1.Parser
 	iters := 20000
-	if testing.Short() {
+	if testing.Short() || testing.CoverMode() != "" {
 		iters = 2000
 	}
 	for range iters {
