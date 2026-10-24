@@ -21,32 +21,28 @@ var selfTestPayload = []byte("kitsunium net/loop io_uring self-test")
 // a multishot recv that must deliver the payload through the buffer ring.
 // Any failure, or a second without the completions, falls back to epoll.
 //
-// It then reports whether closing a direct descriptor releases its socket
-// while another connection's recv, issued before the close, is still armed.
-// Before 6.13 a fixed file removed from the table is put only once every
-// request issued under the table's previous resource node has completed, and
-// a multishot recv on an idle connection never does: closed sockets would
-// stay allocated, their peers never told, for as long as the oldest
-// connection lives (rsrc.c's io_rsrc_node, reworked in 6.13). Where that
-// holds, the loop serves on process descriptors instead.
-func (ul *uLoop) selfTest(flags uint32) (bool, error) {
+// It then runs the release check (releases): whether the loop's close, a
+// shutdown first, tells the peer at once on a direct descriptor, and whether
+// a close alone would leave the socket pinned. It reports the first as
+// direct and the second as deferred.
+func (ul *uLoop) selfTest(flags uint32) (direct, deferred bool, err error) {
 	//: injected.
 	if ul.hooks.failStage == "self_test" {
 		//: named.
-		return false, probeError("self_test", syscall.EIO)
+		return false, false, probeError("self_test", syscall.EIO)
 	}
 	rg, err := selfTestRing(flags)
 	//: no ring, buffers or table.
 	if err != nil {
 		//: named.
-		return false, err
+		return false, false, err
 	}
 	defer rg.close()
 	lfd, port, err := loopbackListener()
 	//: no loopback.
 	if err != nil {
 		//: named.
-		return false, probeError("self_test listen", errnoOfErr(err))
+		return false, false, probeError("self_test listen", errnoOfErr(err))
 	}
 	defer closeFDs([]int{lfd})
 	prepAccept(rg.get(), lfd, udPack(udAccept, 0, 0), true)
@@ -55,42 +51,98 @@ func (ul *uLoop) selfTest(flags uint32) (bool, error) {
 	//: no client, no connection, or no payload sent.
 	if err != nil {
 		//: named.
-		return false, err
+		return false, false, err
 	}
 	defer closeFDs([]int{cfd})
-	run := &selfTestRun{u: rg, index: -1, second: -1}
+	run := &selfTestRun{u: rg, index: -1}
 	run.exchange()
 	//: named by what was missing.
 	if err := run.verdict(); err != nil {
 		//: failed.
-		return false, err
+		return false, false, err
 	}
 	//: passed; closing the ring closes the direct descriptors.
-	return run.releases(port, cfd), nil
+	direct, deferred = run.releases(port)
+	//: the release check's verdict.
+	return direct, deferred, nil
 }
 
-// releases reports whether a direct descriptor closed with another
-// connection's recv still armed lets its peer see the end at once.
-func (st *selfTestRun) releases(port, first int) bool {
-	other, err := selfTestClient(port, nil)
-	//: no second connection: judged unable, which only costs capacity.
+// releases is the release check. The payload's connection stays open, its
+// multishot recv armed first: the oldest request of the table, as a
+// keep-alive that idles is. Before 6.13 every file closed after it is put
+// only once that recv completes (io_uring/rsrc.c, io_rsrc_node_ref_zero puts
+// nodes in order), which an idle recv never does.
+//
+// A second connection is closed the way the loop closes: shutdown(SHUT_RDWR),
+// the cancel hard-linked behind it, then close_direct. Its peer must read the
+// end within 200 ms, whatever the put does: that is direct. A third is closed
+// without the shutdown, cancel then close: its peer reads no end where the
+// put waits for the oldest recv, which is deferred, and the rings sweep. A
+// check that cannot run judges the loop unable, which only costs capacity:
+// connections live in the process table.
+func (st *selfTestRun) releases(port int) (direct, deferred bool) {
+	shut, ok := st.victim(port, true)
+	//: the loop's own close does not tell the peer: process descriptors.
+	if !ok || !shut {
+		//: process descriptors.
+		return false, false
+	}
+	plain, ok := st.victim(port, false)
+	//: the put cannot be judged: assume it waits, so the rings sweep.
+	if !ok {
+		//: direct, swept.
+		return true, true
+	}
+	//: direct; swept when a close alone pinned the socket.
+	return true, !plain
+}
+
+// victim connects a client, waits for its accept and its armed recv, closes
+// the accepted direct descriptor (after a shutdown when shut is set) and
+// reports whether the client read the end within 200 ms. ok is false when
+// the connection or its close never completed.
+func (st *selfTestRun) victim(port int, shut bool) (sawEnd, ok bool) {
+	cfd, err := selfTestClient(port, nil)
+	//: no connection.
 	if err != nil {
-		//: process descriptors.
-		return false
+		//: not judged.
+		return false, false
 	}
-	defer closeFDs([]int{other})
-	st.pump(func() bool { return st.second >= 0 })
+	defer closeFDs([]int{cfd})
+	want := len(st.accepted) + 1
+	st.pump(func() bool { return len(st.accepted) >= want })
 	//: never accepted.
-	if st.second < 0 {
-		//: process descriptors.
-		return false
+	if len(st.accepted) < want {
+		//: not judged.
+		return false, false
 	}
-	prepCancelFixed(st.u.get(), uint32(st.index), udPack(udCancel, 0, 0))
-	st.pump(func() bool { return st.cancelled })
-	prepCloseDirect(st.u.get(), uint32(st.index), udPack(udClose, 0, 0))
+	index := uint32(st.accepted[want-1])
+	//: the chain's two SQEs in a row, never split by a submit.
+	if !st.u.reserve(2) {
+		//: not judged.
+		return false, false
+	}
+	st.done = 0
+	ops := 1
+	//: the loop's close: a shutdown, the cancel hard-linked behind it.
+	if shut {
+		s := st.u.get()
+		prepShutdownFixed(s, index, syscall.SHUT_RDWR, udPack(udShutdown, 0, 0))
+		s.flags |= sqeIOHardlink
+		ops = 2
+	}
+	prepCancelFixed(st.u.get(), index, udPack(udCancel, 0, 0))
+	st.pump(func() bool { return st.done >= ops })
+	st.closed = false
+	prepCloseDirect(st.u.get(), index, udPack(udClose, 0, 0))
 	st.pump(func() bool { return st.closed })
+	//: the close never completed.
+	if !st.closed {
+		//: not judged.
+		return false, false
+	}
 	//: the peer reads the end, or it never comes.
-	return st.closed && peerSeesEnd(first)
+	return peerSeesEnd(cfd), true
 }
 
 // peerSeesEnd reports whether fd reads end-of-stream within 200 ms.
@@ -126,8 +178,8 @@ func selfTestRing(flags uint32) (*uring, error) {
 		//: named.
 		return nil, probeError("self_test buf_ring", errno)
 	}
-	//: a two-entry table is enough for one connection.
-	if errno := rg.registerSparse(2); errno != 0 {
+	//: four entries: the payload's connection and the release check's two.
+	if errno := rg.registerSparse(4); errno != 0 {
 		rg.close()
 		//: named.
 		return nil, probeError("self_test sparse_files", errno)
@@ -172,15 +224,16 @@ func selfTestClient(port int, payload []byte) (int, error) {
 type selfTestRun struct {
 	// u is the self-test's own ring.
 	u *uring
-	// index is the accepted direct descriptor, -1 before the accept.
+	// index is the payload's direct descriptor, -1 before the accept.
 	index int32
 	// got is what the recv delivered so far.
 	got []byte
-	// second is the release check's second connection, -1 before it.
-	second int32
-	// cancelled and closed are the release check's completions.
-	cancelled bool
-	closed    bool
+	// accepted are the release check's direct descriptors, in order.
+	accepted []int32
+	// done counts the release check's shutdown and cancel completions;
+	// closed is its close's.
+	done   int
+	closed bool
 }
 
 // pump reaps the self-test's completions until done reports true or 500 ms
@@ -215,9 +268,9 @@ func (st *selfTestRun) onCQE(c *cqe) {
 	//: the connection: its recv is armed on the index.
 	case udAccept:
 		st.onAccept(c.res)
-	//: the release check's cancel and close.
-	case udCancel:
-		st.cancelled = true
+	//: the release check's shutdown, cancel and close.
+	case udShutdown, udCancel:
+		st.done++
 	case udClose:
 		st.closed = true
 	//: bytes in a provided buffer.
@@ -229,21 +282,21 @@ func (st *selfTestRun) onCQE(c *cqe) {
 	}
 }
 
-// onAccept arms a recv on the first and the second accepted index.
+// onAccept arms a recv on every accepted index: the payload's first, then
+// the release check's.
 func (st *selfTestRun) onAccept(res int32) {
-	//: by order of arrival.
-	switch {
 	//: an error: nothing to arm.
-	case res < 0:
-	//: the payload's connection.
-	case st.index < 0:
-		st.index = res
-		prepRecv(st.u.get(), uint32(res), udPack(udRecv, 0, 0))
-	//: the release check's idle connection.
-	case st.second < 0:
-		st.second = res
-		prepRecv(st.u.get(), uint32(res), udPack(udRecv, 0, 1))
+	if res < 0 {
+		//: nothing.
+		return
 	}
+	//: the payload's connection first.
+	if st.index < 0 {
+		st.index = res
+	} else {
+		st.accepted = append(st.accepted, res)
+	}
+	prepRecv(st.u.get(), uint32(res), udPack(udRecv, 0, uint32(len(st.accepted))))
 }
 
 // verdict is nil once the payload came back whole, otherwise the stage that

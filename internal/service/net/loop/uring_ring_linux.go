@@ -196,6 +196,23 @@ func (u *uring) get() *sqe {
 	return s
 }
 
+// reserve reports whether n SQEs can be taken in a row without get
+// submitting between them, submitting what is queued to make room. A linked
+// chain needs it: a submit in the middle would end the chain early.
+func (u *uring) reserve(n uint32) bool {
+	//: room, or room made by submitting.
+	for i := 0; u.tail-atomic.LoadUint32(u.sqHead)+n > u.sqLen; i++ {
+		//: the kernel never drained the SQ.
+		if i >= enterRetries {
+			//: the caller counts the failure.
+			return false
+		}
+		u.submit()
+	}
+	//: n in a row.
+	return true
+}
+
 // publish hands every filled SQE to the kernel's view of the SQ tail.
 func (u *uring) publish() {
 	//: the SQEs are written before the tail moves.
@@ -475,11 +492,23 @@ func prepSend(s *sqe, index uint32, p []byte, ud uint64) {
 }
 
 // prepCancelFixed fills s as a cancel of every operation on direct descriptor
-// index. It is never linked to the close: the close waits for the count.
+// index. It is never linked to the close: the close waits for the count. It
+// follows a shutdown, hard-linked, so it cannot cancel the shutdown itself.
 func prepCancelFixed(s *sqe, index uint32, ud uint64) {
 	s.opcode = opAsyncCancel
 	s.fd = fixedFd(index)
 	s.opFlags = cancelFD | cancelFDFixed | cancelAll
+	s.userData = ud
+}
+
+// prepShutdownFixed fills s as shutdown(2) with how on direct descriptor
+// index. It sends the FIN without waiting for the file to be put, which a
+// direct descriptor's close may defer (uRing.shutdown says why).
+func prepShutdownFixed(s *sqe, index uint32, how int, ud uint64) {
+	s.opcode = opShutdown
+	s.fd = fixedFd(index)
+	s.flags = sqeFixedFile
+	s.len = uint32(how)
 	s.userData = ud
 }
 

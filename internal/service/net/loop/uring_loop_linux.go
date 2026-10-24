@@ -27,6 +27,7 @@ const (
 	udFan
 	udAcceptCancel
 	udOrphanClose
+	udShutdown
 )
 
 const (
@@ -49,6 +50,20 @@ const (
 	maxProcessFDs uint64 = 1 << 22
 	// genMask keeps the 24 bits of a generation user_data carries.
 	genMask uint32 = 1<<24 - 1
+	// sweepCloses is the fewest closes since the last sweep started that
+	// start the next one on a ring whose closes put their files late
+	// (uRing.sweep); a quarter of the table when that is more.
+	sweepCloses uint64 = 8192
+	// sweepEvery is how many ticks after the last sweep the next one starts,
+	// whatever the closes, once at least one happened.
+	sweepEvery int64 = 1000
+	// sweepScan is the fewest slots a sweep walks per tick.
+	sweepScan int = 128
+	// sweepTicks is the most ticks a pass takes, so a large table is walked
+	// in a second.
+	sweepTicks int = 100
+	// noEpoch marks a slot with no recv armed.
+	noEpoch uint64 = 1<<64 - 1
 )
 
 // udPack builds a user_data: the operation, 24 bits of generation, the slot.
@@ -103,6 +118,24 @@ type uRing struct {
 	// after EMFILE or ENFILE, as epoll paces its listeners.
 	resumeAt int64
 	backoff  int64
+	// sweepOn is whether the ring sweeps: its connections are direct and a
+	// close puts its file only once older requests completed, as before 6.13
+	// (uRing.sweep).
+	sweepOn bool
+	// closes counts the ring's direct-descriptor closes; armEpoch is, per
+	// slot, closes when its recv was last armed, noEpoch when none is.
+	closes   uint64
+	armEpoch []uint64
+	// sweepAt is the next slot the running sweep looks at, -1 when none runs;
+	// sweepEpoch the closes it started at; sweptCloses the closes the last
+	// one started at, lastSweep the tick it ended, sweepTick the tick it last
+	// walked; sweeps counts the passes.
+	sweepAt     int
+	sweepEpoch  uint64
+	sweptCloses uint64
+	lastSweep   int64
+	sweepTick   int64
+	sweeps      int
 }
 
 // uLoop is one loop on io_uring: one thread owns every ring.
@@ -270,7 +303,7 @@ func (ul *uLoop) setup(rings int) error {
 		return err
 	}
 	//: stage 4 and 5 run on every ring as it is built, the self-test once.
-	direct, err := ul.selfTest(flags)
+	direct, deferred, err := ul.selfTest(flags)
 	//: the self-test refused.
 	if err != nil {
 		//: named by the test.
@@ -283,7 +316,7 @@ func (ul *uLoop) setup(rings int) error {
 		ul.stage = "self_test+direct"
 	}
 	//: built, or refused by the ring that could not be.
-	return ul.build(rings, flags)
+	return ul.build(rings, flags, direct && deferred)
 }
 
 // setupFlags is the full flag set the probe tries first: DEFER_TASKRUN
@@ -310,7 +343,7 @@ func (ul *uLoop) probe() (uint32, error) {
 	}
 	ul.flags = flags
 	ul.stage = "setup"
-	ok, perr := probed.supports(opAccept, opRecv, opSend, opAsyncCancel, opClose, opPollAdd, opRead, opNop)
+	ok, perr := probed.supports(opAccept, opRecv, opSend, opAsyncCancel, opClose, opPollAdd, opRead, opNop, opShutdown)
 	//: stage 3: the ops this backend issues.
 	if perr != 0 || !ok || ul.hooks.failStage == "probe" {
 		probed.close()
@@ -348,8 +381,8 @@ func (ul *uLoop) openStaged(flags uint32) (*uring, uint32, error) {
 }
 
 // build creates the Post queue, the two eventfds and every ring, and arms
-// the primary's polls.
-func (ul *uLoop) build(rings int, flags uint32) error {
+// the primary's polls. sweep is whether the rings sweep deferred puts.
+func (ul *uLoop) build(rings int, flags uint32, sweep bool) error {
 	lp := ul.lp
 	lp.post = newPostQueue(ul.wake)
 	wfd, _, e1 := syscall.RawSyscall(syscall.SYS_EVENTFD2, 0, efdNonblock|efdCloexec, 0)
@@ -362,7 +395,7 @@ func (ul *uLoop) build(rings int, flags uint32) error {
 	ul.wakefd, ul.fanfd = int(wfd), int(ffd)
 	//: each ring: its own io_uring, table, buffers, accepts.
 	for i := range rings {
-		rr, err := ul.newRing(i, flags)
+		rr, err := ul.newRing(i, flags, sweep)
 		//: one ring that cannot be built fails the loop.
 		if err != nil {
 			//: named.
@@ -388,8 +421,8 @@ func orErrno(a, b syscall.Errno) syscall.Errno {
 }
 
 // newRing builds ring i: its io_uring, its sparse table, its buffers, and
-// its accepts.
-func (ul *uLoop) newRing(i int, flags uint32) (*uRing, error) {
+// its accepts. sweep is whether it sweeps deferred puts.
+func (ul *uLoop) newRing(i int, flags uint32, sweep bool) (*uRing, error) {
 	u, step, errno := openURing(uringEntries, flags)
 	//: refused.
 	if errno != 0 {
@@ -397,7 +430,7 @@ func (ul *uLoop) newRing(i int, flags uint32) (*uRing, error) {
 		return nil, probeError(step, errno)
 	}
 	lp := ul.lp
-	rr := &uRing{ul: ul, u: u, armed: make([]int, len(ul.lfds)), backoff: backoffMin}
+	rr := &uRing{ul: ul, u: u, armed: make([]int, len(ul.lfds)), backoff: backoffMin, sweepOn: sweep, sweepAt: -1}
 	rr.r = newRing(lp, i, rr)
 	bufs, size := ul.bufShape()
 	//: stage 4: provided buffers and the sparse table.
@@ -643,6 +676,7 @@ func (ul *uLoop) batch(tick *kernelTimespec) {
 		rr.r.wheel.advance(lp.tick, rr.r.expire)
 		rr.pace()
 		rr.watchdog()
+		rr.sweep()
 	}
 	lp.h.OnBatchEnd(lp)
 	lp.endBatch(started)
@@ -693,7 +727,7 @@ func (rr *uRing) handle(c *cqe) {
 	case udAccept:
 		rr.onAccept(int(udSlot(ud)), c)
 	//: a connection's own operation.
-	case udRecv, udSend, udCancel, udClose:
+	case udRecv, udSend, udCancel, udClose, udShutdown:
 		rr.onConnOp(op, int32(udSlot(ud)), udGen(ud), c)
 	//: posted work.
 	case udWake:
@@ -716,8 +750,10 @@ func (rr *uRing) onConnOp(op uint64, slot int32, gen uint32, c *cqe) {
 	//: a send finished.
 	case udSend:
 		rr.onSend(slot, gen, c)
-	//: a cancel finished.
-	case udCancel:
+	//: a cancel or a shutdown finished, whatever its result: a shutdown of a
+	//: socket the peer already reset fails with ENOTCONN, and the close
+	//: follows all the same.
+	case udCancel, udShutdown:
 		rr.opDone(slot, gen)
 	//: a close finished.
 	case udClose:
@@ -822,6 +858,21 @@ func (rr *uRing) armRecv(slot int32) {
 	prepRecv(s, uint32(c.fd), udPack(udRecv, c.gen, uint32(slot)))
 	rr.ul.onFD(s)
 	c.ops++
+	rr.setEpoch(slot, rr.closes)
+}
+
+// setEpoch records the closes count slot's recv was armed at, or noEpoch.
+func (rr *uRing) setEpoch(slot int32, epoch uint64) {
+	//: only a ring that sweeps keeps them.
+	if !rr.sweepOn {
+		//: nothing.
+		return
+	}
+	//: the table grows with the peak; so do the epochs.
+	for int(slot) >= len(rr.armEpoch) {
+		rr.armEpoch = append(rr.armEpoch, noEpoch)
+	}
+	rr.armEpoch[slot] = epoch
 }
 
 // owns reports whether user_data's generation is slot's.
@@ -844,9 +895,11 @@ func (rr *uRing) onRecv(slot int32, gen uint32, c *cqe) {
 		//: dropped.
 		return
 	}
-	//: the multishot ended: one operation less.
+	//: the multishot ended: one operation less, and no recv armed until it
+	//: is armed again.
 	if !more {
 		rr.r.conns[slot].ops--
+		rr.setEpoch(slot, noEpoch)
 	}
 	//: by result.
 	switch {
@@ -1026,6 +1079,7 @@ func (rr *uRing) maybeClose(slot int32) {
 	prepCloseDirect(s, uint32(c.fd), udPack(udClose, c.gen, uint32(slot)))
 	c.ops = 1
 	c.state = stFree
+	rr.closes++
 }
 
 // onClose releases the slot whose direct descriptor closed.
@@ -1160,26 +1214,129 @@ func (rr *uRing) sendFlight(slot int32) {
 	c.flags |= fSending
 }
 
-// shutdown implements driver: every operation of the slot is cancelled,
-// unlinked; the close follows once the count reaches zero.
+// shutdown implements driver. Every close goes the same way, whoever asked
+// for it, the peer included: shutdown(SHUT_RDWR) on the descriptor, a cancel
+// of every operation still on it hard-linked behind the shutdown, and the
+// close once the count of operations in flight reaches zero (maybeClose).
+//
+// The shutdown is what tells the peer. Before 6.13 a direct descriptor's
+// close only hangs its file on the table's current resource node, and nodes
+// are put strictly in order: one idle connection whose recv was armed early
+// holds the file of every later close, and with it the FIN (io_uring/rsrc.c,
+// io_rsrc_node_ref_zero, until 6.13 gave each file a node of its own). The
+// shutdown sends the FIN at once and ends this connection's own recv on zero,
+// whatever the put does later; a peer that closed first is shut down too, or
+// the socket would sit in CLOSE_WAIT and its peer in FIN_WAIT2 until the put.
+// The cancel is linked behind the shutdown so it can never cancel it, which
+// the kernel runs in its worker before 6.13; it only ends the sends still in
+// flight. The shutdown is counted and never skips its completion: the close
+// is due when the count reaches zero, not when the recv ends.
 func (rr *uRing) shutdown(r *ring, slot int32) {
 	c := &r.conns[slot]
-	//: nothing in flight: the close goes now.
-	if c.ops == 0 {
-		rr.maybeClose(slot)
-		//: closing.
-		return
-	}
-	s := rr.u.get()
-	//: no room: the close waits for the operations to end by themselves.
-	if s == nil {
+	//: two SQEs in a row, or no chain: the close waits for the operations to
+	//: end by themselves.
+	if !rr.u.reserve(2) {
 		r.st.retries++
+		rr.maybeClose(slot)
 		//: later.
 		return
 	}
+	s := rr.u.get()
+	prepShutdownFixed(s, uint32(c.fd), syscall.SHUT_RDWR, udPack(udShutdown, c.gen, uint32(slot)))
+	rr.ul.onFD(s)
+	s.flags |= sqeIOHardlink
+	s = rr.u.get()
 	prepCancelFixed(s, uint32(c.fd), udPack(udCancel, c.gen, uint32(slot)))
 	rr.ul.onFD(s)
+	c.ops += 2
+}
+
+// sweep bounds the files a direct descriptor's close leaves pinned where the
+// put is deferred (sweepOn, before 6.13): a closed socket, its inode and its
+// file wait for every recv armed before the close, and an idle connection's
+// multishot recv never completes by itself, so with churn and one old
+// keep-alive the pinned sockets would grow without bound. Each costs about
+// 3.6 KiB of kernel slab and no descriptor (the TCP object, its socket inode,
+// its file and its dentry, read from /proc/slabinfo on 6.8 and 6.12; the
+// package's CLAUDE.md has the sizes).
+//
+// A pass starts once the closes since the last one started reach a quarter
+// of the table, 8192 at least, or sweepEvery ticks after the last with at
+// least one close. It walks the table in at most sweepTicks ticks, sweepScan
+// slots a tick at least, and cancels every recv armed before the pass began
+// and before a close; recvCancelled arms each again under the current node,
+// so the older nodes drain and their files are put. Pinned sockets stay
+// under that threshold plus one second of closes, and a pass costs at most
+// one cancel and one re-arm per open connection, so at most four of each per
+// close. Bytes that arrive between the cancel and the re-arm wait in the
+// socket and are read by the new recv: nothing is lost.
+func (rr *uRing) sweep() {
+	lp := rr.ul.lp
+	//: only where a close's put waits on older recvs, once a tick.
+	if !rr.sweepOn || lp.tick == rr.sweepTick {
+		//: nothing.
+		return
+	}
+	rr.sweepTick = lp.tick
+	//: idle: a pass starts when due.
+	if rr.sweepAt < 0 && !rr.sweepDue(lp.tick) {
+		//: not due.
+		return
+	}
+	//: started at the closes it saw.
+	if rr.sweepAt < 0 {
+		rr.sweepAt, rr.sweepEpoch = 0, rr.closes
+	}
+	conns := rr.r.conns
+	end := min(rr.sweepAt+max(sweepScan, (len(conns)+sweepTicks-1)/sweepTicks), len(conns))
+	//: this tick's share of the table.
+	for ; rr.sweepAt < end; rr.sweepAt++ {
+		//: no room: the rest at the next tick.
+		if !rr.cancelOld(int32(rr.sweepAt)) {
+			//: later.
+			return
+		}
+	}
+	//: the table walked: the pass is over.
+	if rr.sweepAt >= len(conns) {
+		rr.sweepAt = -1
+		rr.sweptCloses = rr.sweepEpoch
+		rr.lastSweep = lp.tick
+		rr.sweeps++
+	}
+}
+
+// sweepDue reports whether a sweep pass is due at tick: enough closes since
+// the last one started, or its period elapsed with at least one.
+func (rr *uRing) sweepDue(tick int64) bool {
+	since := rr.closes - rr.sweptCloses
+	every := cmp.Or(rr.ul.hooks.sweepEvery, sweepEvery)
+	enough := max(sweepCloses, uint64(len(rr.r.conns)/4))
+	//: closes enough, or time with some.
+	return since >= enough || (since > 0 && tick-rr.lastSweep >= every)
+}
+
+// cancelOld cancels slot's recv when it was armed before the pass began and
+// before a close. It reports false when the SQ had no room.
+func (rr *uRing) cancelOld(slot int32) bool {
+	c := &rr.r.conns[slot]
+	//: an open connection whose recv holds an older node.
+	if c.state != stOpen || int(slot) >= len(rr.armEpoch) || rr.armEpoch[slot] >= rr.sweepEpoch {
+		//: nothing to cancel.
+		return true
+	}
+	s := rr.u.get()
+	//: no room.
+	if s == nil {
+		rr.r.st.retries++
+		//: later.
+		return false
+	}
+	prepCancelUserData(s, udPack(udRecv, c.gen, uint32(slot)), udPack(udCancel, c.gen, uint32(slot)))
 	c.ops++
+	rr.armEpoch[slot] = noEpoch
+	//: cancelled; recvCancelled arms it again.
+	return true
 }
 
 // unread implements driver. A direct descriptor has no process descriptor

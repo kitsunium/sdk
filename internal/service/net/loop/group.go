@@ -72,6 +72,8 @@ type loopHooks struct {
 	failStage string
 	// deferTaskrun sets IORING_SETUP_DEFER_TASKRUN instead of COOP_TASKRUN.
 	deferTaskrun bool
+	// sweepEvery shortens io_uring's sweep period, in ticks.
+	sweepEvery int64
 }
 
 // Group is a running loop group: its loops, their threads and their rings.

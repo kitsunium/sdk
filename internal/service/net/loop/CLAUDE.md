@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T12:00:00Z -->
+<!-- updated: 2026-10-25T00:00:00Z -->
 # internal/service/net/loop/
 
 ## Purpose
@@ -30,7 +30,7 @@ the Ubuntu lane name both Linux backends (§D9 step 11). Until then
 | `uring_abi_linux.go` | the io_uring uapi in-tree (no `x/sys`, ADR 0018): syscall numbers 425–427, flags, opcodes, `sqe`/`cqe`/`uringBuf`/`uringParams`/… layouts, `fixedFd` (0-based) and `targetIndex` (index + 1), `FILE_INDEX_ALLOC` raw `0xFFFFFFFF`; one `Syscall6` per waiting enter, `RawSyscall6` to submit only |
 | `uring_ring_linux.go` | one io_uring: `SETUP_CLAMP`+`CQSIZE` with the granted sizes read back, the single mapping, the SQ/CQ views, the bounded submit (EINTR again; EBUSY/EAGAIN counted and left to the next batch), the provided-buffer ring and its tail published by one 32-bit store of entry 0's bid and the tail, the sparse table, `REGISTER_PROBE`, the SQE encoders |
 | `uring_loop_linux.go` | the io_uring loop: one locked thread owns every ring; the primary waits (EXT_ARG, the tick is ETIME), the secondaries signal it through one registered eventfd it polls multishot, the `Post` eventfd is another one; connection slot apart from kernel index (`slotOf`), user_data = op \| gen(24) \| slot; the multishot state machine; the unlinked cancel → count → `close_direct`; ENOBUFS re-arms; accept paused under the reserve and resumed at twice it; the accept watchdog |
-| `uring_probe_linux.go` | the last probe stage: a loopback multishot accept into a direct descriptor and a multishot recv through the buffer ring, on a ring of its own |
+| `uring_probe_linux.go` | the last probe stage: a loopback multishot accept into a direct descriptor and a multishot recv through the buffer ring, on a ring of its own, then the release check (shutdown→cancel→close must show the peer the end; cancel→close alone tells whether puts are deferred) |
 | `uring_none_linux.go` | the Linux architectures outside io_uring's wave 1: `LoopBackendUnavailable`, epoll serves |
 | `group_linux.go`, `group_other.go` | backend choice, `RLIMIT_NOFILE`, `mmap`; elsewhere, `UnsupportedPlatform` |
 | `debug_on_linux.go`, `debug_off_linux.go` | the `loopdebug` build tag: `Gettid` recorded at loop start and checked in `Write`, `Close`, `SetDeadline` and the `Post` consumer |
@@ -96,20 +96,46 @@ the Ubuntu lane name both Linux backends (§D9 step 11). Until then
   reaped" check are not built: this loop always reaps every ring. An
   io_uring connection is never evicted, because a direct descriptor has no
   process descriptor to ask `SIOCINQ` of, so `unread` answers yes.
-- **Direct descriptors only where a close releases the socket.** Before 6.13
-  a file removed from the direct table is put only once every request issued
-  under the table's previous resource node has completed. A multishot recv on
-  an idle connection never does, so a closed connection's socket stays open:
-  the peer never sees the end, and the memory grows with the churn for as long
-  as the oldest connection lives. Debian's 6.12 and Ubuntu's 6.8 both behave
-  this way (CI, and local QEMU arm64 VMs). The self-test therefore ends with a
-  release check: a second connection's recv armed, the first cancelled and
-  closed, and its peer must read the end within 200 ms. Where it does not,
-  the loop serves on **process descriptors** (`ProbeStage` ends in `+fds`
-  rather than `+direct`). It is the same machine without `IOSQE_FIXED_FILE`,
-  bound by `RLIMIT_NOFILE` like epoll, closing with `close(2)` at count zero,
-  backing off on EMFILE, and allowed to evict, since `SIOCINQ` works. Capacity
-  past the limit is io_uring's on 6.13 and later only.
+- **A close is a shutdown first, then direct descriptors on 6.8 and 6.12
+  too.** Before 6.13 a file removed from the direct table is put only once
+  every request issued under the table's older resource nodes has completed
+  (`io_rsrc_node_ref_zero` puts nodes in order; 6.13 gave each file its own).
+  A multishot recv on an idle connection never completes, so a close alone
+  leaves the socket open and its peer never sees the end — Debian's 6.12 and
+  Ubuntu's 6.8 both behave this way. `shutdown(SHUT_RDWR)` does not wait for
+  the put: it sends the FIN and ends the connection's own recv on zero. So
+  every close, the peer finishing first included, is `IORING_OP_SHUTDOWN`
+  (34) on the fixed slot, the `FD|FD_FIXED|ALL` cancel hard-linked behind it
+  (unlinked, it could cancel the shutdown, which 6.8 runs in io-wq), and
+  `close_direct` once the count of operations in flight reaches zero. The
+  shutdown is counted and never `CQE_SKIP_SUCCESS`. Without the shutdown on a
+  peer-first close the socket would sit in CLOSE_WAIT, its peer in FIN_WAIT2.
+- **The release check decides the mode and the sweep.** On the self-test's
+  ring the payload's recv is armed first, as a keep-alive's is. A second
+  connection is closed the loop's way and its peer must read the end within
+  200 ms: that is `+direct`. Only if it fails does the loop serve on
+  **process descriptors** (`+fds`: no `IOSQE_FIXED_FILE`, bound by
+  `RLIMIT_NOFILE`, `close(2)` at count zero, EMFILE backoff, eviction). A
+  third connection is closed without the shutdown: where its peer reads no
+  end, the put is deferred and the rings sweep (`sweepOn`).
+- **The sweep bounds the deferred puts** (`uRing.sweep`, only with
+  `sweepOn`, so never on 6.13+). A closed socket stays allocated — about
+  **3.6 KiB of kernel slab** each, measured from `/proc/slabinfo` on 6.8.0-147
+  and 6.12.113 (TCP 2368/2432 + sock_inode_cache 832 + filp 192–256 + dentry
+  192), no descriptor — until every recv armed before its close completes;
+  with churn and one old keep-alive that is unbounded. A pass starts after
+  max(8192, table/4) closes, or every 10 s with at least one, walks the
+  table in at most 1 s (128 slots a tick at least), and cancels by user_data
+  each recv armed before the pass and before a close (`armEpoch` < the
+  pass's `closes`); `recvCancelled` re-arms it under the current node and the
+  older nodes drain. Pinned sockets stay under that threshold plus one second
+  of closes — 16 384 on a 65 536-entry table, about 58 MiB, plus the second —
+  for at most four cancels and four re-arms per close. Bytes arriving between
+  cancel and re-arm wait in the socket. `TestConformance_sweepReleases`
+  counts `/proc/net/sockstat`'s TCP `alloc` (254 pinned after 256 closes on
+  6.8 and 6.12, all released by one pass); `TestConformance_directCloseEOF`
+  reads the end within 200 ms with a keeper armed first, server close and
+  peer first.
 - **Rings an unprivileged process can afford.** Without `CAP_IPC_LOCK` the
   kernel charges each ring's SQ and CQ to `RLIMIT_MEMLOCK` (8 MiB by
   default). A serving ring asks for 1024 SQEs and a 4096-entry CQ, the
