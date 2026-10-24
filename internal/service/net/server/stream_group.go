@@ -49,6 +49,11 @@ type StreamGroup struct {
 	// declared records that a handler was declared, even a nil one, so a
 	// second declaration is caught whatever the first one passed.
 	declared bool
+	// loop is the Loop option's value; loopSet records that the option was
+	// given, a zero value included, so Start can refuse it on a group whose
+	// handler is not a loop handler (ADR 0186 §D1).
+	loop    corenet.LoopValue
+	loopSet bool
 }
 
 // Name returns the group's name.

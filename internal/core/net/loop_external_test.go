@@ -84,3 +84,33 @@ func Test_LoopConnRef_zero(t *testing.T) {
 		})
 	}
 }
+
+// Test_LoopBackend_String pins the spelling of every backend, which State and
+// the engine's start line print, and that the zero value is auto.
+func Test_LoopBackend_String(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		backend corenet.LoopBackend
+		want    string
+	}
+	tests := []tc{
+		{"the zero value", corenet.LoopBackend(0), "auto"},
+		{"io_uring", corenet.LoopBackendIOURing, "iouring"},
+		{"epoll", corenet.LoopBackendEpoll, "epoll"},
+		{"portable", corenet.LoopBackendPortable, "portable"},
+		{"one past the last backend", corenet.LoopBackendPortable + 1, "unknown"},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if got := c.backend.String(); got != c.want {
+			t.Errorf("LoopBackend(%d).String() = %q, want %q", uint8(c.backend), got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}

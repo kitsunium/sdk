@@ -21,6 +21,21 @@ func WithDrainTimeout(d time.Duration) Option {
 	}
 }
 
+// Loop configures a group's loop engine (ADR 0186 §D5): its backend, its loops
+// and rings, and its per-connection and pressure bounds. It is judged at Start,
+// once the group's handler is known: a group served by Handle, HandleFunc or
+// HandleHTTP, or one with no handler, refuses it with LoopOptionUnsupported,
+// whichever order the declarations came in. No group is served by a loop yet,
+// so every group refuses it until the loop engine's entry is published.
+func Loop(v corenet.LoopValue) GroupOption {
+	//: the option is applied by the constructor, in declaration order; it is
+	//: judged at Start, once the group's handler is known.
+	return func(g *StreamGroup) {
+		g.loop = v
+		g.loopSet = true
+	}
+}
+
 // Listen adds an address to a group. It is variadic-friendly by repetition:
 // calling it twice binds two addresses to the same handler, which is how one
 // service reaches both a TCP port and a Unix socket.
