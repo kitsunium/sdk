@@ -31,6 +31,10 @@ type fileSnapshots struct {
 	writing map[string]int
 	// owners is the one sink each id's spool belongs to (#547).
 	owners map[string]*fileSink
+	// resume is, per id, where the spool of a sink released with nothing
+	// written resumes: the next Create of that id positions it there
+	// without reading it back (#643).
+	resume map[string]resumePoint
 	// afterPublish, when set by a test, runs in Create once its sink owns
 	// the id's spool and before the sink it took the spool from is
 	// superseded (#582).
@@ -67,7 +71,7 @@ func newFileSnapshots(dir string, syncFailed func(op string, cause error) error)
 			}
 		}
 	}
-	s := &fileSnapshots{dir: dir, pins: map[string]int{}, writing: map[string]int{}, owners: map[string]*fileSink{}}
+	s := &fileSnapshots{dir: dir, pins: map[string]int{}, writing: map[string]int{}, owners: map[string]*fileSink{}, resume: map[string]resumePoint{}}
 	if err := s.sweepSpools(newestSpool(ents)); err != nil {
 		return nil, err
 	}
@@ -112,6 +116,7 @@ func (s *fileSnapshots) sweepSpools(keep string) error {
 		if err := os.Remove(filepath.Join(s.dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return storageFailed("remove orphan spool", err)
 		}
+		delete(s.resume, strings.TrimSuffix(name, ".spool"))
 	}
 	if len(orphans) == 0 {
 		return nil
@@ -153,12 +158,27 @@ type fileSink struct {
 	// superseded is set once another sink owns the id's spool: this sink's
 	// handle is closed then, and it never touches the spool again (#547).
 	superseded bool
+	// start is the offset Create positioned the spool at, and wrote is set
+	// by the sink's first write: a sink released with nothing written
+	// leaves its spool resumable at start (#643).
+	start int64
+	wrote bool
+}
+
+// resumePoint is where a released spool resumes, for an offer of the same
+// chunk and encoded sizes: another encoding of the snapshot is read back.
+type resumePoint struct {
+	off, chunk, size int64
 }
 
 // Create implements SnapshotStore: an existing spool of that id resumes from
 // its last whole, checksummed chunk (R8-21), found reading the spool one
-// chunk at a time. Every other spool no sink writes to is removed:
-// accepting this id abandons them (#527).
+// chunk at a time — or, when a sink positioned it and was released with
+// nothing written, from where that sink stood, with nothing read back: an
+// offer whose judgment outlasted the sender's wait for its accept read a
+// cold spool back whole at every offer after it, and never resumed (#643).
+// Every other spool no sink writes to is removed: accepting this id
+// abandons them (#527).
 func (s *fileSnapshots) Create(id string, meta coreconsensus.SnapshotMetaValue) (coreconsensus.SnapshotSink, int64, error) {
 	if !validID(id) {
 		return nil, 0, origin(coreconsensus.FrameInvalid, errs.String("snapshot_id", id))
@@ -175,9 +195,7 @@ func (s *fileSnapshots) Create(id string, meta coreconsensus.SnapshotMetaValue) 
 	// id that supersedes it in the meantime waits, then closes the handle
 	// this one opened (#582).
 	sink.mu.Lock()
-	s.mu.Lock()
-	old := s.claim(sink)
-	s.mu.Unlock()
+	old, at, kept := s.claimSpool(sink)
 	if s.afterPublish != nil {
 		s.afterPublish(id)
 	}
@@ -192,13 +210,7 @@ func (s *fileSnapshots) Create(id string, meta coreconsensus.SnapshotMetaValue) 
 		return nil, 0, storageFailed("spool", err)
 	}
 	sink.f = f
-	var off int64
-	if old != nil {
-		// What another install wrote there is not resumed from.
-		err = f.Truncate(0)
-	} else {
-		off, err = resumeOffset(f, meta.ChunkSize)
-	}
+	off, err := positionSpool(f, old != nil, at, kept, &meta)
 	if err != nil {
 		err = alsoFailed(storageFailed("spool", err), "close", f.Close())
 		sink.f = nil
@@ -206,8 +218,35 @@ func (s *fileSnapshots) Create(id string, meta coreconsensus.SnapshotMetaValue) 
 		sink.closed()
 		return nil, 0, err
 	}
+	sink.start = off
 	sink.mu.Unlock()
 	return sink, off, nil
+}
+
+// claimSpool claims sink's id's spool for it (claim), and takes the resume
+// point a released sink left there, if any.
+func (s *fileSnapshots) claimSpool(sink *fileSink) (old *fileSink, at resumePoint, kept bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	old = s.claim(sink)
+	at, kept = s.resume[sink.id]
+	delete(s.resume, sink.id)
+	return old, at, kept
+}
+
+// positionSpool positions the spool f a new sink owns. Superseding another
+// sink, it starts empty: what another install wrote there is not resumed
+// from. With a resume point kept for an offer of the same chunk and encoded
+// sizes, it resumes there; otherwise at the last whole chunk read back.
+func positionSpool(f spoolFile, superseding bool, at resumePoint, kept bool, meta *coreconsensus.SnapshotMetaValue) (int64, error) {
+	switch {
+	case superseding:
+		return 0, f.Truncate(0)
+	case kept && at.chunk == meta.ChunkSize && at.size == meta.EncodedSize:
+		return resumeAt(f, at.off, meta.ChunkSize)
+	default:
+		return resumeOffset(f, meta.ChunkSize)
+	}
 }
 
 // claim makes sink the owner of its id's spool and returns the sink it took
@@ -267,6 +306,31 @@ func resumeOffset(f spoolFile, chunk int64) (int64, error) {
 	return off, err
 }
 
+// resumeAt cuts the spool f back to off, where a released sink left it, and
+// positions it there. An off past the file's end, which only a change made
+// outside the store could leave, is found by reading the spool back.
+func resumeAt(f spoolFile, off, chunk int64) (int64, error) {
+	st, err := f.Stat()
+	if err != nil {
+		return 0, err
+	}
+	if off < 0 || off > st.Size() {
+		return resumeOffset(f, chunk)
+	}
+	if err := f.Truncate(off); err != nil {
+		return 0, err
+	}
+	_, err = f.Seek(off, io.SeekStart)
+	return off, err
+}
+
+// forget drops the resume point of id, whose spool is published or gone.
+func (s *fileSnapshots) forget(id string) {
+	s.mu.Lock()
+	delete(s.resume, id)
+	s.mu.Unlock()
+}
+
 // closed counts the sink's spool as no longer written to, and the sink as
 // no longer its owner, once.
 func (k *fileSink) closed() {
@@ -289,6 +353,9 @@ func (k *fileSink) Write(p []byte) (int, error) {
 	defer k.mu.Unlock()
 	if k.superseded {
 		return 0, snapshotCorrupt(supersededWhy)
+	}
+	if len(p) > 0 {
+		k.wrote = true
 	}
 	return k.f.Write(p)
 }
@@ -323,6 +390,7 @@ func (k *fileSink) Commit(final coreconsensus.SnapshotMetaValue) error {
 	if err := k.f.Close(); err != nil {
 		return storageFailed("close snapshot", err)
 	}
+	k.s.forget(k.id)
 	if err := os.Rename(filepath.Join(k.s.dir, k.id+".spool"), filepath.Join(k.s.dir, k.id+".snap")); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return snapshotCorrupt("spool gone before its commit")
@@ -370,13 +438,26 @@ func (s *fileSnapshots) published(name string) (coreconsensus.SnapshotMetaValue,
 
 // release closes the spool's handle and keeps the spool for a resume. A
 // failed Close is abandoned: the resume reads back only the chunks whose
-// checksums hold, so nothing it could say changes what is kept.
+// checksums hold, so nothing it could say changes what is kept. A sink that
+// wrote nothing and still owns the id's spool leaves it where Create
+// positioned it, and the next Create resumes there without reading it back
+// (#643). One a newer Create of the id claimed the spool from — released
+// before that Create superseded it — leaves nothing: its point would
+// outlive the newer sink's writes, and a later resume stop short of them.
 func (k *fileSink) release() {
 	defer k.closed()
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	if !k.superseded {
-		abandon(k.f.Close())
+	if k.superseded {
+		return
+	}
+	abandon(k.f.Close())
+	if !k.wrote {
+		k.s.mu.Lock()
+		if k.s.owners[k.id] == k {
+			k.s.resume[k.id] = resumePoint{off: k.start, chunk: k.meta.ChunkSize, size: k.meta.EncodedSize}
+		}
+		k.s.mu.Unlock()
 	}
 }
 
@@ -394,6 +475,7 @@ func (k *fileSink) Abort() error {
 	// about bytes no one will read changes nothing. The removal is what
 	// Abort promises, and its failure is reported.
 	abandon(k.f.Close())
+	k.s.forget(k.id)
 	if err := os.Remove(filepath.Join(k.s.dir, k.id+".spool")); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return storageFailed("abort spool", err)
 	}

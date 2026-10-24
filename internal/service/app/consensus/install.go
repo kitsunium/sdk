@@ -10,11 +10,20 @@ import (
 // offer answers a peer's snapshot offer: held when this node already covers
 // it, refused with the code a leader can act on, or accepted at the offset
 // a resumed spool already holds. It is judged on the event loop, and a node
-// that stopped before the loop answered refuses with NODE_STOPPED.
+// that stopped before the loop answered refuses with NODE_STOPPED; the
+// spool of an offer the loop accepts is positioned off it, on the caller's
+// goroutine (positionOffer, #643).
 func (n *Node) offer(from coreconsensus.AuthenticatedPeerValue, o coreconsensus.InstallOfferValue) coreconsensus.InstallAcceptValue {
 	acc := coreconsensus.InstallAcceptValue{SnapshotID: o.SnapshotID}
-	ok := n.exec(func() { n.judgeOffer(from.ID, &o, &acc) })
-	if !ok {
+	position := false
+	ok := n.exec(func() { position = n.judgeOffer(from.ID, &o, &acc) })
+	switch {
+	case position:
+		// Reserved on the loop, whatever exec then reported: the
+		// reservation is released, and NODE_STOPPED answered once the
+		// node stopped, by positionOffer.
+		n.positionOffer(&o, &acc)
+	case !ok:
 		acc.Refused = coreconsensus.CodeNodeStopped
 	}
 	if acc.Refused == coreconsensus.CodeVersionUnsupported {
@@ -28,21 +37,104 @@ func (n *Node) offer(from coreconsensus.AuthenticatedPeerValue, o coreconsensus.
 	return acc
 }
 
-// judgeOffer is offer's verdict, on the loop: screened first, then answered
-// from a copy already held, else a sink is opened and kept for install.
-func (n *Node) judgeOffer(from coreconsensus.NodeID, o *coreconsensus.InstallOfferValue, acc *coreconsensus.InstallAcceptValue) {
+// judgeOffer is offer's verdict, on the loop, and reports whether the
+// offer's spool is to be positioned: screened first, then answered from a
+// copy already held, refused while that snapshot is installed or another
+// offer's spool is positioned, else reserved for positionOffer.
+func (n *Node) judgeOffer(from coreconsensus.NodeID, o *coreconsensus.InstallOfferValue, acc *coreconsensus.InstallAcceptValue) bool {
 	if n.screenOffer(from, o, acc) || n.answerFromHeld(o, acc) || n.answerRestoring(o, acc) {
+		return false
+	}
+	return n.reservePosition(o.SnapshotID, acc)
+}
+
+// reservePosition reserves the positioning of an accepted offer's spool,
+// and refuses OVERLOADED, reporting false, while another offer's spool is
+// positioned. One positioning at a time keeps the order in which offers
+// supersede each other's spools, as on the loop (#527, #547): an offer of
+// the same id would have waited for that one's resume, then truncated its
+// spool (fileSnapshots.Create). The positioning is counted in n.wg, so
+// Close and HardClose wait for it, and nothing writes the snapshot
+// directory once the node let it go. It runs on the loop.
+func (n *Node) reservePosition(id string, acc *coreconsensus.InstallAcceptValue) bool {
+	n.snapState.mu.Lock()
+	defer n.snapState.mu.Unlock()
+	if n.snapState.positioning != "" {
+		acc.Refused = coreconsensus.CodeOverloaded
+		return false
+	}
+	n.snapState.positioning = id
+	n.wg.Add(1)
+	return true
+}
+
+// positionOffer opens and positions the spool of an offer reservePosition
+// reserved, off the event loop, and keeps its sink for the install. The
+// store's Create sweeps, opens and positions the spool, and a resume reads
+// the spool back, chunk by chunk: on the loop, a cold 1 GiB spool held the
+// node from acknowledging and voting for longer than the leader waits for
+// the accept, the judgment was cut, and every later offer read the spool
+// back again (#643, D5b).
+func (n *Node) positionOffer(o *coreconsensus.InstallOfferValue, acc *coreconsensus.InstallAcceptValue) {
+	defer n.wg.Done()
+	if n.stopped.Load() {
+		n.keepPositioned(o.SnapshotID, nil)
+		acc.Refused = coreconsensus.CodeNodeStopped
 		return
 	}
-	n.dropOtherSpools(o.SnapshotID)
-	n.releaseKept(o.SnapshotID)
-	sink, off, err := n.cfg.Snapshots.Create(o.SnapshotID, o.Meta)
+	sink, off, err := n.openSpool(o)
 	if err != nil {
+		n.keepPositioned(o.SnapshotID, nil)
 		acc.Refused = coreconsensus.CodeStorageFailed
 		return
 	}
-	n.keepSpool(o.SnapshotID, sink)
+	if !n.keepPositioned(o.SnapshotID, sink) {
+		// Nothing else may resume what this sink positioned: an install
+		// of the id is committing or restoring. A spool past a Commit's
+		// rename is a new, empty one.
+		abandon(sink.Abort())
+		acc.Refused = coreconsensus.CodeOverloaded
+		return
+	}
 	acc.Offset = off
+}
+
+// keepPositioned ends the positioning of id's spool, keeps sink, when not
+// nil, for the install, and reports whether it did. An install of id that
+// reached its freshness check while the spool was positioned wins, as
+// answerRestoring has it, and sink is not kept: the offer is refused.
+func (n *Node) keepPositioned(id string, sink coreconsensus.SnapshotSink) bool {
+	n.snapState.mu.Lock()
+	defer n.snapState.mu.Unlock()
+	n.snapState.positioning = ""
+	if sink == nil || n.snapState.restoring[id] > 0 {
+		return false
+	}
+	n.keepSpool(id, sink)
+	return true
+}
+
+// openSpool opens the spool of o, positioned within the snapshot, after the
+// sinks earlier offers left kept: those of another id are aborted, that of
+// o's id released for the resume. A resume past o's encoded size — a spool
+// another leader's encoding of the same position left — was accepted as it
+// was: the sender's open refuses an offset past the snapshot's end, and
+// every later offer resumed at the same one (#643). That spool is discarded
+// and o's opened from its start.
+func (n *Node) openSpool(o *coreconsensus.InstallOfferValue) (coreconsensus.SnapshotSink, int64, error) {
+	n.dropOtherSpools(o.SnapshotID)
+	n.releaseKept(o.SnapshotID)
+	sink, off, err := n.cfg.Snapshots.Create(o.SnapshotID, o.Meta)
+	if err != nil || (off >= 0 && off <= o.Meta.EncodedSize) {
+		return sink, off, err
+	}
+	abandon(sink.Abort())
+	sink, off, err = n.cfg.Snapshots.Create(o.SnapshotID, o.Meta)
+	if err == nil && (off < 0 || off > o.Meta.EncodedSize) {
+		abandon(sink.Abort())
+		return nil, 0, snapshotCorrupt("a new spool resumes past the snapshot's end")
+	}
+	return sink, off, err
 }
 
 // screenOffer settles an offer raft or the bounds decide on their own, and
@@ -157,10 +249,8 @@ func (n *Node) markRestoring(id string, d int) {
 // keepSpool holds the sink an accepted offer opened until its body
 // arrives. A sink an earlier offer of the same id left open is released,
 // never aborted: its spool is what the new offer resumes (review of PR
-// #301, L4).
+// #301, L4). The caller holds snapState.mu.
 func (n *Node) keepSpool(id string, sink coreconsensus.SnapshotSink) {
-	n.snapState.mu.Lock()
-	defer n.snapState.mu.Unlock()
 	if n.snapState.spools == nil {
 		n.snapState.spools = map[string]coreconsensus.SnapshotSink{}
 	}

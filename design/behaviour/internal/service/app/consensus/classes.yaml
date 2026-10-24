@@ -878,11 +878,16 @@ files:
       - (*fileSnapshots).orphanSpools
       - validID
       - fileSink
+      - resumePoint
       - (*fileSnapshots).Create
+      - (*fileSnapshots).claimSpool
+      - positionSpool
       - (*fileSnapshots).claim
       - (*fileSink).supersede
       - spoolFile
       - resumeOffset
+      - resumeAt
+      - (*fileSnapshots).forget
       - (*fileSink).closed
       - (*fileSink).Write
       - (*fileSink).Commit
@@ -932,6 +937,10 @@ files:
   - decls:
       - (*Node).offer
       - (*Node).judgeOffer
+      - (*Node).reservePosition
+      - (*Node).positionOffer
+      - (*Node).keepPositioned
+      - (*Node).openSpool
       - (*Node).screenOffer
       - (*Node).answerFromHeld
       - (*Node).answerRestoring
@@ -2043,10 +2052,25 @@ functions:
     params: id string
     results: bool
   - doc: |-
+      positionSpool positions the spool f a new sink owns. Superseding another
+      sink, it starts empty: what another install wrote there is not resumed
+      from. With a resume point kept for an offer of the same chunk and encoded
+      sizes, it resumes there; otherwise at the last whole chunk read back.
+    name: positionSpool
+    params: f spoolFile, superseding bool, at resumePoint, kept bool, meta *coreconsensus.SnapshotMetaValue
+    results: int64, error
+  - doc: |-
       resumeOffset cuts the spool f back to its last whole chunk, of decoded
       chunks of chunk bytes, and positions it there.
     name: resumeOffset
     params: f spoolFile, chunk int64
+    results: int64, error
+  - doc: |-
+      resumeAt cuts the spool f back to off, where a released sink left it, and
+      positions it there. An off past the file's end, which only a change made
+      outside the store could leave, is found by reading the spool back.
+    name: resumeAt
+    params: f spoolFile, off, chunk int64
     results: int64, error
   - doc: |-
       fsFree returns the bytes an unprivileged writer may still use on the
@@ -4233,6 +4257,12 @@ types:
         name: owners
         type: map[string]*fileSink
       - doc: |-
+          resume is, per id, where the spool of a sink released with nothing
+          written resumes: the next Create of that id positions it there
+          without reading it back (#643).
+        name: resume
+        type: map[string]resumePoint
+      - doc: |-
           afterPublish, when set by a test, runs in Create once its sink owns
           the id's spool and before the sink it took the spool from is
           superseded (#582).
@@ -4261,12 +4291,23 @@ types:
       - doc: |-
           Create implements SnapshotStore: an existing spool of that id resumes from
           its last whole, checksummed chunk (R8-21), found reading the spool one
-          chunk at a time. Every other spool no sink writes to is removed:
-          accepting this id abandons them (#527).
+          chunk at a time — or, when a sink positioned it and was released with
+          nothing written, from where that sink stood, with nothing read back: an
+          offer whose judgment outlasted the sender's wait for its accept read a
+          cold spool back whole at every offer after it, and never resumed (#643).
+          Every other spool no sink writes to is removed: accepting this id
+          abandons them (#527).
         name: Create
         params: id string, meta coreconsensus.SnapshotMetaValue
         recv: s *fileSnapshots
         results: coreconsensus.SnapshotSink, int64, error
+      - doc: |-
+          claimSpool claims sink's id's spool for it (claim), and takes the resume
+          point a released sink left there, if any.
+        name: claimSpool
+        params: sink *fileSink
+        recv: s *fileSnapshots
+        results: old *fileSink, at resumePoint, kept bool
       - doc: |-
           claim makes sink the owner of its id's spool and returns the sink it took
           the spool from, if any. A spool another sink still writes to is never
@@ -4281,6 +4322,10 @@ types:
         params: sink *fileSink
         recv: s *fileSnapshots
         results: "*fileSink"
+      - doc: forget drops the resume point of id, whose spool is published or gone.
+        name: forget
+        params: id string
+        recv: s *fileSnapshots
       - doc: |-
           published reads the snapshot a directory entry named name publishes. ok
           is false for anything that is not a complete snapshot: another file, a
@@ -4332,6 +4377,14 @@ types:
           handle is closed then, and it never touches the spool again (#547).
         name: superseded
         type: bool
+      - doc: |-
+          start is the offset Create positioned the spool at, and wrote is set
+          by the sink's first write: a sink released with nothing written
+          leaves its spool resumable at start (#643).
+        name: start
+        type: int64
+      - name: wrote
+        type: bool
     kind: struct
     methods:
       - doc: |-
@@ -4368,7 +4421,12 @@ types:
       - doc: |-
           release closes the spool's handle and keeps the spool for a resume. A
           failed Close is abandoned: the resume reads back only the chunks whose
-          checksums hold, so nothing it could say changes what is kept.
+          checksums hold, so nothing it could say changes what is kept. A sink that
+          wrote nothing and still owns the id's spool leaves it where Create
+          positioned it, and the next Create resumes there without reading it back
+          (#643). One a newer Create of the id claimed the spool from — released
+          before that Create superseded it — leaves nothing: its point would
+          outlive the newer sink's writes, and a later resume stop short of them.
         name: release
         recv: k *fileSink
       - doc: |-
@@ -4379,6 +4437,18 @@ types:
         recv: k *fileSink
         results: error
     name: fileSink
+  - doc: |-
+      resumePoint is where a released spool resumes, for an offer of the same
+      chunk and encoded sizes: another encoding of the snapshot is read back.
+    fields:
+      - name: "off"
+        type: int64
+      - name: chunk
+        type: int64
+      - name: size
+        type: int64
+    kind: struct
+    name: resumePoint
   - doc: spoolFile is what a resume needs of a spool's file.
     kind: named
     name: spoolFile
@@ -5170,17 +5240,67 @@ types:
           offer answers a peer's snapshot offer: held when this node already covers
           it, refused with the code a leader can act on, or accepted at the offset
           a resumed spool already holds. It is judged on the event loop, and a node
-          that stopped before the loop answered refuses with NODE_STOPPED.
+          that stopped before the loop answered refuses with NODE_STOPPED; the
+          spool of an offer the loop accepts is positioned off it, on the caller's
+          goroutine (positionOffer, #643).
         name: offer
         params: from coreconsensus.AuthenticatedPeerValue, o coreconsensus.InstallOfferValue
         recv: n *Node
         results: coreconsensus.InstallAcceptValue
       - doc: |-
-          judgeOffer is offer's verdict, on the loop: screened first, then answered
-          from a copy already held, else a sink is opened and kept for install.
+          judgeOffer is offer's verdict, on the loop, and reports whether the
+          offer's spool is to be positioned: screened first, then answered from a
+          copy already held, refused while that snapshot is installed or another
+          offer's spool is positioned, else reserved for positionOffer.
         name: judgeOffer
         params: from coreconsensus.NodeID, o *coreconsensus.InstallOfferValue, acc *coreconsensus.InstallAcceptValue
         recv: n *Node
+        results: bool
+      - doc: |-
+          reservePosition reserves the positioning of an accepted offer's spool,
+          and refuses OVERLOADED, reporting false, while another offer's spool is
+          positioned. One positioning at a time keeps the order in which offers
+          supersede each other's spools, as on the loop (#527, #547): an offer of
+          the same id would have waited for that one's resume, then truncated its
+          spool (fileSnapshots.Create). The positioning is counted in n.wg, so
+          Close and HardClose wait for it, and nothing writes the snapshot
+          directory once the node let it go. It runs on the loop.
+        name: reservePosition
+        params: id string, acc *coreconsensus.InstallAcceptValue
+        recv: n *Node
+        results: bool
+      - doc: |-
+          positionOffer opens and positions the spool of an offer reservePosition
+          reserved, off the event loop, and keeps its sink for the install. The
+          store's Create sweeps, opens and positions the spool, and a resume reads
+          the spool back, chunk by chunk: on the loop, a cold 1 GiB spool held the
+          node from acknowledging and voting for longer than the leader waits for
+          the accept, the judgment was cut, and every later offer read the spool
+          back again (#643, D5b).
+        name: positionOffer
+        params: o *coreconsensus.InstallOfferValue, acc *coreconsensus.InstallAcceptValue
+        recv: n *Node
+      - doc: |-
+          keepPositioned ends the positioning of id's spool, keeps sink, when not
+          nil, for the install, and reports whether it did. An install of id that
+          reached its freshness check while the spool was positioned wins, as
+          answerRestoring has it, and sink is not kept: the offer is refused.
+        name: keepPositioned
+        params: id string, sink coreconsensus.SnapshotSink
+        recv: n *Node
+        results: bool
+      - doc: |-
+          openSpool opens the spool of o, positioned within the snapshot, after the
+          sinks earlier offers left kept: those of another id are aborted, that of
+          o's id released for the resume. A resume past o's encoded size — a spool
+          another leader's encoding of the same position left — was accepted as it
+          was: the sender's open refuses an offset past the snapshot's end, and
+          every later offer resumed at the same one (#643). That spool is discarded
+          and o's opened from its start.
+        name: openSpool
+        params: o *coreconsensus.InstallOfferValue
+        recv: n *Node
+        results: coreconsensus.SnapshotSink, int64, error
       - doc: |-
           screenOffer settles an offer raft or the bounds decide on their own, and
           reports whether it did: one this node already covers is held, and one
@@ -5231,7 +5351,7 @@ types:
           keepSpool holds the sink an accepted offer opened until its body
           arrives. A sink an earlier offer of the same id left open is released,
           never aborted: its spool is what the new offer resumes (review of PR
-          #301, L4).
+          #301, L4). The caller holds snapState.mu.
         name: keepSpool
         params: id string, sink coreconsensus.SnapshotSink
         recv: n *Node
@@ -6596,10 +6716,16 @@ types:
         name: newestBytes
         type: int64
       - doc: |-
-          restoring counts, per id, the installs of that snapshot committed
-          and waiting for or under their restore (#610).
+          restoring counts, per id, the installs of that snapshot past their
+          last freshness check: committing, then waiting for or under their
+          restore (#610, #623).
         name: restoring
         type: map[string]int
+      - doc: |-
+          positioning is the id of the accepted offer whose spool is being
+          positioned off the event loop, "" when none is (#643).
+        name: positioning
+        type: string
     kind: struct
     name: snapState
   - fields:

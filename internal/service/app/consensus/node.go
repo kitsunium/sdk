@@ -197,9 +197,13 @@ type snapState struct {
 	// newestBytes is the newest snapshot's size, the larger of its encoded
 	// and decoded sizes, which Health compares with the limit (R2-30, #556).
 	newestBytes int64
-	// restoring counts, per id, the installs of that snapshot committed
-	// and waiting for or under their restore (#610).
+	// restoring counts, per id, the installs of that snapshot past their
+	// last freshness check: committing, then waiting for or under their
+	// restore (#610, #623).
 	restoring map[string]int
+	// positioning is the id of the accepted offer whose spool is being
+	// positioned off the event loop, "" when none is (#643).
+	positioning string
 }
 
 type applyResult struct {

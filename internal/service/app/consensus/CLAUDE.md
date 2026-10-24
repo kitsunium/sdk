@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T07:19:32Z -->
+<!-- updated: 2026-10-24T10:28:32Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -578,3 +578,16 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   `TestAnOfferOfTheSnapshotBeingCommittedIsRefused`,
   `TestAReofferDuringTheCommitIsRefusedWithoutHoldingTheLoop`,
   `TestAReofferToAFollowerStuckInItsCommitDoesNotPinCompaction`).
+- Position an offer's spool on the event loop: the store's `Create` sweeps,
+  opens and, for a resume, reads the spool back whole, and a cold 1 GiB one
+  held the loop past the sender's `JoinTimeout` (D5b), the judgment was cut,
+  and every later offer read the spool back again. The loop screens and
+  reserves (`judgeOffer`, `reservePosition`: one positioning at a time,
+  `OVERLOADED` meanwhile), `positionOffer` positions off it, and a spool
+  released with nothing written resumes from the offset kept in memory
+  (#643, `fileSnapshots.resume`,
+  `TestAResumeWhoseJudgmentOutlastsTheAcceptBoundCompletes`,
+  `TestTheLoopRunsWhileAnOfferIsPositioned`). Nor accept a resume past the
+  snapshot's encoded size: the sender refuses to open there, and every
+  later offer resumed at the same offset (#643, `openSpool`,
+  `TestAResumeIsNeverAcceptedPastTheSnapshotsEnd`).
