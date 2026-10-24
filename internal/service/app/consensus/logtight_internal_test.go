@@ -333,6 +333,14 @@ func TestTheVerdictBoundStillEndsAStreamOnATightLog(t *testing.T) {
 			t.Fatalf("a stream whose receiver never answers its verdict was not cancelled %v after its last byte, its bound %v, with the log tight", time.Since(time.Unix(0, sentAt)), bound)
 		}
 	}
+	// A leader that stepped down cancelled the stream for that reason, not
+	// its bound: that is no pass.
+	if st := l.node.Status(); st.Role != coreconsensus.RoleLeader || st.Term != term {
+		t.Fatalf("setup: the leader lost its leadership before the stream was cancelled (term %d -> %d, role %v), which cancels its streams", term, st.Term, st.Role)
+	}
+	if since := time.Since(time.Unix(0, sentAt)); since < bound {
+		t.Fatalf("the stream was cancelled %v after its last byte, before its %v bound, with the log tight", since, bound)
+	}
 	var scale uint8
 	l.node.exec(func() { scale = l.node.pinScale[f.id] })
 	if scale != 0 {

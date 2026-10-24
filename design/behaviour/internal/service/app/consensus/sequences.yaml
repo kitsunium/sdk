@@ -5455,8 +5455,11 @@ sequences:
           do:
             - eval: k.s.mu.Lock()
               to: k.s.mu.Lock
-            - set: k.s.resume[k.id]
-              value: "resumePoint{off: k.start, chunk: k.meta.ChunkSize, size: k.meta.EncodedSize}"
+            - opt:
+                do:
+                  - set: k.s.resume[k.id]
+                    value: "resumePoint{off: k.start, chunk: k.meta.ChunkSize, size: k.meta.EncodedSize}"
+                when: k.s.owners[k.id] == k
             - eval: k.s.mu.Unlock()
               to: k.s.mu.Unlock
           when: "!k.wrote"

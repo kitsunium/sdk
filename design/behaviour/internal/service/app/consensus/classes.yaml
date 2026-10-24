@@ -4422,8 +4422,11 @@ types:
           release closes the spool's handle and keeps the spool for a resume. A
           failed Close is abandoned: the resume reads back only the chunks whose
           checksums hold, so nothing it could say changes what is kept. A sink that
-          wrote nothing leaves the spool where Create positioned it, and the next
-          Create resumes there without reading it back (#643).
+          wrote nothing and still owns the id's spool leaves it where Create
+          positioned it, and the next Create resumes there without reading it back
+          (#643). One a newer Create of the id claimed the spool from — released
+          before that Create superseded it — leaves nothing: its point would
+          outlive the newer sink's writes, and a later resume stop short of them.
         name: release
         recv: k *fileSink
       - doc: |-

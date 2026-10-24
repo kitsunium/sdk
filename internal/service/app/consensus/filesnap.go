@@ -439,8 +439,11 @@ func (s *fileSnapshots) published(name string) (coreconsensus.SnapshotMetaValue,
 // release closes the spool's handle and keeps the spool for a resume. A
 // failed Close is abandoned: the resume reads back only the chunks whose
 // checksums hold, so nothing it could say changes what is kept. A sink that
-// wrote nothing leaves the spool where Create positioned it, and the next
-// Create resumes there without reading it back (#643).
+// wrote nothing and still owns the id's spool leaves it where Create
+// positioned it, and the next Create resumes there without reading it back
+// (#643). One a newer Create of the id claimed the spool from — released
+// before that Create superseded it — leaves nothing: its point would
+// outlive the newer sink's writes, and a later resume stop short of them.
 func (k *fileSink) release() {
 	defer k.closed()
 	k.mu.Lock()
@@ -451,7 +454,9 @@ func (k *fileSink) release() {
 	abandon(k.f.Close())
 	if !k.wrote {
 		k.s.mu.Lock()
-		k.s.resume[k.id] = resumePoint{off: k.start, chunk: k.meta.ChunkSize, size: k.meta.EncodedSize}
+		if k.s.owners[k.id] == k {
+			k.s.resume[k.id] = resumePoint{off: k.start, chunk: k.meta.ChunkSize, size: k.meta.EncodedSize}
+		}
 		k.s.mu.Unlock()
 	}
 }
