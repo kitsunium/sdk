@@ -17,6 +17,64 @@ constants:
         value: "2"
     name: decimalBase
   - doc: |-
+      HTTP1MaxFields is how many field lines one request of the restricted
+      HTTP/1.1 profile may carry. It sizes HTTP1RequestValue.Fields, so a request is
+      framed into a fixed array and never into a slice that grows: one more line is
+      refused (431), never stored elsewhere.
+    items:
+      - name: HTTP1MaxFields
+        type: int
+        value: "64"
+    name: HTTP1MaxFields
+  - doc: |-
+      HTTP1DefaultHead is the head bound a zero HTTP1LimitsValue.Head selects: the
+      request line, every field line and the blank line that ends them, in bytes.
+    items:
+      - name: HTTP1DefaultHead
+        type: int
+        value: "8192"
+    name: HTTP1DefaultHead
+  - doc: HTTP1MaxHead is the largest head bound HTTP1LimitsValue.Head may ask for.
+    items:
+      - name: HTTP1MaxHead
+        type: int
+        value: "65536"
+    name: HTTP1MaxHead
+  - doc: |-
+      HTTP1DefaultTarget is the request-target bound a zero HTTP1LimitsValue.Target
+      selects, in bytes.
+    items:
+      - name: HTTP1DefaultTarget
+        type: int
+        value: "2048"
+    name: HTTP1DefaultTarget
+  - doc: |-
+      HTTP1DefaultBody is the Content-Length bound a zero HTTP1LimitsValue.Body
+      selects: one mebibyte.
+    items:
+      - name: HTTP1DefaultBody
+        type: int64
+        value: 1 << 20
+    name: HTTP1DefaultBody
+  - doc: |-
+      HTTP1MaxBody is the largest Content-Length bound HTTP1LimitsValue.Body may
+      ask for: one gibibyte, which ten decimal digits always hold.
+    items:
+      - name: HTTP1MaxBody
+        type: int64
+        value: 1 << 30
+    name: HTTP1MaxBody
+  - doc: |-
+      HTTP1MaxContentLengthDigits is how many digits a Content-Length may carry,
+      leading zeros included. Ten digits hold HTTP1MaxBody and stay far from the
+      int64 limit, so the value is accumulated with no overflow to check: a longer
+      field is refused before it is read.
+    items:
+      - name: HTTP1MaxContentLengthDigits
+        type: int
+        value: "10"
+    name: HTTP1MaxContentLengthDigits
+  - doc: |-
       defaultMinVersion is the floor applied when IdentityParams.MinVersion is zero.
       TLS 1.3 is the default rather than 1.2 because a new deployment has no legacy
       peer to accommodate; a caller that genuinely needs 1.2 must say so explicitly.
@@ -394,6 +452,24 @@ files:
       - _
     name: handler_compliance.go
   - decls:
+      - HTTP1MaxFields
+      - HTTP1DefaultHead
+      - HTTP1MaxHead
+      - HTTP1DefaultTarget
+      - HTTP1DefaultBody
+      - HTTP1MaxBody
+      - HTTP1MaxContentLengthDigits
+      - HTTP1LimitsValue
+      - HTTP1FieldValue
+      - HTTP1RequestValue
+      - (*HTTP1RequestValue).Field
+      - foldEqual
+      - foldByte
+      - HTTP1ResponseValue
+      - HTTP1HandlerFunc
+      - HTTP1HandlerFunc.ServeHTTP1
+    name: http1.go
+  - decls:
       - defaultMinVersion
       - IdentityValue
       - IdentityValue.String
@@ -517,6 +593,14 @@ functions:
   - name: DrainSignal
     params: ctx context.Context
     results: <-chan struct{}
+  - doc: foldEqual reports whether b and s are equal once A–Z are folded to a–z.
+    name: foldEqual
+    params: b []byte, s string
+    results: bool
+  - doc: foldByte maps A–Z onto a–z and every other byte onto itself.
+    name: foldByte
+    params: c byte
+    results: byte
   - name: NewIdentityValue
     params: p IdentityParams
     results: id IdentityValue, err error
@@ -720,6 +804,125 @@ types:
         results: error
     name: DurationValue
     underlying: time.Duration
+  - fields:
+      - doc: |-
+          Head bounds the request line, the field lines and the blank line that
+          ends them, in bytes: zero selects HTTP1DefaultHead, at most HTTP1MaxHead.
+        name: Head
+        type: int
+      - doc: |-
+          Target bounds the request-target, in bytes: zero selects
+          HTTP1DefaultTarget, and it may not exceed Head.
+        name: Target
+        type: int
+      - doc: |-
+          Body bounds the Content-Length a request may declare: zero selects
+          HTTP1DefaultBody, at most HTTP1MaxBody.
+        name: Body
+        type: int64
+    kind: struct
+    name: HTTP1LimitsValue
+  - fields:
+      - doc: Name is the field name, validated as an RFC 9110 token.
+        name: Name
+        type: "[]byte"
+      - doc: |-
+          Value is the field value, without its leading and trailing spaces and
+          tabs; it holds no NUL, CR, LF or other control byte but the tab.
+        name: Value
+        type: "[]byte"
+    kind: struct
+    name: HTTP1FieldValue
+  - fields:
+      - doc: Method is the request method, a token.
+        name: Method
+        type: "[]byte"
+      - doc: Target is the request-target exactly as sent, still percent-encoded.
+        name: Target
+        type: "[]byte"
+      - doc: Host is the Host field's value; HasHost says whether it was present.
+        name: Host
+        type: "[]byte"
+      - doc: |-
+          Authorization is the Authorization field's value; HasAuthorization says
+          whether it was present.
+        name: Authorization
+        type: "[]byte"
+      - doc: |-
+          Body is the request content, Content-Length bytes after the head. It is
+          empty until the whole body has arrived.
+        name: Body
+        type: "[]byte"
+      - doc: ContentLength is the declared body length, zero when the field is absent.
+        name: ContentLength
+        type: int64
+      - doc: |-
+          HeadLen is the length of the head: the request line, the field lines and
+          the blank line. It is zero until the head is complete.
+        name: HeadLen
+        type: int
+      - doc: |-
+          Consumed is HeadLen plus ContentLength: the bytes this request takes from
+          the stream, whatever its method or route. The next pipelined request
+          starts there. It is set as soon as the head is complete, before the body
+          arrives, so an early answer knows how much it has to drain.
+        name: Consumed
+        type: int
+      - doc: NFields is how many entries of Fields the request filled.
+        name: NFields
+        type: int
+      - doc: |-
+          Fields holds the request's field lines in the order they arrived,
+          Host, Authorization and Content-Length included.
+        name: Fields
+        type: "[HTTP1MaxFields]HTTP1FieldValue"
+      - doc: HasHost reports whether the request carried a Host field.
+        name: HasHost
+        type: bool
+      - doc: |-
+          HasAuthorization reports whether the request carried an Authorization
+          field.
+        name: HasAuthorization
+        type: bool
+      - doc: |-
+          Close reports whether the client asked to close the connection after
+          this request: a Connection field holding the close token.
+        name: Close
+        type: bool
+    kind: struct
+    methods:
+      - name: Field
+        params: name string
+        recv: r *HTTP1RequestValue
+        results: "[]byte, bool"
+    name: HTTP1RequestValue
+  - fields:
+      - doc: |-
+          Status is the status code, 200 to 999; zero means 200. The profile
+          sends no interim response.
+        name: Status
+        type: int
+      - doc: |-
+          Header holds the response's extra field lines, each written as
+          "Name: value\r\n" by the codec's writer. It never holds Content-Length or
+          Connection, which the codec writes.
+        name: Header
+        type: "[]byte"
+      - doc: Body is the response content.
+        name: Body
+        type: "[]byte"
+      - doc: Close asks the codec to close the connection after this response.
+        name: Close
+        type: bool
+    kind: struct
+    name: HTTP1ResponseValue
+  - kind: named
+    methods:
+      - name: ServeHTTP1
+        params: req *HTTP1RequestValue, res *HTTP1ResponseValue
+        recv: f HTTP1HandlerFunc
+    name: HTTP1HandlerFunc
+    underlying: func(req *HTTP1RequestValue, res *HTTP1ResponseValue)
   - fields:
       - doc: certs holds the parsed keypair; empty for a client that only verifies.
         name: certs
@@ -1341,6 +1544,9 @@ vars:
       - name: _
         type: PacketHandler
         value: PacketHandlerFunc(nil)
+      - name: _
+        type: HTTP1Handler
+        value: HTTP1HandlerFunc(nil)
     name: _
   - doc: |-
       optionNames holds each kind's constructor name, indexed by kind. Its length

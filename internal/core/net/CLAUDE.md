@@ -40,7 +40,7 @@ adapter.
 
 | File | Surface |
 |---|---|
-| `gen_codes.go` | the 44 `Code` constants, `0.2.11.1` – `0.2.11.44`; the matching `*errs.Error` sentinels — written by kit gen from `design/net.yaml` (ADR 0164) |
+| `gen_codes.go` | the 55 `Code` constants, `0.2.11.1` – `0.2.11.55`; the matching `*errs.Error` sentinels — written by kit gen from `design/net.yaml` (ADR 0164) |
 | `wrap.go` | `wrapAs(sentinel, cause, fields...)` — origin-wins sentinel wrapping |
 | `identity.go` | `IdentityValue` — the opaque, redacting TLS identity + `NewIdentityValue` |
 | `identity_params.go` | `IdentityParams` — in-memory TLS material |
@@ -71,6 +71,7 @@ adapter.
 | `websocket_opcode.go` | `WSOpCode` — the six assigned opcodes, `IsControl` / `Defined` / `String` |
 | `websocket_close.go` | `WSCloseCode` — the §7.4.1 registry, `Sendable` / `Echoable`; the close payload's wire form is `service/net/websocket`'s |
 | `websocket_message.go` | `WSMessageValue` — the reassembled message and its `OpCode`; its §8.1 UTF-8 rule is checked by the engine |
+| `http1.go` | the restricted HTTP/1.1 profile's vocabulary (ADR 0186 §D6): `HTTP1RequestValue` (+ `Field`, A–Z folding only), `HTTP1FieldValue`, `HTTP1ResponseValue`, `HTTP1LimitsValue` and its bounds (`HTTP1DefaultHead`, `HTTP1MaxHead`, `HTTP1DefaultTarget`, `HTTP1DefaultBody`, `HTTP1MaxBody`, `HTTP1MaxFields`, `HTTP1MaxContentLengthDigits`), `HTTP1HandlerFunc`, the func adapter of the `HTTP1Handler` port (in `gen_ports.go`); the codec is `service/net/http1`'s |
 
 ## Why-this-shape
 
@@ -234,9 +235,20 @@ SSE terminator scan — moved with the code that pays them, to
 | 0.2.11.42 | `LoopPostQueueFull` | 75 |
 | 0.2.11.43 | `LoopWrongThread` | 70 |
 | 0.2.11.44 | `HandlerAlreadySet` | 64 |
+| 0.2.11.45 | `HTTP1RequestMalformed` | 65 |
+| 0.2.11.46 | `HTTP1TransferEncoding` | 65 |
+| 0.2.11.47 | `HTTP1ContentLengthInvalid` | 65 |
+| 0.2.11.48 | `HTTP1FieldDuplicated` | 65 |
+| 0.2.11.49 | `HTTP1ExpectRefused` | 65 |
+| 0.2.11.50 | `HTTP1HeadTooLarge` | 65 |
+| 0.2.11.51 | `HTTP1TargetTooLong` | 65 |
+| 0.2.11.52 | `HTTP1BodyTooLarge` | 65 |
+| 0.2.11.53 | `HTTP1MethodUnsupported` | 65 |
+| 0.2.11.54 | `HTTP1ResponseInvalid` | 64 |
+| 0.2.11.55 | `HTTP1Misconfigured` | 78 |
 
-`0.2.11.45` – `0.2.11.255` reserved; the `http1` profile's refusals (ADR 0186
-§D6) take theirs from `0.2.11.45`.
+`0.2.11.56` – `0.2.11.255` reserved. The `HTTP1*` refusals carry their
+answer's status in `http:` (400, 413, 414, 417, 431, 501).
 
 ## Imports allowed
 
@@ -291,7 +303,9 @@ cd internal/core && GOWORK=off go test -race -cover ./net/...
   `LoopHandler`, `PostFunc`, `OptionKind`) and its sentinels `0.2.11.35` –
   `0.2.11.44`, `LoopValue`, `LoopBackend` and the loop `State` fields, declared;
   the engines are `internal/service/net/loop` (io_uring and epoll) and
-  `server`'s portable backend, internal until `HandleLoop` — `docs/adr/0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md`
+  `server`'s portable backend, internal until `HandleLoop`; the `http1`
+  profile's values, port and sentinels (`0.2.11.45` – `0.2.11.55`), declared —
+  `docs/adr/0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md`
 - ADR 0043 (drain is a signal), ADR 0016 (one-sibling/many-facades),
   ADR 0018 (portability, `x/sys` ban), ADR 0013 (the redacting `Key`
   precedent), ADR 0028 (config decode shape)

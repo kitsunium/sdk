@@ -1234,6 +1234,14 @@
       "doc": "Package client — the response body size ceiling.\n\nPackage client is the outbound half of the SDK's network domain (ADR 0029):\nan HTTP client whose read-only posture is enforced by the transport rather\nthan by the call site.\n\nPackage client — the policy conjunction.\n\nPackage client — the configuration defaults.\n\nPackage client — the path denylist policy.\n\nPackage client — the policy-enforcing RoundTripper.\n\nPackage client — the method allowlist policy.\n\nPackage client — path safety checks applied before any allowlist pattern.\n\nPackage client — the path allowlist policy.\n\nPackage client — the policy constructors.\n"
     },
     {
+      "path": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "http1",
+      "dir": "service/net/http1",
+      "layer": "service",
+      "family": "net",
+      "doc": "Package http1 is the codec of the restricted HTTP/1.1 profile (ADR 0186\n§D6): it frames requests out of bytes and appends responses to bytes, and\ndoes no I/O. Its request value and handler port are internal/core/net's\n(HTTP1RequestValue, HTTP1Handler); the loop engine's adapter, and the\npkg/v1/net/http1 facade, come with HandleLoop (ADR 0186 §D9).\n\nThe profile is defined by what it refuses. A request is answered with its\nRefusal's status and Connection: close, and the connection closed, when it\ncarries a bare CR or LF, a NUL or another control byte in a value, obs-fold,\nwhitespace before a colon, a name outside tchar, any Transfer-Encoding, a\nContent-Length that is not one run of at most ten digits or that repeats, a\nsecond Authorization or Host, an Expect field, CONNECT, or a head, target or\nbody past its bound. None of those reaches a handler, and a handler cannot\nanswer one.\n\nFraming depends on neither the method nor the route: a request takes its\nhead plus its Content-Length, which Parse computes, so a body that spells a\nrequest is never read as one, and an early answer knows what it must drain\nbefore the next pipelined request.\n\n\tvar p http1.Parser                    // the profile's default limits\n\tvar req corenet.HTTP1RequestValue     // reused: Fields is an array\n\tn, r := p.Parse(buf, &req)\n\tswitch {\n\tcase r != http1.RefusalNone:\n\t\tout = http1.AppendRefusal(out, r) // then close\n\tcase n == 0:\n\t\t// more bytes; req.Consumed is set once the head is whole\n\tdefault:\n\t\th.ServeHTTP1(&req, &res)\n\t\tout, err = http1.AppendResponse(out, &req, &res, false)\n\t\tbuf = buf[n:]\n\t}\n\nNothing here allocates once the caller's buffers have room: Parse slices the\nbytes it was given, and the writer appends precomputed status lines and an\ninteger formatted in place.\n"
+    },
+    {
       "path": "github.com/kitsunium/sdk/internal/service/net/loop",
       "name": "loop",
       "dir": "service/net/loop",
@@ -25463,6 +25471,182 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeHTTP1BodyTooLarge",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeHTTP1BodyTooLarge",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133940",
+      "code": {
+        "value": "0.2.11.52"
+      },
+      "doc": "CodeHTTP1BodyTooLarge identifies a Content-Length past the profile's body\nbound.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeHTTP1ContentLengthInvalid",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeHTTP1ContentLengthInvalid",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133935",
+      "code": {
+        "value": "0.2.11.47"
+      },
+      "doc": "CodeHTTP1ContentLengthInvalid identifies a Content-Length the profile cannot\nframe by: empty, not decimal digits, too long, or present twice, equal or not.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeHTTP1ExpectRefused",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeHTTP1ExpectRefused",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133937",
+      "code": {
+        "value": "0.2.11.49"
+      },
+      "doc": "CodeHTTP1ExpectRefused identifies a request carrying an Expect field: the\nprofile sends no interim response, so 100-continue cannot be met.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeHTTP1FieldDuplicated",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeHTTP1FieldDuplicated",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133936",
+      "code": {
+        "value": "0.2.11.48"
+      },
+      "doc": "CodeHTTP1FieldDuplicated identifies a second Authorization or Host field in\none request.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeHTTP1HeadTooLarge",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeHTTP1HeadTooLarge",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133938",
+      "code": {
+        "value": "0.2.11.50"
+      },
+      "doc": "CodeHTTP1HeadTooLarge identifies a request head past the profile's head\nbound or its field-line count.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeHTTP1MethodUnsupported",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeHTTP1MethodUnsupported",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133941",
+      "code": {
+        "value": "0.2.11.53"
+      },
+      "doc": "CodeHTTP1MethodUnsupported identifies a CONNECT request: the profile opens no\ntunnel.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeHTTP1Misconfigured",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeHTTP1Misconfigured",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133943",
+      "code": {
+        "value": "0.2.11.55"
+      },
+      "doc": "CodeHTTP1Misconfigured identifies profile limits the codec refuses to\ninterpret: a negative bound, or one past its maximum.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeHTTP1RequestMalformed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeHTTP1RequestMalformed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133933",
+      "code": {
+        "value": "0.2.11.45"
+      },
+      "doc": "CodeHTTP1RequestMalformed identifies a request the restricted HTTP/1.1\nprofile refuses for its syntax: a bare CR or LF, a NUL or other control byte\nin a value, obs-fold, whitespace before a colon, a name outside tchar, or a\nrequest line that is not method, target and HTTP/1.1 (ADR 0186 §D6).\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeHTTP1ResponseInvalid",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeHTTP1ResponseInvalid",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133942",
+      "code": {
+        "value": "0.2.11.54"
+      },
+      "doc": "CodeHTTP1ResponseInvalid identifies a response the profile's writer refuses\nto put on the wire: a status outside 200 to 999, a body on a 204 or a 304, a\nfield name that is not a token or that the codec writes itself, or a field\nvalue with a control byte.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeHTTP1TargetTooLong",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeHTTP1TargetTooLong",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133939",
+      "code": {
+        "value": "0.2.11.51"
+      },
+      "doc": "CodeHTTP1TargetTooLong identifies a request-target past the profile's target\nbound.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeHTTP1TransferEncoding",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeHTTP1TransferEncoding",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133934",
+      "code": {
+        "value": "0.2.11.46"
+      },
+      "doc": "CodeHTTP1TransferEncoding identifies a request carrying a\nTransfer-Encoding field, chunked or not: the profile frames by Content-Length\nalone, so it carries no chunked body and no trailer.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeHandlerAlreadySet",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -26310,6 +26494,515 @@
         "public": "The listener group is not declared"
       },
       "doc": "GroupUnknown is returned for a lookup of an undeclared group.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1BodyTooLarge",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1BodyTooLarge",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.52",
+        "reason": "HTTP1_BODY_TOO_LARGE",
+        "public": "The request content is too large"
+      },
+      "doc": "HTTP1BodyTooLarge is the refusal of a Content-Length past the profile's\nbody bound, answered 413 before a byte of the body is read.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1ContentLengthInvalid",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1ContentLengthInvalid",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.47",
+        "reason": "HTTP1_CONTENT_LENGTH_INVALID",
+        "public": "The Content-Length is not valid"
+      },
+      "doc": "HTTP1ContentLengthInvalid is the refusal of a Content-Length the profile\ncannot frame by. A second one is refused even when it repeats the first:\ntwo parsers disagreeing on which one counts is how a body becomes a request.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1DefaultBody",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1DefaultBody",
+      "spelled": "int64",
+      "canonical": "int64",
+      "value": "1048576",
+      "doc": "HTTP1DefaultBody is the Content-Length bound a zero HTTP1LimitsValue.Body\nselects: one mebibyte.\n",
+      "file": "core/net/http1.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1DefaultHead",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1DefaultHead",
+      "spelled": "int",
+      "canonical": "int",
+      "value": "8192",
+      "doc": "HTTP1DefaultHead is the head bound a zero HTTP1LimitsValue.Head selects: the\nrequest line, every field line and the blank line that ends them, in bytes.\n",
+      "file": "core/net/http1.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1DefaultTarget",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1DefaultTarget",
+      "spelled": "int",
+      "canonical": "int",
+      "value": "2048",
+      "doc": "HTTP1DefaultTarget is the request-target bound a zero HTTP1LimitsValue.Target\nselects, in bytes.\n",
+      "file": "core/net/http1.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1ExpectRefused",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1ExpectRefused",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.49",
+        "reason": "HTTP1_EXPECT_REFUSED",
+        "public": "The expectation cannot be met"
+      },
+      "doc": "HTTP1ExpectRefused is the refusal of an Expect field, answered 417\n(RFC 9110 §10.1.1).\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1FieldDuplicated",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1FieldDuplicated",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.48",
+        "reason": "HTTP1_FIELD_DUPLICATED",
+        "public": "A request field is repeated"
+      },
+      "doc": "HTTP1FieldDuplicated is the refusal of a second Authorization or Host. The\nprofile hands a handler one of each, and picking one of two would let a\nfront end and this server judge different credentials or origins.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1FieldValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1FieldValue",
+      "spelled": "struct{Name []byte; Value []byte}",
+      "canonical": "struct{Name []byte; Value []byte}",
+      "fields": [
+        {
+          "name": "Name",
+          "type": "[]byte",
+          "doc": "Name is the field name, validated as an RFC 9110 token.\n"
+        },
+        {
+          "name": "Value",
+          "type": "[]byte",
+          "doc": "Value is the field value, without its leading and trailing spaces and\ntabs; it holds no NUL, CR, LF or other control byte but the tab.\n"
+        }
+      ],
+      "doc": "HTTP1FieldValue is one field line of a request, as it arrived: its name,\nin the case the client wrote it, and its value with the surrounding\nwhitespace removed. Both slices alias the bytes the request was framed from.\n",
+      "file": "core/net/http1.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1Handler",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1Handler",
+      "spelled": "interface{ServeHTTP1(req *HTTP1RequestValue, res *HTTP1ResponseValue)}",
+      "canonical": "interface{ServeHTTP1(req *github.com/kitsunium/sdk/internal/core/net.HTTP1RequestValue, res *github.com/kitsunium/sdk/internal/core/net.HTTP1ResponseValue)}",
+      "doc": "HTTP1Handler answers one request of the restricted HTTP/1.1 profile.\n\nIt sees only requests the codec framed and accepted: a refusal is answered\nand the connection closed before any handler runs, and no handler can turn\none into an answer of its own. It fills res — the status, extra field lines\nand the body — and the codec writes the framing: the status line,\nContent-Length and Connection: close.\n\nreq and every byte it aliases are valid until ServeHTTP1 returns; a handler\nthat keeps one copies it. On the loop engine a handler runs on the loop's\nthread and must not block it.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1Handler.ServeHTTP1",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "ServeHTTP1",
+      "recv": "HTTP1Handler",
+      "spelled": "func(req *HTTP1RequestValue, res *HTTP1ResponseValue)",
+      "canonical": "func(req *github.com/kitsunium/sdk/internal/core/net.HTTP1RequestValue, res *github.com/kitsunium/sdk/internal/core/net.HTTP1ResponseValue)",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1HandlerFunc",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1HandlerFunc",
+      "spelled": "func(req *HTTP1RequestValue, res *HTTP1ResponseValue)",
+      "canonical": "func(req *github.com/kitsunium/sdk/internal/core/net.HTTP1RequestValue, res *github.com/kitsunium/sdk/internal/core/net.HTTP1ResponseValue)",
+      "doc": "HTTP1HandlerFunc adapts a plain function to HTTP1Handler.\n",
+      "file": "core/net/http1.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1HandlerFunc.ServeHTTP1",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "ServeHTTP1",
+      "recv": "HTTP1HandlerFunc",
+      "spelled": "func(req *HTTP1RequestValue, res *HTTP1ResponseValue)",
+      "canonical": "func(req *github.com/kitsunium/sdk/internal/core/net.HTTP1RequestValue, res *github.com/kitsunium/sdk/internal/core/net.HTTP1ResponseValue)",
+      "doc": "ServeHTTP1 implements HTTP1Handler by calling f.\n",
+      "file": "core/net/http1.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1HeadTooLarge",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1HeadTooLarge",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.50",
+        "reason": "HTTP1_HEAD_TOO_LARGE",
+        "public": "The request header is too large"
+      },
+      "doc": "HTTP1HeadTooLarge is the refusal of a head past the profile's bound, in\nbytes or in field lines, answered 431.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1LimitsValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1LimitsValue",
+      "spelled": "struct{Head int \"json:\\\"head\\\"\"; Target int \"json:\\\"target\\\"\"; Body int64 \"json:\\\"body\\\"\"}",
+      "canonical": "struct{Head int \"json:\\\"head\\\"\"; Target int \"json:\\\"target\\\"\"; Body int64 \"json:\\\"body\\\"\"}",
+      "fields": [
+        {
+          "name": "Head",
+          "type": "int",
+          "tag": "json:\"head\"",
+          "doc": "Head bounds the request line, the field lines and the blank line that\nends them, in bytes: zero selects HTTP1DefaultHead, at most HTTP1MaxHead.\n"
+        },
+        {
+          "name": "Target",
+          "type": "int",
+          "tag": "json:\"target\"",
+          "doc": "Target bounds the request-target, in bytes: zero selects\nHTTP1DefaultTarget, and it may not exceed Head.\n"
+        },
+        {
+          "name": "Body",
+          "type": "int64",
+          "tag": "json:\"body\"",
+          "doc": "Body bounds the Content-Length a request may declare: zero selects\nHTTP1DefaultBody, at most HTTP1MaxBody.\n"
+        }
+      ],
+      "doc": "HTTP1LimitsValue bounds what one request of the restricted HTTP/1.1 profile\nmay carry. Zero means the profile's default, never unbounded; a negative\nfield, or one past its maximum, is refused when the codec is built.\n",
+      "file": "core/net/http1.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1MaxBody",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1MaxBody",
+      "spelled": "int64",
+      "canonical": "int64",
+      "value": "1073741824",
+      "doc": "HTTP1MaxBody is the largest Content-Length bound HTTP1LimitsValue.Body may\nask for: one gibibyte, which ten decimal digits always hold.\n",
+      "file": "core/net/http1.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1MaxContentLengthDigits",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1MaxContentLengthDigits",
+      "spelled": "int",
+      "canonical": "int",
+      "value": "10",
+      "doc": "HTTP1MaxContentLengthDigits is how many digits a Content-Length may carry,\nleading zeros included. Ten digits hold HTTP1MaxBody and stay far from the\nint64 limit, so the value is accumulated with no overflow to check: a longer\nfield is refused before it is read.\n",
+      "file": "core/net/http1.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1MaxFields",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1MaxFields",
+      "spelled": "int",
+      "canonical": "int",
+      "value": "64",
+      "doc": "HTTP1MaxFields is how many field lines one request of the restricted\nHTTP/1.1 profile may carry. It sizes HTTP1RequestValue.Fields, so a request is\nframed into a fixed array and never into a slice that grows: one more line is\nrefused (431), never stored elsewhere.\n",
+      "file": "core/net/http1.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1MaxHead",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1MaxHead",
+      "spelled": "int",
+      "canonical": "int",
+      "value": "65536",
+      "doc": "HTTP1MaxHead is the largest head bound HTTP1LimitsValue.Head may ask for.\n",
+      "file": "core/net/http1.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1MethodUnsupported",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1MethodUnsupported",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.53",
+        "reason": "HTTP1_METHOD_UNSUPPORTED",
+        "public": "The request method is not supported"
+      },
+      "doc": "HTTP1MethodUnsupported is the refusal of CONNECT, answered 501: a tunnel is\noutside the profile (ADR 0186 §D6).\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1Misconfigured",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1Misconfigured",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.55",
+        "reason": "HTTP1_MISCONFIGURED",
+        "public": "The HTTP/1.1 profile limits are not valid"
+      },
+      "doc": "HTTP1Misconfigured is returned for profile limits the codec refuses to\ninterpret rather than guess at (ADR 0031): a zero bound is the default, a\nnegative one, or one past its maximum, is refused. The \"option\" field names\nwhich.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1RequestMalformed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1RequestMalformed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.45",
+        "reason": "HTTP1_REQUEST_MALFORMED",
+        "public": "The request is malformed"
+      },
+      "doc": "HTTP1RequestMalformed is the refusal of a request whose syntax the profile\ndoes not accept. It is answered 400 with Connection: close, and the\nconnection is closed: no handler sees the request.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1RequestValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1RequestValue",
+      "spelled": "struct{Method []byte; Target []byte; Host []byte; Authorization []byte; Body []byte; ContentLength int64; HeadLen int; Consumed int; NFields int; Fields [64]HTTP1FieldValue; HasHost bool; HasAuthorization bool; Close bool}",
+      "canonical": "struct{Method []byte; Target []byte; Host []byte; Authorization []byte; Body []byte; ContentLength int64; HeadLen int; Consumed int; NFields int; Fields [64]github.com/kitsunium/sdk/internal/core/net.HTTP1FieldValue; HasHost bool; HasAuthorization bool; Close bool}",
+      "fields": [
+        {
+          "name": "Method",
+          "type": "[]byte",
+          "doc": "Method is the request method, a token.\n"
+        },
+        {
+          "name": "Target",
+          "type": "[]byte",
+          "doc": "Target is the request-target exactly as sent, still percent-encoded.\n"
+        },
+        {
+          "name": "Host",
+          "type": "[]byte",
+          "doc": "Host is the Host field's value; HasHost says whether it was present.\n"
+        },
+        {
+          "name": "Authorization",
+          "type": "[]byte",
+          "doc": "Authorization is the Authorization field's value; HasAuthorization says\nwhether it was present.\n"
+        },
+        {
+          "name": "Body",
+          "type": "[]byte",
+          "doc": "Body is the request content, Content-Length bytes after the head. It is\nempty until the whole body has arrived.\n"
+        },
+        {
+          "name": "ContentLength",
+          "type": "int64",
+          "doc": "ContentLength is the declared body length, zero when the field is absent.\n"
+        },
+        {
+          "name": "HeadLen",
+          "type": "int",
+          "doc": "HeadLen is the length of the head: the request line, the field lines and\nthe blank line. It is zero until the head is complete.\n"
+        },
+        {
+          "name": "Consumed",
+          "type": "int",
+          "doc": "Consumed is HeadLen plus ContentLength: the bytes this request takes from\nthe stream, whatever its method or route. The next pipelined request\nstarts there. It is set as soon as the head is complete, before the body\narrives, so an early answer knows how much it has to drain.\n"
+        },
+        {
+          "name": "NFields",
+          "type": "int",
+          "doc": "NFields is how many entries of Fields the request filled.\n"
+        },
+        {
+          "name": "Fields",
+          "type": "[64]HTTP1FieldValue",
+          "doc": "Fields holds the request's field lines in the order they arrived,\nHost, Authorization and Content-Length included.\n"
+        },
+        {
+          "name": "HasHost",
+          "type": "bool",
+          "doc": "HasHost reports whether the request carried a Host field.\n"
+        },
+        {
+          "name": "HasAuthorization",
+          "type": "bool",
+          "doc": "HasAuthorization reports whether the request carried an Authorization\nfield.\n"
+        },
+        {
+          "name": "Close",
+          "type": "bool",
+          "doc": "Close reports whether the client asked to close the connection after\nthis request: a Connection field holding the close token.\n"
+        }
+      ],
+      "doc": "HTTP1RequestValue is one request of the restricted HTTP/1.1 profile, framed\nby the codec (internal/service/net/http1).\n\nIt is not named RequestValue: that name is the outbound request the Policy\nport judges, and the two never meet. The profile's prefix is the domain's\nway of naming a protocol's value, as SSEEventValue and WSMessageValue do.\n\nEvery slice aliases the bytes the codec read: the value is valid while those\nbytes are, which on the loop engine is until OnBatchEnd returns. A handler\nthat keeps a byte past that copies it. Fields is an array, so a value framed\ninto a reused HTTP1RequestValue allocates nothing.\n",
+      "file": "core/net/http1.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.(*HTTP1RequestValue).Field",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "Field",
+      "recv": "HTTP1RequestValue",
+      "spelled": "func(name string) ([]byte, bool)",
+      "canonical": "func(name string) ([]byte, bool)",
+      "doc": "Field returns the value of the first field named name and true, or nil and\nfalse when the request carries none. Names compare case-insensitively on\nA–Z only, so no locale or Unicode folding can make two names equal.\n",
+      "file": "core/net/http1.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1ResponseInvalid",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1ResponseInvalid",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.54",
+        "reason": "HTTP1_RESPONSE_INVALID",
+        "public": "The response is not valid"
+      },
+      "doc": "HTTP1ResponseInvalid is returned by the profile's writer for a response it\nwill not put on the wire. Nothing is appended: a half-written response on a\nkept-alive connection would frame every response after it wrongly.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1ResponseValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1ResponseValue",
+      "spelled": "struct{Status int; Header []byte; Body []byte; Close bool}",
+      "canonical": "struct{Status int; Header []byte; Body []byte; Close bool}",
+      "fields": [
+        {
+          "name": "Status",
+          "type": "int",
+          "doc": "Status is the status code, 200 to 999; zero means 200. The profile\nsends no interim response.\n"
+        },
+        {
+          "name": "Header",
+          "type": "[]byte",
+          "doc": "Header holds the response's extra field lines, each written as\n\"Name: value\\r\\n\" by the codec's writer. It never holds Content-Length or\nConnection, which the codec writes.\n"
+        },
+        {
+          "name": "Body",
+          "type": "[]byte",
+          "doc": "Body is the response content.\n"
+        },
+        {
+          "name": "Close",
+          "type": "bool",
+          "doc": "Close asks the codec to close the connection after this response.\n"
+        }
+      ],
+      "doc": "HTTP1ResponseValue is the answer an HTTP1Handler gives to one request.\n\nThe handler sets the status, appends any field lines to Header with the\ncodec's writer and the content to Body. The codec writes the status line,\nthe Content-Length computed from Body and Connection: close when it is\nneeded: the handler never spells the response's framing, so it cannot get it\nwrong.\n",
+      "file": "core/net/http1.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1TargetTooLong",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1TargetTooLong",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.51",
+        "reason": "HTTP1_TARGET_TOO_LONG",
+        "public": "The request target is too long"
+      },
+      "doc": "HTTP1TargetTooLong is the refusal of a request-target past the profile's\nbound, answered 414.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1TransferEncoding",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1TransferEncoding",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.46",
+        "reason": "HTTP1_TRANSFER_ENCODING",
+        "public": "Transfer-Encoding is not supported"
+      },
+      "doc": "HTTP1TransferEncoding is the refusal of any Transfer-Encoding. A\nrequest that carries one alongside a Content-Length is the classic smuggling\nvector (RFC 9112 §11.2), so the profile never chooses between them.\n",
       "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
@@ -61164,6 +61857,478 @@
       "canonical": "func(members ...github.com/kitsunium/sdk/internal/core/net.Policy) github.com/kitsunium/sdk/internal/core/net.Policy",
       "doc": "Policies requires every policy to allow the request. Composition is by\nconjunction so that adding a policy can only ever narrow what is permitted.\n",
       "file": "service/net/client/policies.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.AppendField",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "AppendField",
+      "spelled": "func(dst []byte, name string, value string) ([]byte, error)",
+      "canonical": "func(dst []byte, name string, value string) ([]byte, error)",
+      "doc": "AppendField appends the field line \"name: value\\r\\n\" to dst. A name that is\nnot a token, a value with a control byte other than the tab, and the names\nthe codec writes itself — Content-Length, Connection and Transfer-Encoding —\nare refused with corenet.HTTP1ResponseInvalid, and nothing is appended. It\nallocates nothing when dst has room.\n",
+      "file": "service/net/http1/write.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.AppendRefusal",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "AppendRefusal",
+      "spelled": "func(dst []byte, r Refusal) []byte",
+      "canonical": "func(dst []byte, r github.com/kitsunium/sdk/internal/service/net/http1.Refusal) []byte",
+      "doc": "AppendRefusal appends the whole answer to r: its status line,\nContent-Length: 0 and Connection: close. The caller closes the connection\nonce it is written; nothing a handler does changes it. RefusalNone, and a\nvalue this package does not return, append a 400. It allocates nothing\nwhen dst has room.\n",
+      "file": "service/net/http1/write.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.AppendResponse",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "AppendResponse",
+      "spelled": "func(dst []byte, req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue, closing bool) ([]byte, error)",
+      "canonical": "func(dst []byte, req *github.com/kitsunium/sdk/internal/core/net.HTTP1RequestValue, res *github.com/kitsunium/sdk/internal/core/net.HTTP1ResponseValue, closing bool) ([]byte, error)",
+      "doc": "AppendResponse appends the whole response res answers req with: the status\nline, res.Header, Content-Length and, when res.Close, req.Close or closing\nasks for it, Connection: close, then the body.\n\nContent-Length is len(res.Body), so the response's framing is the codec's.\nThe answer to a HEAD carries the Content-Length and no body. A 204 or a 304\ncarries neither, and refuses a body. A status the profile does not send is\nrefused with corenet.HTTP1ResponseInvalid, before anything is appended.\nres.Header is copied as it is: it is the handler's, written by AppendField.\nIt allocates nothing when dst has room.\n",
+      "file": "service/net/http1/write.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.AppendStatusLine",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "AppendStatusLine",
+      "spelled": "func(dst []byte, status int) ([]byte, error)",
+      "canonical": "func(dst []byte, status int) ([]byte, error)",
+      "doc": "AppendStatusLine appends the status line of status to dst: a registered\ncode's line is copied whole, any other code from 200 to 999 gets an empty\nreason phrase, which RFC 9112 §4 allows. A code below 200 is refused with\ncorenet.HTTP1ResponseInvalid: the profile sends no interim response. It\nallocates nothing when dst has room.\n",
+      "file": "service/net/http1/write.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.Continue",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "Continue",
+      "spelled": "func(buf []byte, req *corenet.HTTP1RequestValue) int",
+      "canonical": "func(buf []byte, req *github.com/kitsunium/sdk/internal/core/net.HTTP1RequestValue) int",
+      "doc": "Continue returns req.Consumed and sets req.Body once buf, the bytes the\nrequest was framed from, holds the whole body; until then it returns 0. It\nreads no head: a caller that got 0 from Parse with req.HeadLen set calls\nContinue as bytes arrive, and calls Parse only for the next request.\n",
+      "file": "service/net/http1/parse.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.NewParser",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "NewParser",
+      "spelled": "func(l corenet.HTTP1LimitsValue) (Parser, error)",
+      "canonical": "func(l github.com/kitsunium/sdk/internal/core/net.HTTP1LimitsValue) (github.com/kitsunium/sdk/internal/service/net/http1.Parser, error)",
+      "doc": "NewParser returns a Parser bounded by l. A zero field selects the profile's\ndefault; a negative one, a head past corenet.HTTP1MaxHead, a target past the\nhead or a body past corenet.HTTP1MaxBody is refused with\ncorenet.HTTP1Misconfigured, the field named.\n",
+      "file": "service/net/http1/parse.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.Parser",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "Parser",
+      "spelled": "struct{}",
+      "canonical": "struct{}",
+      "doc": "Parser frames requests of the restricted HTTP/1.1 profile under its limits.\nIt holds three integers and no state between calls, so one Parser serves\nany number of connections and goroutines. The zero Parser uses the\nprofile's default limits.\n",
+      "file": "service/net/http1/parse.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.Parser.Limits",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "Limits",
+      "recv": "Parser",
+      "spelled": "func() corenet.HTTP1LimitsValue",
+      "canonical": "func() github.com/kitsunium/sdk/internal/core/net.HTTP1LimitsValue",
+      "doc": "Limits returns the bounds the Parser applies, defaults resolved.\n",
+      "file": "service/net/http1/parse.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.Parser.Parse",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "Parse",
+      "recv": "Parser",
+      "spelled": "func(buf []byte, req *corenet.HTTP1RequestValue) (int, Refusal)",
+      "canonical": "func(buf []byte, req *github.com/kitsunium/sdk/internal/core/net.HTTP1RequestValue) (int, github.com/kitsunium/sdk/internal/service/net/http1.Refusal)",
+      "doc": "Parse frames the request at the start of buf into req and returns the\nbytes it takes and RefusalNone, once the whole request is there.\n\nIt returns 0 and RefusalNone while more bytes are needed. When the head is\ncomplete and only the body is missing, req.HeadLen and req.Consumed are\nalready set: Continue then waits for the body without reading the head\nagain, and an early answer knows how much the request still has to send.\n\nIt returns 0 and the refusal when the bytes break the profile. A refusal\nnever depends on bytes past the one that broke a rule, so more bytes never\nturn it into an acceptance; and an accepted request takes the same bytes\nwhatever follows it, the next pipelined request included.\n\nFraming depends on neither the method nor the target: a request takes its\nhead plus its Content-Length, a GET's included. Every slice in req aliases\nbuf. Parse allocates nothing.\n",
+      "file": "service/net/http1/parse.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.Pending",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "Pending",
+      "spelled": "func(req *corenet.HTTP1RequestValue, buffered int) int",
+      "canonical": "func(req *github.com/kitsunium/sdk/internal/core/net.HTTP1RequestValue, buffered int) int",
+      "doc": "Pending returns how many bytes of req's body have yet to arrive when\nbuffered bytes of the request are already held: what an early answer to a\ncomplete head has to read and discard before the next request, or the\nreason to close instead.\n",
+      "file": "service/net/http1/parse.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.Refusal",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "Refusal",
+      "spelled": "uint8",
+      "canonical": "uint8",
+      "doc": "Refusal names the rule a request broke. The zero Refusal, RefusalNone, is\nno refusal at all. Every other one is answered with its Status, Connection:\nclose, and the connection closed: the request never reaches a handler, and a\nhandler has no say in it.\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.Refusal.Err",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "Err",
+      "recv": "Refusal",
+      "spelled": "func() error",
+      "canonical": "func() error",
+      "doc": "Err returns the core/net sentinel the refusal belongs to, or nil for\nRefusalNone. Several refusals share a sentinel: the sentinel is what a caller\nbranches on, the Refusal is what a log line names.\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.Refusal.Status",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "Status",
+      "recv": "Refusal",
+      "spelled": "func() int",
+      "canonical": "func() int",
+      "doc": "Status returns the status code the refusal is answered with: 400 for a\nmalformed or smuggling-prone request, 413, 414 and 431 for the size bounds,\n417 for Expect and 501 for CONNECT. RefusalNone, and a value this package\ndoes not return, give 0.\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.Refusal.String",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "String",
+      "recv": "Refusal",
+      "spelled": "func() string",
+      "canonical": "func() string",
+      "doc": "String names the refusal for a log line or a metric label.\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RefusalAuthorizationDuplicated",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "RefusalAuthorizationDuplicated",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.Refusal",
+      "value": "15",
+      "doc": "RefusalAuthorizationDuplicated is a second Authorization field.\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RefusalBareCR",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "RefusalBareCR",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.Refusal",
+      "value": "5",
+      "doc": "RefusalBareCR is a CR not followed by LF.\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RefusalBareLF",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "RefusalBareLF",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.Refusal",
+      "value": "6",
+      "doc": "RefusalBareLF is a LF not preceded by CR.\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RefusalBodyTooLarge",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "RefusalBodyTooLarge",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.Refusal",
+      "value": "21",
+      "doc": "RefusalBodyTooLarge is a Content-Length past the body bound.\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RefusalContentLength",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "RefusalContentLength",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.Refusal",
+      "value": "13",
+      "doc": "RefusalContentLength is a Content-Length that is empty, not decimal\ndigits, or longer than corenet.HTTP1MaxContentLengthDigits.\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RefusalContentLengthDuplicated",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "RefusalContentLengthDuplicated",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.Refusal",
+      "value": "14",
+      "doc": "RefusalContentLengthDuplicated is a second Content-Length field, equal to\nthe first or not.\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RefusalControl",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "RefusalControl",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.Refusal",
+      "value": "8",
+      "doc": "RefusalControl is a control byte other than the tab, or DEL, inside a\nfield value.\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RefusalExpect",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "RefusalExpect",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.Refusal",
+      "value": "17",
+      "doc": "RefusalExpect is an Expect field: the profile sends no interim response,\nso 100-continue cannot be met (RFC 9110 §10.1.1).\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RefusalHeadTooLarge",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "RefusalHeadTooLarge",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.Refusal",
+      "value": "18",
+      "doc": "RefusalHeadTooLarge is a head that does not end within the head bound.\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RefusalHostDuplicated",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "RefusalHostDuplicated",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.Refusal",
+      "value": "16",
+      "doc": "RefusalHostDuplicated is a second Host field.\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RefusalMethod",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "RefusalMethod",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.Refusal",
+      "value": "2",
+      "doc": "RefusalMethod is an empty method, or one that is not a token.\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RefusalMethodUnsupported",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "RefusalMethodUnsupported",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.Refusal",
+      "value": "22",
+      "doc": "RefusalMethodUnsupported is CONNECT: the profile opens no tunnel.\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RefusalNUL",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "RefusalNUL",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.Refusal",
+      "value": "7",
+      "doc": "RefusalNUL is a NUL inside a field value or name.\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RefusalName",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "RefusalName",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.Refusal",
+      "value": "11",
+      "doc": "RefusalName is an empty field name, one that is not a token, or a field\nline with no colon.\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RefusalNone",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "RefusalNone",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.Refusal",
+      "value": "0",
+      "doc": "RefusalNone is no refusal: the request was framed, or needs more bytes.\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RefusalObsFold",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "RefusalObsFold",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.Refusal",
+      "value": "9",
+      "doc": "RefusalObsFold is a field line that starts with a space or a tab: the\nobsolete line folding (RFC 9112 §5.2).\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RefusalRequestLine",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "RefusalRequestLine",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.Refusal",
+      "value": "1",
+      "doc": "RefusalRequestLine is a request line that does not end right after its\nversion.\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RefusalSpaceBeforeColon",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "RefusalSpaceBeforeColon",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.Refusal",
+      "value": "10",
+      "doc": "RefusalSpaceBeforeColon is whitespace between a field name and its colon\n(RFC 9112 §5.1).\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RefusalTarget",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "RefusalTarget",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.Refusal",
+      "value": "3",
+      "doc": "RefusalTarget is an empty request-target, or one holding a control byte,\nDEL or a byte from 0x80 up.\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RefusalTargetTooLong",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "RefusalTargetTooLong",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.Refusal",
+      "value": "20",
+      "doc": "RefusalTargetTooLong is a request-target past the target bound.\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RefusalTooManyFields",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "RefusalTooManyFields",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.Refusal",
+      "value": "19",
+      "doc": "RefusalTooManyFields is a field line past corenet.HTTP1MaxFields.\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RefusalTransferEncoding",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "RefusalTransferEncoding",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.Refusal",
+      "value": "12",
+      "doc": "RefusalTransferEncoding is any Transfer-Encoding field, chunked or not:\nthe profile frames by Content-Length alone, so it carries no chunked body\nand no trailer.\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RefusalVersion",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "RefusalVersion",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.Refusal",
+      "value": "4",
+      "doc": "RefusalVersion is any version but HTTP/1.1.\n",
+      "file": "service/net/http1/refusal.go",
       "layer": "service",
       "family": "net"
     },

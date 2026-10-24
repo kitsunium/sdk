@@ -5,4 +5,5 @@ package net
 var (
 	_ ConnHandler   = ConnHandlerFunc(nil)
 	_ PacketHandler = PacketHandlerFunc(nil)
+	_ HTTP1Handler  = HTTP1HandlerFunc(nil)
 )

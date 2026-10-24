@@ -1094,6 +1094,11 @@ rules:
       # report, introduced by a readability suggestion. Scoped to the one file.
       - "**/internal/service/net/server/loop_portable.go"
       - "internal/service/net/server/loop_portable.go"
+      # core/net.HTTP1RequestValue: HasHost, HasAuthorization and Close are three
+      # answers about one request a handler reads by name, not a set of flags;
+      # HasHost is what tells an empty Host from an absent one (ADR 0186 §D6).
+      - "**/internal/core/net/http1.go"
+      - "internal/core/net/http1.go"
       - "**/internal/service/app/health/entry.go"
       - "internal/service/app/health/entry.go"
       - "**/internal/core/app/scheduler/scheduler_result.go"

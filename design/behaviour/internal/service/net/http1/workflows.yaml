@@ -1,0 +1,112 @@
+# Derived from the code by kit design derive. DO NOT EDIT.
+apiVersion: design/behaviour/v1
+workflows:
+  - of: contentLength
+    steps:
+      - opt:
+          do:
+            - return: RefusalContentLengthDuplicated
+          when: req.ContentLength != 0 || hasField(req, "content-length")
+      - opt:
+          do:
+            - return: RefusalContentLength
+          when: len(value) == 0 || len(value) > corenet.HTTP1MaxContentLengthDigits
+      - var:
+          name: "n"
+          type: int64
+      - loop:
+          do:
+            - bind: d
+              eval: c - '0'
+            - opt:
+                do:
+                  - return: RefusalContentLength
+                when: d > lastDigit
+            - set: "n"
+              value: n*decimalBase + int64(d)
+          key: _
+          range: value
+          value: c
+      - opt:
+          do:
+            - return: RefusalBodyTooLarge
+          when: n > body
+      - set: req.ContentLength
+        value: "n"
+      - return: RefusalNone
+  - of: hasField
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: foldIs(req.Fields[k].Name, name)
+          key: k
+          range: req.NFields
+      - return: "false"
+  - of: tokenEnd
+    steps:
+      - bind: pos
+        eval: "0"
+      - loop:
+          cond: pos+tokenStride <= len(b)
+          do:
+            - opt:
+                do:
+                  - break: true
+                when: "!tchar[b[pos]] || !tchar[b[pos+1]] || !tchar[b[pos+2]] || !tchar[b[pos+3]]"
+          post: pos += tokenStride
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: pos + k
+                when: "!tchar[c]"
+          key: k
+          range: b[pos:]
+          value: c
+      - return: len(b)
+  - of: foldIs
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(b) != len(lit)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: b[k]|asciiCase != lit[k]
+          key: k
+          range: len(lit)
+      - return: "true"
+  - of: token
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: s == ""
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!tchar[s[k]]"
+          key: k
+          range: len(s)
+      - return: "true"
+  - of: fieldText
+    steps:
+      - loop:
+          do:
+            - bind: c
+              eval: s[k]
+            - opt:
+                do:
+                  - return: "false"
+                when: (c < asciiSpace && c != '\t') || c == asciiDEL
+          key: k
+          range: len(s)
+      - return: "true"
