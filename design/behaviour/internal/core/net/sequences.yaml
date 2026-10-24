@@ -241,6 +241,13 @@ sequences:
           		nextProtos:        slices.Clone(p.NextProtos),
           		requireClientCert: p.RequireClientCert,
           	}, nil
+  - of: OptionKind.String
+    steps:
+      - opt:
+          do:
+            - return: "\"unknown\""
+          when: int(k) >= len(optionNames)
+      - return: optionNames[k]
   - of: parseKeyPair
     participants:
       - id: caller
