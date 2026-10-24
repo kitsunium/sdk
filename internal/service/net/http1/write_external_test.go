@@ -63,8 +63,16 @@ func TestAppendField(t *testing.T) {
 		t.Errorf("tab value = %q, %v", got, err)
 	}
 	for _, c := range []struct{ name, value string }{
-		{"", "v"}, {"X Y", "v"}, {"X:", "v"}, {"Content-Length", "1"}, {"connection", "close"},
-		{"Transfer-Encoding", "chunked"}, {"X", "a\r\nInjected: 1"}, {"X", "a\nb"}, {"X", "a\x00"}, {"X", "\x7f"},
+		{"", "v"},
+		{"X Y", "v"},
+		{"X:", "v"},
+		{"Content-Length", "1"},
+		{"connection", "close"},
+		{"Transfer-Encoding", "chunked"},
+		{"X", "a\r\nInjected: 1"},
+		{"X", "a\nb"},
+		{"X", "a\x00"},
+		{"X", "\x7f"},
 	} {
 		got, err := http1.AppendField([]byte("x"), c.name, c.value)
 		if !errs.HasCode(err, corenet.CodeHTTP1ResponseInvalid) || string(got) != "x" {

@@ -235,8 +235,12 @@ func TestNewParser(t *testing.T) {
 		t.Errorf("head 100: target %d, %v", small.Limits().Target, err)
 	}
 	for _, bad := range []corenet.HTTP1LimitsValue{
-		{Head: -1}, {Head: corenet.HTTP1MaxHead + 1}, {Target: -1}, {Head: 100, Target: 101},
-		{Body: -1}, {Body: corenet.HTTP1MaxBody + 1},
+		{Head: -1},
+		{Head: corenet.HTTP1MaxHead + 1},
+		{Target: -1},
+		{Head: 100, Target: 101},
+		{Body: -1},
+		{Body: corenet.HTTP1MaxBody + 1},
 	} {
 		if _, err := http1.NewParser(bad); !errs.HasCode(err, corenet.CodeHTTP1Misconfigured) {
 			t.Errorf("NewParser(%+v) = %v; want HTTP1Misconfigured", bad, err)
