@@ -133,8 +133,11 @@ func TestAFailedRecoveryClosesTheSegmentsItOpened(t *testing.T) {
 		t.Fatal("setup: no segment reached the sync at open")
 	}
 	for _, f := range opened {
-		if _, err := f.Stat(); !errors.Is(err, os.ErrClosed) {
-			t.Errorf("segment %s still open after the failed open (stat: %v)", filepath.Base(f.Name()), err)
+		// A read goes through the descriptor's own reference count, which
+		// answers ErrClosed on every platform; Stat on Windows asks the
+		// handle directly and only says it is invalid.
+		if _, err := f.ReadAt(make([]byte, 1), 0); !errors.Is(err, os.ErrClosed) {
+			t.Errorf("segment %s still open after the failed open (read: %v)", filepath.Base(f.Name()), err)
 		}
 	}
 	forgetBoot(t, dir)
