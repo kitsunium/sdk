@@ -124,6 +124,27 @@ packages:
         type: errs.Code
       - const:
           - doc: |-
+              CodeScratchBusy identifies a VerifyScratch entered while another
+              verification holds it: one scratch was shared across threads.
+            name: CodeScratchBusy
+            value: "0x00_02_0D_11"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeScratchForeign identifies a VerifyScratch that the verifier did not
+              make: nil, the zero scratch, or another verifier's.
+            name: CodeScratchForeign
+            value: "0x00_02_0D_12"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeClaimsBufOverflow identifies a claim, an audience or a declaration
+              past the fixed capacity of a ClaimsBuf.
+            name: CodeClaimsBufOverflow
+            value: "0x00_02_0D_13"
+        type: errs.Code
+      - const:
+          - doc: |-
               CodeHeaderUnsupported identifies a JOSE header the engine will not act on:
               a non-empty "crit" (RFC 7515 §4.1.11 makes an unrecognised critical
               parameter a mandatory rejection), or a "typ" that does not match the one the
@@ -279,6 +300,83 @@ packages:
         name: AlgorithmPasetoV4Public
         type: Algorithm
         value: "4"
+      - blockDoc: |-
+          The fixed capacities of a [ClaimsBuf]. They are bounds, not budgets: a claim
+          longer than its slot, an audience with more members, or more declared
+          private names than this is refused with [ClaimsBufOverflow] — never cut to
+          fit, because a truncated subject is another subject.
+        doc: |-
+          ClaimsBufTextCap is the capacity, in octets, of every text slot of a
+          ClaimsBuf: each registered string claim, each audience member and each
+          declared private claim, decoded.
+        name: ClaimsBufTextCap
+        type: int
+        value: "256"
+      - blockDoc: |-
+          The fixed capacities of a [ClaimsBuf]. They are bounds, not budgets: a claim
+          longer than its slot, an audience with more members, or more declared
+          private names than this is refused with [ClaimsBufOverflow] — never cut to
+          fit, because a truncated subject is another subject.
+        doc: ClaimsBufAudienceCap is how many "aud" members a ClaimsBuf holds.
+        name: ClaimsBufAudienceCap
+        type: int
+        value: "4"
+      - blockDoc: |-
+          The fixed capacities of a [ClaimsBuf]. They are bounds, not budgets: a claim
+          longer than its slot, an audience with more members, or more declared
+          private names than this is refused with [ClaimsBufOverflow] — never cut to
+          fit, because a truncated subject is another subject.
+        doc: |-
+          ClaimsBufPrivateCap is how many private claim names a ClaimsBuf may
+          declare.
+        name: ClaimsBufPrivateCap
+        type: int
+        value: "8"
+      - doc: |-
+          ClaimAbsent is the state of a claim the token did not carry — and of
+          every claim of a ClaimsBuf that was reset or whose verification failed.
+        name: ClaimAbsent
+        type: ClaimState
+        value: "0"
+      - doc: |-
+          ClaimWrongType is the state of a declared private claim whose JSON type
+          is not a string. A registered claim of the wrong type is never stored:
+          the token is refused with [Malformed].
+        name: ClaimWrongType
+        type: ClaimState
+        value: "1"
+      - doc: ClaimInvalid is the state of a text claim that is the empty string.
+        name: ClaimInvalid
+        type: ClaimState
+        value: "2"
+      - doc: ClaimOK is the state of a claim present with a usable value.
+        name: ClaimOK
+        type: ClaimState
+        value: "3"
+      - doc: TextIssuer is the "iss" claim.
+        name: TextIssuer
+        type: TextClaim
+        value: "0"
+      - doc: TextSubject is the "sub" claim.
+        name: TextSubject
+        type: TextClaim
+        value: "1"
+      - doc: TextID is the "jti" claim.
+        name: TextID
+        type: TextClaim
+        value: "2"
+      - doc: TimeExpiry is the "exp" claim.
+        name: TimeExpiry
+        type: TimeClaim
+        value: "0"
+      - doc: TimeNotBefore is the "nbf" claim.
+        name: TimeNotBefore
+        type: TimeClaim
+        value: "1"
+      - doc: TimeIssuedAt is the "iat" claim.
+        name: TimeIssuedAt
+        type: TimeClaim
+        value: "2"
     doc: |-
       Package token — the immutable claim set every concrete token format decodes
       into and every issuer renders from.
@@ -305,6 +403,12 @@ packages:
       compact (RFC 7519) and PASETO v4 — live in internal/service/security/token; this
       package owns only the contract, so a caller can hold a Verifier without
       knowing which wire format produced it.
+
+      [VerifierInto] is the allocation-free sibling of [Verifier], reached by a
+      type assertion on one: it verifies into a caller-owned [ClaimsBuf] through
+      a [VerifyScratch] the caller owns too, one per thread. It is the domain's
+      only port that is not safe for concurrent use through one scratch, and it
+      refuses a shared or a foreign scratch rather than racing on it (ADR 0186).
 
       # There is no registry, and that is the security decision
 
@@ -333,6 +437,23 @@ packages:
         out:
           - type: bool
       - doc: |-
+          NewClaimsBuf returns an empty buffer declaring the private claim names
+          private, in order. It refuses an empty name, a registered one, a repeated
+          one, or one a token could only spell with an escape — a quote, a backslash,
+          a control character or bytes that are not UTF-8 — with [ClaimNameInvalid],
+          and a name longer than [ClaimsBufTextCap] or more than [ClaimsBufPrivateCap]
+          names with [ClaimsBufOverflow].
+        in:
+          - name: private
+            type: string
+        name: NewClaimsBuf
+        out:
+          - name: buf
+            type: "*ClaimsBuf"
+          - name: err
+            type: error
+        variadic: true
+      - doc: |-
           NewClaimsValue returns an empty claim set to build on. The zero ClaimsValue
           is equally valid and equally empty; this constructor exists so a call site
           reads as a statement of intent rather than a struct literal.
@@ -342,8 +463,23 @@ packages:
         name: NewClaimsValue
         out:
           - type: ClaimsValue
+      - doc: |-
+          NewVerifyScratch returns a scratch around mac for the verifier whose token
+          is owner. It is the constructor a [VerifierInto] implementation calls from
+          NewScratch; a caller asks the verifier, never this function, because only
+          the verifier knows its owner token. mac is Reset once here, so the first
+          verification pays nothing the later ones do not.
+        in:
+          - name: owner
+            type: any
+          - name: mac
+            type: hash.Hash
+        name: NewVerifyScratch
+        out:
+          - type: "*VerifyScratch"
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
+      hash: hash
     path: github.com/kitsunium/sdk/internal/core/security/token
     ports:
       - doc: |-
@@ -393,6 +529,45 @@ packages:
               - type: ClaimsValue
               - type: error
         name: Verifier
+      - doc: |-
+          VerifierInto is the allocation-free sibling of [Verifier], reached by a type
+          assertion on one: a verifier that implements it verifies into a [ClaimsBuf]
+          the caller owns, with the mutable MAC state in a [VerifyScratch] the caller
+          owns too. It is the SDK's only port that is NOT safe for concurrent use
+          through one scratch: the verifier itself stays immutable and concurrent, and
+          each thread — each event loop — holds its own scratch.
+
+          It refuses exactly what Verify refuses, in the same order — structure, then
+          the algorithm, then the MAC, then exp, nbf and the policy — and then the
+          caller's claims: a claim past the buffer's capacity is refused with
+          [ClaimsBufOverflow], never truncated. A scratch from another verifier is
+          refused with [ScratchForeign], and one already in use with [ScratchBusy],
+          before any MAC is computed. On every refusal the buffer is left reset.
+
+          IFACE-PLUGIN: constructors in internal/service/security/token hand instances back
+          behind [Verifier]; the HS256 verifier also implements this interface.
+        methods:
+          - doc: |-
+              NewScratch returns a fresh scratch bound to this verifier, its MAC keyed
+              and primed. Make one per thread, once, and reuse it.
+            name: NewScratch
+            out:
+              - type: "*VerifyScratch"
+          - doc: |-
+              VerifyInto authenticates token with the scratch s and stores its claims
+              in dst, which it overwrites on entry. token is read, never retained: dst
+              aliases neither it nor the memory it was received in.
+            in:
+              - name: s
+                type: "*VerifyScratch"
+              - name: token
+                type: "[]byte"
+              - name: dst
+                type: "*ClaimsBuf"
+            name: VerifyInto
+            out:
+              - type: error
+        name: VerifierInto
     sentinels:
       - var:
           - code: CodeMalformed
@@ -567,6 +742,40 @@ packages:
             private: "core/security/token: exp-iat span past MaxLifetime"
             public: The token lifetime exceeds what this recipient accepts
             reason: LIFETIME_TOO_LONG
+          - code: CodeScratchBusy
+            doc: |-
+              ScratchBusy is returned by VerifierInto.VerifyInto when the scratch it
+              was given is held by another verification: one scratch was shared
+              across threads. No MAC was computed. Give each thread its own scratch.
+            exit: SOFTWARE
+            http: 500
+            name: ScratchBusy
+            private: "core/security/token: VerifyScratch entered while in use; a scratch is per thread"
+            public: The token could not be verified
+            reason: SCRATCH_BUSY
+          - code: CodeScratchForeign
+            doc: |-
+              ScratchForeign is returned by VerifierInto.VerifyInto for a scratch the
+              verifier did not make — nil, the zero scratch, or another verifier's —
+              before any MAC is computed.
+            exit: SOFTWARE
+            http: 500
+            name: ScratchForeign
+            private: "core/security/token: VerifyScratch made by another verifier, or by none"
+            public: The token could not be verified
+            reason: SCRATCH_FOREIGN
+          - code: CodeClaimsBufOverflow
+            doc: |-
+              ClaimsBufOverflow is returned when a claim does not fit a ClaimsBuf: a
+              text longer than ClaimsBufTextCap, an audience longer than
+              ClaimsBufAudienceCap, or a declaration past ClaimsBufPrivateCap. The
+              claim is refused, never truncated.
+            exit: DATAERR
+            http: 401
+            name: ClaimsBufOverflow
+            private: "core/security/token: claim past the fixed capacity of a ClaimsBuf"
+            public: The token carries a claim larger than this recipient accepts
+            reason: CLAIMS_BUF_OVERFLOW
           - code: CodeHeaderUnsupported
             doc: |-
               HeaderUnsupported is returned for a JOSE header the engine will not act
@@ -878,6 +1087,271 @@ packages:
             recv: value
         name: Algorithm
         underlying: uint8
+      - doc: |-
+          ClaimState is what a [ClaimsBuf] knows about one claim after a
+          verification: absent, of the wrong JSON type, present but invalid, or
+          present and usable. The zero value is [ClaimAbsent].
+        methods:
+          - doc: |-
+              String reports the state's name: "absent", "wrong_type", "invalid" or "ok".
+            name: String
+            out:
+              - type: string
+            recv: value
+        name: ClaimState
+        underlying: uint8
+      - doc: TextClaim names one registered claim a [ClaimsBuf] stores as text.
+        name: TextClaim
+        underlying: uint8
+      - doc: TimeClaim names one registered claim a [ClaimsBuf] stores as an instant.
+        name: TimeClaim
+        underlying: uint8
+      - doc: |-
+          ClaimsBuf is a caller-owned, fixed-capacity claim set that a
+          [VerifierInto] fills without allocating: one per request, reused from one
+          request to the next. Registered claims are stored as decoded bytes or Unix
+          seconds; private claims are stored only when the caller declared their name
+          at construction ([NewClaimsBuf]), decoded, and only when they are JSON
+          strings. Every field carries a [ClaimState].
+
+          Nothing in it aliases the token or the memory it was received in: every
+          value is a copy. A verification overwrites the whole buffer on entry and
+          leaves it reset when it fails, so no byte of a previous request survives
+          into the next; the declared names are configuration and are kept.
+
+          The views its accessors return are slices of the buffer itself, valid until
+          the next verification or [ClaimsBuf.Reset]. String and GoString render the
+          SHAPE of the buffer, never a value. It is not safe for concurrent use.
+        methods:
+          - doc: Reset clears every value and state of b, keeping its declared names.
+            name: Reset
+            recv: pointer
+          - doc: |-
+              Text returns a view of the registered text claim c and its state. The view
+              is nil unless the state is [ClaimOK].
+            in:
+              - name: c
+                type: TextClaim
+            name: Text
+            out:
+              - name: value
+                type: "[]byte"
+              - name: state
+                type: ClaimState
+            recv: pointer
+          - doc: |-
+              SetText stores value, decoded, as the registered text claim c. The empty
+              value is stored as [ClaimInvalid]. A value longer than [ClaimsBufTextCap] is
+              refused with [ClaimsBufOverflow] and leaves the claim absent. It is the
+              writer a [VerifierInto] implementation fills the buffer with.
+            in:
+              - name: c
+                type: TextClaim
+              - name: value
+                type: "[]byte"
+            name: SetText
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              Unix returns the registered instant c as Unix seconds and nanoseconds, and
+              its state. Both numbers are zero unless the state is [ClaimOK].
+            in:
+              - name: c
+                type: TimeClaim
+            name: Unix
+            out:
+              - name: sec
+                type: int64
+              - name: nsec
+                type: int32
+              - name: state
+                type: ClaimState
+            recv: pointer
+          - doc: |-
+              SetUnix stores the registered instant c as Unix seconds and nanoseconds, in
+              the [ClaimOK] state. It is the writer a [VerifierInto] implementation fills
+              the buffer with; an out-of-range c is ignored.
+            in:
+              - name: c
+                type: TimeClaim
+              - name: sec
+                type: int64
+              - name: nsec
+                type: int32
+            name: SetUnix
+            recv: pointer
+          - doc: AudienceLen reports how many "aud" members b holds.
+            name: AudienceLen
+            out:
+              - type: int
+            recv: pointer
+          - doc: |-
+              Audience returns a view of the i-th "aud" member and its state; out of
+              range, it is absent.
+            in:
+              - name: i
+                type: int
+            name: Audience
+            out:
+              - name: value
+                type: "[]byte"
+              - name: state
+                type: ClaimState
+            recv: pointer
+          - doc: |-
+              AppendAudience stores value, decoded, as the next "aud" member. A member
+              past [ClaimsBufAudienceCap], or longer than [ClaimsBufTextCap], is refused
+              with [ClaimsBufOverflow]. It is the writer a [VerifierInto] implementation
+              fills the buffer with.
+            in:
+              - name: value
+                type: "[]byte"
+            name: AppendAudience
+            out:
+              - type: error
+            recv: pointer
+          - doc: Declared reports how many private claim names b declares.
+            name: Declared
+            out:
+              - type: int
+            recv: pointer
+          - doc: |-
+              PrivateIndex returns the declaration index of the private claim name, or -1
+              when b does not declare it. name is the member name as the token spells it.
+            in:
+              - name: name
+                type: "[]byte"
+            name: PrivateIndex
+            out:
+              - type: int
+            recv: pointer
+          - doc: |-
+              Private returns a view of the declared private claim name and its state. A
+              name b does not declare is reported absent.
+            in:
+              - name: name
+                type: string
+            name: Private
+            out:
+              - name: value
+                type: "[]byte"
+              - name: state
+                type: ClaimState
+            recv: pointer
+          - doc: |-
+              SetPrivate stores value, decoded, as the private claim declared at index i.
+              The empty value is stored as [ClaimInvalid]; a value longer than
+              [ClaimsBufTextCap] is refused with [ClaimsBufOverflow] and leaves the claim
+              absent. It is the writer a [VerifierInto] implementation fills the buffer
+              with; an index b does not declare is refused with [ClaimsBufOverflow].
+            in:
+              - name: i
+                type: int
+              - name: value
+                type: "[]byte"
+            name: SetPrivate
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              MarkPrivate sets the state of the private claim declared at index i without
+              a value — [ClaimWrongType] for a member that is not a JSON string. It is the
+              writer a [VerifierInto] implementation fills the buffer with; an index b does
+              not declare is ignored.
+            in:
+              - name: i
+                type: int
+              - name: state
+                type: ClaimState
+            name: MarkPrivate
+            recv: pointer
+          - doc: |-
+              String implements fmt.Stringer and renders the SHAPE of b, never a value:
+              "token.ClaimsBuf{registered:3 aud:1 private:1/2}" — the registered claims
+              that are usable, the audience members, and the usable private claims over
+              the declared ones. Like a [ClaimsValue], a ClaimsBuf holds the output of an
+              authentication decision, and %v is how such output reaches a log. The
+              receiver is a value, so a ClaimsBuf formatted by value is redacted too.
+            name: String
+            out:
+              - type: string
+            recv: value
+          - doc: |-
+              GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses
+              String for Go-syntax formatting and would otherwise dump every slot.
+            name: GoString
+            out:
+              - type: string
+            recv: value
+        name: ClaimsBuf
+        struct:
+          unexported: true
+      - doc: |-
+          VerifyScratch is the mutable MAC state of one [VerifierInto] caller: a keyed
+          stdlib hash.Hash and the token of the verifier that made it, nothing else.
+          It exists so a verifier can stay immutable and concurrent while a caller
+          that verifies on one thread — an event loop — reuses one keyed MAC instead
+          of building a new one per token.
+
+          It is NOT safe for concurrent use, and that is its whole contract: one
+          scratch per thread. A scratch entered twice at once refuses the second entry
+          with [ScratchBusy] before computing anything, and a scratch made by another
+          verifier is refused with [ScratchForeign]. The tag it sums into is cleared
+          after every comparison, whatever its outcome.
+
+          The zero VerifyScratch belongs to no verifier and is refused by every one.
+        methods:
+          - doc: |-
+              Enter claims s for one verification by the verifier whose token is owner.
+              It refuses a nil scratch, the zero scratch and one made for another owner
+              with [ScratchForeign], and a scratch another call holds with [ScratchBusy] —
+              in every case before any MAC is computed. A nil error must be paired with
+              exactly one [VerifyScratch.Leave].
+            in:
+              - name: owner
+                type: any
+            name: Enter
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              Leave clears the tag s summed into and releases s for the next
+              verification. It is called once per successful [VerifyScratch.Enter], on
+              every exit path.
+            name: Leave
+            recv: pointer
+          - doc: |-
+              MACEqual reports whether tag authenticates input under the scratch's key,
+              comparing with hmac.Equal so the check is constant-time. It reports false
+              on a scratch that is not entered, and clears the computed tag before it
+              returns, whatever the outcome.
+            in:
+              - name: input
+                type: "[]byte"
+              - name: tag
+                type: "[]byte"
+            name: MACEqual
+            out:
+              - type: bool
+            recv: pointer
+          - doc: |-
+              String implements fmt.Stringer and renders the SHAPE of s, never its state:
+              "token.VerifyScratch{owned:true busy:false}".
+            name: String
+            out:
+              - type: string
+            recv: pointer
+          - doc: |-
+              GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses
+              String for Go-syntax formatting and would otherwise dump the keyed MAC.
+            name: GoString
+            out:
+              - type: string
+            recv: pointer
+        name: VerifyScratch
+        struct:
+          unexported: true
   - constants:
       - doc: |-
           DefaultMaxTokenLen is the token-string bound applied when a config
@@ -1639,6 +2113,18 @@ packages:
           before any decode allocates.
         - a repeated JSON member in the header or the claims (RFC 8725 §2.6).
 
+      # Verifying on an event loop without allocating
+
+      The HS256 verifier also implements [VerifierInto], reached by a type
+      assertion. Each thread makes one [VerifyScratch] (VerifierInto.NewScratch)
+      and one [ClaimsBuf] ([NewClaimsBuf], declaring the private claims it reads),
+      once, and reuses both for every request: the token is read straight out of
+      the receive buffer as a []byte, and nothing is allocated per call. The
+      refusals are Verify's, in Verify's order, plus [ClaimsBufOverflow] for a
+      claim larger than the buffer's fixed slots — never truncated. A scratch is
+      not shareable: a second concurrent use is refused with [ScratchBusy] before
+      any MAC is computed, and another verifier's with [ScratchForeign].
+
       # Testing time without sleeping
 
       Every config has a Clock field, and it takes any value with the two methods
@@ -1803,6 +2289,33 @@ packages:
             type: errs.Code
             typed: true
             value: "0x00_02_0D_10"
+      - const:
+          - doc: |-
+              CodeScratchBusy identifies a [VerifyScratch] entered while another
+              verification held it (0.2.13.17).
+            name: CodeScratchBusy
+            reexport: coretoken.CodeScratchBusy
+            type: errs.Code
+            typed: true
+            value: "0x00_02_0D_11"
+      - const:
+          - doc: |-
+              CodeScratchForeign identifies a [VerifyScratch] the verifier did not make
+              (0.2.13.18).
+            name: CodeScratchForeign
+            reexport: coretoken.CodeScratchForeign
+            type: errs.Code
+            typed: true
+            value: "0x00_02_0D_12"
+      - const:
+          - doc: |-
+              CodeClaimsBufOverflow identifies a claim past the fixed capacity of a
+              [ClaimsBuf] (0.2.13.19).
+            name: CodeClaimsBufOverflow
+            reexport: coretoken.CodeClaimsBufOverflow
+            type: errs.Code
+            typed: true
+            value: "0x00_02_0D_13"
       - const:
           - doc: |-
               CodeHeaderUnsupported identifies a non-empty "crit", or a "typ" mismatch
@@ -2009,6 +2522,103 @@ packages:
             type: string
             typed: true
             value: "\"jti\""
+      - const:
+          - doc: |-
+              ClaimsBufTextCap is the capacity, in octets, of every text slot of a
+              [ClaimsBuf].
+            name: ClaimsBufTextCap
+            reexport: coretoken.ClaimsBufTextCap
+            type: int
+            typed: true
+            value: "256"
+      - const:
+          - doc: ClaimsBufAudienceCap is how many "aud" members a [ClaimsBuf] holds.
+            name: ClaimsBufAudienceCap
+            reexport: coretoken.ClaimsBufAudienceCap
+            type: int
+            typed: true
+            value: "4"
+      - const:
+          - doc: ClaimsBufPrivateCap is how many private claim names a [ClaimsBuf] may declare.
+            name: ClaimsBufPrivateCap
+            reexport: coretoken.ClaimsBufPrivateCap
+            type: int
+            typed: true
+            value: "8"
+      - const:
+          - doc: |-
+              ClaimAbsent is the state of a claim the token did not carry, and of every
+              claim of a reset [ClaimsBuf].
+            name: ClaimAbsent
+            reexport: coretoken.ClaimAbsent
+            type: ClaimState
+            typed: true
+            value: "0"
+      - const:
+          - doc: |-
+              ClaimWrongType is the state of a declared private claim that is not a JSON
+              string.
+            name: ClaimWrongType
+            reexport: coretoken.ClaimWrongType
+            type: ClaimState
+            typed: true
+            value: "1"
+      - const:
+          - doc: ClaimInvalid is the state of a text claim that is the empty string.
+            name: ClaimInvalid
+            reexport: coretoken.ClaimInvalid
+            type: ClaimState
+            typed: true
+            value: "2"
+      - const:
+          - doc: ClaimOK is the state of a claim present with a usable value.
+            name: ClaimOK
+            reexport: coretoken.ClaimOK
+            type: ClaimState
+            typed: true
+            value: "3"
+      - const:
+          - doc: TextIssuer is the "iss" claim of a [ClaimsBuf].
+            name: TextIssuer
+            reexport: coretoken.TextIssuer
+            type: TextClaim
+            typed: true
+            value: "0"
+      - const:
+          - doc: TextSubject is the "sub" claim of a [ClaimsBuf].
+            name: TextSubject
+            reexport: coretoken.TextSubject
+            type: TextClaim
+            typed: true
+            value: "1"
+      - const:
+          - doc: TextID is the "jti" claim of a [ClaimsBuf].
+            name: TextID
+            reexport: coretoken.TextID
+            type: TextClaim
+            typed: true
+            value: "2"
+      - const:
+          - doc: TimeExpiry is the "exp" claim of a [ClaimsBuf].
+            name: TimeExpiry
+            reexport: coretoken.TimeExpiry
+            type: TimeClaim
+            typed: true
+            value: "0"
+      - const:
+          - doc: TimeNotBefore is the "nbf" claim of a [ClaimsBuf].
+            name: TimeNotBefore
+            reexport: coretoken.TimeNotBefore
+            type: TimeClaim
+            typed: true
+            value: "1"
+      - const:
+          - doc: TimeIssuedAt is the "iat" claim of a [ClaimsBuf].
+            name: TimeIssuedAt
+            reexport: coretoken.TimeIssuedAt
+            type: TimeClaim
+            typed: true
+            value: "2"
       - const:
           - doc: |-
               KeyTypeEC is the JWK "kty" of an elliptic-curve key on a NIST prime curve
@@ -2453,6 +3063,25 @@ packages:
             name: LifetimeTooLong
             reexport: coretoken.LifetimeTooLong
             type: "*kernelerrs.Error"
+          - doc: |-
+              ScratchBusy is returned by [VerifierInto] when the scratch it was given is
+              held by another verification — one scratch shared across threads. No MAC
+              was computed.
+            name: ScratchBusy
+            reexport: coretoken.ScratchBusy
+            type: "*kernelerrs.Error"
+          - doc: |-
+              ScratchForeign is returned by [VerifierInto] for a scratch the verifier did
+              not make: nil, the zero scratch, or another verifier's.
+            name: ScratchForeign
+            reexport: coretoken.ScratchForeign
+            type: "*kernelerrs.Error"
+          - doc: |-
+              ClaimsBufOverflow is returned when a claim does not fit a [ClaimsBuf]. The
+              claim is refused, never truncated.
+            name: ClaimsBufOverflow
+            reexport: coretoken.ClaimsBufOverflow
+            type: "*kernelerrs.Error"
           - blank: true
             doc: |-
               HeaderUnsupported is returned for a header carrying a non-empty "crit",
@@ -2552,6 +3181,39 @@ packages:
             name: Verifier
             target: coretoken.Verifier
       - alias:
+          - doc: |-
+              VerifierInto is the public alias for the allocation-free verifying port,
+              reached by a type assertion on a [Verifier]: the HS256 verifier implements
+              it. It verifies into a [ClaimsBuf] through a [VerifyScratch], both owned by
+              the caller, and it is the SDK's only port that is not safe for concurrent
+              use through one scratch — make one scratch per thread.
+            name: VerifierInto
+            target: coretoken.VerifierInto
+      - alias:
+          - doc: |-
+              VerifyScratch is the public alias for a [VerifierInto] caller's mutable MAC
+              state: one per thread, refused when shared or foreign.
+            name: VerifyScratch
+            target: coretoken.VerifyScratch
+      - alias:
+          - doc: |-
+              ClaimsBuf is the public alias for the caller-owned, fixed-capacity claim
+              set a [VerifierInto] fills without allocating.
+            name: ClaimsBuf
+            target: coretoken.ClaimsBuf
+      - alias:
+          - doc: ClaimState is the public alias for what a [ClaimsBuf] knows about one claim.
+            name: ClaimState
+            target: coretoken.ClaimState
+      - alias:
+          - doc: TextClaim is the public alias naming a registered text claim of a [ClaimsBuf].
+            name: TextClaim
+            target: coretoken.TextClaim
+      - alias:
+          - doc: TimeClaim is the public alias naming a registered instant of a [ClaimsBuf].
+            name: TimeClaim
+            target: coretoken.TimeClaim
+      - alias:
           - doc: IssuerConfig is the public alias for the JWT issuing policy.
             name: IssuerConfig
             target: svctoken.IssuerConfig
@@ -2583,6 +3245,23 @@ packages:
           name: NewClaims
           out:
             - type: Claims
+      - func:
+          doc: |-
+            NewClaimsBuf returns an empty [ClaimsBuf] declaring the private claim names
+            private: the claims a [VerifierInto] copies, decoded, when they are JSON
+            strings. A bad name is refused with [ClaimNameInvalid], too many with
+            [ClaimsBufOverflow].
+          forward: coretoken.NewClaimsBuf
+          in:
+            - name: private
+              type: string
+          name: NewClaimsBuf
+          out:
+            - name: buf
+              type: "*ClaimsBuf"
+            - name: err
+              type: error
+          variadic: true
     functions:
       - doc: |-
           PrivateClaim decodes the named application claim of claims into T.

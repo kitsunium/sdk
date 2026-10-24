@@ -48,7 +48,7 @@ func (s *depthScan) consumeStructuralByte(char byte) {
 	case '{', '[':
 		s.depth++
 	//: and closes one. An unbalanced close only makes depth wrong-but-smaller;
-	//: encoding/json is what rejects malformed structure.
+	//: the scanner is what rejects malformed structure.
 	case '}', ']':
 		s.depth--
 	}

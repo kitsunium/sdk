@@ -81,6 +81,10 @@ Parsing is the only way to obtain a [JWK](#JWK): the type has no exported field 
   - a token past MaxTokenLen, or claims past MaxClaimDepth — both checked before any decode allocates.
   - a repeated JSON member in the header or the claims (RFC 8725 §2.6).
 
+### Verifying on an event loop without allocating
+
+The HS256 verifier also implements [VerifierInto](#VerifierInto), reached by a type assertion. Each thread makes one [VerifyScratch](#VerifyScratch) (VerifierInto.NewScratch) and one [ClaimsBuf](#ClaimsBuf) ([NewClaimsBuf](#NewClaimsBuf), declaring the private claims it reads), once, and reuses both for every request: the token is read straight out of the receive buffer as a \[]byte, and nothing is allocated per call. The refusals are Verify's, in Verify's order, plus [ClaimsBufOverflow](#ClaimsBufOverflow) for a claim larger than the buffer's fixed slots — never truncated. A scratch is not shareable: a second concurrent use is refused with [ScratchBusy](#ScratchBusy) before any MAC is computed, and another verifier's with [ScratchForeign](#ScratchForeign).
+
 ### Testing time without sleeping
 
 Every config has a Clock field, and it takes any value with the two methods Now and Since — so the fake is one a test writes itself, and an expiry test moves time by assignment instead of by sleeping:
@@ -107,6 +111,7 @@ Move it between calls, or guard it with a mutex if a verifier reads it from anot
 - [Constants](<#constants>)
 - [Variables](<#variables>)
 - [func NewClaims\(\) Claims](<#NewClaims>)
+- [func NewClaimsBuf\(private ...string\) \(buf \*ClaimsBuf, err error\)](<#NewClaimsBuf>)
 - [func NewES256Issuer\(priv \*ecdsa.PrivateKey, cfg IssuerConfig\) \(issuer Issuer, err error\)](<#NewES256Issuer>)
 - [func NewES256Verifier\(pub \*ecdsa.PublicKey, cfg VerifierConfig\) \(verifier Verifier, err error\)](<#NewES256Verifier>)
 - [func NewEdDSAIssuer\(priv ed25519.PrivateKey, cfg IssuerConfig\) \(issuer Issuer, err error\)](<#NewEdDSAIssuer>)
@@ -125,6 +130,8 @@ Move it between calls, or guard it with a mutex if a verifier reads it from anot
 - [type Algorithm](<#Algorithm>)
   - [func \(Algorithm\) Known\(\) bool](<#Algorithm.Known>)
   - [func \(Algorithm\) String\(\) string](<#Algorithm.String>)
+- [type ClaimState](<#ClaimState>)
+  - [func \(ClaimState\) String\(\) string](<#ClaimState.String>)
 - [type Claims](<#Claims>)
   - [func \(Claims\) Audience\(\) \[\]string](<#Claims.Audience>)
   - [func \(Claims\) Expiry\(\) time.Time](<#Claims.Expiry>)
@@ -146,6 +153,22 @@ Move it between calls, or guard it with a mutex if a verifier reads it from anot
   - [func \(Claims\) WithNotBefore\(nbf time.Time\) ClaimsValue](<#Claims.WithNotBefore>)
   - [func \(Claims\) WithPrivateRaw\(name string, raw \[\]byte\) \(claims ClaimsValue, err error\)](<#Claims.WithPrivateRaw>)
   - [func \(Claims\) WithSubject\(sub string\) ClaimsValue](<#Claims.WithSubject>)
+- [type ClaimsBuf](<#ClaimsBuf>)
+  - [func \(\*ClaimsBuf\) AppendAudience\(value \[\]byte\) error](<#ClaimsBuf.AppendAudience>)
+  - [func \(\*ClaimsBuf\) Audience\(i int\) \(value \[\]byte, state ClaimState\)](<#ClaimsBuf.Audience>)
+  - [func \(\*ClaimsBuf\) AudienceLen\(\) int](<#ClaimsBuf.AudienceLen>)
+  - [func \(\*ClaimsBuf\) Declared\(\) int](<#ClaimsBuf.Declared>)
+  - [func \(ClaimsBuf\) GoString\(\) string](<#ClaimsBuf.GoString>)
+  - [func \(\*ClaimsBuf\) MarkPrivate\(i int, state ClaimState\)](<#ClaimsBuf.MarkPrivate>)
+  - [func \(\*ClaimsBuf\) Private\(name string\) \(value \[\]byte, state ClaimState\)](<#ClaimsBuf.Private>)
+  - [func \(\*ClaimsBuf\) PrivateIndex\(name \[\]byte\) int](<#ClaimsBuf.PrivateIndex>)
+  - [func \(\*ClaimsBuf\) Reset\(\)](<#ClaimsBuf.Reset>)
+  - [func \(\*ClaimsBuf\) SetPrivate\(i int, value \[\]byte\) error](<#ClaimsBuf.SetPrivate>)
+  - [func \(\*ClaimsBuf\) SetText\(c TextClaim, value \[\]byte\) error](<#ClaimsBuf.SetText>)
+  - [func \(\*ClaimsBuf\) SetUnix\(c TimeClaim, sec int64, nsec int32\)](<#ClaimsBuf.SetUnix>)
+  - [func \(ClaimsBuf\) String\(\) string](<#ClaimsBuf.String>)
+  - [func \(\*ClaimsBuf\) Text\(c TextClaim\) \(value \[\]byte, state ClaimState\)](<#ClaimsBuf.Text>)
+  - [func \(\*ClaimsBuf\) Unix\(c TimeClaim\) \(sec int64, nsec int32, state ClaimState\)](<#ClaimsBuf.Unix>)
 - [type Curve](<#Curve>)
 - [type Issuer](<#Issuer>)
   - [func \(Issuer\) Issue\(claims ClaimsValue\) \(string, error\)](<#Issuer.Issue>)
@@ -197,9 +220,20 @@ Move it between calls, or guard it with a mutex if a verifier reads it from anot
 - [type KeyType](<#KeyType>)
 - [type PasetoIssuerConfig](<#PasetoIssuerConfig>)
 - [type PasetoVerifierConfig](<#PasetoVerifierConfig>)
+- [type TextClaim](<#TextClaim>)
+- [type TimeClaim](<#TimeClaim>)
 - [type Verifier](<#Verifier>)
   - [func \(Verifier\) Verify\(token string\) \(ClaimsValue, error\)](<#Verifier.Verify>)
 - [type VerifierConfig](<#VerifierConfig>)
+- [type VerifierInto](<#VerifierInto>)
+  - [func \(VerifierInto\) NewScratch\(\) \*VerifyScratch](<#VerifierInto.NewScratch>)
+  - [func \(VerifierInto\) VerifyInto\(s \*VerifyScratch, token \[\]byte, dst \*ClaimsBuf\) error](<#VerifierInto.VerifyInto>)
+- [type VerifyScratch](<#VerifyScratch>)
+  - [func \(\*VerifyScratch\) Enter\(owner any\) error](<#VerifyScratch.Enter>)
+  - [func \(\*VerifyScratch\) GoString\(\) string](<#VerifyScratch.GoString>)
+  - [func \(\*VerifyScratch\) Leave\(\)](<#VerifyScratch.Leave>)
+  - [func \(\*VerifyScratch\) MACEqual\(input \[\]byte, tag \[\]byte\) bool](<#VerifyScratch.MACEqual>)
+  - [func \(\*VerifyScratch\) String\(\) string](<#VerifyScratch.String>)
 
 ## Constants
 
@@ -239,6 +273,15 @@ AlgorithmPasetoV4Public is PASETO v4.public — Ed25519 over the pre-authenticat
 
 Initialised with `github.com/kitsunium/sdk/internal/core/security/token.AlgorithmPasetoV4Public`.
 
+<a name="ClaimAbsent"></a>
+```go
+const ClaimAbsent ClaimState = 0
+```
+
+ClaimAbsent is the state of a claim the token did not carry, and of every claim of a reset [ClaimsBuf](#ClaimsBuf).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/security/token.ClaimAbsent`.
+
 <a name="ClaimAudience"></a>
 ```go
 const ClaimAudience string = "aud"
@@ -265,6 +308,15 @@ const ClaimID string = "jti"
 ClaimID is the registered claim "jti" (RFC 7519 §4.1.7).
 
 Initialised with `github.com/kitsunium/sdk/internal/core/security/token.ClaimID`.
+
+<a name="ClaimInvalid"></a>
+```go
+const ClaimInvalid ClaimState = 2
+```
+
+ClaimInvalid is the state of a text claim that is the empty string.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/security/token.ClaimInvalid`.
 
 <a name="ClaimIssuedAt"></a>
 ```go
@@ -293,6 +345,15 @@ ClaimNotBefore is the registered claim "nbf" (RFC 7519 §4.1.5).
 
 Initialised with `github.com/kitsunium/sdk/internal/core/security/token.ClaimNotBefore`.
 
+<a name="ClaimOK"></a>
+```go
+const ClaimOK ClaimState = 3
+```
+
+ClaimOK is the state of a claim present with a usable value.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/security/token.ClaimOK`.
+
 <a name="ClaimSubject"></a>
 ```go
 const ClaimSubject string = "sub"
@@ -301,6 +362,42 @@ const ClaimSubject string = "sub"
 ClaimSubject is the registered claim "sub" (RFC 7519 §4.1.2).
 
 Initialised with `github.com/kitsunium/sdk/internal/core/security/token.ClaimSubject`.
+
+<a name="ClaimWrongType"></a>
+```go
+const ClaimWrongType ClaimState = 1
+```
+
+ClaimWrongType is the state of a declared private claim that is not a JSON string.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/security/token.ClaimWrongType`.
+
+<a name="ClaimsBufAudienceCap"></a>
+```go
+const ClaimsBufAudienceCap int = 4
+```
+
+ClaimsBufAudienceCap is how many "aud" members a [ClaimsBuf](#ClaimsBuf) holds.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/security/token.ClaimsBufAudienceCap`.
+
+<a name="ClaimsBufPrivateCap"></a>
+```go
+const ClaimsBufPrivateCap int = 8
+```
+
+ClaimsBufPrivateCap is how many private claim names a [ClaimsBuf](#ClaimsBuf) may declare.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/security/token.ClaimsBufPrivateCap`.
+
+<a name="ClaimsBufTextCap"></a>
+```go
+const ClaimsBufTextCap int = 256
+```
+
+ClaimsBufTextCap is the capacity, in octets, of every text slot of a [ClaimsBuf](#ClaimsBuf).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/security/token.ClaimsBufTextCap`.
 
 <a name="CodeAlgorithmMismatch"></a>
 ```go
@@ -345,6 +442,17 @@ CodeClaimNameInvalid identifies an empty or reserved private-claim name (0.2.13.
 Initialised with `github.com/kitsunium/sdk/internal/core/security/token.CodeClaimNameInvalid`.
 
 Code `0.2.13.15`
+
+<a name="CodeClaimsBufOverflow"></a>
+```go
+const CodeClaimsBufOverflow errs.Code = 134419
+```
+
+CodeClaimsBufOverflow identifies a claim past the fixed capacity of a [ClaimsBuf](#ClaimsBuf) (0.2.13.19).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/security/token.CodeClaimsBufOverflow`.
+
+Code `0.2.13.19`
 
 <a name="CodeDuplicateMember"></a>
 ```go
@@ -588,6 +696,28 @@ Initialised with `github.com/kitsunium/sdk/internal/core/security/token.CodeSche
 
 Code `0.3.44.6`
 
+<a name="CodeScratchBusy"></a>
+```go
+const CodeScratchBusy errs.Code = 134417
+```
+
+CodeScratchBusy identifies a [VerifyScratch](#VerifyScratch) entered while another verification held it (0.2.13.17).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/security/token.CodeScratchBusy`.
+
+Code `0.2.13.17`
+
+<a name="CodeScratchForeign"></a>
+```go
+const CodeScratchForeign errs.Code = 134418
+```
+
+CodeScratchForeign identifies a [VerifyScratch](#VerifyScratch) the verifier did not make (0.2.13.18).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/security/token.CodeScratchForeign`.
+
+Code `0.2.13.18`
+
 <a name="CodeSignatureInvalid"></a>
 ```go
 const CodeSignatureInvalid errs.Code = 134404
@@ -684,6 +814,60 @@ KeyTypeOct is the JWK "kty" of a symmetric key carried whole in "k" (RFC 7518 §
 
 Initialised with `github.com/kitsunium/sdk/internal/service/crypto/key/jwk.TypeOct`.
 
+<a name="TextID"></a>
+```go
+const TextID TextClaim = 2
+```
+
+TextID is the "jti" claim of a [ClaimsBuf](#ClaimsBuf).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/security/token.TextID`.
+
+<a name="TextIssuer"></a>
+```go
+const TextIssuer TextClaim = 0
+```
+
+TextIssuer is the "iss" claim of a [ClaimsBuf](#ClaimsBuf).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/security/token.TextIssuer`.
+
+<a name="TextSubject"></a>
+```go
+const TextSubject TextClaim = 1
+```
+
+TextSubject is the "sub" claim of a [ClaimsBuf](#ClaimsBuf).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/security/token.TextSubject`.
+
+<a name="TimeExpiry"></a>
+```go
+const TimeExpiry TimeClaim = 0
+```
+
+TimeExpiry is the "exp" claim of a [ClaimsBuf](#ClaimsBuf).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/security/token.TimeExpiry`.
+
+<a name="TimeIssuedAt"></a>
+```go
+const TimeIssuedAt TimeClaim = 2
+```
+
+TimeIssuedAt is the "iat" claim of a [ClaimsBuf](#ClaimsBuf).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/security/token.TimeIssuedAt`.
+
+<a name="TimeNotBefore"></a>
+```go
+const TimeNotBefore TimeClaim = 1
+```
+
+TimeNotBefore is the "nbf" claim of a [ClaimsBuf](#ClaimsBuf).
+
+Initialised with `github.com/kitsunium/sdk/internal/core/security/token.TimeNotBefore`.
+
 ## Variables
 
 <a name="AlgorithmMismatch"></a>
@@ -729,6 +913,17 @@ ClaimNameInvalid is returned for a private claim name that is empty or shadows a
 Initialised with `github.com/kitsunium/sdk/internal/core/security/token.ClaimNameInvalid`.
 
 Code `0.2.13.15` · reason `CLAIM_NAME_INVALID` · public "The claim name is empty or reserved"
+
+<a name="ClaimsBufOverflow"></a>
+```go
+var ClaimsBufOverflow *errs.Error
+```
+
+ClaimsBufOverflow is returned when a claim does not fit a [ClaimsBuf](#ClaimsBuf). The claim is refused, never truncated.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/security/token.ClaimsBufOverflow`.
+
+Code `0.2.13.19` · reason `CLAIMS_BUF_OVERFLOW` · public "The token carries a claim larger than this recipient accepts"
 
 <a name="DuplicateMember"></a>
 ```go
@@ -972,6 +1167,28 @@ Initialised with `github.com/kitsunium/sdk/internal/core/security/token.SchemeUn
 
 Code `0.3.44.6` · reason `SCHEME_UNSUPPORTED` · public "This token version and purpose are not supported"
 
+<a name="ScratchBusy"></a>
+```go
+var ScratchBusy *errs.Error
+```
+
+ScratchBusy is returned by [VerifierInto](#VerifierInto) when the scratch it was given is held by another verification — one scratch shared across threads. No MAC was computed.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/security/token.ScratchBusy`.
+
+Code `0.2.13.17` · reason `SCRATCH_BUSY` · public "The token could not be verified"
+
+<a name="ScratchForeign"></a>
+```go
+var ScratchForeign *errs.Error
+```
+
+ScratchForeign is returned by [VerifierInto](#VerifierInto) for a scratch the verifier did not make: nil, the zero scratch, or another verifier's.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/security/token.ScratchForeign`.
+
+Code `0.2.13.18` · reason `SCRATCH_FOREIGN` · public "The token could not be verified"
+
 <a name="SignatureInvalid"></a>
 ```go
 var SignatureInvalid *errs.Error
@@ -1013,6 +1230,15 @@ func NewClaims() Claims
 ```
 
 NewClaims returns an empty claim set to build on with the With\* methods.
+
+<a name="NewClaimsBuf"></a>
+## func [NewClaimsBuf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
+
+```go
+func NewClaimsBuf(private ...string) (buf *ClaimsBuf, err error)
+```
+
+NewClaimsBuf returns an empty [ClaimsBuf](#ClaimsBuf) declaring the private claim names private: the claims a [VerifierInto](#VerifierInto) copies, decoded, when they are JSON strings. A bad name is refused with [ClaimNameInvalid](#ClaimNameInvalid), too many with [ClaimsBufOverflow](#ClaimsBufOverflow).
 
 <a name="NewES256Issuer"></a>
 ## func [NewES256Issuer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
@@ -1201,6 +1427,30 @@ func (Algorithm) String() string
 ```
 
 String reports the wire name of a — the JOSE "alg" header value for the JWS algorithms, and the version+purpose header for PASETO. An unknown Algorithm renders "unknown", which matches no wire name, so a zero value can never be mistaken for a real header on either side of a comparison.
+
+<a name="ClaimState"></a>
+## type [ClaimState](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
+
+ClaimState is the public alias for what a [ClaimsBuf](#ClaimsBuf) knows about one claim.
+
+```go
+type ClaimState = coretoken.ClaimState
+```
+
+ClaimState is an alias of `github.com/kitsunium/sdk/internal/core/security/token.ClaimState`, declared as:
+
+```go
+type ClaimState uint8
+```
+
+<a name="ClaimState.String"></a>
+### func \(ClaimState\) [String](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_buf.go>)
+
+```go
+func (ClaimState) String() string
+```
+
+String reports the state's name: "absent", "wrong\_type", "invalid" or "ok".
 
 <a name="Claims"></a>
 ## type [Claims](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
@@ -1406,6 +1656,156 @@ func (Claims) WithSubject(sub string) ClaimsValue
 ```
 
 WithSubject returns a copy of c carrying sub. The empty string clears it.
+
+<a name="ClaimsBuf"></a>
+## type [ClaimsBuf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
+
+ClaimsBuf is the public alias for the caller-owned, fixed-capacity claim set a [VerifierInto](#VerifierInto) fills without allocating.
+
+```go
+type ClaimsBuf = coretoken.ClaimsBuf
+```
+
+ClaimsBuf is an alias of `github.com/kitsunium/sdk/internal/core/security/token.ClaimsBuf`, declared as:
+
+```go
+type ClaimsBuf struct{}
+```
+
+<a name="ClaimsBuf.AppendAudience"></a>
+### func \(ClaimsBuf\) [AppendAudience](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_buf.go>)
+
+```go
+func (*ClaimsBuf) AppendAudience(value []byte) error
+```
+
+AppendAudience stores value, decoded, as the next "aud" member. A member past [ClaimsBufAudienceCap](#ClaimsBufAudienceCap), or longer than [ClaimsBufTextCap](#ClaimsBufTextCap), is refused with [ClaimsBufOverflow](#ClaimsBufOverflow). It is the writer a [VerifierInto](#VerifierInto) implementation fills the buffer with.
+
+<a name="ClaimsBuf.Audience"></a>
+### func \(ClaimsBuf\) [Audience](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_buf.go>)
+
+```go
+func (*ClaimsBuf) Audience(i int) (value []byte, state ClaimState)
+```
+
+Audience returns a view of the i-th "aud" member and its state; out of range, it is absent.
+
+<a name="ClaimsBuf.AudienceLen"></a>
+### func \(ClaimsBuf\) [AudienceLen](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_buf.go>)
+
+```go
+func (*ClaimsBuf) AudienceLen() int
+```
+
+AudienceLen reports how many "aud" members b holds.
+
+<a name="ClaimsBuf.Declared"></a>
+### func \(ClaimsBuf\) [Declared](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_buf.go>)
+
+```go
+func (*ClaimsBuf) Declared() int
+```
+
+Declared reports how many private claim names b declares.
+
+<a name="ClaimsBuf.GoString"></a>
+### func \(ClaimsBuf\) [GoString](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_buf.go>)
+
+```go
+func (ClaimsBuf) GoString() string
+```
+
+GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses String for Go-syntax formatting and would otherwise dump every slot.
+
+<a name="ClaimsBuf.MarkPrivate"></a>
+### func \(ClaimsBuf\) [MarkPrivate](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_buf.go>)
+
+```go
+func (*ClaimsBuf) MarkPrivate(i int, state ClaimState)
+```
+
+MarkPrivate sets the state of the private claim declared at index i without a value — [ClaimWrongType](#ClaimWrongType) for a member that is not a JSON string. It is the writer a [VerifierInto](#VerifierInto) implementation fills the buffer with; an index b does not declare is ignored.
+
+<a name="ClaimsBuf.Private"></a>
+### func \(ClaimsBuf\) [Private](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_buf.go>)
+
+```go
+func (*ClaimsBuf) Private(name string) (value []byte, state ClaimState)
+```
+
+Private returns a view of the declared private claim name and its state. A name b does not declare is reported absent.
+
+<a name="ClaimsBuf.PrivateIndex"></a>
+### func \(ClaimsBuf\) [PrivateIndex](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_buf.go>)
+
+```go
+func (*ClaimsBuf) PrivateIndex(name []byte) int
+```
+
+PrivateIndex returns the declaration index of the private claim name, or -1 when b does not declare it. name is the member name as the token spells it.
+
+<a name="ClaimsBuf.Reset"></a>
+### func \(ClaimsBuf\) [Reset](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_buf.go>)
+
+```go
+func (*ClaimsBuf) Reset()
+```
+
+Reset clears every value and state of b, keeping its declared names.
+
+<a name="ClaimsBuf.SetPrivate"></a>
+### func \(ClaimsBuf\) [SetPrivate](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_buf.go>)
+
+```go
+func (*ClaimsBuf) SetPrivate(i int, value []byte) error
+```
+
+SetPrivate stores value, decoded, as the private claim declared at index i. The empty value is stored as [ClaimInvalid](#ClaimInvalid); a value longer than [ClaimsBufTextCap](#ClaimsBufTextCap) is refused with [ClaimsBufOverflow](#ClaimsBufOverflow) and leaves the claim absent. It is the writer a [VerifierInto](#VerifierInto) implementation fills the buffer with; an index b does not declare is refused with [ClaimsBufOverflow](#ClaimsBufOverflow).
+
+<a name="ClaimsBuf.SetText"></a>
+### func \(ClaimsBuf\) [SetText](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_buf.go>)
+
+```go
+func (*ClaimsBuf) SetText(c TextClaim, value []byte) error
+```
+
+SetText stores value, decoded, as the registered text claim c. The empty value is stored as [ClaimInvalid](#ClaimInvalid). A value longer than [ClaimsBufTextCap](#ClaimsBufTextCap) is refused with [ClaimsBufOverflow](#ClaimsBufOverflow) and leaves the claim absent. It is the writer a [VerifierInto](#VerifierInto) implementation fills the buffer with.
+
+<a name="ClaimsBuf.SetUnix"></a>
+### func \(ClaimsBuf\) [SetUnix](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_buf.go>)
+
+```go
+func (*ClaimsBuf) SetUnix(c TimeClaim, sec int64, nsec int32)
+```
+
+SetUnix stores the registered instant c as Unix seconds and nanoseconds, in the [ClaimOK](#ClaimOK) state. It is the writer a [VerifierInto](#VerifierInto) implementation fills the buffer with; an out-of-range c is ignored.
+
+<a name="ClaimsBuf.String"></a>
+### func \(ClaimsBuf\) [String](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_buf.go>)
+
+```go
+func (ClaimsBuf) String() string
+```
+
+String implements fmt.Stringer and renders the SHAPE of b, never a value: "token.ClaimsBuf{registered:3 aud:1 private:1/2}" — the registered claims that are usable, the audience members, and the usable private claims over the declared ones. Like a \[ClaimsValue], a ClaimsBuf holds the output of an authentication decision, and %v is how such output reaches a log. The receiver is a value, so a ClaimsBuf formatted by value is redacted too.
+
+<a name="ClaimsBuf.Text"></a>
+### func \(ClaimsBuf\) [Text](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_buf.go>)
+
+```go
+func (*ClaimsBuf) Text(c TextClaim) (value []byte, state ClaimState)
+```
+
+Text returns a view of the registered text claim c and its state. The view is nil unless the state is [ClaimOK](#ClaimOK).
+
+<a name="ClaimsBuf.Unix"></a>
+### func \(ClaimsBuf\) [Unix](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/claims_buf.go>)
+
+```go
+func (*ClaimsBuf) Unix(c TimeClaim) (sec int64, nsec int32, state ClaimState)
+```
+
+Unix returns the registered instant c as Unix seconds and nanoseconds, and its state. Both numbers are zero unless the state is [ClaimOK](#ClaimOK).
 
 <a name="Curve"></a>
 ## type [Curve](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
@@ -2015,6 +2415,36 @@ type PasetoVerifierConfig struct {
 }
 ```
 
+<a name="TextClaim"></a>
+## type [TextClaim](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
+
+TextClaim is the public alias naming a registered text claim of a [ClaimsBuf](#ClaimsBuf).
+
+```go
+type TextClaim = coretoken.TextClaim
+```
+
+TextClaim is an alias of `github.com/kitsunium/sdk/internal/core/security/token.TextClaim`, declared as:
+
+```go
+type TextClaim uint8
+```
+
+<a name="TimeClaim"></a>
+## type [TimeClaim](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
+
+TimeClaim is the public alias naming a registered instant of a [ClaimsBuf](#ClaimsBuf).
+
+```go
+type TimeClaim = coretoken.TimeClaim
+```
+
+TimeClaim is an alias of `github.com/kitsunium/sdk/internal/core/security/token.TimeClaim`, declared as:
+
+```go
+type TimeClaim uint8
+```
+
 <a name="Verifier"></a>
 ## type [Verifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
 
@@ -2093,5 +2523,140 @@ type VerifierConfig struct {
 	Clock              clock.Clock
 }
 ```
+
+<a name="VerifierInto"></a>
+## type [VerifierInto](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
+
+VerifierInto is the public alias for the allocation-free verifying port, reached by a type assertion on a [Verifier](#Verifier): the HS256 verifier implements it. It verifies into a [ClaimsBuf](#ClaimsBuf) through a [VerifyScratch](#VerifyScratch), both owned by the caller, and it is the SDK's only port that is not safe for concurrent use through one scratch — make one scratch per thread.
+
+```go
+type VerifierInto = coretoken.VerifierInto
+```
+
+VerifierInto is an alias of `github.com/kitsunium/sdk/internal/core/security/token.VerifierInto`, declared as:
+
+```go
+type VerifierInto interface {
+	// NewScratch returns a fresh scratch bound to this verifier, its MAC keyed
+	// and primed. Make one per thread, once, and reuse it.
+	NewScratch() *VerifyScratch
+	// VerifyInto authenticates token with the scratch s and stores its claims
+	// in dst, which it overwrites on entry. token is read, never retained: dst
+	// aliases neither it nor the memory it was received in.
+	VerifyInto(s *VerifyScratch, token []byte, dst *ClaimsBuf) error
+}
+```
+
+<details><summary>Example</summary>
+<p>
+
+ExampleVerifierInto verifies a token into a reused buffer through a per-thread scratch, allocating nothing per request.
+
+```go
+secret, _ := crypto.NewKey(bytes.Repeat([]byte{1}, 32))
+issuer, _ := token.NewHS256Issuer(secret, token.IssuerConfig{Lifetime: time.Hour})
+claims, _ := token.SetPrivateClaim(token.NewClaims().WithSubject("42"), "username", "alice")
+minted, _ := issuer.Issue(claims)
+verifier, _ := token.NewHS256Verifier(secret, token.VerifierConfig{})
+into := verifier.(token.VerifierInto)
+scratch := into.NewScratch()
+buf, _ := token.NewClaimsBuf("username")
+if err := into.VerifyInto(scratch, []byte(minted), buf); err != nil {
+	fmt.Println("refused:", err)
+	return
+}
+sub, _ := buf.Text(token.TextSubject)
+name, state := buf.Private("username")
+fmt.Println(string(sub), string(name), state)
+fmt.Println(buf)
+```
+
+#### Output
+
+```
+42 alice ok
+token.ClaimsBuf{registered:3 aud:0 private:1/1}
+```
+
+</p>
+</details>
+
+<a name="VerifierInto.NewScratch"></a>
+### func \(VerifierInto\) [NewScratch](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/gen_ports.go>)
+
+```go
+func (VerifierInto) NewScratch() *VerifyScratch
+```
+
+NewScratch returns a fresh scratch bound to this verifier, its MAC keyed and primed. Make one per thread, once, and reuse it.
+
+<a name="VerifierInto.VerifyInto"></a>
+### func \(VerifierInto\) [VerifyInto](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/gen_ports.go>)
+
+```go
+func (VerifierInto) VerifyInto(s *VerifyScratch, token []byte, dst *ClaimsBuf) error
+```
+
+VerifyInto authenticates token with the scratch s and stores its claims in dst, which it overwrites on entry. token is read, never retained: dst aliases neither it nor the memory it was received in.
+
+<a name="VerifyScratch"></a>
+## type [VerifyScratch](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
+
+VerifyScratch is the public alias for a [VerifierInto](#VerifierInto) caller's mutable MAC state: one per thread, refused when shared or foreign.
+
+```go
+type VerifyScratch = coretoken.VerifyScratch
+```
+
+VerifyScratch is an alias of `github.com/kitsunium/sdk/internal/core/security/token.VerifyScratch`, declared as:
+
+```go
+type VerifyScratch struct{}
+```
+
+<a name="VerifyScratch.Enter"></a>
+### func \(VerifyScratch\) [Enter](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/scratch.go>)
+
+```go
+func (*VerifyScratch) Enter(owner any) error
+```
+
+Enter claims s for one verification by the verifier whose token is owner. It refuses a nil scratch, the zero scratch and one made for another owner with [ScratchForeign](#ScratchForeign), and a scratch another call holds with [ScratchBusy](#ScratchBusy) — in every case before any MAC is computed. A nil error must be paired with exactly one [VerifyScratch.Leave](#VerifyScratch.Leave).
+
+<a name="VerifyScratch.GoString"></a>
+### func \(VerifyScratch\) [GoString](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/scratch.go>)
+
+```go
+func (*VerifyScratch) GoString() string
+```
+
+GoString implements fmt.GoStringer so %#v stays redacted too — fmt bypasses String for Go-syntax formatting and would otherwise dump the keyed MAC.
+
+<a name="VerifyScratch.Leave"></a>
+### func \(VerifyScratch\) [Leave](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/scratch.go>)
+
+```go
+func (*VerifyScratch) Leave()
+```
+
+Leave clears the tag s summed into and releases s for the next verification. It is called once per successful [VerifyScratch.Enter](#VerifyScratch.Enter), on every exit path.
+
+<a name="VerifyScratch.MACEqual"></a>
+### func \(VerifyScratch\) [MACEqual](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/scratch.go>)
+
+```go
+func (*VerifyScratch) MACEqual(input []byte, tag []byte) bool
+```
+
+MACEqual reports whether tag authenticates input under the scratch's key, comparing with hmac.Equal so the check is constant-time. It reports false on a scratch that is not entered, and clears the computed tag before it returns, whatever the outcome.
+
+<a name="VerifyScratch.String"></a>
+### func \(VerifyScratch\) [String](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/scratch.go>)
+
+```go
+func (*VerifyScratch) String() string
+```
+
+String implements fmt.Stringer and renders the SHAPE of s, never its state: "token.VerifyScratch{owned:true busy:false}".
 
 Generated from [docs/api](<https://github.com/kitsunium/sdk/blob/main/docs/api>) by tools/genindex.

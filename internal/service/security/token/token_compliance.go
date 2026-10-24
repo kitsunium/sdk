@@ -23,4 +23,7 @@ var (
 	_ coretoken.Verifier = (*jwsVerifier)(nil)
 	_ coretoken.Verifier = (*pasetoVerifier)(nil)
 	_ coretoken.Verifier = (*setVerifier)(nil)
+	_ coretoken.Verifier = (*hs256Verifier)(nil)
+
+	_ coretoken.VerifierInto = (*hs256Verifier)(nil)
 )

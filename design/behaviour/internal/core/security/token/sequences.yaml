@@ -95,6 +95,262 @@ sequences:
     steps:
       - return: c.String()
         to: c.String
+  - of: ClaimState.String
+    steps:
+      - switch:
+          cases:
+            - case: ClaimAbsent
+              do:
+                - return: "\"absent\""
+            - case: ClaimWrongType
+              do:
+                - return: "\"wrong_type\""
+            - case: ClaimInvalid
+              do:
+                - return: "\"invalid\""
+            - case: ClaimOK
+              do:
+                - return: "\"ok\""
+            - default: true
+              do:
+                - return: "\"unknown\""
+          "on": s
+  - of: NewClaimsBuf
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewClaimsBuf
+        kind: self
+      - id: buf.declare
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, ClaimsBufOverflow
+          when: len(private) > ClaimsBufPrivateCap
+      - set: buf
+        value: "&ClaimsBuf{}"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil, derr
+                init:
+                  bind: derr
+                  eval: buf.declare(name)
+                  to: buf.declare
+                when: derr != nil
+          key: _
+          range: private
+          value: name
+      - return: buf, nil
+  - of: plainMemberName
+    participants:
+      - id: caller
+        kind: actor
+      - id: plainMemberName
+        kind: self
+      - id: utf8
+        kind: stdlib
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                init:
+                  bind: c
+                  eval: name[i]
+                when: c == '"' || c == '\\' || c < ' '
+          key: i
+          range: len(name)
+      - return: utf8.ValidString(name)
+        to: utf8
+  - of: (*ClaimsBuf).Reset
+    steps:
+      - set: b.text
+        value: "[textClaims]textSlot{}"
+      - set: b.times
+        value: "[timeClaims]timeSlot{}"
+      - set: b.audience
+        value: "[ClaimsBufAudienceCap]textSlot{}"
+      - set: b.audienceLen
+        value: "0"
+      - set: b.private
+        value: "[ClaimsBufPrivateCap]textSlot{}"
+  - of: (*ClaimsBuf).Text
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ClaimsBuf).Text
+        kind: self
+      - id: b.text[c].view
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, ClaimAbsent
+          when: int(c) >= textClaims
+      - return: b.text[c].view()
+        to: b.text[c].view
+  - of: (*ClaimsBuf).SetText
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ClaimsBuf).SetText
+        kind: self
+      - id: b.text[c].set
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ClaimsBufOverflow
+          when: int(c) >= textClaims
+      - return: b.text[c].set(value)
+        to: b.text[c].set
+  - of: (*ClaimsBuf).Unix
+    steps:
+      - opt:
+          do:
+            - return: 0, 0, ClaimAbsent
+          when: int(c) >= timeClaims
+      - bind: slot
+        eval: b.times[c]
+      - return: slot.sec, slot.nsec, slot.state
+  - of: (*ClaimsBuf).SetUnix
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: int(c) >= timeClaims
+      - set: b.times[c]
+        value: "timeSlot{sec: sec, nsec: nsec, state: ClaimOK}"
+  - of: (*ClaimsBuf).AudienceLen
+    steps:
+      - return: int(b.audienceLen)
+  - of: (*ClaimsBuf).Audience
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ClaimsBuf).Audience
+        kind: self
+      - id: b.audience[i].view
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, ClaimAbsent
+          when: i < 0 || i >= int(b.audienceLen)
+      - return: b.audience[i].view()
+        to: b.audience[i].view
+  - of: (*ClaimsBuf).AppendAudience
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ClaimsBuf).AppendAudience
+        kind: self
+      - id: b.audience[b.audienceLen].set
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ClaimsBufOverflow
+          when: int(b.audienceLen) >= ClaimsBufAudienceCap
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: b.audience[b.audienceLen].set(value)
+            to: b.audience[b.audienceLen].set
+          when: err != nil
+      - op: ++
+        set: b.audienceLen
+      - return: nil
+  - of: (*ClaimsBuf).Declared
+    steps:
+      - return: int(b.declared)
+  - of: (*ClaimsBuf).Private
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ClaimsBuf).Private
+        kind: self
+      - id: b.private[i].view
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: b.private[i].view()
+                    to: b.private[i].view
+                when: declared == name
+          key: i
+          range: b.names[:b.declared]
+          value: declared
+      - return: nil, ClaimAbsent
+  - of: (*ClaimsBuf).SetPrivate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*ClaimsBuf).SetPrivate
+        kind: self
+      - id: b.private[i].set
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ClaimsBufOverflow
+          when: i < 0 || i >= int(b.declared)
+      - return: b.private[i].set(value)
+        to: b.private[i].set
+  - of: (*ClaimsBuf).MarkPrivate
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: i < 0 || i >= int(b.declared)
+      - set: b.private[i]
+        value: "textSlot{state: state}"
+  - of: ClaimsBuf.GoString
+    participants:
+      - id: caller
+        kind: actor
+      - id: ClaimsBuf.GoString
+        kind: self
+      - id: b.String
+        kind: internal
+    steps:
+      - return: b.String()
+        to: b.String
+  - of: (*textSlot).view
+    steps:
+      - opt:
+          do:
+            - return: nil, s.state
+          when: s.state != ClaimOK
+      - return: s.value[:s.n:s.n], ClaimOK
+  - of: (*textSlot).set
+    steps:
+      - opt:
+          do:
+            - set: "*s"
+              value: textSlot{}
+            - return: ClaimsBufOverflow
+          when: len(value) > ClaimsBufTextCap
+      - opt:
+          do:
+            - set: "*s"
+              value: "textSlot{state: ClaimInvalid}"
+            - return: nil
+          when: len(value) == 0
+      - set: s.n
+        value: uint16(copy(s.value[:], value))
+      - eval: clear(s.value[s.n:])
+      - set: s.state
+        value: ClaimOK
+      - return: nil
   - of: ClaimsValue.WithIssuer
     steps:
       - set: c.issuer
@@ -172,6 +428,92 @@ sequences:
         to: slices
         value: slices.Clone(raw)
       - return: c, nil
+  - of: NewVerifyScratch
+    participants:
+      - id: caller
+        kind: actor
+      - id: NewVerifyScratch
+        kind: self
+      - id: mac.Reset
+        kind: value
+    steps:
+      - eval: mac.Reset()
+        to: mac.Reset
+      - return: "&VerifyScratch{mac: mac, owner: owner}"
+  - of: (*VerifyScratch).Enter
+    steps:
+      - opt:
+          do:
+            - return: ScratchForeign
+          when: s == nil || s.owner == nil || s.owner != owner
+      - opt:
+          do:
+            - return: ScratchBusy
+          when: "!s.inUse.CompareAndSwap(0, 1)"
+      - return: nil
+  - of: (*VerifyScratch).Leave
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*VerifyScratch).Leave
+        kind: self
+      - id: s.inUse.Store
+        kind: value
+    steps:
+      - eval: clear(s.sum[:])
+      - eval: s.inUse.Store(0)
+        to: s.inUse.Store
+  - of: (*VerifyScratch).MACEqual
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*VerifyScratch).MACEqual
+        kind: self
+      - id: s.mac.Reset
+        kind: value
+      - id: s.mac.Write
+        kind: value
+      - id: s.mac.Sum
+        kind: value
+      - id: hmac
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: s.inUse.Load() != 1
+      - eval: s.mac.Reset()
+        to: s.mac.Reset
+      - eval: s.mac.Write(input)
+        to: s.mac.Write
+      - bind: sum
+        eval: s.mac.Sum(s.sum[:0])
+        to: s.mac.Sum
+      - bind: equal
+        eval: hmac.Equal(sum, tag)
+        to: hmac
+      - eval: clear(s.sum[:])
+      - return: equal
+  - of: (*VerifyScratch).String
+    steps:
+      - opt:
+          do:
+            - return: "\"token.VerifyScratch{nil}\""
+          when: s == nil
+      - return: |-
+          "token.VerifyScratch{owned:" + strconv.FormatBool(s.owner != nil) +
+          		" busy:" + strconv.FormatBool(s.inUse.Load() == 1) + "}"
+  - of: (*VerifyScratch).GoString
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*VerifyScratch).GoString
+        kind: self
+      - id: s.String
+        kind: internal
+    steps:
+      - return: s.String()
+        to: s.String
   - of: Algorithm.String
     steps:
       - switch:

@@ -49,30 +49,28 @@ sequences:
             - return: 0, misconfigured(knob)
           when: configured < low || configured > high
       - return: configured, nil
-  - of: decodeClaims
+  - of: readClaims
     participants:
       - id: caller
         kind: actor
-      - id: decodeClaims
+      - id: readClaims
         kind: self
       - id: checkJSONDepth
         kind: internal
-      - id: checkNoDuplicateMembers
+      - id: scanObject
         kind: internal
-      - id: json
-        kind: stdlib
-      - id: decodeRegistered
+      - id: readRegistered
         kind: internal
-      - id: attachPrivate
+      - id: checkPrivateMembers
         kind: internal
     steps:
       - opt:
           do:
-            - return: coretoken.ClaimsValue{}, malformed("claims are not UTF-8")
+            - return: registeredValue{}, malformed("claims are not UTF-8")
           when: "!utf8.Valid(raw)"
       - opt:
           do:
-            - return: coretoken.ClaimsValue{}, derr
+            - return: registeredValue{}, derr
           init:
             bind: derr
             eval: checkJSONDepth(raw, maxDepth)
@@ -80,191 +78,131 @@ sequences:
           when: derr != nil
       - opt:
           do:
-            - return: coretoken.ClaimsValue{}, derr
+            - return: registeredValue{}, serr
           init:
-            bind: derr
-            eval: checkNoDuplicateMembers(raw)
-            to: checkNoDuplicateMembers
-          when: derr != nil
-      - var:
-          name: members
-          type: map[string]json.RawMessage
-      - opt:
-          do:
-            - return: coretoken.ClaimsValue{}, malformed("claims are not a JSON object")
-          init:
-            bind: uerr
-            eval: json.Unmarshal(raw, &members)
-            to: json
-          when: uerr != nil
-      - opt:
-          do:
-            - return: |-
-                coretoken.ClaimsValue{}, errs.Wrap(coretoken.TooLarge,
-                			errs.WrapParams{}, errs.Int("limit", maxClaimMembers))
-          when: len(members) > maxClaimMembers
-      - bind: registered, rerr
-        eval: decodeRegistered(members, shape)
-        to: decodeRegistered
-      - opt:
-          do:
-            - return: coretoken.ClaimsValue{}, rerr
-          when: rerr != nil
-      - return: attachPrivate(registered, members)
-        to: attachPrivate
-  - of: decodeRegistered
-    participants:
-      - id: caller
-        kind: actor
-      - id: decodeRegistered
-        kind: self
-      - id: nullRegisteredClaim
-        kind: internal
-      - id: decodeStringClaim
-        kind: internal
-      - id: shape.decodeAudience
-        kind: internal
-      - id: coretoken.NewClaimsValue().WithIssuer(iss).WithSubject(sub).WithID
-        kind: value
-      - id: decodeTimeClaims
-        kind: internal
-    steps:
-      - opt:
-          do:
-            - return: coretoken.ClaimsValue{}, malformed("registered claim " + name + " is null")
-          init:
-            bind: name, found
-            eval: nullRegisteredClaim(members)
-            to: nullRegisteredClaim
-          when: found
-      - bind: iss, ierr
-        eval: decodeStringClaim(members, coretoken.ClaimIssuer)
-        to: decodeStringClaim
-      - opt:
-          do:
-            - return: coretoken.ClaimsValue{}, ierr
-          when: ierr != nil
-      - bind: sub, serr
-        eval: decodeStringClaim(members, coretoken.ClaimSubject)
-        to: decodeStringClaim
-      - opt:
-          do:
-            - return: coretoken.ClaimsValue{}, serr
+            bind: serr
+            eval: scanObject(raw, maxDepth, idx)
+            to: scanObject
           when: serr != nil
-      - bind: jti, jerr
-        eval: decodeStringClaim(members, coretoken.ClaimID)
-        to: decodeStringClaim
+      - bind: reg, rerr
+        eval: readRegistered(raw, idx, shape)
+        to: readRegistered
       - opt:
           do:
-            - return: coretoken.ClaimsValue{}, jerr
-          when: jerr != nil
-      - bind: audience, aerr
-        eval: shape.decodeAudience(members[coretoken.ClaimAudience])
-        to: shape.decodeAudience
+            - return: registeredValue{}, rerr
+          when: rerr != nil
       - opt:
           do:
-            - return: coretoken.ClaimsValue{}, aerr
-          when: aerr != nil
-      - bind: base
-        eval: coretoken.NewClaimsValue().WithIssuer(iss).WithSubject(sub).WithID(jti)
-        to: coretoken.NewClaimsValue().WithIssuer(iss).WithSubject(sub).WithID
-      - return: decodeTimeClaims(base.WithAudience(audience...), members, shape)
-        to: decodeTimeClaims
-  - of: decodeTimeClaims
+            - return: registeredValue{}, perr
+          init:
+            bind: perr
+            eval: checkPrivateMembers(raw, idx)
+            to: checkPrivateMembers
+          when: perr != nil
+      - return: reg, nil
+  - of: readRegistered
     participants:
       - id: caller
         kind: actor
-      - id: decodeTimeClaims
+      - id: readRegistered
         kind: self
-      - id: decodeTimeClaim
+      - id: locateRegistered
         kind: internal
-      - id: base.WithExpiry(exp).WithNotBefore(nbf).WithIssuedAt
-        kind: value
+      - id: checkAudienceIn
+        kind: internal
+      - id: readInstants
+        kind: internal
     steps:
-      - bind: exp, eerr
-        eval: decodeTimeClaim(members, coretoken.ClaimExpiry, shape)
-        to: decodeTimeClaim
-      - opt:
-          do:
-            - return: coretoken.ClaimsValue{}, eerr
-          when: eerr != nil
-      - bind: nbf, nerr
-        eval: decodeTimeClaim(members, coretoken.ClaimNotBefore, shape)
-        to: decodeTimeClaim
-      - opt:
-          do:
-            - return: coretoken.ClaimsValue{}, nerr
-          when: nerr != nil
-      - bind: iat, ierr
-        eval: decodeTimeClaim(members, coretoken.ClaimIssuedAt, shape)
-        to: decodeTimeClaim
-      - opt:
-          do:
-            - return: coretoken.ClaimsValue{}, ierr
-          when: ierr != nil
-      - return: base.WithExpiry(exp).WithNotBefore(nbf).WithIssuedAt(iat), nil
-        to: base.WithExpiry(exp).WithNotBefore(nbf).WithIssuedAt
-  - of: attachPrivate
-    participants:
-      - id: caller
-        kind: actor
-      - id: attachPrivate
-        kind: self
-      - id: claims.WithPrivateRaw
-        kind: value
-    steps:
-      - set: claims
-        value: base
+      - set: reg.at
+        to: locateRegistered
+        value: locateRegistered(raw, idx)
       - loop:
           do:
             - opt:
                 do:
-                  - continue: true
-                when: coretoken.IsRegisteredClaim(name)
-            - bind: next, aerr
-              eval: claims.WithPrivateRaw(name, raw)
-              to: claims.WithPrivateRaw
+                  - return: registeredValue{}, malformed("registered claim " + registeredNames[slot] + " is null")
+                when: at >= 0 && idx.member[at].kind == kindNull
+          key: slot
+          range: reg.at
+          value: at
+      - loop:
+          do:
             - opt:
                 do:
-                  - return: coretoken.ClaimsValue{}, aerr
+                  - return: registeredValue{}, malformed("registered claim " + registeredNames[slot] + " is not a string")
+                init:
+                  bind: at
+                  eval: reg.at[slot]
+                when: at >= 0 && idx.member[at].kind != kindString
+          key: _
+          range: "[...]int{slotIssuer, slotSubject, slotID}"
+          value: slot
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: registeredValue{}, aerr
+                init:
+                  bind: aerr
+                  eval: checkAudienceIn(shape, idx.value(raw, at))
+                  to: checkAudienceIn
                 when: aerr != nil
-            - set: claims
-              value: next
-          key: name
-          range: members
-          value: raw
-      - return: claims, nil
-  - of: decodeStringClaim
-    steps:
-      - bind: raw, present
-        eval: members[name]
-      - opt:
-          do:
-            - return: "\"\", nil"
-          when: "!present"
-      - opt:
-          do:
-            - return: "\"\", malformed(\"registered claim \" + name + \" is not a string\")"
-          when: json.Unmarshal(raw, &value) != nil
-      - return: value, nil
-  - of: decodeTimeClaim
+          init:
+            bind: at
+            eval: reg.at[slotAudience]
+          when: at >= 0
+      - return: readInstants(raw, idx, reg, shape)
+        to: readInstants
+  - of: readInstants
     participants:
       - id: caller
         kind: actor
-      - id: decodeTimeClaim
+      - id: readInstants
         kind: self
-      - id: shape.decodeTime
+      - id: readInstant
         kind: internal
     steps:
-      - bind: raw, present
-        eval: members[name]
+      - var:
+          name: err
+          type: error
+      - set: reg.expiry, err
+        to: readInstant
+        value: readInstant(raw, idx, reg.at[slotExpiry], coretoken.ClaimExpiry, shape)
+      - opt:
+          do:
+            - return: registeredValue{}, err
+          when: err != nil
+      - set: reg.notBefore, err
+        to: readInstant
+        value: readInstant(raw, idx, reg.at[slotNotBefore], coretoken.ClaimNotBefore, shape)
+      - opt:
+          do:
+            - return: registeredValue{}, err
+          when: err != nil
+      - set: reg.issuedAt, err
+        to: readInstant
+        value: readInstant(raw, idx, reg.at[slotIssuedAt], coretoken.ClaimIssuedAt, shape)
+      - opt:
+          do:
+            - return: registeredValue{}, err
+          when: err != nil
+      - return: reg, nil
+  - of: readInstant
+    participants:
+      - id: caller
+        kind: actor
+      - id: readInstant
+        kind: self
+      - id: decodeTimeIn
+        kind: internal
+    steps:
       - opt:
           do:
             - return: time.Time{}, nil
-          when: "!present"
+          when: at < 0
       - set: instant, err
-        to: shape.decodeTime
-        value: shape.decodeTime(raw)
+        to: decodeTimeIn
+        value: decodeTimeIn(shape, idx.value(raw, at))
       - opt:
           do:
             - return: time.Time{}, err
@@ -274,6 +212,265 @@ sequences:
             - return: time.Time{}, malformed("registered claim " + name + " is the zero instant")
           when: instant.IsZero()
       - return: instant, nil
+  - of: decodeTimeIn
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeTimeIn
+        kind: self
+      - id: joseShape{}.decodeTime
+        kind: internal
+      - id: pasetoShape{}.decodeTime
+        kind: internal
+    steps:
+      - typeswitch:
+          cases:
+            - do:
+                - return: joseShape{}.decodeTime(raw)
+                  to: joseShape{}.decodeTime
+              types: joseShape
+            - do:
+                - return: pasetoShape{}.decodeTime(raw)
+                  to: pasetoShape{}.decodeTime
+              types: pasetoShape
+            - default: true
+              do:
+                - return: time.Time{}, malformed("claims of an unknown format")
+          "on": shape
+  - of: checkAudienceIn
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkAudienceIn
+        kind: self
+      - id: joseShape{}.checkAudience
+        kind: internal
+      - id: pasetoShape{}.checkAudience
+        kind: internal
+      - id: malformed
+        kind: internal
+    steps:
+      - typeswitch:
+          cases:
+            - do:
+                - return: joseShape{}.checkAudience(raw)
+                  to: joseShape{}.checkAudience
+              types: joseShape
+            - do:
+                - return: pasetoShape{}.checkAudience(raw)
+                  to: pasetoShape{}.checkAudience
+              types: pasetoShape
+            - default: true
+              do:
+                - return: malformed("claims of an unknown format")
+                  to: malformed
+          "on": shape
+  - of: locateRegistered
+    participants:
+      - id: caller
+        kind: actor
+      - id: locateRegistered
+        kind: self
+      - id: registeredSlot
+        kind: internal
+    steps:
+      - set: at
+        value: "[registeredSlots]int{-1, -1, -1, -1, -1, -1, -1}"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: at[slot]
+                    value: i
+                init:
+                  bind: slot
+                  eval: registeredSlot(idx.name(raw, i))
+                  to: registeredSlot
+                when: slot >= 0
+          key: i
+          range: idx.count
+      - return: at
+  - of: registeredSlot
+    steps:
+      - switch:
+          cases:
+            - case: coretoken.ClaimIssuer
+              do:
+                - return: slotIssuer
+            - case: coretoken.ClaimSubject
+              do:
+                - return: slotSubject
+            - case: coretoken.ClaimAudience
+              do:
+                - return: slotAudience
+            - case: coretoken.ClaimExpiry
+              do:
+                - return: slotExpiry
+            - case: coretoken.ClaimNotBefore
+              do:
+                - return: slotNotBefore
+            - case: coretoken.ClaimIssuedAt
+              do:
+                - return: slotIssuedAt
+            - case: coretoken.ClaimID
+              do:
+                - return: slotID
+            - default: true
+              do:
+                - return: "-1"
+          "on": string(name)
+  - of: checkPrivateMembers
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkPrivateMembers
+        kind: self
+      - id: idx.name
+        kind: internal
+    steps:
+      - bind: count
+        eval: "0"
+      - loop:
+          do:
+            - bind: name
+              eval: idx.name(raw, i)
+              to: idx.name
+            - opt:
+                do:
+                  - continue: true
+                when: registeredSlot(name) >= 0
+            - opt:
+                do:
+                  - return: coretoken.ClaimNameInvalid
+                when: len(name) == 0
+            - op: ++
+              set: count
+            - opt:
+                do:
+                  - return: coretoken.TooLarge
+                when: count > coretoken.MaxPrivateClaims
+          key: i
+          range: idx.count
+      - return: nil
+  - of: decodeClaims
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeClaims
+        kind: self
+      - id: readClaims
+        kind: internal
+      - id: shape.decodeAudience
+        kind: internal
+      - id: |-
+          coretoken.NewClaimsValue().
+          		WithIssuer(memberText(raw, &idx, reg.at[slotIssuer])).
+          		WithSubject(memberText(raw, &idx, reg.at[slotSubject])).
+          		WithID(memberText(raw, &idx, reg.at[slotID])).
+          		WithAudience(audience...).
+          		WithExpiry(reg.expiry).WithNotBefore(reg.notBefore).WithIssuedAt
+        kind: value
+      - id: attachPrivate
+        kind: internal
+    steps:
+      - var:
+          name: idx
+          type: objectIndex
+      - bind: reg, rerr
+        eval: readClaims(raw, maxDepth, shape, &idx)
+        to: readClaims
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, rerr
+          when: rerr != nil
+      - bind: audience, aerr
+        eval: shape.decodeAudience(memberValue(raw, &idx, reg.at[slotAudience]))
+        to: shape.decodeAudience
+      - opt:
+          do:
+            - return: coretoken.ClaimsValue{}, aerr
+          when: aerr != nil
+      - set: claims
+        to: |-
+          coretoken.NewClaimsValue().
+          		WithIssuer(memberText(raw, &idx, reg.at[slotIssuer])).
+          		WithSubject(memberText(raw, &idx, reg.at[slotSubject])).
+          		WithID(memberText(raw, &idx, reg.at[slotID])).
+          		WithAudience(audience...).
+          		WithExpiry(reg.expiry).WithNotBefore(reg.notBefore).WithIssuedAt
+        value: |-
+          coretoken.NewClaimsValue().
+          		WithIssuer(memberText(raw, &idx, reg.at[slotIssuer])).
+          		WithSubject(memberText(raw, &idx, reg.at[slotSubject])).
+          		WithID(memberText(raw, &idx, reg.at[slotID])).
+          		WithAudience(audience...).
+          		WithExpiry(reg.expiry).WithNotBefore(reg.notBefore).WithIssuedAt(reg.issuedAt)
+      - return: attachPrivate(claims, raw, &idx)
+        to: attachPrivate
+  - of: attachPrivate
+    participants:
+      - id: caller
+        kind: actor
+      - id: attachPrivate
+        kind: self
+      - id: idx.name
+        kind: internal
+      - id: claims.WithPrivateRaw
+        kind: value
+    steps:
+      - set: claims
+        value: base
+      - loop:
+          do:
+            - bind: name
+              eval: idx.name(raw, i)
+              to: idx.name
+            - opt:
+                do:
+                  - continue: true
+                when: registeredSlot(name) >= 0
+            - bind: next, aerr
+              eval: claims.WithPrivateRaw(string(name), idx.value(raw, i))
+              to: claims.WithPrivateRaw
+            - opt:
+                do:
+                  - return: coretoken.ClaimsValue{}, aerr
+                when: aerr != nil
+            - set: claims
+              value: next
+          key: i
+          range: idx.count
+      - return: claims, nil
+  - of: memberValue
+    participants:
+      - id: caller
+        kind: actor
+      - id: memberValue
+        kind: self
+      - id: idx.value
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: at < 0
+      - return: idx.value(raw, at)
+        to: idx.value
+  - of: memberText
+    participants:
+      - id: caller
+        kind: actor
+      - id: memberText
+        kind: self
+      - id: decodeText
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "\"\""
+          when: at < 0
+      - return: decodeText(idx.value(raw, at))
+        to: decodeText
   - of: encodeClaims
     participants:
       - id: caller
@@ -606,6 +803,80 @@ sequences:
             - return: nil, malformed("segment is not strict unpadded base64url")
           when: derr != nil
       - return: decoded, nil
+  - of: splitCompactBytes
+    participants:
+      - id: caller
+        kind: actor
+      - id: splitCompactBytes
+        kind: self
+      - id: bytes
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: |-
+                segmentsBytes{}, errs.Wrap(coretoken.TooLarge, errs.WrapParams{},
+                			errs.Int("limit", maxLen))
+          when: len(tok) > maxLen
+      - bind: rest
+        eval: tok
+      - loop:
+          do:
+            - bind: idx
+              eval: bytes.IndexByte(rest, '.')
+              to: bytes
+            - opt:
+                do:
+                  - set: seg.part[seg.count]
+                    value: rest
+                  - op: ++
+                    set: seg.count
+                  - return: seg, nil
+                when: idx < 0
+            - opt:
+                do:
+                  - return: segmentsBytes{}, coretoken.Malformed
+                when: seg.count == maxSegments-1
+            - set: seg.part[seg.count]
+              value: rest[:idx]
+            - op: ++
+              set: seg.count
+            - set: rest
+              value: rest[idx+1:]
+          forever: true
+  - of: decodeSegmentInto
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeSegmentInto
+        kind: self
+      - id: b64.DecodedLen
+        kind: value
+      - id: b64.Decode
+        kind: value
+    steps:
+      - bind: size
+        eval: b64.DecodedLen(len(segment))
+        to: b64.DecodedLen
+      - opt:
+          do:
+            - return: |-
+                nil, errs.Wrap(coretoken.TooLarge, errs.WrapParams{},
+                			errs.Int("limit", maxLen))
+          when: size > maxLen
+      - opt:
+          do:
+            - set: dst
+              value: make([]byte, size)
+          when: size > len(dst)
+      - bind: n, derr
+        eval: b64.Decode(dst[:size], segment)
+        to: b64.Decode
+      - opt:
+          do:
+            - return: nil, malformed("segment is not strict unpadded base64url")
+          when: derr != nil
+      - return: dst[:n], nil
   - of: checkJSONDepth
     participants:
       - id: caller
@@ -642,107 +913,6 @@ sequences:
           range: raw
           value: char
       - return: nil
-  - of: checkNoDuplicateMembers
-    participants:
-      - id: caller
-        kind: actor
-      - id: checkNoDuplicateMembers
-        kind: self
-      - id: json
-        kind: stdlib
-      - id: dec.Token
-        kind: value
-      - id: skipValue
-        kind: internal
-    steps:
-      - bind: dec
-        eval: json.NewDecoder(bytes.NewReader(raw))
-        to: json
-      - bind: open, terr
-        eval: dec.Token()
-        to: dec.Token
-      - opt:
-          do:
-            - return: coretoken.Malformed
-          when: terr != nil || open != json.Delim('{')
-      - bind: seen
-        eval: map[string]struct{}{}
-      - loop:
-          cond: dec.More()
-          do:
-            - bind: name, nerr
-              eval: dec.Token()
-              to: dec.Token
-            - bind: key, isString
-              eval: name.(string)
-            - opt:
-                do:
-                  - return: coretoken.Malformed
-                when: nerr != nil || !isString
-            - opt:
-                do:
-                  - return: coretoken.DuplicateMember
-                init:
-                  bind: _, dup
-                  eval: seen[key]
-                when: dup
-            - set: seen[key]
-              value: struct{}{}
-            - opt:
-                do:
-                  - return: coretoken.Malformed
-                init:
-                  bind: serr
-                  eval: skipValue(dec)
-                  to: skipValue
-                when: serr != nil
-      - return: nil
-  - of: skipValue
-    participants:
-      - id: caller
-        kind: actor
-      - id: skipValue
-        kind: self
-      - id: dec.Token
-        kind: value
-    steps:
-      - bind: depth
-        eval: "0"
-      - loop:
-          do:
-            - bind: tok, terr
-              eval: dec.Token()
-              to: dec.Token
-            - opt:
-                do:
-                  - return: terr
-                when: terr != nil
-            - bind: delim, isDelim
-              eval: tok.(json.Delim)
-            - opt:
-                do:
-                  - opt:
-                      do:
-                        - return: nil
-                      when: depth == 0
-                  - continue: true
-                when: "!isDelim"
-            - switch:
-                cases:
-                  - case: "'{', '['"
-                    do:
-                      - op: ++
-                        set: depth
-                  - default: true
-                    do:
-                      - op: "--"
-                        set: depth
-                      - opt:
-                          do:
-                            - return: nil
-                          when: depth == 0
-                "on": delim
-          forever: true
   - of: preAuthEncode
     participants:
       - id: caller
@@ -899,35 +1069,544 @@ sequences:
     steps:
       - return: hmacsha2.MAC.Verify(b.secret, input, sig)
         to: hmacsha2.MAC.Verify
+  - of: newHS256Verifier
+    steps:
+      - return: |-
+          &hs256Verifier{
+          		jwsVerifier: jwsVerifier{bound: binding, policy: policy},
+          		secret:      binding, owner: &scratchOwner{},
+          	}
+  - of: (*hs256Verifier).NewScratch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*hs256Verifier).NewScratch
+        kind: self
+      - id: coretoken
+        kind: package
+    steps:
+      - return: coretoken.NewVerifyScratch(v.owner, hmacsha2.MAC.New(v.secret.secret))
+        to: coretoken
+  - of: (*hs256Verifier).VerifyInto
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*hs256Verifier).VerifyInto
+        kind: self
+      - id: errs
+        kind: package
+      - id: dst.Reset
+        kind: value
+      - id: s.Enter
+        kind: value
+      - id: s.Leave
+        kind: value
+      - id: v.verifyInto
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coretoken.PolicyMisconfigured, errs.WrapParams{},
+                			errs.String("knob", "ClaimsBuf"))
+              to: errs
+          when: dst == nil
+      - eval: dst.Reset()
+        to: dst.Reset
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: s.Enter(v.owner)
+            to: s.Enter
+          when: err != nil
+      - defer: s.Leave()
+        to: s.Leave
+      - bind: err
+        eval: v.verifyInto(s, token, dst)
+        to: v.verifyInto
+      - opt:
+          do:
+            - eval: dst.Reset()
+              to: dst.Reset
+          when: err != nil
+      - return: err
+  - of: (*hs256Verifier).verifyInto
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*hs256Verifier).verifyInto
+        kind: self
+      - id: splitCompactBytes
+        kind: internal
+      - id: decodeSegmentInto
+        kind: internal
+      - id: readJOSEHeader
+        kind: internal
+      - id: v.authenticate
+        kind: internal
+    steps:
+      - bind: seg, serr
+        eval: splitCompactBytes(token, v.policy.maxTokenLen)
+        to: splitCompactBytes
+      - opt:
+          do:
+            - return: serr
+          when: serr != nil
+      - opt:
+          do:
+            - return: coretoken.Malformed
+          when: seg.count != jwsSegments
+      - var:
+          name: headerBuf
+          type: "[headerStackLen]byte"
+      - bind: header, herr
+        eval: decodeSegmentInto(headerBuf[:], seg.part[headerSegment], maxHeaderLen)
+        to: decodeSegmentInto
+      - opt:
+          do:
+            - return: herr
+          when: herr != nil
+      - bind: view, rerr
+        eval: readJOSEHeader(header)
+        to: readJOSEHeader
+      - opt:
+          do:
+            - return: rerr
+          when: rerr != nil
+      - return: v.authenticate(s, token, &seg, &view, dst)
+        to: v.authenticate
+  - of: (*hs256Verifier).authenticate
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*hs256Verifier).authenticate
+        kind: self
+      - id: decodeSegmentInto
+        kind: internal
+      - id: v.policy.checkHeaderView
+        kind: internal
+      - id: s.MACEqual
+        kind: value
+      - id: v.policy.judgeInto
+        kind: internal
+    steps:
+      - var:
+          name: sigBuf
+          type: "[maxSignatureLen]byte"
+      - bind: signature, gerr
+        eval: decodeSegmentInto(sigBuf[:], seg.part[signatureSegment], maxSignatureLen)
+        to: decodeSegmentInto
+      - opt:
+          do:
+            - return: gerr
+          when: gerr != nil
+      - opt:
+          do:
+            - eval: clear(sigBuf[:])
+            - return: herr
+          init:
+            bind: herr
+            eval: v.policy.checkHeaderView(view, coretoken.AlgorithmHS256)
+            to: v.policy.checkHeaderView
+          when: herr != nil
+      - bind: inputLen
+        eval: len(seg.part[headerSegment]) + 1 + len(seg.part[payloadSegment])
+      - bind: authentic
+        eval: s.MACEqual(token[:inputLen], signature)
+        to: s.MACEqual
+      - eval: clear(sigBuf[:])
+      - opt:
+          do:
+            - return: coretoken.SignatureInvalid
+          when: "!authentic"
+      - var:
+          name: payloadBuf
+          type: "[payloadStackLen]byte"
+      - bind: raw, derr
+        eval: decodeSegmentInto(payloadBuf[:], seg.part[payloadSegment], v.policy.maxTokenLen)
+        to: decodeSegmentInto
+      - opt:
+          do:
+            - return: derr
+          when: derr != nil
+      - bind: err
+        eval: v.policy.judgeInto(raw, dst)
+        to: v.policy.judgeInto
+      - eval: clear(raw)
+      - return: err
+  - of: policyValue.judgeInto
+    participants:
+      - id: caller
+        kind: actor
+      - id: policyValue.judgeInto
+        kind: self
+      - id: readClaims
+        kind: internal
+      - id: p.judgeClaims
+        kind: internal
+      - id: storeClaims
+        kind: internal
+    steps:
+      - var:
+          name: idx
+          type: objectIndex
+      - bind: reg, rerr
+        eval: readClaims(raw, p.maxClaimDepth, joseShape{}, &idx)
+        to: readClaims
+      - opt:
+          do:
+            - return: rerr
+          when: rerr != nil
+      - opt:
+          do:
+            - return: jerr
+          init:
+            bind: jerr
+            eval: |-
+              p.judgeClaims(claimFacts{
+              		expiry: reg.expiry, notBefore: reg.notBefore, issuedAt: reg.issuedAt,
+              		issuerOK:   p.issuer == "" || literalEqual(memberValue(raw, &idx, reg.at[slotIssuer]), p.issuer),
+              		audienceOK: p.audience == "" || audienceContains(memberValue(raw, &idx, reg.at[slotAudience]), p.audience),
+              	})
+            to: p.judgeClaims
+          when: jerr != nil
+      - return: storeClaims(raw, &idx, &reg, dst)
+        to: storeClaims
+  - of: audienceContains
+    participants:
+      - id: caller
+        kind: actor
+      - id: audienceContains
+        kind: self
+      - id: jsonStringEqual
+        kind: internal
+      - id: newArrayStrings
+        kind: internal
+      - id: walk.next
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: raw == nil
+      - opt:
+          do:
+            - return: jsonStringEqual(raw, want)
+              to: jsonStringEqual
+          when: raw[0] == '"'
+      - bind: walk
+        eval: newArrayStrings(raw)
+        to: newArrayStrings
+      - loop:
+          do:
+            - bind: lit, more, err
+              eval: walk.next()
+              to: walk.next
+            - opt:
+                do:
+                  - return: "false"
+                when: err != nil || !more
+            - opt:
+                do:
+                  - return: "true"
+                when: jsonStringEqual(lit, want)
+          forever: true
+  - of: storeClaims
+    participants:
+      - id: caller
+        kind: actor
+      - id: storeClaims
+        kind: self
+      - id: storeText
+        kind: internal
+      - id: storeInstants
+        kind: internal
+      - id: storeAudience
+        kind: internal
+      - id: storePrivate
+        kind: internal
+    steps:
+      - var:
+          name: text
+          type: "[coretoken.ClaimsBufTextCap]byte"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: err
+                      init:
+                        bind: err
+                        eval: storeText(dst, field.claim, text[:], idx.value(raw, at))
+                        to: storeText
+                      when: err != nil
+                init:
+                  bind: at
+                  eval: reg.at[field.slot]
+                when: at >= 0
+          key: _
+          range: |-
+            [...]struct {
+            		slot  int
+            		claim coretoken.TextClaim
+            	}{{slotIssuer, coretoken.TextIssuer}, {slotSubject, coretoken.TextSubject}, {slotID, coretoken.TextID}}
+          value: field
+      - eval: storeInstants(reg, dst)
+        to: storeInstants
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: storeAudience(memberValue(raw, idx, reg.at[slotAudience]), text[:], dst)
+            to: storeAudience
+          when: err != nil
+      - return: storePrivate(raw, idx, text[:], dst)
+        to: storePrivate
+  - of: storeText
+    participants:
+      - id: caller
+        kind: actor
+      - id: storeText
+        kind: self
+      - id: decodeTextInto
+        kind: internal
+      - id: dst.SetText
+        kind: value
+    steps:
+      - bind: n, ok
+        eval: decodeTextInto(buf, lit)
+        to: decodeTextInto
+      - opt:
+          do:
+            - return: coretoken.ClaimsBufOverflow
+          when: "!ok"
+      - return: dst.SetText(claim, buf[:n])
+        to: dst.SetText
+  - of: storeInstants
+    participants:
+      - id: caller
+        kind: actor
+      - id: storeInstants
+        kind: self
+      - id: reg.instant
+        kind: internal
+      - id: dst.SetUnix
+        kind: value
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: reg.at[field.slot] < 0
+            - bind: instant
+              eval: reg.instant(field.slot)
+              to: reg.instant
+            - eval: dst.SetUnix(field.claim, instant.Unix(), int32(instant.Nanosecond()))
+              to: dst.SetUnix
+          key: _
+          range: |-
+            [...]struct {
+            		slot  int
+            		claim coretoken.TimeClaim
+            	}{{slotExpiry, coretoken.TimeExpiry}, {slotNotBefore, coretoken.TimeNotBefore}, {slotIssuedAt, coretoken.TimeIssuedAt}}
+          value: field
+  - of: storeAudience
+    participants:
+      - id: caller
+        kind: actor
+      - id: storeAudience
+        kind: self
+      - id: storeMember
+        kind: internal
+      - id: newArrayStrings
+        kind: internal
+      - id: walk.next
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: raw == nil
+      - opt:
+          do:
+            - return: storeMember(raw, buf, dst)
+              to: storeMember
+          when: raw[0] == '"'
+      - bind: walk
+        eval: newArrayStrings(raw)
+        to: newArrayStrings
+      - loop:
+          do:
+            - bind: lit, more, err
+              eval: walk.next()
+              to: walk.next
+            - opt:
+                do:
+                  - return: err
+                when: err != nil || !more
+            - opt:
+                do:
+                  - return: serr
+                init:
+                  bind: serr
+                  eval: storeMember(lit, buf, dst)
+                  to: storeMember
+                when: serr != nil
+          forever: true
+  - of: storeMember
+    participants:
+      - id: caller
+        kind: actor
+      - id: storeMember
+        kind: self
+      - id: decodeTextInto
+        kind: internal
+      - id: dst.AppendAudience
+        kind: value
+    steps:
+      - bind: n, ok
+        eval: decodeTextInto(buf, lit)
+        to: decodeTextInto
+      - opt:
+          do:
+            - return: coretoken.ClaimsBufOverflow
+          when: "!ok"
+      - return: dst.AppendAudience(buf[:n])
+        to: dst.AppendAudience
+  - of: storePrivate
+    participants:
+      - id: caller
+        kind: actor
+      - id: storePrivate
+        kind: self
+      - id: dst.PrivateIndex
+        kind: value
+      - id: dst.MarkPrivate
+        kind: value
+      - id: decodeTextInto
+        kind: internal
+      - id: dst.SetPrivate
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: dst.Declared() == 0
+      - loop:
+          do:
+            - bind: slot
+              eval: dst.PrivateIndex(idx.name(raw, i))
+              to: dst.PrivateIndex
+            - opt:
+                do:
+                  - continue: true
+                when: slot < 0
+            - opt:
+                do:
+                  - eval: dst.MarkPrivate(slot, coretoken.ClaimWrongType)
+                    to: dst.MarkPrivate
+                  - continue: true
+                when: idx.member[i].kind != kindString
+            - bind: n, ok
+              eval: decodeTextInto(buf, idx.value(raw, i))
+              to: decodeTextInto
+            - opt:
+                do:
+                  - return: coretoken.ClaimsBufOverflow
+                when: "!ok"
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: dst.SetPrivate(slot, buf[:n])
+                  to: dst.SetPrivate
+                when: err != nil
+          key: i
+          range: idx.count
+      - return: nil
+  - of: (*registeredValue).instant
+    steps:
+      - switch:
+          cases:
+            - case: slotExpiry
+              do:
+                - return: r.expiry
+            - case: slotNotBefore
+              do:
+                - return: r.notBefore
+            - default: true
+              do:
+                - return: r.issuedAt
+          "on": slot
   - of: joseShape.decodeTime
     participants:
       - id: caller
         kind: actor
       - id: joseShape.decodeTime
         kind: self
+      - id: numericInteger
+        kind: internal
+      - id: time.Unix(whole, 0).UTC
+        kind: value
+      - id: strconv
+        kind: stdlib
       - id: math
         kind: stdlib
       - id: time.Unix(int64(whole), int64(frac*float64(time.Second))).UTC
         kind: value
     steps:
-      - var:
-          name: seconds
-          type: float64
       - opt:
           do:
             - return: time.Time{}, malformed("NumericDate claim is not a JSON number")
-          when: json.Unmarshal(raw, &seconds) != nil
+          when: len(raw) == 0 || (raw[0] != '-' && !isDigit(raw[0]))
       - opt:
           do:
-            - return: |-
-                time.Time{}, errs.Wrap(coretoken.Malformed, errs.WrapParams{},
-                			errs.String("claim", "NumericDate out of range"))
+            - opt:
+                do:
+                  - return: time.Time{}, numericDateOutOfRange()
+                when: math.Abs(float64(whole)) > maxNumericDate
+            - return: time.Unix(whole, 0).UTC(), nil
+              to: time.Unix(whole, 0).UTC
+          init:
+            bind: whole, ok
+            eval: numericInteger(raw)
+            to: numericInteger
+          when: ok
+      - bind: seconds, perr
+        eval: strconv.ParseFloat(string(raw), 64)
+        to: strconv
+      - opt:
+          do:
+            - return: time.Time{}, malformed("NumericDate claim is not a JSON number")
+          when: perr != nil
+      - opt:
+          do:
+            - return: time.Time{}, numericDateOutOfRange()
           when: math.IsNaN(seconds) || math.IsInf(seconds, 0) || math.Abs(seconds) > maxNumericDate
       - bind: whole, frac
         eval: math.Modf(seconds)
         to: math
       - return: time.Unix(int64(whole), int64(frac*float64(time.Second))).UTC(), nil
         to: time.Unix(int64(whole), int64(frac*float64(time.Second))).UTC
+  - of: numericDateOutOfRange
+    participants:
+      - id: caller
+        kind: actor
+      - id: numericDateOutOfRange
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(coretoken.Malformed, errs.WrapParams{},
+          		errs.String("claim", "NumericDate out of range"))
+        to: errs
   - of: joseShape.encodeTime
     participants:
       - id: caller
@@ -939,27 +1618,88 @@ sequences:
     steps:
       - return: json.RawMessage(strconv.FormatInt(instant.Unix(), decimalBase))
         to: json
+  - of: joseShape.checkAudience
+    participants:
+      - id: caller
+        kind: actor
+      - id: joseShape.checkAudience
+        kind: self
+      - id: newArrayStrings
+        kind: internal
+      - id: walk.next
+        kind: internal
+      - id: malformed
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: "'\"'"
+              do:
+                - return: nil
+            - case: "'['"
+              do:
+                - bind: walk
+                  eval: newArrayStrings(raw)
+                  to: newArrayStrings
+                - loop:
+                    do:
+                      - bind: _, more, err
+                        eval: walk.next()
+                        to: walk.next
+                      - opt:
+                          do:
+                            - return: err
+                          when: err != nil
+                      - opt:
+                          do:
+                            - return: nil
+                          when: "!more"
+                    forever: true
+            - default: true
+              do:
+                - return: malformed("aud is neither a string nor an array of strings")
+                  to: malformed
+          "on": raw[0]
   - of: joseShape.decodeAudience
+    participants:
+      - id: caller
+        kind: actor
+      - id: joseShape.decodeAudience
+        kind: self
+      - id: newArrayStrings
+        kind: internal
+      - id: walk.next
+        kind: internal
     steps:
       - opt:
           do:
             - return: nil, nil
           when: len(raw) == 0
-      - var:
-          name: single
-          type: string
       - opt:
           do:
-            - return: "[]string{single}, nil"
-          when: json.Unmarshal(raw, &single) == nil
-      - var:
-          name: many
-          type: "[]string"
-      - opt:
+            - return: "[]string{decodeText(raw)}, nil"
+          when: raw[0] == '"'
+      - set: audience
+        value: "[]string{}"
+      - bind: walk
+        eval: newArrayStrings(raw)
+        to: newArrayStrings
+      - loop:
           do:
-            - return: nil, malformed("aud is neither a string nor an array of strings")
-          when: json.Unmarshal(raw, &many) != nil
-      - return: many, nil
+            - bind: lit, more, werr
+              eval: walk.next()
+              to: walk.next
+            - opt:
+                do:
+                  - return: nil, werr
+                when: werr != nil
+            - opt:
+                do:
+                  - return: audience, nil
+                when: "!more"
+            - set: audience
+              value: append(audience, decodeText(lit))
+          forever: true
   - of: joseShape.encodeAudience
     participants:
       - id: caller
@@ -980,6 +1720,878 @@ sequences:
           when: len(audience) == 1
       - return: json.RawMessage(quoteJSONStrings(audience)), nil
         to: json
+  - of: (*objectIndex).name
+    steps:
+      - bind: m
+        eval: x.member[i]
+      - return: raw[m.nameStart:m.nameEnd]
+  - of: (*objectIndex).value
+    steps:
+      - bind: m
+        eval: x.member[i]
+      - return: raw[m.valueStart:m.valueEnd]
+  - of: scanObject
+    participants:
+      - id: caller
+        kind: actor
+      - id: scanObject
+        kind: self
+      - id: s.skipSpace
+        kind: internal
+      - id: s.topMembers
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - bind: s
+        eval: "jsonScan{raw: raw, maxDepth: maxDepth}"
+      - set: idx.count, idx.total
+        value: 0, 0
+      - eval: s.skipSpace()
+        to: s.skipSpace
+      - opt:
+          do:
+            - return: coretoken.Malformed
+          when: "!s.consume('{')"
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: s.topMembers(idx)
+            to: s.topMembers
+          when: err != nil
+      - eval: s.skipSpace()
+        to: s.skipSpace
+      - opt:
+          do:
+            - return: coretoken.Malformed
+          when: s.pos != len(s.raw)
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coretoken.TooLarge, errs.WrapParams{},
+                			errs.Int("limit", maxIndexedMembers))
+              to: errs
+          when: idx.total > maxIndexedMembers
+      - return: nil
+  - of: (*jsonScan).topMembers
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*jsonScan).topMembers
+        kind: self
+      - id: s.skipSpace
+        kind: internal
+      - id: s.topMember
+        kind: internal
+    steps:
+      - eval: s.skipSpace()
+        to: s.skipSpace
+      - opt:
+          do:
+            - return: nil
+          when: s.consume('}')
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: s.topMember(idx)
+                  to: s.topMember
+                when: err != nil
+            - eval: s.skipSpace()
+              to: s.skipSpace
+            - opt:
+                do:
+                  - continue: true
+                when: s.consume(',')
+            - opt:
+                do:
+                  - return: nil
+                when: s.consume('}')
+            - return: coretoken.Malformed
+          forever: true
+  - of: (*jsonScan).topMember
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*jsonScan).topMember
+        kind: self
+      - id: s.skipSpace
+        kind: internal
+      - id: s.str
+        kind: internal
+      - id: s.value
+        kind: internal
+    steps:
+      - eval: s.skipSpace()
+        to: s.skipSpace
+      - opt:
+          do:
+            - return: coretoken.Malformed
+          when: s.peek() != '"'
+      - bind: nameStart
+        eval: s.pos + 1
+      - bind: escaped, serr
+        eval: s.str()
+        to: s.str
+      - opt:
+          do:
+            - return: serr
+          when: serr != nil
+      - opt:
+          do:
+            - return: coretoken.Malformed
+          when: escaped
+      - bind: name
+        eval: "s.raw[nameStart : s.pos-1]"
+      - opt:
+          do:
+            - return: coretoken.DuplicateMember
+          when: idx.total < maxIndexedMembers && idx.hasName(s.raw, name)
+      - eval: s.skipSpace()
+        to: s.skipSpace
+      - opt:
+          do:
+            - return: coretoken.Malformed
+          when: "!s.consume(':')"
+      - eval: s.skipSpace()
+        to: s.skipSpace
+      - bind: valueStart
+        eval: s.pos
+      - bind: kind, verr
+        eval: s.value(1)
+        to: s.value
+      - opt:
+          do:
+            - return: verr
+          when: verr != nil
+      - opt:
+          do:
+            - set: idx.member[idx.count]
+              value: |-
+                memberSpan{
+                			nameStart: int32(nameStart), nameEnd: int32(nameStart + len(name)),
+                			valueStart: int32(valueStart), valueEnd: int32(s.pos), kind: kind,
+                		}
+            - op: ++
+              set: idx.count
+          when: idx.count < maxIndexedMembers
+      - op: ++
+        set: idx.total
+      - return: nil
+  - of: (*jsonScan).value
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*jsonScan).value
+        kind: self
+      - id: s.peek
+        kind: internal
+      - id: s.str
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: c == '"'
+              do:
+                - set: _, err
+                  to: s.str
+                  value: s.str()
+                - return: kindString, err
+            - case: c == '{'
+              do:
+                - return: kindObject, s.container(depth, '}')
+            - case: c == '['
+              do:
+                - return: kindArray, s.container(depth, ']')
+            - case: c == '-' || isDigit(c)
+              do:
+                - return: kindNumber, s.number()
+            - case: c == 't'
+              do:
+                - return: kindTrue, s.literal("true")
+            - case: c == 'f'
+              do:
+                - return: kindFalse, s.literal("false")
+            - case: c == 'n'
+              do:
+                - return: kindNull, s.literal("null")
+            - default: true
+              do:
+                - return: 0, coretoken.Malformed
+          init:
+            bind: c
+            eval: s.peek()
+            to: s.peek
+  - of: (*jsonScan).container
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*jsonScan).container
+        kind: self
+      - id: errs
+        kind: package
+      - id: s.skipSpace
+        kind: internal
+      - id: s.element
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(coretoken.TooDeep, errs.WrapParams{},
+                			errs.Int("limit", s.maxDepth))
+              to: errs
+          when: depth >= s.maxDepth
+      - op: ++
+        set: s.pos
+      - eval: s.skipSpace()
+        to: s.skipSpace
+      - opt:
+          do:
+            - return: nil
+          when: s.consume(closer)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: s.element(depth, closer == '}')
+                  to: s.element
+                when: err != nil
+            - eval: s.skipSpace()
+              to: s.skipSpace
+            - opt:
+                do:
+                  - eval: s.skipSpace()
+                    to: s.skipSpace
+                  - continue: true
+                when: s.consume(',')
+            - opt:
+                do:
+                  - return: nil
+                when: s.consume(closer)
+            - return: coretoken.Malformed
+          forever: true
+  - of: (*jsonScan).element
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*jsonScan).element
+        kind: self
+      - id: s.str
+        kind: internal
+      - id: s.skipSpace
+        kind: internal
+      - id: s.value
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: coretoken.Malformed
+                when: s.peek() != '"'
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: _, err
+                  eval: s.str()
+                  to: s.str
+                when: err != nil
+            - eval: s.skipSpace()
+              to: s.skipSpace
+            - opt:
+                do:
+                  - return: coretoken.Malformed
+                when: "!s.consume(':')"
+            - eval: s.skipSpace()
+              to: s.skipSpace
+          when: member
+      - bind: _, err
+        eval: s.value(depth + 1)
+        to: s.value
+      - return: err
+  - of: (*jsonScan).str
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*jsonScan).str
+        kind: self
+      - id: escapeLen
+        kind: internal
+    steps:
+      - op: ++
+        set: s.pos
+      - loop:
+          cond: s.pos < len(s.raw)
+          do:
+            - bind: c
+              eval: s.raw[s.pos]
+            - switch:
+                cases:
+                  - case: c == '"'
+                    do:
+                      - op: ++
+                        set: s.pos
+                      - return: escaped, nil
+                  - case: c == '\\'
+                    do:
+                      - set: escaped
+                        value: "true"
+                      - bind: n, eerr
+                        eval: escapeLen(s.raw[s.pos:])
+                        to: escapeLen
+                      - opt:
+                          do:
+                            - return: true, eerr
+                          when: eerr != nil
+                      - op: +=
+                        set: s.pos
+                        value: "n"
+                  - case: c < firstPrintable
+                    do:
+                      - return: escaped, coretoken.Malformed
+                  - default: true
+                    do:
+                      - op: ++
+                        set: s.pos
+      - return: escaped, coretoken.Malformed
+  - of: escapeLen
+    participants:
+      - id: caller
+        kind: actor
+      - id: escapeLen
+        kind: self
+      - id: hexUnit
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: 0, coretoken.Malformed
+          when: len(esc) < 2
+      - switch:
+          cases:
+            - case: "'\"', '\\\\', '/', 'b', 'f', 'n', 'r', 't'"
+              do:
+                - return: 2, nil
+            - case: "'u'"
+            - default: true
+              do:
+                - return: 0, coretoken.Malformed
+          "on": esc[1]
+      - bind: unit, ok
+        eval: hexUnit(esc)
+        to: hexUnit
+      - opt:
+          do:
+            - return: 0, coretoken.Malformed
+          when: "!ok"
+      - opt:
+          do:
+            - return: 0, coretoken.Malformed
+          when: unit >= 0xDC00 && unit <= 0xDFFF
+      - opt:
+          do:
+            - return: unicodeEscapeLen, nil
+          when: unit < 0xD800 || unit > 0xDBFF
+      - opt:
+          do:
+            - return: 0, coretoken.Malformed
+          when: len(esc) < 2*unicodeEscapeLen || esc[unicodeEscapeLen] != '\\'
+      - bind: low, lok
+        eval: hexUnit(esc[unicodeEscapeLen:])
+        to: hexUnit
+      - opt:
+          do:
+            - return: 0, coretoken.Malformed
+          when: "!lok || low < 0xDC00 || low > 0xDFFF"
+      - return: 2 * unicodeEscapeLen, nil
+  - of: hexUnit
+    participants:
+      - id: caller
+        kind: actor
+      - id: hexUnit
+        kind: self
+      - id: hexValue
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: 0, false
+          when: len(esc) < unicodeEscapeLen || esc[0] != '\\' || esc[1] != 'u'
+      - loop:
+          do:
+            - bind: digit, dok
+              eval: hexValue(c)
+              to: hexValue
+            - opt:
+                do:
+                  - return: 0, false
+                when: "!dok"
+            - set: unit
+              value: unit<<hexRadixBits | digit
+          key: _
+          range: esc[2:unicodeEscapeLen]
+          value: c
+      - return: unit, true
+  - of: hexValue
+    steps:
+      - switch:
+          cases:
+            - case: isDigit(c)
+              do:
+                - return: rune(c - '0'), true
+            - case: c >= 'a' && c <= 'f'
+              do:
+                - return: rune(c-'a') + hexLetterOffset, true
+            - case: c >= 'A' && c <= 'F'
+              do:
+                - return: rune(c-'A') + hexLetterOffset, true
+            - default: true
+              do:
+                - return: 0, false
+  - of: (*jsonScan).number
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*jsonScan).number
+        kind: self
+      - id: s.consume
+        kind: internal
+      - id: s.exponent
+        kind: internal
+      - id: s.checkMagnitude
+        kind: internal
+    steps:
+      - bind: start
+        eval: s.pos
+      - eval: s.consume('-')
+        to: s.consume
+      - bind: intStart
+        eval: s.pos
+      - opt:
+          do:
+            - return: coretoken.Malformed
+          when: "!s.consume('0') && !s.digits()"
+      - bind: intDigits
+        eval: s.pos - intStart
+      - bind: fracStart, fracEnd
+        eval: s.pos, s.pos
+      - opt:
+          do:
+            - set: fracStart
+              value: s.pos
+            - opt:
+                do:
+                  - return: coretoken.Malformed
+                when: "!s.digits()"
+            - set: fracEnd
+              value: s.pos
+          when: s.consume('.')
+      - bind: exponent, eerr
+        eval: s.exponent()
+        to: s.exponent
+      - opt:
+          do:
+            - return: eerr
+          when: eerr != nil
+      - return: s.checkMagnitude(start, intStart, intDigits, s.raw[fracStart:fracEnd], exponent)
+        to: s.checkMagnitude
+  - of: (*jsonScan).exponent
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*jsonScan).exponent
+        kind: self
+      - id: s.consume
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: 0, nil
+          when: "!s.consume('e') && !s.consume('E')"
+      - bind: negative
+        eval: "false"
+      - opt:
+          do:
+            - set: negative
+              to: s.consume
+              value: s.consume('-')
+          when: "!s.consume('+')"
+      - bind: start
+        eval: s.pos
+      - opt:
+          do:
+            - return: 0, coretoken.Malformed
+          when: "!s.digits()"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: value
+                    value: value*decimalBase + int(c-'0')
+                when: value < exponentSaturation
+          key: _
+          range: s.raw[start:s.pos]
+          value: c
+      - opt:
+          do:
+            - set: value
+              value: "-value"
+          when: negative
+      - return: value, nil
+  - of: (*jsonScan).checkMagnitude
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*jsonScan).checkMagnitude
+        kind: self
+      - id: strconv
+        kind: stdlib
+    steps:
+      - var:
+          name: order
+          type: int
+      - alt:
+          - do:
+              - set: order
+                value: intDigits - 1 + exponent
+            when: s.raw[intStart] != '0'
+          - do:
+              - bind: lead
+                eval: "0"
+              - loop:
+                  cond: lead < len(frac) && frac[lead] == '0'
+                  do:
+                    - op: ++
+                      set: lead
+              - opt:
+                  do:
+                    - return: nil
+                  when: lead == len(frac)
+              - set: order
+                value: exponent - lead - 1
+            else: true
+      - switch:
+          cases:
+            - case: order < maxFloat64Order
+              do:
+                - return: nil
+            - case: order > maxFloat64Order
+              do:
+                - return: coretoken.Malformed
+            - default: true
+              do:
+                - opt:
+                    do:
+                      - return: coretoken.Malformed
+                    init:
+                      bind: _, perr
+                      eval: strconv.ParseFloat(string(s.raw[start:s.pos]), 64)
+                      to: strconv
+                    when: perr != nil
+                - return: nil
+  - of: (*jsonScan).digits
+    steps:
+      - bind: start
+        eval: s.pos
+      - loop:
+          cond: s.pos < len(s.raw) && isDigit(s.raw[s.pos])
+          do:
+            - op: ++
+              set: s.pos
+      - return: s.pos > start
+  - of: (*jsonScan).literal
+    steps:
+      - opt:
+          do:
+            - return: coretoken.Malformed
+          when: len(s.raw)-s.pos < len(word) || string(s.raw[s.pos:s.pos+len(word)]) != word
+      - op: +=
+        set: s.pos
+        value: len(word)
+      - return: nil
+  - of: (*jsonScan).peek
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: s.pos >= len(s.raw)
+      - return: s.raw[s.pos]
+  - of: (*jsonScan).consume
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: s.peek() != c || s.pos >= len(s.raw)
+      - op: ++
+        set: s.pos
+      - return: "true"
+  - of: isDigit
+    steps:
+      - return: c >= '0' && c <= '9'
+  - of: appendJSONString
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendJSONString
+        kind: self
+      - id: decodeEscape
+        kind: internal
+      - id: utf8
+        kind: stdlib
+    steps:
+      - bind: body
+        eval: "lit[1 : len(lit)-1]"
+      - loop:
+          cond: i < len(body)
+          do:
+            - opt:
+                do:
+                  - bind: j
+                    eval: i + 1
+                  - loop:
+                      cond: j < len(body) && body[j] != '\\'
+                      do:
+                        - op: ++
+                          set: j
+                  - set: dst
+                    value: append(dst, body[i:j]...)
+                  - set: i
+                    value: j
+                  - continue: true
+                when: body[i] != '\\'
+            - bind: r, n
+              eval: decodeEscape(body[i:])
+              to: decodeEscape
+            - set: dst
+              to: utf8
+              value: utf8.AppendRune(dst, r)
+            - op: +=
+              set: i
+              value: "n"
+          init: i := 0
+      - return: dst
+  - of: decodeEscape
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeEscape
+        kind: self
+      - id: hexUnit
+        kind: internal
+      - id: utf16
+        kind: stdlib
+    steps:
+      - switch:
+          cases:
+            - case: "'b'"
+              do:
+                - return: "'\\b', 2"
+            - case: "'f'"
+              do:
+                - return: "'\\f', 2"
+            - case: "'n'"
+              do:
+                - return: "'\\n', 2"
+            - case: "'r'"
+              do:
+                - return: "'\\r', 2"
+            - case: "'t'"
+              do:
+                - return: "'\\t', 2"
+            - case: "'u'"
+              do:
+                - bind: unit, _
+                  eval: hexUnit(esc)
+                  to: hexUnit
+                - opt:
+                    do:
+                      - bind: low, _
+                        eval: hexUnit(esc[unicodeEscapeLen:])
+                        to: hexUnit
+                      - return: utf16.DecodeRune(unit, low), 2 * unicodeEscapeLen
+                        to: utf16
+                    when: utf16.IsSurrogate(unit)
+                - return: unit, unicodeEscapeLen
+            - default: true
+              do:
+                - return: rune(esc[1]), 2
+          "on": esc[1]
+  - of: jsonStringEqual
+    participants:
+      - id: caller
+        kind: actor
+      - id: jsonStringEqual
+        kind: self
+      - id: decodeEscape
+        kind: internal
+      - id: utf8
+        kind: stdlib
+    steps:
+      - bind: body
+        eval: "lit[1 : len(lit)-1]"
+      - var:
+          name: unit
+          type: "[utf8.UTFMax]byte"
+      - bind: w
+        eval: "0"
+      - loop:
+          cond: i < len(body)
+          do:
+            - bind: piece
+              eval: "body[i : i+1]"
+            - bind: consumed
+              eval: "1"
+            - opt:
+                do:
+                  - bind: r, n
+                    eval: decodeEscape(body[i:])
+                    to: decodeEscape
+                  - set: piece
+                    to: utf8
+                    value: utf8.AppendRune(unit[:0], r)
+                  - set: consumed
+                    value: "n"
+                when: body[i] == '\\'
+            - opt:
+                do:
+                  - return: "false"
+                when: len(want)-w < len(piece) || want[w:w+len(piece)] != string(piece)
+            - op: +=
+              set: w
+              value: len(piece)
+            - op: +=
+              set: i
+              value: consumed
+          init: i := 0
+      - return: w == len(want)
+  - of: newArrayStrings
+    participants:
+      - id: caller
+        kind: actor
+      - id: newArrayStrings
+        kind: self
+      - id: walk.s.skipSpace
+        kind: internal
+    steps:
+      - bind: walk
+        eval: "arrayStrings{s: jsonScan{raw: arr, pos: 1}}"
+      - eval: walk.s.skipSpace()
+        to: walk.s.skipSpace
+      - return: walk
+  - of: (*arrayStrings).next
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*arrayStrings).next
+        kind: self
+      - id: a.s.str
+        kind: internal
+      - id: a.s.skipSpace
+        kind: internal
+      - id: a.s.consume
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil, false, nil
+          when: a.s.peek() == ']'
+      - opt:
+          do:
+            - return: nil, false, malformed("aud is neither a string nor an array of strings")
+          when: a.s.peek() != '"'
+      - bind: start
+        eval: a.s.pos
+      - opt:
+          do:
+            - return: nil, false, serr
+          init:
+            bind: _, serr
+            eval: a.s.str()
+            to: a.s.str
+          when: serr != nil
+      - set: lit
+        value: a.s.raw[start:a.s.pos]
+      - eval: a.s.skipSpace()
+        to: a.s.skipSpace
+      - eval: a.s.consume(',')
+        to: a.s.consume
+      - eval: a.s.skipSpace()
+        to: a.s.skipSpace
+      - return: lit, true, nil
+  - of: decodeText
+    steps:
+      - bind: body
+        eval: "lit[1 : len(lit)-1]"
+      - opt:
+          do:
+            - return: string(body)
+          when: bytes.IndexByte(body, '\\') < 0
+      - var:
+          name: buf
+          type: "[coretoken.ClaimsBufTextCap]byte"
+      - return: string(appendJSONString(buf[:0], lit))
+  - of: decodeTextInto
+    participants:
+      - id: caller
+        kind: actor
+      - id: decodeTextInto
+        kind: self
+      - id: decodeEscape
+        kind: internal
+      - id: utf8
+        kind: stdlib
+    steps:
+      - bind: body
+        eval: "lit[1 : len(lit)-1]"
+      - loop:
+          cond: i < len(body)
+          do:
+            - opt:
+                do:
+                  - bind: j
+                    eval: i + 1
+                  - loop:
+                      cond: j < len(body) && body[j] != '\\'
+                      do:
+                        - op: ++
+                          set: j
+                  - opt:
+                      do:
+                        - return: 0, false
+                      when: len(dst)-n < j-i
+                  - op: +=
+                    set: "n"
+                    value: copy(dst[n:], body[i:j])
+                  - set: i
+                    value: j
+                  - continue: true
+                when: body[i] != '\\'
+            - bind: r, consumed
+              eval: decodeEscape(body[i:])
+              to: decodeEscape
+            - opt:
+                do:
+                  - return: 0, false
+                when: len(dst)-n < utf8.RuneLen(r)
+            - op: +=
+              set: "n"
+              to: utf8
+              value: utf8.EncodeRune(dst[n:], r)
+            - op: +=
+              set: i
+              value: consumed
+          init: i := 0
+      - return: n, true
   - of: quoteJSONString
     participants:
       - id: caller
@@ -1499,125 +3111,247 @@ sequences:
             - default: true
               do:
                 - return: "\"\", false"
+  - of: readJOSEHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: readJOSEHeader
+        kind: self
+      - id: checkJSONDepth
+        kind: internal
+      - id: scanObject
+        kind: internal
+      - id: headerMember
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: headerView{}, malformed("JOSE header is not UTF-8")
+          when: "!utf8.Valid(raw)"
+      - opt:
+          do:
+            - return: headerView{}, derr
+          init:
+            bind: derr
+            eval: checkJSONDepth(raw, maxHeaderDepth)
+            to: checkJSONDepth
+          when: derr != nil
+      - var:
+          name: idx
+          type: objectIndex
+      - opt:
+          do:
+            - return: headerView{}, serr
+          init:
+            bind: serr
+            eval: scanObject(raw, maxHeaderDepth, &idx)
+            to: scanObject
+          when: serr != nil
+      - var:
+          name: merr
+          type: error
+      - opt:
+          do:
+            - return: headerView{}, merr
+          init:
+            bind: view.alg, merr
+            eval: headerMember(raw, &idx, "alg")
+            op: =
+            to: headerMember
+          when: merr != nil
+      - opt:
+          do:
+            - return: headerView{}, merr
+          init:
+            bind: view.typ, merr
+            eval: headerMember(raw, &idx, "typ")
+            op: =
+            to: headerMember
+          when: merr != nil
+      - opt:
+          do:
+            - return: headerView{}, merr
+          init:
+            bind: view.kid, merr
+            eval: headerMember(raw, &idx, "kid")
+            op: =
+            to: headerMember
+          when: merr != nil
+      - set: view.critical
+        value: idx.lookup(raw, "crit") >= 0
+      - return: view, nil
+  - of: headerMember
+    participants:
+      - id: caller
+        kind: actor
+      - id: headerMember
+        kind: self
+      - id: idx.lookup
+        kind: internal
+      - id: idx.value
+        kind: internal
+    steps:
+      - bind: at
+        eval: idx.lookup(raw, name)
+        to: idx.lookup
+      - opt:
+          do:
+            - return: nil, nil
+          when: at < 0 || idx.member[at].kind == kindNull
+      - opt:
+          do:
+            - return: nil, malformed("registered claim " + name + " is not a string")
+          when: idx.member[at].kind != kindString
+      - return: idx.value(raw, at), nil
+        to: idx.value
   - of: parseJOSEHeader
     participants:
       - id: caller
         kind: actor
       - id: parseJOSEHeader
         kind: self
-      - id: checkJSONDepth
-        kind: internal
-      - id: checkNoDuplicateMembers
-        kind: internal
-      - id: decodeStringClaim
-        kind: internal
-      - id: finishHeader
+      - id: readJOSEHeader
         kind: internal
     steps:
+      - bind: view, rerr
+        eval: readJOSEHeader(raw)
+        to: readJOSEHeader
       - opt:
           do:
-            - return: headerValue{}, malformed("JOSE header is not UTF-8")
-          when: "!utf8.Valid(raw)"
-      - opt:
-          do:
-            - return: headerValue{}, derr
-          init:
-            bind: derr
-            eval: checkJSONDepth(raw, maxHeaderDepth)
-            to: checkJSONDepth
-          when: derr != nil
-      - opt:
-          do:
-            - return: headerValue{}, derr
-          init:
-            bind: derr
-            eval: checkNoDuplicateMembers(raw)
-            to: checkNoDuplicateMembers
-          when: derr != nil
-      - var:
-          name: members
-          type: map[string]json.RawMessage
-      - opt:
-          do:
-            - return: headerValue{}, malformed("JOSE header is not a JSON object")
-          when: json.Unmarshal(raw, &members) != nil
-      - bind: alg, aerr
-        eval: decodeStringClaim(members, "alg")
-        to: decodeStringClaim
-      - opt:
-          do:
-            - return: headerValue{}, aerr
-          when: aerr != nil
-      - return: finishHeader(members, alg)
-        to: finishHeader
-  - of: finishHeader
+            - return: headerValue{}, rerr
+          when: rerr != nil
+      - return: |-
+          headerValue{
+          		alg: headerText(view.alg), typ: headerText(view.typ),
+          		kid: headerText(view.kid), critical: view.critical,
+          	}, nil
+  - of: headerText
     participants:
       - id: caller
         kind: actor
-      - id: finishHeader
+      - id: headerText
         kind: self
-      - id: decodeStringClaim
+      - id: decodeText
         kind: internal
     steps:
-      - bind: typ, terr
-        eval: decodeStringClaim(members, "typ")
-        to: decodeStringClaim
       - opt:
           do:
-            - return: headerValue{}, terr
-          when: terr != nil
-      - bind: kid, kerr
-        eval: decodeStringClaim(members, "kid")
-        to: decodeStringClaim
-      - opt:
+            - return: "\"\""
+          when: lit == nil
+      - loop:
           do:
-            - return: headerValue{}, kerr
-          when: kerr != nil
-      - bind: _, critical
-        eval: members["crit"]
-      - return: "headerValue{alg: alg, typ: typ, kid: kid, critical: critical}, nil"
+            - opt:
+                do:
+                  - return: known
+                when: string(lit[1:len(lit)-1]) == known
+          key: _
+          range: "[...]string{\"HS256\", \"ES256\", \"EdDSA\", defaultType}"
+          value: known
+      - return: decodeText(lit)
+        to: decodeText
   - of: policyValue.checkHeader
     participants:
       - id: caller
         kind: actor
       - id: policyValue.checkHeader
         kind: self
-      - id: refuseUnsecured
+      - id: p.judgeHeader
         kind: internal
+    steps:
+      - return: |-
+          p.judgeHeader(headerFacts{
+          		unsecured: strings.EqualFold(header.alg, algNone), algEmpty: header.alg == "",
+          		algBound: header.alg == bound.String(), critical: header.critical,
+          		typeOK: p.requireType == "" || header.typ == p.requireType,
+          	}, bound)
+        to: p.judgeHeader
+  - of: policyValue.checkHeaderView
+    participants:
+      - id: caller
+        kind: actor
+      - id: policyValue.checkHeaderView
+        kind: self
+      - id: p.judgeHeader
+        kind: internal
+    steps:
+      - return: |-
+          p.judgeHeader(headerFacts{
+          		unsecured: literalIsNone(view.alg), algEmpty: literalEqual(view.alg, ""),
+          		algBound: literalEqual(view.alg, bound.String()), critical: view.critical,
+          		typeOK: p.requireType == "" || literalEqual(view.typ, p.requireType),
+          	}, bound)
+        to: p.judgeHeader
+  - of: policyValue.judgeHeader
+    participants:
+      - id: caller
+        kind: actor
+      - id: policyValue.judgeHeader
+        kind: self
       - id: errs
         kind: package
     steps:
       - opt:
           do:
-            - return: uerr
-          init:
-            bind: uerr
-            eval: refuseUnsecured(header)
-            to: refuseUnsecured
-          when: uerr != nil
+            - return: coretoken.AlgorithmNone
+          when: facts.unsecured
       - opt:
           do:
             - return: coretoken.Malformed
-          when: header.alg == ""
+          when: facts.algEmpty
       - opt:
           do:
             - return: |-
                 errs.Wrap(coretoken.AlgorithmMismatch, errs.WrapParams{},
                 			errs.String("expected", bound.String()))
               to: errs
-          when: header.alg != bound.String()
+          when: "!facts.algBound"
       - opt:
           do:
             - return: coretoken.HeaderUnsupported
-          when: header.critical
+          when: facts.critical
       - opt:
           do:
             - return: |-
                 errs.Wrap(coretoken.HeaderUnsupported, errs.WrapParams{},
                 			errs.String("expected_typ", p.requireType))
               to: errs
-          when: p.requireType != "" && header.typ != p.requireType
+          when: "!facts.typeOK"
       - return: nil
+  - of: literalEqual
+    participants:
+      - id: caller
+        kind: actor
+      - id: literalEqual
+        kind: self
+      - id: jsonStringEqual
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: want == ""
+          when: lit == nil
+      - return: jsonStringEqual(lit, want)
+        to: jsonStringEqual
+  - of: literalIsNone
+    participants:
+      - id: caller
+        kind: actor
+      - id: literalIsNone
+        kind: self
+      - id: decodeTextInto
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: lit == nil || len(lit) > 2+4*unicodeEscapeLen
+      - var:
+          name: buf
+          type: "[4 * unicodeEscapeLen]byte"
+      - bind: n, ok
+        eval: decodeTextInto(buf[:], lit)
+        to: decodeTextInto
+      - return: ok && n == len(algNone) && bytes.EqualFold(buf[:n], []byte(algNone))
   - of: policyValue.decodeAndValidate
     participants:
       - id: caller
@@ -1835,6 +3569,8 @@ sequences:
         kind: self
       - id: newPolicy
         kind: internal
+      - id: newHS256Verifier
+        kind: internal
     steps:
       - bind: policy, perr
         eval: newPolicy(cfg)
@@ -1843,6 +3579,14 @@ sequences:
           do:
             - return: nil, perr
           when: perr != nil
+      - opt:
+          do:
+            - return: newHS256Verifier(secret, policy), nil
+              to: newHS256Verifier
+          init:
+            bind: secret, symmetric
+            eval: bound.(hs256Binding)
+          when: symmetric
       - return: "&jwsVerifier{bound: bound, policy: policy}, nil"
   - of: (*jwsVerifier).Verify
     participants:
@@ -2278,15 +4022,12 @@ sequences:
       - id: parsed.UTC
         kind: value
     steps:
-      - var:
-          name: text
-          type: string
       - opt:
           do:
             - return: time.Time{}, malformed("PASETO time claim is not a JSON string")
-          when: json.Unmarshal(raw, &text) != nil
+          when: raw[0] != '"'
       - bind: parsed, perr
-        eval: time.Parse(time.RFC3339, text)
+        eval: time.Parse(time.RFC3339, decodeText(raw))
         to: time
       - opt:
           do:
@@ -2305,20 +4046,28 @@ sequences:
     steps:
       - return: json.RawMessage(quoteJSONString(instant.UTC().Format(time.RFC3339)))
         to: json
+  - of: pasetoShape.checkAudience
+    participants:
+      - id: caller
+        kind: actor
+      - id: pasetoShape.checkAudience
+        kind: self
+      - id: malformed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: malformed("PASETO aud is not a string")
+              to: malformed
+          when: raw[0] != '"'
+      - return: nil
   - of: pasetoShape.decodeAudience
     steps:
       - opt:
           do:
             - return: nil, nil
           when: len(raw) == 0
-      - var:
-          name: single
-          type: string
-      - opt:
-          do:
-            - return: nil, malformed("PASETO aud is not a string")
-          when: json.Unmarshal(raw, &single) != nil
-      - return: "[]string{single}, nil"
+      - return: "[]string{decodeText(raw)}, nil"
   - of: pasetoShape.encodeAudience
     participants:
       - id: caller
@@ -2572,15 +4321,28 @@ sequences:
         kind: actor
       - id: policyValue.validateClaims
         kind: self
+      - id: p.judgeClaims
+        kind: internal
+    steps:
+      - return: |-
+          p.judgeClaims(claimFacts{
+          		expiry: claims.Expiry(), notBefore: claims.NotBefore(), issuedAt: claims.IssuedAt(),
+          		issuerOK: p.issuer == "" || claims.Issuer() == p.issuer,
+          		//: Audience clones, so it is only called when there is one to match.
+          		audienceOK: p.audience == "" || slices.Contains(claims.Audience(), p.audience),
+          	})
+        to: p.judgeClaims
+  - of: policyValue.judgeClaims
+    participants:
+      - id: caller
+        kind: actor
+      - id: policyValue.judgeClaims
+        kind: self
       - id: p.timeSource.Now
         kind: value
       - id: p.checkExpiry
         kind: internal
-      - id: claims.NotBefore
-        kind: value
       - id: p.checkLifetime
-        kind: internal
-      - id: p.checkIdentity
         kind: internal
     steps:
       - bind: now
@@ -2591,50 +4353,32 @@ sequences:
             - return: err
           init:
             bind: err
-            eval: p.checkExpiry(claims, now)
+            eval: p.checkExpiry(facts.expiry, now)
             to: p.checkExpiry
           when: err != nil
       - opt:
           do:
             - return: coretoken.NotYetValid
-          init:
-            bind: nbf
-            eval: claims.NotBefore()
-            to: claims.NotBefore
-          when: "!nbf.IsZero() && now.Before(nbf.Add(-p.leeway))"
+          when: "!facts.notBefore.IsZero() && now.Before(facts.notBefore.Add(-p.leeway))"
       - opt:
           do:
             - return: err
           init:
             bind: err
-            eval: p.checkLifetime(claims)
+            eval: p.checkLifetime(facts.expiry, facts.issuedAt)
             to: p.checkLifetime
           when: err != nil
-      - return: p.checkIdentity(claims)
-        to: p.checkIdentity
-  - of: policyValue.checkIdentity
-    steps:
       - opt:
           do:
             - return: coretoken.IssuerMismatch
-          when: p.issuer != "" && claims.Issuer() != p.issuer
+          when: "!facts.issuerOK"
       - opt:
           do:
             - return: coretoken.AudienceMismatch
-          when: p.audience != "" && !slices.Contains(claims.Audience(), p.audience)
+          when: "!facts.audienceOK"
       - return: nil
   - of: policyValue.checkExpiry
-    participants:
-      - id: caller
-        kind: actor
-      - id: policyValue.checkExpiry
-        kind: self
-      - id: claims.Expiry
-        kind: value
     steps:
-      - bind: exp
-        eval: claims.Expiry()
-        to: claims.Expiry
       - opt:
           do:
             - opt:
@@ -2661,8 +4405,6 @@ sequences:
           do:
             - return: nil
           when: p.maxLifetime <= 0
-      - bind: exp, iat
-        eval: claims.Expiry(), claims.IssuedAt()
       - opt:
           do:
             - return: |-
