@@ -1543,8 +1543,9 @@ packages:
             doc: |-
               LoopOptionUnsupported is returned by Start for an option a group cannot honour
               on its engine: Loop on a group served by Handle, HandleFunc or HandleHTTP, or
-              on one with no handler; Use on a loop group; or an option neither the loop
-              engine nor its handler honours. The "option" field names it. It is judged at
+              on a datagram group; Use on a loop group; or an option neither the loop
+              engine nor its handler honours. A group with no handler fails with
+              HandlerMissing instead. The "option" field names it. It is judged at
               Start, once the handler is known, whatever order the declarations came in.
             exit: CONFIG
             name: LoopOptionUnsupported
@@ -2989,9 +2990,11 @@ packages:
           Loop configures a group's loop engine (ADR 0186 §D5): its backend, its loops
           and rings, and its per-connection and pressure bounds. It is judged at Start,
           once the group's handler is known: a group served by Handle, HandleFunc or
-          HandleHTTP, or one with no handler, refuses it with LoopOptionUnsupported,
-          whichever order the declarations came in. No group is served by a loop yet,
-          so every group refuses it until the loop engine's entry is published.
+          HandleHTTP refuses it with LoopOptionUnsupported, whichever order the
+          declarations came in. A group with no handler fails with HandlerMissing
+          instead, and one given a second handler with HandlerAlreadySet. A datagram
+          group refuses it with LoopOptionUnsupported too. No group is served by a loop
+          yet, so every group refuses it until the loop engine's entry is published.
         in:
           - name: v
             type: corenet.LoopValue
@@ -5098,6 +5101,156 @@ packages:
             typed: true
             value: "3"
       - alias:
+          - doc: |-
+              LoopHandler serves the connections of a loop group, one callback per event,
+              on the loop's thread. A callback must not block it.
+            name: LoopHandler
+            target: corenet.LoopHandler
+      - alias:
+          - doc: |-
+              LoopIO is what a loop offers its handler: Write, Close, SetDeadline and
+              Pressure on its connections, from a callback, and Post from any goroutine.
+            name: LoopIO
+            target: corenet.LoopIO
+      - alias:
+          - doc: |-
+              LoopOptionHonourer is the optional capability of a LoopHandler that honours
+              group options the loop engine does not.
+            name: LoopOptionHonourer
+            target: corenet.LoopOptionHonourer
+      - alias:
+          - doc: |-
+              LoopConnRef names one connection of a loop by ring, slot and generation. The
+              zero value names no connection.
+            name: LoopConnRef
+            target: corenet.LoopConnRef
+      - alias:
+          - doc: |-
+              PostFunc is an operation posted to a loop with LoopIO.Post. It runs once, on
+              the loop's thread.
+            name: PostFunc
+            target: corenet.PostFunc
+      - alias:
+          - doc: OptionKind names a group option, for LoopOptionHonourer.Honours.
+            name: OptionKind
+            target: corenet.OptionKind
+      - const:
+          - doc: OptionNone names no option; it is the zero value.
+            name: OptionNone
+            reexport: corenet.OptionNone
+            type: OptionKind
+            typed: true
+            value: "0"
+      - const:
+          - doc: OptionTLS is TLS. A loop group always refuses it.
+            name: OptionTLS
+            reexport: corenet.OptionTLS
+            type: OptionKind
+            typed: true
+            value: "1"
+      - const:
+          - doc: OptionMiddleware is Use. A loop group always refuses it.
+            name: OptionMiddleware
+            reexport: corenet.OptionMiddleware
+            type: OptionKind
+            typed: true
+            value: "2"
+      - const:
+          - doc: OptionReadTimeout is ReadTimeout.
+            name: OptionReadTimeout
+            reexport: corenet.OptionReadTimeout
+            type: OptionKind
+            typed: true
+            value: "3"
+      - const:
+          - doc: OptionWriteTimeout is WriteTimeout.
+            name: OptionWriteTimeout
+            reexport: corenet.OptionWriteTimeout
+            type: OptionKind
+            typed: true
+            value: "4"
+      - const:
+          - doc: OptionIdleTimeout is IdleTimeout. The loop engine honours it.
+            name: OptionIdleTimeout
+            reexport: corenet.OptionIdleTimeout
+            type: OptionKind
+            typed: true
+            value: "5"
+      - const:
+          - doc: |-
+              OptionReadHeaderTimeout is ReadHeaderTimeout, which only a protocol adapter
+              can honour.
+            name: OptionReadHeaderTimeout
+            reexport: corenet.OptionReadHeaderTimeout
+            type: OptionKind
+            typed: true
+            value: "6"
+      - const:
+          - doc: |-
+              OptionMaxHeaderBytes is MaxHeaderBytes, which only a protocol adapter can
+              honour.
+            name: OptionMaxHeaderBytes
+            reexport: corenet.OptionMaxHeaderBytes
+            type: OptionKind
+            typed: true
+            value: "7"
+      - const:
+          - doc: OptionHandshakeTimeout is HandshakeTimeout.
+            name: OptionHandshakeTimeout
+            reexport: corenet.OptionHandshakeTimeout
+            type: OptionKind
+            typed: true
+            value: "8"
+      - const:
+          - doc: OptionReadBufferSize is ReadBufferSize.
+            name: OptionReadBufferSize
+            reexport: corenet.OptionReadBufferSize
+            type: OptionKind
+            typed: true
+            value: "9"
+      - const:
+          - doc: OptionMaxPacketSize is MaxPacketSize.
+            name: OptionMaxPacketSize
+            reexport: corenet.OptionMaxPacketSize
+            type: OptionKind
+            typed: true
+            value: "10"
+      - const:
+          - doc: OptionBatchSize is BatchSize.
+            name: OptionBatchSize
+            reexport: corenet.OptionBatchSize
+            type: OptionKind
+            typed: true
+            value: "11"
+      - const:
+          - doc: OptionShards is Shards.
+            name: OptionShards
+            reexport: corenet.OptionShards
+            type: OptionKind
+            typed: true
+            value: "12"
+      - const:
+          - doc: OptionMaxConns is MaxConns. The loop engine honours it.
+            name: OptionMaxConns
+            reexport: corenet.OptionMaxConns
+            type: OptionKind
+            typed: true
+            value: "13"
+      - const:
+          - doc: OptionAdopt is Adopt. The loop engine honours it.
+            name: OptionAdopt
+            reexport: corenet.OptionAdopt
+            type: OptionKind
+            typed: true
+            value: "14"
+      - const:
+          - doc: OptionPreHandshake is PreHandshake.
+            name: OptionPreHandshake
+            reexport: corenet.OptionPreHandshake
+            type: OptionKind
+            typed: true
+            value: "15"
+      - alias:
           - doc: Phase is where a server sits in its lifecycle.
             name: Phase
             target: corenet.Phase
@@ -5182,6 +5335,46 @@ packages:
             name: ConnLimitReached
             reexport: corenet.ConnLimitReached
             type: "*errs.Error"
+          - doc: HandlerAlreadySet reports a second handler declared on one stream group.
+            name: HandlerAlreadySet
+            reexport: corenet.HandlerAlreadySet
+            type: "*errs.Error"
+          - doc: LoopTLSUnsupported reports TLS set on a loop group.
+            name: LoopTLSUnsupported
+            reexport: corenet.LoopTLSUnsupported
+            type: "*errs.Error"
+          - doc: LoopOptionUnsupported reports a group option a loop group cannot honour.
+            name: LoopOptionUnsupported
+            reexport: corenet.LoopOptionUnsupported
+            type: "*errs.Error"
+          - doc: LoopBackendUnavailable reports an explicit loop backend the kernel's probe refused.
+            name: LoopBackendUnavailable
+            reexport: corenet.LoopBackendUnavailable
+            type: "*errs.Error"
+          - doc: LoopNoDescriptors reports a loop group with no RLIMIT_NOFILE to size it by.
+            name: LoopNoDescriptors
+            reexport: corenet.LoopNoDescriptors
+            type: "*errs.Error"
+          - doc: LoopStaleRef reports an operation on a connection that has closed.
+            name: LoopStaleRef
+            reexport: corenet.LoopStaleRef
+            type: "*errs.Error"
+          - doc: LoopOutputFull reports a Write past a connection's or a loop's output bound.
+            name: LoopOutputFull
+            reexport: corenet.LoopOutputFull
+            type: "*errs.Error"
+          - doc: LoopSpillFull reports a connection closed for unconsumed input past its ceiling.
+            name: LoopSpillFull
+            reexport: corenet.LoopSpillFull
+            type: "*errs.Error"
+          - doc: LoopPostQueueFull reports a Post refused by a full queue.
+            name: LoopPostQueueFull
+            reexport: corenet.LoopPostQueueFull
+            type: "*errs.Error"
+          - doc: LoopWrongThread reports, under loopdebug, a loop operation off the loop's thread.
+            name: LoopWrongThread
+            reexport: corenet.LoopWrongThread
+            type: "*errs.Error"
       - func:
           doc: New builds a server.
           forward: svcserver.New
@@ -5232,9 +5425,11 @@ packages:
             Loop configures a group's loop engine (ADR 0186 §D5): its backend, its loops
             and rings, and its per-connection and pressure bounds. It is judged at Start,
             once the group's handler is known: a group served by Handle, HandleFunc or
-            HandleHTTP, or one with no handler, refuses it with LoopOptionUnsupported,
-            whichever order the declarations came in. No group is served by a loop yet,
-            so every group refuses it until the loop engine's entry is published.
+            HandleHTTP refuses it with LoopOptionUnsupported, whichever order the
+            declarations came in. A group with no handler fails with HandlerMissing
+            instead, and one given a second handler with HandlerAlreadySet. A datagram
+            group refuses it with LoopOptionUnsupported too. No group is served by a loop
+            yet, so every group refuses it until the loop engine's entry is published.
           forward: svcserver.Loop
           in:
             - name: v

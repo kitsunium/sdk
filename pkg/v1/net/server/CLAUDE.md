@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-05T12:00:00Z -->
+<!-- updated: 2026-10-24T12:00:00Z -->
 # pkg/v1/net/server/
 
 ## Purpose
@@ -38,6 +38,10 @@ in the dimension that motivated the domain, whatever else it gained.
 | `WithDrainTimeout` | server option |
 | `DrainSignal` | the shutdown signal a handler holding a connection open watches |
 | `ListenFailed` … `ConnLimitReached` | sentinels |
+| `Loop`, `LoopValue`, `LoopBackend`, `LoopBackend*` | a group's loop engine (ADR 0186 §D5); every group refuses it with `LoopOptionUnsupported` until `HandleLoop` is published (§D9 step 11) |
+| `LoopHandler`, `LoopIO`, `LoopOptionHonourer`, `LoopConnRef`, `PostFunc`, `OptionKind`, `Option*` | the loop ports and values (§D9 step 6), published before any group can serve them so a consumer can implement a handler first; `TestLoopPortsArePublic` writes one with this package alone |
+| `LoopState`, `LoopRingState` | `State.Loops`, empty while no loop group exists |
+| `HandlerAlreadySet`, `LoopTLSUnsupported` … `LoopWrongThread` | the loop's sentinels, and a second handler on one group |
 
 `sse` is the Server-Sent Events half, `websocket` is WebSocket (RFC 6455) and
 `static` serves a file tree safely (ADR 0130), each a package of its own beside

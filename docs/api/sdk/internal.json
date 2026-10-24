@@ -27051,7 +27051,7 @@
         "reason": "LOOP_OPTION_UNSUPPORTED",
         "public": "The group option is not supported by its engine"
       },
-      "doc": "LoopOptionUnsupported is returned by Start for an option a group cannot honour\non its engine: Loop on a group served by Handle, HandleFunc or HandleHTTP, or\non one with no handler; Use on a loop group; or an option neither the loop\nengine nor its handler honours. The \"option\" field names it. It is judged at\nStart, once the handler is known, whatever order the declarations came in.\n",
+      "doc": "LoopOptionUnsupported is returned by Start for an option a group cannot honour\non its engine: Loop on a group served by Handle, HandleFunc or HandleHTTP, or\non a datagram group; Use on a loop group; or an option neither the loop\nengine nor its handler honours. A group with no handler fails with\nHandlerMissing instead. The \"option\" field names it. It is judged at\nStart, once the handler is known, whatever order the declarations came in.\n",
       "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
@@ -60600,7 +60600,7 @@
       "name": "Loop",
       "spelled": "func(v corenet.LoopValue) GroupOption",
       "canonical": "func(v github.com/kitsunium/sdk/internal/core/net.LoopValue) github.com/kitsunium/sdk/internal/service/net/server.GroupOption",
-      "doc": "Loop configures a group's loop engine (ADR 0186 §D5): its backend, its loops\nand rings, and its per-connection and pressure bounds. It is judged at Start,\nonce the group's handler is known: a group served by Handle, HandleFunc or\nHandleHTTP, or one with no handler, refuses it with LoopOptionUnsupported,\nwhichever order the declarations came in. No group is served by a loop yet,\nso every group refuses it until the loop engine's entry is published.\n",
+      "doc": "Loop configures a group's loop engine (ADR 0186 §D5): its backend, its loops\nand rings, and its per-connection and pressure bounds. It is judged at Start,\nonce the group's handler is known: a group served by Handle, HandleFunc or\nHandleHTTP refuses it with LoopOptionUnsupported, whichever order the\ndeclarations came in. A group with no handler fails with HandlerMissing\ninstead, and one given a second handler with HandlerAlreadySet. A datagram\ngroup refuses it with LoopOptionUnsupported too. No group is served by a loop\nyet, so every group refuses it until the loop engine's entry is published.\n",
       "file": "service/net/server/options.go",
       "layer": "service",
       "family": "net"

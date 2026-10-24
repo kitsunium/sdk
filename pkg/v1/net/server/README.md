@@ -118,11 +118,29 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
 - [type ListenerState](<#ListenerState>)
 - [type LoopBackend](<#LoopBackend>)
   - [func \(LoopBackend\) String\(\) string](<#LoopBackend.String>)
+- [type LoopConnRef](<#LoopConnRef>)
+- [type LoopHandler](<#LoopHandler>)
+  - [func \(LoopHandler\) OnBatchEnd\(io LoopIO\)](<#LoopHandler.OnBatchEnd>)
+  - [func \(LoopHandler\) OnClose\(io LoopIO, ref LoopConnRef, err error\)](<#LoopHandler.OnClose>)
+  - [func \(LoopHandler\) OnData\(io LoopIO, ref LoopConnRef, buf \[\]byte\) int](<#LoopHandler.OnData>)
+  - [func \(LoopHandler\) OnOpen\(io LoopIO, ref LoopConnRef\)](<#LoopHandler.OnOpen>)
+  - [func \(LoopHandler\) OnTimeout\(io LoopIO, ref LoopConnRef\)](<#LoopHandler.OnTimeout>)
+  - [func \(LoopHandler\) OnWritable\(io LoopIO, ref LoopConnRef\)](<#LoopHandler.OnWritable>)
+- [type LoopIO](<#LoopIO>)
+  - [func \(LoopIO\) Close\(ref LoopConnRef\) error](<#LoopIO.Close>)
+  - [func \(LoopIO\) Post\(op PostFunc, arg uintptr\) error](<#LoopIO.Post>)
+  - [func \(LoopIO\) Pressure\(ref LoopConnRef\) bool](<#LoopIO.Pressure>)
+  - [func \(LoopIO\) SetDeadline\(ref LoopConnRef, d time.Duration\) error](<#LoopIO.SetDeadline>)
+  - [func \(LoopIO\) Write\(ref LoopConnRef, p \[\]byte\) error](<#LoopIO.Write>)
+- [type LoopOptionHonourer](<#LoopOptionHonourer>)
+  - [func \(LoopOptionHonourer\) Honours\(k OptionKind\) bool](<#LoopOptionHonourer.Honours>)
 - [type LoopRingState](<#LoopRingState>)
 - [type LoopState](<#LoopState>)
 - [type LoopValue](<#LoopValue>)
 - [type Middleware](<#Middleware>)
 - [type Option](<#Option>)
+- [type OptionKind](<#OptionKind>)
+  - [func \(OptionKind\) String\(\) string](<#OptionKind.String>)
 - [type Packet](<#Packet>)
   - [func \(Packet\) Data\(\) \[\]byte](<#Packet.Data>)
   - [func \(Packet\) From\(\) stdnet.Addr](<#Packet.From>)
@@ -142,6 +160,7 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
 - [type PacketMiddleware](<#PacketMiddleware>)
 - [type Phase](<#Phase>)
   - [func \(Phase\) String\(\) string](<#Phase.String>)
+- [type PostFunc](<#PostFunc>)
 - [type Server](<#Server>)
   - [func \(\*Server\) Close\(\) error](<#Server.Close>)
   - [func \(\*Server\) Group\(name string, opts ...GroupOption\) \*StreamGroup](<#Server.Group>)
@@ -190,6 +209,150 @@ const LoopBackendPortable LoopBackend = 3
 LoopBackendPortable is the default engine's accept path, serialised onto one handler goroutine.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopBackendPortable`.
+
+<a name="OptionAdopt"></a>
+```go
+const OptionAdopt OptionKind = 14
+```
+
+OptionAdopt is Adopt. The loop engine honours it.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionAdopt`.
+
+<a name="OptionBatchSize"></a>
+```go
+const OptionBatchSize OptionKind = 11
+```
+
+OptionBatchSize is BatchSize.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionBatchSize`.
+
+<a name="OptionHandshakeTimeout"></a>
+```go
+const OptionHandshakeTimeout OptionKind = 8
+```
+
+OptionHandshakeTimeout is HandshakeTimeout.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionHandshakeTimeout`.
+
+<a name="OptionIdleTimeout"></a>
+```go
+const OptionIdleTimeout OptionKind = 5
+```
+
+OptionIdleTimeout is IdleTimeout. The loop engine honours it.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionIdleTimeout`.
+
+<a name="OptionMaxConns"></a>
+```go
+const OptionMaxConns OptionKind = 13
+```
+
+OptionMaxConns is MaxConns. The loop engine honours it.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionMaxConns`.
+
+<a name="OptionMaxHeaderBytes"></a>
+```go
+const OptionMaxHeaderBytes OptionKind = 7
+```
+
+OptionMaxHeaderBytes is MaxHeaderBytes, which only a protocol adapter can honour.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionMaxHeaderBytes`.
+
+<a name="OptionMaxPacketSize"></a>
+```go
+const OptionMaxPacketSize OptionKind = 10
+```
+
+OptionMaxPacketSize is MaxPacketSize.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionMaxPacketSize`.
+
+<a name="OptionMiddleware"></a>
+```go
+const OptionMiddleware OptionKind = 2
+```
+
+OptionMiddleware is Use. A loop group always refuses it.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionMiddleware`.
+
+<a name="OptionNone"></a>
+```go
+const OptionNone OptionKind = 0
+```
+
+OptionNone names no option; it is the zero value.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionNone`.
+
+<a name="OptionPreHandshake"></a>
+```go
+const OptionPreHandshake OptionKind = 15
+```
+
+OptionPreHandshake is PreHandshake.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionPreHandshake`.
+
+<a name="OptionReadBufferSize"></a>
+```go
+const OptionReadBufferSize OptionKind = 9
+```
+
+OptionReadBufferSize is ReadBufferSize.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionReadBufferSize`.
+
+<a name="OptionReadHeaderTimeout"></a>
+```go
+const OptionReadHeaderTimeout OptionKind = 6
+```
+
+OptionReadHeaderTimeout is ReadHeaderTimeout, which only a protocol adapter can honour.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionReadHeaderTimeout`.
+
+<a name="OptionReadTimeout"></a>
+```go
+const OptionReadTimeout OptionKind = 3
+```
+
+OptionReadTimeout is ReadTimeout.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionReadTimeout`.
+
+<a name="OptionShards"></a>
+```go
+const OptionShards OptionKind = 12
+```
+
+OptionShards is Shards.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionShards`.
+
+<a name="OptionTLS"></a>
+```go
+const OptionTLS OptionKind = 1
+```
+
+OptionTLS is TLS. A loop group always refuses it.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionTLS`.
+
+<a name="OptionWriteTimeout"></a>
+```go
+const OptionWriteTimeout OptionKind = 4
+```
+
+OptionWriteTimeout is WriteTimeout.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionWriteTimeout`.
 
 <a name="PhaseDraining"></a>
 ```go
@@ -282,6 +445,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/net.GroupDuplicate`.
 
 Code `0.2.11.12` · reason `GROUP_DUPLICATE` · public "The listener group is already declared"
 
+<a name="HandlerAlreadySet"></a>
+```go
+var HandlerAlreadySet *errs.Error
+```
+
+HandlerAlreadySet reports a second handler declared on one stream group.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.HandlerAlreadySet`.
+
+Code `0.2.11.44` · reason `HANDLER_ALREADY_SET` · public "The listener group already has a handler"
+
 <a name="HandlerMissing"></a>
 ```go
 var HandlerMissing *errs.Error
@@ -314,6 +488,105 @@ ListenFailed reports a listener that could not be bound.
 Initialised with `github.com/kitsunium/sdk/internal/core/net.ListenFailed`.
 
 Code `0.2.11.1` · reason `LISTEN_FAILED` · public "The server could not bind its listening address"
+
+<a name="LoopBackendUnavailable"></a>
+```go
+var LoopBackendUnavailable *errs.Error
+```
+
+LoopBackendUnavailable reports an explicit loop backend the kernel's probe refused.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopBackendUnavailable`.
+
+Code `0.2.11.37` · reason `LOOP_BACKEND_UNAVAILABLE` · public "The requested loop backend is not available on this kernel"
+
+<a name="LoopNoDescriptors"></a>
+```go
+var LoopNoDescriptors *errs.Error
+```
+
+LoopNoDescriptors reports a loop group with no RLIMIT\_NOFILE to size it by.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopNoDescriptors`.
+
+Code `0.2.11.38` · reason `LOOP_NO_DESCRIPTORS` · public "The process has no file descriptor available for the loop"
+
+<a name="LoopOptionUnsupported"></a>
+```go
+var LoopOptionUnsupported *errs.Error
+```
+
+LoopOptionUnsupported reports a group option a loop group cannot honour.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopOptionUnsupported`.
+
+Code `0.2.11.36` · reason `LOOP_OPTION_UNSUPPORTED` · public "The group option is not supported by its engine"
+
+<a name="LoopOutputFull"></a>
+```go
+var LoopOutputFull *errs.Error
+```
+
+LoopOutputFull reports a Write past a connection's or a loop's output bound.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopOutputFull`.
+
+Code `0.2.11.40` · reason `LOOP_OUTPUT_FULL` · public "The connection cannot take more output now"
+
+<a name="LoopPostQueueFull"></a>
+```go
+var LoopPostQueueFull *errs.Error
+```
+
+LoopPostQueueFull reports a Post refused by a full queue.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopPostQueueFull`.
+
+Code `0.2.11.42` · reason `LOOP_POST_QUEUE_FULL` · public "The loop cannot take more posted work now"
+
+<a name="LoopSpillFull"></a>
+```go
+var LoopSpillFull *errs.Error
+```
+
+LoopSpillFull reports a connection closed for unconsumed input past its ceiling.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopSpillFull`.
+
+Code `0.2.11.41` · reason `LOOP_SPILL_FULL` · public "The connection sent more than it may hold unread"
+
+<a name="LoopStaleRef"></a>
+```go
+var LoopStaleRef *errs.Error
+```
+
+LoopStaleRef reports an operation on a connection that has closed.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopStaleRef`.
+
+Code `0.2.11.39` · reason `LOOP_STALE_REF` · public "The connection is closed"
+
+<a name="LoopTLSUnsupported"></a>
+```go
+var LoopTLSUnsupported *errs.Error
+```
+
+LoopTLSUnsupported reports TLS set on a loop group.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopTLSUnsupported`.
+
+Code `0.2.11.35` · reason `LOOP_TLS_UNSUPPORTED` · public "The loop engine does not serve TLS"
+
+<a name="LoopWrongThread"></a>
+```go
+var LoopWrongThread *errs.Error
+```
+
+LoopWrongThread reports, under loopdebug, a loop operation off the loop's thread.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopWrongThread`.
+
+Code `0.2.11.43` · reason `LOOP_WRONG_THREAD` · public "The operation was called outside its loop"
 
 <a name="UnsupportedNetwork"></a>
 ```go
@@ -421,7 +694,7 @@ On Windows, whose AF\_UNIX sockets are stream-only, a "unixgram" or "unixpacket"
 func Loop(v LoopValue) GroupOption
 ```
 
-Loop configures a group's loop engine (ADR 0186 §D5): its backend, its loops and rings, and its per-connection and pressure bounds. It is judged at Start, once the group's handler is known: a group served by Handle, HandleFunc or HandleHTTP, or one with no handler, refuses it with LoopOptionUnsupported, whichever order the declarations came in. No group is served by a loop yet, so every group refuses it until the loop engine's entry is published.
+Loop configures a group's loop engine (ADR 0186 §D5): its backend, its loops and rings, and its per-connection and pressure bounds. It is judged at Start, once the group's handler is known: a group served by Handle, HandleFunc or HandleHTTP refuses it with LoopOptionUnsupported, whichever order the declarations came in. A group with no handler fails with HandlerMissing instead, and one given a second handler with HandlerAlreadySet. A datagram group refuses it with LoopOptionUnsupported too. No group is served by a loop yet, so every group refuses it until the loop engine's entry is published.
 
 <a name="MaxConns"></a>
 ## func [MaxConns](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
@@ -774,6 +1047,243 @@ func (LoopBackend) String() string
 
 String renders the backend as State and the start line spell it.
 
+<a name="LoopConnRef"></a>
+## type [LoopConnRef](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+LoopConnRef names one connection of a loop by ring, slot and generation. The zero value names no connection.
+
+```go
+type LoopConnRef = corenet.LoopConnRef
+```
+
+LoopConnRef is an alias of `github.com/kitsunium/sdk/internal/core/net.LoopConnRef`, declared as:
+
+```go
+type LoopConnRef struct {
+	// Ring is the ring, inside its loop, that holds the connection.
+	Ring uint32
+	// Slot is the connection's index in the ring's table.
+	Slot uint32
+	// Gen is the slot's generation. It is never zero for a live connection, so
+	// the zero LoopConnRef is stale on every loop.
+	Gen  uint32
+}
+```
+
+<a name="LoopHandler"></a>
+## type [LoopHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+LoopHandler serves the connections of a loop group, one callback per event, on the loop's thread. A callback must not block it.
+
+```go
+type LoopHandler = corenet.LoopHandler
+```
+
+LoopHandler is an alias of `github.com/kitsunium/sdk/internal/core/net.LoopHandler`, declared as:
+
+```go
+type LoopHandler interface {
+	// OnBatchEnd is called once per loop iteration, after the OnData calls of
+	// every ring of the loop, and before any buffer handed to them returns to the
+	// kernel. It is where a handler flushes work it batched — one database
+	// commit for every request of the batch, say — before writing the answers.
+	OnBatchEnd(io LoopIO)
+	// OnClose is called once per connection, last. err is nil when the peer
+	// closed cleanly or the handler called Close, and otherwise names why the
+	// loop closed it — LoopSpillFull, an idle timeout, the drain, a socket
+	// error. ref is stale once OnClose returns.
+	OnClose(io LoopIO, ref LoopConnRef, err error)
+	// OnData hands the handler the bytes received on ref and returns how many of
+	// them it consumed, from 0 to len(buf). buf stays valid until the next
+	// OnBatchEnd returns, never later, and the handler must not write to it.
+	// The unconsumed tail is kept in the connection's spill and handed back
+	// first, followed by the next bytes, on the next OnData; a tail past the
+	// spill ceiling closes the connection with LoopSpillFull. A value outside
+	// 0 to len(buf) is treated as len(buf).
+	OnData(io LoopIO, ref LoopConnRef, buf []byte) int
+	// OnOpen is called once per accepted connection, before any OnData for it.
+	// Pressure(ref) already answers for this connection.
+	OnOpen(io LoopIO, ref LoopConnRef)
+	// OnTimeout is called when the deadline set by SetDeadline on ref expires.
+	// The connection stays open: closing it is the handler's choice.
+	OnTimeout(io LoopIO, ref LoopConnRef)
+	// OnWritable is called when ref's pending output falls below the loop's
+	// low-water mark after a Write was refused with LoopOutputFull or left output
+	// pending past the mark, so a producer that paused can resume.
+	OnWritable(io LoopIO, ref LoopConnRef)
+}
+```
+
+<a name="LoopHandler.OnBatchEnd"></a>
+### func \(LoopHandler\) [OnBatchEnd](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (LoopHandler) OnBatchEnd(io LoopIO)
+```
+
+OnBatchEnd is called once per loop iteration, after the OnData calls of every ring of the loop, and before any buffer handed to them returns to the kernel. It is where a handler flushes work it batched — one database commit for every request of the batch, say — before writing the answers.
+
+<a name="LoopHandler.OnClose"></a>
+### func \(LoopHandler\) [OnClose](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (LoopHandler) OnClose(io LoopIO, ref LoopConnRef, err error)
+```
+
+OnClose is called once per connection, last. err is nil when the peer closed cleanly or the handler called Close, and otherwise names why the loop closed it — LoopSpillFull, an idle timeout, the drain, a socket error. ref is stale once OnClose returns.
+
+<a name="LoopHandler.OnData"></a>
+### func \(LoopHandler\) [OnData](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (LoopHandler) OnData(io LoopIO, ref LoopConnRef, buf []byte) int
+```
+
+OnData hands the handler the bytes received on ref and returns how many of them it consumed, from 0 to len(buf). buf stays valid until the next OnBatchEnd returns, never later, and the handler must not write to it. The unconsumed tail is kept in the connection's spill and handed back first, followed by the next bytes, on the next OnData; a tail past the spill ceiling closes the connection with LoopSpillFull. A value outside 0 to len(buf) is treated as len(buf).
+
+<a name="LoopHandler.OnOpen"></a>
+### func \(LoopHandler\) [OnOpen](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (LoopHandler) OnOpen(io LoopIO, ref LoopConnRef)
+```
+
+OnOpen is called once per accepted connection, before any OnData for it. Pressure(ref) already answers for this connection.
+
+<a name="LoopHandler.OnTimeout"></a>
+### func \(LoopHandler\) [OnTimeout](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (LoopHandler) OnTimeout(io LoopIO, ref LoopConnRef)
+```
+
+OnTimeout is called when the deadline set by SetDeadline on ref expires. The connection stays open: closing it is the handler's choice.
+
+<a name="LoopHandler.OnWritable"></a>
+### func \(LoopHandler\) [OnWritable](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (LoopHandler) OnWritable(io LoopIO, ref LoopConnRef)
+```
+
+OnWritable is called when ref's pending output falls below the loop's low-water mark after a Write was refused with LoopOutputFull or left output pending past the mark, so a producer that paused can resume.
+
+<a name="LoopIO"></a>
+## type [LoopIO](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+LoopIO is what a loop offers its handler: Write, Close, SetDeadline and Pressure on its connections, from a callback, and Post from any goroutine.
+
+```go
+type LoopIO = corenet.LoopIO
+```
+
+LoopIO is an alias of `github.com/kitsunium/sdk/internal/core/net.LoopIO`, declared as:
+
+```go
+type LoopIO interface {
+	// Close closes ref's connection once the output already written has left,
+	// and calls OnClose. A second Close, or a Close on a stale reference, returns
+	// LoopStaleRef and does nothing.
+	Close(ref LoopConnRef) error
+	// Post queues op to run once on the loop's thread with arg, and wakes the
+	// loop. It is the one operation any goroutine may call. The queue is
+	// preallocated and holds no closure: op is a plain function and arg an
+	// integer the caller gives meaning to. Each posted operation runs exactly
+	// once, in the order posted; a full queue refuses with LoopPostQueueFull, and
+	// a loop that has stopped with ServerClosed.
+	Post(op PostFunc, arg uintptr) error
+	// Pressure reports whether ref's connection was accepted, or has since come,
+	// under the loop's soft pressure: the group serves more connections than its
+	// soft bound. It is a primitive; what a protocol makes of it — HTTP/1.1
+	// answers Connection: close — is the protocol adapter's. A stale reference
+	// reports false.
+	Pressure(ref LoopConnRef) bool
+	// SetDeadline arms ref's timer to fire OnTimeout after d, on the loop's
+	// coarse timer wheel: it fires no earlier than d and at most one wheel tick
+	// late. A d of zero or less disarms it. Arming again replaces the previous
+	// deadline.
+	SetDeadline(ref LoopConnRef, d time.Duration) error
+	// Write copies p into ref's output and returns. Writes on one reference leave
+	// in the order they were made, and p may be reused once Write returns. It is
+	// refused with LoopOutputFull, copying nothing, when p would pass the
+	// connection's output ceiling or the loop's global output budget, and with
+	// LoopStaleRef when ref's connection has closed.
+	Write(ref LoopConnRef, p []byte) error
+}
+```
+
+<a name="LoopIO.Close"></a>
+### func \(LoopIO\) [Close](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (LoopIO) Close(ref LoopConnRef) error
+```
+
+Close closes ref's connection once the output already written has left, and calls OnClose. A second Close, or a Close on a stale reference, returns LoopStaleRef and does nothing.
+
+<a name="LoopIO.Post"></a>
+### func \(LoopIO\) [Post](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (LoopIO) Post(op PostFunc, arg uintptr) error
+```
+
+Post queues op to run once on the loop's thread with arg, and wakes the loop. It is the one operation any goroutine may call. The queue is preallocated and holds no closure: op is a plain function and arg an integer the caller gives meaning to. Each posted operation runs exactly once, in the order posted; a full queue refuses with LoopPostQueueFull, and a loop that has stopped with ServerClosed.
+
+<a name="LoopIO.Pressure"></a>
+### func \(LoopIO\) [Pressure](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (LoopIO) Pressure(ref LoopConnRef) bool
+```
+
+Pressure reports whether ref's connection was accepted, or has since come, under the loop's soft pressure: the group serves more connections than its soft bound. It is a primitive; what a protocol makes of it — HTTP/1.1 answers Connection: close — is the protocol adapter's. A stale reference reports false.
+
+<a name="LoopIO.SetDeadline"></a>
+### func \(LoopIO\) [SetDeadline](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (LoopIO) SetDeadline(ref LoopConnRef, d time.Duration) error
+```
+
+SetDeadline arms ref's timer to fire OnTimeout after d, on the loop's coarse timer wheel: it fires no earlier than d and at most one wheel tick late. A d of zero or less disarms it. Arming again replaces the previous deadline.
+
+<a name="LoopIO.Write"></a>
+### func \(LoopIO\) [Write](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (LoopIO) Write(ref LoopConnRef, p []byte) error
+```
+
+Write copies p into ref's output and returns. Writes on one reference leave in the order they were made, and p may be reused once Write returns. It is refused with LoopOutputFull, copying nothing, when p would pass the connection's output ceiling or the loop's global output budget, and with LoopStaleRef when ref's connection has closed.
+
+<a name="LoopOptionHonourer"></a>
+## type [LoopOptionHonourer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+LoopOptionHonourer is the optional capability of a LoopHandler that honours group options the loop engine does not.
+
+```go
+type LoopOptionHonourer = corenet.LoopOptionHonourer
+```
+
+LoopOptionHonourer is an alias of `github.com/kitsunium/sdk/internal/core/net.LoopOptionHonourer`, declared as:
+
+```go
+type LoopOptionHonourer interface {
+	// Honours reports whether the handler applies the option of kind k itself.
+	Honours(k OptionKind) bool
+}
+```
+
+<a name="LoopOptionHonourer.Honours"></a>
+### func \(LoopOptionHonourer\) [Honours](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (LoopOptionHonourer) Honours(k OptionKind) bool
+```
+
+Honours reports whether the handler applies the option of kind k itself.
+
 <a name="LoopRingState"></a>
 ## type [LoopRingState](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
@@ -951,6 +1461,30 @@ Option is an alias of `github.com/kitsunium/sdk/internal/service/net/server.Opti
 ```go
 type Option func(*Server)
 ```
+
+<a name="OptionKind"></a>
+## type [OptionKind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+OptionKind names a group option, for LoopOptionHonourer.Honours.
+
+```go
+type OptionKind = corenet.OptionKind
+```
+
+OptionKind is an alias of `github.com/kitsunium/sdk/internal/core/net.OptionKind`, declared as:
+
+```go
+type OptionKind uint8
+```
+
+<a name="OptionKind.String"></a>
+### func \(OptionKind\) [String](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/loop.go>)
+
+```go
+func (OptionKind) String() string
+```
+
+String renders the option's name, as its constructor spells it.
 
 <a name="Packet"></a>
 ## type [Packet](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
@@ -1172,6 +1706,21 @@ func (Phase) String() string
 ```
 
 String renders the phase for logs and status output.
+
+<a name="PostFunc"></a>
+## type [PostFunc](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+PostFunc is an operation posted to a loop with LoopIO.Post. It runs once, on the loop's thread.
+
+```go
+type PostFunc = corenet.PostFunc
+```
+
+PostFunc is an alias of `github.com/kitsunium/sdk/internal/core/net.PostFunc`, declared as:
+
+```go
+type PostFunc func(io LoopIO, arg uintptr)
+```
 
 <a name="Server"></a>
 ## type [Server](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
