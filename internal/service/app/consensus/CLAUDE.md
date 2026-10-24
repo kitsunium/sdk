@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T16:59:26Z -->
+<!-- updated: 2026-10-24T20:23:47Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -77,6 +77,19 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   `TestADirectoryThatCannotBeOpenedToSyncWritesNoMarker`). A recovery that
   fails closes the segments it opened
   (`TestAFailedRecoveryClosesTheSegmentsItOpened`).
+- Hold the log in memory to recover it: every segment read whole and kept,
+  with an 88-byte record per record pointing into them, took one to three
+  times the log in heap until `recover` returned, and a node whose log grew
+  while its compaction stalled was OOM-killed at every restart, `Inspect`
+  and WipeAndRejoin with it. `scanSegments` reads one segment at a time
+  into the same buffer (`scanBufs`), a sealed one up to its seal and the
+  rest of a file only for a hole (`segRead`), keeps a 40-byte `scanRec` per
+  record and copies out only the checkpoint and hard-state payloads
+  (`scanned.keep`); only the last segment keeps its bytes, and replay
+  sizes the index once (#630, `TestReopeningTheLogHoldsOneSegmentAtATime`,
+  `TestASealedSegmentIsReadUpToItsSeal`, `FuzzScanSegment`). Nor parse
+  bytes past `segRead.n`: they are the previous segment's, and
+  `segRead.record` reads what `parseRecord` judges first.
 - Compact the store past its end without the term: it holds no entry to read
   it from, and a node restarted with no table votes on that term. The engine
   passes it (`storeReq.compactTerm`, `compactLog`), the file log refuses a
@@ -141,7 +154,15 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   `TestARetentionWhoseRemoveFailsStopsTheNode`).
 - Convert a length read off the wire or the disk to `int` before bounding
   it: on 32 bits it turns negative and passes the bound (#422,
-  `TestReadChunkRefusesALengthAboveTheLimit`, run by `test-386`).
+  `TestReadChunkRefusesALengthAboveTheLimit`, run by `test-386`). Nor add
+  to it as an int, nor make a buffer of an int64 size an int may not hold:
+  near 2^31 the sum wraps negative, and the bound passes or make panics.
+  A torn log tail stopped every open, a member's frame the node, and an
+  offer's chunk size the node verifying the snapshot (#630,
+  `TestARecordOfLength2To31IsAHole`,
+  `TestReadFrameRefusesALengthThatWrapsOn32Bits`,
+  `TestASegmentAnIntDoesNotHoldIsRefusedOn32Bits`,
+  `TestASnapshotChunkAnIntDoesNotHoldIsRefused`).
 - Keep `Recover`'s index at a persisted commit below the log's base: the
   forced entry cannot be appended there, and every rerun failed the same
   way. `adoptedPastTheBase` adopts from the base, and refuses with a reason

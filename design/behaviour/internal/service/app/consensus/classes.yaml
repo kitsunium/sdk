@@ -111,6 +111,12 @@ constants:
         name: errSilenceLength
         type: cause
         value: "\"silence condition of the wrong length\""
+      - doc: |-
+          errSegmentTooLarge is the cause of a log segment larger than an int
+          holds on this platform: its scan cannot be given a buffer of its size.
+        name: errSegmentTooLarge
+        type: cause
+        value: "\"segment larger than this platform's int\""
       - doc: MaxJoinReasonBytes bounds the reason a JOIN refusal carries to the joiner.
         name: MaxJoinReasonBytes
         type: int
@@ -186,6 +192,13 @@ constants:
         name: sealReserve
         type: int64
         value: "64"
+      - doc: |-
+          scanChunk is how far ahead of its parse recovery reads a segment: a
+          sealed one is read up to its seal and at most this much past it, not
+          to its preallocated size (#630).
+        name: scanChunk
+        type: int64
+        value: 1 << 20
       - doc: DefaultSegmentBytes is a segment's fixed size (provisional).
         name: DefaultSegmentBytes
         type: int64
@@ -809,14 +822,25 @@ files:
       - openFileLog
       - (*fileLog).prepareOpen
       - scanned
+      - (*scanned).keep
+      - scanRec
+      - scanRecOf
       - (*fileLog).recover
       - (*fileLog).segmentNumbers
       - (*fileLog).scanSegments
       - (*fileLog).scanSegment
+      - (*scanned).parse
+      - (*scanned).holeAt
+      - scanBufs
+      - (*scanBufs).reader
+      - segRead
+      - (*segRead).record
+      - (*segRead).upTo
       - (*fileLog).checkBatchSequence
       - continuesBatch
       - (*fileLog).trimTornTail
       - (*fileLog).replay
+      - entryRecords
       - (*fileLog).applyCheckpoint
       - (*fileLog).applyRecord
       - (*fileLog).applyEntry
@@ -1885,12 +1909,18 @@ functions:
     name: boolByte
     params: v bool
     results: byte
-  - doc: sealRecord recomputes a record's crc over its body.
+  - doc: |-
+      sealRecord recomputes a record's crc over its body. The body's end is
+      summed in uint64, where a length near 2^31 cannot wrap as an int sum does
+      on 32 bits.
     name: sealRecord
     params: b []byte
   - doc: |-
       sealedBody is the body of the record at b[0:] when its length is in range
-      and its crc holds, whatever version it carries; nil otherwise.
+      and its crc holds, whatever version it carries; nil otherwise. The length
+      is bounded as the u32 it is, before any int sum: on 32 bits one near 2^31
+      wrapped recHeader+n negative, passed the bound, and the slice panicked
+      the open of a log whose tail held a torn or damaged header.
     name: sealedBody
     params: b []byte
     results: "[]byte"
@@ -1941,12 +1971,22 @@ functions:
     name: openFileLog
     params: dd *dataDir, segBytes int64
     results: "*fileLog, error"
+  - doc: scanRecOf is the scanRec of r, parsed at offset off.
+    name: scanRecOf
+    params: r *record, off int64
+    results: scanRec
   - doc: |-
       continuesBatch reports whether r may follow prev: in prev's batch, or
       first of the next one once prev ended its own.
     name: continuesBatch
-    params: prev, r *record
+    params: prev, r *scanRec
     results: bool
+  - doc: |-
+      entryRecords is the number of entry records segs hold, the most slots
+      replay appends.
+    name: entryRecords
+    params: segs []*scanned
+    results: int
   - doc: |-
       checkLayouts refuses, before any tail is classified or trimmed, a record
       of a kind this build does not know or a hard state of another length:
@@ -1957,15 +1997,16 @@ functions:
     results: error
   - doc: |-
       knownLayout is nil for a record of a kind this build reads, with the
-      payload length that kind has where it has one.
+      payload length that kind has where it has one; pay is the payload of a
+      hard-state record.
     name: knownLayout
-    params: seg uint64, r *record
+    params: seg uint64, r *scanRec, pay []byte
     results: error
   - doc: |-
       unknownLayout is the VERSION_UNSUPPORTED of record r of segment seg, a
       layout this build does not read: field names what it is, v its value.
     name: unknownLayout
-    params: seg uint64, r *record, field string, v int
+    params: seg uint64, r *scanRec, field string, v int
     results: error
   - doc: decodeHS parses encodeHS's payload; the caller checked its length.
     name: decodeHS
@@ -1983,7 +2024,7 @@ functions:
       R9-03): it returns where to truncate a torn tail, or -1 and why the hole
       is quarantined.
     name: classifyTail
-    params: b []byte, recs []record, hole int64
+    params: b []byte, recs []scanRec, hole int64
     results: int64, string
   - doc: recordsAfter is every valid record after the hole, at record boundaries.
     name: recordsAfter
@@ -2000,7 +2041,7 @@ functions:
       all of it is dropped, as it was never synced and never acknowledged. A
       torn batch that starts with the segment's checkpoint is quarantined.
     name: tornBatchStart
-    params: recs []record, lastOff int64, torn uint64
+    params: recs []scanRec, lastOff int64, torn uint64
     results: int64, string
   - doc: allZero reports whether b holds only zero bytes.
     name: allZero
@@ -2647,7 +2688,9 @@ functions:
       maxEncodedChunk is the largest encoded chunk a stream of decoded chunks
       of chunk bytes may hold, the bound chunkReader applies. chunk comes from
       a peer's offer: it is clamped to what a chunk header's u32 lengths can
-      name, so the sum cannot overflow into a negative buffer size.
+      name, so the sum cannot overflow into a negative buffer size, and the sum
+      to what an int holds, as chunkReader bounds a chunk: alignedOffsetAt makes
+      a buffer of it, and on 32 bits make panicked on a chunk size near 2^31.
     name: maxEncodedChunk
     params: chunk int64
     results: int64
@@ -3825,7 +3868,8 @@ types:
       - doc: |-
           scanSegments reads and parses every segment in order. A segment is judged
           as soon as it is read, so the first damage found is the one quarantined,
-          and nothing after it is read.
+          and nothing after it is read. The segments are read one at a time into
+          the same buffers, and only the last one's bytes are kept (#630).
         name: scanSegments
         params: nums []uint64
         recv: l *fileLog
@@ -3833,9 +3877,12 @@ types:
       - doc: |-
           scanSegment reads segment n and parses its records up to the first hole,
           or through its seal: a sealed segment is read up to its sealed length
-          (R9-02).
+          (R9-02), and the rest of a segment is read only for a hole, which is
+          classified on the whole file. The bytes go to sb's buffer, which the next
+          segment reuses: what the scanned segment keeps past the scan is copied
+          out of it, its data aside.
         name: scanSegment
-        params: n uint64
+        params: n uint64, sb *scanBufs
         recv: l *fileLog
         results: "*scanned, error"
       - doc: |-
@@ -3872,27 +3919,28 @@ types:
         recv: l *fileLog
         results: error
       - doc: |-
-          applyRecord applies one record of segment seg to the log being rebuilt.
-          An entry out of sequence is quarantined; a record kind this build does
-          not know, or a hard state of another length, is a newer layout and stops
-          the open VERSION_UNSUPPORTED — skipped, it lost what a newer build wrote
-          there (D18, #511). A seal changes nothing.
+          applyRecord applies one record of segment seg to the log being rebuilt,
+          pay its payload when it is a hard state's. An entry out of sequence is
+          quarantined; a record kind this build does not know, or a hard state of
+          another length, is a newer layout and stops the open VERSION_UNSUPPORTED
+          — skipped, it lost what a newer build wrote there (D18, #511). A seal
+          changes nothing.
         name: applyRecord
-        params: seg uint64, r *record
+        params: seg uint64, r *scanRec, pay []byte
         recv: l *fileLog
         results: error
       - doc: |-
           applyEntry appends an entry record's slot, quarantining one out of
           sequence.
         name: applyEntry
-        params: seg uint64, r *record
+        params: seg uint64, r *scanRec
         recv: l *fileLog
         results: error
       - doc: |-
-          applyHardState applies a hard-state record; one of another length is a
-          newer layout (#511).
+          applyHardState applies a hard-state record, of payload pay; one of
+          another length is a newer layout (#511).
         name: applyHardState
-        params: seg uint64, r *record
+        params: seg uint64, r *scanRec, pay []byte
         recv: l *fileLog
         results: error
       - doc: |-
@@ -4275,14 +4323,32 @@ types:
         recv: l *fileLog
         results: error
     name: fileLog
-  - doc: scanned is one segment as recovery read it, before anything is changed.
+  - doc: |-
+      scanned is one segment as recovery read it, before anything is changed.
+      It keeps what the later steps read and nothing more: a scanRec per
+      record, the payloads replay decodes, copied out, and the bytes read only
+      for the last segment, whose tail is still to be classified. Holding every
+      segment's bytes whole, with a record pointing into them per record, took
+      one to three times the log in heap until recover returned, and a node
+      whose log grew while its compaction stalled was OOM-killed at every
+      restart on a small host, Inspect and WipeAndRejoin with it (#630).
     fields:
       - name: "n"
         type: uint64
-      - name: data
+      - name: size
+        type: int64
+      - doc: |-
+          data is the bytes read of the last segment, nil for the others: the
+          whole file, unless it is sealed and was read up to its seal only.
+        name: data
         type: "[]byte"
       - name: recs
-        type: "[]record"
+        type: "[]scanRec"
+      - doc: |-
+          pay holds, by record position, the payloads of the checkpoint and
+          hard-state records, the only ones recovery reads past the scan.
+        name: pay
+        type: map[int][]byte
       - name: hole
         type: int64
       - name: sealed
@@ -4290,7 +4356,105 @@ types:
       - name: trimmed
         type: int64
     kind: struct
+    methods:
+      - doc: |-
+          keep copies out the payload of record i, a checkpoint or a hard state:
+          replay decodes it once the buffer it was read into holds the next
+          segment.
+        name: keep
+        params: i int, payload []byte
+        recv: s *scanned
+      - doc: |-
+          parse appends to recs the records of s read through reader, up to the
+          first hole or through the seal, and returns them.
+        name: parse
+        params: reader *segRead, recs []scanRec
+        recv: s *scanned
+        results: "[]scanRec, error"
+      - doc: |-
+          holeAt records the hole at off once the rest of the file is read, which
+          is where it is classified. A record a newer build wrote, here or past the
+          hole, stops the open before anything is classified or changed (#511).
+        name: holeAt
+        params: reader *segRead, off int64
+        recv: s *scanned
+        results: error
     name: scanned
+  - doc: |-
+      scanRec is what recovery keeps of a record past the scan: its kind,
+      batch, end flag, term, index, offset and length on disk, without the
+      payload's slice and the entry fields a record carries, under half its
+      size.
+    fields:
+      - name: "off"
+        type: int64
+      - name: batch
+        type: uint64
+      - name: term
+        type: uint64
+      - name: index
+        type: uint64
+      - name: length
+        type: uint32
+      - name: kind
+        type: uint8
+      - name: end
+        type: bool
+    kind: struct
+    name: scanRec
+  - doc: |-
+      scanBufs is what the scan reuses from one segment to the next: the
+      buffer a segment is read into, and the records parsed from it. chunk is
+      how far ahead it reads, scanChunk when zero; only a test sets it.
+    fields:
+      - name: b
+        type: "[]byte"
+      - name: recs
+        type: "[]scanRec"
+      - name: chunk
+        type: int64
+    kind: struct
+    methods:
+      - doc: |-
+          reader is the read of segment file f into sb's buffer, grown when the
+          file is larger than any before it. A file larger than an int holds is
+          refused before the buffer is made: on 32 bits make panicked on it.
+        name: reader
+        params: f *os.File
+        recv: sb *scanBufs
+        results: "*segRead, error"
+    name: scanBufs
+  - doc: |-
+      segRead is a segment file read in order into b, the file's size, of
+      which the first n bytes are read, chunk at least at a time. What lies
+      past n is the bytes of an earlier segment, and no parse looks at it.
+    fields:
+      - name: f
+        type: "*os.File"
+      - name: b
+        type: "[]byte"
+      - name: "n"
+        type: int64
+      - name: chunk
+        type: int64
+    kind: struct
+    methods:
+      - doc: |-
+          record reads enough for parseRecord to judge the record at off on b[off:n]
+          as it would on the whole file: its header and fixed fields, then the
+          length its header announces, both bounded by the file's size.
+        name: record
+        params: off int64
+        recv: r *segRead
+        results: error
+      - doc: |-
+          upTo reads the file up to end, at most its size, a chunk at least at a
+          time.
+        name: upTo
+        params: end int64
+        recv: r *segRead
+        results: error
+    name: segRead
   - doc: |-
       prepared is the next segment, zero-filled in the background as a .tmp
       while the current one fills (R3-24, R4-01). It is never published early:

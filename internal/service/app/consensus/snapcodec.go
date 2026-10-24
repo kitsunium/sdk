@@ -165,7 +165,11 @@ func (c *chunkReader) next() error {
 	}
 	encLen := int64(binary.LittleEndian.Uint32(h[0:]))
 	decLen := int64(binary.LittleEndian.Uint32(h[4:]))
-	if decLen > c.chunk || encLen > c.chunk+c.chunk/8+1024 || c.total+decLen > c.limit {
+	// The encoded length is also bounded by what an int holds, the buffer
+	// made for it: on 32 bits an offer's chunk size near 2^31 let a length
+	// of 2^31 or more through, and make panicked the node that verified or
+	// restored the snapshot.
+	if decLen > c.chunk || encLen > min(c.chunk+c.chunk/8+1024, math.MaxInt) || c.total+decLen > c.limit {
 		return origin(coreconsensus.SnapshotTooLarge, errs.Int64("chunk", decLen))
 	}
 	if int64(cap(c.enc)) < encLen {
@@ -209,10 +213,12 @@ func verifySnapshot(r io.Reader, meta coreconsensus.SnapshotMetaValue, codec cor
 // maxEncodedChunk is the largest encoded chunk a stream of decoded chunks
 // of chunk bytes may hold, the bound chunkReader applies. chunk comes from
 // a peer's offer: it is clamped to what a chunk header's u32 lengths can
-// name, so the sum cannot overflow into a negative buffer size.
+// name, so the sum cannot overflow into a negative buffer size, and the sum
+// to what an int holds, as chunkReader bounds a chunk: alignedOffsetAt makes
+// a buffer of it, and on 32 bits make panicked on a chunk size near 2^31.
 func maxEncodedChunk(chunk int64) int64 {
 	chunk = min(max(chunk, 1), math.MaxUint32)
-	return chunk + chunk/8 + 1024
+	return min(chunk+chunk/8+1024, math.MaxInt)
 }
 
 // alignedOffsetAt is the largest chunk boundary of the encoded prefix of

@@ -3,7 +3,7 @@
 #
 # Runs every fuzz target of the consensus domain for a bounded time each:
 # the frame, snapshot-metadata, admin and token decoders of wire/, and the
-# log record decoder and tail classification of the engine. A crash, a hang
+# log record decoder, segment scan and tail classification of the engine. A crash, a hang
 # or a broken property fails the run; go writes the failing input under the
 # package's testdata/fuzz/<Target>/, which the workflow uploads, and which a
 # fix commits as a regression case. Local: scripts/ci/consensus-fuzz.sh 30s.
@@ -18,6 +18,7 @@ targets=(
 	"./internal/service/app/consensus/wire FuzzParseToken"
 	"./internal/service/app/consensus FuzzParseRecord"
 	"./internal/service/app/consensus FuzzClassifyTail"
+	"./internal/service/app/consensus FuzzScanSegment"
 )
 failed=0
 for t in "${targets[@]}"; do

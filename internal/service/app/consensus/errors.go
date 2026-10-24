@@ -29,6 +29,9 @@ const (
 	// errSilenceLength is the cause of a silence condition of a length this
 	// version never writes.
 	errSilenceLength cause = "silence condition of the wrong length"
+	// errSegmentTooLarge is the cause of a log segment larger than an int
+	// holds on this platform: its scan cannot be given a buffer of its size.
+	errSegmentTooLarge cause = "segment larger than this platform's int"
 
 	// MaxJoinReasonBytes bounds the reason a JOIN refusal carries to the joiner.
 	MaxJoinReasonBytes int = 256

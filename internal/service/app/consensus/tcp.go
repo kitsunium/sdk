@@ -635,11 +635,14 @@ func readFrame(r io.Reader, buf []byte, limit int) ([]byte, bool) {
 	if _, err := io.ReadFull(r, h[:]); err != nil {
 		return buf, false
 	}
-	n := int(binary.LittleEndian.Uint32(h[:]))
-	// The announced length is checked before anything is allocated.
-	if n < minFrameBody || n+4 > limit {
+	// The announced length is checked before anything is allocated, and
+	// as the u32 it is: on 32 bits n+4 wrapped negative for a length within
+	// 4 of 2^31, passed the limit, and the slice panicked the reader.
+	ln := binary.LittleEndian.Uint32(h[:])
+	if limit < 0 || ln < uint32(minFrameBody) || uint64(ln)+4 > uint64(limit) {
 		return buf, false
 	}
+	n := int(ln)
 	if cap(buf) < n+4 {
 		buf = make([]byte, n+4)
 	}

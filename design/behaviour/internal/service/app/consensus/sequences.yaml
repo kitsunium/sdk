@@ -2213,22 +2213,30 @@ sequences:
       - bind: "n"
         eval: binary.LittleEndian.Uint32(b)
         to: binary.LittleEndian.Uint32
-      - eval: binary.LittleEndian.PutUint32(b[4:], crc32.Checksum(b[recHeader:recHeader+int(n)], castagnoli))
+      - eval: binary.LittleEndian.PutUint32(b[4:], crc32.Checksum(b[recHeader:uint64(recHeader)+uint64(n)], castagnoli))
         to: binary.LittleEndian.PutUint32
   - of: sealedBody
+    participants:
+      - id: caller
+        kind: actor
+      - id: sealedBody
+        kind: self
+      - id: binary.LittleEndian.Uint32
+        kind: value
     steps:
       - opt:
           do:
             - return: nil
           when: len(b) < recHeader+recFixed
       - bind: "n"
-        eval: int(binary.LittleEndian.Uint32(b))
+        eval: binary.LittleEndian.Uint32(b)
+        to: binary.LittleEndian.Uint32
       - opt:
           do:
             - return: nil
-          when: n < recFixed || recHeader+n > len(b)
+          when: n < uint32(recFixed) || uint64(n) > uint64(len(b)-recHeader)
       - bind: body
-        eval: "b[recHeader : recHeader+n]"
+        eval: "b[recHeader : recHeader+int(n)]"
       - opt:
           do:
             - return: nil
@@ -2517,6 +2525,26 @@ sequences:
       - set: l.stamp
         value: st
       - return: nil
+  - of: (*scanned).keep
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*scanned).keep
+        kind: self
+      - id: bytes
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - set: s.pay
+              value: map[int][]byte{}
+          when: s.pay == nil
+      - set: s.pay[i]
+        to: bytes
+        value: bytes.Clone(payload)
+  - of: scanRecOf
+    steps:
+      - return: "scanRec{off: off, batch: r.batch, term: r.term, index: r.index, length: uint32(r.length), kind: r.kind, end: r.end}"
   - of: (*fileLog).recover
     participants:
       - id: caller
@@ -2716,15 +2744,23 @@ sequences:
     steps:
       - bind: segs
         eval: make([]*scanned, len(nums))
+      - var:
+          name: sb
+          type: scanBufs
       - loop:
           do:
             - bind: s, err
-              eval: l.scanSegment(n)
+              eval: l.scanSegment(n, &sb)
               to: l.scanSegment
             - opt:
                 do:
                   - return: nil, err
                 when: err != nil
+            - opt:
+                do:
+                  - set: s.data
+                    value: nil
+                when: i < len(nums)-1
             - set: segs[i]
               value: s
             - opt:
@@ -2747,49 +2783,83 @@ sequences:
         kind: self
       - id: os
         kind: stdlib
-      - id: parseRecord
+      - id: sb.reader
         kind: internal
-      - id: unknownVersionAt
+      - id: s.parse
         kind: internal
+      - id: slices
+        kind: stdlib
     steps:
-      - bind: b, err
-        eval: os.ReadFile(filepath.Join(l.logDir(), segName(n)))
+      - bind: f, err
+        eval: os.Open(filepath.Join(l.logDir(), segName(n)))
         to: os
       - opt:
           do:
             - return: nil, storageFailed("read segment", err)
           when: err != nil
-      - bind: s
-        eval: "&scanned{n: n, data: b, hole: -1, trimmed: -1}"
-      - bind: limit
-        eval: int64(len(b))
-      - var:
-          name: "off"
-          type: int64
-      - loop:
-          cond: off < limit
+      - defer: func() { abandon(f.Close()) }()
+      - bind: reader, err
+        eval: sb.reader(f)
+        to: sb.reader
+      - opt:
           do:
+            - return: nil, storageFailed("read segment", err)
+          when: err != nil
+      - bind: s
+        eval: "&scanned{n: n, size: int64(len(reader.b)), hole: -1, trimmed: -1}"
+      - bind: recs, err
+        eval: s.parse(reader, sb.recs[:0])
+        to: s.parse
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - set: s.recs
+        to: slices
+        value: slices.Clone(recs)
+      - set: sb.recs
+        value: recs
+      - set: s.data
+        value: reader.b[:reader.n]
+      - return: s, nil
+  - of: (*scanned).parse
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*scanned).parse
+        kind: self
+      - id: reader.record
+        kind: internal
+      - id: parseRecord
+        kind: internal
+      - id: s.keep
+        kind: internal
+    steps:
+      - loop:
+          cond: off < s.size
+          do:
+            - opt:
+                do:
+                  - return: nil, storageFailed("read segment", err)
+                init:
+                  bind: err
+                  eval: reader.record(off)
+                  to: reader.record
+                when: err != nil
             - bind: r, ok
-              eval: parseRecord(b[off:limit])
+              eval: parseRecord(reader.b[off:reader.n])
               to: parseRecord
             - opt:
                 do:
-                  - opt:
-                      do:
-                        - return: nil, err
-                      init:
-                        bind: err
-                        eval: unknownVersionAt(b[:limit], n, off)
-                        to: unknownVersionAt
-                      when: err != nil
-                  - set: s.hole
-                    value: "off"
-                  - break: true
+                  - return: recs, s.holeAt(reader, off)
                 when: "!ok"
-            - set: r.off
-              value: "off"
-            - set: s.recs
-              value: append(s.recs, r)
+            - opt:
+                do:
+                  - eval: s.keep(len(recs), r.data)
+                    to: s.keep
+                when: r.kind == recCheckpt || r.kind == recHardState
+            - set: recs
+              value: append(recs, scanRecOf(&r, off))
             - op: +=
               set: "off"
               value: int64(r.length)
@@ -2799,7 +2869,132 @@ sequences:
                     value: "true"
                   - break: true
                 when: r.kind == recSeal
-      - return: s, nil
+          init: off := int64(0)
+      - return: recs, nil
+  - of: (*scanned).holeAt
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*scanned).holeAt
+        kind: self
+      - id: reader.upTo
+        kind: internal
+      - id: storageFailed
+        kind: internal
+      - id: unknownVersionAt
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: storageFailed("read segment", err)
+              to: storageFailed
+          init:
+            bind: err
+            eval: reader.upTo(s.size)
+            to: reader.upTo
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: unknownVersionAt(reader.b, s.n, off)
+            to: unknownVersionAt
+          when: err != nil
+      - set: s.hole
+        value: "off"
+      - return: nil
+  - of: (*scanBufs).reader
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*scanBufs).reader
+        kind: self
+      - id: f.Stat
+        kind: value
+      - id: st.Size
+        kind: value
+    steps:
+      - bind: st, err
+        eval: f.Stat()
+        to: f.Stat
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - bind: size
+        eval: st.Size()
+        to: st.Size
+      - opt:
+          do:
+            - return: nil, errSegmentTooLarge
+          when: size > math.MaxInt
+      - opt:
+          do:
+            - set: sb.b
+              value: make([]byte, 0, size)
+          when: int64(cap(sb.b)) < size
+      - bind: chunk
+        eval: sb.chunk
+      - opt:
+          do:
+            - set: chunk
+              value: scanChunk
+          when: chunk <= 0
+      - return: "&segRead{f: f, b: sb.b[:size], chunk: chunk}, nil"
+  - of: (*segRead).record
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*segRead).record
+        kind: self
+      - id: r.upTo
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: r.upTo(off + int64(recHeader+recFixed))
+            to: r.upTo
+          when: err != nil
+      - opt:
+          do:
+            - return: nil
+          when: off+int64(recHeader) > r.n
+      - return: r.upTo(off + int64(recHeader) + int64(binary.LittleEndian.Uint32(r.b[off:])))
+        to: r.upTo
+  - of: (*segRead).upTo
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*segRead).upTo
+        kind: self
+      - id: io
+        kind: stdlib
+    steps:
+      - bind: size
+        eval: int64(len(r.b))
+      - set: end
+        value: min(end, size)
+      - opt:
+          do:
+            - return: nil
+          when: r.n >= end
+      - bind: to
+        eval: min(size, max(end, r.n+r.chunk))
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: _, err
+            eval: io.ReadFull(r.f, r.b[r.n:to])
+            to: io
+          when: err != nil
+      - set: r.n
+        value: to
+      - return: nil
   - of: (*fileLog).checkBatchSequence
     participants:
       - id: caller
@@ -2811,7 +3006,7 @@ sequences:
     steps:
       - var:
           name: prev
-          type: "*record"
+          type: "*scanRec"
       - loop:
           do:
             - loop:
@@ -2886,10 +3081,12 @@ sequences:
       - id: l.applyRecord
         kind: internal
     steps:
+      - set: l.slots
+        value: make([]slot, 0, entryRecords(segs))
       - loop:
           do:
             - bind: cp, ok
-              eval: decodeCheckpoint(s.recs[0].data)
+              eval: decodeCheckpoint(s.pay[0])
               to: decodeCheckpoint
             - opt:
                 do:
@@ -2905,20 +3102,22 @@ sequences:
                   to: l.applyCheckpoint
                 when: err != nil
             - loop:
+                cond: i < len(s.recs)
                 do:
+                  - bind: r
+                    eval: "&s.recs[i]"
                   - opt:
                       do:
                         - return: err
                       init:
                         bind: err
-                        eval: l.applyRecord(s.n, &r)
+                        eval: l.applyRecord(s.n, r, s.pay[i])
                         to: l.applyRecord
                       when: err != nil
                   - set: l.batch
                     value: r.batch
-                key: _
-                range: s.recs[1:]
-                value: r
+                init: i := 1
+                post: i++
             - opt:
                 do:
                   - set: l.batch
@@ -2928,6 +3127,25 @@ sequences:
           range: segs
           value: s
       - return: nil
+  - of: entryRecords
+    steps:
+      - bind: "n"
+        eval: "0"
+      - loop:
+          do:
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - op: ++
+                          set: "n"
+                      when: s.recs[i].kind == recEntry
+                key: i
+                range: s.recs
+          key: _
+          range: segs
+          value: s
+      - return: "n"
   - of: (*fileLog).applyCheckpoint
     participants:
       - id: caller
@@ -2994,7 +3212,7 @@ sequences:
                   to: l.applyTruncate
             - case: recHardState
               do:
-                - return: l.applyHardState(seg, r)
+                - return: l.applyHardState(seg, r, pay)
                   to: l.applyHardState
             - case: recCommit
               do:
@@ -3046,7 +3264,7 @@ sequences:
                         - return: err
                       init:
                         bind: err
-                        eval: knownLayout(s.n, &s.recs[i])
+                        eval: knownLayout(s.n, &s.recs[i], s.pay[i])
                         to: knownLayout
                       when: err != nil
                 key: i
@@ -3073,9 +3291,9 @@ sequences:
               do:
                 - opt:
                     do:
-                      - return: unknownLayout(seg, r, "hard_state_bytes", len(r.data))
+                      - return: unknownLayout(seg, r, "hard_state_bytes", len(pay))
                         to: unknownLayout
-                    when: len(r.data) != hardStateLen
+                    when: len(pay) != hardStateLen
                 - return: nil
             - default: true
               do:
@@ -3095,12 +3313,12 @@ sequences:
     steps:
       - opt:
           do:
-            - return: unknownLayout(seg, r, "hard_state_bytes", len(r.data))
+            - return: unknownLayout(seg, r, "hard_state_bytes", len(pay))
               to: unknownLayout
-          when: len(r.data) != hardStateLen
+          when: len(pay) != hardStateLen
       - set: l.hs
         to: decodeHS
-        value: decodeHS(r.data)
+        value: decodeHS(pay)
       - return: nil
   - of: unknownLayout
     participants:
@@ -3196,8 +3414,8 @@ sequences:
                     to: storageFailed
                 when: err != nil
             - set: l.segs
-              value: "append(l.segs, &segment{n: s.n, f: f, size: int64(len(s.data))})"
-            - eval: l.occupied.Add(int64(len(s.data)))
+              value: "append(l.segs, &segment{n: s.n, f: f, size: s.size})"
+            - eval: l.occupied.Add(s.size)
               to: l.occupied.Add
           key: _
           range: segs
@@ -4057,7 +4275,7 @@ sequences:
       - opt:
           do:
             - return: coreconsensus.EntryValue{}, origin(coreconsensus.LogCorrupt, errs.String("segment", segName(s.seg)), errs.Int64("offset", s.off))
-          when: int64(ln) > seg.size-s.off-int64(recHeader)
+          when: int64(ln) > min(seg.size-s.off, math.MaxInt)-int64(recHeader)
       - bind: b
         eval: make([]byte, recHeader+int(ln))
       - opt:
@@ -16730,7 +16948,7 @@ sequences:
           do:
             - return: origin(coreconsensus.SnapshotTooLarge, errs.Int64("chunk", decLen))
               to: origin
-          when: decLen > c.chunk || encLen > c.chunk+c.chunk/8+1024 || c.total+decLen > c.limit
+          when: decLen > c.chunk || encLen > min(c.chunk+c.chunk/8+1024, math.MaxInt) || c.total+decLen > c.limit
       - opt:
           do:
             - set: c.enc
@@ -16814,7 +17032,7 @@ sequences:
     steps:
       - set: chunk
         value: min(max(chunk, 1), math.MaxUint32)
-      - return: chunk + chunk/8 + 1024
+      - return: min(chunk+chunk/8+1024, math.MaxInt)
   - of: alignedOffsetAt
     participants:
       - id: caller
@@ -19493,6 +19711,8 @@ sequences:
         kind: self
       - id: io
         kind: stdlib
+      - id: binary.LittleEndian.Uint32
+        kind: value
     steps:
       - var:
           name: h
@@ -19505,12 +19725,15 @@ sequences:
             eval: io.ReadFull(r, h[:])
             to: io
           when: err != nil
-      - bind: "n"
-        eval: int(binary.LittleEndian.Uint32(h[:]))
+      - bind: ln
+        eval: binary.LittleEndian.Uint32(h[:])
+        to: binary.LittleEndian.Uint32
       - opt:
           do:
             - return: buf, false
-          when: n < minFrameBody || n+4 > limit
+          when: limit < 0 || ln < uint32(minFrameBody) || uint64(ln)+4 > uint64(limit)
+      - bind: "n"
+        eval: int(ln)
       - opt:
           do:
             - set: buf

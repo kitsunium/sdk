@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"hash/crc32"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -809,3 +811,211 @@ func TestASpoolResumesBeforeARegionOfZeros(t *testing.T) {
 		t.Fatalf("resume offset %d over a chunk then zeros, want %d", got, want)
 	}
 }
+
+// fillLog appends synced batches of about 512 KiB of entries of payload
+// bytes to l until its segments occupy size bytes, and returns the last
+// index.
+func fillLog(t *testing.T, l *fileLog, payload int, size int64) uint64 {
+	t.Helper()
+	data := make([]byte, payload)
+	per := max(1, (512<<10)/(payload+recHeader+recFixed))
+	var idx uint64
+	for l.logBytes() < size {
+		es := make([]coreconsensus.EntryValue, 0, per)
+		for range per {
+			idx++
+			es = append(es, coreconsensus.EntryValue{
+				Position: coreconsensus.PositionValue{Term: 1, Index: idx},
+				Kind:     coreconsensus.EntryCommand, BodySum: wire.BodySum(data), Data: data,
+			})
+		}
+		if err := l.Append(es, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := l.Sync(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return idx
+}
+
+// A reopen of the file log read every segment whole and kept them all, with
+// a record struct per record pointing into them, until recover returned:
+// the transient heap was one to three times the log on disk, and a node
+// whose log grew while its compaction stalled was OOM-killed at every
+// restart on a small host, Inspect and WipeAndRejoin with it (#630). The
+// open reads one segment at a time into the same buffer and keeps 40 bytes
+// per record past it, beside the index's 32 per entry: a 32 MiB log in
+// 4 MiB segments, of entries of 4 KiB, where the open costs about a
+// segment, and of 64 B, where the per-record cost dominates. What the
+// reopen allocates in all bounds its peak from above, whenever the
+// collector ran.
+func TestReopeningTheLogHoldsOneSegmentAtATime(t *testing.T) {
+	const segBytes, logSize = 4 << 20, 32 << 20
+	for _, payload := range []int{4096, 64} {
+		dir := t.TempDir()
+		d := openDir(t, dir, segBytes)
+		last := fillLog(t, d.d.log, payload, logSize)
+		onDisk := d.d.log.logBytes()
+		if err := d.Close(); err != nil {
+			t.Fatal(err)
+		}
+		// The closed log's index goes too: the heap starts without a log.
+		d = DataDir{}
+		var before, opened, after runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&before)
+		d = openDir(t, dir, segBytes)
+		runtime.ReadMemStats(&opened)
+		runtime.GC()
+		runtime.ReadMemStats(&after)
+		allocated := int64(opened.TotalAlloc - before.TotalAlloc)
+		retained := int64(after.HeapAlloc) - int64(before.HeapAlloc)
+		if f, la := d.Log().Bounds(); f != 1 || la != last {
+			t.Fatalf("bounds %d..%d after the reopen, want 1..%d", f, la, last)
+		}
+		if err := d.Close(); err != nil {
+			t.Fatal(err)
+		}
+		// Three segments and 160 bytes an entry, about twice what the open
+		// allocates. Reading every segment whole took the eight segments,
+		// and a record of 88 bytes an entry, grown by append, several
+		// times over: about three times this bound.
+		bound := 3*segBytes + 160*int64(last)
+		t.Logf("entries of %d B: %d of them, a log of %.1f MiB on disk; the reopen allocated %.1f MiB, bound %.1f MiB, and retained %.1f MiB",
+			payload, last, mib(onDisk), mib(allocated), mib(bound), mib(retained))
+		if allocated > bound {
+			t.Errorf("entries of %d B: reopening a log of %.1f MiB allocated %.1f MiB, over %.1f MiB: the open holds the log, not a segment at a time",
+				payload, mib(onDisk), mib(allocated), mib(bound))
+		}
+	}
+}
+
+// A sealed segment is read up to its seal (R9-02), not to its
+// preallocated size: the scan read every segment whole (#630). Segment 1,
+// of 4 MiB, sealed after three entries, as a crash after a rotation's seal
+// leaves it; the open that follows finishes the rotation on the records it
+// read (review H2).
+func TestASealedSegmentIsReadUpToItsSeal(t *testing.T) {
+	const segBytes = 4 << 20
+	dir := t.TempDir()
+	d := openDir(t, dir, segBytes)
+	l := d.d.log
+	if err := l.Append(ents(1, 3, 1), nil); err != nil {
+		t.Fatal(err)
+	}
+	mustSync(t, l)
+	seal := appendRecord(nil, &record{kind: recSeal, end: true, batch: l.batch, index: uint64(l.off)})
+	sealEnd := l.off + int64(len(seal))
+	tail(t, d, seal, 0)
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := (&fileLog{dir: dir}).scanSegment(1, &scanBufs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.sealed || s.size != segBytes {
+		t.Fatalf("segment 1: sealed %v, size %d, want sealed, of %d", s.sealed, s.size, segBytes)
+	}
+	if read := int64(len(s.data)); read >= sealEnd+scanChunk || read >= s.size {
+		t.Fatalf("a segment of %d sealed at %d read %d bytes, want at most a chunk past its seal", s.size, sealEnd, read)
+	}
+	d = openDir(t, dir, segBytes)
+	defer d.Close()
+	checkEntries(t, d.Log(), 1, 3, 1)
+	if n := len(d.d.log.segs); n != 2 {
+		t.Fatalf("%d segments after the open, want the next one published", n)
+	}
+}
+
+// A record whose length field is near 2^31 is a hole, never a panic: on 32
+// bits sealedBody added it to the header as an int, the sum wrapped
+// negative, passed the bound, and the slice panicked the open of a log
+// whose tail held such a torn or damaged header, so the node could not
+// restart (FuzzScanSegment/seed#6 on linux/386). The open truncates it as
+// the garbage after a complete batch it is. The test-386 lane runs this.
+func TestARecordOfLength2To31IsAHole(t *testing.T) {
+	for _, n := range []uint32{0x7FFFFFF8, 0x7FFFFFFF, 1 << 31, 0xFFFFFFFF} {
+		b := make([]byte, 256)
+		binary.LittleEndian.PutUint32(b, n)
+		if body := sealedBody(b); body != nil {
+			t.Fatalf("length %#x: a body of %d bytes out of %d", n, len(body), len(b))
+		}
+		if _, ok := parseRecord(b); ok {
+			t.Fatalf("length %#x parsed as a record", n)
+		}
+		if err := unknownVersionAt(b, 1, 0); err != nil {
+			t.Fatalf("length %#x: %v", n, err)
+		}
+	}
+	dir, d := base(t)
+	tail(t, d, []byte{0xff, 0xff, 0xff, 0x7f}, 0)
+	nd := reopenExpect(t, dir, d, false)
+	defer nd.Close()
+	if _, la := nd.Log().Bounds(); la != 3 {
+		t.Fatalf("last %d, want 3", la)
+	}
+	checkEntries(t, nd.Log(), 1, 3, 1)
+}
+
+// On 32 bits a segment larger than an int holds is refused, never a panic:
+// the scan's buffer is the file's size, and make panicked on it. A length
+// in such a segment that an int does not hold is LOG_CORRUPT, where make
+// panicked on its negative conversion. The segment is sparse.
+func TestASegmentAnIntDoesNotHoldIsRefusedOn32Bits(t *testing.T) {
+	if strconv.IntSize != 32 {
+		t.Skip("an int holds every segment size on 64 bits")
+	}
+	const size int64 = 3 << 30
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "log"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "log", segName(1)), os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	var h [recHeader]byte
+	binary.LittleEndian.PutUint32(h[:], 1<<31)
+	if _, err := f.WriteAt(h[:], 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(size); err != nil {
+		t.Skipf("no sparse file of %d bytes here: %v", size, err)
+	}
+	if _, err := (&fileLog{dir: dir}).scanSegment(1, &scanBufs{}); !errors.Is(err, coreconsensus.StorageFailed) {
+		t.Fatalf("scan of a segment of %d bytes: %v, want STORAGE_FAILED", size, err)
+	}
+	l := &fileLog{segs: []*segment{{n: 1, f: f, size: size}}}
+	if _, err := l.readEntry(slot{seg: 1}); !errors.Is(err, coreconsensus.LogCorrupt) {
+		t.Fatalf("an entry of 2^31 bytes: %v, want LOG_CORRUPT", err)
+	}
+}
+
+// A snapshot chunk an int does not hold is refused, never a panic: an
+// offer's chunk size comes from the leader, and on 32 bits one near 2^31
+// let an encoded length of 2^31 through the stream's bound and the
+// resume's, and make panicked on either. The bound is checked everywhere;
+// the stream only on 32 bits, where it is refused before anything is
+// allocated.
+func TestASnapshotChunkAnIntDoesNotHoldIsRefused(t *testing.T) {
+	for _, chunk := range []int64{1 << 31, math.MaxUint32, math.MaxInt64} {
+		if got := maxEncodedChunk(chunk); got <= 0 || got > math.MaxInt {
+			t.Fatalf("encoded bound %d for chunks of %d bytes", got, chunk)
+		}
+	}
+	if strconv.IntSize != 32 {
+		return
+	}
+	var h [chunkHeaderLen]byte
+	binary.LittleEndian.PutUint32(h[0:], 1<<31)
+	cr := newChunkReader(bytes.NewReader(h[:]), nil, 1<<31, 1<<40)
+	if err := cr.next(); !errors.Is(err, coreconsensus.SnapshotTooLarge) {
+		t.Fatalf("a chunk of 2^31 encoded bytes: %v, want SNAPSHOT_TOO_LARGE", err)
+	}
+}
+
+// mib is n bytes in MiB.
+func mib(n int64) float64 { return float64(n) / (1 << 20) }
