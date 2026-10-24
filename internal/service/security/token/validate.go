@@ -50,47 +50,64 @@ func nonUTF8Knob(cfg IssuerConfig) string {
 	return ""
 }
 
+// claimFacts is what the policy judges, whichever reader produced it: the
+// three instants, and whether the issuer and the audience matched what the
+// recipient configured.
+type claimFacts struct {
+	// expiry / notBefore / issuedAt are the registered instants, zero when
+	// absent.
+	expiry, notBefore, issuedAt time.Time
+	// issuerOK: no issuer is configured, or "iss" equals it.
+	issuerOK bool
+	// audienceOK: no audience is configured, or "aud" contains it.
+	audienceOK bool
+}
+
 // validateClaims applies the policy's temporal and identity checks to an
 // already-authenticated claim set, returning the first verdict that refuses it.
+func (p policyValue) validateClaims(claims coretoken.ClaimsValue) error {
+	//: the same judgement a ClaimsBuf gets, from the value's accessors.
+	return p.judgeClaims(claimFacts{
+		expiry: claims.Expiry(), notBefore: claims.NotBefore(), issuedAt: claims.IssuedAt(),
+		issuerOK: p.issuer == "" || claims.Issuer() == p.issuer,
+		//: Audience clones, so it is only called when there is one to match.
+		audienceOK: p.audience == "" || slices.Contains(claims.Audience(), p.audience),
+	})
+}
+
+// judgeClaims returns the first verdict facts earn.
 //
 // The order is cheapest-and-most-common first: a token is far more often
 // expired than addressed to the wrong service.
-func (p policyValue) validateClaims(claims coretoken.ClaimsValue) error {
+func (p policyValue) judgeClaims(facts claimFacts) error {
 	now := p.timeSource.Now()
 	//: expiry, including the "there wasn't one" case.
-	if err := p.checkExpiry(claims, now); err != nil {
+	if err := p.checkExpiry(facts.expiry, now); err != nil {
 		//: first refusal wins.
 		return err
 	}
 	//: not-before, when the token carries one.
-	if nbf := claims.NotBefore(); !nbf.IsZero() && now.Before(nbf.Add(-p.leeway)) {
+	if !facts.notBefore.IsZero() && now.Before(facts.notBefore.Add(-p.leeway)) {
 		//: the token exists but is not live yet.
 		return coretoken.NotYetValid
 	}
 	//: lifetime cap, when the recipient set one.
-	if err := p.checkLifetime(claims); err != nil {
+	if err := p.checkLifetime(facts.expiry, facts.issuedAt); err != nil {
 		//: refuse a token whose validity window is longer than we accept.
 		return err
 	}
-	//: who minted it and who it is for.
-	return p.checkIdentity(claims)
-}
-
-// checkIdentity enforces the issuer and audience expectations, each only when
-// the caller named one — this package has no opinion about who should have
-// minted a token, only about whether it matches what the caller said.
-func (p policyValue) checkIdentity(claims coretoken.ClaimsValue) error {
-	//: issuer (RFC 8725 §3.8).
-	if p.issuer != "" && claims.Issuer() != p.issuer {
+	//: who minted it (RFC 8725 §3.8) — checked only when the caller named one;
+	//: this package has no opinion about who should have minted a token.
+	if !facts.issuerOK {
 		//: a token from another issuer is not this recipient's token.
 		return coretoken.IssuerMismatch
 	}
-	//: audience (RFC 8725 §3.9).
-	if p.audience != "" && !slices.Contains(claims.Audience(), p.audience) {
+	//: who it is for (RFC 8725 §3.9).
+	if !facts.audienceOK {
 		//: correctly signed, addressed elsewhere: still invalid here.
 		return coretoken.AudienceMismatch
 	}
-	//: both configured checks passed.
+	//: every configured check passed.
 	return nil
 }
 
@@ -101,8 +118,7 @@ func (p policyValue) checkIdentity(claims coretoken.ClaimsValue) error {
 // valid forever. A bearer token that never expires is a password with no
 // rotation story, so the default here inverts the RFC's optionality — and the
 // opt-out is a named field rather than a silent absence.
-func (p policyValue) checkExpiry(claims coretoken.ClaimsValue, now time.Time) error {
-	exp := claims.Expiry()
+func (p policyValue) checkExpiry(exp, now time.Time) error {
 	//: absence is a policy question, not a comparison.
 	if exp.IsZero() {
 		//: the profile decides; the default is to require one.
@@ -128,13 +144,12 @@ func (p policyValue) checkExpiry(claims coretoken.ClaimsValue, now time.Time) er
 // window this recipient cannot measure, and "I could not measure it" is not a
 // reason to accept it — the whole point of the cap is to refuse a credential
 // that outlives the recipient's tolerance for one it cannot revoke.
-func (p policyValue) checkLifetime(claims coretoken.ClaimsValue) error {
+func (p policyValue) checkLifetime(exp, iat time.Time) error {
 	//: no cap configured means no check.
 	if p.maxLifetime <= 0 {
 		//: nothing to enforce.
 		return nil
 	}
-	exp, iat := claims.Expiry(), claims.IssuedAt()
 	//: an unmeasurable lifetime is not an accepted one.
 	if exp.IsZero() || iat.IsZero() {
 		//: say which half was missing, without quoting either claim.

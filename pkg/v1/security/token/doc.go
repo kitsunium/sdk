@@ -113,6 +113,18 @@
 //     before any decode allocates.
 //   - a repeated JSON member in the header or the claims (RFC 8725 §2.6).
 //
+// # Verifying on an event loop without allocating
+//
+// The HS256 verifier also implements [VerifierInto], reached by a type
+// assertion. Each thread makes one [VerifyScratch] (VerifierInto.NewScratch)
+// and one [ClaimsBuf] ([NewClaimsBuf], declaring the private claims it reads),
+// once, and reuses both for every request: the token is read straight out of
+// the receive buffer as a []byte, and nothing is allocated per call. The
+// refusals are Verify's, in Verify's order, plus [ClaimsBufOverflow] for a
+// claim larger than the buffer's fixed slots — never truncated. A scratch is
+// not shareable: a second concurrent use is refused with [ScratchBusy] before
+// any MAC is computed, and another verifier's with [ScratchForeign].
+//
 // # Testing time without sleeping
 //
 // Every config has a Clock field, and it takes any value with the two methods

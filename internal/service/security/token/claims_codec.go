@@ -1,7 +1,6 @@
 package token
 
 import (
-	"bytes"
 	"encoding/json"
 	"time"
 	"unicode/utf8"
@@ -14,202 +13,180 @@ import (
 // seven registered names plus the private-claim cap the core value enforces.
 const maxClaimMembers int = 7 + coretoken.MaxPrivateClaims
 
+// The registered claims, as slots of registeredValue, in RFC 7519 §4.1 order —
+// the order a refusal names the first offender in.
+const (
+	// slotIssuer is "iss".
+	slotIssuer int = iota
+	// slotSubject is "sub".
+	slotSubject
+	// slotAudience is "aud".
+	slotAudience
+	// slotExpiry is "exp".
+	slotExpiry
+	// slotNotBefore is "nbf".
+	slotNotBefore
+	// slotIssuedAt is "iat".
+	slotIssuedAt
+	// slotID is "jti".
+	slotID
+	// registeredSlots is how many registered claims there are.
+	registeredSlots
+)
+
+// registeredNames spells each slot.
+var registeredNames = [registeredSlots]string{
+	coretoken.ClaimIssuer, coretoken.ClaimSubject, coretoken.ClaimAudience,
+	coretoken.ClaimExpiry, coretoken.ClaimNotBefore, coretoken.ClaimIssuedAt,
+	coretoken.ClaimID,
+}
+
 // claimShape is the per-format encoding of the claim values whose spelling the
-// two formats disagree about.
+// two formats disagree about. Every decode method reads a value the scanner
+// already validated as JSON.
 type claimShape interface {
 	// decodeTime reads one registered time claim.
-	decodeTime(raw json.RawMessage) (time.Time, error)
+	decodeTime(raw []byte) (time.Time, error)
 	// encodeTime renders one registered time claim.
 	encodeTime(instant time.Time) json.RawMessage
-	// decodeAudience reads the "aud" claim into its general slice form.
-	decodeAudience(raw json.RawMessage) ([]string, error)
+	// checkAudience refuses an "aud" value the format cannot carry, without
+	// building anything.
+	checkAudience(raw []byte) error
+	// decodeAudience reads an "aud" value checkAudience accepted into its
+	// general slice form; nil raw is no audience.
+	decodeAudience(raw []byte) ([]string, error)
 	// encodeAudience renders "aud", or nil to omit the member entirely.
 	encodeAudience(audience []string) (json.RawMessage, error)
 }
 
-// decodeClaims turns a raw claims object into a ClaimsValue under shape.
+// registeredValue is what one claims object says through its registered
+// claims: where each one sits in the object index, and the three instants,
+// decoded once.
+type registeredValue struct {
+	// at is each slot's member index, -1 when the claim is absent.
+	at [registeredSlots]int
+	// expiry / notBefore / issuedAt are the decoded instants, zero when absent.
+	expiry, notBefore, issuedAt time.Time
+}
+
+// readClaims holds raw to every rule a claims object answers to, and indexes
+// it into idx. It is the ONE refusal set: Verify, every format and
+// VerifyInto go through it, so no path accepts what another refuses.
 //
-// The refusals happen in cost order, cheapest first: text that is not UTF-8
-// and nesting depth (two linear scans), duplicate members (one streaming pass),
-// then member count. Only after all of them does encoding/json build anything.
+// The refusals happen in cost order, cheapest first, and in the legacy
+// reader's order, so a token refused for two reasons is refused for the same
+// one: text that is not UTF-8, nesting depth (two linear scans), then one
+// strict RFC 8259 pass that refuses malformed text, a duplicate or escaped
+// member name, and a member count past the cap; then the registered claims,
+// then the private names.
 //
-// UTF-8 is checked because encoding/json does not refuse invalid bytes — it
-// replaces each with U+FFFD — so without it "a\xff" and "a\xfe" from a careless
-// or hostile issuer would verify as one subject. RFC 8259 §8.1 makes JSON
-// exchanged between systems UTF-8, and RFC 8725 §3.7 asks the reader to hold
-// the writer to it.
-func decodeClaims(raw []byte, maxDepth int, shape claimShape) (claims coretoken.ClaimsValue, err error) {
+// UTF-8 is checked because a reader that repairs invalid bytes — encoding/json
+// replaces each with U+FFFD — would verify "a\xff" and "a\xfe" from a careless
+// or hostile issuer as one subject. RFC 8259 §8.1 makes JSON exchanged between
+// systems UTF-8, and RFC 8725 §3.7 asks the reader to hold the writer to it.
+func readClaims(raw []byte, maxDepth int, shape claimShape, idx *objectIndex) (reg registeredValue, err error) {
 	//: two byte strings must never decode to one claim value.
 	if !utf8.Valid(raw) {
-		//: refused before anything is decoded, never repaired.
-		return coretoken.ClaimsValue{}, malformed("claims are not UTF-8")
+		//: refused before anything is read, never repaired.
+		return registeredValue{}, malformed("claims are not UTF-8")
 	}
-	//: bound the nesting before a decoder allocates a frame per level.
+	//: bound the nesting before the scanner descends a level.
 	if derr := checkJSONDepth(raw, maxDepth); derr != nil {
 		//: the depth verdict already names the limit.
-		return coretoken.ClaimsValue{}, derr
+		return registeredValue{}, derr
 	}
-	//: refuse a claims object that says two things (RFC 8725 §2.6).
-	if derr := checkNoDuplicateMembers(raw); derr != nil {
-		//: propagate DuplicateMember or Malformed unchanged.
-		return coretoken.ClaimsValue{}, derr
+	//: one strict pass: grammar, duplicates (RFC 8725 §2.6), the member cap.
+	if serr := scanObject(raw, maxDepth, idx); serr != nil {
+		//: Malformed, DuplicateMember or TooLarge, unchanged.
+		return registeredValue{}, serr
 	}
-	var members map[string]json.RawMessage
-	//: now it is safe to build the member map.
-	if uerr := json.Unmarshal(raw, &members); uerr != nil {
-		//: a payload that is not a JSON object is not a claim set.
-		return coretoken.ClaimsValue{}, malformed("claims are not a JSON object")
-	}
-	//: cap the member count so a valid-but-vast payload is still refused.
-	if len(members) > maxClaimMembers {
-		//: name the limit, never the members.
-		return coretoken.ClaimsValue{}, errs.Wrap(coretoken.TooLarge,
-			errs.WrapParams{}, errs.Int("limit", maxClaimMembers))
-	}
-	registered, rerr := decodeRegistered(members, shape)
-	//: a malformed registered claim stops the decode.
+	reg, rerr := readRegistered(raw, idx, shape)
+	//: a malformed registered claim stops the read.
 	if rerr != nil {
 		//: propagate the typed verdict.
-		return coretoken.ClaimsValue{}, rerr
+		return registeredValue{}, rerr
 	}
-	//: everything the domain does not model becomes a private claim.
-	return attachPrivate(registered, members)
+	//: the private names answer to the core value's rules, checked here so
+	//: a path that never builds a ClaimsValue refuses what one would.
+	if perr := checkPrivateMembers(raw, idx); perr != nil {
+		//: ClaimNameInvalid or TooLarge.
+		return registeredValue{}, perr
+	}
+	//: every rule held.
+	return reg, nil
 }
 
-// decodeRegistered reads the seven registered claims out of members.
-func decodeRegistered(members map[string]json.RawMessage, shape claimShape) (claims coretoken.ClaimsValue, err error) {
-	//: a registered claim present as JSON null is no value of its type, and
-	//: encoding/json would decode it as one anyway — "" for iss, sub and jti,
-	//: an audience of [""] for aud, the Unix epoch for exp, nbf and iat — so a
-	//: signed token could say "null" and be read as absent, empty or 1970.
-	if name, found := nullRegisteredClaim(members); found {
-		//: name the claim, which is the domain's vocabulary, never its value.
-		return coretoken.ClaimsValue{}, malformed("registered claim " + name + " is null")
+// readRegistered locates and judges the seven registered claims.
+//
+// A registered claim present as JSON null is no value of its type, and a
+// lenient reader would decode it as one anyway — "" for iss, sub and jti, an
+// audience of [""] for aud, the Unix epoch for exp, nbf and iat — so a signed
+// token could say "null" and be read as absent, empty or 1970.
+func readRegistered(raw []byte, idx *objectIndex, shape claimShape) (reg registeredValue, err error) {
+	reg.at = locateRegistered(raw, idx)
+	//: null first, in RFC 7519 §4.1 order so the refusal is deterministic.
+	for slot, at := range reg.at {
+		//: a present claim whose value is the null literal.
+		if at >= 0 && idx.member[at].kind == kindNull {
+			//: name the claim, which is the domain's vocabulary, never its value.
+			return registeredValue{}, malformed("registered claim " + registeredNames[slot] + " is null")
+		}
 	}
-	iss, ierr := decodeStringClaim(members, coretoken.ClaimIssuer)
-	//: a non-string "iss" is malformed, not ignorable.
-	if ierr != nil {
-		//: propagate.
-		return coretoken.ClaimsValue{}, ierr
+	//: the three string claims: present but not a string is malformed.
+	for _, slot := range [...]int{slotIssuer, slotSubject, slotID} {
+		//: never coerced.
+		if at := reg.at[slot]; at >= 0 && idx.member[at].kind != kindString {
+			//: name the claim, not its contents.
+			return registeredValue{}, malformed("registered claim " + registeredNames[slot] + " is not a string")
+		}
 	}
-	sub, serr := decodeStringClaim(members, coretoken.ClaimSubject)
-	//: propagate.
-	if serr != nil {
-		//: a non-string "sub" is malformed.
-		return coretoken.ClaimsValue{}, serr
-	}
-	jti, jerr := decodeStringClaim(members, coretoken.ClaimID)
-	//: propagate.
-	if jerr != nil {
-		//: a non-string "jti" is malformed.
-		return coretoken.ClaimsValue{}, jerr
-	}
-	audience, aerr := shape.decodeAudience(members[coretoken.ClaimAudience])
-	//: propagate the format's own audience rule.
-	if aerr != nil {
+	//: the format's own audience rule.
+	if at := reg.at[slotAudience]; at >= 0 {
 		//: a shape-illegal "aud" is malformed.
-		return coretoken.ClaimsValue{}, aerr
-	}
-	base := coretoken.NewClaimsValue().WithIssuer(iss).WithSubject(sub).WithID(jti)
-	//: the audience setter clones, so passing nil clears the claim.
-	return decodeTimeClaims(base.WithAudience(audience...), members, shape)
-}
-
-// nullRegisteredClaim reports the first registered claim members carries as
-// JSON null, in RFC 7519 §4.1 order so the refusal is deterministic.
-func nullRegisteredClaim(members map[string]json.RawMessage) (name string, found bool) {
-	//: the seven names this domain decodes into typed fields.
-	for _, claim := range [...]string{
-		coretoken.ClaimIssuer, coretoken.ClaimSubject, coretoken.ClaimAudience,
-		coretoken.ClaimExpiry, coretoken.ClaimNotBefore, coretoken.ClaimIssuedAt,
-		coretoken.ClaimID,
-	} {
-		//: RawMessage keeps the member's bytes as sent; the decoder already
-		//: trimmed the whitespace around them.
-		if raw, present := members[claim]; present && bytes.Equal(raw, []byte("null")) {
-			//: the first null registered claim.
-			return claim, true
+		if aerr := checkAudienceIn(shape, idx.value(raw, at)); aerr != nil {
+			//: propagate.
+			return registeredValue{}, aerr
 		}
 	}
-	//: none is null.
-	return "", false
+	//: the three instants, each the one claim we must never guess at.
+	return readInstants(raw, idx, reg, shape)
 }
 
-// decodeTimeClaims reads exp / nbf / iat under shape onto base.
-func decodeTimeClaims(base coretoken.ClaimsValue, members map[string]json.RawMessage, shape claimShape) (claims coretoken.ClaimsValue, err error) {
-	exp, eerr := decodeTimeClaim(members, coretoken.ClaimExpiry, shape)
+// readInstants decodes exp, nbf and iat onto reg.
+func readInstants(raw []byte, idx *objectIndex, reg registeredValue, shape claimShape) (registeredValue, error) {
+	var err error
+	reg.expiry, err = readInstant(raw, idx, reg.at[slotExpiry], coretoken.ClaimExpiry, shape)
 	//: a malformed exp is the one claim we must never guess at.
-	if eerr != nil {
+	if err != nil {
 		//: propagate.
-		return coretoken.ClaimsValue{}, eerr
+		return registeredValue{}, err
 	}
-	nbf, nerr := decodeTimeClaim(members, coretoken.ClaimNotBefore, shape)
+	reg.notBefore, err = readInstant(raw, idx, reg.at[slotNotBefore], coretoken.ClaimNotBefore, shape)
 	//: propagate.
-	if nerr != nil {
+	if err != nil {
 		//: a malformed nbf is malformed.
-		return coretoken.ClaimsValue{}, nerr
+		return registeredValue{}, err
 	}
-	iat, ierr := decodeTimeClaim(members, coretoken.ClaimIssuedAt, shape)
+	reg.issuedAt, err = readInstant(raw, idx, reg.at[slotIssuedAt], coretoken.ClaimIssuedAt, shape)
 	//: propagate.
-	if ierr != nil {
+	if err != nil {
 		//: a malformed iat is malformed.
-		return coretoken.ClaimsValue{}, ierr
+		return registeredValue{}, err
 	}
-	//: all three parsed; the zero Time still means "absent".
-	return base.WithExpiry(exp).WithNotBefore(nbf).WithIssuedAt(iat), nil
+	//: all three read; the zero Time still means "absent".
+	return reg, nil
 }
 
-// attachPrivate copies every non-registered member onto base as a raw private
-// claim, in whatever order the map yields — the core value stores them keyed,
-// and PrivateNames sorts on the way out.
-func attachPrivate(base coretoken.ClaimsValue, members map[string]json.RawMessage) (claims coretoken.ClaimsValue, err error) {
-	claims = base
-	//: everything the domain does not model travels through verbatim.
-	for name, raw := range members {
-		//: the registered claims already have typed homes.
-		if coretoken.IsRegisteredClaim(name) {
-			continue
-		}
-		next, aerr := claims.WithPrivateRaw(name, raw)
-		//: the core value enforces the name and count rules.
-		if aerr != nil {
-			//: propagate ClaimNameInvalid / TooLarge unchanged.
-			return coretoken.ClaimsValue{}, aerr
-		}
-		claims = next
-	}
-	//: the complete claim set.
-	return claims, nil
-}
-
-// decodeStringClaim reads a registered string claim, treating absence as "".
-func decodeStringClaim(members map[string]json.RawMessage, name string) (value string, err error) {
-	raw, present := members[name]
-	//: absence is normal for every registered claim.
-	if !present {
-		//: the empty string is this domain's "absent".
-		return "", nil
-	}
-	//: present but not a string is malformed — never coerced.
-	if json.Unmarshal(raw, &value) != nil {
-		//: name the claim, not its contents.
-		return "", malformed("registered claim " + name + " is not a string")
-	}
-	//: the claim as sent.
-	return value, nil
-}
-
-// decodeTimeClaim reads a registered time claim under shape, treating absence
-// as the zero Time.
-func decodeTimeClaim(members map[string]json.RawMessage, name string, shape claimShape) (instant time.Time, err error) {
-	raw, present := members[name]
+// readInstant decodes the registered time claim at member index at under
+// shape, treating absence (at < 0) as the zero Time.
+func readInstant(raw []byte, idx *objectIndex, at int, name string, shape claimShape) (instant time.Time, err error) {
 	//: absence is normal — exp/nbf/iat are all OPTIONAL in RFC 7519 §4.1.
-	if !present {
+	if at < 0 {
 		//: the zero Time is this domain's "absent".
 		return time.Time{}, nil
 	}
 	//: the format decides how a timestamp is spelled.
-	instant, err = shape.decodeTime(raw)
+	instant, err = decodeTimeIn(shape, idx.value(raw, at))
 	//: propagate the format's own refusal.
 	if err != nil {
 		//: Malformed, from the shape.
@@ -225,6 +202,204 @@ func decodeTimeClaim(members map[string]json.RawMessage, name string, shape clai
 	}
 	//: a real instant.
 	return instant, nil
+}
+
+// decodeTimeIn is shape.decodeTime, dispatched over the closed set of shapes.
+//
+// The switch is the point: a call through the interface makes its argument
+// escape, which would move the claims a VerifyInto decodes on its stack onto
+// the heap — one allocation per token. A concrete call keeps them where they
+// are.
+func decodeTimeIn(shape claimShape, raw []byte) (time.Time, error) {
+	//: the two formats this package implements.
+	switch shape.(type) {
+	//: NumericDate.
+	case joseShape:
+		//: a concrete call.
+		return joseShape{}.decodeTime(raw)
+	//: RFC 3339.
+	case pasetoShape:
+		//: a concrete call.
+		return pasetoShape{}.decodeTime(raw)
+	//: no third format exists.
+	default:
+		//: refused rather than read under a rule nobody wrote.
+		return time.Time{}, malformed("claims of an unknown format")
+	}
+}
+
+// checkAudienceIn is shape.checkAudience, dispatched as decodeTimeIn is and
+// for the same reason.
+func checkAudienceIn(shape claimShape, raw []byte) error {
+	//: the two formats this package implements.
+	switch shape.(type) {
+	//: a string or an array of them.
+	case joseShape:
+		//: a concrete call.
+		return joseShape{}.checkAudience(raw)
+	//: a string.
+	case pasetoShape:
+		//: a concrete call.
+		return pasetoShape{}.checkAudience(raw)
+	//: no third format exists.
+	default:
+		//: refused rather than read under a rule nobody wrote.
+		return malformed("claims of an unknown format")
+	}
+}
+
+// locateRegistered maps each registered slot to its member index, -1 when
+// the claim is absent. Names are unique, so each slot is set at most once.
+func locateRegistered(raw []byte, idx *objectIndex) (at [registeredSlots]int) {
+	at = [registeredSlots]int{-1, -1, -1, -1, -1, -1, -1}
+	//: one pass over the members.
+	for i := range idx.count {
+		//: a registered member takes its slot.
+		if slot := registeredSlot(idx.name(raw, i)); slot >= 0 {
+			at[slot] = i
+		}
+	}
+	//: the located claims.
+	return at
+}
+
+// registeredSlot returns the slot of a registered name, or -1.
+func registeredSlot(name []byte) int {
+	//: a switch over the seven spellings; the conversion allocates nothing.
+	switch string(name) {
+	//: iss.
+	case coretoken.ClaimIssuer:
+		//: its slot.
+		return slotIssuer
+	//: sub.
+	case coretoken.ClaimSubject:
+		//: its slot.
+		return slotSubject
+	//: aud.
+	case coretoken.ClaimAudience:
+		//: its slot.
+		return slotAudience
+	//: exp.
+	case coretoken.ClaimExpiry:
+		//: its slot.
+		return slotExpiry
+	//: nbf.
+	case coretoken.ClaimNotBefore:
+		//: its slot.
+		return slotNotBefore
+	//: iat.
+	case coretoken.ClaimIssuedAt:
+		//: its slot.
+		return slotIssuedAt
+	//: jti.
+	case coretoken.ClaimID:
+		//: its slot.
+		return slotID
+	//: anything else is private.
+	default:
+		//: not registered.
+		return -1
+	}
+}
+
+// checkPrivateMembers holds the private members to the rules
+// ClaimsValue.WithPrivateRaw enforces — no empty name, at most
+// MaxPrivateClaims of them — in member order.
+func checkPrivateMembers(raw []byte, idx *objectIndex) error {
+	count := 0
+	//: every member the domain does not model.
+	for i := range idx.count {
+		name := idx.name(raw, i)
+		//: the registered claims have typed homes.
+		if registeredSlot(name) >= 0 {
+			continue
+		}
+		//: an unnamed claim cannot be addressed.
+		if len(name) == 0 {
+			//: the core value's own verdict.
+			return coretoken.ClaimNameInvalid
+		}
+		count++
+		//: the cap the core value enforces.
+		if count > coretoken.MaxPrivateClaims {
+			//: the core value's own verdict.
+			return coretoken.TooLarge
+		}
+	}
+	//: every private name is one the core value accepts.
+	return nil
+}
+
+// decodeClaims turns a raw claims object into a ClaimsValue under shape: the
+// one refusal set of readClaims, then the value, built from the index.
+func decodeClaims(raw []byte, maxDepth int, shape claimShape) (claims coretoken.ClaimsValue, err error) {
+	var idx objectIndex
+	reg, rerr := readClaims(raw, maxDepth, shape, &idx)
+	//: refused by a rule.
+	if rerr != nil {
+		//: the zero value with the verdict.
+		return coretoken.ClaimsValue{}, rerr
+	}
+	audience, aerr := shape.decodeAudience(memberValue(raw, &idx, reg.at[slotAudience]))
+	//: checkAudience accepted it already; kept typed anyway.
+	if aerr != nil {
+		//: propagate.
+		return coretoken.ClaimsValue{}, aerr
+	}
+	claims = coretoken.NewClaimsValue().
+		WithIssuer(memberText(raw, &idx, reg.at[slotIssuer])).
+		WithSubject(memberText(raw, &idx, reg.at[slotSubject])).
+		WithID(memberText(raw, &idx, reg.at[slotID])).
+		WithAudience(audience...).
+		WithExpiry(reg.expiry).WithNotBefore(reg.notBefore).WithIssuedAt(reg.issuedAt)
+	//: everything the domain does not model becomes a private claim.
+	return attachPrivate(claims, raw, &idx)
+}
+
+// attachPrivate copies every non-registered member onto base as a raw private
+// claim, in member order — the core value stores them keyed, and PrivateNames
+// sorts on the way out. The bytes are the value exactly as the issuer signed it.
+func attachPrivate(base coretoken.ClaimsValue, raw []byte, idx *objectIndex) (claims coretoken.ClaimsValue, err error) {
+	claims = base
+	//: everything the domain does not model travels through verbatim.
+	for i := range idx.count {
+		name := idx.name(raw, i)
+		//: the registered claims already have typed homes.
+		if registeredSlot(name) >= 0 {
+			continue
+		}
+		next, aerr := claims.WithPrivateRaw(string(name), idx.value(raw, i))
+		//: checkPrivateMembers already held these rules; kept typed anyway.
+		if aerr != nil {
+			//: propagate ClaimNameInvalid / TooLarge unchanged.
+			return coretoken.ClaimsValue{}, aerr
+		}
+		claims = next
+	}
+	//: the complete claim set.
+	return claims, nil
+}
+
+// memberValue returns the value of member at, nil when absent.
+func memberValue(raw []byte, idx *objectIndex, at int) []byte {
+	//: absence is nil, which every shape reads as "no claim".
+	if at < 0 {
+		//: absent.
+		return nil
+	}
+	//: a view.
+	return idx.value(raw, at)
+}
+
+// memberText decodes the string member at, "" when absent.
+func memberText(raw []byte, idx *objectIndex, at int) string {
+	//: the empty string is this domain's "absent".
+	if at < 0 {
+		//: absent.
+		return ""
+	}
+	//: the decoded string.
+	return decodeText(idx.value(raw, at))
 }
 
 // encodeClaims renders claims under shape. The member map marshals with sorted

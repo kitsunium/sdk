@@ -24,6 +24,12 @@
 // package owns only the contract, so a caller can hold a Verifier without
 // knowing which wire format produced it.
 //
+// [VerifierInto] is the allocation-free sibling of [Verifier], reached by a
+// type assertion on one: it verifies into a caller-owned [ClaimsBuf] through
+// a [VerifyScratch] the caller owns too, one per thread. It is the domain's
+// only port that is not safe for concurrent use through one scratch, and it
+// refuses a shared or a foreign scratch rather than racing on it (ADR 0186).
+//
 // # There is no registry, and that is the security decision
 //
 // Every other pluggable SDK domain resolves an implementation through a
