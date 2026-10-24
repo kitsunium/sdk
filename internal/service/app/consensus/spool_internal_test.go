@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -273,5 +274,49 @@ func TestACreateSupersededBeforeItsSpoolIsOpenLeaksNoHandle(t *testing.T) {
 	}
 	if err := fresh.Commit(meta); err != nil {
 		t.Fatalf("the later install's Commit: %v", err)
+	}
+}
+
+// A sink a newer Create of the same id claimed the spool from, released
+// before that Create superseded it, recorded its resume point anyway: the
+// newer sink's writes past that point were then cut back by the next
+// Create, which resumed where the older sink had stood (#643, review of
+// PR #647). Only the sink that owns the spool records one.
+func TestALateReleaseOfASupersededSinkLeavesNoResumePoint(t *testing.T) {
+	dir := t.TempDir()
+	s := must(newFileSnapshots(dir, storageFailed))(t)
+	id := "00000000000000000333-00000000000000000002"
+	c := chunk([]byte("a chunk of " + id))
+	meta := coreconsensus.SnapshotMetaValue{ID: id, ChunkSize: defaultChunkSize, EncodedSize: int64(8 * len(c))}
+	first, _ := must2(s.Create(id, meta))(t)
+	for range 2 {
+		if _, err := first.Write(c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first.(*fileSink).release()
+	older, off := must2(s.Create(id, meta))(t)
+	if want := int64(2 * len(c)); off != want {
+		t.Fatalf("setup: resumed at %d, want %d", off, want)
+	}
+	// The older sink is released once the newer Create owns the spool,
+	// before it supersedes the older one.
+	var once sync.Once
+	s.afterPublish = func(string) { once.Do(older.(*fileSink).release) }
+	newer, off := must2(s.Create(id, meta))(t)
+	s.afterPublish = nil
+	if off != 0 {
+		t.Fatalf("setup: the newer sink starts at %d, want 0", off)
+	}
+	for range 3 {
+		if _, err := newer.Write(c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	newer.(*fileSink).release()
+	last, off := must2(s.Create(id, meta))(t)
+	last.(*fileSink).release()
+	if want := int64(3 * len(c)); off != want {
+		t.Fatalf("the spool resumed at %d, where a superseded sink stood, not at the %d the newer sink wrote", off, want)
 	}
 }
