@@ -97,13 +97,23 @@ func TestAnOfferOfTheSnapshotBeingRestoredIsRefused(t *testing.T) {
 	defer release()
 	c.net.Isolate(f.id, false)
 	var id string
-	waitFor(t, "the follower restoring a snapshot", func() bool {
+	// The install counts as restoring from before its Commit (#623): the
+	// snapshot is published as well once its restore runs.
+	waitFor(t, "the follower restoring a snapshot it committed", func() bool {
 		f.node.snapState.mu.Lock()
-		defer f.node.snapState.mu.Unlock()
 		for k := range f.node.snapState.restoring {
 			id = k
 		}
-		return id != ""
+		f.node.snapState.mu.Unlock()
+		if id == "" {
+			return false
+		}
+		h, err := f.snaps.Open(id)
+		if err != nil {
+			return false
+		}
+		_ = h.Close()
+		return true
 	})
 	h, err := f.snaps.Open(id)
 	if err != nil {

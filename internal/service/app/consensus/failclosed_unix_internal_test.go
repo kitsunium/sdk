@@ -105,7 +105,7 @@ func TestASnapshotListingReportsAnUnreadableMeta(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores the file's permission bits")
 	}
-	s, err := newFileSnapshots(t.TempDir())
+	s, err := newFileSnapshots(t.TempDir(), storageFailed)
 	if err != nil {
 		t.Fatal(err)
 	}

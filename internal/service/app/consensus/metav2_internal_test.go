@@ -30,7 +30,7 @@ func metaV2(m *coreconsensus.SnapshotMetaValue) []byte {
 // its log kept (#546 phase 1, ADR 0152 D18).
 func TestASnapshotMetaOfVersion2IsRestored(t *testing.T) {
 	dir := t.TempDir()
-	snaps, err := newFileSnapshots(dir)
+	snaps, err := newFileSnapshots(dir, storageFailed)
 	if err != nil {
 		t.Fatal(err)
 	}

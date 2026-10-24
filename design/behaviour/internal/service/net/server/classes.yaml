@@ -241,6 +241,7 @@ files:
   - decls:
       - drainPollInterval
       - (*Server).Start
+      - groupDeclErr
       - (*Server).bindEverything
       - (*Server).bindPacketAll
       - (*Server).bindPacketGroup
@@ -382,8 +383,10 @@ files:
       - StreamGroup
       - (*StreamGroup).Name
       - (*StreamGroup).Handle
+      - (*StreamGroup).claimHandler
       - (*StreamGroup).HandleFunc
       - (*StreamGroup).HandleHTTP
+      - (*StreamGroup).mountHTTP
       - (*StreamGroup).tracksCloses
       - (*StreamGroup).Use
       - (*StreamGroup).resolved
@@ -588,6 +591,12 @@ functions:
     name: setKernelLen
     params: dst *T, n int
     typeParams: T ~uint32 | ~uint64
+  - doc: |-
+      groupDeclErr returns the first declaration error recorded on a group, in
+      declaration order, or nil when every group was declared cleanly.
+    name: groupDeclErr
+    params: groups []*StreamGroup
+    results: error
   - doc: |-
       batchDegradation reports whether batched reading was asked for and is
       unavailable, and why. A silent fallback is indistinguishable from a working
@@ -2113,6 +2122,18 @@ types:
           handshake; nil when the group has none (ADR 0174).
         name: admission
         type: "*Admission"
+      - doc: |-
+          declErr is the group's first declaration error — a second handler,
+          HandlerAlreadySet — surfaced by Start like the server's own (ADR 0186
+          §D1). The group records it because a handler is declared on the group,
+          after Group has returned and released the server's lock.
+        name: declErr
+        type: error
+      - doc: |-
+          declared records that a handler was declared, even a nil one, so a
+          second declaration is caught whatever the first one passed.
+        name: declared
+        type: bool
     kind: struct
     methods:
       - name: Name
@@ -2122,11 +2143,26 @@ types:
         params: h corenet.ConnHandler
         recv: g *StreamGroup
         results: "*StreamGroup"
+      - doc: |-
+          claimHandler reports whether the group may take its handler now, and
+          records HandlerAlreadySet when it already has one. It is the one check every
+          declaration takes, so Handle, HandleFunc and HandleHTTP cannot disagree on
+          what a second declaration means.
+        name: claimHandler
+        recv: g *StreamGroup
+        results: bool
       - name: HandleFunc
         params: f corenet.ConnHandlerFunc
         recv: g *StreamGroup
         results: "*StreamGroup"
       - name: HandleHTTP
+        params: h http.Handler
+        recv: g *StreamGroup
+        results: "*StreamGroup"
+      - doc: |-
+          mountHTTP installs the net/http adapter as the group's handler, unless the
+          group already has one.
+        name: mountHTTP
         params: h http.Handler
         recv: g *StreamGroup
         results: "*StreamGroup"

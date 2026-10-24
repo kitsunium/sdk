@@ -342,8 +342,9 @@ constants:
   - doc: |-
       pinAfterStream bounds the pin of a streamed snapshot, in maximum
       election timeouts: a peer that stopped after its install no longer holds
-      the log back once it passes. It bounds the wait for the install's
-      verdict as well, from the moment the transport read the last byte.
+      the log back once it passes. It bounds a stream that stopped moving as
+      well: the wait for the accept of its offer, and for the install's
+      verdict from the moment the transport read the last byte.
     items:
       - name: pinAfterStream
         type: int64
@@ -813,6 +814,9 @@ files:
       - (*fileLog).applyCompaction
       - (*fileLog).openSegments
       - (*fileLog).syncAtOpen
+      - (*fileLog).syncFailedAtOpen
+      - syncRan
+      - syncFileAtOpen
       - (*fileLog).positionTail
       - classifyTail
       - recordsAfter
@@ -820,6 +824,7 @@ files:
       - tornBatchStart
       - allZero
       - zeroFrom
+      - zeroRange
       - (*fileLog).quarantine
       - (*fileLog).createSegment
       - (*fileLog).segmentFile
@@ -1134,10 +1139,12 @@ files:
       - sendPin
       - (*Node).pinAt
       - (*Node).pinBound
+      - (*Node).streamDue
       - (*Node).logTight
       - (*Node).growPin
       - (*Node).watchPins
       - (*Node).prunePinScale
+      - (*Node).releasePin
       - (*Node).dropPin
       - sentReader
       - (*sentReader).Read
@@ -1460,6 +1467,7 @@ files:
       - encodeOffer
       - decodeOffer
       - (*TCPTransport).Stream
+      - readAccept
       - streamFrom
       - closeWriter
       - boundedWriter
@@ -1918,6 +1926,13 @@ functions:
     params: b []byte
     results: coreconsensus.HardState
   - doc: |-
+      syncRan reports whether cause is the failure of a sync that ran, and not
+      that of opening the directory syncDir syncs: os.Open fails with the
+      PathError of op "open" before any sync was asked for.
+    name: syncRan
+    params: cause error
+    results: bool
+  - doc: |-
       classifyTail is step 2 to 4 of the decision procedure (R8-02, R9-01,
       R9-03): it returns where to truncate a torn tail, or -1 and why the hole
       is quarantined.
@@ -1951,6 +1966,12 @@ functions:
       the range being durable zeros on return.
     name: zeroFrom
     params: f *os.File, off, size int64
+    results: error
+  - doc: |-
+      zeroRange writes zeros over f from off to size, 1 MiB at a time, and
+      syncs nothing.
+    name: zeroRange
+    params: f io.WriterAt, off, size int64
     results: error
   - doc: |-
       abandonTmp closes f, the segment .tmp at path a failure leaves
@@ -2001,8 +2022,11 @@ functions:
       nor resumable. Of the receive spools only the newest stays, the one a
       resume may still continue (#527). A directory that cannot be created, listed or cleaned is a
       STORAGE_FAILED, so a store never opens over a state it could not read.
+      syncFailed builds the STORAGE_FAILED of a failed directory sync: a data
+      directory's open passes its log's syncFailedAtOpen, which writes the
+      markers first (#637), and a store opened alone passes storageFailed.
     name: newFileSnapshots
-    params: dir string
+    params: dir string, syncFailed func(op string, cause error) error
     results: "*fileSnapshots, error"
   - doc: |-
       newestSpool is the id of the newest receive spool among ents, "" when
@@ -2819,6 +2843,18 @@ functions:
     params: b []byte
     results: coreconsensus.InstallOfferValue, error
   - doc: |-
+      readAccept reads the receiver's accept of an offer on c under d. The
+      receiver judges the offer on its loop, as a member judges a JOIN, and d
+      is the JOIN's JoinTimeout. With no deadline, a receiver that read the
+      offer and never answered it — its loop standing still in its judgment —
+      held the stream until its context ended, past every write bound, and
+      the stream's pin held the sender's compaction meanwhile (#623). The
+      verdict's read that follows keeps no deadline: a restore may take long,
+      and the node bounds that wait (#602).
+    name: readAccept
+    params: c net.Conn, d time.Duration
+    results: "[]byte, error"
+  - doc: |-
       streamFrom copies the snapshot from the accepted offset and closes the
       write half, so the receiver sees the stream end. A Close failure of the
       source is reported only when the copy itself succeeded.
@@ -2911,6 +2947,7 @@ imports:
   filepath: path/filepath
   flock: github.com/kitsunium/sdk/internal/kernel/fs/flock
   fmt: fmt
+  fs: io/fs
   hash: hash
   hex: encoding/hex
   io: io
@@ -3157,7 +3194,8 @@ types:
       - doc: |-
           open opens the log, then the snapshots; when the snapshots fail the log
           just opened is closed again, so a failed open holds nothing but the lock
-          its caller releases.
+          its caller releases. A failed sync of the snapshot directory writes the
+          log's markers, as the log's own syncs at open do (#637).
         name: open
         recv: d *dataDir
         results: error
@@ -3641,7 +3679,10 @@ types:
           stops in the data directory only. It returns the failure of each place:
           the data directory's, and the boot-scoped one's (nil for a stop that writes no
           boot-scoped marker). R9-05 lets a node stop with one marker of the two,
-          but not silently: the caller reports the place it could not write.
+          but not silently: the caller reports the place it could not write. The
+          boot-scoped marker is written first: it sits on a tmpfs, refuses a
+          restart in this boot alone, and a data directory whose device hangs or
+          refuses the write cannot keep it from being written (#637).
         name: markStopEach
         params: code errs.Code, detail string
         recv: l *fileLog
@@ -3801,8 +3842,26 @@ types:
           crash recovery for this reason (SyncDataDirectory). A write-back that
           failed after the process died is reported to this fresh descriptor too
           (errseq, Linux 4.13), so a failure here is STORAGE_FAILED, never a log
-          trusted from pages the disk refused.
+          trusted from pages the disk refused, and it writes the markers: the error
+          is reported once, so the next open in the same boot would sync clean
+          (#637).
         name: syncAtOpen
+        recv: l *fileLog
+        results: error
+      - doc: |-
+          syncFailedAtOpen is the STORAGE_FAILED of a sync an open could not make,
+          its markers written first, as a running node's stop writes them (R9-05).
+          The kernel reports a failed write-back once, to the first descriptor that
+          syncs after it (errseq, Linux 4.13): this open consumed it, and the next
+          one in the same boot synced clean and trusted the pages the disk had
+          refused (#637). Only a sync's failure writes them: a failed read, or a
+          directory that could not be opened to be synced (a descriptor table
+          full), consumes no write-back error, and a marker would refuse every
+          start until the reboot. A data directory neither marker could be written
+          for is refused to any later open in the process (noteUnmarked), and the
+          places that could not be written travel with the error.
+        name: syncFailedAtOpen
+        params: op string, cause error
         recv: l *fileLog
         results: error
       - doc: |-
@@ -5149,21 +5208,22 @@ types:
         recv: n *Node
         results: bool
       - doc: |-
-          answerRestoring refuses OVERLOADED an offer of a snapshot this node
-          committed and is restoring, and reports whether it did. A leader whose
-          pin on a slow receiver fell due offers the same snapshot again:
-          accepted, a spool was opened over the published id, the whole snapshot
-          was streamed a second time, committed over the file the restore in
-          progress reads — a rename Windows refuses — and restored once more
-          (#610). Refused, the leader probes again, and finds the receiver at the
+          answerRestoring refuses OVERLOADED an offer of a snapshot this node is
+          installing — committing, then restoring — and reports whether it did. A
+          leader whose pin on a slow receiver fell due offers the same snapshot
+          again: accepted, a spool was opened over the published id, the whole
+          snapshot was streamed a second time, committed over the file the restore
+          in progress reads — a rename Windows refuses — and restored once more
+          (#610); during the Commit, the offer's Create waited for it on the loop
+          (#623). Refused, the leader probes again, and finds the receiver at the
           snapshot once restored.
         name: answerRestoring
         params: o *coreconsensus.InstallOfferValue, acc *coreconsensus.InstallAcceptValue
         recv: n *Node
         results: bool
       - doc: |-
-          markRestoring counts one more, or one less, install of id waiting for
-          or under its restore.
+          markRestoring counts one more, or one less, install of id between its
+          last freshness check and the end of its restore.
         name: markRestoring
         params: id string, d int
         recv: n *Node
@@ -5876,19 +5936,17 @@ types:
       - doc: |-
           pinAt is the index pin holds compaction back to at now, and false once
           it no longer holds: a streamed snapshot's pin ends when this node no
-          longer leads the peer, or when until passed. A stream's pin ends
-          pinBound after its last byte was read: a receiver that is sent every
-          byte and never answers — a stuck disk under its spool's sync, a stuck
-          Restore, an apply goroutine held by an abandoned SaveSnapshot — pinned
-          this node's compaction for good, and its log grew to the NO_SPACE alarm
-          (#602). No pin holds once the log is tight. It runs on the loop.
+          longer leads the peer, or when until passed. A stream's pin ends once
+          its stream is due (streamDue), or once it was lifted. No pin holds once
+          the log is tight. It runs on the loop.
         name: pinAt
         params: to coreconsensus.NodeID, pin sendPin, now time.Time
         recv: n *Node
         results: uint64, bool
       - doc: |-
-          pinBound is how long a pin to peer to holds once its stream read the
-          last byte, and once its stream ended: pinAfterStream maximum election
+          pinBound is how long a stream's pin to peer to holds once its stream
+          stopped moving, and a streamed snapshot's pin once its stream ended:
+          pinAfterStream maximum election
           timeouts, doubled each time a stream's pin to that peer fell due while
           the peer still answered, up to pinScaleMax times. The bound alone could
           not tell a receiver stuck in its install from one only slow to restore:
@@ -5902,23 +5960,47 @@ types:
         recv: n *Node
         results: time.Duration
       - doc: |-
-          logTight reports whether the log is within twice LogReserveBytes of
-          MaxLogBytes, half way to the no-space alarm: no pin holds compaction
-          back then, whatever its bound.
+          streamDue reports whether the stream of pin to peer to is to be
+          cancelled at now: it has not moved for pinBound, or this node no longer
+          leads the peer, which left the configuration. A receiver that is sent
+          every byte and never answers — a stuck disk under its spool's sync, a
+          stuck Restore, an apply goroutine held by an abandoned SaveSnapshot —
+          pinned this node's compaction for good, and its log grew to the
+          NO_SPACE alarm (#602). So did one that never answered the offer, its
+          loop standing still in its judgment, since the bound ran from the last
+          byte only, and one removed while it was sent the snapshot, whose stream
+          only its end released (#623). It runs on the loop.
+        name: streamDue
+        params: to coreconsensus.NodeID, pin sendPin, now time.Time
+        recv: n *Node
+        results: bool
+      - doc: |-
+          logTight reports whether the log is past both of two thresholds: within
+          twice LogReserveBytes of MaxLogBytes, and half way to the no-space
+          alarm, which rises at MaxLogBytes less LogReserveBytes. No pin holds
+          compaction back then, whatever its bound, so a pin never brings the
+          alarm on. The first threshold alone covered the whole quota once
+          MaxLogBytes was at most twice LogReserveBytes, which refuseCeilings
+          accepts — 512 MiB under the default reserve — and no pin ever held: a
+          snapshot in flight was compacted past, as before #550 (#622). From three
+          reserves up, the first is the later of the two and the band is #616's.
         name: logTight
         recv: n *Node
         results: bool
       - doc: |-
           growPin doubles the pin bound of peer to, whose stream's pin fell due,
           when it answered within the last maximum election timeout: it is alive
-          and still installing, slow rather than stuck. A pin dropped because the
-          log is tight says nothing of the peer, and grows nothing.
+          and still installing, slow rather than stuck. Nor while the log is
+          tight: no pin holds compaction back then, and a longer bound would hold
+          nothing.
         name: growPin
         params: to coreconsensus.NodeID, now time.Time
         recv: n *Node
       - doc: |-
           watchPins ends, at each tick, the pins of streamed snapshots that no
-          longer hold: their peer caught up with the log, left, or until passed.
+          longer hold: their peer caught up with the log, left, or until passed;
+          it cancels the streams that are due, and lifts the others' hold once the
+          log is tight (releasePin).
           Compaction only runs after a cut, so the log is compacted again at once:
           a pin that ended once the writes stopped held it back until the next
           write. Caught up is the peer's match at the last index, never the pin's
@@ -5933,11 +6015,26 @@ types:
         name: prunePinScale
         recv: n *Node
       - doc: |-
+          releasePin settles the pin of peer to, which no longer holds compaction
+          at now, and reports whether it changed: a stream's pin is dropped, and
+          its stream cancelled, only when the stream is due (streamDue); one that
+          only lost its hold to a tight log is lifted, for good, and its stream
+          goes on. A tight log says nothing of the transfer: cancelled with it, no
+          stream outlived the band's first tick, and under a quota of at most
+          twice LogReserveBytes no follower behind the compacted log, joiner or
+          learner was ever installed (#622). Any other pin is dropped. It runs on
+          the loop.
+        name: releasePin
+        params: to coreconsensus.NodeID, pin sendPin, now time.Time
+        recv: n *Node
+        results: bool
+      - doc: |-
           dropPin ends the pin of peer to, and cancels its stream when the pin is
-          a stream's whose verdict is overdue: the stream ends, raft probes the
-          peer again, and a peer that finished its install meanwhile is found
-          there. The receiver keeps its spool and its install, and its next pin
-          holds longer when it still answers (growPin). It runs on the loop.
+          a stream's, which releasePin drops only once the stream is due: the
+          stream ends, raft probes the peer again, and a peer that finished its
+          install meanwhile is found there. The receiver keeps its spool and its
+          install, and its next pin holds longer when it still answers (growPin).
+          It runs on the loop.
         name: dropPin
         params: to coreconsensus.NodeID
         recv: n *Node
@@ -6681,12 +6778,16 @@ types:
     name: progressWatch
   - doc: |-
       sendPin is a snapshot that pins compaction for a peer. While it streams,
-      until is zero, and sent is when the transport read the snapshot's last
-      byte, in Unix nanoseconds of n.clk, 0 before. Once streamed, the pin
-      follows the peer's match until the peer catches up or until passes: the
-      leader only probes the peer after an install, and a cut that landed in
-      that window compacted past the entries the peer needed next, so it was
-      offered snapshot after snapshot (#550).
+      until is zero; moved is when the stream last moved, in Unix nanoseconds
+      of n.clk: its offer, then the accept, which opens the snapshot, then each
+      read of it by the transport; sent is when the transport read the
+      snapshot's last byte, 0 before; and lifted is set once the log was tight
+      during the stream: the pin holds compaction back no more, for good, and
+      the stream goes on (#622). Once streamed, the pin follows the
+      peer's match until the peer catches up or until passes: the leader only
+      probes the peer after an install, and a cut that landed in that window
+      compacted past the entries the peer needed next, so it was offered
+      snapshot after snapshot (#550).
     fields:
       - name: index
         type: uint64
@@ -6694,11 +6795,15 @@ types:
         type: time.Time
       - name: sent
         type: "*atomic.Int64"
+      - name: moved
+        type: "*atomic.Int64"
+      - name: lifted
+        type: bool
     kind: struct
     name: sendPin
   - doc: |-
-      sentReader marks sent with n.clk's time once r reads to its end: the
-      transport read the snapshot's last byte.
+      sentReader marks moved with n.clk's time at each read of r, and sent
+      once r reads to its end: the transport read the snapshot's last byte.
     fields:
       - name: r
         type: io.Reader
@@ -6706,9 +6811,11 @@ types:
         type: "*Node"
       - name: sent
         type: "*atomic.Int64"
+      - name: moved
+        type: "*atomic.Int64"
     kind: struct
     methods:
-      - doc: Read reads r and marks the end of the stream.
+      - doc: Read reads r, and marks the stream moving and its end.
         name: Read
         params: p []byte
         recv: s *sentReader
@@ -7779,6 +7886,18 @@ vars:
           	coreconsensus.CodeLeadershipUnconfirmed:   coreconsensus.LeadershipUnconfirmed,
           }
     name: sentinelByCode
+  - doc: |-
+      syncFileAtOpen and syncDirAtOpen are the syncs an open makes of what it
+      read before it trusts it: datasync and syncDir, unless a test replaces one
+      to fail as a write-back error reported at open does (#637). Only the
+      open's own goroutine reads them.
+    grouped: true
+    items:
+      - name: syncFileAtOpen
+        value: datasync
+      - name: syncDirAtOpen
+        value: syncDir
+    name: syncFileAtOpen
   - grouped: true
     items:
       - doc: |-

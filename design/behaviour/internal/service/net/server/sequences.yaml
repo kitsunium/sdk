@@ -1252,6 +1252,8 @@ sequences:
         kind: value
       - id: errs
         kind: package
+      - id: groupDeclErr
+        kind: internal
       - id: s.phase.Store
         kind: value
       - id: slices
@@ -1278,6 +1280,16 @@ sequences:
               to: s.mu.Unlock
             - return: s.declErr
           when: s.declErr != nil
+      - opt:
+          do:
+            - eval: s.mu.Unlock()
+              to: s.mu.Unlock
+            - return: err
+          init:
+            bind: err
+            eval: groupDeclErr(s.groups)
+            to: groupDeclErr
+          when: err != nil
       - eval: s.phase.Store(uint32(corenet.PhaseStarting))
         to: s.phase.Store
       - bind: groups
@@ -3264,9 +3276,37 @@ sequences:
       - return: g.name
   - of: (*StreamGroup).Handle
     steps:
+      - opt:
+          do:
+            - return: g
+          when: "!g.claimHandler()"
       - set: g.handler
         value: h
       - return: g
+  - of: (*StreamGroup).claimHandler
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StreamGroup).claimHandler
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - set: g.declared
+              value: "true"
+            - return: "true"
+          when: "!g.declared"
+      - opt:
+          do:
+            - set: g.declErr
+              to: errs
+              value: |-
+                errs.Wrap(corenet.HandlerAlreadySet, errs.WrapParams{},
+                			errs.String("group", g.name))
+          when: g.declErr == nil
+      - return: "false"
   - of: (*StreamGroup).HandleFunc
     participants:
       - id: caller
@@ -3284,18 +3324,32 @@ sequences:
         kind: actor
       - id: (*StreamGroup).HandleHTTP
         kind: self
-      - id: newHTTPAdapter
-        kind: internal
-      - id: g.Handle
+      - id: g.mountHTTP
         kind: internal
     steps:
+      - return: g.mountHTTP(h)
+        to: g.mountHTTP
+  - of: (*StreamGroup).mountHTTP
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StreamGroup).mountHTTP
+        kind: self
+      - id: newHTTPAdapter
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: g
+          when: "!g.claimHandler()"
       - bind: adapter
         eval: newHTTPAdapter(h)
         to: newHTTPAdapter
       - set: g.httpAdapter
         value: adapter
-      - return: g.Handle(adapter)
-        to: g.Handle
+      - set: g.handler
+        value: adapter
+      - return: g
   - of: (*StreamGroup).tracksCloses
     steps:
       - return: g.httpAdapter != nil && g.limiter != nil

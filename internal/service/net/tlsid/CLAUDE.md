@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-13T20:00:00Z -->
+<!-- updated: 2026-10-24T04:00:00Z -->
 # internal/service/net/tlsid/
 
 ## Purpose
@@ -31,9 +31,17 @@ handshake before the caller's check, and a file identity reloaded in place.
 - `PeerOf` sets `Chain` only from `VerifiedChains`; under the identity's own
   `VerifyConnection` that is empty, never the presented certificates
   (review of PR #301, L1).
-- The roots only grow until the process restarts (ADR 0174 D1, L2).
-- A refused pair is read again at every look, even under the same mtime, and
-  counted once per mtime (L3).
+- The roots only grow until the process restarts (ADR 0174 D1, L2). A roots
+  file that cannot be read is no change; one that names no certificate, an
+  empty one included, is counted once and never replaces nor narrows them.
+- A look, at most once per `Every`, reads the three files and decides by
+  their bytes (SHA-256 per file), never by their times (ADR 0174, amendment
+  of 2026-10-24, #633): a copy that keeps times (`cp -p`, `rsync -a`,
+  `tar x`) or a coarse filesystem gives a new file an older or the same
+  mtime. Unchanged bytes are not parsed again, whatever their times.
+- A refused pair is read again at every look, and counted once for the bytes
+  refused (L3); a pair caught mid-write is refused, then taken at the next
+  look once whole. It is parsed from the very bytes the look compared.
 
 ## Why-this-shape
 
@@ -73,14 +81,21 @@ stdlib (`os`) + `internal/kernel/errs` + `internal/core/net`. Never `pkg/*`.
 - Put file contents into an error field.
 - Return a partially-loaded identity when one file failed — a half-configured
   TLS identity is worse than none, because it looks configured.
+- Decide that a reloadable identity's file changed by its metadata — mtime,
+  size, inode, ctime —, nor skip a look because a time is not newer. A copy
+  that keeps times hides a change from the mtime; on a coarse filesystem an
+  in-place rewrite of the same size within the same second hides it from all
+  four, and Windows has no inode nor ctime to read. A CA rollover is then
+  never trusted, a renewal never served (#633). Compare the bytes.
 
 ## Cost — deliberately not benchmarked
 
 **`Load` does no work per request and none per handshake, so it ships a
 paragraph instead of a `BENCH.md`.** This section is about `Load` alone; the
 `Identity` of `identity.go` is not covered by it, and does work per handshake
-(the chain and roots verified before the caller's check) and per reload (the
-files read again), which is not benchmarked here. `Load` calls
+(the chain and roots verified before the caller's check) and per look, at most
+once per `Every` (the three files read and hashed, parsed only when their
+bytes changed), which is not benchmarked here. `Load` calls
 `os.ReadFile` at most four times and hands the bytes to
 `corenet.NewIdentityValue`. It is invoked once, at wiring time; no internal
 caller reaches it on a request path, and `go build -gcflags=-m` reports not one

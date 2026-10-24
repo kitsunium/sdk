@@ -1547,7 +1547,25 @@ is refused with `OVERLOADED`. Nothing is appended in either case.
     replacement of the snapshot it reads are DEFERRED, and compaction is
     pinned, as etcd skips compaction while a snapshot is in flight
     (`server.go:2140-2141`).
-  - The transfer is cancelled only when the log reaches `LogReserveBytes`.
+  - The log's pressure never cancels a transfer (amendment of 2026-10-24,
+    #622). Once the log is tight — past both `MaxLogBytes` less twice
+    `LogReserveBytes` and half way to the no-space alarm — the pin's hold
+    on compaction is lifted for the rest of the transfer, and the transfer
+    goes on. Cancelled with it, no transfer outlived the band's first tick,
+    and under a quota of at most twice the reserve, which the configuration
+    accepts, the band covered the whole quota: no pin ever held, and no
+    peer behind the compacted log was ever installed.
+  - A transfer is cancelled once it has not moved for its peer's pin bound
+    — from its offer, through the accept and each read of the snapshot, to
+    the verdict after its last byte — and once its peer leaves the
+    configuration (amendment of 2026-10-24, #623), as well as when the
+    leader loses its leadership or its term (#547). Bounded from the last
+    byte only, a transfer whose offer was never answered held the leader's
+    compaction for as long as it led. The shipped transport reads the
+    accept under `JoinTimeout`, as a JOIN's answer. A receiver refuses
+    `OVERLOADED`, an existing code, an offer of a snapshot it is committing
+    or restoring: during the `Commit`, the offer's `Create` of the same id
+    waited for it on the event loop.
   - On the receiving side, an install from a higher term, or of a newer
     snapshot id, replaces a stale receive spool.
   - A simulator case makes a transfer last longer than the cut interval,
@@ -4093,6 +4111,37 @@ completed:
 - **Not in protocol 2.** The fresh epoch in the stamp and D18's announced `PayloadMax` with
   `PAYLOAD_VERSION_REFUSED` (follow-ups of kodflow/forgejo-raft#65 and #50)
   have no issue yet. Each that changes a format will need protocol 3.
+
+## Amendment — a sync that fails at open writes the STORAGE_FAILED markers (2026-10-24, #637)
+
+The rule above, "after `STORAGE_FAILED`, the node refuses to start until the
+machine reboots", wrote its markers only when a running node stopped. The
+sync at open of #414 failed `STORAGE_FAILED` with no marker, and the kernel
+reports a failed write-back once, to the first descriptor that syncs after
+it (errseq, Linux 4.13). That open consumed the error. The next open in the
+same boot, a supervisor's restart, synced clean over the pages the disk had
+refused, and the node acknowledged and voted on them
+([#637](https://github.com/kitsunium/sdk/issues/637), an incomplete fix of
+#414).
+
+- **A sync that fails at open writes the markers before the open returns**,
+  as a running node's stop writes them (R9-05): a segment's `fdatasync`, the
+  log, data and snapshot directories' syncs, and the sync of a torn tail the
+  open zeroed. The next open in the boot is refused `STOP_MARKER_PRESENT`;
+  after the reboot the directory opens. A device that refuses both markers
+  leaves the directory refused to any later open in the process (#562).
+- **The boot-scoped marker is written first**, at an open as at a running
+  node's stop. It sits on a tmpfs and alone refuses a restart in the boot,
+  so a data directory whose device hangs or refuses the write cannot keep it
+  from being written. The data directory's follows, at best.
+- **Only a sync's failure writes them.** A read that fails at open, or a
+  directory that cannot be opened to be synced (a descriptor table that is
+  full), consumes no write-back error. A marker there would refuse every
+  start until the reboot for a cause that may be gone a moment later.
+- A recovery that fails closes the segments it opened, which a caller
+  retrying in the process leaked at every try.
+
+Nothing published changes: no frame, no payload, no record format.
 
 ## Revision history
 

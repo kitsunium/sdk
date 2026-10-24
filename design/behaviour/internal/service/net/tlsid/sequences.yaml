@@ -12,6 +12,9 @@ sequences:
     steps:
       - return: sha256.Sum256(c.RawSubjectPublicKeyInfo)
         to: sha256
+  - of: sumPair
+    steps:
+      - return: "pairSum{cert: sha256.Sum256(certPEM), key: sha256.Sum256(keyPEM)}"
   - of: materialInvalid
     participants:
       - id: caller
@@ -61,15 +64,17 @@ sequences:
         kind: actor
       - id: LoadReloadable
         kind: self
-      - id: readPair
-        kind: internal
       - id: os
         kind: stdlib
+      - id: parsePair
+        kind: internal
       - id: x509
         kind: stdlib
       - id: id.roots.Store
         kind: value
-      - id: modTime
+      - id: sha256
+        kind: stdlib
+      - id: sumPair
         kind: internal
       - id: time
         kind: stdlib
@@ -81,9 +86,23 @@ sequences:
           when: f.Every <= 0
       - bind: id
         eval: "&Identity{files: &f}"
+      - bind: certPEM, err
+        eval: os.ReadFile(f.CertFile)
+        to: os
+      - opt:
+          do:
+            - return: nil, materialInvalid("cert_file", err.Error())
+          when: err != nil
+      - bind: keyPEM, err
+        eval: os.ReadFile(f.KeyFile)
+        to: os
+      - opt:
+          do:
+            - return: nil, materialInvalid("key_file", err.Error())
+          when: err != nil
       - bind: c, leaf, err
-        eval: readPair(f.CertFile, f.KeyFile)
-        to: readPair
+        eval: parsePair(certPEM, keyPEM)
+        to: parsePair
       - opt:
           do:
             - return: nil, err
@@ -104,13 +123,16 @@ sequences:
           when: "!pool.AppendCertsFromPEM(pemRoots)"
       - eval: id.roots.Store(pool)
         to: id.roots.Store
+      - set: id.rootsLast
+        to: sha256
+        value: sha256.Sum256(pemRoots)
       - set: id.rootsSeen
-        value: "[][]byte{pemRoots}"
+        value: "[][32]byte{id.rootsLast}"
       - set: id.cur, id.spki, id.san
         value: c, SPKI(leaf), sanOf(leaf)
-      - set: id.stamp
-        to: modTime
-        value: modTime(f.CertFile, f.KeyFile, f.RootsFile)
+      - set: id.pairLast
+        to: sumPair
+        value: sumPair(certPEM, keyPEM)
       - set: id.checked
         to: time
         value: time.Now()
@@ -153,41 +175,11 @@ sequences:
           value: d
       - return: b.String()
         to: b.String
-  - of: modTime
+  - of: parsePair
     participants:
       - id: caller
         kind: actor
-      - id: modTime
-        kind: self
-      - id: os
-        kind: stdlib
-      - id: st.ModTime
-        kind: value
-    steps:
-      - var:
-          name: t
-          type: time.Time
-      - loop:
-          do:
-            - opt:
-                do:
-                  - set: t
-                    to: st.ModTime
-                    value: st.ModTime()
-                init:
-                  bind: st, err
-                  eval: os.Stat(f)
-                  to: os
-                when: err == nil && st.ModTime().After(t)
-          key: _
-          range: files
-          value: f
-      - return: t
-  - of: readPair
-    participants:
-      - id: caller
-        kind: actor
-      - id: readPair
+      - id: parsePair
         kind: self
       - id: tls
         kind: stdlib
@@ -195,7 +187,7 @@ sequences:
         kind: stdlib
     steps:
       - bind: c, err
-        eval: tls.LoadX509KeyPair(certFile, keyFile)
+        eval: tls.X509KeyPair(certPEM, keyPEM)
         to: tls
       - opt:
           do:
@@ -219,18 +211,10 @@ sequences:
         kind: self
       - id: time
         kind: stdlib
-      - id: modTime
+      - id: id.reloadPair
         kind: internal
-      - id: readPair
+      - id: id.reloadRoots
         kind: internal
-      - id: id.failures.Add
-        kind: value
-      - id: os
-        kind: stdlib
-      - id: id.roots.Load().Clone
-        kind: value
-      - id: id.roots.Store
-        kind: value
     steps:
       - lock:
           mutex: id.mu
@@ -241,62 +225,110 @@ sequences:
       - set: id.checked
         to: time
         value: time.Now()
-      - bind: m
-        eval: modTime(id.files.CertFile, id.files.KeyFile, id.files.RootsFile)
-        to: modTime
-      - opt:
-          do:
-            - return: id.cur, nil
-          when: "!m.After(id.stamp)"
-      - bind: c, leaf, err
-        eval: readPair(id.files.CertFile, id.files.KeyFile)
-        to: readPair
-      - bind: pairOK
-        eval: "false"
-      - switch:
-          cases:
-            - case: err != nil, SPKI(leaf) != id.spki, sanOf(leaf) != id.san
-              do:
-                - opt:
-                    do:
-                      - eval: id.failures.Add(1)
-                        to: id.failures.Add
-                      - set: id.refusedAt
-                        value: m
-                    when: "!m.Equal(id.refusedAt)"
-            - default: true
-              do:
-                - set: id.cur
-                  value: c
-                - set: pairOK
-                  value: "true"
-      - opt:
-          do:
-            - bind: pool
-              eval: id.roots.Load().Clone()
-              to: id.roots.Load().Clone
-            - alt:
-                - do:
-                    - set: id.rootsSeen
-                      value: append(id.rootsSeen, pemRoots)
-                    - eval: id.roots.Store(pool)
-                      to: id.roots.Store
-                  when: pool.AppendCertsFromPEM(pemRoots)
-                - do:
-                    - eval: id.failures.Add(1)
-                      to: id.failures.Add
-                  else: true
-          init:
-            bind: pemRoots, err
-            eval: os.ReadFile(id.files.RootsFile)
-            to: os
-          when: err == nil && !seen(id.rootsSeen, pemRoots)
-      - opt:
-          do:
-            - set: id.stamp
-              value: m
-          when: pairOK
+      - eval: id.reloadPair()
+        to: id.reloadPair
+      - eval: id.reloadRoots()
+        to: id.reloadRoots
       - return: id.cur, nil
+  - of: (*Identity).reloadPair
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Identity).reloadPair
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: sumPair
+        kind: internal
+      - id: parsePair
+        kind: internal
+      - id: id.failures.Add
+        kind: value
+    steps:
+      - bind: certPEM, err
+        eval: os.ReadFile(id.files.CertFile)
+        to: os
+      - opt:
+          do:
+            - return: ""
+          when: err != nil
+      - bind: keyPEM, err
+        eval: os.ReadFile(id.files.KeyFile)
+        to: os
+      - opt:
+          do:
+            - return: ""
+          when: err != nil
+      - bind: sum
+        eval: sumPair(certPEM, keyPEM)
+        to: sumPair
+      - opt:
+          do:
+            - return: ""
+          when: sum == id.pairLast
+      - set: id.pairLast
+        value: sum
+      - bind: c, leaf, err
+        eval: parsePair(certPEM, keyPEM)
+        to: parsePair
+      - opt:
+          do:
+            - eval: id.failures.Add(1)
+              to: id.failures.Add
+            - return: ""
+          when: err != nil || SPKI(leaf) != id.spki || sanOf(leaf) != id.san
+      - set: id.cur
+        value: c
+  - of: (*Identity).reloadRoots
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Identity).reloadRoots
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: sha256
+        kind: stdlib
+      - id: id.roots.Load().Clone
+        kind: value
+      - id: id.failures.Add
+        kind: value
+      - id: id.roots.Store
+        kind: value
+    steps:
+      - bind: pemRoots, err
+        eval: os.ReadFile(id.files.RootsFile)
+        to: os
+      - opt:
+          do:
+            - return: ""
+          when: err != nil
+      - bind: sum
+        eval: sha256.Sum256(pemRoots)
+        to: sha256
+      - opt:
+          do:
+            - return: ""
+          when: sum == id.rootsLast
+      - set: id.rootsLast
+        value: sum
+      - opt:
+          do:
+            - return: ""
+          when: slices.Contains(id.rootsSeen, sum)
+      - bind: pool
+        eval: id.roots.Load().Clone()
+        to: id.roots.Load().Clone
+      - opt:
+          do:
+            - eval: id.failures.Add(1)
+              to: id.failures.Add
+            - return: ""
+          when: "!pool.AppendCertsFromPEM(pemRoots)"
+      - set: id.rootsSeen
+        value: append(id.rootsSeen, sum)
+      - eval: id.roots.Store(pool)
+        to: id.roots.Store
   - of: (*Identity).Certificate
     steps:
       - bind: c, err

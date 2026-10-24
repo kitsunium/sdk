@@ -8,15 +8,17 @@ files:
       - SPKI
       - Verify
       - Identity
+      - pairSum
+      - sumPair
       - FilesConfig
       - materialInvalid
       - NewIdentity
       - LoadReloadable
       - sanOf
-      - modTime
-      - readPair
+      - parsePair
       - (*Identity).reload
-      - seen
+      - (*Identity).reloadPair
+      - (*Identity).reloadRoots
       - (*Identity).Certificate
       - (*Identity).Leaf
       - (*Identity).Roots
@@ -37,6 +39,10 @@ functions:
   - name: SPKI
     params: c *x509.Certificate
     results: "[32]byte"
+  - doc: sumPair is the pairSum of a certificate's and a key's bytes.
+    name: sumPair
+    params: certPEM, keyPEM []byte
+    results: pairSum
   - doc: |-
       materialInvalid is the one refusal of unusable TLS material: it names the
       field at fault and why, and never the material itself.
@@ -56,23 +62,12 @@ functions:
     params: c *x509.Certificate
     results: string
   - doc: |-
-      modTime is the newest modification time among files; a file that cannot
-      be stated does not count, so a transient absence never triggers a reload.
-    name: modTime
-    params: files ...string
-    results: time.Time
-  - doc: |-
-      readPair loads a certificate and its key and parses the leaf, refusing a
-      pair that does not match.
-    name: readPair
-    params: certFile, keyFile string
+      parsePair builds a certificate from its PEM and its key's, refusing a pair
+      that does not match, and parses the leaf. It takes the very bytes a look
+      compared, never the files read a second time.
+    name: parsePair
+    params: certPEM, keyPEM []byte
     results: "*tls.Certificate, *x509.Certificate, error"
-  - doc: |-
-      seen reports whether a roots file's bytes were already merged, so the
-      same file read again does not grow the pool.
-    name: seen
-    params: all [][]byte, b []byte
-    results: bool
   - name: PeerOf
     params: cs tls.ConnectionState
     results: PeerIdentityValue, bool
@@ -96,11 +91,11 @@ functions:
     results: error
 imports:
   atomic: sync/atomic
-  bytes: bytes
   corenet: github.com/kitsunium/sdk/internal/core/net
   errs: github.com/kitsunium/sdk/internal/kernel/errs
   os: os
   sha256: crypto/sha256
+  slices: slices
   strings: strings
   sync: sync
   time: time
@@ -144,7 +139,11 @@ types:
         type: atomic.Pointer[x509.CertPool]
       - name: failures
         type: atomic.Int64
-      - doc: For an identity read from files.
+      - doc: |-
+          For an identity read from files. A look decides by the files' bytes,
+          never by their times (#633): pairLast and rootsLast are the digests of
+          the bytes the last look decided on, rootsSeen those of every roots
+          file merged.
         name: mu
         type: sync.Mutex
       - name: files
@@ -155,22 +154,49 @@ types:
         type: "[32]byte"
       - name: san
         type: string
-      - name: stamp
-        type: time.Time
-      - name: refusedAt
-        type: time.Time
+      - name: pairLast
+        type: pairSum
+      - name: rootsLast
+        type: "[32]byte"
       - name: checked
         type: time.Time
       - name: rootsSeen
-        type: "[][]byte"
+        type: "[][32]byte"
     kind: struct
     methods:
       - doc: |-
           reload is the file identity's source: at most every Files.Every it looks
           at the files, and swaps in a renewal that keeps the key and the SAN.
+
+          A look reads the three files and decides by their bytes, never by their
+          times (#633). A copy that keeps its source's time (cp -p, rsync -a, tar
+          x), a filesystem of a coarse granularity, or a clock set back, gives a new
+          file a time older than, or the same as, the one a look last saw, and a
+          rule of "newer than the last look" never read it: a CA rollover's bundle
+          was never trusted, a renewal never served. The files are a few KiB of PEM,
+          read at most once per Every; bytes the last look already decided on are
+          not parsed again.
         name: reload
         recv: id *Identity
         results: "*tls.Certificate, error"
+      - doc: |-
+          reloadPair swaps in a pair whose bytes changed when it keeps the key and
+          the SAN. A file that cannot be read is no change, so a transient absence,
+          between an unlink and its replacement, neither swaps nor counts. A refused
+          pair is counted once and read again at every look, so a key landing after
+          its certificate is taken whatever the two files' times (review of PR
+          #301, L3); bytes equal to the refused ones are not parsed again, since
+          they would be refused again.
+        name: reloadPair
+        recv: id *Identity
+      - doc: |-
+          reloadRoots adds a roots file whose bytes changed to the roots, which only
+          grow until the process restarts (ADR 0174 D1, review of PR #301, L2). A
+          file that cannot be read is no change; one that names no certificate,
+          an empty one included, is counted once and never replaces nor narrows the
+          roots. Bytes already merged do not grow the pool again.
+        name: reloadRoots
+        recv: id *Identity
       - name: Certificate
         recv: id *Identity
         results: "*tls.Certificate, error"
@@ -206,6 +232,17 @@ types:
         recv: id *Identity
         results: "*tls.Config"
     name: Identity
+  - doc: |-
+      pairSum is what a look compares a pair with: the SHA-256 of each file's
+      bytes, kept apart so that bytes moved from one file to the other are a
+      change too. A digest, not the bytes, so the key's PEM is not kept.
+    fields:
+      - name: cert
+        type: "[32]byte"
+      - name: key
+        type: "[32]byte"
+    kind: struct
+    name: pairSum
   - fields:
       - doc: CertFile holds the certificate, its chain may follow it.
         name: CertFile

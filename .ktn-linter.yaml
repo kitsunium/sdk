@@ -1383,6 +1383,14 @@ rules:
     exclude:
       - "**/internal/service/proc/childwait/childwait.go"
       - "internal/service/proc/childwait/childwait.go"
+      # core/net.LoopConnRef is the loop engine's connection reference, the word
+      # ADR 0186 §D4 decides in and the type of a parameter in every LoopIO and
+      # LoopHandler method. "Ref" is its role: it names a connection the engine
+      # owns, by ring, slot and generation, and carries none of it. The suffix
+      # the rule would infer, LoopConnRefValue, says the same thing twice in every
+      # callback signature a consumer writes. Scoped to the one file.
+      - "**/internal/core/net/loop.go"
+      - "internal/core/net/loop.go"
       # service/data/docstore.Store is the word the SDK's storage ports already use
       # — core/security/session.Store, core/data/cache.Store, core/security/secret.Store — and the
       # rule only spares them because they are interfaces. The concrete

@@ -64,7 +64,7 @@ func must2[A, B any](a A, b B, err error) func(testing.TB) (A, B) {
 // the data disk for good, one more at every such cut (#527).
 func TestAnOrphanSpoolIsRemoved(t *testing.T) {
 	dir := t.TempDir()
-	s := must(newFileSnapshots(dir))(t)
+	s := must(newFileSnapshots(dir, storageFailed))(t)
 	x := "00000000000000000333-00000000000000000002"
 	y := "00000000000000000383-00000000000000000002"
 	brokenTransfer(t, s, x)
@@ -95,7 +95,7 @@ func TestAnOrphanSpoolIsRemoved(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, x+".spool"), chunk([]byte("old")), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := newFileSnapshots(dir); err != nil {
+	if _, err := newFileSnapshots(dir, storageFailed); err != nil {
 		t.Fatal(err)
 	}
 	if got := spools(t, dir); !slices.Equal(got, []string{w + ".spool"}) {
@@ -108,7 +108,7 @@ func TestAnOrphanSpoolIsRemoved(t *testing.T) {
 // and the resume panicked on the event loop.
 func TestAResumeBoundsTheChunkSizeAnOfferNames(t *testing.T) {
 	dir := t.TempDir()
-	s := must(newFileSnapshots(dir))(t)
+	s := must(newFileSnapshots(dir, storageFailed))(t)
 	id := "00000000000000000333-00000000000000000002"
 	brokenTransfer(t, s, id)
 	for _, size := range []int64{math.MaxInt64, math.MaxInt64 / 8 * 7, -1} {
@@ -125,7 +125,7 @@ func TestAResumeBoundsTheChunkSizeAnOfferNames(t *testing.T) {
 // the spool's size (#527).
 func TestAResumeReadsItsSpoolInBoundedMemory(t *testing.T) {
 	dir := t.TempDir()
-	s := must(newFileSnapshots(dir))(t)
+	s := must(newFileSnapshots(dir, storageFailed))(t)
 	id := "00000000000000000333-00000000000000000002"
 	payload := make([]byte, defaultChunkSize)
 	for i := range payload {
@@ -169,7 +169,7 @@ func TestAResumeReadsItsSpoolInBoundedMemory(t *testing.T) {
 // node's disk (#547).
 func TestAStaleInstallLeavesTheCurrentInstallOfTheSameIDIntact(t *testing.T) {
 	dir := t.TempDir()
-	s := must(newFileSnapshots(dir))(t)
+	s := must(newFileSnapshots(dir, storageFailed))(t)
 	id := "00000000000000000040-00000000000000000002"
 	body := chunk([]byte("the snapshot " + id))
 	meta := coreconsensus.SnapshotMetaValue{ID: id, EncodedSize: int64(len(body))}
@@ -228,7 +228,7 @@ func TestAStaleInstallLeavesTheCurrentInstallOfTheSameIDIntact(t *testing.T) {
 // (#582).
 func TestACreateSupersededBeforeItsSpoolIsOpenLeaksNoHandle(t *testing.T) {
 	dir := t.TempDir()
-	s := must(newFileSnapshots(dir))(t)
+	s := must(newFileSnapshots(dir, storageFailed))(t)
 	id := "00000000000000000120-00000000000000000004"
 	body := chunk([]byte("the snapshot " + id))
 	meta := coreconsensus.SnapshotMetaValue{ID: id, EncodedSize: int64(len(body))}

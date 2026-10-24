@@ -383,7 +383,7 @@
       "dir": "core/net",
       "layer": "core",
       "family": "net",
-      "doc": "Package net — the listen address value.\n\nPackage net — the completed-call observation record.\n\nPackage net — the outbound client configuration.\n\nPackage net — range 0.2.11.* (ADR 0029 core/net block).\n\nPackage net — the accepted stream connection port.\n\nPackage net — the shutdown signal a long-lived handler observes.\n\nPackage net — the configuration-friendly duration value.\n\nPackage net — declares the sentinel *errs.Error outcomes of the network\ndomain. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE form.\nService implementations and the pkg/v1 facades wrap these sentinels; they\ndeclare no codes of their own (the ADR 0016 proc precedent).\n\nPackage net — compile-time interface assertions, kept out of the production\nsource per KTN-IFACE-ASSERT-PLACEMENT.\n\nPackage net — the opaque, redacting TLS identity value.\n\nPackage net — the on-disk TLS material description.\n\nPackage net — the TLS identity construction parameters.\n\nPackage net — the per-group resource ceilings.\n\nPackage net — TLS material parsing helpers shared by NewIdentity.\n\nPackage net — the generic handler decorator.\n\nPackage net — the received datagram port.\n\nPackage net — the server lifecycle phase.\n\nPackage net — the outbound authorisation port.\n\nPackage net — compile-time interface assertions, kept out of the production\nsource per KTN-IFACE-ASSERT-PLACEMENT.\n\nPackage net — the completed outbound response value.\n\nPackage net — the Server-Sent Events frame: the value a stream sends and the\nrules a frame must satisfy to be carried at all. Writing it — the encoder\nthat splits Data into data lines, and the comment frame — is\ninternal/service/net/sse's (ADR 0160 §4).\n\nPackage net — the server's reported state.\n\nPackage net — the per-phase deadlines.\n\nPackage net — the WebSocket protocol's vocabulary (RFC 6455): the opening\nhandshake's constants and the control-frame ceiling. Reading and writing the\nprotocol — the handshake's key check and digest, the frame codec, the close\npayload, the UTF-8 check — is internal/service/net/websocket's (ADR 0160 §4).\n\nPackage net — the WebSocket close code (RFC 6455 §7.4) and the predicates\nthat govern it in both directions. The close payload's wire form is\ninternal/service/net/websocket's (ADR 0160 §4).\n\nPackage net — the WebSocket application message (RFC 6455 §5.6). Its UTF-8\nrule (§8.1) is checked by the engine on the bytes, as they come off and go\nonto the wire: internal/service/net/websocket.ValidateText (ADR 0160 §4).\n\nPackage net — the WebSocket frame opcode (RFC 6455 §5.2).\n\nPackage net — shared sentinel-wrapping helper.\n"
+      "doc": "Package net — the listen address value.\n\nPackage net — the completed-call observation record.\n\nPackage net — the outbound client configuration.\n\nPackage net — range 0.2.11.* (ADR 0029 core/net block).\n\nPackage net — the accepted stream connection port.\n\nPackage net — the shutdown signal a long-lived handler observes.\n\nPackage net — the configuration-friendly duration value.\n\nPackage net — declares the sentinel *errs.Error outcomes of the network\ndomain. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE form.\nService implementations and the pkg/v1 facades wrap these sentinels; they\ndeclare no codes of their own (the ADR 0016 proc precedent).\n\nPackage net — compile-time interface assertions, kept out of the production\nsource per KTN-IFACE-ASSERT-PLACEMENT.\n\nPackage net — the opaque, redacting TLS identity value.\n\nPackage net — the on-disk TLS material description.\n\nPackage net — the TLS identity construction parameters.\n\nPackage net — the per-group resource ceilings.\n\nPackage net — the loop engine's contract: the connection reference, the\nposted operation, the option kinds a loop group judges, and the ports a loop\nand its handler implement (ADR 0186 §D4).\n\nPackage net — TLS material parsing helpers shared by NewIdentity.\n\nPackage net — the generic handler decorator.\n\nPackage net — the received datagram port.\n\nPackage net — the server lifecycle phase.\n\nPackage net — the outbound authorisation port.\n\nPackage net — compile-time interface assertions, kept out of the production\nsource per KTN-IFACE-ASSERT-PLACEMENT.\n\nPackage net — the completed outbound response value.\n\nPackage net — the Server-Sent Events frame: the value a stream sends and the\nrules a frame must satisfy to be carried at all. Writing it — the encoder\nthat splits Data into data lines, and the comment frame — is\ninternal/service/net/sse's (ADR 0160 §4).\n\nPackage net — the server's reported state.\n\nPackage net — the per-phase deadlines.\n\nPackage net — the WebSocket protocol's vocabulary (RFC 6455): the opening\nhandshake's constants and the control-frame ceiling. Reading and writing the\nprotocol — the handshake's key check and digest, the frame codec, the close\npayload, the UTF-8 check — is internal/service/net/websocket's (ADR 0160 §4).\n\nPackage net — the WebSocket close code (RFC 6455 §7.4) and the predicates\nthat govern it in both directions. The close payload's wire form is\ninternal/service/net/websocket's (ADR 0160 §4).\n\nPackage net — the WebSocket application message (RFC 6455 §5.6). Its UTF-8\nrule (§8.1) is checked by the engine on the bytes, as they come off and go\nonto the wire: internal/service/net/websocket.ValidateText (ADR 0160 §4).\n\nPackage net — the WebSocket frame opcode (RFC 6455 §5.2).\n\nPackage net — shared sentinel-wrapping helper.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/core/observe/logger",
@@ -25455,6 +25455,22 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeHandlerAlreadySet",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeHandlerAlreadySet",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133932",
+      "code": {
+        "value": "0.2.11.44"
+      },
+      "doc": "CodeHandlerAlreadySet identifies a second handler declaration on one stream\ngroup — Handle, HandleFunc, HandleHTTP or HandleLoop, in any order — which\ndoes not replace the first (ADR 0186 §D1).\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeHandlerMissing",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -25530,6 +25546,150 @@
         "value": "0.2.11.1"
       },
       "doc": "CodeListenFailed identifies a listener that could not be bound to its address.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeLoopBackendUnavailable",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeLoopBackendUnavailable",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133925",
+      "code": {
+        "value": "0.2.11.37"
+      },
+      "doc": "CodeLoopBackendUnavailable identifies an explicit loop backend the running\nkernel's probe refused, on a platform that has the mechanic (ADR 0186 §D5).\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeLoopNoDescriptors",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeLoopNoDescriptors",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133926",
+      "code": {
+        "value": "0.2.11.38"
+      },
+      "doc": "CodeLoopNoDescriptors identifies a loop group refused at Start because the\neffective RLIMIT_NOFILE is zero or unreadable, which leaves no descriptor\nfor a ring's table or a connection (ADR 0186 §D5).\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeLoopOptionUnsupported",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeLoopOptionUnsupported",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133924",
+      "code": {
+        "value": "0.2.11.36"
+      },
+      "doc": "CodeLoopOptionUnsupported identifies an option a group cannot honour on its\nengine: Loop on a group not served by a loop handler, or, on a loop group,\nUse or an option neither the engine nor the handler honours (ADR 0186 §D1).\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeLoopOutputFull",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeLoopOutputFull",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133928",
+      "code": {
+        "value": "0.2.11.40"
+      },
+      "doc": "CodeLoopOutputFull identifies a write refused because the connection's\noutput, or the loop's global output budget, is at its ceiling.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeLoopPostQueueFull",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeLoopPostQueueFull",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133930",
+      "code": {
+        "value": "0.2.11.42"
+      },
+      "doc": "CodeLoopPostQueueFull identifies a Post refused because the loop's\npreallocated queue of posted operations is full.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeLoopSpillFull",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeLoopSpillFull",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133929",
+      "code": {
+        "value": "0.2.11.41"
+      },
+      "doc": "CodeLoopSpillFull identifies an unconsumed tail that does not fit the\nconnection's spill, or the loop's global spill budget.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeLoopStaleRef",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeLoopStaleRef",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133927",
+      "code": {
+        "value": "0.2.11.39"
+      },
+      "doc": "CodeLoopStaleRef identifies an operation on a connection reference whose\ngeneration has ended: the connection closed, and its slot may already\nserve another one.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeLoopTLSUnsupported",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeLoopTLSUnsupported",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133923",
+      "code": {
+        "value": "0.2.11.35"
+      },
+      "doc": "CodeLoopTLSUnsupported identifies a loop group given a TLS identity: the\nloop engine speaks plaintext only, and the SDK owns no TLS stack it could\ndrive without a blocking net.Conn (ADR 0186 §D2).\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeLoopWrongThread",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeLoopWrongThread",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133931",
+      "code": {
+        "value": "0.2.11.43"
+      },
+      "doc": "CodeLoopWrongThread identifies a loop operation called from a thread other\nthan the loop's own, detected under the loopdebug build tag.\n",
       "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
@@ -26147,6 +26307,23 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HandlerAlreadySet",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HandlerAlreadySet",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.44",
+        "reason": "HANDLER_ALREADY_SET",
+        "public": "The listener group already has a handler"
+      },
+      "doc": "HandlerAlreadySet is returned by Start for a stream group whose handler was\ndeclared twice — by Handle, HandleFunc, HandleHTTP or HandleLoop, in any\norder. The second declaration does not replace the first; the \"group\" field\nnames the group.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.HandlerMissing",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -26531,6 +26708,380 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopBackendUnavailable",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "LoopBackendUnavailable",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.37",
+        "reason": "LOOP_BACKEND_UNAVAILABLE",
+        "public": "The requested loop backend is not available on this kernel"
+      },
+      "doc": "LoopBackendUnavailable is returned by Start for an explicit loop backend the\nrunning kernel's probe refused. The \"stage\" and \"reason\" fields name the probe\nstep that failed. A GOOS that has no such mechanic at all returns the shared\nUnsupportedPlatform instead (ADR 0018 §(a)).\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopConnRef",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "LoopConnRef",
+      "spelled": "struct{Ring uint32; Slot uint32; Gen uint32}",
+      "canonical": "struct{Ring uint32; Slot uint32; Gen uint32}",
+      "fields": [
+        {
+          "name": "Ring",
+          "type": "uint32",
+          "doc": "Ring is the ring, inside its loop, that holds the connection.\n"
+        },
+        {
+          "name": "Slot",
+          "type": "uint32",
+          "doc": "Slot is the connection's index in the ring's table.\n"
+        },
+        {
+          "name": "Gen",
+          "type": "uint32",
+          "doc": "Gen is the slot's generation. It is never zero for a live connection, so\nthe zero LoopConnRef is stale on every loop.\n"
+        }
+      ],
+      "doc": "LoopConnRef names one connection of a loop: the ring it lives on, its slot\nin that ring's table and the generation of that slot. It is a comparable value\nwith no behaviour, so a handler can key a map with it and hold it without\nholding anything of the engine.\n\nA slot is reused only once every operation of its previous generation has\ncompleted, and the generation then moves on, so an operation on a reference\nwhose connection closed does nothing and returns LoopStaleRef — it can never\nreach the connection that took the slot since. The zero value names no\nconnection.\n",
+      "file": "core/net/loop.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopHandler",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "LoopHandler",
+      "spelled": "interface{OnBatchEnd(io LoopIO); OnClose(io LoopIO, ref LoopConnRef, err error); OnData(io LoopIO, ref LoopConnRef, buf []byte) int; OnOpen(io LoopIO, ref LoopConnRef); OnTimeout(io LoopIO, ref LoopConnRef); OnWritable(io LoopIO, ref LoopConnRef)}",
+      "canonical": "interface{OnBatchEnd(io github.com/kitsunium/sdk/internal/core/net.LoopIO); OnClose(io github.com/kitsunium/sdk/internal/core/net.LoopIO, ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef, err error); OnData(io github.com/kitsunium/sdk/internal/core/net.LoopIO, ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef, buf []byte) int; OnOpen(io github.com/kitsunium/sdk/internal/core/net.LoopIO, ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef); OnTimeout(io github.com/kitsunium/sdk/internal/core/net.LoopIO, ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef); OnWritable(io github.com/kitsunium/sdk/internal/core/net.LoopIO, ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef)}",
+      "doc": "LoopHandler is the port a consumer implements to be served by a loop group\n(ADR 0186 §D4).\n\nOne thread calls it: every callback of one loop runs on that loop's thread,\none at a time, so a handler needs no lock for state it keeps per loop. It\nMUST NOT block: a blocking callback stalls every connection of its loop. A\ncallback receives the LoopIO of the loop that calls it and the reference of\nthe connection concerned; neither is valid past the loop's life, and a\nreference past its connection's OnClose is stale.\n\nIFACE-PLUGIN: the engines live in internal/service/net/loop and\ninternal/service/net/server; this port is what a consumer writes.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopHandler.OnBatchEnd",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OnBatchEnd",
+      "recv": "LoopHandler",
+      "spelled": "func(io LoopIO)",
+      "canonical": "func(io github.com/kitsunium/sdk/internal/core/net.LoopIO)",
+      "doc": "OnBatchEnd is called once per loop iteration, after the OnData calls of\nevery ring of the loop, and before any buffer handed to them returns to the\nkernel. It is where a handler flushes work it batched — one database\ncommit for every request of the batch, say — before writing the answers.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopHandler.OnClose",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OnClose",
+      "recv": "LoopHandler",
+      "spelled": "func(io LoopIO, ref LoopConnRef, err error)",
+      "canonical": "func(io github.com/kitsunium/sdk/internal/core/net.LoopIO, ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef, err error)",
+      "doc": "OnClose is called once per connection, last. err is nil when the peer\nclosed cleanly or the handler called Close, and otherwise names why the\nloop closed it — LoopSpillFull, an idle timeout, the drain, a socket\nerror. ref is stale once OnClose returns.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopHandler.OnData",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OnData",
+      "recv": "LoopHandler",
+      "spelled": "func(io LoopIO, ref LoopConnRef, buf []byte) int",
+      "canonical": "func(io github.com/kitsunium/sdk/internal/core/net.LoopIO, ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef, buf []byte) int",
+      "doc": "OnData hands the handler the bytes received on ref and returns how many of\nthem it consumed, from 0 to len(buf). buf stays valid until the next\nOnBatchEnd returns, never later, and the handler must not write to it.\nThe unconsumed tail is kept in the connection's spill and handed back\nfirst, followed by the next bytes, on the next OnData; a tail past the\nspill ceiling closes the connection with LoopSpillFull. A value outside\n0 to len(buf) is treated as len(buf).\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopHandler.OnOpen",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OnOpen",
+      "recv": "LoopHandler",
+      "spelled": "func(io LoopIO, ref LoopConnRef)",
+      "canonical": "func(io github.com/kitsunium/sdk/internal/core/net.LoopIO, ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef)",
+      "doc": "OnOpen is called once per accepted connection, before any OnData for it.\nPressure(ref) already answers for this connection.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopHandler.OnTimeout",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OnTimeout",
+      "recv": "LoopHandler",
+      "spelled": "func(io LoopIO, ref LoopConnRef)",
+      "canonical": "func(io github.com/kitsunium/sdk/internal/core/net.LoopIO, ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef)",
+      "doc": "OnTimeout is called when the deadline set by SetDeadline on ref expires.\nThe connection stays open: closing it is the handler's choice.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopHandler.OnWritable",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OnWritable",
+      "recv": "LoopHandler",
+      "spelled": "func(io LoopIO, ref LoopConnRef)",
+      "canonical": "func(io github.com/kitsunium/sdk/internal/core/net.LoopIO, ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef)",
+      "doc": "OnWritable is called when ref's pending output falls below the loop's\nlow-water mark after a Write was refused with LoopOutputFull or left output\npending past the mark, so a producer that paused can resume.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopIO",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "LoopIO",
+      "spelled": "interface{Close(ref LoopConnRef) error; Post(op PostFunc, arg uintptr) error; Pressure(ref LoopConnRef) bool; SetDeadline(ref LoopConnRef, d time.Duration) error; Write(ref LoopConnRef, p []byte) error}",
+      "canonical": "interface{Close(ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef) error; Post(op github.com/kitsunium/sdk/internal/core/net.PostFunc, arg uintptr) error; Pressure(ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef) bool; SetDeadline(ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef, d time.Duration) error; Write(ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef, p []byte) error}",
+      "doc": "LoopIO is what a loop offers its handler: the operations on its connections\n(ADR 0186 §D4). Each loop implements it with a pointer of its own, handed to\nevery callback.\n\nWrite, Close and SetDeadline belong to the loop's thread: they are called from\na callback, never from another goroutine, which is what lets them take no\nlock. Under the loopdebug build tag a call from another thread is refused with\nLoopWrongThread. Post is the one operation another goroutine may call. Every\nerror is a preallocated sentinel; none of the calls allocates when p belongs\nto the caller's heap or mapping.\n\nIFACE-PLUGIN: the concrete loops stay unexported in\ninternal/service/net/loop and internal/service/net/server.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopIO.Close",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "Close",
+      "recv": "LoopIO",
+      "spelled": "func(ref LoopConnRef) error",
+      "canonical": "func(ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef) error",
+      "doc": "Close closes ref's connection once the output already written has left,\nand calls OnClose. A second Close, or a Close on a stale reference, returns\nLoopStaleRef and does nothing.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopIO.Post",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "Post",
+      "recv": "LoopIO",
+      "spelled": "func(op PostFunc, arg uintptr) error",
+      "canonical": "func(op github.com/kitsunium/sdk/internal/core/net.PostFunc, arg uintptr) error",
+      "doc": "Post queues op to run once on the loop's thread with arg, and wakes the\nloop. It is the one operation any goroutine may call. The queue is\npreallocated and holds no closure: op is a plain function and arg an\ninteger the caller gives meaning to. Each posted operation runs exactly\nonce, in the order posted; a full queue refuses with LoopPostQueueFull, and\na loop that has stopped with ServerClosed.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopIO.Pressure",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "Pressure",
+      "recv": "LoopIO",
+      "spelled": "func(ref LoopConnRef) bool",
+      "canonical": "func(ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef) bool",
+      "doc": "Pressure reports whether ref's connection was accepted, or has since come,\nunder the loop's soft pressure: the group serves more connections than its\nsoft bound. It is a primitive; what a protocol makes of it — HTTP/1.1\nanswers Connection: close — is the protocol adapter's. A stale reference\nreports false.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopIO.SetDeadline",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "SetDeadline",
+      "recv": "LoopIO",
+      "spelled": "func(ref LoopConnRef, d time.Duration) error",
+      "canonical": "func(ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef, d time.Duration) error",
+      "doc": "SetDeadline arms ref's timer to fire OnTimeout after d, on the loop's\ncoarse timer wheel: it fires no earlier than d and at most one wheel tick\nlate. A d of zero or less disarms it. Arming again replaces the previous\ndeadline.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopIO.Write",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "Write",
+      "recv": "LoopIO",
+      "spelled": "func(ref LoopConnRef, p []byte) error",
+      "canonical": "func(ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef, p []byte) error",
+      "doc": "Write copies p into ref's output and returns. Writes on one reference leave\nin the order they were made, and p may be reused once Write returns. It is\nrefused with LoopOutputFull, copying nothing, when p would pass the\nconnection's output ceiling or the loop's global output budget, and with\nLoopStaleRef when ref's connection has closed.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopNoDescriptors",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "LoopNoDescriptors",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.38",
+        "reason": "LOOP_NO_DESCRIPTORS",
+        "public": "The process has no file descriptor available for the loop"
+      },
+      "doc": "LoopNoDescriptors is returned by Start for a loop group when the effective\nRLIMIT_NOFILE soft limit is zero or cannot be read: no ring table and no\nconnection could hold a descriptor. It is checked before the ring count is\nderived, so it is never a division by zero.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopOptionHonourer",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "LoopOptionHonourer",
+      "spelled": "interface{Honours(k OptionKind) bool}",
+      "canonical": "interface{Honours(k github.com/kitsunium/sdk/internal/core/net.OptionKind) bool}",
+      "doc": "LoopOptionHonourer is the optional capability of a LoopHandler that honours\ngroup options the loop engine does not: a protocol adapter that applies a\nheader deadline, say. At Start, server refuses with LoopOptionUnsupported\nevery option set on a loop group that neither the engine nor the handler\nhonours (ADR 0186 §D1). A handler without it honours nothing of its own.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopOptionHonourer.Honours",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "Honours",
+      "recv": "LoopOptionHonourer",
+      "spelled": "func(k OptionKind) bool",
+      "canonical": "func(k github.com/kitsunium/sdk/internal/core/net.OptionKind) bool",
+      "doc": "Honours reports whether the handler applies the option of kind k itself.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopOptionUnsupported",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "LoopOptionUnsupported",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.36",
+        "reason": "LOOP_OPTION_UNSUPPORTED",
+        "public": "The group option is not supported by its engine"
+      },
+      "doc": "LoopOptionUnsupported is returned by Start for an option a group cannot honour\non its engine: Loop on a group served by Handle, HandleFunc or HandleHTTP, or\non one with no handler; Use on a loop group; or an option neither the loop\nengine nor its handler honours. The \"option\" field names it. It is judged at\nStart, once the handler is known, whatever order the declarations came in.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopOutputFull",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "LoopOutputFull",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.40",
+        "reason": "LOOP_OUTPUT_FULL",
+        "public": "The connection cannot take more output now"
+      },
+      "doc": "LoopOutputFull is returned by Write when the bytes would pass the connection's\noutput ceiling or the loop's global output budget. Nothing is copied; the\ncaller waits for OnWritable or closes.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopPostQueueFull",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "LoopPostQueueFull",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.42",
+        "reason": "LOOP_POST_QUEUE_FULL",
+        "public": "The loop cannot take more posted work now"
+      },
+      "doc": "LoopPostQueueFull is returned by Post when the loop's preallocated queue is\nfull. The operation is not queued and will not run.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopSpillFull",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "LoopSpillFull",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.41",
+        "reason": "LOOP_SPILL_FULL",
+        "public": "The connection sent more than it may hold unread"
+      },
+      "doc": "LoopSpillFull is the error OnClose receives for a connection whose unconsumed\ninput passed its spill ceiling or the loop's global spill budget. The loop\ncloses it rather than read further.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopStaleRef",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "LoopStaleRef",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.39",
+        "reason": "LOOP_STALE_REF",
+        "public": "The connection is closed"
+      },
+      "doc": "LoopStaleRef is returned by a loop operation on a reference whose connection\nhas closed. The operation does nothing: the slot may already name another\nconnection, and the generation is what tells the two apart.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopTLSUnsupported",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "LoopTLSUnsupported",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.35",
+        "reason": "LOOP_TLS_UNSUPPORTED",
+        "public": "The loop engine does not serve TLS"
+      },
+      "doc": "LoopTLSUnsupported is returned by Start for a loop group given TLS. The loop\nengine is plaintext only (ADR 0186 §D2); a group that needs TLS is served by\nHandle or HandleHTTP on the default engine.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopWrongThread",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "LoopWrongThread",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.43",
+        "reason": "LOOP_WRONG_THREAD",
+        "public": "The operation was called outside its loop"
+      },
+      "doc": "LoopWrongThread is returned under the loopdebug build tag by Write, Close or\nSetDeadline called from a thread other than the loop's own. Without the tag\nthe check is not compiled; the call is a contract violation either way.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.Middleware",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -26568,6 +27119,239 @@
       },
       "doc": "NotStarted is returned when an operation requires a running server.\n",
       "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.OptionAdopt",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OptionAdopt",
+      "spelled": "OptionKind",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.OptionKind",
+      "value": "14",
+      "doc": "OptionAdopt is Adopt. The loop engine honours it.\n",
+      "file": "core/net/loop.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.OptionBatchSize",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OptionBatchSize",
+      "spelled": "OptionKind",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.OptionKind",
+      "value": "11",
+      "doc": "OptionBatchSize is BatchSize.\n",
+      "file": "core/net/loop.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.OptionHandshakeTimeout",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OptionHandshakeTimeout",
+      "spelled": "OptionKind",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.OptionKind",
+      "value": "8",
+      "doc": "OptionHandshakeTimeout is HandshakeTimeout.\n",
+      "file": "core/net/loop.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.OptionIdleTimeout",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OptionIdleTimeout",
+      "spelled": "OptionKind",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.OptionKind",
+      "value": "5",
+      "doc": "OptionIdleTimeout is IdleTimeout. The loop engine honours it.\n",
+      "file": "core/net/loop.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.OptionKind",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OptionKind",
+      "spelled": "uint8",
+      "canonical": "uint8",
+      "doc": "OptionKind names a group option, for the one question a loop group asks of\nits options at Start: is this one honoured (LoopOptionHonourer)? It names\noptions, not their values.\n",
+      "file": "core/net/loop.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.OptionKind.String",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "String",
+      "recv": "OptionKind",
+      "spelled": "func() string",
+      "canonical": "func() string",
+      "doc": "String renders the option's name, as its constructor spells it.\n",
+      "file": "core/net/loop.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.OptionMaxConns",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OptionMaxConns",
+      "spelled": "OptionKind",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.OptionKind",
+      "value": "13",
+      "doc": "OptionMaxConns is MaxConns. The loop engine honours it, refusing with\nConnLimitReached.\n",
+      "file": "core/net/loop.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.OptionMaxHeaderBytes",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OptionMaxHeaderBytes",
+      "spelled": "OptionKind",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.OptionKind",
+      "value": "7",
+      "doc": "OptionMaxHeaderBytes is MaxHeaderBytes, which only a protocol adapter can\nhonour.\n",
+      "file": "core/net/loop.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.OptionMaxPacketSize",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OptionMaxPacketSize",
+      "spelled": "OptionKind",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.OptionKind",
+      "value": "10",
+      "doc": "OptionMaxPacketSize is MaxPacketSize.\n",
+      "file": "core/net/loop.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.OptionMiddleware",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OptionMiddleware",
+      "spelled": "OptionKind",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.OptionKind",
+      "value": "2",
+      "doc": "OptionMiddleware is Use. A loop group always refuses it: there is no\nConnHandler to decorate.\n",
+      "file": "core/net/loop.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.OptionNone",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OptionNone",
+      "spelled": "OptionKind",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.OptionKind",
+      "value": "0",
+      "doc": "OptionNone names no option; it is the zero value.\n",
+      "file": "core/net/loop.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.OptionPreHandshake",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OptionPreHandshake",
+      "spelled": "OptionKind",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.OptionKind",
+      "value": "15",
+      "doc": "OptionPreHandshake is PreHandshake.\n",
+      "file": "core/net/loop.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.OptionReadBufferSize",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OptionReadBufferSize",
+      "spelled": "OptionKind",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.OptionKind",
+      "value": "9",
+      "doc": "OptionReadBufferSize is ReadBufferSize.\n",
+      "file": "core/net/loop.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.OptionReadHeaderTimeout",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OptionReadHeaderTimeout",
+      "spelled": "OptionKind",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.OptionKind",
+      "value": "6",
+      "doc": "OptionReadHeaderTimeout is ReadHeaderTimeout, which only a protocol adapter\ncan honour.\n",
+      "file": "core/net/loop.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.OptionReadTimeout",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OptionReadTimeout",
+      "spelled": "OptionKind",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.OptionKind",
+      "value": "3",
+      "doc": "OptionReadTimeout is ReadTimeout.\n",
+      "file": "core/net/loop.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.OptionShards",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OptionShards",
+      "spelled": "OptionKind",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.OptionKind",
+      "value": "12",
+      "doc": "OptionShards is Shards.\n",
+      "file": "core/net/loop.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.OptionTLS",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OptionTLS",
+      "spelled": "OptionKind",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.OptionKind",
+      "value": "1",
+      "doc": "OptionTLS is TLS. A loop group always refuses it, with LoopTLSUnsupported.\n",
+      "file": "core/net/loop.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.OptionWriteTimeout",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OptionWriteTimeout",
+      "spelled": "OptionKind",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.OptionKind",
+      "value": "4",
+      "doc": "OptionWriteTimeout is WriteTimeout.\n",
+      "file": "core/net/loop.go",
       "layer": "core",
       "family": "net"
     },
@@ -26863,6 +27647,18 @@
       "canonical": "func(req github.com/kitsunium/sdk/internal/core/net.RequestValue) error",
       "doc": "Allow implements Policy by calling f.\n",
       "file": "core/net/policy.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.PostFunc",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "PostFunc",
+      "spelled": "func(io LoopIO, arg uintptr)",
+      "canonical": "func(io github.com/kitsunium/sdk/internal/core/net.LoopIO, arg uintptr)",
+      "doc": "PostFunc is an operation posted to a loop with LoopIO.Post. It runs once, on\nthe loop's thread, with the loop's LoopIO and the integer it was posted with.\nIt is a plain function rather than a closure so the queue holds no pointer the\nposter built: a top-level function and an index into the caller's own table\npost without allocating.\n",
+      "file": "core/net/loop.go",
       "layer": "core",
       "family": "net"
     },
@@ -59788,7 +60584,7 @@
       "recv": "StreamGroup",
       "spelled": "func(h corenet.ConnHandler) *StreamGroup",
       "canonical": "func(h github.com/kitsunium/sdk/internal/core/net.ConnHandler) *github.com/kitsunium/sdk/internal/service/net/server.StreamGroup",
-      "doc": "Handle sets the group's handler, replacing any previous one.\n",
+      "doc": "Handle sets the group's handler. A group declares one handler, once: a\nsecond declaration on the same group — Handle, HandleFunc or HandleHTTP, in\nany order — does not replace the first, and Start returns HandlerAlreadySet\nnaming the group (ADR 0186 §D1).\n",
       "file": "service/net/server/stream_group.go",
       "layer": "service",
       "family": "net"

@@ -1218,9 +1218,9 @@ func (t *TCPTransport) Stream(ctx context.Context, to coreconsensus.NodeID, offe
 	if err := writeChunk(w, encodeOffer(offer)); err != nil {
 		return err
 	}
-	acc, err := readChunk(c, 64)
-	if err != nil || len(acc) != 13 {
-		return origin(coreconsensus.FrameInvalid, errs.String("what", "install accept"))
+	acc, err := readAccept(c, t.cfg.JoinTimeout)
+	if err != nil {
+		return err
 	}
 	off := int64(binary.LittleEndian.Uint64(acc))
 	code := errs.Code(binary.LittleEndian.Uint32(acc[8:]))
@@ -1234,6 +1234,25 @@ func (t *TCPTransport) Stream(ctx context.Context, to coreconsensus.NodeID, offe
 		return err
 	}
 	return installResult(c)
+}
+
+// readAccept reads the receiver's accept of an offer on c under d. The
+// receiver judges the offer on its loop, as a member judges a JOIN, and d
+// is the JOIN's JoinTimeout. With no deadline, a receiver that read the
+// offer and never answered it — its loop standing still in its judgment —
+// held the stream until its context ended, past every write bound, and
+// the stream's pin held the sender's compaction meanwhile (#623). The
+// verdict's read that follows keeps no deadline: a restore may take long,
+// and the node bounds that wait (#602).
+func readAccept(c net.Conn, d time.Duration) ([]byte, error) {
+	if err := c.SetReadDeadline(time.Now().Add(d)); err != nil {
+		return nil, err
+	}
+	acc, err := readChunk(c, 64)
+	if err != nil || len(acc) != 13 {
+		return nil, origin(coreconsensus.FrameInvalid, errs.String("what", "install accept"))
+	}
+	return acc, c.SetReadDeadline(time.Time{})
 }
 
 // streamFrom copies the snapshot from the accepted offset and closes the

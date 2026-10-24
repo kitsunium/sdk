@@ -88,6 +88,7 @@ alias(
 go_test(
     name = "consensus_test",
     srcs = [
+        "acceptbound_internal_test.go",
         "adoptedfrom_internal_test.go",
         "allpeersgone_internal_test.go",
         "cancel_internal_test.go",
@@ -115,6 +116,7 @@ go_test(
         "joinlimit_internal_test.go",
         "joinsmalllimit_internal_test.go",
         "learnerownlimit_internal_test.go",
+        "logtight_internal_test.go",
         "lostframe_internal_test.go",
         "metabitflip_internal_test.go",
         "metav2_internal_test.go",
@@ -140,9 +142,12 @@ go_test(
         "storagefailed_open_internal_test.go",
         "stuckinstall_internal_test.go",
         "stuckleader_internal_test.go",
+        "syncatopen_internal_test.go",
+        "syncatopen_unix_internal_test.go",
         "tcp_internal_test.go",
         "tcp_joiner_internal_test.go",
         "tcp_link_internal_test.go",
+        "tcp_pemrollover_internal_test.go",
         "tcp_senderrelease_internal_test.go",
         "tcp_streamstall_internal_test.go",
         "transferpin_internal_test.go",

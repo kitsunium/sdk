@@ -1,6 +1,18 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 workflows:
+  - of: groupDeclErr
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: group.declErr
+                when: group.declErr != nil
+          key: _
+          range: groups
+          value: group
+      - return: nil
   - of: unixAddr
     steps:
       - bind: sa

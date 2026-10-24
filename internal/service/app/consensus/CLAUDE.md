@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T05:41:53Z -->
+<!-- updated: 2026-10-24T07:19:32Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -61,6 +61,22 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   `syncAtOpen` fdatasyncs every segment and syncs the log, data and
   snapshot directories before anything is trusted (#414,
   `TestRecoverySyncsWhatItTrustsBeforeServing`).
+- Return a sync that failed at open without the STORAGE_FAILED markers. The
+  kernel reports a failed write-back once, to the first descriptor that
+  syncs (errseq): the open that saw it failed with no marker, and the next
+  one in the same boot synced clean and trusted pages the disk had refused.
+  `syncFailedAtOpen` writes them first, boot-scoped one first, for a
+  segment's, the log, data or snapshot directory's, or a zeroed torn tail's
+  sync, and `noteUnmarked` covers a device that refuses both (#637,
+  `TestASyncThatFailsAtOpenRefusesTheSameBootRestart`,
+  `TestAnUnmarkedSyncFailureAtOpenRefusesAnyLaterOpenInTheProcess`). Nor
+  write them for a failure that is no sync's: a read at open, or a
+  directory that cannot be opened to be synced (a descriptor table full,
+  `syncRan`), consumes no write-back error, and a marker would refuse every
+  start until the reboot (`TestAReadThatFailsAtOpenWritesNoMarker`,
+  `TestADirectoryThatCannotBeOpenedToSyncWritesNoMarker`). A recovery that
+  fails closes the segments it opened
+  (`TestAFailedRecoveryClosesTheSegmentsItOpened`).
 - Compact the store past its end without the term: it holds no entry to read
   it from, and a node restarted with no table votes on that term. The engine
   passes it (`storeReq.compactTerm`, `compactLog`), the file log refuses a
@@ -537,3 +553,28 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   Nor refuse the removal of a learner that never voted: it vouches for no
   one (#614, `neverVoter`,
   `TestAnAnsweringLearnerIsRemovedWhileAVoterIsAlreadyStranded`).
+- Cancel a snapshot stream because the log is tight: its pin's hold on
+  compaction is lifted, for good, and the stream goes on; only a stream
+  that is due is cancelled (`streamDue`). Cancelled with it, no stream
+  outlived the band's first tick (#622, `releasePin`,
+  `TestAStreamSurvivesATightLogOverTCP`,
+  `TestTheVerdictBoundStillEndsAStreamOnATightLog`). Nor start the band
+  before half way to the no-space alarm: within twice `LogReserveBytes` of
+  `MaxLogBytes` alone, it covered the whole of a quota of at most twice the
+  reserve, which the configuration accepts, and no pin ever held (#622,
+  `logTight`, `TestAPinHoldsCompactionUnderAQuotaOfTwoReservesOrLess`).
+- Bound a stream from its last byte only: a stream whose offer was never
+  answered, the receiver's loop standing still in its judgment, and one to
+  a peer removed meanwhile held the leader's compaction for as long as it
+  led. A stream is due once it has not moved — offer, accept, a read of the
+  snapshot — for its peer's `pinBound`, and once its peer left (#623,
+  `streamDue`, `TestAnOfferNeverAcceptedDoesNotPinCompaction`,
+  `TestRemovingAPeerCancelsItsSnapshotStream`); `Stream` reads the accept
+  under `JoinTimeout` (`TestTCPStreamWhoseOfferIsNeverAnsweredEndsAtItsBound`).
+  Nor let an offer wait in `Create` for the `Commit` of the same id: the
+  loop stood still behind the spool's fsync. The install counts as
+  restoring from before its freshness check, and the offer is refused
+  `OVERLOADED` (#623, `markRestoring`,
+  `TestAnOfferOfTheSnapshotBeingCommittedIsRefused`,
+  `TestAReofferDuringTheCommitIsRefusedWithoutHoldingTheLoop`,
+  `TestAReofferToAFollowerStuckInItsCommitDoesNotPinCompaction`).
