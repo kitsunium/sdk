@@ -57,6 +57,10 @@ const (
 	// maxCtrlPerTurn caps the control messages drained after each turn,
 	// so control comes first without starving the data lane (D4).
 	maxCtrlPerTurn int = 256
+	// preferMaxDoublings caps how many times the pause between two
+	// transfers to a preferred node doubles: at most 16 maximum election
+	// timeouts (#662).
+	preferMaxDoublings int = 4
 )
 
 // Node is one member of a consensus group: the event loop that owns the step
@@ -1442,10 +1446,6 @@ func (n *Node) startGrace(commit uint64) {
 	}
 	n.am.Unlock()
 }
-
-// preferMaxDoublings caps how many times the pause between two transfers
-// to a preferred node doubles: at most 16 maximum election timeouts.
-const preferMaxDoublings = 4
 
 // preferWatch is a leader's watch of PreferredLeaders, reset at every
 // change of leadership.

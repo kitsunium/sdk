@@ -348,14 +348,14 @@ constants:
         name: maxCtrlPerTurn
         type: int
         value: "256"
-    name: inboxDepth
-  - doc: |-
-      preferMaxDoublings caps how many times the pause between two transfers
-      to a preferred node doubles: at most 16 maximum election timeouts.
-    items:
-      - name: preferMaxDoublings
+      - doc: |-
+          preferMaxDoublings caps how many times the pause between two
+          transfers to a preferred node doubles: at most 16 maximum election
+          timeouts (#662).
+        name: preferMaxDoublings
+        type: int
         value: "4"
-    name: preferMaxDoublings
+    name: inboxDepth
   - doc: |-
       cutAllowance is how many maximum election timeouts a cut on the apply
       goroutine may hold it before watchProgress counts it as a stuck apply: a
@@ -1165,7 +1165,6 @@ files:
       - joinReleaser
       - (*Node).leadershipChanged
       - (*Node).startGrace
-      - preferMaxDoublings
       - preferWatch
       - (*Node).watchPreferred
       - (*Node).preferPause
