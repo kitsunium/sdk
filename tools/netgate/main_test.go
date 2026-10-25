@@ -89,6 +89,18 @@ func TestParseBench(t *testing.T) {
 	}
 }
 
+// TestParseBench_nonFinite drops a NaN or an Inf value like a malformed
+// pair: it ends the line's metrics, what came before it stands.
+func TestParseBench_nonFinite(t *testing.T) {
+	in := "BenchmarkLoadL1/engine=loop-4 100 50 ns/op NaN cpu-ns/req\n" +
+		"BenchmarkLoadL1/engine=loop-4 100 50 ns/op 7 cpu-ns/req +Inf lost/op 1 x/op\n" +
+		"BenchmarkLoadL1/engine=loop-4 100 50 ns/op -Inf cpu-ns/req\n"
+	got := mustParse(t, in)[seriesKey{Load: "L1", Engine: "loop"}]
+	if !slices.Equal(got["cpu-ns/req"], []float64{7}) || len(got["lost/op"]) != 0 || len(got["x/op"]) != 0 {
+		t.Fatalf("series = %v, want only the finite cpu-ns/req 7", got)
+	}
+}
+
 // activeTable is the plan's table with every gate turned on, so each
 // threshold is exercised as it will be once its step lands.
 func activeTable() []gateEntity {
@@ -135,6 +147,8 @@ func TestEvaluate_thresholds(t *testing.T) {
 		{"P2 equal on the median fails on the bound", benchLines("L2", "handwritten", "cpu-ns/req", tenSamples) + benchLines("L2", "chain", "cpu-ns/req", tenSamples), "P2", verdictFail},
 		{"P2 with nine runs is missing", benchLines("L2", "handwritten", "cpu-ns/req", tenSamples) + benchLines("L2", "chain", "cpu-ns/req", tenSamples[:9]), "P2", verdictMissing},
 		{"P5 no worse than published passes", benchLines("L1", "published", "cpu-ns/req", scaled(tenSamples, 1.3)) + benchLines("L1", "loop", "cpu-ns/req", tenSamples), "P5", verdictPass},
+		// Median ratio 1.0, upper bound 110/97 = 1.13.
+		{"P5 equal on the median fails on the bound", benchLines("L1", "published", "cpu-ns/req", tenSamples) + benchLines("L1", "loop", "cpu-ns/req", tenSamples), "P5", verdictFail},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

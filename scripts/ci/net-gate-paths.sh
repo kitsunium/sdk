@@ -48,7 +48,9 @@ for c in "$base" "$eval_sha"; do
   fi
 done
 
-if ! changed="$(git diff --name-only "$base" "$eval_sha")"; then
+# --no-renames: a rename lists its source too, so a file moved out of a
+# matched path still counts as a change to it.
+if ! changed="$(git diff --no-renames --name-only "$base" "$eval_sha")"; then
   echo "net-gate-paths: git diff $base $eval_sha failed" >&2
   exit 1
 fi

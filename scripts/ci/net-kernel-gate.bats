@@ -72,6 +72,20 @@ repo_with() {
   [ "${lines[-1]}" = "relevant=false" ]
 }
 
+# A move out of a matched path must count: rename detection would list only
+# the destination, and the gate would skip.
+@test "paths: a file moved out of the engines is relevant" {
+  repo_with internal/service/net/loop/core.go
+  BASE="$HEAD_SHA"
+  mkdir -p docs
+  git mv internal/service/net/loop/core.go docs/core.go
+  git commit -qm move
+  HEAD_SHA="$(git rev-parse HEAD)"
+  run bash "$CI_DIR/net-gate-paths.sh" "$BASE" "$HEAD_SHA"
+  [ "$status" -eq 0 ]
+  [ "${lines[-1]}" = "relevant=true" ]
+}
+
 # Fail-closed: a base the clone does not hold must never read as "nothing
 # changed", which would skip the gate and report success.
 @test "paths: an unknown base fails, never answers relevant=false" {

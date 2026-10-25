@@ -5,6 +5,7 @@ package main
 import (
 	"bufio"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -90,8 +91,9 @@ func parseLine(line string) (seriesKey, []metricSample, bool) {
 	//: value then unit.
 	for i := 2; i+1 < len(f); i += 2 {
 		v, err := strconv.ParseFloat(f[i], 64)
-		//: a malformed pair ends the line's metrics.
-		if err != nil {
+		//: a malformed pair, or a NaN or an Inf ParseFloat accepts, ends the
+		//: line's metrics: a non-finite sample would shift the interval.
+		if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
 			//: what was read stands.
 			break
 		}

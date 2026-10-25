@@ -204,7 +204,11 @@ jobs:
           fi
 
       - name: the veth pair L3 runs over
-        run: sudo bash scripts/ci/net-veth.sh up | tee -a "$GITHUB_ENV"
+        # pipefail: a failed setup must fail the step, not hide behind tee's 0
+        # and let the bench run without the L3 environment.
+        run: |
+          set -euo pipefail
+          sudo bash scripts/ci/net-veth.sh up | tee -a "$GITHUB_ENV"
 
       - name: build the bench binary
         working-directory: internal

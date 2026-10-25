@@ -67,9 +67,23 @@ ssh_up() {
     -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 "$user@127.0.0.1" true 2>/dev/null
 }
 
+# stop_guest waits for qemu to exit — SIGTERM, then SIGKILL after 10 s — so
+# the retry's qemu finds the forwarded port free.
 stop_guest() {
   if [ -s qemu.pid ]; then
-    kill "$(cat qemu.pid)" 2>/dev/null || true
+    local pid n=0
+    pid="$(cat qemu.pid)"
+    kill "$pid" 2>/dev/null || true
+    while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 20 ]; do
+      sleep 0.5
+      n=$((n + 1))
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -9 "$pid" 2>/dev/null || true
+      while kill -0 "$pid" 2>/dev/null; do
+        sleep 0.5
+      done
+    fi
   fi
   rm -f qemu.pid
 }
