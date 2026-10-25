@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	core "github.com/kitsunium/sdk/internal/core/app/consensus"
+	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
 
 // memLog is the step function's view of the log: the snapshot base and every
@@ -89,6 +90,34 @@ func (l *memLog) slice(lo, hi uint64, maxBytes int) []core.EntryValue {
 		n++
 	}
 	return slices.Clone(src[:n])
+}
+
+// batchLen is how many of ents, from the first, one append carries: at
+// least one, and no more than maxBytes of their encoding (wire.EntryLen).
+// Config holds MaxFrameBytes above MaxBatchBytes by the message header and
+// the first entry's (review M2); a store bounds a read by the payloads
+// alone, so a fetched batch sent whole outgrew the frame a follower reads,
+// which refused it at every probe (#683). slice counts 64 bytes an entry,
+// more than the encoding's header, so it stays within the same bound.
+func batchLen(ents []core.EntryValue, maxBytes int) int {
+	n, size := 0, 0
+	for n < len(ents) {
+		size += wire.EntryLen(&ents[n])
+		if n > 0 && size > maxBytes {
+			break
+		}
+		n++
+	}
+	return n
+}
+
+// fetchSpan bounds the entries one fetch asks the store for: the most one
+// append carries under maxBytes, since no entry encodes shorter than one
+// with no payload. A store bounds a read by the payloads alone, so a long
+// run of small entries was read whole only for batchLen to keep its head,
+// and read again at the next fetch (#683).
+func fetchSpan(maxBytes int) uint64 {
+	return uint64(max(1, maxBytes/wire.EntryLen(&core.EntryValue{})))
 }
 
 // resident sums the payload bytes held for (from, to].

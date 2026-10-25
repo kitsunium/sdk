@@ -52987,6 +52987,18 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/wire.EntryLen",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/wire",
+      "name": "EntryLen",
+      "spelled": "func(e *coreconsensus.EntryValue) int",
+      "canonical": "func(e *github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue) int",
+      "doc": "EntryLen returns the length of e's encoding in an append message: its\nfixed header, then its payload. A batch counted by its payloads alone\noutgrows its frame by this header per entry (#683).\n",
+      "file": "service/app/consensus/wire/codec.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/wire.Lane",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/wire",

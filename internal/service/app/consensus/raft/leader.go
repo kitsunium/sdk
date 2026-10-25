@@ -195,9 +195,11 @@ func (r *Raft) sendAppend(to core.NodeID, sendIfEmpty bool) {
 		return
 	}
 	if pr.next <= r.log.evicted && pr.next <= r.log.lastIndex() {
-		// The payloads were evicted: the driver reads them off the loop.
+		// The payloads were evicted: the driver reads them off the loop, no
+		// more of them than one append carries (#683).
 		pr.facts |= peerFetching
-		r.rd.Fetch = append(r.rd.Fetch, FetchSpec{To: to, Lo: pr.next, Hi: min(r.log.evicted, r.log.lastIndex()) + 1})
+		hi := min(r.log.evicted, r.log.lastIndex(), prev+fetchSpan(r.cfg.MaxBatchBytes)) + 1
+		r.rd.Fetch = append(r.rd.Fetch, FetchSpec{To: to, Lo: pr.next, Hi: hi})
 		return
 	}
 	ents := r.log.slice(pr.next, r.log.lastIndex()+1, r.cfg.MaxBatchBytes)
@@ -234,7 +236,12 @@ func (r *Raft) Fetched(to core.NodeID, lo uint64, ents []core.EntryValue, compac
 		r.sendAppend(to, false)
 		return
 	}
-	r.sendEntries(pr, to, lo-1, prevTerm, ents)
+	// The store bounded its read by the payloads alone: the batch is cut to
+	// MaxBatchBytes of its encoding, the bound slice holds the log's to, or
+	// the follower refuses the frame above its MaxFrameBytes at every probe
+	// and never catches up (#683). The rest is fetched again from the next
+	// index.
+	r.sendEntries(pr, to, lo-1, prevTerm, ents[:batchLen(ents, r.cfg.MaxBatchBytes)])
 }
 
 // fetchedMatch reports whether ents are the entries from lo on, one per

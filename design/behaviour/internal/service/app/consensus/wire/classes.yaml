@@ -146,6 +146,7 @@ files:
       - Lane
       - AppendMessage
       - appendEntry
+      - EntryLen
       - ParseMessage
       - parseEntry
       - AppendToken
@@ -214,6 +215,9 @@ functions:
     name: appendEntry
     params: dst []byte, e *coreconsensus.EntryValue
     results: "[]byte"
+  - name: EntryLen
+    params: e *coreconsensus.EntryValue
+    results: int
   - name: ParseMessage
     params: frame []byte, m *coreconsensus.MessageValue
     results: error

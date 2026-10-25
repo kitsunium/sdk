@@ -288,8 +288,10 @@ sequences:
             - op: "|="
               set: pr.facts
               value: peerFetching
+            - bind: hi
+              eval: min(r.log.evicted, r.log.lastIndex(), prev+fetchSpan(r.cfg.MaxBatchBytes)) + 1
             - set: r.rd.Fetch
-              value: "append(r.rd.Fetch, FetchSpec{To: to, Lo: pr.next, Hi: min(r.log.evicted, r.log.lastIndex()) + 1})"
+              value: "append(r.rd.Fetch, FetchSpec{To: to, Lo: pr.next, Hi: hi})"
             - return: ""
           when: pr.next <= r.log.evicted && pr.next <= r.log.lastIndex()
       - bind: ents
@@ -354,7 +356,7 @@ sequences:
               to: r.sendAppend
             - return: ""
           when: "!ok || len(ents) == 0"
-      - eval: r.sendEntries(pr, to, lo-1, prevTerm, ents)
+      - eval: r.sendEntries(pr, to, lo-1, prevTerm, ents[:batchLen(ents, r.cfg.MaxBatchBytes)])
         to: r.sendEntries
   - of: (*Raft).fetchedMatch
     participants:
@@ -2608,6 +2610,34 @@ sequences:
               set: "n"
       - return: slices.Clone(src[:n])
         to: slices
+  - of: batchLen
+    participants:
+      - id: caller
+        kind: actor
+      - id: batchLen
+        kind: self
+      - id: wire
+        kind: package
+    steps:
+      - bind: n, size
+        eval: 0, 0
+      - loop:
+          cond: n < len(ents)
+          do:
+            - op: +=
+              set: size
+              to: wire
+              value: wire.EntryLen(&ents[n])
+            - opt:
+                do:
+                  - break: true
+                when: n > 0 && size > maxBytes
+            - op: ++
+              set: "n"
+      - return: "n"
+  - of: fetchSpan
+    steps:
+      - return: uint64(max(1, maxBytes/wire.EntryLen(&core.EntryValue{})))
   - of: (*memLog).resident
     steps:
       - var:

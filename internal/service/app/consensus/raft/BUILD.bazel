@@ -67,6 +67,7 @@ go_test(
         "updatelimit_internal_test.go",
         "upgrade_internal_test.go",
         "votewindowraise_internal_test.go",
+        "wirebatch_internal_test.go",
     ],
     embed = [":raft"],
     # The deterministic simulations take ~300 CPU-seconds under race and

@@ -1591,6 +1591,7 @@ files:
       - (*TCPTransport).serveMember
       - (*TCPTransport).readFrames
       - readFrame
+      - (*TCPTransport).refusedOversized
       - (*TCPTransport).deliverTo
       - (*TCPTransport).dial
       - (*TCPTransport).dialAny
@@ -3076,10 +3077,11 @@ functions:
   - doc: |-
       readFrame reads one frame into buf, grown only when the announced length
       needs it; ok is false on a read error or a length outside
-      [minFrameBody, limit-4].
+      [minFrameBody, limit-4], and over is the announced length when it was
+      above limit-4, 0 otherwise.
     name: readFrame
     params: r io.Reader, buf []byte, limit int
-    results: "[]byte, bool"
+    results: frame []byte, over uint32, ok bool
   - doc: |-
       takeBatch adds to batch every frame already queued, up to maxSenderBatch,
       and releases their bytes from the peer's queue budget.
@@ -8536,6 +8538,11 @@ types:
           whole peer queue (#669).
         name: oversized
         type: atomic.Int64
+      - doc: |-
+          refused counts the frames a member announced above the bound its lane
+          is read under, each of which ended the connection (#683).
+        name: refused
+        type: atomic.Int64
     kind: struct
     methods:
       - name: Addr
@@ -8612,6 +8619,16 @@ types:
           reused for the connection's life: deliver copies what it keeps.
         name: readFrames
         params: c net.Conn, peer coreconsensus.AuthenticatedPeerValue, limit int
+        recv: t *TCPTransport
+      - doc: |-
+          refusedOversized counts a frame a member announced, at ln bytes after its
+          length, above the bound limit its lane is read under, which ends the
+          connection, and logs it at the first refusal and at each power of two
+          after it. A leader whose batch outgrew the frame sent it again at every
+          probe, and the follower refused it each time without a word (#683); the
+          retransmissions would otherwise log at every heartbeat.
+        name: refusedOversized
+        params: from coreconsensus.NodeID, ln uint32, limit int
         recv: t *TCPTransport
       - doc: |-
           deliverTo is the bound deliver callback and whether the key is still a
