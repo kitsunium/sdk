@@ -36,7 +36,7 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
 | fuzz | `go test -fuzz` on the targets of `wire/` and this package; nightly in CI |
 | dm-crypt | `testdata/dmcrypt/run.sh` (Docker, privileged): fsync latency and power cuts through LUKS; results in `testdata/dmcrypt/RESULTS.md` |
 
-Under Bazel `consensus_test` has 12 shards: under race and coverage the suite
+Under Bazel `consensus_test` has 24 shards: under race and coverage the suite
 passed the 60 s cap per target once the disk scenarios of #507, #516 and
 #524 joined it (4 shards), and the snapshot and disk scenarios of #506,
 #512, #513, #515, #520, #525, #526 and #533 brought the slowest of 4 to
@@ -53,7 +53,21 @@ scenarios (`TestDiskClusterSurvivesFullRestart`,
 `TestTheEntriesRecoverKeepsHaveOneTokenOnEveryNode`, the ten election
 timeouts of `TestAPinThatEndsCompactsTheLogWithoutAWrite`'s pin) still
 paired at 8 and 10: on a loaded machine the slowest of 8 summed 49 to
-53 s, of 12 37 to 39 s.
+53 s, of 12 37 to 39 s. #663's tests shifted every index past them, and
+shard 3 of 12 timed out under coverage after its PASS: it now dealt
+`TestAMetaOfAVersionThisBuildCannotReadRefusesTheOpen` beside
+`TestHealthWarnsBeforeTheSnapshotLimit`, and the former's data directory,
+on 64 MiB segments, spent 25 of its 26 s scanning the unused tail of the
+active segment at reopen, a loop coverage slows six times where it adds
+7 % to the suite as a whole. It opens on 64 KiB segments now (0.05 s).
+The two heaviest left, `TestReopeningAFollowersLogDoesNotHoldItsHardStates`
+(23 s) and `TestTheStartHoldsNoMoreOfTheTailThanItsBudget` (22 s, the
+collector at GOGC=10), fill most of a shard wherever they are dealt, so the
+rest is spread thinner (24 shards): the sums per shard of a `-race
+-covermode=atomic -json` run, 43.6 s for the slowest of 12 on one
+machine, are 32.9 s at 24, and 34 s for the slowest on average over
+4,000 draws of up to 40 tests inserted anywhere (36 to 37 s at 19 or
+20, 31 s at 28).
 
 ## Do NOT
 

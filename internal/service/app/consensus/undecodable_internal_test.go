@@ -204,13 +204,19 @@ func TestAMetaOfAVersionThisBuildCannotReadRefusesTheOpen(t *testing.T) {
 		}
 	})
 	t.Run("data directory", func(t *testing.T) {
+		// The refusal does not depend on the segment's size, and the
+		// reopen scans the unused tail of the active segment for records
+		// past a torn one: at the default 64 MiB that scan took the whole
+		// subtest, 25 s under -race with coverage, and alone pushed a
+		// shard of consensus_test past Bazel's 60 s.
+		const seg = 1 << 16
 		dir := t.TempDir()
-		d := openDir(t, dir, 0)
+		d := openDir(t, dir, seg)
 		if err := d.Close(); err != nil {
 			t.Fatal(err)
 		}
 		writeSnapshotFiles(t, filepath.Join(dir, "snap"), &m, newer)
-		d, err := NewDataDirWith(dir, DataDirOptions{RuntimeDir: testRuntimeDir()})
+		d, err := NewDataDirWith(dir, DataDirOptions{SegmentBytes: seg, RuntimeDir: testRuntimeDir()})
 		if err == nil {
 			_ = d.Close()
 			t.Fatal("the data directory opened over a version 4 .meta")
