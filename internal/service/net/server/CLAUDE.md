@@ -103,7 +103,7 @@ Public façade: `pkg/v1/net/server`.
   go_test's `data`; `pkg/v1/net/server` exports it).
 - **`Plaintext`, `Name` and `Engine` are honoured by every engine, and
   contradictions are refused, never folded back** (ADR 0187 §D3, §D4).
-  `engineRefusal` runs in `groupDeclErr` for every group with a handler,
+  `engineRefusal` runs in `startRefusal` (each group of `groupDeclErr`) for every group with a handler,
   before `loopRefusal`: `Plaintext` with `TLS` is `PlaintextWithTLS`;
   `EngineGoroutine` with `Loop` or `HandleLoop`, `EngineLoop` with a
   goroutine handler, or a value outside the block is `EngineUnsupported`.

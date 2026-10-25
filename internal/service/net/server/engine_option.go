@@ -45,20 +45,13 @@ func (g *StreamGroup) engineRefusal() error {
 		return nil
 	}
 	loop := g.loopHandler != nil
-	//: the two combinations an engine can serve.
-	switch {
-	//: a goroutine handler, and no loop option.
-	case g.engine == corenet.EngineGoroutine && !loop && !g.loopSet:
-		//: served on the goroutine engine.
+	//: a goroutine handler with no loop option, or a loop handler: the two
+	//: combinations an engine can serve.
+	if (g.engine == corenet.EngineGoroutine && !loop && !g.loopSet) || (g.engine == corenet.EngineLoop && loop) {
+		//: served on the engine it names.
 		return nil
-	//: a loop handler.
-	case g.engine == corenet.EngineLoop && loop:
-		//: served on the loop engine, on Loop's backend.
-		return nil
-	//: every other combination contradicts the engine.
-	default:
-		//: refused, never served on the other engine.
-		return errs.Wrap(corenet.EngineUnsupported, errs.WrapParams{},
-			errs.String("group", g.name), errs.String("engine", g.engine.String()))
 	}
+	//: every other combination is refused, never served on the other engine.
+	return errs.Wrap(corenet.EngineUnsupported, errs.WrapParams{},
+		errs.String("group", g.name), errs.String("engine", g.engine.String()))
 }

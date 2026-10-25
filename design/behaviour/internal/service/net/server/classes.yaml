@@ -289,6 +289,7 @@ files:
       - drainPollInterval
       - (*Server).Start
       - groupDeclErr
+      - (*StreamGroup).startRefusal
       - (*Server).bindEverything
       - (*Server).bindPacketAll
       - (*Server).bindPacketGroup
@@ -406,8 +407,8 @@ files:
   - decls:
       - optionSet
       - (*optionSet).add
-      - optionSet.has
-      - optionSet.list
+      - (*optionSet).has
+      - (*optionSet).list
     name: option_set.go
   - decls:
       - Option
@@ -2090,13 +2091,13 @@ types:
       - doc: has reports whether an option of kind k was given.
         name: has
         params: k corenet.OptionKind
-        recv: s optionSet
+        recv: s *optionSet
         results: bool
       - doc: |-
           list returns the kinds given, in the constant block's order, so the first
           refusal reported is reproducible.
         name: list
-        recv: s optionSet
+        recv: s *optionSet
         results: "[]corenet.OptionKind"
     name: optionSet
     underlying: uint64
@@ -2745,6 +2746,15 @@ types:
           or the Loop option contradicts, or a value outside the block, with
           EngineUnsupported. It never picks the other engine instead (R6).
         name: engineRefusal
+        recv: g *StreamGroup
+        results: error
+      - doc: |-
+          startRefusal is one group's judgement at Start: its first declaration
+          error, then the options that constrain its engine (ADR 0187), then the
+          options a loop group cannot honour or Loop on a goroutine group (ADR 0186
+          §D1). A group with no handler is left to bindAll, whose HandlerMissing wins
+          over an option's refusal because it explains it.
+        name: startRefusal
         recv: g *StreamGroup
         results: error
       - name: HandleLoop

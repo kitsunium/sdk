@@ -135,15 +135,16 @@ func New(opts ...Option) *Server {
 // error is recorded and surfaced by Start, so the common path stays a single
 // chained expression instead of an error check per line.
 func (s *Server) Group(name string, opts ...GroupOption) *StreamGroup {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	group := &StreamGroup{name: name}
 	//: options apply in order, before the name is checked: Name may set it.
+	//: They touch only the new group, so they run outside the server's lock.
 	for _, opt := range opts {
 		opt(group)
 	}
 	group.reconcileName()
 	name = group.name
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	//: a duplicate name would make logs, metrics and State ambiguous.
 	if _, exists := s.byName[name]; exists {
 		s.recordDeclError(errs.Wrap(corenet.GroupDuplicate, errs.WrapParams{},
@@ -161,16 +162,17 @@ func (s *Server) Group(name string, opts ...GroupOption) *StreamGroup {
 // attachment. It mirrors Group deliberately: the point of the domain is that a
 // UDP service is declared the same way a TCP one is.
 func (s *Server) PacketGroup(name string, opts ...GroupOption) *PacketGroup {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	shim := &StreamGroup{name: name}
 	//: the option set is shared, so apply it to a shim and copy what applies;
-	//: before the name is checked, since Name may set it.
+	//: before the name is checked, since Name may set it, and outside the
+	//: server's lock, since they touch only the shim.
 	for _, opt := range opts {
 		opt(shim)
 	}
 	shim.reconcileName()
 	name = shim.name
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	//: names are shared across both natures, so one group cannot shadow another
 	//: in logs, metrics or State.
 	_, streamTaken := s.byName[name]

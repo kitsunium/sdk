@@ -792,20 +792,14 @@ sequences:
           when: "!g.kinds.has(corenet.OptionEngine) || g.engine == corenet.EngineAuto"
       - bind: loop
         eval: g.loopHandler != nil
-      - switch:
-          cases:
-            - case: g.engine == corenet.EngineGoroutine && !loop && !g.loopSet
-              do:
-                - return: nil
-            - case: g.engine == corenet.EngineLoop && loop
-              do:
-                - return: nil
-            - default: true
-              do:
-                - return: |-
-                    errs.Wrap(corenet.EngineUnsupported, errs.WrapParams{},
-                    			errs.String("group", g.name), errs.String("engine", g.engine.String()))
-                  to: errs
+      - opt:
+          do:
+            - return: nil
+          when: (g.engine == corenet.EngineGoroutine && !loop && !g.loopSet) || (g.engine == corenet.EngineLoop && loop)
+      - return: |-
+          errs.Wrap(corenet.EngineUnsupported, errs.WrapParams{},
+          		errs.String("group", g.name), errs.String("engine", g.engine.String()))
+        to: errs
   - of: platformLacks
     steps:
       - return: "false"
@@ -1405,53 +1399,64 @@ sequences:
         kind: actor
       - id: groupDeclErr
         kind: self
-      - id: group.engineRefusal
+      - id: group.startRefusal
         kind: internal
-      - id: group.loopRefusal
-        kind: internal
-      - id: errs
-        kind: package
     steps:
       - loop:
           do:
             - opt:
                 do:
-                  - return: group.declErr
-                when: group.declErr != nil
-            - opt:
-                do:
-                  - continue: true
-                when: group.loopHandler == nil && group.handler == nil
-            - opt:
-                do:
                   - return: err
                 init:
                   bind: err
-                  eval: group.engineRefusal()
-                  to: group.engineRefusal
+                  eval: group.startRefusal()
+                  to: group.startRefusal
                 when: err != nil
-            - opt:
-                do:
-                  - opt:
-                      do:
-                        - return: err
-                      init:
-                        bind: err
-                        eval: group.loopRefusal()
-                        to: group.loopRefusal
-                      when: err != nil
-                  - continue: true
-                when: group.loopHandler != nil
-            - opt:
-                do:
-                  - return: |-
-                      errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
-                      				errs.String("group", group.name), errs.String("option", "Loop"))
-                    to: errs
-                when: group.loopSet
           key: _
           range: groups
           value: group
+      - return: nil
+  - of: (*StreamGroup).startRefusal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StreamGroup).startRefusal
+        kind: self
+      - id: g.engineRefusal
+        kind: internal
+      - id: g.loopRefusal
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: g.declErr
+          when: g.declErr != nil
+      - opt:
+          do:
+            - return: nil
+          when: g.loopHandler == nil && g.handler == nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: g.engineRefusal()
+            to: g.engineRefusal
+          when: err != nil
+      - opt:
+          do:
+            - return: g.loopRefusal()
+              to: g.loopRefusal
+          when: g.loopHandler != nil
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
+                			errs.String("group", g.name), errs.String("option", "Loop"))
+              to: errs
+          when: g.loopSet
       - return: nil
   - of: (*Server).bindEverything
     participants:
@@ -4051,19 +4056,19 @@ sequences:
       - op: "|="
         set: "*s"
         value: 1 << k
-  - of: optionSet.has
+  - of: (*optionSet).has
     steps:
-      - return: s&(1<<k) != 0
-  - of: optionSet.list
+      - return: "*s&(1<<k) != 0"
+  - of: (*optionSet).list
     steps:
       - bind: out
-        eval: make([]corenet.OptionKind, 0, bits.OnesCount64(uint64(s)))
+        eval: make([]corenet.OptionKind, 0, bits.OnesCount64(uint64(*s)))
       - loop:
           cond: rest != 0
           do:
             - set: out
               value: append(out, corenet.OptionKind(bits.TrailingZeros64(rest)))
-          init: rest := uint64(s)
+          init: rest := uint64(*s)
           post: rest &= rest - 1
       - return: out
   - of: WithDrainTimeout
@@ -4825,8 +4830,6 @@ sequences:
       - id: s.recordDeclError
         kind: internal
     steps:
-      - lock:
-          mutex: s.mu
       - bind: group
         eval: "&StreamGroup{name: name}"
       - loop:
@@ -4839,6 +4842,8 @@ sequences:
         to: group.reconcileName
       - set: name
         value: group.name
+      - lock:
+          mutex: s.mu
       - opt:
           do:
             - eval: |-
@@ -4868,8 +4873,6 @@ sequences:
       - id: s.judgePacketOptions
         kind: internal
     steps:
-      - lock:
-          mutex: s.mu
       - bind: shim
         eval: "&StreamGroup{name: name}"
       - loop:
@@ -4882,6 +4885,8 @@ sequences:
         to: shim.reconcileName
       - set: name
         value: shim.name
+      - lock:
+          mutex: s.mu
       - bind: _, streamTaken
         eval: s.byName[name]
       - bind: _, packetTaken

@@ -21,17 +21,17 @@ func (s *optionSet) add(k corenet.OptionKind) {
 }
 
 // has reports whether an option of kind k was given.
-func (s optionSet) has(k corenet.OptionKind) bool {
+func (s *optionSet) has(k corenet.OptionKind) bool {
 	//: the kind's own bit.
-	return s&(1<<k) != 0
+	return *s&(1<<k) != 0
 }
 
 // list returns the kinds given, in the constant block's order, so the first
 // refusal reported is reproducible.
-func (s optionSet) list() []corenet.OptionKind {
-	out := make([]corenet.OptionKind, 0, bits.OnesCount64(uint64(s)))
+func (s *optionSet) list() []corenet.OptionKind {
+	out := make([]corenet.OptionKind, 0, bits.OnesCount64(uint64(*s)))
 	//: lowest bit first, which is the block's order.
-	for rest := uint64(s); rest != 0; rest &= rest - 1 {
+	for rest := uint64(*s); rest != 0; rest &= rest - 1 {
 		out = append(out, corenet.OptionKind(bits.TrailingZeros64(rest)))
 	}
 	//: possibly empty, never nil-checked by a caller.

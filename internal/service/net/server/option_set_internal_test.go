@@ -165,7 +165,8 @@ func Test_optionSet(t *testing.T) {
 	if !s.has(corenet.OptionTLS) || s.has(corenet.OptionReadTimeout) {
 		t.Fatalf("has: TLS %v, ReadTimeout %v; want true, false", s.has(corenet.OptionTLS), s.has(corenet.OptionReadTimeout))
 	}
-	if got := optionSet(0).list(); len(got) != 0 {
+	var empty optionSet
+	if got := empty.list(); len(got) != 0 {
 		t.Fatalf("the empty set lists %v", got)
 	}
 }
