@@ -622,6 +622,12 @@ constants:
         type: int
         value: 16 << 20
       - doc: |-
+          defaultPeerQueueBytes is PeerQueueBytes when unset, or MaxFrameBytes
+          when that is larger: the queue is never below the frame bound (#669).
+        name: defaultPeerQueueBytes
+        type: int64
+        value: 64 << 20
+      - doc: |-
           senderQueueFrames bounds the frames queued for one peer and lane; the
           byte bound PeerQueueBytes usually binds first.
         name: senderQueueFrames
@@ -1527,6 +1533,7 @@ files:
       - (*TCPTransport).dialVerified
       - (*TCPTransport).address
       - (*TCPTransport).Send
+      - (*TCPTransport).droppedOversized
       - (*TCPTransport).sender
       - senderLink
       - (*senderLink).close
@@ -8115,6 +8122,11 @@ types:
           version this build does not know (#665); nil refuses it unjudged.
         name: undecodable
         type: func(coreconsensus.AuthenticatedPeerValue, uint64, error) errs.Code
+      - doc: |-
+          oversized counts the frames Send dropped for being larger than the
+          whole peer queue (#669).
+        name: oversized
+        type: atomic.Int64
     kind: struct
     methods:
       - name: Addr
@@ -8229,6 +8241,16 @@ types:
         results: string, [32]byte, bool
       - name: Send
         params: to coreconsensus.NodeID, frame []byte
+        recv: t *TCPTransport
+      - doc: |-
+          droppedOversized counts a frame Send dropped for being larger than the
+          whole peer queue, and logs it at the first drop and at each power of two
+          after it. TransportConfig refuses a queue below MaxFrameBytes, so such a
+          frame is above the bound a peer configured as this node reads under, and
+          can never be sent; it used to be dropped without a word (#669). The
+          retransmissions of one would otherwise log at every heartbeat.
+        name: droppedOversized
+        params: to coreconsensus.NodeID, lane byte, n int
         recv: t *TCPTransport
       - doc: |-
           sender writes every frame queued for one peer and lane in one write; a

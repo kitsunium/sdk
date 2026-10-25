@@ -3578,8 +3578,8 @@ packages:
       - doc: |-
           TransportConfig builds the shipped mTLS transport (D4, D14). A zero bound
           is clamped to its default; nil Roots, no certificate, a HandshakeTimeout
-          above one second, or a control frame bound not below the data bound is
-          refused.
+          above one second, a control frame bound not below the data bound, or a
+          peer queue below the data bound is refused.
         name: TransportConfig
         struct:
           fields:

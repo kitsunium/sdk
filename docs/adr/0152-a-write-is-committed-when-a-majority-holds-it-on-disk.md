@@ -2563,7 +2563,7 @@ transport. The cross-field rules are checked after defaults are applied
 | `MaxFrameBytes` | transport | 16 MiB | clamp; refuse if < `MaxBatchBytes` + header |
 | `HandshakeTimeout` | transport | 1 s | clamp; refuse > 1 s |
 | `MaxUnauthenticatedPerIP`, `ReservedMemberSlots` | transport | 4, 8 | clamp |
-| `PeerQueueBytes` | transport | 64 MiB | clamp |
+| `PeerQueueBytes` | transport | 64 MiB, or `MaxFrameBytes` when larger | clamp; refuse if < `MaxFrameBytes`; a frame larger than the queue is counted and logged (#669) |
 | `InboundDataBytes`, `InboundControlMessages` | transport | 64 MiB, 4 096 | clamp (R2-08) |
 | `MaxConnectionAge` | transport | 24 h | clamp (R2-20) |
 | `ForwardedAdminBytes` | transport | 64 KiB | clamp, and refuse ≥ `InboundControlBytes` / 4, so forwarded administration never crowds out votes (R7-37) |
@@ -4523,6 +4523,28 @@ minutes, since its announcement held for the rest of the term
   metadata of a later version.
 
 No frame, payload or record format changes; the refusals are new.
+
+## Amendment — a peer queue below the frame bound is refused (2026-10-25, #669)
+
+`TransportConfig` accepted a `PeerQueueBytes` below the largest append
+frame, and `Send` dropped, without a counter or a line, every frame
+larger than the queue, even into an empty one: an entry legal under
+`MaxEntryBytes`, or a lagging follower's catch-up batch, never reached a
+follower, and the commit stopped for good under the same leader, its
+heartbeats still passing ([#669](https://github.com/kitsunium/sdk/issues/669),
+the class of #557).
+
+- **The queue is refused below `MaxFrameBytes`** (`TRANSPORT_MISCONFIGURED`,
+  field `PeerQueueBytes`), as a control frame bound not below the data
+  bound is. Config already holds a batch below `MaxFrameBytes`, the bound
+  every frame a peer reads is under, so a queue at that bound holds any
+  frame a peer can read. Unset, the queue is the larger of 64 MiB and
+  `MaxFrameBytes`, so no configuration the default accepted is refused.
+- **A frame larger than the whole queue is counted and logged**, at the
+  first drop and at each power of two after it, rather than dropped
+  without a word; it is still dropped, since `Send` never blocks (D4).
+
+No frame, payload or record format changes.
 
 ## Revision history
 

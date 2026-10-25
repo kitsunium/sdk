@@ -69,6 +69,9 @@ const (
 	// defaultMaxFrameBytes is MaxFrameBytes when unset, and the bound the
 	// memory double reads a snapshot offer under (#634).
 	defaultMaxFrameBytes int = 16 << 20
+	// defaultPeerQueueBytes is PeerQueueBytes when unset, or MaxFrameBytes
+	// when that is larger: the queue is never below the frame bound (#669).
+	defaultPeerQueueBytes int64 = 64 << 20
 	// senderQueueFrames bounds the frames queued for one peer and lane; the
 	// byte bound PeerQueueBytes usually binds first.
 	senderQueueFrames int = 4096
@@ -111,8 +114,8 @@ var listenTCP = net.Listen
 
 // TransportConfig builds the shipped mTLS transport (D4, D14). A zero bound
 // is clamped to its default; nil Roots, no certificate, a HandshakeTimeout
-// above one second, or a control frame bound not below the data bound is
-// refused.
+// above one second, a control frame bound not below the data bound, or a
+// peer queue below the data bound is refused.
 type TransportConfig struct {
 	// Certificate is the node's certificate and key. It carries exactly one
 	// URI SAN, kitsunium-consensus://<cluster>/slot/<slot>, and both
@@ -298,6 +301,9 @@ type TCPTransport struct {
 	// undecodable judges, on the node, an offer whose metadata is of a
 	// version this build does not know (#665); nil refuses it unjudged.
 	undecodable func(coreconsensus.AuthenticatedPeerValue, uint64, error) errs.Code
+	// oversized counts the frames Send dropped for being larger than the
+	// whole peer queue (#669).
+	oversized atomic.Int64
 }
 
 type outKey struct {
@@ -310,7 +316,7 @@ func (c *TransportConfig) validate() error {
 	clampInt(&c.MaxFrameBytes, defaultMaxFrameBytes)
 	clampInt(&c.MaxControlFrameBytes, 64<<10)
 	clampDuration(&c.HandshakeTimeout, time.Second)
-	clampInt64(&c.PeerQueueBytes, 64<<20)
+	clampInt64(&c.PeerQueueBytes, max(defaultPeerQueueBytes, int64(c.MaxFrameBytes)))
 	clampDuration(&c.MaxConnectionAge, 24*time.Hour)
 	clampDuration(&c.WriteTimeout, 2*time.Second)
 	clampDuration(&c.JoinTimeout, 10*time.Second)
@@ -325,6 +331,13 @@ func (c *TransportConfig) validate() error {
 		return transportMisconfigured("HandshakeTimeout", "above 1 s")
 	case c.MaxControlFrameBytes >= c.MaxFrameBytes:
 		return transportMisconfigured("MaxControlFrameBytes", "not below MaxFrameBytes")
+	case c.PeerQueueBytes < int64(c.MaxFrameBytes):
+		// Send drops a frame larger than the whole queue: an entry under
+		// MaxEntryBytes, or a catch-up batch, never reached a follower, and
+		// the commit stopped for good under the same leader (#669). Config
+		// holds every batch below MaxFrameBytes, so a queue at that bound
+		// holds any frame a peer can read.
+		return transportMisconfigured("PeerQueueBytes", "below MaxFrameBytes")
 	case c.ListenAddress == "":
 		return transportMisconfigured("ListenAddress", "empty")
 	}
@@ -774,6 +787,9 @@ func (t *TCPTransport) Send(to coreconsensus.NodeID, frame []byte) {
 	pc.mu.Lock()
 	if pc.bytes+int64(len(frame)) > t.cfg.PeerQueueBytes {
 		pc.mu.Unlock()
+		if int64(len(frame)) > t.cfg.PeerQueueBytes {
+			t.droppedOversized(to, lane, len(frame))
+		}
 		return
 	}
 	pc.bytes += int64(len(frame))
@@ -784,6 +800,26 @@ func (t *TCPTransport) Send(to coreconsensus.NodeID, frame []byte) {
 		pc.mu.Lock()
 		pc.bytes -= int64(len(frame))
 		pc.mu.Unlock()
+	}
+}
+
+// droppedOversized counts a frame Send dropped for being larger than the
+// whole peer queue, and logs it at the first drop and at each power of two
+// after it. TransportConfig refuses a queue below MaxFrameBytes, so such a
+// frame is above the bound a peer configured as this node reads under, and
+// can never be sent; it used to be dropped without a word (#669). The
+// retransmissions of one would otherwise log at every heartbeat.
+func (t *TCPTransport) droppedOversized(to coreconsensus.NodeID, lane byte, n int) {
+	dropped := t.oversized.Add(1)
+	if dropped&(dropped-1) != 0 {
+		return
+	}
+	t.mu.Lock()
+	warn := t.warn
+	t.mu.Unlock()
+	if warn != nil {
+		warn("consensus: a frame larger than the peer queue was dropped", lattr("to", uint64(to)), lattr("lane", uint64(lane)),
+			lattr("length", uint64(n)), lattr("bound", uint64(t.cfg.PeerQueueBytes)), lattr("dropped", uint64(dropped)))
 	}
 }
 

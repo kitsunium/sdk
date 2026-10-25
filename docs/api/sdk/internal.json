@@ -51013,7 +51013,7 @@
           "type": "time.Duration"
         }
       ],
-      "doc": "TransportConfig builds the shipped mTLS transport (D4, D14). A zero bound\nis clamped to its default; nil Roots, no certificate, a HandshakeTimeout\nabove one second, or a control frame bound not below the data bound is\nrefused.\n",
+      "doc": "TransportConfig builds the shipped mTLS transport (D4, D14). A zero bound\nis clamped to its default; nil Roots, no certificate, a HandshakeTimeout\nabove one second, a control frame bound not below the data bound, or a\npeer queue below the data bound is refused.\n",
       "file": "service/app/consensus/tcp.go",
       "layer": "service",
       "family": "app"

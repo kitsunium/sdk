@@ -620,6 +620,16 @@ one machine, are 31 s at 8.
   `TestAJoinSentAgainReplacesOnlyAHeldAnswer`), nor over a later explicit
   Join: an answer installs only in the hold's generation its JOIN began in
   (`joinHold.gen`, `TestAJoinSentAgainNeverInstallsOverALaterJoin`).
+- Accept a `PeerQueueBytes` below `MaxFrameBytes`, or drop without a word
+  a frame larger than the whole queue: `Send` drops it even into an empty
+  queue, and an entry under `MaxEntryBytes`, or a lagging follower's
+  catch-up batch, never reached a follower while the commit stopped for
+  good under the same leader (#669). `validate` refuses the queue below
+  the frame bound, an unset one defaults to the larger of 64 MiB and
+  `MaxFrameBytes`, and such a frame is counted and logged at the first
+  drop and each power of two (`droppedOversized`,
+  `TestAPeerQueueBelowTheFrameBoundIsRefused`,
+  `TestAFrameAboveThePeerQueueIsCountedAndLogged`).
 - Read a snapshot offer under `MaxControlFrameBytes`, or end a refused one
   without a line: its metadata carries the configuration, `Retired`
   included, and from protocol 3 `RetiredKeys` (#648), which every Remove

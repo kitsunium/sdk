@@ -19298,7 +19298,7 @@ sequences:
         to: clampInt
       - eval: clampDuration(&c.HandshakeTimeout, time.Second)
         to: clampDuration
-      - eval: clampInt64(&c.PeerQueueBytes, 64<<20)
+      - eval: clampInt64(&c.PeerQueueBytes, max(defaultPeerQueueBytes, int64(c.MaxFrameBytes)))
         to: clampInt64
       - eval: clampDuration(&c.MaxConnectionAge, 24*time.Hour)
         to: clampDuration
@@ -19327,6 +19327,10 @@ sequences:
             - case: c.MaxControlFrameBytes >= c.MaxFrameBytes
               do:
                 - return: transportMisconfigured("MaxControlFrameBytes", "not below MaxFrameBytes")
+                  to: transportMisconfigured
+            - case: c.PeerQueueBytes < int64(c.MaxFrameBytes)
+              do:
+                - return: transportMisconfigured("PeerQueueBytes", "below MaxFrameBytes")
                   to: transportMisconfigured
             - case: c.ListenAddress == ""
               do:
@@ -20087,6 +20091,8 @@ sequences:
         kind: value
       - id: pc.mu.Unlock
         kind: value
+      - id: t.droppedOversized
+        kind: internal
     steps:
       - bind: lane
         eval: laneData
@@ -20139,6 +20145,11 @@ sequences:
           do:
             - eval: pc.mu.Unlock()
               to: pc.mu.Unlock
+            - opt:
+                do:
+                  - eval: t.droppedOversized(to, lane, len(frame))
+                    to: t.droppedOversized
+                when: int64(len(frame)) > t.cfg.PeerQueueBytes
             - return: ""
           when: pc.bytes+int64(len(frame)) > t.cfg.PeerQueueBytes
       - op: +=
@@ -20158,6 +20169,38 @@ sequences:
                   value: int64(len(frame))
                 - eval: pc.mu.Unlock()
                   to: pc.mu.Unlock
+  - of: (*TCPTransport).droppedOversized
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).droppedOversized
+        kind: self
+      - id: t.oversized.Add
+        kind: value
+      - id: t.mu.Lock
+        kind: value
+      - id: t.mu.Unlock
+        kind: value
+    steps:
+      - bind: dropped
+        eval: t.oversized.Add(1)
+        to: t.oversized.Add
+      - opt:
+          do:
+            - return: ""
+          when: dropped&(dropped-1) != 0
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - bind: warn
+        eval: t.warn
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
+      - opt:
+          do:
+            - eval: |-
+                warn("consensus: a frame larger than the peer queue was dropped", lattr("to", uint64(to)), lattr("lane", uint64(lane)),
+                			lattr("length", uint64(n)), lattr("bound", uint64(t.cfg.PeerQueueBytes)), lattr("dropped", uint64(dropped)))
+          when: warn != nil
   - of: (*TCPTransport).sender
     participants:
       - id: caller
