@@ -147,9 +147,8 @@ type Node struct {
 	// writing a snapshot itself, applying nothing meanwhile, in Unix
 	// nanoseconds of n.clk; 0 when it is not cutting (#593).
 	cuttingSince atomic.Int64
-	// preferAt is the earliest tick at which this leader tries
-	// PreferredLeaders again after a transfer it started (#559).
-	preferAt time.Time
+	// prefer is this leader's watch of PreferredLeaders (#559, #662).
+	prefer preferWatch
 
 	watchMu  sync.Mutex
 	watchers map[chan coreconsensus.StatusValue]struct{}
@@ -1417,8 +1416,9 @@ func (n *Node) leadershipChanged() {
 		w.done <- readResult{code: coreconsensus.CodeNotLeader}
 	}
 	// The preferred nodes are judged from the next tick: becomeLeader has
-	// just reset every match to 0 (#559).
-	n.preferAt = time.Time{}
+	// just reset every match to 0 (#559). The pause starts over with the
+	// leadership, and so does the order (#662).
+	n.prefer = preferWatch{}
 }
 
 // startGrace starts the grace period of every unresolved proposal.
@@ -1443,38 +1443,95 @@ func (n *Node) startGrace(commit uint64) {
 	n.am.Unlock()
 }
 
+// preferMaxDoublings caps how many times the pause between two transfers
+// to a preferred node doubles: at most 16 maximum election timeouts.
+const preferMaxDoublings = 4
+
+// preferWatch is a leader's watch of PreferredLeaders, reset at every
+// change of leadership.
+type preferWatch struct {
+	// at is the earliest tick at which the leader starts a transfer to a
+	// preferred node: a pause after the end of the previous transfer,
+	// whoever started it (#662).
+	at time.Time
+	// tries counts the transfers the watch started in this leadership. One
+	// that hands over ends the leadership, so all but the last failed.
+	tries int
+	// next is the position in PreferredLeaders the next choice starts
+	// from: just after the last node tried.
+	next int
+}
+
 // watchPreferred hands the leadership to a preferred node once one holds
 // the commit, while this leader is not preferred (D8). It runs on the loop,
 // at every tick: on the Ready where a node becomes leader every match is
-// still 0, so a check made only then never transferred (#559). A transfer
-// it started, done or not, is not tried again before the maximum election
-// timeout, so a lagging preferred node causes no churn.
+// still 0, so a check made only then never transferred (#559).
+//
+// Every proposal is refused NOT_LEADER while a transfer runs, the
+// operator's admin included. The next transfer used to start at the very
+// tick the previous one expired, on a match that still held the commit
+// since nothing could commit meanwhile, so a preferred node that died
+// before taking over stopped every write for as long as this node led
+// (#662). The next transfer now waits a pause after the previous one
+// ended (preferPause), so writes and admin go through in between, and a
+// lagging preferred node causes no churn.
 func (n *Node) watchPreferred(now time.Time) {
-	if len(n.cfg.PreferredLeaders) == 0 || now.Before(n.preferAt) {
+	if len(n.cfg.PreferredLeaders) == 0 {
 		return
 	}
 	st := n.r.Status()
-	if st.Role != coreconsensus.RoleLeader || st.Transfer != 0 {
+	if st.Role != coreconsensus.RoleLeader {
 		return
 	}
-	if n.preferLeader(now, &st) {
-		n.preferAt = now.Add(st.Timing.ElectionTimeoutMax)
+	if st.Transfer != 0 {
+		// A transfer runs, this watch's or the operator's: the pause counts
+		// from its end, the first tick that no longer sees it.
+		if at := now.Add(n.preferPause(&st)); at.After(n.prefer.at) {
+			n.prefer.at = at
+		}
+		return
 	}
+	if now.Before(n.prefer.at) || !n.preferLeader(now, &st) {
+		return
+	}
+	n.prefer.tries++
+	n.prefer.at = now.Add(st.Timing.ElectionTimeoutMax + n.preferPause(&st))
 }
 
-// preferLeader starts a transfer to the first preferred voter that holds
-// the commit, and reports whether it did; a preferred node never hands
-// over.
+// preferPause is the pause after a transfer before the watch starts the
+// next one: the maximum election timeout, doubled by each earlier transfer
+// the watch started in this leadership, every one of which failed since a
+// success ends the leadership, at most preferMaxDoublings times.
+func (n *Node) preferPause(st *raft.StatusValue) time.Duration {
+	return st.Timing.ElectionTimeoutMax << min(max(n.prefer.tries-1, 0), preferMaxDoublings)
+}
+
+// preferLeader starts a transfer to a preferred voter that holds the commit
+// and was heard within the minimum election timeout, the first in
+// PreferredLeaders from just after the last one tried, and reports whether
+// it did; a preferred node never hands over. A preferred node that went
+// silent is no target: a transfer to it can only expire (#662). The order
+// moves on after each try, so a preferred node that is heard but never
+// takes over does not keep the next one from leading.
 func (n *Node) preferLeader(now time.Time, st *raft.StatusValue) bool {
-	if slices.Contains(n.cfg.PreferredLeaders, n.stamp.ID) {
+	prefs := n.cfg.PreferredLeaders
+	if slices.Contains(prefs, n.stamp.ID) {
 		return false
 	}
-	for _, id := range n.cfg.PreferredLeaders {
-		if m, ok := st.Conf.Member(id); ok && m.Voter {
-			if match, _, ok := n.r.Progress(id); ok && match >= st.Commit {
-				return n.r.TransferLeadership(now, id) == 0
-			}
+	for k := range prefs {
+		i := (n.prefer.next + k) % len(prefs)
+		if m, ok := st.Conf.Member(prefs[i]); !ok || !m.Voter {
+			continue
 		}
+		match, heard, ok := n.r.Progress(prefs[i])
+		if !ok || match < st.Commit || now.Sub(heard) >= st.Timing.ElectionTimeoutMin {
+			continue
+		}
+		if n.r.TransferLeadership(now, prefs[i]) != 0 {
+			return false
+		}
+		n.prefer.next = i + 1
+		return true
 	}
 	return false
 }

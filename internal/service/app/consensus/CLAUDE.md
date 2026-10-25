@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T23:30:00Z -->
+<!-- updated: 2026-10-25T02:20:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -476,6 +476,17 @@ one machine, are 31 s at 8.
   on a follower only. `Remove` transfers to this node (or another voter),
   then submits the removal again while the new leader's no-op is pending
   (#529, `TestRemovingTheLeaderFromAFollowerTransfersFirst`).
+- Start a transfer to a preferred node at the tick the previous one
+  expired, to one not heard within `ElectionTimeoutMin`, or always to the
+  first of `PreferredLeaders`: a transfer refuses every proposal, admin
+  included, so a preferred node that died before taking over kept every
+  write and its own `Remove` refused for as long as the leader led.
+  `watchPreferred` waits a pause after any transfer ended, doubled by each
+  earlier one it started in the leadership up to 16 × `ElectionTimeoutMax`,
+  and `preferLeader` starts after the last node tried (#662,
+  `TestAPreferredNodeLostBeforeTakingOverLeavesTheMajorityWriting`,
+  `TestAPreferredNodeThatCannotTakeOverIsTriedAgainOnlyAfterAPause`,
+  `TestAPreferredNodeThatCannotTakeOverYieldsToTheNextOne`).
 - Leave a peer's series at their last value once it is no longer published,
   or keep a departed member's certificate in `peerExpiry`: a series is never
   deleted, and "peer unreachable" and "certificate expiring" alerted for a
