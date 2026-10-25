@@ -7353,6 +7353,12 @@ types:
           from: just after the last node tried.
         name: next
         type: int
+      - doc: |-
+          running is whether a transfer was under way at the last tick, the
+          watch's or the operator's: the pause starts at the first tick that no
+          longer sees it.
+        name: running
+        type: bool
     kind: struct
     name: preferWatch
   - fields:

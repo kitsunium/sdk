@@ -157,10 +157,11 @@ func otherVoter(c *cluster, a, p *testNode) *testNode {
 }
 
 // retryRefused runs op until it is not refused NOT_LEADER, nor
-// MEMBERSHIP_CHANGE_PENDING while a new leader's no-op is pending, for at
-// most within, the way an operator retries a retryable refusal, and returns
-// the refusals it met and its last error.
-func retryRefused(within time.Duration, op func(ctx context.Context) error) (int, error) {
+// MEMBERSHIP_CHANGE_PENDING while a new leader's no-op is pending, nor one
+// of also, for at most within, the way an operator retries a refusal that
+// may pass, and returns the refusals it met and its last error. Before
+// #662's fix every call was refused NOT_LEADER until the deadline.
+func retryRefused(within time.Duration, op func(ctx context.Context) error, also ...error) (int, error) {
 	deadline := time.Now().Add(within)
 	refused := 0
 	for {
@@ -168,12 +169,36 @@ func retryRefused(within time.Duration, op func(ctx context.Context) error) (int
 		err := op(ctx)
 		cancel()
 		retryable := errors.Is(err, coreconsensus.NotLeader) || errors.Is(err, coreconsensus.MembershipChangePending)
+		for _, a := range also {
+			retryable = retryable || errors.Is(err, a)
+		}
 		if !retryable || !time.Now().Before(deadline) {
 			return refused, err
 		}
 		refused++
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+// removeRetried removes id through n, retried as retryRefused does. A
+// removal is also refused MEMBERSHIP_INVALID until the voters left answer
+// the leader by a majority within the minimum election timeout, which a
+// loaded runner misses for a moment after a change of leader: a write the
+// leader commits proves nothing there, the voter removed may have
+// acknowledged it.
+func removeRetried(n *Node, id coreconsensus.NodeID) (int, error) {
+	return retryRefused(5*time.Second, func(ctx context.Context) error {
+		return n.Remove(ctx, "op:test", id)
+	}, coreconsensus.MembershipInvalid)
+}
+
+// transferRetried moves leadership to id through n, retried as
+// retryRefused does, and on TRANSFER_FAILED, which a loaded runner meets
+// when the target takes more than twice the maximum election timeout.
+func transferRetried(n *Node, id coreconsensus.NodeID) (int, error) {
+	return retryRefused(5*time.Second, func(ctx context.Context) error {
+		return n.TransferLeadership(ctx, "op:test", id)
+	}, coreconsensus.TransferFailed)
 }
 
 // TestAPreferredNodeLostBeforeTakingOverLeavesTheMajorityWriting is #662:
@@ -236,15 +261,11 @@ func TestAPreferredNodeLostBeforeTakingOverLeavesTheMajorityWriting(t *testing.T
 	if ok == 0 {
 		t.Fatalf("a healthy majority (A, B) committed no write in 2 s, %d refused NOT_LEADER: A restarts a transfer to the dead preferred node at every expiry", notLeader)
 	}
-	refused, err := retryRefused(2*time.Second, func(ctx context.Context) error {
-		return a.node.Remove(ctx, "op:test", p.id)
-	})
+	refused, err := removeRetried(a.node, p.id)
 	if err != nil {
 		t.Fatalf("Remove of the dead preferred node, after %d refusals: %v", refused, err)
 	}
-	refused, err = retryRefused(2*time.Second, func(ctx context.Context) error {
-		return a.node.TransferLeadership(ctx, "op:test", b.id)
-	})
+	refused, err = transferRetried(a.node, b.id)
 	if err != nil {
 		t.Fatalf("TransferLeadership to the healthy voter, after %d refusals: %v", refused, err)
 	}
@@ -273,24 +294,26 @@ func TestAPreferredNodeThatCannotTakeOverIsTriedAgainOnlyAfterAPause(t *testing.
 	st0 := a.node.Status()
 	etMax := st0.Timing.ElectionTimeoutMax
 
-	// Watch A's transfers for 1.5 s, on its loop: each gap between two of
-	// them, from the last sample that saw one to the first that saw the
-	// next, can only be longer than the real one.
+	// Watch A's transfers for 1.5 s, sampled on its loop and timed there:
+	// a sample that sees a transfer runs before the tick that ends it, and
+	// the first that sees the next one after the tick that starts it, so
+	// each gap measured is longer than the real one.
 	var gaps []time.Duration
 	var lastSeen time.Time
 	inGap := false
 	until := time.Now().Add(1500 * time.Millisecond)
 	for time.Now().Before(until) {
 		var rs struct {
+			at       time.Time
 			role     coreconsensus.Role
 			term     uint64
 			transfer coreconsensus.NodeID
 		}
 		a.node.exec(func() {
 			s := a.node.r.Status()
-			rs.role, rs.term, rs.transfer = s.Role, s.Term, s.Transfer
+			rs.at, rs.role, rs.term, rs.transfer = time.Now(), s.Role, s.Term, s.Transfer
 		})
-		now := time.Now()
+		now := rs.at
 		if rs.role != coreconsensus.RoleLeader || rs.term != st0.Term {
 			t.Fatalf("A lost its leadership while watching its transfers: %v at term %d", rs.role, rs.term)
 		}
@@ -311,25 +334,20 @@ func TestAPreferredNodeThatCannotTakeOverIsTriedAgainOnlyAfterAPause(t *testing.
 		t.Fatalf("A ran transfers to P back to back for 1.5 s: no pause between two of them")
 	}
 	for _, g := range gaps {
-		if g < etMax*3/4 {
+		if g < etMax {
 			t.Errorf("a transfer to P started %v after the previous one ended, under the maximum election timeout %v", g, etMax)
 		}
 	}
 
-	refused, err := retryRefused(5*time.Second, func(ctx context.Context) error {
-		return a.node.TransferLeadership(ctx, "op:test", b.id)
-	})
+	refused, err := transferRetried(a.node, b.id)
 	if err != nil {
 		t.Fatalf("TransferLeadership to the healthy voter, after %d refusals: %v", refused, err)
 	}
 	t.Logf("TransferLeadership to B went through after %d refusals", refused)
-	// B transfers to P in turn. A write it commits between two of them
-	// proves A answers B, which a Remove needs to leave a majority that
-	// answers.
+	// B transfers to P in turn; a write and the Remove of P go through
+	// between two of its transfers.
 	propose(t, b.node, "on=b")
-	refused, err = retryRefused(5*time.Second, func(ctx context.Context) error {
-		return b.node.Remove(ctx, "op:test", p.id)
-	})
+	refused, err = removeRetried(b.node, p.id)
 	if err != nil {
 		t.Fatalf("Remove of the preferred node, after %d refusals: %v", refused, err)
 	}

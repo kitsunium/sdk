@@ -1460,6 +1460,10 @@ type preferWatch struct {
 	// next is the position in PreferredLeaders the next choice starts
 	// from: just after the last node tried.
 	next int
+	// running is whether a transfer was under way at the last tick, the
+	// watch's or the operator's: the pause starts at the first tick that no
+	// longer sees it.
+	running bool
 }
 
 // watchPreferred hands the leadership to a preferred node once one holds
@@ -1484,18 +1488,23 @@ func (n *Node) watchPreferred(now time.Time) {
 		return
 	}
 	if st.Transfer != 0 {
-		// A transfer runs, this watch's or the operator's: the pause counts
-		// from its end, the first tick that no longer sees it.
-		if at := now.Add(n.preferPause(&st)); at.After(n.prefer.at) {
-			n.prefer.at = at
-		}
+		n.prefer.running = true
+		return
+	}
+	if n.prefer.running {
+		// The transfer the last tick saw, this watch's or the operator's,
+		// has ended. While this node leads, a transfer only ends when its
+		// deadline expires, in the Tick of this very turn, so the pause
+		// counts from now: a late tick shortens none of it.
+		n.prefer.running = false
+		n.prefer.at = now.Add(n.preferPause(&st))
 		return
 	}
 	if now.Before(n.prefer.at) || !n.preferLeader(now, &st) {
 		return
 	}
 	n.prefer.tries++
-	n.prefer.at = now.Add(st.Timing.ElectionTimeoutMax + n.preferPause(&st))
+	n.prefer.running = true
 }
 
 // preferPause is the pause after a transfer before the watch starts the

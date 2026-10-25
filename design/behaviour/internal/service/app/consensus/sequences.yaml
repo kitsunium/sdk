@@ -10398,26 +10398,27 @@ sequences:
           when: st.Role != coreconsensus.RoleLeader
       - opt:
           do:
-            - opt:
-                do:
-                  - set: n.prefer.at
-                    value: at
-                init:
-                  bind: at
-                  eval: now.Add(n.preferPause(&st))
-                  to: now.Add
-                when: at.After(n.prefer.at)
+            - set: n.prefer.running
+              value: "true"
             - return: ""
           when: st.Transfer != 0
+      - opt:
+          do:
+            - set: n.prefer.running
+              value: "false"
+            - set: n.prefer.at
+              to: now.Add
+              value: now.Add(n.preferPause(&st))
+            - return: ""
+          when: n.prefer.running
       - opt:
           do:
             - return: ""
           when: now.Before(n.prefer.at) || !n.preferLeader(now, &st)
       - op: ++
         set: n.prefer.tries
-      - set: n.prefer.at
-        to: now.Add
-        value: now.Add(st.Timing.ElectionTimeoutMax + n.preferPause(&st))
+      - set: n.prefer.running
+        value: "true"
   - of: (*Node).preferPause
     steps:
       - return: st.Timing.ElectionTimeoutMax << min(max(n.prefer.tries-1, 0), preferMaxDoublings)
