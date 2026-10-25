@@ -55,6 +55,7 @@ func TLS(id corenet.IdentityValue) GroupOption {
 	//: the option is applied by the constructor, in declaration order.
 	return func(g *StreamGroup) {
 		g.identity = id
+		g.kinds.add(corenet.OptionTLS)
 	}
 }
 
@@ -66,6 +67,7 @@ func ReadTimeout(d time.Duration) GroupOption {
 	//: the option is applied by the constructor, in declaration order.
 	return func(g *StreamGroup) {
 		g.timeouts.Read = corenet.DurationValue(d)
+		g.kinds.add(corenet.OptionReadTimeout)
 	}
 }
 
@@ -74,6 +76,7 @@ func WriteTimeout(d time.Duration) GroupOption {
 	//: the option is applied by the constructor, in declaration order.
 	return func(g *StreamGroup) {
 		g.timeouts.Write = corenet.DurationValue(d)
+		g.kinds.add(corenet.OptionWriteTimeout)
 	}
 }
 
@@ -82,6 +85,7 @@ func IdleTimeout(d time.Duration) GroupOption {
 	//: the option is applied by the constructor, in declaration order.
 	return func(g *StreamGroup) {
 		g.timeouts.Idle = corenet.DurationValue(d)
+		g.kinds.add(corenet.OptionIdleTimeout)
 	}
 }
 
@@ -100,6 +104,7 @@ func ReadHeaderTimeout(d time.Duration) GroupOption {
 	//: the option is applied by the constructor, in declaration order.
 	return func(g *StreamGroup) {
 		g.http.readHeaderTimeout = d
+		g.kinds.add(corenet.OptionReadHeaderTimeout)
 	}
 }
 
@@ -116,6 +121,7 @@ func MaxHeaderBytes(n int) GroupOption {
 	//: the option is applied by the constructor, in declaration order.
 	return func(g *StreamGroup) {
 		g.http.maxHeaderBytes = n
+		g.kinds.add(corenet.OptionMaxHeaderBytes)
 	}
 }
 
@@ -128,6 +134,7 @@ func HandshakeTimeout(d time.Duration) GroupOption {
 	//: the option is applied by the constructor, in declaration order.
 	return func(g *StreamGroup) {
 		g.timeouts.Handshake = corenet.DurationValue(d)
+		g.kinds.add(corenet.OptionHandshakeTimeout)
 	}
 }
 
@@ -136,6 +143,7 @@ func ReadBufferSize(n int) GroupOption {
 	//: the option is applied by the constructor, in declaration order.
 	return func(g *StreamGroup) {
 		g.limits.ReadBufferSize = n
+		g.kinds.add(corenet.OptionReadBufferSize)
 	}
 }
 
@@ -145,6 +153,7 @@ func MaxPacketSize(n int) GroupOption {
 	//: the option is applied by the constructor, in declaration order.
 	return func(g *StreamGroup) {
 		g.limits.MaxPacketSize = n
+		g.kinds.add(corenet.OptionMaxPacketSize)
 	}
 }
 
@@ -155,6 +164,7 @@ func BatchSize(n int) GroupOption {
 	//: the option is applied by the constructor, in declaration order.
 	return func(g *StreamGroup) {
 		g.limits.BatchSize = n
+		g.kinds.add(corenet.OptionBatchSize)
 	}
 }
 
@@ -169,6 +179,7 @@ func Shards(n int) GroupOption {
 	//: the option is applied by the constructor, in declaration order.
 	return func(g *StreamGroup) {
 		g.limits.Shards = n
+		g.kinds.add(corenet.OptionShards)
 	}
 }
 
@@ -184,6 +195,7 @@ func MaxConns(n int) GroupOption {
 	//: the option is applied by the constructor, in declaration order.
 	return func(g *StreamGroup) {
 		g.limits.MaxConns = n
+		g.kinds.add(corenet.OptionMaxConns)
 	}
 }
 
@@ -201,5 +213,49 @@ func Adopt(names ...string) GroupOption {
 	//: the option is applied by the constructor, in declaration order.
 	return func(g *StreamGroup) {
 		g.adopt = append(g.adopt, names...)
+		g.kinds.add(corenet.OptionAdopt)
+	}
+}
+
+// Plaintext declares that the group serves no TLS (ADR 0187). Every engine
+// honours it. A group given both Plaintext and TLS, in either order, fails
+// Start with PlaintextWithTLS. It is not yet required of a plaintext group:
+// the simple API will require it of every HTTP group without TLS.
+func Plaintext() GroupOption {
+	//: the option is applied by the constructor, in declaration order; the
+	//: contradiction with TLS is judged at Start.
+	return func(g *StreamGroup) {
+		g.kinds.add(corenet.OptionPlaintext)
+	}
+}
+
+// Name names the group in State, logs and errors (ADR 0187). On a group
+// declared with an empty name it sets the name, which must then be unique like
+// any other; on one declared with a name it must repeat it. An empty Name, or
+// one that differs from a non-empty declared name, fails Start with
+// GroupNameConflict.
+func Name(name string) GroupOption {
+	//: the option is applied by the constructor, in declaration order; the
+	//: declaration reconciles it with the declared name.
+	return func(g *StreamGroup) {
+		g.optName = name
+		g.kinds.add(corenet.OptionName)
+	}
+}
+
+// Engine names the engine family the group runs on (ADR 0187): EngineGoroutine,
+// one goroutine per connection, or EngineLoop, the loop engine; Loop then
+// picks the loop's backend. The zero value, EngineAuto, lets the handler's
+// type choose, which is what a group without the option does. An engine the
+// group's handler cannot run on, or that another option contradicts —
+// EngineGoroutine with Loop or HandleLoop, EngineLoop with Handle, HandleFunc
+// or HandleHTTP or on a datagram group — fails Start with EngineUnsupported,
+// and is never replaced by the other engine.
+func Engine(e corenet.EngineValue) GroupOption {
+	//: the option is applied by the constructor, in declaration order; it is
+	//: judged at Start, once the group's handler is known.
+	return func(g *StreamGroup) {
+		g.engine = e
+		g.kinds.add(corenet.OptionEngine)
 	}
 }

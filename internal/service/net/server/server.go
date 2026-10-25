@@ -137,18 +137,19 @@ func New(opts ...Option) *Server {
 func (s *Server) Group(name string, opts ...GroupOption) *StreamGroup {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	group := &StreamGroup{name: name}
+	//: options apply in order, before the name is checked: Name may set it.
+	for _, opt := range opts {
+		opt(group)
+	}
+	group.reconcileName()
+	name = group.name
 	//: a duplicate name would make logs, metrics and State ambiguous.
 	if _, exists := s.byName[name]; exists {
 		s.recordDeclError(errs.Wrap(corenet.GroupDuplicate, errs.WrapParams{},
 			errs.String("group", name)))
-		//: hand back a detached group so the caller's chained calls stay safe.
 		//: a detached group keeps the caller's chained calls safe.
 		return &StreamGroup{name: name}
-	}
-	group := &StreamGroup{name: name}
-	//: options apply in order.
-	for _, opt := range opts {
-		opt(group)
 	}
 	s.byName[name] = group
 	s.groups = append(s.groups, group)
@@ -162,6 +163,14 @@ func (s *Server) Group(name string, opts ...GroupOption) *StreamGroup {
 func (s *Server) PacketGroup(name string, opts ...GroupOption) *PacketGroup {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	shim := &StreamGroup{name: name}
+	//: the option set is shared, so apply it to a shim and copy what applies;
+	//: before the name is checked, since Name may set it.
+	for _, opt := range opts {
+		opt(shim)
+	}
+	shim.reconcileName()
+	name = shim.name
 	//: names are shared across both natures, so one group cannot shadow another
 	//: in logs, metrics or State.
 	_, streamTaken := s.byName[name]
@@ -174,17 +183,7 @@ func (s *Server) PacketGroup(name string, opts ...GroupOption) *PacketGroup {
 		return &PacketGroup{name: name}
 	}
 	group := &PacketGroup{name: name}
-	shim := &StreamGroup{}
-	//: the option set is shared, so apply it to a shim and copy what applies.
-	for _, opt := range opts {
-		opt(shim)
-	}
-	//: a datagram group has no loop engine: the option is refused at Start
-	//: rather than dropped with the rest of the shim.
-	if shim.loopSet {
-		s.recordDeclError(errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
-			errs.String("group", name), errs.String("option", "Loop")))
-	}
+	s.judgePacketOptions(shim)
 	group.addrs = shim.addrs
 	group.limits = shim.limits
 	group.adopt = shim.adopt
@@ -192,6 +191,27 @@ func (s *Server) PacketGroup(name string, opts ...GroupOption) *PacketGroup {
 	s.packetGroups = append(s.packetGroups, group)
 	//: returned so the caller can attach a handler in the same expression.
 	return group
+}
+
+// judgePacketOptions records the first option a datagram group cannot honour
+// (ADR 0186 §D1, ADR 0187), for Start to report: a Name that contradicts the
+// declared one, Loop, which has no datagram engine, and Plaintext with TLS or
+// an Engine other than the goroutine one. The caller holds s.mu.
+func (s *Server) judgePacketOptions(shim *StreamGroup) {
+	//: the declared name and Name disagree.
+	if shim.declErr != nil {
+		s.recordDeclError(shim.declErr)
+	}
+	//: a datagram group has no loop engine: the option is refused at Start
+	//: rather than dropped with the rest of the shim.
+	if shim.loopSet {
+		s.recordDeclError(errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
+			errs.String("group", shim.name), errs.String("option", "Loop")))
+	}
+	//: judged as a goroutine group's: only EngineGoroutine or EngineAuto serve it.
+	if err := shim.engineRefusal(); err != nil {
+		s.recordDeclError(err)
+	}
 }
 
 // recordDeclError keeps the first declaration error. The caller holds s.mu.

@@ -79,9 +79,17 @@ func groupDeclErr(groups []*StreamGroup) error {
 			//: the first one found is the one reported.
 			return group.declErr
 		}
-		//: no stream group is served by a loop handler yet, so the Loop option
-		//: is one no group can honour. A missing handler wins, because it
-		//: explains the refusal; bindAll reports it.
+		//: a group with no handler is left to bindAll, whose HandlerMissing
+		//: wins over an option's refusal because it explains it.
+		if group.loopHandler == nil && group.handler == nil {
+			continue
+		}
+		//: the options that constrain the engine, against each other and the
+		//: handler's type (ADR 0187).
+		if err := group.engineRefusal(); err != nil {
+			//: refused before anything is bound.
+			return err
+		}
 		//: a loop group judges every option it was given against the engine
 		//: and its handler.
 		if group.loopHandler != nil {
@@ -92,7 +100,7 @@ func groupDeclErr(groups []*StreamGroup) error {
 			}
 			continue
 		}
-		if group.loopSet && group.handler != nil {
+		if group.loopSet {
 			//: refuse rather than ignore a configuration the group cannot apply.
 			return errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
 				errs.String("group", group.name), errs.String("option", "Loop"))

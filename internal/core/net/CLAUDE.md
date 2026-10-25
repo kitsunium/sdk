@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T12:00:00Z -->
+<!-- updated: 2026-10-25T12:00:00Z -->
 # internal/core/net/
 
 ## Purpose
@@ -50,7 +50,8 @@ adapter.
 | `duration.go` | `DurationValue` — config-friendly duration (`"30s"` or nanoseconds) |
 | `address.go` | `AddressValue` — one socket to bind |
 | `limits.go` | `LimitsValue` — one listener group's resource ceilings; a zero field means the domain default, never unbounded |
-| `loop.go` | the loop engine's contract values (ADR 0186 §D4): `LoopConnRef` — ring, slot, generation, comparable, the zero value stale; `PostFunc` — an operation posted to a loop, a plain function and an integer, no closure; `OptionKind` + its constants + `String` — the group options a loop group judges at `Start` |
+| `loop.go` | the loop engine's contract values (ADR 0186 §D4): `LoopConnRef` — ring, slot, generation, comparable, the zero value stale; `PostFunc` — an operation posted to a loop, a plain function and an integer, no closure; `OptionKind` + its constants + `String` — the group options a loop group judges at `Start`, an iota whose kinds 16–18 (`OptionPlaintext`, `OptionName`, `OptionEngine`, ADR 0187) follow `OptionPreHandshake` so no earlier value moves |
+| `engine.go` | `EngineValue` + `EngineAuto` (the zero: the handler's type chooses), `EngineGoroutine`, `EngineLoop` + `String` — the engine family `Engine` names (ADR 0187 §D3) |
 | `loop_state.go` | `LoopStateValue` — one loop group's backend, probe stage, fallback, sizing (`Loops`, `Rings` and where it came from), the effective `RLIMIT_NOFILE` and `GOMAXPROCS`, the batch p99 — and `LoopRingStateValue`, one ring's counters (ADR 0186 §D8) |
 | `loop_value.go` | `LoopValue` — a loop group's engine configuration, passed by the `Loop` group option; `LoopBackend` + its constants (`auto`, the zero, `iouring`, `epoll`, `portable`) + `String` (ADR 0186 §D5) |
 | `timeouts.go` | `TimeoutsValue` — per-operation deadlines, one per phase (`Read` / `Write` / `Idle` / `Handshake`) |
@@ -246,8 +247,11 @@ SSE terminator scan — moved with the code that pays them, to
 | 0.2.11.53 | `HTTP1MethodUnsupported` | 65 |
 | 0.2.11.54 | `HTTP1ResponseInvalid` | 64 |
 | 0.2.11.55 | `HTTP1Misconfigured` | 78 |
+| 0.2.11.56 | `EngineUnsupported` | 78 |
+| 0.2.11.57 | `PlaintextWithTLS` | 78 |
+| 0.2.11.58 | `GroupNameConflict` | 64 |
 
-`0.2.11.56` – `0.2.11.255` reserved. The `HTTP1*` refusals carry their
+`0.2.11.59` – `0.2.11.255` reserved. The `HTTP1*` refusals carry their
 answer's status in `http:` (400, 413, 414, 417, 431, 501).
 
 ## Imports allowed
@@ -306,6 +310,10 @@ cd internal/core && GOWORK=off go test -race -cover ./net/...
   `server`'s portable backend, published by `StreamGroup.HandleLoop`; the `http1`
   profile's values, port and sentinels (`0.2.11.45` – `0.2.11.55`), declared —
   `docs/adr/0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md`
+- ADR 0187 — `EngineValue`, the kinds `OptionPlaintext`, `OptionName`,
+  `OptionEngine`, and the sentinels `0.2.11.56` – `0.2.11.58`
+  (`EngineUnsupported`, `PlaintextWithTLS`, `GroupNameConflict`) —
+  `docs/adr/0187-the-handler-type-chooses-the-engine.md`
 - ADR 0043 (drain is a signal), ADR 0016 (one-sibling/many-facades),
   ADR 0018 (portability, `x/sys` ban), ADR 0013 (the redacting `Key`
   precedent), ADR 0028 (config decode shape)

@@ -2,6 +2,10 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 package(default_visibility = ["//visibility:public"])
 
+# internal/service/net/server's TestGroupOption_recordsItsKind walks the
+# facade's GroupOption constructors.
+exports_files(["gen_facade.go"])
+
 go_library(
     name = "server",
     srcs = [

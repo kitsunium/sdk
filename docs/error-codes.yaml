@@ -617,6 +617,18 @@ codes:
     const: CodeHTTP1Misconfigured
     hex: "0x00_02_0B_37"
     package: internal/core/net
+  - code: "0.2.11.56"
+    const: CodeEngineUnsupported
+    hex: "0x00_02_0B_38"
+    package: internal/core/net
+  - code: "0.2.11.57"
+    const: CodePlaintextWithTLS
+    hex: "0x00_02_0B_39"
+    package: internal/core/net
+  - code: "0.2.11.58"
+    const: CodeGroupNameConflict
+    hex: "0x00_02_0B_3A"
+    package: internal/core/net
   - code: "0.2.12.1"
     const: CodeInvalidEntry
     hex: "0x00_02_0C_01"

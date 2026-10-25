@@ -232,6 +232,10 @@ files:
   - decls: []
     name: doc.go
   - decls:
+      - (*StreamGroup).reconcileName
+      - (*StreamGroup).engineRefusal
+    name: engine_option.go
+  - decls:
       - platformLacks
     name: family_other.go
   - decls:
@@ -337,7 +341,6 @@ files:
       - (*StreamGroup).HandleLoop
       - (*StreamGroup).loopRefusal
       - loopHonours
-      - (*StreamGroup).loopOptionsSet
       - (*Server).bindLoopGroup
       - (*Server).registerLoopListeners
       - (*Server).loopStates
@@ -401,6 +404,12 @@ files:
       - mmsghdr
     name: multireader_mmsghdr_linux.go
   - decls:
+      - optionSet
+      - (*optionSet).add
+      - optionSet.has
+      - optionSet.list
+    name: option_set.go
+  - decls:
       - Option
       - GroupOption
       - WithDrainTimeout
@@ -419,6 +428,9 @@ files:
       - Shards
       - MaxConns
       - Adopt
+      - Plaintext
+      - Name
+      - Engine
     name: options.go
   - decls:
       - packet
@@ -472,6 +484,7 @@ files:
       - New
       - (*Server).Group
       - (*Server).PacketGroup
+      - (*Server).judgePacketOptions
       - (*Server).recordDeclError
       - (*Server).State
     name: server.go
@@ -818,8 +831,9 @@ functions:
     params: ls []loop.Listener
   - doc: |-
       loopHonours reports the options the loop engine honours itself (ADR 0186
-      §D4): IdleTimeout, MaxConns and Adopt. Listen and Loop are not options a
-      loop judges; the drain is the server's.
+      §D4, ADR 0187): IdleTimeout, MaxConns and Adopt, and Plaintext, Name and
+      Engine, which every engine honours. Listen and Loop are not options a loop
+      judges; the drain is the server's.
     name: loopHonours
     params: k corenet.OptionKind
     results: bool
@@ -897,6 +911,14 @@ functions:
     results: GroupOption
   - name: Adopt
     params: names ...string
+    results: GroupOption
+  - name: Plaintext
+    results: GroupOption
+  - name: Name
+    params: name string
+    results: GroupOption
+  - name: Engine
+    params: e corenet.EngineValue
     results: GroupOption
   - doc: listenPacket binds one datagram socket.
     name: listenPacket
@@ -985,6 +1007,7 @@ functions:
     results: bool
 imports:
   atomic: sync/atomic
+  bits: math/bits
   buffer: github.com/kitsunium/sdk/internal/kernel/concur/buffer
   clock: github.com/kitsunium/sdk/internal/kernel/clock
   context: context
@@ -2050,6 +2073,33 @@ types:
         type: uint32
     kind: struct
     name: mmsghdr
+  - doc: |-
+      optionSet is the set of option kinds a group was given (ADR 0187), one bit
+      per corenet.OptionKind. The kind is an iota, not a bit: the set does the
+      shifting, so a kind added at the end of the block shifts no published value.
+      A refusal reads the set, so an option given with its zero value — a
+      ReadTimeout(0) — counts as given, which a guess from non-zero fields missed.
+    kind: named
+    methods:
+      - doc: |-
+          add records that an option of kind k was given. A kind past the set's width
+          cannot be recorded; Test_optionSet_width keeps every kind within it.
+        name: add
+        params: k corenet.OptionKind
+        recv: s *optionSet
+      - doc: has reports whether an option of kind k was given.
+        name: has
+        params: k corenet.OptionKind
+        recv: s optionSet
+        results: bool
+      - doc: |-
+          list returns the kinds given, in the constant block's order, so the first
+          refusal reported is reproducible.
+        name: list
+        recv: s optionSet
+        results: "[]corenet.OptionKind"
+    name: optionSet
+    underlying: uint64
   - kind: named
     name: Option
     underlying: func(*Server)
@@ -2565,6 +2615,14 @@ types:
         params: name string, opts ...GroupOption
         recv: s *Server
         results: "*PacketGroup"
+      - doc: |-
+          judgePacketOptions records the first option a datagram group cannot honour
+          (ADR 0186 §D1, ADR 0187), for Start to report: a Name that contradicts the
+          declared one, Loop, which has no datagram engine, and Plaintext with TLS or
+          an Engine other than the goroutine one. The caller holds s.mu.
+        name: judgePacketOptions
+        params: shim *StreamGroup
+        recv: s *Server
       - doc: recordDeclError keeps the first declaration error. The caller holds s.mu.
         name: recordDeclError
         params: err error
@@ -2655,8 +2713,40 @@ types:
           with one is served by the loop engine (ADR 0186 §D1).
         name: loopHandler
         type: corenet.LoopHandler
+      - doc: |-
+          kinds is the set of option kinds the group was given, a zero value
+          included, so a refusal reads what was posed rather than guessing from a
+          non-zero field (ADR 0187).
+        name: kinds
+        type: optionSet
+      - doc: |-
+          engine is the Engine option's value; it is read only when kinds holds
+          OptionEngine.
+        name: engine
+        type: corenet.EngineValue
+      - doc: |-
+          optName is the Name option's value; it is read only when kinds holds
+          OptionName.
+        name: optName
+        type: string
     kind: struct
     methods:
+      - doc: |-
+          reconcileName applies the Name option to the name the group was declared
+          with (ADR 0187): an empty declared name takes it, an equal one keeps it,
+          and an empty Name or a different one records GroupNameConflict, which Start
+          reports. The group keeps its declared name then.
+        name: reconcileName
+        recv: g *StreamGroup
+      - doc: |-
+          engineRefusal judges, at Start, the options that constrain the group's
+          engine against each other and against its handler (ADR 0187): Plaintext
+          with TLS is refused with PlaintextWithTLS, and an Engine the handler's type
+          or the Loop option contradicts, or a value outside the block, with
+          EngineUnsupported. It never picks the other engine instead (R6).
+        name: engineRefusal
+        recv: g *StreamGroup
+        results: error
       - name: HandleLoop
         params: h corenet.LoopHandler
         recv: g *StreamGroup
@@ -2664,15 +2754,13 @@ types:
       - doc: |-
           loopRefusal judges a loop group's options at Start, once its handler is
           known: TLS is never served (LoopTLSUnsupported), Use never applies, and
-          every other option set is refused unless the loop engine or the handler
-          honours it (LoopOptionUnsupported, naming it).
+          every other option given — a zero value included — is refused unless the
+          loop engine or the handler honours it (LoopOptionUnsupported, naming it).
+          It reads the set of kinds the group was given, never a guess from non-zero
+          fields (ADR 0187).
         name: loopRefusal
         recv: g *StreamGroup
         results: error
-      - doc: loopOptionsSet lists the kinds of every option set on the group.
-        name: loopOptionsSet
-        recv: g *StreamGroup
-        results: "[]corenet.OptionKind"
       - name: Name
         recv: g *StreamGroup
         results: string
