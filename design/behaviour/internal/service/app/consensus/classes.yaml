@@ -511,7 +511,10 @@ constants:
       - doc: |-
           WipeAndRejoin wipes the directory; the operator then Removes the old
           NodeID and Inits under a NEW one (R4-03). A voter's incarnation is
-          never swapped in place.
+          never swapped in place. A wipe that does not finish leaves the stop
+          marker STOP-WIPE, which refuses a start, Init, Redraw, Recover,
+          RestoreSnapshot and TruncateAndStaySilent until WipeAndRejoin runs
+          again and completes it.
         name: WipeAndRejoin
         type: QuarantineExit
         value: iota + 1
@@ -538,6 +541,22 @@ constants:
           what the first one decided (#405).
         name: markerRecover
         value: markerStopPrefix + "RECOVER"
+      - doc: |-
+          markerWipe is the stop marker of a WipeAndRejoin in progress: written,
+          synced, before anything is removed, and removed last, once the stores,
+          then the stamp and every other marker, are durably gone. A wipe a crash
+          interrupted left a member stamp over an empty log, and the node
+          restarted as the same voter with no term, no vote and no entry (#690).
+          While it is there a start is refused, the log is not recovered at
+          open, every offline write but the wipe refuses, and the wipe run again
+          completes.
+        name: markerWipe
+        value: markerStopPrefix + "WIPE"
+      - doc: |-
+          wipeDetail is what STOP-WIPE shows the operator, as the detail of
+          STOP_MARKER_PRESENT.
+        name: wipeDetail
+        value: "\"WipeAndRejoin was interrupted: run ClearQuarantine(WipeAndRejoin) again to complete it, then Init under a new NodeID\\n\""
     name: fileSilent
   - grouped: true
     items:
@@ -1339,6 +1358,8 @@ files:
       - WipeAndRejoin
       - fileSilent
       - DataDir.offline
+      - DataDir.offlineWrite
+      - wipeMarker
       - DataDir.audit
       - Init
       - Redraw
@@ -1350,8 +1371,13 @@ files:
       - QuarantineExit
       - ClearQuarantine
       - DataDir.wipeAndRejoin
+      - DataDir.markWipe
+      - DataDir.clearWipeMarker
+      - DataDir.wipeStep
       - DataDir.removeStores
       - DataDir.removeStampAndMarkers
+      - wipedWithStamp
+      - DataDir.removeBootMarker
       - RecoverOptions
       - receiptMessage
       - ReceiptMessage
@@ -2559,6 +2585,13 @@ functions:
     name: checkObservedTail
     params: exp *coreconsensus.SnapshotMetaValue, tail []coreconsensus.EntryValue
     results: error
+  - doc: |-
+      wipeMarker is the STOP_MARKER_PRESENT of the STOP-WIPE marker of dir, nil
+      when there is none. One that is there but cannot be read is a
+      STORAGE_FAILED, never read as no wipe in progress.
+    name: wipeMarker
+    params: dir string
+    results: error
   - name: Init
     params: d DataDir, cluster coreconsensus.ClusterID, slot string
     results: coreconsensus.NodeID, coreconsensus.Incarnation, error
@@ -2597,6 +2630,14 @@ functions:
   - name: ClearQuarantine
     params: d DataDir, exit QuarantineExit, op coreconsensus.Operator
     results: error
+  - doc: |-
+      wipedWithStamp reports whether the wipe removes the data directory's
+      entry name with the stamp: the quarantine marker, the silence condition
+      — the new member must not start silent at the old log's index (#422) —
+      and every stop marker but STOP-WIPE.
+    name: wipedWithStamp
+    params: name string
+    results: bool
   - doc: |-
       receiptMessage is what a witness signs: the old cluster, the new cluster
       and the fenced voter.
@@ -3514,6 +3555,14 @@ types:
           there, as a crash would. Only a test sets it.
         name: afterTruncate
         type: func() error
+      - doc: |-
+          afterWipeStep runs after each step of WipeAndRejoin, named: "marker"
+          once STOP-WIPE is durable, "log" and "snap" once each store is
+          removed, "stamp" once the stamp and the other markers are durably
+          gone, "done" once STOP-WIPE is; an error ends the wipe there, as a
+          crash would. Only a test sets it.
+        name: afterWipeStep
+        type: func(step string) error
     kind: struct
     methods:
       - doc: |-
@@ -3549,6 +3598,13 @@ types:
         recv: d DataDir
         results: error
       - doc: |-
+          offlineWrite is offline, and refuses as well a directory whose wipe was
+          interrupted: what it holds is neither the old member nor an empty
+          directory, and only WipeAndRejoin, run again, may write there (#690).
+        name: offlineWrite
+        recv: d DataDir
+        results: error
+      - doc: |-
           audit appends one line to the operator audit file and syncs it before the
           operation it records runs. Its Close is part of the write: a failure there
           is a storage failure like the sync's, never a detail dropped at return.
@@ -3557,23 +3613,58 @@ types:
         recv: d DataDir
         results: err error
       - doc: |-
-          wipeAndRejoin is the WipeAndRejoin exit: audited first, then the log is
-          closed, its stores, stamp and markers are deleted, the directory synced,
-          and the directory reopened empty.
+          wipeAndRejoin is the WipeAndRejoin exit, in an order a crash at any step
+          leaves safe (#690): audited first; then STOP-WIPE, durable before
+          anything is removed; the log closed, its stores deleted and the
+          directory synced; the stamp, the quarantine marker, the silence condition
+          and every other stop marker deleted and the directory synced; STOP-WIPE
+          removed last and the directory synced; and the directory reopened empty.
+          Interrupted anywhere before the last step, the directory keeps STOP-WIPE,
+          which refuses a start and every offline write, and the wipe run again
+          resumes it: it keeps nothing, so it starts over. It is never undone.
         name: wipeAndRejoin
         params: op coreconsensus.Operator
         recv: d DataDir
         results: error
-      - doc: removeStores deletes the log and the snapshots, whole.
+      - doc: markWipe publishes STOP-WIPE, durably, before the wipe removes anything.
+        name: markWipe
+        recv: d DataDir
+        results: error
+      - doc: |-
+          clearWipeMarker removes STOP-WIPE, durably, once everything else the wipe
+          removes is durably gone: until then nothing tells a directory this wipe
+          has not finished from the old member's.
+        name: clearWipeMarker
+        recv: d DataDir
+        results: error
+      - doc: |-
+          wipeStep runs the test hook after a step of the wipe, nil when no test
+          set it.
+        name: wipeStep
+        params: step string
+        recv: d DataDir
+        results: error
+      - doc: |-
+          removeStores deletes the log and the snapshots, whole, then syncs the
+          directory: the stamp goes only once their removal is durable, and with
+          the stamp the last trace of the old member but STOP-WIPE.
         name: removeStores
         recv: d DataDir
         results: error
       - doc: |-
           removeStampAndMarkers deletes the stamp, the quarantine marker, the
-          silence condition and every stop marker. A directory that could not be listed keeps its stamp and its
-          markers: the wipe fails here rather than reopen a directory it did not
-          clear.
+          silence condition and every stop marker but STOP-WIPE, which goes last,
+          and the boot-scoped STORAGE_FAILED marker, then syncs the directory. A
+          directory that could not be listed keeps its stamp and its markers: the
+          wipe fails here rather than reopen a directory it did not clear.
         name: removeStampAndMarkers
+        recv: d DataDir
+        results: error
+      - doc: |-
+          removeBootMarker removes the boot-scoped STORAGE_FAILED marker, which
+          exists only after a storage failure of this boot; one that cannot be
+          removed would refuse the next start anyway, so the wipe says so now.
+        name: removeBootMarker
         recv: d DataDir
         results: error
       - doc: |-

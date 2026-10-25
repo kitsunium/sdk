@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T17:00:00Z -->
+<!-- updated: 2026-10-25T21:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -438,6 +438,16 @@ machine, are 32.9 s at 24, and 34 s for the slowest on average over
   `TestTwoSurvivorsNamingEachOtherAVoterAreRefused`). `RestoreSnapshot`
   keeps every voter it is given: it runs on every node it names
   (`TestARestoreOnEveryNodeWithTheSameMembersElects`).
+- Remove anything in `WipeAndRejoin` before `STOP-WIPE` is durable, the
+  stamp before the stores' removal is synced, or `STOP-WIPE` before the
+  stamp and the other markers are durably gone: cut between the log and
+  the stamp, the wipe left a member stamp over an empty log, and the node
+  restarted as the same voter with no term, no vote and no entry, then
+  lost acknowledged writes; `Init` handed back the old pair. While the
+  marker is there the open skips recovery, the start and every offline
+  write but the wipe are refused, and the wipe run again completes (#690,
+  `TestAnInterruptedWipeRefusesTheStartUntilItIsRunAgain`,
+  `TestAWipeCutAtEveryStepIsSafe`).
 - Plan `Recover` from the log's bounds alone: an install a crash
   interrupted after its publication left the snapshot past the log, and
   the forced entry written after the short log was erased at the next

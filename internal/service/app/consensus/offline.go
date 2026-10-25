@@ -22,7 +22,10 @@ import (
 const (
 	// WipeAndRejoin wipes the directory; the operator then Removes the old
 	// NodeID and Inits under a NEW one (R4-03). A voter's incarnation is
-	// never swapped in place.
+	// never swapped in place. A wipe that does not finish leaves the stop
+	// marker STOP-WIPE, which refuses a start, Init, Redraw, Recover,
+	// RestoreSnapshot and TruncateAndStaySilent until WipeAndRejoin runs
+	// again and completes it.
 	WipeAndRejoin QuarantineExit = iota + 1
 	// TruncateAndStaySilent truncates at the damage and persists a silence
 	// condition (R4-03).
@@ -41,6 +44,18 @@ const (
 	// is refused while it is there and a Recover to that cluster resumes from
 	// what the first one decided (#405).
 	markerRecover = markerStopPrefix + "RECOVER"
+	// markerWipe is the stop marker of a WipeAndRejoin in progress: written,
+	// synced, before anything is removed, and removed last, once the stores,
+	// then the stamp and every other marker, are durably gone. A wipe a crash
+	// interrupted left a member stamp over an empty log, and the node
+	// restarted as the same voter with no term, no vote and no entry (#690).
+	// While it is there a start is refused, the log is not recovered at
+	// open, every offline write but the wipe refuses, and the wipe run again
+	// completes.
+	markerWipe = markerStopPrefix + "WIPE"
+	// wipeDetail is what STOP-WIPE shows the operator, as the detail of
+	// STOP_MARKER_PRESENT.
+	wipeDetail = "WipeAndRejoin was interrupted: run ClearQuarantine(WipeAndRejoin) again to complete it, then Init under a new NodeID\n"
 )
 
 // The offline functions work on the shipped layout, and only on it (D17,
@@ -61,6 +76,31 @@ func (d DataDir) offline() error {
 		return origin(coreconsensus.DataDirInUse, errs.String("dir", d.d.dir))
 	}
 	return nil
+}
+
+// offlineWrite is offline, and refuses as well a directory whose wipe was
+// interrupted: what it holds is neither the old member nor an empty
+// directory, and only WipeAndRejoin, run again, may write there (#690).
+func (d DataDir) offlineWrite() error {
+	if err := d.offline(); err != nil {
+		return err
+	}
+	return wipeMarker(d.d.dir)
+}
+
+// wipeMarker is the STOP_MARKER_PRESENT of the STOP-WIPE marker of dir, nil
+// when there is none. One that is there but cannot be read is a
+// STORAGE_FAILED, never read as no wipe in progress.
+func wipeMarker(dir string) error {
+	p := filepath.Join(dir, markerWipe)
+	b, err := os.ReadFile(p)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return nil
+	case err != nil:
+		return storageFailed("read stop marker", err)
+	}
+	return stopMarkerPresent(p, b)
 }
 
 // audit appends one line to the operator audit file and syncs it before the
@@ -94,7 +134,9 @@ func (d DataDir) audit(op coreconsensus.Operator, what string) (err error) {
 // stamp, and the pair the operator or the JOIN gives to AddLearner. It is
 // idempotent (R3-02, R7-41, R8-10).
 func Init(d DataDir, cluster coreconsensus.ClusterID, slot string) (coreconsensus.NodeID, coreconsensus.Incarnation, error) {
-	if err := d.offline(); err != nil {
+	// A half-wiped directory still holds the old member stamp, which the
+	// idempotent path would hand back as the "new" pair (#690).
+	if err := d.offlineWrite(); err != nil {
 		return 0, coreconsensus.Incarnation{}, err
 	}
 	return InitLog(d.Log(), cluster, slot)
@@ -103,7 +145,7 @@ func Init(d DataDir, cluster coreconsensus.ClusterID, slot string) (coreconsensu
 // Redraw draws a new id, only while the stamp is joining and the log empty,
 // after a JOIN_REFUSED for a reused or retired id (R8-10).
 func Redraw(d DataDir) (coreconsensus.NodeID, error) {
-	if err := d.offline(); err != nil {
+	if err := d.offlineWrite(); err != nil {
 		return 0, err
 	}
 	return RedrawLog(d.Log())
@@ -237,6 +279,11 @@ func ClearQuarantine(d DataDir, exit QuarantineExit, op coreconsensus.Operator) 
 	case WipeAndRejoin:
 		return d.wipeAndRejoin(op)
 	case TruncateAndStaySilent:
+		if err := wipeMarker(d.d.dir); err != nil {
+			// The log a wipe began to delete is not one to truncate: the
+			// wipe is completed, never undone (#690).
+			return err
+		}
 		if err := d.d.log.storageFailedThisBoot(); err != nil {
 			// The truncation would be written after pages the disk may
 			// not hold: reboot first (#563). WipeAndRejoin keeps nothing
@@ -252,11 +299,20 @@ func ClearQuarantine(d DataDir, exit QuarantineExit, op coreconsensus.Operator) 
 	}
 }
 
-// wipeAndRejoin is the WipeAndRejoin exit: audited first, then the log is
-// closed, its stores, stamp and markers are deleted, the directory synced,
-// and the directory reopened empty.
+// wipeAndRejoin is the WipeAndRejoin exit, in an order a crash at any step
+// leaves safe (#690): audited first; then STOP-WIPE, durable before
+// anything is removed; the log closed, its stores deleted and the
+// directory synced; the stamp, the quarantine marker, the silence condition
+// and every other stop marker deleted and the directory synced; STOP-WIPE
+// removed last and the directory synced; and the directory reopened empty.
+// Interrupted anywhere before the last step, the directory keeps STOP-WIPE,
+// which refuses a start and every offline write, and the wipe run again
+// resumes it: it keeps nothing, so it starts over. It is never undone.
 func (d DataDir) wipeAndRejoin(op coreconsensus.Operator) error {
 	if err := d.audit(op, "clear-quarantine wipe-and-rejoin"); err != nil {
+		return err
+	}
+	if err := d.markWipe(); err != nil {
 		return err
 	}
 	if err := d.d.log.Close(); err != nil {
@@ -268,46 +324,106 @@ func (d DataDir) wipeAndRejoin(op coreconsensus.Operator) error {
 	if err := d.removeStampAndMarkers(); err != nil {
 		return err
 	}
-	// The boot-scoped marker exists only after a storage failure of this
-	// boot; one that cannot be removed would refuse the next start anyway,
-	// so the wipe says so now.
-	if err := os.Remove(d.d.log.runtimeMarker("STORAGE_FAILED")); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return storageFailed("wipe", err)
-	}
-	if err := syncDir(d.d.dir); err != nil {
-		return storageFailed("wipe", err)
+	if err := d.clearWipeMarker(); err != nil {
+		return err
 	}
 	return d.d.open()
 }
 
-// removeStores deletes the log and the snapshots, whole.
+// markWipe publishes STOP-WIPE, durably, before the wipe removes anything.
+func (d DataDir) markWipe() error {
+	if err := writeFileSync(filepath.Join(d.d.dir, markerWipe), []byte(wipeDetail)); err != nil {
+		return storageFailed("wipe marker", err)
+	}
+	return d.wipeStep("marker")
+}
+
+// clearWipeMarker removes STOP-WIPE, durably, once everything else the wipe
+// removes is durably gone: until then nothing tells a directory this wipe
+// has not finished from the old member's.
+func (d DataDir) clearWipeMarker() error {
+	if err := os.Remove(filepath.Join(d.d.dir, markerWipe)); err != nil {
+		return storageFailed("wipe marker", err)
+	}
+	if err := syncDir(d.d.dir); err != nil {
+		return storageFailed("wipe", err)
+	}
+	return d.wipeStep("done")
+}
+
+// wipeStep runs the test hook after a step of the wipe, nil when no test
+// set it.
+func (d DataDir) wipeStep(step string) error {
+	if d.d.afterWipeStep == nil {
+		return nil
+	}
+	return d.d.afterWipeStep(step)
+}
+
+// removeStores deletes the log and the snapshots, whole, then syncs the
+// directory: the stamp goes only once their removal is durable, and with
+// the stamp the last trace of the old member but STOP-WIPE.
 func (d DataDir) removeStores() error {
 	for _, name := range []string{"log", "snap"} {
 		if err := os.RemoveAll(filepath.Join(d.d.dir, name)); err != nil {
 			return storageFailed("wipe", err)
 		}
+		if err := d.wipeStep(name); err != nil {
+			return err
+		}
+	}
+	if err := syncDir(d.d.dir); err != nil {
+		return storageFailed("wipe", err)
 	}
 	return nil
 }
 
 // removeStampAndMarkers deletes the stamp, the quarantine marker, the
-// silence condition and every stop marker. A directory that could not be listed keeps its stamp and its
-// markers: the wipe fails here rather than reopen a directory it did not
-// clear.
+// silence condition and every stop marker but STOP-WIPE, which goes last,
+// and the boot-scoped STORAGE_FAILED marker, then syncs the directory. A
+// directory that could not be listed keeps its stamp and its markers: the
+// wipe fails here rather than reopen a directory it did not clear.
 func (d DataDir) removeStampAndMarkers() error {
 	ents, err := os.ReadDir(d.d.dir)
 	if err != nil {
 		return storageFailed("wipe", err)
 	}
 	for _, e := range ents {
-		n := e.Name()
-		// SILENT goes too: the new member must not start silent at the old
-		// log's index (#422).
-		if n == fileStamp || n == markerQuarantine || n == fileSilent || strings.HasPrefix(n, markerStopPrefix) {
-			if err := os.Remove(filepath.Join(d.d.dir, n)); err != nil {
+		if wipedWithStamp(e.Name()) {
+			if err := os.Remove(filepath.Join(d.d.dir, e.Name())); err != nil {
 				return storageFailed("wipe", err)
 			}
 		}
+	}
+	if err := d.removeBootMarker(); err != nil {
+		return err
+	}
+	if err := syncDir(d.d.dir); err != nil {
+		return storageFailed("wipe", err)
+	}
+	return d.wipeStep("stamp")
+}
+
+// wipedWithStamp reports whether the wipe removes the data directory's
+// entry name with the stamp: the quarantine marker, the silence condition
+// — the new member must not start silent at the old log's index (#422) —
+// and every stop marker but STOP-WIPE.
+func wipedWithStamp(name string) bool {
+	switch name {
+	case fileStamp, markerQuarantine, fileSilent:
+		return true
+	case markerWipe:
+		return false
+	}
+	return strings.HasPrefix(name, markerStopPrefix)
+}
+
+// removeBootMarker removes the boot-scoped STORAGE_FAILED marker, which
+// exists only after a storage failure of this boot; one that cannot be
+// removed would refuse the next start anyway, so the wipe says so now.
+func (d DataDir) removeBootMarker() error {
+	if err := os.Remove(d.d.log.runtimeMarker("STORAGE_FAILED")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return storageFailed("wipe", err)
 	}
 	return nil
 }
@@ -360,12 +476,13 @@ func ReceiptMessage(old, next coreconsensus.ClusterID, voter coreconsensus.NodeI
 // the marker: the new history keeps that snapshot's index, and the forced
 // entry follows it.
 func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RecoverOptions) error {
-	if err := d.offline(); err != nil {
+	if err := d.offlineWrite(); err != nil {
 		return err
 	}
 	flog := d.d.log
 	if errs.HasCode(flog.refuse, coreconsensus.CodeStopMarkerPresent) {
-		// A STORAGE_FAILED stop of this boot: reboot first (#563).
+		// A STORAGE_FAILED stop of this boot: reboot first (#563); or a
+		// wipe interrupted: complete it (#690).
 		return flog.refuse
 	}
 	if flog.refuse != nil {
@@ -1063,7 +1180,7 @@ type RestoreOptions struct {
 // RestoreSnapshot starts a new history from a saved snapshot on an empty,
 // joining directory, without a Node (R3-15).
 func RestoreSnapshot(d DataDir, r io.Reader, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RestoreOptions) (coreconsensus.SnapshotMetaValue, error) {
-	if err := d.offline(); err != nil {
+	if err := d.offlineWrite(); err != nil {
 		return coreconsensus.SnapshotMetaValue{}, err
 	}
 	flog := d.d.log

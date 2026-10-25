@@ -51534,7 +51534,7 @@
       "spelled": "QuarantineExit",
       "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.QuarantineExit",
       "value": "1",
-      "doc": "WipeAndRejoin wipes the directory; the operator then Removes the old\nNodeID and Inits under a NEW one (R4-03). A voter's incarnation is\nnever swapped in place.\n",
+      "doc": "WipeAndRejoin wipes the directory; the operator then Removes the old\nNodeID and Inits under a NEW one (R4-03). A voter's incarnation is\nnever swapped in place. A wipe that does not finish leaves the stop\nmarker STOP-WIPE, which refuses a start, Init, Redraw, Recover,\nRestoreSnapshot and TruncateAndStaySilent until WipeAndRejoin runs\nagain and completes it.\n",
       "file": "service/app/consensus/offline.go",
       "layer": "service",
       "family": "app"

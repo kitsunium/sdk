@@ -2218,7 +2218,10 @@ packages:
       - doc: |-
           WipeAndRejoin wipes the directory; the operator then Removes the old
           NodeID and Inits under a NEW one (R4-03). A voter's incarnation is
-          never swapped in place.
+          never swapped in place. A wipe that does not finish leaves the stop
+          marker STOP-WIPE, which refuses a start, Init, Redraw, Recover,
+          RestoreSnapshot and TruncateAndStaySilent until WipeAndRejoin runs
+          again and completes it.
         name: WipeAndRejoin
         type: QuarantineExit
         value: "1"

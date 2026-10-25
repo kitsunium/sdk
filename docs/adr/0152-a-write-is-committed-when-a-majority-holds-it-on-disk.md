@@ -821,7 +821,38 @@ directory and cleared it, through `Inspect` and the product's own procedure
 1. **WipeAndRejoin (R4-03):** `Remove` the old `NodeID`, then `Init` under a
    NEW `NodeID`, which returns that `(NodeID, Incarnation)`. A voter's
    incarnation is never swapped in place, and a mutation that does so must
-   fail;
+   fail.
+   **A wipe a crash interrupts never restarts the old member (amendment of
+   2026-10-25, [#690](https://github.com/kitsunium/sdk/issues/690)).** The
+   wipe deleted the log, then the snapshots, then the stamp and the
+   markers, and synced the directory once, at the end. Cut after the log
+   and before the stamp, it left a member stamp over a log brought back to
+   its snapshot: no term, no vote, none of the entries past the snapshot.
+   Nothing refused that start, a `STORAGE_FAILED` marker of an earlier boot
+   included, and `Init`'s idempotent path handed back the old pair; the
+   node voted again under its old `NodeID` and incarnation, against R1-17,
+   and the writes it had acknowledged were lost when it and a lagging voter
+   elected a leader without them. The order is now:
+   - the audit record; then the stop marker `STOP-WIPE`, written and synced
+     before anything is removed;
+   - the log closed, the log and snapshot stores deleted, the directory
+     synced;
+   - the stamp, the quarantine marker, the silence condition and every
+     other stop marker deleted, the boot-scoped `STORAGE_FAILED` marker
+     too, the directory synced;
+   - `STOP-WIPE` removed last, the directory synced, and the directory
+     reopened empty.
+
+   While `STOP-WIPE` is there, a start is refused `STOP_MARKER_PRESENT`,
+   whose detail names the exit to run again; the log is not recovered at
+   open, so a log the wipe cut midway cannot fail the open; `Init`,
+   `Redraw`, `Recover`, `RestoreSnapshot` and `TruncateAndStaySilent` are
+   refused `STOP_MARKER_PRESENT`; and `WipeAndRejoin` run again completes
+   the wipe, which keeps nothing, so it starts over. A crash before the
+   marker is durable leaves the member whole, one after its removal an
+   empty directory. The marker is removed by the wipe only, never by hand:
+   removed early, it leaves exactly the amnesic voter it guards against. No
+   format changes; `Inspect` lists the marker;
 2. **TruncateAndStaySilent (R4-03):** truncate at the damage, and PERSIST,
    before returning, a silence condition: no vote and no acknowledgement
    until a leader of a term at least equal to the node's own has rewritten
@@ -4880,6 +4911,7 @@ of the issue:
 | S3 | Raft hunt lot S3, 2026-10-23 | protocol version 2 raised once: the announcement, the raise refused until every member speaks it, the checksummed snapshot meta, `Origin`, `AdoptedFrom`, the stale voter's admission of a vouched-for leader in D4 (amendment of 2026-10-23) |
 | #648 | the owner's decision, 2026-10-24 | protocol version 3: one key, one ID for the cluster's whole life, the retired keys in the configuration, the admin payload and the snapshot metadata of version 3, `FlagProtocol3` and the raise refused until every member announces it (amendment of 2026-10-24, #648) |
 | #677 | the owner's decision, 2026-10-25 | a member states its own snapshot limit: `ChangeSnapshotLimit`, admitted from that member only, a lowering below the state not proposed, no protocol raise (amendment of 2026-10-25, #677) |
+| #690 | Raft hunt, 2026-10-25 | the offline operations: `WipeAndRejoin` ordered behind the stop marker `STOP-WIPE`, a crash at any step refusing the start and every offline write until the wipe runs again (#690) |
 
 ## raft-sql-poc (owner's prior Raft)
 
