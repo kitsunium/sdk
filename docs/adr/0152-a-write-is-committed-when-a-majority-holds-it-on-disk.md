@@ -2675,7 +2675,7 @@ transport. The cross-field rules are checked after defaults are applied
 | `InitialTiming.ElectionTimeoutMin`, `…Max` | engine | 1 s, 2 s | clamp; refuse if Max ≤ Min |
 | `InitialTiming.MaxClockDrift` | engine | none | with `ReadLease`: refuse unless finite and `0 < d < 1` (R2-14) |
 | `Durability` | engine | none | refuse if it disagrees with the state machine's siblings (R2-09) |
-| `MaxBatchBytes` | engine | 1 MiB | clamp; refuse if it plus 1 KiB of framing is above the shipped transport's `MaxFrameBytes` (review M2) |
+| `MaxBatchBytes` | engine | 1 MiB | clamp; refuse if it plus 1 KiB of framing is above the shipped transport's `MaxFrameBytes` (review M2); one append carries no more than it of its entries' encoding, a fetched batch included (#683) |
 | `MaxInflight`, `MaxInflightBytes` | engine | 64, 8 MiB | clamp; refuse if `MaxInflightBytes` < `MaxBatchBytes` |
 | `MaxEntryBytes` | engine | 1 MiB | clamp; refuse if > `MaxBatchBytes` |
 | `MaxPendingBytes` | engine | 64 MiB | clamp; refuse if < `MaxEntryBytes` (#557) |
@@ -4865,6 +4865,49 @@ of the issue:
   lowering by its own newest snapshot: a voter that lagged far behind may
   still propose one the cluster's state outgrew.
 
+## Amendment — a fetched batch is cut by its encoding (2026-10-25, #683)
+
+Config refuses a `MaxBatchBytes` whose batch plus 1 KiB of framing the
+transport cannot carry (review M2), and the leader's in-memory path holds
+that bound: `slice` counts 64 bytes an entry on top of its payload. The
+path that feeds a follower behind the payloads the leader evicted (#664)
+did not. The driver reads `Log.Entries(lo, hi, MaxBatchBytes)`, both
+shipped stores count the payloads alone, and the batch went out whole: 33
+bytes an entry and the message's 112 over its payloads, past the 1 KiB
+from some 28 entries on. The follower's reader refused the frame and ended
+the connection without a word, the leader fetched the same batch at the
+next probe, and the follower never caught up by appends. Since #664 the
+payloads are evicted past `RecentEntriesBytes` right after the commit, so
+the fetch is how any follower that far behind catches up; with no cut
+before `SnapshotEvery` there was no install either, and one more failure
+left the leader without a quorum, for good
+([#683](https://github.com/kitsunium/sdk/issues/683), the class of #669).
+The amendment of #669 says Config already holds a batch below
+`MaxFrameBytes`: on this path it did not, until this amendment.
+
+- **The leader cuts a fetched batch by its encoding** (`Fetched`,
+  `batchLen`): at least one entry, and no more than `MaxBatchBytes` of
+  their wire length, the 33-byte header and the payload of each
+  (`wire.EntryLen`, new in the wire package's surface). The rest is fetched
+  again from the next index. The bound is the encoding's, not `slice`'s
+  64 bytes an entry, so a fetched batch carries as many entries as the
+  bound lets it: under the defaults, 1 MiB below 16 MiB, which the defect
+  reached only with payloads of 2 bytes or less, 1 967 entries of 500 bytes
+  where it carried 2 097, the same mebibyte on the wire, and 253 of 4 KiB
+  where it carried 256.
+- **A fetch asks for no more entries than one append carries**
+  (`fetchSpan`: `MaxBatchBytes` over the 33 bytes of an entry with no
+  payload, 31 775 under the defaults). A store bounds its read by the
+  payloads alone, so a run of small entries, or of empty ones, was read
+  whole for its head to be sent, and read again at the next fetch.
+- **A frame above the bound its lane is read under is counted and
+  logged** by the receiving transport, at the first refusal and at each
+  power of two after it, as `Send`'s drops are (#669); it still ends the
+  connection.
+
+No frame, payload or record format changes, and the in-memory path is
+unchanged.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -4880,6 +4923,7 @@ of the issue:
 | S3 | Raft hunt lot S3, 2026-10-23 | protocol version 2 raised once: the announcement, the raise refused until every member speaks it, the checksummed snapshot meta, `Origin`, `AdoptedFrom`, the stale voter's admission of a vouched-for leader in D4 (amendment of 2026-10-23) |
 | #648 | the owner's decision, 2026-10-24 | protocol version 3: one key, one ID for the cluster's whole life, the retired keys in the configuration, the admin payload and the snapshot metadata of version 3, `FlagProtocol3` and the raise refused until every member announces it (amendment of 2026-10-24, #648) |
 | #677 | the owner's decision, 2026-10-25 | a member states its own snapshot limit: `ChangeSnapshotLimit`, admitted from that member only, a lowering below the state not proposed, no protocol raise (amendment of 2026-10-25, #677) |
+| #683 | Raft hunt loop, 2026-10-25 | a batch fetched for a follower behind the evicted payloads is cut by its encoding, a fetch asks for no more entries than one append carries, and a frame refused above the read bound is counted and logged; no format change (amendment of 2026-10-25, #683) |
 
 ## raft-sql-poc (owner's prior Raft)
 

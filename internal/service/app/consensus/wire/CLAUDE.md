@@ -7,6 +7,9 @@ The consensus domain's hand-written fixed layouts (ADR 0152 D4, D18): the
 frame of a `MessageValue`, the 41-byte `TokenValue`, `SnapshotMetaValue`, `MembershipValue`,
 the timing contract, the admin payload, and the CRC-32C body and chain sums.
 They are not codec formats: two nodes must write the same bytes.
+`EntryLen` is an entry's length in an append, its 33-byte header and its
+payload: what the leader cuts a batch by, a store counting the payloads
+alone (#683).
 
 ## Do NOT
 

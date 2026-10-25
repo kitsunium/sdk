@@ -562,6 +562,8 @@ files:
       - (*memLog).at
       - (*memLog).matchTerm
       - (*memLog).slice
+      - batchLen
+      - fetchSpan
       - (*memLog).resident
       - (*memLog).evict
       - (*memLog).truncateFrom
@@ -773,6 +775,26 @@ functions:
     name: recordOf
     params: m *core.MessageValue
     results: core.MemberValue, bool
+  - doc: |-
+      batchLen is how many of ents, from the first, one append carries: at
+      least one, and no more than maxBytes of their encoding (wire.EntryLen).
+      Config holds MaxFrameBytes above MaxBatchBytes by the message header and
+      the first entry's (review M2); a store bounds a read by the payloads
+      alone, so a fetched batch sent whole outgrew the frame a follower reads,
+      which refused it at every probe (#683). slice counts 64 bytes an entry,
+      more than the encoding's header, so it stays within the same bound.
+    name: batchLen
+    params: ents []core.EntryValue, maxBytes int
+    results: int
+  - doc: |-
+      fetchSpan bounds the entries one fetch asks the store for: the most one
+      append carries under maxBytes, since no entry encodes shorter than one
+      with no payload. A store bounds a read by the payloads alone, so a long
+      run of small entries was read whole only for batchLen to keep its head,
+      and read again at the next fetch (#683).
+    name: fetchSpan
+    params: maxBytes int
+    results: uint64
   - doc: statFlag is x when on, else nothing.
     name: statFlag
     params: x PeerStatFlags, on bool

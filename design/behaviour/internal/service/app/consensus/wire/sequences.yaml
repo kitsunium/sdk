@@ -346,6 +346,9 @@ sequences:
         to: binary.LittleEndian.AppendUint32
         value: binary.LittleEndian.AppendUint32(dst, uint32(len(e.Data)))
       - return: append(dst, e.Data...)
+  - of: EntryLen
+    steps:
+      - return: entryFixedLen + len(e.Data)
   - of: ParseMessage
     participants:
       - id: caller

@@ -129,6 +129,11 @@ func appendEntry(dst []byte, e *coreconsensus.EntryValue) []byte {
 	return append(dst, e.Data...)
 }
 
+// EntryLen returns the length of e's encoding in an append message: its
+// fixed header, then its payload. A batch counted by its payloads alone
+// outgrows its frame by this header per entry (#683).
+func EntryLen(e *coreconsensus.EntryValue) int { return entryFixedLen + len(e.Data) }
+
 // ParseMessage decodes one frame into m, reusing m.Entries' capacity. Entry
 // data aliases frame: it is valid while frame is. A frame that does not parse
 // is FRAME_INVALID; a frame version this node does not know is

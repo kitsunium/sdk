@@ -755,6 +755,15 @@ machine, are 32.9 s at 24, and 34 s for the slowest on average over
   drop and each power of two (`droppedOversized`,
   `TestAPeerQueueBelowTheFrameBoundIsRefused`,
   `TestAFrameAboveThePeerQueueIsCountedAndLogged`).
+- Refuse without a word a frame a member announces above the bound its
+  lane is read under: a leader whose fetched batch outgrew the follower's
+  `MaxFrameBytes` sent it again at every probe, the follower ended each
+  connection in silence, and never caught up (#683). The leader now cuts a
+  fetched batch by its encoding (raft's `batchLen`); the reader still ends
+  the connection, and counts and logs the refusal at the first and each
+  power of two (`refusedOversized`,
+  `TestAFollowerBehindTheEvictedPayloadsCatchesUpUnderTheTightestFrame`,
+  `TestAFrameAboveTheReadBoundIsCountedAndLogged`).
 - Read a snapshot offer under `MaxControlFrameBytes`, or end a refused one
   without a line: its metadata carries the configuration, `Retired`
   included, and from protocol 3 `RetiredKeys` (#648), which every Remove

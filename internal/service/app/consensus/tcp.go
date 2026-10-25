@@ -304,6 +304,9 @@ type TCPTransport struct {
 	// oversized counts the frames Send dropped for being larger than the
 	// whole peer queue (#669).
 	oversized atomic.Int64
+	// refused counts the frames a member announced above the bound its lane
+	// is read under, each of which ended the connection (#683).
+	refused atomic.Int64
 }
 
 type outKey struct {
@@ -631,8 +634,11 @@ func (t *TCPTransport) readFrames(c net.Conn, peer coreconsensus.AuthenticatedPe
 	r := bufio.NewReaderSize(c, connBufferBytes)
 	var buf []byte
 	for {
-		frame, ok := readFrame(r, buf, limit)
+		frame, over, ok := readFrame(r, buf, limit)
 		if !ok {
+			if over != 0 {
+				t.refusedOversized(peer.ID, over, limit)
+			}
 			return
 		}
 		buf = frame
@@ -648,18 +654,22 @@ func (t *TCPTransport) readFrames(c net.Conn, peer coreconsensus.AuthenticatedPe
 
 // readFrame reads one frame into buf, grown only when the announced length
 // needs it; ok is false on a read error or a length outside
-// [minFrameBody, limit-4].
-func readFrame(r io.Reader, buf []byte, limit int) ([]byte, bool) {
+// [minFrameBody, limit-4], and over is the announced length when it was
+// above limit-4, 0 otherwise.
+func readFrame(r io.Reader, buf []byte, limit int) (frame []byte, over uint32, ok bool) {
 	var h [4]byte
 	if _, err := io.ReadFull(r, h[:]); err != nil {
-		return buf, false
+		return buf, 0, false
 	}
 	// The announced length is checked before anything is allocated, and
 	// as the u32 it is: on 32 bits n+4 wrapped negative for a length within
 	// 4 of 2^31, passed the limit, and the slice panicked the reader.
 	ln := binary.LittleEndian.Uint32(h[:])
-	if limit < 0 || ln < uint32(minFrameBody) || uint64(ln)+4 > uint64(limit) {
-		return buf, false
+	switch {
+	case limit < 0 || ln < uint32(minFrameBody):
+		return buf, 0, false
+	case uint64(ln)+4 > uint64(limit):
+		return buf, ln, false
 	}
 	n := int(ln)
 	if cap(buf) < n+4 {
@@ -668,9 +678,29 @@ func readFrame(r io.Reader, buf []byte, limit int) ([]byte, bool) {
 	buf = buf[:n+4]
 	copy(buf, h[:])
 	if _, err := io.ReadFull(r, buf[4:]); err != nil {
-		return buf, false
+		return buf, 0, false
 	}
-	return buf, true
+	return buf, 0, true
+}
+
+// refusedOversized counts a frame a member announced, at ln bytes after its
+// length, above the bound limit its lane is read under, which ends the
+// connection, and logs it at the first refusal and at each power of two
+// after it. A leader whose batch outgrew the frame sent it again at every
+// probe, and the follower refused it each time without a word (#683); the
+// retransmissions would otherwise log at every heartbeat.
+func (t *TCPTransport) refusedOversized(from coreconsensus.NodeID, ln uint32, limit int) {
+	refused := t.refused.Add(1)
+	if refused&(refused-1) != 0 {
+		return
+	}
+	t.mu.Lock()
+	warn := t.warn
+	t.mu.Unlock()
+	if warn != nil {
+		warn("consensus: a frame above the bound was refused", lattr("from", uint64(from)),
+			lattr("length", uint64(ln)+4), lattr("bound", uint64(limit)), lattr("refused", uint64(refused)))
+	}
 }
 
 // deliverTo is the bound deliver callback and whether the key is still a
