@@ -760,7 +760,7 @@ func TestReadFrameRefusesALengthThatWrapsOn32Bits(t *testing.T) {
 	for _, ln := range []uint32{0x7FFFFFFC, 0x7FFFFFFF, 1 << 31, 0xFFFFFFFF} {
 		var h [4]byte
 		binary.LittleEndian.PutUint32(h[:], ln)
-		if _, ok := readFrame(bytes.NewReader(h[:]), nil, 1<<20); ok {
+		if _, _, ok := readFrame(bytes.NewReader(h[:]), nil, 1<<20); ok {
 			t.Fatalf("length %#x read under a limit of 1 MiB", ln)
 		}
 	}

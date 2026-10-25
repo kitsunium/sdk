@@ -52,6 +52,15 @@ under coverage before touching `shard_count`.
   commands only without their payloads; every other entry keeps its own,
   whose effects `NewRaft` applies (#663,
   `TestAStartWithEvictedPayloadsHandsThemByIndex`).
+- Send a fetched batch as the store returned it: a store bounds its read
+  by the payloads alone, and one append carries no more than
+  `MaxBatchBytes` of its entries' encoding (`batchLen`, `wire.EntryLen`),
+  the bound Config holds `MaxFrameBytes` above by 1 KiB. Sent whole, a
+  batch of 500-byte entries outgrew the follower's frame bound, was refused
+  at every probe, and the follower never caught up (#683). Nor ask a fetch
+  for more entries than one append carries (`fetchSpan`): a run of small
+  entries was read whole for its head alone
+  (`TestAFetchedBatchIsCutByItsEncoding`).
 - Acknowledge a snapshot install past its index (review H1,
   `mutSnapshotAckLastIndex`).
 - Append, acknowledge or skip an entry kind `Known` refuses: report it in

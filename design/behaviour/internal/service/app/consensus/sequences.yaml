@@ -20795,6 +20795,8 @@ sequences:
         kind: stdlib
       - id: readFrame
         kind: internal
+      - id: t.refusedOversized
+        kind: internal
       - id: t.deliverTo
         kind: internal
     steps:
@@ -20806,11 +20808,16 @@ sequences:
           type: "[]byte"
       - loop:
           do:
-            - bind: frame, ok
+            - bind: frame, over, ok
               eval: readFrame(r, buf, limit)
               to: readFrame
             - opt:
                 do:
+                  - opt:
+                      do:
+                        - eval: t.refusedOversized(peer.ID, over, limit)
+                          to: t.refusedOversized
+                      when: over != 0
                   - return: ""
                 when: "!ok"
             - set: buf
@@ -20843,7 +20850,7 @@ sequences:
           type: "[4]byte"
       - opt:
           do:
-            - return: buf, false
+            - return: buf, 0, false
           init:
             bind: _, err
             eval: io.ReadFull(r, h[:])
@@ -20852,10 +20859,14 @@ sequences:
       - bind: ln
         eval: binary.LittleEndian.Uint32(h[:])
         to: binary.LittleEndian.Uint32
-      - opt:
-          do:
-            - return: buf, false
-          when: limit < 0 || ln < uint32(minFrameBody) || uint64(ln)+4 > uint64(limit)
+      - switch:
+          cases:
+            - case: limit < 0 || ln < uint32(minFrameBody)
+              do:
+                - return: buf, 0, false
+            - case: uint64(ln)+4 > uint64(limit)
+              do:
+                - return: buf, ln, false
       - bind: "n"
         eval: int(ln)
       - opt:
@@ -20868,13 +20879,45 @@ sequences:
       - eval: copy(buf, h[:])
       - opt:
           do:
-            - return: buf, false
+            - return: buf, 0, false
           init:
             bind: _, err
             eval: io.ReadFull(r, buf[4:])
             to: io
           when: err != nil
-      - return: buf, true
+      - return: buf, 0, true
+  - of: (*TCPTransport).refusedOversized
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).refusedOversized
+        kind: self
+      - id: t.refused.Add
+        kind: value
+      - id: t.mu.Lock
+        kind: value
+      - id: t.mu.Unlock
+        kind: value
+    steps:
+      - bind: refused
+        eval: t.refused.Add(1)
+        to: t.refused.Add
+      - opt:
+          do:
+            - return: ""
+          when: refused&(refused-1) != 0
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - bind: warn
+        eval: t.warn
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
+      - opt:
+          do:
+            - eval: |-
+                warn("consensus: a frame above the bound was refused", lattr("from", uint64(from)),
+                			lattr("length", uint64(ln)+4), lattr("bound", uint64(limit)), lattr("refused", uint64(refused)))
+          when: warn != nil
   - of: (*TCPTransport).deliverTo
     steps:
       - lock:
