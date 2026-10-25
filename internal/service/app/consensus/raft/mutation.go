@@ -179,6 +179,11 @@ const (
 	// of the term announced the version, however long ago it was heard
 	// (#665).
 	mutRaiseOverSilence
+	// mutRecordByIndexOnly judges a PreVote behind the commit by its last
+	// index alone, as before #675: a voter, or a learner's question, whose
+	// uncommitted tail of an older term reaches past the commit is never
+	// sent the leader record.
+	mutRecordByIndexOnly
 	// mutStalledTakesOver campaigns on a TimeoutNow whatever the driver says
 	// of its apply, as before #674: a leader that handed its leadership over
 	// for a stuck apply (#554) took it straight back.

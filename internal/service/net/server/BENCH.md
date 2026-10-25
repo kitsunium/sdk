@@ -128,6 +128,32 @@ and off-by-default-sized (`Shards(0)` = one per core) rather than being removed,
 because the regime it targets (a saturated NIC with many short-lived
 connections) is one this laptop cannot produce.
 
+## The merge gate's loads (L1, L2, L3)
+
+`BenchmarkLoadL1`, `BenchmarkLoadL2` and `BenchmarkLoadL3` are the loads the
+network plan's merge gate measures (plan P8; `.github/workflows/net-kernel-gate.yml`,
+`tools/netgate`). Their numbers are not kept in this file: they are measured on
+every pull request that touches the engines, ten interleaved rounds on one
+GitHub-hosted runner, and the samples and the report are the run's
+`net-bench-<sha>` artefact, tied to the commit measured. The loads are fixed in
+the code — L1: a plaintext GET, 1 KiB answered, 1000 kept-alive connections;
+L2: L1 with a Bearer token and routing; L3: 1200-byte UDP datagrams, a GSO
+sender of 54 segments, 4 flows at 200 000 datagrams a second, over a veth pair
+— and the metric is the server's CPU, measured in its own process, so the
+client's cost never dilutes a ratio. No gate is required yet: each waits for
+the step that builds its engine B (`netgate -list`).
+
+One measurement, under Docker on a Mac (Linux 7.0 arm64, 8 CPUs, epoll since
+Docker's profile refuses io_uring), one round at `-benchtime=100000x`, given
+only as the order of magnitude the gate starts from:
+
+| Benchmark | cpu-ns/req or /datagram |
+|---|---|
+| `LoadL1/engine=goroutine` | 16 419 |
+| `LoadL1/engine=loop` | 4 282 |
+| `LoadL2/engine=handwritten` | 6 403 |
+| `LoadL3/engine=recvmmsg` (loopback, 55.7 datagrams a receive) | 621 |
+
 ## What is NOT measured here
 
 Nothing outstanding: every optimisation ADR 0029 §D5 lists now has a number

@@ -675,7 +675,11 @@ machine, are 32.9 s at 24, and 34 s for the slowest on average over
   delay cut a leader still heard, its snapshot stream included, and a
   voter whose install outlasted it never caught up under writes (#618,
   `TestAStaleVoterWhoseInstallOutlastsTheRecordCatchesUp`, raft's
-  `checkVouchedLeaderAdmittedWhileHeard`).
+  `checkVouchedLeaderAdmittedWhileHeard`). Behind the commit is judged by
+  the PreVote's last term and last index, never its index alone: a voter
+  back with an uncommitted tail of an older term, longer than the commit,
+  was never sent the record on a quiet cluster (#675, raft's
+  `checkLeaderRecordReachesAnOldTail`).
 - Gate the leader record on the cluster version: the raise to 2 is refused
   while a member is unheard, and the stale voter the record is for is one
   the leader cannot hear, so a cluster that had not raised never repaired

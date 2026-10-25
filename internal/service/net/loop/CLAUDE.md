@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T00:00:00Z -->
+<!-- updated: 2026-10-25T20:00:00Z -->
 # internal/service/net/loop/
 
 ## Purpose
@@ -171,7 +171,14 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
 ## Conformance (one suite, every backend present)
 
 `conformance_linux_test.go` runs on `iouring` and `epoll`. `requiredBackends`
-is linked in, and the suite fails closed. It covers: partial consume, an
+and `requiredCaps` are linked in, and the suite fails closed on both
+(`TestBackendsRequired`, `TestCapsRequired`): unset fails, a backend or a
+capability the kernel lacks fails, and a capability no probe of `capProbes`
+checks fails too — a lane may not require what nothing verifies. The one
+capability today is `uring-direct` (the release check chose direct
+descriptors, from 6.13); P3's capability reports add theirs to `capProbes`.
+Bazel links `epoll` and `none`; e2e-cross's lanes `iouring,epoll` and `none`;
+each leg of `net-kernel-gate.yml` declares both lists. It covers: partial consume, an
 8 MiB response byte-exact behind short sends and EAGAIN, `LoopSpillFull`,
 closing slot 0 while 1 lives, slot reuse with a stale `Write`, a table of 2
 (epoll refuses, io_uring waits and serves after a close), MaxConns, idle,
@@ -205,9 +212,9 @@ connections still live. These are named here so nobody believes them done.
 # Linux (CI, and Docker on a Mac with --security-opt seccomp=unconfined, which
 # io_uring needs; under Docker's default profile auto falls back to epoll):
 cd internal && GOWORK=off go test -race -tags loopdebug \
-  -ldflags=-X=github.com/kitsunium/sdk/internal/service/net/loop.requiredBackends=iouring,epoll \
+  -ldflags='-X=github.com/kitsunium/sdk/internal/service/net/loop.requiredBackends=iouring,epoll -X=github.com/kitsunium/sdk/internal/service/net/loop.requiredCaps=none' \
   ./service/net/loop/
-# without the -X the suite fails closed on Linux, by design; `none` requires nothing.
+# without either -X the suite fails closed on Linux, by design; `none` requires nothing.
 bazel test //internal/service/net/loop:all
 ```
 

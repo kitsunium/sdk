@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T18:00:00Z -->
+<!-- updated: 2026-10-25T20:00:00Z -->
 # internal/service/net/server/
 
 ## Purpose
@@ -61,6 +61,8 @@ Public façade: `pkg/v1/net/server`.
 | `adopt.go` | adoption of listeners inherited from a supervisor |
 | `handshake.go` | the bounded TLS handshake — `handshakeHandler`, and `defaultHandshakeTimeout` (10 s) for a group that sets none |
 | `swallow.go` | `swallowErr` — the recorded discard of a non-actionable cleanup error |
+| `load_gate_linux_test.go` | the network merge gate's L1 and L2 (plan P8, `tools/netgate`): `BenchmarkLoadL1` (`engine=goroutine`, `HandleHTTP`; `engine=loop`, `HandleLoop` of `http1.HandleLoop` on the best backend) and `BenchmarkLoadL2` (`engine=handwritten`: Bearer and routing written by hand in one handler, P2's engine A), 1000 kept-alive connections, a 1 KiB body; the server is this binary re-run on `TestLoadChild` and the metric is ITS CPU (`cpu-ns/req`, getrusage at the window's ends); `TestLoadL1L2_wired` serves each engine for three requests |
+| `load_l3_linux_internal_test.go` | L3: `BenchmarkLoadL3` (`engine=recvmmsg`, today's `datagramSource`, P4a's engine A) over the veth pair of `scripts/ci/net-veth.sh`, 1200-byte datagrams from 4 GSO flows (`UDP_SEGMENT`, 54 segments a send) at 200 000 a second, the receiver re-run on `TestLoadL3Child` in the namespace; `cpu-ns/datagram`, `datagrams/syscall` (datagrams per `readBatch`) and `lost/op`; skipped without `KITSUNIUM_NETGATE_L3_PEER`; `TestLoadL3_wired` sends one GSO burst on loopback and counts its 54 datagrams |
 | `{batch,conn,linux}_compliance.go` | compile-time interface assertions (`KTN-IFACE-ASSERT-PLACEMENT`) |
 
 ## Why-this-shape

@@ -1055,7 +1055,10 @@ down while a member was admitted, promoted and handed the leadership unable
 to hear that leader, for as long as it led: the members it knew were
 followers and sent it nothing. From protocol 2:
 - A follower that follows a live leader and receives a PreVote from a
-  member of its configuration whose last index is behind its commit answers
+  member of its configuration whose last log position is behind its commit
+  (its last index below the commit, or its last term older than the
+  committed entry's: amended 2026-10-25,
+  [#675](https://github.com/kitsunium/sdk/issues/675), below) answers
   with `MsgLeaderRecord`: the leader's member record (ID, slot, SPKI,
   address), read from its COMMITTED configuration. Only to a PreVote that
   itself carries `FlagProtocol2`, from a follower that speaks protocol 2
@@ -4706,6 +4709,44 @@ in heap to start, past the bound the amendment of #630 states
   bound.
 
 Nothing published changes: no frame, no payload, no record format.
+
+## Amendment — a member is behind the commit by its last term as well as its last index (2026-10-25, #675)
+
+D4's leader record (#542) answered a PreVote whose last index was below
+the follower's commit, though #542's arbitration speaks of a last log
+position. The index alone missed a voter back with an uncommitted tail of
+an older term, longer than the commit: a leader cut off from its members
+appends its clients' proposals until CheckQuorum deposes it, as far as
+`MaxPendingBytes` allows within the minimum election timeout. Its PreVote
+carried that tail's last index, at or past the commit of the leader that
+followed, so no follower sent it the record, and the PreVote itself failed,
+its last term being older. On a quiet cluster it stayed cut off for as long
+as that leader led: one vote lost, one more failure stopped every commit,
+and every raise of the cluster version, which waits for every member,
+stayed refused ([#675](https://github.com/kitsunium/sdk/issues/675), the
+class of #542 and #603). A learner's question (#639) carries the same
+position, and was dropped the same way.
+
+- **Behind is judged by the last term and the last index.** A follower
+  answers with the record a PreVote whose last index is below its commit,
+  as before, or whose last term is older than the term of the entry at its
+  commit. Terms never decrease along a log, so a log that holds the
+  committed entry ends at its term or a later one: a log that ends at an
+  older term lacks it, however far its index reaches.
+- **The bounds of #542 stay.** A log whose last term is the committed
+  entry's, at or past its index, holds that entry, since the leader of that
+  term only appended; one of a later term, at or past it, may hold it.
+  Neither is sent a record. A member that is sent one lacks a committed
+  entry, so it wins no election while a majority holds that entry, and the
+  record still admits the leader for its appends, heartbeats and installs
+  only, under every bound above: from a member of the voter's
+  configuration, at a term at least its own, for an ID it neither lists nor
+  retired, until its delay ends.
+- **What it costs.** A follower reads the term of the entry at its commit,
+  which its log always holds, at its snapshot base at the lowest. Nothing
+  else changes: no frame, no payload, no record format. The PreVote
+  already carries its last term and last index; only the follower's reading
+  of them changes, and a follower of an older release answers as before.
 
 ## Revision history
 

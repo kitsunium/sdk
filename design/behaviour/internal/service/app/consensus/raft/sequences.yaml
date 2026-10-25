@@ -2257,7 +2257,7 @@ sequences:
             - return: ""
           when: |-
             !r.mayRecordTo(m) || r.role == core.RoleLeader || r.lead == 0 || r.lead == m.From ||
-            		r.lastLeaderContact.IsZero() || now.Sub(r.lastLeaderContact) >= r.voteWindow || m.Index >= r.log.committed
+            		r.lastLeaderContact.IsZero() || now.Sub(r.lastLeaderContact) >= r.voteWindow || !r.behindCommit(m)
       - opt:
           do:
             - return: ""
@@ -2282,6 +2282,27 @@ sequences:
           		Entries: []core.EntryValue{{Kind: core.EntryMembership, BodySum: wire.BodySum(data), Data: data}},
           	})
         to: r.send
+  - of: (*Raft).behindCommit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).behindCommit
+        kind: self
+      - id: r.log.term
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: m.Index < r.log.committed
+      - opt:
+          do:
+            - return: "false"
+          when: r.mutated(mutRecordByIndexOnly)
+      - bind: t, ok
+        eval: r.log.term(r.log.committed)
+        to: r.log.term
+      - return: ok && m.LogTerm < t
   - of: (*Raft).mayRecordTo
     steps:
       - switch:

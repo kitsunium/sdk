@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T13:06:04Z -->
+<!-- updated: 2026-10-25T20:00:00Z -->
 # .github/
 
 ## Purpose
@@ -17,6 +17,8 @@ GitHub-side configuration for the SDK repo: the workflows — the SDK lanes, the
 | `workflows/e2e-cross.yml`       | Runtime tests on Linux (unprivileged, as root under systemd and OpenRC, and on the Debian, Fedora and Alpine kernels in QEMU/KVM guests), macOS, Windows, the three BSDs, illumos and Solaris |
 | `workflows/docs-deploy.yml`     | Builds and deploys the versioned docs portal |
 | `workflows/bazel-bench.yml`     | Kernel benchmarks, on demand, weekly or on a `run-bench` label |
+| `workflows/net-kernel-gate.yml` | The network engines' merge gate: path filter, kernel lanes failing closed on `requiredBackends`/`requiredCaps`, engine A against engine B judged by `tools/netgate`, and the `net-kernel-gate` aggregator to require |
+| `workflows/net-default-change.yml` | The `net:default-change` label's `Override:` block, held to the capability registry |
 | `dependabot.yml`                | Weekly `github-actions` ecosystem updates, `chore:` commit prefix, `dependencies` label |
 
 ## Conventions
