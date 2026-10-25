@@ -10713,19 +10713,20 @@ sequences:
           do:
             - return: "false"
           when: "!ok"
-      - alt:
-          - do:
-              - opt:
-                  do:
-                    - return: "false"
-                  when: "!n.syncFor(reqs)"
-              - set: st.synced, st.lazy
-                value: written, false
-            when: durable
-          - do:
-              - set: st.lazy
-                value: "true"
-            else: true
+      - switch:
+          cases:
+            - case: "!durable"
+              do:
+                - set: st.lazy
+                  value: "true"
+            - case: st.lazy || writesAny(reqs)
+              do:
+                - opt:
+                    do:
+                      - return: "false"
+                    when: "!n.syncFor(reqs)"
+                - set: st.synced, st.lazy
+                  value: written, false
       - loop:
           do:
             - opt:

@@ -164,6 +164,9 @@ func TestRecoverRefusesAnInterruptedInstallAboveTheProtocol(t *testing.T) {
 	}()
 	next := coreconsensus.ClusterID{7, 5, 7}
 	members, opt := recoverArgs(t, c, nodes, keep, next)
+	// The open zero-fills the next segment's .tmp in the background: the
+	// tree is read once it is whole, or that fill shows as Recover's write.
+	settlePrepared(keep.dd)
 	before := treeOf(t, keep.dir)
 	audit := auditOf(t, keep.dir)
 	if err := Recover(keep.dd, next, members, opt); !errors.Is(err, coreconsensus.VersionUnsupported) {
@@ -182,6 +185,18 @@ func TestRecoverRefusesAnInterruptedInstallAboveTheProtocol(t *testing.T) {
 	}
 	if got := auditOf(t, keep.dir); !bytes.Equal(got, audit) {
 		t.Fatalf("a refused Recover wrote its audit line: %q", got)
+	}
+}
+
+// settlePrepared waits for the segment d's log zero-fills in the
+// background, when there is one.
+func settlePrepared(d DataDir) {
+	fl := d.d.log
+	fl.mu.Lock()
+	p := fl.prep
+	fl.mu.Unlock()
+	if p != nil {
+		<-p.done
 	}
 }
 

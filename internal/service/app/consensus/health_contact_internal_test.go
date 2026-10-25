@@ -130,9 +130,13 @@ func TestApplyReadiness(t *testing.T) {
 // #545, end to end: under a steady write load, a caught-up follower is
 // never reported not ready for a lag of a few entries. Its published
 // status paired each new commit with the applied index of the turn
-// before, and a strict comparison flapped its readiness.
+// before, and a strict comparison flapped its readiness. The stall bound
+// is the minimum election timeout: at testTimingFast's 100 ms, a runner
+// that held the follower's apply that long had it not ready by the rule,
+// once in 34 samples on linux/386 (#654); steadyTiming's 500 ms leaves the
+// lag the test is about.
 func TestAFollowerUnderLoadStaysReady(t *testing.T) {
-	c := newCluster(t, 3, 0)
+	c := newClusterWith(t, &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{1, 2, 3}, size: 3, timing: steadyTiming()})
 	l := c.settledLeader(5 * time.Second)
 	f := c.otherThan(l)
 	if h, ok := waitHealth(f, true, true, 5*time.Second); !ok {
