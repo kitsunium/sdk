@@ -32,6 +32,7 @@ platforms:
 auxiliary:
   - e2e
   - tools/genindex
+  - tools/netgate
   - tools/sdkguard
 # The Go modules (ADR 0171 §7, platform ADR 0011): each by the directory of its
 # go.mod, with every module of the repository its go.mod requires — the go

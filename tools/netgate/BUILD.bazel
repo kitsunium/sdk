@@ -1,0 +1,26 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+
+go_library(
+    name = "netgate_lib",
+    srcs = [
+        "eval.go",
+        "gates.go",
+        "main.go",
+        "parse.go",
+        "stats.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/tools/netgate",
+    visibility = ["//visibility:private"],
+)
+
+go_binary(
+    name = "netgate",
+    embed = [":netgate_lib"],
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "netgate_test",
+    srcs = ["main_test.go"],
+    embed = [":netgate_lib"],
+)
