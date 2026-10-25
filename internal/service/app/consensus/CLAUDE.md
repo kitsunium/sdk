@@ -365,6 +365,15 @@ machine, are 32.9 s at 24, and 34 s for the slowest on average over
   `TestASilentNodeVotesAgainOnlyWithTheWritesItAcknowledged`; the
   liveness half, the silent node caught up across batches it never
   acknowledges, `TestASilentNodeRejoinsUnderItsLeaderWithTheWritesItAcknowledged`).
+- End a silence on disk before the entries that meet its condition are: raft
+  judged it on the append's entries, in memory, and said so in the same
+  Ready, and `endSilence` removed SILENT on the loop before the storage
+  actor synced them. A crash during that fdatasync restarted a voter whose
+  log stopped at the truncation point, elected at the leader's next failure
+  over the writes it had acknowledged. Raft now ends the silence once
+  `StorageDone` reports the log durable through the commit that met the
+  condition, and the driver removes SILENT in the Ready after (#684,
+  `TestTheEndOfASilenceIsDurableOnlyAfterTheEntriesThatEndIt`).
 - Refuse a JOIN on a held slot when the member holding it is the requester
   itself — id, incarnation, slot and key all equal: a joiner restarted
   before anything reached its log admits the members only from a JOIN

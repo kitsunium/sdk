@@ -530,6 +530,7 @@ var checks = map[string]func(mutation) error{
 	"silence never ends on a refusal":   checkSilenceNeverEndsOnARefusal,
 	"silence not ended by own snapshot": checkSilenceNotEndedByItsOwnSnapshot,
 	"silent heartbeat reports":          checkSilentHeartbeatReports,
+	"silence ends once durable":         checkSilenceEndsOnceDurable,
 	"leader record by announcement":     checkLeaderRecordFollowsTheAnnouncement,
 	"stranded learner asks":             checkStrandedLearnerAsks,
 	"learner question binds nothing":    checkLearnerAskBindsNothing,
@@ -608,6 +609,7 @@ func TestMutationsAreCaught(t *testing.T) {
 		"silence ends on a refusal":        mutSilenceEndsOnARefusal,
 		"silent index under the snapshot":  mutSilenceIndexBelowSnapshot,
 		"silent report ignored":            mutSilentReportIgnored,
+		"silence ends before durable":      mutSilenceEndsBeforeDurable,
 		"record by cluster version":        mutRecordAtClusterVersion,
 		"record to an unannounced prevote": mutRecordUnannounced,
 		"learner never asks":               mutLearnerNeverAsks,
@@ -801,6 +803,13 @@ func TestSilentNodeStaysSilentUntilTheConditionHolds(t *testing.T) {
 	m = msg(core.MsgApp, 1, 2, 4)
 	m.Index, m.LogTerm, m.Entries, m.Commit = 2, 4, ents[2:3], 3
 	f.Step(t0.Add(5*time.Second), m)
+	rd = f.Ready()
+	// The condition holds on entries 2 and 3, which are not durable yet: the
+	// silence ends once they are (#684).
+	if rd.SilenceEnded || f.cfg.SilentIndex == 0 || granted(rd, core.MsgAppResp) {
+		t.Fatal("the silence ended before the entries that meet its condition were durable")
+	}
+	f.StorageDone(rd.Seq, 3, 4)
 	rd = f.Ready()
 	if !rd.SilenceEnded || f.cfg.SilentIndex != 0 {
 		t.Fatal("the silence condition held and the node stayed silent")
