@@ -11669,41 +11669,70 @@ sequences:
         kind: internal
     steps:
       - var:
+          name: tried
+          type: "[]coreconsensus.NodeID"
+      - loop:
+          cond: ctx.Err() == nil
+          do:
+            - var:
+                name: to
+                type: coreconsensus.NodeID
+            - eval: |-
+                n.exec(func() {
+                			if st := n.r.Status(); st.Role == coreconsensus.RoleLeader {
+                				to = n.handOffTarget(&st, tried)
+                			}
+                		})
+              to: n.exec
+            - opt:
+                do:
+                  - return: ""
+                when: to == 0
+            - bind: tctx, cancel
+              eval: context.WithTimeout(ctx, n.cfg.InitialTiming.ElectionTimeoutMax)
+              to: context
+            - bind: err
+              eval: n.transferLocal(tctx, to)
+              to: n.transferLocal
+            - eval: cancel()
+            - opt:
+                do:
+                  - return: ""
+                when: err == nil
+            - eval: "n.obs.info(\"consensus: leadership hand-off did not complete\", lattr(\"to\", uint64(to)), lstr(\"error\", err.Error()))"
+              to: n.obs.info
+            - set: tried
+              value: append(tried, to)
+  - of: (*Node).handOffTarget
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).handOffTarget
+        kind: self
+      - id: n.voterMatch
+        kind: internal
+    steps:
+      - var:
           name: to
           type: coreconsensus.NodeID
       - var:
           name: best
           type: uint64
-      - eval: |-
-          n.exec(func() {
-          		st := n.r.Status()
-          		for _, m := range st.Conf.Members {
-          			if !m.Voter || m.ID == n.stamp.ID {
-          				continue
-          			}
-          			if match, _, ok := n.r.Progress(m.ID); ok && (to == 0 || match > best) {
-          				to, best = m.ID, match
-          			}
-          		}
-          	})
-        to: n.exec
-      - opt:
+      - loop:
           do:
-            - return: ""
-          when: to == 0
-      - bind: tctx, cancel
-        eval: context.WithTimeout(ctx, n.cfg.InitialTiming.ElectionTimeoutMax)
-        to: context
-      - defer: cancel()
-      - opt:
-          do:
-            - eval: "n.obs.info(\"consensus: leadership hand-off at close did not complete\", lattr(\"to\", uint64(to)), lstr(\"error\", err.Error()))"
-              to: n.obs.info
-          init:
-            bind: err
-            eval: n.transferLocal(tctx, to)
-            to: n.transferLocal
-          when: err != nil
+            - opt:
+                do:
+                  - set: to, best
+                    value: m.ID, match
+                init:
+                  bind: match, ok
+                  eval: n.voterMatch(m)
+                  to: n.voterMatch
+                when: ok && !slices.Contains(tried, m.ID) && (to == 0 || match > best)
+          key: _
+          range: st.Conf.Members
+          value: m
+      - return: to
   - of: (*Node).HardClose
     participants:
       - id: caller
@@ -17090,32 +17119,67 @@ sequences:
         kind: actor
       - id: (*Node).transferLocal
         kind: self
-      - id: n.stoppedErr
-        kind: internal
-      - id: origin
+      - id: n.startLocal
         kind: internal
       - id: n.awaitLeader
         kind: internal
+      - id: origin
+        kind: internal
+      - id: n.stoppedErr
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: running, err
+              eval: n.startLocal(to)
+              to: n.startLocal
+            - switch:
+                cases:
+                  - case: err != nil
+                    do:
+                      - return: err
+                  - case: running == nil
+                    do:
+                      - return: n.awaitLeader(ctx, to)
+                        to: n.awaitLeader
+            - select:
+                cases:
+                  - comm: <-running
+                  - comm: <-ctx.Done()
+                    do:
+                      - return: origin(coreconsensus.TransferFailed, errs.String("cause", ctx.Err().Error()))
+                        to: origin
+                  - comm: <-n.loopDone
+                    do:
+                      - return: n.stoppedErr()
+                        to: n.stoppedErr
+          forever: true
+  - of: (*Node).startLocal
     steps:
       - var:
           name: code
           type: errs.Code
+      - var:
+          name: running
+          type: chan errs.Code
       - opt:
           do:
-            - return: n.stoppedErr()
-              to: n.stoppedErr
+            - return: nil, n.stoppedErr()
           when: |-
             !n.exec(func() {
+            		if cur := n.r.Status().Transfer; cur != 0 && cur != to {
+            			running = make(chan errs.Code, 1)
+            			n.transfers = append(n.transfers, running)
+            			return
+            		}
             		code = n.r.TransferLeadership(n.clk.Now(), to)
             		n.handleReady()
             	})
       - opt:
           do:
-            - return: origin(sentinelOf(code))
-              to: origin
+            - return: nil, origin(sentinelOf(code))
           when: code != 0
-      - return: n.awaitLeader(ctx, to)
-        to: n.awaitLeader
+      - return: running, nil
   - of: (*Node).awaitLeader
     participants:
       - id: caller

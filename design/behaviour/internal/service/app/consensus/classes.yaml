@@ -1229,6 +1229,7 @@ files:
       - (*Node).Close
       - (*Node).releaseDir
       - (*Node).handOff
+      - (*Node).handOffTarget
       - (*Node).HardClose
       - (*Node).Status
       - (*Node).Watch
@@ -1421,6 +1422,7 @@ files:
       - (*Node).TransferLeadership
       - (*Node).confirmLeader
       - (*Node).transferLocal
+      - (*Node).startLocal
       - (*Node).awaitLeader
     name: ops.go
   - decls:
@@ -6702,10 +6704,25 @@ types:
           it again; HardClose skips it when a goroutine may still be writing.
         name: releaseDir
         recv: n *Node
-      - doc: handOff transfers leadership to the most caught-up voter, best effort.
+      - doc: |-
+          handOff transfers leadership to the most caught-up voter, best effort,
+          and to the next most caught-up when that one does not take it over, each
+          voter once, while this node leads. A voter that handed its own leadership
+          over for a stuck apply declines every transfer until that apply moves,
+          and only it knows (#674): picked first on an equal match, it made the
+          Remove of this leader submitted here, which moves the leadership away
+          first (#529), fail at every attempt (#681).
         name: handOff
         params: ctx context.Context
         recv: n *Node
+      - doc: |-
+          handOffTarget is the voter other than this node with the highest
+          acknowledged index, the first of the configuration on a tie, among those
+          not in tried; 0 when there is none.
+        name: handOffTarget
+        params: st *raft.StatusValue, tried []coreconsensus.NodeID
+        recv: n *Node
+        results: coreconsensus.NodeID
       - name: HardClose
         recv: n *Node
         results: error
@@ -7159,11 +7176,22 @@ types:
           transferLocal starts a leadership transfer on this node's own raft
           instance, without writing an entry, and waits for the target to lead: the
           hand-off Close and a leader's self-Remove use, where no operator entry is
-          owed and the node may be about to leave.
+          owed and the node may be about to leave. A transfer to another voter
+          still under way is waited out first: raft starts none while one runs, and
+          the hand-off to the next voter, whose wait for the previous one ends a
+          tick before raft's deadline, sent nobody a TimeoutNow (#681).
         name: transferLocal
         params: ctx context.Context, to coreconsensus.NodeID
         recv: n *Node
         results: error
+      - doc: |-
+          startLocal starts transferLocal's transfer to to on the loop, unless a
+          transfer to another voter still runs: it then returns the channel that
+          transfer's end is sent on (answerReady), and starts nothing.
+        name: startLocal
+        params: to coreconsensus.NodeID
+        recv: n *Node
+        results: <-chan errs.Code, error
       - doc: |-
           awaitLeader waits until to is the leader the node observes. It fails with
           TRANSFER_FAILED after twice the maximum election timeout, or when ctx

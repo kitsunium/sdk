@@ -2177,32 +2177,51 @@ func (n *Node) releaseDir() {
 	})
 }
 
-// handOff transfers leadership to the most caught-up voter, best effort.
+// handOff transfers leadership to the most caught-up voter, best effort,
+// and to the next most caught-up when that one does not take it over, each
+// voter once, while this node leads. A voter that handed its own leadership
+// over for a stuck apply declines every transfer until that apply moves,
+// and only it knows (#674): picked first on an equal match, it made the
+// Remove of this leader submitted here, which moves the leadership away
+// first (#529), fail at every attempt (#681).
 func (n *Node) handOff(ctx context.Context) {
+	var tried []coreconsensus.NodeID
+	for ctx.Err() == nil {
+		var to coreconsensus.NodeID
+		n.exec(func() {
+			if st := n.r.Status(); st.Role == coreconsensus.RoleLeader {
+				to = n.handOffTarget(&st, tried)
+			}
+		})
+		if to == 0 {
+			return
+		}
+		tctx, cancel := context.WithTimeout(ctx, n.cfg.InitialTiming.ElectionTimeoutMax)
+		err := n.transferLocal(tctx, to)
+		cancel()
+		if err == nil {
+			return
+		}
+		// Close goes on whatever the transfers answered: the hand-off only
+		// spares the cluster an election timeout, so a failed one is worth
+		// a line in the log and nothing more.
+		n.obs.info("consensus: leadership hand-off did not complete", lattr("to", uint64(to)), lstr("error", err.Error()))
+		tried = append(tried, to)
+	}
+}
+
+// handOffTarget is the voter other than this node with the highest
+// acknowledged index, the first of the configuration on a tie, among those
+// not in tried; 0 when there is none.
+func (n *Node) handOffTarget(st *raft.StatusValue, tried []coreconsensus.NodeID) coreconsensus.NodeID {
 	var to coreconsensus.NodeID
 	var best uint64
-	n.exec(func() {
-		st := n.r.Status()
-		for _, m := range st.Conf.Members {
-			if !m.Voter || m.ID == n.stamp.ID {
-				continue
-			}
-			if match, _, ok := n.r.Progress(m.ID); ok && (to == 0 || match > best) {
-				to, best = m.ID, match
-			}
+	for _, m := range st.Conf.Members {
+		if match, ok := n.voterMatch(m); ok && !slices.Contains(tried, m.ID) && (to == 0 || match > best) {
+			to, best = m.ID, match
 		}
-	})
-	if to == 0 {
-		return
 	}
-	tctx, cancel := context.WithTimeout(ctx, n.cfg.InitialTiming.ElectionTimeoutMax)
-	defer cancel()
-	// Close goes on whatever the transfer answered: the hand-off only
-	// spares the cluster an election timeout, so a failed one is worth a
-	// line in the log and nothing more.
-	if err := n.transferLocal(tctx, to); err != nil {
-		n.obs.info("consensus: leadership hand-off at close did not complete", lattr("to", uint64(to)), lstr("error", err.Error()))
-	}
+	return to
 }
 
 // HardClose stops now: no transfer, no final sync, bounded by

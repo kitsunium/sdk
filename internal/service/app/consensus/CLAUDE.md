@@ -607,6 +607,18 @@ machine, are 32.9 s at 24, and 34 s for the slowest on average over
   `TestRemovingAPreferredLeaderOnItselfIsNotUndoneByTheWatch`,
   `TestRemovingAPreferredLeaderFromAFollowerIsNotUndoneByTheWatch`,
   `TestAPreferredNodeHandedOverByATransferLeadsAgainAfterTheWindow`).
+- Hand the leadership off to one voter only, or start a local transfer
+  while raft still runs another: a voter that handed over for a stuck apply
+  declines every transfer (#674), and only it knows, so a `Remove` of the
+  leader submitted on it, whose hand-off went to that voter, the first of
+  the configuration on an equal match, failed `MEMBERSHIP_INVALID` at every
+  attempt. `handOff` tries the next most caught-up voter, each once while
+  the node leads (`handOffTarget`), and `transferLocal` waits out a
+  transfer to another voter still under way: raft starts none while one
+  runs, and the wait for the voter that declined ends a tick before raft's
+  deadline (#681,
+  `TestRemovingTheLeaderOnItselfHandsOverPastAVoterThatDeclines`,
+  `TestALocalTransferWaitsOutTheOneUnderWay`).
 - Leave a peer's series at their last value once it is no longer published,
   or keep a departed member's certificate in `peerExpiry`: a series is never
   deleted, and "peer unreachable" and "certificate expiring" alerted for a

@@ -657,19 +657,50 @@ func (n *Node) confirmLeader(ctx context.Context, to coreconsensus.NodeID, refus
 // transferLocal starts a leadership transfer on this node's own raft
 // instance, without writing an entry, and waits for the target to lead: the
 // hand-off Close and a leader's self-Remove use, where no operator entry is
-// owed and the node may be about to leave.
+// owed and the node may be about to leave. A transfer to another voter
+// still under way is waited out first: raft starts none while one runs, and
+// the hand-off to the next voter, whose wait for the previous one ends a
+// tick before raft's deadline, sent nobody a TimeoutNow (#681).
 func (n *Node) transferLocal(ctx context.Context, to coreconsensus.NodeID) error {
+	for {
+		running, err := n.startLocal(to)
+		switch {
+		case err != nil:
+			return err
+		case running == nil:
+			return n.awaitLeader(ctx, to)
+		}
+		select {
+		case <-running:
+		case <-ctx.Done():
+			return origin(coreconsensus.TransferFailed, errs.String("cause", ctx.Err().Error()))
+		case <-n.loopDone:
+			return n.stoppedErr()
+		}
+	}
+}
+
+// startLocal starts transferLocal's transfer to to on the loop, unless a
+// transfer to another voter still runs: it then returns the channel that
+// transfer's end is sent on (answerReady), and starts nothing.
+func (n *Node) startLocal(to coreconsensus.NodeID) (<-chan errs.Code, error) {
 	var code errs.Code
+	var running chan errs.Code
 	if !n.exec(func() {
+		if cur := n.r.Status().Transfer; cur != 0 && cur != to {
+			running = make(chan errs.Code, 1)
+			n.transfers = append(n.transfers, running)
+			return
+		}
 		code = n.r.TransferLeadership(n.clk.Now(), to)
 		n.handleReady()
 	}) {
-		return n.stoppedErr()
+		return nil, n.stoppedErr()
 	}
 	if code != 0 {
-		return origin(sentinelOf(code))
+		return nil, origin(sentinelOf(code))
 	}
-	return n.awaitLeader(ctx, to)
+	return running, nil
 }
 
 // awaitLeader waits until to is the leader the node observes. It fails with
