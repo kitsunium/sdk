@@ -348,6 +348,13 @@ constants:
         name: maxCtrlPerTurn
         type: int
         value: "256"
+      - doc: |-
+          preferMaxDoublings caps how many times the pause between two
+          transfers to a preferred node doubles: at most 16 maximum election
+          timeouts (#662).
+        name: preferMaxDoublings
+        type: int
+        value: "4"
     name: inboxDepth
   - doc: |-
       cutAllowance is how many maximum election timeouts a cut on the apply
@@ -1174,7 +1181,9 @@ files:
       - joinReleaser
       - (*Node).leadershipChanged
       - (*Node).startGrace
+      - preferWatch
       - (*Node).watchPreferred
+      - (*Node).preferPause
       - (*Node).preferLeader
       - (*Node).publish
       - fetchDone
@@ -5542,11 +5551,9 @@ types:
           nanoseconds of n.clk; 0 when it is not cutting (#593).
         name: cuttingSince
         type: atomic.Int64
-      - doc: |-
-          preferAt is the earliest tick at which this leader tries
-          PreferredLeaders again after a transfer it started (#559).
-        name: preferAt
-        type: time.Time
+      - doc: "prefer is this leader's watch of PreferredLeaders (#559, #662)."
+        name: prefer
+        type: preferWatch
       - name: watchMu
         type: sync.Mutex
       - name: watchers
@@ -6406,16 +6413,36 @@ types:
           watchPreferred hands the leadership to a preferred node once one holds
           the commit, while this leader is not preferred (D8). It runs on the loop,
           at every tick: on the Ready where a node becomes leader every match is
-          still 0, so a check made only then never transferred (#559). A transfer
-          it started, done or not, is not tried again before the maximum election
-          timeout, so a lagging preferred node causes no churn.
+          still 0, so a check made only then never transferred (#559).
+
+          Every proposal is refused NOT_LEADER while a transfer runs, the
+          operator's admin included. The next transfer used to start at the very
+          tick the previous one expired, on a match that still held the commit
+          since nothing could commit meanwhile, so a preferred node that died
+          before taking over stopped every write for as long as this node led
+          (#662). The next transfer now waits a pause after the previous one
+          ended (preferPause), so writes and admin go through in between, and a
+          lagging preferred node causes no churn.
         name: watchPreferred
         params: now time.Time
         recv: n *Node
       - doc: |-
-          preferLeader starts a transfer to the first preferred voter that holds
-          the commit, and reports whether it did; a preferred node never hands
-          over.
+          preferPause is the pause after a transfer before the watch starts the
+          next one: the maximum election timeout, doubled by each earlier transfer
+          the watch started in this leadership, every one of which failed since a
+          success ends the leadership, at most preferMaxDoublings times.
+        name: preferPause
+        params: st *raft.StatusValue
+        recv: n *Node
+        results: time.Duration
+      - doc: |-
+          preferLeader starts a transfer to a preferred voter that holds the commit
+          and was heard within the minimum election timeout, the first in
+          PreferredLeaders from just after the last one tried, and reports whether
+          it did; a preferred node never hands over. A preferred node that went
+          silent is no target: a transfer to it can only expire (#662). The order
+          moves on after each try, so a preferred node that is heard but never
+          takes over does not keep the next one from leading.
         name: preferLeader
         params: now time.Time, st *raft.StatusValue
         recv: n *Node
@@ -7448,6 +7475,34 @@ types:
       interface {
       	releaseJoinAnswer()
       }
+  - doc: |-
+      preferWatch is a leader's watch of PreferredLeaders, reset at every
+      change of leadership.
+    fields:
+      - doc: |-
+          at is the earliest tick at which the leader starts a transfer to a
+          preferred node: a pause after the end of the previous transfer,
+          whoever started it (#662).
+        name: at
+        type: time.Time
+      - doc: |-
+          tries counts the transfers the watch started in this leadership. One
+          that hands over ends the leadership, so all but the last failed.
+        name: tries
+        type: int
+      - doc: |-
+          next is the position in PreferredLeaders the next choice starts
+          from: just after the last node tried.
+        name: next
+        type: int
+      - doc: |-
+          running is whether a transfer was under way at the last tick, the
+          watch's or the operator's: the pause starts at the first tick that no
+          longer sees it.
+        name: running
+        type: bool
+    kind: struct
+    name: preferWatch
   - fields:
       - name: req
         type: raft.FetchSpec

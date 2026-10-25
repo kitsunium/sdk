@@ -1935,9 +1935,28 @@ leader transfers to after an election when it is not one of them — here FRA
 and RBX, 9.6 ms apart, so a commit costs ~10 ms of network instead of ~23.
 The leader judges them at every tick, not only when it is elected: at that
 moment no peer has acknowledged anything yet, so a check made only then never
-transferred (#559). It hands over to the first preferred voter that holds the
-commit, and does not try again before `ElectionTimeoutMax` after a transfer it
-started.
+transferred (#559). It hands over to a preferred voter that holds the commit
+and was heard within `ElectionTimeoutMin`, the first of the list from just
+after the last one it tried (amendment of 2026-10-25,
+[#662](https://github.com/kitsunium/sdk/issues/662)):
+
+- A transfer refuses every proposal while it runs, the operator's admin
+  included. The next one used to start at the very tick the previous one
+  expired, so a preferred node that died after catching up, before it won,
+  kept every write refused, and the `Remove` of it and a transfer to a
+  healthy voter with them, for as long as the leader lasted: its match still
+  held a commit that nothing could move. A preferred node that went silent
+  is no target.
+- The next transfer waits a pause after the previous one ended, whoever
+  started it: `ElectionTimeoutMax`, doubled by each earlier transfer the
+  leader started in the same leadership, every one of which failed since a
+  success ends it, and at most 16 × `ElectionTimeoutMax`. Writes and admin
+  are admitted in the pause.
+- The list moves on after each try, so a preferred node that is heard but
+  never takes over, its `TimeoutNow` lost, does not keep the next one from
+  leading.
+- The rule is the leader's alone: no frame changes, and a mixed cluster
+  needs nothing.
 
 ### D9 — Reads: ReadIndex by default, a lease kept with every correction (Q2, R1-19)
 
