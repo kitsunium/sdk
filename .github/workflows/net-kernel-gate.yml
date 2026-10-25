@@ -1,0 +1,263 @@
+name: Net kernel gate
+# The merge gate of the network engines (plan P8-infra; R7: a gate is placed
+# at the merge, never at the release). Three jobs and an aggregator:
+#
+#   - `changes`: the path filter, computed between the two commits the event
+#     names — on a pull request the base branch's tip and the merge commit
+#     GitHub evaluates, in the merge queue the queue's base_sha and head_sha
+#     (scripts/ci/net-gate-paths.sh). No network path changed: the other jobs
+#     are skipped and the gate passes.
+#   - `lanes`: the net suites on a kernel, one leg per kernel, each declaring
+#     `requiredBackends` and `requiredCaps`, compiled into the loop suite,
+#     which fails closed: a backend or a capability the leg requires and the
+#     kernel lacks FAILS the leg, it is never skipped. The guest leg boots its
+#     image with one retry of the boot (scripts/ci/boot-guest.sh).
+#   - `bench`: engine A against engine B on each load, interleaved, ten
+#     rounds, in this one job on one GitHub-hosted runner — never a
+#     self-hosted one, which a fork's pull request could reach — then
+#     tools/netgate judges the plan's gates on benchstat's interval and writes
+#     a report naming the commit it measured.
+#   - `net-kernel-gate`: the one status to require; it passes when the filter
+#     ran and either nothing relevant changed or the lanes and the bench both
+#     passed (scripts/ci/net-gate-verdict.sh).
+#
+# Budget: 45 minutes a pull request; every job is capped below it and they
+# run side by side. `pull_request`, never `pull_request_target`: no secret,
+# a read-only token. Requiring `net-kernel-gate` is a ruleset setting, left to
+# the maintainer (.github/workflows/CLAUDE.md §Merge queue).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  merge_group:
+    types: [checks_requested]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # A newer push to a pull request supersedes its run; a queue entry, and
+  # anything on main, is never cancelled.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  # The evaluated commit and the base the filter compares it with.
+  EVAL_SHA: ${{ github.sha }}
+  BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+  # The net packages the lanes run, relative to the internal module.
+  NET_PKGS: "./core/net ./service/net/loop ./service/net/server ./service/net/http1"
+  LOOP_PKG: github.com/kitsunium/sdk/internal/service/net/loop
+
+jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      relevant: ${{ steps.paths.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: the network paths between the base and the evaluated commit
+        id: paths
+        run: bash scripts/ci/net-gate-paths.sh "$BASE_SHA" "$EVAL_SHA" >>"$GITHUB_OUTPUT"
+
+  lanes:
+    name: lane ${{ matrix.leg }}
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The runner's own kernel.
+          - leg: host
+            kind: host
+            requiredBackends: "iouring,epoll"
+            requiredCaps: "none"
+          # Ubuntu noble at its own kernel, 6.8, the one the loop engine's
+          # io_uring is sized against (ADR 0186); the image e2e-cross.yml pins,
+          # by URL and digest.
+          - leg: noble-6.8
+            kind: vm
+            requiredBackends: "iouring,epoll"
+            requiredCaps: "none"
+            url: https://cloud-images.ubuntu.com/noble/20261017/noble-server-cloudimg-amd64.img
+            algo: sha256
+            sum: 04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94
+    env:
+      GOWORK: "off"
+      CGO_ENABLED: "0"
+      REQUIRED_BACKENDS: ${{ matrix.requiredBackends }}
+      REQUIRED_CAPS: ${{ matrix.requiredCaps }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+
+      - name: the leg declares its backends and capabilities
+        run: |
+          set -euo pipefail
+          if [ -z "$REQUIRED_BACKENDS" ] || [ -z "$REQUIRED_CAPS" ]; then
+            echo "::error::leg ${{ matrix.leg }} declares no requiredBackends or no requiredCaps: a lane fails closed"
+            exit 1
+          fi
+          echo "GOFLAGS=-tags=loopdebug '-ldflags=-X=$LOOP_PKG.requiredBackends=$REQUIRED_BACKENDS -X=$LOOP_PKG.requiredCaps=$REQUIRED_CAPS'" >>"$GITHUB_ENV"
+
+      - name: the net suites on the runner's kernel, race on
+        if: matrix.kind == 'host'
+        working-directory: internal
+        run: |
+          set -euo pipefail
+          echo "kernel: $(uname -r)"
+          # shellcheck disable=SC2086 # NET_PKGS is a list.
+          CGO_ENABLED=1 go test -race -count=1 $NET_PKGS
+
+      - name: compile the net suites for the guest
+        if: matrix.kind == 'vm'
+        run: |
+          set -euo pipefail
+          mkdir -p bins
+          : >bins/manifest
+          for pkg in $NET_PKGS; do
+            bin="$(echo "${pkg#./}" | tr '/' '_').test"
+            (cd internal && go test -c -o "$GITHUB_WORKSPACE/bins/$bin" "$pkg")
+            echo "$bin internal/${pkg#./}" >>bins/manifest
+          done
+          cat bins/manifest
+
+      - name: fetch the ${{ matrix.leg }} image and verify its digest
+        if: matrix.kind == 'vm'
+        env:
+          URL: ${{ matrix.url }}
+          ALGO: ${{ matrix.algo }}
+          SUM: ${{ matrix.sum }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils cloud-image-utils
+          mkdir -p vm
+          curl -fsSL --retry 5 --retry-all-errors -o vm/base.qcow2 "$URL"
+          echo "$SUM  vm/base.qcow2" | "${ALGO}sum" -c -
+          sudo chmod 666 /dev/kvm
+
+      - name: boot ${{ matrix.leg }}, one retry of the boot
+        if: matrix.kind == 'vm'
+        timeout-minutes: 12
+        run: bash scripts/ci/boot-guest.sh vm
+
+      - name: the net suites on the guest's own kernel
+        if: matrix.kind == 'vm'
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          s="ssh -i vm/key -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@127.0.0.1"
+          echo "runner kernel: $(uname -r)"
+          echo "guest kernel : $($s uname -r)"
+          tar --exclude=./.git --exclude=./vm -cf - . | $s "rm -rf /work && mkdir /work && tar -C /work -xf -"
+          $s "cd /work && TEST_TIMEOUT=10m sh scripts/ci/run-test-binaries.sh bins -test.count=1"
+
+      - name: guest console (on failure)
+        if: ${{ failure() && matrix.kind == 'vm' }}
+        run: tail -120 vm/console.log || true
+
+  bench:
+    name: bench
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
+    # GitHub-hosted, always: the gate's numbers come from a runner a fork
+    # cannot reach, and A and B share it.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GOWORK: "off"
+      CGO_ENABLED: "0"
+      # Ten rounds, each running every engine once: interleaved, so a drift
+      # of the runner lands on both sides.
+      ROUNDS: "10"
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+
+      - name: the checkout is the evaluated commit
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          if [ "$head" != "$EVAL_SHA" ]; then
+            echo "::error::checked out $head, evaluating $EVAL_SHA: the result would not be tied to the commit measured"
+            exit 1
+          fi
+
+      - name: the veth pair L3 runs over
+        run: sudo bash scripts/ci/net-veth.sh up | tee -a "$GITHUB_ENV"
+
+      - name: build the bench binary
+        working-directory: internal
+        run: go test -c -o "$RUNNER_TEMP/server.test" ./service/net/server
+
+      - name: engine A against engine B, interleaved
+        working-directory: internal/service/net/server
+        run: |
+          set -euo pipefail
+          echo "kernel: $(uname -r), $(nproc) CPUs, commit $EVAL_SHA" | tee "$RUNNER_TEMP/bench.txt"
+          for round in $(seq 1 "$ROUNDS"); do
+            echo "::group::round $round"
+            "$RUNNER_TEMP/server.test" -test.run='^$' -test.bench='^BenchmarkLoad' \
+              -test.benchtime=100000x -test.count=1 -test.timeout=10m \
+              2> >(grep -v '^net/loop:' >&2) | tee -a "$RUNNER_TEMP/bench.txt"
+            echo "::endgroup::"
+          done
+
+      - name: judge the gates
+        working-directory: tools/netgate
+        run: go run . -in "$RUNNER_TEMP/bench.txt" -sha "$EVAL_SHA" -out "$RUNNER_TEMP/netgate-report.json"
+
+      - name: publish the samples and the report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: net-bench-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/bench.txt
+            ${{ runner.temp }}/netgate-report.json
+          retention-days: 90
+
+      - name: remove the veth pair
+        if: always()
+        run: sudo bash scripts/ci/net-veth.sh down
+
+  net-kernel-gate:
+    name: net-kernel-gate
+    needs: [changes, lanes, bench]
+    # Always, so a failed or skipped need is judged here instead of skipping
+    # this job, which a ruleset would count as passing.
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - name: verdict
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          RELEVANT: ${{ needs.changes.outputs.relevant }}
+          LANES: ${{ needs.lanes.result }}
+          BENCH: ${{ needs.bench.result }}
+        run: bash scripts/ci/net-gate-verdict.sh "$CHANGES" "$RELEVANT" "$LANES" "$BENCH"
