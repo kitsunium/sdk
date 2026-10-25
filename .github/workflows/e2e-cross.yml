@@ -143,7 +143,9 @@ env:
   # above. Relative to framework/, a directory of the SDK module (ADR 0162),
   # as the three lists above are relative to the layer directories.
   FRAMEWORK_PKGS: "./internal/service/entitlement"
-  LOOP_GOFLAGS: "-tags=loopdebug -ldflags=-X=github.com/kitsunium/sdk/internal/service/net/loop.requiredBackends=iouring,epoll"
+  # Quoted: one -ldflags carrying both -X, the backends and the capabilities
+  # (none required here; net-kernel-gate.yml's legs declare theirs).
+  LOOP_GOFLAGS: "-tags=loopdebug '-ldflags=-X=github.com/kitsunium/sdk/internal/service/net/loop.requiredBackends=iouring,epoll -X=github.com/kitsunium/sdk/internal/service/net/loop.requiredCaps=none'"
 
 jobs:
   # ── Native hosted runners: Go runs in place, no cross-compile ──────────────

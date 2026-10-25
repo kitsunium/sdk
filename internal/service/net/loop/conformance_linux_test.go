@@ -38,6 +38,44 @@ import (
 // "none" runs whatever is present and requires nothing.
 var requiredBackends string
 
+// requiredCaps is the comma-separated list of kernel capabilities this test
+// binary must find, set at link time beside requiredBackends:
+//
+//	go test -ldflags='-X=github.com/kitsunium/sdk/internal/service/net/loop.requiredBackends=iouring -X=github.com/kitsunium/sdk/internal/service/net/loop.requiredCaps=uring-direct'
+//
+// "none" requires none. Like requiredBackends it fails closed: unset fails, a
+// capability this kernel lacks fails, and a capability no probe of capProbes
+// checks fails too — a lane may not require what nothing verifies. The
+// net-kernel-gate workflow declares both per leg.
+var requiredCaps string
+
+// capProbes are the capabilities a lane may require, each with the probe that
+// proves it on the running kernel. P3's capability reports add theirs here.
+var capProbes = map[string]func() error{
+	// uring-direct: io_uring's release check chose direct descriptors (a
+	// kernel from 6.13, ADR 0186).
+	"uring-direct": probeURingDirect,
+}
+
+// errCapAbsent reports a capability whose probe ran and did not find it.
+var errCapAbsent = errors.New("capability absent")
+
+// probeURingDirect starts an io_uring group and reads its probe stage.
+func probeURingDirect() error {
+	g, err := Start(Config{Group: "probe", Value: corenet.LoopValue{Backend: corenet.LoopBackendIOURing}, Handler: &lineH{}, Log: io.Discard})
+	if err != nil {
+		return err
+	}
+	stage := g.State().ProbeStage
+	if err := g.Close(); err != nil {
+		return err
+	}
+	if !strings.HasSuffix(stage, "+direct") {
+		return fmt.Errorf("%w: probe stage %q, want +direct", errCapAbsent, stage)
+	}
+	return nil
+}
+
 // idleClients is the memory test's client process, set by its file in the
 // race-off build.
 var idleClients func(addr string) int
@@ -93,6 +131,29 @@ func TestBackendsRequired(t *testing.T) {
 		}
 	}
 	t.Logf("net/loop backends: required=%s present=%v kernel=%s", requiredBackends, present, kernelRelease())
+}
+
+// TestCapsRequired fails closed as TestBackendsRequired does: no expectation
+// compiled in, a capability without a probe, and a capability the kernel
+// lacks each fail, naming the kernel.
+func TestCapsRequired(t *testing.T) {
+	if requiredCaps == "" {
+		t.Fatal("no capability expectation compiled in: build with -ldflags=-X=github.com/kitsunium/sdk/internal/service/net/loop.requiredCaps=<list|none>")
+	}
+	if requiredCaps == "none" {
+		return
+	}
+	for _, want := range strings.Split(requiredCaps, ",") {
+		probe, ok := capProbes[want]
+		if !ok {
+			t.Errorf("capability %q is required on this lane and no probe checks it", want)
+			continue
+		}
+		if err := probe(); err != nil {
+			t.Errorf("capability %q is required on this lane and absent on %s: %v %v", want, kernelRelease(), err, errs.FieldsOf(err))
+		}
+	}
+	t.Logf("net/loop capabilities: required=%s kernel=%s", requiredCaps, kernelRelease())
 }
 
 // probeBackend starts and closes an empty group on b.
