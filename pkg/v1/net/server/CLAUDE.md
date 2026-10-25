@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T18:00:00Z -->
+<!-- updated: 2026-10-25T23:00:00Z -->
 # pkg/v1/net/server/
 
 ## Purpose
@@ -42,6 +42,7 @@ in the dimension that motivated the domain, whatever else it gained.
 | `DrainSignal` | the shutdown signal a handler holding a connection open watches |
 | `ListenFailed` … `ConnLimitReached` | sentinels |
 | `Group.HandleLoop` | serves a plaintext group on the loop engine (ADR 0186, §D9 step 11): io_uring or epoll on Linux, the portable backend elsewhere; TLS, `Use` and every option given — its zero value included — that neither the engine nor the handler honours are refused at `Start` (ADR 0187 §D2). `TestHandleLoopServesInPublic` serves one with this package alone |
+| `Group.UseLoop`, `LoopMiddleware`, `LoopLayer`, `NewLoopLayer`, `LoopLayered`, `LoopStarter`, `OptionLoopMiddleware`, `LoopMiddlewareInvalid` | loop middlewares (ADR 0189 §D2): a layer embeds `LoopLayer`, Start checks it forwards every callback through a probe chain, a goroutine group refuses `UseLoop`; `LoopStarter.OnStart(lanes)` before any callback, `Loops` lanes on every backend |
 | `Loop`, `LoopValue`, `LoopBackend`, `LoopBackend*` | a group's loop engine (ADR 0186 §D5): a `HandleLoop` group runs on it, any other group refuses it with `LoopOptionUnsupported` |
 | `LoopHandler`, `LoopIO`, `LoopOptionHonourer`, `LoopConnRef`, `PostFunc`, `OptionKind`, `Option*` | the loop ports and values (§D9 step 6); `LoopIO.Loop` names the loop a callback runs on, so a handler keeps per-loop state in a slice; `TestLoopPortsArePublic` writes one with this package alone |
 | `LoopState`, `LoopRingState` | `State.Loops`, empty while no loop group exists |

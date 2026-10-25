@@ -94,6 +94,24 @@ constants:
         value: "64"
     name: HTTP1MaxFields
   - doc: |-
+      HTTP1MaxSubject is the longest subject an HTTP1AuthValue holds, in bytes. It
+      sizes the value's array, so a subject is copied into the request and never
+      aliases the bytes it was read from; a longer one is refused.
+    items:
+      - name: HTTP1MaxSubject
+        type: int
+        value: "128"
+    name: HTTP1MaxSubject
+  - doc: |-
+      HTTP1MaxAccessFields is how many request fields an access-log link may
+      allow: it sizes HTTP1AccessValue.Fields, so a record is a value and never a
+      slice that grows.
+    items:
+      - name: HTTP1MaxAccessFields
+        type: int
+        value: "8"
+    name: HTTP1MaxAccessFields
+  - doc: |-
       HTTP1DefaultHead is the head bound a zero HTTP1LimitsValue.Head selects: the
       request line, every field line and the blank line that ends them, in bytes.
     items:
@@ -206,6 +224,10 @@ constants:
           OptionEngine is Engine. Every engine honours it, or refuses the group with
           EngineUnsupported.
         name: OptionEngine
+      - doc: |-
+          OptionLoopMiddleware is UseLoop. The loop engine honours it; every group no
+          loop handler serves refuses it with LoopOptionUnsupported.
+        name: OptionLoopMiddleware
     name: OptionNone
   - doc: The loop backends. The zero value is LoopBackendAuto.
     grouped: true
@@ -542,6 +564,8 @@ files:
     name: handler_compliance.go
   - decls:
       - HTTP1MaxFields
+      - HTTP1MaxSubject
+      - HTTP1MaxAccessFields
       - HTTP1DefaultHead
       - HTTP1MaxHead
       - HTTP1DefaultTarget
@@ -558,6 +582,15 @@ files:
       - HTTP1HandlerFunc
       - HTTP1HandlerFunc.ServeHTTP1
     name: http1.go
+  - decls:
+      - HTTP1AuthValue
+      - (*HTTP1AuthValue).SetSubject
+      - (*HTTP1AuthValue).Subject
+      - (*HTTP1AuthValue).SetClaims
+      - (*HTTP1AuthValue).Claims
+      - (*HTTP1AuthValue).Reset
+      - HTTP1AccessValue
+    name: http1_auth.go
   - decls:
       - defaultMinVersion
       - IdentityValue
@@ -588,6 +621,19 @@ files:
       - optionNames
       - OptionKind.String
     name: loop.go
+  - decls:
+      - LoopLayer
+      - NewLoopLayer
+      - LoopLayer.Next
+      - LoopLayer.OnOpen
+      - LoopLayer.OnData
+      - LoopLayer.OnTimeout
+      - LoopLayer.OnWritable
+      - LoopLayer.OnBatchEnd
+      - LoopLayer.OnClose
+      - LoopLayer.Honours
+      - LoopLayer.OnStart
+    name: loop_layer.go
   - decls:
       - LoopRingStateValue
       - LoopStateValue
@@ -699,6 +745,9 @@ functions:
   - name: NewIdentityValue
     params: p IdentityParams
     results: id IdentityValue, err error
+  - name: NewLoopLayer
+    params: next LoopHandler
+    results: LoopLayer
   - doc: |-
       parseKeyPair turns a PEM certificate chain and key into a tls.Certificate.
       Both halves empty is legitimate — a client that only verifies the server holds
@@ -995,12 +1044,46 @@ types:
         name: Close
         type: bool
       - doc: |-
-          Loop is the index of the loop that framed the request — its
-          LoopIO.Loop — set by the loop adapter before the handler runs, so a
-          handler finds its per-loop state in a slice, with no lock. Parse leaves
-          it as it is; outside the loop adapter it is what the caller set.
-        name: Loop
+          Lane is the index of the lane that framed the request, from 0 to the
+          group's lane count less one — its LoopIO.Loop — set by the loop adapter
+          before the handler runs. One lane is one thread or one goroutine, so a
+          handler finds its per-lane state in a slice sized at LoopStarter.OnStart,
+          with no lock. Parse leaves it as it is; outside the loop adapter it is
+          what the caller set.
+        name: Lane
         type: int
+      - doc: |-
+          Path is the request's canonical path, the one target every link of a
+          chain routes and judges on, computed once by the codec: the target's
+          path up to its query, an absolute-form target reduced to its path once
+          its authority matched Host. It is still percent-encoded, and holds no
+          dot-segment, no empty segment, no backslash and no encoded slash, dot,
+          backslash or NUL: the codec refuses a target that would (400). An
+          asterisk-form target, OPTIONS only, is "*".
+        name: Path
+        type: "[]byte"
+      - doc: |-
+          Query is the target's query, after its "?" and without it; empty when
+          the target has none.
+        name: Query
+        type: "[]byte"
+      - doc: |-
+          Route is the identifier of the route a router link matched, zero for
+          none. Parse resets it to zero; only a link sets it.
+        name: Route
+        type: int
+      - doc: |-
+          Auth is what an authenticating link established: the subject and the
+          claims, copied by value into the request, so nothing of them aliases
+          bytes the connection reuses. Parse resets it; Authenticated says
+          whether a link set it.
+        name: Auth
+        type: HTTP1AuthValue
+      - doc: |-
+          Authenticated reports whether an authenticating link verified the
+          request's credentials and filled Auth. Parse resets it to false.
+        name: Authenticated
+        type: bool
     kind: struct
     methods:
       - name: Field
@@ -1045,6 +1128,71 @@ types:
         recv: f HTTP1HandlerFunc
     name: HTTP1HandlerFunc
     underlying: func(req *HTTP1RequestValue, res *HTTP1ResponseValue)
+  - fields:
+      - doc: subject holds the subject's bytes, the first n of them.
+        name: subject
+        type: "[HTTP1MaxSubject]byte"
+      - doc: n is the subject's length.
+        name: "n"
+        type: uint8
+      - doc: claims are the application's bits.
+        name: claims
+        type: uint64
+    kind: struct
+    methods:
+      - name: SetSubject
+        params: b []byte
+        recv: a *HTTP1AuthValue
+        results: bool
+      - name: Subject
+        recv: a *HTTP1AuthValue
+        results: "[]byte"
+      - name: SetClaims
+        params: c uint64
+        recv: a *HTTP1AuthValue
+      - name: Claims
+        recv: a *HTTP1AuthValue
+        results: uint64
+      - name: Reset
+        recv: a *HTTP1AuthValue
+    name: HTTP1AuthValue
+  - fields:
+      - doc: Lane is the request's lane.
+        name: Lane
+        type: int
+      - doc: Route is the route a router link matched, zero for none.
+        name: Route
+        type: int
+      - doc: Method is the request method.
+        name: Method
+        type: "[]byte"
+      - doc: Path is the request's canonical path, without its query.
+        name: Path
+        type: "[]byte"
+      - doc: |-
+          Status is the answer's status code, 200 when the handler left it zero;
+          zero for an answer still deferred.
+        name: Status
+        type: int
+      - doc: BodyLen is the length of the answer's body.
+        name: BodyLen
+        type: int
+      - doc: Authenticated reports whether an authenticating link verified the request.
+        name: Authenticated
+        type: bool
+      - doc: Deferred reports whether the answer was deferred to the batch's end.
+        name: Deferred
+        type: bool
+      - doc: NFields is how many entries of Fields the record filled.
+        name: NFields
+        type: int
+      - doc: |-
+          Fields holds the allowed request fields the request carried, in the order
+          the link was given their names.
+        name: Fields
+        type: "[HTTP1MaxAccessFields]HTTP1FieldValue"
+    kind: struct
+    name: HTTP1AccessValue
   - fields:
       - doc: certs holds the parsed keypair; empty for a client that only verifies.
         name: certs
@@ -1246,6 +1394,42 @@ types:
         results: string
     name: OptionKind
     underlying: uint8
+  - fields:
+      - doc: next is the handler the layer wraps.
+        name: next
+        type: LoopHandler
+    kind: struct
+    methods:
+      - name: Next
+        recv: l LoopLayer
+        results: LoopHandler
+      - name: OnOpen
+        params: io LoopIO, ref LoopConnRef
+        recv: l LoopLayer
+      - name: OnData
+        params: io LoopIO, ref LoopConnRef, buf []byte
+        recv: l LoopLayer
+        results: int
+      - name: OnTimeout
+        params: io LoopIO, ref LoopConnRef
+        recv: l LoopLayer
+      - name: OnWritable
+        params: io LoopIO, ref LoopConnRef
+        recv: l LoopLayer
+      - name: OnBatchEnd
+        params: io LoopIO
+        recv: l LoopLayer
+      - name: OnClose
+        params: io LoopIO, ref LoopConnRef, err error
+        recv: l LoopLayer
+      - name: Honours
+        params: k OptionKind
+        recv: l LoopLayer
+        results: bool
+      - name: OnStart
+        params: lanes int
+        recv: l LoopLayer
+    name: LoopLayer
   - fields:
       - doc: Loop is the loop's index in its group.
         name: Loop
@@ -1744,6 +1928,9 @@ vars:
   - doc: |-
       The func adapters must satisfy the ports they exist to adapt; an adapter that
       drifts from its interface is useless and the drift is silent until call time.
+      LoopLayer forwards every callback a layer may be asked for: it must stay a
+      LoopHandler, and each optional capability, or a layer embedding it would
+      stop forwarding one without a compile error.
     grouped: true
     items:
       - name: _
@@ -1755,6 +1942,18 @@ vars:
       - name: _
         type: HTTP1Handler
         value: HTTP1HandlerFunc(nil)
+      - name: _
+        type: LoopHandler
+        value: LoopLayer{}
+      - name: _
+        type: LoopLayered
+        value: LoopLayer{}
+      - name: _
+        type: LoopOptionHonourer
+        value: LoopLayer{}
+      - name: _
+        type: LoopStarter
+        value: LoopLayer{}
     name: _
   - doc: |-
       optionNames holds each kind's constructor name, indexed by kind. Its length
@@ -1783,6 +1982,7 @@ vars:
           	OptionPlaintext:         "Plaintext",
           	OptionName:              "Name",
           	OptionEngine:            "Engine",
+          	OptionLoopMiddleware:    "UseLoop",
           }
     name: optionNames
   - doc: |-

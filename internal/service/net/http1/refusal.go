@@ -62,10 +62,22 @@ const (
 	RefusalBodyTooLarge
 	// RefusalMethodUnsupported is CONNECT: the profile opens no tunnel.
 	RefusalMethodUnsupported
+	// RefusalTargetPath is a target whose path holds a dot-segment, an empty
+	// segment, a backslash, an invalid percent-escape, or an encoded slash, dot,
+	// backslash or NUL: a path two links of a chain, or a link and a backend,
+	// could read as two different resources.
+	RefusalTargetPath
+	// RefusalTargetForm is a target in none of the forms the profile serves:
+	// origin-form, absolute-form with an http or https scheme, or "*" for OPTIONS.
+	RefusalTargetForm
+	// RefusalTargetHost is an absolute-form target whose authority carries
+	// userinfo, is empty, or differs from the Host field, or comes with no Host
+	// field at all.
+	RefusalTargetHost
 )
 
 // refusalCount is one past the last Refusal: the length of every table below.
-const refusalCount int = int(RefusalMethodUnsupported) + 1
+const refusalCount int = int(RefusalTargetHost) + 1
 
 // The status codes a refusal is answered with (RFC 9110 §15).
 const (
@@ -109,6 +121,9 @@ var (
 		RefusalTargetTooLong:           "target_too_long",
 		RefusalBodyTooLarge:            "body_too_large",
 		RefusalMethodUnsupported:       "method_unsupported",
+		RefusalTargetPath:              "target_path",
+		RefusalTargetForm:              "target_form",
+		RefusalTargetHost:              "target_host",
 	}
 
 	// refusalStatus is the status each refusal is answered with; RefusalNone's
@@ -136,6 +151,9 @@ var (
 		RefusalTargetTooLong:           statusURITooLong,
 		RefusalBodyTooLarge:            statusContentTooLarge,
 		RefusalMethodUnsupported:       statusNotImplemented,
+		RefusalTargetPath:              statusBadRequest,
+		RefusalTargetForm:              statusBadRequest,
+		RefusalTargetHost:              statusBadRequest,
 	}
 
 	// refusalErrs is the core/net sentinel each refusal belongs to, grouped by
@@ -163,6 +181,9 @@ var (
 		RefusalTargetTooLong:           corenet.HTTP1TargetTooLong,
 		RefusalBodyTooLarge:            corenet.HTTP1BodyTooLarge,
 		RefusalMethodUnsupported:       corenet.HTTP1MethodUnsupported,
+		RefusalTargetPath:              corenet.HTTP1RequestMalformed,
+		RefusalTargetForm:              corenet.HTTP1RequestMalformed,
+		RefusalTargetHost:              corenet.HTTP1RequestMalformed,
 	}
 )
 

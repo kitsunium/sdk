@@ -1,6 +1,30 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 workflows:
+  - of: wrapLoop
+    steps:
+      - bind: chain
+        eval: h
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: mw == nil
+            - bind: layer
+              eval: mw(chain)
+            - bind: l, ok
+              eval: layer.(corenet.LoopLayered)
+            - opt:
+                do:
+                  - return: nil, false
+                when: "!ok || !sameHandler(l.Next(), chain)"
+            - set: chain
+              value: layer
+          key: _
+          range: slices.Backward(mws)
+          value: mw
+      - return: chain, true
   - of: (*portableLoop).compactSpills
     steps:
       - loop:

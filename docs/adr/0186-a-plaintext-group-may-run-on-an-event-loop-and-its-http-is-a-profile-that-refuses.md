@@ -14,7 +14,9 @@
 - **Amended by**: [ADR 0187](0187-the-handler-type-chooses-the-engine.md) — D1 (the
   engine chosen by the handler's type, every option judged by its kind, a
   zero value included), D2 and D3 (an `http1` handler served behind
-  `crypto/tls` on the portable backend)
+  `crypto/tls` on the portable backend); [ADR 0189](0189-a-loop-middleware-forwards-every-callback-and-the-http1-chain-judges-one-canonical-target.md)
+  — D3 (the portable backend runs `Loops` lanes) and D6 (one canonical target,
+  three more target refusals)
 - **Amends**: [ADR 0029](0029-sdk-net-domain.md) D1 (the tree), D2 (one
   goroutine per connection, now the default rather than the only engine), D3
   (do not reimplement HTTP, now with one restricted exception) and D4 (pooling

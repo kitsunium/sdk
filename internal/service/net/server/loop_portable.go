@@ -31,6 +31,9 @@ const (
 	// portableOutputCap is LoopValue.OutputCap's default, as the native
 	// backends have it.
 	portableOutputCap int = 1 << 20
+	// recycledMark is the byte a released buffer is filled with under
+	// markRecycled.
+	recycledMark byte = 0xAA
 )
 
 // The kinds of a portable event.
@@ -40,6 +43,10 @@ const (
 	pevEnd
 	pevSent
 )
+
+// markRecycled, set by a test, fills each read buffer the batch released
+// with recycledMark before it is read into again.
+var markRecycled atomic.Bool
 
 // portableEvent is what a connection's goroutines tell the handler goroutine.
 type portableEvent struct {
@@ -79,20 +86,47 @@ type portableConn struct {
 	reasonSet bool
 }
 
-// portableLoop is the portable backend (ADR 0186 §D3, §D7): the default
+// portableGroup is the portable backend (ADR 0186 §D3, §D7): the default
 // engine's accept path and a goroutine pair per connection on the netpoller,
-// every handler callback serialised onto one handler goroutine, so the
-// LoopHandler contract holds unchanged: one goroutine calls it, buf valid
-// until OnBatchEnd.
-type portableLoop struct {
+// spread over LoopValue.Loops lanes, every callback of one lane serialised
+// onto that lane's handler goroutine, so the LoopHandler contract holds
+// unchanged: one goroutine calls a lane, buf valid until its OnBatchEnd.
+// The acceptors hand connections to the lanes in turn.
+type portableGroup struct {
 	group    string
+	soft     int
+	maxConns int
+	degraded string
+	lanes    []*portableLoop
+	lns      []stdnet.Listener
+	// turn is the lane the next accepted connection goes to, modulo the count.
+	turn     atomic.Uint64
+	drainReq atomic.Bool
+	stopReq  atomic.Bool
+	rejected atomic.Uint64
+	once     sync.Once
+}
+
+// live is how many connections the group's lanes serve together.
+func (g *portableGroup) live() int64 {
+	var n int64
+	//: one atomic load a lane.
+	for _, pl := range g.lanes {
+		n += pl.live.Load()
+	}
+	//: the group's count.
+	return n
+}
+
+// portableLoop is one lane of the portable backend: its handler goroutine,
+// its connections, its post queue and its LoopIO.
+type portableLoop struct {
+	g        *portableGroup
+	lane     int
 	h        corenet.LoopHandler
 	spillCap int
 	outCap   int
-	soft     int
-	maxConns int
 	idle     time.Duration
-	degraded string
 
 	events chan portableEvent
 	// post is the queue of posted operations; wake rouses the handler.
@@ -109,48 +143,53 @@ type portableLoop struct {
 	free  []int32
 	live  atomic.Int64
 
-	drainReq atomic.Bool
-	stopReq  atomic.Bool
 	draining bool
 	done     chan struct{}
-	lns      []stdnet.Listener
 	accepted atomic.Uint64
 	closed   atomic.Uint64
 	batches  atomic.Uint64
-	rejected atomic.Uint64
-	once     sync.Once
 	readers  sync.WaitGroup
 	// batchAcks are the readers waiting on the current batch.
 	batchAcks []chan struct{}
 	dirty     []int32
 }
 
-// startPortable starts the portable backend on lns. degraded names why a
-// Linux auto group fell back to it, empty otherwise.
+// startPortable starts the portable backend on lns, with one lane per loop
+// of the group's LoopValue (zero meaning one). degraded names why a Linux
+// auto group fell back to it, empty otherwise.
 //
 // Goroutine lifecycle: it launches one acceptor per listener, which returns
-// once server closes that listener or the backend stops, and the handler
-// goroutine, which returns once the backend stopped or drained to its last
-// connection, closing done as it does.
+// once server closes that listener or the backend stops, and one handler
+// goroutine per lane, which returns once the backend stopped or its lane
+// drained to its last connection, closing the lane's done as it does.
 func startPortable(group *StreamGroup, lns []stdnet.Listener, degraded string) portableEngine {
 	v := group.loop
-	pl := &portableLoop{
-		group: group.name, h: group.loopHandler,
-		spillCap: orDefaultInt(v.SpillCap, portableSpillCap),
-		outCap:   orDefaultInt(v.OutputCap, portableOutputCap),
-		soft:     max(v.SoftConns, 0), maxConns: max(group.limits.MaxConns, 0),
-		idle: loopIdle(group), degraded: degraded,
-		events:  make(chan portableEvent, portableEvents),
-		postOps: make([]corenet.PostFunc, portablePostCap), postArgs: make([]uintptr, portablePostCap),
-		wake: make(chan struct{}, 1), done: make(chan struct{}), lns: lns,
+	g := &portableGroup{
+		group: group.name, soft: max(v.SoftConns, 0), maxConns: max(group.limits.MaxConns, 0),
+		degraded: degraded, lns: lns,
+	}
+	//: the lanes, built before any acceptor can hand one a connection.
+	for i := range loopLanes(v) {
+		g.lanes = append(g.lanes, &portableLoop{
+			g: g, lane: i, h: group.loopChain,
+			spillCap: orDefaultInt(v.SpillCap, portableSpillCap),
+			outCap:   orDefaultInt(v.OutputCap, portableOutputCap),
+			idle:     loopIdle(group),
+			events:   make(chan portableEvent, portableEvents),
+			postOps:  make([]corenet.PostFunc, portablePostCap), postArgs: make([]uintptr, portablePostCap),
+			wake: make(chan struct{}, 1), done: make(chan struct{}),
+		})
 	}
 	//: one acceptor per listener; it ends when server closes the listener.
 	for _, ln := range lns {
-		go pl.acceptLoop(ln)
+		go g.acceptLoop(ln)
 	}
-	go pl.run(pl.done)
+	//: one handler goroutine per lane.
+	for _, pl := range g.lanes {
+		go pl.run(pl.done)
+	}
 	//: serving.
-	return portableEngine{pl: pl}
+	return portableEngine{g: g}
 }
 
 // orDefaultInt returns v, or def when v is zero or less.
@@ -164,8 +203,8 @@ func orDefaultInt(v, def int) int {
 	return v
 }
 
-// acceptLoop hands each accepted connection to the handler goroutine.
-func (pl *portableLoop) acceptLoop(ln stdnet.Listener) {
+// acceptLoop hands each accepted connection to a lane, in turn.
+func (g *portableGroup) acceptLoop(ln stdnet.Listener) {
 	failures := 0
 	//: until server closes the listener.
 	for {
@@ -173,7 +212,7 @@ func (pl *portableLoop) acceptLoop(ln stdnet.Listener) {
 		//: closed, or a failure to back off from.
 		if err != nil {
 			//: server closed it.
-			if errors.Is(err, stdnet.ErrClosed) || pl.stopReq.Load() {
+			if errors.Is(err, stdnet.ErrClosed) || g.stopReq.Load() {
 				//: done.
 				return
 			}
@@ -183,11 +222,12 @@ func (pl *portableLoop) acceptLoop(ln stdnet.Listener) {
 		}
 		failures = 0
 		//: MaxConns: accepted and closed, a refusal the peer sees.
-		if pl.maxConns > 0 && pl.live.Load() >= int64(pl.maxConns) || pl.drainReq.Load() {
-			pl.rejected.Add(1)
+		if g.maxConns > 0 && g.live() >= int64(g.maxConns) || g.drainReq.Load() {
+			g.rejected.Add(1)
 			swallowErr(c.Close())
 			continue
 		}
+		pl := g.lanes[(g.turn.Add(1)-1)%uint64(len(g.lanes))]
 		pl.live.Add(1)
 		pl.events <- portableEvent{kind: pevOpen, conn: c}
 	}
@@ -215,7 +255,7 @@ func (pl *portableLoop) run(done chan<- struct{}) {
 		pl.h.OnBatchEnd(pl)
 		pl.endBatch()
 		//: finished.
-		if pl.stopReq.Load() || (pl.draining && pl.live.Load() == 0) {
+		if pl.g.stopReq.Load() || (pl.draining && pl.live.Load() == 0) {
 			pl.closeAll()
 			//: out.
 			return
@@ -329,7 +369,7 @@ func (pl *portableLoop) open(c stdnet.Conn) {
 	}
 	pc := &portableConn{
 		conn: c, gen: gen, ack: make(chan struct{}, 1), kick: make(chan struct{}, 1), open: true, lastIO: time.Now(),
-		pressure: pl.soft > 0 && pl.live.Load() > int64(pl.soft),
+		pressure: pl.g.soft > 0 && pl.g.live() > int64(pl.g.soft),
 	}
 	pl.conns[slot] = pc
 	pl.accepted.Add(1)
@@ -350,6 +390,11 @@ func (pl *portableLoop) reader(slot int32, pc *portableConn) {
 		if n > 0 {
 			pl.events <- portableEvent{kind: pevData, slot: slot, gen: pc.gen, data: buf[:n]}
 			<-pc.ack
+			//: a test marks the buffer the batch released, so a byte kept past
+			//: OnBatchEnd reads as the mark rather than as the next bytes.
+			if markRecycled.Load() {
+				fillMark(buf[:n])
+			}
 		}
 		//: the end of input, or a failure.
 		if err != nil {
@@ -534,7 +579,7 @@ func (pl *portableLoop) timers() {
 // control applies the drain.
 func (pl *portableLoop) control() {
 	//: the drain closes every connection with no partial input.
-	if !pl.drainReq.Load() {
+	if !pl.g.drainReq.Load() {
 		//: not draining.
 		return
 	}
@@ -728,10 +773,10 @@ func (pl *portableLoop) Pressure(ref corenet.LoopConnRef) bool {
 	return pc != nil && pc.pressure
 }
 
-// Loop implements corenet.LoopIO: the portable backend is one loop, index 0.
+// Loop implements corenet.LoopIO: the lane's index.
 func (pl *portableLoop) Loop() int {
-	//: one handler goroutine, so one loop.
-	return 0
+	//: one handler goroutine a lane.
+	return pl.lane
 }
 
 // Post implements corenet.LoopIO.
@@ -765,42 +810,52 @@ func (pl *portableLoop) Post(op corenet.PostFunc, arg uintptr) error {
 }
 
 // portableEngine is the portable backend as server drives it: the lifecycle
-// half, apart from the LoopIO its handler is called with, whose Close names a
-// connection.
+// half, apart from the LoopIO each lane's handler is called with, whose
+// Close names a connection.
 type portableEngine struct {
-	pl *portableLoop
+	g *portableGroup
 }
 
-// Shutdown implements loopEngine.
-func (e portableEngine) Shutdown(ctx context.Context) error {
-	pl := e.pl
-	pl.drainReq.Store(true)
-	select {
-	case pl.wake <- struct{}{}:
-	default:
-	}
-	//: drained, or out of budget.
-	select {
-	case <-pl.done:
-		//: drained.
-		return nil
-	case <-ctx.Done():
-		swallowErr(e.Close())
-		//: cut short.
-		return errs.Wrap(corenet.DrainTimeout, errs.WrapParams{}, errs.String("group", pl.group))
-	}
-}
-
-// Close implements loopEngine.
-func (e portableEngine) Close() error {
-	pl := e.pl
-	pl.once.Do(func() {
-		pl.stopReq.Store(true)
+// wakeAll rouses every lane's handler goroutine.
+func (g *portableGroup) wakeAll() {
+	//: one wake a lane, never blocking.
+	for _, pl := range g.lanes {
 		select {
 		case pl.wake <- struct{}{}:
 		default:
 		}
-		<-pl.done
+	}
+}
+
+// Shutdown implements loopEngine.
+func (e portableEngine) Shutdown(ctx context.Context) error {
+	g := e.g
+	g.drainReq.Store(true)
+	g.wakeAll()
+	//: every lane drained, or out of budget.
+	for _, pl := range g.lanes {
+		select {
+		case <-pl.done:
+		case <-ctx.Done():
+			swallowErr(e.Close())
+			//: cut short.
+			return errs.Wrap(corenet.DrainTimeout, errs.WrapParams{}, errs.String("group", g.group))
+		}
+	}
+	//: drained.
+	return nil
+}
+
+// Close implements loopEngine.
+func (e portableEngine) Close() error {
+	g := e.g
+	g.once.Do(func() {
+		g.stopReq.Store(true)
+		g.wakeAll()
+		//: every lane's goroutine returned.
+		for _, pl := range g.lanes {
+			<-pl.done
+		}
 	})
 	//: closed.
 	return nil
@@ -808,15 +863,28 @@ func (e portableEngine) Close() error {
 
 // State implements loopEngine.
 func (e portableEngine) State() corenet.LoopStateValue {
-	pl := e.pl
-	//: one loop of one ring, on the Go heap.
-	return corenet.LoopStateValue{
-		Group: pl.group, Backend: corenet.LoopBackendPortable, ProbeStage: "portable",
-		Degraded: pl.degraded != "", DegradedReason: pl.degraded,
-		Loops: 1, Rings: 1, RingsSource: "single", GOMAXPROCS: runtime.GOMAXPROCS(0),
-		RingStates: []corenet.LoopRingStateValue{{
+	g := e.g
+	rings := make([]corenet.LoopRingStateValue, 0, len(g.lanes))
+	//: one ring a lane, on the Go heap.
+	for _, pl := range g.lanes {
+		rings = append(rings, corenet.LoopRingStateValue{
 			Conns: pl.live.Load(), Accepted: pl.accepted.Load(), Closed: pl.closed.Load(),
 			Batches: pl.batches.Load(), Evicted: 0,
-		}},
+		})
+	}
+	//: as many loops as lanes, one ring each.
+	return corenet.LoopStateValue{
+		Group: g.group, Backend: corenet.LoopBackendPortable, ProbeStage: "portable",
+		Degraded: g.degraded != "", DegradedReason: g.degraded,
+		Loops: len(g.lanes), Rings: 1, RingsSource: "single", GOMAXPROCS: runtime.GOMAXPROCS(0),
+		RingStates: rings,
+	}
+}
+
+// fillMark fills b with recycledMark.
+func fillMark(b []byte) {
+	//: every byte the batch held.
+	for i := range b {
+		b[i] = recycledMark
 	}
 }

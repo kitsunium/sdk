@@ -16,8 +16,8 @@ const internalError string = "HTTP/1.1 500 Internal Server Error\r\nContent-Leng
 // serves with StreamGroup.HandleLoop. p frames every request, so its limits
 // are the group's; the zero Parser is the profile's defaults.
 //
-// Each loop frames its requests into a request value of its own, sets its
-// Loop, and calls h on the loop's thread, one request at a time, in the order
+// Each lane frames its requests into a request value of its own, sets its
+// Lane, and calls h on the lane's thread, one request at a time, in the order
 // they arrived, pipelined ones included. A refused request is answered and
 // its connection closed without reaching h. An answer has AppendResponse's
 // framing, with Connection: close when the request, the response or the
@@ -42,12 +42,13 @@ func HandleLoop(h corenet.HTTP1Handler, p Parser) *LoopHandler {
 }
 
 // LoopHandler serves the restricted HTTP/1.1 profile on a loop group: the
-// corenet.LoopHandler HandleLoop returns. Its state is per loop — a request
-// value, the batch's answers, a flag per connection — and a loop touches only
-// its own, found by LoopIO.Loop, so the data path takes no lock and, once a
-// loop's buffers have grown to its batches, allocates nothing. It honours no
-// group option itself: a loop group given ReadHeaderTimeout or MaxHeaderBytes
-// refuses it at Start, the head bound being p's.
+// corenet.LoopHandler HandleLoop returns. Its state is per lane — a request
+// value, the batch's answers, a flag per connection — and a lane touches only
+// its own, found by LoopIO.Loop and built at OnStart, so the data path takes
+// no lock and, once a lane's buffers have grown to its batches, allocates
+// nothing. It honours no group option itself: a loop group given
+// ReadHeaderTimeout or MaxHeaderBytes refuses it at Start, the head bound
+// being p's.
 type LoopHandler struct {
 	// h serves every request.
 	h corenet.HTTP1Handler
@@ -114,7 +115,7 @@ type connFlag struct {
 	dead bool
 }
 
-// OnOpen implements corenet.LoopHandler. It marks the connection open on its loop.
+// OnOpen implements corenet.LoopHandler. It marks the connection open on its lane.
 func (a *LoopHandler) OnOpen(io corenet.LoopIO, ref corenet.LoopConnRef) {
 	*a.state(io.Loop()).flag(ref) = connFlag{gen: ref.Gen}
 }
@@ -165,7 +166,7 @@ func (a *LoopHandler) OnData(io corenet.LoopIO, ref corenet.LoopConnRef, buf []b
 // serve hands the request framed into st.req to the handler and queues its
 // answer, and reports whether the connection closes after it.
 func (a *LoopHandler) serve(io corenet.LoopIO, ref corenet.LoopConnRef, st *loopState, loop int) bool {
-	st.req.Loop = loop
+	st.req.Lane = loop
 	res := st.take()
 	st.served++
 	a.h.ServeHTTP1(&st.req, res)
@@ -225,6 +226,16 @@ func (a *LoopHandler) OnBatchEnd(io corenet.LoopIO) {
 	st.complete()
 	st.flush(io)
 	st.items, st.out, st.served = st.items[:0], st.out[:0], 0
+}
+
+// OnStart implements corenet.LoopStarter: it builds every lane's state
+// before the first callback, so no lane builds its own under a lock.
+func (a *LoopHandler) OnStart(lanes int) {
+	//: each lane's state, published at once; a lane past the count still
+	//: builds its own, as a handler driven without OnStart does.
+	for i := range lanes {
+		a.state(i)
+	}
 }
 
 // OnClose implements corenet.LoopHandler. The connection's flag stays until
@@ -385,7 +396,7 @@ func (a *LoopHandler) grow(i int) *loopState {
 	next := make([]*loopState, max(len(cur), i+1))
 	copy(next, cur)
 	st := &loopState{}
-	st.req.Loop = i
+	st.req.Lane = i
 	next[i] = st
 	a.loops.Store(&next)
 	//: published.

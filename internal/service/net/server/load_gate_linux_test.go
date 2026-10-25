@@ -77,6 +77,8 @@ func TestLoadChild(t *testing.T) {
 		}), http1.Parser{}))
 	case load == "L2" && engine == "handwritten":
 		g.HandleLoop(http1.HandleLoop(corenet.HTTP1HandlerFunc(handwrittenL2), http1.Parser{}))
+	case load == "L2" && engine == "chain":
+		g.HandleLoop(http1.HandleLoop(chainL2(t), http1.Parser{}))
 	default:
 		t.Fatalf("no engine %q on load %q", engine, load)
 	}
@@ -107,8 +109,8 @@ var (
 	loadBearer     = []byte(loadToken)
 )
 
-// handwrittenL2 is L2's engine A: the auth and the routing a P2 chain will
-// do, written by hand in one handler. It allocates nothing.
+// handwrittenL2 is L2's engine A: the auth and the routing chainL2 does,
+// written by hand in one handler. It allocates nothing.
 func handwrittenL2(req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue) {
 	if !bytes.Equal(req.Authorization, loadBearer) {
 		res.Status = http.StatusUnauthorized
@@ -123,6 +125,55 @@ func handwrittenL2(req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseVal
 	default:
 		res.Status = http.StatusNotFound
 	}
+}
+
+// The routes of chainL2, by the identifier its handler switches on.
+const (
+	loadRouteItems = iota + 1
+	loadRouteUsers
+	loadRouteHealth
+)
+
+// loadVerifier is chainL2's: the one token L2 sends, and a subject.
+type loadVerifier struct{}
+
+// loadTokenBytes and loadSubject are what loadVerifier compares and sets.
+var (
+	loadTokenBytes = []byte(strings.TrimPrefix(loadToken, "Bearer "))
+	loadSubject    = []byte("netgate")
+)
+
+func (loadVerifier) VerifyBearer(token []byte, auth *corenet.HTTP1AuthValue) bool {
+	return bytes.Equal(token, loadTokenBytes) && auth.SetSubject(loadSubject)
+}
+
+// chainL2 is L2's engine B: the same auth and routing as handwrittenL2, built
+// from the http1 chain's links — Routes, then Bearer with /health exempt —
+// in front of a handler that answers by route.
+func chainL2(t testing.TB) corenet.HTTP1Handler {
+	routes, err := http1.Routes(
+		http1.RouteValue{ID: loadRouteItems, Path: string(loadItemsRoute), Prefix: true},
+		http1.RouteValue{ID: loadRouteUsers, Path: string(loadUsersRoute), Prefix: true},
+		http1.RouteValue{ID: loadRouteHealth, Path: string(loadHealth)},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bearer, err := http1.Bearer(loadVerifier{}, loadRouteHealth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := corenet.HTTP1HandlerFunc(func(req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue) {
+		switch req.Route {
+		case loadRouteItems, loadRouteUsers:
+			res.Status, res.Body = http.StatusOK, loadBody
+		case loadRouteHealth:
+			res.Status = http.StatusNoContent
+		default:
+			res.Status = http.StatusNotFound
+		}
+	})
+	return corenet.Chain[corenet.HTTP1Handler](app, routes, bearer)
 }
 
 // answerSamples answers each line read from in with one line on out: the
@@ -222,10 +273,12 @@ func BenchmarkLoadL1(b *testing.B) {
 	}
 }
 
-// BenchmarkLoadL2 is L2 on the hand-written handler, the P2 gate's A. Its B,
-// the http1 middleware chain, lands with P2.
+// BenchmarkLoadL2 is L2 on the hand-written handler and on the http1 chain:
+// the P2 gate's A and B.
 func BenchmarkLoadL2(b *testing.B) {
-	b.Run("engine=handwritten", func(b *testing.B) { benchHTTPLoad(b, "L2", "handwritten", loadL2Request) })
+	for _, engine := range []string{"handwritten", "chain"} {
+		b.Run("engine="+engine, func(b *testing.B) { benchHTTPLoad(b, "L2", engine, loadL2Request) })
+	}
 }
 
 // benchHTTPLoad serves load on engine in a child, opens loadConns kept-alive
@@ -320,7 +373,7 @@ func TestLoadL1L2_wired(t *testing.T) {
 	for _, c := range []struct {
 		load, engine string
 		req          []byte
-	}{{"L1", "goroutine", loadL1Request}, {"L1", "loop", loadL1Request}, {"L2", "handwritten", loadL2Request}} {
+	}{{"L1", "goroutine", loadL1Request}, {"L1", "loop", loadL1Request}, {"L2", "handwritten", loadL2Request}, {"L2", "chain", loadL2Request}} {
 		t.Run(c.load+"/"+c.engine, func(t *testing.T) {
 			child := startLoadChild(t, c.load, c.engine)
 			conn, err := stdnet.DialTimeout("tcp", child.addr, 5*time.Second)

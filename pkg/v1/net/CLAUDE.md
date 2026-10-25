@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-05T00:00:00Z -->
+<!-- updated: 2026-10-25T23:00:00Z -->
 # pkg/v1/net/
 
 ## Purpose
@@ -31,12 +31,12 @@ arrived is the security family's (`pkg/v1/security`).
 
 | Package | What it publishes | Aliases onto | README |
 |---|---|---|---|
-| `server/` | `New` → a `Server` of stream `Group`s and `PacketGroup`s, `Chain` / `ChainPacket`, the drain announced through `DrainSignal` rather than imposed (ADR 0029, ADR 0043) | `internal/core/net`, `internal/service/net/server` | `server/README.md` |
+| `server/` | `New` → a `Server` of stream `Group`s and `PacketGroup`s, `Chain` / `ChainPacket`, the drain announced through `DrainSignal` rather than imposed (ADR 0029, ADR 0043); loop middlewares through `Group.UseLoop`, their base `LoopLayer` / `NewLoopLayer` and `LoopStarter` (ADR 0189) | `internal/core/net`, `internal/service/net/server` | `server/README.md` |
 | `client/` | `New(cfg, tlsid.Identity, Policy, CallHook)` → a `Client` whose `Policy` is enforced in the transport; a refusal is `RequestDenied` (ADR 0029) | `internal/core/net`, `internal/service/net/client` | `client/README.md` |
 | `tlsid/` | `New` for material in memory, `Load` for material on disk → an `Identity` shared by `server` and `client`; `MaterialInvalid`, `HandshakeFailed` (ADR 0029) | `internal/core/net`, `internal/service/net/tlsid` | `tlsid/README.md` |
 | `sse/` | `New(w, r, opts…)` → a `Stream` with keep-alive, `Retry` and a write timeout; `DrainSignal` (ADR 0029, ADR 0043) | `internal/core/net`, `internal/service/net/sse` | `sse/README.md` |
 | `websocket/` | `Upgrade` → a `Conn`, RFC 6455 in the stdlib, the origin checked by default; `DrainSignal` (ADR 0047, ADR 0069) | `internal/core/net`, `internal/service/net/websocket` | `websocket/README.md` |
-| `http1/` | the restricted HTTP/1.1 profile: `HandleLoop(h, Parser)` → the handler of `server.Group.HandleLoop`, a `Batcher` capability for answers deferred to the batch's end, and the codec (`Parser`, `AppendResponse`, …); its refusals' sentinels (ADR 0186) | `internal/core/net`, `internal/service/net/http1` | `http1/README.md` |
+| `http1/` | the restricted HTTP/1.1 profile: `HandleLoop(h, Parser)` → the handler of `server.Group.HandleLoop`, a `Batcher` capability for answers deferred to the batch's end, and the codec (`Parser`, `AppendResponse`, …); its refusals' sentinels (ADR 0186); the chain — `Chain`, `Routes`, `Bearer`, `Headers`, `Log` — over the canonical `Request.Path` (ADR 0189) | `internal/core/net`, `internal/service/net/http1` | `http1/README.md` |
 | `static/` | `New(fsys, Config)` → an `http.Handler` that never lists a directory and sends the security headers on every answer; `Misconfigured` (ADR 0130) | `internal/core/net`, `internal/service/net/static` | `static/README.md` |
 
 `server`, `client` and `tlsid` moved here from the root of `pkg/v1`, and `sse`,

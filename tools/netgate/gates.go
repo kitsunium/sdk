@@ -80,16 +80,25 @@ var (
 	p5Criteria = []criterionEntity{{Metric: metricCPUPerReq, Op: opAtMost, Threshold: publishedCPUCeiling, Ratio: true}}
 
 	// gates is the plan's table (P8 §Gates). P0, P1 and P3 have functional
-	// gates only (the lanes), so they have no row here. No step a row gates
-	// is built yet, so every row is inactive: reported, never failing.
+	// gates only (the lanes), so they have no row here. P2 is active: its
+	// chain (internal/service/net/http1's links) is engine B. Every other row
+	// waits on its step, inactive: reported, never failing.
 	gates = []gateEntity{
-		{Step: "P2", Load: loadL2, A: "handwritten", B: "chain", Criteria: p2Criteria,
-			AllocBudget: p2AllocBudget, Pending: "the http1 middleware chain (P2) is engine B"},
-		{Step: "P4a", Load: loadL3, A: "recvmmsg", B: "gro", Criteria: p4aCriteria,
-			Pending: "GSO/GRO and sendmmsg in datagramSource (P4a) is engine B"},
-		{Step: "P6", Load: loadL1, A: "goroutine", B: "loop", Criteria: p6Criteria,
-			Pending: "LoopsAuto and the drain (P6) set engine B's loop count"},
-		{Step: "P5", Load: loadL1, A: "published", B: "loop", Criteria: p5Criteria,
-			Pending: "the published http1's L1 samples (engine A) are not stored yet; P5 widens the profile"},
+		{
+			Step: "P2", Load: loadL2, A: "handwritten", B: "chain", Criteria: p2Criteria,
+			AllocBudget: p2AllocBudget, Active: true,
+		},
+		{
+			Step: "P4a", Load: loadL3, A: "recvmmsg", B: "gro", Criteria: p4aCriteria,
+			Pending: "GSO/GRO and sendmmsg in datagramSource (P4a) is engine B",
+		},
+		{
+			Step: "P6", Load: loadL1, A: "goroutine", B: "loop", Criteria: p6Criteria,
+			Pending: "LoopsAuto and the drain (P6) set engine B's loop count",
+		},
+		{
+			Step: "P5", Load: loadL1, A: "published", B: "loop", Criteria: p5Criteria,
+			Pending: "the published http1's L1 samples (engine A) are not stored yet; P5 widens the profile",
+		},
 	}
 )

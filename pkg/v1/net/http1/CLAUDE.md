@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T12:00:00Z -->
+<!-- updated: 2026-10-25T23:00:00Z -->
 # pkg/v1/net/http1/
 
 ## Purpose
@@ -19,8 +19,9 @@ the job is discussed.
 |---|---|
 | `HandleLoop(h, p)` → `*LoopHandler` | the `server.LoopHandler` of a loop group serving `h`; `p` sets the limits, the zero `Parser` the defaults |
 | `Handler`, `HandlerFunc` | what a consumer writes: `ServeHTTP1(*Request, *Response)` |
-| `Batcher` | optional: `EndBatch(loop)` once per batch, before its answers leave — where a handler runs the work it batched and completes what it deferred |
-| `Request`, `Response`, `Field`, `Limits` | the values; `Request.Loop` names the loop, `Response.Defer` answers at the batch's end |
+| `Batcher` | optional: `EndBatch(lane)` once per batch, before its answers leave — where a handler runs the work it batched and completes what it deferred |
+| `Request`, `Response`, `Field`, `Limits` | the values; `Request.Lane` names the lane, `Request.Path` is the canonical target, `Route` and `Auth` what the links set, `Response.Defer` answers at the batch's end |
+| `Middleware`, `Chain`, `Routes` (`Route`, `RouteLayer`), `Bearer` (`BearerVerifier`, `Auth`, `BearerLayer`), `Headers` (`HeadersLayer`), `Log` (`AccessLogger`, `Access`, `LogLayer`), `MaxSubject`, `MaxAccessFields` | the chain (ADR 0189 §D4): links composed outermost first, judging `Path`; exemptions by route id, the subject copied by value, no credential logged |
 | `Parser`, `NewParser`, `Continue`, `Pending`, `Refusal`, `RefusalNone` | the codec's framing, usable without the loop |
 | `AppendStatusLine`, `AppendField`, `AppendResponse`, `AppendRefusal` | the codec's writer |
 | `MaxFields`, `DefaultHead`, `MaxHead`, `DefaultTarget`, `DefaultBody`, `MaxBody` | the bounds |
@@ -28,10 +29,14 @@ the job is discussed.
 
 ## Why-this-shape
 
-- **Only `RefusalNone` of the 23 refusals is re-exported.** A consumer branches
+- **Only `RefusalNone` of the 26 refusals is re-exported.** A consumer branches
   on the sentinel (`Refusal.Err`) and logs the `Refusal`'s `String`; the
   values themselves stay the codec's, so a refusal added later is not a
   surface change.
+- **`Middleware` and `Chain` are this package's own.** `server.Chain` composes
+  `ConnHandler`s; a chain of `Handler`s needs its own instance of
+  `corenet.Chain`, and naming it here keeps `http1.Chain(h, routes, bearer)`
+  readable without the generic parameter.
 - **`HandleLoop` takes a `Parser`, not a `Limits`.** The limits are validated
   where they are built (`NewParser`), so `HandleLoop` cannot fail.
 - `TestHandleLoopServesHTTP` serves a `Batcher` written with this package and

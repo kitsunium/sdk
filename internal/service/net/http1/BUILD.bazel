@@ -5,10 +5,12 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "http1",
     srcs = [
+        "chain.go",
         "doc.go",
         "loop.go",
         "parse.go",
         "refusal.go",
+        "target.go",
         "write.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/net/http1",
@@ -35,6 +37,7 @@ alias(
 go_test(
     name = "http1_test",
     srcs = [
+        "chain_external_test.go",
         "corpus_external_test.go",
         "fuzz_external_test.go",
         "gen_api_test.go",
@@ -43,6 +46,7 @@ go_test(
         "loop_external_test.go",
         "loop_fixtures_test.go",
         "perf_fixtures_test.go",
+        "target_external_test.go",
         "write_external_test.go",
     ],
     data = glob(["testdata/**"]),

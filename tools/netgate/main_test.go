@@ -167,28 +167,43 @@ func TestEvaluate_thresholds(t *testing.T) {
 	}
 }
 
-// TestEvaluate_inactiveNeverFails pins the table as it ships: no step it
-// gates is built, so no gate is active, and a run with no sample at all, or
-// with samples that would fail, passes while reporting each gate inactive.
-func TestEvaluate_inactiveNeverFails(t *testing.T) {
+// tightSamples spread by 1 %: two engines measured alike by them pass a
+// ratio of 1.05 on the interval's bound, as tenSamples, spread by 25 %, never
+// would.
+var tightSamples = []float64{100, 100.5, 99.5, 100.2, 99.8, 100.1, 99.9, 100.3, 99.7, 100}
+
+// p2Passing is L2 measured alike on both of P2's engines.
+var p2Passing = benchLines("L2", "handwritten", "cpu-ns/req", tightSamples) + benchLines("L2", "chain", "cpu-ns/req", tightSamples)
+
+// TestEvaluate_shippedTable pins the table as it ships: P2 is active, so a
+// run without its samples, or with a chain 10 % dearer, fails; every other
+// gate waits on its step, inactive, and samples that would fail it fail
+// nothing while it still reports what it measured.
+func TestEvaluate_shippedTable(t *testing.T) {
 	failing := benchLines("L1", "goroutine", "cpu-ns/req", tenSamples) + benchLines("L1", "loop", "cpu-ns/req", scaled(tenSamples, 2))
-	for _, in := range []string{"", failing} {
-		s, err := parseBench(strings.NewReader(in))
-		if err != nil {
-			t.Fatal(err)
-		}
-		rep := evaluate(gates, s, "abc")
-		if !rep.Passed {
-			t.Fatalf("inactive table failed: %+v", rep)
-		}
-		for _, g := range rep.Gates {
-			if g.Active || g.Verdict != verdictInactive || g.Pending == "" {
-				t.Errorf("%s: active=%t verdict=%s pending=%q, want inactive with what it waits for", g.Step, g.Active, g.Verdict, g.Pending)
+	rep := evaluate(gates, mustParse(t, p2Passing+failing), "abc")
+	if !rep.Passed {
+		t.Fatalf("shipped table with P2 passing failed: %+v", rep)
+	}
+	for _, g := range rep.Gates {
+		if g.Step == "P2" {
+			if !g.Active || g.Verdict != verdictPass || g.Pending != "" {
+				t.Errorf("P2: active=%t verdict=%s pending=%q, want active and passing", g.Active, g.Verdict, g.Pending)
 			}
+			continue
+		}
+		if g.Active || g.Verdict != verdictInactive || g.Pending == "" {
+			t.Errorf("%s: active=%t verdict=%s pending=%q, want inactive with what it waits for", g.Step, g.Active, g.Verdict, g.Pending)
 		}
 	}
-	if g := gateNamed(t, evaluate(gates, mustParse(t, failing), "abc"), "P6"); g.Measured[0].Verdict != verdictFail {
+	if g := gateNamed(t, rep, "P6"); g.Measured[0].Verdict != verdictFail {
 		t.Fatalf("an inactive gate still reports what it measured: %+v", g.Measured)
+	}
+	dearer := benchLines("L2", "handwritten", "cpu-ns/req", tightSamples) + benchLines("L2", "chain", "cpu-ns/req", scaled(tightSamples, 1.1))
+	for _, in := range []string{"", failing, dearer} {
+		if rep := evaluate(gates, mustParse(t, in), "abc"); rep.Passed {
+			t.Fatalf("P2 without its samples, or failing, passed: %q", in)
+		}
 	}
 }
 
@@ -258,7 +273,7 @@ func TestJudge_refusesBadReferenceAndOp(t *testing.T) {
 func TestRun(t *testing.T) {
 	dir := t.TempDir()
 	in := filepath.Join(dir, "bench.txt")
-	if err := os.WriteFile(in, []byte(benchLines("L1", "loop", "cpu-ns/req", tenSamples)), 0o600); err != nil {
+	if err := os.WriteFile(in, []byte(p2Passing+benchLines("L1", "loop", "cpu-ns/req", tenSamples)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var out, errb bytes.Buffer
@@ -274,7 +289,7 @@ func TestRun(t *testing.T) {
 	report := filepath.Join(dir, "report.json")
 	out.Reset()
 	if code := run([]string{"-sha", "abc123", "-in", in, "-out", report}, &out, &errb); code != 0 {
-		t.Fatalf("inactive table: %d %s", code, errb.String())
+		t.Fatalf("shipped table, P2 passing: %d %s", code, errb.String())
 	}
 	if !strings.Contains(out.String(), "commit abc123") || !strings.Contains(out.String(), "P6   inactive") {
 		t.Fatalf("summary:\n%s", out.String())

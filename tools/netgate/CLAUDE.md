@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T20:00:00Z -->
+<!-- updated: 2026-10-25T23:00:00Z -->
 # tools/netgate/
 
 ## Purpose
@@ -24,13 +24,13 @@ Stdlib-only, no `go.sum`, outside `go.work` (the `tools/` convention, and an
 | `parse.go` | `BenchmarkLoad<load>/engine=<label>[-procs]` lines read into samples by load, engine and metric; every other line skipped |
 | `eval.go` | the types, and `evaluate`: a ratio criterion bounds B/A by the widest the two intervals allow (`hi(B)/lo(A)` for `<=`, `lo(B)/hi(A)` for `>=`); a missing or short side is `missing`; an active gate that does not pass fails the report; an inactive gate reports what it measured and never fails |
 | `main.go` | the CLI: `-in`, `-sha` (required: no report without its commit), `-out`, `-list`; exit 0, 1 (an active gate failed), 2 (usage, unreadable input) |
-| `main_test.go` | the interval against benchstat's own output on a fixed set (100.5 ± 9 %), k for n = 10 and 20, the parser, each gate of the table turned on and held to its threshold — passing, failing on the bound with the median on the threshold, missing a side, nine samples —, the shipped table all inactive and passing, and the CLI |
+| `main_test.go` | the interval against benchstat's own output on a fixed set (100.5 ± 9 %), k for n = 10 and 20, the parser, each gate of the table turned on and held to its threshold — passing, failing on the bound with the median on the threshold, missing a side, nine samples —, the shipped table — P2 active, passing on like samples and failing without them or 10 % dearer, every other row inactive, and the CLI |
 
 ## The table
 
 | Step | Load | A → B | Criterion (bound) | State |
 |---|---|---|---|---|
-| P2 | L2 | handwritten → chain | `cpu-ns/req` ratio ≤ 1.05 (upper); 0 allocations as a kit budget, not a bench metric | inactive until P2's chain |
+| P2 | L2 | handwritten → chain | `cpu-ns/req` ratio ≤ 1.05 (upper); 0 allocations as a kit budget, not a bench metric (the four http1 links' `ServeHTTP1`) | **active** (ADR 0189): `chainL2` is `http1.Routes` then `http1.Bearer` |
 | P4a | L3 | recvmmsg → gro | `datagrams/syscall` ratio ≥ 4 (lower); `cpu-ns/datagram` ratio ≤ 0.75 (upper) | inactive until P4a |
 | P6 | L1 | goroutine → loop | `cpu-ns/req` ratio ≤ 0.70 (upper) | inactive until P6 |
 | P5 | L1 | published → loop | `cpu-ns/req` ratio ≤ 1.0 (upper) | inactive: the published http1's samples are not stored |

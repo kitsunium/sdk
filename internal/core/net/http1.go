@@ -6,6 +6,16 @@ package net
 // refused (431), never stored elsewhere.
 const HTTP1MaxFields int = 64
 
+// HTTP1MaxSubject is the longest subject an HTTP1AuthValue holds, in bytes. It
+// sizes the value's array, so a subject is copied into the request and never
+// aliases the bytes it was read from; a longer one is refused.
+const HTTP1MaxSubject int = 128
+
+// HTTP1MaxAccessFields is how many request fields an access-log link may
+// allow: it sizes HTTP1AccessValue.Fields, so a record is a value and never a
+// slice that grows.
+const HTTP1MaxAccessFields int = 8
+
 // HTTP1DefaultHead is the head bound a zero HTTP1LimitsValue.Head selects: the
 // request line, every field line and the blank line that ends them, in bytes.
 const HTTP1DefaultHead int = 8192
@@ -67,7 +77,12 @@ type HTTP1FieldValue struct {
 // Every slice aliases the bytes the codec read: the value is valid while those
 // bytes are, which on the loop engine is until OnBatchEnd returns. A handler
 // that keeps a byte past that copies it. Fields is an array, so a value framed
-// into a reused HTTP1RequestValue allocates nothing.
+// into a reused HTTP1RequestValue allocates nothing. Auth is a value, not a
+// slice: what a link established survives the bytes it was read from.
+//
+// A link of a chain may read every field and set Route, Auth and
+// Authenticated; writing Consumed, HeadLen or Body changes nothing, since the
+// adapter frames with what Parse returned, never with what a link left.
 type HTTP1RequestValue struct {
 	// Method is the request method, a token.
 	Method []byte
@@ -104,11 +119,35 @@ type HTTP1RequestValue struct {
 	// Close reports whether the client asked to close the connection after
 	// this request: a Connection field holding the close token.
 	Close bool
-	// Loop is the index of the loop that framed the request — its
-	// LoopIO.Loop — set by the loop adapter before the handler runs, so a
-	// handler finds its per-loop state in a slice, with no lock. Parse leaves
-	// it as it is; outside the loop adapter it is what the caller set.
-	Loop int
+	// Lane is the index of the lane that framed the request, from 0 to the
+	// group's lane count less one — its LoopIO.Loop — set by the loop adapter
+	// before the handler runs. One lane is one thread or one goroutine, so a
+	// handler finds its per-lane state in a slice sized at LoopStarter.OnStart,
+	// with no lock. Parse leaves it as it is; outside the loop adapter it is
+	// what the caller set.
+	Lane int
+	// Path is the request's canonical path, the one target every link of a
+	// chain routes and judges on, computed once by the codec: the target's
+	// path up to its query, an absolute-form target reduced to its path once
+	// its authority matched Host. It is still percent-encoded, and holds no
+	// dot-segment, no empty segment, no backslash and no encoded slash, dot,
+	// backslash or NUL: the codec refuses a target that would (400). An
+	// asterisk-form target, OPTIONS only, is "*".
+	Path []byte
+	// Query is the target's query, after its "?" and without it; empty when
+	// the target has none.
+	Query []byte
+	// Route is the identifier of the route a router link matched, zero for
+	// none. Parse resets it to zero; only a link sets it.
+	Route int
+	// Auth is what an authenticating link established: the subject and the
+	// claims, copied by value into the request, so nothing of them aliases
+	// bytes the connection reuses. Parse resets it; Authenticated says
+	// whether a link set it.
+	Auth HTTP1AuthValue
+	// Authenticated reports whether an authenticating link verified the
+	// request's credentials and filled Auth. Parse resets it to false.
+	Authenticated bool
 }
 
 // Field returns the value of the first field named name and true, or nil and

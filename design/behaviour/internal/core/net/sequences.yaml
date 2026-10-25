@@ -138,6 +138,29 @@ sequences:
   - of: HTTP1HandlerFunc.ServeHTTP1
     steps:
       - eval: f(req, res)
+  - of: (*HTTP1AuthValue).SetSubject
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(b) > HTTP1MaxSubject
+      - set: a.n
+        value: uint8(copy(a.subject[:], b))
+      - return: "true"
+  - of: (*HTTP1AuthValue).Subject
+    steps:
+      - return: a.subject[:a.n]
+  - of: (*HTTP1AuthValue).SetClaims
+    steps:
+      - set: a.claims
+        value: c
+  - of: (*HTTP1AuthValue).Claims
+    steps:
+      - return: a.claims
+  - of: (*HTTP1AuthValue).Reset
+    steps:
+      - set: a.n, a.claims
+        value: 0, 0
   - of: IdentityValue.String
     steps:
       - return: "\"<redacted>\""
@@ -275,6 +298,100 @@ sequences:
             - return: "\"unknown\""
           when: int(k) >= len(optionNames)
       - return: optionNames[k]
+  - of: NewLoopLayer
+    steps:
+      - return: "LoopLayer{next: next}"
+  - of: LoopLayer.Next
+    steps:
+      - return: l.next
+  - of: LoopLayer.OnOpen
+    participants:
+      - id: caller
+        kind: actor
+      - id: LoopLayer.OnOpen
+        kind: self
+      - id: l.next.OnOpen
+        kind: internal
+    steps:
+      - eval: l.next.OnOpen(io, ref)
+        to: l.next.OnOpen
+  - of: LoopLayer.OnData
+    participants:
+      - id: caller
+        kind: actor
+      - id: LoopLayer.OnData
+        kind: self
+      - id: l.next.OnData
+        kind: internal
+    steps:
+      - return: l.next.OnData(io, ref, buf)
+        to: l.next.OnData
+  - of: LoopLayer.OnTimeout
+    participants:
+      - id: caller
+        kind: actor
+      - id: LoopLayer.OnTimeout
+        kind: self
+      - id: l.next.OnTimeout
+        kind: internal
+    steps:
+      - eval: l.next.OnTimeout(io, ref)
+        to: l.next.OnTimeout
+  - of: LoopLayer.OnWritable
+    participants:
+      - id: caller
+        kind: actor
+      - id: LoopLayer.OnWritable
+        kind: self
+      - id: l.next.OnWritable
+        kind: internal
+    steps:
+      - eval: l.next.OnWritable(io, ref)
+        to: l.next.OnWritable
+  - of: LoopLayer.OnBatchEnd
+    participants:
+      - id: caller
+        kind: actor
+      - id: LoopLayer.OnBatchEnd
+        kind: self
+      - id: l.next.OnBatchEnd
+        kind: internal
+    steps:
+      - eval: l.next.OnBatchEnd(io)
+        to: l.next.OnBatchEnd
+  - of: LoopLayer.OnClose
+    participants:
+      - id: caller
+        kind: actor
+      - id: LoopLayer.OnClose
+        kind: self
+      - id: l.next.OnClose
+        kind: internal
+    steps:
+      - eval: l.next.OnClose(io, ref, err)
+        to: l.next.OnClose
+  - of: LoopLayer.Honours
+    steps:
+      - bind: h, ok
+        eval: l.next.(LoopOptionHonourer)
+      - return: ok && h.Honours(k)
+  - of: LoopLayer.OnStart
+    participants:
+      - id: caller
+        kind: actor
+      - id: LoopLayer.OnStart
+        kind: self
+      - id: s.OnStart
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: s.OnStart(lanes)
+              to: s.OnStart
+          init:
+            bind: s, ok
+            eval: l.next.(LoopStarter)
+          when: ok
   - of: LoopBackend.String
     steps:
       - switch:

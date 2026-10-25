@@ -1204,6 +1204,20 @@ rules:
       # it would be a second way to the same value. Scoped to the one file.
       - "**/internal/service/net/http1/loop.go"
       - "internal/service/net/http1/loop.go"
+      # service/net/http1's chain layers (ADR 0189 §D4): a layer wraps the next
+      # handler, which exists only when Chain applies the middleware Routes,
+      # Bearer, Headers or Log returned. The middleware IS the constructor; a
+      # NewRouteLayer(next, routes) beside it would be a second way to build a
+      # layer whose table nobody checked. Scoped to the one file.
+      - "**/internal/service/net/http1/chain.go"
+      - "internal/service/net/http1/chain.go"
+      # core/net.HTTP1AuthValue (ADR 0189 §D4) is filled in place, on the
+      # request's own value, by the verifier through SetSubject: a constructor
+      # returning one would copy 140 bytes a request and invite building a
+      # subject outside the request it belongs to. Its zero value is the one
+      # Parse resets to. Scoped to the one file.
+      - "**/internal/core/net/http1_auth.go"
+      - "internal/core/net/http1_auth.go"
       # kernel/jsonenc.Object is built by BeginObject, which is what it does: it
       # writes the opening brace onto the caller's slice and returns the value
       # that writes the members after it. The zero Object holds no slice and is
@@ -1533,6 +1547,13 @@ rules:
       # break that one-line migration for every consumer.
       - "**/internal/service/data/codec/toml/localtime.go"
       - "internal/service/data/codec/toml/localtime.go"
+      # service/net/http1's RouteLayer, BearerLayer, HeadersLayer and LogLayer
+      # (ADR 0189 §D4): "Layer" is their role, the word the chain is discussed
+      # in and the one LoopLayer already carries for a loop middleware. The
+      # suffix the rule infers, Handler, would name four links like the handler
+      # they wrap. Scoped to the one file.
+      - "**/internal/service/net/http1/chain.go"
+      - "internal/service/net/http1/chain.go"
 
   # KTN-GOROUTINE-LOCKSCOPE (warning) — "move unrelated statements outside the
   # critical section". In service/proc/childwait's spawn, the statement the

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T20:00:00Z -->
+<!-- updated: 2026-10-25T23:00:00Z -->
 # internal/service/net/server/
 
 ## Purpose
@@ -21,16 +21,19 @@ Public façade: `pkg/v1/net/server`.
 | `operator_internal_test.go` | `TestCapabilityRegistry_matchesTheDesign` (reads `design/net.yaml`, the go_test's `data`), `TestReadOperator`, `TestOperatorPlan` (every code × engine × disable combination: never above the code nor the ceiling, never a ruled-out backend, the highest left), and a loop group started under each switch — `ProbeStage` `epoll` where io_uring is ruled out |
 | `stall_internal_test.go` | a fake loop engine walked from healthy to one drained ring to a stall: faults, readiness, liveness at the grace to the nanosecond on a manual clock, no stall during a drain, `Serve` returning `LoopGroupStalled`, `RegisterHealth`, the platform and the fallbacks |
 | `lifecycle.go` | `Start`, `Serve`, `Shutdown`, `Close`, the accept loop and its backoff (`acceptDelay`, `backOff`), the drain |
-| `loop_group.go` | loop groups: `HandleLoop` (ADR 0186 §D9 step 11), `loopRefusal` — TLS, `Use` and every kind of the group's set neither the engine (`loopHonours`: IdleTimeout, MaxConns, Adopt, Plaintext, Name, Engine) nor the handler's `LoopOptionHonourer` honours, `Use` whatever the handler claims — the listeners bound or adopted and registered like any group's, the engines in `Shutdown`, `Close` and `State` |
+| `loop_group.go` | loop groups: `HandleLoop` (ADR 0186 §D9 step 11), `loopRefusal` — TLS, `Use` and every kind of the group's set neither the engine (`loopHonours`: IdleTimeout, MaxConns, Adopt, Plaintext, Name, Engine, UseLoop) nor the chain (`chainHonours`: a layer or the handler) honours, after `buildLoopChain`; `OnStart(lanes)` on the chain before the engine starts, `Use` whatever the handler claims — the listeners bound or adopted and registered like any group's, the engines in `Shutdown`, `Close` and `State` |
 | `option_set.go` | `optionSet` — the kinds a group was given, one bit per `corenet.OptionKind` (ADR 0187 §D2); every `GroupOption`, `Use` and `PreHandshake` add theirs, a zero value included |
 | `engine_option.go` | `reconcileName` (Name against the declared name, `GroupNameConflict`) and `engineRefusal` — `PlaintextWithTLS`, and an `Engine` the handler's type or `Loop` contradicts (`EngineUnsupported`), judged at `Start`, never folded back (ADR 0187 §D4) |
 | `option_set_internal_test.go` | `TestGroupOption_recordsItsKind` — walks every function returning a `GroupOption` in `pkg/v1/net/server/gen_facade.go` and this package (exempt: `Listen`, `Loop`), each given its zero value records exactly its kind; the set's order and width |
 | `engine_option_external_test.go` | `TestEngine`, `TestName` — `Engine`, `Plaintext` and `Name` served, refused and what wins, on both natures |
 | `loop_engine_linux.go`, `loop_engine_other.go` | the backend: on Linux the leaf `loop` on duplicated descriptors (`F_DUPFD_CLOEXEC`, non-blocking), auto falling back to portable with the reason in `State`; elsewhere the portable backend, an explicit native one refused with `UnsupportedPlatform` |
-| `loop_portable.go` | the portable loop backend: a reader and a writer goroutine per connection on the netpoller, every callback on one handler goroutine, the reader's buffer held until the batch ends |
+| `loop_chain.go` | loop middlewares (ADR 0189 §D2): `loopLanes` (`Loops`, zero one), `buildLoopChain` — the layers applied outermost first, each a `LoopLayered` whose `Next` is what it wrapped (`sameHandler`, which takes two values of an uncomparable type as the same rather than panic), then the same middlewares over `loopProbe` and every callback sent through by `sendProbe` with `probeIO` — `LoopMiddlewareInvalid` naming the callback; `chainHonours` |
+| `loop_chain_internal_test.go` | the chain served on every backend (order, OnStart before any callback, the lane count), every broken layer refused by name, the honours merged, `UseLoop` refused on a goroutine group and recording its kind |
+| `loop_chain_conformance_internal_test.go` | P2's conformance: N connections × N tokens through `Routes` and `Bearer` behind `http1.HandleLoop`, two lanes, every backend present, `markRecycled` on — each answer its own subject, a 401 in between, every kept `Auth` still its token's after the buffers were reused |
+| `loop_portable.go` | the portable loop backend: `Loops` lanes (`portableGroup`, its acceptors handing connections to the lanes in turn, the group's `live` the lanes' sum), each a `portableLoop` — its own handler goroutine, connections, post queue and `Loop` index; a reader and a writer goroutine per connection on the netpoller, the reader's buffer held until its lane's batch ends; `markRecycled`, a test's switch that fills each released buffer with 0xAA |
 | `loop_group_internal_test.go` | loop groups on every backend the platform has: split lines, a 4 MiB response byte-exact, close, spill, drain, and every refusal — a zero-valued option included; `TestLoopGroup_middlewareRefused`, `Use` refused on every backend whatever the handler claims |
 | `loop_option_external_test.go` | `TestLoop` — the `Loop` option refused before or after the handler, on both natures, and what wins over it |
-| `stream_group.go` | `StreamGroup` — `Handle`, `HandleFunc`, `HandleHTTP`, `Use`; `claimHandler`, the one-handler rule every declaration takes |
+| `stream_group.go` | `StreamGroup` — `Handle`, `HandleFunc`, `HandleHTTP`, `Use`, `UseLoop` (kind `OptionLoopMiddleware`, every call); `claimHandler`, the one-handler rule every declaration takes |
 | `listen.go` | listener construction; TLS/mTLS wrapping; family validation |
 | `conn.go` | the pooled `corenet.Conn` implementation, and the `hijacked` hand-over flag |
 | `pool.go` | per-connection recycling + the live-socket registry |
@@ -61,7 +64,7 @@ Public façade: `pkg/v1/net/server`.
 | `adopt.go` | adoption of listeners inherited from a supervisor |
 | `handshake.go` | the bounded TLS handshake — `handshakeHandler`, and `defaultHandshakeTimeout` (10 s) for a group that sets none |
 | `swallow.go` | `swallowErr` — the recorded discard of a non-actionable cleanup error |
-| `load_gate_linux_test.go` | the network merge gate's L1 and L2 (plan P8, `tools/netgate`): `BenchmarkLoadL1` (`engine=goroutine`, `HandleHTTP`; `engine=loop`, `HandleLoop` of `http1.HandleLoop` on the best backend) and `BenchmarkLoadL2` (`engine=handwritten`: Bearer and routing written by hand in one handler, P2's engine A), 1000 kept-alive connections, a 1 KiB body; the server is this binary re-run on `TestLoadChild` and the metric is ITS CPU (`cpu-ns/req`, getrusage at the window's ends); `TestLoadL1L2_wired` serves each engine for three requests |
+| `load_gate_linux_test.go` | the network merge gate's L1 and L2 (plan P8, `tools/netgate`): `BenchmarkLoadL1` (`engine=goroutine`, `HandleHTTP`; `engine=loop`, `HandleLoop` of `http1.HandleLoop` on the best backend) and `BenchmarkLoadL2` (`engine=handwritten`: Bearer and routing written by hand in one handler, P2's engine A; `engine=chain`: the same through `http1.Routes` and `http1.Bearer`, P2's engine B), 1000 kept-alive connections, a 1 KiB body; the server is this binary re-run on `TestLoadChild` and the metric is ITS CPU (`cpu-ns/req`, getrusage at the window's ends); `TestLoadL1L2_wired` serves each engine for three requests |
 | `load_l3_linux_internal_test.go` | L3: `BenchmarkLoadL3` (`engine=recvmmsg`, today's `datagramSource`, P4a's engine A) over the veth pair of `scripts/ci/net-veth.sh`, 1200-byte datagrams from 4 GSO flows (`UDP_SEGMENT`, 54 segments a send) at 200 000 a second, the receiver re-run on `TestLoadL3Child` in the namespace; `cpu-ns/datagram`, `datagrams/syscall` (datagrams per `readBatch`) and `lost/op`; skipped without `KITSUNIUM_NETGATE_L3_PEER`; `TestLoadL3_wired` sends one GSO burst on loopback and counts its 54 datagrams |
 | `{batch,conn,linux}_compliance.go` | compile-time interface assertions (`KTN-IFACE-ASSERT-PLACEMENT`) |
 
@@ -135,6 +138,21 @@ Public façade: `pkg/v1/net/server`.
   buffer, so `buf` stays valid until `OnBatchEnd` as the contract says. Its
   `LoopIO` and its lifecycle are two types (`portableLoop`,
   `portableEngine`), because `LoopIO.Close` names a connection.
+- **A loop chain is checked once, at Start, and costs nothing after** (ADR
+  0189 §D2). `UseLoop`'s middlewares are applied in `loopRefusal`, before
+  anything is bound, and the chain the engine serves is `loopChain`. Each
+  layer must say what it wraps (`LoopLayered`); then the same middlewares
+  are built again over a probe and the eight callbacks sent through once, so
+  a layer that keeps one fails `Start` by name. A middleware is therefore
+  called twice; wrapping the served handler in a recorder instead would make
+  every callback of every connection pay for a property proved once. A
+  goroutine group refuses `UseLoop` (R6).
+- **Every backend runs `Loops` lanes** (ADR 0189 §D1). The portable backend
+  shards like a native one, so `OnStart(loopLanes(v))` is called once by
+  `bindLoopGroup` before the engine starts and a fallback to portable keeps
+  the count the chain was told. Its lanes share nothing but the listeners and
+  the group's counters; `MaxConns` and soft pressure read the lanes' summed
+  `live`.
 - **The operator's switches only restrict, and are read before any probe**
   (ADR 0188, R5). `New` reads `KITSUNIUM_NET_ENGINE` and
   `KITSUNIUM_NET_DISABLE` once, through `lookup` (`os.LookupEnv` unless a test
@@ -544,5 +562,6 @@ cd internal/service && GOWORK=off go test -race -cover ./net/server/...
 - ADR 0186 — the opt-in loop engine and its HTTP/1.1 profile — `docs/adr/0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md`
 - ADR 0187 — the handler type chooses the engine; the kind set, `Plaintext`, `Name`, `Engine` — `docs/adr/0187-the-handler-type-chooses-the-engine.md`
 - ADR 0188 — the operator's switches, `State`'s faults, fallbacks, override and platform, readiness and liveness — `docs/adr/0188-the-operators-switches-only-restrict-and-state-says-what-the-server-runs-without.md`
+- ADR 0189 — `Loops` lanes on every backend, `OnStart`, `UseLoop` and the probe chain — `docs/adr/0189-a-loop-middleware-forwards-every-callback-and-the-http1-chain-judges-one-canonical-target.md`
 - Contract layer — `internal/core/net/CLAUDE.md`
 - The two protocols that depend on both — `internal/service/net/{sse,websocket}/CLAUDE.md`

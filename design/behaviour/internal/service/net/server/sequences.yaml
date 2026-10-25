@@ -1554,6 +1554,13 @@ sequences:
                 			errs.String("group", g.name), errs.String("option", "Loop"))
               to: errs
           when: g.loopSet
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
+                			errs.String("group", g.name), errs.String("option", corenet.OptionLoopMiddleware.String()))
+              to: errs
+          when: g.kinds.has(corenet.OptionLoopMiddleware)
       - return: nil
   - of: (*Server).bindEverything
     participants:
@@ -2639,6 +2646,216 @@ sequences:
             - return: nil, aerr
           when: aerr != nil
       - return: "&trackedConn{Conn: socket}, nil"
+  - of: loopLanes
+    steps:
+      - return: max(v.Loops, 1)
+  - of: buildLoopChain
+    participants:
+      - id: caller
+        kind: actor
+      - id: buildLoopChain
+        kind: self
+      - id: wrapLoop
+        kind: internal
+      - id: sendProbe
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: h, nil
+          when: len(mws) == 0
+      - bind: chain, ok
+        eval: wrapLoop(h, mws)
+        to: wrapLoop
+      - opt:
+          do:
+            - return: nil, invalidLayer(group, "Next")
+          when: "!ok"
+      - bind: probe
+        eval: "&loopProbe{}"
+      - bind: probed, ok
+        eval: wrapLoop(probe, mws)
+        to: wrapLoop
+      - opt:
+          do:
+            - return: nil, invalidLayer(group, "Next")
+          when: "!ok"
+      - eval: sendProbe(probed)
+        to: sendProbe
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil, invalidLayer(group, probeNames[cb])
+                when: "!seen"
+          key: cb
+          range: probe.seen
+          value: seen
+      - return: chain, nil
+  - of: sameHandler
+    steps:
+      - opt:
+          do:
+            - return: a == nil && b == nil
+          when: a == nil || b == nil
+      - bind: ta, tb
+        eval: reflect.TypeOf(a), reflect.TypeOf(b)
+      - opt:
+          do:
+            - return: "false"
+          when: ta != tb
+      - return: "!ta.Comparable() || a == b"
+  - of: chainHonours
+    participants:
+      - id: caller
+        kind: actor
+      - id: chainHonours
+        kind: self
+      - id: l.Next
+        kind: value
+    steps:
+      - loop:
+          cond: node != nil
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                init:
+                  bind: h, ok
+                  eval: node.(corenet.LoopOptionHonourer)
+                when: ok && h.Honours(k)
+            - bind: l, ok
+              eval: node.(corenet.LoopLayered)
+            - opt:
+                do:
+                  - break: true
+                when: "!ok"
+            - set: node
+              to: l.Next
+              value: l.Next()
+          init: node := chain
+      - return: "false"
+  - of: invalidLayer
+    participants:
+      - id: caller
+        kind: actor
+      - id: invalidLayer
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corenet.LoopMiddlewareInvalid, errs.WrapParams{},
+          		errs.String("group", group), errs.String("callback", callback))
+        to: errs
+  - of: sendProbe
+    participants:
+      - id: caller
+        kind: actor
+      - id: sendProbe
+        kind: self
+      - id: s.OnStart
+        kind: value
+      - id: probed.OnOpen
+        kind: value
+      - id: probed.OnData
+        kind: value
+      - id: probed.OnTimeout
+        kind: value
+      - id: probed.OnWritable
+        kind: value
+      - id: probed.OnBatchEnd
+        kind: value
+      - id: probed.OnClose
+        kind: value
+      - id: h.Honours
+        kind: value
+    steps:
+      - bind: io
+        eval: probeIO{}
+      - var:
+          name: ref
+          type: corenet.LoopConnRef
+      - opt:
+          do:
+            - eval: s.OnStart(1)
+              to: s.OnStart
+          init:
+            bind: s, ok
+            eval: probed.(corenet.LoopStarter)
+          when: ok
+      - eval: probed.OnOpen(io, ref)
+        to: probed.OnOpen
+      - eval: probed.OnData(io, ref, nil)
+        to: probed.OnData
+      - eval: probed.OnTimeout(io, ref)
+        to: probed.OnTimeout
+      - eval: probed.OnWritable(io, ref)
+        to: probed.OnWritable
+      - eval: probed.OnBatchEnd(io)
+        to: probed.OnBatchEnd
+      - eval: probed.OnClose(io, ref, nil)
+        to: probed.OnClose
+      - opt:
+          do:
+            - eval: h.Honours(corenet.OptionNone)
+              to: h.Honours
+          init:
+            bind: h, ok
+            eval: probed.(corenet.LoopOptionHonourer)
+          when: ok
+  - of: (*loopProbe).OnStart
+    steps:
+      - set: p.seen[probeStart]
+        value: "true"
+  - of: (*loopProbe).OnOpen
+    steps:
+      - set: p.seen[probeOpen]
+        value: "true"
+  - of: (*loopProbe).OnData
+    steps:
+      - set: p.seen[probeData]
+        value: "true"
+      - return: len(buf)
+  - of: (*loopProbe).OnTimeout
+    steps:
+      - set: p.seen[probeTimeout]
+        value: "true"
+  - of: (*loopProbe).OnWritable
+    steps:
+      - set: p.seen[probeWritable]
+        value: "true"
+  - of: (*loopProbe).OnBatchEnd
+    steps:
+      - set: p.seen[probeBatchEnd]
+        value: "true"
+  - of: (*loopProbe).OnClose
+    steps:
+      - set: p.seen[probeClose]
+        value: "true"
+  - of: (*loopProbe).Honours
+    steps:
+      - set: p.seen[probeHonours]
+        value: "true"
+      - return: "false"
+  - of: probeIO.Write
+    steps:
+      - return: corenet.LoopStaleRef
+  - of: probeIO.Close
+    steps:
+      - return: corenet.LoopStaleRef
+  - of: probeIO.SetDeadline
+    steps:
+      - return: corenet.LoopStaleRef
+  - of: probeIO.Pressure
+    steps:
+      - return: "false"
+  - of: probeIO.Post
+    steps:
+      - return: corenet.ServerClosed
+  - of: probeIO.Loop
+    steps:
+      - return: "0"
   - of: startLoopEngine
     participants:
       - id: caller
@@ -2672,7 +2889,7 @@ sequences:
         eval: |-
           loop.Start(loop.Config{
           		Group: group.name, Value: value, MaxConns: group.limits.MaxConns,
-          		IdleTimeout: loopIdle(group), Handler: group.loopHandler, Listeners: handoff,
+          		IdleTimeout: loopIdle(group), Handler: group.loopChain, Listeners: handoff,
           	})
         to: loop
       - opt:
@@ -2798,20 +3015,29 @@ sequences:
         kind: self
       - id: errs
         kind: package
+      - id: buildLoopChain
+        kind: internal
     steps:
       - opt:
           do:
             - return: errs.Wrap(corenet.LoopTLSUnsupported, errs.WrapParams{}, errs.String("group", g.name))
               to: errs
           when: g.kinds.has(corenet.OptionTLS)
-      - bind: honours, _
-        eval: g.loopHandler.(corenet.LoopOptionHonourer)
+      - bind: chain, err
+        eval: buildLoopChain(g.name, g.loopHandler, g.loopMiddlewares)
+        to: buildLoopChain
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - set: g.loopChain
+        value: chain
       - loop:
           do:
             - opt:
                 do:
                   - continue: true
-                when: loopHonours(k) || (honours != nil && k != corenet.OptionMiddleware && honours.Honours(k))
+                when: loopHonours(k) || (k != corenet.OptionMiddleware && chainHonours(chain, k))
             - return: |-
                 errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
                 			errs.String("group", g.name), errs.String("option", k.String()))
@@ -2824,7 +3050,7 @@ sequences:
     steps:
       - switch:
           cases:
-            - case: corenet.OptionIdleTimeout, corenet.OptionMaxConns, corenet.OptionAdopt, corenet.OptionPlaintext, corenet.OptionName, corenet.OptionEngine
+            - case: corenet.OptionIdleTimeout, corenet.OptionMaxConns, corenet.OptionAdopt, corenet.OptionPlaintext, corenet.OptionName, corenet.OptionEngine, corenet.OptionLoopMiddleware
               do:
                 - return: "true"
             - default: true
@@ -2845,6 +3071,8 @@ sequences:
         kind: internal
       - id: s.operator.plan
         kind: internal
+      - id: st.OnStart
+        kind: value
       - id: startLoopEngine
         kind: internal
       - id: eng.State
@@ -2894,6 +3122,14 @@ sequences:
       - bind: plan
         eval: s.operator.plan(group.loop.Backend, nativeLoopBackends)
         to: s.operator.plan
+      - opt:
+          do:
+            - eval: st.OnStart(loopLanes(group.loop))
+              to: st.OnStart
+          init:
+            bind: st, ok
+            eval: group.loopChain.(corenet.LoopStarter)
+          when: ok
       - bind: eng, err
         eval: startLoopEngine(group, lns, plan)
         to: startLoopEngine
@@ -3037,41 +3273,77 @@ sequences:
     steps:
       - return: time.Duration(group.timeouts.Idle)
         to: time
+  - of: (*portableGroup).live
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*portableGroup).live
+        kind: self
+      - id: pl.live.Load
+        kind: value
+    steps:
+      - var:
+          name: "n"
+          type: int64
+      - loop:
+          do:
+            - op: +=
+              set: "n"
+              to: pl.live.Load
+              value: pl.live.Load()
+          key: _
+          range: g.lanes
+          value: pl
+      - return: "n"
   - of: startPortable
     participants:
       - id: caller
         kind: actor
       - id: startPortable
         kind: self
-      - id: pl.acceptLoop
+      - id: g.acceptLoop
         kind: internal
       - id: pl.run
         kind: internal
     steps:
       - bind: v
         eval: group.loop
-      - bind: pl
+      - bind: g
         eval: |-
-          &portableLoop{
-          		group: group.name, h: group.loopHandler,
-          		spillCap: orDefaultInt(v.SpillCap, portableSpillCap),
-          		outCap:   orDefaultInt(v.OutputCap, portableOutputCap),
-          		soft:     max(v.SoftConns, 0), maxConns: max(group.limits.MaxConns, 0),
-          		idle: loopIdle(group), degraded: degraded,
-          		events:  make(chan portableEvent, portableEvents),
-          		postOps: make([]corenet.PostFunc, portablePostCap), postArgs: make([]uintptr, portablePostCap),
-          		wake: make(chan struct{}, 1), done: make(chan struct{}), lns: lns,
+          &portableGroup{
+          		group: group.name, soft: max(v.SoftConns, 0), maxConns: max(group.limits.MaxConns, 0),
+          		degraded: degraded, lns: lns,
           	}
       - loop:
           do:
-            - go: pl.acceptLoop(ln)
-              to: pl.acceptLoop
+            - set: g.lanes
+              value: |-
+                append(g.lanes, &portableLoop{
+                			g: g, lane: i, h: group.loopChain,
+                			spillCap: orDefaultInt(v.SpillCap, portableSpillCap),
+                			outCap:   orDefaultInt(v.OutputCap, portableOutputCap),
+                			idle:     loopIdle(group),
+                			events:   make(chan portableEvent, portableEvents),
+                			postOps:  make([]corenet.PostFunc, portablePostCap), postArgs: make([]uintptr, portablePostCap),
+                			wake: make(chan struct{}, 1), done: make(chan struct{}),
+                		})
+          key: i
+          range: loopLanes(v)
+      - loop:
+          do:
+            - go: g.acceptLoop(ln)
+              to: g.acceptLoop
           key: _
           range: lns
           value: ln
-      - go: pl.run(pl.done)
-        to: pl.run
-      - return: "portableEngine{pl: pl}"
+      - loop:
+          do:
+            - go: pl.run(pl.done)
+              to: pl.run
+          key: _
+          range: g.lanes
+          value: pl
+      - return: "portableEngine{g: g}"
   - of: orDefaultInt
     steps:
       - opt:
@@ -3079,17 +3351,17 @@ sequences:
             - return: def
           when: v <= 0
       - return: v
-  - of: (*portableLoop).acceptLoop
+  - of: (*portableGroup).acceptLoop
     participants:
       - id: caller
         kind: actor
-      - id: (*portableLoop).acceptLoop
+      - id: (*portableGroup).acceptLoop
         kind: self
       - id: ln.Accept
         kind: value
       - id: time
         kind: stdlib
-      - id: pl.rejected.Add
+      - id: g.rejected.Add
         kind: value
       - id: swallowErr
         kind: internal
@@ -3108,7 +3380,7 @@ sequences:
                   - opt:
                       do:
                         - return: ""
-                      when: errors.Is(err, stdnet.ErrClosed) || pl.stopReq.Load()
+                      when: errors.Is(err, stdnet.ErrClosed) || g.stopReq.Load()
                   - op: ++
                     set: failures
                   - eval: time.Sleep(acceptDelay(failures))
@@ -3119,12 +3391,14 @@ sequences:
               value: "0"
             - opt:
                 do:
-                  - eval: pl.rejected.Add(1)
-                    to: pl.rejected.Add
+                  - eval: g.rejected.Add(1)
+                    to: g.rejected.Add
                   - eval: swallowErr(c.Close())
                     to: swallowErr
                   - continue: true
-                when: pl.maxConns > 0 && pl.live.Load() >= int64(pl.maxConns) || pl.drainReq.Load()
+                when: g.maxConns > 0 && g.live() >= int64(g.maxConns) || g.drainReq.Load()
+            - bind: pl
+              eval: g.lanes[(g.turn.Add(1)-1)%uint64(len(g.lanes))]
             - eval: pl.live.Add(1)
               to: pl.live.Add
             - send:
@@ -3191,7 +3465,7 @@ sequences:
                   - eval: pl.closeAll()
                     to: pl.closeAll
                   - return: ""
-                when: pl.stopReq.Load() || (pl.draining && pl.live.Load() == 0)
+                when: pl.g.stopReq.Load() || (pl.draining && pl.live.Load() == 0)
           forever: true
   - of: (*portableLoop).collect
     participants:
@@ -3383,7 +3657,7 @@ sequences:
         eval: |-
           &portableConn{
           		conn: c, gen: gen, ack: make(chan struct{}, 1), kick: make(chan struct{}, 1), open: true, lastIO: time.Now(),
-          		pressure: pl.soft > 0 && pl.live.Load() > int64(pl.soft),
+          		pressure: pl.g.soft > 0 && pl.g.live() > int64(pl.g.soft),
           	}
       - set: pl.conns[slot]
         value: pc
@@ -3407,6 +3681,8 @@ sequences:
         kind: value
       - id: pc.conn.Read
         kind: value
+      - id: fillMark
+        kind: internal
     steps:
       - defer: pl.readers.Done()
         to: pl.readers.Done
@@ -3423,6 +3699,11 @@ sequences:
                       chan: pl.events
                       value: "portableEvent{kind: pevData, slot: slot, gen: pc.gen, data: buf[:n]}"
                   - eval: <-pc.ack
+                  - opt:
+                      do:
+                        - eval: fillMark(buf[:n])
+                          to: fillMark
+                      when: markRecycled.Load()
                 when: n > 0
             - opt:
                 do:
@@ -3687,7 +3968,7 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: "!pl.drainReq.Load()"
+          when: "!pl.g.drainReq.Load()"
       - set: pl.draining
         value: "true"
       - loop:
@@ -3975,7 +4256,7 @@ sequences:
       - return: pc != nil && pc.pressure
   - of: (*portableLoop).Loop
     steps:
-      - return: "0"
+      - return: pl.lane
   - of: (*portableLoop).Post
     participants:
       - id: caller
@@ -4017,74 +4298,107 @@ sequences:
                   - default: true
           when: pl.postWait.CompareAndSwap(false, true)
       - return: nil
+  - of: (*portableGroup).wakeAll
+    steps:
+      - loop:
+          do:
+            - select:
+                cases:
+                  - comm: pl.wake <- struct{}{}
+                  - default: true
+          key: _
+          range: g.lanes
+          value: pl
   - of: portableEngine.Shutdown
     participants:
       - id: caller
         kind: actor
       - id: portableEngine.Shutdown
         kind: self
-      - id: pl.drainReq.Store
+      - id: g.drainReq.Store
         kind: value
+      - id: g.wakeAll
+        kind: internal
       - id: swallowErr
         kind: internal
       - id: errs
         kind: package
     steps:
-      - bind: pl
-        eval: e.pl
-      - eval: pl.drainReq.Store(true)
-        to: pl.drainReq.Store
-      - select:
-          cases:
-            - comm: pl.wake <- struct{}{}
-            - default: true
-      - select:
-          cases:
-            - comm: <-pl.done
-              do:
-                - return: nil
-            - comm: <-ctx.Done()
-              do:
-                - eval: swallowErr(e.Close())
-                  to: swallowErr
-                - return: errs.Wrap(corenet.DrainTimeout, errs.WrapParams{}, errs.String("group", pl.group))
-                  to: errs
+      - bind: g
+        eval: e.g
+      - eval: g.drainReq.Store(true)
+        to: g.drainReq.Store
+      - eval: g.wakeAll()
+        to: g.wakeAll
+      - loop:
+          do:
+            - select:
+                cases:
+                  - comm: <-pl.done
+                  - comm: <-ctx.Done()
+                    do:
+                      - eval: swallowErr(e.Close())
+                        to: swallowErr
+                      - return: errs.Wrap(corenet.DrainTimeout, errs.WrapParams{}, errs.String("group", g.group))
+                        to: errs
+          key: _
+          range: g.lanes
+          value: pl
+      - return: nil
   - of: portableEngine.Close
     participants:
       - id: caller
         kind: actor
       - id: portableEngine.Close
         kind: self
-      - id: pl.once.Do
+      - id: g.once.Do
         kind: value
     steps:
-      - bind: pl
-        eval: e.pl
+      - bind: g
+        eval: e.g
       - eval: |-
-          pl.once.Do(func() {
-          		pl.stopReq.Store(true)
-          		select {
-          		case pl.wake <- struct{}{}:
-          		default:
+          g.once.Do(func() {
+          		g.stopReq.Store(true)
+          		g.wakeAll()
+          		//: every lane's goroutine returned.
+          		for _, pl := range g.lanes {
+          			<-pl.done
           		}
-          		<-pl.done
           	})
-        to: pl.once.Do
+        to: g.once.Do
       - return: nil
   - of: portableEngine.State
     steps:
-      - bind: pl
-        eval: e.pl
+      - bind: g
+        eval: e.g
+      - bind: rings
+        eval: make([]corenet.LoopRingStateValue, 0, len(g.lanes))
+      - loop:
+          do:
+            - set: rings
+              value: |-
+                append(rings, corenet.LoopRingStateValue{
+                			Conns: pl.live.Load(), Accepted: pl.accepted.Load(), Closed: pl.closed.Load(),
+                			Batches: pl.batches.Load(), Evicted: 0,
+                		})
+          key: _
+          range: g.lanes
+          value: pl
       - return: |-
           corenet.LoopStateValue{
-          		Group: pl.group, Backend: corenet.LoopBackendPortable, ProbeStage: "portable",
-          		Degraded: pl.degraded != "", DegradedReason: pl.degraded,
-          		Loops: 1, Rings: 1, RingsSource: "single", GOMAXPROCS: runtime.GOMAXPROCS(0),
-          		RingStates: []corenet.LoopRingStateValue{{
-          			Conns: pl.live.Load(), Accepted: pl.accepted.Load(), Closed: pl.closed.Load(),
-          			Batches: pl.batches.Load(), Evicted: 0,
-          		}},
+          		Group: g.group, Backend: corenet.LoopBackendPortable, ProbeStage: "portable",
+          		Degraded: g.degraded != "", DegradedReason: g.degraded,
+          		Loops: len(g.lanes), Rings: 1, RingsSource: "single", GOMAXPROCS: runtime.GOMAXPROCS(0),
+          		RingStates: rings,
           	}
+  - of: fillMark
+    steps:
+      - loop:
+          do:
+            - set: b[i]
+              value: recycledMark
+          key: i
+          range: b
   - of: newMultiReader
     participants:
       - id: caller
@@ -5707,6 +6021,20 @@ sequences:
       - set: g.middlewares
         value: append(g.middlewares, middlewares...)
       - eval: g.kinds.add(corenet.OptionMiddleware)
+        to: g.kinds.add
+      - return: g
+  - of: (*StreamGroup).UseLoop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StreamGroup).UseLoop
+        kind: self
+      - id: g.kinds.add
+        kind: internal
+    steps:
+      - set: g.loopMiddlewares
+        value: append(g.loopMiddlewares, middlewares...)
+      - eval: g.kinds.add(corenet.OptionLoopMiddleware)
         to: g.kinds.add
       - return: g
   - of: (*StreamGroup).resolved
