@@ -104,9 +104,14 @@ record on, the loop's included.
 
 **Zero means the default, for new options only.** `EngineAuto` is the zero
 `EngineValue`, and every option added from this record on gives its zero value
-the default's meaning (ADR 0031). An option published before it keeps the
-meaning it has: `MaxConns(0)` still means no ceiling, and the timeouts' zero
-still means unset.
+the default's meaning (ADR 0031), unless no default can be defensible: then
+the zero is refused, the other half of ADR 0031. `Name("")` is that
+exception — an empty name names nothing, and a group declared without a name
+already has the default — so it fails `Start` with `GroupNameConflict`
+rather than meaning "no `Name`"; a caller with no name to give omits the
+option. An option published before this record keeps the meaning it has:
+`MaxConns(0)` still means no ceiling, and the timeouts' zero still means
+unset.
 
 ### D4 — A contradiction is refused, never folded back (R6)
 
