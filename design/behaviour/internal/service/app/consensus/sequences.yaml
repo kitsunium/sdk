@@ -5010,9 +5010,11 @@ sequences:
         kind: self
       - id: mkdirDurable
         kind: internal
-      - id: os
-        kind: stdlib
+      - id: snapshotEntries
+        kind: internal
       - id: strings
+        kind: stdlib
+      - id: os
         kind: stdlib
       - id: s.sweepSpools
         kind: internal
@@ -5026,11 +5028,11 @@ sequences:
             to: mkdirDurable
           when: err != nil
       - bind: ents, err
-        eval: os.ReadDir(dir)
-        to: os
+        eval: snapshotEntries(dir)
+        to: snapshotEntries
       - opt:
           do:
-            - return: nil, storageFailed("list snapshots", err)
+            - return: nil, err
           when: err != nil
       - loop:
           do:
@@ -5077,6 +5079,75 @@ sequences:
             eval: syncDirAtOpen(dir)
           when: err != nil
       - return: s, nil
+  - of: snapshotEntries
+    participants:
+      - id: caller
+        kind: actor
+      - id: snapshotEntries
+        kind: self
+      - id: os
+        kind: stdlib
+    steps:
+      - bind: ents, err
+        eval: os.ReadDir(dir)
+        to: os
+      - opt:
+          do:
+            - return: nil, storageFailed("list snapshots", err)
+          when: err != nil
+      - return: ents, newerMetas(dir, ents)
+  - of: newerMetas
+    participants:
+      - id: caller
+        kind: actor
+      - id: newerMetas
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: newerMeta
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: "!strings.HasSuffix(e.Name(), \".meta\")"
+            - opt:
+                do:
+                  - var:
+                      name: m
+                      type: coreconsensus.SnapshotMetaValue
+                  - opt:
+                      do:
+                        - return: err
+                      init:
+                        bind: err
+                        eval: newerMeta(b, wire.ParseSnapshotMeta(b, &m))
+                        to: newerMeta
+                      when: err != nil
+                init:
+                  bind: b, err
+                  eval: os.ReadFile(filepath.Join(dir, e.Name()))
+                  to: os
+                when: err == nil
+          key: _
+          range: ents
+          value: e
+      - return: nil
+  - of: newerMeta
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!errs.HasCode(err, coreconsensus.CodeVersionUnsupported) || len(b) < 1+4"
+      - bind: end
+        eval: len(b) - 4
+      - opt:
+          do:
+            - return: nil
+          when: wire.BodySum(b[:end]) != binary.LittleEndian.Uint32(b[end:])
+      - return: err
   - of: newestSpool
     participants:
       - id: caller
@@ -5603,6 +5674,10 @@ sequences:
         kind: stdlib
       - id: os
         kind: stdlib
+      - id: wire
+        kind: package
+      - id: newerMeta
+        kind: internal
     steps:
       - var:
           name: m
@@ -5625,10 +5700,21 @@ sequences:
           do:
             - return: m, false, storageFailed("read snapshot meta", err)
           when: err != nil
+      - bind: perr
+        eval: wire.ParseSnapshotMeta(b, &m)
+        to: wire
+      - opt:
+          do:
+            - return: m, false, err
+          init:
+            bind: err
+            eval: newerMeta(b, perr)
+            to: newerMeta
+          when: err != nil
       - opt:
           do:
             - return: m, false, nil
-          when: wire.ParseSnapshotMeta(b, &m) != nil || m.ID != id || !idNamesPosition(&m)
+          when: perr != nil || m.ID != id || !idNamesPosition(&m)
       - opt:
           do:
             - opt:
@@ -6341,6 +6427,32 @@ sequences:
               to: n.stop
           when: acc.Refused == coreconsensus.CodeVersionUnsupported
       - return: acc
+  - of: (*Node).undecodableOffer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).undecodableOffer
+        kind: self
+      - id: n.stop
+        kind: internal
+    steps:
+      - bind: fromLeader
+        eval: "false"
+      - opt:
+          do:
+            - return: coreconsensus.CodeNodeStopped
+          when: |-
+            !n.exec(func() {
+            		st := n.r.Status()
+            		fromLeader = term == st.Term && from.ID == st.Lead && st.Role != coreconsensus.RoleLeader
+            	})
+      - opt:
+          do:
+            - return: coreconsensus.CodeNotLeader
+          when: "!fromLeader"
+      - eval: n.stop(errs.Wrap(cause, errs.WrapParams{}, errs.String("leader", from.ID.String()), errs.String("term", strconv.FormatUint(term, 10))), false)
+        to: n.stop
+      - return: coreconsensus.CodeVersionUnsupported
   - of: (*Node).judgeOffer
     participants:
       - id: caller
@@ -8710,6 +8822,8 @@ sequences:
         kind: value
       - id: jb.BindJoinReason
         kind: value
+      - id: ub.bindUndecodable
+        kind: internal
       - id: wb.bindWarn
         kind: internal
     steps:
@@ -8747,6 +8861,14 @@ sequences:
           init:
             bind: jb, ok
             eval: cfg.Transport.(coreconsensus.JoinReasonBinder)
+          when: ok
+      - opt:
+          do:
+            - eval: ub.bindUndecodable(n.undecodableOffer)
+              to: ub.bindUndecodable
+          init:
+            bind: ub, ok
+            eval: cfg.Transport.(undecodableBinder)
           when: ok
       - opt:
           do:
@@ -17842,6 +17964,38 @@ sequences:
               to: n.obs.warn
           when: n.tooLarge[to] != meta.ID
       - return: "true"
+  - of: (*Node).withholds
+    steps:
+      - return: n.withheld(to, meta) || n.unannounced(to, meta)
+  - of: (*Node).unannounced
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).unannounced
+        kind: self
+      - id: n.obs.warn
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: delete(n.notAnnounced, to)
+            - return: "false"
+          when: meta.ClusterVersion < raft.Protocol3 || !belowProtocol3(n.r.PeerStats(), to)
+      - opt:
+          do:
+            - set: n.notAnnounced
+              value: map[coreconsensus.NodeID]string{}
+          when: n.notAnnounced == nil
+      - opt:
+          do:
+            - set: n.notAnnounced[to]
+              value: meta.ID
+            - eval: |-
+                n.obs.warn("consensus: a member does not announce protocol 3 and cannot read this snapshot; it is not offered",
+                			lattr("peer", uint64(to)), lstr("id", meta.ID), lattr("cluster_version", uint64(meta.ClusterVersion)))
+              to: n.obs.warn
+          when: n.notAnnounced[to] != meta.ID
+      - return: "true"
   - of: (*Node).afterCut
     participants:
       - id: caller
@@ -18483,7 +18637,7 @@ sequences:
             - eval: n.r.SnapshotDone(to, 0, false)
               to: n.r.SnapshotDone
             - return: ""
-          when: n.withheld(to, &meta)
+          when: n.withholds(to, &meta)
       - bind: h, err
         eval: n.cfg.Snapshots.Open(meta.ID)
         to: n.cfg.Snapshots.Open
@@ -19175,7 +19329,7 @@ sequences:
         to: clampInt
       - eval: clampDuration(&c.HandshakeTimeout, time.Second)
         to: clampDuration
-      - eval: clampInt64(&c.PeerQueueBytes, 64<<20)
+      - eval: clampInt64(&c.PeerQueueBytes, max(defaultPeerQueueBytes, int64(c.MaxFrameBytes)))
         to: clampInt64
       - eval: clampDuration(&c.MaxConnectionAge, 24*time.Hour)
         to: clampDuration
@@ -19204,6 +19358,10 @@ sequences:
             - case: c.MaxControlFrameBytes >= c.MaxFrameBytes
               do:
                 - return: transportMisconfigured("MaxControlFrameBytes", "not below MaxFrameBytes")
+                  to: transportMisconfigured
+            - case: c.PeerQueueBytes < int64(c.MaxFrameBytes)
+              do:
+                - return: transportMisconfigured("PeerQueueBytes", "below MaxFrameBytes")
                   to: transportMisconfigured
             - case: c.ListenAddress == ""
               do:
@@ -19964,6 +20122,8 @@ sequences:
         kind: value
       - id: pc.mu.Unlock
         kind: value
+      - id: t.droppedOversized
+        kind: internal
     steps:
       - bind: lane
         eval: laneData
@@ -20016,6 +20176,11 @@ sequences:
           do:
             - eval: pc.mu.Unlock()
               to: pc.mu.Unlock
+            - opt:
+                do:
+                  - eval: t.droppedOversized(to, lane, len(frame))
+                    to: t.droppedOversized
+                when: int64(len(frame)) > t.cfg.PeerQueueBytes
             - return: ""
           when: pc.bytes+int64(len(frame)) > t.cfg.PeerQueueBytes
       - op: +=
@@ -20035,6 +20200,38 @@ sequences:
                   value: int64(len(frame))
                 - eval: pc.mu.Unlock()
                   to: pc.mu.Unlock
+  - of: (*TCPTransport).droppedOversized
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).droppedOversized
+        kind: self
+      - id: t.oversized.Add
+        kind: value
+      - id: t.mu.Lock
+        kind: value
+      - id: t.mu.Unlock
+        kind: value
+    steps:
+      - bind: dropped
+        eval: t.oversized.Add(1)
+        to: t.oversized.Add
+      - opt:
+          do:
+            - return: ""
+          when: dropped&(dropped-1) != 0
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - bind: warn
+        eval: t.warn
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
+      - opt:
+          do:
+            - eval: |-
+                warn("consensus: a frame larger than the peer queue was dropped", lattr("to", uint64(to)), lattr("lane", uint64(lane)),
+                			lattr("length", uint64(n)), lattr("bound", uint64(t.cfg.PeerQueueBytes)), lattr("dropped", uint64(dropped)))
+          when: warn != nil
   - of: (*TCPTransport).sender
     participants:
       - id: caller
@@ -20989,15 +21186,11 @@ sequences:
         kind: internal
       - id: decodeOffer
         kind: internal
+      - id: t.refuseOffer
+        kind: internal
       - id: t.mu.Lock
         kind: value
       - id: t.mu.Unlock
-        kind: value
-      - id: offerRefused
-        kind: internal
-      - id: binary.LittleEndian.AppendUint64
-        kind: value
-      - id: binary.LittleEndian.AppendUint32
         kind: value
       - id: writeChunk
         kind: internal
@@ -21022,38 +21215,30 @@ sequences:
               to: decodeOffer
               value: decodeOffer(b)
           when: err == nil
-      - eval: t.mu.Lock()
-        to: t.mu.Lock
-      - bind: of, in, warn
-        eval: t.offer, t.install, t.warn
-      - eval: t.mu.Unlock()
-        to: t.mu.Unlock
       - opt:
           do:
-            - eval: offerRefused(warn, peer.ID, t.cfg.MaxFrameBytes, err)
-              to: offerRefused
+            - eval: t.refuseOffer(c, peer, o.Term, err)
+              to: t.refuseOffer
             - return: ""
           when: err != nil
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - bind: of, in
+        eval: t.offer, t.install
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
       - opt:
           do:
             - return: ""
           when: of == nil || in == nil
       - bind: acc
         eval: of(peer, o)
-      - bind: reply
-        eval: binary.LittleEndian.AppendUint64(nil, uint64(acc.Offset))
-        to: binary.LittleEndian.AppendUint64
-      - set: reply
-        to: binary.LittleEndian.AppendUint32
-        value: binary.LittleEndian.AppendUint32(reply, uint32(acc.Refused))
-      - set: reply
-        value: append(reply, boolByte(acc.Held))
       - opt:
           do:
             - return: ""
           init:
             bind: err
-            eval: writeChunk(c, reply)
+            eval: writeChunk(c, encodeAccept(&acc))
             to: writeChunk
           when: err != nil || acc.Refused != 0 || acc.Held
       - bind: ctx, cancel
@@ -21104,6 +21289,58 @@ sequences:
         to: io
       - eval: abandon(err)
         to: abandon
+  - of: encodeAccept
+    participants:
+      - id: caller
+        kind: actor
+      - id: encodeAccept
+        kind: self
+      - id: binary.LittleEndian.AppendUint64
+        kind: value
+      - id: binary.LittleEndian.AppendUint32
+        kind: value
+    steps:
+      - bind: b
+        eval: binary.LittleEndian.AppendUint64(nil, uint64(acc.Offset))
+        to: binary.LittleEndian.AppendUint64
+      - set: b
+        to: binary.LittleEndian.AppendUint32
+        value: binary.LittleEndian.AppendUint32(b, uint32(acc.Refused))
+      - return: append(b, boolByte(acc.Held))
+  - of: (*TCPTransport).refuseOffer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).refuseOffer
+        kind: self
+      - id: t.mu.Lock
+        kind: value
+      - id: t.mu.Unlock
+        kind: value
+      - id: abandon
+        kind: internal
+      - id: offerRefused
+        kind: internal
+    steps:
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - bind: warn, judge
+        eval: t.warn, t.undecodable
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
+      - opt:
+          do:
+            - bind: acc
+              eval: "coreconsensus.InstallAcceptValue{Refused: judge(peer, term, err)}"
+            - eval: abandon(writeChunk(c, encodeAccept(&acc)))
+              to: abandon
+            - opt:
+                do:
+                  - return: ""
+                when: acc.Refused == coreconsensus.CodeVersionUnsupported
+          when: judge != nil && errs.HasCode(err, coreconsensus.CodeVersionUnsupported)
+      - eval: offerRefused(warn, peer.ID, t.cfg.MaxFrameBytes, err)
+        to: offerRefused
   - of: offerRefused
     participants:
       - id: caller
@@ -21149,6 +21386,23 @@ sequences:
         to: t.mu.Lock
       - set: t.warn
         value: warn
+      - eval: t.mu.Unlock()
+        to: t.mu.Unlock
+  - of: (*TCPTransport).bindUndecodable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*TCPTransport).bindUndecodable
+        kind: self
+      - id: t.mu.Lock
+        kind: value
+      - id: t.mu.Unlock
+        kind: value
+    steps:
+      - eval: t.mu.Lock()
+        to: t.mu.Lock
+      - set: t.undecodable
+        value: judge
       - eval: t.mu.Unlock()
         to: t.mu.Unlock
   - of: encodeJoin

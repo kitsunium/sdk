@@ -272,6 +272,11 @@ constants:
           the retired keys, in an entry of payload version 3, which a node of
           protocol 2 cannot read (#648, D18).
         name: mutProtocol3BelowRaise
+      - doc: |-
+          mutRaiseOverSilence admits a raise over a member whose last message
+          of the term announced the version, however long ago it was heard
+          (#665).
+        name: mutRaiseOverSilence
     name: mutAckBeforeSync
   - doc: The facts a PeerStatValue carries.
     grouped: true
@@ -288,6 +293,10 @@ constants:
         name: StatProbing
       - doc: StatSnapshot is set while a snapshot is being sent to the peer.
         name: StatSnapshot
+      - doc: |-
+          StatProtocol3 is set while the peer's last message of the term
+          announced protocol 3.
+        name: StatProtocol3
     name: StatVoter
   - doc: The facts a progress holds, one bit each in peerFacts.
     grouped: true
@@ -413,6 +422,7 @@ files:
       - (*Raft).checkTimingContract
       - (*Raft).checkClusterVersion
       - (*Raft).checkAnnounced
+      - (*Raft).checkHeard
       - announcementOf
       - (*Raft).announces
       - announced
@@ -1687,6 +1697,21 @@ types:
         recv: r *Raft
         results: errs.Code
       - doc: |-
+          checkHeard refuses a raise to v while a member of the latest
+          configuration, voter or learner, was last heard a vote window ago or
+          more, whatever its last message announced: an announcement holds for as
+          long as the member answers, not for the rest of the term. A voter that
+          announced the version once and then went down was rolled back to the
+          previous release meanwhile; it met the raise only as a snapshot it could
+          not read once the leader compacted past its log, and left replication
+          without a word (#665). The window is answering's, the minimum election
+          timeout, which the leader's heartbeats fill several times over. It is
+          apart from checkAnnounced, which inlines.
+        name: checkHeard
+        params: v uint32
+        recv: r *Raft
+        results: errs.Code
+      - doc: |-
           announces is the announcement this node's own frames carry, as the facts
           a leader keeps of a peer that sent them.
         name: announces
@@ -1831,8 +1856,8 @@ types:
       - doc: |-
           atProtocol3 reports whether the committed cluster version admits the
           formats of protocol 3: every member announced it before the raise
-          committed, and a node of protocol 2 stops on the raise instead of meeting
-          them (D18).
+          committed, and a node of protocol 2 stops on the raise, or is withheld a
+          snapshot it cannot read (D18, #665).
         name: atProtocol3
         recv: r *Raft
         results: bool

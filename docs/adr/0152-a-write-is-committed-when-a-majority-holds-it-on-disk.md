@@ -2582,7 +2582,7 @@ transport. The cross-field rules are checked after defaults are applied
 | `MaxFrameBytes` | transport | 16 MiB | clamp; refuse if < `MaxBatchBytes` + header |
 | `HandshakeTimeout` | transport | 1 s | clamp; refuse > 1 s |
 | `MaxUnauthenticatedPerIP`, `ReservedMemberSlots` | transport | 4, 8 | clamp |
-| `PeerQueueBytes` | transport | 64 MiB | clamp |
+| `PeerQueueBytes` | transport | 64 MiB, or `MaxFrameBytes` when larger | clamp; refuse if < `MaxFrameBytes`; a frame larger than the queue is counted and logged (#669) |
 | `InboundDataBytes`, `InboundControlMessages` | transport | 64 MiB, 4 096 | clamp (R2-08) |
 | `MaxConnectionAge` | transport | 24 h | clamp (R2-20) |
 | `ForwardedAdminBytes` | transport | 64 KiB | clamp, and refuse ≥ `InboundControlBytes` / 4, so forwarded administration never crowds out votes (R7-37) |
@@ -3389,7 +3389,9 @@ The rules:
   R2-14).
 - **Unknown means stop.** An entry kind, record version, frame version or
   snapshot version a node does not know stops that node with
-  `VERSION_UNSUPPORTED`. It is never skipped: skipping an entry is a fork.
+  `VERSION_UNSUPPORTED`, a snapshot metadata it cannot decode for its
+  version included (amendment of 2026-10-25, #665). It is never skipped:
+  skipping an entry is a fork.
   A follower appends and acknowledges the entries before an unknown kind,
   never the unknown one, and stops; an unknown kind already in the log
   stops the node when it reaches apply (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), M3).
@@ -4379,9 +4381,13 @@ not to work around it on every node:
   - **The raise.** `RaiseClusterVersion(3)` is refused
     `VERSION_UNSUPPORTED` while any member of the latest configuration,
     voter or learner, was not heard in the term announcing protocol 3; the
-    raise to 2 still asks for `FlagProtocol2` alone. A node of protocol 2
-    that replays the raise to 3, or meets a snapshot at cluster version 3,
-    stops `VERSION_UNSUPPORTED` (#640). Do not roll back past the raise.
+    raise to 2 still asks for `FlagProtocol2` alone, and both wait for
+    every member to answer within the vote window (corrected 2026-10-25,
+    #665). A node of protocol 2
+    that replays the raise to 3 stops `VERSION_UNSUPPORTED`; one that meets
+    a snapshot at cluster version 3 stops only when its metadata decodes,
+    which version 3's does not for it (corrected 2026-10-25, #665). Do not
+    roll back past the raise.
   - **What protocol 3 writes**, each chosen by the committed cluster
     version, never before the raise, and each older form still read:
     - the admin payload of entry version 3 (`wire.AdminVersion3`): version
@@ -4390,9 +4396,13 @@ not to work around it on every node:
       stops on version 3 when the entry commits;
     - the snapshot metadata in version 3, for a cluster at version 3:
       version 1's fields, then the retired keys, then the CRC-32C of every
-      byte before it. A node of protocol 2 refuses it
-      `VERSION_UNSUPPORTED`; that guard, rule 5 of #564's old reader,
-      already ships (#513, #640);
+      byte before it. A node of protocol 2 cannot decode it: its
+      transport refuses such an offer before its node judges it, and its
+      start skips such a `.meta` as one that rotted, so neither #513's
+      guard nor #640's, which run on a metadata that decodes, stops it.
+      Rule 5 of #564, an old-reader guard one release before the format,
+      was not met for this version as #546 met it for version 2
+      (corrected 2026-10-25, #665: see that amendment);
     - `Recover`'s forced entry, in a history at protocol 3, of payload
       version 3: it keeps the old configuration's retired keys as it keeps
       its retired IDs, and `RestoreSnapshot` keeps the snapshot's. Below,
@@ -4447,6 +4457,113 @@ the reopen kept 0.5 to 0.9 times the log in heap, and allocated past
   allocates 13 MiB and keeps 2 MiB.
 
 Nothing published changes: no frame, no payload, no record format.
+
+## Amendment — a metadata a node cannot decode stops it, and the raise waits for every member to answer (2026-10-25, #665)
+
+The amendment of 2026-10-24 (#648) said a node of protocol 2 refuses the
+snapshot metadata of version 3 `VERSION_UNSUPPORTED` and stops. It cannot
+decode it: its transport refused such an offer before its node judged it,
+and its start skipped such a `.meta` as one that rotted, so the stops of
+#513 and #640, which run on a metadata that decodes, never ran. A voter
+rolled back past the raise to 3, or an old binary that joined after it,
+left replication without a word, still answering its leader's heartbeats
+and counted by CheckQuorum, and the leader offered it the snapshot again
+at every probe. The raise itself passed over a voter silent for ten
+minutes, since its announcement held for the rest of the term
+([#665](https://github.com/kitsunium/sdk/issues/665)).
+
+- **This build stops on any metadata version it does not know.** It is
+  the old reader of every later protocol, as the release of protocol 2 is
+  of protocol 3, and holds rule 5 of #564 for the snapshot metadata of all
+  of them:
+  - an offer whose metadata does not decode for its version is handed to
+    the node with its term, which stops `VERSION_UNSUPPORTED` when the
+    offer comes from its leader in its term, and refuses it `NOT_LEADER`
+    otherwise: only the node's leader speaks for the cluster. The leader
+    reads the refusal and logs that its peer stops;
+  - a `.meta` of a version it does not know whose trailing CRC-32C holds,
+    which a newer build wrote, refuses the open of the snapshot store, and
+    so of the data directory, `VERSION_UNSUPPORTED`, before anything in it
+    is removed, as a log record of an unknown version does (#511); a
+    listing reports one rather than skip it. One whose sum fails rotted,
+    as a flipped version byte does, and is skipped as before (#546). Every
+    metadata version from 2 ends with the CRC-32C of every byte before it,
+    and a later version keeps that end.
+- **The leader withholds a snapshot of cluster version 3 from a peer of
+  protocol 2.** A peer heard in the term whose last message did not
+  announce protocol 3 is not offered it; the leader logs it once per
+  snapshot and peer, and offers it as soon as the peer announces 3. A peer
+  not heard yet is offered: a node of protocol 3 announces it at its first
+  answer. A later metadata version needs no such rule, since every build
+  from this one stops on a snapshot metadata it cannot decode. A frame
+  version or a message kind it cannot parse is still dropped, not stopped
+  on, short of D18's rule: a later protocol that changes either needs its
+  own guard.
+- **The raise waits for every member to answer.** `RaiseClusterVersion` to
+  2 or above is refused `VERSION_UNSUPPORTED` while a member of the latest
+  configuration, voter or learner, was last heard a vote window ago or
+  more, the minimum election timeout, whatever its last message
+  announced: an announcement holds while the member answers, not for the
+  rest of the term.
+- **The release of protocol 2 is shipped, and nothing here changes it.**
+  Rolled back past the raise to 3, a node of it stops on the raise entry
+  and on an admin payload of version 3 while the log still holds them; on
+  the snapshot path it is withheld: it answers heartbeats, so CheckQuorum
+  counts it, and holds no new entry; at its start it skips its own `.meta`
+  files of version 3 and starts on an older snapshot, or on none and is
+  refused `SNAPSHOT_CORRUPT`. Two ways would stop it, each a decision left
+  open: offer it a metadata of version 2 at cluster version 3, which
+  #640's guard refuses and stops on but which a build of protocol 2 before
+  #640 would install, and which chooses a layout by its reader rather than
+  by its value; or write at the raise a stamp that protocol 2 refuses to
+  open.
+- **The rule for the raise to 3 (Forgejo, D19).** Three steps, in order:
+  1. every member runs a build with this amendment, the autopilot still at
+     protocol 2: the leader that will admit the raise holds every member
+     to the vote window, and withholds from a peer of protocol 2 a
+     snapshot it cannot read;
+  2. no binary of protocol 2 can come back: none is left in the
+     deployment, kept as a rollback target, allowed to `JOIN`, or used for
+     an offline command (`Recover`, `RestoreSnapshot`, `Inspect`) over a
+     data directory of the cluster — a build of the SDK before #659, such
+     as dd1d0807, which Forgejo pinned until kodflow/forgejo-raft#227. The
+     floor of a rollback is the release of step 1: another build of
+     protocol 3 reads version 3 too, but only a build with this amendment
+     stops on what a later protocol writes;
+  3. only then a later release raises the autopilot to protocol 3, which
+     the engine admits once every member answers within the vote window
+     announcing it.
+
+  After the raise, the leader's line "a member does not announce protocol
+  3 and cannot read this snapshot; it is not offered" names a node that
+  came back on a binary of protocol 2: count it as down, and upgrade or
+  remove it. From the raise to 4 on, a node rolled back to a build with
+  this amendment stops `VERSION_UNSUPPORTED` instead, on a snapshot
+  metadata of a later version.
+
+No frame, payload or record format changes; the refusals are new.
+
+## Amendment — a peer queue below the frame bound is refused (2026-10-25, #669)
+
+`TransportConfig` accepted a `PeerQueueBytes` below the largest append
+frame, and `Send` dropped, without a counter or a line, every frame
+larger than the queue, even into an empty one: an entry legal under
+`MaxEntryBytes`, or a lagging follower's catch-up batch, never reached a
+follower, and the commit stopped for good under the same leader, its
+heartbeats still passing ([#669](https://github.com/kitsunium/sdk/issues/669),
+the class of #557).
+
+- **The queue is refused below `MaxFrameBytes`** (`TRANSPORT_MISCONFIGURED`,
+  field `PeerQueueBytes`), as a control frame bound not below the data
+  bound is. Config already holds a batch below `MaxFrameBytes`, the bound
+  every frame a peer reads is under, so a queue at that bound holds any
+  frame a peer can read. Unset, the queue is the larger of 64 MiB and
+  `MaxFrameBytes`, so no configuration the default accepted is refused.
+- **A frame larger than the whole queue is counted and logged**, at the
+  first drop and at each power of two after it, rather than dropped
+  without a word; it is still dropped, since `Send` never blocks (D4).
+
+No frame, payload or record format changes.
 
 ## Revision history
 

@@ -517,6 +517,7 @@ var checks = map[string]func(mutation) error{
 	"retired key refused":               checkRetiredKeyRefused,
 	"nothing new below protocol 3":      checkNothingNewBelowProtocol3,
 	"raise to 3 announced":              checkRaise3Announced,
+	"raise heard in the vote window":    checkRaiseHeardRecently,
 }
 
 func TestChecksPassUnmutated(t *testing.T) {
@@ -590,6 +591,7 @@ func TestMutationsAreCaught(t *testing.T) {
 		"retired key admitted":             mutRetiredKeyAdmitted,
 		"key not retired":                  mutKeyNotRetired,
 		"protocol 3 below the raise":       mutProtocol3BelowRaise,
+		"raise over a silent member":       mutRaiseOverSilence,
 	}
 	for name, m := range muts {
 		caught := ""

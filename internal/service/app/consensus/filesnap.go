@@ -1,6 +1,7 @@
 package consensus
 
 import (
+	"encoding/binary"
 	"errors"
 	"io"
 	"os"
@@ -47,6 +48,8 @@ type fileSnapshots struct {
 // nor resumable. Of the receive spools only the newest stays, the one a
 // resume may still continue (#527). A directory that cannot be created, listed or cleaned is a
 // STORAGE_FAILED, so a store never opens over a state it could not read.
+// One that holds a .meta a newer build wrote is refused VERSION_UNSUPPORTED
+// before anything in it is removed (newerMetas, #665).
 // syncFailed builds the STORAGE_FAILED of a failed directory sync: a data
 // directory's open passes its log's syncFailedAtOpen, which writes the
 // markers first (#637), and a store opened alone passes storageFailed.
@@ -56,9 +59,9 @@ func newFileSnapshots(dir string, syncFailed func(op string, cause error) error)
 	}
 	// A crash between a snapshot's rename and its .meta leaves a .snap
 	// that is not a snapshot, nor resumable: it goes (review of PR #301, L4).
-	ents, err := os.ReadDir(dir)
+	ents, err := snapshotEntries(dir)
 	if err != nil {
-		return nil, storageFailed("list snapshots", err)
+		return nil, err
 	}
 	for _, e := range ents {
 		id, ok := strings.CutSuffix(e.Name(), ".snap")
@@ -83,6 +86,57 @@ func newFileSnapshots(dir string, syncFailed func(op string, cause error) error)
 		return nil, syncFailed("sync snapshots at open", err)
 	}
 	return s, nil
+}
+
+// snapshotEntries lists the snapshot directory dir for its open: a
+// STORAGE_FAILED when it cannot be listed, and VERSION_UNSUPPORTED when it
+// holds a .meta a newer build wrote (newerMetas), before anything in it is
+// removed.
+func snapshotEntries(dir string) ([]os.DirEntry, error) {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, storageFailed("list snapshots", err)
+	}
+	return ents, newerMetas(dir, ents)
+}
+
+// newerMetas refuses VERSION_UNSUPPORTED the first .meta among ents that a
+// newer build wrote (newerMeta). Opened over it, a node rolled back past a
+// raise skipped it as a .meta that rotted and started on an older state,
+// or none, where it should have refused to start, as for a log record of
+// a version it does not know (D18, #511): the release of protocol 2 did
+// so with #659's version 3 (#665). A .meta that cannot be read is left to
+// the listing, which reports it.
+func newerMetas(dir string, ents []os.DirEntry) error {
+	for _, e := range ents {
+		if !strings.HasSuffix(e.Name(), ".meta") {
+			continue
+		}
+		if b, err := os.ReadFile(filepath.Join(dir, e.Name())); err == nil {
+			var m coreconsensus.SnapshotMetaValue
+			if err := newerMeta(b, wire.ParseSnapshotMeta(b, &m)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// newerMeta returns err, what parsing the encoded .meta b returned, when it
+// is the VERSION_UNSUPPORTED of a version this build does not know and b's
+// trailing CRC-32C holds: what a newer build wrote, every version from 2
+// ending with the CRC-32C of every byte before it (D18). One whose sum
+// fails rotted, as a flipped version byte does, and is nil, as is every
+// .meta this build reads.
+func newerMeta(b []byte, err error) error {
+	if !errs.HasCode(err, coreconsensus.CodeVersionUnsupported) || len(b) < 1+4 {
+		return nil
+	}
+	end := len(b) - 4
+	if wire.BodySum(b[:end]) != binary.LittleEndian.Uint32(b[end:]) {
+		return nil
+	}
+	return err
 }
 
 // newestSpool is the id of the newest receive spool among ents, "" when
@@ -410,7 +464,8 @@ func (k *fileSink) Commit(final coreconsensus.SnapshotMetaValue) error {
 // skipped: it is a publication a crash interrupted or a .meta that rotted,
 // not a snapshot to restore from. A .meta or a .snap that is there
 // but cannot be read is neither: it is an I/O failure, and it is reported,
-// so that a listing never reads a failing disk as "no snapshot".
+// so that a listing never reads a failing disk as "no snapshot". Nor is a
+// .meta a newer build wrote: it is reported VERSION_UNSUPPORTED (#665).
 func (s *fileSnapshots) published(name string) (coreconsensus.SnapshotMetaValue, bool, error) {
 	var m coreconsensus.SnapshotMetaValue
 	if !strings.HasSuffix(name, ".meta") {
@@ -424,7 +479,11 @@ func (s *fileSnapshots) published(name string) (coreconsensus.SnapshotMetaValue,
 	if err != nil {
 		return m, false, storageFailed("read snapshot meta", err)
 	}
-	if wire.ParseSnapshotMeta(b, &m) != nil || m.ID != id || !idNamesPosition(&m) {
+	perr := wire.ParseSnapshotMeta(b, &m)
+	if err := newerMeta(b, perr); err != nil {
+		return m, false, err
+	}
+	if perr != nil || m.ID != id || !idNamesPosition(&m) {
 		return m, false, nil
 	}
 	if _, err := os.Stat(filepath.Join(s.dir, id+".snap")); err != nil {

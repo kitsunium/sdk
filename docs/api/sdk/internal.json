@@ -51215,7 +51215,7 @@
           "type": "time.Duration"
         }
       ],
-      "doc": "TransportConfig builds the shipped mTLS transport (D4, D14). A zero bound\nis clamped to its default; nil Roots, no certificate, a HandshakeTimeout\nabove one second, or a control frame bound not below the data bound is\nrefused.\n",
+      "doc": "TransportConfig builds the shipped mTLS transport (D4, D14). A zero bound\nis clamped to its default; nil Roots, no certificate, a HandshakeTimeout\nabove one second, a control frame bound not below the data bound, or a\npeer queue below the data bound is refused.\n",
       "file": "service/app/consensus/tcp.go",
       "layer": "service",
       "family": "app"
@@ -51481,7 +51481,7 @@
           "type": "time.Time"
         }
       ],
-      "doc": "PeerStatValue is the leader's view of one peer, for Health (D13). Flags\nsay whether it votes, answered in this term, is probed or is being sent a\nsnapshot; LastHeard is meaningful only once StatHeard is set.\n",
+      "doc": "PeerStatValue is the leader's view of one peer, for Health (D13). Flags\nsay whether it votes, answered in this term, is probed, is being sent a\nsnapshot or last announced protocol 3; LastHeard is meaningful only once\nStatHeard is set.\n",
       "file": "service/app/consensus/raft/peerstat.go",
       "layer": "service",
       "family": "app"
@@ -52167,6 +52167,19 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus/raft.PeerStatFlags",
       "value": "4",
       "doc": "StatProbing is set while the leader probes for the peer's match.\n",
+      "file": "service/app/consensus/raft/peerstat.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.StatProtocol3",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "StatProtocol3",
+      "spelled": "PeerStatFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus/raft.PeerStatFlags",
+      "value": "16",
+      "doc": "StatProtocol3 is set while the peer's last message of the term\nannounced protocol 3.\n",
       "file": "service/app/consensus/raft/peerstat.go",
       "layer": "service",
       "family": "app"

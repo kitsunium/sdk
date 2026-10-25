@@ -160,6 +160,10 @@ const (
 	// the retired keys, in an entry of payload version 3, which a node of
 	// protocol 2 cannot read (#648, D18).
 	mutProtocol3BelowRaise
+	// mutRaiseOverSilence admits a raise over a member whose last message
+	// of the term announced the version, however long ago it was heard
+	// (#665).
+	mutRaiseOverSilence
 )
 
 // mutated reports whether a test switched mutation m on; it is false in every

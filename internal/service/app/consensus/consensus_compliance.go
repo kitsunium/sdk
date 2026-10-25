@@ -53,6 +53,9 @@ var (
 	_ refreshJoiner                    = (*MemoryTransport)(nil)
 	_ bindWarner                       = (*TCPTransport)(nil)
 	_ bindWarner                       = (*MemoryTransport)(nil)
+	// The transport hands the node an offer it could not decode, which
+	// stops it when its leader made it (#665).
+	_ undecodableBinder = (*TCPTransport)(nil)
 	_ interface {
 		CertExpiry() time.Time
 		PeerCertExpiry() map[coreconsensus.NodeID]time.Time

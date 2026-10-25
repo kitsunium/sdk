@@ -89,8 +89,9 @@ constants:
           configuration carries its retired keys: the fields of version 1,
           then the retired keys, then the CRC-32C of every byte before it. It
           is written for a cluster at protocol version 3, which every member
-          announced, and a node of protocol 2 refuses it VERSION_UNSUPPORTED
-          (#648).
+          announced (#648). A node of protocol 2 cannot decode it and does not
+          stop on it, so a leader withholds such a snapshot from a peer that
+          does not announce protocol 3 (#665).
         name: metaVersion3
         type: byte
         value: "3"

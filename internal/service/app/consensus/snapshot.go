@@ -426,6 +426,51 @@ func (n *Node) withheld(to coreconsensus.NodeID, meta *coreconsensus.SnapshotMet
 	return true
 }
 
+// withholds reports whether meta is not offered to peer to: too large for
+// the limit it announced (withheld, #591), or of a metadata version its
+// protocol cannot decode (unannounced, #665). It runs on the loop.
+func (n *Node) withholds(to coreconsensus.NodeID, meta *coreconsensus.SnapshotMetaValue) bool {
+	return n.withheld(to, meta) || n.unannounced(to, meta)
+}
+
+// unannounced reports whether meta is of a cluster version whose metadata
+// peer to cannot decode, and says so once per snapshot. A peer heard in the
+// term whose last message did not announce protocol 3 runs a release of
+// protocol 2: it cannot decode the metadata of version 3 a snapshot at
+// cluster version 3 carries, its transport refuses the offer before its
+// node judges it, and nothing stops it. Offered, it was offered again at
+// every probe while it stayed out of replication (#665). A peer not heard
+// yet is offered: a node of protocol 3 announces it at its first answer.
+// From this build on, a node stops on an offer of its leader it cannot
+// decode (undecodableOffer), so a later metadata version needs no such
+// rule. It runs on the loop.
+func (n *Node) unannounced(to coreconsensus.NodeID, meta *coreconsensus.SnapshotMetaValue) bool {
+	if meta.ClusterVersion < raft.Protocol3 || !belowProtocol3(n.r.PeerStats(), to) {
+		delete(n.notAnnounced, to)
+		return false
+	}
+	if n.notAnnounced == nil {
+		n.notAnnounced = map[coreconsensus.NodeID]string{}
+	}
+	if n.notAnnounced[to] != meta.ID {
+		n.notAnnounced[to] = meta.ID
+		n.obs.warn("consensus: a member does not announce protocol 3 and cannot read this snapshot; it is not offered",
+			lattr("peer", uint64(to)), lstr("id", meta.ID), lattr("cluster_version", uint64(meta.ClusterVersion)))
+	}
+	return true
+}
+
+// belowProtocol3 reports whether the leader's view stats holds peer to as
+// heard in the term, its last message announcing no protocol 3.
+func belowProtocol3(stats []raft.PeerStatValue, to coreconsensus.NodeID) bool {
+	for i := range stats {
+		if stats[i].ID == to {
+			return stats[i].Flags.Has(raft.StatHeard) && !stats[i].Flags.Has(raft.StatProtocol3)
+		}
+	}
+	return false
+}
+
 // afterCut keeps the two newest snapshots and compacts the log back to the
 // older one, less SnapshotTrailing, with saturating arithmetic (D7). A
 // snapshot in flight to a peer, then streamed until the peer catches up
@@ -801,7 +846,7 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 		n.r.SnapshotDone(to, 0, false)
 		return
 	}
-	if n.withheld(to, &meta) {
+	if n.withholds(to, &meta) {
 		n.r.SnapshotDone(to, 0, false)
 		return
 	}

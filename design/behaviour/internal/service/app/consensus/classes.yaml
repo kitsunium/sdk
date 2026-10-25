@@ -629,6 +629,12 @@ constants:
         type: int
         value: 16 << 20
       - doc: |-
+          defaultPeerQueueBytes is PeerQueueBytes when unset, or MaxFrameBytes
+          when that is larger: the queue is never below the frame bound (#669).
+        name: defaultPeerQueueBytes
+        type: int64
+        value: 64 << 20
+      - doc: |-
           senderQueueFrames bounds the frames queued for one peer and lane; the
           byte bound PeerQueueBytes usually binds first.
         name: senderQueueFrames
@@ -931,6 +937,9 @@ files:
       - supersededWhy
       - fileSnapshots
       - newFileSnapshots
+      - snapshotEntries
+      - newerMetas
+      - newerMeta
       - newestSpool
       - (*fileSnapshots).sweepSpools
       - (*fileSnapshots).orphanSpools
@@ -994,6 +1003,8 @@ files:
     name: initlog.go
   - decls:
       - (*Node).offer
+      - undecodableBinder
+      - (*Node).undecodableOffer
       - (*Node).judgeOffer
       - (*Node).reservePosition
       - (*Node).positionOffer
@@ -1443,6 +1454,9 @@ files:
       - cutLimit
       - tooLargeFor
       - (*Node).withheld
+      - (*Node).withholds
+      - (*Node).unannounced
+      - belowProtocol3
       - (*Node).afterCut
       - (*Node).retain
       - snapshotSize
@@ -1529,6 +1543,7 @@ files:
       - (*TCPTransport).dialVerified
       - (*TCPTransport).address
       - (*TCPTransport).Send
+      - (*TCPTransport).droppedOversized
       - (*TCPTransport).sender
       - senderLink
       - (*senderLink).close
@@ -1562,8 +1577,11 @@ files:
       - installResult
       - (*TCPTransport).serveSnapshot
       - drainHalfClose
+      - encodeAccept
+      - (*TCPTransport).refuseOffer
       - offerRefused
       - (*TCPTransport).bindWarn
+      - (*TCPTransport).bindUndecodable
       - encodeJoin
       - decodeJoin
       - encodeJoinV2
@@ -2154,12 +2172,43 @@ functions:
       nor resumable. Of the receive spools only the newest stays, the one a
       resume may still continue (#527). A directory that cannot be created, listed or cleaned is a
       STORAGE_FAILED, so a store never opens over a state it could not read.
+      One that holds a .meta a newer build wrote is refused VERSION_UNSUPPORTED
+      before anything in it is removed (newerMetas, #665).
       syncFailed builds the STORAGE_FAILED of a failed directory sync: a data
       directory's open passes its log's syncFailedAtOpen, which writes the
       markers first (#637), and a store opened alone passes storageFailed.
     name: newFileSnapshots
     params: dir string, syncFailed func(op string, cause error) error
     results: "*fileSnapshots, error"
+  - doc: |-
+      snapshotEntries lists the snapshot directory dir for its open: a
+      STORAGE_FAILED when it cannot be listed, and VERSION_UNSUPPORTED when it
+      holds a .meta a newer build wrote (newerMetas), before anything in it is
+      removed.
+    name: snapshotEntries
+    params: dir string
+    results: "[]os.DirEntry, error"
+  - doc: |-
+      newerMetas refuses VERSION_UNSUPPORTED the first .meta among ents that a
+      newer build wrote (newerMeta). Opened over it, a node rolled back past a
+      raise skipped it as a .meta that rotted and started on an older state,
+      or none, where it should have refused to start, as for a log record of
+      a version it does not know (D18, #511): the release of protocol 2 did
+      so with #659's version 3 (#665). A .meta that cannot be read is left to
+      the listing, which reports it.
+    name: newerMetas
+    params: dir string, ents []os.DirEntry
+    results: error
+  - doc: |-
+      newerMeta returns err, what parsing the encoded .meta b returned, when it
+      is the VERSION_UNSUPPORTED of a version this build does not know and b's
+      trailing CRC-32C holds: what a newer build wrote, every version from 2
+      ending with the CRC-32C of every byte before it (D18). One whose sum
+      fails rotted, as a flipped version byte does, and is nil, as is every
+      .meta this build reads.
+    name: newerMeta
+    params: b []byte, err error
+    results: error
   - doc: |-
       newestSpool is the id of the newest receive spool among ents, "" when
       there is none. Snapshot ids are fixed-width (index, term), so the newest
@@ -2845,6 +2894,12 @@ functions:
     params: conf *coreconsensus.MembershipValue, to coreconsensus.NodeID, meta *coreconsensus.SnapshotMetaValue
     results: int64, bool
   - doc: |-
+      belowProtocol3 reports whether the leader's view stats holds peer to as
+      heard in the term, its last message announcing no protocol 3.
+    name: belowProtocol3
+    params: stats []raft.PeerStatValue, to coreconsensus.NodeID
+    results: bool
+  - doc: |-
       snapshotSize is the size m's limit bounds: the larger of its encoded and
       decoded sizes, the two the chunk writer holds to it.
     name: snapshotSize
@@ -3057,6 +3112,13 @@ functions:
       gave up on still gets its connection ended.
     name: drainHalfClose
     params: c net.Conn, d time.Duration
+  - doc: |-
+      encodeAccept is the wire form of a receiver's answer to an offer: the
+      offset its spool resumes at, the refusal, and whether it holds the
+      snapshot already.
+    name: encodeAccept
+    params: acc *coreconsensus.InstallAcceptValue
+    results: "[]byte"
   - doc: |-
       offerRefused logs, through warn, a snapshot offer from peer that the
       receiving transport refused before the node judged it: one above bound, or
@@ -4683,7 +4745,8 @@ types:
           skipped: it is a publication a crash interrupted or a .meta that rotted,
           not a snapshot to restore from. A .meta or a .snap that is there
           but cannot be read is neither: it is an I/O failure, and it is reported,
-          so that a listing never reads a failing disk as "no snapshot".
+          so that a listing never reads a failing disk as "no snapshot". Nor is a
+          .meta a newer build wrote: it is reported VERSION_UNSUPPORTED (#665).
         name: published
         params: name string
         recv: s *fileSnapshots
@@ -4955,6 +5018,16 @@ types:
         params: commit, applied uint64, now time.Time
         recv: p *applyProgress
     name: applyProgress
+  - doc: |-
+      undecodableBinder is a transport that hands the node an offer whose
+      metadata is of a version this build does not know, which it cannot
+      decode into an offer, with the term it was made at (#665).
+    kind: named
+    name: undecodableBinder
+    underlying: |-
+      interface {
+      	bindUndecodable(judge func(from coreconsensus.AuthenticatedPeerValue, term uint64, cause error) errs.Code)
+      }
   - doc: |-
       joinHold is a transport's hold on its JOIN answer: the configuration it
       last joined with, kept so that a joining node that hears no leader can
@@ -5476,6 +5549,12 @@ types:
         name: tooLarge
         type: map[coreconsensus.NodeID]string
       - doc: |-
+          notAnnounced is, per peer, the newest snapshot withheld from it for
+          a protocol its last message did not announce, so that it is said
+          once per snapshot (#665). Made at its first use, on the loop.
+        name: notAnnounced
+        type: map[coreconsensus.NodeID]string
+      - doc: |-
           unfed is, while this node leads, the learners whose announced
           MaxSnapshotBytes the newest snapshot is over: they are sent no
           entries (#613).
@@ -5696,6 +5775,22 @@ types:
         params: from coreconsensus.AuthenticatedPeerValue, o coreconsensus.InstallOfferValue
         recv: n *Node
         results: coreconsensus.InstallAcceptValue
+      - doc: |-
+          undecodableOffer judges an offer from peer at term whose metadata the
+          transport could not decode for its version, cause, and returns the code
+          the offer is refused with. From this node's leader in its term, it is the
+          cluster writing a format this build cannot read: the node stops
+          VERSION_UNSUPPORTED, as on a metadata version or a cluster version it
+          decodes and does not know (D18, #513, #640). Only refused, it stayed out
+          of replication, answering its leader's heartbeats, and was offered the
+          snapshot again at every probe: so did a node of protocol 2 offered #659's
+          version 3 (#665). Any other offer is refused as one from a node that is
+          not the leader, and stops nothing. The verdict is the loop's; the stop is
+          off it, as in offer.
+        name: undecodableOffer
+        params: from coreconsensus.AuthenticatedPeerValue, term uint64, cause error
+        recv: n *Node
+        results: errs.Code
       - doc: |-
           judgeOffer is offer's verdict, on the loop, and reports whether the
           offer's spool is to be positioned: screened first, then answered from a
@@ -7013,6 +7108,30 @@ types:
         recv: n *Node
         results: bool
       - doc: |-
+          withholds reports whether meta is not offered to peer to: too large for
+          the limit it announced (withheld, #591), or of a metadata version its
+          protocol cannot decode (unannounced, #665). It runs on the loop.
+        name: withholds
+        params: to coreconsensus.NodeID, meta *coreconsensus.SnapshotMetaValue
+        recv: n *Node
+        results: bool
+      - doc: |-
+          unannounced reports whether meta is of a cluster version whose metadata
+          peer to cannot decode, and says so once per snapshot. A peer heard in the
+          term whose last message did not announce protocol 3 runs a release of
+          protocol 2: it cannot decode the metadata of version 3 a snapshot at
+          cluster version 3 carries, its transport refuses the offer before its
+          node judges it, and nothing stops it. Offered, it was offered again at
+          every probe while it stayed out of replication (#665). A peer not heard
+          yet is offered: a node of protocol 3 announces it at its first answer.
+          From this build on, a node stops on an offer of its leader it cannot
+          decode (undecodableOffer), so a later metadata version needs no such
+          rule. It runs on the loop.
+        name: unannounced
+        params: to coreconsensus.NodeID, meta *coreconsensus.SnapshotMetaValue
+        recv: n *Node
+        results: bool
+      - doc: |-
           afterCut keeps the two newest snapshots and compacts the log back to the
           older one, less SnapshotTrailing, with saturating arithmetic (D7). A
           snapshot in flight to a peer, then streamed until the peer catches up
@@ -8065,6 +8184,16 @@ types:
           callback of the node sees it (#634); nil logs nothing.
         name: warn
         type: func(msg string, attrs ...corelogger.AttrValue)
+      - doc: |-
+          undecodable judges, on the node, an offer whose metadata is of a
+          version this build does not know (#665); nil refuses it unjudged.
+        name: undecodable
+        type: func(coreconsensus.AuthenticatedPeerValue, uint64, error) errs.Code
+      - doc: |-
+          oversized counts the frames Send dropped for being larger than the
+          whole peer queue (#669).
+        name: oversized
+        type: atomic.Int64
     kind: struct
     methods:
       - name: Addr
@@ -8181,6 +8310,16 @@ types:
         params: to coreconsensus.NodeID, frame []byte
         recv: t *TCPTransport
       - doc: |-
+          droppedOversized counts a frame Send dropped for being larger than the
+          whole peer queue, and logs it at the first drop and at each power of two
+          after it. TransportConfig refuses a queue below MaxFrameBytes, so such a
+          frame is above the bound a peer configured as this node reads under, and
+          can never be sent; it used to be dropped without a word (#669). The
+          retransmissions of one would otherwise log at every heartbeat.
+        name: droppedOversized
+        params: to coreconsensus.NodeID, lane byte, n int
+        recv: t *TCPTransport
+      - doc: |-
           sender writes every frame queued for one peer and lane in one write; a
           write that misses its deadline closes the connection and reports the
           peer unreachable (D4, R2-06). It is the background goroutine Send
@@ -8290,12 +8429,32 @@ types:
           receiver ended each stream without a word (#634). A configuration already
           reaches every member in a membership entry under MaxFrameBytes. An offer
           refused before the node judged it is logged.
+
+          An offer whose metadata is of a version this build does not know is still
+          judged by the node, from its term alone, and its refusal answered
+          (refuseOffer, #665).
         name: serveSnapshot
         params: c *tls.Conn, peer coreconsensus.AuthenticatedPeerValue
+        recv: t *TCPTransport
+      - doc: |-
+          refuseOffer ends an offer from peer at term that was not read, or did
+          not decode, err. One whose metadata is of a version this build does not
+          know is judged by the node from its term alone (undecodableOffer), and
+          its refusal answered: from the node's leader in its term it stops the
+          node VERSION_UNSUPPORTED, as one that decodes does (#513, #640). Refused
+          here unjudged, the release of protocol 2 offered #659's version 3 never
+          stopped, and its leader offered it again at every probe (#665). Every
+          other refusal is logged.
+        name: refuseOffer
+        params: c *tls.Conn, peer coreconsensus.AuthenticatedPeerValue, term uint64, err error
         recv: t *TCPTransport
       - doc: bindWarn implements bindWarner.
         name: bindWarn
         params: warn func(msg string, attrs ...corelogger.AttrValue)
+        recv: t *TCPTransport
+      - doc: bindUndecodable implements undecodableBinder.
+        name: bindUndecodable
+        params: judge func(coreconsensus.AuthenticatedPeerValue, uint64, error) errs.Code
         recv: t *TCPTransport
       - doc: |-
           serveJoin answers the one frame a non-member may send. The slot comes
@@ -8570,6 +8729,12 @@ vars:
       - name: _
         type: bindWarner
         value: (*MemoryTransport)(nil)
+      - doc: |-
+          The transport hands the node an offer it could not decode, which
+          stops it when its leader made it (#665).
+        name: _
+        type: undecodableBinder
+        value: (*TCPTransport)(nil)
       - name: _
         type: |-
           interface {
