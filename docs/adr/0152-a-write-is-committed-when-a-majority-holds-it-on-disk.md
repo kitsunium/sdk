@@ -2595,9 +2595,11 @@ transport. The cross-field rules are checked after defaults are applied
   `PeerQueueBytes` per peer and connection, and `InboundDataBytes`. With the
   defaults and two peers, that is under 1 GiB. `NewRaft` reports the total,
   so a product can check it against its own limit.
-- **Opening the log is outside that sum**: about one segment plus 72 bytes
-  per record, before any of these bounds holds anything (amendment of
-  2026-10-24, [#630](https://github.com/kitsunium/sdk/issues/630)).
+- **Opening the log is outside that sum**: about one segment and 80 bytes
+  per record of one segment, plus 72 bytes per entry, before any of these
+  bounds holds anything (amendments of 2026-10-24 and 2026-10-25,
+  [#630](https://github.com/kitsunium/sdk/issues/630),
+  [#660](https://github.com/kitsunium/sdk/issues/660)).
 - **Snapshot slots are bounded and enforced, and the disk reservation is
   their actual maximum (R4-28, R5-01, R6-02).** At most FOUR snapshots exist
   at once: the two retained, one being written, and one being received.
@@ -4308,7 +4310,8 @@ which open the log the same way, with it
   its kind, batch, end flag, term, index, offset and length (40 bytes),
   and a copy of each checkpoint and hard-state payload. Only the last
   segment's bytes stay, for its tail. The log's index is sized once, for
-  the entry records read.
+  the entry records read. (Narrowed on 2026-10-25, below: a segment before
+  the last keeps neither its hard states nor a copy of them, #660.)
 - **The procedure is unchanged.** Every segment is scanned and every hole
   classified before anything changes (R8-02, R9-03), in the same order and
   with the same verdicts: a fuzz target holds the scan in pieces to a parse
@@ -4409,6 +4412,41 @@ not to work around it on every node:
   raises to protocol 3 only in a release that says so, never on its pin
   alone, and `RaiseClusterVersion(3)` is no longer a protocol this engine
   refuses to speak.
+
+## Amendment — a segment before the last keeps no hard state (2026-10-25, #660)
+
+The reopen of #630 still kept, for the whole log until recovery returned,
+the 40 bytes of a record per record and a copy of every hard state's
+payload. A follower writes a hard state at nearly every Ready, the one
+whose commit moved, so two records of three in its log are hard states:
+the reopen kept 0.5 to 0.9 times the log in heap, and allocated past
+#630's own bound of three segments and 160 bytes an entry
+([#660](https://github.com/kitsunium/sdk/issues/660)).
+
+- **A segment before the last keeps what replay reads of it.** Its hard
+  states and commits set only the hard state, and the next segment's
+  checkpoint, written with the current hard state, sets it again. Such a
+  segment keeps its checkpoint, decoded during the scan, and every other
+  record: entries, truncations, compactions, its seal. The last segment
+  keeps every record, for its tail, and replay reads its hard states back
+  from its bytes, which it already kept.
+- **Every record is still judged, in the same order.** The batch sequence
+  (R9-01) and the layouts (D18) are judged during the scan on every record
+  read, not on those kept, and refused after it as before: the scan's own
+  verdicts first, then the first break of the batch sequence, then the
+  first layout this build does not read, then the tail's classification
+  and replay's verdicts. A fuzz target still holds the scan in pieces to a
+  parse of the whole file.
+- **The open's cost, stated again.** About one segment, and 80 bytes per
+  record of one segment (the records of the segment read, and those the
+  last one keeps), plus 72 bytes per entry: 40 transient, 32 for the index
+  that stays. The records read are held in a buffer that doubles, where a
+  slice grown by append grows by a quarter and left four times its size to
+  the collector. A 16 MiB follower's log in 4 MiB segments, 64-byte
+  entries, allocated 36 MiB to reopen and kept 14 MiB past its scan; it now
+  allocates 13 MiB and keeps 2 MiB.
+
+Nothing published changes: no frame, no payload, no record format.
 
 ## Revision history
 

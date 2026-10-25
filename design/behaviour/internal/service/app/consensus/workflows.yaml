@@ -54,6 +54,58 @@ workflows:
           range: ents
           value: e
       - return: paths
+  - of: replayed
+    steps:
+      - bind: "n"
+        eval: "0"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - op: ++
+                    set: "n"
+                when: i == 0 || keptEarlier(recs[i].kind)
+          key: i
+          range: recs
+      - bind: out
+        eval: make([]scanRec, 0, n)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, recs[i])
+                when: i == 0 || keptEarlier(recs[i].kind)
+          key: i
+          range: recs
+      - return: out
+  - of: (*batchSeq).follow
+    steps:
+      - loop:
+          do:
+            - bind: r
+              eval: "&recs[i]"
+            - opt:
+                do:
+                  - return: r.off
+                when: q.any && !continuesBatch(&q.prev, r)
+            - set: q.prev, q.any
+              value: "*r, true"
+          key: i
+          range: recs
+      - return: "-1"
+  - of: checkLayouts
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: s.layout
+                when: s.layout != nil
+          key: _
+          range: segs
+          value: s
+      - return: nil
   - of: judgeAfterHole
     steps:
       - loop:

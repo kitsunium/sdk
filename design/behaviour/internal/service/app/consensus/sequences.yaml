@@ -2525,23 +2525,51 @@ sequences:
       - set: l.stamp
         value: st
       - return: nil
-  - of: (*scanned).keep
+  - of: (*scanned).note
     participants:
       - id: caller
         kind: actor
-      - id: (*scanned).keep
+      - id: (*scanned).note
         kind: self
-      - id: bytes
+      - id: scanRecOf
+        kind: internal
+      - id: decodeCheckpoint
+        kind: internal
+      - id: knownLayout
+        kind: internal
+      - id: slices
         kind: stdlib
     steps:
+      - bind: sr
+        eval: scanRecOf(r, off)
+        to: scanRecOf
       - opt:
           do:
-            - set: s.pay
-              value: map[int][]byte{}
-          when: s.pay == nil
-      - set: s.pay[i]
-        to: bytes
-        value: bytes.Clone(payload)
+            - set: s.cp, s.cpOK
+              to: decodeCheckpoint
+              value: decodeCheckpoint(r.data)
+          when: len(recs) == 0 && r.kind == recCheckpt
+      - opt:
+          do:
+            - set: s.layout
+              to: knownLayout
+              value: knownLayout(s.n, &sr, len(r.data))
+          when: s.layout == nil
+      - opt:
+          do:
+            - set: recs
+              to: slices
+              value: slices.Grow(recs, max(len(recs), 64))
+          when: len(recs) == cap(recs)
+      - return: append(recs, sr)
+  - of: keptEarlier
+    steps:
+      - return: k != recHardState && k != recCommit
+  - of: payloadAt
+    steps:
+      - bind: "n"
+        eval: int64(binary.LittleEndian.Uint32(b[r.off:]))
+      - return: "b[r.off+int64(recHeader+recFixed) : r.off+int64(recHeader)+n]"
   - of: scanRecOf
     steps:
       - return: "scanRec{off: off, batch: r.batch, term: r.term, index: r.index, length: uint32(r.length), kind: r.kind, end: r.end}"
@@ -2741,12 +2769,21 @@ sequences:
         kind: self
       - id: l.scanSegment
         kind: internal
+      - id: seq.follow
+        kind: internal
+      - id: replayed
+        kind: internal
+      - id: slices
+        kind: stdlib
     steps:
       - bind: segs
         eval: make([]*scanned, len(nums))
       - var:
           name: sb
           type: scanBufs
+      - var:
+          name: seq
+          type: batchSeq
       - loop:
           do:
             - bind: s, err
@@ -2756,11 +2793,22 @@ sequences:
                 do:
                   - return: nil, err
                 when: err != nil
-            - opt:
-                do:
-                  - set: s.data
-                    value: nil
-                when: i < len(nums)-1
+            - set: s.seqBreak
+              to: seq.follow
+              value: seq.follow(s.recs)
+            - alt:
+                - do:
+                    - set: s.data
+                      value: nil
+                    - set: s.recs
+                      to: replayed
+                      value: replayed(s.recs)
+                  when: i < len(nums)-1
+                - do:
+                    - set: s.recs
+                      to: slices
+                      value: slices.Clone(s.recs)
+                  else: true
             - set: segs[i]
               value: s
             - opt:
@@ -2787,8 +2835,6 @@ sequences:
         kind: internal
       - id: s.parse
         kind: internal
-      - id: slices
-        kind: stdlib
     steps:
       - bind: f, err
         eval: os.Open(filepath.Join(l.logDir(), segName(n)))
@@ -2806,7 +2852,7 @@ sequences:
             - return: nil, storageFailed("read segment", err)
           when: err != nil
       - bind: s
-        eval: "&scanned{n: n, size: int64(len(reader.b)), hole: -1, trimmed: -1}"
+        eval: "&scanned{n: n, size: int64(len(reader.b)), seqBreak: -1, hole: -1, trimmed: -1}"
       - bind: recs, err
         eval: s.parse(reader, sb.recs[:0])
         to: s.parse
@@ -2814,10 +2860,9 @@ sequences:
           do:
             - return: nil, err
           when: err != nil
-      - set: s.recs
-        to: slices
-        value: slices.Clone(recs)
       - set: sb.recs
+        value: recs
+      - set: s.recs
         value: recs
       - set: s.data
         value: reader.b[:reader.n]
@@ -2832,7 +2877,7 @@ sequences:
         kind: internal
       - id: parseRecord
         kind: internal
-      - id: s.keep
+      - id: s.note
         kind: internal
     steps:
       - loop:
@@ -2853,13 +2898,9 @@ sequences:
                 do:
                   - return: recs, s.holeAt(reader, off)
                 when: "!ok"
-            - opt:
-                do:
-                  - eval: s.keep(len(recs), r.data)
-                    to: s.keep
-                when: r.kind == recCheckpt || r.kind == recHardState
             - set: recs
-              value: append(recs, scanRecOf(&r, off))
+              to: s.note
+              value: s.note(recs, &r, off)
             - op: +=
               set: "off"
               value: int64(r.length)
@@ -3004,24 +3045,13 @@ sequences:
       - id: l.quarantine
         kind: internal
     steps:
-      - var:
-          name: prev
-          type: "*scanRec"
       - loop:
           do:
-            - loop:
+            - opt:
                 do:
-                  - bind: r
-                    eval: "&s.recs[i]"
-                  - opt:
-                      do:
-                        - return: l.quarantine(s.n, r.off, "batch sequence")
-                          to: l.quarantine
-                      when: prev != nil && !continuesBatch(prev, r)
-                  - set: prev
-                    value: r
-                key: i
-                range: s.recs
+                  - return: l.quarantine(s.n, s.seqBreak, "batch sequence")
+                    to: l.quarantine
+                when: s.seqBreak >= 0
           key: _
           range: segs
           value: s
@@ -3072,8 +3102,6 @@ sequences:
         kind: actor
       - id: (*fileLog).replay
         kind: self
-      - id: decodeCheckpoint
-        kind: internal
       - id: l.quarantine
         kind: internal
       - id: l.applyCheckpoint
@@ -3085,20 +3113,17 @@ sequences:
         value: make([]slot, 0, entryRecords(segs))
       - loop:
           do:
-            - bind: cp, ok
-              eval: decodeCheckpoint(s.pay[0])
-              to: decodeCheckpoint
             - opt:
                 do:
                   - return: l.quarantine(s.n, 0, "checkpoint payload")
                     to: l.quarantine
-                when: "!ok"
+                when: "!s.cpOK"
             - opt:
                 do:
                   - return: err
                 init:
                   bind: err
-                  eval: l.applyCheckpoint(si == 0, s.n, &cp)
+                  eval: l.applyCheckpoint(si == 0, s.n, &s.cp)
                   to: l.applyCheckpoint
                 when: err != nil
             - loop:
@@ -3111,7 +3136,7 @@ sequences:
                         - return: err
                       init:
                         bind: err
-                        eval: l.applyRecord(s.n, r, s.pay[i])
+                        eval: l.applyRecord(s.n, r, s.data)
                         to: l.applyRecord
                       when: err != nil
                   - set: l.batch
@@ -3212,7 +3237,7 @@ sequences:
                   to: l.applyTruncate
             - case: recHardState
               do:
-                - return: l.applyHardState(seg, r, pay)
+                - return: l.applyHardState(seg, r, payloadAt(data, r))
                   to: l.applyHardState
             - case: recCommit
               do:
@@ -3246,33 +3271,6 @@ sequences:
       - set: l.slots
         value: "append(l.slots, slot{seg: seg, off: r.off, term: r.term})"
       - return: nil
-  - of: checkLayouts
-    participants:
-      - id: caller
-        kind: actor
-      - id: checkLayouts
-        kind: self
-      - id: knownLayout
-        kind: internal
-    steps:
-      - loop:
-          do:
-            - loop:
-                do:
-                  - opt:
-                      do:
-                        - return: err
-                      init:
-                        bind: err
-                        eval: knownLayout(s.n, &s.recs[i], s.pay[i])
-                        to: knownLayout
-                      when: err != nil
-                key: i
-                range: s.recs
-          key: _
-          range: segs
-          value: s
-      - return: nil
   - of: knownLayout
     participants:
       - id: caller
@@ -3291,9 +3289,9 @@ sequences:
               do:
                 - opt:
                     do:
-                      - return: unknownLayout(seg, r, "hard_state_bytes", len(pay))
+                      - return: unknownLayout(seg, r, "hard_state_bytes", payload)
                         to: unknownLayout
-                    when: len(pay) != hardStateLen
+                    when: payload != hardStateLen
                 - return: nil
             - default: true
               do:
