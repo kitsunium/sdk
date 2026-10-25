@@ -21,7 +21,7 @@ const nativeLoopBackends bool = false
 // IFACE-OPAQUE: the Linux build of this function chooses between the leaf's
 // *loop.Group and the portable backend at Start; both builds return the same
 // lifecycle interface so server never names the engine's type.
-func startLoopEngine(group *StreamGroup, lns []stdnet.Listener, _ loopPlan) (loopEngine, error) {
+func startLoopEngine(group *StreamGroup, lns []stdnet.Listener, plan loopPlan) (loopEngine, error) {
 	//: by the backend asked for.
 	switch group.loop.Backend {
 	//: no io_uring or epoll on this GOOS.
@@ -32,6 +32,6 @@ func startLoopEngine(group *StreamGroup, lns []stdnet.Listener, _ loopPlan) (loo
 	//: auto or portable.
 	default:
 		//: on the netpoller.
-		return startPortable(group, lns, ""), nil
+		return startPortable(group, lns, "", plan), nil
 	}
 }

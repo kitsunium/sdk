@@ -25340,7 +25340,20 @@
       "name": "Capability",
       "spelled": "string",
       "canonical": "string",
-      "doc": "Capability names one engine of the lattice the operator's switches restrict\n(ADR 0188): iouring > epoll > portable > goroutine. Its values are the tokens\nKITSUNIUM_NET_ENGINE and KITSUNIUM_NET_DISABLE take; this block is the\nregistry they are parsed against, and any other token is unknown.\n",
+      "doc": "Capability names one engine of the lattice the operator's switches restrict\n(ADR 0188), iouring > epoll > portable > goroutine, or one optional kernel\ncapability a loop group probes (ADR 0189). Its values are the tokens\nKITSUNIUM_NET_ENGINE and KITSUNIUM_NET_DISABLE take; these blocks are the\nregistry they are parsed against, and any other token is unknown.\nKITSUNIUM_NET_ENGINE takes an engine only.\n",
+      "file": "core/net/capability.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CapabilityBusyPoll",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CapabilityBusyPoll",
+      "spelled": "Capability",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
+      "value": "\"busy-poll\"",
+      "doc": "CapabilityBusyPoll is busy polling of the network device's queue.\n",
       "file": "core/net/capability.go",
       "layer": "core",
       "family": "net"
@@ -25354,6 +25367,19 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
       "value": "\"epoll\"",
       "doc": "CapabilityEpoll is epoll, below io_uring. Switched off, a loop group that would\nhave fallen back to it runs on the portable backend.\n",
+      "file": "core/net/capability.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CapabilityEpollExclusive",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CapabilityEpollExclusive",
+      "spelled": "Capability",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
+      "value": "\"epoll-exclusive\"",
+      "doc": "CapabilityEpollExclusive is EPOLLEXCLUSIVE on every loop's listener\nregistration. Switched off, every loop's epoll is woken by each connection.\n",
       "file": "core/net/capability.go",
       "layer": "core",
       "family": "net"
@@ -25393,6 +25419,239 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
       "value": "\"portable\"",
       "doc": "CapabilityPortable is the portable loop backend, the loop family's floor on\nevery platform, and what an unknown token caps the engine at.\n",
+      "file": "core/net/capability.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CapabilityReuseportCBPF",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CapabilityReuseportCBPF",
+      "spelled": "Capability",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
+      "value": "\"reuseport-cbpf\"",
+      "doc": "CapabilityReuseportCBPF is a classic BPF program steering SO_REUSEPORT\nconnections to their loop.\n",
+      "file": "core/net/capability.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CapabilityTCPDeferAccept",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CapabilityTCPDeferAccept",
+      "spelled": "Capability",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
+      "value": "\"tcp-defer-accept\"",
+      "doc": "CapabilityTCPDeferAccept is TCP_DEFER_ACCEPT on the listeners.\n",
+      "file": "core/net/capability.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CapabilityTCPNoDelay",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CapabilityTCPNoDelay",
+      "spelled": "Capability",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
+      "value": "\"tcp-nodelay\"",
+      "doc": "CapabilityTCPNoDelay is TCP_NODELAY on the listeners a loop group accepts on,\ninherited by every accepted socket. Switched off, it is not set.\n",
+      "file": "core/net/capability.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CapabilityURingBundle",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CapabilityURingBundle",
+      "spelled": "Capability",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
+      "value": "\"uring-bundle\"",
+      "doc": "CapabilityURingBundle is io_uring's receive and send bundles.\n",
+      "file": "core/net/capability.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CapabilityURingDeferTaskrun",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CapabilityURingDeferTaskrun",
+      "spelled": "Capability",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
+      "value": "\"uring-defer-taskrun\"",
+      "doc": "CapabilityURingDeferTaskrun is IORING_SETUP_DEFER_TASKRUN with SINGLE_ISSUER on\nthe ring a loop's thread waits on; the other rings keep COOP_TASKRUN.\n",
+      "file": "core/net/capability.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CapabilityURingDirect",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CapabilityURingDirect",
+      "spelled": "Capability",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
+      "value": "\"uring-direct\"",
+      "doc": "CapabilityURingDirect is io_uring's direct descriptors, chosen when the release\ncheck passes (a kernel from 6.13). Switched off, connections live in the process\ntable and the release check does not run.\n",
+      "file": "core/net/capability.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CapabilityURingMinTimeout",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CapabilityURingMinTimeout",
+      "spelled": "Capability",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
+      "value": "\"uring-min-timeout\"",
+      "doc": "CapabilityURingMinTimeout is io_uring's minimum wait (min_wait_usec), only where\nthe kernel advertises IORING_FEAT_MIN_TIMEOUT.\n",
+      "file": "core/net/capability.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CapabilityURingMultishotRecv",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CapabilityURingMultishotRecv",
+      "spelled": "Capability",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
+      "value": "\"uring-multishot-recv\"",
+      "doc": "CapabilityURingMultishotRecv is io_uring's multishot receive. Switched off,\nevery receive is single-shot and re-armed after each completion.\n",
+      "file": "core/net/capability.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CapabilityURingNoSQArray",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CapabilityURingNoSQArray",
+      "spelled": "Capability",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
+      "value": "\"uring-no-sqarray\"",
+      "doc": "CapabilityURingNoSQArray is IORING_SETUP_NO_SQARRAY: the SQ indexes the SQEs\ndirectly, with no indirection array.\n",
+      "file": "core/net/capability.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CapabilityURingPbuf",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CapabilityURingPbuf",
+      "spelled": "Capability",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
+      "value": "\"uring-pbuf\"",
+      "doc": "CapabilityURingPbuf is io_uring's provided-buffer ring. The io_uring backend\nreceives into nothing else: switched off, io_uring is never set up and the group\nruns on epoll.\n",
+      "file": "core/net/capability.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CapabilityURingPbufInc",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CapabilityURingPbufInc",
+      "spelled": "Capability",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
+      "value": "\"uring-pbuf-inc\"",
+      "doc": "CapabilityURingPbufInc is the incrementally consumed buffer ring\n(IOU_PBUF_RING_INC).\n",
+      "file": "core/net/capability.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CapabilityURingRingFDs",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CapabilityURingRingFDs",
+      "spelled": "Capability",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
+      "value": "\"uring-ring-fds\"",
+      "doc": "CapabilityURingRingFDs registers each ring's descriptor with its thread\n(IORING_REGISTER_RING_FDS), at most 16 a thread, and unregisters it before the\nring closes.\n",
+      "file": "core/net/capability.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CapabilityURingSQRewind",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CapabilityURingSQRewind",
+      "spelled": "Capability",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
+      "value": "\"uring-sq-rewind\"",
+      "doc": "CapabilityURingSQRewind is IORING_SETUP_SQ_REWIND with NO_SQARRAY: every\nsubmission is filled from SQE 0. It needs the kernel 7.0 lane before it may\nleave class A-code.\n",
+      "file": "core/net/capability.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CapabilityURingSendZC",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CapabilityURingSendZC",
+      "spelled": "Capability",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
+      "value": "\"uring-send-zc\"",
+      "doc": "CapabilityURingSendZC is io_uring's zero-copy send.\n",
+      "file": "core/net/capability.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CapabilityURingZCRX",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CapabilityURingZCRX",
+      "spelled": "Capability",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
+      "value": "\"uring-zcrx\"",
+      "doc": "CapabilityURingZCRX is io_uring's zero-copy receive.\n",
+      "file": "core/net/capability.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CapabilityValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CapabilityValue",
+      "spelled": "struct{Name Capability \"json:\\\"name\\\"\"; Class string \"json:\\\"class\\\"\"; Status string \"json:\\\"status\\\"\"; Reason string \"json:\\\"reason,omitempty\\\"\"}",
+      "canonical": "struct{Name github.com/kitsunium/sdk/internal/core/net.Capability \"json:\\\"name\\\"\"; Class string \"json:\\\"class\\\"\"; Status string \"json:\\\"status\\\"\"; Reason string \"json:\\\"reason,omitempty\\\"\"}",
+      "fields": [
+        {
+          "name": "Name",
+          "type": "Capability",
+          "tag": "json:\"name\"",
+          "doc": "Name is the capability.\n"
+        },
+        {
+          "name": "Class",
+          "type": "string",
+          "tag": "json:\"class\"",
+          "doc": "Class is \"a-kernel\", \"a-code\" or \"b\".\n"
+        },
+        {
+          "name": "Status",
+          "type": "string",
+          "tag": "json:\"status\"",
+          "doc": "Status is \"on\" (probed and in use), \"available\" (probed, not asked for),\n\"absent\" (probed, the kernel lacks it), \"missing\" (a class A-code\ncapability the code opted into and the kernel lacks: a fault),\n\"disabled\" (switched off by KITSUNIUM_NET_DISABLE or an unknown token,\nnever probed) or \"unprobed\" (the backend the group runs on has no use for\nit).\n"
+        },
+        {
+          "name": "Reason",
+          "type": "string",
+          "tag": "json:\"reason,omitempty\"",
+          "doc": "Reason names the probe stage and the kernel's answer, or the switch.\n"
+        }
+      ],
+      "doc": "CapabilityValue reports one optional kernel capability of a loop group: what\nits probe found and whether the group runs with it (ADR 0189). A capability the\noperator switched off is never probed.\n",
       "file": "core/net/capability.go",
       "layer": "core",
       "family": "net"
@@ -25889,6 +26148,22 @@
         "value": "0.2.11.37"
       },
       "doc": "CodeLoopBackendUnavailable identifies an explicit loop backend the running\nkernel's probe refused, on a platform that has the mechanic (ADR 0186 §D5).\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeLoopCapabilityRefused",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeLoopCapabilityRefused",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133948",
+      "code": {
+        "value": "0.2.11.60"
+      },
+      "doc": "CodeLoopCapabilityRefused identifies a LoopValue.Capabilities entry the loop\ncannot opt into: an engine, a class B capability or an unknown token\n(ADR 0189).\n",
       "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
@@ -27899,6 +28174,23 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopCapabilityRefused",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "LoopCapabilityRefused",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.60",
+        "reason": "LOOP_CAPABILITY_REFUSED",
+        "public": "The loop group asks for a capability it cannot opt into"
+      },
+      "doc": "LoopCapabilityRefused is returned by Start for a loop group whose\nLoopValue.Capabilities names something it cannot opt into: an engine, a\nclass B capability, which stays off until BENCH.md shows its threshold, or a\ntoken outside the registry. The \"capability\" field names it. It is refused,\nnever ignored (ADR 0189).\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopConnRef",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -28348,8 +28640,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/net",
       "name": "LoopStateValue",
-      "spelled": "struct{Group string \"json:\\\"group\\\"\"; Backend LoopBackend \"json:\\\"backend\\\"\"; ProbeStage string \"json:\\\"probe_stage\\\"\"; Degraded bool \"json:\\\"degraded\\\"\"; DegradedReason string \"json:\\\"degraded_reason,omitempty\\\"\"; Loops int \"json:\\\"loops\\\"\"; Rings int \"json:\\\"rings\\\"\"; RingsSource string \"json:\\\"rings_source\\\"\"; RLimitNoFile uint64 \"json:\\\"rlimit_nofile\\\"\"; GOMAXPROCS int \"json:\\\"gomaxprocs\\\"\"; BatchP99 DurationValue \"json:\\\"batch_p99\\\"\"; RingStates []LoopRingStateValue \"json:\\\"ring_states\\\"\"}",
-      "canonical": "struct{Group string \"json:\\\"group\\\"\"; Backend github.com/kitsunium/sdk/internal/core/net.LoopBackend \"json:\\\"backend\\\"\"; ProbeStage string \"json:\\\"probe_stage\\\"\"; Degraded bool \"json:\\\"degraded\\\"\"; DegradedReason string \"json:\\\"degraded_reason,omitempty\\\"\"; Loops int \"json:\\\"loops\\\"\"; Rings int \"json:\\\"rings\\\"\"; RingsSource string \"json:\\\"rings_source\\\"\"; RLimitNoFile uint64 \"json:\\\"rlimit_nofile\\\"\"; GOMAXPROCS int \"json:\\\"gomaxprocs\\\"\"; BatchP99 github.com/kitsunium/sdk/internal/core/net.DurationValue \"json:\\\"batch_p99\\\"\"; RingStates []github.com/kitsunium/sdk/internal/core/net.LoopRingStateValue \"json:\\\"ring_states\\\"\"}",
+      "spelled": "struct{Group string \"json:\\\"group\\\"\"; Backend LoopBackend \"json:\\\"backend\\\"\"; ProbeStage string \"json:\\\"probe_stage\\\"\"; Degraded bool \"json:\\\"degraded\\\"\"; DegradedReason string \"json:\\\"degraded_reason,omitempty\\\"\"; Loops int \"json:\\\"loops\\\"\"; Rings int \"json:\\\"rings\\\"\"; RingsSource string \"json:\\\"rings_source\\\"\"; RLimitNoFile uint64 \"json:\\\"rlimit_nofile\\\"\"; GOMAXPROCS int \"json:\\\"gomaxprocs\\\"\"; BatchP99 DurationValue \"json:\\\"batch_p99\\\"\"; RingStates []LoopRingStateValue \"json:\\\"ring_states\\\"\"; Capabilities []CapabilityValue \"json:\\\"capabilities,omitempty\\\"\"}",
+      "canonical": "struct{Group string \"json:\\\"group\\\"\"; Backend github.com/kitsunium/sdk/internal/core/net.LoopBackend \"json:\\\"backend\\\"\"; ProbeStage string \"json:\\\"probe_stage\\\"\"; Degraded bool \"json:\\\"degraded\\\"\"; DegradedReason string \"json:\\\"degraded_reason,omitempty\\\"\"; Loops int \"json:\\\"loops\\\"\"; Rings int \"json:\\\"rings\\\"\"; RingsSource string \"json:\\\"rings_source\\\"\"; RLimitNoFile uint64 \"json:\\\"rlimit_nofile\\\"\"; GOMAXPROCS int \"json:\\\"gomaxprocs\\\"\"; BatchP99 github.com/kitsunium/sdk/internal/core/net.DurationValue \"json:\\\"batch_p99\\\"\"; RingStates []github.com/kitsunium/sdk/internal/core/net.LoopRingStateValue \"json:\\\"ring_states\\\"\"; Capabilities []github.com/kitsunium/sdk/internal/core/net.CapabilityValue \"json:\\\"capabilities,omitempty\\\"\"}",
       "fields": [
         {
           "name": "Group",
@@ -28422,6 +28714,12 @@
           "type": "[]LoopRingStateValue",
           "tag": "json:\"ring_states\"",
           "doc": "RingStates reports every ring of every loop, loop by loop.\n"
+        },
+        {
+          "name": "Capabilities",
+          "type": "[]CapabilityValue",
+          "tag": "json:\"capabilities,omitempty\"",
+          "doc": "Capabilities reports every optional kernel capability the group's backend\nprobed or was told not to, the server's socket probes merged in\n(ADR 0189).\n"
         }
       ],
       "doc": "LoopStateValue reports one loop group: the backend it runs on, how it got\nthere, how it is sized, and its rings' counters (ADR 0186 §D8). A fallback is\nreported here and by Degraded, never silently.\n",
@@ -28451,8 +28749,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/net",
       "name": "LoopValue",
-      "spelled": "struct{Backend LoopBackend \"json:\\\"backend\\\"\"; Loops int \"json:\\\"loops\\\"\"; Rings int \"json:\\\"rings\\\"\"; CQBatch int \"json:\\\"cq_batch\\\"\"; SpillCap int \"json:\\\"spill_cap\\\"\"; OutputCap int \"json:\\\"output_cap\\\"\"; SoftConns int \"json:\\\"soft_conns\\\"\"; EvictIdle DurationValue \"json:\\\"evict_idle\\\"\"}",
-      "canonical": "struct{Backend github.com/kitsunium/sdk/internal/core/net.LoopBackend \"json:\\\"backend\\\"\"; Loops int \"json:\\\"loops\\\"\"; Rings int \"json:\\\"rings\\\"\"; CQBatch int \"json:\\\"cq_batch\\\"\"; SpillCap int \"json:\\\"spill_cap\\\"\"; OutputCap int \"json:\\\"output_cap\\\"\"; SoftConns int \"json:\\\"soft_conns\\\"\"; EvictIdle github.com/kitsunium/sdk/internal/core/net.DurationValue \"json:\\\"evict_idle\\\"\"}",
+      "spelled": "struct{Backend LoopBackend \"json:\\\"backend\\\"\"; Loops int \"json:\\\"loops\\\"\"; Rings int \"json:\\\"rings\\\"\"; CQBatch int \"json:\\\"cq_batch\\\"\"; SpillCap int \"json:\\\"spill_cap\\\"\"; OutputCap int \"json:\\\"output_cap\\\"\"; SoftConns int \"json:\\\"soft_conns\\\"\"; EvictIdle DurationValue \"json:\\\"evict_idle\\\"\"; Capabilities []Capability \"json:\\\"capabilities,omitempty\\\"\"}",
+      "canonical": "struct{Backend github.com/kitsunium/sdk/internal/core/net.LoopBackend \"json:\\\"backend\\\"\"; Loops int \"json:\\\"loops\\\"\"; Rings int \"json:\\\"rings\\\"\"; CQBatch int \"json:\\\"cq_batch\\\"\"; SpillCap int \"json:\\\"spill_cap\\\"\"; OutputCap int \"json:\\\"output_cap\\\"\"; SoftConns int \"json:\\\"soft_conns\\\"\"; EvictIdle github.com/kitsunium/sdk/internal/core/net.DurationValue \"json:\\\"evict_idle\\\"\"; Capabilities []github.com/kitsunium/sdk/internal/core/net.Capability \"json:\\\"capabilities,omitempty\\\"\"}",
       "fields": [
         {
           "name": "Backend",
@@ -28501,6 +28799,12 @@
           "type": "DurationValue",
           "tag": "json:\"evict_idle\"",
           "doc": "EvictIdle is how long a connection must have been idle before the loop\nmay close it to admit another under hard pressure — the process out of\ndescriptors, or MaxConns reached. A connection with unread bytes is\nnever evicted. Zero evicts nothing.\n"
+        },
+        {
+          "name": "Capabilities",
+          "type": "[]Capability",
+          "tag": "json:\"capabilities,omitempty\"",
+          "doc": "Capabilities opts the group into kernel capabilities of class A-code\n(ADR 0189). Each is probed and used where the kernel has it, reported\n\"missing\" and as a fault where it does not, and never used once\nKITSUNIUM_NET_DISABLE names it. An engine, a class B capability or an\nunknown token is refused at Start with LoopCapabilityRefused. Nil asks\nfor none; the class A-kernel capabilities need no opt-in.\n"
         }
       ],
       "doc": "LoopValue configures a loop group's engine (ADR 0186 §D5). It is a value of\nits own, passed by the Loop group option, so LimitsValue and TimeoutsValue\nkeep the meanings they publish for every engine. Every field is optional:\nzero selects the domain default, never \"unbounded\".\n",
@@ -63398,12 +63702,24 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/loop.CheckCapabilities",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/net/loop",
+      "name": "CheckCapabilities",
+      "spelled": "func(group string, v corenet.LoopValue) error",
+      "canonical": "func(group string, v github.com/kitsunium/sdk/internal/core/net.LoopValue) error",
+      "doc": "CheckCapabilities refuses a LoopValue.Capabilities entry the group cannot opt\ninto: an engine, a class B capability or an unknown token, with\nLoopCapabilityRefused naming it (ADR 0189). A class A-kernel entry needs no\nopt-in and is accepted as it is. server calls it for the portable backend,\nwhich never reaches Start.\n",
+      "file": "service/net/loop/caps.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/net/loop.Config",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/net/loop",
       "name": "Config",
-      "spelled": "struct{Group string; Value corenet.LoopValue; MaxConns int; IdleTimeout time.Duration; Handler corenet.LoopHandler; Listeners []Listener; Log io.Writer}",
-      "canonical": "struct{Group string; Value github.com/kitsunium/sdk/internal/core/net.LoopValue; MaxConns int; IdleTimeout time.Duration; Handler github.com/kitsunium/sdk/internal/core/net.LoopHandler; Listeners []github.com/kitsunium/sdk/internal/service/net/loop.Listener; Log io.Writer}",
+      "spelled": "struct{Group string; Value corenet.LoopValue; MaxConns int; IdleTimeout time.Duration; Handler corenet.LoopHandler; Listeners []Listener; Log io.Writer; Disabled []corenet.Capability; DisabledBy string}",
+      "canonical": "struct{Group string; Value github.com/kitsunium/sdk/internal/core/net.LoopValue; MaxConns int; IdleTimeout time.Duration; Handler github.com/kitsunium/sdk/internal/core/net.LoopHandler; Listeners []github.com/kitsunium/sdk/internal/service/net/loop.Listener; Log io.Writer; Disabled []github.com/kitsunium/sdk/internal/core/net.Capability; DisabledBy string}",
       "fields": [
         {
           "name": "Group",
@@ -63439,6 +63755,16 @@
           "name": "Log",
           "type": "io.Writer",
           "doc": "Log receives the one start line; nil is standard error.\n"
+        },
+        {
+          "name": "Disabled",
+          "type": "[]corenet.Capability",
+          "doc": "Disabled are the capabilities the operator switched off: never probed,\nnever used, reported \"disabled\" (ADR 0189).\n"
+        },
+        {
+          "name": "DisabledBy",
+          "type": "string",
+          "doc": "DisabledBy says how they were switched off in State; empty is\nKITSUNIUM_NET_DISABLE.\n"
         }
       ],
       "doc": "Config is what server gives a loop group to start: the group's name, its\nLoopValue, the two options the engine honours itself — MaxConns and\nIdleTimeout — its handler and its listeners.\n",
@@ -63551,6 +63877,18 @@
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/net/loop.Config) (*github.com/kitsunium/sdk/internal/service/net/loop.Group, error)",
       "doc": "Start resolves cfg against the effective RLIMIT_NOFILE — refusing with\nLoopNoDescriptors when it is zero or unreadable, before the one ring formula\ndivides by it — starts the group's loops on the backend cfg asks for, and\nwrites one line to cfg.Log naming the backend, the probe stage, any fallback\nreason, the loops, the rings and their sizes. The listeners are the group's\nfrom the call on, started or refused. An explicit backend the platform has\nno mechanic for is UnsupportedPlatform; one the kernel's probe refused is\nLoopBackendUnavailable.\n",
       "file": "service/net/loop/group.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/loop.Unprobed",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/net/loop",
+      "name": "Unprobed",
+      "spelled": "func(backend string, disabled []corenet.Capability, disabledBy string) []corenet.CapabilityValue",
+      "canonical": "func(backend string, disabled []github.com/kitsunium/sdk/internal/core/net.Capability, disabledBy string) []github.com/kitsunium/sdk/internal/core/net.CapabilityValue",
+      "doc": "Unprobed is the capability report of a group that runs on backend without\nthe leaf's probes — the portable backend: every row unprobed, or disabled\nby what the operator switched off, as disabledBy says (ADR 0189).\n",
+      "file": "service/net/loop/caps.go",
       "layer": "service",
       "family": "net"
     },

@@ -25,15 +25,27 @@ const (
 	setupCoopTaskrun  uint32 = 1 << 8
 	setupSingleIssuer uint32 = 1 << 12
 	setupDeferTaskrun uint32 = 1 << 13
+	// setupNoSQArray is IORING_SETUP_NO_SQARRAY (6.6): the SQ tail indexes
+	// the SQEs directly and sqOff.array reads zero.
+	setupNoSQArray uint32 = 1 << 16
+	// setupSQRewind is IORING_SETUP_SQ_REWIND (7.0): the kernel ignores the
+	// SQ head and tail and takes every submission from SQE 0. It requires
+	// NO_SQARRAY and refuses SQPOLL, which this backend never sets.
+	setupSQRewind uint32 = 1 << 20
 
 	// io_uring_params.features.
 	featSingleMmap uint32 = 1 << 0
 	featNoDrop     uint32 = 1 << 1
 	featExtArg     uint32 = 1 << 8
+	// featMinTimeout is IORING_FEAT_MIN_TIMEOUT (6.12), class B's min_wait.
+	featMinTimeout uint32 = 1 << 15
 
 	// io_uring_enter flags.
 	enterGetEvents uint32 = 1 << 0
 	enterExtArg    uint32 = 1 << 3
+	// enterRegisteredRing is IORING_ENTER_REGISTERED_RING: fd is the index
+	// IORING_REGISTER_RING_FDS returned, not a descriptor.
+	enterRegisteredRing uint32 = 1 << 4
 
 	// SQ ring flags.
 	sqCQOverflow uint32 = 1 << 1
@@ -87,8 +99,14 @@ const (
 	regEventFD    uintptr = 4
 	regProbe      uintptr = 8
 	regFiles2     uintptr = 13
+	regRingFDs    uintptr = 20
+	unregRingFDs  uintptr = 21
 	regPbufRing   uintptr = 22
 	unregPbufRing uintptr = 23
+	// ringFDsMax is IO_RINGFD_REG_MAX: a thread registers at most 16 rings.
+	ringFDsMax int = 16
+	// ringFDAlloc is the offset -1U that lets the kernel pick the index.
+	ringFDAlloc uint32 = 0xFFFFFFFF
 	// pbufRingMmap is IOU_PBUF_RING_MMAP (6.4): the kernel allocates the
 	// buffer ring and the loop maps it, at offPbufRing | bgid << offPbufShift,
 	// so no user page is pinned against RLIMIT_MEMLOCK.
@@ -183,6 +201,14 @@ type rsrcRegister struct {
 	tags  uint64
 }
 
+// rsrcUpdate is struct io_uring_rsrc_update, IORING_REGISTER_RING_FDS's
+// argument: offset is the index, data the ring's descriptor.
+type rsrcUpdate struct {
+	offset uint32
+	resv   uint32
+	data   uint64
+}
+
 // getEventsArg is struct io_uring_getevents_arg.
 type getEventsArg struct {
 	sigmask   uint64
@@ -245,6 +271,14 @@ func uringEnterWait(fd int, submit, minComplete, flags uint32, arg unsafe.Pointe
 // RawSyscall6, with no scheduler round trip.
 func uringEnterSubmit(fd int, submit uint32) (int, syscall.Errno) {
 	n, _, errno := syscall.RawSyscall6(sysIOURingEnter, uintptr(fd), uintptr(submit), 0, 0, 0, 0)
+	//: the SQEs consumed, or the kernel's error.
+	return int(n), errno
+}
+
+// uringEnterFlags is uringEnterSubmit with flags: GETEVENTS with
+// min_complete zero, which never blocks, and REGISTERED_RING.
+func uringEnterFlags(fd int, submit, flags uint32) (int, syscall.Errno) {
+	n, _, errno := syscall.RawSyscall6(sysIOURingEnter, uintptr(fd), uintptr(submit), 0, uintptr(flags), 0, 0)
 	//: the SQEs consumed, or the kernel's error.
 	return int(n), errno
 }

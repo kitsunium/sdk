@@ -104,6 +104,7 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
 - [func WithDrainTimeout\(d time.Duration\) Option](<#WithDrainTimeout>)
 - [func WriteTimeout\(d time.Duration\) GroupOption](<#WriteTimeout>)
 - [type Capability](<#Capability>)
+- [type CapabilityValue](<#CapabilityValue>)
 - [type Conn](<#Conn>)
   - [func \(Conn\) Buffer\(\) \[\]byte](<#Conn.Buffer>)
   - [func \(Conn\) Group\(\) string](<#Conn.Group>)
@@ -222,6 +223,42 @@ const CapabilityPortable Capability = "portable"
 CapabilityPortable is the portable loop backend, the loop family's floor.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/net.CapabilityPortable`.
+
+<a name="CapabilityURingDeferTaskrun"></a>
+```go
+const CapabilityURingDeferTaskrun Capability = "uring-defer-taskrun"
+```
+
+CapabilityURingDeferTaskrun opts a loop group into uring-defer-taskrun, a class A-code kernel capability.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.CapabilityURingDeferTaskrun`.
+
+<a name="CapabilityURingNoSQArray"></a>
+```go
+const CapabilityURingNoSQArray Capability = "uring-no-sqarray"
+```
+
+CapabilityURingNoSQArray opts a loop group into uring-no-sqarray, a class A-code kernel capability.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.CapabilityURingNoSQArray`.
+
+<a name="CapabilityURingRingFDs"></a>
+```go
+const CapabilityURingRingFDs Capability = "uring-ring-fds"
+```
+
+CapabilityURingRingFDs opts a loop group into uring-ring-fds, a class A-code kernel capability.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.CapabilityURingRingFDs`.
+
+<a name="CapabilityURingSQRewind"></a>
+```go
+const CapabilityURingSQRewind Capability = "uring-sq-rewind"
+```
+
+CapabilityURingSQRewind opts a loop group into uring-sq-rewind, a class A-code kernel capability.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.CapabilityURingSQRewind`.
 
 <a name="EngineAuto"></a>
 ```go
@@ -1014,6 +1051,35 @@ Capability is an alias of `github.com/kitsunium/sdk/internal/core/net.Capability
 type Capability string
 ```
 
+<a name="CapabilityValue"></a>
+## type [CapabilityValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+CapabilityValue reports one optional kernel capability of a loop group.
+
+```go
+type CapabilityValue = corenet.CapabilityValue
+```
+
+CapabilityValue is an alias of `github.com/kitsunium/sdk/internal/core/net.CapabilityValue`, declared as:
+
+```go
+type CapabilityValue struct {
+	// Name is the capability.
+	Name   Capability `json:"name"`
+	// Class is "a-kernel", "a-code" or "b".
+	Class  string     `json:"class"`
+	// Status is "on" (probed and in use), "available" (probed, not asked for),
+	// "absent" (probed, the kernel lacks it), "missing" (a class A-code
+	// capability the code opted into and the kernel lacks: a fault),
+	// "disabled" (switched off by KITSUNIUM_NET_DISABLE or an unknown token,
+	// never probed) or "unprobed" (the backend the group runs on has no use for
+	// it).
+	Status string     `json:"status"`
+	// Reason names the probe stage and the kernel's answer, or the switch.
+	Reason string     `json:"reason,omitempty"`
+}
+```
+
 <a name="Conn"></a>
 ## type [Conn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
@@ -1681,6 +1747,10 @@ type LoopState struct {
 	BatchP99       DurationValue        `json:"batch_p99"`
 	// RingStates reports every ring of every loop, loop by loop.
 	RingStates     []LoopRingStateValue `json:"ring_states"`
+	// Capabilities reports every optional kernel capability the group's backend
+	// probed or was told not to, the server's socket probes merged in
+	// (ADR 0189).
+	Capabilities   []CapabilityValue    `json:"capabilities,omitempty"`
 }
 ```
 
@@ -1700,12 +1770,12 @@ type LoopValue struct {
 	// Backend is the mechanic to run on. LoopBackendAuto takes the best one the
 	// platform's probe reaches and reports any fallback in State; an explicit
 	// backend the platform cannot run is refused at Start.
-	Backend   LoopBackend   `json:"backend"`
+	Backend      LoopBackend   `json:"backend"`
 	// Loops is the number of loops, each one goroutine locked to its OS thread
 	// on a native backend. Zero selects one. The SDK never sets GOMAXPROCS:
 	// sizing the process against its loops is the consumer's policy, and State
 	// reports both.
-	Loops     int           `json:"loops"`
+	Loops        int           `json:"loops"`
 	// Rings is the number of descriptor shards inside one loop, each with its
 	// own table of at most min(RLIMIT_NOFILE, IORING_MAX_FIXED_FILES) entries:
 	// what lets io_uring serve more connections than RLIMIT_NOFILE. Zero
@@ -1713,28 +1783,35 @@ type LoopValue struct {
 	// IORING_MAX_FIXED_FILES)⌉, and one when both are zero; that is the only
 	// formula, and State says where the value came from. epoll and the portable
 	// backend run one ring whatever it says.
-	Rings     int           `json:"rings"`
+	Rings        int           `json:"rings"`
 	// CQBatch bounds the completions or events one loop iteration reaps before
 	// it calls OnBatchEnd. Zero selects the domain default.
-	CQBatch   int           `json:"cq_batch"`
+	CQBatch      int           `json:"cq_batch"`
 	// SpillCap is the most unconsumed input, in bytes, one connection may hold
 	// between OnData calls. Past it the connection is closed with
 	// LoopSpillFull. Zero selects the domain default.
-	SpillCap  int           `json:"spill_cap"`
+	SpillCap     int           `json:"spill_cap"`
 	// OutputCap is the most written and unsent output, in bytes, one
 	// connection may hold. A Write past it is refused with LoopOutputFull. Zero
 	// selects the domain default.
-	OutputCap int           `json:"output_cap"`
+	OutputCap    int           `json:"output_cap"`
 	// SoftConns is the soft connection bound: a connection accepted while the
 	// group serves more is flagged under pressure (LoopIO.Pressure), so a
 	// protocol can ask its peer to leave. It refuses nothing; MaxConns does.
 	// Zero sets no soft bound.
-	SoftConns int           `json:"soft_conns"`
+	SoftConns    int           `json:"soft_conns"`
 	// EvictIdle is how long a connection must have been idle before the loop
 	// may close it to admit another under hard pressure — the process out of
 	// descriptors, or MaxConns reached. A connection with unread bytes is
 	// never evicted. Zero evicts nothing.
-	EvictIdle DurationValue `json:"evict_idle"`
+	EvictIdle    DurationValue `json:"evict_idle"`
+	// Capabilities opts the group into kernel capabilities of class A-code
+	// (ADR 0189). Each is probed and used where the kernel has it, reported
+	// "missing" and as a fault where it does not, and never used once
+	// KITSUNIUM_NET_DISABLE names it. An engine, a class B capability or an
+	// unknown token is refused at Start with LoopCapabilityRefused. Nil asks
+	// for none; the class A-kernel capabilities need no opt-in.
+	Capabilities []Capability  `json:"capabilities,omitempty"`
 }
 ```
 

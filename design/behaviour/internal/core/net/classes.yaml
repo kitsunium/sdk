@@ -50,6 +50,114 @@ constants:
         type: Capability
         value: "\"goroutine\""
     name: CapabilityPortable
+  - doc: The class A-kernel capabilities, on once probed, which KITSUNIUM_NET_DISABLE may switch off (ADR 0189).
+    grouped: true
+    items:
+      - doc: |-
+          CapabilityURingMultishotRecv is io_uring's multishot receive. Switched off,
+          every receive is single-shot and re-armed after each completion.
+        name: CapabilityURingMultishotRecv
+        type: Capability
+        value: "\"uring-multishot-recv\""
+      - doc: |-
+          CapabilityURingPbuf is io_uring's provided-buffer ring. The io_uring backend
+          receives into nothing else: switched off, io_uring is never set up and the group
+          runs on epoll.
+        name: CapabilityURingPbuf
+        type: Capability
+        value: "\"uring-pbuf\""
+      - doc: |-
+          CapabilityURingDirect is io_uring's direct descriptors, chosen when the release
+          check passes (a kernel from 6.13). Switched off, connections live in the process
+          table and the release check does not run.
+        name: CapabilityURingDirect
+        type: Capability
+        value: "\"uring-direct\""
+      - doc: |-
+          CapabilityEpollExclusive is EPOLLEXCLUSIVE on every loop's listener
+          registration. Switched off, every loop's epoll is woken by each connection.
+        name: CapabilityEpollExclusive
+        type: Capability
+        value: "\"epoll-exclusive\""
+      - doc: |-
+          CapabilityTCPNoDelay is TCP_NODELAY on the listeners a loop group accepts on,
+          inherited by every accepted socket. Switched off, it is not set.
+        name: CapabilityTCPNoDelay
+        type: Capability
+        value: "\"tcp-nodelay\""
+    name: CapabilityURingMultishotRecv
+  - doc: The class A-code capabilities, opt-in, which KITSUNIUM_NET_DISABLE may switch off (ADR 0189).
+    grouped: true
+    items:
+      - doc: |-
+          CapabilityURingDeferTaskrun is IORING_SETUP_DEFER_TASKRUN with SINGLE_ISSUER on
+          the ring a loop's thread waits on; the other rings keep COOP_TASKRUN.
+        name: CapabilityURingDeferTaskrun
+        type: Capability
+        value: "\"uring-defer-taskrun\""
+      - doc: |-
+          CapabilityURingNoSQArray is IORING_SETUP_NO_SQARRAY: the SQ indexes the SQEs
+          directly, with no indirection array.
+        name: CapabilityURingNoSQArray
+        type: Capability
+        value: "\"uring-no-sqarray\""
+      - doc: |-
+          CapabilityURingRingFDs registers each ring's descriptor with its thread
+          (IORING_REGISTER_RING_FDS), at most 16 a thread, and unregisters it before the
+          ring closes.
+        name: CapabilityURingRingFDs
+        type: Capability
+        value: "\"uring-ring-fds\""
+      - doc: |-
+          CapabilityURingSQRewind is IORING_SETUP_SQ_REWIND with NO_SQARRAY: every
+          submission is filled from SQE 0. It needs the kernel 7.0 lane before it may
+          leave class A-code.
+        name: CapabilityURingSQRewind
+        type: Capability
+        value: "\"uring-sq-rewind\""
+    name: CapabilityURingDeferTaskrun
+  - doc: The class B capabilities, declared, not built, which KITSUNIUM_NET_DISABLE may name (ADR 0189).
+    grouped: true
+    items:
+      - doc: CapabilityURingSendZC is io_uring's zero-copy send.
+        name: CapabilityURingSendZC
+        type: Capability
+        value: "\"uring-send-zc\""
+      - doc: CapabilityURingBundle is io_uring's receive and send bundles.
+        name: CapabilityURingBundle
+        type: Capability
+        value: "\"uring-bundle\""
+      - doc: |-
+          CapabilityURingPbufInc is the incrementally consumed buffer ring
+          (IOU_PBUF_RING_INC).
+        name: CapabilityURingPbufInc
+        type: Capability
+        value: "\"uring-pbuf-inc\""
+      - doc: CapabilityBusyPoll is busy polling of the network device's queue.
+        name: CapabilityBusyPoll
+        type: Capability
+        value: "\"busy-poll\""
+      - doc: CapabilityURingZCRX is io_uring's zero-copy receive.
+        name: CapabilityURingZCRX
+        type: Capability
+        value: "\"uring-zcrx\""
+      - doc: |-
+          CapabilityReuseportCBPF is a classic BPF program steering SO_REUSEPORT
+          connections to their loop.
+        name: CapabilityReuseportCBPF
+        type: Capability
+        value: "\"reuseport-cbpf\""
+      - doc: CapabilityTCPDeferAccept is TCP_DEFER_ACCEPT on the listeners.
+        name: CapabilityTCPDeferAccept
+        type: Capability
+        value: "\"tcp-defer-accept\""
+      - doc: |-
+          CapabilityURingMinTimeout is io_uring's minimum wait (min_wait_usec), only where
+          the kernel advertises IORING_FEAT_MIN_TIMEOUT.
+        name: CapabilityURingMinTimeout
+        type: Capability
+        value: "\"uring-min-timeout\""
+    name: CapabilityURingSendZC
   - grouped: true
     items:
       - doc: decimalBase is the radix used to read a bare nanosecond count.
@@ -508,6 +616,10 @@ files:
       - Capability
       - CapabilityIOURing
       - CapabilityPortable
+      - CapabilityURingMultishotRecv
+      - CapabilityURingDeferTaskrun
+      - CapabilityURingSendZC
+      - CapabilityValue
     name: capability.go
   - decls:
       - ClientConfig
@@ -815,6 +927,27 @@ types:
   - kind: named
     name: Capability
     underlying: string
+  - fields:
+      - doc: Name is the capability.
+        name: Name
+        type: Capability
+      - doc: Class is "a-kernel", "a-code" or "b".
+        name: Class
+        type: string
+      - doc: |-
+          Status is "on" (probed and in use), "available" (probed, not asked for),
+          "absent" (probed, the kernel lacks it), "missing" (a class A-code
+          capability the code opted into and the kernel lacks: a fault),
+          "disabled" (switched off by KITSUNIUM_NET_DISABLE or an unknown token,
+          never probed) or "unprobed" (the backend the group runs on has no use for
+          it).
+        name: Status
+        type: string
+      - doc: Reason names the probe stage and the kernel's answer, or the switch.
+        name: Reason
+        type: string
+    kind: struct
+    name: CapabilityValue
   - fields:
       - doc: BaseURL is the origin every relative path resolves against.
         name: BaseURL
@@ -1347,6 +1480,12 @@ types:
       - doc: RingStates reports every ring of every loop, loop by loop.
         name: RingStates
         type: "[]LoopRingStateValue"
+      - doc: |-
+          Capabilities reports every optional kernel capability the group's backend
+          probed or was told not to, the server's socket probes merged in
+          (ADR 0189).
+        name: Capabilities
+        type: "[]CapabilityValue"
     kind: struct
     name: LoopStateValue
   - kind: named
@@ -1411,6 +1550,15 @@ types:
           never evicted. Zero evicts nothing.
         name: EvictIdle
         type: DurationValue
+      - doc: |-
+          Capabilities opts the group into kernel capabilities of class A-code
+          (ADR 0189). Each is probed and used where the kernel has it, reported
+          "missing" and as a fault where it does not, and never used once
+          KITSUNIUM_NET_DISABLE names it. An engine, a class B capability or an
+          unknown token is refused at Start with LoopCapabilityRefused. Nil asks
+          for none; the class A-kernel capabilities need no opt-in.
+        name: Capabilities
+        type: "[]Capability"
     kind: struct
     name: LoopValue
   - kind: named

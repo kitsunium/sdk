@@ -90,4 +90,11 @@ type LoopValue struct {
 	// descriptors, or MaxConns reached. A connection with unread bytes is
 	// never evicted. Zero evicts nothing.
 	EvictIdle DurationValue `json:"evict_idle"`
+	// Capabilities opts the group into kernel capabilities of class A-code
+	// (ADR 0189). Each is probed and used where the kernel has it, reported
+	// "missing" and as a fault where it does not, and never used once
+	// KITSUNIUM_NET_DISABLE names it. An engine, a class B capability or an
+	// unknown token is refused at Start with LoopCapabilityRefused. Nil asks
+	// for none; the class A-kernel capabilities need no opt-in.
+	Capabilities []Capability `json:"capabilities,omitempty"`
 }

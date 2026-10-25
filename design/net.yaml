@@ -438,6 +438,14 @@ packages:
             name: CodeLoopGroupStalled
             value: "0x00_02_0B_3B"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeLoopCapabilityRefused identifies a LoopValue.Capabilities entry the loop
+              cannot opt into: an engine, a class B capability or an unknown token
+              (ADR 0189).
+            name: CodeLoopCapabilityRefused
+            value: "0x00_02_0B_3C"
+        type: errs.Code
     constants:
       - blockDoc: The loop backends. The zero value is LoopBackendAuto.
         doc: |-
@@ -623,6 +631,124 @@ packages:
         name: CapabilityGoroutine
         type: Capability
         value: "\"goroutine\""
+      - blockDoc: The class A-kernel capabilities, on once probed, which KITSUNIUM_NET_DISABLE may switch off (ADR 0189).
+        doc: |-
+          CapabilityURingMultishotRecv is io_uring's multishot receive. Switched off,
+          every receive is single-shot and re-armed after each completion.
+        name: CapabilityURingMultishotRecv
+        type: Capability
+        value: "\"uring-multishot-recv\""
+      - blockDoc: The class A-kernel capabilities, on once probed, which KITSUNIUM_NET_DISABLE may switch off (ADR 0189).
+        doc: |-
+          CapabilityURingPbuf is io_uring's provided-buffer ring. The io_uring backend
+          receives into nothing else: switched off, io_uring is never set up and the group
+          runs on epoll.
+        name: CapabilityURingPbuf
+        type: Capability
+        value: "\"uring-pbuf\""
+      - blockDoc: The class A-kernel capabilities, on once probed, which KITSUNIUM_NET_DISABLE may switch off (ADR 0189).
+        doc: |-
+          CapabilityURingDirect is io_uring's direct descriptors, chosen when the release
+          check passes (a kernel from 6.13). Switched off, connections live in the process
+          table and the release check does not run.
+        name: CapabilityURingDirect
+        type: Capability
+        value: "\"uring-direct\""
+      - blockDoc: The class A-kernel capabilities, on once probed, which KITSUNIUM_NET_DISABLE may switch off (ADR 0189).
+        doc: |-
+          CapabilityEpollExclusive is EPOLLEXCLUSIVE on every loop's listener
+          registration. Switched off, every loop's epoll is woken by each connection.
+        name: CapabilityEpollExclusive
+        type: Capability
+        value: "\"epoll-exclusive\""
+      - blockDoc: The class A-kernel capabilities, on once probed, which KITSUNIUM_NET_DISABLE may switch off (ADR 0189).
+        doc: |-
+          CapabilityTCPNoDelay is TCP_NODELAY on the listeners a loop group accepts on,
+          inherited by every accepted socket. Switched off, it is not set.
+        name: CapabilityTCPNoDelay
+        type: Capability
+        value: "\"tcp-nodelay\""
+      - blockDoc: The class A-code capabilities, opt-in, which KITSUNIUM_NET_DISABLE may switch off (ADR 0189).
+        doc: |-
+          CapabilityURingDeferTaskrun is IORING_SETUP_DEFER_TASKRUN with SINGLE_ISSUER on
+          the ring a loop's thread waits on; the other rings keep COOP_TASKRUN.
+        name: CapabilityURingDeferTaskrun
+        type: Capability
+        value: "\"uring-defer-taskrun\""
+      - blockDoc: The class A-code capabilities, opt-in, which KITSUNIUM_NET_DISABLE may switch off (ADR 0189).
+        doc: |-
+          CapabilityURingNoSQArray is IORING_SETUP_NO_SQARRAY: the SQ indexes the SQEs
+          directly, with no indirection array.
+        name: CapabilityURingNoSQArray
+        type: Capability
+        value: "\"uring-no-sqarray\""
+      - blockDoc: The class A-code capabilities, opt-in, which KITSUNIUM_NET_DISABLE may switch off (ADR 0189).
+        doc: |-
+          CapabilityURingRingFDs registers each ring's descriptor with its thread
+          (IORING_REGISTER_RING_FDS), at most 16 a thread, and unregisters it before the
+          ring closes.
+        name: CapabilityURingRingFDs
+        type: Capability
+        value: "\"uring-ring-fds\""
+      - blockDoc: The class A-code capabilities, opt-in, which KITSUNIUM_NET_DISABLE may switch off (ADR 0189).
+        doc: |-
+          CapabilityURingSQRewind is IORING_SETUP_SQ_REWIND with NO_SQARRAY: every
+          submission is filled from SQE 0. It needs the kernel 7.0 lane before it may
+          leave class A-code.
+        name: CapabilityURingSQRewind
+        type: Capability
+        value: "\"uring-sq-rewind\""
+      - blockDoc: The class B capabilities, declared, not built, which KITSUNIUM_NET_DISABLE may name (ADR 0189).
+        doc: |-
+          CapabilityURingSendZC is io_uring's zero-copy send.
+        name: CapabilityURingSendZC
+        type: Capability
+        value: "\"uring-send-zc\""
+      - blockDoc: The class B capabilities, declared, not built, which KITSUNIUM_NET_DISABLE may name (ADR 0189).
+        doc: |-
+          CapabilityURingBundle is io_uring's receive and send bundles.
+        name: CapabilityURingBundle
+        type: Capability
+        value: "\"uring-bundle\""
+      - blockDoc: The class B capabilities, declared, not built, which KITSUNIUM_NET_DISABLE may name (ADR 0189).
+        doc: |-
+          CapabilityURingPbufInc is the incrementally consumed buffer ring
+          (IOU_PBUF_RING_INC).
+        name: CapabilityURingPbufInc
+        type: Capability
+        value: "\"uring-pbuf-inc\""
+      - blockDoc: The class B capabilities, declared, not built, which KITSUNIUM_NET_DISABLE may name (ADR 0189).
+        doc: |-
+          CapabilityBusyPoll is busy polling of the network device's queue.
+        name: CapabilityBusyPoll
+        type: Capability
+        value: "\"busy-poll\""
+      - blockDoc: The class B capabilities, declared, not built, which KITSUNIUM_NET_DISABLE may name (ADR 0189).
+        doc: |-
+          CapabilityURingZCRX is io_uring's zero-copy receive.
+        name: CapabilityURingZCRX
+        type: Capability
+        value: "\"uring-zcrx\""
+      - blockDoc: The class B capabilities, declared, not built, which KITSUNIUM_NET_DISABLE may name (ADR 0189).
+        doc: |-
+          CapabilityReuseportCBPF is a classic BPF program steering SO_REUSEPORT
+          connections to their loop.
+        name: CapabilityReuseportCBPF
+        type: Capability
+        value: "\"reuseport-cbpf\""
+      - blockDoc: The class B capabilities, declared, not built, which KITSUNIUM_NET_DISABLE may name (ADR 0189).
+        doc: |-
+          CapabilityTCPDeferAccept is TCP_DEFER_ACCEPT on the listeners.
+        name: CapabilityTCPDeferAccept
+        type: Capability
+        value: "\"tcp-defer-accept\""
+      - blockDoc: The class B capabilities, declared, not built, which KITSUNIUM_NET_DISABLE may name (ADR 0189).
+        doc: |-
+          CapabilityURingMinTimeout is io_uring's minimum wait (min_wait_usec), only where
+          the kernel advertises IORING_FEAT_MIN_TIMEOUT.
+        name: CapabilityURingMinTimeout
+        type: Capability
+        value: "\"uring-min-timeout\""
       - doc: |-
           EnvEngine is the variable that caps every group's engine at one capability of
           the lattice: min(code, environment), never above the code's choice.
@@ -2085,6 +2211,18 @@ packages:
             private: "core/net: every ring of the loop group was drained by its watchdog; set KITSUNIUM_NET_DISABLE before restarting"
             public: A loop group stopped accepting connections
             reason: LOOP_GROUP_STALLED
+          - code: CodeLoopCapabilityRefused
+            doc: |-
+              LoopCapabilityRefused is returned by Start for a loop group whose
+              LoopValue.Capabilities names something it cannot opt into: an engine, a
+              class B capability, which stays off until BENCH.md shows its threshold, or a
+              token outside the registry. The "capability" field names it. It is refused,
+              never ignored (ADR 0189).
+            exit: CONFIG
+            name: LoopCapabilityRefused
+            private: "core/net: LoopValue.Capabilities names an engine, a class B capability or an unknown token"
+            public: The loop group asks for a capability it cannot opt into
+            reason: LOOP_CAPABILITY_REFUSED
     types:
       - doc: |-
           AddressValue names one socket to bind. It is a value type so a group's listen
@@ -2876,6 +3014,13 @@ packages:
               name: RingStates
               tag: json:"ring_states"
               type: "[]LoopRingStateValue"
+            - doc: |-
+                Capabilities reports every optional kernel capability the group's backend
+                probed or was told not to, the server's socket probes merged in
+                (ADR 0189).
+              name: Capabilities
+              tag: json:"capabilities,omitempty"
+              type: "[]CapabilityValue"
       - doc: |-
           LoopValue configures a loop group's engine (ADR 0186 §D5). It is a value of
           its own, passed by the Loop group option, so LimitsValue and TimeoutsValue
@@ -2946,6 +3091,16 @@ packages:
               name: EvictIdle
               tag: json:"evict_idle"
               type: DurationValue
+            - doc: |-
+                Capabilities opts the group into kernel capabilities of class A-code
+                (ADR 0189). Each is probed and used where the kernel has it, reported
+                "missing" and as a fault where it does not, and never used once
+                KITSUNIUM_NET_DISABLE names it. An engine, a class B capability or an
+                unknown token is refused at Start with LoopCapabilityRefused. Nil asks
+                for none; the class A-kernel capabilities need no opt-in.
+              name: Capabilities
+              tag: json:"capabilities,omitempty"
+              type: "[]Capability"
       - doc: |-
           Middleware decorates a handler with another of the same type.
 
@@ -3144,11 +3299,42 @@ packages:
               type: DurationValue
       - doc: |-
           Capability names one engine of the lattice the operator's switches restrict
-          (ADR 0188): iouring > epoll > portable > goroutine. Its values are the tokens
-          KITSUNIUM_NET_ENGINE and KITSUNIUM_NET_DISABLE take; this block is the
+          (ADR 0188), iouring > epoll > portable > goroutine, or one optional kernel
+          capability a loop group probes (ADR 0189). Its values are the tokens
+          KITSUNIUM_NET_ENGINE and KITSUNIUM_NET_DISABLE take; these blocks are the
           registry they are parsed against, and any other token is unknown.
+          KITSUNIUM_NET_ENGINE takes an engine only.
         name: Capability
         underlying: string
+      - doc: |-
+          CapabilityValue reports one optional kernel capability of a loop group: what
+          its probe found and whether the group runs with it (ADR 0189). A capability the
+          operator switched off is never probed.
+        name: CapabilityValue
+        struct:
+          fields:
+            - doc: Name is the capability.
+              name: Name
+              tag: json:"name"
+              type: Capability
+            - doc: Class is "a-kernel", "a-code" or "b".
+              name: Class
+              tag: json:"class"
+              type: string
+            - doc: |-
+                Status is "on" (probed and in use), "available" (probed, not asked for),
+                "absent" (probed, the kernel lacks it), "missing" (a class A-code
+                capability the code opted into and the kernel lacks: a fault),
+                "disabled" (switched off by KITSUNIUM_NET_DISABLE or an unknown token,
+                never probed) or "unprobed" (the backend the group runs on has no use for
+                it).
+              name: Status
+              tag: json:"status"
+              type: string
+            - doc: Reason names the probe stage and the kernel's answer, or the switch.
+              name: Reason
+              tag: json:"reason,omitempty"
+              type: string
       - doc: |-
           OverrideValue reports what the operator's environment did to the engines,
           read once, before any probe (ADR 0188). The zero value is "no override".
@@ -4132,6 +4318,34 @@ packages:
         out:
           - type: "*Group"
           - type: error
+      - doc: |-
+          CheckCapabilities refuses a LoopValue.Capabilities entry the group cannot opt
+          into: an engine, a class B capability or an unknown token, with
+          LoopCapabilityRefused naming it (ADR 0189). A class A-kernel entry needs no
+          opt-in and is accepted as it is. server calls it for the portable backend,
+          which never reaches Start.
+        in:
+          - name: group
+            type: string
+          - name: v
+            type: corenet.LoopValue
+        name: CheckCapabilities
+        out:
+          - type: error
+      - doc: |-
+          Unprobed is the capability report of a group that runs on backend without
+          the leaf's probes — the portable backend: every row unprobed, or disabled
+          by what the operator switched off, as disabledBy says (ADR 0189).
+        in:
+          - name: backend
+            type: string
+          - name: disabled
+            type: "[]corenet.Capability"
+          - name: disabledBy
+            type: string
+        name: Unprobed
+        out:
+          - type: "[]corenet.CapabilityValue"
     imports:
       corenet: github.com/kitsunium/sdk/internal/core/net
     path: github.com/kitsunium/sdk/internal/service/net/loop
@@ -4168,6 +4382,16 @@ packages:
             - doc: Log receives the one start line; nil is standard error.
               name: Log
               type: io.Writer
+            - doc: |-
+                Disabled are the capabilities the operator switched off: never probed,
+                never used, reported "disabled" (ADR 0189).
+              name: Disabled
+              type: "[]corenet.Capability"
+            - doc: |-
+                DisabledBy says how they were switched off in State; empty is
+                KITSUNIUM_NET_DISABLE.
+              name: DisabledBy
+              type: string
       - doc: |-
           Group is a running loop group: its loops, their threads and their rings.
           Start is the one way to get one, so a Group always runs, or ran and was
@@ -6876,6 +7100,38 @@ packages:
             type: Capability
             typed: true
             value: "\"goroutine\""
+      - alias:
+          - doc: CapabilityValue reports one optional kernel capability of a loop group.
+            name: CapabilityValue
+            target: corenet.CapabilityValue
+      - const:
+          - doc: CapabilityURingDeferTaskrun opts a loop group into uring-defer-taskrun, a class A-code kernel capability.
+            name: CapabilityURingDeferTaskrun
+            reexport: corenet.CapabilityURingDeferTaskrun
+            type: Capability
+            typed: true
+            value: "\"uring-defer-taskrun\""
+      - const:
+          - doc: CapabilityURingNoSQArray opts a loop group into uring-no-sqarray, a class A-code kernel capability.
+            name: CapabilityURingNoSQArray
+            reexport: corenet.CapabilityURingNoSQArray
+            type: Capability
+            typed: true
+            value: "\"uring-no-sqarray\""
+      - const:
+          - doc: CapabilityURingRingFDs opts a loop group into uring-ring-fds, a class A-code kernel capability.
+            name: CapabilityURingRingFDs
+            reexport: corenet.CapabilityURingRingFDs
+            type: Capability
+            typed: true
+            value: "\"uring-ring-fds\""
+      - const:
+          - doc: CapabilityURingSQRewind opts a loop group into uring-sq-rewind, a class A-code kernel capability.
+            name: CapabilityURingSQRewind
+            reexport: corenet.CapabilityURingSQRewind
+            type: Capability
+            typed: true
+            value: "\"uring-sq-rewind\""
       - const:
           - doc: EnvEngine is the variable that caps every group's engine.
             name: EnvEngine

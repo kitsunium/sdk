@@ -77,17 +77,21 @@ jobs:
       matrix:
         include:
           # The runner's own kernel.
+          # requiredCaps (ADR 0189): every class A capability a kernel from
+          # 6.6 has, class A-kernel and class A-code alike. uring-sq-rewind
+          # (7.0) is required by no leg until a kernel 7.x lane exists, and
+          # stays class A-code until then.
           - leg: host
             kind: host
             requiredBackends: "iouring,epoll"
-            requiredCaps: "none"
+            requiredCaps: "uring-multishot-recv,uring-pbuf,uring-direct,epoll-exclusive,uring-defer-taskrun,uring-no-sqarray,uring-ring-fds"
           # Ubuntu noble at its own kernel, 6.8, the one the loop engine's
           # io_uring is sized against (ADR 0186); the image e2e-cross.yml pins,
           # by URL and digest.
           - leg: noble-6.8
             kind: vm
             requiredBackends: "iouring,epoll"
-            requiredCaps: "none"
+            requiredCaps: "uring-multishot-recv,uring-pbuf,uring-direct,epoll-exclusive,uring-defer-taskrun,uring-no-sqarray,uring-ring-fds"
             url: https://cloud-images.ubuntu.com/noble/20261017/noble-server-cloudimg-amd64.img
             algo: sha256
             sum: 04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94

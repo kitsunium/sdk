@@ -1,6 +1,58 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 constants:
+  - doc: The classes a capability row names (ADR 0189).
+    grouped: true
+    items:
+      - doc: "classKernel is class A-kernel: on once the probe validates it."
+        name: classKernel
+        type: string
+        value: "\"a-kernel\""
+      - doc: "classCode is class A-code: on only when LoopValue.Capabilities opts in."
+        name: classCode
+        type: string
+        value: "\"a-code\""
+      - doc: "classB is class B: declared, never turned on by this step."
+        name: classB
+        type: string
+        value: "\"b\""
+    name: classKernel
+  - doc: The statuses a capability row reports (ADR 0189).
+    grouped: true
+    items:
+      - doc: statusOn is probed and in use.
+        name: statusOn
+        type: string
+        value: "\"on\""
+      - doc: statusAvailable is probed and present, not asked for.
+        name: statusAvailable
+        type: string
+        value: "\"available\""
+      - doc: statusAbsent is probed, and the kernel lacks it.
+        name: statusAbsent
+        type: string
+        value: "\"absent\""
+      - doc: |-
+          statusMissing is a class A-code capability the code opted into and the
+          kernel lacks: server reports it as a fault.
+        name: statusMissing
+        type: string
+        value: "\"missing\""
+      - doc: "statusDisabled is switched off by the operator: never probed."
+        name: statusDisabled
+        type: string
+        value: "\"disabled\""
+      - doc: statusUnprobed is of no use to the backend the group runs on.
+        name: statusUnprobed
+        type: string
+        value: "\"unprobed\""
+    name: statusOn
+  - doc: reasonClassB is the reason every class B row gives.
+    items:
+      - name: reasonClassB
+        type: string
+        value: "\"class B: declared, not built until BENCH.md shows its threshold\""
+    name: reasonClassB
   - doc: |-
       The states of a connection slot. A slot returns to stFree only once its
       backend released the descriptor and every operation still in flight, its
@@ -321,6 +373,19 @@ constants:
       - name: setupDeferTaskrun
         type: uint32
         value: 1 << 13
+      - doc: |-
+          setupNoSQArray is IORING_SETUP_NO_SQARRAY (6.6): the SQ tail indexes
+          the SQEs directly and sqOff.array reads zero.
+        name: setupNoSQArray
+        type: uint32
+        value: 1 << 16
+      - doc: |-
+          setupSQRewind is IORING_SETUP_SQ_REWIND (7.0): the kernel ignores the
+          SQ head and tail and takes every submission from SQE 0. It requires
+          NO_SQARRAY and refuses SQPOLL, which this backend never sets.
+        name: setupSQRewind
+        type: uint32
+        value: 1 << 20
       - doc: io_uring_params.features.
         name: featSingleMmap
         type: uint32
@@ -331,6 +396,10 @@ constants:
       - name: featExtArg
         type: uint32
         value: 1 << 8
+      - doc: featMinTimeout is IORING_FEAT_MIN_TIMEOUT (6.12), class B's min_wait.
+        name: featMinTimeout
+        type: uint32
+        value: 1 << 15
       - doc: io_uring_enter flags.
         name: enterGetEvents
         type: uint32
@@ -338,6 +407,12 @@ constants:
       - name: enterExtArg
         type: uint32
         value: 1 << 3
+      - doc: |-
+          enterRegisteredRing is IORING_ENTER_REGISTERED_RING: fd is the index
+          IORING_REGISTER_RING_FDS returned, not a descriptor.
+        name: enterRegisteredRing
+        type: uint32
+        value: 1 << 4
       - doc: SQ ring flags.
         name: sqCQOverflow
         type: uint32
@@ -443,12 +518,26 @@ constants:
       - name: regFiles2
         type: uintptr
         value: "13"
+      - name: regRingFDs
+        type: uintptr
+        value: "20"
+      - name: unregRingFDs
+        type: uintptr
+        value: "21"
       - name: regPbufRing
         type: uintptr
         value: "22"
       - name: unregPbufRing
         type: uintptr
         value: "23"
+      - doc: "ringFDsMax is IO_RINGFD_REG_MAX: a thread registers at most 16 rings."
+        name: ringFDsMax
+        type: int
+        value: "16"
+      - doc: ringFDAlloc is the offset -1U that lets the kernel pick the index.
+        name: ringFDAlloc
+        type: uint32
+        value: "0xFFFFFFFF"
       - doc: |-
           pbufRingMmap is IOU_PBUF_RING_MMAP (6.4): the kernel allocates the
           buffer ring and the loop maps it, at offPbufRing | bgid << offPbufShift,
@@ -483,6 +572,25 @@ constants:
         type: syscall.Errno
         value: syscall.ENOBUFS
     name: sysIOURingSetup
+  - doc: |-
+      The setup flags every ring may carry: the floor every kernel the backend
+      serves accepts, and SINGLE_ISSUER, which 6.0 added.
+    grouped: true
+    items:
+      - doc: setupBase is what a ring carries whatever the probe finds.
+        name: setupBase
+        type: uint32
+        value: setupCoopTaskrun | setupSubmitAll
+      - doc: |-
+          rewindFirst and rewindSecond are the user_data of SQ_REWIND's two
+          self-test NOPs: the order they complete in is the contract.
+        name: rewindFirst
+        type: uint64
+        value: "0xA1"
+      - name: rewindSecond
+        type: uint64
+        value: "0xA2"
+    name: setupBase
   - doc: The operations a CQE's user_data names, in its top byte.
     grouped: true
     items:
@@ -633,6 +741,25 @@ constants:
     name: tickEvery
 files:
   - decls:
+      - classKernel
+      - statusOn
+      - reasonClassB
+      - capClass
+      - loopCaps
+      - capClassOf
+      - CheckCapabilities
+      - capSwitches
+      - newSwitches
+      - capSwitches.disabled
+      - capSwitches.wants
+      - capReport
+      - newReport
+      - (*capReport).set
+      - (*capReport).wanted
+      - (*capReport).found
+      - Unprobed
+    name: caps.go
+  - decls:
       - stFree
       - fPressure
       - rNone
@@ -698,6 +825,7 @@ files:
       - epollRunner
       - epollLoop
       - startEpoll
+      - probeExclusive
       - (*epollRunner).drain
       - (*epollRunner).stop
       - (*epollRunner).wait
@@ -753,6 +881,7 @@ files:
       - backendEpoll
       - watchdogTicks
       - startNative
+      - noDelay
       - descriptorLimit
       - mmapAnon
       - closeFDs
@@ -805,6 +934,7 @@ files:
       - uringBuf
       - bufReg
       - rsrcRegister
+      - rsrcUpdate
       - getEventsArg
       - kernelTimespec
       - probeHeader
@@ -814,9 +944,26 @@ files:
       - uringRegister
       - uringEnterWait
       - uringEnterSubmit
+      - uringEnterFlags
       - fixedFd
       - targetIndex
     name: uring_abi_linux.go
+  - decls:
+      - setupBase
+      - setupDrops
+      - (*uLoop).probe
+      - (*uLoop).openDescending
+      - (*uLoop).probeFlags
+      - (*uLoop).giveUp
+      - (*uLoop).probeRingFDs
+      - (*uLoop).rewindSelfTest
+      - (*uLoop).settle
+      - layoutFlags
+      - (*uLoop).reportMinTimeout
+      - (*uLoop).reportSelfTest
+      - (*uLoop).registerRing
+      - probeReason
+    name: uring_caps_linux.go
   - decls:
       - udRecv
       - acceptDepth
@@ -826,6 +973,7 @@ files:
       - udSlot
       - uRing
       - uLoop
+      - ringUses
       - uringRunner
       - (*uringRunner).drain
       - (*uringRunner).stop
@@ -836,9 +984,6 @@ files:
       - probeError
       - (*uLoop).run
       - (*uLoop).setup
-      - (*uLoop).setupFlags
-      - (*uLoop).probe
-      - (*uLoop).openStaged
       - (*uLoop).build
       - orErrno
       - (*uLoop).newRing
@@ -849,6 +994,7 @@ files:
       - (*uLoop).onFD
       - (*uRing).pollFD
       - (*uRing).armAccepts
+      - (*uRing).acceptsNothing
       - (*uRing).acceptRoom
       - (*uRing).cancelAccepts
       - (*uRing).used
@@ -906,9 +1052,13 @@ files:
       - selfTestRing
       - selfTestClient
       - selfTestRun
+      - selfTestMode
+      - (*selfTestRun).closeAccepted
+      - (*selfTestRun).armRecv
       - (*selfTestRun).pump
       - (*selfTestRun).exchange
       - (*selfTestRun).onCQE
+      - (*selfTestRun).onRecv
       - (*selfTestRun).onAccept
       - (*selfTestRun).verdict
       - loopbackListener
@@ -923,7 +1073,17 @@ files:
       - (*uring).close
       - (*uring).get
       - (*uring).reserve
+      - (*uring).noArray
+      - (*uring).rewind
+      - (*uring).deferred
+      - (*uring).room
+      - (*uring).slot
+      - (*uring).consumed
       - (*uring).publish
+      - (*uring).enterSubmit
+      - (*uring).enterTarget
+      - (*uring).registerRing
+      - (*uring).unregisterRing
       - (*uring).pending
       - (*uring).submit
       - (*uring).wait
@@ -939,6 +1099,7 @@ files:
       - (*uring).publishBufs
       - (*uring).registerSparse
       - (*uring).supports
+      - singleShot
       - prepAccept
       - prepRecv
       - prepSend
@@ -960,6 +1121,26 @@ files:
       - (*wheel).advance
     name: wheel.go
 functions:
+  - doc: capClassOf is c's class, and false for a capability the loop does not report.
+    name: capClassOf
+    params: c corenet.Capability
+    results: string, bool
+  - name: CheckCapabilities
+    params: group string, v corenet.LoopValue
+    results: error
+  - doc: newSwitches reads cfg's switches.
+    name: newSwitches
+    params: cfg *Config
+    results: capSwitches
+  - doc: |-
+      newReport starts a report: every row unprobed by backend, a switched-off
+      one disabled, a class B one named as such.
+    name: newReport
+    params: s capSwitches, backend string
+    results: capReport
+  - name: Unprobed
+    params: backend string, disabled []corenet.Capability, disabledBy string
+    results: "[]corenet.CapabilityValue"
   - doc: emptyConn is a slot's state on the free list.
     name: emptyConn
     params: gen uint32
@@ -991,6 +1172,13 @@ functions:
     name: startEpoll
     params: g *Group, cfg *Config
     results: error
+  - doc: |-
+      probeExclusive asks a throwaway epoll instance whether it takes
+      EPOLLEXCLUSIVE (4.5), on an eventfd of its own, and reports it. It returns
+      the flag every listener registration carries.
+    name: probeExclusive
+    params: sw capSwitches, rep *capReport
+    results: uint32
   - doc: errnoOf extracts the errno of a syscall error, EIO when it is none.
     name: errnoOf
     params: err error
@@ -1022,6 +1210,12 @@ functions:
     name: startNative
     params: g *Group, cfg *Config
     results: error
+  - doc: |-
+      noDelay sets TCP_NODELAY on a listener, inherited by every socket it
+      accepts, unless the operator switched tcp-nodelay off. A socket that
+      refuses it still serves; server reads the option back for State.
+    name: noDelay
+    params: fd int, sw capSwitches
   - doc: |-
       descriptorLimit is the effective RLIMIT_NOFILE soft limit, zero when it
       cannot be read.
@@ -1092,6 +1286,12 @@ functions:
     params: fd int, submit uint32
     results: int, syscall.Errno
   - doc: |-
+      uringEnterFlags is uringEnterSubmit with flags: GETEVENTS with
+      min_complete zero, which never blocks, and REGISTERED_RING.
+    name: uringEnterFlags
+    params: fd int, submit, flags uint32
+    results: int, syscall.Errno
+  - doc: |-
       fixedFd is the descriptor field of an SQE flagged IOSQE_FIXED_FILE: the
       direct-descriptor index itself, 0-based.
     name: fixedFd
@@ -1104,6 +1304,20 @@ functions:
     name: targetIndex
     params: index uint32
     results: uint32
+  - doc: |-
+      layoutFlags is the SQ layout every ring takes: NO_SQARRAY as asked, or
+      because SQ_REWIND needs it, and SQ_REWIND once its self-test passed.
+    name: layoutFlags
+    params: sw capSwitches, found uint32, rewind bool
+    results: uint32
+  - doc: |-
+      probeReason names a probe step's refusal. EEXIST is a defect of the probe,
+      never of the kernel: a SINGLE_ISSUER ring entered or registered off the
+      thread that set it up (ADR 0189), which a probe run under LockOSThread from
+      setup to close never does.
+    name: probeReason
+    params: step string, errno syscall.Errno
+    results: string
   - doc: "udPack builds a user_data: the operation, 24 bits of generation, the slot."
     name: udPack
     params: op uint64, gen, slot uint32
@@ -1156,7 +1370,7 @@ functions:
       selfTestRing opens the self-test's ring with flags, and gives it buffers
       and a table as a serving ring has them. A failure closes it.
     name: selfTestRing
-    params: flags uint32
+    params: flags uint32, direct bool
     results: "*uring, error"
   - doc: |-
       selfTestClient connects a blocking client socket to the loopback port and
@@ -1190,6 +1404,11 @@ functions:
     name: registerBufRing
     params: fd int, reg *bufReg
     results: syscall.Errno
+  - doc: |-
+      singleShot turns a multishot recv into a single-shot one: one
+      completion, never F_MORE, re-armed by the state machine after it.
+    name: singleShot
+    params: s *sqe
   - doc: |-
       prepAccept fills s as an accept on lfd into a kernel-allocated direct
       descriptor: multishot for the probe's self-test, single-shot for serving
@@ -1259,6 +1478,73 @@ package:
   name: loop
   purpose: "Package loop is the network domain's event-loop engine (ADR 0186): the native backends a plaintext stream group runs on when it is served by a corenet.LoopHandler — epoll on every Linux architecture, io_uring after a staged probe of the running kernel — and nothing else of the SDK."
 types:
+  - doc: |-
+      capClass is one capability the loop reports and its class, in the order
+      State lists them.
+    fields:
+      - doc: name is the capability.
+        name: name
+        type: corenet.Capability
+      - doc: class is its class.
+        name: class
+        type: string
+    kind: struct
+    name: capClass
+  - doc: |-
+      capSwitches is what the group may use: the operator's switches and the
+      code's opt-ins, read once at Start.
+    fields:
+      - doc: off holds what the operator switched off, with offBy saying how.
+        name: "off"
+        type: "[]corenet.Capability"
+      - name: offBy
+        type: string
+      - doc: want holds the class A-code capabilities the code opted into.
+        name: want
+        type: "[]corenet.Capability"
+    kind: struct
+    methods:
+      - doc: disabled reports whether the operator switched c off.
+        name: disabled
+        params: c corenet.Capability
+        recv: s capSwitches
+        results: bool
+      - doc: |-
+          wants reports whether c may be used: class A-kernel unless switched off,
+          class A-code when opted into and not switched off.
+        name: wants
+        params: c corenet.Capability
+        recv: s capSwitches
+        results: bool
+    name: capSwitches
+  - doc: |-
+      capReport is the rows a backend fills, one per loopCaps entry, in order,
+      and the class A-code capabilities the code opted into.
+    fields:
+      - name: rows
+        type: "[]corenet.CapabilityValue"
+      - name: want
+        type: "[]corenet.Capability"
+    kind: struct
+    methods:
+      - doc: |-
+          set records c's status and reason, unless the operator switched it off.
+          An absent class A-code capability the code opted into is missing.
+        name: set
+        params: c corenet.Capability, status, reason string
+        recv: r *capReport
+      - doc: wanted reports whether the code opted into c, a class A-code capability.
+        name: wanted
+        params: c corenet.Capability
+        recv: r *capReport
+        results: bool
+      - doc: |-
+          found records a probed capability: on when the group uses it, available
+          when nobody asked for it, absent with reason when the kernel lacks it.
+        name: found
+        params: s capSwitches, c corenet.Capability, present bool, reason string
+        recv: r *capReport
+    name: capReport
   - doc: |-
       connCtl is one connection slot's control state. It holds no pointer, so the
       table of them is a pointer-free Go slice the race detector sees and the
@@ -1793,6 +2079,11 @@ types:
       - doc: evClosed is set once the eventfd is closed.
         name: evClosed
         type: bool
+      - doc: |-
+          excl is EPOLLEXCLUSIVE when the group registers its listeners with it,
+          zero when the operator switched it off or the kernel lacks it.
+        name: excl
+        type: uint32
     kind: struct
     methods:
       - doc: wake writes the loop's eventfd. It is safe from any goroutine.
@@ -1962,6 +2253,16 @@ types:
         name: Log
         type: io.Writer
       - doc: |-
+          Disabled are the capabilities the operator switched off: never probed,
+          never used, reported "disabled" (ADR 0189).
+        name: Disabled
+        type: "[]corenet.Capability"
+      - doc: |-
+          DisabledBy says how they were switched off in State; empty is
+          KITSUNIUM_NET_DISABLE.
+        name: DisabledBy
+        type: string
+      - doc: |-
           tableCap, when positive, caps every ring's table below the descriptor
           limit: the conformance suite's tiny slot table.
         name: tableCap
@@ -1990,8 +2291,10 @@ types:
       - doc: failStage fails the io_uring probe at the named stage.
         name: failStage
         type: string
-      - doc: deferTaskrun sets IORING_SETUP_DEFER_TASKRUN instead of COOP_TASKRUN.
-        name: deferTaskrun
+      - doc: |-
+          primaryIdle keeps io_uring's primary ring from accepting, so every
+          connection lands on a secondary (P3a's wake test).
+        name: primaryIdle
         type: bool
       - doc: sweepEvery shortens io_uring's sweep period, in ticks.
         name: sweepEvery
@@ -2027,6 +2330,9 @@ types:
       - doc: procs is GOMAXPROCS read at Start.
         name: procs
         type: int
+      - doc: caps is what the backend's probe found of each capability.
+        name: caps
+        type: capReport
     kind: struct
     methods:
       - name: Shutdown
@@ -2396,6 +2702,18 @@ types:
         type: uint64
     kind: struct
     name: rsrcRegister
+  - doc: |-
+      rsrcUpdate is struct io_uring_rsrc_update, IORING_REGISTER_RING_FDS's
+      argument: offset is the index, data the ring's descriptor.
+    fields:
+      - name: offset
+        type: uint32
+      - name: resv
+        type: uint32
+      - name: data
+        type: uint64
+    kind: struct
+    name: rsrcUpdate
   - doc: getEventsArg is struct io_uring_getevents_arg.
     fields:
       - name: sigmask
@@ -2540,6 +2858,12 @@ types:
           one entry until it completes, cannot overshoot.
         name: armAccepts
         recv: rr *uRing
+      - doc: |-
+          acceptsNothing reports a ring that arms no accept: paused, draining, or
+          the primary a test keeps idle.
+        name: acceptsNothing
+        recv: rr *uRing
+        results: bool
       - doc: |-
           acceptRoom is how many more accepts may be in flight: the free entries
           above the reserve, less those the accepts in flight will take.
@@ -2814,8 +3138,106 @@ types:
           tables (the probe's release check passed) or in the process table.
         name: direct
         type: bool
+      - doc: sw is what the group may use; rep what the probe found (ADR 0189).
+        name: sw
+        type: capSwitches
+      - name: rep
+        type: capReport
+      - doc: |-
+          primary and secondary are the setup flags of ring 0, the one the
+          thread waits on, and of the others: DEFER_TASKRUN only on the primary
+          (P3a), the others posting their completions themselves (COOP).
+        name: primary
+        type: uint32
+      - doc: |-
+          primary and secondary are the setup flags of ring 0, the one the
+          thread waits on, and of the others: DEFER_TASKRUN only on the primary
+          (P3a), the others posting their completions themselves (COOP).
+        name: secondary
+        type: uint32
+      - doc: |-
+          uses is what the probe settled the rings use; registered is how many
+          rings are registered with the thread.
+        name: uses
+        type: ringUses
+      - name: registered
+        type: int
     kind: struct
     methods:
+      - doc: |-
+          probe runs stages 1 to 3 on throwaway rings, on this locked thread from
+          setup to close (ADR 0189): io_uring_setup with every flag the switches
+          allow, giving them up one by one on EINVAL (setupDrops); the features;
+          REGISTER_PROBE for every op this backend issues; RING_FDS registered and
+          unregistered before the close; SQ_REWIND's partial submit. It settles the
+          primary's and the secondaries' flags and fills the report.
+        name: probe
+        recv: ul *uLoop
+        results: error
+      - doc: |-
+          openDescending opens the probe's ring with every setup flag the switches
+          allow and gives them up in setupDrops' order while the kernel answers
+          EINVAL, recording each one given up as absent. It returns the ring and the
+          flags it was opened with.
+        name: openDescending
+        recv: ul *uLoop
+        results: "*uring, uint32, error"
+      - doc: |-
+          probeFlags is the first setup the probe tries: every class A-code flag the
+          operator left on, SQ_REWIND only with NO_SQARRAY, which it requires, and
+          DEFER_TASKRUN in place of COOP_TASKRUN.
+        name: probeFlags
+        recv: ul *uLoop
+        results: uint32
+      - doc: |-
+          giveUp drops flag from flags after the kernel refused it, reporting the
+          capability it names absent; DEFER_TASKRUN given up makes the ring
+          cooperative again.
+        name: giveUp
+        params: flags, flag uint32, name corenet.Capability, errno syscall.Errno
+        recv: ul *uLoop
+        results: uint32
+      - doc: |-
+          probeRingFDs registers the probe's ring with this thread and unregisters
+          it before the ring closes: a ring left registered outlives its close.
+        name: probeRingFDs
+        params: probed *uring
+        recv: ul *uLoop
+      - doc: |-
+          rewindSelfTest checks SQ_REWIND's contract on the probe's ring: two NOPs
+          filled from SQE 0, one submitted, then the one left moved to SQE 0 and
+          submitted, each completion carrying its own user_data. A kernel that read
+          the head instead of SQE 0 would complete the first twice.
+        name: rewindSelfTest
+        params: probed *uring
+        recv: ul *uLoop
+        results: bool
+      - doc: |-
+          settle derives the serving flags from what setup accepted and reports the
+          setup capabilities. found is the probe ring's flags, rewind whether
+          SQ_REWIND passed its self-test, features the kernel's.
+        name: settle
+        params: found uint32, rewind bool, features uint32
+        recv: ul *uLoop
+      - doc: |-
+          reportMinTimeout is class B's MIN_TIMEOUT row: what the features say,
+          never turned on (minWaitUsec stays zero).
+        name: reportMinTimeout
+        params: features uint32
+        recv: ul *uLoop
+      - doc: |-
+          reportSelfTest records what the self-test proved: multishot recv and the
+          buffer ring served the payload, and the release check chose the mode.
+        name: reportSelfTest
+        params: direct bool
+        recv: ul *uLoop
+      - doc: |-
+          registerRing registers a serving ring with this thread when RING_FDS is
+          on, at most ringFDsMax a thread: a ring past them is entered by its
+          descriptor, which the report says.
+        name: registerRing
+        params: u *uring
+        recv: ul *uLoop
       - doc: wake writes the Post eventfd.
         name: wake
         recv: ul *uLoop
@@ -2829,38 +3251,17 @@ types:
         recv: ul *uLoop
         results: error
       - doc: |-
-          setupFlags is the full flag set the probe tries first: DEFER_TASKRUN
-          replaces COOP_TASKRUN when the hook asks for it.
-        name: setupFlags
-        recv: ul *uLoop
-        results: uint32
-      - doc: |-
-          probe runs stages 1 to 3: a ring with the full flag set, one with fewer on
-          an older kernel, and REGISTER_PROBE for every op this backend issues. It
-          returns the flags that passed.
-        name: probe
-        recv: ul *uLoop
-        results: uint32, error
-      - doc: |-
-          openStaged runs stages 1 and 2: a ring with flags, and, when an older
-          kernel refuses a flag it does not know, one without SINGLE_ISSUER. It
-          returns the ring and the flags it was opened with.
-        name: openStaged
-        params: flags uint32
-        recv: ul *uLoop
-        results: "*uring, uint32, error"
-      - doc: |-
           build creates the Post queue, the two eventfds and every ring, and arms
           the primary's polls. sweep is whether the rings sweep deferred puts.
         name: build
-        params: rings int, flags uint32, sweep bool
+        params: rings int, sweep bool
         recv: ul *uLoop
         results: error
       - doc: |-
           newRing builds ring i: its io_uring, its sparse table, its buffers, and
           its accepts. sweep is whether it sweeps deferred puts.
         name: newRing
-        params: i int, flags uint32, sweep bool
+        params: i int, sweep bool
         recv: ul *uLoop
         results: "*uRing, error"
       - doc: |-
@@ -2933,6 +3334,20 @@ types:
         recv: ul *uLoop
         results: direct, deferred bool, err error
     name: uLoop
+  - doc: ringUses is what a loop's rings use beyond their setup flags.
+    fields:
+      - doc: |-
+          multishot is whether recvs are multishot; ringFDs whether rings are
+          registered with the thread.
+        name: multishot
+        type: bool
+      - doc: |-
+          multishot is whether recvs are multishot; ringFDs whether rings are
+          registered with the thread.
+        name: ringFDs
+        type: bool
+    kind: struct
+    name: ringUses
   - doc: uringRunner runs the group's io_uring loops.
     fields:
       - name: loops
@@ -2982,6 +3397,9 @@ types:
         type: int
       - name: closed
         type: bool
+      - doc: mode is how the self-test runs.
+        name: mode
+        type: selfTestMode
     kind: struct
     methods:
       - doc: |-
@@ -3012,6 +3430,15 @@ types:
         recv: st *selfTestRun
         results: sawEnd, ok bool
       - doc: |-
+          closeAccepted closes the payload's process descriptor; a direct one goes
+          with the ring.
+        name: closeAccepted
+        recv: st *selfTestRun
+      - doc: armRecv arms the self-test's recv on res, the way the loop arms one.
+        name: armRecv
+        params: res int32, slot uint32
+        recv: st *selfTestRun
+      - doc: |-
           pump reaps the self-test's completions until done reports true or 500 ms
           are up.
         name: pump
@@ -3029,6 +3456,13 @@ types:
         params: c *cqe
         recv: st *selfTestRun
       - doc: |-
+          onRecv appends the bytes of a recv's provided buffer and gives the buffer
+          back; a single-shot recv of the payload that ended with bytes is armed
+          again.
+        name: onRecv
+        params: c *cqe
+        recv: st *selfTestRun
+      - doc: |-
           onAccept arms a recv on every accepted index: the payload's first, then
           the release check's.
         name: onAccept
@@ -3041,6 +3475,20 @@ types:
         recv: st *selfTestRun
         results: error
     name: selfTestRun
+  - doc: selfTestMode is how the self-test runs, as the switches say.
+    fields:
+      - doc: |-
+          fds is a self-test on process descriptors, uring-direct switched off;
+          multishot whether its recv is multishot.
+        name: fds
+        type: bool
+      - doc: |-
+          fds is a self-test on process descriptors, uring-direct switched off;
+          multishot whether its recv is multishot.
+        name: multishot
+        type: bool
+    kind: struct
+    name: selfTestMode
   - doc: |-
       uring is one io_uring instance: its mappings, the views into them, and its
       provided-buffer ring. It belongs to one loop thread.
@@ -3101,6 +3549,16 @@ types:
       - doc: retries counts busy submits retried.
         name: retries
         type: uint64
+      - doc: |-
+          setup is the flags the ring was set up with, as asked: what the kernel
+          writes back into params is not read for them.
+        name: setup
+        type: uint32
+      - doc: |-
+          ringIdx is the ring's index among its thread's registered rings
+          (IORING_REGISTER_RING_FDS), -1 when it is entered by descriptor.
+        name: ringIdx
+        type: int32
     kind: struct
     methods:
       - doc: |-
@@ -3114,7 +3572,10 @@ types:
           to SQE i once and for all.
         name: buildViews
         recv: u *uring
-      - doc: close releases every mapping and the ring.
+      - doc: |-
+          close releases every mapping and the ring, its registration with the
+          thread first: a ring still registered stays referenced by the thread and
+          outlives its close, its direct descriptors with it (P3c).
         name: close
         recv: u *uring
       - doc: |-
@@ -3132,8 +3593,69 @@ types:
         params: n uint32
         recv: u *uring
         results: bool
-      - doc: publish hands every filled SQE to the kernel's view of the SQ tail.
+      - doc: "noArray is NO_SQARRAY: there is no SQ array to fill."
+        name: noArray
+        recv: u *uring
+        results: bool
+      - doc: |-
+          rewind is SQ_REWIND: the kernel takes every submission from SQE 0, so the
+          pending SQEs are always sqes[0:pending] (uring.slot).
+        name: rewind
+        recv: u *uring
+        results: bool
+      - doc: |-
+          deferred is DEFER_TASKRUN: completions are posted only when this thread
+          enters with GETEVENTS, which every submit then does with min_complete 0.
+        name: deferred
+        recv: u *uring
+        results: bool
+      - doc: |-
+          room reports whether n more SQEs fit: against the kernel's head, or,
+          under SQ_REWIND, against the SQEs filled since the last submit.
+        name: room
+        params: n uint32
+        recv: u *uring
+        results: bool
+      - doc: |-
+          slot is the SQE the next get fills: the tail's, or, under SQ_REWIND, the
+          one after those pending, the submitter filling from SQE 0.
+        name: slot
+        recv: u *uring
+        results: "*sqe"
+      - doc: |-
+          consumed records got SQEs taken by the kernel. Under SQ_REWIND a partial
+          submit leaves the rest at sqes[got:pending], and the kernel starts at 0
+          again: they are moved down, in order, links and all.
+        name: consumed
+        params: got uint32
+        recv: u *uring
+      - doc: |-
+          publish hands every filled SQE to the kernel's view of the SQ tail; under
+          SQ_REWIND the tail stays zero and the count passed to enter is the view.
         name: publish
+        recv: u *uring
+      - doc: |-
+          enterSubmit submits n SQEs: the plain submit, which inlines, when no
+          flag is asked for, one with flags otherwise.
+        name: enterSubmit
+        params: fd int, n, flags uint32
+        recv: u *uring
+        results: int, syscall.Errno
+      - doc: |-
+          enterTarget is the fd argument and the flag of every enter: the
+          registered index when the ring has one, the descriptor otherwise.
+        name: enterTarget
+        recv: u *uring
+        results: int, uint32
+      - doc: |-
+          registerRing registers the ring with the calling thread
+          (IORING_REGISTER_RING_FDS), the kernel picking the index. It must run on
+          the thread that enters it, and unregisterRing on the same one.
+        name: registerRing
+        recv: u *uring
+        results: syscall.Errno
+      - doc: unregisterRing drops the thread's registration, if any.
+        name: unregisterRing
         recv: u *uring
       - doc: pending is how many SQEs are published but not yet submitted.
         name: pending
@@ -3272,6 +3794,49 @@ types:
         recv: w *wheel
     name: wheel
 vars:
+  - doc: |-
+      loopCaps are the capabilities a loop group reports, class A-kernel first.
+      tcp-nodelay is server's socket probe, merged into the report by server.
+    items:
+      - name: loopCaps
+        value: |-
+          [...]capClass{
+          	{corenet.CapabilityURingMultishotRecv, classKernel},
+          	{corenet.CapabilityURingPbuf, classKernel},
+          	{corenet.CapabilityURingDirect, classKernel},
+          	{corenet.CapabilityEpollExclusive, classKernel},
+          	{corenet.CapabilityURingDeferTaskrun, classCode},
+          	{corenet.CapabilityURingNoSQArray, classCode},
+          	{corenet.CapabilityURingRingFDs, classCode},
+          	{corenet.CapabilityURingSQRewind, classCode},
+          	{corenet.CapabilityURingSendZC, classB},
+          	{corenet.CapabilityURingBundle, classB},
+          	{corenet.CapabilityURingPbufInc, classB},
+          	{corenet.CapabilityBusyPoll, classB},
+          	{corenet.CapabilityURingZCRX, classB},
+          	{corenet.CapabilityReuseportCBPF, classB},
+          	{corenet.CapabilityTCPDeferAccept, classB},
+          	{corenet.CapabilityURingMinTimeout, classB},
+          }
+    name: loopCaps
+  - doc: |-
+      setupDrops is the order in which the probe gives up setup flags on EINVAL,
+      the newest first, so a flag is never dropped before one that requires it:
+      SQ_REWIND before NO_SQARRAY (REWIND⇒NO_SQARRAY), DEFER_TASKRUN before
+      SINGLE_ISSUER (DEFER⇒SINGLE).
+    items:
+      - name: setupDrops
+        value: |-
+          [...]struct {
+          	flag uint32
+          	name corenet.Capability
+          }{
+          	{setupSQRewind, corenet.CapabilityURingSQRewind},
+          	{setupNoSQArray, corenet.CapabilityURingNoSQArray},
+          	{setupDeferTaskrun, corenet.CapabilityURingDeferTaskrun},
+          	{setupSingleIssuer, ""},
+          }
+    name: setupDrops
   - doc: |-
       selfTestPayload is what the loopback self-test sends and expects back
       through a provided buffer.

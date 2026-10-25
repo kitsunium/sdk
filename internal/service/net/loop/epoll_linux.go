@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+
+	corenet "github.com/kitsunium/sdk/internal/core/net"
 )
 
 const (
@@ -85,6 +87,9 @@ type epollLoop struct {
 	wakeMu sync.Mutex
 	// evClosed is set once the eventfd is closed.
 	evClosed bool
+	// excl is EPOLLEXCLUSIVE when the group registers its listeners with it,
+	// zero when the operator switched it off or the kernel lacks it.
+	excl uint32
 }
 
 // startEpoll starts g's loops on epoll.
@@ -95,10 +100,13 @@ type epollLoop struct {
 func startEpoll(g *Group, cfg *Config) error {
 	fin := make(chan struct{})
 	er := &epollRunner{fin: fin}
+	sw := newSwitches(cfg)
+	g.caps = newReport(sw, "epoll")
+	excl := probeExclusive(sw, &g.caps)
 	//: listeners: TCP_NODELAY set before any accept, so every accepted
 	//: socket inherits it; a socket that refuses it still serves.
 	for _, l := range cfg.Listeners {
-		swallowErr(syscall.SetsockoptInt(l.FD, syscall.IPPROTO_TCP, syscall.TCP_NODELAY, 1))
+		noDelay(l.FD, sw)
 		er.lfds = append(er.lfds, l.FD)
 	}
 	ready := make(chan error, g.sz.loops)
@@ -106,7 +114,7 @@ func startEpoll(g *Group, cfg *Config) error {
 	//: locked itself to its thread.
 	for i := range g.sz.loops {
 		lp := newLoop(g, *cfg, i, mmapAnon)
-		el := &epollLoop{lp: lp, lfds: er.lfds, epfd: -1, evfd: -1, events: make([]syscall.EpollEvent, g.sz.cqBatch), backoff: backoffMin}
+		el := &epollLoop{lp: lp, lfds: er.lfds, epfd: -1, evfd: -1, events: make([]syscall.EpollEvent, g.sz.cqBatch), backoff: backoffMin, excl: excl}
 		er.loops = append(er.loops, el)
 		g.loops = append(g.loops, lp)
 		er.wg.Add(1)
@@ -138,6 +146,43 @@ func startEpoll(g *Group, cfg *Config) error {
 	g.backend = backendEpoll
 	//: running.
 	return nil
+}
+
+// probeExclusive asks a throwaway epoll instance whether it takes
+// EPOLLEXCLUSIVE (4.5), on an eventfd of its own, and reports it. It returns
+// the flag every listener registration carries.
+func probeExclusive(sw capSwitches, rep *capReport) uint32 {
+	//: the operator's switch: never probed.
+	if sw.disabled(corenet.CapabilityEpollExclusive) {
+		//: without.
+		return 0
+	}
+	epfd, err := syscall.EpollCreate1(syscall.EPOLL_CLOEXEC)
+	//: no instance to ask.
+	if err != nil {
+		rep.set(corenet.CapabilityEpollExclusive, statusAbsent, "epoll_create1: "+err.Error())
+		//: without.
+		return 0
+	}
+	defer closeFDs([]int{epfd})
+	efd, _, errno := syscall.RawSyscall(syscall.SYS_EVENTFD2, 0, efdNonblock|efdCloexec, 0)
+	//: nothing to register.
+	if errno != 0 {
+		rep.set(corenet.CapabilityEpollExclusive, statusAbsent, "eventfd: "+errno.Error())
+		//: without.
+		return 0
+	}
+	defer closeFDs([]int{int(efd)})
+	ev := new(syscall.EpollEvent{Events: syscall.EPOLLIN | epollExclusive})
+	//: the kernel's answer: EINVAL before 4.5.
+	if err := syscall.EpollCtl(epfd, syscall.EPOLL_CTL_ADD, int(efd), ev); err != nil {
+		rep.set(corenet.CapabilityEpollExclusive, statusAbsent, "epoll_ctl: "+err.Error())
+		//: without.
+		return 0
+	}
+	rep.found(sw, corenet.CapabilityEpollExclusive, true, "")
+	//: with.
+	return epollExclusive
 }
 
 // drain implements runner.
@@ -240,7 +285,7 @@ func (el *epollLoop) armListeners() {
 	//: each listener, tagged by index; one the kernel refuses stays out of
 	//: this loop's set, and the group's other loops still accept on it.
 	for i, fd := range el.lfds {
-		swallowErr(el.ctl(syscall.EPOLL_CTL_ADD, fd, syscall.EPOLLIN|epollExclusive, tagListen-int32(i), 0))
+		swallowErr(el.ctl(syscall.EPOLL_CTL_ADD, fd, syscall.EPOLLIN|el.excl, tagListen-int32(i), 0))
 	}
 	el.armed = true
 }

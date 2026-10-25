@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"syscall"
 	"time"
+
+	corenet "github.com/kitsunium/sdk/internal/core/net"
 )
 
 // peerPeekBytes is the release check's read buffer: any read will do, the
@@ -31,7 +33,8 @@ func (ul *uLoop) selfTest(flags uint32) (direct, deferred bool, err error) {
 		//: named.
 		return false, false, probeError("self_test", syscall.EIO)
 	}
-	rg, err := selfTestRing(flags)
+	fds := ul.sw.disabled(corenet.CapabilityURingDirect)
+	rg, err := selfTestRing(flags, !fds)
 	//: no ring, buffers or table.
 	if err != nil {
 		//: named.
@@ -45,7 +48,12 @@ func (ul *uLoop) selfTest(flags uint32) (direct, deferred bool, err error) {
 		return false, false, probeError("self_test listen", errnoOfErr(err))
 	}
 	defer closeFDs([]int{lfd})
-	prepAccept(rg.get(), lfd, udPack(udAccept, 0, 0), true)
+	s := rg.get()
+	prepAccept(s, lfd, udPack(udAccept, 0, 0), true)
+	//: uring-direct switched off: never asked of the kernel.
+	if fds {
+		onProcessFD(s)
+	}
 	rg.submit()
 	cfd, err := selfTestClient(port, selfTestPayload)
 	//: no client, no connection, or no payload sent.
@@ -54,12 +62,18 @@ func (ul *uLoop) selfTest(flags uint32) (direct, deferred bool, err error) {
 		return false, false, err
 	}
 	defer closeFDs([]int{cfd})
-	run := &selfTestRun{u: rg, index: -1}
+	run := &selfTestRun{u: rg, index: -1, mode: selfTestMode{fds: fds, multishot: ul.sw.wants(corenet.CapabilityURingMultishotRecv)}}
+	defer run.closeAccepted()
 	run.exchange()
 	//: named by what was missing.
 	if err := run.verdict(); err != nil {
 		//: failed.
 		return false, false, err
+	}
+	//: uring-direct switched off: the release check never runs.
+	if fds {
+		//: process descriptors.
+		return false, false, nil
 	}
 	//: passed; closing the ring closes the direct descriptors.
 	direct, deferred = run.releases(port)
@@ -165,7 +179,7 @@ func peerSeesEnd(fd int) bool {
 
 // selfTestRing opens the self-test's ring with flags, and gives it buffers
 // and a table as a serving ring has them. A failure closes it.
-func selfTestRing(flags uint32) (*uring, error) {
+func selfTestRing(flags uint32, direct bool) (*uring, error) {
 	rg, step, errno := openURing(probeEntries, flags)
 	//: no ring.
 	if errno != 0 {
@@ -178,7 +192,12 @@ func selfTestRing(flags uint32) (*uring, error) {
 		//: named.
 		return nil, probeError("self_test buf_ring", errno)
 	}
-	//: four entries: the payload's connection and the release check's two.
+	//: four entries: the payload's connection and the release check's two;
+	//: none on process descriptors.
+	if !direct {
+		//: ready.
+		return rg, nil
+	}
 	if errno := rg.registerSparse(4); errno != 0 {
 		rg.close()
 		//: named.
@@ -234,6 +253,38 @@ type selfTestRun struct {
 	// closed is its close's.
 	done   int
 	closed bool
+	// mode is how the self-test runs.
+	mode selfTestMode
+}
+
+// selfTestMode is how the self-test runs, as the switches say.
+type selfTestMode struct {
+	// fds is a self-test on process descriptors, uring-direct switched off;
+	// multishot whether its recv is multishot.
+	fds, multishot bool
+}
+
+// closeAccepted closes the payload's process descriptor; a direct one goes
+// with the ring.
+func (st *selfTestRun) closeAccepted() {
+	//: a process descriptor was accepted.
+	if st.mode.fds && st.index >= 0 {
+		closeFDs([]int{int(st.index)})
+	}
+}
+
+// armRecv arms the self-test's recv on res, the way the loop arms one.
+func (st *selfTestRun) armRecv(res int32, slot uint32) {
+	s := st.u.get()
+	prepRecv(s, uint32(res), udPack(udRecv, 0, slot))
+	//: single-shot: re-armed after each completion.
+	if !st.mode.multishot {
+		singleShot(s)
+	}
+	//: on a process descriptor.
+	if st.mode.fds {
+		onProcessFD(s)
+	}
 }
 
 // pump reaps the self-test's completions until done reports true or 500 ms
@@ -275,10 +326,23 @@ func (st *selfTestRun) onCQE(c *cqe) {
 		st.closed = true
 	//: bytes in a provided buffer.
 	case udRecv:
-		//: bytes.
-		if c.res > 0 && c.flags&cqeFBuffer != 0 {
-			st.got = append(st.got, st.u.buf(uint16(c.flags >> cqeBufferShift))[:c.res]...)
-		}
+		st.onRecv(c)
+	}
+}
+
+// onRecv appends the bytes of a recv's provided buffer and gives the buffer
+// back; a single-shot recv of the payload that ended with bytes is armed
+// again.
+func (st *selfTestRun) onRecv(c *cqe) {
+	//: bytes.
+	if c.res > 0 && c.flags&cqeFBuffer != 0 {
+		st.got = append(st.got, st.u.buf(uint16(c.flags >> cqeBufferShift))[:c.res]...)
+		st.u.addBuf(uint16(c.flags >> cqeBufferShift))
+		st.u.publishBufs()
+	}
+	//: single-shot, ended with bytes, the payload's.
+	if !st.mode.multishot && c.res > 0 && c.flags&cqeFMore == 0 && udSlot(c.userData) == 0 {
+		st.armRecv(st.index, 0)
 	}
 }
 
@@ -296,7 +360,7 @@ func (st *selfTestRun) onAccept(res int32) {
 	} else {
 		st.accepted = append(st.accepted, res)
 	}
-	prepRecv(st.u.get(), uint32(res), udPack(udRecv, 0, uint32(len(st.accepted))))
+	st.armRecv(res, uint32(len(st.accepted)))
 }
 
 // verdict is nil once the payload came back whole, otherwise the stage that

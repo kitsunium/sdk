@@ -2654,7 +2654,7 @@ sequences:
     steps:
       - opt:
           do:
-            - return: startPortable(group, lns, ""), nil
+            - return: startPortable(group, lns, "", plan), nil
               to: startPortable
           when: plan.backend == corenet.LoopBackendPortable
       - bind: handoff, err
@@ -2673,18 +2673,104 @@ sequences:
           loop.Start(loop.Config{
           		Group: group.name, Value: value, MaxConns: group.limits.MaxConns,
           		IdleTimeout: loopIdle(group), Handler: group.loopHandler, Listeners: handoff,
+          		Disabled: plan.disabled, DisabledBy: plan.disabledBy,
           	})
         to: loop
       - opt:
           do:
-            - return: g, nil
+            - return: "&nativeEngine{Group: g, noDelay: probeNoDelay(lns, plan)}, nil"
           when: err == nil
       - opt:
           do:
-            - return: "startPortable(group, lns, \"native loop backend unavailable: \"+err.Error()), nil"
+            - return: "startPortable(group, lns, \"native loop backend unavailable: \"+err.Error(), plan), nil"
               to: startPortable
           when: plan.fallback && !errs.HasCode(err, corenet.CodeLoopNoDescriptors)
       - return: nil, err
+  - of: (*nativeEngine).State
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*nativeEngine).State
+        kind: self
+      - id: e.Group.State
+        kind: value
+    steps:
+      - bind: st
+        eval: e.Group.State()
+        to: e.Group.State
+      - set: st.Capabilities
+        value: append(st.Capabilities, e.noDelay)
+      - return: st
+  - of: probeNoDelay
+    participants:
+      - id: caller
+        kind: actor
+      - id: probeNoDelay
+        kind: self
+      - id: noDelayOf
+        kind: internal
+    steps:
+      - bind: row
+        eval: "corenet.CapabilityValue{Name: corenet.CapabilityTCPNoDelay, Class: classKernel, Status: statusOn}"
+      - opt:
+          do:
+            - set: row.Status, row.Reason
+              value: statusDisabled, plan.disabledBy
+            - return: row
+          when: slices.Contains(plan.disabled, corenet.CapabilityTCPNoDelay)
+      - loop:
+          do:
+            - bind: v, err
+              eval: noDelayOf(ln)
+              to: noDelayOf
+            - opt:
+                do:
+                  - set: row.Status, row.Reason
+                    value: "statusAbsent, \"getsockopt TCP_NODELAY: not set\""
+                  - return: row
+                when: err != nil || v == 0
+          key: _
+          range: lns
+          value: ln
+      - return: row
+  - of: noDelayOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: noDelayOf
+        kind: self
+      - id: sc.SyscallConn
+        kind: value
+      - id: rc.Control
+        kind: value
+    steps:
+      - bind: sc, ok
+        eval: ln.(syscall.Conn)
+      - opt:
+          do:
+            - return: 0, syscall.EINVAL
+          when: "!ok"
+      - bind: rc, err
+        eval: sc.SyscallConn()
+        to: sc.SyscallConn
+      - opt:
+          do:
+            - return: 0, err
+          when: err != nil
+      - var:
+          name: v
+          type: int
+      - var:
+          name: gerr
+          type: error
+      - bind: cerr
+        eval: rc.Control(func(fd uintptr) { v, gerr = syscall.GetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_NODELAY) })
+        to: rc.Control
+      - opt:
+          do:
+            - return: 0, cerr
+          when: cerr != nil
+      - return: v, gerr
   - of: dupListeners
     participants:
       - id: caller
@@ -2843,6 +2929,8 @@ sequences:
         kind: internal
       - id: listen
         kind: internal
+      - id: loop
+        kind: package
       - id: s.operator.plan
         kind: internal
       - id: startLoopEngine
@@ -2891,6 +2979,14 @@ sequences:
           key: _
           range: group.addrs
           value: addr
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: loop.CheckCapabilities(group.name, group.loop)
+            to: loop
+          when: err != nil
       - bind: plan
         eval: s.operator.plan(group.loop.Backend, nativeLoopBackends)
         to: s.operator.plan
@@ -3061,6 +3157,8 @@ sequences:
           		events:  make(chan portableEvent, portableEvents),
           		postOps: make([]corenet.PostFunc, portablePostCap), postArgs: make([]uintptr, portablePostCap),
           		wake: make(chan struct{}, 1), done: make(chan struct{}), lns: lns,
+          		caps:       append(loop.Unprobed("portable", plan.disabled, plan.disabledBy), portableNoDelay(plan)),
+          		noDelayOff: slices.Contains(plan.disabled, corenet.CapabilityTCPNoDelay),
           	}
       - loop:
           do:
@@ -3072,6 +3170,16 @@ sequences:
       - go: pl.run(pl.done)
         to: pl.run
       - return: "portableEngine{pl: pl}"
+  - of: portableNoDelay
+    steps:
+      - bind: row
+        eval: "corenet.CapabilityValue{Name: corenet.CapabilityTCPNoDelay, Class: classKernel, Status: statusOn, Reason: \"the netpoller's default\"}"
+      - opt:
+          do:
+            - set: row.Status, row.Reason
+              value: statusDisabled, plan.disabledBy
+          when: slices.Contains(plan.disabled, corenet.CapabilityTCPNoDelay)
+      - return: row
   - of: orDefaultInt
     steps:
       - opt:
@@ -3340,6 +3448,8 @@ sequences:
         kind: actor
       - id: (*portableLoop).open
         kind: self
+      - id: swallowErr
+        kind: internal
       - id: pl.accepted.Add
         kind: value
       - id: pl.readers.Add
@@ -3351,6 +3461,14 @@ sequences:
       - id: pl.h.OnOpen
         kind: value
     steps:
+      - opt:
+          do:
+            - eval: swallowErr(tc.SetNoDelay(false))
+              to: swallowErr
+          init:
+            bind: tc, ok
+            eval: c.(*stdnet.TCPConn)
+          when: ok && pl.noDelayOff
       - var:
           name: slot
           type: int32
@@ -4080,6 +4198,7 @@ sequences:
           		Group: pl.group, Backend: corenet.LoopBackendPortable, ProbeStage: "portable",
           		Degraded: pl.degraded != "", DegradedReason: pl.degraded,
           		Loops: 1, Rings: 1, RingsSource: "single", GOMAXPROCS: runtime.GOMAXPROCS(0),
+          		Capabilities: slices.Clone(pl.caps),
           		RingStates: []corenet.LoopRingStateValue{{
           			Conns: pl.live.Load(), Accepted: pl.accepted.Load(), Closed: pl.closed.Load(),
           			Batches: pl.batches.Load(), Evicted: 0,
@@ -4287,7 +4406,7 @@ sequences:
             - eval: e.unknown(corenet.EnvEngine, token)
               to: e.unknown
             - return: ""
-          when: "!ok"
+          when: "!ok || entry.kernel"
       - set: e.ceiling
         value: min(e.ceiling, entry.rank)
   - of: (*operatorEnv).applyDisable
@@ -4323,6 +4442,17 @@ sequences:
                 when: "!ok || !entry.switchable"
             - opt:
                 do:
+                  - opt:
+                      do:
+                        - set: e.kernelOff
+                          value: append(e.kernelOff, entry.token)
+                        - set: e.override.Disabled
+                          value: append(e.override.Disabled, entry.token)
+                      when: "!slices.Contains(e.kernelOff, entry.token)"
+                  - continue: true
+                when: entry.kernel
+            - opt:
+                do:
                   - set: e.disabled[entry.rank]
                     value: "true"
                   - set: e.override.Disabled
@@ -4334,6 +4464,8 @@ sequences:
     steps:
       - set: e.ceiling
         value: min(e.ceiling, rankPortable)
+      - set: e.noOptional
+        value: "true"
       - set: e.faults
         value: |-
           append(e.faults, corenet.FaultValue{
@@ -4342,12 +4474,57 @@ sequences:
           	})
   - of: (*operatorEnv).allows
     steps:
+      - opt:
+          do:
+            - return: "false"
+          when: r == rankIOURing && e.kernelDisabled(corenet.CapabilityURingPbuf)
       - return: r <= e.ceiling && !e.disabled[r]
+  - of: (*operatorEnv).kernelDisabled
+    steps:
+      - return: e.noOptional || slices.Contains(e.kernelOff, c)
+  - of: (*operatorEnv).kernelSwitches
+    steps:
+      - opt:
+          do:
+            - var:
+                name: all
+                type: "[]corenet.Capability"
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - set: all
+                          value: append(all, entry.token)
+                      when: entry.kernel
+                key: _
+                range: capabilityRegistry
+                value: entry
+            - return: all, unknownDisables
+          when: e.noOptional
+      - return: e.kernelOff, corenet.EnvDisable
   - of: (*operatorEnv).plan
     participants:
       - id: caller
         kind: actor
       - id: (*operatorEnv).plan
+        kind: self
+      - id: e.backendPlan
+        kind: internal
+      - id: e.kernelSwitches
+        kind: internal
+    steps:
+      - bind: p
+        eval: e.backendPlan(code, native)
+        to: e.backendPlan
+      - set: p.disabled, p.disabledBy
+        to: e.kernelSwitches
+        value: e.kernelSwitches()
+      - return: p
+  - of: (*operatorEnv).backendPlan
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*operatorEnv).backendPlan
         kind: self
       - id: e.allows
         kind: internal
