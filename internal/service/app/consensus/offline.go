@@ -56,6 +56,8 @@ const (
 	// wipeDetail is what STOP-WIPE shows the operator, as the detail of
 	// STOP_MARKER_PRESENT.
 	wipeDetail = "WipeAndRejoin was interrupted: run ClearQuarantine(WipeAndRejoin) again to complete it, then Init under a new NodeID\n"
+	// whyOldMember is the reason checkOldMembers refuses a Recover.
+	whyOldMember = "a member other than this node carries the ID of an old member: the others are nodes Init prepared under the new cluster"
 )
 
 // The offline functions work on the shipped layout, and only on it (D17,
@@ -430,14 +432,15 @@ func (d DataDir) removeBootMarker() error {
 
 // RecoverOptions are Recover's preconditions (R2-25, R3-02, R4-04, R9-08).
 // Recover refuses, before it writes anything, an invalid operator, a
-// confirmation that does not name the new cluster, no witness key, and an
-// old voter left out without a receipt from every witness.
+// confirmation that does not name the new cluster, no witness key, an old
+// voter other than this node without a receipt from every witness, and
+// another member under the ID of an old or retired member.
 type RecoverOptions struct {
 	// Confirm must equal the new cluster id in hex: a typed confirmation.
 	Confirm string
 	// Operator is recorded in the audit file.
 	Operator coreconsensus.Operator
-	// Fenced attests every old voter left out of the new members.
+	// Fenced attests every old voter but this node, whether the new members list it or not.
 	Fenced []coreconsensus.FencedAttestationValue
 	// WitnessKeys verify the receipts: one per witness, each must sign.
 	WitnessKeys []ed25519.PublicKey
@@ -463,8 +466,10 @@ func ReceiptMessage(old, next coreconsensus.ClusterID, voter coreconsensus.NodeI
 // fails, so no write the old cluster acknowledged is lost;
 // a new cluster id that records its predecessor and the last index it kept;
 // and a forced configuration. The audit file records how many entries past
-// the persisted commit were adopted. Every old voter left out must be
-// attested fenced by every witness; without witness keys it fails closed.
+// the persisted commit were adopted. Every old voter but this node must be
+// attested fenced by every witness, whatever the new members name, and no
+// other member may carry the ID of an old or retired member; without
+// witness keys it fails closed.
 // A stop marker, STOP-RECOVER, is durable before the forced entry and
 // removed once the new stamp is: a Recover interrupted between the two
 // refuses a start, and is completed by running Recover again to the same
@@ -617,9 +622,10 @@ type recoverPlan struct {
 	install *coreconsensus.SnapshotMetaValue
 }
 
-// planRecover decides what the new history keeps, checks the fence of every
-// old voter left out against the configuration in force there, and audits
-// the operation, before anything else is written. A first Recover keeps the
+// planRecover decides what the new history keeps, checks against the
+// configuration in force there that no other member carries an old ID and
+// that every old voter but this node is fenced, and audits the operation,
+// before anything else is written. A first Recover keeps the
 // verified suffix past the persisted commit; a resumed one keeps what the
 // first decided, read from its marker. Its forced entry, durable or not, is
 // never read as the old configuration, so the fences are asked for again.
@@ -644,7 +650,10 @@ func (d DataDir) planRecover(stamp *coreconsensus.StampValue, newCluster corecon
 		// change counts.
 		return p, err
 	}
-	if err := checkFenced(p.old.Voters(), members, opt, stamp.Log.Cluster, newCluster); err != nil {
+	if err := checkOldMembers(&p.old, members, stamp.ID); err != nil {
+		return p, err
+	}
+	if err := checkFenced(p.old.Voters(), stamp.ID, opt, stamp.Log.Cluster, newCluster); err != nil {
 		return p, err
 	}
 	if err := d.planAdopted(&p); err != nil {
@@ -878,7 +887,9 @@ func checkRecover(stamp *coreconsensus.StampValue, newCluster coreconsensus.Clus
 // Promote, never as empty voters (R3-02, R4-04): a member Init only
 // prepared cannot vote before a leader admits it, so a forced configuration
 // that needed its vote never elected one, and two survivors naming each
-// other recovered two histories into one identity (#642).
+// other recovered two histories into one identity (#642). Named learners,
+// the two survivors still did; the old configuration, which refuses them,
+// is read later (checkOldMembers, #691).
 func checkRecoverMembers(stamp *coreconsensus.StampValue, members []coreconsensus.MemberValue) error {
 	self := false
 	for _, m := range members {
@@ -901,11 +912,34 @@ func checkRecoverMembers(stamp *coreconsensus.StampValue, members []coreconsensu
 	return nil
 }
 
-// checkFenced refuses a Recover that leaves out an old voter without a
-// fence receipt from EVERY witness for it.
-func checkFenced(voters []coreconsensus.NodeID, members []coreconsensus.MemberValue, opt *RecoverOptions, oldCluster, newCluster coreconsensus.ClusterID) error {
+// checkOldMembers refuses new members that name, beside this node, an ID
+// the old configuration lists, voter or learner, or retired. The others
+// are joiners Init prepared under the new cluster id, each under a NEW
+// NodeID (R1-17, R3-02, R4-04): an old member's ID is a node of the old
+// cluster, and it reaches the new one only by a Recover of its own, a
+// second history under the same identity. Two survivors that each named
+// the other a learner were both accepted, with no fence for the other, and
+// ran two leaders at one term (#691).
+func checkOldMembers(old *coreconsensus.MembershipValue, members []coreconsensus.MemberValue, self coreconsensus.NodeID) error {
+	for _, m := range members {
+		if m.ID == self {
+			continue
+		}
+		if _, ok := old.Member(m.ID); ok || old.IsRetired(m.ID) {
+			return recoverRefused(whyOldMember)
+		}
+	}
+	return nil
+}
+
+// checkFenced refuses a Recover unless every old voter but this node holds
+// a fence receipt from EVERY witness, whatever the new members name: the
+// ADR asks one attestation per old voter (R4-04, R9-08), and an old voter
+// excused as a member let two survivors recover two histories into one
+// identity (#691).
+func checkFenced(voters []coreconsensus.NodeID, self coreconsensus.NodeID, opt *RecoverOptions, oldCluster, newCluster coreconsensus.ClusterID) error {
 	for _, v := range voters {
-		if slices.ContainsFunc(members, func(m coreconsensus.MemberValue) bool { return m.ID == v }) {
+		if v == self {
 			continue
 		}
 		i := slices.IndexFunc(opt.Fenced, func(a coreconsensus.FencedAttestationValue) bool { return a.Voter == v })

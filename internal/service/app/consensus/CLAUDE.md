@@ -438,6 +438,15 @@ machine, are 32.9 s at 24, and 34 s for the slowest on average over
   `TestTwoSurvivorsNamingEachOtherAVoterAreRefused`). `RestoreSnapshot`
   keeps every voter it is given: it runs on every node it names
   (`TestARestoreOnEveryNodeWithTheSameMembersElects`).
+- Excuse an old voter from its fence because the new members list it, or
+  accept beside the survivor a member under an old member's or a retired
+  ID: two survivors that each named the other a LEARNER were both accepted,
+  neither fenced, and ran two histories under one identity. `checkFenced`
+  asks a receipt for every old voter but the survivor, and
+  `checkOldMembers` refuses any old or retired ID beside it (R1-17, #691,
+  `TestTwoSurvivorsNamingEachOtherALearnerAreRefused`,
+  `TestRecoverNamingEveryOldVoterALearnerWithoutAFenceIsRefused`,
+  `TestRecoverRefusesAnOldMemberNamedALearnerEvenFenced`).
 - Remove anything in `WipeAndRejoin` before `STOP-WIPE` is durable, the
   stamp before the stores' removal is synced, or `STOP-WIPE` before the
   stamp and the other markers are durably gone: cut between the log and

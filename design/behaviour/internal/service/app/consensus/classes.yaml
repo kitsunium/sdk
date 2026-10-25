@@ -557,6 +557,9 @@ constants:
           STOP_MARKER_PRESENT.
         name: wipeDetail
         value: "\"WipeAndRejoin was interrupted: run ClearQuarantine(WipeAndRejoin) again to complete it, then Init under a new NodeID\\n\""
+      - doc: whyOldMember is the reason checkOldMembers refuses a Recover.
+        name: whyOldMember
+        value: "\"a member other than this node carries the ID of an old member: the others are nodes Init prepared under the new cluster\""
     name: fileSilent
   - grouped: true
     items:
@@ -1402,6 +1405,7 @@ files:
       - isZeroDigest
       - checkRecover
       - checkRecoverMembers
+      - checkOldMembers
       - checkFenced
       - signedByEvery
       - DataDir.adoptedEnd
@@ -2681,15 +2685,32 @@ functions:
       Promote, never as empty voters (R3-02, R4-04): a member Init only
       prepared cannot vote before a leader admits it, so a forced configuration
       that needed its vote never elected one, and two survivors naming each
-      other recovered two histories into one identity (#642).
+      other recovered two histories into one identity (#642). Named learners,
+      the two survivors still did; the old configuration, which refuses them,
+      is read later (checkOldMembers, #691).
     name: checkRecoverMembers
     params: stamp *coreconsensus.StampValue, members []coreconsensus.MemberValue
     results: error
   - doc: |-
-      checkFenced refuses a Recover that leaves out an old voter without a
-      fence receipt from EVERY witness for it.
+      checkOldMembers refuses new members that name, beside this node, an ID
+      the old configuration lists, voter or learner, or retired. The others
+      are joiners Init prepared under the new cluster id, each under a NEW
+      NodeID (R1-17, R3-02, R4-04): an old member's ID is a node of the old
+      cluster, and it reaches the new one only by a Recover of its own, a
+      second history under the same identity. Two survivors that each named
+      the other a learner were both accepted, with no fence for the other, and
+      ran two leaders at one term (#691).
+    name: checkOldMembers
+    params: old *coreconsensus.MembershipValue, members []coreconsensus.MemberValue, self coreconsensus.NodeID
+    results: error
+  - doc: |-
+      checkFenced refuses a Recover unless every old voter but this node holds
+      a fence receipt from EVERY witness, whatever the new members name: the
+      ADR asks one attestation per old voter (R4-04, R9-08), and an old voter
+      excused as a member let two survivors recover two histories into one
+      identity (#691).
     name: checkFenced
-    params: voters []coreconsensus.NodeID, members []coreconsensus.MemberValue, opt *RecoverOptions, oldCluster, newCluster coreconsensus.ClusterID
+    params: voters []coreconsensus.NodeID, self coreconsensus.NodeID, opt *RecoverOptions, oldCluster, newCluster coreconsensus.ClusterID
     results: error
   - doc: signedByEvery reports whether every key signed msg in one of receipts.
     name: signedByEvery
@@ -3700,9 +3721,10 @@ types:
         recv: d DataDir
         results: err error
       - doc: |-
-          planRecover decides what the new history keeps, checks the fence of every
-          old voter left out against the configuration in force there, and audits
-          the operation, before anything else is written. A first Recover keeps the
+          planRecover decides what the new history keeps, checks against the
+          configuration in force there that no other member carries an old ID and
+          that every old voter but this node is fenced, and audits the operation,
+          before anything else is written. A first Recover keeps the
           verified suffix past the persisted commit; a resumed one keeps what the
           first decided, read from its marker. Its forced entry, durable or not, is
           never read as the old configuration, so the fences are asked for again.
@@ -8203,7 +8225,7 @@ types:
       - doc: Operator is recorded in the audit file.
         name: Operator
         type: coreconsensus.Operator
-      - doc: Fenced attests every old voter left out of the new members.
+      - doc: Fenced attests every old voter but this node, whether the new members list it or not.
         name: Fenced
         type: "[]coreconsensus.FencedAttestationValue"
       - doc: "WitnessKeys verify the receipts: one per witness, each must sign."

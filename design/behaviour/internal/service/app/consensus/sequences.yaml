@@ -14522,6 +14522,8 @@ sequences:
         kind: internal
       - id: lastMembership
         kind: internal
+      - id: checkOldMembers
+        kind: internal
       - id: checkFenced
         kind: internal
       - id: d.planAdopted
@@ -14565,7 +14567,15 @@ sequences:
             - return: p, err
           init:
             bind: err
-            eval: checkFenced(p.old.Voters(), members, opt, stamp.Log.Cluster, newCluster)
+            eval: checkOldMembers(&p.old, members, stamp.ID)
+            to: checkOldMembers
+          when: err != nil
+      - opt:
+          do:
+            - return: p, err
+          init:
+            bind: err
+            eval: checkFenced(p.old.Voters(), stamp.ID, opt, stamp.Log.Cluster, newCluster)
             to: checkFenced
           when: err != nil
       - opt:
@@ -15041,6 +15051,36 @@ sequences:
               to: recoverRefused
           when: "!self"
       - return: nil
+  - of: checkOldMembers
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkOldMembers
+        kind: self
+      - id: old.Member
+        kind: value
+      - id: recoverRefused
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: m.ID == self
+            - opt:
+                do:
+                  - return: recoverRefused(whyOldMember)
+                    to: recoverRefused
+                init:
+                  bind: _, ok
+                  eval: old.Member(m.ID)
+                  to: old.Member
+                when: ok || old.IsRetired(m.ID)
+          key: _
+          range: members
+          value: m
+      - return: nil
   - of: checkFenced
     participants:
       - id: caller
@@ -15059,7 +15099,7 @@ sequences:
             - opt:
                 do:
                   - continue: true
-                when: slices.ContainsFunc(members, func(m coreconsensus.MemberValue) bool { return m.ID == v })
+                when: v == self
             - bind: i
               eval: slices.IndexFunc(opt.Fenced, func(a coreconsensus.FencedAttestationValue) bool { return a.Voter == v })
               to: slices

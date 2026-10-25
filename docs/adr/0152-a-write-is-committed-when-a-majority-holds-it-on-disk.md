@@ -3284,6 +3284,23 @@ node, under the directory lock.
     member `Init` only prepared could not vote before a leader admitted it,
     and the cluster never elected one. `RestoreSnapshot` keeps every voter
     it is given: it runs on every node it names.
+    **It refuses as well any member besides the survivor whose `NodeID` the
+    old configuration lists, voter or learner, or retired, and it asks a
+    fence receipt for EVERY old voter but the survivor, whatever the new
+    members name (amendment of 2026-10-25,
+    [#691](https://github.com/kitsunium/sdk/issues/691)).** The fence was
+    asked only of the old voters the new members left out: two survivors
+    that each named the other a LEARNER were both accepted, neither with a
+    receipt for the other, and recovered two histories under one identity,
+    each its own single voter. Each elected itself and acknowledged writes
+    alone; healed, they ran two leaders at one term, or one followed the
+    other, which did not hold the write it had acknowledged. Listing every
+    old voter as a learner ran a `Recover` with no receipt at all. An old
+    member's ID is never a joiner's: `Init` for the new cluster draws a NEW
+    `NodeID`, and an old member's directory reaches the new cluster only by
+    a `Recover` of its own, a second history (R1-17). The joiners stay
+    learners prepared by `Init`; nothing else is refused, and no format
+    changes. The first consumer's `--joining` list meets the same refusal.
   - **Which node:** the one with the highest `(lastLogTerm, lastLogIndex)`,
     compared in that order, not "the highest committed index", which no
     surviving node can know for certain.
@@ -4911,7 +4928,7 @@ of the issue:
 | S3 | Raft hunt lot S3, 2026-10-23 | protocol version 2 raised once: the announcement, the raise refused until every member speaks it, the checksummed snapshot meta, `Origin`, `AdoptedFrom`, the stale voter's admission of a vouched-for leader in D4 (amendment of 2026-10-23) |
 | #648 | the owner's decision, 2026-10-24 | protocol version 3: one key, one ID for the cluster's whole life, the retired keys in the configuration, the admin payload and the snapshot metadata of version 3, `FlagProtocol3` and the raise refused until every member announces it (amendment of 2026-10-24, #648) |
 | #677 | the owner's decision, 2026-10-25 | a member states its own snapshot limit: `ChangeSnapshotLimit`, admitted from that member only, a lowering below the state not proposed, no protocol raise (amendment of 2026-10-25, #677) |
-| #690 | Raft hunt, 2026-10-25 | the offline operations: `WipeAndRejoin` ordered behind the stop marker `STOP-WIPE`, a crash at any step refusing the start and every offline write until the wipe runs again (#690) |
+| #690, #691 | Raft hunt, 2026-10-25 | the offline operations: `WipeAndRejoin` ordered behind the stop marker `STOP-WIPE`, a crash at any step refusing the start and every offline write until the wipe runs again (#690); `Recover` refuses an old member's ID beside the survivor and asks a fence for every other old voter, whatever the members name (#691) |
 
 ## raft-sql-poc (owner's prior Raft)
 

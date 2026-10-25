@@ -2452,8 +2452,10 @@ packages:
           fails, so no write the old cluster acknowledged is lost;
           a new cluster id that records its predecessor and the last index it kept;
           and a forced configuration. The audit file records how many entries past
-          the persisted commit were adopted. Every old voter left out must be
-          attested fenced by every witness; without witness keys it fails closed.
+          the persisted commit were adopted. Every old voter but this node must be
+          attested fenced by every witness, whatever the new members name, and no
+          other member may carry the ID of an old or retired member; without
+          witness keys it fails closed.
           A stop marker, STOP-RECOVER, is durable before the forced entry and
           removed once the new stamp is: a Recover interrupted between the two
           refuses a start, and is completed by running Recover again to the same
@@ -3481,8 +3483,9 @@ packages:
       - doc: |-
           RecoverOptions are Recover's preconditions (R2-25, R3-02, R4-04, R9-08).
           Recover refuses, before it writes anything, an invalid operator, a
-          confirmation that does not name the new cluster, no witness key, and an
-          old voter left out without a receipt from every witness.
+          confirmation that does not name the new cluster, no witness key, an old
+          voter other than this node without a receipt from every witness, and
+          another member under the ID of an old or retired member.
         name: RecoverOptions
         struct:
           fields:
@@ -3492,7 +3495,7 @@ packages:
             - doc: Operator is recorded in the audit file.
               name: Operator
               type: coreconsensus.Operator
-            - doc: Fenced attests every old voter left out of the new members.
+            - doc: Fenced attests every old voter but this node, whether the new members list it or not.
               name: Fenced
               type: "[]coreconsensus.FencedAttestationValue"
             - doc: "WitnessKeys verify the receipts: one per witness, each must sign."
@@ -5096,8 +5099,8 @@ packages:
           doc: |-
             Recover starts a new history from this node's committed log and the
             contiguous entries past it whose body and chain checksums verify and whose
-            term does not decrease, every old voter left out attested fenced by every
-            witness. An interrupted Recover leaves the stop marker STOP-RECOVER, which
+            term does not decrease, every other old voter attested fenced by every
+            witness and no other member under an old member's ID. An interrupted Recover leaves the stop marker STOP-RECOVER, which
             refuses a start until Recover runs again to the same new cluster. It
             removes the silence condition TruncateAndStaySilent left, and first
             finishes an install a crash interrupted after its snapshot was

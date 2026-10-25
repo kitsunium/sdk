@@ -1410,7 +1410,7 @@ ReceiptMessage returns the bytes a witness signs to attest a fenced voter.
 func Recover(d DataDir, newCluster ClusterID, members []MemberValue, opt *RecoverOptions) error
 ```
 
-Recover starts a new history from this node's committed log and the contiguous entries past it whose body and chain checksums verify and whose term does not decrease, every old voter left out attested fenced by every witness. An interrupted Recover leaves the stop marker STOP-RECOVER, which refuses a start until Recover runs again to the same new cluster. It removes the silence condition TruncateAndStaySilent left, and first finishes an install a crash interrupted after its snapshot was published, so the forced entry follows that snapshot.
+Recover starts a new history from this node's committed log and the contiguous entries past it whose body and chain checksums verify and whose term does not decrease, every other old voter attested fenced by every witness and no other member under an old member's ID. An interrupted Recover leaves the stop marker STOP-RECOVER, which refuses a start until Recover runs again to the same new cluster. It removes the silence condition TruncateAndStaySilent left, and first finishes an install a crash interrupted after its snapshot was published, so the forced entry follows that snapshot.
 
 <a name="Redraw"></a>
 ## func [Redraw](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/gen_facade.go>)
@@ -3427,7 +3427,7 @@ type RecoverOptions struct {
 	Confirm     string
 	// Operator is recorded in the audit file.
 	Operator    coreconsensus.Operator
-	// Fenced attests every old voter left out of the new members.
+	// Fenced attests every old voter but this node, whether the new members list it or not.
 	Fenced      []coreconsensus.FencedAttestationValue
 	// WitnessKeys verify the receipts: one per witness, each must sign.
 	WitnessKeys []ed25519.PublicKey
