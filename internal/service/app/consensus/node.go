@@ -1629,8 +1629,12 @@ func (n *Node) finalWrites(reqs []storeReq, st *storeState) {
 // file log) per queued Ready, and the next commit or election waited for
 // it to drain its backlog one sync at a time. A group of commit-only
 // Readys is not synced: the persisted commit is an optimisation, and its
-// record rides the next sync. It returns false when the actor must end: a
-// hard stop arrived, or a write stopped the node.
+// record rides the next sync. Nor is a group that writes nothing once
+// every earlier write is synced: its acknowledgements vouch for writes a
+// sync already made durable, and the replies to heartbeats and resent
+// appends that reach a follower draining its backlog each cost one more
+// Sync after it. It returns false when the actor must end: a hard stop
+// arrived, or a write stopped the node.
 func (n *Node) writeAll(reqs []storeReq, st *storeState) bool {
 	if len(reqs) == 0 {
 		return true
@@ -1639,13 +1643,14 @@ func (n *Node) writeAll(reqs []storeReq, st *storeState) bool {
 	if !ok {
 		return false
 	}
-	if durable {
+	switch {
+	case !durable:
+		st.lazy = true
+	case st.lazy || writesAny(reqs):
 		if !n.syncFor(reqs) {
 			return false
 		}
 		st.synced, st.lazy = written, false
-	} else {
-		st.lazy = true
 	}
 	for i := range reqs {
 		if !n.completeWrite(&reqs[i].rd) {
@@ -1675,6 +1680,19 @@ func (n *Node) stageAll(reqs []storeReq, synced uint64) (written uint64, durable
 // ReadyValue.Commit).
 func needsSync(rd *raft.ReadyValue) bool {
 	return rd.HardState != nil || rd.TruncateFrom != 0 || rd.Compact != 0 || len(rd.Entries) != 0 || len(rd.AfterSync) != 0
+}
+
+// writesAny reports whether one request of a group stages anything in the
+// log: a truncation, entries, a hard state or a commit record, or a
+// compaction.
+func writesAny(reqs []storeReq) bool {
+	for i := range reqs {
+		rd := &reqs[i].rd
+		if rd.HardState != nil || rd.Commit != 0 || rd.TruncateFrom != 0 || rd.Compact != 0 || len(rd.Entries) != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // write stages one Ready in the log, truncation, entries with their hard

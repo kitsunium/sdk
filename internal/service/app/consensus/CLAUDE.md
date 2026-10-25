@@ -136,7 +136,11 @@ paired at 8 and 10: on a loaded machine the slowest of 8 summed 49 to
   staged, then synced ONCE, then completed in order, so no `AfterSync`
   leaves before the sync that covers it; a group of commit-only Readys is
   not synced, its record rides the next sync (#558,
-  `TestABacklogOfWritesIsSyncedAsOneGroup`).
+  `TestABacklogOfWritesIsSyncedAsOneGroup`). Nor sync a group that writes
+  nothing once every earlier write is synced: its acknowledgements vouch
+  for durable writes, and a follower draining a backlog paid one Sync per
+  heartbeat or resent append it answered (#654,
+  `TestAGroupOfAcknowledgementsAloneIsNotSynced`).
 - Probe a replicating peer whose heartbeat answer reports holding the
   oldest append in flight: its acknowledgement is only late, and the probe
   resent a window it held (#560, `TestASlowAcknowledgementIsNotALostAppend`).
