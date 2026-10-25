@@ -79,6 +79,22 @@ workflows:
           range: r.conf().Members
           value: m
       - return: "0"
+  - of: (*Raft).checkHeard
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: v < Protocol2 || r.mutated(mutRaiseOverSilence)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: codeVersion
+                when: m.ID != r.id && !r.answering(m.ID)
+          key: _
+          range: r.conf().Members
+          value: m
+      - return: "0"
   - of: (*Raft).strands
     steps:
       - loop:

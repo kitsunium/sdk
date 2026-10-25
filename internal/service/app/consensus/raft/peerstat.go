@@ -17,11 +17,15 @@ const (
 	StatProbing
 	// StatSnapshot is set while a snapshot is being sent to the peer.
 	StatSnapshot
+	// StatProtocol3 is set while the peer's last message of the term
+	// announced protocol 3.
+	StatProtocol3
 )
 
 // PeerStatValue is the leader's view of one peer, for Health (D13). Flags
-// say whether it votes, answered in this term, is probed or is being sent a
-// snapshot; LastHeard is meaningful only once StatHeard is set.
+// say whether it votes, answered in this term, is probed, is being sent a
+// snapshot or last announced protocol 3; LastHeard is meaningful only once
+// StatHeard is set.
 type PeerStatValue struct {
 	ID        core.NodeID
 	Flags     PeerStatFlags

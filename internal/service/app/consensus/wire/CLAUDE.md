@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T23:30:00Z -->
+<!-- updated: 2026-10-25T06:33:47Z -->
 # internal/service/app/consensus/wire/
 
 ## Purpose
@@ -17,9 +17,15 @@ They are not codec formats: two nodes must write the same bytes.
   version 3 (version 1's fields, the retired keys, then the CRC-32C); the
   reader of version 2 shipped one release before the writer (#546, ADR
   0152 amendments of 2026-10-22 and 2026-10-23), and version 3 is written
-  only at a cluster version every member announced, which a node of
-  protocol 2 already refuses (#648, #640). `export_test.go` writes each
+  only at a cluster version every member announced (#648). No reader of
+  version 3 shipped before its writer: a node of protocol 2 cannot decode
+  it, nor stops on it, so the leader withholds such a snapshot from a peer
+  that does not announce protocol 3 (#665). `export_test.go` writes each
   version for the suite.
+- End a `SnapshotMeta` version from 2 on with anything but the CRC-32C of
+  every byte before it: a reader that does not know the version tells by
+  that sum a `.meta` a newer build wrote, which refuses its open, from one
+  that rotted, which it skips (#665, the store's `newerMeta`).
 - Choose a layout's version by anything but the value or the entry it
   belongs to: `AppendSnapshotMeta` writes version 2 exactly when the
   meta's ClusterVersion is 2 (#546 phase 2) and version 3 when it is 3 or

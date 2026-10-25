@@ -991,6 +991,8 @@ sequences:
         kind: self
       - id: r.checkAnnounced
         kind: internal
+      - id: r.checkHeard
+        kind: internal
     steps:
       - opt:
           do:
@@ -1004,8 +1006,16 @@ sequences:
           do:
             - return: "0"
           when: r.mutated(mutRaiseUnannounced)
-      - return: r.checkAnnounced(admin.ClusterVersion)
-        to: r.checkAnnounced
+      - opt:
+          do:
+            - return: code
+          init:
+            bind: code
+            eval: r.checkAnnounced(admin.ClusterVersion)
+            to: r.checkAnnounced
+          when: code != 0
+      - return: r.checkHeard(admin.ClusterVersion)
+        to: r.checkHeard
   - of: announcementOf
     steps:
       - var:
@@ -4067,7 +4077,8 @@ sequences:
                 append(out, PeerStatValue{
                 			ID: id, Match: pr.match, Next: pr.next, Inflight: len(pr.inflight), LastHeard: pr.lastHeard,
                 			Flags: statFlag(StatVoter, r.isVoter(id)) | statFlag(StatHeard, pr.facts&peerHeard != 0) |
-                				statFlag(StatProbing, pr.state == stateProbe) | statFlag(StatSnapshot, pr.state == stateSnapshot),
+                				statFlag(StatProbing, pr.state == stateProbe) | statFlag(StatSnapshot, pr.state == stateSnapshot) |
+                				statFlag(StatProtocol3, pr.facts&peerProtocol3 != 0),
                 		})
           key: _
           range: r.peers()

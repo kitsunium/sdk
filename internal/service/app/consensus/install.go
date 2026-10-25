@@ -2,6 +2,7 @@ package consensus
 
 import (
 	"io"
+	"strconv"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -36,6 +37,39 @@ func (n *Node) offer(from coreconsensus.AuthenticatedPeerValue, o coreconsensus.
 			errs.String("snapshot_codec", o.Meta.Codec), errs.Int("cluster_version", int(o.Meta.ClusterVersion))), false)
 	}
 	return acc
+}
+
+// undecodableBinder is a transport that hands the node an offer whose
+// metadata is of a version this build does not know, which it cannot
+// decode into an offer, with the term it was made at (#665).
+type undecodableBinder interface {
+	bindUndecodable(judge func(from coreconsensus.AuthenticatedPeerValue, term uint64, cause error) errs.Code)
+}
+
+// undecodableOffer judges an offer from peer at term whose metadata the
+// transport could not decode for its version, cause, and returns the code
+// the offer is refused with. From this node's leader in its term, it is the
+// cluster writing a format this build cannot read: the node stops
+// VERSION_UNSUPPORTED, as on a metadata version or a cluster version it
+// decodes and does not know (D18, #513, #640). Only refused, it stayed out
+// of replication, answering its leader's heartbeats, and was offered the
+// snapshot again at every probe: so did a node of protocol 2 offered #659's
+// version 3 (#665). Any other offer is refused as one from a node that is
+// not the leader, and stops nothing. The verdict is the loop's; the stop is
+// off it, as in offer.
+func (n *Node) undecodableOffer(from coreconsensus.AuthenticatedPeerValue, term uint64, cause error) errs.Code {
+	fromLeader := false
+	if !n.exec(func() {
+		st := n.r.Status()
+		fromLeader = term == st.Term && from.ID == st.Lead && st.Role != coreconsensus.RoleLeader
+	}) {
+		return coreconsensus.CodeNodeStopped
+	}
+	if !fromLeader {
+		return coreconsensus.CodeNotLeader
+	}
+	n.stop(errs.Wrap(cause, errs.WrapParams{}, errs.String("leader", from.ID.String()), errs.String("term", strconv.FormatUint(term, 10))), false)
+	return coreconsensus.CodeVersionUnsupported
 }
 
 // judgeOffer is offer's verdict, on the loop, and reports whether the

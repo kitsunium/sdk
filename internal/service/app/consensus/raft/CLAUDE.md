@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T23:30:00Z -->
+<!-- updated: 2026-10-25T06:33:47Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -101,7 +101,14 @@ under coverage before touching `shard_count`.
   to 3 while one was not heard announcing FlagProtocol3, or apply a raise
   above the version this node speaks: D18 refuses the raise while any
   member does not speak it (lot S3, #648, `mutRaiseUnannounced`,
-  `checkRaise3Announced`). A node of protocol 3 announces both flags.
+  `checkRaise3Announced`). A node of protocol 3 announces both flags. Nor
+  raise while a member was last heard a vote window ago or more, whatever
+  it announced: a voter that announced 3 once and went down was rolled
+  back meanwhile, and met the raise only as a snapshot it could not read
+  (#665, `checkHeard`, `mutRaiseOverSilence`, `checkRaiseHeardRecently`).
+  `PeerStats` says per peer whether its last message announced protocol 3
+  (`StatProtocol3`), for the driver that withholds a snapshot of cluster
+  version 3 from a node of protocol 2.
 - Add a learner over a key the configuration retired, or remove a member,
   or deny its pin, without retiring its key, at protocol 3: one key, one id
   for the cluster's whole life, or a node whose configuration still listed

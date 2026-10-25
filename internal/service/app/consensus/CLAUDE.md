@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T00:37:46Z -->
+<!-- updated: 2026-10-25T06:33:47Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -322,6 +322,26 @@ one machine, are 31 s at 8.
   A snapshot is decoded with the codec its metadata names (#513, #512,
   `TestASnapshotOfAnUnknownFormatStopsTheNode`,
   `TestASnapshotIsReadWithTheCodecItWasWrittenWith`).
+- Refuse at the transport, unjudged, an offer whose metadata does not
+  decode for its version, or skip such a `.meta` as one that rotted: the
+  stop of #513 and #640 runs only on a metadata that decodes, and the
+  release of protocol 2, offered #659's version 3, left replication
+  without a word while its leader offered it again at every probe (#665).
+  `refuseOffer` hands such an offer to the node with its term
+  (`undecodableBinder`), which stops VERSION_UNSUPPORTED when it comes from
+  its leader in its term and refuses NOT_LEADER otherwise
+  (`TestAnOfferOfAMetadataVersionThisBuildCannotReadStopsTheNode`). A
+  `.meta` of a version this build does not know whose trailing CRC-32C
+  holds, what a newer build wrote, refuses the store's open, and so the
+  data directory's, before anything is removed, and a listing reports it;
+  one whose sum fails rotted and is skipped (`newerMetas`, `newerMeta`,
+  `TestAMetaOfAVersionThisBuildCannotReadRefusesTheOpen`).
+- Offer a snapshot at cluster version 3 to a peer heard in the term whose
+  last message announced no protocol 3: a release of protocol 2 cannot
+  decode its version 3 metadata and does not stop on it (#665). The
+  leader withholds it, says so once per snapshot, and offers it once the
+  peer announces 3 (`unannounced`, raft's `StatProtocol3`,
+  `TestALeaderWithholdsAVersion3SnapshotFromAPeerOfProtocol2`).
 - Take a snapshot's `ClusterVersion` without comparing it with
   `ProtocolMax`. Once the log is compacted past a raise, the snapshot is
   all that carries it: a node rolled back started or installed it and ran

@@ -1229,7 +1229,8 @@ func (r *Raft) PeerStats() []PeerStatValue {
 		out = append(out, PeerStatValue{
 			ID: id, Match: pr.match, Next: pr.next, Inflight: len(pr.inflight), LastHeard: pr.lastHeard,
 			Flags: statFlag(StatVoter, r.isVoter(id)) | statFlag(StatHeard, pr.facts&peerHeard != 0) |
-				statFlag(StatProbing, pr.state == stateProbe) | statFlag(StatSnapshot, pr.state == stateSnapshot),
+				statFlag(StatProbing, pr.state == stateProbe) | statFlag(StatSnapshot, pr.state == stateSnapshot) |
+				statFlag(StatProtocol3, pr.facts&peerProtocol3 != 0),
 		})
 	}
 	return out

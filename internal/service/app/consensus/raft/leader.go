@@ -662,7 +662,10 @@ func (r *Raft) checkClusterVersion(admin *wire.AdminValue) errs.Code {
 	if r.mutated(mutRaiseUnannounced) {
 		return 0
 	}
-	return r.checkAnnounced(admin.ClusterVersion)
+	if code := r.checkAnnounced(admin.ClusterVersion); code != 0 {
+		return code
+	}
+	return r.checkHeard(admin.ClusterVersion)
 }
 
 // checkAnnounced refuses a raise to v while a member of the latest
@@ -680,6 +683,28 @@ func (r *Raft) checkAnnounced(v uint32) errs.Code {
 	}
 	for _, m := range r.conf().Members {
 		if pr := r.prs[m.ID]; pr == nil || pr.facts&want != want {
+			return codeVersion
+		}
+	}
+	return 0
+}
+
+// checkHeard refuses a raise to v while a member of the latest
+// configuration, voter or learner, was last heard a vote window ago or
+// more, whatever its last message announced: an announcement holds for as
+// long as the member answers, not for the rest of the term. A voter that
+// announced the version once and then went down was rolled back to the
+// previous release meanwhile; it met the raise only as a snapshot it could
+// not read once the leader compacted past its log, and left replication
+// without a word (#665). The window is answering's, the minimum election
+// timeout, which the leader's heartbeats fill several times over. It is
+// apart from checkAnnounced, which inlines.
+func (r *Raft) checkHeard(v uint32) errs.Code {
+	if v < Protocol2 || r.mutated(mutRaiseOverSilence) {
+		return 0
+	}
+	for _, m := range r.conf().Members {
+		if m.ID != r.id && !r.answering(m.ID) {
 			return codeVersion
 		}
 	}
@@ -1013,8 +1038,8 @@ func (r *Raft) retireKey(cur *core.MembershipValue, spki [32]byte) {
 
 // atProtocol3 reports whether the committed cluster version admits the
 // formats of protocol 3: every member announced it before the raise
-// committed, and a node of protocol 2 stops on the raise instead of meeting
-// them (D18).
+// committed, and a node of protocol 2 stops on the raise, or is withheld a
+// snapshot it cannot read (D18, #665).
 func (r *Raft) atProtocol3() bool {
 	return r.clusterVer >= Protocol3 || r.mutated(mutProtocol3BelowRaise)
 }

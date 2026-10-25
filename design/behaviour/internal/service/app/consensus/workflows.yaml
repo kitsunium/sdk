@@ -313,3 +313,14 @@ workflows:
           range: conf.Members
           value: m
       - return: voters
+  - of: belowProtocol3
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: stats[i].Flags.Has(raft.StatHeard) && !stats[i].Flags.Has(raft.StatProtocol3)
+                when: stats[i].ID == to
+          key: i
+          range: stats
+      - return: "false"

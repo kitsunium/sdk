@@ -295,6 +295,9 @@ type TCPTransport struct {
 	// warn is the node's log, for what the transport refuses before any
 	// callback of the node sees it (#634); nil logs nothing.
 	warn func(msg string, attrs ...corelogger.AttrValue)
+	// undecodable judges, on the node, an offer whose metadata is of a
+	// version this build does not know (#665); nil refuses it unjudged.
+	undecodable func(coreconsensus.AuthenticatedPeerValue, uint64, error) errs.Code
 }
 
 type outKey struct {
@@ -1364,27 +1367,28 @@ func installResult(c *tls.Conn) error {
 // receiver ended each stream without a word (#634). A configuration already
 // reaches every member in a membership entry under MaxFrameBytes. An offer
 // refused before the node judged it is logged.
+//
+// An offer whose metadata is of a version this build does not know is still
+// judged by the node, from its term alone, and its refusal answered
+// (refuseOffer, #665).
 func (t *TCPTransport) serveSnapshot(c *tls.Conn, peer coreconsensus.AuthenticatedPeerValue) {
 	b, err := readChunk(c, t.cfg.MaxFrameBytes)
 	var o coreconsensus.InstallOfferValue
 	if err == nil {
 		o, err = decodeOffer(b)
 	}
-	t.mu.Lock()
-	of, in, warn := t.offer, t.install, t.warn
-	t.mu.Unlock()
 	if err != nil {
-		offerRefused(warn, peer.ID, t.cfg.MaxFrameBytes, err)
+		t.refuseOffer(c, peer, o.Term, err)
 		return
 	}
+	t.mu.Lock()
+	of, in := t.offer, t.install
+	t.mu.Unlock()
 	if of == nil || in == nil {
 		return
 	}
 	acc := of(peer, o)
-	reply := binary.LittleEndian.AppendUint64(nil, uint64(acc.Offset))
-	reply = binary.LittleEndian.AppendUint32(reply, uint32(acc.Refused))
-	reply = append(reply, boolByte(acc.Held))
-	if err := writeChunk(c, reply); err != nil || acc.Refused != 0 || acc.Held {
+	if err := writeChunk(c, encodeAccept(&acc)); err != nil || acc.Refused != 0 || acc.Held {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1422,6 +1426,37 @@ func drainHalfClose(c net.Conn, d time.Duration) {
 	abandon(err)
 }
 
+// encodeAccept is the wire form of a receiver's answer to an offer: the
+// offset its spool resumes at, the refusal, and whether it holds the
+// snapshot already.
+func encodeAccept(acc *coreconsensus.InstallAcceptValue) []byte {
+	b := binary.LittleEndian.AppendUint64(nil, uint64(acc.Offset))
+	b = binary.LittleEndian.AppendUint32(b, uint32(acc.Refused))
+	return append(b, boolByte(acc.Held))
+}
+
+// refuseOffer ends an offer from peer at term that was not read, or did
+// not decode, err. One whose metadata is of a version this build does not
+// know is judged by the node from its term alone (undecodableOffer), and
+// its refusal answered: from the node's leader in its term it stops the
+// node VERSION_UNSUPPORTED, as one that decodes does (#513, #640). Refused
+// here unjudged, the release of protocol 2 offered #659's version 3 never
+// stopped, and its leader offered it again at every probe (#665). Every
+// other refusal is logged.
+func (t *TCPTransport) refuseOffer(c *tls.Conn, peer coreconsensus.AuthenticatedPeerValue, term uint64, err error) {
+	t.mu.Lock()
+	warn, judge := t.warn, t.undecodable
+	t.mu.Unlock()
+	if judge != nil && errs.HasCode(err, coreconsensus.CodeVersionUnsupported) {
+		acc := coreconsensus.InstallAcceptValue{Refused: judge(peer, term, err)}
+		abandon(writeChunk(c, encodeAccept(&acc)))
+		if acc.Refused == coreconsensus.CodeVersionUnsupported {
+			return
+		}
+	}
+	offerRefused(warn, peer.ID, t.cfg.MaxFrameBytes, err)
+}
+
 // offerRefused logs, through warn, a snapshot offer from peer that the
 // receiving transport refused before the node judged it: one above bound, or
 // one that does not decode. A failure to read that carries no code, the
@@ -1443,6 +1478,13 @@ func offerRefused(warn func(string, ...corelogger.AttrValue), from coreconsensus
 func (t *TCPTransport) bindWarn(warn func(msg string, attrs ...corelogger.AttrValue)) {
 	t.mu.Lock()
 	t.warn = warn
+	t.mu.Unlock()
+}
+
+// bindUndecodable implements undecodableBinder.
+func (t *TCPTransport) bindUndecodable(judge func(coreconsensus.AuthenticatedPeerValue, uint64, error) errs.Code) {
+	t.mu.Lock()
+	t.undecodable = judge
 	t.mu.Unlock()
 }
 
