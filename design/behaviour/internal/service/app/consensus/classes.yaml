@@ -1186,6 +1186,7 @@ files:
       - (*Node).writeAll
       - (*Node).stageAll
       - needsSync
+      - writesAny
       - (*Node).write
       - (*Node).truncateFor
       - (*Node).appendFor
@@ -2424,6 +2425,13 @@ functions:
       ReadyValue.Commit).
     name: needsSync
     params: rd *raft.ReadyValue
+    results: bool
+  - doc: |-
+      writesAny reports whether one request of a group stages anything in the
+      log: a truncation, entries, a hard state or a commit record, or a
+      compaction.
+    name: writesAny
+    params: reqs []storeReq
     results: bool
   - doc: |-
       newObs binds a node's instruments to its configured Meter, Tracer and
@@ -6438,8 +6446,12 @@ types:
           file log) per queued Ready, and the next commit or election waited for
           it to drain its backlog one sync at a time. A group of commit-only
           Readys is not synced: the persisted commit is an optimisation, and its
-          record rides the next sync. It returns false when the actor must end: a
-          hard stop arrived, or a write stopped the node.
+          record rides the next sync. Nor is a group that writes nothing once
+          every earlier write is synced: its acknowledgements vouch for writes a
+          sync already made durable, and the replies to heartbeats and resent
+          appends that reach a follower draining its backlog each cost one more
+          Sync after it. It returns false when the actor must end: a hard stop
+          arrived, or a write stopped the node.
         name: writeAll
         params: reqs []storeReq, st *storeState
         recv: n *Node

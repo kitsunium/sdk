@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T06:33:47Z -->
+<!-- updated: 2026-10-25T06:43:54Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -36,7 +36,7 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
 | fuzz | `go test -fuzz` on the targets of `wire/` and this package; nightly in CI |
 | dm-crypt | `testdata/dmcrypt/run.sh` (Docker, privileged): fsync latency and power cuts through LUKS; results in `testdata/dmcrypt/RESULTS.md` |
 
-Under Bazel `consensus_test` has 8 shards: under race and coverage the suite
+Under Bazel `consensus_test` has 12 shards: under race and coverage the suite
 passed the 60 s cap per target once the disk scenarios of #507, #516 and
 #524 joined it (4 shards), and the snapshot and disk scenarios of #506,
 #512, #513, #515, #520, #525, #526 and #533 brought the slowest of 4 to
@@ -44,7 +44,16 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
 shards). The slowest of 6 reached 52 s under coverage on CI, and #648's
 scenarios took it past 60 s: Bazel deals top-level tests by index, and
 the sums per shard of a `-race -json` run, 43 s for the slowest of 6 on
-one machine, are 31 s at 8.
+one machine, are 31 s at 8 (8 shards). Shard 5 of 6 had timed out under
+`bazel coverage` on main as well (60.1 s, after its PASS). The suite
+waits rather than computes: that shard spent 6.7 s of CPU in 63 s, and
+coverage adds 7 % to the whole suite, so no grid shrinks under
+`testing.CoverMode()`. Dealt by index (`i % shard_count`), the 10 to 14 s
+scenarios (`TestDiskClusterSurvivesFullRestart`,
+`TestTheEntriesRecoverKeepsHaveOneTokenOnEveryNode`, the ten election
+timeouts of `TestAPinThatEndsCompactsTheLogWithoutAWrite`'s pin) still
+paired at 8 and 10: on a loaded machine the slowest of 8 summed 49 to
+53 s, of 12 37 to 39 s.
 
 ## Do NOT
 
@@ -127,7 +136,11 @@ one machine, are 31 s at 8.
   staged, then synced ONCE, then completed in order, so no `AfterSync`
   leaves before the sync that covers it; a group of commit-only Readys is
   not synced, its record rides the next sync (#558,
-  `TestABacklogOfWritesIsSyncedAsOneGroup`).
+  `TestABacklogOfWritesIsSyncedAsOneGroup`). Nor sync a group that writes
+  nothing once every earlier write is synced: its acknowledgements vouch
+  for durable writes, and a follower draining a backlog paid one Sync per
+  heartbeat or resent append it answered (#654,
+  `TestAGroupOfAcknowledgementsAloneIsNotSynced`).
 - Probe a replicating peer whose heartbeat answer reports holding the
   oldest append in flight: its acknowledgement is only late, and the probe
   resent a window it held (#560, `TestASlowAcknowledgementIsNotALostAppend`).

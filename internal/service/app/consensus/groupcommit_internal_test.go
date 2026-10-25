@@ -8,6 +8,8 @@ import (
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
+	"github.com/kitsunium/sdk/internal/service/app/consensus/raft"
 )
 
 // syncs is the number of Sync calls l completed.
@@ -78,9 +80,52 @@ func TestABacklogOfWritesIsSyncedAsOneGroup(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	// The Sync that was held, then one for the whole backlog; one more
-	// may start while the first one runs.
+	// may start while the first one runs. A group of acknowledgements
+	// alone, the replies to the heartbeats and resent appends that reach
+	// the follower as it drains, is not synced: each one used to add a
+	// Sync, and a slower runner counted 4 (#654).
 	if n := logOf(slow).syncs() - before; n > 3 {
 		t.Fatalf("released: %d Syncs to make entries %d..%d durable, want at most 3", n, held+1, last)
+	}
+}
+
+// #654: a group that writes nothing once every earlier write is synced
+// is not synced again. Its acknowledgements vouch for writes a sync made
+// durable already; a follower draining its backlog took one such group
+// per heartbeat or resent append it answered, a Sync each, and the count
+// after a held Sync depended on how many arrived while it drained.
+func TestAGroupOfAcknowledgementsAloneIsNotSynced(t *testing.T) {
+	ml := &hangLog{MemoryLog: NewMemoryLog()}
+	n := &Node{cfg: Config{Log: ml}, clk: clock.System, storec: make(chan storeDone, 8), stopc: make(chan struct{})}
+	n.obs = newObs(&n.cfg)
+	ack := func(seq uint64) []storeReq {
+		return []storeReq{{rd: raft.ReadyValue{Seq: seq, AfterSync: []coreconsensus.MessageValue{{Kind: coreconsensus.MsgAppResp, To: 2}}}}}
+	}
+	var st storeState
+	steps := []struct {
+		what  string
+		reqs  []storeReq
+		syncs int
+	}{
+		{"an append", []storeReq{{rd: raft.ReadyValue{Seq: 1, Entries: ents(1, 3, 1)}}}, 1},
+		{"an acknowledgement after it", ack(2), 1},
+		{"a commit alone", []storeReq{{rd: raft.ReadyValue{Seq: 3, Commit: 3}}}, 1},
+		{"an acknowledgement after the commit record", ack(4), 2},
+		{"an acknowledgement after that sync", ack(5), 2},
+	}
+	for _, s := range steps {
+		if !n.writeAll(s.reqs, &st) {
+			t.Fatalf("%s: the actor ended", s.what)
+		}
+		if got := ml.syncs(); got != s.syncs {
+			t.Fatalf("%s: %d Syncs, want %d", s.what, got, s.syncs)
+		}
+		if d := <-n.storec; d.seq != s.reqs[0].rd.Seq || len(d.after) != len(s.reqs[0].rd.AfterSync) {
+			t.Fatalf("%s: completion %+v", s.what, d)
+		}
+	}
+	if st.synced != 3 {
+		t.Fatalf("durable through %d, want 3", st.synced)
 	}
 }
 

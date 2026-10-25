@@ -25478,6 +25478,22 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeEngineUnsupported",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeEngineUnsupported",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133944",
+      "code": {
+        "value": "0.2.11.56"
+      },
+      "doc": "CodeEngineUnsupported identifies an Engine a group cannot run on: one its\nhandler's type has no such engine for, one another option contradicts, or a\nvalue outside the engine constants (ADR 0187).\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeGroupDuplicate",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -25489,6 +25505,22 @@
         "value": "0.2.11.12"
       },
       "doc": "CodeGroupDuplicate identifies a second declaration of an already-declared\nlistener group name.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeGroupNameConflict",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeGroupNameConflict",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133946",
+      "code": {
+        "value": "0.2.11.58"
+      },
+      "doc": "CodeGroupNameConflict identifies a Name option that contradicts the name the\ngroup was declared with, or names nothing (ADR 0187).\n",
       "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
@@ -25953,6 +25985,22 @@
         "value": "0.2.11.14"
       },
       "doc": "CodePacketTooLarge identifies a datagram longer than the group's accepted size.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodePlaintextWithTLS",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodePlaintextWithTLS",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133945",
+      "code": {
+        "value": "0.2.11.57"
+      },
+      "doc": "CodePlaintextWithTLS identifies a group given both Plaintext and TLS: the\ngroup cannot both refuse and serve TLS (ADR 0187).\n",
       "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
@@ -26504,6 +26552,87 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.EngineAuto",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "EngineAuto",
+      "spelled": "EngineValue",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.EngineValue",
+      "value": "0",
+      "doc": "EngineAuto lets the group's handler type choose its engine (ADR 0187): a loop\nhandler runs on the loop engine, every other handler on the goroutine engine.\n",
+      "file": "core/net/engine.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.EngineGoroutine",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "EngineGoroutine",
+      "spelled": "EngineValue",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.EngineValue",
+      "value": "1",
+      "doc": "EngineGoroutine is the default engine: one goroutine per connection on the\nruntime's netpoller. It serves Handle, HandleFunc and HandleHTTP.\n",
+      "file": "core/net/engine.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.EngineLoop",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "EngineLoop",
+      "spelled": "EngineValue",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.EngineValue",
+      "value": "2",
+      "doc": "EngineLoop is the loop engine of ADR 0186. It serves HandleLoop; Loop picks its\nbackend.\n",
+      "file": "core/net/engine.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.EngineUnsupported",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "EngineUnsupported",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.56",
+        "reason": "ENGINE_UNSUPPORTED",
+        "public": "The group's engine cannot serve its handler"
+      },
+      "doc": "EngineUnsupported is returned by Start for a group whose Engine cannot serve\nit: EngineGoroutine on a group served by HandleLoop or given Loop, EngineLoop\non a group served by Handle, HandleFunc or HandleHTTP or on a datagram group,\nor a value outside the engine constants. The \"engine\" field names the value.\nIt is refused, never replaced by another engine (ADR 0187).\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.EngineValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "EngineValue",
+      "spelled": "uint8",
+      "canonical": "uint8",
+      "doc": "EngineValue names the engine family a group runs on, passed by Engine (ADR\n0187): the goroutine engine or the loop engine. The zero value, EngineAuto,\nlets the handler's type choose. The backend inside the loop family is\nLoopValue.Backend's.\n",
+      "file": "core/net/engine.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.EngineValue.String",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "String",
+      "recv": "EngineValue",
+      "spelled": "func() string",
+      "canonical": "func() string",
+      "doc": "String renders the engine as an error field spells it.\n",
+      "file": "core/net/engine.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.GroupDuplicate",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -26516,6 +26645,23 @@
         "public": "The listener group is already declared"
       },
       "doc": "GroupDuplicate is returned for a second declaration of one group name.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.GroupNameConflict",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "GroupNameConflict",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.58",
+        "reason": "GROUP_NAME_CONFLICT",
+        "public": "The group's name is not consistent"
+      },
+      "doc": "GroupNameConflict is returned by Start for a group given a Name that is empty\nor differs from the non-empty name it was declared with. The \"group\" and\n\"name\" fields carry both.\n",
       "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
@@ -28254,6 +28400,19 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.OptionEngine",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OptionEngine",
+      "spelled": "OptionKind",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.OptionKind",
+      "value": "18",
+      "doc": "OptionEngine is Engine. Every engine honours it, or refuses the group with\nEngineUnsupported.\n",
+      "file": "core/net/loop.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.OptionHandshakeTimeout",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -28357,6 +28516,19 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.OptionName",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OptionName",
+      "spelled": "OptionKind",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.OptionKind",
+      "value": "17",
+      "doc": "OptionName is Name. Every engine honours it.\n",
+      "file": "core/net/loop.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.OptionNone",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -28365,6 +28537,19 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/net.OptionKind",
       "value": "0",
       "doc": "OptionNone names no option; it is the zero value.\n",
+      "file": "core/net/loop.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.OptionPlaintext",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OptionPlaintext",
+      "spelled": "OptionKind",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.OptionKind",
+      "value": "16",
+      "doc": "OptionPlaintext is Plaintext. Every engine honours it; with TLS it is refused\nwith PlaintextWithTLS.\n",
       "file": "core/net/loop.go",
       "layer": "core",
       "family": "net"
@@ -28703,6 +28888,23 @@
       "value": "4",
       "doc": "PhaseStopped has released every listener.\n",
       "file": "core/net/phase.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.PlaintextWithTLS",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "PlaintextWithTLS",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.57",
+        "reason": "PLAINTEXT_WITH_TLS",
+        "public": "The group cannot be both plaintext and TLS"
+      },
+      "doc": "PlaintextWithTLS is returned by Start for a group given both Plaintext and\nTLS, in either order. The group is never served in plaintext nor over TLS by\ndefault: the contradiction is the caller's to settle (ADR 0187).\n",
+      "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
     },
@@ -63053,6 +63255,18 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/server.Engine",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/net/server",
+      "name": "Engine",
+      "spelled": "func(e corenet.EngineValue) GroupOption",
+      "canonical": "func(e github.com/kitsunium/sdk/internal/core/net.EngineValue) github.com/kitsunium/sdk/internal/service/net/server.GroupOption",
+      "doc": "Engine names the engine family the group runs on (ADR 0187): EngineGoroutine,\none goroutine per connection, or EngineLoop, the loop engine; Loop then\npicks the loop's backend. The zero value, EngineAuto, lets the handler's\ntype choose, which is what a group without the option does. An engine the\ngroup's handler cannot run on, or that another option contradicts —\nEngineGoroutine with Loop or HandleLoop, EngineLoop with Handle, HandleFunc\nor HandleHTTP or on a datagram group — fails Start with EngineUnsupported,\nand is never replaced by the other engine.\n",
+      "file": "service/net/server/options.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/net/server.GroupOption",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/net/server",
@@ -63144,6 +63358,18 @@
       "spelled": "func(n int) GroupOption",
       "canonical": "func(n int) github.com/kitsunium/sdk/internal/service/net/server.GroupOption",
       "doc": "MaxPacketSize caps the datagram size a group accepts. A larger datagram is\ndropped and counted in State, never delivered as a truncated prefix.\n",
+      "file": "service/net/server/options.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/server.Name",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/net/server",
+      "name": "Name",
+      "spelled": "func(name string) GroupOption",
+      "canonical": "func(name string) github.com/kitsunium/sdk/internal/service/net/server.GroupOption",
+      "doc": "Name names the group in State, logs and errors (ADR 0187). On a group\ndeclared with an empty name it sets the name, which must then be unique like\nany other; on one declared with a name it must repeat it. An empty Name, or\none that differs from a non-empty declared name, fails Start with\nGroupNameConflict.\n",
       "file": "service/net/server/options.go",
       "layer": "service",
       "family": "net"
@@ -63245,6 +63471,18 @@
       "canonical": "func(middlewares ...github.com/kitsunium/sdk/internal/core/net.Middleware[github.com/kitsunium/sdk/internal/core/net.PacketHandler]) *github.com/kitsunium/sdk/internal/service/net/server.PacketGroup",
       "doc": "Use appends middlewares, outermost first.\n",
       "file": "service/net/server/packet_group.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/server.Plaintext",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/net/server",
+      "name": "Plaintext",
+      "spelled": "func() GroupOption",
+      "canonical": "func() github.com/kitsunium/sdk/internal/service/net/server.GroupOption",
+      "doc": "Plaintext declares that the group serves no TLS (ADR 0187). Every engine\nhonours it. A group given both Plaintext and TLS, in either order, fails\nStart with PlaintextWithTLS. It is not yet required of a plaintext group:\nthe simple API will require it of every HTTP group without TLS.\n",
+      "file": "service/net/server/options.go",
       "layer": "service",
       "family": "net"
     },
@@ -63470,7 +63708,7 @@
       "recv": "StreamGroup",
       "spelled": "func(h corenet.LoopHandler) *StreamGroup",
       "canonical": "func(h github.com/kitsunium/sdk/internal/core/net.LoopHandler) *github.com/kitsunium/sdk/internal/service/net/server.StreamGroup",
-      "doc": "HandleLoop serves the group on the loop engine (ADR 0186): h is called on\nthe loop's own thread for every connection of the group, with the bytes\neach one receives, instead of a goroutine per connection. It is opt-in, and\nplaintext only.\n\nThe group keeps the server's lifecycle — the bind, the adoption of\ninherited sockets, MaxConns, the drain, State — and Loop(v) sizes and\nplaces the engine: io_uring after a probe of the running kernel, then epoll,\non Linux, and the portable backend, the default engine's accept path\nserialised onto one handler goroutine, everywhere else. Start refuses a loop\ngroup given TLS with LoopTLSUnsupported, one given Use or an option neither\nthe engine (IdleTimeout, MaxConns, Adopt) nor h, through\nLoopOptionHonourer, honours with LoopOptionUnsupported, and an explicit\nbackend the platform or the kernel cannot run with UnsupportedPlatform or\nLoopBackendUnavailable.\n\nA callback of h runs on the loop's thread and must not block it: a blocking\ncall stalls every connection of its loop. h is declared once, like every\nhandler: a second declaration of any kind makes Start return\nHandlerAlreadySet.\n",
+      "doc": "HandleLoop serves the group on the loop engine (ADR 0186): h is called on\nthe loop's own thread for every connection of the group, with the bytes\neach one receives, instead of a goroutine per connection. It is opt-in, and\nplaintext only.\n\nThe group keeps the server's lifecycle — the bind, the adoption of\ninherited sockets, MaxConns, the drain, State — and Loop(v) sizes and\nplaces the engine: io_uring after a probe of the running kernel, then epoll,\non Linux, and the portable backend, the default engine's accept path\nserialised onto one handler goroutine, everywhere else. Start refuses a loop\ngroup given TLS with LoopTLSUnsupported, one given Use or an option neither\nthe engine (IdleTimeout, MaxConns, Adopt, Plaintext, Name, Engine) nor h,\nthrough LoopOptionHonourer, honours with LoopOptionUnsupported — an option\ngiven counts, its zero value included —, and an explicit backend the\nplatform or the kernel cannot run with UnsupportedPlatform or\nLoopBackendUnavailable.\n\nA callback of h runs on the loop's thread and must not block it: a blocking\ncall stalls every connection of its loop. h is declared once, like every\nhandler: a second declaration of any kind makes Start return\nHandlerAlreadySet.\n",
       "file": "service/net/server/loop_group.go",
       "layer": "service",
       "family": "net"

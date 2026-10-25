@@ -182,6 +182,13 @@ sequences:
       - return: a.refused.Load()
         to: a.refused.Load
   - of: PreHandshake
+    participants:
+      - id: caller
+        kind: actor
+      - id: PreHandshake
+        kind: self
+      - id: g.kinds.add
+        kind: internal
     steps:
       - return:
           closure:
@@ -189,6 +196,8 @@ sequences:
             steps:
               - set: g.admission
                 value: a
+              - eval: g.kinds.add(corenet.OptionPreHandshake)
+                to: g.kinds.add
   - of: releaseAdmission
     steps:
       - opt:
@@ -736,6 +745,61 @@ sequences:
   - of: batchAvailable
     steps:
       - return: "true"
+  - of: (*StreamGroup).reconcileName
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StreamGroup).reconcileName
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!g.kinds.has(corenet.OptionName)"
+      - opt:
+          do:
+            - set: g.name
+              value: g.optName
+            - return: ""
+          when: g.optName != "" && (g.name == "" || g.name == g.optName)
+      - opt:
+          do:
+            - set: g.declErr
+              to: errs
+              value: |-
+                errs.Wrap(corenet.GroupNameConflict, errs.WrapParams{},
+                			errs.String("group", g.name), errs.String("name", g.optName))
+          when: g.declErr == nil
+  - of: (*StreamGroup).engineRefusal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StreamGroup).engineRefusal
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(corenet.PlaintextWithTLS, errs.WrapParams{}, errs.String("group", g.name))
+              to: errs
+          when: g.kinds.has(corenet.OptionPlaintext) && g.kinds.has(corenet.OptionTLS)
+      - opt:
+          do:
+            - return: nil
+          when: "!g.kinds.has(corenet.OptionEngine) || g.engine == corenet.EngineAuto"
+      - bind: loop
+        eval: g.loopHandler != nil
+      - opt:
+          do:
+            - return: nil
+          when: (g.engine == corenet.EngineGoroutine && !loop && !g.loopSet) || (g.engine == corenet.EngineLoop && loop)
+      - return: |-
+          errs.Wrap(corenet.EngineUnsupported, errs.WrapParams{},
+          		errs.String("group", g.name), errs.String("engine", g.engine.String()))
+        to: errs
   - of: platformLacks
     steps:
       - return: "false"
@@ -1335,39 +1399,64 @@ sequences:
         kind: actor
       - id: groupDeclErr
         kind: self
-      - id: group.loopRefusal
+      - id: group.startRefusal
         kind: internal
-      - id: errs
-        kind: package
     steps:
       - loop:
           do:
             - opt:
                 do:
-                  - return: group.declErr
-                when: group.declErr != nil
-            - opt:
-                do:
-                  - opt:
-                      do:
-                        - return: err
-                      init:
-                        bind: err
-                        eval: group.loopRefusal()
-                        to: group.loopRefusal
-                      when: err != nil
-                  - continue: true
-                when: group.loopHandler != nil
-            - opt:
-                do:
-                  - return: |-
-                      errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
-                      				errs.String("group", group.name), errs.String("option", "Loop"))
-                    to: errs
-                when: group.loopSet && group.handler != nil
+                  - return: err
+                init:
+                  bind: err
+                  eval: group.startRefusal()
+                  to: group.startRefusal
+                when: err != nil
           key: _
           range: groups
           value: group
+      - return: nil
+  - of: (*StreamGroup).startRefusal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StreamGroup).startRefusal
+        kind: self
+      - id: g.engineRefusal
+        kind: internal
+      - id: g.loopRefusal
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: g.declErr
+          when: g.declErr != nil
+      - opt:
+          do:
+            - return: nil
+          when: g.loopHandler == nil && g.handler == nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: g.engineRefusal()
+            to: g.engineRefusal
+          when: err != nil
+      - opt:
+          do:
+            - return: g.loopRefusal()
+              to: g.loopRefusal
+          when: g.loopHandler != nil
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
+                			errs.String("group", g.name), errs.String("option", "Loop"))
+              to: errs
+          when: g.loopSet
       - return: nil
   - of: (*Server).bindEverything
     participants:
@@ -2576,7 +2665,7 @@ sequences:
           do:
             - return: errs.Wrap(corenet.LoopTLSUnsupported, errs.WrapParams{}, errs.String("group", g.name))
               to: errs
-          when: "!g.identity.IsZero()"
+          when: g.kinds.has(corenet.OptionTLS)
       - bind: honours, _
         eval: g.loopHandler.(corenet.LoopOptionHonourer)
       - loop:
@@ -2590,42 +2679,20 @@ sequences:
                 			errs.String("group", g.name), errs.String("option", k.String()))
               to: errs
           key: _
-          range: g.loopOptionsSet()
+          range: g.kinds.list()
           value: k
       - return: nil
   - of: loopHonours
     steps:
-      - return: k == corenet.OptionIdleTimeout || k == corenet.OptionMaxConns || k == corenet.OptionAdopt
-  - of: (*StreamGroup).loopOptionsSet
-    steps:
-      - var:
-          name: set
-          type: "[]corenet.OptionKind"
-      - bind: add
-        eval:
-          closure:
-            params: on bool, k corenet.OptionKind
-            steps:
-              - opt:
-                  do:
-                    - set: set
-                      value: append(set, k)
-                  when: "on"
-      - eval: add(len(g.middlewares) > 0, corenet.OptionMiddleware)
-      - eval: add(g.timeouts.Read > 0, corenet.OptionReadTimeout)
-      - eval: add(g.timeouts.Write > 0, corenet.OptionWriteTimeout)
-      - eval: add(g.timeouts.Idle > 0, corenet.OptionIdleTimeout)
-      - eval: add(g.http.readHeaderTimeout > 0, corenet.OptionReadHeaderTimeout)
-      - eval: add(g.http.maxHeaderBytes > 0, corenet.OptionMaxHeaderBytes)
-      - eval: add(g.timeouts.Handshake > 0, corenet.OptionHandshakeTimeout)
-      - eval: add(g.limits.ReadBufferSize > 0, corenet.OptionReadBufferSize)
-      - eval: add(g.limits.MaxPacketSize > 0, corenet.OptionMaxPacketSize)
-      - eval: add(g.limits.BatchSize > 0, corenet.OptionBatchSize)
-      - eval: add(g.limits.Shards > 0, corenet.OptionShards)
-      - eval: add(g.limits.MaxConns > 0, corenet.OptionMaxConns)
-      - eval: add(len(g.adopt) > 0, corenet.OptionAdopt)
-      - eval: add(g.admission != nil, corenet.OptionPreHandshake)
-      - return: set
+      - switch:
+          cases:
+            - case: corenet.OptionIdleTimeout, corenet.OptionMaxConns, corenet.OptionAdopt, corenet.OptionPlaintext, corenet.OptionName, corenet.OptionEngine
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+          "on": k
   - of: (*Server).bindLoopGroup
     participants:
       - id: caller
@@ -3984,6 +4051,26 @@ sequences:
               value: sockaddrToAddr(&r.names[i])
           key: i
           range: received
+  - of: (*optionSet).add
+    steps:
+      - op: "|="
+        set: "*s"
+        value: 1 << k
+  - of: (*optionSet).has
+    steps:
+      - return: "*s&(1<<k) != 0"
+  - of: (*optionSet).list
+    steps:
+      - bind: out
+        eval: make([]corenet.OptionKind, 0, bits.OnesCount64(uint64(*s)))
+      - loop:
+          cond: rest != 0
+          do:
+            - set: out
+              value: append(out, corenet.OptionKind(bits.TrailingZeros64(rest)))
+          init: rest := uint64(*s)
+          post: rest &= rest - 1
+      - return: out
   - of: WithDrainTimeout
     steps:
       - return:
@@ -4011,6 +4098,13 @@ sequences:
               - set: g.addrs
                 value: "append(g.addrs, corenet.AddressValue{Network: network, Addr: addr})"
   - of: TLS
+    participants:
+      - id: caller
+        kind: actor
+      - id: TLS
+        kind: self
+      - id: g.kinds.add
+        kind: internal
     steps:
       - return:
           closure:
@@ -4018,6 +4112,8 @@ sequences:
             steps:
               - set: g.identity
                 value: id
+              - eval: g.kinds.add(corenet.OptionTLS)
+                to: g.kinds.add
   - of: ReadTimeout
     participants:
       - id: caller
@@ -4026,6 +4122,8 @@ sequences:
         kind: self
       - id: corenet
         kind: package
+      - id: g.kinds.add
+        kind: internal
     steps:
       - return:
           closure:
@@ -4034,6 +4132,8 @@ sequences:
               - set: g.timeouts.Read
                 to: corenet
                 value: corenet.DurationValue(d)
+              - eval: g.kinds.add(corenet.OptionReadTimeout)
+                to: g.kinds.add
   - of: WriteTimeout
     participants:
       - id: caller
@@ -4042,6 +4142,8 @@ sequences:
         kind: self
       - id: corenet
         kind: package
+      - id: g.kinds.add
+        kind: internal
     steps:
       - return:
           closure:
@@ -4050,6 +4152,8 @@ sequences:
               - set: g.timeouts.Write
                 to: corenet
                 value: corenet.DurationValue(d)
+              - eval: g.kinds.add(corenet.OptionWriteTimeout)
+                to: g.kinds.add
   - of: IdleTimeout
     participants:
       - id: caller
@@ -4058,6 +4162,8 @@ sequences:
         kind: self
       - id: corenet
         kind: package
+      - id: g.kinds.add
+        kind: internal
     steps:
       - return:
           closure:
@@ -4066,7 +4172,16 @@ sequences:
               - set: g.timeouts.Idle
                 to: corenet
                 value: corenet.DurationValue(d)
+              - eval: g.kinds.add(corenet.OptionIdleTimeout)
+                to: g.kinds.add
   - of: ReadHeaderTimeout
+    participants:
+      - id: caller
+        kind: actor
+      - id: ReadHeaderTimeout
+        kind: self
+      - id: g.kinds.add
+        kind: internal
     steps:
       - return:
           closure:
@@ -4074,7 +4189,16 @@ sequences:
             steps:
               - set: g.http.readHeaderTimeout
                 value: d
+              - eval: g.kinds.add(corenet.OptionReadHeaderTimeout)
+                to: g.kinds.add
   - of: MaxHeaderBytes
+    participants:
+      - id: caller
+        kind: actor
+      - id: MaxHeaderBytes
+        kind: self
+      - id: g.kinds.add
+        kind: internal
     steps:
       - return:
           closure:
@@ -4082,6 +4206,8 @@ sequences:
             steps:
               - set: g.http.maxHeaderBytes
                 value: "n"
+              - eval: g.kinds.add(corenet.OptionMaxHeaderBytes)
+                to: g.kinds.add
   - of: HandshakeTimeout
     participants:
       - id: caller
@@ -4090,6 +4216,8 @@ sequences:
         kind: self
       - id: corenet
         kind: package
+      - id: g.kinds.add
+        kind: internal
     steps:
       - return:
           closure:
@@ -4098,7 +4226,16 @@ sequences:
               - set: g.timeouts.Handshake
                 to: corenet
                 value: corenet.DurationValue(d)
+              - eval: g.kinds.add(corenet.OptionHandshakeTimeout)
+                to: g.kinds.add
   - of: ReadBufferSize
+    participants:
+      - id: caller
+        kind: actor
+      - id: ReadBufferSize
+        kind: self
+      - id: g.kinds.add
+        kind: internal
     steps:
       - return:
           closure:
@@ -4106,7 +4243,16 @@ sequences:
             steps:
               - set: g.limits.ReadBufferSize
                 value: "n"
+              - eval: g.kinds.add(corenet.OptionReadBufferSize)
+                to: g.kinds.add
   - of: MaxPacketSize
+    participants:
+      - id: caller
+        kind: actor
+      - id: MaxPacketSize
+        kind: self
+      - id: g.kinds.add
+        kind: internal
     steps:
       - return:
           closure:
@@ -4114,7 +4260,16 @@ sequences:
             steps:
               - set: g.limits.MaxPacketSize
                 value: "n"
+              - eval: g.kinds.add(corenet.OptionMaxPacketSize)
+                to: g.kinds.add
   - of: BatchSize
+    participants:
+      - id: caller
+        kind: actor
+      - id: BatchSize
+        kind: self
+      - id: g.kinds.add
+        kind: internal
     steps:
       - return:
           closure:
@@ -4122,7 +4277,16 @@ sequences:
             steps:
               - set: g.limits.BatchSize
                 value: "n"
+              - eval: g.kinds.add(corenet.OptionBatchSize)
+                to: g.kinds.add
   - of: Shards
+    participants:
+      - id: caller
+        kind: actor
+      - id: Shards
+        kind: self
+      - id: g.kinds.add
+        kind: internal
     steps:
       - return:
           closure:
@@ -4130,7 +4294,16 @@ sequences:
             steps:
               - set: g.limits.Shards
                 value: "n"
+              - eval: g.kinds.add(corenet.OptionShards)
+                to: g.kinds.add
   - of: MaxConns
+    participants:
+      - id: caller
+        kind: actor
+      - id: MaxConns
+        kind: self
+      - id: g.kinds.add
+        kind: internal
     steps:
       - return:
           closure:
@@ -4138,7 +4311,16 @@ sequences:
             steps:
               - set: g.limits.MaxConns
                 value: "n"
+              - eval: g.kinds.add(corenet.OptionMaxConns)
+                to: g.kinds.add
   - of: Adopt
+    participants:
+      - id: caller
+        kind: actor
+      - id: Adopt
+        kind: self
+      - id: g.kinds.add
+        kind: internal
     steps:
       - return:
           closure:
@@ -4146,6 +4328,57 @@ sequences:
             steps:
               - set: g.adopt
                 value: append(g.adopt, names...)
+              - eval: g.kinds.add(corenet.OptionAdopt)
+                to: g.kinds.add
+  - of: Plaintext
+    participants:
+      - id: caller
+        kind: actor
+      - id: Plaintext
+        kind: self
+      - id: g.kinds.add
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: g *StreamGroup
+            steps:
+              - eval: g.kinds.add(corenet.OptionPlaintext)
+                to: g.kinds.add
+  - of: Name
+    participants:
+      - id: caller
+        kind: actor
+      - id: Name
+        kind: self
+      - id: g.kinds.add
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: g *StreamGroup
+            steps:
+              - set: g.optName
+                value: name
+              - eval: g.kinds.add(corenet.OptionName)
+                to: g.kinds.add
+  - of: Engine
+    participants:
+      - id: caller
+        kind: actor
+      - id: Engine
+        kind: self
+      - id: g.kinds.add
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: g *StreamGroup
+            steps:
+              - set: g.engine
+                value: e
+              - eval: g.kinds.add(corenet.OptionEngine)
+                to: g.kinds.add
   - of: (*packet).Data
     steps:
       - return: p.data
@@ -4592,9 +4825,23 @@ sequences:
         kind: actor
       - id: (*Server).Group
         kind: self
+      - id: group.reconcileName
+        kind: internal
       - id: s.recordDeclError
         kind: internal
     steps:
+      - bind: group
+        eval: "&StreamGroup{name: name}"
+      - loop:
+          do:
+            - eval: opt(group)
+          key: _
+          range: opts
+          value: opt
+      - eval: group.reconcileName()
+        to: group.reconcileName
+      - set: name
+        value: group.name
       - lock:
           mutex: s.mu
       - opt:
@@ -4608,14 +4855,6 @@ sequences:
             bind: _, exists
             eval: s.byName[name]
           when: exists
-      - bind: group
-        eval: "&StreamGroup{name: name}"
-      - loop:
-          do:
-            - eval: opt(group)
-          key: _
-          range: opts
-          value: opt
       - set: s.byName[name]
         value: group
       - set: s.groups
@@ -4627,9 +4866,25 @@ sequences:
         kind: actor
       - id: (*Server).PacketGroup
         kind: self
+      - id: shim.reconcileName
+        kind: internal
       - id: s.recordDeclError
         kind: internal
+      - id: s.judgePacketOptions
+        kind: internal
     steps:
+      - bind: shim
+        eval: "&StreamGroup{name: name}"
+      - loop:
+          do:
+            - eval: opt(shim)
+          key: _
+          range: opts
+          value: opt
+      - eval: shim.reconcileName()
+        to: shim.reconcileName
+      - set: name
+        value: shim.name
       - lock:
           mutex: s.mu
       - bind: _, streamTaken
@@ -4646,21 +4901,8 @@ sequences:
           when: streamTaken || packetTaken
       - bind: group
         eval: "&PacketGroup{name: name}"
-      - bind: shim
-        eval: "&StreamGroup{}"
-      - loop:
-          do:
-            - eval: opt(shim)
-          key: _
-          range: opts
-          value: opt
-      - opt:
-          do:
-            - eval: |-
-                s.recordDeclError(errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
-                			errs.String("group", name), errs.String("option", "Loop")))
-              to: s.recordDeclError
-          when: shim.loopSet
+      - eval: s.judgePacketOptions(shim)
+        to: s.judgePacketOptions
       - set: group.addrs
         value: shim.addrs
       - set: group.limits
@@ -4672,6 +4914,38 @@ sequences:
       - set: s.packetGroups
         value: append(s.packetGroups, group)
       - return: group
+  - of: (*Server).judgePacketOptions
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).judgePacketOptions
+        kind: self
+      - id: s.recordDeclError
+        kind: internal
+      - id: shim.engineRefusal
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: s.recordDeclError(shim.declErr)
+              to: s.recordDeclError
+          when: shim.declErr != nil
+      - opt:
+          do:
+            - eval: |-
+                s.recordDeclError(errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
+                			errs.String("group", shim.name), errs.String("option", "Loop")))
+              to: s.recordDeclError
+          when: shim.loopSet
+      - opt:
+          do:
+            - eval: s.recordDeclError(err)
+              to: s.recordDeclError
+          init:
+            bind: err
+            eval: shim.engineRefusal()
+            to: shim.engineRefusal
+          when: err != nil
   - of: (*Server).recordDeclError
     steps:
       - opt:
@@ -4874,9 +5148,18 @@ sequences:
     steps:
       - return: g.httpAdapter != nil && g.limiter != nil
   - of: (*StreamGroup).Use
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StreamGroup).Use
+        kind: self
+      - id: g.kinds.add
+        kind: internal
     steps:
       - set: g.middlewares
         value: append(g.middlewares, middlewares...)
+      - eval: g.kinds.add(corenet.OptionMiddleware)
+        to: g.kinds.add
       - return: g
   - of: (*StreamGroup).resolved
     participants:

@@ -242,6 +242,19 @@ workflows:
           key: i
           range: reqs
       - return: written, durable, true
+  - of: writesAny
+    steps:
+      - loop:
+          do:
+            - bind: rd
+              eval: "&reqs[i].rd"
+            - opt:
+                do:
+                  - return: "true"
+                when: rd.HardState != nil || rd.Commit != 0 || rd.TruncateFrom != 0 || rd.Compact != 0 || len(rd.Entries) != 0
+          key: i
+          range: reqs
+      - return: "false"
   - of: signedByEvery
     steps:
       - loop:

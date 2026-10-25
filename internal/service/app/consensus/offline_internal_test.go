@@ -916,15 +916,28 @@ func silenceUnderItsLeaderOnDisk(t *testing.T) *silencedOnDisk {
 	s.c.waitAppliedDisk(s.nodes, tok.Index)
 	term := s.lead.node.Status().Term
 	s.trs[s.lagger.id].setDrop(func(m *coreconsensus.MessageValue) bool { return m.Kind == coreconsensus.MsgApp })
+	moved := func(err error) {
+		if st := s.lead.node.Status(); st.Role != coreconsensus.RoleLeader || st.Term != term {
+			t.Skipf("setup: leadership changed during the writes (%+v): %v", st, err)
+		}
+	}
 	for i := range 30 {
 		key := fmt.Sprintf("ack%02d", i)
-		tok = propose(t, s.lead.node, key+"="+strings.Repeat("v", 1024))
+		// Bound to this leader: one whose fdatasync stalls hands its
+		// leadership over (#554), and its write answers ENTRY_SUPERSEDED or
+		// OUTCOME_UNKNOWN, which the check below the loop never saw (#654).
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		got, _, err := s.lead.node.Propose(ctx, []byte(key+"="+strings.Repeat("v", 1024)))
+		cancel()
+		if err != nil {
+			moved(err)
+			t.Fatalf("propose %q: %v", key, err)
+		}
+		tok = got
 		s.acked[key] = tok.Index
 	}
 	waitAppliedOnly(t, s.victim, tok.Index)
-	if st := s.lead.node.Status(); st.Role != coreconsensus.RoleLeader || st.Term != term {
-		t.Skipf("setup: leadership changed during the writes (%+v)", st)
-	}
+	moved(nil)
 	_, s.oldLast = s.lead.dd.Log().Bounds()
 	s.c.net.Isolate(s.victim.id, true)
 	s.victim.crash(t, s.c)

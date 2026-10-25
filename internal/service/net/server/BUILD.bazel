@@ -17,6 +17,7 @@ go_library(
         "datagram_source_linux.go",
         "datagram_source_other.go",
         "doc.go",
+        "engine_option.go",
         "family_other.go",
         "family_windows.go",
         "handshake.go",
@@ -35,6 +36,7 @@ go_library(
         "loop_portable.go",
         "multireader_linux.go",
         "multireader_mmsghdr_linux.go",
+        "option_set.go",
         "options.go",
         "packet.go",
         "packet_group.go",
@@ -100,6 +102,7 @@ go_test(
         "conn_internal_test.go",
         "conn_tracked_internal_test.go",
         "datagram_source_linux_internal_test.go",
+        "engine_option_external_test.go",
         "family_windows_internal_test.go",
         "gen_api_test.go",
         "handshake_internal_test.go",
@@ -116,6 +119,7 @@ go_test(
         "loop_group_internal_test.go",
         "loop_option_external_test.go",
         "multireader_linux_internal_test.go",
+        "option_set_internal_test.go",
         "options_external_test.go",
         "packet_group_external_test.go",
         "packet_group_internal_test.go",
@@ -138,6 +142,9 @@ go_test(
         "testsockets_unix_internal_test.go",
         "truncation_windows_internal_test.go",
     ],
+    # keep: TestGroupOption_recordsItsKind reads pkg/v1/net/server's facade
+    # and this package's own sources, from the package directory.
+    data = glob(["*.go"]) + ["//pkg/v1/net/server:gen_facade.go"],
     embed = [":server"],
     # keep: these tests bind a loopback socket. Bazel's linux-sandbox gives the
     # action its own network namespace, so bind and dial fail inside it. Running

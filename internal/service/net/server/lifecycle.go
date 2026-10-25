@@ -74,31 +74,51 @@ func (s *Server) Start(ctx context.Context) error {
 func groupDeclErr(groups []*StreamGroup) error {
 	//: declaration order, so the error reported is reproducible.
 	for _, group := range groups {
-		//: the group's first mistake explains the rest of it.
-		if group.declErr != nil {
-			//: the first one found is the one reported.
-			return group.declErr
-		}
-		//: no stream group is served by a loop handler yet, so the Loop option
-		//: is one no group can honour. A missing handler wins, because it
-		//: explains the refusal; bindAll reports it.
-		//: a loop group judges every option it was given against the engine
-		//: and its handler.
-		if group.loopHandler != nil {
-			//: the first option nobody honours.
-			if err := group.loopRefusal(); err != nil {
-				//: refused before anything is bound.
-				return err
-			}
-			continue
-		}
-		if group.loopSet && group.handler != nil {
-			//: refuse rather than ignore a configuration the group cannot apply.
-			return errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
-				errs.String("group", group.name), errs.String("option", "Loop"))
+		//: the first group's refusal is the one reported.
+		if err := group.startRefusal(); err != nil {
+			//: refused before anything is bound.
+			return err
 		}
 	}
 	//: no group recorded a mistake.
+	return nil
+}
+
+// startRefusal is one group's judgement at Start: its first declaration
+// error, then the options that constrain its engine (ADR 0187), then the
+// options a loop group cannot honour or Loop on a goroutine group (ADR 0186
+// §D1). A group with no handler is left to bindAll, whose HandlerMissing wins
+// over an option's refusal because it explains it.
+func (g *StreamGroup) startRefusal() error {
+	//: the group's first mistake explains the rest of it.
+	if g.declErr != nil {
+		//: the first one recorded is the one reported.
+		return g.declErr
+	}
+	//: no handler: bindAll reports it.
+	if g.loopHandler == nil && g.handler == nil {
+		//: nothing judged here.
+		return nil
+	}
+	//: the options that constrain the engine, against each other and the
+	//: handler's type.
+	if err := g.engineRefusal(); err != nil {
+		//: refused by name.
+		return err
+	}
+	//: a loop group judges every option it was given against the engine and
+	//: its handler.
+	if g.loopHandler != nil {
+		//: the first option nobody honours, or none.
+		return g.loopRefusal()
+	}
+	//: a goroutine group cannot apply the Loop option.
+	if g.loopSet {
+		//: refuse rather than ignore a configuration the group cannot apply.
+		return errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
+			errs.String("group", g.name), errs.String("option", "Loop"))
+	}
+	//: every option is one the group can apply.
 	return nil
 }
 
