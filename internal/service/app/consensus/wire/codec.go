@@ -36,6 +36,18 @@ const (
 	// metaProtocol2 is the cluster version from which a SnapshotMeta is
 	// written in version 2.
 	metaProtocol2 uint32 = 2
+	// metaVersion3 is the leading byte of a SnapshotMeta whose
+	// configuration carries its retired keys: the fields of version 1,
+	// then the retired keys, then the CRC-32C of every byte before it. It
+	// is written for a cluster at protocol version 3, which every member
+	// announced, and a node of protocol 2 refuses it VERSION_UNSUPPORTED
+	// (#648).
+	metaVersion3 byte = 3
+	// metaProtocol3 is the cluster version from which a SnapshotMeta is
+	// written in version 3.
+	metaProtocol3 uint32 = 3
+	// keyLen is the length of one retired key, an SPKI pin.
+	keyLen int = 32
 	// metaSumLen is the length of version 2's trailing CRC-32C.
 	metaSumLen int = 4
 	// entryFixedLen is an entry's header before its data: term, index,
@@ -230,19 +242,25 @@ func ParseToken(b []byte) (coreconsensus.TokenValue, error) {
 
 // AppendSnapshotMeta appends the versioned encoding of m. The version
 // follows the cluster version m carries: a meta of a cluster below protocol
-// version 2 is written in version 1, and one of a cluster at 2 or above in
-// version 2, checksummed, which the release before already reads (D18,
-// #546). Only a cluster whose every member announced protocol 2 reaches
-// that version.
+// version 2 is written in version 1, one of a cluster at 2 in version 2,
+// checksummed, which the release before already reads (D18, #546), and one
+// of a cluster at 3 or above in version 3, which adds the retired keys of
+// its configuration (#648). Only a cluster whose every member announced a
+// protocol reaches its version.
 func AppendSnapshotMeta(dst []byte, m *coreconsensus.SnapshotMetaValue) []byte {
-	if m.ClusterVersion < metaProtocol2 {
+	switch {
+	case m.ClusterVersion >= metaProtocol3:
+		return appendMeta(dst, metaVersion3, m)
+	case m.ClusterVersion >= metaProtocol2:
+		return appendMeta(dst, metaVersion2, m)
+	default:
 		return appendMeta(dst, metaVersion1, m)
 	}
-	return appendMeta(dst, metaVersion2, m)
 }
 
 // appendMeta appends m in version v: the version byte, the fields of
-// version 1, then for version 2 the CRC-32C of every byte before it.
+// version 1, then for version 3 the configuration's retired keys, and for
+// versions 2 and 3 the CRC-32C of every byte before it.
 func appendMeta(dst []byte, v byte, m *coreconsensus.SnapshotMetaValue) []byte {
 	start := len(dst)
 	dst = append(dst, v)
@@ -263,15 +281,18 @@ func appendMeta(dst []byte, v byte, m *coreconsensus.SnapshotMetaValue) []byte {
 	dst = binary.LittleEndian.AppendUint64(dst, m.ClusterGeneration)
 	dst = binary.LittleEndian.AppendUint64(dst, uint64(m.NoSpace))
 	dst = appendBytes(dst, m.Reserved)
-	if v == metaVersion2 {
+	if v == metaVersion3 {
+		dst = appendKeys(dst, m.Membership.RetiredKeys)
+	}
+	if v == metaVersion2 || v == metaVersion3 {
 		dst = binary.LittleEndian.AppendUint32(dst, crc32.Checksum(dst[start:], castagnoli))
 	}
 	return dst
 }
 
 // ParseSnapshotMeta decodes a SnapshotMeta, copying every byte it keeps:
-// version 1, or version 2 once its trailing CRC-32C holds. Another
-// version is VERSION_UNSUPPORTED, a version 2 whose sum fails
+// version 1, or version 2 or 3 once its trailing CRC-32C holds. Another
+// version is VERSION_UNSUPPORTED, a version 2 or 3 whose sum fails
 // FRAME_INVALID.
 func ParseSnapshotMeta(b []byte, m *coreconsensus.SnapshotMetaValue) error {
 	body, err := metaFields(b)
@@ -301,6 +322,9 @@ func ParseSnapshotMeta(b []byte, m *coreconsensus.SnapshotMetaValue) error {
 	if reserved := r.bytes(); len(reserved) != 0 {
 		out.Reserved = slices.Clone(reserved)
 	}
+	if b[0] == metaVersion3 {
+		out.Membership.RetiredKeys = r.keys()
+	}
 	if r.err == nil && len(r.b) != 0 {
 		r.err = frameInvalid("snapshot meta trailing bytes", len(b))
 	}
@@ -312,11 +336,13 @@ func ParseSnapshotMeta(b []byte, m *coreconsensus.SnapshotMetaValue) error {
 }
 
 // metaFields returns the fields of an encoded SnapshotMeta, after its
-// version byte: those of version 1 as they are, those of version 2 once its
-// trailing CRC-32C holds. A version 2 read before its writer ships lets a
-// node run the release before the one that writes it, or roll back to it,
-// and still read every .meta and offer (#546). Another version is
-// VERSION_UNSUPPORTED, a version 2 whose sum fails FRAME_INVALID.
+// version byte: those of version 1 as they are, those of versions 2 and 3
+// once their trailing CRC-32C holds. A version 2 read before its writer
+// ships lets a node run the release before the one that writes it, or roll
+// back to it, and still read every .meta and offer (#546). Version 3 is
+// written only at a cluster version every member announced (#648). Another
+// version is VERSION_UNSUPPORTED, a version 2 or 3 whose sum fails
+// FRAME_INVALID.
 func metaFields(b []byte) ([]byte, error) {
 	if len(b) == 0 {
 		return nil, frameInvalid("short field", 0)
@@ -324,7 +350,7 @@ func metaFields(b []byte) ([]byte, error) {
 	switch b[0] {
 	case metaVersion1:
 		return b[1:], nil
-	case metaVersion2:
+	case metaVersion2, metaVersion3:
 		if len(b) < 1+metaSumLen {
 			return nil, frameInvalid("short field", len(b)-1)
 		}
@@ -404,6 +430,16 @@ func appendLogIdentity(dst []byte, l coreconsensus.LogIdentityValue) []byte {
 func appendString(dst []byte, s string) []byte {
 	dst = binary.LittleEndian.AppendUint32(dst, uint32(len(s)))
 	return append(dst, s...)
+}
+
+// appendKeys appends a u32-counted list of 32-byte keys: the retired keys
+// of a membership, in its order.
+func appendKeys(dst []byte, keys [][32]byte) []byte {
+	dst = binary.LittleEndian.AppendUint32(dst, uint32(len(keys)))
+	for i := range keys {
+		dst = append(dst, keys[i][:]...)
+	}
+	return dst
 }
 
 // appendBytes appends u32-length-prefixed bytes.
@@ -549,4 +585,23 @@ func (r *reader) membership() coreconsensus.MembershipValue {
 		m.Retired = append(m.Retired, coreconsensus.NodeID(r.u64()))
 	}
 	return m
+}
+
+// keys reads the layout appendKeys writes, nil for none. The count is
+// bounded by the bytes left before anything is allocated, as membership's
+// are.
+func (r *reader) keys() [][32]byte {
+	k := r.u32()
+	if r.err != nil {
+		return nil
+	}
+	if uint64(k)*uint64(keyLen) > uint64(len(r.b)) {
+		r.err = frameInvalid("retired key count", len(r.b))
+		return nil
+	}
+	var out [][32]byte
+	for range k {
+		out = append(out, [32]byte(r.n(keyLen)))
+	}
+	return out
 }

@@ -158,10 +158,11 @@ go_test(
         "verdictclose_internal_test.go",
         "waitapplied_internal_test.go",
         "waiter_internal_test.go",
+        "withdrawnkey_internal_test.go",
     ],
     data = glob(["testdata/**"]),
     embed = [":consensus"],
-    shard_count = 6,
+    shard_count = 8,
     deps = [
         "//internal/core/app/consensus",
         "//internal/core/data/transform",

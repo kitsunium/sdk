@@ -51,6 +51,15 @@ func (n *Node) joinReason(ctx context.Context, from coreconsensus.AuthenticatedP
 		// A slot that still has a live member is refused (R8-11).
 		return refuse("the slot still has a member")
 	}
+	if n.Membership().IsRetiredKey(r.SPKI) {
+		// One key, one id, for the cluster's whole life: the key of a
+		// member removed, or whose pin was denied, at protocol 3 is never
+		// admitted again, under any id. A node whose configuration still
+		// listed that member under it refused the new one as leader, a
+		// stale voter as a joiner (#648). The leader's AddLearner refuses
+		// it too; the reason says what to do.
+		return refuse("the key of a removed member: join with a new key")
+	}
 	op, err := n.cfg.JoinAuthorizer.Authorize(ctx, r)
 	if err != nil {
 		n.obs.warn("consensus: JOIN refused by the authorizer", lstr("slot", r.Slot), lstr("error", err.Error()))

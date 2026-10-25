@@ -45,9 +45,10 @@ func TestASnapshotMetaOfVersion2IsRead(t *testing.T) {
 }
 
 // Every single bit flipped in a version 2 metadata is refused: the version
-// byte names a version this node does not read, any other bit fails the
-// CRC-32C, FRAME_INVALID. Version 1 carries no sum, which is why its reader
-// cross-checks the id against the position (#546).
+// byte names a version this node does not read, or version 3, whose sum
+// then fails; any other bit fails the CRC-32C, FRAME_INVALID. Version 1
+// carries no sum, which is why its reader cross-checks the id against the
+// position (#546).
 func TestEveryBitFlippedInAVersion2MetaIsRefused(t *testing.T) {
 	enc := wire.AppendSnapshotMetaV2ForTest(nil, metaForTest())
 	for i := range enc {
@@ -57,7 +58,7 @@ func TestEveryBitFlippedInAVersion2MetaIsRefused(t *testing.T) {
 			var out coreconsensus.SnapshotMetaValue
 			err := wire.ParseSnapshotMeta(b, &out)
 			want := coreconsensus.FrameInvalid
-			if i == 0 {
+			if i == 0 && b[0] != 3 {
 				want = coreconsensus.VersionUnsupported
 			}
 			if !errors.Is(err, want) {

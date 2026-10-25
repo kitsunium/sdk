@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T20:23:47Z -->
+<!-- updated: 2026-10-24T23:30:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -36,11 +36,15 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
 | fuzz | `go test -fuzz` on the targets of `wire/` and this package; nightly in CI |
 | dm-crypt | `testdata/dmcrypt/run.sh` (Docker, privileged): fsync latency and power cuts through LUKS; results in `testdata/dmcrypt/RESULTS.md` |
 
-Under Bazel `consensus_test` has 6 shards: under race and coverage the suite
+Under Bazel `consensus_test` has 8 shards: under race and coverage the suite
 passed the 60 s cap per target once the disk scenarios of #507, #516 and
 #524 joined it (4 shards), and the snapshot and disk scenarios of #506,
 #512, #513, #515, #520, #525, #526 and #533 brought the slowest of 4 to
-28 s on an 8-core machine, too close to the cap on a CI runner.
+28 s on an 8-core machine, too close to the cap on a CI runner (6
+shards). The slowest of 6 reached 52 s under coverage on CI, and #648's
+scenarios took it past 60 s: Bazel deals top-level tests by index, and
+the sums per shard of a `-race -json` run, 43 s for the slowest of 6 on
+one machine, are 31 s at 8.
 
 ## Do NOT
 
@@ -176,6 +180,20 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   which one process does not exclude from itself (#422, ADR 0152).
 - Take a JOIN answer from an unpinned peer (`JoinConfig.Pins`, review M4),
   or admit a key two members share (review M5).
+- Admit at the JOIN, once the cluster is at protocol 3, the key of a member
+  removed or whose pin was denied, under any new id: one key, one id for
+  the cluster's whole life. A host back over a removed member's key file
+  led under a new id, and every node whose configuration still listed the
+  removed member under that key refused it as leader, a stale voter as a
+  joiner (#648, `TestAJoinOnARemovedMembersKeyIsRefusedOnceTheProtocolIsRaised`;
+  raft's `checkRetiredKeyRefused`). Nor keep a retired key below the raise
+  (`TestBelowProtocol3ARemovedMembersKeyIsAdmittedAsBefore`), drop the
+  retired keys at a `Recover` or a `RestoreSnapshot`
+  (`TestRecoverKeepsTheRetiredKeysOfAHistoryAtProtocol3`,
+  `TestARestoredSnapshotKeepsItsRetiredKeys`) or at an install
+  (`TestANodeThatInstallsASnapshotRefusesItsRetiredKeys`), or read them
+  anywhere but the JOIN and raft's `addLearner`: a retired key never cuts a
+  live member, and the transport's admission stays M5's.
 - Extend the JOIN of `laneJoin` in place: a member that predates a field
   reads it as part of the address. A joiner announcing its
   `MaxSnapshotBytes` uses `laneJoinV2` (`joinVersion2`, the limit, then the
@@ -503,7 +521,10 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   meta never carries it) are chosen by the cluster version, and a node of protocol 1 stops on the
   raise instead of meeting them (`TestAVersion2MetaThatRottedIsNotRestored`,
   `TestRecoverBelowProtocol2RecordsNoAdoptedRange`, raft's
-  `checkRaiseAnnounced`).
+  `checkRaiseAnnounced`). Nor one of protocol 3 before it is 3: the admin
+  payload and the snapshot meta of version 3, which carry the retired keys,
+  and `Recover`'s forced entry of version 3 (#648, raft's
+  `checkNothingNewBelowProtocol3` and `TestAMixedClusterRaisesTo3OnceEveryMemberSpeaksIt`).
 - Commit an administrative entry with an origin the forwarder wrote, or
   append one as leader without a Warn naming its origin (#561,
   `TestAForwardedRemoveRecordsTheFollowerAsItsOrigin`, raft's
@@ -570,7 +591,8 @@ passed the 60 s cap per target once the disk scenarios of #507, #516 and
   (`joinHold.gen`, `TestAJoinSentAgainNeverInstallsOverALaterJoin`).
 - Read a snapshot offer under `MaxControlFrameBytes`, or end a refused one
   without a line: its metadata carries the configuration, `Retired`
-  included, which every Remove grows for good, and past about 8 100
+  included, and from protocol 3 `RetiredKeys` (#648), which every Remove
+  grows for good, and past about 8 100
   removals no snapshot was ever installed over TCP again (#634,
   `serveSnapshot`, `offerRefused`,
   `TestASnapshotOfferCarryingManyRetiredIDsIsInstalledOverTCP`). The memory

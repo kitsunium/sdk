@@ -10,15 +10,19 @@ import (
 
 // A meta of a cluster below protocol 2 is written in version 1, which the
 // release before writes; one of a cluster at 2 in version 2, which the
-// release before reads. Both are read back as they were written (#546
-// phase 2, D18).
+// release before reads; one of a cluster at 3 in version 3, which carries
+// the retired keys of its configuration (#648). Each is read back as it
+// was written (#546 phase 2, D18).
 func TestTheMetaVersionFollowsTheClusterVersion(t *testing.T) {
 	for _, tc := range []struct {
 		cluster uint32
 		version byte
-	}{{0, 1}, {1, 1}, {2, 2}} {
+	}{{0, 1}, {1, 1}, {2, 2}, {3, 3}} {
 		m := metaForTest()
 		m.ClusterVersion = tc.cluster
+		if tc.cluster >= 3 {
+			m.Membership.RetiredKeys = [][32]byte{{0x99}, {0x9a}}
+		}
 		b := wire.AppendSnapshotMeta(nil, m)
 		if b[0] != tc.version {
 			t.Fatalf("cluster version %d: meta written in version %d, want %d", tc.cluster, b[0], tc.version)

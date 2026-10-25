@@ -57,15 +57,24 @@ workflows:
       - opt:
           do:
             - return: "0"
-          when: v < Protocol2 || r.mutated(mutRaiseUnannounced)
+          when: v < Protocol2
+      - bind: want
+        eval: peerHeard | peerProtocol2
+      - opt:
+          do:
+            - op: "|="
+              set: want
+              value: peerProtocol3
+          when: v >= Protocol3
       - loop:
           do:
-            - bind: pr
-              eval: r.prs[m.ID]
             - opt:
                 do:
                   - return: codeVersion
-                when: pr == nil || pr.facts&peerHeard == 0 || pr.facts&peerProtocol2 == 0
+                init:
+                  bind: pr
+                  eval: r.prs[m.ID]
+                when: pr == nil || pr.facts&want != want
           key: _
           range: r.conf().Members
           value: m

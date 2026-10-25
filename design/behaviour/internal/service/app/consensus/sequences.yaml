@@ -7009,6 +7009,10 @@ sequences:
           do:
             - return: refuse("the slot still has a member")
           when: n.slotTaken(r.Slot)
+      - opt:
+          do:
+            - return: "refuse(\"the key of a removed member: join with a new key\")"
+          when: n.Membership().IsRetiredKey(r.SPKI)
       - bind: op, err
         eval: n.cfg.JoinAuthorizer.Authorize(ctx, r)
         to: n.cfg.JoinAuthorizer.Authorize
@@ -14232,6 +14236,8 @@ sequences:
         kind: internal
       - id: d.chainAt
         kind: internal
+      - id: clusterVersionThrough
+        kind: internal
       - id: wire
         kind: package
       - id: flog.Append
@@ -14266,16 +14272,31 @@ sequences:
           when: err != nil
       - bind: term
         eval: max(hard.Term, termAt) + 1
+      - bind: cluster, err
+        eval: clusterVersionThrough(flog, d.d.snaps, commit)
+        to: clusterVersionThrough
+      - opt:
+          do:
+            - return: err
+          when: err != nil
       - bind: conf
         eval: "coreconsensus.MembershipValue{Members: byID(members), Retired: old.Retired}"
+      - var:
+          name: version
+          type: uint32
+      - opt:
+          do:
+            - set: version, conf.RetiredKeys
+              value: wire.AdminVersion3, slices.Clone(old.RetiredKeys)
+          when: cluster >= raft.Protocol3
       - bind: data
-        eval: "wire.AppendAdmin(nil, &wire.AdminValue{Operator: string(operator), Change: wire.ChangeForced, Membership: conf})"
+        eval: "wire.AppendAdminAt(nil, version, &wire.AdminValue{Operator: string(operator), Change: wire.ChangeForced, Membership: conf})"
         to: wire
       - bind: e
         eval: |-
           coreconsensus.EntryValue{
           		Position: coreconsensus.PositionValue{Term: term, Index: commit + 1}, Kind: coreconsensus.EntryMembership,
-          		BodySum: wire.BodySum(data), Data: data,
+          		Version: version, BodySum: wire.BodySum(data), Data: data,
           	}
       - set: e.ChainSum
         to: wire
@@ -14758,7 +14779,11 @@ sequences:
               value: exp.Position.Index
           when: exp.ClusterVersion >= raft.Protocol2
       - set: meta.Membership
-        value: "coreconsensus.MembershipValue{Index: exp.Position.Index, Members: slices.Clone(members), Retired: exp.Membership.Retired}"
+        value: |-
+          coreconsensus.MembershipValue{
+          		Index: exp.Position.Index, Members: slices.Clone(members), Retired: exp.Membership.Retired,
+          		RetiredKeys: exp.Membership.RetiredKeys,
+          	}
       - return: meta
   - of: DataDir.spoolRestored
     participants:

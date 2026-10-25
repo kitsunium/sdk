@@ -1344,6 +1344,20 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.FlagProtocol3",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "FlagProtocol3",
+      "spelled": "coreconsensus.MessageFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/core/app/consensus.MessageFlags",
+      "value": "32",
+      "init": "go:github.com/kitsunium/sdk/internal/core/app/consensus.FlagProtocol3",
+      "doc": "The read modes and durabilities.\n",
+      "file": "consensus/gen_facade.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.FlagTransfer",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
@@ -2653,7 +2667,7 @@
       "name": "ParseSnapshotMeta",
       "spelled": "func(b []byte, m *SnapshotMetaValue) error",
       "canonical": "func(b []byte, m *github.com/kitsunium/sdk/pkg/v1/app/consensus.SnapshotMetaValue) error",
-      "doc": "ParseSnapshotMeta decodes a SnapshotMeta: version 1, or version 2\nonce its trailing CRC-32C holds.\n",
+      "doc": "ParseSnapshotMeta decodes a SnapshotMeta: version 1, or version 2 or\n3 once its trailing CRC-32C holds.\n",
       "file": "consensus/gen_facade.go",
       "layer": "public",
       "family": "app"

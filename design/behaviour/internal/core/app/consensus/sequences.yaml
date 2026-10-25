@@ -60,6 +60,17 @@ sequences:
     steps:
       - return: slices.Contains(m.Retired, id)
         to: slices
+  - of: MembershipValue.IsRetiredKey
+    participants:
+      - id: caller
+        kind: actor
+      - id: MembershipValue.IsRetiredKey
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Contains(m.RetiredKeys, spki)
+        to: slices
   - of: MembershipValue.Clone
     steps:
       - return: |-
@@ -68,8 +79,9 @@ sequences:
           		// append(s[:0:0], s...) is the copy slices.Clone makes, nil kept nil,
           		// written out because slices.Clone's own body would push the engine's
           		// ConfAt, which inlines this method, past the inliner's budget.
-          		Members: append(m.Members[:0:0], m.Members...),
-          		Retired: append(m.Retired[:0:0], m.Retired...),
+          		Members:     append(m.Members[:0:0], m.Members...),
+          		Retired:     append(m.Retired[:0:0], m.Retired...),
+          		RetiredKeys: append(m.RetiredKeys[:0:0], m.RetiredKeys...),
           	}
   - of: MessageKind.Lane
     steps:

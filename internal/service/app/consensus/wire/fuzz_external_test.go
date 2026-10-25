@@ -35,14 +35,19 @@ func FuzzParseSnapshotMeta(f *testing.F) {
 	m := &coreconsensus.SnapshotMetaValue{ID: "1-2", Version: 1, Position: coreconsensus.PositionValue{Term: 2, Index: 1}, Codec: "flate"}
 	f.Add(wire.AppendSnapshotMeta(nil, m))
 	f.Add(wire.AppendSnapshotMetaV2ForTest(nil, m))
+	m.Membership.RetiredKeys = [][32]byte{{0x99}}
+	f.Add(wire.AppendSnapshotMetaV3ForTest(nil, m))
 	f.Fuzz(func(t *testing.T, b []byte) {
 		var out coreconsensus.SnapshotMetaValue
 		if err := wire.ParseSnapshotMeta(b, &out); err != nil {
 			return
 		}
 		again := wire.AppendSnapshotMetaV1ForTest(nil, &out)
-		if b[0] == 2 {
+		switch b[0] {
+		case 2:
 			again = wire.AppendSnapshotMetaV2ForTest(nil, &out)
+		case 3:
+			again = wire.AppendSnapshotMetaV3ForTest(nil, &out)
 		}
 		if !bytes.Equal(again, b) {
 			t.Fatalf("accepted meta does not round-trip")
@@ -50,15 +55,19 @@ func FuzzParseSnapshotMeta(f *testing.F) {
 	})
 }
 
-// FuzzParseAdmin: the admin payload decoder never panics, in either
-// payload version. A refusal is the expected outcome for most inputs and
-// carries nothing to assert; the property under test is that the call
-// returns at all.
+// FuzzParseAdmin: the admin payload decoder never panics, in any payload
+// version. A refusal is the expected outcome for most inputs and carries
+// nothing to assert; the property under test is that the call returns at
+// all.
 func FuzzParseAdmin(f *testing.F) {
 	f.Add(wire.AppendAdmin(nil, &wire.AdminValue{Operator: "op", Change: wire.ChangeRemove, Target: 9}))
 	f.Add(wire.AppendAdminAt(nil, wire.AdminVersion2, &wire.AdminValue{Operator: "op", Change: wire.ChangeRemove, Target: 9, Origin: 4}))
+	f.Add(wire.AppendAdminAt(nil, wire.AdminVersion3, &wire.AdminValue{
+		Operator: "op", Change: wire.ChangeRemove, Target: 9, Origin: 4,
+		Membership: coreconsensus.MembershipValue{Retired: []coreconsensus.NodeID{9}, RetiredKeys: [][32]byte{{0x99}}},
+	}))
 	f.Fuzz(func(_ *testing.T, b []byte) {
-		for _, v := range []uint32{0, wire.AdminVersion2} {
+		for _, v := range []uint32{0, wire.AdminVersion2, wire.AdminVersion3} {
 			if _, err := wire.ParseAdminAt(v, b); err != nil {
 				continue
 			}

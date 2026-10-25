@@ -91,6 +91,9 @@ type simNode struct {
 	applied     []core.EntryValue
 	checked     uint64
 	maxTerm     uint64
+	// unsupported is the first entry this node reported it cannot apply,
+	// zero while it reported none.
+	unsupported UnsupportedEntryValue
 }
 
 type entryKey struct {
@@ -120,6 +123,10 @@ type simOptions struct {
 	// snapLoss is the chance a restart loses the snapshot's body, the node
 	// keeping its log and starting with no table.
 	snapLoss float64
+	// speaks, per node, is the protocol version it runs in place of
+	// ProtocolMax: a node of a previous release in a mixed cluster. Read at
+	// each start, so a restart after a change upgrades the node.
+	speaks map[core.NodeID]uint32
 }
 
 type sim struct {
@@ -208,6 +215,7 @@ func (s *sim) cfg(id core.NodeID) Config {
 		ID: id, Group: 1, Seed: s.opt.seed*31 + uint64(id), Timing: s.timing,
 		MaxInflight: 16, MaxInflightBytes: 1 << 20, MaxBatchBytes: 64 << 10, MinVoters: 1,
 		PromoteLag: 64, Lease: s.opt.lease, CanVote: true, MaxChainRefusals: 3, mut: s.opt.mut, RecentEntriesBytes: s.opt.recent,
+		speaks: s.opt.speaks[id],
 	}
 }
 
@@ -267,7 +275,8 @@ func (s *sim) deliver(m core.MessageValue) {
 	if s.onSend != nil {
 		s.onSend(m)
 	}
-	if s.cut[[2]core.NodeID{m.From, m.To}] || s.rng.Float64() < s.opt.drop {
+	// A learner the test added without a node never answers.
+	if s.nodes[m.To] == nil || s.cut[[2]core.NodeID{m.From, m.To}] || s.rng.Float64() < s.opt.drop {
 		return
 	}
 	m.Entries = slices.Clone(m.Entries)
@@ -281,6 +290,9 @@ func (s *sim) deliver(m core.MessageValue) {
 func (s *sim) process(n *simNode) {
 	for n.alive && n.r.HasReady() {
 		rd := n.r.Ready()
+		if rd.Unsupported.Index != 0 && n.unsupported.Index == 0 {
+			n.unsupported = rd.Unsupported
+		}
 		for _, m := range rd.Messages {
 			s.deliver(m)
 		}
@@ -608,7 +620,7 @@ func (s *sim) sendSnapshot(n *simNode, to core.NodeID) {
 		return
 	}
 	m := core.MessageValue{From: n.id, To: to, Term: n.r.Status().Term}
-	if s.cut[[2]core.NodeID{n.id, to}] || s.rng.Float64() < s.opt.drop {
+	if s.nodes[to] == nil || s.cut[[2]core.NodeID{n.id, to}] || s.rng.Float64() < s.opt.drop {
 		s.push(&event{at: s.now.Add(rtt(n.id, to)), kind: evSnapDone, node: n.id, life: n.life, msg: core.MessageValue{From: to}})
 		return
 	}

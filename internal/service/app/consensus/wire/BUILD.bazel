@@ -37,6 +37,7 @@ go_test(
         "gen_api_test.go",
         "meta_external_test.go",
         "metav2_external_test.go",
+        "metav3_external_test.go",
     ],
     data = glob(["testdata/**"]),
     embed = [":wire"],

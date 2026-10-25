@@ -1600,6 +1600,16 @@ rules:
       # built, never on Enqueue's path (ADR 0185).
       - "**/internal/service/app/forward/forwarder.go"
       - "internal/service/app/forward/forwarder.go"
+      # core/app/consensus.MembershipValue (80 bytes) crossed 64 bytes when
+      # #648 gave it RetiredKeys beside Members and Retired: three slice
+      # headers and an index. Its methods — Member, IsRetired, IsRetiredKey,
+      # Voters, Clone — take it by value as the design fixes (recv: value) and
+      # pkg/v1/app/consensus aliases it: the engine and its callers read them
+      # on a value a call returned (Node.Membership(), Raft.ConfAt), which a
+      # pointer receiver would not even compile on, and a copy is the three
+      # headers, never their elements. Scoped to the one file.
+      - "**/internal/core/app/consensus/membership.go"
+      - "internal/core/app/consensus/membership.go"
       # core/app/cli.CommandValue is 88 bytes — Name + Summary + Description (16
       # each) + Flags + Run (8 each) + Commands (24) — and none of the six is
       # removable: they are the whole declaration. Value semantics are the

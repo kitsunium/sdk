@@ -1004,7 +1004,10 @@ R2-21).**
     `Bootstrap`, `Recover` and `RestoreSnapshot` refuse a member whose key
     another member already holds, and a transport given two members under
     one key admits that key for neither: admission goes by key, so two
-    members under one key could speak as each other.
+    members under one key could speak as each other. From protocol 3, one
+    key, one ID for the cluster's whole life: `AddLearner` and the `JOIN`
+    also refuse the key of a member removed, or whose pin was denied
+    (amendment of 2026-10-24, [#648](https://github.com/kitsunium/sdk/issues/648)).
   - The dialer checks the listener's SAN, and the listener checks the
     dialer's. A wrong cluster or slot is `PEER_REJECTED`.
   - The transport takes its own cluster and slot from its own certificate's
@@ -1592,9 +1595,10 @@ is refused with `OVERLOADED`. Nothing is appended in either case.
 - **The engine's own replicated state rides in the snapshot (R2-12).**
   `SnapshotMeta` is versioned and carries the committed cluster version, the
   committed timing contract, the no-space alarm, a reserved alarm field
-  carried uninterpreted for ADR 0173 (R6-04), and the set of retired IDs. A node that installs a snapshot restores them before it
+  carried uninterpreted for ADR 0173 (R6-04), and the set of retired IDs, and
+  from protocol 3 the set of retired keys (amendment of 2026-10-24, #648). A node that installs a snapshot restores them before it
   admits any peer, so a node rebuilt from a snapshot cannot forget a retired
-  ID or an alarm.
+  ID, a retired key or an alarm.
 - **Compaction bound (R1-14, R6-02):** after the snapshot is committed to
   disk, `CompactPrefix` drops the log through
   `min(older retained snapshot.Index, applied) − SnapshotTrailing` (default
@@ -1862,7 +1866,9 @@ one term — once before the loss, once after — and elect two leaders.
   can only join as an empty learner.
 - The set of removed IDs is replicated, part of the membership. `AddLearner`
   and `Promote` refuse a retired ID with `NODE_ID_RETIRED`, and so does the
-  transport.
+  transport. From protocol 3 the keys of the members removed are replicated
+  beside them, and `AddLearner` and the `JOIN` refuse one under any new ID
+  (amendment of 2026-10-24, #648).
 - **Bootstrap (R2-24, R7-36, R7-43).** It is an explicit call in two phases.
   First `Init` runs on every founding node and prints its
   `NodeID:Incarnation:slot:SPKI:address` (R9-04). Then `Bootstrap` runs on every founding node
@@ -3829,7 +3835,9 @@ Nomad and Vault.
 - **A returning allocation with a retired ID (R8-11)** wipes its directory
   only under the R7-39 conditions AND a quorum-confirmed answer that its ID
   is retired. It RENAMES the directory to a dated name, kept N days, and
-  never deletes it. It then rejoins as a new node.
+  never deletes it. It then rejoins as a new node, with a new key: from
+  protocol 3 the cluster refuses a removed member's key under any new ID
+  (amendment of 2026-10-24, #648).
 - **Rolling update, one job, site by site (Q16, R8-19, R9-12).**
   - **No generic submitter touches this job.** The job carries `meta {
     rollout = "script" }`, and every generic submitter, the management's
@@ -4301,6 +4309,88 @@ which open the log the same way, with it
 
 Nothing published changes: no frame, no payload, no record format.
 
+## Amendment — protocol version 3: one key, one ID for the cluster's whole life (2026-10-24, #648)
+
+D4's "one key, one member" (review M5) held among the current members
+only: `AddLearner` and the `JOIN` compared a new member's key with the keys
+of the configuration's members, never with those of the members it had
+removed, so the key of a removed member could be taken again under a new
+ID ([#648](https://github.com/kitsunium/sdk/issues/648)). Forgejo's
+autopilot removes a dead member without revoking its key, so that it
+returns, and keeps the key apart from the Raft data directory: a host whose
+data was wiped joined under a new ID with the same key. Once that member
+led, every node whose configuration still listed the removed member under
+the key — a voter back from an outage, even with #542's leader record, or
+a joiner replaying a state from before the `Remove` — published the key
+under two IDs, and its transport, which admits a key two members hold for
+neither (M5), refused the leader for as long as it led: the voter frozen,
+one failure away from the loss of every commit (the class of #603), the
+joiner never admitted. The owner chose on 2026-10-24 to remove the case,
+not to work around it on every node:
+
+- **One key, one ID, for the cluster's whole life.** From protocol 3 the
+  configuration keeps the SPKI pin of every member a `Remove` takes out,
+  and of every pin a `DenyPin` withdraws: `Membership.RetiredKeys`, beside
+  `Retired`. `AddLearner` refuses a retired key `MEMBERSHIP_INVALID`, as it
+  refuses a key a current member holds, and the `JOIN` refuses it
+  `JOIN_REFUSED`, its reason saying to join with a new key, as it refuses a
+  slot a live member holds. A member removed comes back under a new ID and
+  a new key. The renewal of a live member's certificate still reuses its
+  key (R8-07).
+- **A retired key never cuts a live member.** Only `AddLearner` and the
+  `JOIN` read the list; the transport, the admission set and the leader
+  record (#542) do not. A member that holds a retired key — admitted
+  before the raise, or named by a forced configuration — stays admitted as
+  any member.
+- **Bounded as `Retired` is.** The list grows by a key, 32 bytes, at each
+  `Remove` or `DenyPin` of a pinned member and is never pruned, as
+  `Retired` grows by an ID (amendment of 2026-10-24, #634). It rides in
+  every membership entry, which the leader rewrites into the whole
+  configuration (D8), and in the snapshot offer, both read under
+  `MaxFrameBytes`. Bounding it, like bounding `Retired`, would need another
+  way to keep the guarantee, and is left open with it.
+- **A format change, so protocol 3 (D18), on protocol 2's scheme:**
+  - **Announcement.** A node of protocol 3 sets `FlagProtocol3` on every
+    frame it sends, beside `FlagProtocol2`. A node of protocol 2 tests only
+    the bits it names, and ignores it. The leader keeps, per member,
+    whether its last message of the term carried each flag.
+  - **The raise.** `RaiseClusterVersion(3)` is refused
+    `VERSION_UNSUPPORTED` while any member of the latest configuration,
+    voter or learner, was not heard in the term announcing protocol 3; the
+    raise to 2 still asks for `FlagProtocol2` alone. A node of protocol 2
+    that replays the raise to 3, or meets a snapshot at cluster version 3,
+    stops `VERSION_UNSUPPORTED` (#640). Do not roll back past the raise.
+  - **What protocol 3 writes**, each chosen by the committed cluster
+    version, never before the raise, and each older form still read:
+    - the admin payload of entry version 3 (`wire.AdminVersion3`): version
+      2's fields, `Origin` included, then the retired keys of its
+      membership. A node of protocol 2 reads versions 0 and 2 only, and
+      stops on version 3 when the entry commits;
+    - the snapshot metadata in version 3, for a cluster at version 3:
+      version 1's fields, then the retired keys, then the CRC-32C of every
+      byte before it. A node of protocol 2 refuses it
+      `VERSION_UNSUPPORTED`; that guard, rule 5 of #564's old reader,
+      already ships (#513, #640);
+    - `Recover`'s forced entry, in a history at protocol 3, of payload
+      version 3: it keeps the old configuration's retired keys as it keeps
+      its retired IDs, and `RestoreSnapshot` keeps the snapshot's. Below,
+      the forced entry is of version 0, as it always was.
+  - **Below the raise nothing changes.** A `Remove` keeps no key, every
+    entry stays of payload version 2 at most and the snapshot metadata of
+    version 2, and the key of a removed member is admitted again, as
+    before.
+- **What protocol 3 cannot know.** A key removed before the raise was never
+  kept: the guarantee holds for every `Remove` and `DenyPin` the leader
+  admits once the raise to 3 is committed, as `Origin` is written from the
+  raise to 2 on, and a key reused before the raise stays with its member
+  (above).
+- **Forgejo, part C of the decision (tracked in kodflow/forgejo-raft).** A
+  member removed comes back with a fresh key, never its old one, which a
+  cluster not yet raised needs as much. D19's rule holds: the autopilot
+  raises to protocol 3 only in a release that says so, never on its pin
+  alone, and `RaiseClusterVersion(3)` is no longer a protocol this engine
+  refuses to speak.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -4314,6 +4404,7 @@ Nothing published changes: no frame, no payload, no record format.
 | R9 | review run 3, round 3 (final, overall round 9), 2026-10-13 | **State: rewritten after the final round, not re-reviewed.** Batch sequences contiguous, stale recovery rules withdrawn, tears judged on the highest batch's end record per 512 B chunk (R9-01 to R9-03). SPKI required at every founding and recovery, break-glass certificates over the pinned key, `STORAGE_FAILED` markers in two places, a `join` callback off the event loop, the lane in the frame type's high bits (R9-04 to R9-07). The witness: signed receipts from both NAS, a check that blocks Forgejo only and fails closed, reached through a dated read-only matrix exception (Q18, Q19, Q20, R9-08 to R9-11). The job kept from generic submitters and rolled with a plan check, Vault roles bound by namespace with a claim per slot (R9-12, R9-13). The SQL boundary: backup cursor, step table, per-database dumps, predecessor events drained (R9-14 to R9-16, R9-19). Submission counter exhaustion, `DenyPin`, the image outside the forge, `require_cn` lab-gated (R9-17, R9-18, R9-20, R9-21) |
 | Accepted | the owner's decision, 2026-10-13 | Accepted on R9 as written; the SDK stays public. No text changed but the status |
 | S3 | Raft hunt lot S3, 2026-10-23 | protocol version 2 raised once: the announcement, the raise refused until every member speaks it, the checksummed snapshot meta, `Origin`, `AdoptedFrom`, the stale voter's admission of a vouched-for leader in D4 (amendment of 2026-10-23) |
+| #648 | the owner's decision, 2026-10-24 | protocol version 3: one key, one ID for the cluster's whole life, the retired keys in the configuration, the admin payload and the snapshot metadata of version 3, `FlagProtocol3` and the raise refused until every member announces it (amendment of 2026-10-24, #648) |
 
 ## raft-sql-poc (owner's prior Raft)
 

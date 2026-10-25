@@ -15,6 +15,9 @@ const (
 	// peerProtocol2 is set while the peer's last message of the term
 	// carried FlagProtocol2.
 	peerProtocol2
+	// peerProtocol3 is set while the peer's last message of the term
+	// carried FlagProtocol3.
+	peerProtocol3
 )
 
 // peerFacts are a peer's yes/no state in the leader's progress, one bit each.

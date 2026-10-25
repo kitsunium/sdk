@@ -1358,7 +1358,8 @@ func installResult(c *tls.Conn) error {
 // The offer is read under MaxFrameBytes, the data lane's bound, never the
 // control lane's: its metadata carries the configuration at the snapshot's
 // index, Retired included, which every Remove grows by an ID for the life of
-// the cluster. Read under MaxControlFrameBytes (64 KiB by default), past
+// the cluster, and from protocol 3 RetiredKeys, which it grows by a key
+// (#648). Read under MaxControlFrameBytes (64 KiB by default), past
 // about 8 100 removals no snapshot was ever installed again, and the
 // receiver ended each stream without a word (#634). A configuration already
 // reaches every member in a membership entry under MaxFrameBytes. An offer

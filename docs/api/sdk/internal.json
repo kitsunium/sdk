@@ -3701,6 +3701,19 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.FlagProtocol3",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
+      "name": "FlagProtocol3",
+      "spelled": "MessageFlags",
+      "canonical": "github.com/kitsunium/sdk/internal/core/app/consensus.MessageFlags",
+      "value": "32",
+      "doc": "FlagProtocol3 marks a frame from a node that speaks protocol version\n3, which sets FlagProtocol2 beside it. A node of protocol 2 or below\ntests the bits it names only and ignores it, and a leader refuses to\nraise the cluster version to 3 while a member's last frame of the term\nlacks it.\n",
+      "file": "core/app/consensus/message.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.FlagTransfer",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
@@ -4587,8 +4600,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
       "name": "MembershipValue",
-      "spelled": "struct{Index uint64; Members []MemberValue; Retired []NodeID}",
-      "canonical": "struct{Index uint64; Members []github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue; Retired []github.com/kitsunium/sdk/internal/core/app/consensus.NodeID}",
+      "spelled": "struct{Index uint64; Members []MemberValue; Retired []NodeID; RetiredKeys [][32]byte}",
+      "canonical": "struct{Index uint64; Members []github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue; Retired []github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; RetiredKeys [][32]byte}",
       "fields": [
         {
           "name": "Index",
@@ -4604,9 +4617,14 @@
           "name": "Retired",
           "type": "[]NodeID",
           "doc": "Retired lists every removed NodeID.\n"
+        },
+        {
+          "name": "RetiredKeys",
+          "type": "[][32]byte",
+          "doc": "RetiredKeys lists the SPKI pin of every member removed, and every pin\nDenyPin withdrew, since the cluster version is 3: a key held once is\nnever admitted again under another id. Empty below version 3.\n"
         }
       ],
-      "doc": "MembershipValue is the configuration at a position: its members and the set of\nretired IDs, which is never reused.\n",
+      "doc": "MembershipValue is the configuration at a position: its members, the set of\nretired IDs, which is never reused, and from protocol 3 the set of retired\nkeys, which is never admitted again.\n",
       "file": "core/app/consensus/membership.go",
       "layer": "core",
       "family": "app"
@@ -4633,6 +4651,19 @@
       "spelled": "func(id NodeID) bool",
       "canonical": "func(id github.com/kitsunium/sdk/internal/core/app/consensus.NodeID) bool",
       "doc": "IsRetired reports whether the id was removed.\n",
+      "file": "core/app/consensus/membership.go",
+      "layer": "core",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue.IsRetiredKey",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
+      "name": "IsRetiredKey",
+      "recv": "MembershipValue",
+      "spelled": "func(spki [32]byte) bool",
+      "canonical": "func(spki [32]byte) bool",
+      "doc": "IsRetiredKey reports whether the key was retired with a member removed, or\nwith a pin denied.\n",
       "file": "core/app/consensus/membership.go",
       "layer": "core",
       "family": "app"
@@ -51267,14 +51298,27 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.Protocol3",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "Protocol3",
+      "spelled": "uint32",
+      "canonical": "uint32",
+      "value": "3",
+      "doc": "Protocol3 is the protocol version from which a configuration keeps the\nkey of every member removed, and of every pin denied, and refuses it to\nany new member (#648).\n",
+      "file": "service/app/consensus/raft/raft.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.ProtocolMax",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "ProtocolMax",
       "spelled": "uint32",
       "canonical": "uint32",
-      "value": "2",
-      "doc": "ProtocolMax is the highest protocol version this engine speaks: a cluster\nversion above it is refused, and stops a node that finds it committed.\nVersion 2 adds the snapshot metadata's checksum, the admin payload's\nOrigin and the log identity's AdoptedFrom, each written only once the\ncommitted cluster version is 2 (lot S3).\n",
+      "value": "3",
+      "doc": "ProtocolMax is the highest protocol version this engine speaks: a cluster\nversion above it is refused, and stops a node that finds it committed.\nVersion 2 adds the snapshot metadata's checksum, the admin payload's\nOrigin and the log identity's AdoptedFrom, each written only once the\ncommitted cluster version is 2 (lot S3). Version 3 adds the retired keys\nof the configuration, written only once it is 3 (#648).\n",
       "file": "service/app/consensus/raft/raft.go",
       "layer": "service",
       "family": "app"
@@ -52107,7 +52151,7 @@
         {
           "name": "Origin",
           "type": "coreconsensus.NodeID",
-          "doc": "Origin is the authenticated node the leader received the operation\nfrom: the member that forwarded it, or the leader itself. The leader\nwrites it, overwriting whatever the proposer wrote, and only in an\nentry of payload version AdminVersion2 (ADR 0152 D8, #561).\n"
+          "doc": "Origin is the authenticated node the leader received the operation\nfrom: the member that forwarded it, or the leader itself. The leader\nwrites it, overwriting whatever the proposer wrote, and only in an\nentry of payload version AdminVersion2 or AdminVersion3 (ADR 0152 D8,\n#561).\n"
         }
       ],
       "doc": "AdminValue is the payload of every engine entry kind: who asked, what it expects\nto act on, and what it changes. Each kind reads the fields it needs.\n",
@@ -52124,6 +52168,19 @@
       "canonical": "uint32",
       "value": "2",
       "doc": "AdminVersion2 is the payload version of an engine entry whose admin\ncarries Origin. A leader writes it once the committed cluster version is\n2, never before: a node of protocol 1 reads version 0 only (D18, #561).\n",
+      "file": "service/app/consensus/wire/admin.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/wire.AdminVersion3",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/wire",
+      "name": "AdminVersion3",
+      "spelled": "uint32",
+      "canonical": "uint32",
+      "value": "3",
+      "doc": "AdminVersion3 is the payload version of an engine entry whose admin\ncarries, after version 2's Origin, the retired keys of its membership. A\nleader writes it once the committed cluster version is 3, never before: a\nnode of protocol 2 reads versions 0 and 2 only (D18, #648).\n",
       "file": "service/app/consensus/wire/admin.go",
       "layer": "service",
       "family": "app"
@@ -52147,7 +52204,7 @@
       "name": "AppendAdminAt",
       "spelled": "func(dst []byte, v uint32, a *AdminValue) []byte",
       "canonical": "func(dst []byte, v uint32, a *github.com/kitsunium/sdk/internal/service/app/consensus/wire.AdminValue) []byte",
-      "doc": "AppendAdminAt appends the encoding of an engine entry's payload of\nversion v: version 0's fields, then Origin from AdminVersion2. Another\nversion is not written: the encoding of version 0 is returned for it.\n",
+      "doc": "AppendAdminAt appends the encoding of an engine entry's payload of\nversion v: version 0's fields, then Origin from AdminVersion2, then the\nmembership's retired keys from AdminVersion3. Another version is not\nwritten: the encoding of version 0 is returned for it.\n",
       "file": "service/app/consensus/wire/admin.go",
       "layer": "service",
       "family": "app"
@@ -52183,7 +52240,7 @@
       "name": "AppendSnapshotMeta",
       "spelled": "func(dst []byte, m *coreconsensus.SnapshotMetaValue) []byte",
       "canonical": "func(dst []byte, m *github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue) []byte",
-      "doc": "AppendSnapshotMeta appends the versioned encoding of m. The version\nfollows the cluster version m carries: a meta of a cluster below protocol\nversion 2 is written in version 1, and one of a cluster at 2 or above in\nversion 2, checksummed, which the release before already reads (D18,\n#546). Only a cluster whose every member announced protocol 2 reaches\nthat version.\n",
+      "doc": "AppendSnapshotMeta appends the versioned encoding of m. The version\nfollows the cluster version m carries: a meta of a cluster below protocol\nversion 2 is written in version 1, one of a cluster at 2 in version 2,\nchecksummed, which the release before already reads (D18, #546), and one\nof a cluster at 3 or above in version 3, which adds the retired keys of\nits configuration (#648). Only a cluster whose every member announced a\nprotocol reaches its version.\n",
       "file": "service/app/consensus/wire/codec.go",
       "layer": "service",
       "family": "app"
@@ -52394,7 +52451,7 @@
       "name": "ParseSnapshotMeta",
       "spelled": "func(b []byte, m *coreconsensus.SnapshotMetaValue) error",
       "canonical": "func(b []byte, m *github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue) error",
-      "doc": "ParseSnapshotMeta decodes a SnapshotMeta, copying every byte it keeps:\nversion 1, or version 2 once its trailing CRC-32C holds. Another\nversion is VERSION_UNSUPPORTED, a version 2 whose sum fails\nFRAME_INVALID.\n",
+      "doc": "ParseSnapshotMeta decodes a SnapshotMeta, copying every byte it keeps:\nversion 1, or version 2 or 3 once its trailing CRC-32C holds. Another\nversion is VERSION_UNSUPPORTED, a version 2 or 3 whose sum fails\nFRAME_INVALID.\n",
       "file": "service/app/consensus/wire/codec.go",
       "layer": "service",
       "family": "app"
