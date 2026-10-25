@@ -93,12 +93,11 @@ func TestAJoinerKeepsALeaderNewerThanTheConfigurationItReplays(t *testing.T) {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
-			if err := tcpLeader(t, ns).node.Promote(ctx, "op:test", d.id); err != nil {
-				t.Fatalf("promote D: %v", err)
-			}
-			if err := tcpLeader(t, ns).node.TransferLeadership(ctx, "op:test", d.id); err != nil {
-				t.Fatalf("transfer to D: %v", err)
-			}
+			// A promotion is refused while the leader has not heard the learner's
+			// durable progress within an election timeout: D applied the write,
+			// its acknowledgement may still be on the way (#654).
+			retryAdmin(t, "promote D", func() error { return tcpLeader(t, ns).node.Promote(ctx, "op:test", d.id) })
+			retryAdmin(t, "transfer to D", func() error { return tcpLeader(t, ns).node.TransferLeadership(ctx, "op:test", d.id) })
 			all := append(append([]*tcpNode(nil), ns...), d)
 			if l := tcpLeader(t, all); l != d {
 				t.Fatalf("D does not lead: %d does", l.id)
@@ -159,12 +158,11 @@ func TestAJoinerHearsALeaderAdmittedAfterItsJoinAnswer(t *testing.T) {
 	if !waitKV(t, l, "b", "2", 10*time.Second) {
 		t.Fatalf("L never caught up: %+v", l.node.Status())
 	}
-	if err := tcpLeader(t, ns).node.Promote(ctx, "op:test", l.id); err != nil {
-		t.Fatalf("promote L: %v", err)
-	}
-	if err := tcpLeader(t, ns).node.TransferLeadership(ctx, "op:test", l.id); err != nil {
-		t.Fatalf("transfer to L: %v", err)
-	}
+	// A promotion is refused while the leader has not heard the learner's
+	// durable progress within an election timeout: L applied the write,
+	// its acknowledgement may still be on the way (#654).
+	retryAdmin(t, "promote L", func() error { return tcpLeader(t, ns).node.Promote(ctx, "op:test", l.id) })
+	retryAdmin(t, "transfer to L", func() error { return tcpLeader(t, ns).node.TransferLeadership(ctx, "op:test", l.id) })
 	all := append(append([]*tcpNode(nil), ns...), l)
 	if ld := tcpLeader(t, all); ld != l {
 		t.Fatalf("L does not lead: %d does", ld.id)
