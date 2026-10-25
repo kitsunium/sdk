@@ -87,16 +87,22 @@ func FuzzScanSegment(f *testing.F) {
 			t.Fatalf("scan in pieces: %d records, hole %d, sealed %v, size %d; of the whole file: %d, %d, %v, %d",
 				len(got.recs), got.hole, got.sealed, got.size, len(want.recs), want.hole, want.sealed, want.size)
 		}
-		if len(got.pay) != len(want.pay) {
-			t.Fatalf("%d payloads kept, want %d", len(got.pay), len(want.pay))
-		}
-		for i, p := range want.pay {
-			if !bytes.Equal(got.pay[i], p) {
-				t.Fatalf("payload of record %d: %x, want %x", i, got.pay[i], p)
-			}
+		if got.cp != want.cp || got.cpOK != want.cpOK || errText(got.layout) != errText(want.layout) {
+			t.Fatalf("scan in pieces: checkpoint %+v (%v), layout %v; of the whole file: %+v (%v), %v",
+				got.cp, got.cpOK, got.layout, want.cp, want.cpOK, want.layout)
 		}
 		if !bytes.Equal(got.data, b[:len(got.data)]) || (got.hole >= 0 && len(got.data) != len(b)) {
 			t.Fatalf("%d bytes read, of %d, that are not the file's, or not all of it for a hole at %d", len(got.data), len(b), got.hole)
+		}
+		// Replay reads the last segment's hard states from the bytes read.
+		for i := range got.recs {
+			r := &got.recs[i]
+			if k := r.kind; k != recCheckpt && k != recHardState {
+				continue
+			}
+			if p, w := payloadAt(got.data, r), payloadAt(b, r); !bytes.Equal(p, w) {
+				t.Fatalf("payload of record %d: %x, want %x", i, p, w)
+			}
 		}
 		if got.sealed {
 			seal := got.recs[len(got.recs)-1]
@@ -111,7 +117,7 @@ func FuzzScanSegment(f *testing.F) {
 // the whole file read at once: the reference FuzzScanSegment holds the scan
 // in pieces to.
 func scanWhole(b []byte, n uint64) (*scanned, error) {
-	s := &scanned{n: n, size: int64(len(b)), hole: -1, trimmed: -1}
+	s := &scanned{n: n, size: int64(len(b)), seqBreak: -1, hole: -1, trimmed: -1}
 	var off int64
 	for off < int64(len(b)) {
 		r, ok := parseRecord(b[off:])
@@ -122,10 +128,7 @@ func scanWhole(b []byte, n uint64) (*scanned, error) {
 			s.hole = off
 			break
 		}
-		if r.kind == recCheckpt || r.kind == recHardState {
-			s.keep(len(s.recs), r.data)
-		}
-		s.recs = append(s.recs, scanRecOf(&r, off))
+		s.recs = s.note(s.recs, &r, off)
 		off += int64(r.length)
 		if r.kind == recSeal {
 			s.sealed = true
@@ -133,6 +136,14 @@ func scanWhole(b []byte, n uint64) (*scanned, error) {
 		}
 	}
 	return s, nil
+}
+
+// errText is err's text, "" for nil: two verdicts compare by it.
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // scanSeed is a segment b, the segment read before it into the same buffer,
