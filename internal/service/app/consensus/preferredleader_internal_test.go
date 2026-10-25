@@ -375,31 +375,39 @@ func TestAPreferredNodeTakesOverOnceATransferToItWasLost(t *testing.T) {
 // Whether P died after catching up or stays up but deaf to TimeoutNow, Q
 // now takes over.
 func TestAPreferredNodeThatCannotTakeOverYieldsToTheNextOne(t *testing.T) {
-	for name, dies := range map[string]bool{"dead": true, "deaf": false} {
-		t.Run(name, func(t *testing.T) {
-			cid := byte(0x6e)
-			if dies {
-				cid = 0x6f
-			}
-			c, loss := preferredCluster(t, cid, 5, 3, 4)
-			p, q := c.nodes[3], c.nodes[4]
-			c.settledLeader(5 * time.Second)
-			// A non-preferred node leads, and its commit passes what P and Q
-			// hold: neither is a target until it catches up.
-			c.kill(p)
-			c.kill(q)
-			a := c.settledLeader(5 * time.Second)
-			loss.to.Store(uint64(p.id))
-			c.start(p)
-			loss.waitLost(t, 0, 10*time.Second)
-			if dies {
-				c.kill(p)
-				loss.to.Store(0)
-			}
-			c.start(q)
-			t.Logf("leader A=%d, P=%d (dies %v), Q=%d", a.id, p.id, dies, q.id)
-			waitLeaderIs(t, c, q, 5*time.Second)
-			propose(t, q.node, "after=transfer")
-		})
+	type tc struct {
+		name string
+		// cid is the case's own cluster id.
+		cid byte
+		// dies is whether P dies after catching up; otherwise it stays up,
+		// deaf to TimeoutNow.
+		dies bool
+	}
+	runCase := func(t *testing.T, c tc) {
+		cl, loss := preferredCluster(t, c.cid, 5, 3, 4)
+		p, q := cl.nodes[3], cl.nodes[4]
+		cl.settledLeader(5 * time.Second)
+		// A non-preferred node leads, and its commit passes what P and Q
+		// hold: neither is a target until it catches up.
+		cl.kill(p)
+		cl.kill(q)
+		a := cl.settledLeader(5 * time.Second)
+		loss.to.Store(uint64(p.id))
+		cl.start(p)
+		loss.waitLost(t, 0, 10*time.Second)
+		if c.dies {
+			cl.kill(p)
+			loss.to.Store(0)
+		}
+		cl.start(q)
+		t.Logf("leader A=%d, P=%d (dies %v), Q=%d", a.id, p.id, c.dies, q.id)
+		waitLeaderIs(t, cl, q, 5*time.Second)
+		propose(t, q.node, "after=transfer")
+	}
+	for _, c := range []tc{
+		{name: "dead", cid: 0x6f, dies: true},
+		{name: "deaf", cid: 0x6e},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
