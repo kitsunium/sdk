@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T13:00:00Z -->
+<!-- updated: 2026-10-25T17:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -104,6 +104,18 @@ under coverage before touching `shard_count`.
   rejection was contact for CheckQuorum and the trigger of an immediate
   resend, and the refusing majority never campaigned (#508,
   `mutRefusedLeadHeard`, `checkRefusedLeaderIsNotHeard`).
+- Admit a `ChangeSnapshotLimit` from any origin but the member it names
+  (the authenticated origin `validateAdmin` holds, a forwarder or this
+  leader), of a limit of 0 or below, or of the limit already recorded: only
+  a member knows the limit it runs with, a 0 lifts every bound on what it
+  is offered, and a repeat appends an entry for nothing. It needs an
+  answering majority, as an address change does (`updateSnapshotLimit`,
+  #677, `mutLimitAnyOrigin`, `mutLimitZero`, `mutLimitUnchanged`,
+  `checkLimitFromItsMemberOnly`, `checkLimitAboveZero`,
+  `checkLimitThatChanges`). The kind keeps every change's layout: a leader
+  of an earlier release refuses it in `nextConf`'s default branch, and a
+  follower of one adopts the membership the payload carries
+  (`TestAnOlderReleaseRefusesTheLimitAsLeaderAndAdoptsItAsFollower`).
 - Admit a DenyPin of this leader, or one that leaves no answering majority
   without its target, or withdraw the pin from the admission set before the
   change commits (#530, `mutDenyPinUnchecked`, `mutDenyPinAtAppend`).

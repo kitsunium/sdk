@@ -188,6 +188,15 @@ const (
 	// of its apply, as before #674: a leader that handed its leadership over
 	// for a stuck apply (#554) took it straight back.
 	mutStalledTakesOver
+	// mutLimitAnyOrigin admits a ChangeSnapshotLimit from any origin, not
+	// only from the member it names (#677).
+	mutLimitAnyOrigin
+	// mutLimitZero admits a ChangeSnapshotLimit of 0 or below, which
+	// records no limit at all (#677).
+	mutLimitZero
+	// mutLimitUnchanged admits a ChangeSnapshotLimit of the limit already
+	// recorded, an entry for nothing (#677).
+	mutLimitUnchanged
 )
 
 // mutated reports whether a test switched mutation m on; it is false in every

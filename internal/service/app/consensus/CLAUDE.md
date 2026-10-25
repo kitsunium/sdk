@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T13:00:00Z -->
+<!-- updated: 2026-10-25T17:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -773,6 +773,25 @@ machine, are 32.9 s at 24, and 34 s for the slowest on average over
 - Feed the log to a learner whose announced limit the newest snapshot is
   over: it compacts nothing and its log filled its disk (#613,
   `watchUnfed`, `TestALearnerTheStateOutgrewIsNotFedTheLogPastItsQuota`).
+- Leave a member's recorded `MaxSnapshotBytes` as its JOIN wrote it: a
+  voter raised and restarted, #512's remedy, was held to the old one by
+  every cut of every node, nothing was compacted and NO_SPACE refused every
+  write (#677). `watchSnapshotLimit` (`node_snaplimit.go`) proposes, at each
+  tick, the node's own limit in a `ChangeSnapshotLimit` when its record
+  holds another above 0, off the loop, one at a time, one second after a
+  refusal doubling to a minute — a leader of an earlier release refuses the
+  kind (`TestARaisedSnapshotLimitReachesTheMembership`,
+  `TestALearnerWhoseLimitIsRaisedIsFedInstalledAndPromoted`,
+  `TestAnOlderLeaderRefusesTheLimitAndANewerOneRecordsIt`). Nor replace a
+  recorded 0, which announces no limit (#591's trap), nor propose a lowering
+  below the newest snapshot, the store's newest included, which a start
+  under that limit may not have restored: it is said once and the record
+  kept, or every cut would freeze
+  (`TestALowLimitIsNeverOfferedMoreAndItsLoweringBelowTheStateIsNotProposed`).
+  Only the member states its limit: raft refuses any other origin
+  (`TestASnapshotLimitChangeFromAnotherNodeIsRefused`). A test's joiner
+  that announces a limit runs with it, or it states its own once admitted
+  (`joinWithLimit`).
 - Cut again at an index whose snapshot is published: the commit renamed
   over a file a copy may hold open, which Windows refuses (#611,
   `publishedAt`, `TestASecondSaveOfAnIdleNodeDoesNotRecommitThePublishedSnapshot`).

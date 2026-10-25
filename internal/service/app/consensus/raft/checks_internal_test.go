@@ -542,6 +542,9 @@ var checks = map[string]func(mutation) error{
 	"no table keeps committed payloads": checkNoTableKeepsCommittedPayloads,
 	"raise heard in the vote window":    checkRaiseHeardRecently,
 	"leader record reaches an old tail": checkLeaderRecordReachesAnOldTail,
+	"limit from its member only":        checkLimitFromItsMemberOnly,
+	"limit above zero":                  checkLimitAboveZero,
+	"limit that changes":                checkLimitThatChanges,
 }
 
 func TestChecksPassUnmutated(t *testing.T) {
@@ -622,6 +625,9 @@ func TestMutationsAreCaught(t *testing.T) {
 		"raise over a silent member":       mutRaiseOverSilence,
 		"record by the last index alone":   mutRecordByIndexOnly,
 		"stalled apply takes over":         mutStalledTakesOver,
+		"limit from any origin":            mutLimitAnyOrigin,
+		"limit of zero":                    mutLimitZero,
+		"limit unchanged":                  mutLimitUnchanged,
 	}
 	for name, m := range muts {
 		caught := ""

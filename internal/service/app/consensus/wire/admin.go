@@ -23,6 +23,10 @@ const (
 	ChangeDenyPin
 	// ChangeForced is the configuration Recover or RestoreSnapshot forces.
 	ChangeForced
+	// ChangeSnapshotLimit records the MaxSnapshotBytes a member runs with,
+	// on that member's word alone: Target and the one member the change
+	// carries name it, and the leader admits it from that member only.
+	ChangeSnapshotLimit
 )
 
 // AdminVersion2 is the payload version of an engine entry whose admin

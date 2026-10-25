@@ -20,6 +20,11 @@ constants:
         name: ChangeDenyPin
       - doc: ChangeForced is the configuration Recover or RestoreSnapshot forces.
         name: ChangeForced
+      - doc: |-
+          ChangeSnapshotLimit records the MaxSnapshotBytes a member runs with,
+          on that member's word alone: Target and the one member the change
+          carries name it, and the leader admits it from that member only.
+        name: ChangeSnapshotLimit
     name: ChangeFounding
   - doc: |-
       AdminVersion2 is the payload version of an engine entry whose admin

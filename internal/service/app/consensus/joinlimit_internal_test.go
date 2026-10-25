@@ -10,10 +10,14 @@ import (
 )
 
 // joinWithLimit has a new node join the TCP cluster ns, announcing limit,
-// and returns the learner as the leader l admitted it.
+// the MaxSnapshotBytes it runs with, and returns the learner as the leader
+// l admitted it. A node running with another limit would state its own
+// once admitted (#677).
 func joinWithLimit(t *testing.T, ca *testCA, cid coreconsensus.ClusterID, ns []*tcpNode, l *tcpNode, limit int64) coreconsensus.MemberValue {
 	t.Helper()
-	j := &tcpNode{slot: "site-new", log: NewMemoryLog(), snaps: NewMemorySnapshots()}
+	j := &tcpNode{slot: "site-new", log: NewMemoryLog(), snaps: NewMemorySnapshots(), tweak: func(c *Config) {
+		c.MaxSnapshotBytes, c.SnapshotEveryBytes = limit, limit/2
+	}}
 	j.cert, j.spki = ca.issue(t, SAN(cid, j.slot), nil)
 	j.listen(t, ca)
 	id, _, err := InitLog(j.log, cid, j.slot)

@@ -4575,6 +4575,14 @@ packages:
         name: ChangeForced
         type: uint8
         value: "7"
+      - blockDoc: The membership changes an EntryMembership records.
+        doc: |-
+          ChangeSnapshotLimit records the MaxSnapshotBytes a member runs with,
+          on that member's word alone: Target and the one member the change
+          carries name it, and the leader admits it from that member only.
+        name: ChangeSnapshotLimit
+        type: uint8
+        value: "8"
       - doc: |-
           AdminVersion2 is the payload version of an engine entry whose admin
           carries Origin. A leader writes it once the committed cluster version is

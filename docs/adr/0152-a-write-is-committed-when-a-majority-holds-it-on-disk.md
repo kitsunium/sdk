@@ -1721,7 +1721,10 @@ is refused with `OVERLOADED`. Nothing is appended in either case.
   SHA-256 here is integrity, not authentication: the authentication is the
   TLS identity of the sender.
 - **The leader knows each peer's limit (R2-30).** Each peer announces its
-  `MaxSnapshotBytes` in the handshake. When the state approaches the smallest
+  `MaxSnapshotBytes` in the handshake (amended: no handshake carries it; a
+  joiner announces it in its JOIN, and a member states a changed one in a
+  `ChangeSnapshotLimit` — amendments of 2026-10-22 and of 2026-10-25,
+  [#677](https://github.com/kitsunium/sdk/issues/677)). When the state approaches the smallest
   limit among the members, the leader reports it in `Health` and raises an
   alarm, before a snapshot exists that some peer could never install.
 - **Retention:** the previous snapshot is kept until the new one is durable,
@@ -4748,6 +4751,69 @@ position, and was dropped the same way.
   already carries its last term and last index; only the follower's reading
   of them changes, and a follower of an older release answers as before.
 
+## Amendment — a member states its own snapshot limit (2026-10-25, #677)
+
+The remedy #512 gives a state that outgrows a limit — raise
+`MaxSnapshotBytes` on every node and restart — did nothing for a member
+that announced its limit at its JOIN (#556). A member's record held the
+limit its JOIN or an operator's member list wrote, and nothing updated it:
+no handshake and no frame carries a limit, and a member already admitted is
+answered `alreadyJoined`. A voter's recorded limit bounds every cut of
+every node (`cutLimit`, #591): once the state outgrew the one it joined
+with, every cut failed `SNAPSHOT_TOO_LARGE`, no log was compacted, and the
+no-space alarm refused every write of the cluster until that voter was
+replaced under a new ID and, from protocol 3, a new key
+([#677](https://github.com/kitsunium/sdk/issues/677)). A learner raised the
+same way was neither fed (#613) nor offered a snapshot (#591), and never
+promoted. The owner's decision of 2026-10-25 retains options A1, B1 and C1
+of the issue:
+
+- **A change kind, `ChangeSnapshotLimit` (8).** A membership entry whose
+  `Target` is the member and whose one member carries its ID and its
+  `MaxSnapshotBytes`; the leader rewrites it into the whole configuration,
+  as every change. It is admitted when it names one existing member, a
+  limit above 0 that differs from the recorded one, while a majority
+  answers, and — **C1** — only from that member: its origin, the node the
+  transport authenticated (D8, #561), is its target. No operator API states
+  another member's limit. Like every engine entry it is admitted under the
+  no-space alarm, so a cluster frozen by a stale limit compacts again; the
+  operator still clears the alarm.
+- **The member states it.** At each tick, a node that its configuration
+  lists with a recorded limit above 0 other than its own `MaxSnapshotBytes`
+  proposes its own, one proposal at a time, off the event loop, while it
+  knows a leader; after a refusal it waits one second, doubling to a
+  minute. A recorded 0 announces no limit and is never replaced: recorded,
+  the node's limit would start bounding every cut, the trap of #591. A value
+  the configuration holds, appended or committed, is not proposed again.
+- **B1: a lowering below the state is not proposed.** A limit below the
+  node's newest snapshot — the one it cut or installed last, or the newest
+  its store publishes, which a start under the lowered limit may have failed
+  to restore — is said once at Warn and not proposed, and the membership
+  keeps the limit it records, as Promote refuses a learner the state does
+  not fit in (#591). Recorded, a voter's would freeze every cut of every
+  node.
+- **What follows the value.** Unchanged code reads the recorded limit:
+  `cutLimit`, `Health`'s `SnapshotLimit`, the snapshot withheld from a peer
+  it does not fit (`tooLargeFor`), `feedOrNot` and Promote's check. A peer
+  never receives more than it runs with: the receiver bounds an offer by its
+  own `MaxSnapshotBytes`, and the old, lower value bounds the leader until
+  a raise commits.
+- **A1: no protocol raise.** The entry's layout is every membership
+  change's, in every payload version; only the value of its `Change` byte
+  is new. A leader of an earlier release refuses the kind
+  `MEMBERSHIP_INVALID` in `nextConf`'s default branch, and the member
+  proposes again until a leader of this release leads. A node of an earlier
+  release adopts the configuration the entry carries as a follower: every
+  reader takes the membership from the payload whatever its change kind
+  (`noteAppended`, `applyAdmin`, `foundingContract`, Recover's
+  `lastMembership`; `ParseAdminAt` does not judge `Change`), and a
+  snapshot's metadata carries the limit in the layout it always had.
+- **What it leaves.** A member whose recorded limit the state outgrew and
+  which runs an earlier release still binds every cut until it is upgraded
+  or removed, and a silent member until it comes back. A node judges a
+  lowering by its own newest snapshot: a voter that lagged far behind may
+  still propose one the cluster's state outgrew.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -4762,6 +4828,7 @@ position, and was dropped the same way.
 | Accepted | the owner's decision, 2026-10-13 | Accepted on R9 as written; the SDK stays public. No text changed but the status |
 | S3 | Raft hunt lot S3, 2026-10-23 | protocol version 2 raised once: the announcement, the raise refused until every member speaks it, the checksummed snapshot meta, `Origin`, `AdoptedFrom`, the stale voter's admission of a vouched-for leader in D4 (amendment of 2026-10-23) |
 | #648 | the owner's decision, 2026-10-24 | protocol version 3: one key, one ID for the cluster's whole life, the retired keys in the configuration, the admin payload and the snapshot metadata of version 3, `FlagProtocol3` and the raise refused until every member announces it (amendment of 2026-10-24, #648) |
+| #677 | the owner's decision, 2026-10-25 | a member states its own snapshot limit: `ChangeSnapshotLimit`, admitted from that member only, a lowering below the state not proposed, no protocol raise (amendment of 2026-10-25, #677) |
 
 ## raft-sql-poc (owner's prior Raft)
 

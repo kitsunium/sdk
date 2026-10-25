@@ -9795,6 +9795,8 @@ sequences:
         kind: internal
       - id: n.watchUnfed
         kind: internal
+      - id: n.watchSnapshotLimit
+        kind: internal
     steps:
       - opt:
           do:
@@ -9834,6 +9836,8 @@ sequences:
         to: n.guardSpace
       - eval: n.watchUnfed()
         to: n.watchUnfed
+      - eval: n.watchSnapshotLimit(turn)
+        to: n.watchSnapshotLimit
       - return: turn, true
   - of: (*Node).onMessage
     participants:
@@ -12331,6 +12335,202 @@ sequences:
               to: s.sent.CompareAndSwap
           when: err == io.EOF
       - return: k, err
+  - of: (*Node).watchSnapshotLimit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).watchSnapshotLimit
+        kind: self
+      - id: n.r.Status
+        kind: value
+      - id: st.Conf.Member
+        kind: value
+      - id: w.mu.Lock
+        kind: value
+      - id: now.Before
+        kind: value
+      - id: w.mu.Unlock
+        kind: value
+      - id: w.proposing.Store
+        kind: value
+      - id: n.wg.Add
+        kind: value
+      - id: n.proposeSnapshotLimit
+        kind: internal
+    steps:
+      - bind: w
+        eval: "&n.snapLimit"
+      - opt:
+          do:
+            - return: ""
+          when: w.proposing.Load()
+      - bind: st
+        eval: n.r.Status()
+        to: n.r.Status
+      - bind: m, ok
+        eval: st.Conf.Member(n.stamp.ID)
+        to: st.Conf.Member
+      - bind: own
+        eval: n.cfg.MaxSnapshotBytes
+      - opt:
+          do:
+            - return: ""
+          when: "!ok || m.MaxSnapshotBytes <= 0 || m.MaxSnapshotBytes == own || st.Lead == 0"
+      - eval: w.mu.Lock()
+        to: w.mu.Lock
+      - bind: wait
+        eval: now.Before(w.retryAt)
+        to: now.Before
+      - eval: w.mu.Unlock()
+        to: w.mu.Unlock
+      - opt:
+          do:
+            - return: ""
+          when: wait
+      - eval: w.proposing.Store(true)
+        to: w.proposing.Store
+      - eval: n.wg.Add(1)
+        to: n.wg.Add
+      - go: n.proposeSnapshotLimit(m.MaxSnapshotBytes, own)
+        to: n.proposeSnapshotLimit
+  - of: (*Node).proposeSnapshotLimit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).proposeSnapshotLimit
+        kind: self
+      - id: n.wg.Done
+        kind: value
+      - id: n.snapLimit.proposing.Store
+        kind: value
+      - id: n.newestSnapshotBytes
+        kind: internal
+      - id: n.limitBelowNewest
+        kind: internal
+      - id: context
+        kind: stdlib
+      - id: n.admin
+        kind: internal
+      - id: n.snapLimit.answered
+        kind: internal
+    steps:
+      - defer: n.wg.Done()
+        to: n.wg.Done
+      - defer: n.snapLimit.proposing.Store(false)
+        to: n.snapLimit.proposing.Store
+      - opt:
+          do:
+            - opt:
+                do:
+                  - eval: n.limitBelowNewest(recorded, newest)
+                    to: n.limitBelowNewest
+                  - return: ""
+                init:
+                  bind: newest
+                  eval: n.newestSnapshotBytes()
+                  to: n.newestSnapshotBytes
+                when: newest > own
+          when: own < recorded
+      - bind: ctx, cancel
+        eval: context.WithTimeout(context.Background(), 2*n.Status().Timing.ElectionTimeoutMax+time.Second)
+        to: context
+      - defer: cancel()
+      - bind: self
+        eval: "[]coreconsensus.MemberValue{{ID: n.stamp.ID, MaxSnapshotBytes: own}}"
+      - bind: err
+        eval: |-
+          n.admin(ctx, coreconsensus.EntryMembership, wire.AdminValue{
+          		Operator: string(snapLimitOperator), Change: wire.ChangeSnapshotLimit, Target: n.stamp.ID,
+          		Membership: coreconsensus.MembershipValue{Members: self},
+          	})
+        to: n.admin
+      - eval: n.snapLimit.answered(n.clk.Now(), err == nil)
+        to: n.snapLimit.answered
+  - of: (*Node).newestSnapshotBytes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).newestSnapshotBytes
+        kind: self
+      - id: n.snapState.mu.Lock
+        kind: value
+      - id: n.snapState.mu.Unlock
+        kind: value
+      - id: n.cfg.Snapshots.List
+        kind: value
+    steps:
+      - eval: n.snapState.mu.Lock()
+        to: n.snapState.mu.Lock
+      - bind: newest
+        eval: n.snapState.newestBytes
+      - eval: n.snapState.mu.Unlock()
+        to: n.snapState.mu.Unlock
+      - opt:
+          do:
+            - set: newest
+              value: max(newest, snapshotSize(&metas[0]))
+          init:
+            bind: metas, err
+            eval: n.cfg.Snapshots.List()
+            to: n.cfg.Snapshots.List
+          when: err == nil && len(metas) > 0
+      - return: newest
+  - of: (*Node).limitBelowNewest
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).limitBelowNewest
+        kind: self
+      - id: w.mu.Lock
+        kind: value
+      - id: w.mu.Unlock
+        kind: value
+      - id: n.obs.warn
+        kind: internal
+      - id: w.answered
+        kind: internal
+    steps:
+      - bind: w, own
+        eval: "&n.snapLimit, n.cfg.MaxSnapshotBytes"
+      - eval: w.mu.Lock()
+        to: w.mu.Lock
+      - bind: first
+        eval: w.warned != own
+      - set: w.warned
+        value: own
+      - eval: w.mu.Unlock()
+        to: w.mu.Unlock
+      - opt:
+          do:
+            - eval: |-
+                n.obs.warn("consensus: this node's MaxSnapshotBytes is below its newest snapshot; the lowering is not proposed, and the membership keeps the limit it records",
+                			lattr("limit", uint64(own)), lattr("bytes", uint64(newest)), lattr("recorded", uint64(recorded)))
+              to: n.obs.warn
+          when: first
+      - eval: w.answered(n.clk.Now(), false)
+        to: w.answered
+  - of: (*snapLimitWatch).answered
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*snapLimitWatch).answered
+        kind: self
+      - id: now.Add
+        kind: value
+    steps:
+      - lock:
+          mutex: w.mu
+      - opt:
+          do:
+            - set: w.backoff, w.retryAt, w.warned
+              value: 0, time.Time{}, 0
+            - return: ""
+          when: admitted
+      - set: w.backoff
+        value: min(max(2*w.backoff, snapLimitFirstWait), snapLimitMaxWait)
+      - set: w.retryAt
+        to: now.Add
+        value: now.Add(w.backoff)
   - of: newObs
     steps:
       - return: |-
