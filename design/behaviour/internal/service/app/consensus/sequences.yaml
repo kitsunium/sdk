@@ -10114,8 +10114,8 @@ sequences:
         eval: n.applyLag.Load(), n.applyReads.Load() > 0
       - eval: n.r.SetApplyLag(lag, reading)
         to: n.r.SetApplyLag
-      - set: n.handedLag, n.handedRead
-        value: 0, false
+      - set: n.handedLag, n.handedReads
+        value: 0, 0
       - loop:
           cond: n.r.HasReady()
           do:
@@ -10127,7 +10127,7 @@ sequences:
                 when: n.stopOnUnsupported(rd)
             - eval: n.handleOne(rd)
               to: n.handleOne
-      - eval: n.awaitApply(lag+n.handedLag, reading || n.handedRead)
+      - eval: n.awaitApply(lag+n.handedLag, reading || n.handedReads > 0)
         to: n.awaitApply
       - eval: n.leadershipChanged()
         to: n.leadershipChanged
@@ -10423,8 +10423,8 @@ sequences:
           do:
             - eval: n.applyReads.Add(1)
               to: n.applyReads.Add
-            - set: n.handedRead
-              value: "true"
+            - op: ++
+              set: n.handedReads
             - eval: "n.aq.push(applyItem{read: rd.ApplyRead})"
               to: n.aq.push
           when: rd.ApplyRead.Lo != 0

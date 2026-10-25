@@ -5471,13 +5471,13 @@ types:
         name: applyWake
         type: atomic.Bool
       - doc: |-
-          handedLag and handedRead are what the loop's Readies handed apply
+          handedLag and handedReads are what the loop's Readies handed apply
           since the turn told raft the apply lag: payload bytes in memory, and
-          whether a read of the log. Loop-owned.
+          reads of the log. Loop-owned.
         name: handedLag
         type: int64
-      - name: handedRead
-        type: bool
+      - name: handedReads
+        type: int
       - doc: |-
           logApplied is the last entry applied from the log, never an index a
           restored snapshot set: an entry applied from the log was synced at its

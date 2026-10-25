@@ -115,11 +115,11 @@ type Node struct {
 	// applyWake asks the apply goroutine to wake the loop once it has room
 	// again, while raft holds committed entries back for it.
 	applyWake atomic.Bool
-	// handedLag and handedRead are what the loop's Readies handed apply
+	// handedLag and handedReads are what the loop's Readies handed apply
 	// since the turn told raft the apply lag: payload bytes in memory, and
-	// whether a read of the log. Loop-owned.
-	handedLag  int64
-	handedRead bool
+	// reads of the log. Loop-owned.
+	handedLag   int64
+	handedReads int
 	// logApplied is the last entry applied from the log, never an index a
 	// restored snapshot set: an entry applied from the log was synced at its
 	// term before it was handed to the apply goroutine, so the store holds it
@@ -1292,7 +1292,7 @@ func (n *Node) tickInterval() time.Duration {
 func (n *Node) handleReady() {
 	lag, reading := n.applyLag.Load(), n.applyReads.Load() > 0
 	n.r.SetApplyLag(lag, reading)
-	n.handedLag, n.handedRead = 0, false
+	n.handedLag, n.handedReads = 0, 0
 	for n.r.HasReady() {
 		rd := new(n.r.Ready())
 		if n.stopOnUnsupported(rd) {
@@ -1300,7 +1300,7 @@ func (n *Node) handleReady() {
 		}
 		n.handleOne(rd)
 	}
-	n.awaitApply(lag+n.handedLag, reading || n.handedRead)
+	n.awaitApply(lag+n.handedLag, reading || n.handedReads > 0)
 	n.leadershipChanged()
 	n.publish()
 }
@@ -1467,7 +1467,7 @@ func (n *Node) endSilence() {
 func (n *Node) queueApply(rd *raft.ReadyValue) {
 	if rd.ApplyRead.Lo != 0 {
 		n.applyReads.Add(1)
-		n.handedRead = true
+		n.handedReads++
 		n.aq.push(applyItem{read: rd.ApplyRead})
 	}
 	entries := rd.Apply
