@@ -1236,7 +1236,11 @@ files:
       - cutAllowance
       - progressWatch
       - (*Node).watchProgress
+      - (*Node).handOver
+      - (*Node).watchApplied
+      - (*Node).declineNoted
       - (*Node).mostCaughtUpVoter
+      - (*Node).voterMatch
       - (*Node).cutExempt
     name: node_progresswatch.go
   - decls:
@@ -6736,17 +6740,55 @@ types:
           legitimately slow fdatasync moves within that bound, and the time the
           apply goroutine spends cutting a snapshot is not counted; a transfer already
           under way is left alone, and the clocks restart after each hand-off.
-          It runs on the loop, at every tick.
+          It runs on the loop, at every tick; a hand-off for a stuck apply is
+          remembered across the change of leadership (watchApplied).
         name: watchProgress
         params: now time.Time
         recv: n *Node
       - doc: |-
+          handOver starts the transfer of a leader that makes no progress to the
+          most caught-up voter, and restarts the clocks. A voter that handed over
+          for its own stuck apply declines it (#674): the one the last hand-off
+          went to is passed over, so it does not keep this one leading. A hand-off
+          for a stuck apply is remembered until the apply moves (watchApplied).
+        name: handOver
+        params: now time.Time, st *raft.StatusValue, applied uint64, stuckApply bool
+        recv: n *Node
+      - doc: |-
+          watchApplied ends what a hand-off for a stuck apply started: from that
+          hand-off on, the node declines a transfer to itself (raft's
+          SetApplyStalled), until its applied index moves or reaches the commit it
+          knows. Its log works, so it still acknowledges and holds the commit, and
+          its successor's watch of PreferredLeaders handed it the leadership
+          straight back: it led almost all the time with its writes refused
+          OVERLOADED (#674). The memory is the node's own, kept across the change
+          of leadership, since nothing a leader receives says whether a follower
+          applies. It runs on every role, at every tick.
+        name: watchApplied
+        params: applied, commit uint64
+        recv: n *Node
+      - doc: |-
+          declineNoted logs a TimeoutNow this node's leader sent it while it
+          declines one (watchApplied): an operator's transfer to it fails, and the
+          line says why.
+        name: declineNoted
+        params: m *coreconsensus.MessageValue
+        recv: n *Node
+      - doc: |-
           mostCaughtUpVoter is the voter other than this node with the highest
-          acknowledged index, 0 when there is none.
+          acknowledged index, past passed over when another voter has one; 0 when
+          there is none.
         name: mostCaughtUpVoter
-        params: st *raft.StatusValue
+        params: st *raft.StatusValue, past coreconsensus.NodeID
         recv: n *Node
         results: coreconsensus.NodeID
+      - doc: |-
+          voterMatch is the acknowledged index of m when m is a voter other than
+          this node whose progress this leader holds.
+        name: voterMatch
+        params: m coreconsensus.MemberValue
+        recv: n *Node
+        results: uint64, bool
       - doc: |-
           cutExempt reports whether the apply goroutine is cutting, and has been
           for less than cutAllowance maximum election timeouts.
@@ -7683,6 +7725,21 @@ types:
         type: time.Time
       - name: appliedAt
         type: time.Time
+      - doc: |-
+          ceded is whether this node handed its leadership over because its
+          apply made no progress, and its applied index has not moved from
+          moved since: it declines a transfer to itself meanwhile, on every
+          role (raft's SetApplyStalled, #674).
+        name: ceded
+        type: bool
+      - name: moved
+        type: uint64
+      - doc: |-
+          to is the voter the last hand-off went to while this node still
+          leads: that hand-off did not complete, and the next one goes to
+          another voter when there is one (#674).
+        name: to
+        type: coreconsensus.NodeID
     kind: struct
     name: progressWatch
   - doc: |-

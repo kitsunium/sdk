@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T08:20:00Z -->
+<!-- updated: 2026-10-25T12:20:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -579,6 +579,22 @@ machine, are 32.9 s at 24, and 34 s for the slowest on average over
   `TestAPreferredNodeLostBeforeTakingOverLeavesTheMajorityWriting`,
   `TestAPreferredNodeThatCannotTakeOverIsTriedAgainOnlyAfterAPause`,
   `TestAPreferredNodeThatCannotTakeOverYieldsToTheNextOne`).
+- Campaign on a `TimeoutNow` after handing the leadership over for a stuck
+  apply, before the apply moves: the node still acknowledges, and its
+  successor's watch of `PreferredLeaders` transferred straight back to it,
+  which led about 99 % of the time with every write refused `OVERLOADED`.
+  `watchProgress` remembers the hand-over across the change of role
+  (`ceded`), raft declines the `TimeoutNow` (`SetApplyStalled`) until
+  `watchApplied` sees the applied index move or reach the commit, and
+  `declineNoted` logs it. Nor decline on a follower's own stalled apply
+  alone: a stuck leader then ran expiring transfers, refusing proposals
+  `NOT_LEADER`, against every other stuck voter (`TestApplyLagBackpressure`).
+  Nor hand over again to the voter whose hand-off expired when another can
+  take it: the node that handed over first kept a second stuck node leading
+  (#674, `mostCaughtUpVoter`,
+  `TestAStuckPreferredLeaderIsNotHandedLeadershipBack`,
+  `TestANodeThatHandedOverForAStuckApplyDeclinesATransferBack`,
+  `TestALeaderWithAStuckApplyHandsOverPastAVoterAlsoStuck`).
 - Leave a peer's series at their last value once it is no longer published,
   or keep a departed member's certificate in `peerExpiry`: a series is never
   deleted, and "peer unreachable" and "certificate expiring" alerted for a

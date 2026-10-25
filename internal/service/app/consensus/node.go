@@ -1080,6 +1080,7 @@ func (n *Node) onMessage(m *coreconsensus.MessageValue, ok bool) (time.Time, boo
 	}
 	turn := n.clk.Now()
 	n.r.SetOverloaded(n.applyOverloaded())
+	n.declineNoted(m)
 	n.r.Step(n.clk.Now(), *m)
 	return turn, true
 }
@@ -1169,6 +1170,7 @@ func (n *Node) drainControl() {
 		if !ok {
 			return
 		}
+		n.declineNoted(&m)
 		n.r.Step(n.clk.Now(), m)
 	}
 }

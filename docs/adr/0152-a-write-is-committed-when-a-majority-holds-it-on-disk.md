@@ -1958,6 +1958,35 @@ after the last one it tried (amendment of 2026-10-25,
 - The rule is the leader's alone: no frame changes, and a mixed cluster
   needs nothing.
 
+**A leader that handed over for a stuck apply takes no leadership back by a
+transfer** (amendment of 2026-10-25, [#674](https://github.com/kitsunium/sdk/issues/674)).
+A leader whose `Apply` blocks hands its leadership over (D13, #554), but its
+log and its loop go on, so it still acknowledges and holds the commit: its
+successor's watch, started over with the leadership, transferred straight
+back to it when `PreferredLeaders` named it, and it led about 99 % of the
+time, every write entering at it hung and, past `MaxApplyLagBytes`, every
+write of the cluster refused `OVERLOADED`. Nothing a leader receives says
+whether a follower applies, and saying it would change a frame, so the
+memory is the node's own:
+
+- From the hand-over its stuck apply caused until its applied index moves,
+  or reaches the commit it knows, the node does not campaign on a
+  `TimeoutNow`, whatever its role meanwhile. Every transfer to it expires,
+  the watch's as an operator's, which fails `TRANSFER_FAILED`, and the watch
+  then waits the pause above, so writes go through between two tries, at
+  most one maximum election timeout in 17 in the steady state. An election
+  is untouched: a node that wins one hands over again after the bound.
+- A follower whose apply is stuck and that never led still takes a
+  transfer, leads, and hands over after the bound, once: then it remembers.
+  Declining on the follower's own measure alone would have the stuck leader
+  run transfers that expire against every other stuck voter, refusing
+  proposals `NOT_LEADER` meanwhile, where they hopped from one to the next.
+- A leader whose own hand-over expired, its target declining, hands over
+  next to another voter when there is one: picked again on an equal match,
+  the node that handed over first kept a second stuck node leading.
+- The rule is each node's alone: no frame changes, and in a mixed cluster a
+  node of an earlier release still takes the leadership back.
+
 ### D9 — Reads: ReadIndex by default, a lease kept with every correction (Q2, R1-19)
 
 `Barrier(ctx)` returns once the local state machine reflects every write
@@ -2303,7 +2332,11 @@ read entering at it waited. At every tick the leader watches its durable
 index against its log and its applied index against its commit; when
 either has trailed without moving for `ElectionTimeoutMax`, it transfers
 leadership to the voter with the highest acknowledged index (D8). A slow
-fdatasync that moves within the bound changes nothing.
+fdatasync that moves within the bound changes nothing. A leader that handed
+over for a stuck apply takes no leadership back by a transfer until its
+apply moves, and the next hand-over of a leader whose previous one expired
+goes to another voter (amendment of 2026-10-25, D8,
+[#674](https://github.com/kitsunium/sdk/issues/674)).
 
 `Node.Health()` returns a structured verdict an orchestrator can poll: role,
 leader known — on a node that does not lead, a leader that answered one of

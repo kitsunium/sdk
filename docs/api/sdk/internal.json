@@ -52148,6 +52148,19 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.(*Raft).SetApplyStalled",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "SetApplyStalled",
+      "recv": "Raft",
+      "spelled": "func(on bool)",
+      "canonical": "func(on bool)",
+      "doc": "SetApplyStalled tells the step function whether the driver holds its\napply stalled: while it does, a TimeoutNow does not make this node\ncampaign. A leader whose apply makes no progress hands its leadership\nover (#554), and a transfer back to it, the watch of PreferredLeaders' or\nan operator's, handed it the leadership it would hand over again; the\ndriver holds it stalled from that hand-over until its apply moves (#674).\nAn election is untouched.\n",
+      "file": "service/app/consensus/raft/raft.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.(*Raft).SetCanVote",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",

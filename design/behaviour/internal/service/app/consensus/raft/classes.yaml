@@ -296,6 +296,11 @@ constants:
           of the term announced the version, however long ago it was heard
           (#665).
         name: mutRaiseOverSilence
+      - doc: |-
+          mutStalledTakesOver campaigns on a TimeoutNow whatever the driver says
+          of its apply, as before #674: a leader that handed its leadership over
+          for a stuck apply (#554) took it straight back.
+        name: mutStalledTakesOver
     name: mutAckBeforeSync
   - doc: The facts a PeerStatValue carries.
     grouped: true
@@ -379,6 +384,11 @@ constants:
           log entries Ready handed it by index (ApplyRead): nothing is handed in
           memory behind them until the driver says the read is over (D6, #664).
         name: raftApplyReading
+      - doc: |-
+          raftApplyStalled is the driver's word that its apply is stalled, from
+          a hand-over its stuck apply caused until it moves: a TimeoutNow does
+          not make this node campaign while it holds (#554, #674).
+        name: raftApplyStalled
     name: raftSelfVoteDurable
   - doc: |-
       ProtocolMax is the highest protocol version this engine speaks: a cluster
@@ -569,6 +579,7 @@ files:
       - fwdEntry
       - (*Raft).SetOverloaded
       - (*Raft).SetApplyLag
+      - (*Raft).SetApplyStalled
       - (*Raft).ApplyHeld
       - StartState
       - ReadState
@@ -2249,6 +2260,9 @@ types:
         recv: r *Raft
       - name: SetApplyLag
         params: bytes int64, reading bool
+        recv: r *Raft
+      - name: SetApplyStalled
+        params: on bool
         recv: r *Raft
       - name: ApplyHeld
         recv: r *Raft

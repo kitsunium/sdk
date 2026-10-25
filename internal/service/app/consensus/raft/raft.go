@@ -30,6 +30,10 @@ const (
 	// log entries Ready handed it by index (ApplyRead): nothing is handed in
 	// memory behind them until the driver says the read is over (D6, #664).
 	raftApplyReading
+	// raftApplyStalled is the driver's word that its apply is stalled, from
+	// a hand-over its stuck apply caused until it moves: a TimeoutNow does
+	// not make this node campaign while it holds (#554, #674).
+	raftApplyStalled
 )
 
 // ProtocolMax is the highest protocol version this engine speaks: a cluster
@@ -146,6 +150,21 @@ func (r *Raft) SetApplyLag(bytes int64, reading bool) {
 		return
 	}
 	r.facts &^= raftApplyReading
+}
+
+// SetApplyStalled tells the step function whether the driver holds its
+// apply stalled: while it does, a TimeoutNow does not make this node
+// campaign. A leader whose apply makes no progress hands its leadership
+// over (#554), and a transfer back to it, the watch of PreferredLeaders' or
+// an operator's, handed it the leadership it would hand over again; the
+// driver holds it stalled from that hand-over until its apply moves (#674).
+// An election is untouched.
+func (r *Raft) SetApplyStalled(on bool) {
+	if on {
+		r.facts |= raftApplyStalled
+		return
+	}
+	r.facts &^= raftApplyStalled
 }
 
 // ApplyHeld reports whether committed, durable entries wait to be handed to

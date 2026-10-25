@@ -2866,6 +2866,18 @@ sequences:
       - op: "&^="
         set: r.facts
         value: raftApplyReading
+  - of: (*Raft).SetApplyStalled
+    steps:
+      - opt:
+          do:
+            - op: "|="
+              set: r.facts
+              value: raftApplyStalled
+            - return: ""
+          when: "on"
+      - op: "&^="
+        set: r.facts
+        value: raftApplyStalled
   - of: (*Raft).ApplyHeld
     steps:
       - return: "!r.cfg.NoTable && r.log.applied < min(r.log.committed, r.log.stable)"
@@ -4917,15 +4929,15 @@ sequences:
       - id: r.campaign
         kind: internal
     steps:
-      - opt:
-          do:
-            - return: ""
-          when: "!r.mutated(mutTimeoutNowAnyTerm) && (m.From != r.lead || m.Term != r.term)"
+      - bind: valid
+        eval: r.mutated(mutTimeoutNowAnyTerm) || (m.From == r.lead && m.Term == r.term)
+      - bind: stalled
+        eval: r.facts&raftApplyStalled != 0 && !r.mutated(mutStalledTakesOver)
       - opt:
           do:
             - eval: r.campaign(false, m.From, m.Term)
               to: r.campaign
-          when: r.promotable()
+          when: valid && !stalled && r.promotable()
   - of: (*Raft).handleAppend
     participants:
       - id: caller

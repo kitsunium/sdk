@@ -1,13 +1,17 @@
 package consensus
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
 
@@ -409,5 +413,92 @@ func TestAPreferredNodeThatCannotTakeOverYieldsToTheNextOne(t *testing.T) {
 		{name: "deaf", cid: 0x6e},
 	} {
 		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// TestAStuckPreferredLeaderIsNotHandedLeadershipBack is #674: three voters,
+// every one with PreferredLeaders = [L], and L's Apply blocks while its log
+// and its loop go on. #554 hands L's leadership to the most caught-up voter
+// X; X's preferred watch, started over with the leadership, saw L hold the
+// commit (a stuck apply still acknowledges) and transferred back at its
+// first tick, and L led about 99 % of the time: every write entering at it
+// hung, and once its apply lag passed MaxApplyLagBytes every write of the
+// cluster was refused OVERLOADED. A node whose apply makes no progress now
+// declines a transfer to itself, so X keeps the leadership and the others'
+// writes commit.
+func TestAStuckPreferredLeaderIsNotHandedLeadershipBack(t *testing.T) {
+	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{5, 17, 11}, size: 3}
+	c.configure = func(_ *testNode, cfg *Config) {
+		cfg.MaxApplyLagBytes = 16 << 10
+		cfg.PreferredLeaders = []coreconsensus.NodeID{c.nodes[0].id}
+	}
+	newClusterWith(t, c)
+	stuck := c.nodes[0]
+	waitLeaderIs(t, c, stuck, 5*time.Second)
+	c.settledLeader(5 * time.Second)
+	propose(t, stuck.node, "a=1")
+	// The stuck node's machine blocks in Apply from now on.
+	stuck.sm.mu.Lock()
+	var once sync.Once
+	release := func() { once.Do(stuck.sm.mu.Unlock) }
+	defer release()
+	etMax := testTimingFast().ElectionTimeoutMax
+	// Let #554's watch act once.
+	time.Sleep(4 * etMax)
+	var mu sync.Mutex
+	samples, stuckLeads := 0, 0
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for {
+			select {
+			case <-stop:
+				return
+			case <-time.After(5 * time.Millisecond):
+			}
+			mu.Lock()
+			samples++
+			if stuck.node.Status().Role == coreconsensus.RoleLeader {
+				stuckLeads++
+			}
+			mu.Unlock()
+		}
+	})
+	// Writes enter at the other nodes only, 1 KiB each.
+	ok, codes := 0, map[string]int{}
+	payload := bytes.Repeat([]byte{'x'}, 1<<10)
+	end := time.Now().Add(10 * etMax)
+	var others []*testNode
+	for _, tn := range c.nodes {
+		if tn != stuck {
+			others = append(others, tn)
+		}
+	}
+	for i := 0; time.Now().Before(end); i++ {
+		tn := others[i%2]
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		_, _, err := tn.node.Propose(ctx, append(fmt.Appendf(nil, "k%d=", i), payload...))
+		cancel()
+		if err == nil {
+			ok++
+		} else {
+			code, _ := errs.CodeOf(err)
+			codes[fmt.Sprint(code)]++
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	close(stop)
+	wg.Wait()
+	mu.Lock()
+	share := float64(stuckLeads) / float64(max(samples, 1))
+	mu.Unlock()
+	t.Logf("over %v: the stuck node led %.0f%% of %d samples; writes at the others: %d ok, refusals %v",
+		10*etMax, 100*share, samples, ok, codes)
+	if share > 0.5 {
+		t.Errorf("the node whose apply is stuck led %.0f%% of the time after #554's hand-over: %d writes ok, refusals %v",
+			100*share, ok, codes)
+	}
+	if ok == 0 {
+		t.Errorf("no write entering at the healthy nodes committed: refusals %v", codes)
 	}
 }

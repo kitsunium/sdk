@@ -486,10 +486,12 @@ func (r *Raft) reportedContract() uint64 {
 // campaign.
 func (r *Raft) followTimeoutNow(m core.MessageValue) {
 	// Accepted only from the leader of this term, at this term (R2-13).
-	if !r.mutated(mutTimeoutNowAnyTerm) && (m.From != r.lead || m.Term != r.term) {
-		return
-	}
-	if r.promotable() {
+	valid := r.mutated(mutTimeoutNowAnyTerm) || (m.From == r.lead && m.Term == r.term)
+	// A node whose apply the driver holds stalled takes no leadership by a
+	// transfer: it handed its own over for that apply (#554), and a
+	// transfer back to it made it lead almost all the time (#674).
+	stalled := r.facts&raftApplyStalled != 0 && !r.mutated(mutStalledTakesOver)
+	if valid && !stalled && r.promotable() {
 		r.campaign(false, m.From, m.Term)
 	}
 }
