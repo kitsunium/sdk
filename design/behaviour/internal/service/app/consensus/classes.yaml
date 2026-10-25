@@ -355,6 +355,14 @@ constants:
         name: preferMaxDoublings
         type: int
         value: "4"
+      - doc: |-
+          handOffWindow is how many maximum election timeouts follow a
+          transfer for what it was made for to complete: removeAfterTransfer
+          submits a removal of the old leader again for that long, and a leader
+          that took over by a transfer starts none of its own meanwhile (#676).
+        name: handOffWindow
+        type: time.Duration
+        value: "2"
     name: inboxDepth
   - doc: |-
       cutAllowance is how many maximum election timeouts a cut on the apply
@@ -6521,7 +6529,10 @@ types:
           before taking over stopped every write for as long as this node led
           (#662). The next transfer now waits a pause after the previous one
           ended (preferPause), so writes and admin go through in between, and a
-          lagging preferred node causes no churn.
+          lagging preferred node causes no churn. A leadership a transfer handed
+          over starts with a pause as well (leadershipChanged, #676), and a node
+          that handed its own over for a stuck apply declines a transfer back until
+          that apply moves (#674).
         name: watchPreferred
         params: now time.Time
         recv: n *Node
@@ -7093,7 +7104,8 @@ types:
           new leader accepts no membership change before its term's no-op commits
           (MEMBERSHIP_CHANGE_PENDING), an engine detail of the transfer the call
           itself made, not the caller's: it is submitted again, each heartbeat, for
-          at most twice the maximum election timeout.
+          at most handOffWindow maximum election timeouts, in which the new leader's
+          watch of PreferredLeaders hands nothing back (#676).
         name: removeAfterTransfer
         params: ctx context.Context, remove wire.AdminValue
         recv: n *Node
@@ -7643,7 +7655,8 @@ types:
       - doc: |-
           at is the earliest tick at which the leader starts a transfer to a
           preferred node: a pause after the end of the previous transfer,
-          whoever started it (#662).
+          whoever started it (#662), and after the start of a leadership a
+          transfer handed over (#676).
         name: at
         type: time.Time
       - doc: |-

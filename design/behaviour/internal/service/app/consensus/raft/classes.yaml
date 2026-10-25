@@ -1494,7 +1494,9 @@ types:
         type: time.Duration
       - name: contracts
         type: map[uint64]core.TimingContractSpec
-      - doc: campaignTransfer is the flag the current campaign carries.
+      - doc: |-
+          campaignIssuer and campaignTerm are the transfer flag the current
+          campaign carries, kept for the term it wins (Status.HandedBy).
         name: campaignIssuer
         type: core.NodeID
       - name: campaignTerm
@@ -2956,6 +2958,11 @@ types:
       - name: Committed
         type: core.MembershipValue
       - name: Transfer
+        type: core.NodeID
+      - doc: |-
+          HandedBy is, while the node leads, the leader whose TimeoutNow made it
+          campaign for this term, 0 for a term it won by an election.
+        name: HandedBy
         type: core.NodeID
     kind: struct
     name: StatusValue

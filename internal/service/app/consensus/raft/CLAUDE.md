@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T12:20:00Z -->
+<!-- updated: 2026-10-25T13:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -87,6 +87,10 @@ under coverage before touching `shard_count`.
   still acknowledges, and the transfer back to it made it lead almost all
   the time. An election is untouched (#674, `mutStalledTakesOver`,
   `checkStalledApplyDeclinesTransfer`).
+- Clear a campaign's transfer issuer when it wins: `Status.HandedBy` names it
+  while the term lasts, and the driver's watch of `PreferredLeaders` pauses
+  after a transfer on it (#676,
+  `TestTheStatusNamesTheLeaderThatHandedTheTermOver`).
 - Admit a command while the no-space alarm is committed, locally or
   forwarded: `checkProposed` refuses it NO_SPACE and still admits the
   engine entries, the alarm's clearing among them (D17, #515,

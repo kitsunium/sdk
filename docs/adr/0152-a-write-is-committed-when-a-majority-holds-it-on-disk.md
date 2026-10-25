@@ -1987,6 +1987,26 @@ memory is the node's own:
 - The rule is each node's alone: no frame changes, and in a mixed cluster a
   node of an earlier release still takes the leadership back.
 
+**A leader that took over by a transfer hands nothing back at once**
+(amendment of 2026-10-25, [#676](https://github.com/kitsunium/sdk/issues/676)).
+`Remove` of the leader moves its leadership away first, then submits the
+removal again while the new leader's no-op is pending (#529). With
+`PreferredLeaders` naming the node removed, the new leader's watch, started
+over with the leadership, transferred back to it at its first tick once it
+held the no-op, before the removal's resubmission a heartbeat later, and the
+node, leading again, refused to remove itself `MEMBERSHIP_INVALID`, at every
+attempt submitted on it:
+
+- A leadership won by a campaign a `TimeoutNow` started (the step function
+  keeps its issuer while the term lasts) starts with the watch paused for
+  `2 × ElectionTimeoutMax`, the window in which the removal is submitted
+  again. A transfer is made for something, a removal, a hand-over for a
+  stuck apply, an operator's move, and that comes first. A leadership won by
+  an election starts with no pause (#559), and the healthy preferred node
+  takes the leadership back once the window ended.
+- The rule is the leader's alone: no frame changes, and a mixed cluster
+  needs nothing.
+
 ### D9 — Reads: ReadIndex by default, a lease kept with every correction (Q2, R1-19)
 
 `Barrier(ctx)` returns once the local state machine reflects every write

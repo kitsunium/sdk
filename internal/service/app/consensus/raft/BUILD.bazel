@@ -58,6 +58,7 @@ go_test(
         "slowack_internal_test.go",
         "soak_internal_test.go",
         "timing_internal_test.go",
+        "transferissuer_internal_test.go",
         "truncatedsilence_internal_test.go",
         "unapplied_internal_test.go",
         "unappliedstart_internal_test.go",

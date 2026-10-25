@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T12:20:00Z -->
+<!-- updated: 2026-10-25T13:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -595,6 +595,18 @@ machine, are 32.9 s at 24, and 34 s for the slowest on average over
   `TestAStuckPreferredLeaderIsNotHandedLeadershipBack`,
   `TestANodeThatHandedOverForAStuckApplyDeclinesATransferBack`,
   `TestALeaderWithAStuckApplyHandsOverPastAVoterAlsoStuck`).
+- Start the watch of `PreferredLeaders` at the first tick of a leadership a
+  transfer handed over: a `Remove` of the preferred leader, submitted on it,
+  moves leadership away and submits the removal again while the new no-op
+  is pending (#529), and the watch handed leadership back before that, so
+  the removal failed `MEMBERSHIP_INVALID` at every attempt.
+  `leadershipChanged` pauses the watch for `handOffWindow` maximum election
+  timeouts, the window `removeAfterTransfer` submits for, when raft's
+  `HandedBy` names the leader whose `TimeoutNow` won the term; an election
+  starts with no pause (#676,
+  `TestRemovingAPreferredLeaderOnItselfIsNotUndoneByTheWatch`,
+  `TestRemovingAPreferredLeaderFromAFollowerIsNotUndoneByTheWatch`,
+  `TestAPreferredNodeHandedOverByATransferLeadsAgainAfterTheWindow`).
 - Leave a peer's series at their last value once it is no longer published,
   or keep a departed member's certificate in `peerExpiry`: a series is never
   deleted, and "peer unreachable" and "certificate expiring" alerted for a

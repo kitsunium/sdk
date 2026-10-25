@@ -52584,8 +52584,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "StatusValue",
-      "spelled": "struct{Role core.Role; Term uint64; Lead core.NodeID; Commit uint64; Last uint64; Stable uint64; Timing core.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace core.AlarmID; Conf core.MembershipValue; Committed core.MembershipValue; Transfer core.NodeID}",
-      "canonical": "struct{Role github.com/kitsunium/sdk/internal/core/app/consensus.Role; Term uint64; Lead github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Commit uint64; Last uint64; Stable uint64; Timing github.com/kitsunium/sdk/internal/core/app/consensus.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace github.com/kitsunium/sdk/internal/core/app/consensus.AlarmID; Conf github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue; Committed github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue; Transfer github.com/kitsunium/sdk/internal/core/app/consensus.NodeID}",
+      "spelled": "struct{Role core.Role; Term uint64; Lead core.NodeID; Commit uint64; Last uint64; Stable uint64; Timing core.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace core.AlarmID; Conf core.MembershipValue; Committed core.MembershipValue; Transfer core.NodeID; HandedBy core.NodeID}",
+      "canonical": "struct{Role github.com/kitsunium/sdk/internal/core/app/consensus.Role; Term uint64; Lead github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Commit uint64; Last uint64; Stable uint64; Timing github.com/kitsunium/sdk/internal/core/app/consensus.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace github.com/kitsunium/sdk/internal/core/app/consensus.AlarmID; Conf github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue; Committed github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue; Transfer github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; HandedBy github.com/kitsunium/sdk/internal/core/app/consensus.NodeID}",
       "fields": [
         {
           "name": "Role",
@@ -52638,6 +52638,11 @@
         {
           "name": "Transfer",
           "type": "core.NodeID"
+        },
+        {
+          "name": "HandedBy",
+          "type": "core.NodeID",
+          "doc": "HandedBy is, while the node leads, the leader whose TimeoutNow made it\ncampaign for this term, 0 for a term it won by an election.\n"
         }
       ],
       "doc": "StatusValue is the step function's part of a node's status. It is a copy:\nits memberships are cloned, so the caller may keep it.\n",

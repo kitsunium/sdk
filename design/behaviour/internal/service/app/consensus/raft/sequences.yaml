@@ -3305,7 +3305,8 @@ sequences:
         to: r.log.term
   - of: (*Raft).Status
     steps:
-      - return: |-
+      - bind: st
+        eval: |-
           StatusValue{
           		Role: r.role, Term: r.term, Lead: r.lead, Commit: r.log.committed,
           		Last: r.log.lastIndex(), Stable: r.log.stable, Timing: r.timing,
@@ -3313,6 +3314,12 @@ sequences:
           		Conf: r.conf().Clone(), Committed: r.confAt(r.log.committed).Clone(),
           		Transfer: r.transferTo,
           	}
+      - opt:
+          do:
+            - set: st.HandedBy
+              value: r.campaignIssuer
+          when: r.role == core.RoleLeader
+      - return: st
   - of: (*Raft).Progress
     steps:
       - bind: pr

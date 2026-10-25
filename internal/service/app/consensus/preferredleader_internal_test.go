@@ -502,3 +502,31 @@ func TestAStuckPreferredLeaderIsNotHandedLeadershipBack(t *testing.T) {
 		t.Errorf("no write entering at the healthy nodes committed: refusals %v", codes)
 	}
 }
+
+// TestAPreferredNodeHandedOverByATransferLeadsAgainAfterTheWindow keeps
+// #559 under #676's pause: an operator moves leadership off the healthy
+// preferred node P. The node that took over by that transfer hands nothing
+// back for the hand-off's window, in which a Remove of P would go through,
+// and P leads again once the window ended.
+func TestAPreferredNodeHandedOverByATransferLeadsAgainAfterTheWindow(t *testing.T) {
+	c, _ := preferredCluster(t, 0x70, 3, 0)
+	p := c.nodes[0]
+	waitLeaderIs(t, c, p, 5*time.Second)
+	c.settledLeader(5 * time.Second)
+	x := c.otherThan(p)
+	if refused, err := transferRetried(p.node, x.id); err != nil {
+		t.Fatalf("TransferLeadership to %d, after %d refusals: %v", x.id, refused, err)
+	}
+	var tookOver time.Time
+	x.node.exec(func() { tookOver = time.Now() })
+	window := handOffWindow * testTimingFast().ElectionTimeoutMax
+	waitLeaderIs(t, c, p, window+5*time.Second)
+	back := time.Since(tookOver)
+	t.Logf("%d took over from the preferred node %d, which led again %v later (window %v)", x.id, p.id, back, window)
+	// The transfer back starts at the first tick past the window, and the
+	// wait above sees its end; the slack covers a tick and the sampling.
+	if back < window-20*time.Millisecond {
+		t.Errorf("leadership went back to the preferred node %v after the transfer, inside the hand-off's window %v", back, window)
+	}
+	propose(t, p.node, "after=window")
+}

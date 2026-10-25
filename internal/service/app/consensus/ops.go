@@ -558,10 +558,11 @@ func (n *Node) successorOf(id coreconsensus.NodeID) (coreconsensus.NodeID, bool)
 // new leader accepts no membership change before its term's no-op commits
 // (MEMBERSHIP_CHANGE_PENDING), an engine detail of the transfer the call
 // itself made, not the caller's: it is submitted again, each heartbeat, for
-// at most twice the maximum election timeout.
+// at most handOffWindow maximum election timeouts, in which the new leader's
+// watch of PreferredLeaders hands nothing back (#676).
 func (n *Node) removeAfterTransfer(ctx context.Context, remove wire.AdminValue) error {
 	timing := n.Status().Timing
-	deadline := n.clk.Now().Add(2 * timing.ElectionTimeoutMax)
+	deadline := n.clk.Now().Add(handOffWindow * timing.ElectionTimeoutMax)
 	for {
 		err := n.admin(ctx, coreconsensus.EntryMembership, remove)
 		if !errs.HasCode(err, coreconsensus.CodeMembershipChangePending) || !n.clk.Now().Before(deadline) {

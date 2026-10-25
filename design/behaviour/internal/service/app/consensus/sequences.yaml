@@ -10707,6 +10707,8 @@ sequences:
         kind: value
       - id: n.startGrace
         kind: internal
+      - id: n.clk.Now().Add
+        kind: value
     steps:
       - bind: st
         eval: n.r.Status()
@@ -10738,6 +10740,12 @@ sequences:
           value: w
       - set: n.prefer
         value: preferWatch{}
+      - opt:
+          do:
+            - set: n.prefer.at
+              to: n.clk.Now().Add
+              value: n.clk.Now().Add(handOffWindow * st.Timing.ElectionTimeoutMax)
+          when: st.Role == coreconsensus.RoleLeader && st.HandedBy != 0
   - of: (*Node).startGrace
     participants:
       - id: caller
@@ -16923,7 +16931,7 @@ sequences:
       - bind: timing
         eval: n.Status().Timing
       - bind: deadline
-        eval: n.clk.Now().Add(2 * timing.ElectionTimeoutMax)
+        eval: n.clk.Now().Add(handOffWindow * timing.ElectionTimeoutMax)
         to: n.clk.Now().Add
       - loop:
           do:

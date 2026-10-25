@@ -4520,6 +4520,11 @@ packages:
               type: core.MembershipValue
             - name: Transfer
               type: core.NodeID
+            - doc: |-
+                HandedBy is, while the node leads, the leader whose TimeoutNow made it
+                campaign for this term, 0 for a term it won by an election.
+              name: HandedBy
+              type: core.NodeID
       - doc: |-
           EngineValue is the engine's own replicated state: the timing contract, the
           cluster version and its generation, and the no-space alarm.
