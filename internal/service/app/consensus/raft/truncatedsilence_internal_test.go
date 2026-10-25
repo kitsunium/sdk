@@ -302,13 +302,21 @@ func silentAt(mut mutation, silentIndex uint64, snap core.PositionValue, ents []
 	return r
 }
 
-// stillSilent reports how the silence ended in rd, nil when it holds.
-func stillSilent(r *Raft, rd ReadyValue) error {
-	if rd.SilenceEnded || r.cfg.SilentIndex == 0 {
-		return errors.New("the silence ended")
-	}
-	if granted(rd, core.MsgAppResp) {
-		return errors.New("a silent node acknowledged an append")
+// stillSilent reports how the silence ended, nil when it holds: in r's
+// Ready, or in the one after that Ready's write is durable, since a silence
+// whose condition holds ends only once its entries are (#684).
+func stillSilent(r *Raft) error {
+	for range 2 {
+		rd := r.Ready()
+		if rd.SilenceEnded || r.cfg.SilentIndex == 0 {
+			return errors.New("the silence ended")
+		}
+		if granted(rd, core.MsgAppResp) {
+			return errors.New("a silent node acknowledged an append")
+		}
+		if rd.Seq != 0 {
+			r.StorageDone(rd.Seq, r.log.lastIndex(), r.log.lastTerm())
+		}
 	}
 	return nil
 }
@@ -323,7 +331,7 @@ func checkSilenceHoldsTheLeadersCommit(mut mutation) error {
 	m := msg(core.MsgApp, 1, 2, 2)
 	m.Index, m.LogTerm, m.Entries, m.Commit = 5, 2, ents[5:7], 11
 	r.Step(t0.Add(time.Second), m)
-	if err := stillSilent(r, r.Ready()); err != nil {
+	if err := stillSilent(r); err != nil {
 		return fmt.Errorf("%w at commit %d, below the commit %d of the leader of SilentTerm", err, r.log.committed, m.Commit)
 	}
 	return nil
@@ -338,7 +346,7 @@ func checkSilenceNeverEndsOnARefusal(mut mutation) error {
 	m.Index, m.LogTerm, m.Commit = 8, 2, 6
 	m.Entries = []core.EntryValue{{Position: core.PositionValue{Term: 2, Index: 9}, Kind: core.EntryCommand}}
 	r.Step(t0.Add(time.Second), m)
-	if err := stillSilent(r, r.Ready()); err != nil {
+	if err := stillSilent(r); err != nil {
 		return fmt.Errorf("%w on a refused append", err)
 	}
 	return nil
@@ -352,8 +360,32 @@ func checkSilenceNotEndedByItsOwnSnapshot(mut mutation) error {
 	m := msg(core.MsgApp, 1, 2, 2)
 	m.Index, m.LogTerm, m.Commit = 20, 2, 20
 	r.Step(t0.Add(time.Second), m)
-	if err := stillSilent(r, r.Ready()); err != nil {
+	if err := stillSilent(r); err != nil {
 		return fmt.Errorf("%w on its own snapshot's commit", err)
+	}
+	return nil
+}
+
+// checkSilenceEndsOnceDurable: an accepted append that meets the condition
+// ends the silence once the entries it brought are durable, never in the
+// Ready that hands them to the driver, which ends the silence on disk at
+// once: a crash during their sync restarted a voter whose log stopped at
+// the truncation point (#684). It ends it then, acknowledging the commit.
+func checkSilenceEndsOnceDurable(mut mutation) error {
+	ents := chainEntries(0, 1, 1, 1, 1, 2, 2, 2, 2)
+	r := silentAt(mut, 6, core.PositionValue{}, ents[:5], 3)
+	m := msg(core.MsgApp, 1, 2, 2)
+	m.Index, m.LogTerm, m.Entries, m.Commit = 5, 2, ents[5:], 7
+	r.Step(t0.Add(time.Second), m)
+	rd := r.Ready()
+	if rd.SilenceEnded || r.cfg.SilentIndex == 0 || granted(rd, core.MsgAppResp) {
+		return fmt.Errorf("the silence ended with entries 6..7, which meet its condition, durable through %d only", r.log.stable)
+	}
+	r.StorageDone(rd.Seq, 7, 2)
+	rd = r.Ready()
+	if !rd.SilenceEnded || r.cfg.SilentIndex != 0 || !granted(rd, core.MsgAppResp) {
+		return fmt.Errorf("the silence held once entries 6..7, which meet its condition, were durable (ended %v, silent index %d)",
+			rd.SilenceEnded, r.cfg.SilentIndex)
 	}
 	return nil
 }

@@ -878,6 +878,32 @@ directory and cleared it, through `Inspect` and the product's own procedure
    longer hold. The node keeps no durable bound of what it acknowledged; a
    bound persisted with the silence would close it for the records still
    readable.
+   **The end of the silence is durable only after the entries that meet
+   its condition (amendment of 2026-10-25,
+   [#684](https://github.com/kitsunium/sdk/issues/684)).** The condition is
+   judged on the append the node accepted, whose entries are then in
+   memory only. The end was signalled in that same Ready, and the driver
+   removed `SILENT` and synced the directory on the event loop before it
+   handed the storage actor those entries. A crash during their fdatasync
+   restarted the node with no silence and a log that stopped at the
+   truncation point: a voter again, it was elected with the lagger's vote
+   at its leader's next failure, over the writes it had acknowledged. The
+   order is now the durability's:
+   - the step function records the commit at which the condition held and
+     keeps the node silent, no vote, no acknowledgement and `FlagTruncated`
+     on its heartbeat answers, until the log is durable through that
+     commit: the storage completion that reports it, or the install of a
+     snapshot that covers it. Those entries are committed and never
+     truncated, so the log does become durable through them;
+   - the silence ends in the Ready after, where the driver removes
+     `SILENT` as before, so the file goes once the entries are on disk, and
+     the acknowledgement of the commit that moves the leader's probe leaves
+     after the file is gone;
+   - a crash before then leaves `SILENT`, and the node restarts silent, as
+     it does after a failed fdatasync of that batch once an operator clears
+     its `STORAGE_FAILED`.
+   No format changes, of frame or disk: the cost is one sync of delay on
+   the node's return to voting.
 There is no third exit that keeps the damaged node voting.
 
 **Product commands (R5-12).** The first consumer exposes both exits as

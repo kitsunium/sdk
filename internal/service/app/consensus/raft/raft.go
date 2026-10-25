@@ -425,6 +425,10 @@ type Raft struct {
 	// the driver last reported them (SetApplyLag) plus what Ready handed it
 	// in memory since.
 	applyLag int64
+	// silenceEndAt is the commit at which an accepted append met the
+	// silence condition while the log was not yet durable through it, 0
+	// when none: the silence ends once it is (endSilenceOnceDurable, #684).
+	silenceEndAt uint64
 }
 
 // NewRaft builds the step function over the loaded state.
@@ -579,6 +583,7 @@ func (r *Raft) StorageDone(seq, index, term uint64) {
 		return
 	}
 	r.log.stable = min(index, r.log.lastIndex())
+	r.endSilenceOnceDurable()
 	if r.role == core.RoleLeader {
 		if pr := r.prs[r.id]; pr != nil {
 			pr.maybeUpdate(r.log.stable)

@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"cmp"
 	"time"
 
 	core "github.com/kitsunium/sdk/internal/core/app/consensus"
@@ -683,6 +684,9 @@ func (r *Raft) refuses(from core.NodeID) bool {
 // failure of that leader elected a log that lacked them. Holding m.Commit,
 // the node holds everything that leader had committed when it sent m, and
 // the election restriction then refuses any candidate that lacks it.
+//
+// The condition is met on the log in memory; the silence ends once that
+// log is durable through the commit that met it (endSilenceOnceDurable).
 func (r *Raft) maybeEndSilence(m core.MessageValue) {
 	if r.cfg.SilentIndex == 0 || m.Term < r.cfg.SilentTerm || r.log.lastIndex() < r.cfg.SilentIndex {
 		return
@@ -693,8 +697,33 @@ func (r *Raft) maybeEndSilence(m core.MessageValue) {
 	if m.Term == r.cfg.SilentTerm && r.log.committed < m.Commit && !r.mutated(mutSilenceEndsBeforeCommit) {
 		return
 	}
+	// The first commit that met the condition is enough: it stays committed.
+	r.silenceEndAt = cmp.Or(r.silenceEndAt, r.log.committed)
+	r.endSilenceOnceDurable()
+}
+
+// endSilenceOnceDurable ends the silence whose condition an accepted append
+// met at the commit silenceEndAt, once the log is durable through that
+// commit (#684). The append's entries are in memory only when it is
+// judged: SilenceEnded in that same Ready had the driver remove SILENT
+// before the storage actor synced them, and a crash during their
+// fdatasync restarted a voter whose log stopped at the truncation point,
+// which one failure of the leader later elected over the writes it had
+// acknowledged. The entries through silenceEndAt are committed and never
+// truncated, so the log becomes durable through it: StorageDone reports it,
+// and the silence ends in the Ready after, which the driver ends on disk
+// only then. A crash before leaves SILENT, and the node restarts silent.
+func (r *Raft) endSilenceOnceDurable() {
+	if r.silenceEndAt == 0 || (r.log.stable < r.silenceEndAt && !r.mutated(mutSilenceEndsBeforeDurable)) {
+		return
+	}
+	r.silenceEndAt = 0
 	r.cfg.SilentIndex, r.cfg.SilentTerm = 0, 0
 	r.rd.SilenceEnded = true
-	// The committed prefix is verified: acknowledging it is safe.
-	r.send(core.MessageValue{Kind: core.MsgAppResp, To: m.From, Index: r.log.committed})
+	// The committed prefix is verified, and every later leader holds it:
+	// acknowledging it is safe. The node acknowledged none of the appends
+	// that brought it, so this one moves the leader's probe.
+	if r.lead != 0 {
+		r.send(core.MessageValue{Kind: core.MsgAppResp, To: r.lead, Index: r.log.committed})
+	}
 }

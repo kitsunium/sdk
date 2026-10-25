@@ -244,6 +244,11 @@ constants:
           moves past the first batch (#636).
         name: mutSilentReportIgnored
       - doc: |-
+          mutSilenceEndsBeforeDurable ends the silence on the log in memory, as
+          before #684: in the Ready whose entries meet the condition, which the
+          driver ends on disk before the storage actor syncs them.
+        name: mutSilenceEndsBeforeDurable
+      - doc: |-
           mutRecordAtClusterVersion sends the leader record by the cluster
           version, as before #638: below 2 never, at 2 to any PreVote.
         name: mutRecordAtClusterVersion
@@ -726,6 +731,7 @@ files:
       - (*Raft).chainRefused
       - (*Raft).refuses
       - (*Raft).maybeEndSilence
+      - (*Raft).endSilenceOnceDurable
     name: step.go
 functions:
   - doc: |-
@@ -804,6 +810,7 @@ functions:
     params: c, cur core.TimingContractSpec
     results: bool
 imports:
+  cmp: cmp
   core: github.com/kitsunium/sdk/internal/core/app/consensus
   errors: errors
   errs: github.com/kitsunium/sdk/internal/kernel/errs
@@ -1575,6 +1582,12 @@ types:
           in memory since.
         name: applyLag
         type: int64
+      - doc: |-
+          silenceEndAt is the commit at which an accepted append met the
+          silence condition while the log was not yet durable through it, 0
+          when none: the silence ends once it is (endSilenceOnceDurable, #684).
+        name: silenceEndAt
+        type: uint64
     kind: struct
     methods:
       - name: Debug
@@ -3001,8 +3014,25 @@ types:
           failure of that leader elected a log that lacked them. Holding m.Commit,
           the node holds everything that leader had committed when it sent m, and
           the election restriction then refuses any candidate that lacks it.
+
+          The condition is met on the log in memory; the silence ends once that
+          log is durable through the commit that met it (endSilenceOnceDurable).
         name: maybeEndSilence
         params: m core.MessageValue
+        recv: r *Raft
+      - doc: |-
+          endSilenceOnceDurable ends the silence whose condition an accepted append
+          met at the commit silenceEndAt, once the log is durable through that
+          commit (#684). The append's entries are in memory only when it is
+          judged: SilenceEnded in that same Ready had the driver remove SILENT
+          before the storage actor synced them, and a crash during their
+          fdatasync restarted a voter whose log stopped at the truncation point,
+          which one failure of the leader later elected over the writes it had
+          acknowledged. The entries through silenceEndAt are committed and never
+          truncated, so the log becomes durable through it: StorageDone reports it,
+          and the silence ends in the Ready after, which the driver ends on disk
+          only then. A crash before leaves SILENT, and the node restarts silent.
+        name: endSilenceOnceDurable
         recv: r *Raft
     name: Raft
   - fields:

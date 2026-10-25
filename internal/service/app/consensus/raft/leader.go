@@ -1515,6 +1515,9 @@ func (r *Raft) InstallSnapshot(meta core.SnapshotMetaValue) {
 	r.installEngine(&meta)
 	r.cfg.NoTable = false
 	r.confChanged()
+	// A durable snapshot through the commit that met the silence condition
+	// ends the silence as the entries would (#684).
+	r.endSilenceOnceDurable()
 	// The install proves the prefix up to idx only: a kept suffix may be
 	// another term's, and the next append verifies it (review H1).
 	ack := idx

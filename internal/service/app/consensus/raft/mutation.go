@@ -138,6 +138,10 @@ const (
 	// answer carries: a stale match is not lowered and the probe never
 	// moves past the first batch (#636).
 	mutSilentReportIgnored
+	// mutSilenceEndsBeforeDurable ends the silence on the log in memory, as
+	// before #684: in the Ready whose entries meet the condition, which the
+	// driver ends on disk before the storage actor syncs them.
+	mutSilenceEndsBeforeDurable
 	// mutRecordAtClusterVersion sends the leader record by the cluster
 	// version, as before #638: below 2 never, at 2 to any PreVote.
 	mutRecordAtClusterVersion

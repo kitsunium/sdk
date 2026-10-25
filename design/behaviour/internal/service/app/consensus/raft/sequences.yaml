@@ -2087,6 +2087,8 @@ sequences:
         kind: internal
       - id: r.confChanged
         kind: internal
+      - id: r.endSilenceOnceDurable
+        kind: internal
       - id: r.log.lastIndex
         kind: internal
       - id: r.send
@@ -2128,6 +2130,8 @@ sequences:
         value: "false"
       - eval: r.confChanged()
         to: r.confChanged
+      - eval: r.endSilenceOnceDurable()
+        to: r.endSilenceOnceDurable
       - bind: ack
         eval: idx
       - opt:
@@ -3149,6 +3153,8 @@ sequences:
         kind: self
       - id: r.noteSelfVote
         kind: internal
+      - id: r.endSilenceOnceDurable
+        kind: internal
       - id: pr.maybeUpdate
         kind: internal
       - id: r.broadcastAppend
@@ -3162,6 +3168,8 @@ sequences:
           when: index == 0 || index <= r.log.stable || (!r.mutated(mutStaleCompletion) && !r.log.matchTerm(index, term))
       - set: r.log.stable
         value: min(index, r.log.lastIndex())
+      - eval: r.endSilenceOnceDurable()
+        to: r.endSilenceOnceDurable
       - opt:
           do:
             - opt:
@@ -5253,7 +5261,9 @@ sequences:
         kind: self
       - id: r.log.term
         kind: internal
-      - id: r.send
+      - id: cmp
+        kind: stdlib
+      - id: r.endSilenceOnceDurable
         kind: internal
     steps:
       - opt:
@@ -5272,9 +5282,32 @@ sequences:
           do:
             - return: ""
           when: m.Term == r.cfg.SilentTerm && r.log.committed < m.Commit && !r.mutated(mutSilenceEndsBeforeCommit)
+      - set: r.silenceEndAt
+        to: cmp
+        value: cmp.Or(r.silenceEndAt, r.log.committed)
+      - eval: r.endSilenceOnceDurable()
+        to: r.endSilenceOnceDurable
+  - of: (*Raft).endSilenceOnceDurable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).endSilenceOnceDurable
+        kind: self
+      - id: r.send
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: r.silenceEndAt == 0 || (r.log.stable < r.silenceEndAt && !r.mutated(mutSilenceEndsBeforeDurable))
+      - set: r.silenceEndAt
+        value: "0"
       - set: r.cfg.SilentIndex, r.cfg.SilentTerm
         value: 0, 0
       - set: r.rd.SilenceEnded
         value: "true"
-      - eval: "r.send(core.MessageValue{Kind: core.MsgAppResp, To: m.From, Index: r.log.committed})"
-        to: r.send
+      - opt:
+          do:
+            - eval: "r.send(core.MessageValue{Kind: core.MsgAppResp, To: r.lead, Index: r.log.committed})"
+              to: r.send
+          when: r.lead != 0

@@ -187,6 +187,15 @@ under coverage before touching `shard_count`.
   append, the probe never moved past its first batch, and the node stayed
   silent for as long as its leader led (`mutSilentReportIgnored`,
   `TestTheSilenceEndsOnceTheSameTermLeadersCommitIsHeld`).
+- End a silence in the Ready whose entries meet its condition, or before
+  the log is durable through the commit that met it: the driver removes
+  SILENT as soon as a Ready says `SilenceEnded`, before the storage actor
+  syncs that Ready's entries, and a crash during their sync restarted a
+  voter without them. `maybeEndSilence` records the commit in
+  `silenceEndAt`, and `endSilenceOnceDurable` ends the silence from
+  `StorageDone` or `InstallSnapshot` once `stable` reaches it (#684,
+  `mutSilenceEndsBeforeDurable`, `checkSilenceEndsOnceDurable`). A test
+  that judges a silence reports its writes durable first (`stillSilent`).
 - Answer with a leader record a PreVote that does not carry FlagProtocol2,
   or wait for the cluster version 2 to send one: a node of protocol 1 does
   not know the kind, and the raise is refused while the stale voter the
