@@ -120,15 +120,18 @@ func TestAFollowerSlowToApplyHoldsNoMoreThanMaxApplyLagBytes(t *testing.T) {
 	}
 	wg.Wait()
 	st, fst := lead.node.Status(), slow.node.Status()
-	t.Logf("leader %d committed %d, applied %d; slow follower %d applied %d; leader refused %d OVERLOADED, %d other failures; the follower's apply lag peaked at %.1f MiB, its bound MaxApplyLagBytes is %.1f MiB",
-		lead.id, st.Commit, st.Applied, slow.id, fst.Applied, refused.Load(), failed.Load(), mib(maxLag.Load()), mib(lagBound))
+	t.Logf("leader %d committed %d, applied %d; slow follower %d applied %d; leader refused %d OVERLOADED, %d other failures; the follower's apply lag peaked at %d bytes, its bound MaxApplyLagBytes is %d",
+		lead.id, st.Commit, st.Applied, slow.id, fst.Applied, refused.Load(), failed.Load(), maxLag.Load(), int64(lagBound))
 	if fst.Applied >= st.Commit {
 		t.Fatalf("setup: the slow follower kept up (applied %d of %d): nothing was held back", fst.Applied, st.Commit)
 	}
-	// One batch past the bound is what a Ready may hand at once.
-	if maxLag.Load() > lagBound+(1<<20) {
-		t.Errorf("a follower slower to apply held %.1f MiB of committed entries unapplied in memory, past MaxApplyLagBytes (%.1f MiB) plus a batch: D6's bound holds on the leader only",
-			mib(maxLag.Load()), mib(lagBound))
+	// Apply holds the entries handed in memory, MaxApplyLagBytes at most,
+	// or the batch it reads back, MaxApplyLagBytes at most too, never both:
+	// nothing is handed in memory behind a read, and a read comes after the
+	// entries handed before it were applied.
+	if maxLag.Load() > lagBound {
+		t.Errorf("a follower slower to apply held %d bytes of committed entries unapplied in memory, past MaxApplyLagBytes (%d): D6's bound holds on the leader only",
+			maxLag.Load(), int64(lagBound))
 	}
 
 	// The follower catches up, still within its bound, once its machine
@@ -144,8 +147,8 @@ func TestAFollowerSlowToApplyHoldsNoMoreThanMaxApplyLagBytes(t *testing.T) {
 	if got := slow.node.Status().Applied; got < commit {
 		t.Fatalf("the slow follower applied %d of %d within 30 s once its machine was fast again", got, commit)
 	}
-	if maxLag.Load() > lagBound+(1<<20) {
-		t.Errorf("catching up, the follower's apply lag peaked at %.1f MiB, past MaxApplyLagBytes plus a batch", mib(maxLag.Load()))
+	if maxLag.Load() > lagBound {
+		t.Errorf("catching up, the follower's apply lag peaked at %d bytes, past MaxApplyLagBytes (%d)", maxLag.Load(), int64(lagBound))
 	}
 	waitFor(t, "the follower's apply lag to drain to 0", func() bool { return slow.node.applyLag.Load() == 0 })
 	// A proposal whose caller gave up may have committed after the commit

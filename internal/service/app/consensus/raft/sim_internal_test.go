@@ -691,7 +691,11 @@ func (s *sim) run(until time.Time, load bool) {
 				continue
 			}
 			n.applyDue = false
-			s.applyHead(n)
+			// An install drains the queue, and the evApply armed before it
+			// still comes.
+			if len(n.applyQ) > 0 {
+				s.applyHead(n)
+			}
 			s.process(n)
 			s.scheduleApply(n)
 		}
