@@ -517,6 +517,10 @@ var checks = map[string]func(mutation) error{
 	"retired key refused":               checkRetiredKeyRefused,
 	"nothing new below protocol 3":      checkNothingNewBelowProtocol3,
 	"raise to 3 announced":              checkRaise3Announced,
+	"apply bounded by its lag":          checkApplyBounded,
+	"held payloads evicted":             checkHeldPayloadsEvicted,
+	"nothing handed behind a read":      checkNothingHandedBehindARead,
+	"no table keeps committed payloads": checkNoTableKeepsCommittedPayloads,
 	"raise heard in the vote window":    checkRaiseHeardRecently,
 }
 
@@ -591,6 +595,10 @@ func TestMutationsAreCaught(t *testing.T) {
 		"retired key admitted":             mutRetiredKeyAdmitted,
 		"key not retired":                  mutKeyNotRetired,
 		"protocol 3 below the raise":       mutProtocol3BelowRaise,
+		"apply unbounded":                  mutApplyUnbounded,
+		"handed behind a read":             mutApplyBehindRead,
+		"evicted through applied only":     mutEvictAppliedOnly,
+		"no table evicts committed":        mutNoTableEvictsCommitted,
 		"raise over a silent member":       mutRaiseOverSilence,
 	}
 	for name, m := range muts {

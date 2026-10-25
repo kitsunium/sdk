@@ -2852,6 +2852,23 @@ sequences:
       - op: "&^="
         set: r.facts
         value: raftOverloaded
+  - of: (*Raft).SetApplyLag
+    steps:
+      - set: r.applyLag
+        value: bytes
+      - opt:
+          do:
+            - op: "|="
+              set: r.facts
+              value: raftApplyReading
+            - return: ""
+          when: reading
+      - op: "&^="
+        set: r.facts
+        value: raftApplyReading
+  - of: (*Raft).ApplyHeld
+    steps:
+      - return: "!r.cfg.NoTable && r.log.applied < min(r.log.committed, r.log.stable)"
   - of: (*ReadyValue).NeedsWrite
     steps:
       - return: rd.HardState != nil || rd.TruncateFrom != 0 || rd.Compact != 0 || len(rd.Entries) != 0 || len(rd.AfterSync) != 0 || rd.Commit != 0
@@ -2923,7 +2940,7 @@ sequences:
       - set: node.engBase
         to: node.engine
         value: node.engine()
-      - eval: node.loadEntries(st.Entries)
+      - eval: node.loadEntries(st)
         to: node.loadEntries
       - set: node.log.stable
         to: node.log.lastIndex
@@ -2988,22 +3005,33 @@ sequences:
       - id: r.noteAppended
         kind: internal
     steps:
+      - bind: ents
+        eval: st.Entries
+      - bind: k
+        eval: "0"
+      - loop:
+          cond: k < len(ents) && ents[k].Position.Index <= r.log.snapIndex
+          do:
+            - op: ++
+              set: k
+      - set: r.log.ents
+        value: ents[k:]
+      - set: r.log.evicted
+        value: min(max(st.Evicted, r.log.snapIndex), r.log.lastIndex())
       - loop:
           do:
+            - bind: e
+              eval: "&r.log.ents[i]"
             - opt:
                 do:
-                  - continue: true
-                when: e.Position.Index <= r.log.snapIndex
-            - set: r.log.ents
-              value: append(r.log.ents, e)
-            - op: +=
-              set: r.log.window
-              value: int64(len(e.Data))
-            - eval: r.noteAppended(&e)
+                  - op: +=
+                    set: r.log.window
+                    value: int64(len(e.Data))
+                when: e.Position.Index > r.log.evicted
+            - eval: r.noteAppended(e)
               to: r.noteAppended
-          key: _
-          range: ents
-          value: e
+          key: i
+          range: r.log.ents
   - of: (*Raft).raiseSilenceOverSnapshot
     steps:
       - opt:
@@ -3317,9 +3345,7 @@ sequences:
       - opt:
           do:
             - return: "true"
-          when: |-
-            r.term != r.hs.Term || r.vote != r.hs.Vote || r.log.committed != r.hs.Commit ||
-            		(r.log.applied < min(r.log.committed, r.log.stable) && !r.cfg.NoTable)
+          when: r.term != r.hs.Term || r.vote != r.hs.Vote || r.log.committed != r.hs.Commit || r.applyReady()
       - return: rd.hasLogWork() || rd.hasNotices()
   - of: (*ReadyValue).hasLogWork
     steps:
@@ -3340,8 +3366,8 @@ sequences:
         kind: self
       - id: r.flushReads
         kind: internal
-      - id: slices
-        kind: stdlib
+      - id: r.handApply
+        kind: internal
       - id: r.log.evict
         kind: internal
       - id: r.numberWrite
@@ -3373,20 +3399,102 @@ sequences:
         value: "core.HardState{Term: r.term, Vote: r.vote, Commit: r.log.committed}"
       - opt:
           do:
-            - set: rd.Apply
-              to: slices
-              value: "slices.Clone(r.log.ents[r.log.applied-r.log.snapIndex : hi-r.log.snapIndex])"
-            - set: r.log.applied
-              value: hi
-          init:
-            bind: hi
-            eval: min(r.log.committed, r.log.stable)
-          when: r.log.applied < hi && !r.cfg.NoTable
-      - eval: r.log.evict(r.cfg.RecentEntriesBytes, min(r.log.applied, r.log.stable))
+            - eval: r.handApply(&rd, min(r.log.committed, r.log.stable))
+              to: r.handApply
+          when: r.applyReady()
+      - eval: r.log.evict(r.cfg.RecentEntriesBytes, r.evictable())
         to: r.log.evict
       - eval: r.numberWrite(&rd, hsChanged)
         to: r.numberWrite
       - return: rd
+  - of: (*Raft).applyReady
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).applyReady
+        kind: self
+      - id: r.applyLimit
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: r.cfg.NoTable || r.log.applied >= min(r.log.committed, r.log.stable)
+      - bind: next
+        eval: r.log.applied + 1
+      - bind: limit
+        eval: r.applyLimit()
+        to: r.applyLimit
+      - switch:
+          cases:
+            - case: limit <= 0 || next <= r.log.evicted
+              do:
+                - return: "true"
+            - case: r.facts&raftApplyReading != 0 && !r.mutated(mutApplyBehindRead)
+              do:
+                - return: "false"
+      - return: r.applyLag <= 0 || r.applyLag+int64(len(r.log.at(next).Data)) <= limit
+  - of: (*Raft).applyLimit
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: r.mutated(mutApplyUnbounded)
+      - return: r.cfg.MaxApplyLagBytes
+  - of: (*Raft).handApply
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Raft).handApply
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - bind: lo
+        eval: r.log.applied + 1
+      - opt:
+          do:
+            - bind: end
+              eval: min(r.log.evicted, hi)
+            - set: rd.ApplyRead
+              value: "ReadBackSpec{Lo: lo, Hi: end + 1}"
+            - set: r.log.applied
+              value: end
+            - op: "|="
+              set: r.facts
+              value: raftApplyReading
+            - return: ""
+          when: lo <= r.log.evicted
+      - bind: limit, held, end
+        eval: r.applyLimit(), r.applyLag, lo-1
+      - loop:
+          cond: end < hi
+          do:
+            - bind: size
+              eval: int64(len(r.log.at(end + 1).Data))
+            - opt:
+                do:
+                  - break: true
+                when: limit > 0 && held > 0 && held+size > limit
+            - op: +=
+              set: held
+              value: size
+            - op: ++
+              set: end
+      - set: rd.Apply
+        to: slices
+        value: "slices.Clone(r.log.ents[lo-r.log.snapIndex-1 : end-r.log.snapIndex])"
+      - set: r.log.applied
+        value: end
+      - set: r.applyLag
+        value: held
+  - of: (*Raft).evictable
+    steps:
+      - opt:
+          do:
+            - return: min(r.log.applied, r.log.stable)
+          when: r.mutated(mutEvictAppliedOnly) || (r.cfg.NoTable && !r.mutated(mutNoTableEvictsCommitted))
+      - return: min(r.log.committed, r.log.stable)
   - of: (*Raft).numberWrite
     steps:
       - opt:

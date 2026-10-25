@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T07:09:45Z -->
+<!-- updated: 2026-10-25T08:20:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -36,7 +36,7 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
 | fuzz | `go test -fuzz` on the targets of `wire/` and this package; nightly in CI |
 | dm-crypt | `testdata/dmcrypt/run.sh` (Docker, privileged): fsync latency and power cuts through LUKS; results in `testdata/dmcrypt/RESULTS.md` |
 
-Under Bazel `consensus_test` has 12 shards: under race and coverage the suite
+Under Bazel `consensus_test` has 24 shards: under race and coverage the suite
 passed the 60 s cap per target once the disk scenarios of #507, #516 and
 #524 joined it (4 shards), and the snapshot and disk scenarios of #506,
 #512, #513, #515, #520, #525, #526 and #533 brought the slowest of 4 to
@@ -53,7 +53,21 @@ scenarios (`TestDiskClusterSurvivesFullRestart`,
 `TestTheEntriesRecoverKeepsHaveOneTokenOnEveryNode`, the ten election
 timeouts of `TestAPinThatEndsCompactsTheLogWithoutAWrite`'s pin) still
 paired at 8 and 10: on a loaded machine the slowest of 8 summed 49 to
-53 s, of 12 37 to 39 s.
+53 s, of 12 37 to 39 s. #663's tests shifted every index past them, and
+shard 3 of 12 timed out under coverage after its PASS: it now dealt
+`TestAMetaOfAVersionThisBuildCannotReadRefusesTheOpen` beside
+`TestHealthWarnsBeforeTheSnapshotLimit`, and the former's data directory,
+on 64 MiB segments, spent 25 of its 26 s scanning the unused tail of the
+active segment at reopen, a loop coverage slows six times where it adds
+7 % to the suite as a whole. It opens on 64 KiB segments now (0.05 s).
+The two heaviest left, `TestReopeningAFollowersLogDoesNotHoldItsHardStates`
+(23 s) and `TestTheStartHoldsNoMoreOfTheTailThanItsBudget` (22 s, the
+collector at GOGC=10), fill most of a shard wherever they are dealt, so the
+rest is spread thinner (24 shards): the sums per shard of a `-race
+-covermode=atomic -json` run, 43.6 s for the slowest of 12 on one
+machine, are 32.9 s at 24, and 34 s for the slowest on average over
+4,000 draws of up to 40 tests inserted anywhere (36 to 37 s at 19 or
+20, 31 s at 28).
 
 ## Do NOT
 
@@ -114,6 +128,40 @@ paired at 8 and 10: on a loaded machine the slowest of 8 summed 49 to
   first break, then the first unknown layout, are refused in log order, as
   before (#660, `TestReopeningAFollowersLogDoesNotHoldItsHardStates`,
   `TestAnEarlierSegmentIsJudgedOnEveryRecordItHeld`).
+- Read the tail past the snapshot whole, or hand apply every committed
+  entry: `readTail` read every entry with its payload, raft's first Ready
+  handed them all to apply, and so did every Ready of a follower slower to
+  apply than its leader. A node needed several times its log in heap to
+  start, and a slow follower held everything it was behind by until it was
+  OOM-killed (#663, #664). `readTail` reads `MaxBatchBytes` at a time into
+  one slice raft keeps as its log, a quarter of room past it, and past
+  `RecentEntriesBytes` drops the payloads of the oldest committed commands
+  (`StartState.Evicted`; every other kind keeps its own, which `NewRaft`
+  applies). Raft hands apply `MaxApplyLagBytes` at most past what the
+  apply goroutine holds (`SetApplyLag`, from `handleReady`), drops the
+  payloads of committed entries past `RecentEntriesBytes` whether handed or
+  not, and hands those by index (`ReadyValue.ApplyRead`): `applyRead`
+  reads them back on the apply goroutine, a batch at a time within both
+  bounds, in order, past what a restore covers, and stops the node when
+  the log cannot give back what it holds committed. Nothing is handed in
+  memory behind a read, and a batch leaves the apply lag once the machine
+  applied it, by the bytes it was handed. Nor admit a command while raft
+  holds committed entries back or a read is pending (`applyOverloaded`):
+  the bytes apply holds no longer measure the gap between commit and
+  applied, and a follower's forwards grew it with no bound. The apply
+  goroutine wakes the loop once it has room (`applyMoved`, `awaitApply`)
+  (`TestTheStartHoldsNoMoreOfTheTailThanItsBudget`,
+  `TestAFollowerSlowToApplyHoldsNoMoreThanMaxApplyLagBytes`,
+  `TestALeaderSlowToApplyStillRefusesForwardsPastMaxApplyLagBytes`,
+  `TestAMachineThatDropsItsPayloadsLeavesNoApplyLag`,
+  `TestADurableMachineResumesInsideTheTailReadBack`).
+- Sample a heap peak in the package's own process: the tests before it
+  leave hundreds of MiB live, and the collector lets a share of that grow
+  in garbage on top of what is measured.
+  `TestTheStartHoldsNoMoreOfTheTailThanItsBudget` measures in a child
+  process of the test binary (`startInAChild`); in the package's process it
+  sampled 60 to 87 MiB over a 600 MiB baseline on every CI runner, whatever
+  the start held.
 - Compact the store past its end without the term: it holds no entry to read
   it from, and a node restarted with no table votes on that term. The engine
   passes it (`storeReq.compactTerm`, `compactLog`), the file log refuses a
@@ -129,8 +177,8 @@ paired at 8 and 10: on a loaded machine the slowest of 8 summed 49 to
 - Move raft onto an install it committed past while the machine restored
   it, or onto any install on a leader: `InstallSnapshot` ignores both, or
   the engine state of the entries committed past the snapshot is rolled
-  back and carried by the next cut — a node with a table evicted the
-  payloads it applied, so they cannot be replayed (#416,
+  back and carried by the next cut — a node with a table evicts the
+  payloads it committed, so they cannot be replayed (#416,
   `TestAnInstallBelowTheCommitLeavesTheEngineStateAlone`).
 - Sync once per queued Ready: every request the storage actor takes is
   staged, then synced ONCE, then completed in order, so no `AfterSync`

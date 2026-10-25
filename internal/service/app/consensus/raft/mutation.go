@@ -160,6 +160,21 @@ const (
 	// the retired keys, in an entry of payload version 3, which a node of
 	// protocol 2 cannot read (#648, D18).
 	mutProtocol3BelowRaise
+	// mutApplyUnbounded hands apply every committed entry whatever it
+	// holds, as before #664: a follower slower to apply than its leader held
+	// in memory everything it was behind by.
+	mutApplyUnbounded
+	// mutApplyBehindRead hands entries in memory while apply still reads
+	// back from the log the ones handed by index, which then queue behind
+	// the read with their payloads (#664).
+	mutApplyBehindRead
+	// mutEvictAppliedOnly drops no payload past what apply was handed, as
+	// before #664: the committed entries held back kept theirs in memory.
+	mutEvictAppliedOnly
+	// mutNoTableEvictsCommitted lets a node with no table drop the payloads
+	// of the entries it holds committed, whose engine effects its install
+	// replays from them (#416, #664).
+	mutNoTableEvictsCommitted
 	// mutRaiseOverSilence admits a raise over a member whose last message
 	// of the term announced the version, however long ago it was heard
 	// (#665).

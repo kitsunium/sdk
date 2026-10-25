@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T06:33:47Z -->
+<!-- updated: 2026-10-25T06:45:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -16,6 +16,10 @@ unexported `Config.mut`), and the linearizability checker with its negative
 control (`lincheck_internal_test.go`). `simOptions.speaks` runs a node of a
 previous release in a mixed cluster, read at each start so a restart
 upgrades it (`TestAMixedClusterRaisesTo3OnceEveryMemberSpeaksIt`).
+`simOptions.applyLag` bounds apply by `MaxApplyLagBytes` and makes it
+asynchronous, the entries handed by index read back from the disk model
+and a restart loading the committed commands past `recent` without their
+payloads, as the driver does (`TestSimBoundedApply*`, #663, #664).
 
 Bazel deals top-level tests to shards by their index, so a new test file
 whose name sorts before the simulator's (`sim_*`, `soak_*`) moves every
@@ -33,6 +37,21 @@ under coverage before touching `shard_count`.
 
 - Iterate a map where the order reaches a message: a run must stay a pure
   function of its seed.
+- Hand apply more than `MaxApplyLagBytes` past what the driver reports it
+  holds (`SetApplyLag`), but one entry when it holds nothing, or anything
+  in memory while it reads back entries handed by index: a follower slower
+  to apply than its leader held everything it was behind by (#664,
+  `mutApplyUnbounded`, `checkApplyBounded`; `mutApplyBehindRead`,
+  `checkNothingHandedBehindARead`). Nor keep the payloads of the committed
+  entries held back past `RecentEntriesBytes`: they are durable, and the
+  driver reads them back (`ReadyValue.ApplyRead`, `mutEvictAppliedOnly`,
+  `checkHeldPayloadsEvicted`) — but on a node with no table, whose install
+  replays the engine effects of what it holds committed from their
+  payloads (#416, `mutNoTableEvictsCommitted`,
+  `checkNoTableKeepsCommittedPayloads`). A start's `Evicted` loads
+  commands only without their payloads; every other entry keeps its own,
+  whose effects `NewRaft` applies (#663,
+  `TestAStartWithEvictedPayloadsHandsThemByIndex`).
 - Acknowledge a snapshot install past its index (review H1,
   `mutSnapshotAckLastIndex`).
 - Append, acknowledge or skip an entry kind `Known` refuses: report it in

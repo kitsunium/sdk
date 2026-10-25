@@ -3956,8 +3956,17 @@ packages:
               type: uint64
             - doc: |-
                 RecentEntriesBytes bounds the payloads held in memory; 0 holds them
-                all. Older ones are fetched from the store when a peer needs them.
+                all. Older ones are fetched from the store when a peer needs them, and
+                read back from it by the driver when apply reaches them.
               name: RecentEntriesBytes
+              type: int64
+            - doc: |-
+                MaxApplyLagBytes bounds the payload bytes Ready hands apply past what
+                the driver reports applied (SetApplyLag): one entry is handed when
+                nothing is outstanding, whatever its size, and entries whose payloads
+                were evicted are handed by index, for the driver to read from the
+                store (D6, #664). 0 does not bound them.
+              name: MaxApplyLagBytes
               type: int64
             - doc: |-
                 MaxEntryBytes bounds a forwarded command's payload as the driver
@@ -3983,9 +3992,19 @@ packages:
             - doc: Snapshot is the base the log continues, zero for none.
               name: Snapshot
               type: core.SnapshotMetaValue
-            - doc: Entries are the durable entries after the snapshot.
+            - doc: |-
+                Entries are the durable entries after the snapshot. NewRaft keeps
+                them as its log, with the room past them: the caller hands them over
+                and no longer uses them.
               name: Entries
               type: "[]core.EntryValue"
+            - doc: |-
+                Evicted is the last index the driver loaded without its payload, 0
+                when it loaded every one: each command after the snapshot through it
+                carries none and is read back from the store when applied, every other
+                entry keeps its own. Only a committed entry may be loaded so (#663).
+              name: Evicted
+              type: uint64
             - doc: Applied is where the state machine resumes, at least the snapshot.
               name: Applied
               type: uint64
@@ -4054,6 +4073,13 @@ packages:
             - doc: Apply are committed, locally durable entries, in order.
               name: Apply
               type: "[]core.EntryValue"
+            - doc: |-
+                ApplyRead names committed, locally durable entries the step function
+                holds without their payloads: the driver reads them from its store
+                and applies them, in order, before Apply. Its Lo is 0 when there are
+                none (D6, #664).
+              name: ApplyRead
+              type: ReadBackSpec
             - doc: SendSnapshot names the peers that need a snapshot.
               name: SendSnapshot
               type: "[]core.NodeID"
@@ -4117,6 +4143,16 @@ packages:
               type: uint64
             - name: Kind
               type: core.EntryKind
+      - doc: |-
+          ReadBackSpec names the committed entries [Lo, Hi) the driver reads back
+          from its store to apply them: the step function holds them without
+          their payloads (ReadyValue.ApplyRead).
+        name: ReadBackSpec
+        struct:
+          fields:
+            - name: Lo
+            - name: Hi
+              type: uint64
       - doc: |-
           FetchSpec asks for the entries [Lo, Hi) of the store for a peer, whose
           payloads the step function evicted. The driver reads them off the event
@@ -4222,6 +4258,27 @@ packages:
               - name: "on"
                 type: bool
             name: SetOverloaded
+            recv: pointer
+          - doc: |-
+              SetApplyLag tells the step function what the apply goroutine has not
+              applied yet of what Ready handed it: the payload bytes of the entries it
+              holds, and whether it still reads back entries handed by index. Ready
+              hands nothing in memory past MaxApplyLagBytes of them, nor while it reads
+              (D6, #664).
+            in:
+              - name: bytes
+                type: int64
+              - name: reading
+                type: bool
+            name: SetApplyLag
+            recv: pointer
+          - doc: |-
+              ApplyHeld reports whether committed, durable entries wait to be handed to
+              apply, held back by MaxApplyLagBytes: the gap between commit and applied
+              is at its bound, and the driver refuses new commands meanwhile (D6).
+            name: ApplyHeld
+            out:
+              - type: bool
             recv: pointer
           - doc: Tick advances the timers to now.
             in:

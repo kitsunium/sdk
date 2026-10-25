@@ -157,6 +157,8 @@ go_test(
         "transferpin_internal_test.go",
         "unacked_linux_test.go",
         "unannounced_internal_test.go",
+        "unapplied_internal_test.go",
+        "unappliedstart_internal_test.go",
         "undecodable_internal_test.go",
         "verdictclose_internal_test.go",
         "waitapplied_internal_test.go",
@@ -165,7 +167,7 @@ go_test(
     ],
     data = glob(["testdata/**"]),
     embed = [":consensus"],
-    shard_count = 12,
+    shard_count = 24,
     deps = [
         "//internal/core/app/consensus",
         "//internal/core/data/transform",

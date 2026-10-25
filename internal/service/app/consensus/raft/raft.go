@@ -26,6 +26,10 @@ const (
 	// raftOverloaded is the driver's apply backpressure, set each turn: a
 	// forwarded command is refused while it holds, as a local one is.
 	raftOverloaded
+	// raftApplyReading is set while the apply goroutine reads back from the
+	// log entries Ready handed it by index (ApplyRead): nothing is handed in
+	// memory behind them until the driver says the read is over (D6, #664).
+	raftApplyReading
 )
 
 // ProtocolMax is the highest protocol version this engine speaks: a cluster
@@ -91,8 +95,15 @@ type Config struct {
 	// covers is raised past it.
 	SilentTerm, SilentIndex uint64
 	// RecentEntriesBytes bounds the payloads held in memory; 0 holds them
-	// all. Older ones are fetched from the store when a peer needs them.
+	// all. Older ones are fetched from the store when a peer needs them, and
+	// read back from it by the driver when apply reaches them.
 	RecentEntriesBytes int64
+	// MaxApplyLagBytes bounds the payload bytes Ready hands apply past what
+	// the driver reports applied (SetApplyLag): one entry is handed when
+	// nothing is outstanding, whatever its size, and entries whose payloads
+	// were evicted are handed by index, for the driver to read from the
+	// store (D6, #664). 0 does not bound them.
+	MaxApplyLagBytes int64
 	// MaxEntryBytes bounds a forwarded command's payload as the driver
 	// bounds a local one; 0 does not bound it.
 	MaxEntryBytes int
@@ -123,6 +134,27 @@ func (r *Raft) SetOverloaded(on bool) {
 	r.facts &^= raftOverloaded
 }
 
+// SetApplyLag tells the step function what the apply goroutine has not
+// applied yet of what Ready handed it: the payload bytes of the entries it
+// holds, and whether it still reads back entries handed by index. Ready
+// hands nothing in memory past MaxApplyLagBytes of them, nor while it reads
+// (D6, #664).
+func (r *Raft) SetApplyLag(bytes int64, reading bool) {
+	r.applyLag = bytes
+	if reading {
+		r.facts |= raftApplyReading
+		return
+	}
+	r.facts &^= raftApplyReading
+}
+
+// ApplyHeld reports whether committed, durable entries wait to be handed to
+// apply, held back by MaxApplyLagBytes: the gap between commit and applied
+// is at its bound, and the driver refuses new commands meanwhile (D6).
+func (r *Raft) ApplyHeld() bool {
+	return !r.cfg.NoTable && r.log.applied < min(r.log.committed, r.log.stable)
+}
+
 // StartState is the durable state the driver loaded from its store at
 // boot. NewRaft rebuilds the step function from it alone, so a restart
 // depends on nothing held in memory.
@@ -131,8 +163,15 @@ type StartState struct {
 	HardState core.HardState
 	// Snapshot is the base the log continues, zero for none.
 	Snapshot core.SnapshotMetaValue
-	// Entries are the durable entries after the snapshot.
+	// Entries are the durable entries after the snapshot. NewRaft keeps
+	// them as its log, with the room past them: the caller hands them over
+	// and no longer uses them.
 	Entries []core.EntryValue
+	// Evicted is the last index the driver loaded without its payload, 0
+	// when it loaded every one: each command after the snapshot through it
+	// carries none and is read back from the store when applied, every other
+	// entry keeps its own. Only a committed entry may be loaded so (#663).
+	Evicted uint64
 	// Applied is where the state machine resumes, at least the snapshot.
 	Applied uint64
 	// Now is the start instant: the restart vote-refusal window opens here.
@@ -176,6 +215,11 @@ type ReadyValue struct {
 	AfterSync []core.MessageValue
 	// Apply are committed, locally durable entries, in order.
 	Apply []core.EntryValue
+	// ApplyRead names committed, locally durable entries the step function
+	// holds without their payloads: the driver reads them from its store
+	// and applies them, in order, before Apply. Its Lo is 0 when there are
+	// none (D6, #664).
+	ApplyRead ReadBackSpec
 	// SendSnapshot names the peers that need a snapshot.
 	SendSnapshot []core.NodeID
 	// ReadStates answer reads.
@@ -217,6 +261,13 @@ type ReadyValue struct {
 type UnsupportedEntryValue struct {
 	Index uint64
 	Kind  core.EntryKind
+}
+
+// ReadBackSpec names the committed entries [Lo, Hi) the driver reads back
+// from its store to apply them: the step function holds them without
+// their payloads (ReadyValue.ApplyRead).
+type ReadBackSpec struct {
+	Lo, Hi uint64
 }
 
 // FetchSpec asks for the entries [Lo, Hi) of the store for a peer, whose
@@ -350,6 +401,10 @@ type Raft struct {
 	seq uint64
 	rd  ReadyValue
 	hs  core.HardState
+	// applyLag is the payload bytes the apply goroutine holds unapplied, as
+	// the driver last reported them (SetApplyLag) plus what Ready handed it
+	// in memory since.
+	applyLag int64
 }
 
 // NewRaft builds the step function over the loaded state.
@@ -380,7 +435,7 @@ func NewRaft(cfg *Config, st *StartState) *Raft {
 	node.voteWindow = node.timing.ElectionTimeoutMin
 	node.contracts = map[uint64]core.TimingContractSpec{node.timing.Generation: node.timing}
 	node.engBase = node.engine()
-	node.loadEntries(st.Entries)
+	node.loadEntries(st)
 	node.log.stable = node.log.lastIndex()
 	node.raiseSilenceOverSnapshot()
 	node.log.committed = min(max(st.HardState.Commit, node.log.snapIndex), node.log.lastIndex())
@@ -429,16 +484,25 @@ func (r *Raft) refusesClusterVersion(sm *core.SnapshotMetaValue) bool {
 	return true
 }
 
-// loadEntries appends the start's entries past the snapshot to the log,
-// noting what each changes at append time.
-func (r *Raft) loadEntries(ents []core.EntryValue) {
-	for _, e := range ents {
-		if e.Position.Index <= r.log.snapIndex {
-			continue
+// loadEntries takes the start's entries past the snapshot as the log, in
+// place, noting what each changes at append time: copied, the log's
+// metadata was held twice while the step function was built (#663). The
+// window counts the payloads past the ones the driver evicted, which a
+// node holds at most RecentEntriesBytes of: the rest stays on disk.
+func (r *Raft) loadEntries(st *StartState) {
+	ents := st.Entries
+	k := 0
+	for k < len(ents) && ents[k].Position.Index <= r.log.snapIndex {
+		k++
+	}
+	r.log.ents = ents[k:]
+	r.log.evicted = min(max(st.Evicted, r.log.snapIndex), r.log.lastIndex())
+	for i := range r.log.ents {
+		e := &r.log.ents[i]
+		if e.Position.Index > r.log.evicted {
+			r.log.window += int64(len(e.Data))
 		}
-		r.log.ents = append(r.log.ents, e)
-		r.log.window += int64(len(e.Data))
-		r.noteAppended(&e)
+		r.noteAppended(e)
 	}
 }
 
@@ -673,8 +737,7 @@ func (r *Raft) HasReady() bool {
 	rd := &r.rd
 	// A hard state to write, or committed entries to apply, are work even
 	// with nothing queued (a node with no table applies nothing, D7).
-	if r.term != r.hs.Term || r.vote != r.hs.Vote || r.log.committed != r.hs.Commit ||
-		(r.log.applied < min(r.log.committed, r.log.stable) && !r.cfg.NoTable) {
+	if r.term != r.hs.Term || r.vote != r.hs.Vote || r.log.committed != r.hs.Commit || r.applyReady() {
 		return true
 	}
 	return rd.hasLogWork() || rd.hasNotices()
@@ -717,14 +780,81 @@ func (r *Raft) Ready() ReadyValue {
 		rd.Commit = r.log.committed
 	}
 	r.hs = core.HardState{Term: r.term, Vote: r.vote, Commit: r.log.committed}
-	// A node with no table applies nothing until an install (D7).
-	if hi := min(r.log.committed, r.log.stable); r.log.applied < hi && !r.cfg.NoTable {
-		rd.Apply = slices.Clone(r.log.ents[r.log.applied-r.log.snapIndex : hi-r.log.snapIndex])
-		r.log.applied = hi
+	if r.applyReady() {
+		r.handApply(&rd, min(r.log.committed, r.log.stable))
 	}
-	r.log.evict(r.cfg.RecentEntriesBytes, min(r.log.applied, r.log.stable))
+	r.log.evict(r.cfg.RecentEntriesBytes, r.evictable())
 	r.numberWrite(&rd, hsChanged)
 	return rd
+}
+
+// applyReady reports whether Ready hands apply anything: committed, durable
+// entries past those handed, by index when their payloads were evicted,
+// else within MaxApplyLagBytes of what apply holds, at least one when it
+// holds nothing, and none while it reads entries back. A node with no
+// table applies nothing until an install (D7).
+func (r *Raft) applyReady() bool {
+	if r.cfg.NoTable || r.log.applied >= min(r.log.committed, r.log.stable) {
+		return false
+	}
+	next := r.log.applied + 1
+	limit := r.applyLimit()
+	switch {
+	case limit <= 0 || next <= r.log.evicted:
+		return true
+	case r.facts&raftApplyReading != 0 && !r.mutated(mutApplyBehindRead):
+		return false
+	}
+	return r.applyLag <= 0 || r.applyLag+int64(len(r.log.at(next).Data)) <= limit
+}
+
+// applyLimit is MaxApplyLagBytes, 0 when apply is not bounded.
+func (r *Raft) applyLimit() int64 {
+	if r.mutated(mutApplyUnbounded) {
+		return 0
+	}
+	return r.cfg.MaxApplyLagBytes
+}
+
+// handApply hands apply what applyReady allows up to hi: the entries whose
+// payloads were evicted, by index and alone in their Ready, or those held in
+// memory within MaxApplyLagBytes. Bounded on a follower too, the apply
+// goroutine of a node slower to apply than its leader held everything it
+// was behind by (#664), and a node started on a long committed tail held it
+// all at its first Ready (#663).
+func (r *Raft) handApply(rd *ReadyValue, hi uint64) {
+	lo := r.log.applied + 1
+	if lo <= r.log.evicted {
+		end := min(r.log.evicted, hi)
+		rd.ApplyRead = ReadBackSpec{Lo: lo, Hi: end + 1}
+		r.log.applied = end
+		r.facts |= raftApplyReading
+		return
+	}
+	limit, held, end := r.applyLimit(), r.applyLag, lo-1
+	for end < hi {
+		size := int64(len(r.log.at(end + 1).Data))
+		if limit > 0 && held > 0 && held+size > limit {
+			break
+		}
+		held += size
+		end++
+	}
+	rd.Apply = slices.Clone(r.log.ents[lo-r.log.snapIndex-1 : end-r.log.snapIndex])
+	r.log.applied = end
+	r.applyLag = held
+}
+
+// evictable is the last entry whose payload Ready may drop: a durable one,
+// committed for a node with a table, whose engine effects are applied and
+// which apply reads back from the store once it reaches it; applied for a
+// node with none, whose install replays the effects of the entries it holds
+// committed past the snapshot from their payloads (#416).
+func (r *Raft) evictable() uint64 {
+	if r.mutated(mutEvictAppliedOnly) || (r.cfg.NoTable && !r.mutated(mutNoTableEvictsCommitted)) {
+		return min(r.log.applied, r.log.stable)
+	}
+	return min(r.log.committed, r.log.stable)
 }
 
 // numberWrite gives a Ready that asks the storage actor for anything the
