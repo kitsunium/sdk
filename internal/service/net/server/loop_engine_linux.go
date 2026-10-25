@@ -11,17 +11,22 @@ import (
 	"github.com/kitsunium/sdk/internal/service/net/loop"
 )
 
-// startLoopEngine starts a loop group on Linux: the leaf's native backends,
-// handed duplicated descriptors of the listeners server bound (ADR 0186 §D3),
-// or the portable backend when asked for it or, under auto, when no native
-// backend starts — reported, never silent.
+// nativeLoopBackends is true where the leaf's io_uring and epoll exist.
+const nativeLoopBackends bool = true
+
+// startLoopEngine starts a loop group on Linux on the backend plan names —
+// min(code, environment), ADR 0188 —: the leaf's native backends, handed
+// duplicated descriptors of the listeners server bound (ADR 0186 §D3), or the
+// portable backend when the plan says so or, when the code asked for auto, when
+// no native backend starts — reported, never silent. A backend the plan rules
+// out is never probed.
 //
 // IFACE-OPAQUE: which engine runs is decided here at Start — the leaf's
 // *loop.Group or the portable backend — and server only drives the lifecycle
 // half both share, so the caller holds the interface and never the type.
-func startLoopEngine(group *StreamGroup, lns []stdnet.Listener) (loopEngine, error) {
-	//: the portable backend, as asked.
-	if group.loop.Backend == corenet.LoopBackendPortable {
+func startLoopEngine(group *StreamGroup, lns []stdnet.Listener, plan loopPlan) (loopEngine, error) {
+	//: the portable backend, as the code or the environment asked.
+	if plan.backend == corenet.LoopBackendPortable {
 		//: on the netpoller.
 		return startPortable(group, lns, ""), nil
 	}
@@ -31,8 +36,10 @@ func startLoopEngine(group *StreamGroup, lns []stdnet.Listener) (loopEngine, err
 		//: refused.
 		return nil, err
 	}
+	value := group.loop
+	value.Backend = plan.backend
 	g, err := loop.Start(loop.Config{
-		Group: group.name, Value: group.loop, MaxConns: group.limits.MaxConns,
+		Group: group.name, Value: value, MaxConns: group.limits.MaxConns,
 		IdleTimeout: loopIdle(group), Handler: group.loopHandler, Listeners: handoff,
 	})
 	//: started natively.
@@ -41,7 +48,7 @@ func startLoopEngine(group *StreamGroup, lns []stdnet.Listener) (loopEngine, err
 		return g, nil
 	}
 	//: auto falls back, and says so; an explicit backend is refused.
-	if group.loop.Backend == corenet.LoopBackendAuto && !errs.HasCode(err, corenet.CodeLoopNoDescriptors) {
+	if plan.fallback && !errs.HasCode(err, corenet.CodeLoopNoDescriptors) {
 		//: degraded, by name.
 		return startPortable(group, lns, "native loop backend unavailable: "+err.Error()), nil
 	}

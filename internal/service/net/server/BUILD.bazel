@@ -21,6 +21,7 @@ go_library(
         "family_other.go",
         "family_windows.go",
         "handshake.go",
+        "health.go",
         "http_adapter.go",
         "http_bounds.go",
         "http_listener.go",
@@ -36,12 +37,18 @@ go_library(
         "loop_portable.go",
         "multireader_linux.go",
         "multireader_mmsghdr_linux.go",
+        "operator.go",
         "option_set.go",
         "options.go",
         "packet.go",
         "packet_group.go",
         "packet_listen.go",
         "packet_loop.go",
+        "platform.go",
+        "platform_bsd.go",
+        "platform_linux.go",
+        "platform_other.go",
+        "platform_windows.go",
         "pool.go",
         "raw_conn_provider_linux.go",
         "reuseport_bsd.go",
@@ -49,6 +56,7 @@ go_library(
         "reuseport_other.go",
         "server.go",
         "sockaddr_linux.go",
+        "stall.go",
         "stream_group.go",
         "stream_group_limiter.go",
         "swallow.go",
@@ -61,6 +69,7 @@ go_library(
         "//internal/service:service_consumers",
     ],
     deps = [
+        "//internal/core/app/health",
         "//internal/core/net",
         "//internal/core/proc",
         "//internal/kernel/backoff",
@@ -119,6 +128,7 @@ go_test(
         "loop_group_internal_test.go",
         "loop_option_external_test.go",
         "multireader_linux_internal_test.go",
+        "operator_internal_test.go",
         "option_set_internal_test.go",
         "options_external_test.go",
         "packet_group_external_test.go",
@@ -132,6 +142,7 @@ go_test(
         "server_external_test.go",
         "server_internal_test.go",
         "sockaddr_linux_internal_test.go",
+        "stall_internal_test.go",
         "stream_group_external_test.go",
         "stream_group_internal_test.go",
         "stream_group_limiter_internal_test.go",
@@ -143,8 +154,12 @@ go_test(
         "truncation_windows_internal_test.go",
     ],
     # keep: TestGroupOption_recordsItsKind reads pkg/v1/net/server's facade
-    # and this package's own sources, from the package directory.
-    data = glob(["*.go"]) + ["//pkg/v1/net/server:gen_facade.go"],
+    # and this package's own sources, from the package directory;
+    # TestCapabilityRegistry_matchesTheDesign reads design/net.yaml.
+    data = glob(["*.go"]) + [
+        "//:design/net.yaml",
+        "//pkg/v1/net/server:gen_facade.go",
+    ],
     embed = [":server"],
     # keep: these tests bind a loopback socket. Bazel's linux-sandbox gives the
     # action its own network namespace, so bind and dial fail inside it. Running
@@ -152,6 +167,7 @@ go_test(
     # the `requires-network` tag alone does not (measured, both ways).
     local = True,
     deps = [
+        "//internal/core/app/health",
         "//internal/core/net",
         "//internal/core/proc",
         "//internal/kernel/clock",

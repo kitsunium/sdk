@@ -431,6 +431,13 @@ packages:
             name: CodeGroupNameConflict
             value: "0x00_02_0B_3A"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeLoopGroupStalled identifies a loop group every ring of which the watchdog
+              drained while the server was serving (ADR 0188).
+            name: CodeLoopGroupStalled
+            value: "0x00_02_0B_3B"
+        type: errs.Code
     constants:
       - blockDoc: The loop backends. The zero value is LoopBackendAuto.
         doc: |-
@@ -587,6 +594,47 @@ packages:
         name: EngineLoop
         type: EngineValue
         value: "2"
+      - blockDoc: The engines an operator may switch off with KITSUNIUM_NET_DISABLE (ADR 0188).
+        doc: |-
+          CapabilityIOURing is io_uring, the top of the lattice. Switched off, or capped
+          below, no loop group calls io_uring_setup.
+        name: CapabilityIOURing
+        type: Capability
+        value: "\"iouring\""
+      - blockDoc: The engines an operator may switch off with KITSUNIUM_NET_DISABLE (ADR 0188).
+        doc: |-
+          CapabilityEpoll is epoll, below io_uring. Switched off, a loop group that would
+          have fallen back to it runs on the portable backend.
+        name: CapabilityEpoll
+        type: Capability
+        value: "\"epoll\""
+      - blockDoc: The floors of the lattice, which KITSUNIUM_NET_ENGINE may name and nothing switches off (ADR 0188).
+        doc: |-
+          CapabilityPortable is the portable loop backend, the loop family's floor on
+          every platform, and what an unknown token caps the engine at.
+        name: CapabilityPortable
+        type: Capability
+        value: "\"portable\""
+      - blockDoc: The floors of the lattice, which KITSUNIUM_NET_ENGINE may name and nothing switches off (ADR 0188).
+        doc: |-
+          CapabilityGoroutine is the goroutine engine, the bottom of the lattice. A loop
+          handler capped at it runs on the portable backend, the lowest engine that can
+          serve one.
+        name: CapabilityGoroutine
+        type: Capability
+        value: "\"goroutine\""
+      - doc: |-
+          EnvEngine is the variable that caps every group's engine at one capability of
+          the lattice: min(code, environment), never above the code's choice.
+        name: EnvEngine
+        type: string
+        value: "\"KITSUNIUM_NET_ENGINE\""
+      - doc: |-
+          EnvDisable is the variable that switches engines off, a comma-separated list of
+          capabilities the operator may switch off.
+        name: EnvDisable
+        type: string
+        value: "\"KITSUNIUM_NET_DISABLE\""
       - doc: |-
           HTTP1MaxFields is how many field lines one request of the restricted
           HTTP/1.1 profile may carry. It sizes HTTP1RequestValue.Fields, so a request is
@@ -1090,6 +1138,7 @@ packages:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
       http: net/http
       stdnet: net
+      time: time
       tls: crypto/tls
     path: github.com/kitsunium/sdk/internal/core/net
     ports:
@@ -2024,6 +2073,18 @@ packages:
             private: "core/net: the Name option contradicts the group's declared name, or is empty"
             public: The group's name is not consistent
             reason: GROUP_NAME_CONFLICT
+          - code: CodeLoopGroupStalled
+            doc: |-
+              LoopGroupStalled is returned by Serve once every ring of a loop group has been
+              drained by its watchdog while the server was serving, and by the server's
+              liveness check once that has lasted the stall grace (ADR 0188). The "group"
+              field names it. A process restarted with the same environment stalls the
+              same way: the runbook sets KITSUNIUM_NET_DISABLE.
+            exit: UNAVAILABLE
+            name: LoopGroupStalled
+            private: "core/net: every ring of the loop group was drained by its watchdog; set KITSUNIUM_NET_DISABLE before restarting"
+            public: A loop group stopped accepting connections
+            reason: LOOP_GROUP_STALLED
     types:
       - doc: |-
           AddressValue names one socket to bind. It is a value type so a group's listen
@@ -3082,15 +3143,123 @@ packages:
               tag: json:"retry"
               type: DurationValue
       - doc: |-
+          Capability names one engine of the lattice the operator's switches restrict
+          (ADR 0188): iouring > epoll > portable > goroutine. Its values are the tokens
+          KITSUNIUM_NET_ENGINE and KITSUNIUM_NET_DISABLE take; this block is the
+          registry they are parsed against, and any other token is unknown.
+        name: Capability
+        underlying: string
+      - doc: |-
+          OverrideValue reports what the operator's environment did to the engines,
+          read once, before any probe (ADR 0188). The zero value is "no override".
+        name: OverrideValue
+        struct:
+          fields:
+            - doc: |-
+                Source is "environment" when KITSUNIUM_NET_ENGINE or KITSUNIUM_NET_DISABLE
+                is set to a non-empty value, and empty otherwise.
+              name: Source
+              tag: json:"source,omitempty"
+              type: string
+            - doc: |-
+                Raw is what was read, each variable set as NAME=value, separated by a
+                space, in the order EnvEngine, EnvDisable.
+              name: Raw
+              tag: json:"raw,omitempty"
+              type: string
+            - doc: |-
+                Applied is the highest engine the environment lets a group run on, after
+                both variables; empty when nothing is set. A group runs on
+                min(its code's choice, Applied), skipping what Disabled names.
+              name: Applied
+              tag: json:"applied,omitempty"
+              type: Capability
+            - doc: Disabled lists the engines KITSUNIUM_NET_DISABLE switched off.
+              name: Disabled
+              tag: json:"disabled,omitempty"
+              type: "[]Capability"
+      - doc: |-
+          FaultValue reports one thing the server runs without, or cannot do, now: a
+          degraded listener or loop group, a drained ring, a stalled loop group, or an
+          environment token the registry does not know (ADR 0188).
+        name: FaultValue
+        struct:
+          fields:
+            - doc: |-
+                Source says what reported it: "listener", "loop", "ring", "stall" or
+                "environment".
+              name: Source
+              tag: json:"source"
+              type: string
+            - doc: Group names the group concerned; empty for the environment.
+              name: Group
+              tag: json:"group,omitempty"
+              type: string
+            - doc: Reason names the fault and, where one exists, the runbook's switch.
+              name: Reason
+              tag: json:"reason"
+              type: string
+      - doc: |-
+          FallbacksValue counts the times a group started on a lower engine than the one
+          its code asked for, because the better one failed, and keeps the last one
+          (ADR 0188). An override by the environment is not a fallback.
+        name: FallbacksValue
+        struct:
+          fields:
+            - doc: Count is the number of fallbacks since the server was built.
+              name: Count
+              tag: json:"count"
+              type: uint64
+            - doc: LastGroup names the group of the last fallback.
+              name: LastGroup
+              tag: json:"last_group,omitempty"
+              type: string
+            - doc: LastReason is the last fallback's reason.
+              name: LastReason
+              tag: json:"last_reason,omitempty"
+              type: string
+            - doc: LastAt is when the last fallback happened; zero when none did.
+              name: LastAt
+              tag: json:"last_at"
+              type: time.Time
+      - doc: |-
+          PlatformValue names what the server runs on, so a report says which kernel a
+          probe ran against (ADR 0188).
+        name: PlatformValue
+        struct:
+          fields:
+            - doc: GOOS is runtime.GOOS.
+              name: GOOS
+              tag: json:"goos"
+              type: string
+            - doc: GOARCH is runtime.GOARCH.
+              name: GOARCH
+              tag: json:"goarch"
+              type: string
+            - doc: |-
+                Kernel is the operating system's release as the platform reports it: the
+                uname release on Linux, kern.osrelease on darwin and the BSDs,
+                major.minor.build as GetVersion reports it on Windows; empty when it cannot
+                be read, and on illumos and Solaris, where the standard library reads none.
+              name: Kernel
+              tag: json:"kernel,omitempty"
+              type: string
+            - doc: Go is runtime.Version(), the toolchain the binary was built with.
+              name: Go
+              tag: json:"go"
+              type: string
+      - doc: |-
           StateValue is a snapshot of the server's lifecycle and listeners.
 
           It is a value, so a caller can hold it, log it, or compare it without racing
           the server that produced it.
         methods:
           - doc: |-
-              Degraded reports whether any listener or loop group fell back from a
-              requested optimisation, so a caller can assert "no silent degradation" in
-              one call instead of walking the slices.
+              Degraded reports whether the server runs with any fault — a listener or loop
+              group that fell back from a requested optimisation, a drained ring, a
+              stalled loop group, an unknown environment token — so a caller can assert
+              "no silent degradation" in one call. It reads Faults, and still the
+              Degraded flags of Listeners and Loops for a value built by hand (ADR 0188).
             name: Degraded
             out:
               - type: bool
@@ -3143,6 +3312,26 @@ packages:
               name: Loops
               tag: json:"loops,omitempty"
               type: "[]LoopStateValue"
+            - doc: |-
+                Override reports what KITSUNIUM_NET_ENGINE and KITSUNIUM_NET_DISABLE did
+                (ADR 0188).
+              name: Override
+              tag: json:"override"
+              type: OverrideValue
+            - doc: |-
+                Faults lists everything the server runs without now, the degradations of
+                Listeners and Loops included; Degraded is true when it is not empty.
+              name: Faults
+              tag: json:"faults,omitempty"
+              type: "[]FaultValue"
+            - doc: Fallbacks counts the engine fallbacks and keeps the last one.
+              name: Fallbacks
+              tag: json:"fallbacks"
+              type: FallbacksValue
+            - doc: Platform names the operating system, its release and the toolchain.
+              name: Platform
+              tag: json:"platform"
+              type: PlatformValue
       - doc: |-
           ListenerStateValue reports one bound listener.
 
@@ -4376,6 +4565,7 @@ packages:
           - type: "*Server"
         variadic: true
     imports:
+      corehealth: github.com/kitsunium/sdk/internal/core/app/health
       corenet: github.com/kitsunium/sdk/internal/core/net
       http: net/http
       stdnet: net
@@ -4507,7 +4697,9 @@ packages:
 
               It is the one-call entry point: a caller that has nothing else to do on the
               main goroutine writes Serve and gets startup, blocking and graceful shutdown
-              without assembling them.
+              without assembling them. It also returns, after the same drain, once every
+              ring of a loop group has been drained by its watchdog: LoopGroupStalled,
+              naming the group (ADR 0188).
             in:
               - name: ctx
                 type: context.Context
@@ -4566,6 +4758,19 @@ packages:
             name: State
             out:
               - type: corenet.StateValue
+            recv: pointer
+          - doc: |-
+              RegisterHealth registers the server's readiness and liveness checks on h,
+              both named "net/server" (ADR 0188). Readiness is built from State: ready
+              while serving with no stalled loop group. Liveness fails once a loop group
+              has stayed stalled for the stall grace, 30 seconds. A receive that never
+              completes on a live ring is not watched.
+            in:
+              - name: h
+                type: corehealth.Health
+            name: RegisterHealth
+            out:
+              - type: error
             recv: pointer
         name: Server
         struct:
@@ -6621,6 +6826,72 @@ packages:
             target: corenet.LoopRingStateValue
       - alias:
           - doc: |-
+              Override reports what KITSUNIUM_NET_ENGINE and KITSUNIUM_NET_DISABLE did to
+              the engines.
+            name: Override
+            target: corenet.OverrideValue
+      - alias:
+          - doc: Fault reports one thing the server runs without, or cannot do, now.
+            name: Fault
+            target: corenet.FaultValue
+      - alias:
+          - doc: Fallbacks counts the engine fallbacks and keeps the last one.
+            name: Fallbacks
+            target: corenet.FallbacksValue
+      - alias:
+          - doc: Platform names the operating system, its release and the toolchain.
+            name: Platform
+            target: corenet.PlatformValue
+      - alias:
+          - doc: |-
+              Capability names one engine of the lattice iouring > epoll > portable >
+              goroutine; its values are the operator's tokens.
+            name: Capability
+            target: corenet.Capability
+      - const:
+          - doc: CapabilityIOURing is io_uring, the top of the lattice.
+            name: CapabilityIOURing
+            reexport: corenet.CapabilityIOURing
+            type: Capability
+            typed: true
+            value: "\"iouring\""
+      - const:
+          - doc: CapabilityEpoll is epoll, below io_uring.
+            name: CapabilityEpoll
+            reexport: corenet.CapabilityEpoll
+            type: Capability
+            typed: true
+            value: "\"epoll\""
+      - const:
+          - doc: CapabilityPortable is the portable loop backend, the loop family's floor.
+            name: CapabilityPortable
+            reexport: corenet.CapabilityPortable
+            type: Capability
+            typed: true
+            value: "\"portable\""
+      - const:
+          - doc: CapabilityGoroutine is the goroutine engine, the bottom of the lattice.
+            name: CapabilityGoroutine
+            reexport: corenet.CapabilityGoroutine
+            type: Capability
+            typed: true
+            value: "\"goroutine\""
+      - const:
+          - doc: EnvEngine is the variable that caps every group's engine.
+            name: EnvEngine
+            reexport: corenet.EnvEngine
+            type: string
+            typed: true
+            value: "\"KITSUNIUM_NET_ENGINE\""
+      - const:
+          - doc: EnvDisable is the variable that switches engines off.
+            name: EnvDisable
+            reexport: corenet.EnvDisable
+            type: string
+            typed: true
+            value: "\"KITSUNIUM_NET_DISABLE\""
+      - alias:
+          - doc: |-
               LoopValue configures a group's loop engine, passed by Loop. Every field is
               optional: zero selects the domain default.
             name: LoopValue
@@ -6968,6 +7239,10 @@ packages:
           - doc: GroupNameConflict reports a Name that is empty or contradicts the group's declared name.
             name: GroupNameConflict
             reexport: corenet.GroupNameConflict
+            type: "*errs.Error"
+          - doc: LoopGroupStalled reports a loop group every ring of which its watchdog drained.
+            name: LoopGroupStalled
+            reexport: corenet.LoopGroupStalled
             type: "*errs.Error"
           - doc: LoopBackendUnavailable reports an explicit loop backend the kernel's probe refused.
             name: LoopBackendUnavailable

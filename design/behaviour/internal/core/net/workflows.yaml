@@ -42,6 +42,10 @@ workflows:
       - return: h
   - of: StateValue.Degraded
     steps:
+      - opt:
+          do:
+            - return: "true"
+          when: len(s.Faults) > 0
       - loop:
           do:
             - opt:

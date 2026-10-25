@@ -103,12 +103,15 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
 - [func TLS\(id tlsid.Identity\) GroupOption](<#TLS>)
 - [func WithDrainTimeout\(d time.Duration\) Option](<#WithDrainTimeout>)
 - [func WriteTimeout\(d time.Duration\) GroupOption](<#WriteTimeout>)
+- [type Capability](<#Capability>)
 - [type Conn](<#Conn>)
   - [func \(Conn\) Buffer\(\) \[\]byte](<#Conn.Buffer>)
   - [func \(Conn\) Group\(\) string](<#Conn.Group>)
   - [func \(Conn\) ID\(\) uint64](<#Conn.ID>)
 - [type EngineValue](<#EngineValue>)
   - [func \(EngineValue\) String\(\) string](<#EngineValue.String>)
+- [type Fallbacks](<#Fallbacks>)
+- [type Fault](<#Fault>)
 - [type Group](<#Group>)
   - [func \(\*Group\) Handle\(h corenet.ConnHandler\) \*StreamGroup](<#Group.Handle>)
   - [func \(\*Group\) HandleFunc\(f corenet.ConnHandlerFunc\) \*StreamGroup](<#Group.HandleFunc>)
@@ -148,6 +151,7 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
 - [type Option](<#Option>)
 - [type OptionKind](<#OptionKind>)
   - [func \(OptionKind\) String\(\) string](<#OptionKind.String>)
+- [type Override](<#Override>)
 - [type Packet](<#Packet>)
   - [func \(Packet\) Data\(\) \[\]byte](<#Packet.Data>)
   - [func \(Packet\) From\(\) stdnet.Addr](<#Packet.From>)
@@ -167,11 +171,13 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
 - [type PacketMiddleware](<#PacketMiddleware>)
 - [type Phase](<#Phase>)
   - [func \(Phase\) String\(\) string](<#Phase.String>)
+- [type Platform](<#Platform>)
 - [type PostFunc](<#PostFunc>)
 - [type Server](<#Server>)
   - [func \(\*Server\) Close\(\) error](<#Server.Close>)
   - [func \(\*Server\) Group\(name string, opts ...GroupOption\) \*StreamGroup](<#Server.Group>)
   - [func \(\*Server\) PacketGroup\(name string, opts ...GroupOption\) \*PacketGroup](<#Server.PacketGroup>)
+  - [func \(\*Server\) RegisterHealth\(h corehealth.Health\) error](<#Server.RegisterHealth>)
   - [func \(\*Server\) Serve\(ctx context.Context\) error](<#Server.Serve>)
   - [func \(\*Server\) Shutdown\(ctx context.Context\) error](<#Server.Shutdown>)
   - [func \(\*Server\) Start\(ctx context.Context\) error](<#Server.Start>)
@@ -180,6 +186,42 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
   - [func \(State\) Degraded\(\) bool](<#State.Degraded>)
 
 ## Constants
+
+<a name="CapabilityEpoll"></a>
+```go
+const CapabilityEpoll Capability = "epoll"
+```
+
+CapabilityEpoll is epoll, below io\_uring.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.CapabilityEpoll`.
+
+<a name="CapabilityGoroutine"></a>
+```go
+const CapabilityGoroutine Capability = "goroutine"
+```
+
+CapabilityGoroutine is the goroutine engine, the bottom of the lattice.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.CapabilityGoroutine`.
+
+<a name="CapabilityIOURing"></a>
+```go
+const CapabilityIOURing Capability = "iouring"
+```
+
+CapabilityIOURing is io\_uring, the top of the lattice.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.CapabilityIOURing`.
+
+<a name="CapabilityPortable"></a>
+```go
+const CapabilityPortable Capability = "portable"
+```
+
+CapabilityPortable is the portable loop backend, the loop family's floor.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.CapabilityPortable`.
 
 <a name="EngineAuto"></a>
 ```go
@@ -207,6 +249,24 @@ const EngineLoop EngineValue = 2
 EngineLoop is the loop engine; Loop picks its backend.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/net.EngineLoop`.
+
+<a name="EnvDisable"></a>
+```go
+const EnvDisable string = "KITSUNIUM_NET_DISABLE"
+```
+
+EnvDisable is the variable that switches engines off.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.EnvDisable`.
+
+<a name="EnvEngine"></a>
+```go
+const EnvEngine string = "KITSUNIUM_NET_ENGINE"
+```
+
+EnvEngine is the variable that caps every group's engine.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.EnvEngine`.
 
 <a name="LoopBackendAuto"></a>
 ```go
@@ -583,6 +643,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopBackendUnavaila
 
 Code `0.2.11.37` · reason `LOOP_BACKEND_UNAVAILABLE` · public "The requested loop backend is not available on this kernel"
 
+<a name="LoopGroupStalled"></a>
+```go
+var LoopGroupStalled *errs.Error
+```
+
+LoopGroupStalled reports a loop group every ring of which its watchdog drained.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopGroupStalled`.
+
+Code `0.2.11.59` · reason `LOOP_GROUP_STALLED` · public "A loop group stopped accepting connections"
+
 <a name="LoopNoDescriptors"></a>
 ```go
 var LoopNoDescriptors *errs.Error
@@ -928,6 +999,21 @@ func WriteTimeout(d time.Duration) GroupOption
 
 WriteTimeout bounds one write to the peer, refreshed per write.
 
+<a name="Capability"></a>
+## type [Capability](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+Capability names one engine of the lattice iouring > epoll > portable > goroutine; its values are the operator's tokens.
+
+```go
+type Capability = corenet.Capability
+```
+
+Capability is an alias of `github.com/kitsunium/sdk/internal/core/net.Capability`, declared as:
+
+```go
+type Capability string
+```
+
 <a name="Conn"></a>
 ## type [Conn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
@@ -1005,6 +1091,53 @@ func (EngineValue) String() string
 ```
 
 String renders the engine as an error field spells it.
+
+<a name="Fallbacks"></a>
+## type [Fallbacks](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+Fallbacks counts the engine fallbacks and keeps the last one.
+
+```go
+type Fallbacks = corenet.FallbacksValue
+```
+
+Fallbacks is an alias of `github.com/kitsunium/sdk/internal/core/net.FallbacksValue`, declared as:
+
+```go
+type Fallbacks struct {
+	// Count is the number of fallbacks since the server was built.
+	Count      uint64    `json:"count"`
+	// LastGroup names the group of the last fallback.
+	LastGroup  string    `json:"last_group,omitempty"`
+	// LastReason is the last fallback's reason.
+	LastReason string    `json:"last_reason,omitempty"`
+	// LastAt is when the last fallback happened; zero when none did.
+	LastAt     time.Time `json:"last_at"`
+}
+```
+
+<a name="Fault"></a>
+## type [Fault](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+Fault reports one thing the server runs without, or cannot do, now.
+
+```go
+type Fault = corenet.FaultValue
+```
+
+Fault is an alias of `github.com/kitsunium/sdk/internal/core/net.FaultValue`, declared as:
+
+```go
+type Fault struct {
+	// Source says what reported it: "listener", "loop", "ring", "stall" or
+	// "environment".
+	Source string `json:"source"`
+	// Group names the group concerned; empty for the environment.
+	Group  string `json:"group,omitempty"`
+	// Reason names the fault and, where one exists, the runbook's switch.
+	Reason string `json:"reason"`
+}
+```
 
 <a name="Group"></a>
 ## type [Group](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
@@ -1659,6 +1792,34 @@ func (OptionKind) String() string
 
 String renders the option's name, as its constructor spells it.
 
+<a name="Override"></a>
+## type [Override](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+Override reports what KITSUNIUM\_NET\_ENGINE and KITSUNIUM\_NET\_DISABLE did to the engines.
+
+```go
+type Override = corenet.OverrideValue
+```
+
+Override is an alias of `github.com/kitsunium/sdk/internal/core/net.OverrideValue`, declared as:
+
+```go
+type Override struct {
+	// Source is "environment" when KITSUNIUM_NET_ENGINE or KITSUNIUM_NET_DISABLE
+	// is set to a non-empty value, and empty otherwise.
+	Source   string       `json:"source,omitempty"`
+	// Raw is what was read, each variable set as NAME=value, separated by a
+	// space, in the order EnvEngine, EnvDisable.
+	Raw      string       `json:"raw,omitempty"`
+	// Applied is the highest engine the environment lets a group run on, after
+	// both variables; empty when nothing is set. A group runs on
+	// min(its code's choice, Applied), skipping what Disabled names.
+	Applied  Capability   `json:"applied,omitempty"`
+	// Disabled lists the engines KITSUNIUM_NET_DISABLE switched off.
+	Disabled []Capability `json:"disabled,omitempty"`
+}
+```
+
 <a name="Packet"></a>
 ## type [Packet](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
@@ -1880,6 +2041,33 @@ func (Phase) String() string
 
 String renders the phase for logs and status output.
 
+<a name="Platform"></a>
+## type [Platform](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+Platform names the operating system, its release and the toolchain.
+
+```go
+type Platform = corenet.PlatformValue
+```
+
+Platform is an alias of `github.com/kitsunium/sdk/internal/core/net.PlatformValue`, declared as:
+
+```go
+type Platform struct {
+	// GOOS is runtime.GOOS.
+	GOOS   string `json:"goos"`
+	// GOARCH is runtime.GOARCH.
+	GOARCH string `json:"goarch"`
+	// Kernel is the operating system's release as the platform reports it: the
+	// uname release on Linux, kern.osrelease on darwin and the BSDs,
+	// major.minor.build as GetVersion reports it on Windows; empty when it cannot
+	// be read, and on illumos and Solaris, where the standard library reads none.
+	Kernel string `json:"kernel,omitempty"`
+	// Go is runtime.Version(), the toolchain the binary was built with.
+	Go     string `json:"go"`
+}
+```
+
 <a name="PostFunc"></a>
 ## type [PostFunc](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
@@ -1939,6 +2127,15 @@ func (*Server) PacketGroup(name string, opts ...GroupOption) *PacketGroup
 
 PacketGroup declares a datagram listener group and returns it for handler attachment. It mirrors Group deliberately: the point of the domain is that a UDP service is declared the same way a TCP one is.
 
+<a name="Server.RegisterHealth"></a>
+### func \(Server\) [RegisterHealth](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/server/health.go>)
+
+```go
+func (*Server) RegisterHealth(h corehealth.Health) error
+```
+
+RegisterHealth registers the server's readiness and liveness checks on h, both named "net/server" (ADR 0188). Readiness is built from State: ready while serving with no stalled loop group. Liveness fails once a loop group has stayed stalled for the stall grace, 30 seconds. A receive that never completes on a live ring is not watched.
+
 <a name="Server.Serve"></a>
 ### func \(Server\) [Serve](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/server/lifecycle.go>)
 
@@ -1948,7 +2145,7 @@ func (*Server) Serve(ctx context.Context) error
 
 Serve starts the server and blocks until ctx is cancelled, then drains.
 
-It is the one-call entry point: a caller that has nothing else to do on the main goroutine writes Serve and gets startup, blocking and graceful shutdown without assembling them.
+It is the one-call entry point: a caller that has nothing else to do on the main goroutine writes Serve and gets startup, blocking and graceful shutdown without assembling them. It also returns, after the same drain, once every ring of a loop group has been drained by its watchdog: LoopGroupStalled, naming the group (ADR 0188).
 
 <a name="Server.Shutdown"></a>
 ### func \(Server\) [Shutdown](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/server/lifecycle.go>)
@@ -2018,6 +2215,16 @@ type State struct {
 	// Loops reports every loop group (ADR 0186 §D8). It is empty while the
 	// server serves none.
 	Loops            []LoopStateValue     `json:"loops,omitempty"`
+	// Override reports what KITSUNIUM_NET_ENGINE and KITSUNIUM_NET_DISABLE did
+	// (ADR 0188).
+	Override         OverrideValue        `json:"override"`
+	// Faults lists everything the server runs without now, the degradations of
+	// Listeners and Loops included; Degraded is true when it is not empty.
+	Faults           []FaultValue         `json:"faults,omitempty"`
+	// Fallbacks counts the engine fallbacks and keeps the last one.
+	Fallbacks        FallbacksValue       `json:"fallbacks"`
+	// Platform names the operating system, its release and the toolchain.
+	Platform         PlatformValue        `json:"platform"`
 }
 ```
 
@@ -2028,6 +2235,6 @@ type State struct {
 func (State) Degraded() bool
 ```
 
-Degraded reports whether any listener or loop group fell back from a requested optimisation, so a caller can assert "no silent degradation" in one call instead of walking the slices.
+Degraded reports whether the server runs with any fault — a listener or loop group that fell back from a requested optimisation, a drained ring, a stalled loop group, an unknown environment token — so a caller can assert "no silent degradation" in one call. It reads Faults, and still the Degraded flags of Listeners and Loops for a value built by hand (ADR 0188).
 
 Generated from [docs/api](<https://github.com/kitsunium/sdk/blob/main/docs/api>) by tools/genindex.

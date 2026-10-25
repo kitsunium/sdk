@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T12:00:00Z -->
+<!-- updated: 2026-10-25T18:00:00Z -->
 # internal/service/net/server/
 
 ## Purpose
@@ -13,7 +13,13 @@ Public façade: `pkg/v1/net/server`.
 
 | File | Surface |
 |---|---|
-| `server.go` | `Server`, `New`, `Group`, `State` |
+| `server.go` | `Server`, `New` (which reads the operator's variables and the platform once), `Group`, `State` (and the faults, fallbacks, override and platform it reports), `recordFallback` |
+| `operator.go` | the operator's switches (ADR 0188): `capabilityRegistry`, the design's registry with each token's rank and whether it is switchable; `readOperator`, `KITSUNIUM_NET_ENGINE` and `KITSUNIUM_NET_DISABLE` through the injected `lookup`, R5's reading; `operatorEnv.plan`, min(code, environment) for a loop group; `withLookup`, the tests' injection |
+| `stall.go` | R1 (ADR 0188 §D5): the stall watcher (`worker.Every`, `stallPoll`, the engine's clock, `PhaseServing` only), `groupStalled`, `markStalled` — what `Serve` selects on —, `loopStallGrace`, and `faults`, the `State.Faults` builder: the environment's, each degraded listener and loop group, each drained ring and stalled group |
+| `health.go` | `RegisterHealth` — the `net/server` readiness check, `readinessOf(State)`, and the process-local liveness check |
+| `platform.go`, `platform_{linux,bsd,windows,other}.go` | `readPlatform` and `kernelRelease` per GOOS: uname on Linux, `kern.osrelease` on darwin and the BSDs, `GetVersion` on Windows, empty on illumos and Solaris |
+| `operator_internal_test.go` | `TestCapabilityRegistry_matchesTheDesign` (reads `design/net.yaml`, the go_test's `data`), `TestReadOperator`, `TestOperatorPlan` (every code × engine × disable combination: never above the code nor the ceiling, never a ruled-out backend, the highest left), and a loop group started under each switch — `ProbeStage` `epoll` where io_uring is ruled out |
+| `stall_internal_test.go` | a fake loop engine walked from healthy to one drained ring to a stall: faults, readiness, liveness at the grace to the nanosecond on a manual clock, no stall during a drain, `Serve` returning `LoopGroupStalled`, `RegisterHealth`, the platform and the fallbacks |
 | `lifecycle.go` | `Start`, `Serve`, `Shutdown`, `Close`, the accept loop and its backoff (`acceptDelay`, `backOff`), the drain |
 | `loop_group.go` | loop groups: `HandleLoop` (ADR 0186 §D9 step 11), `loopRefusal` — TLS, `Use` and every kind of the group's set neither the engine (`loopHonours`: IdleTimeout, MaxConns, Adopt, Plaintext, Name, Engine) nor the handler's `LoopOptionHonourer` honours, `Use` whatever the handler claims — the listeners bound or adopted and registered like any group's, the engines in `Shutdown`, `Close` and `State` |
 | `option_set.go` | `optionSet` — the kinds a group was given, one bit per `corenet.OptionKind` (ADR 0187 §D2); every `GroupOption`, `Use` and `PreHandshake` add theirs, a zero value included |
@@ -127,6 +133,41 @@ Public façade: `pkg/v1/net/server`.
   buffer, so `buf` stays valid until `OnBatchEnd` as the contract says. Its
   `LoopIO` and its lifecycle are two types (`portableLoop`,
   `portableEngine`), because `LoopIO.Close` names a connection.
+- **The operator's switches only restrict, and are read before any probe**
+  (ADR 0188, R5). `New` reads `KITSUNIUM_NET_ENGINE` and
+  `KITSUNIUM_NET_DISABLE` once, through `lookup` (`os.LookupEnv` unless a test
+  injects a map), and caches the answer; nothing reads the environment again.
+  The vocabulary is `design/net.yaml`'s `Capability` blocks, which
+  `capabilityRegistry` is held to by a test reading the design. An empty value
+  is unset; an unknown token, or a floor named in DISABLE, caps every group at
+  portable and is a fault. A loop group runs on `operatorEnv.plan` — the highest
+  backend at or below its code's that the environment allows: the leaf is asked
+  for `epoll` explicitly, or the portable backend starts without it, so a
+  ruled-out io_uring is never set up; `auto` keeps its fallback to portable, an
+  explicit backend lowered refuses on failure, an explicit native backend off
+  Linux is refused first, whatever the environment. A goroutine-engine group is
+  the floor: the environment changes nothing on it, and never TLS, `Plaintext`
+  or a limit on any group. A group the environment lowered is overridden, not a
+  fault and not a fallback.
+- **`State` says what the server runs without** (ADR 0188 §D4). `Faults` lists
+  the environment's unknown tokens, every degraded listener and loop group, and,
+  while serving, each ring the watchdog drained (`ring`) and each group every
+  ring of which is drained (`stall`), naming the runbook
+  (`KITSUNIUM_NET_DISABLE=iouring`); a drain stops every ring on purpose, so
+  nothing of it is a fault. `Degraded()` reads `Faults`. `Fallbacks` counts the
+  loop groups that started below their code's choice because the better
+  backend failed (the engine's `State().Degraded` at start), with the last one;
+  `Platform` is read once by `New`.
+- **No restart in process: a stall stops `Serve` and fails liveness** (R1). A
+  watcher ticks every `stallPoll` on the engine's clock while a loop group runs
+  and the server serves; the first group whose every ring is drained is
+  recorded, `Serve` drains and returns `LoopGroupStalled` naming it, and the
+  `net/server` liveness check `RegisterHealth` registers fails once
+  `loopStallGrace` (30 s) has passed since — for a process that runs without
+  `Serve`. Readiness, from `State`, fails at once. **A receive that never
+  completes on a live ring is not watched**: only the io_uring accept watchdog
+  drains a ring, and a silent peer is `IdleTimeout`'s to bound. The portable
+  backend has no ring and never stalls.
 - **TLS is applied at the listener, not in the accept loop.** `tls.NewListener`
   defers the handshake to the connection's own goroutine, so a slow or hostile
   peer stalls only itself. Doing the handshake inline in `Accept` would let one
@@ -334,8 +375,8 @@ second on Linux by a review of a downstream framework, and N cores with N shards
 - **The wait is on the engine's clock** — `Server.clk`, `clock.System` unless an
   internal test sets a manual one — so `TestAFailingAcceptWaitsOnTheEnginesClock`
   asserts each wait to the nanosecond and that no `Accept` happens while the
-  clock stands still. It is the only wait the engine takes on that clock; the
-  drain's poll is still on the wall clock.
+  clock stands still. The stall watcher's tick and the liveness grace are on it
+  too (ADR 0188); the drain's poll is still on the wall clock.
 - **A listener closed during a wait ends it at once.** The loop is not blocked in
   `Accept` then, so closing the socket alone would not reach it; `boundListener`
   carries a `closed` channel its `Close` closes (zero-value safe, created under a
@@ -455,8 +496,9 @@ connection trying to deregister.
 ## Error range
 
 None of its own. Every failure is a `internal/core/net` sentinel (`0.2.11.*`),
-wrapped with the offending group or address. Per ADR 0029 the service layer
-declares **no** codes.
+wrapped with the offending group or address — `LoopGroupStalled` included,
+and `RegisterHealth` on a nil registry is `core/app/health.InvalidCheck`. Per
+ADR 0029 the service layer declares **no** codes.
 
 The one exception is a platform refusal, and it is the SDK's shared one: a
 family this platform has no socket for — `unixgram` and `unixpacket` on
@@ -478,6 +520,10 @@ the measurement behind it and fails the day Windows opens either family.
   `MaxConns`, the second serves every HTTPS request as plaintext.
 - Add a registry of listener types; one canonical engine per family
   (the `proc`/`resilience` no-registry precedent).
+- Read `KITSUNIUM_NET_*` anywhere but `New`, or probe a backend before reading
+  them: a switched-off io_uring must never be set up. Add a token to
+  `capabilityRegistry` without the design's block, or restart a stalled loop
+  group in process (R1).
 
 ## Verification
 
@@ -495,5 +541,6 @@ cd internal/service && GOWORK=off go test -race -cover ./net/server/...
 - ADR 0047 §D9 — the hijacked-connection hand-over — `docs/adr/0047-sdk-net-websocket.md`
 - ADR 0186 — the opt-in loop engine and its HTTP/1.1 profile — `docs/adr/0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md`
 - ADR 0187 — the handler type chooses the engine; the kind set, `Plaintext`, `Name`, `Engine` — `docs/adr/0187-the-handler-type-chooses-the-engine.md`
+- ADR 0188 — the operator's switches, `State`'s faults, fallbacks, override and platform, readiness and liveness — `docs/adr/0188-the-operators-switches-only-restrict-and-state-says-what-the-server-runs-without.md`
 - Contract layer — `internal/core/net/CLAUDE.md`
 - The two protocols that depend on both — `internal/service/net/{sse,websocket}/CLAUDE.md`

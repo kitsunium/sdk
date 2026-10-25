@@ -824,3 +824,67 @@ SH
   done
   [[ "$(cat "$BATS_TEST_TMPDIR/release-summary.md")" == *"SDK release summary"* ]]
 }
+
+# ── check-net-default-change.sh (ADR 0188) ──────────────────────────────────
+
+# body <text> — a pull request body in a file, printf-expanded.
+net_body() {
+  printf "$1" >"$BATS_TEST_TMPDIR/body.md"
+}
+
+@test "net-default-change: an Override block in the registry's tokens passes" {
+  net_body 'Turns multishot on.\r\n\r\nOverride:\r\n  KITSUNIUM_NET_DISABLE=iouring, epoll\r\nKITSUNIUM_NET_ENGINE=portable\r\n\r\nmore text\n'
+  run bash "$CI_DIR/check-net-default-change.sh" "$BATS_TEST_TMPDIR/body.md"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"matches the registry"* ]]
+}
+
+@test "net-default-change: a block inside a fence ends at the fence" {
+  net_body '```\nOverride:\nKITSUNIUM_NET_ENGINE=epoll\n```\nKITSUNIUM_NET_ENGINE=bogus\n'
+  run bash "$CI_DIR/check-net-default-change.sh" "$BATS_TEST_TMPDIR/body.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "net-default-change: no block is refused, naming what to add" {
+  net_body 'Changes a default and says nothing.\n'
+  run bash "$CI_DIR/check-net-default-change.sh" "$BATS_TEST_TMPDIR/body.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"holds no Override: block"* ]]
+}
+
+@test "net-default-change: an unknown token, a floor switched off and a foreign variable are each refused" {
+  net_body 'Override:\nKITSUNIUM_NET_ENGINE=kqueue\n'
+  run bash "$CI_DIR/check-net-default-change.sh" "$BATS_TEST_TMPDIR/body.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"KITSUNIUM_NET_ENGINE=kqueue names no capability"* ]]
+  net_body 'Override:\nKITSUNIUM_NET_DISABLE=portable\n'
+  run bash "$CI_DIR/check-net-default-change.sh" "$BATS_TEST_TMPDIR/body.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"'portable' is no capability an operator may switch off (iouring, epoll)"* ]]
+  net_body 'Override:\nGODEBUG=x\n'
+  run bash "$CI_DIR/check-net-default-change.sh" "$BATS_TEST_TMPDIR/body.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"'GODEBUG' is not one of the operator's variables"* ]]
+  net_body 'Override:\nKITSUNIUM_NET_ENGINE=epoll\nKITSUNIUM_NET_ENGINE=portable\n'
+  run bash "$CI_DIR/check-net-default-change.sh" "$BATS_TEST_TMPDIR/body.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"at most once"* ]]
+}
+
+@test "net-default-change: the registry is the design's, so a token it drops is refused" {
+  sed 's/"\\"epoll\\""/"\\"renamed\\""/' "$REPO_ROOT/design/net.yaml" >"$BATS_TEST_TMPDIR/net.yaml"
+  net_body 'Override:\nKITSUNIUM_NET_DISABLE=epoll\n'
+  run bash "$CI_DIR/check-net-default-change.sh" "$BATS_TEST_TMPDIR/body.md" "$BATS_TEST_TMPDIR/net.yaml"
+  [ "$status" -eq 1 ]
+  run bash "$CI_DIR/check-net-default-change.sh" "$BATS_TEST_TMPDIR/body.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "net-default-change: the workflow runs on the pull request and in the merge queue, read-only" {
+  wf="$REPO_ROOT/.github/workflows/net-default-change.yml"
+  grep -q '^  merge_group:' "$wf"
+  grep -q 'types: \[opened, edited, reopened, synchronize, labeled, unlabeled\]' "$wf"
+  grep -q 'scripts/ci/check-net-default-change.sh' "$wf"
+  run grep -nE '^  pull_request_target:|: write' "$wf"
+  [ "$status" -ne 0 ]
+}

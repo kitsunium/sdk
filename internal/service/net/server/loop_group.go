@@ -124,11 +124,16 @@ func (s *Server) bindLoopGroup(ctx context.Context, group *StreamGroup) error {
 		lns = append(lns, ln)
 		s.registerLoopListeners(group, []stdnet.Listener{ln}, false)
 	}
-	eng, err := startLoopEngine(group, lns)
+	plan := s.operator.plan(group.loop.Backend, nativeLoopBackends)
+	eng, err := startLoopEngine(group, lns, plan)
 	//: the backend refused.
 	if err != nil {
 		//: Start unwinds the listeners.
 		return err
+	}
+	//: started lower than the code asked, because the better backend failed.
+	if st := eng.State(); st.Degraded {
+		s.recordFallback(group.name, st.DegradedReason)
 	}
 	s.mu.Lock()
 	s.loopEngines = append(s.loopEngines, eng)

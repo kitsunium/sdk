@@ -26,6 +26,9 @@ const (
 	expectedLiveConns int = 256
 )
 
+// lookupFunc reads one environment variable: os.LookupEnv, or a test's map.
+type lookupFunc func(key string) (string, bool)
+
 // Server owns a set of listener groups and their lifecycle.
 //
 // It is safe for concurrent use. Declaration-time mistakes — a duplicate group
@@ -99,6 +102,18 @@ type Server struct {
 	// start context so cancelling that context does not tear handlers down
 	// before the drain has had its budget.
 	runCtx context.Context
+	// lookup reads the operator's variables; os.LookupEnv unless a test says.
+	lookup lookupFunc
+	// operator is what they said, read once by New, before any probe.
+	operator operatorEnv
+	// platform is what State names the server runs on, read once by New.
+	platform corenet.PlatformValue
+	// fallbackMu guards fallbacks.
+	fallbackMu sync.Mutex
+	// fallbacks counts the engine fallbacks and keeps the last one.
+	fallbacks corenet.FallbacksValue
+	// stall watches the loop groups for one every ring of which is drained.
+	stall stallWatch
 }
 
 // newPooledConn mints an empty connection wrapper for the recycler.
@@ -109,6 +124,13 @@ func newPooledConn() *conn {
 
 // New builds a server.
 func New(opts ...Option) *Server {
+	//: the operator's variables come from the process environment.
+	return newServer(os.LookupEnv, opts...)
+}
+
+// newServer builds a server whose operator's variables are read through
+// lookup: os.LookupEnv for New, a map for a test.
+func newServer(lookup lookupFunc, opts ...Option) *Server {
 	s := &Server{
 		byName:       make(map[string]*StreamGroup, expectedGroups),
 		packetByName: make(map[string]*PacketGroup, expectedGroups),
@@ -116,11 +138,16 @@ func New(opts ...Option) *Server {
 		drainTimeout: defaultDrainTimeout,
 		connPool:     recycler.NewPool(newPooledConn),
 		clk:          clock.System,
+		lookup:       lookup,
+		stall:        stallWatch{stalled: make(chan struct{})},
 	}
 	//: options apply in order, so a later one deliberately wins.
 	for _, opt := range opts {
 		opt(s)
 	}
+	//: the operator's switches, read once and before any probe (ADR 0188).
+	s.operator = readOperator(s.lookup)
+	s.platform = readPlatform()
 	//: a server that is never started still hands handlers a usable context.
 	s.runCtx = context.Background()
 	//: a freshly built server has bound nothing yet.
@@ -229,9 +256,14 @@ func (s *Server) State() corenet.StateValue {
 	s.mu.RLock()
 	listeners := slices.Clone(s.states)
 	s.mu.RUnlock()
+	s.fallbackMu.Lock()
+	fallbacks := s.fallbacks
+	s.fallbackMu.Unlock()
+	override := s.operator.override
+	override.Disabled = slices.Clone(override.Disabled)
 	//: a copied slice so the caller cannot observe a listener set mutating
 	//: underneath it, and cannot mutate ours.
-	return corenet.StateValue{
+	st := corenet.StateValue{
 		Phase:            corenet.Phase(s.phase.Load()),
 		Listeners:        listeners,
 		ActiveConns:      s.active.Load(),
@@ -240,5 +272,22 @@ func (s *Server) State() corenet.StateValue {
 		OversizedPackets: s.oversized.Load(),
 		AcceptBackoffs:   s.acceptBackoffs.Load(),
 		Loops:            s.loopStates(),
+		Override:         override,
+		Fallbacks:        fallbacks,
+		Platform:         s.platform,
 	}
+	st.Faults = s.faults(st)
+	//: a snapshot.
+	return st
+}
+
+// recordFallback counts a group started on a lower engine than its code asked
+// for, because the better one failed, and keeps it as the last (ADR 0188).
+func (s *Server) recordFallback(group, reason string) {
+	s.fallbackMu.Lock()
+	defer s.fallbackMu.Unlock()
+	s.fallbacks.Count++
+	s.fallbacks.LastGroup = group
+	s.fallbacks.LastReason = reason
+	s.fallbacks.LastAt = s.clk.Now()
 }

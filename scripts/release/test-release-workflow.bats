@@ -201,3 +201,30 @@ JSON
   run bash "$NOTES" start-tag "$BATS_TEST_TMPDIR/absent.json"
   [ "$status" -eq 1 ]
 }
+
+# ADR 0188: the release renders the Override block of a net:default-change pull
+# request back, as written, and judges nothing.
+@test "release-notes: default-changes renders the labelled pull requests' Override blocks, and only theirs" {
+  cat >"$BATS_TEST_TMPDIR/prs.json" <<'JSON'
+[{"number":7,"title":"feat(net): multishot by default","body":"Turns X on.\r\n\r\nOverride:\r\nKITSUNIUM_NET_DISABLE=iouring\r\n\r\nrest","labels":[{"name":"net:default-change"}]},
+ {"number":8,"title":"fix: other","body":"Override:\nKITSUNIUM_NET_ENGINE=epoll\n","labels":[]},
+ {"number":9,"title":"feat(net): an unchecked token","body":"Override:\nKITSUNIUM_NET_ENGINE=whatever\n","labels":[{"name":"net:default-change"}]}]
+JSON
+  run bash "$NOTES" default-changes "$BATS_TEST_TMPDIR/prs.json"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"- #7 feat(net): multishot by default"* ]]
+  [[ "$output" == *"  KITSUNIUM_NET_DISABLE=iouring"* ]]
+  [[ "$output" == *"  KITSUNIUM_NET_ENGINE=whatever"* ]]
+  [[ "$output" != *"#8"* ]]
+  [[ "$output" != *$'\r'* ]]
+  echo '[]' >"$BATS_TEST_TMPDIR/prs.json"
+  run bash "$NOTES" default-changes "$BATS_TEST_TMPDIR/prs.json"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "the release step appends the default changes and warns rather than fails on a lookup" {
+  body="$(step "Create the GitHub release")"
+  [[ "$body" == *'release-notes.sh default-changes /tmp/release-prs.json'* ]]
+  [[ "$body" == *'::warning::the net:default-change pull requests of this release could not be read'* ]]
+}

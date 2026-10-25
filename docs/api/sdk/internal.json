@@ -25334,6 +25334,70 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.Capability",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "Capability",
+      "spelled": "string",
+      "canonical": "string",
+      "doc": "Capability names one engine of the lattice the operator's switches restrict\n(ADR 0188): iouring > epoll > portable > goroutine. Its values are the tokens\nKITSUNIUM_NET_ENGINE and KITSUNIUM_NET_DISABLE take; this block is the\nregistry they are parsed against, and any other token is unknown.\n",
+      "file": "core/net/capability.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CapabilityEpoll",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CapabilityEpoll",
+      "spelled": "Capability",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
+      "value": "\"epoll\"",
+      "doc": "CapabilityEpoll is epoll, below io_uring. Switched off, a loop group that would\nhave fallen back to it runs on the portable backend.\n",
+      "file": "core/net/capability.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CapabilityGoroutine",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CapabilityGoroutine",
+      "spelled": "Capability",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
+      "value": "\"goroutine\"",
+      "doc": "CapabilityGoroutine is the goroutine engine, the bottom of the lattice. A loop\nhandler capped at it runs on the portable backend, the lowest engine that can\nserve one.\n",
+      "file": "core/net/capability.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CapabilityIOURing",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CapabilityIOURing",
+      "spelled": "Capability",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
+      "value": "\"iouring\"",
+      "doc": "CapabilityIOURing is io_uring, the top of the lattice. Switched off, or capped\nbelow, no loop group calls io_uring_setup.\n",
+      "file": "core/net/capability.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CapabilityPortable",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CapabilityPortable",
+      "spelled": "Capability",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.Capability",
+      "value": "\"portable\"",
+      "doc": "CapabilityPortable is the portable loop backend, the loop family's floor on\nevery platform, and what an unknown token caps the engine at.\n",
+      "file": "core/net/capability.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.Chain[...]",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -25825,6 +25889,22 @@
         "value": "0.2.11.37"
       },
       "doc": "CodeLoopBackendUnavailable identifies an explicit loop backend the running\nkernel's probe refused, on a platform that has the mechanic (ADR 0186 §D5).\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeLoopGroupStalled",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeLoopGroupStalled",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133947",
+      "code": {
+        "value": "0.2.11.59"
+      },
+      "doc": "CodeLoopGroupStalled identifies a loop group every ring of which the watchdog\ndrained while the server was serving (ADR 0188).\n",
       "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
@@ -26629,6 +26709,102 @@
       "canonical": "func() string",
       "doc": "String renders the engine as an error field spells it.\n",
       "file": "core/net/engine.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.EnvDisable",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "EnvDisable",
+      "spelled": "string",
+      "canonical": "string",
+      "value": "\"KITSUNIUM_NET_DISABLE\"",
+      "doc": "EnvDisable is the variable that switches engines off, a comma-separated list of\ncapabilities the operator may switch off.\n",
+      "file": "core/net/capability.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.EnvEngine",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "EnvEngine",
+      "spelled": "string",
+      "canonical": "string",
+      "value": "\"KITSUNIUM_NET_ENGINE\"",
+      "doc": "EnvEngine is the variable that caps every group's engine at one capability of\nthe lattice: min(code, environment), never above the code's choice.\n",
+      "file": "core/net/capability.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.FallbacksValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "FallbacksValue",
+      "spelled": "struct{Count uint64 \"json:\\\"count\\\"\"; LastGroup string \"json:\\\"last_group,omitempty\\\"\"; LastReason string \"json:\\\"last_reason,omitempty\\\"\"; LastAt time.Time \"json:\\\"last_at\\\"\"}",
+      "canonical": "struct{Count uint64 \"json:\\\"count\\\"\"; LastGroup string \"json:\\\"last_group,omitempty\\\"\"; LastReason string \"json:\\\"last_reason,omitempty\\\"\"; LastAt time.Time \"json:\\\"last_at\\\"\"}",
+      "fields": [
+        {
+          "name": "Count",
+          "type": "uint64",
+          "tag": "json:\"count\"",
+          "doc": "Count is the number of fallbacks since the server was built.\n"
+        },
+        {
+          "name": "LastGroup",
+          "type": "string",
+          "tag": "json:\"last_group,omitempty\"",
+          "doc": "LastGroup names the group of the last fallback.\n"
+        },
+        {
+          "name": "LastReason",
+          "type": "string",
+          "tag": "json:\"last_reason,omitempty\"",
+          "doc": "LastReason is the last fallback's reason.\n"
+        },
+        {
+          "name": "LastAt",
+          "type": "time.Time",
+          "tag": "json:\"last_at\"",
+          "doc": "LastAt is when the last fallback happened; zero when none did.\n"
+        }
+      ],
+      "doc": "FallbacksValue counts the times a group started on a lower engine than the one\nits code asked for, because the better one failed, and keeps the last one\n(ADR 0188). An override by the environment is not a fallback.\n",
+      "file": "core/net/state_report.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.FaultValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "FaultValue",
+      "spelled": "struct{Source string \"json:\\\"source\\\"\"; Group string \"json:\\\"group,omitempty\\\"\"; Reason string \"json:\\\"reason\\\"\"}",
+      "canonical": "struct{Source string \"json:\\\"source\\\"\"; Group string \"json:\\\"group,omitempty\\\"\"; Reason string \"json:\\\"reason\\\"\"}",
+      "fields": [
+        {
+          "name": "Source",
+          "type": "string",
+          "tag": "json:\"source\"",
+          "doc": "Source says what reported it: \"listener\", \"loop\", \"ring\", \"stall\" or\n\"environment\".\n"
+        },
+        {
+          "name": "Group",
+          "type": "string",
+          "tag": "json:\"group,omitempty\"",
+          "doc": "Group names the group concerned; empty for the environment.\n"
+        },
+        {
+          "name": "Reason",
+          "type": "string",
+          "tag": "json:\"reason\"",
+          "doc": "Reason names the fault and, where one exists, the runbook's switch.\n"
+        }
+      ],
+      "doc": "FaultValue reports one thing the server runs without, or cannot do, now: a\ndegraded listener or loop group, a drained ring, a stalled loop group, or an\nenvironment token the registry does not know (ADR 0188).\n",
+      "file": "core/net/state_report.go",
       "layer": "core",
       "family": "net"
     },
@@ -27752,6 +27928,23 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopGroupStalled",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "LoopGroupStalled",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.59",
+        "reason": "LOOP_GROUP_STALLED",
+        "public": "A loop group stopped accepting connections"
+      },
+      "doc": "LoopGroupStalled is returned by Serve once every ring of a loop group has been\ndrained by its watchdog while the server was serving, and by the server's\nliveness check once that has lasted the stall grace (ADR 0188). The \"group\"\nfield names it. A process restarted with the same environment stalls the\nsame way: the runbook sets KITSUNIUM_NET_DISABLE.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopHandler",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -28646,6 +28839,44 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.OverrideValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OverrideValue",
+      "spelled": "struct{Source string \"json:\\\"source,omitempty\\\"\"; Raw string \"json:\\\"raw,omitempty\\\"\"; Applied Capability \"json:\\\"applied,omitempty\\\"\"; Disabled []Capability \"json:\\\"disabled,omitempty\\\"\"}",
+      "canonical": "struct{Source string \"json:\\\"source,omitempty\\\"\"; Raw string \"json:\\\"raw,omitempty\\\"\"; Applied github.com/kitsunium/sdk/internal/core/net.Capability \"json:\\\"applied,omitempty\\\"\"; Disabled []github.com/kitsunium/sdk/internal/core/net.Capability \"json:\\\"disabled,omitempty\\\"\"}",
+      "fields": [
+        {
+          "name": "Source",
+          "type": "string",
+          "tag": "json:\"source,omitempty\"",
+          "doc": "Source is \"environment\" when KITSUNIUM_NET_ENGINE or KITSUNIUM_NET_DISABLE\nis set to a non-empty value, and empty otherwise.\n"
+        },
+        {
+          "name": "Raw",
+          "type": "string",
+          "tag": "json:\"raw,omitempty\"",
+          "doc": "Raw is what was read, each variable set as NAME=value, separated by a\nspace, in the order EnvEngine, EnvDisable.\n"
+        },
+        {
+          "name": "Applied",
+          "type": "Capability",
+          "tag": "json:\"applied,omitempty\"",
+          "doc": "Applied is the highest engine the environment lets a group run on, after\nboth variables; empty when nothing is set. A group runs on\nmin(its code's choice, Applied), skipping what Disabled names.\n"
+        },
+        {
+          "name": "Disabled",
+          "type": "[]Capability",
+          "tag": "json:\"disabled,omitempty\"",
+          "doc": "Disabled lists the engines KITSUNIUM_NET_DISABLE switched off.\n"
+        }
+      ],
+      "doc": "OverrideValue reports what the operator's environment did to the engines,\nread once, before any probe (ADR 0188). The zero value is \"no override\".\n",
+      "file": "core/net/state_report.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.Packet",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -28905,6 +29136,44 @@
       },
       "doc": "PlaintextWithTLS is returned by Start for a group given both Plaintext and\nTLS, in either order. The group is never served in plaintext nor over TLS by\ndefault: the contradiction is the caller's to settle (ADR 0187).\n",
       "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.PlatformValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "PlatformValue",
+      "spelled": "struct{GOOS string \"json:\\\"goos\\\"\"; GOARCH string \"json:\\\"goarch\\\"\"; Kernel string \"json:\\\"kernel,omitempty\\\"\"; Go string \"json:\\\"go\\\"\"}",
+      "canonical": "struct{GOOS string \"json:\\\"goos\\\"\"; GOARCH string \"json:\\\"goarch\\\"\"; Kernel string \"json:\\\"kernel,omitempty\\\"\"; Go string \"json:\\\"go\\\"\"}",
+      "fields": [
+        {
+          "name": "GOOS",
+          "type": "string",
+          "tag": "json:\"goos\"",
+          "doc": "GOOS is runtime.GOOS.\n"
+        },
+        {
+          "name": "GOARCH",
+          "type": "string",
+          "tag": "json:\"goarch\"",
+          "doc": "GOARCH is runtime.GOARCH.\n"
+        },
+        {
+          "name": "Kernel",
+          "type": "string",
+          "tag": "json:\"kernel,omitempty\"",
+          "doc": "Kernel is the operating system's release as the platform reports it: the\nuname release on Linux, kern.osrelease on darwin and the BSDs,\nmajor.minor.build as GetVersion reports it on Windows; empty when it cannot\nbe read, and on illumos and Solaris, where the standard library reads none.\n"
+        },
+        {
+          "name": "Go",
+          "type": "string",
+          "tag": "json:\"go\"",
+          "doc": "Go is runtime.Version(), the toolchain the binary was built with.\n"
+        }
+      ],
+      "doc": "PlatformValue names what the server runs on, so a report says which kernel a\nprobe ran against (ADR 0188).\n",
+      "file": "core/net/state_report.go",
       "layer": "core",
       "family": "net"
     },
@@ -29282,8 +29551,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/net",
       "name": "StateValue",
-      "spelled": "struct{Phase Phase \"json:\\\"phase\\\"\"; Listeners []ListenerStateValue \"json:\\\"listeners\\\"\"; ActiveConns int64 \"json:\\\"active_conns\\\"\"; TotalConns uint64 \"json:\\\"total_conns\\\"\"; RejectedConns uint64 \"json:\\\"rejected_conns\\\"\"; OversizedPackets uint64 \"json:\\\"oversized_packets\\\"\"; AcceptBackoffs uint64 \"json:\\\"accept_backoffs\\\"\"; Loops []LoopStateValue \"json:\\\"loops,omitempty\\\"\"}",
-      "canonical": "struct{Phase github.com/kitsunium/sdk/internal/core/net.Phase \"json:\\\"phase\\\"\"; Listeners []github.com/kitsunium/sdk/internal/core/net.ListenerStateValue \"json:\\\"listeners\\\"\"; ActiveConns int64 \"json:\\\"active_conns\\\"\"; TotalConns uint64 \"json:\\\"total_conns\\\"\"; RejectedConns uint64 \"json:\\\"rejected_conns\\\"\"; OversizedPackets uint64 \"json:\\\"oversized_packets\\\"\"; AcceptBackoffs uint64 \"json:\\\"accept_backoffs\\\"\"; Loops []github.com/kitsunium/sdk/internal/core/net.LoopStateValue \"json:\\\"loops,omitempty\\\"\"}",
+      "spelled": "struct{Phase Phase \"json:\\\"phase\\\"\"; Listeners []ListenerStateValue \"json:\\\"listeners\\\"\"; ActiveConns int64 \"json:\\\"active_conns\\\"\"; TotalConns uint64 \"json:\\\"total_conns\\\"\"; RejectedConns uint64 \"json:\\\"rejected_conns\\\"\"; OversizedPackets uint64 \"json:\\\"oversized_packets\\\"\"; AcceptBackoffs uint64 \"json:\\\"accept_backoffs\\\"\"; Loops []LoopStateValue \"json:\\\"loops,omitempty\\\"\"; Override OverrideValue \"json:\\\"override\\\"\"; Faults []FaultValue \"json:\\\"faults,omitempty\\\"\"; Fallbacks FallbacksValue \"json:\\\"fallbacks\\\"\"; Platform PlatformValue \"json:\\\"platform\\\"\"}",
+      "canonical": "struct{Phase github.com/kitsunium/sdk/internal/core/net.Phase \"json:\\\"phase\\\"\"; Listeners []github.com/kitsunium/sdk/internal/core/net.ListenerStateValue \"json:\\\"listeners\\\"\"; ActiveConns int64 \"json:\\\"active_conns\\\"\"; TotalConns uint64 \"json:\\\"total_conns\\\"\"; RejectedConns uint64 \"json:\\\"rejected_conns\\\"\"; OversizedPackets uint64 \"json:\\\"oversized_packets\\\"\"; AcceptBackoffs uint64 \"json:\\\"accept_backoffs\\\"\"; Loops []github.com/kitsunium/sdk/internal/core/net.LoopStateValue \"json:\\\"loops,omitempty\\\"\"; Override github.com/kitsunium/sdk/internal/core/net.OverrideValue \"json:\\\"override\\\"\"; Faults []github.com/kitsunium/sdk/internal/core/net.FaultValue \"json:\\\"faults,omitempty\\\"\"; Fallbacks github.com/kitsunium/sdk/internal/core/net.FallbacksValue \"json:\\\"fallbacks\\\"\"; Platform github.com/kitsunium/sdk/internal/core/net.PlatformValue \"json:\\\"platform\\\"\"}",
       "fields": [
         {
           "name": "Phase",
@@ -29332,6 +29601,30 @@
           "type": "[]LoopStateValue",
           "tag": "json:\"loops,omitempty\"",
           "doc": "Loops reports every loop group (ADR 0186 §D8). It is empty while the\nserver serves none.\n"
+        },
+        {
+          "name": "Override",
+          "type": "OverrideValue",
+          "tag": "json:\"override\"",
+          "doc": "Override reports what KITSUNIUM_NET_ENGINE and KITSUNIUM_NET_DISABLE did\n(ADR 0188).\n"
+        },
+        {
+          "name": "Faults",
+          "type": "[]FaultValue",
+          "tag": "json:\"faults,omitempty\"",
+          "doc": "Faults lists everything the server runs without now, the degradations of\nListeners and Loops included; Degraded is true when it is not empty.\n"
+        },
+        {
+          "name": "Fallbacks",
+          "type": "FallbacksValue",
+          "tag": "json:\"fallbacks\"",
+          "doc": "Fallbacks counts the engine fallbacks and keeps the last one.\n"
+        },
+        {
+          "name": "Platform",
+          "type": "PlatformValue",
+          "tag": "json:\"platform\"",
+          "doc": "Platform names the operating system, its release and the toolchain.\n"
         }
       ],
       "doc": "StateValue is a snapshot of the server's lifecycle and listeners.\n\nIt is a value, so a caller can hold it, log it, or compare it without racing\nthe server that produced it.\n",
@@ -29347,7 +29640,7 @@
       "recv": "StateValue",
       "spelled": "func() bool",
       "canonical": "func() bool",
-      "doc": "Degraded reports whether any listener or loop group fell back from a\nrequested optimisation, so a caller can assert \"no silent degradation\" in\none call instead of walking the slices.\n",
+      "doc": "Degraded reports whether the server runs with any fault — a listener or loop\ngroup that fell back from a requested optimisation, a drained ring, a\nstalled loop group, an unknown environment token — so a caller can assert\n\"no silent degradation\" in one call. It reads Faults, and still the\nDegraded flags of Listeners and Loops for a value built by hand (ADR 0188).\n",
       "file": "core/net/state.go",
       "layer": "core",
       "family": "net"
@@ -63573,6 +63866,19 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/server.(*Server).RegisterHealth",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/server",
+      "name": "RegisterHealth",
+      "recv": "Server",
+      "spelled": "func(h corehealth.Health) error",
+      "canonical": "func(h github.com/kitsunium/sdk/internal/core/app/health.Health) error",
+      "doc": "RegisterHealth registers the server's readiness and liveness checks on h,\nboth named \"net/server\" (ADR 0188). Readiness is built from State: ready\nwhile serving with no stalled loop group. Liveness fails once a loop group\nhas stayed stalled for the stall grace, 30 seconds. A receive that never\ncompletes on a live ring is not watched.\n",
+      "file": "service/net/server/health.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/net/server.(*Server).Serve",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/service/net/server",
@@ -63580,7 +63886,7 @@
       "recv": "Server",
       "spelled": "func(ctx context.Context) error",
       "canonical": "func(ctx context.Context) error",
-      "doc": "Serve starts the server and blocks until ctx is cancelled, then drains.\n\nIt is the one-call entry point: a caller that has nothing else to do on the\nmain goroutine writes Serve and gets startup, blocking and graceful shutdown\nwithout assembling them.\n",
+      "doc": "Serve starts the server and blocks until ctx is cancelled, then drains.\n\nIt is the one-call entry point: a caller that has nothing else to do on the\nmain goroutine writes Serve and gets startup, blocking and graceful shutdown\nwithout assembling them. It also returns, after the same drain, once every\nring of a loop group has been drained by its watchdog: LoopGroupStalled,\nnaming the group (ADR 0188).\n",
       "file": "service/net/server/lifecycle.go",
       "layer": "service",
       "family": "net"

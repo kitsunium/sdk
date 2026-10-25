@@ -15,6 +15,30 @@ workflows:
           key: _
           range: pl.conns
           value: pc
+  - of: (*operatorEnv).applied
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: entry.token
+                when: e.allows(entry.rank)
+          key: _
+          range: capabilityRegistry
+          value: entry
+      - return: corenet.CapabilityGoroutine
+  - of: lookupCapability
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: entry, true
+                when: string(entry.token) == token
+          key: _
+          range: capabilityRegistry
+          value: entry
+      - return: capabilityEntry{}, false
   - of: unixAddr
     steps:
       - bind: sa
@@ -37,3 +61,85 @@ workflows:
           range: sa.Path
           value: c
       - return: "&stdnet.UnixAddr{Name: string(buf), Net: \"unixgram\"}"
+  - of: groupStalled
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(st.RingStates) == 0
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: "!r.Draining"
+          key: _
+          range: st.RingStates
+          value: r
+      - return: "true"
+  - of: (*Server).faults
+    steps:
+      - bind: out
+        eval: make([]corenet.FaultValue, 0, len(s.operator.faults))
+      - set: out
+        value: append(out, s.operator.faults...)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: "append(out, corenet.FaultValue{Source: faultListener, Group: l.Group, Reason: l.DegradedReason})"
+                when: l.Degraded
+          key: _
+          range: st.Listeners
+          value: l
+      - bind: serving
+        eval: st.Phase == corenet.PhaseServing
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: "append(out, corenet.FaultValue{Source: faultLoop, Group: lp.Group, Reason: lp.DegradedReason})"
+                when: lp.Degraded
+            - opt:
+                do:
+                  - set: out
+                    value: append(out, ringFaults(lp)...)
+                when: serving
+          key: _
+          range: st.Loops
+          value: lp
+      - opt:
+          do:
+            - return: nil
+          when: len(out) == 0
+      - return: out
+  - of: ringFaults
+    steps:
+      - opt:
+          do:
+            - return: |-
+                []corenet.FaultValue{{
+                			Source: faultStall, Group: lp.Group,
+                			Reason: "every ring drained by its watchdog: the group accepts nothing; " + runbook,
+                		}}
+          when: groupStalled(lp)
+      - var:
+          name: out
+          type: "[]corenet.FaultValue"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: out
+                    value: |-
+                      append(out, corenet.FaultValue{
+                      				Source: faultRing, Group: lp.Group,
+                      				Reason: "loop " + strconv.Itoa(r.Loop) + " ring " + strconv.Itoa(r.Ring) + " drained by its watchdog; " + runbook,
+                      			})
+                when: r.Draining
+          key: _
+          range: lp.RingStates
+          value: r
+      - return: out

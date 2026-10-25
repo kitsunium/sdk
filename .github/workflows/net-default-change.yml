@@ -1,0 +1,75 @@
+name: Net default change
+# The gate of the `net:default-change` label (ADR 0188). A pull request that
+# changes a default of the network engines — a capability turned on by default,
+# a backend preferred over another — carries the label, and its body says how
+# an operator gets the old behaviour back: an `Override:` block of
+# KITSUNIUM_NET_ENGINE / KITSUNIUM_NET_DISABLE lines in the registry's tokens.
+# scripts/ci/check-net-default-change.sh holds the block to design/net.yaml's
+# registry; a pull request without the label passes.
+#
+# On the pull request AND in the merge queue (ADR 0187 §D10, gates at the
+# merge): a queue entry has no `github.event.pull_request`, so both events read
+# the pull request through the API — its number from the event on a pull
+# request, from the queue ref `gh-readonly-queue/<base>/pr-<n>-<sha>` in the
+# queue — and judge the label and the body read there, the same answer on both.
+# It re-runs on `edited`, `labeled` and `unlabeled`: the body and the label are
+# the fix. release-notes.sh only renders the block back at the release.
+#
+# `pull_request`, never `pull_request_target`: no secret, a read-only token.
+# Requiring the `net-default-change` status is a repository setting (the
+# ruleset), left to the maintainer; see .github/workflows/CLAUDE.md.
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, labeled, unlabeled]
+  merge_group:
+    types: [checks_requested]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # A newer push to a pull request supersedes the run; a queue entry is never
+  # cancelled, its ref being its own.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  net-default-change:
+    name: net-default-change
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Granted to this job only.
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - name: the Override block of a net:default-change pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Through the environment, never `${{ }}` in the script text.
+          EVENT: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          QUEUE_REF: ${{ github.event.merge_group.head_ref }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          number="$PR_NUMBER"
+          if [ "$EVENT" = "merge_group" ]; then
+            number="$(sed -n 's#^refs/heads/gh-readonly-queue/.*/pr-\([0-9][0-9]*\)-[0-9a-f]*$#\1#p' <<<"$QUEUE_REF")"
+          fi
+          if [ -z "$number" ]; then
+            echo "::error::no pull request number in event '$EVENT' (queue ref '$QUEUE_REF')"
+            exit 1
+          fi
+          gh api "repos/$REPO/pulls/$number" >"$RUNNER_TEMP/pr.json"
+          if ! jq -e '[.labels[].name] | index("net:default-change")' "$RUNNER_TEMP/pr.json" >/dev/null; then
+            echo "#$number does not carry net:default-change: nothing to check"
+            exit 0
+          fi
+          jq -r '.body // ""' "$RUNNER_TEMP/pr.json" >"$RUNNER_TEMP/body.md"
+          bash scripts/ci/check-net-default-change.sh "$RUNNER_TEMP/body.md"

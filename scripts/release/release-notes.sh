@@ -21,6 +21,13 @@
 #                                          whose tag is the manifest's
 #                                          `release`; empty when it was never
 #                                          tagged before
+#   release-notes.sh default-changes <prs> the `Override:` block of every pull
+#                                          request of <prs> — a JSON array of
+#                                          {number, title, body, labels} as
+#                                          the API returns them — labelled
+#                                          net:default-change, rendered back
+#                                          as it was written; nothing when
+#                                          none is (ADR 0188)
 #
 # Exit 1 on a tag no family accepts, on an empty or unreadable list, or on a
 # manifest whose `release` is no module of it; 64 on bad usage.
@@ -153,7 +160,46 @@ start_tag() {
   fi
 }
 
-usage="usage: $0 classify|count|notes <tag-list> | start-tag <manifest>"
+# default_changes <prs.json> — the `Override:` blocks of the pull requests
+# labelled net:default-change, as their bodies hold them. It renders and never
+# judges: the block was held to the registry on the pull request and in the
+# merge queue (scripts/ci/check-net-default-change.sh), and a release is no
+# place for a gate (ADR 0187 §D10).
+default_changes() {
+  local file="$1" blocks
+  if [ ! -r "$file" ]; then
+    echo "release-notes: $file is missing or unreadable" >&2
+    return 1
+  fi
+  if ! blocks="$(jq -r '
+      .[] | select([.labels[]?.name] | index("net:default-change"))
+      | "\(.number)\t\(.title | @base64)\t\((.body // "") | gsub("\r"; "") | @base64)"
+    ' "$file")"; then
+    echo "release-notes: $file is no JSON array of pull requests" >&2
+    return 1
+  fi
+  [ -z "$blocks" ] && return 0
+  echo "Defaults of the network engines changed by this release; each block is how an operator gets the previous behaviour back (ADR 0188):"
+  local number title body block
+  while IFS=$'\t' read -r number title body; do
+    block="$(base64 -d <<<"$body" | awk '
+      found && (/^[[:space:]]*$/ || /^[[:space:]]*```/) { exit }
+      found { sub(/^[[:space:]]+/, ""); print; next }
+      /^[[:space:]]*Override:[[:space:]]*$/ { found = 1 }
+    ')"
+    echo
+    echo "- #$number $(base64 -d <<<"$title")"
+    echo
+    echo '  ```'
+    echo '  Override:'
+    while IFS= read -r line; do
+      [ -n "$line" ] && echo "  $line"
+    done <<<"$block"
+    echo '  ```'
+  done <<<"$blocks"
+}
+
+usage="usage: $0 classify|count|notes <tag-list> | start-tag <manifest> | default-changes <prs.json>"
 if [ "$#" -ne 2 ]; then
   echo "$usage" >&2
   exit 64
@@ -163,6 +209,7 @@ case "$1" in
   count) count "$2" ;;
   notes) notes "$2" ;;
   start-tag) start_tag "$2" ;;
+  default-changes) default_changes "$2" ;;
   *)
     echo "$usage" >&2
     exit 64

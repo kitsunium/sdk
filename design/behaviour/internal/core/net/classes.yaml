@@ -1,6 +1,55 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 constants:
+  - doc: |-
+      EnvEngine is the variable that caps every group's engine at one capability of
+      the lattice: min(code, environment), never above the code's choice.
+    items:
+      - name: EnvEngine
+        type: string
+        value: "\"KITSUNIUM_NET_ENGINE\""
+    name: EnvEngine
+  - doc: |-
+      EnvDisable is the variable that switches engines off, a comma-separated list of
+      capabilities the operator may switch off.
+    items:
+      - name: EnvDisable
+        type: string
+        value: "\"KITSUNIUM_NET_DISABLE\""
+    name: EnvDisable
+  - doc: The engines an operator may switch off with KITSUNIUM_NET_DISABLE (ADR 0188).
+    grouped: true
+    items:
+      - doc: |-
+          CapabilityIOURing is io_uring, the top of the lattice. Switched off, or capped
+          below, no loop group calls io_uring_setup.
+        name: CapabilityIOURing
+        type: Capability
+        value: "\"iouring\""
+      - doc: |-
+          CapabilityEpoll is epoll, below io_uring. Switched off, a loop group that would
+          have fallen back to it runs on the portable backend.
+        name: CapabilityEpoll
+        type: Capability
+        value: "\"epoll\""
+    name: CapabilityIOURing
+  - doc: The floors of the lattice, which KITSUNIUM_NET_ENGINE may name and nothing switches off (ADR 0188).
+    grouped: true
+    items:
+      - doc: |-
+          CapabilityPortable is the portable loop backend, the loop family's floor on
+          every platform, and what an unknown token caps the engine at.
+        name: CapabilityPortable
+        type: Capability
+        value: "\"portable\""
+      - doc: |-
+          CapabilityGoroutine is the goroutine engine, the bottom of the lattice. A loop
+          handler capped at it runs on the portable backend, the lowest engine that can
+          serve one.
+        name: CapabilityGoroutine
+        type: Capability
+        value: "\"goroutine\""
+    name: CapabilityPortable
   - grouped: true
     items:
       - doc: decimalBase is the radix used to read a bare nanosecond count.
@@ -454,6 +503,13 @@ files:
       - CallHook
     name: call.go
   - decls:
+      - EnvEngine
+      - EnvDisable
+      - Capability
+      - CapabilityIOURing
+      - CapabilityPortable
+    name: capability.go
+  - decls:
       - ClientConfig
     name: client_config.go
   - decls:
@@ -587,6 +643,12 @@ files:
       - StateValue.Degraded
       - ListenerStateValue
     name: state.go
+  - decls:
+      - OverrideValue
+      - FaultValue
+      - FallbacksValue
+      - PlatformValue
+    name: state_report.go
   - decls:
       - TimeoutsValue
     name: timeouts.go
@@ -750,6 +812,9 @@ types:
   - kind: named
     name: CallHook
     underlying: func(call CallValue)
+  - kind: named
+    name: Capability
+    underlying: string
   - fields:
       - doc: BaseURL is the origin every relative path resolves against.
         name: BaseURL
@@ -1491,6 +1556,22 @@ types:
           server serves none.
         name: Loops
         type: "[]LoopStateValue"
+      - doc: |-
+          Override reports what KITSUNIUM_NET_ENGINE and KITSUNIUM_NET_DISABLE did
+          (ADR 0188).
+        name: Override
+        type: OverrideValue
+      - doc: |-
+          Faults lists everything the server runs without now, the degradations of
+          Listeners and Loops included; Degraded is true when it is not empty.
+        name: Faults
+        type: "[]FaultValue"
+      - doc: Fallbacks counts the engine fallbacks and keeps the last one.
+        name: Fallbacks
+        type: FallbacksValue
+      - doc: Platform names the operating system, its release and the toolchain.
+        name: Platform
+        type: PlatformValue
     kind: struct
     methods:
       - name: Degraded
@@ -1529,6 +1610,76 @@ types:
         type: bool
     kind: struct
     name: ListenerStateValue
+  - fields:
+      - doc: |-
+          Source is "environment" when KITSUNIUM_NET_ENGINE or KITSUNIUM_NET_DISABLE
+          is set to a non-empty value, and empty otherwise.
+        name: Source
+        type: string
+      - doc: |-
+          Raw is what was read, each variable set as NAME=value, separated by a
+          space, in the order EnvEngine, EnvDisable.
+        name: Raw
+        type: string
+      - doc: |-
+          Applied is the highest engine the environment lets a group run on, after
+          both variables; empty when nothing is set. A group runs on
+          min(its code's choice, Applied), skipping what Disabled names.
+        name: Applied
+        type: Capability
+      - doc: Disabled lists the engines KITSUNIUM_NET_DISABLE switched off.
+        name: Disabled
+        type: "[]Capability"
+    kind: struct
+    name: OverrideValue
+  - fields:
+      - doc: |-
+          Source says what reported it: "listener", "loop", "ring", "stall" or
+          "environment".
+        name: Source
+        type: string
+      - doc: Group names the group concerned; empty for the environment.
+        name: Group
+        type: string
+      - doc: Reason names the fault and, where one exists, the runbook's switch.
+        name: Reason
+        type: string
+    kind: struct
+    name: FaultValue
+  - fields:
+      - doc: Count is the number of fallbacks since the server was built.
+        name: Count
+        type: uint64
+      - doc: LastGroup names the group of the last fallback.
+        name: LastGroup
+        type: string
+      - doc: LastReason is the last fallback's reason.
+        name: LastReason
+        type: string
+      - doc: LastAt is when the last fallback happened; zero when none did.
+        name: LastAt
+        type: time.Time
+    kind: struct
+    name: FallbacksValue
+  - fields:
+      - doc: GOOS is runtime.GOOS.
+        name: GOOS
+        type: string
+      - doc: GOARCH is runtime.GOARCH.
+        name: GOARCH
+        type: string
+      - doc: |-
+          Kernel is the operating system's release as the platform reports it: the
+          uname release on Linux, kern.osrelease on darwin and the BSDs,
+          major.minor.build as GetVersion reports it on Windows; empty when it cannot
+          be read, and on illumos and Solaris, where the standard library reads none.
+        name: Kernel
+        type: string
+      - doc: Go is runtime.Version(), the toolchain the binary was built with.
+        name: Go
+        type: string
+    kind: struct
+    name: PlatformValue
   - fields:
       - doc: Read bounds one read from the peer.
         name: Read

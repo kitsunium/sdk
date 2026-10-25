@@ -466,6 +466,8 @@ jobs:
         if: steps.compute.outputs.majors != '' && steps.cut.outputs.held != 'true' && env.DRY_RUN != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The main commit this release was cut from.
+          MAIN_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           set -euo pipefail
           # ONE release per run (ADR 0171), on the manifest's `release` — the
@@ -482,6 +484,31 @@ jobs:
           from=()
           if [ -n "$start" ]; then
             from=(--notes-start-tag "$start")
+          fi
+          # The defaults of the network engines this release changes (ADR
+          # 0188): the Override: block of each pull request labelled
+          # net:default-change merged since the commit the previous tag was cut
+          # from, rendered back by release-notes.sh. Held to the registry on
+          # the pull request and in the queue (net-default-change.yml), never
+          # judged here; a lookup that fails warns and leaves the section out,
+          # the tags being pushed already.
+          if [ -n "$start" ] && base="$(git rev-parse --verify -q "$start^")"; then
+            : >/tmp/release-prs.jsonl
+            looked=true
+            while IFS= read -r sha; do
+              if ! gh api "repos/$GITHUB_REPOSITORY/commits/$sha/pulls" --jq '[.[] | {number, title, body, labels}]' >>/tmp/release-prs.jsonl; then
+                looked=false
+                break
+              fi
+            done < <(git log --first-parent --format=%H "$base..$MAIN_SHA")
+            if [ "$looked" = true ] && jq -s 'add // [] | unique_by(.number)' /tmp/release-prs.jsonl >/tmp/release-prs.json &&
+              bash scripts/release/release-notes.sh default-changes /tmp/release-prs.json >/tmp/default-changes.md; then
+              if [ -s /tmp/default-changes.md ]; then
+                { echo; cat /tmp/default-changes.md; } >>/tmp/release-notes.md
+              fi
+            else
+              echo "::warning::the net:default-change pull requests of this release could not be read; the notes leave them out"
+            fi
           fi
           # --notes, which gh documents as PREPENDED to the generated notes.
           gh release create "$primary" /tmp/release-manifest.json --generate-notes ${from[@]+"${from[@]}"} --verify-tag --title "$primary" --notes "$(cat /tmp/release-notes.md)"
