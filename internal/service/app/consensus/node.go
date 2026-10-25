@@ -146,6 +146,10 @@ type Node struct {
 	// tooLarge is, per learner, the newest snapshot it was found too small
 	// to install, so that it is said once per snapshot (#591).
 	tooLarge map[coreconsensus.NodeID]string
+	// notAnnounced is, per peer, the newest snapshot withheld from it for
+	// a protocol its last message did not announce, so that it is said
+	// once per snapshot (#665). Made at its first use, on the loop.
+	notAnnounced map[coreconsensus.NodeID]string
 	// unfed is, while this node leads, the learners whose announced
 	// MaxSnapshotBytes the newest snapshot is over: they are sent no
 	// entries (#613).
@@ -522,6 +526,9 @@ func (n *Node) bindTransport() error {
 	}
 	if jb, ok := cfg.Transport.(coreconsensus.JoinReasonBinder); ok {
 		jb.BindJoinReason(cfg.Group, n.joinReason)
+	}
+	if ub, ok := cfg.Transport.(undecodableBinder); ok {
+		ub.bindUndecodable(n.undecodableOffer)
 	}
 	if wb, ok := cfg.Transport.(bindWarner); ok {
 		wb.bindWarn(n.obs.warn)

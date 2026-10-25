@@ -3578,8 +3578,8 @@ packages:
       - doc: |-
           TransportConfig builds the shipped mTLS transport (D4, D14). A zero bound
           is clamped to its default; nil Roots, no certificate, a HandshakeTimeout
-          above one second, or a control frame bound not below the data bound is
-          refused.
+          above one second, a control frame bound not below the data bound, or a
+          peer queue below the data bound is refused.
         name: TransportConfig
         struct:
           fields:
@@ -3784,6 +3784,13 @@ packages:
         name: StatSnapshot
         type: PeerStatFlags
         value: "8"
+      - blockDoc: The facts a PeerStatValue carries.
+        doc: |-
+          StatProtocol3 is set while the peer's last message of the term
+          announced protocol 3.
+        name: StatProtocol3
+        type: PeerStatFlags
+        value: "16"
       - doc: |-
           ProtocolMax is the highest protocol version this engine speaks: a cluster
           version above it is refused, and stops a node that finds it committed.
@@ -3842,8 +3849,9 @@ packages:
     types:
       - doc: |-
           PeerStatValue is the leader's view of one peer, for Health (D13). Flags
-          say whether it votes, answered in this term, is probed or is being sent a
-          snapshot; LastHeard is meaningful only once StatHeard is set.
+          say whether it votes, answered in this term, is probed, is being sent a
+          snapshot or last announced protocol 3; LastHeard is meaningful only once
+          StatHeard is set.
         name: PeerStatValue
         struct:
           fields:

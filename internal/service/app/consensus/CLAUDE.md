@@ -369,6 +369,26 @@ paired at 8 and 10: on a loaded machine the slowest of 8 summed 49 to
   A snapshot is decoded with the codec its metadata names (#513, #512,
   `TestASnapshotOfAnUnknownFormatStopsTheNode`,
   `TestASnapshotIsReadWithTheCodecItWasWrittenWith`).
+- Refuse at the transport, unjudged, an offer whose metadata does not
+  decode for its version, or skip such a `.meta` as one that rotted: the
+  stop of #513 and #640 runs only on a metadata that decodes, and the
+  release of protocol 2, offered #659's version 3, left replication
+  without a word while its leader offered it again at every probe (#665).
+  `refuseOffer` hands such an offer to the node with its term
+  (`undecodableBinder`), which stops VERSION_UNSUPPORTED when it comes from
+  its leader in its term and refuses NOT_LEADER otherwise
+  (`TestAnOfferOfAMetadataVersionThisBuildCannotReadStopsTheNode`). A
+  `.meta` of a version this build does not know whose trailing CRC-32C
+  holds, what a newer build wrote, refuses the store's open, and so the
+  data directory's, before anything is removed, and a listing reports it;
+  one whose sum fails rotted and is skipped (`newerMetas`, `newerMeta`,
+  `TestAMetaOfAVersionThisBuildCannotReadRefusesTheOpen`).
+- Offer a snapshot at cluster version 3 to a peer heard in the term whose
+  last message announced no protocol 3: a release of protocol 2 cannot
+  decode its version 3 metadata and does not stop on it (#665). The
+  leader withholds it, says so once per snapshot, and offers it once the
+  peer announces 3 (`unannounced`, raft's `StatProtocol3`,
+  `TestALeaderWithholdsAVersion3SnapshotFromAPeerOfProtocol2`).
 - Take a snapshot's `ClusterVersion` without comparing it with
   `ProtocolMax`. Once the log is compacted past a raise, the snapshot is
   all that carries it: a node rolled back started or installed it and ran
@@ -658,6 +678,16 @@ paired at 8 and 10: on a loaded machine the slowest of 8 summed 49 to
   `TestAJoinSentAgainReplacesOnlyAHeldAnswer`), nor over a later explicit
   Join: an answer installs only in the hold's generation its JOIN began in
   (`joinHold.gen`, `TestAJoinSentAgainNeverInstallsOverALaterJoin`).
+- Accept a `PeerQueueBytes` below `MaxFrameBytes`, or drop without a word
+  a frame larger than the whole queue: `Send` drops it even into an empty
+  queue, and an entry under `MaxEntryBytes`, or a lagging follower's
+  catch-up batch, never reached a follower while the commit stopped for
+  good under the same leader (#669). `validate` refuses the queue below
+  the frame bound, an unset one defaults to the larger of 64 MiB and
+  `MaxFrameBytes`, and such a frame is counted and logged at the first
+  drop and each power of two (`droppedOversized`,
+  `TestAPeerQueueBelowTheFrameBoundIsRefused`,
+  `TestAFrameAboveThePeerQueueIsCountedAndLogged`).
 - Read a snapshot offer under `MaxControlFrameBytes`, or end a refused one
   without a line: its metadata carries the configuration, `Retired`
   included, and from protocol 3 `RetiredKeys` (#648), which every Remove

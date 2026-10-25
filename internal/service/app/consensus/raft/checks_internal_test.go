@@ -521,6 +521,7 @@ var checks = map[string]func(mutation) error{
 	"held payloads evicted":             checkHeldPayloadsEvicted,
 	"nothing handed behind a read":      checkNothingHandedBehindARead,
 	"no table keeps committed payloads": checkNoTableKeepsCommittedPayloads,
+	"raise heard in the vote window":    checkRaiseHeardRecently,
 }
 
 func TestChecksPassUnmutated(t *testing.T) {
@@ -598,6 +599,7 @@ func TestMutationsAreCaught(t *testing.T) {
 		"handed behind a read":             mutApplyBehindRead,
 		"evicted through applied only":     mutEvictAppliedOnly,
 		"no table evicts committed":        mutNoTableEvictsCommitted,
+		"raise over a silent member":       mutRaiseOverSilence,
 	}
 	for name, m := range muts {
 		caught := ""

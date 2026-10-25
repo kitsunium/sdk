@@ -175,6 +175,10 @@ const (
 	// of the entries it holds committed, whose engine effects its install
 	// replays from them (#416, #664).
 	mutNoTableEvictsCommitted
+	// mutRaiseOverSilence admits a raise over a member whose last message
+	// of the term announced the version, however long ago it was heard
+	// (#665).
+	mutRaiseOverSilence
 )
 
 // mutated reports whether a test switched mutation m on; it is false in every
