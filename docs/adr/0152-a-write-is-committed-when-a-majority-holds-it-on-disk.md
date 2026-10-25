@@ -2010,6 +2010,31 @@ attempt submitted on it:
 - The rule is the leader's alone: no frame changes, and a mixed cluster
   needs nothing.
 
+**A hand-off a voter declines goes on to the next voter** (amendment of
+2026-10-25, [#681](https://github.com/kitsunium/sdk/issues/681)). `Remove`
+of the leader submitted on it, and `Close`, hand the leadership off without
+an entry to the most caught-up voter, the first of the configuration on an
+equal match. A voter that handed over for a stuck apply declines every
+transfer until that apply moves, and only it knows (#674): when it was the
+voter picked, the transfer expired, the node still led and refused to
+remove itself `MEMBERSHIP_INVALID`, or `NOT_LEADER` while the transfer ran,
+at every attempt submitted on it, for as long as the other's apply stayed
+stuck:
+
+- The hand-off tries the next most caught-up voter when one does not take
+  over, each voter once, while the node leads. Each try is bounded by
+  `ElectionTimeoutMax`, as the single one was, so the removal goes through
+  as soon as one voter other than the leader takes transfers. A `Close`
+  takes one more `ElectionTimeoutMax` per voter that does not take over,
+  bounded by its context; a stop timeout that kills it meanwhile is a
+  crash, the election the hand-off was to spare.
+- The step function starts no transfer while one runs, and the wait for the
+  voter that declined ends a tick before the step function's deadline: the
+  next try waits out a transfer to another voter still under way, then
+  starts its own.
+- The rule is the node's alone: no frame changes, and a mixed cluster needs
+  nothing.
+
 ### D9 — Reads: ReadIndex by default, a lease kept with every correction (Q2, R1-19)
 
 `Barrier(ctx)` returns once the local state machine reflects every write
