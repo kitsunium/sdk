@@ -231,6 +231,19 @@ func (c *cluster) kill(tn *testNode) {
 	tn.node = nil
 }
 
+// holdsNoTable reports whether tn's raft still waits for a snapshot install,
+// read on tn's event loop like every reader of the node does: the loop
+// clears it in InstallSnapshot, and a read from the test's goroutine raced
+// that write and failed the package under -race (#656).
+func holdsNoTable(t *testing.T, tn *testNode) bool {
+	t.Helper()
+	noTable := false
+	if !tn.node.exec(func() { noTable = tn.node.r.NoTable() }) {
+		t.Fatalf("node %d stopped before its table could be read", tn.id)
+	}
+	return noTable
+}
+
 func (c *cluster) leader(timeout time.Duration) *testNode {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -890,7 +903,7 @@ func TestClusterNodeWithoutAValidSnapshotAsksForAnInstall(t *testing.T) {
 	}
 	f.snaps.mu.Unlock()
 	c.start(f)
-	if !f.node.r.NoTable() && f.node.Status().Applied == 0 {
+	if !holdsNoTable(t, f) && f.node.Status().Applied == 0 {
 		t.Fatal("setup: the node did not start without a table")
 	}
 	for i := 120; i < 130; i++ {

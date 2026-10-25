@@ -62,7 +62,7 @@ func TestARollingSnapshotCodecChangeKeepsALeader(t *testing.T) {
 		mu.Unlock()
 		c.start(tn)
 		write(1)
-		if tn.node.r.NoTable() {
+		if holdsNoTable(t, tn) {
 			t.Fatalf("step %d: node %d restarted on gzip holds no table", step, tn.id)
 		}
 		if v, _ := tn.sm.get("k5"); v != "5" {

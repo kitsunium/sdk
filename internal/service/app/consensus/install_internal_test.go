@@ -103,7 +103,7 @@ func TestANodeWithNoTableKeepsItsMembersThroughAFailedReplacement(t *testing.T) 
 	held := holdOnlyTheLeadersNewest(t, l, f)
 	refuse.Store(uint64(f.id))
 	c.start(f)
-	if !f.node.r.NoTable() {
+	if !holdsNoTable(t, f) {
 		t.Fatal("setup: the node started with a table")
 	}
 	c.net.Isolate(f.id, false)
@@ -244,7 +244,7 @@ func TestASnapshotIsReadWithTheCodecItWasWrittenWith(t *testing.T) {
 	c.kill(tn)
 	gzip.Store(true)
 	c.start(tn)
-	if tn.node.r.NoTable() {
+	if holdsNoTable(t, tn) {
 		t.Fatal("a node whose codec changed started with no table")
 	}
 	if v, _ := tn.sm.get("k5"); v != "5" {

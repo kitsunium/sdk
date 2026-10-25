@@ -104,7 +104,7 @@ func TestASnapshotThatDidNotRestoreIsUnpublished(t *testing.T) {
 	data[len(data)/2] ^= 0xff
 	publish(f, x, data)
 	c.start(f)
-	if f.node.r.NoTable() {
+	if holdsNoTable(t, f) {
 		t.Fatal("setup: the lagging node started with no table")
 	}
 	for _, m := range must(f.snaps.List())(t) {
@@ -171,7 +171,7 @@ func TestASnapshotOverALoweredLimitStaysPublished(t *testing.T) {
 	c.kill(f)
 	limit.Store((snapshotSize(&metas[0]) + snapshotSize(&metas[1])) / 2)
 	c.start(f)
-	if f.node.r.NoTable() {
+	if holdsNoTable(t, f) {
 		t.Fatal("setup: the follower started with no table")
 	}
 	held := false
@@ -296,7 +296,7 @@ func TestNoSnapshotIsUnpublishedBeforeItsFallbackContinuesTheLog(t *testing.T) {
 func TestAHeldSnapshotPastTheAppliedIndexIsReplaced(t *testing.T) {
 	c, l, f, x := laggingWithOwnSnapshots(t)
 	c.start(f)
-	if f.node.r.NoTable() {
+	if holdsNoTable(t, f) {
 		t.Fatal("setup: the lagging node started with no table")
 	}
 	// Published while the node runs past what it applied: the copy an
