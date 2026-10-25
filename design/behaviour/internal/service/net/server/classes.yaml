@@ -33,12 +33,24 @@ constants:
         type: time.Duration
         value: 10 * time.Second
     name: defaultHandshakeTimeout
+  - doc: healthCheckName names the server's readiness and liveness checks.
+    items:
+      - name: healthCheckName
+        type: string
+        value: "\"net/server\""
+    name: healthCheckName
   - doc: drainPollInterval is how often the drain re-checks the in-flight count.
     items:
       - name: drainPollInterval
         type: time.Duration
         value: 10 * time.Millisecond
     name: drainPollInterval
+  - doc: nativeLoopBackends is true where the leaf's io_uring and epoll exist.
+    items:
+      - name: nativeLoopBackends
+        type: bool
+        value: "true"
+    name: nativeLoopBackends
   - grouped: true
     items:
       - doc: |-
@@ -100,6 +112,34 @@ constants:
           (unsafe.Sizeof(syscall.Msghdr{}) +
           	unsafe.Sizeof(uint32(0)) + mmsghdrAlign - 1) / mmsghdrAlign * mmsghdrAlign
     name: mmsghdrStride
+  - doc: |-
+      The ranks of the lattice iouring > epoll > portable > goroutine (ADR 0188
+      §D1). A rank is compared, never shown: State spells the capability.
+    grouped: true
+    items:
+      - doc: rankGoroutine is the goroutine engine, the bottom.
+        name: rankGoroutine
+        type: int
+        value: iota + 1
+      - doc: rankPortable is the portable loop backend, the loop family's floor.
+        name: rankPortable
+      - doc: rankEpoll is epoll.
+        name: rankEpoll
+      - doc: rankIOURing is io_uring, the top.
+        name: rankIOURing
+    name: rankGoroutine
+  - doc: The words State uses for the environment.
+    grouped: true
+    items:
+      - doc: sourceEnvironment is OverrideValue.Source when a variable is set.
+        name: sourceEnvironment
+        type: string
+        value: "\"environment\""
+      - doc: faultEnvironment is FaultValue.Source for an unknown token.
+        name: faultEnvironment
+        type: string
+        value: "\"environment\""
+    name: sourceEnvironment
   - grouped: true
     items:
       - doc: |-
@@ -159,6 +199,45 @@ constants:
         type: uint16
         value: "0xFF"
     name: portByteShift
+  - grouped: true
+    items:
+      - doc: |-
+          loopStallGrace is how long a loop group may stay stalled — every ring of
+          it drained by its watchdog — before the server's liveness check fails
+          (ADR 0188, R1). Serve returns at once; the grace is for a process that
+          keeps running without Serve, so an orchestrator restarts it.
+        name: loopStallGrace
+        type: time.Duration
+        value: 30 * time.Second
+      - doc: stallPoll is how often the loop groups' rings are read for a stall.
+        name: stallPoll
+        type: time.Duration
+        value: time.Second
+      - doc: runbook is what a fault about a drained ring tells the operator to set.
+        name: runbook
+        type: string
+        value: "\"set \" + corenet.EnvDisable + \"=\" + string(corenet.CapabilityIOURing) + \" before restarting\""
+    name: loopStallGrace
+  - doc: The words FaultValue.Source takes for what the server reports itself.
+    grouped: true
+    items:
+      - doc: faultListener is a degraded listener.
+        name: faultListener
+        type: string
+        value: "\"listener\""
+      - doc: faultLoop is a loop group on a lower backend than it asked for.
+        name: faultLoop
+        type: string
+        value: "\"loop\""
+      - doc: faultRing is one ring drained while others still accept.
+        name: faultRing
+        type: string
+        value: "\"ring\""
+      - doc: faultStall is a loop group every ring of which is drained.
+        name: faultStall
+        type: string
+        value: "\"stall\""
+    name: faultListener
 files:
   - decls:
       - defaultPerAddress
@@ -245,6 +324,13 @@ files:
       - boundHandshake
       - handshakeBudget
     name: handshake.go
+  - decls:
+      - healthCheckName
+      - (*Server).RegisterHealth
+      - (*Server).readiness
+      - readinessOf
+      - (*Server).liveness
+    name: health.go
   - decls:
       - httpAdapter
       - newHTTPAdapter
@@ -333,6 +419,7 @@ files:
       - (*trackedListener).Accept
     name: listen_tracked.go
   - decls:
+      - nativeLoopBackends
       - startLoopEngine
       - dupListeners
       - closeHandoff
@@ -405,6 +492,22 @@ files:
       - mmsghdr
     name: multireader_mmsghdr_linux.go
   - decls:
+      - rankGoroutine
+      - sourceEnvironment
+      - capabilityEntry
+      - capabilityRegistry
+      - operatorEnv
+      - readOperator
+      - (*operatorEnv).applyEngine
+      - (*operatorEnv).applyDisable
+      - (*operatorEnv).unknown
+      - (*operatorEnv).applied
+      - (*operatorEnv).allows
+      - lookupCapability
+      - loopPlan
+      - (*operatorEnv).plan
+    name: operator.go
+  - decls:
       - optionSet
       - (*optionSet).add
       - (*optionSet).has
@@ -466,6 +569,12 @@ files:
       - (*Server).servePacket
     name: packet_loop.go
   - decls:
+      - readPlatform
+    name: platform.go
+  - decls:
+      - kernelRelease
+    name: platform_linux.go
+  - decls:
       - (*Server).acquire
       - (*Server).release
       - (*Server).closeLive
@@ -480,14 +589,17 @@ files:
     name: reuseport_linux.go
   - decls:
       - defaultDrainTimeout
+      - lookupFunc
       - Server
       - newPooledConn
       - New
+      - newServer
       - (*Server).Group
       - (*Server).PacketGroup
       - (*Server).judgePacketOptions
       - (*Server).recordDeclError
       - (*Server).State
+      - (*Server).recordFallback
     name: server.go
   - decls:
       - portByteShift
@@ -498,6 +610,20 @@ files:
       - hostPort
       - zoneOf
     name: sockaddr_linux.go
+  - decls:
+      - loopStallGrace
+      - faultListener
+      - stallWatch
+      - groupStalled
+      - (*Server).startStallWatch
+      - (*Server).stopStallWatch
+      - (*Server).checkStalls
+      - (*Server).markStalled
+      - (*Server).stalledGroup
+      - stallError
+      - (*Server).faults
+      - ringFaults
+    name: stall.go
   - decls:
       - StreamGroup
       - (*StreamGroup).Name
@@ -630,6 +756,13 @@ functions:
     name: handshakeBudget
     params: timeouts corenet.TimeoutsValue
     results: time.Duration
+  - doc: |-
+      readinessOf is ready for a server serving with no stalled loop group: not
+      before Start has bound everything, not once the drain began, and not while a
+      loop group accepts nothing. A degraded server is ready: it serves.
+    name: readinessOf
+    params: st corenet.StateValue
+    results: error
   - doc: newHTTPAdapter wraps an http.Handler as a ConnHandler.
     name: newHTTPAdapter
     params: h http.Handler
@@ -810,16 +943,18 @@ functions:
     params: raw stdnet.Listener, id corenet.IdentityValue, trackCloses bool
     results: stdnet.Listener
   - doc: |-
-      startLoopEngine starts a loop group on Linux: the leaf's native backends,
-      handed duplicated descriptors of the listeners server bound (ADR 0186 §D3),
-      or the portable backend when asked for it or, under auto, when no native
-      backend starts — reported, never silent.
+      startLoopEngine starts a loop group on Linux on the backend plan names —
+      min(code, environment), ADR 0188 —: the leaf's native backends, handed
+      duplicated descriptors of the listeners server bound (ADR 0186 §D3), or the
+      portable backend when the plan says so or, when the code asked for auto, when
+      no native backend starts — reported, never silent. A backend the plan rules
+      out is never probed.
 
       IFACE-OPAQUE: which engine runs is decided here at Start — the leaf's
       *loop.Group or the portable backend — and server only drives the lifecycle
       half both share, so the caller holds the interface and never the type.
     name: startLoopEngine
-    params: group *StreamGroup, lns []stdnet.Listener
+    params: group *StreamGroup, lns []stdnet.Listener, plan loopPlan
     results: loopEngine, error
   - doc: |-
       dupListeners duplicates each listener's descriptor, close-on-exec and
@@ -865,6 +1000,17 @@ functions:
     name: newMultiReader
     params: pc stdnet.PacketConn, sc rawConnProvider
     results: reader *multiReader, err error
+  - doc: |-
+      readOperator reads both variables through lookup and applies R5 (ADR 0187
+      §D8): an empty value is unset, an unknown token caps the engine at portable,
+      and nothing the environment says raises a group above its code's choice.
+    name: readOperator
+    params: lookup lookupFunc
+    results: operatorEnv
+  - doc: lookupCapability finds a token in the registry, exactly as spelled.
+    name: lookupCapability
+    params: token string
+    results: capabilityEntry, bool
   - name: WithDrainTimeout
     params: d time.Duration
     results: Option
@@ -934,6 +1080,17 @@ functions:
     params: limits corenet.LimitsValue
     results: int
   - doc: |-
+      readPlatform names what the server runs on: the GOOS, the GOARCH, the
+      kernel's release as the platform reports it (kernelRelease, per GOOS) and
+      the toolchain. It is read once, by New.
+    name: readPlatform
+    results: corenet.PlatformValue
+  - doc: |-
+      kernelRelease is uname(2)'s release, "6.8.0-45-generic" say; empty when the
+      call fails.
+    name: kernelRelease
+    results: string
+  - doc: |-
       reusePortSupported reports whether this platform can bind several listeners
       to one address.
     name: reusePortSupported
@@ -947,6 +1104,12 @@ functions:
     results: "*conn"
   - name: New
     params: opts ...Option
+    results: "*Server"
+  - doc: |-
+      newServer builds a server whose operator's variables are read through
+      lookup: os.LookupEnv for New, a map for a test.
+    name: newServer
+    params: lookup lookupFunc, opts ...Option
     results: "*Server"
   - doc: |-
       sockaddrToAddr converts a kernel sockaddr into a net.Addr.
@@ -983,6 +1146,23 @@ functions:
     name: zoneOf
     params: scope uint32
     results: zone string, ok bool
+  - doc: |-
+      groupStalled reports whether every ring of a loop group is drained: a
+      native backend whose watchdog gave up on each of its rings. The portable
+      backend has no ring and never stalls.
+    name: groupStalled
+    params: st corenet.LoopStateValue
+    results: bool
+  - doc: stallError is LoopGroupStalled naming group.
+    name: stallError
+    params: group string
+    results: error
+  - doc: |-
+      ringFaults is one fault per drained ring of lp, or one stall fault when every
+      ring is drained (R1).
+    name: ringFaults
+    params: lp corenet.LoopStateValue
+    results: "[]corenet.FaultValue"
   - doc: newConnLimiter returns the group's ceiling, or nil when it has none.
     name: newConnLimiter
     params: limits corenet.LimitsValue
@@ -1012,6 +1192,7 @@ imports:
   buffer: github.com/kitsunium/sdk/internal/kernel/concur/buffer
   clock: github.com/kitsunium/sdk/internal/kernel/clock
   context: context
+  corehealth: github.com/kitsunium/sdk/internal/core/app/health
   corenet: github.com/kitsunium/sdk/internal/core/net
   coreproc: github.com/kitsunium/sdk/internal/core/proc
   errors: errors
@@ -1027,6 +1208,7 @@ imports:
   sdlisten: github.com/kitsunium/sdk/internal/service/proc/systemd/listen
   slices: slices
   stdnet: net
+  strconv: strconv
   strings: strings
   sync: sync
   syscall: syscall
@@ -2075,6 +2257,95 @@ types:
     kind: struct
     name: mmsghdr
   - doc: |-
+      capabilityEntry is one row of the registry: a token, its rank, and whether
+      KITSUNIUM_NET_DISABLE may switch it off.
+    fields:
+      - doc: token is the capability, as the variables spell it.
+        name: token
+        type: corenet.Capability
+      - doc: rank is its place in the lattice.
+        name: rank
+        type: int
+      - doc: switchable is true for an engine an operator may switch off; a floor is not.
+        name: switchable
+        type: bool
+    kind: struct
+    name: capabilityEntry
+  - doc: |-
+      operatorEnv is what KITSUNIUM_NET_ENGINE and KITSUNIUM_NET_DISABLE say, read
+      once by New, before any group is declared and so before any probe.
+    fields:
+      - doc: override is what State reports.
+        name: override
+        type: corenet.OverrideValue
+      - doc: faults are the tokens the registry does not know.
+        name: faults
+        type: "[]corenet.FaultValue"
+      - doc: ceiling is the highest rank the environment allows.
+        name: ceiling
+        type: int
+      - doc: disabled holds the ranks KITSUNIUM_NET_DISABLE switched off.
+        name: disabled
+        type: "[rankIOURing + 1]bool"
+    kind: struct
+    methods:
+      - doc: |-
+          applyEngine caps the lattice at the named engine; an unknown one caps it at
+          portable and is reported.
+        name: applyEngine
+        params: token string
+        recv: e *operatorEnv
+      - doc: |-
+          applyDisable switches off each listed engine; a token outside the registry,
+          or a floor, which nothing switches off, caps the lattice at portable and is
+          reported.
+        name: applyDisable
+        params: list string
+        recv: e *operatorEnv
+      - doc: |-
+          unknown records a token the registry does not know and caps the lattice at
+          portable, with no optional capability (R5).
+        name: unknown
+        params: variable, token string
+        recv: e *operatorEnv
+      - doc: applied is the highest engine the environment allows, Disabled skipped.
+        name: applied
+        recv: e *operatorEnv
+        results: corenet.Capability
+      - doc: |-
+          allows reports whether the environment lets a group run on the engine of
+          rank r.
+        name: allows
+        params: r int
+        recv: e *operatorEnv
+        results: bool
+      - doc: |-
+          plan is min(code, environment) for a loop group whose code asked for code,
+          on a platform with the native backends when native is true (ADR 0187 §D8):
+          the highest backend at or below the code's that the environment allows. A
+          backend the environment rules out is never probed: epoll and portable never
+          reach io_uring_setup. Off Linux every loop group is portable, whatever the
+          environment says, an explicit native backend having been refused already.
+        name: plan
+        params: code corenet.LoopBackend, native bool
+        recv: e *operatorEnv
+        results: loopPlan
+    name: operatorEnv
+  - doc: |-
+      loopPlan is the backend a loop group starts on once the environment is
+      applied, and whether a native failure may still fall back to portable.
+    fields:
+      - doc: backend is what the leaf is asked for, or LoopBackendPortable.
+        name: backend
+        type: corenet.LoopBackend
+      - doc: |-
+          fallback is true when the code asked for auto: a native failure then
+          falls back to portable, reported, rather than refusing Start.
+        name: fallback
+        type: bool
+    kind: struct
+    name: loopPlan
+  - doc: |-
       optionSet is the set of option kinds a group was given (ADR 0187), one bit
       per corenet.OptionKind. The kind is an iota, not a bit: the set does the
       shifting, so a kind added at the end of the block shifts no published value.
@@ -2247,6 +2518,10 @@ types:
       interface {
       	SyscallConn() (syscall.RawConn, error)
       }
+  - doc: "lookupFunc reads one environment variable: os.LookupEnv, or a test's map."
+    kind: named
+    name: lookupFunc
+    underlying: func(key string) (string, bool)
   - fields:
       - doc: mu guards the declaration-time fields below.
         name: mu
@@ -2347,6 +2622,24 @@ types:
           before the drain has had its budget.
         name: runCtx
         type: context.Context
+      - doc: lookup reads the operator's variables; os.LookupEnv unless a test says.
+        name: lookup
+        type: lookupFunc
+      - doc: operator is what they said, read once by New, before any probe.
+        name: operator
+        type: operatorEnv
+      - doc: platform is what State names the server runs on, read once by New.
+        name: platform
+        type: corenet.PlatformValue
+      - doc: fallbackMu guards fallbacks.
+        name: fallbackMu
+        type: sync.Mutex
+      - doc: fallbacks counts the engine fallbacks and keeps the last one.
+        name: fallbacks
+        type: corenet.FallbacksValue
+      - doc: stall watches the loop groups for one every ring of which is drained.
+        name: stall
+        type: stallWatch
     kind: struct
     methods:
       - doc: |-
@@ -2380,6 +2673,22 @@ types:
         params: name string
         recv: s *Server
         results: conns []stdnet.PacketConn, err error
+      - name: RegisterHealth
+        params: h corehealth.Health
+        recv: s *Server
+        results: error
+      - doc: readiness is the readiness check, built from State.
+        name: readiness
+        params: _ context.Context
+        recv: s *Server
+        results: error
+      - doc: |-
+          liveness is the liveness check: it fails once a loop group has stayed
+          stalled for loopStallGrace (R1). A ring whose receive never completes is
+          not watched: only the accept watchdog drains a ring.
+        name: liveness
+        recv: s *Server
+        results: error
       - name: Start
         params: ctx context.Context
         recv: s *Server
@@ -2632,6 +2941,45 @@ types:
         recv: s *Server
         results: corenet.StateValue
       - doc: |-
+          recordFallback counts a group started on a lower engine than its code asked
+          for, because the better one failed, and keeps it as the last (ADR 0188).
+        name: recordFallback
+        params: group, reason string
+        recv: s *Server
+      - doc: |-
+          startStallWatch ticks the watcher on the engine's clock while the server
+          has loop groups. Shutdown and Close stop it.
+        name: startStallWatch
+        recv: s *Server
+      - doc: stopStallWatch stops the watcher, if it runs, and joins it.
+        name: stopStallWatch
+        recv: s *Server
+      - doc: |-
+          checkStalls reads every loop group while the server serves, and records the
+          first one stalled: Serve returns LoopGroupStalled, and liveness fails once
+          loopStallGrace has passed. A drain stops every ring on purpose, so nothing
+          is read outside PhaseServing.
+        name: checkStalls
+        recv: s *Server
+      - doc: |-
+          markStalled records group as stalled, once: the first stall is the one
+          Serve returns and the grace counts from.
+        name: markStalled
+        params: group string
+        recv: s *Server
+      - doc: stalledGroup is the first loop group seen stalled and when; empty while none.
+        name: stalledGroup
+        recv: s *Server
+        results: string, time.Time
+      - doc: |-
+          faults lists what st says the server runs without: the environment's unknown
+          tokens, the degraded listeners and loop groups, and, while serving, each
+          drained ring and each stalled group (ADR 0188).
+        name: faults
+        params: st corenet.StateValue
+        recv: s *Server
+        results: "[]corenet.FaultValue"
+      - doc: |-
           admit runs the handler under the group's ceiling, translating a rejection
           into the domain's own sentinel.
 
@@ -2644,6 +2992,30 @@ types:
         recv: s *Server
         results: error
     name: Server
+  - doc: |-
+      stallWatch is the state of the stall watcher: the first group seen stalled
+      and when, and the channel Serve selects on.
+    fields:
+      - doc: mu guards group and at.
+        name: mu
+        type: sync.Mutex
+      - doc: group is the first loop group seen stalled; empty while none is.
+        name: group
+        type: string
+      - doc: at is when it was first seen.
+        name: at
+        type: time.Time
+      - doc: once closes stalled once.
+        name: once
+        type: sync.Once
+      - doc: stalled is closed when a group is first seen stalled.
+        name: stalled
+        type: chan struct{}
+      - doc: daemon ticks the watcher while the server serves; nil without loop groups.
+        name: daemon
+        type: "*worker.LoopDaemon"
+    kind: struct
+    name: stallWatch
   - fields:
       - doc: name identifies the group in logs, metrics and State.
         name: name
@@ -2890,6 +3262,19 @@ vars:
           	"tcp": {}, "tcp4": {}, "tcp6": {}, "unix": {}, "unixpacket": {},
           }
     name: streamNetworks
+  - doc: |-
+      capabilityRegistry is design/net.yaml's registry, top first.
+      TestCapabilityRegistry_matchesTheDesign holds it to the design's two blocks.
+    items:
+      - name: capabilityRegistry
+        value: |-
+          [...]capabilityEntry{
+          	{token: corenet.CapabilityIOURing, rank: rankIOURing, switchable: true},
+          	{token: corenet.CapabilityEpoll, rank: rankEpoll, switchable: true},
+          	{token: corenet.CapabilityPortable, rank: rankPortable, switchable: false},
+          	{token: corenet.CapabilityGoroutine, rank: rankGoroutine, switchable: false},
+          }
+    name: capabilityRegistry
   - doc: packetNetworks are the datagram families the engine serves.
     items:
       - name: packetNetworks

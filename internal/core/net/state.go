@@ -31,12 +31,29 @@ type StateValue struct {
 	// Loops reports every loop group (ADR 0186 §D8). It is empty while the
 	// server serves none.
 	Loops []LoopStateValue `json:"loops,omitempty"`
+	// Override reports what KITSUNIUM_NET_ENGINE and KITSUNIUM_NET_DISABLE did
+	// (ADR 0188).
+	Override OverrideValue `json:"override"`
+	// Faults lists everything the server runs without now, the degradations of
+	// Listeners and Loops included; Degraded is true when it is not empty.
+	Faults []FaultValue `json:"faults,omitempty"`
+	// Fallbacks counts the engine fallbacks and keeps the last one.
+	Fallbacks FallbacksValue `json:"fallbacks"`
+	// Platform names the operating system, its release and the toolchain.
+	Platform PlatformValue `json:"platform"`
 }
 
-// Degraded reports whether any listener or loop group fell back from a
-// requested optimisation, so a caller can assert "no silent degradation" in
-// one call instead of walking the slices.
+// Degraded reports whether the server runs with any fault — a listener or loop
+// group that fell back from a requested optimisation, a drained ring, a
+// stalled loop group, an unknown environment token — so a caller can assert
+// "no silent degradation" in one call. It reads Faults, and still the
+// Degraded flags of Listeners and Loops for a value built by hand (ADR 0188).
 func (s StateValue) Degraded() bool {
+	//: a fault, whatever reported it, settles it.
+	if len(s.Faults) > 0 {
+		//: the server runs without something.
+		return true
+	}
 	//: any degraded listener degrades the whole server's answer.
 	for _, listener := range s.Listeners {
 		//: the first degraded listener settles it.

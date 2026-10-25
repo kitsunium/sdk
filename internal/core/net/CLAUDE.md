@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T12:00:00Z -->
+<!-- updated: 2026-10-25T18:00:00Z -->
 # internal/core/net/
 
 ## Purpose
@@ -61,7 +61,9 @@ adapter.
 | `handler_compliance.go` | the compile-time proof that both func adapters satisfy their ports |
 | `middleware.go` | `Middleware[H]` + `Chain` — one generic decorator shape for stream and datagram handlers, the first listed outermost |
 | `phase.go` | `Phase` — `PhaseNew` / `PhaseStarting` / `PhaseServing` / `PhaseDraining` / `PhaseStopped` + `String` |
-| `state.go` | `StateValue` (+ `Degraded`, which a loop group's fallback sets as a listener's does) and `ListenerStateValue` — the server's reported state; `StateValue.Loops` is empty while no loop group exists |
+| `state.go` | `StateValue` (+ `Degraded`, true for any `Faults` entry and, for a value built by hand, any row's `Degraded` — ADR 0188 §D4) and `ListenerStateValue` — the server's reported state; `StateValue.Loops` is empty while no loop group exists |
+| `state_report.go` | `OverrideValue` (what the operator's variables did: source, raw, applied ceiling, disabled), `FaultValue` (one thing the server runs without: source, group, reason), `FallbacksValue` (count and last occurrence), `PlatformValue` (GOOS, GOARCH, kernel release, toolchain) — the four fields ADR 0188 adds to `StateValue` |
+| `capability.go` | `Capability` and the registry of the operator's tokens, top first — `CapabilityIOURing`, `CapabilityEpoll` (switchable), `CapabilityPortable`, `CapabilityGoroutine` (floors) — and `EnvEngine`, `EnvDisable`, the variables' names (ADR 0188 §D1); the parser in `net/server` and `scripts/ci/check-net-default-change.sh` read the same design blocks |
 | `policy.go` | `PolicyFunc`, the func form of the outbound authorisation port `Policy` |
 | `policy_compliance.go` | the compile-time proof that `PolicyFunc` satisfies `Policy` |
 | `response.go` | `ResponseValue` — a fully-read outbound response — and `RequestValue`, the request a `Policy` judges |
@@ -250,8 +252,9 @@ SSE terminator scan — moved with the code that pays them, to
 | 0.2.11.56 | `EngineUnsupported` | 78 |
 | 0.2.11.57 | `PlaintextWithTLS` | 78 |
 | 0.2.11.58 | `GroupNameConflict` | 64 |
+| 0.2.11.59 | `LoopGroupStalled` | 69 |
 
-`0.2.11.59` – `0.2.11.255` reserved. The `HTTP1*` refusals carry their
+`0.2.11.60` – `0.2.11.255` reserved. The `HTTP1*` refusals carry their
 answer's status in `http:` (400, 413, 414, 417, 431, 501).
 
 ## Imports allowed
@@ -314,6 +317,10 @@ cd internal/core && GOWORK=off go test -race -cover ./net/...
   `OptionEngine`, and the sentinels `0.2.11.56` – `0.2.11.58`
   (`EngineUnsupported`, `PlaintextWithTLS`, `GroupNameConflict`) —
   `docs/adr/0187-the-handler-type-chooses-the-engine.md`
+- ADR 0188 — `Capability`, `EnvEngine`, `EnvDisable`, `OverrideValue`,
+  `FaultValue`, `FallbacksValue`, `PlatformValue`, the four `StateValue`
+  fields and `LoopGroupStalled` (`0.2.11.59`) —
+  `docs/adr/0188-the-operators-switches-only-restrict-and-state-says-what-the-server-runs-without.md`
 - ADR 0043 (drain is a signal), ADR 0016 (one-sibling/many-facades),
   ADR 0018 (portability, `x/sys` ban), ADR 0013 (the redacting `Key`
   precedent), ADR 0028 (config decode shape)

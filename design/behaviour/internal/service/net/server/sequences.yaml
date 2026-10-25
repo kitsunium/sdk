@@ -876,6 +876,99 @@ sequences:
             to: timeouts.Handshake.Duration
           when: configured > 0
       - return: defaultHandshakeTimeout
+  - of: (*Server).RegisterHealth
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).RegisterHealth
+        kind: self
+      - id: errs
+        kind: package
+      - id: h.AddReadiness
+        kind: value
+      - id: h.AddLiveness
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: errs.Wrap(corehealth.InvalidCheck, errs.WrapParams{}, errs.String("check", healthCheckName))
+              to: errs
+          when: h == nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: "h.AddReadiness(corehealth.ReadinessCheckValue{Name: healthCheckName, Check: s.readiness})"
+            to: h.AddReadiness
+          when: err != nil
+      - return: "h.AddLiveness(corehealth.LivenessCheckValue{Name: healthCheckName, Check: s.liveness})"
+        to: h.AddLiveness
+  - of: (*Server).readiness
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).readiness
+        kind: self
+      - id: readinessOf
+        kind: internal
+    steps:
+      - return: readinessOf(s.State())
+        to: readinessOf
+  - of: readinessOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: readinessOf
+        kind: self
+      - id: errs
+        kind: package
+      - id: stallError
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: corenet.PhaseServing
+            - case: corenet.PhaseNew, corenet.PhaseStarting
+              do:
+                - return: errs.Wrap(corenet.NotStarted, errs.WrapParams{}, errs.String("phase", st.Phase.String()))
+                  to: errs
+            - default: true
+              do:
+                - return: errs.Wrap(corenet.ServerClosed, errs.WrapParams{}, errs.String("phase", st.Phase.String()))
+                  to: errs
+          "on": st.Phase
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: stallError(lp.Group)
+                    to: stallError
+                when: groupStalled(lp)
+          key: _
+          range: st.Loops
+          value: lp
+      - return: nil
+  - of: (*Server).liveness
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).liveness
+        kind: self
+      - id: s.stalledGroup
+        kind: internal
+      - id: stallError
+        kind: internal
+    steps:
+      - bind: group, at
+        eval: s.stalledGroup()
+        to: s.stalledGroup
+      - opt:
+          do:
+            - return: nil
+          when: group == "" || s.clk.Since(at) < loopStallGrace
+      - return: stallError(group)
+        to: stallError
   - of: newHTTPAdapter
     steps:
       - return: |-
@@ -1328,6 +1421,8 @@ sequences:
         kind: internal
       - id: s.Close
         kind: internal
+      - id: s.startStallWatch
+        kind: internal
     steps:
       - eval: s.mu.Lock()
         to: s.mu.Lock
@@ -1392,6 +1487,8 @@ sequences:
           when: err != nil
       - eval: s.phase.Store(uint32(corenet.PhaseServing))
         to: s.phase.Store
+      - eval: s.startStallWatch()
+        to: s.startStallWatch
       - return: nil
   - of: groupDeclErr
     participants:
@@ -2045,11 +2142,15 @@ sequences:
         kind: self
       - id: s.Start
         kind: internal
-      - id: ctx.Done
-        kind: value
       - id: context
         kind: stdlib
       - id: s.Shutdown
+        kind: internal
+      - id: s.stalledGroup
+        kind: internal
+      - id: errs
+        kind: package
+      - id: stallError
         kind: internal
     steps:
       - opt:
@@ -2060,14 +2161,39 @@ sequences:
             eval: s.Start(ctx)
             to: s.Start
           when: err != nil
-      - eval: <-ctx.Done()
-        to: ctx.Done
+      - var:
+          name: stalled
+          type: bool
+      - select:
+          cases:
+            - comm: <-ctx.Done()
+            - comm: <-s.stall.stalled
+              do:
+                - set: stalled
+                  value: "true"
       - bind: drainCtx, cancel
         eval: context.WithTimeout(context.WithoutCancel(ctx), s.drainTimeout)
         to: context
       - defer: cancel()
-      - return: s.Shutdown(drainCtx)
+      - bind: err
+        eval: s.Shutdown(drainCtx)
         to: s.Shutdown
+      - opt:
+          do:
+            - return: err
+          when: "!stalled"
+      - bind: group, _
+        eval: s.stalledGroup()
+        to: s.stalledGroup
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(corenet.LoopGroupStalled, errs.WrapParams{},
+                			errs.String("group", group), errs.String("drain", err.Error()))
+              to: errs
+          when: err != nil
+      - return: stallError(group)
+        to: stallError
   - of: (*Server).Shutdown
     participants:
       - id: caller
@@ -2076,6 +2202,8 @@ sequences:
         kind: self
       - id: s.phase.Store
         kind: value
+      - id: s.stopStallWatch
+        kind: internal
       - id: s.closeListeners
         kind: internal
       - id: s.shutdownLoops
@@ -2095,6 +2223,8 @@ sequences:
           when: corenet.Phase(s.phase.Load()) == corenet.PhaseNew
       - eval: s.phase.Store(uint32(corenet.PhaseDraining))
         to: s.phase.Store
+      - eval: s.stopStallWatch()
+        to: s.stopStallWatch
       - eval: s.closeListeners()
         to: s.closeListeners
       - bind: loopErr
@@ -2226,6 +2356,8 @@ sequences:
         kind: actor
       - id: (*Server).Close
         kind: self
+      - id: s.stopStallWatch
+        kind: internal
       - id: s.closeListeners
         kind: internal
       - id: s.closeLoops
@@ -2237,6 +2369,8 @@ sequences:
       - id: s.phase.Store
         kind: value
     steps:
+      - eval: s.stopStallWatch()
+        to: s.stopStallWatch
       - eval: s.closeListeners()
         to: s.closeListeners
       - eval: s.closeLoops()
@@ -2522,7 +2656,7 @@ sequences:
           do:
             - return: startPortable(group, lns, ""), nil
               to: startPortable
-          when: group.loop.Backend == corenet.LoopBackendPortable
+          when: plan.backend == corenet.LoopBackendPortable
       - bind: handoff, err
         eval: dupListeners(lns)
         to: dupListeners
@@ -2530,10 +2664,14 @@ sequences:
           do:
             - return: nil, err
           when: err != nil
+      - bind: value
+        eval: group.loop
+      - set: value.Backend
+        value: plan.backend
       - bind: g, err
         eval: |-
           loop.Start(loop.Config{
-          		Group: group.name, Value: group.loop, MaxConns: group.limits.MaxConns,
+          		Group: group.name, Value: value, MaxConns: group.limits.MaxConns,
           		IdleTimeout: loopIdle(group), Handler: group.loopHandler, Listeners: handoff,
           	})
         to: loop
@@ -2545,7 +2683,7 @@ sequences:
           do:
             - return: "startPortable(group, lns, \"native loop backend unavailable: \"+err.Error()), nil"
               to: startPortable
-          when: group.loop.Backend == corenet.LoopBackendAuto && !errs.HasCode(err, corenet.CodeLoopNoDescriptors)
+          when: plan.fallback && !errs.HasCode(err, corenet.CodeLoopNoDescriptors)
       - return: nil, err
   - of: dupListeners
     participants:
@@ -2705,7 +2843,13 @@ sequences:
         kind: internal
       - id: listen
         kind: internal
+      - id: s.operator.plan
+        kind: internal
       - id: startLoopEngine
+        kind: internal
+      - id: eng.State
+        kind: internal
+      - id: s.recordFallback
         kind: internal
       - id: s.mu.Lock
         kind: value
@@ -2747,13 +2891,25 @@ sequences:
           key: _
           range: group.addrs
           value: addr
+      - bind: plan
+        eval: s.operator.plan(group.loop.Backend, nativeLoopBackends)
+        to: s.operator.plan
       - bind: eng, err
-        eval: startLoopEngine(group, lns)
+        eval: startLoopEngine(group, lns, plan)
         to: startLoopEngine
       - opt:
           do:
             - return: err
           when: err != nil
+      - opt:
+          do:
+            - eval: s.recordFallback(group.name, st.DegradedReason)
+              to: s.recordFallback
+          init:
+            bind: st
+            eval: eng.State()
+            to: eng.State
+          when: st.Degraded
       - eval: s.mu.Lock()
         to: s.mu.Lock
       - set: s.loopEngines
@@ -4051,6 +4207,176 @@ sequences:
               value: sockaddrToAddr(&r.names[i])
           key: i
           range: received
+  - of: readOperator
+    participants:
+      - id: caller
+        kind: actor
+      - id: readOperator
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: env.applyEngine
+        kind: internal
+      - id: env.applyDisable
+        kind: internal
+      - id: env.applied
+        kind: internal
+    steps:
+      - bind: env
+        eval: "operatorEnv{ceiling: rankIOURing}"
+      - var:
+          name: raw
+          type: "[]string"
+      - bind: engine, _
+        eval: lookup(corenet.EnvEngine)
+      - opt:
+          do:
+            - set: raw
+              value: append(raw, corenet.EnvEngine+"="+engine)
+            - eval: env.applyEngine(engine)
+              to: env.applyEngine
+          init:
+            bind: engine
+            eval: strings.TrimSpace(engine)
+            op: =
+            to: strings
+          when: engine != ""
+      - bind: disable, _
+        eval: lookup(corenet.EnvDisable)
+      - opt:
+          do:
+            - set: raw
+              value: append(raw, corenet.EnvDisable+"="+disable)
+            - eval: env.applyDisable(disable)
+              to: env.applyDisable
+          init:
+            bind: disable
+            eval: strings.TrimSpace(disable)
+            op: =
+            to: strings
+          when: disable != ""
+      - opt:
+          do:
+            - return: env
+          when: len(raw) == 0
+      - set: env.override.Source
+        value: sourceEnvironment
+      - set: env.override.Raw
+        to: strings
+        value: strings.Join(raw, " ")
+      - set: env.override.Applied
+        to: env.applied
+        value: env.applied()
+      - return: env
+  - of: (*operatorEnv).applyEngine
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*operatorEnv).applyEngine
+        kind: self
+      - id: lookupCapability
+        kind: internal
+      - id: e.unknown
+        kind: internal
+    steps:
+      - bind: entry, ok
+        eval: lookupCapability(token)
+        to: lookupCapability
+      - opt:
+          do:
+            - eval: e.unknown(corenet.EnvEngine, token)
+              to: e.unknown
+            - return: ""
+          when: "!ok"
+      - set: e.ceiling
+        value: min(e.ceiling, entry.rank)
+  - of: (*operatorEnv).applyDisable
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*operatorEnv).applyDisable
+        kind: self
+      - id: strings
+        kind: stdlib
+      - id: lookupCapability
+        kind: internal
+      - id: e.unknown
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: token
+              eval: strings.TrimSpace(item)
+              to: strings
+            - opt:
+                do:
+                  - continue: true
+                when: token == ""
+            - bind: entry, ok
+              eval: lookupCapability(token)
+              to: lookupCapability
+            - opt:
+                do:
+                  - eval: e.unknown(corenet.EnvDisable, token)
+                    to: e.unknown
+                  - continue: true
+                when: "!ok || !entry.switchable"
+            - opt:
+                do:
+                  - set: e.disabled[entry.rank]
+                    value: "true"
+                  - set: e.override.Disabled
+                    value: append(e.override.Disabled, entry.token)
+                when: "!e.disabled[entry.rank]"
+          key: item
+          range: strings.SplitSeq(list, ",")
+  - of: (*operatorEnv).unknown
+    steps:
+      - set: e.ceiling
+        value: min(e.ceiling, rankPortable)
+      - set: e.faults
+        value: |-
+          append(e.faults, corenet.FaultValue{
+          		Source: faultEnvironment,
+          		Reason: variable + ": unknown token " + strconv.Quote(token) + ": engines capped at portable",
+          	})
+  - of: (*operatorEnv).allows
+    steps:
+      - return: r <= e.ceiling && !e.disabled[r]
+  - of: (*operatorEnv).plan
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*operatorEnv).plan
+        kind: self
+      - id: e.allows
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "loopPlan{backend: corenet.LoopBackendPortable}"
+          when: "!native || code == corenet.LoopBackendPortable"
+      - bind: iouring
+        eval: code != corenet.LoopBackendEpoll && e.allows(rankIOURing)
+      - bind: epoll
+        eval: e.allows(rankEpoll)
+        to: e.allows
+      - bind: auto
+        eval: code == corenet.LoopBackendAuto
+      - switch:
+          cases:
+            - case: auto && iouring && epoll
+              do:
+                - return: "loopPlan{backend: corenet.LoopBackendAuto, fallback: true}"
+            - case: iouring
+              do:
+                - return: "loopPlan{backend: corenet.LoopBackendIOURing, fallback: auto}"
+            - case: epoll
+              do:
+                - return: "loopPlan{backend: corenet.LoopBackendEpoll, fallback: auto}"
+            - default: true
+              do:
+                - return: "loopPlan{backend: corenet.LoopBackendPortable}"
   - of: (*optionSet).add
     steps:
       - op: "|="
@@ -4650,6 +4976,47 @@ sequences:
         to: recoverHandler
       - return: handler.ServePacket(s.runCtx, p)
         to: handler.ServePacket
+  - of: readPlatform
+    steps:
+      - return: |-
+          corenet.PlatformValue{
+          		GOOS: runtime.GOOS, GOARCH: runtime.GOARCH,
+          		Kernel: kernelRelease(), Go: runtime.Version(),
+          	}
+  - of: kernelRelease
+    participants:
+      - id: caller
+        kind: actor
+      - id: kernelRelease
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - var:
+          name: u
+          type: syscall.Utsname
+      - opt:
+          do:
+            - return: "\"\""
+          init:
+            bind: err
+            eval: syscall.Uname(&u)
+            to: syscall
+          when: err != nil
+      - bind: buf
+        eval: make([]byte, 0, len(u.Release))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - break: true
+                when: c == 0
+            - set: buf
+              value: append(buf, byte(c))
+          key: _
+          range: u.Release
+          value: c
+      - return: string(buf)
   - of: (*Server).acquire
     participants:
       - id: caller
@@ -4792,6 +5159,21 @@ sequences:
         kind: actor
       - id: New
         kind: self
+      - id: newServer
+        kind: internal
+    steps:
+      - return: newServer(os.LookupEnv, opts...)
+        to: newServer
+  - of: newServer
+    participants:
+      - id: caller
+        kind: actor
+      - id: newServer
+        kind: self
+      - id: readOperator
+        kind: internal
+      - id: readPlatform
+        kind: internal
       - id: context
         kind: stdlib
       - id: s.phase.Store
@@ -4806,6 +5188,8 @@ sequences:
           		drainTimeout: defaultDrainTimeout,
           		connPool:     recycler.NewPool(newPooledConn),
           		clk:          clock.System,
+          		lookup:       lookup,
+          		stall:        stallWatch{stalled: make(chan struct{})},
           	}
       - loop:
           do:
@@ -4813,6 +5197,12 @@ sequences:
           key: _
           range: opts
           value: opt
+      - set: s.operator
+        to: readOperator
+        value: readOperator(s.lookup)
+      - set: s.platform
+        to: readPlatform
+        value: readPlatform()
       - set: s.runCtx
         to: context
         value: context.Background()
@@ -4965,6 +5355,12 @@ sequences:
         kind: stdlib
       - id: s.mu.RUnlock
         kind: value
+      - id: s.fallbackMu.Lock
+        kind: value
+      - id: s.fallbackMu.Unlock
+        kind: value
+      - id: s.faults
+        kind: internal
     steps:
       - eval: s.mu.RLock()
         to: s.mu.RLock
@@ -4973,7 +5369,19 @@ sequences:
         to: slices
       - eval: s.mu.RUnlock()
         to: s.mu.RUnlock
-      - return: |-
+      - eval: s.fallbackMu.Lock()
+        to: s.fallbackMu.Lock
+      - bind: fallbacks
+        eval: s.fallbacks
+      - eval: s.fallbackMu.Unlock()
+        to: s.fallbackMu.Unlock
+      - bind: override
+        eval: s.operator.override
+      - set: override.Disabled
+        to: slices
+        value: slices.Clone(override.Disabled)
+      - bind: st
+        eval: |-
           corenet.StateValue{
           		Phase:            corenet.Phase(s.phase.Load()),
           		Listeners:        listeners,
@@ -4983,7 +5391,34 @@ sequences:
           		OversizedPackets: s.oversized.Load(),
           		AcceptBackoffs:   s.acceptBackoffs.Load(),
           		Loops:            s.loopStates(),
+          		Override:         override,
+          		Fallbacks:        fallbacks,
+          		Platform:         s.platform,
           	}
+      - set: st.Faults
+        to: s.faults
+        value: s.faults(st)
+      - return: st
+  - of: (*Server).recordFallback
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).recordFallback
+        kind: self
+      - id: s.clk.Now
+        kind: value
+    steps:
+      - lock:
+          mutex: s.fallbackMu
+      - op: ++
+        set: s.fallbacks.Count
+      - set: s.fallbacks.LastGroup
+        value: group
+      - set: s.fallbacks.LastReason
+        value: reason
+      - set: s.fallbacks.LastAt
+        to: s.clk.Now
+        value: s.clk.Now()
   - of: sockaddrToAddr
     participants:
       - id: caller
@@ -5065,6 +5500,119 @@ sequences:
             - return: "\"\", false"
           when: err != nil
       - return: iface.Name, true
+  - of: (*Server).startStallWatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).startStallWatch
+        kind: self
+      - id: worker
+        kind: package
+    steps:
+      - lock:
+          mutex: s.mu
+      - opt:
+          do:
+            - return: ""
+          when: len(s.loopEngines) == 0 || s.stall.daemon != nil
+      - set: s.stall.daemon
+        to: worker
+        value: worker.Every(stallPoll, s.checkStalls, worker.WithClock(s.clk))
+  - of: (*Server).stopStallWatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).stopStallWatch
+        kind: self
+      - id: s.mu.Lock
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+      - id: daemon.Stop
+        kind: value
+    steps:
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - bind: daemon
+        eval: s.stall.daemon
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
+      - opt:
+          do:
+            - return: ""
+          when: daemon == nil
+      - eval: daemon.Stop()
+        to: daemon.Stop
+  - of: (*Server).checkStalls
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).checkStalls
+        kind: self
+      - id: s.markStalled
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: corenet.Phase(s.phase.Load()) != corenet.PhaseServing
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: "!groupStalled(st)"
+            - eval: s.markStalled(st.Group)
+              to: s.markStalled
+            - return: ""
+          key: _
+          range: s.loopStates()
+          value: st
+  - of: (*Server).markStalled
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).markStalled
+        kind: self
+      - id: s.stall.mu.Lock
+        kind: value
+      - id: s.clk.Now
+        kind: value
+      - id: s.stall.mu.Unlock
+        kind: value
+      - id: s.stall.once.Do
+        kind: value
+    steps:
+      - eval: s.stall.mu.Lock()
+        to: s.stall.mu.Lock
+      - opt:
+          do:
+            - set: s.stall.group
+              value: group
+            - set: s.stall.at
+              to: s.clk.Now
+              value: s.clk.Now()
+          when: s.stall.group == ""
+      - eval: s.stall.mu.Unlock()
+        to: s.stall.mu.Unlock
+      - eval: s.stall.once.Do(func() { close(s.stall.stalled) })
+        to: s.stall.once.Do
+  - of: (*Server).stalledGroup
+    steps:
+      - lock:
+          mutex: s.stall.mu
+      - return: s.stall.group, s.stall.at
+  - of: stallError
+    participants:
+      - id: caller
+        kind: actor
+      - id: stallError
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(corenet.LoopGroupStalled, errs.WrapParams{}, errs.String("group", group))
+        to: errs
   - of: (*StreamGroup).Name
     steps:
       - return: g.name

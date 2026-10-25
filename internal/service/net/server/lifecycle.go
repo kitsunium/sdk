@@ -64,6 +64,8 @@ func (s *Server) Start(ctx context.Context) error {
 		return err
 	}
 	s.phase.Store(uint32(corenet.PhaseServing))
+	//: a loop group whose every ring drains is a stall Serve returns (R1).
+	s.startStallWatch()
 	//: every listener is bound and accepting.
 	return nil
 }
@@ -512,20 +514,43 @@ func recoverHandler() {
 //
 // It is the one-call entry point: a caller that has nothing else to do on the
 // main goroutine writes Serve and gets startup, blocking and graceful shutdown
-// without assembling them.
+// without assembling them. It also returns, after the same drain, once every
+// ring of a loop group has been drained by its watchdog: LoopGroupStalled,
+// naming the group (ADR 0188).
 func (s *Server) Serve(ctx context.Context) error {
 	//: a failed start has already released whatever it bound.
 	if err := s.Start(ctx); err != nil {
 		//: a failed start already released whatever it bound.
 		return err
 	}
-	<-ctx.Done()
+	var stalled bool
+	//: the caller's end, or a loop group that accepts nothing any more (R1).
+	select {
+	//: the caller is done.
+	case <-ctx.Done():
+	//: every ring of a loop group drained: no restart in process.
+	case <-s.stall.stalled:
+		stalled = true
+	}
 	//: the drain budget is independent of the cancelled ctx, or shutdown would
 	//: have no time left to run at the very moment it is needed.
 	drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.drainTimeout)
 	defer cancel()
-	//: drain within the budget and report whether it completed.
-	return s.Shutdown(drainCtx)
+	err := s.Shutdown(drainCtx)
+	//: the caller's end: whether the drain completed.
+	if !stalled {
+		//: drained, or the overrun.
+		return err
+	}
+	group, _ := s.stalledGroup()
+	//: a drain that overran is said beside the stall, never instead of it.
+	if err != nil {
+		//: the stall, and the drain's overrun.
+		return errs.Wrap(corenet.LoopGroupStalled, errs.WrapParams{},
+			errs.String("group", group), errs.String("drain", err.Error()))
+	}
+	//: the stall, which a restart with the same environment repeats.
+	return stallError(group)
 }
 
 // Shutdown stops accepting and waits for in-flight connections to finish,
@@ -537,6 +562,8 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		return nil
 	}
 	s.phase.Store(uint32(corenet.PhaseDraining))
+	//: a drain stops every ring on purpose: no stall is watched from here.
+	s.stopStallWatch()
 	//: closing the listeners is what ends the accept loops.
 	s.closeListeners()
 	//: loop groups drain on their own threads within the same budget.
@@ -621,6 +648,7 @@ func (s *Server) waitIdle(ctx context.Context) error {
 // Close releases every listener and severs every live connection immediately,
 // without draining.
 func (s *Server) Close() error {
+	s.stopStallWatch()
 	s.closeListeners()
 	//: loop groups close their connections and stop their threads.
 	s.closeLoops()

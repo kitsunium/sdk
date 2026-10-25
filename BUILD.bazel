@@ -9,11 +9,14 @@ load("@gazelle//:def.bzl", "gazelle")
 
 gazelle(name = "gazelle")
 
-# The files tools/genindex's tests read as data dependencies: the platforms
-# table every judgement is made on (scripts/pre-commit/check-platforms.sh
-# holds it to bazel-ci.yml's cross-build matrix), and the docs/api schema whose
-# vectors the writer is held to.
+# The files tests read as data dependencies: the net domain's design, whose
+# capability registry //internal/service/net/server:server_test holds its
+# parser to (ADR 0188); and tools/genindex's, the platforms table every
+# judgement is made on (scripts/pre-commit/check-platforms.sh holds it to
+# bazel-ci.yml's cross-build matrix), and the docs/api schema whose vectors the
+# writer is held to.
 exports_files([
+    "design/net.yaml",
     "docs/api/schema.json",
     "scripts/ci/platforms.sh",
 ])

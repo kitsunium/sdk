@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T12:00:00Z -->
+<!-- updated: 2026-10-25T18:00:00Z -->
 # pkg/v1/net/server/
 
 ## Purpose
@@ -25,6 +25,9 @@ in the dimension that motivated the domain, whatever else it gained.
 | `Handler`, `HandlerFunc`, `Middleware`, `Chain` | the handler shape |
 | `PacketGroup`, `Packet`, `PacketHandler`, `PacketHandlerFunc`, `PacketMiddleware`, `ChainPacket` | the datagram half: one handler per packet, the same chain shape |
 | `State`, `ListenerState`, `Phase`, `Phase*` | lifecycle reporting — and the counters, `AcceptBackoffs` among them: the waits a failing Accept took (ADR 0130) |
+| `Override`, `Fault`, `Fallbacks`, `Platform` | what `State` adds (ADR 0188): what the operator's variables did, everything the server runs without (`Degraded` reads it), the engine fallbacks and the last one, the OS, its release and the toolchain |
+| `Capability`, `Capability*`, `EnvEngine`, `EnvDisable` | the operator's switches: `KITSUNIUM_NET_ENGINE` caps every group at a capability of `iouring` > `epoll` > `portable` > `goroutine`, `KITSUNIUM_NET_DISABLE` switches `iouring` or `epoll` off; read once by `New`, before any probe, and they only ever lower an engine (ADR 0188) |
+| `Server.RegisterHealth`, `LoopGroupStalled` | the server's readiness and liveness checks on a health registry; a loop group every ring of which its watchdog drained makes `Serve` return `LoopGroupStalled` and liveness fail after 30 s |
 | `Listen`, `Adopt` | where a group listens: an address it binds, or a socket a supervisor passed (`LISTEN_FDNAMES`) — a missing one is `SocketAdoptFailed`, never a silent bind |
 | `TLS` | TLS, or mutual TLS when the identity requires a client certificate |
 | `ReadTimeout`, `WriteTimeout`, `IdleTimeout` | per-operation bounds, refreshed per read/write; on an HTTP group `ReadTimeout` bounds each read of a request body (#454 — it used to be net/http's whole-request `ReadTimeout`), `WriteTimeout` each response |

@@ -629,6 +629,10 @@ codes:
     const: CodeGroupNameConflict
     hex: "0x00_02_0B_3A"
     package: internal/core/net
+  - code: "0.2.11.59"
+    const: CodeLoopGroupStalled
+    hex: "0x00_02_0B_3B"
+    package: internal/core/net
   - code: "0.2.12.1"
     const: CodeInvalidEntry
     hex: "0x00_02_0C_01"
