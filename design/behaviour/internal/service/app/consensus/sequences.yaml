@@ -10332,8 +10332,8 @@ sequences:
           key: ctx
           range: n.reads
           value: w
-      - set: n.preferAt
-        value: time.Time{}
+      - set: n.prefer
+        value: preferWatch{}
   - of: (*Node).startGrace
     participants:
       - id: caller
@@ -10388,20 +10388,40 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: len(n.cfg.PreferredLeaders) == 0 || now.Before(n.preferAt)
+          when: len(n.cfg.PreferredLeaders) == 0
       - bind: st
         eval: n.r.Status()
         to: n.r.Status
       - opt:
           do:
             - return: ""
-          when: st.Role != coreconsensus.RoleLeader || st.Transfer != 0
+          when: st.Role != coreconsensus.RoleLeader
       - opt:
           do:
-            - set: n.preferAt
+            - set: n.prefer.running
+              value: "true"
+            - return: ""
+          when: st.Transfer != 0
+      - opt:
+          do:
+            - set: n.prefer.running
+              value: "false"
+            - set: n.prefer.at
               to: now.Add
-              value: now.Add(st.Timing.ElectionTimeoutMax)
-          when: n.preferLeader(now, &st)
+              value: now.Add(n.preferPause(&st))
+            - return: ""
+          when: n.prefer.running
+      - opt:
+          do:
+            - return: ""
+          when: now.Before(n.prefer.at) || !n.preferLeader(now, &st)
+      - op: ++
+        set: n.prefer.tries
+      - set: n.prefer.running
+        value: "true"
+  - of: (*Node).preferPause
+    steps:
+      - return: st.Timing.ElectionTimeoutMax << min(max(n.prefer.tries-1, 0), preferMaxDoublings)
   - of: (*Node).preferLeader
     participants:
       - id: caller
@@ -10413,30 +10433,40 @@ sequences:
       - id: n.r.Progress
         kind: value
     steps:
+      - bind: prefs
+        eval: n.cfg.PreferredLeaders
       - opt:
           do:
             - return: "false"
-          when: slices.Contains(n.cfg.PreferredLeaders, n.stamp.ID)
+          when: slices.Contains(prefs, n.stamp.ID)
       - loop:
           do:
+            - bind: i
+              eval: (n.prefer.next + k) % len(prefs)
             - opt:
                 do:
-                  - opt:
-                      do:
-                        - return: n.r.TransferLeadership(now, id) == 0
-                      init:
-                        bind: match, _, ok
-                        eval: n.r.Progress(id)
-                        to: n.r.Progress
-                      when: ok && match >= st.Commit
+                  - continue: true
                 init:
                   bind: m, ok
-                  eval: st.Conf.Member(id)
+                  eval: st.Conf.Member(prefs[i])
                   to: st.Conf.Member
-                when: ok && m.Voter
-          key: _
-          range: n.cfg.PreferredLeaders
-          value: id
+                when: "!ok || !m.Voter"
+            - bind: match, heard, ok
+              eval: n.r.Progress(prefs[i])
+              to: n.r.Progress
+            - opt:
+                do:
+                  - continue: true
+                when: "!ok || match < st.Commit || now.Sub(heard) >= st.Timing.ElectionTimeoutMin"
+            - opt:
+                do:
+                  - return: "false"
+                when: n.r.TransferLeadership(now, prefs[i]) != 0
+            - set: n.prefer.next
+              value: i + 1
+            - return: "true"
+          key: k
+          range: prefs
       - return: "false"
   - of: (*Node).publish
     participants:
