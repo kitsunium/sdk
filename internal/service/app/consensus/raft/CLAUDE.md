@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T06:45:00Z -->
+<!-- updated: 2026-10-25T13:00:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -171,6 +171,16 @@ under coverage before touching `shard_count`.
   not know the kind, and the raise is refused while the stale voter the
   record is for stays unheard (#638, `mutRecordAtClusterVersion`,
   `mutRecordUnannounced`, `checkLeaderRecordFollowsTheAnnouncement`).
+- Judge a PreVote behind the commit by its last index alone
+  (`behindCommit`): a voter back with an uncommitted tail of an older term,
+  longer than the commit, or a learner's question over one, lacks the
+  committed entry as surely as a shorter log, and was never sent the record
+  on a quiet cluster (#675, `mutRecordByIndexOnly`,
+  `checkLeaderRecordReachesAnOldTail`,
+  `TestAStaleVoterWithAnOldTailPastTheCommitIsSentTheRecord`,
+  `TestALearnerWithAnOldTailPastTheCommitIsSentTheRecord`). Nor send it to
+  a log whose last term is the committed entry's at or past its index, or
+  a later one at or past it: such a log holds, or may hold, the commit.
 - Leave a learner that hears no leader waiting for nothing, or let its
   question be a campaign: it never sends the PreVote #542's record answers,
   and a learner down while a member was made leader was never fed by it

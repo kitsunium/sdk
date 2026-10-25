@@ -522,6 +522,7 @@ var checks = map[string]func(mutation) error{
 	"nothing handed behind a read":      checkNothingHandedBehindARead,
 	"no table keeps committed payloads": checkNoTableKeepsCommittedPayloads,
 	"raise heard in the vote window":    checkRaiseHeardRecently,
+	"leader record reaches an old tail": checkLeaderRecordReachesAnOldTail,
 }
 
 func TestChecksPassUnmutated(t *testing.T) {
@@ -600,6 +601,7 @@ func TestMutationsAreCaught(t *testing.T) {
 		"evicted through applied only":     mutEvictAppliedOnly,
 		"no table evicts committed":        mutNoTableEvictsCommitted,
 		"raise over a silent member":       mutRaiseOverSilence,
+		"record by the last index alone":   mutRecordByIndexOnly,
 	}
 	for name, m := range muts {
 		caught := ""

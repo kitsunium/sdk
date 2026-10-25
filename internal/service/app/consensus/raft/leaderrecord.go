@@ -49,8 +49,8 @@ func (r *Raft) stepLeaderRecord(now time.Time, m core.MessageValue) bool {
 }
 
 // sendLeaderRecord answers a PreVote from a member that campaigns behind
-// this node's commit, while this node follows a live leader, with that
-// leader's record read from the committed configuration.
+// this node's commit (behindCommit), while this node follows a live leader,
+// with that leader's record read from the committed configuration.
 //
 // Only to a PreVote that itself announces protocol 2, from a node that
 // speaks it: a node of protocol 1 does not know the kind, and the two
@@ -62,7 +62,7 @@ func (r *Raft) stepLeaderRecord(now time.Time, m core.MessageValue) bool {
 // send it (#638).
 func (r *Raft) sendLeaderRecord(now time.Time, m core.MessageValue) {
 	if !r.mayRecordTo(m) || r.role == core.RoleLeader || r.lead == 0 || r.lead == m.From ||
-		r.lastLeaderContact.IsZero() || now.Sub(r.lastLeaderContact) >= r.voteWindow || m.Index >= r.log.committed {
+		r.lastLeaderContact.IsZero() || now.Sub(r.lastLeaderContact) >= r.voteWindow || !r.behindCommit(m) {
 		return
 	}
 	if _, ok := r.conf().Member(m.From); !ok {
@@ -77,6 +77,35 @@ func (r *Raft) sendLeaderRecord(now time.Time, m core.MessageValue) {
 		Kind: core.MsgLeaderRecord, To: m.From, Index: r.log.committed,
 		Entries: []core.EntryValue{{Kind: core.EntryMembership, BodySum: wire.BodySum(data), Data: data}},
 	})
+}
+
+// behindCommit reports whether the log a PreVote m announces, by its last
+// term and last index, cannot hold the entry at this node's commit: its
+// sender lacks a committed entry, so it wins no election while a majority
+// holds that entry, and the record only lets it hear the leader. It is
+// behind when its last index is below the commit, as #542 judged it, or
+// when its last term is older than the committed entry's: terms never
+// decrease along a log, so a log holding that entry ends at its term or a
+// later one, however far its index reaches (#675). Judged on the index
+// alone, a voter back with an uncommitted tail of an older term, longer
+// than the commit, or a learner's question over one (#639), was never
+// answered, and on a quiet cluster stayed cut off from the leader for as
+// long as it led: one vote lost, and one more failure stopped every commit.
+//
+// A log whose last term is the committed entry's, at or past its index,
+// holds that entry, since the leader of that term only appended; one whose
+// last term is later, at or past it, may hold it. Neither is sent a
+// record, as before: the record is for a member behind the commit, never
+// for one level with it or ahead.
+func (r *Raft) behindCommit(m core.MessageValue) bool {
+	if m.Index < r.log.committed {
+		return true
+	}
+	if r.mutated(mutRecordByIndexOnly) {
+		return false
+	}
+	t, ok := r.log.term(r.log.committed)
+	return ok && m.LogTerm < t
 }
 
 // mayRecordTo reports whether the PreVote m may be answered with a leader
