@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T06:45:00Z -->
+<!-- updated: 2026-10-25T08:20:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -141,6 +141,13 @@ paired at 8 and 10: on a loaded machine the slowest of 8 summed 49 to
   `TestALeaderSlowToApplyStillRefusesForwardsPastMaxApplyLagBytes`,
   `TestAMachineThatDropsItsPayloadsLeavesNoApplyLag`,
   `TestADurableMachineResumesInsideTheTailReadBack`).
+- Sample a heap peak in the package's own process: the tests before it
+  leave hundreds of MiB live, and the collector lets a share of that grow
+  in garbage on top of what is measured.
+  `TestTheStartHoldsNoMoreOfTheTailThanItsBudget` measures in a child
+  process of the test binary (`startInAChild`); in the package's process it
+  sampled 60 to 87 MiB over a 600 MiB baseline on every CI runner, whatever
+  the start held.
 - Compact the store past its end without the term: it holds no entry to read
   it from, and a node restarted with no table votes on that term. The engine
   passes it (`storeReq.compactTerm`, `compactLog`), the file log refuses a

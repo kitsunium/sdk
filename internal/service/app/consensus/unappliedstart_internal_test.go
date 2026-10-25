@@ -2,17 +2,24 @@ package consensus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	coreproc "github.com/kitsunium/sdk/internal/core/proc"
+	"github.com/kitsunium/sdk/internal/kernel/fs/flock"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/raft"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
@@ -22,6 +29,14 @@ import (
 func tailOpen(t *testing.T, dir, run string) DataDir {
 	t.Helper()
 	d, err := NewDataDirWith(dir, DataDirOptions{SegmentBytes: 4 << 20, RuntimeDir: run})
+	//: no flock(2), no data directory (illumos, Solaris): the refusal is
+	//: asserted, then the case skips, as openDir's do.
+	if !flock.Native {
+		if !errors.Is(err, coreproc.UnsupportedPlatform) {
+			t.Fatalf("NewDataDirWith on %s = %v, want UNSUPPORTED_PLATFORM", runtime.GOOS, err)
+		}
+		t.Skipf("%s has no flock(2), so a data directory is refused there (ADR 0144)", runtime.GOOS)
+	}
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -149,11 +164,46 @@ func (s *orderKV) err() error {
 // The peak is sampled with the collector at GOGC=10: at the default of 100
 // the heap sampled also holds the garbage the collector lets grow up to the
 // live heap again, the baseline's included, whatever the start holds. Each
-// payload runs in its own subtest, so the baseline holds nothing of the
-// previous one.
+// payload is measured in a child process of this test binary, so the
+// baseline holds nothing but the start's: in the package's own process the
+// tests before it left about 600 MiB live, a tenth of which in garbage the
+// collector let grow on top of the start's own, and the peak sampled 60 to
+// 87 MiB over the baseline whatever the start held (startInAChild).
 func TestTheStartHoldsNoMoreOfTheTailThanItsBudget(t *testing.T) {
+	if p := os.Getenv(startTailChildEnv); p != "" {
+		payload, err := strconv.Atoi(p)
+		if err != nil {
+			t.Fatalf("%s=%q: %v", startTailChildEnv, p, err)
+		}
+		startHoldsItsBudget(t, payload)
+		return
+	}
 	for _, payload := range []int{64, 4096} {
-		t.Run(fmt.Sprintf("payload %d B", payload), func(t *testing.T) { startHoldsItsBudget(t, payload) })
+		t.Run(fmt.Sprintf("payload %d B", payload), func(t *testing.T) { startInAChild(t, payload) })
+	}
+}
+
+// startTailChildEnv names the payload size a child process of
+// TestTheStartHoldsNoMoreOfTheTailThanItsBudget measures the start for; the
+// test only launches its children when it is unset.
+const startTailChildEnv = "CONSENSUS_START_TAIL_PAYLOAD"
+
+// startInAChild runs startHoldsItsBudget for payload in a child process of
+// this test binary, which runs that test alone, and relays what it measured.
+func startInAChild(t *testing.T, payload int) {
+	if !flock.Native {
+		t.Skipf("%s has no flock(2), so a data directory is refused there (ADR 0144)", runtime.GOOS)
+	}
+	child := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestTheStartHoldsNoMoreOfTheTailThanItsBudget$", "-test.v") //nolint:gosec
+	child.Env = append(os.Environ(), startTailChildEnv+"="+strconv.Itoa(payload))
+	out, err := child.CombinedOutput()
+	for line := range strings.Lines(string(out)) {
+		if strings.Contains(line, "unappliedstart_internal_test.go:") {
+			t.Log(strings.TrimSpace(line))
+		}
+	}
+	if err != nil {
+		t.Errorf("payload %d B: the child process measuring the start failed: %v\n%s", payload, err, out)
 	}
 }
 
