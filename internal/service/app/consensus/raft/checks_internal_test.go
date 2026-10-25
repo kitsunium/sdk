@@ -322,6 +322,24 @@ func checkTimeoutNowTerm(mut mutation) error {
 	return nil
 }
 
+// checkStalledApplyDeclinesTransfer is #674: a follower whose driver holds
+// its apply stalled does not campaign on its leader's TimeoutNow, and does
+// once its apply moves again.
+func checkStalledApplyDeclinesTransfer(mut mutation) error {
+	f, now := followerOfOne(mut, nil)
+	f.SetApplyStalled(true)
+	f.Step(now, msg(core.MsgTimeoutNow, 1, 2, 2))
+	if f.role != core.RoleFollower || f.term != 2 {
+		return fmt.Errorf("a node whose apply is stalled campaigned on a TimeoutNow (role %v term %d)", f.role, f.term)
+	}
+	f.SetApplyStalled(false)
+	f.Step(now, msg(core.MsgTimeoutNow, 1, 2, 2))
+	if f.role != core.RoleCandidate || f.term != 3 {
+		return fmt.Errorf("setup: a node whose apply moves again did not campaign on a TimeoutNow (role %v term %d)", f.role, f.term)
+	}
+	return nil
+}
+
 func checkStaleCompletion(mut mutation) error {
 	f := newTest(2, testState{term: 1, commit: 0}, mut, false)
 	m := msg(core.MsgApp, 1, 2, 1)
@@ -478,6 +496,7 @@ var checks = map[string]func(mutation) error{
 	"heartbeat commit clamped":          checkHeartbeatClamped,
 	"restart refusal":                   checkRestartRefusal,
 	"timeout-now term":                  checkTimeoutNowTerm,
+	"stalled apply declines a transfer": checkStalledApplyDeclinesTransfer,
 	"stale completion":                  checkStaleCompletion,
 	"lease dropped after transfer":      checkLeaseDroppedAfterTransfer,
 	"membership after no-op":            checkMembershipAfterNoOp,
@@ -602,6 +621,7 @@ func TestMutationsAreCaught(t *testing.T) {
 		"no table evicts committed":        mutNoTableEvictsCommitted,
 		"raise over a silent member":       mutRaiseOverSilence,
 		"record by the last index alone":   mutRecordByIndexOnly,
+		"stalled apply takes over":         mutStalledTakesOver,
 	}
 	for name, m := range muts {
 		caught := ""

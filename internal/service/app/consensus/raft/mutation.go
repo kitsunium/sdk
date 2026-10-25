@@ -184,6 +184,10 @@ const (
 	// uncommitted tail of an older term reaches past the commit is never
 	// sent the leader record.
 	mutRecordByIndexOnly
+	// mutStalledTakesOver campaigns on a TimeoutNow whatever the driver says
+	// of its apply, as before #674: a leader that handed its leadership over
+	// for a stuck apply (#554) took it straight back.
+	mutStalledTakesOver
 )
 
 // mutated reports whether a test switched mutation m on; it is false in every

@@ -2887,6 +2887,18 @@ sequences:
       - op: "&^="
         set: r.facts
         value: raftApplyReading
+  - of: (*Raft).SetApplyStalled
+    steps:
+      - opt:
+          do:
+            - op: "|="
+              set: r.facts
+              value: raftApplyStalled
+            - return: ""
+          when: "on"
+      - op: "&^="
+        set: r.facts
+        value: raftApplyStalled
   - of: (*Raft).ApplyHeld
     steps:
       - return: "!r.cfg.NoTable && r.log.applied < min(r.log.committed, r.log.stable)"
@@ -3314,7 +3326,8 @@ sequences:
         to: r.log.term
   - of: (*Raft).Status
     steps:
-      - return: |-
+      - bind: st
+        eval: |-
           StatusValue{
           		Role: r.role, Term: r.term, Lead: r.lead, Commit: r.log.committed,
           		Last: r.log.lastIndex(), Stable: r.log.stable, Timing: r.timing,
@@ -3322,6 +3335,12 @@ sequences:
           		Conf: r.conf().Clone(), Committed: r.confAt(r.log.committed).Clone(),
           		Transfer: r.transferTo,
           	}
+      - opt:
+          do:
+            - set: st.HandedBy
+              value: r.campaignIssuer
+          when: r.role == core.RoleLeader
+      - return: st
   - of: (*Raft).Progress
     steps:
       - bind: pr
@@ -4938,15 +4957,15 @@ sequences:
       - id: r.campaign
         kind: internal
     steps:
-      - opt:
-          do:
-            - return: ""
-          when: "!r.mutated(mutTimeoutNowAnyTerm) && (m.From != r.lead || m.Term != r.term)"
+      - bind: valid
+        eval: r.mutated(mutTimeoutNowAnyTerm) || (m.From == r.lead && m.Term == r.term)
+      - bind: stalled
+        eval: r.facts&raftApplyStalled != 0 && !r.mutated(mutStalledTakesOver)
       - opt:
           do:
             - eval: r.campaign(false, m.From, m.Term)
               to: r.campaign
-          when: r.promotable()
+          when: valid && !stalled && r.promotable()
   - of: (*Raft).handleAppend
     participants:
       - id: caller

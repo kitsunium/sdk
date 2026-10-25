@@ -4273,6 +4273,19 @@ packages:
             name: SetApplyLag
             recv: pointer
           - doc: |-
+              SetApplyStalled tells the step function whether the driver holds its
+              apply stalled: while it does, a TimeoutNow does not make this node
+              campaign. A leader whose apply makes no progress hands its leadership
+              over (#554), and a transfer back to it, the watch of PreferredLeaders' or
+              an operator's, handed it the leadership it would hand over again; the
+              driver holds it stalled from that hand-over until its apply moves (#674).
+              An election is untouched.
+            in:
+              - name: "on"
+                type: bool
+            name: SetApplyStalled
+            recv: pointer
+          - doc: |-
               ApplyHeld reports whether committed, durable entries wait to be handed to
               apply, held back by MaxApplyLagBytes: the gap between commit and applied
               is at its bound, and the driver refuses new commands meanwhile (D6).
@@ -4506,6 +4519,11 @@ packages:
             - name: Committed
               type: core.MembershipValue
             - name: Transfer
+              type: core.NodeID
+            - doc: |-
+                HandedBy is, while the node leads, the leader whose TimeoutNow made it
+                campaign for this term, 0 for a term it won by an election.
+              name: HandedBy
               type: core.NodeID
       - doc: |-
           EngineValue is the engine's own replicated state: the timing contract, the

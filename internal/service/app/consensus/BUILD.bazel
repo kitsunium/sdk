@@ -164,6 +164,7 @@ go_test(
         "waitapplied_internal_test.go",
         "waiter_internal_test.go",
         "withdrawnkey_internal_test.go",
+        "yieldback_internal_test.go",
     ],
     data = glob(["testdata/**"]),
     embed = [":consensus"],

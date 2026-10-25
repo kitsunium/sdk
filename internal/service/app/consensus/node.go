@@ -61,6 +61,11 @@ const (
 	// transfers to a preferred node doubles: at most 16 maximum election
 	// timeouts (#662).
 	preferMaxDoublings int = 4
+	// handOffWindow is how many maximum election timeouts follow a
+	// transfer for what it was made for to complete: removeAfterTransfer
+	// submits a removal of the old leader again for that long, and a leader
+	// that took over by a transfer starts none of its own meanwhile (#676).
+	handOffWindow time.Duration = 2
 )
 
 // Node is one member of a consensus group: the event loop that owns the step
@@ -1080,6 +1085,7 @@ func (n *Node) onMessage(m *coreconsensus.MessageValue, ok bool) (time.Time, boo
 	}
 	turn := n.clk.Now()
 	n.r.SetOverloaded(n.applyOverloaded())
+	n.declineNoted(m)
 	n.r.Step(n.clk.Now(), *m)
 	return turn, true
 }
@@ -1169,6 +1175,7 @@ func (n *Node) drainControl() {
 		if !ok {
 			return
 		}
+		n.declineNoted(&m)
 		n.r.Step(n.clk.Now(), m)
 	}
 }
@@ -1568,6 +1575,17 @@ func (n *Node) leadershipChanged() {
 	// just reset every match to 0 (#559). The pause starts over with the
 	// leadership, and so does the order (#662).
 	n.prefer = preferWatch{}
+	if st.Role == coreconsensus.RoleLeader && st.HandedBy != 0 {
+		// A leadership a transfer handed over starts with the watch paused
+		// for the hand-off's window. The transfer was made for something:
+		// a Remove of its issuer, which handOff moved leadership away for
+		// and removeAfterTransfer submits again until this term's no-op
+		// commits, was undone at every attempt by a transfer back to its
+		// preferred issuer, leading again and refusing to remove itself
+		// MEMBERSHIP_INVALID (#676); a hand-over for a stuck apply (#554), or
+		// an operator's. An election starts with none (#559).
+		n.prefer.at = n.clk.Now().Add(handOffWindow * st.Timing.ElectionTimeoutMax)
+	}
 }
 
 // startGrace starts the grace period of every unresolved proposal.
@@ -1597,7 +1615,8 @@ func (n *Node) startGrace(commit uint64) {
 type preferWatch struct {
 	// at is the earliest tick at which the leader starts a transfer to a
 	// preferred node: a pause after the end of the previous transfer,
-	// whoever started it (#662).
+	// whoever started it (#662), and after the start of a leadership a
+	// transfer handed over (#676).
 	at time.Time
 	// tries counts the transfers the watch started in this leadership. One
 	// that hands over ends the leadership, so all but the last failed.
@@ -1623,7 +1642,10 @@ type preferWatch struct {
 // before taking over stopped every write for as long as this node led
 // (#662). The next transfer now waits a pause after the previous one
 // ended (preferPause), so writes and admin go through in between, and a
-// lagging preferred node causes no churn.
+// lagging preferred node causes no churn. A leadership a transfer handed
+// over starts with a pause as well (leadershipChanged, #676), and a node
+// that handed its own over for a stuck apply declines a transfer back until
+// that apply moves (#674).
 func (n *Node) watchPreferred(now time.Time) {
 	if len(n.cfg.PreferredLeaders) == 0 {
 		return

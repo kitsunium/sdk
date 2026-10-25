@@ -82,6 +82,15 @@ under coverage before touching `shard_count`.
   one other grant while the leader was down, it overwrote the acknowledged
   entries it had truncated (#524, `mutSilentCampaigns`,
   `checkSilentNodeNeverCampaigns`).
+- Campaign on a TimeoutNow while the driver holds its apply stalled
+  (`SetApplyStalled`): a leader whose apply is stuck hands over (#554) and
+  still acknowledges, and the transfer back to it made it lead almost all
+  the time. An election is untouched (#674, `mutStalledTakesOver`,
+  `checkStalledApplyDeclinesTransfer`).
+- Clear a campaign's transfer issuer when it wins: `Status.HandedBy` names it
+  while the term lasts, and the driver's watch of `PreferredLeaders` pauses
+  after a transfer on it (#676,
+  `TestTheStatusNamesTheLeaderThatHandedTheTermOver`).
 - Admit a command while the no-space alarm is committed, locally or
   forwarded: `checkProposed` refuses it NO_SPACE and still admits the
   engine entries, the alarm's clearing among them (D17, #515,

@@ -30,6 +30,10 @@ const (
 	// log entries Ready handed it by index (ApplyRead): nothing is handed in
 	// memory behind them until the driver says the read is over (D6, #664).
 	raftApplyReading
+	// raftApplyStalled is the driver's word that its apply is stalled, from
+	// a hand-over its stuck apply caused until it moves: a TimeoutNow does
+	// not make this node campaign while it holds (#554, #674).
+	raftApplyStalled
 )
 
 // ProtocolMax is the highest protocol version this engine speaks: a cluster
@@ -146,6 +150,21 @@ func (r *Raft) SetApplyLag(bytes int64, reading bool) {
 		return
 	}
 	r.facts &^= raftApplyReading
+}
+
+// SetApplyStalled tells the step function whether the driver holds its
+// apply stalled: while it does, a TimeoutNow does not make this node
+// campaign. A leader whose apply makes no progress hands its leadership
+// over (#554), and a transfer back to it, the watch of PreferredLeaders' or
+// an operator's, handed it the leadership it would hand over again; the
+// driver holds it stalled from that hand-over until its apply moves (#674).
+// An election is untouched.
+func (r *Raft) SetApplyStalled(on bool) {
+	if on {
+		r.facts |= raftApplyStalled
+		return
+	}
+	r.facts &^= raftApplyStalled
 }
 
 // ApplyHeld reports whether committed, durable entries wait to be handed to
@@ -370,7 +389,8 @@ type Raft struct {
 	// never from the leader's newer view (D9 d).
 	leaseLen  time.Duration
 	contracts map[uint64]core.TimingContractSpec
-	// campaignTransfer is the flag the current campaign carries.
+	// campaignIssuer and campaignTerm are the transfer flag the current
+	// campaign carries, kept for the term it wins (Status.HandedBy).
 	campaignIssuer core.NodeID
 	campaignTerm   uint64
 
@@ -691,17 +711,27 @@ type StatusValue struct {
 	Conf      core.MembershipValue
 	Committed core.MembershipValue
 	Transfer  core.NodeID
+	// HandedBy is, while the node leads, the leader whose TimeoutNow made it
+	// campaign for this term, 0 for a term it won by an election.
+	HandedBy core.NodeID
 }
 
 // Status returns the step function's view.
 func (r *Raft) Status() StatusValue {
-	return StatusValue{
+	st := StatusValue{
 		Role: r.role, Term: r.term, Lead: r.lead, Commit: r.log.committed,
 		Last: r.log.lastIndex(), Stable: r.log.stable, Timing: r.timing,
 		Cluster: r.clusterVer, ClusterG: r.clusterGen, NoSpace: r.noSpace,
 		Conf: r.conf().Clone(), Committed: r.confAt(r.log.committed).Clone(),
 		Transfer: r.transferTo,
 	}
+	if r.role == core.RoleLeader {
+		// The issuer of the TimeoutNow whose campaign won this term, 0 for
+		// an election: becomeLeader keeps the campaign's flag, and
+		// becomeFollower clears it (#676).
+		st.HandedBy = r.campaignIssuer
+	}
+	return st
 }
 
 // Progress returns the leader's match index of a peer.

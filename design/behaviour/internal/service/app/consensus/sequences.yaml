@@ -9845,6 +9845,8 @@ sequences:
         kind: value
       - id: n.r.SetOverloaded
         kind: value
+      - id: n.declineNoted
+        kind: internal
       - id: n.r.Step
         kind: value
     steps:
@@ -9857,6 +9859,8 @@ sequences:
         to: n.clk.Now
       - eval: n.r.SetOverloaded(n.applyOverloaded())
         to: n.r.SetOverloaded
+      - eval: n.declineNoted(m)
+        to: n.declineNoted
       - eval: n.r.Step(n.clk.Now(), *m)
         to: n.r.Step
       - return: turn, true
@@ -10012,6 +10016,8 @@ sequences:
         kind: self
       - id: n.queuedControl
         kind: internal
+      - id: n.declineNoted
+        kind: internal
       - id: n.r.Step
         kind: value
     steps:
@@ -10024,6 +10030,8 @@ sequences:
                 do:
                   - return: ""
                 when: "!ok"
+            - eval: n.declineNoted(&m)
+              to: n.declineNoted
             - eval: n.r.Step(n.clk.Now(), m)
               to: n.r.Step
           range: maxCtrlPerTurn
@@ -10699,6 +10707,8 @@ sequences:
         kind: value
       - id: n.startGrace
         kind: internal
+      - id: n.clk.Now().Add
+        kind: value
     steps:
       - bind: st
         eval: n.r.Status()
@@ -10730,6 +10740,12 @@ sequences:
           value: w
       - set: n.prefer
         value: preferWatch{}
+      - opt:
+          do:
+            - set: n.prefer.at
+              to: n.clk.Now().Add
+              value: n.clk.Now().Add(handOffWindow * st.Timing.ElectionTimeoutMax)
+          when: st.Role == coreconsensus.RoleLeader && st.HandedBy != 0
   - of: (*Node).startGrace
     participants:
       - id: caller
@@ -11868,12 +11884,12 @@ sequences:
         kind: value
       - id: n.am.Unlock
         kind: value
-      - id: n.mostCaughtUpVoter
+      - id: n.cutExempt
         kind: internal
-      - id: n.obs.warn
+      - id: n.watchApplied
         kind: internal
-      - id: n.r.TransferLeadership
-        kind: value
+      - id: n.handOver
+        kind: internal
     steps:
       - bind: st
         eval: n.r.Status()
@@ -11886,10 +11902,17 @@ sequences:
         eval: n.applied
       - eval: n.am.Unlock()
         to: n.am.Unlock
+      - bind: limit
+        eval: st.Timing.ElectionTimeoutMax
+      - bind: cutting
+        eval: n.cutExempt(now, limit)
+        to: n.cutExempt
+      - eval: n.watchApplied(applied, st.Commit)
+        to: n.watchApplied
       - opt:
           do:
-            - set: "*w"
-              value: "progressWatch{stable: st.Stable, applied: applied, stableAt: now, appliedAt: now}"
+            - set: w.stable, w.applied, w.stableAt, w.appliedAt, w.to
+              value: st.Stable, applied, now, now, 0
             - return: ""
           when: st.Role != coreconsensus.RoleLeader
       - opt:
@@ -11901,17 +11924,34 @@ sequences:
           do:
             - set: w.applied, w.appliedAt
               value: applied, now
-          when: applied != w.applied || applied >= st.Commit || n.cutExempt(now, st.Timing.ElectionTimeoutMax)
-      - bind: limit
-        eval: st.Timing.ElectionTimeoutMax
+          when: applied != w.applied || applied >= st.Commit || cutting
       - bind: stuckSync, stuckApply
         eval: now.Sub(w.stableAt) > limit, now.Sub(w.appliedAt) > limit
       - opt:
           do:
             - return: ""
           when: (!stuckSync && !stuckApply) || st.Transfer != 0
+      - eval: n.handOver(now, &st, applied, stuckApply)
+        to: n.handOver
+  - of: (*Node).handOver
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).handOver
+        kind: self
+      - id: n.mostCaughtUpVoter
+        kind: internal
+      - id: n.obs.warn
+        kind: internal
+      - id: n.r.TransferLeadership
+        kind: value
+      - id: n.r.SetApplyStalled
+        kind: value
+    steps:
+      - bind: w
+        eval: "&n.watch"
       - bind: to
-        eval: n.mostCaughtUpVoter(&st)
+        eval: n.mostCaughtUpVoter(st, w.to)
         to: n.mostCaughtUpVoter
       - opt:
           do:
@@ -11924,16 +11964,68 @@ sequences:
         to: n.obs.warn
       - eval: n.r.TransferLeadership(now, to)
         to: n.r.TransferLeadership
-      - set: w.stableAt, w.appliedAt
-        value: now, now
+      - set: w.stableAt, w.appliedAt, w.to
+        value: now, now, to
+      - opt:
+          do:
+            - set: w.ceded, w.moved
+              value: true, applied
+            - eval: n.r.SetApplyStalled(true)
+              to: n.r.SetApplyStalled
+          when: stuckApply && !w.ceded
+  - of: (*Node).watchApplied
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).watchApplied
+        kind: self
+      - id: n.r.SetApplyStalled
+        kind: value
+    steps:
+      - bind: w
+        eval: "&n.watch"
+      - opt:
+          do:
+            - set: w.ceded
+              value: "false"
+            - eval: n.r.SetApplyStalled(false)
+              to: n.r.SetApplyStalled
+          when: w.ceded && (applied != w.moved || applied >= commit)
+  - of: (*Node).declineNoted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).declineNoted
+        kind: self
+      - id: n.am.Lock
+        kind: value
+      - id: n.am.Unlock
+        kind: value
+      - id: n.obs.warn
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: m.Kind != coreconsensus.MsgTimeoutNow || !n.watch.ceded || m.From != n.lastLead || m.Term != n.lastTerm
+      - eval: n.am.Lock()
+        to: n.am.Lock
+      - bind: applied
+        eval: n.applied
+      - eval: n.am.Unlock()
+        to: n.am.Unlock
+      - eval: |-
+          n.obs.warn("consensus: a leadership transfer to this node is declined, it handed its leadership over for an apply that has not moved since",
+          		lattr("from", uint64(m.From)), lattr("applied", applied))
+        to: n.obs.warn
   - of: (*Node).mostCaughtUpVoter
     participants:
       - id: caller
         kind: actor
       - id: (*Node).mostCaughtUpVoter
         kind: self
-      - id: n.r.Progress
-        kind: value
+      - id: n.voterMatch
+        kind: internal
     steps:
       - var:
           name: to
@@ -11941,25 +12033,49 @@ sequences:
       - var:
           name: best
           type: uint64
+      - bind: pastFound
+        eval: "false"
       - loop:
           do:
-            - opt:
-                do:
-                  - continue: true
-                when: "!m.Voter || m.ID == n.stamp.ID"
-            - opt:
-                do:
-                  - set: to, best
-                    value: m.ID, match
-                init:
-                  bind: match, _, ok
-                  eval: n.r.Progress(m.ID)
-                  to: n.r.Progress
-                when: ok && (to == 0 || match > best)
+            - bind: match, ok
+              eval: n.voterMatch(m)
+              to: n.voterMatch
+            - switch:
+                cases:
+                  - case: "!ok"
+                  - case: m.ID == past
+                    do:
+                      - set: pastFound
+                        value: "true"
+                  - case: to == 0 || match > best
+                    do:
+                      - set: to, best
+                        value: m.ID, match
           key: _
           range: st.Conf.Members
           value: m
+      - opt:
+          do:
+            - return: past
+          when: to == 0 && pastFound
       - return: to
+  - of: (*Node).voterMatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).voterMatch
+        kind: self
+      - id: n.r.Progress
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: 0, false
+          when: "!m.Voter || m.ID == n.stamp.ID"
+      - bind: match, _, ok
+        eval: n.r.Progress(m.ID)
+        to: n.r.Progress
+      - return: match, ok
   - of: (*Node).cutExempt
     participants:
       - id: caller
@@ -16815,7 +16931,7 @@ sequences:
       - bind: timing
         eval: n.Status().Timing
       - bind: deadline
-        eval: n.clk.Now().Add(2 * timing.ElectionTimeoutMax)
+        eval: n.clk.Now().Add(handOffWindow * timing.ElectionTimeoutMax)
         to: n.clk.Now().Add
       - loop:
           do:
