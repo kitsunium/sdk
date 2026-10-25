@@ -93,10 +93,70 @@ func appendTo(rd *ReadyValue, to core.NodeID) (core.MessageValue, bool) {
 // it; a fetch asks for no more entries than one append carries, so a run
 // of small entries is not read whole for its head alone.
 func TestAFetchedBatchIsCutByItsEncoding(t *testing.T) {
-	cases := []struct {
+	type tc struct {
 		name               string
 		n, payload, budget int
-	}{
+	}
+	runCase := func(t *testing.T, c tc) {
+		r, store := evictedLeader(t, c.n, c.payload, c.budget)
+		// The encoding EntryLen states is the one AppendMessage writes.
+		one := core.MessageValue{Entries: store[:1]}
+		if got, want := wire.EntryLen(&store[0]), len(wire.AppendMessage(nil, &one))-len(wire.AppendMessage(nil, &core.MessageValue{})); got != want {
+			t.Fatalf("EntryLen says %d, an entry adds %d to its message", got, want)
+		}
+		span := uint64(max(1, c.budget/wire.EntryLen(&core.EntryValue{})))
+		// Peer 2 refuses the leader's first append: it holds nothing.
+		m := msg(core.MsgAppResp, 2, 1, 2)
+		m.Reject, m.Index = true, uint64(c.n)
+		r.Step(r.now, m)
+		appends, fetches := 0, 0
+		for range 4 * c.n {
+			if r.prs[2].match == r.log.lastIndex() {
+				break
+			}
+			rd := r.Ready()
+			for _, f := range rd.Fetch {
+				if f.To != 2 {
+					continue
+				}
+				fetches++
+				if f.Hi-f.Lo > span {
+					t.Fatalf("a fetch asked for [%d, %d), %d entries, one append carries %d at most under %d bytes", f.Lo, f.Hi, f.Hi-f.Lo, span, c.budget)
+				}
+				r.Fetched(f.To, f.Lo, storeRead(store, f.Lo, f.Hi, c.budget), false)
+				rd = r.Ready()
+			}
+			app, ok := appendTo(&rd, 2)
+			if !ok {
+				t.Fatalf("peer 2 at match %d of %d got neither a fetch nor an append", r.prs[2].match, r.log.lastIndex())
+			}
+			appends++
+			size := 0
+			for i := range app.Entries {
+				size += wire.EntryLen(&app.Entries[i])
+			}
+			frame := len(wire.AppendMessage(nil, &app))
+			if frame > c.budget+frameOverhead {
+				t.Fatalf("an append of %d entries from %d is a frame of %d bytes, %d of entries, over the %d a member reads under (MaxBatchBytes %d + 1 KiB)",
+					len(app.Entries), app.Index+1, frame, size, c.budget+frameOverhead, c.budget)
+			}
+			if len(app.Entries) > 1 && size > c.budget {
+				t.Fatalf("an append of %d entries carries %d bytes of them, over MaxBatchBytes %d", len(app.Entries), size, c.budget)
+			}
+			last := app.Entries[len(app.Entries)-1].Position.Index
+			if last < uint64(c.n) && size+wire.EntryLen(&store[last]) <= c.budget {
+				t.Fatalf("an append through %d carries %d bytes of entries, and the next, %d more, fits MaxBatchBytes %d: the cut is not the bound's", last, size, wire.EntryLen(&store[last]), c.budget)
+			}
+			ack := msg(core.MsgAppResp, 2, 1, 2)
+			ack.Index = last
+			r.Step(r.now, ack)
+		}
+		if r.prs[2].match != r.log.lastIndex() {
+			t.Fatalf("peer 2 stayed at match %d of %d", r.prs[2].match, r.log.lastIndex())
+		}
+		t.Logf("%d entries of %d bytes under MaxBatchBytes %d: %d fetches, %d appends", c.n, c.payload, c.budget, fetches, appends)
+	}
+	cases := []tc{
 		{"500-byte entries under 64 KiB, the issue's", 300, 500, 64 << 10},
 		{"empty entries under 4 KiB", 2000, 0, 4 << 10},
 		{"2-byte entries under 4 KiB", 2000, 2, 4 << 10},
@@ -104,64 +164,6 @@ func TestAFetchedBatchIsCutByItsEncoding(t *testing.T) {
 		{"entries of MaxBatchBytes, one an append", 6, 4 << 10, 4 << 10},
 	}
 	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			r, store := evictedLeader(t, c.n, c.payload, c.budget)
-			// The encoding EntryLen states is the one AppendMessage writes.
-			one := core.MessageValue{Entries: store[:1]}
-			if got, want := wire.EntryLen(&store[0]), len(wire.AppendMessage(nil, &one))-len(wire.AppendMessage(nil, &core.MessageValue{})); got != want {
-				t.Fatalf("EntryLen says %d, an entry adds %d to its message", got, want)
-			}
-			span := uint64(max(1, c.budget/wire.EntryLen(&core.EntryValue{})))
-			// Peer 2 refuses the leader's first append: it holds nothing.
-			m := msg(core.MsgAppResp, 2, 1, 2)
-			m.Reject, m.Index = true, uint64(c.n)
-			r.Step(r.now, m)
-			appends, fetches := 0, 0
-			for range 4 * c.n {
-				if r.prs[2].match == r.log.lastIndex() {
-					break
-				}
-				rd := r.Ready()
-				for _, f := range rd.Fetch {
-					if f.To != 2 {
-						continue
-					}
-					fetches++
-					if f.Hi-f.Lo > span {
-						t.Fatalf("a fetch asked for [%d, %d), %d entries, one append carries %d at most under %d bytes", f.Lo, f.Hi, f.Hi-f.Lo, span, c.budget)
-					}
-					r.Fetched(f.To, f.Lo, storeRead(store, f.Lo, f.Hi, c.budget), false)
-					rd = r.Ready()
-				}
-				app, ok := appendTo(&rd, 2)
-				if !ok {
-					t.Fatalf("peer 2 at match %d of %d got neither a fetch nor an append", r.prs[2].match, r.log.lastIndex())
-				}
-				appends++
-				size := 0
-				for i := range app.Entries {
-					size += wire.EntryLen(&app.Entries[i])
-				}
-				frame := len(wire.AppendMessage(nil, &app))
-				if frame > c.budget+frameOverhead {
-					t.Fatalf("an append of %d entries from %d is a frame of %d bytes, %d of entries, over the %d a member reads under (MaxBatchBytes %d + 1 KiB)",
-						len(app.Entries), app.Index+1, frame, size, c.budget+frameOverhead, c.budget)
-				}
-				if len(app.Entries) > 1 && size > c.budget {
-					t.Fatalf("an append of %d entries carries %d bytes of them, over MaxBatchBytes %d", len(app.Entries), size, c.budget)
-				}
-				last := app.Entries[len(app.Entries)-1].Position.Index
-				if last < uint64(c.n) && size+wire.EntryLen(&store[last]) <= c.budget {
-					t.Fatalf("an append through %d carries %d bytes of entries, and the next, %d more, fits MaxBatchBytes %d: the cut is not the bound's", last, size, wire.EntryLen(&store[last]), c.budget)
-				}
-				ack := msg(core.MsgAppResp, 2, 1, 2)
-				ack.Index = last
-				r.Step(r.now, ack)
-			}
-			if r.prs[2].match != r.log.lastIndex() {
-				t.Fatalf("peer 2 stayed at match %d of %d", r.prs[2].match, r.log.lastIndex())
-			}
-			t.Logf("%d entries of %d bytes under MaxBatchBytes %d: %d fetches, %d appends", c.n, c.payload, c.budget, fetches, appends)
-		})
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }

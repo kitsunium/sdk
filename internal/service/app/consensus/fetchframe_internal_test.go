@@ -101,77 +101,79 @@ func storeReadFrame(t *testing.T, log *MemoryLog, lo uint64, batch int) (frame, 
 func TestAFollowerBehindTheEvictedPayloadsCatchesUpUnderTheTightestFrame(t *testing.T) {
 	const batch = 64 << 10
 	entry := strings.Repeat("v", 500)
-	cases := []struct {
+	type tc struct {
 		name   string
 		frame  int
 		recent int64
-	}{
+	}
+	runCase := func(t *testing.T, c tc) {
+		ca := newTestCA(t)
+		ns := fetchFrameCluster(t, ca, c.frame, func(cfg *Config) {
+			cfg.MaxBatchBytes = batch
+			cfg.MaxEntryBytes = 4 << 10
+			cfg.RecentEntriesBytes = c.recent
+		})
+		l := tcpLeader(t, ns)
+		var f1, f2 *tcpNode
+		for _, tn := range ns {
+			switch {
+			case tn == l:
+			case f1 == nil:
+				f1 = tn
+			default:
+				f2 = tn
+			}
+		}
+		propose(t, l.node, "a=1")
+		lo := f1.node.Status().Commit + 1
+		f1.stop(t)
+		// About 300 KB of 500-byte writes while f1 is down: committed by
+		// l and f2, far below SnapshotEvery, so no cut and no compaction.
+		for i := range 600 {
+			propose(t, l.node, fmt.Sprintf("k%d=%s", i, entry))
+		}
+		want := l.node.Status().Commit
+		bound := c.frame
+		if bound == 0 {
+			bound = defaultMaxFrameBytes
+		}
+		frame, n, payload := storeReadFrame(t, l.log, lo, batch)
+		t.Logf("a store's read from %d under MaxBatchBytes %d: %d entries, %d payload bytes, an append frame of %d bytes sent whole; the follower reads under MaxFrameBytes %d",
+			lo, batch, n, payload, frame, bound)
+		if c.frame != 0 && frame <= bound {
+			t.Fatalf("setup: a store's read sent whole (%d bytes) is within the bound (%d), so nothing here is #683's", frame, bound)
+		}
+		fetchFrameTransport(t, f1, ca, f1.addr, c.frame)
+		f1.start(t, fetchFrameCID)
+		deadline := time.Now().Add(6 * time.Second)
+		for time.Now().Before(deadline) && f1.node.Status().Commit < want {
+			time.Sleep(20 * time.Millisecond)
+		}
+		st := f1.node.Status()
+		refused := f1.tr.refused.Load()
+		t.Logf("restarted follower: commit %d applied %d leader %d, the leader's commit %d; it refused %d frames above its bound", st.Commit, st.Applied, st.Leader, want, refused)
+		if st.Commit < want {
+			t.Fatalf("the restarted follower stayed at commit %d under the same leader, whose commit is %d", st.Commit, want)
+		}
+		if refused != 0 {
+			t.Fatalf("the restarted follower caught up, but refused %d frames above its MaxFrameBytes %d on the way", refused, bound)
+		}
+		// One more failure: the leader and f1 alone still commit.
+		f2.stop(t)
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_, _, err := l.node.Propose(ctx, []byte("z=9"))
+		cancel()
+		if err != nil {
+			t.Fatalf("with f2 down, Propose(\"z=9\"): %v; leader status role %v term %d commit %d", err, l.node.Status().Role, l.node.Status().Term, l.node.Status().Commit)
+		}
+	}
+	cases := []tc{
 		{"default MaxFrameBytes, payloads evicted", 0, 16 << 10},
 		{"MaxFrameBytes = MaxBatchBytes + 1 KiB, payloads in memory", batch + batchFrameOverhead, 0},
 		{"MaxFrameBytes = MaxBatchBytes + 1 KiB, payloads evicted", batch + batchFrameOverhead, 16 << 10},
 	}
 	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			ca := newTestCA(t)
-			ns := fetchFrameCluster(t, ca, c.frame, func(cfg *Config) {
-				cfg.MaxBatchBytes = batch
-				cfg.MaxEntryBytes = 4 << 10
-				cfg.RecentEntriesBytes = c.recent
-			})
-			l := tcpLeader(t, ns)
-			var f1, f2 *tcpNode
-			for _, tn := range ns {
-				switch {
-				case tn == l:
-				case f1 == nil:
-					f1 = tn
-				default:
-					f2 = tn
-				}
-			}
-			propose(t, l.node, "a=1")
-			lo := f1.node.Status().Commit + 1
-			f1.stop(t)
-			// About 300 KB of 500-byte writes while f1 is down: committed by
-			// l and f2, far below SnapshotEvery, so no cut and no compaction.
-			for i := range 600 {
-				propose(t, l.node, fmt.Sprintf("k%d=%s", i, entry))
-			}
-			want := l.node.Status().Commit
-			bound := c.frame
-			if bound == 0 {
-				bound = defaultMaxFrameBytes
-			}
-			frame, n, payload := storeReadFrame(t, l.log, lo, batch)
-			t.Logf("a store's read from %d under MaxBatchBytes %d: %d entries, %d payload bytes, an append frame of %d bytes sent whole; the follower reads under MaxFrameBytes %d",
-				lo, batch, n, payload, frame, bound)
-			if c.frame != 0 && frame <= bound {
-				t.Fatalf("setup: a store's read sent whole (%d bytes) is within the bound (%d), so nothing here is #683's", frame, bound)
-			}
-			fetchFrameTransport(t, f1, ca, f1.addr, c.frame)
-			f1.start(t, fetchFrameCID)
-			deadline := time.Now().Add(6 * time.Second)
-			for time.Now().Before(deadline) && f1.node.Status().Commit < want {
-				time.Sleep(20 * time.Millisecond)
-			}
-			st := f1.node.Status()
-			refused := f1.tr.refused.Load()
-			t.Logf("restarted follower: commit %d applied %d leader %d, the leader's commit %d; it refused %d frames above its bound", st.Commit, st.Applied, st.Leader, want, refused)
-			if st.Commit < want {
-				t.Fatalf("the restarted follower stayed at commit %d under the same leader, whose commit is %d", st.Commit, want)
-			}
-			if refused != 0 {
-				t.Fatalf("the restarted follower caught up, but refused %d frames above its MaxFrameBytes %d on the way", refused, bound)
-			}
-			// One more failure: the leader and f1 alone still commit.
-			f2.stop(t)
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			_, _, err := l.node.Propose(ctx, []byte("z=9"))
-			cancel()
-			if err != nil {
-				t.Fatalf("with f2 down, Propose(\"z=9\"): %v; leader status role %v term %d commit %d", err, l.node.Status().Role, l.node.Status().Term, l.node.Status().Commit)
-			}
-		})
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 
