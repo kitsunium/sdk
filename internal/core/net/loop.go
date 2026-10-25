@@ -70,6 +70,14 @@ const (
 	OptionAdopt
 	// OptionPreHandshake is PreHandshake.
 	OptionPreHandshake
+	// OptionPlaintext is Plaintext. Every engine honours it; with TLS it is refused
+	// with PlaintextWithTLS.
+	OptionPlaintext
+	// OptionName is Name. Every engine honours it.
+	OptionName
+	// OptionEngine is Engine. Every engine honours it, or refuses the group with
+	// EngineUnsupported.
+	OptionEngine
 )
 
 // optionNames holds each kind's constructor name, indexed by kind. Its length
@@ -92,6 +100,9 @@ var optionNames = [...]string{
 	OptionMaxConns:          "MaxConns",
 	OptionAdopt:             "Adopt",
 	OptionPreHandshake:      "PreHandshake",
+	OptionPlaintext:         "Plaintext",
+	OptionName:              "Name",
+	OptionEngine:            "Engine",
 }
 
 // String renders the option's name, as its constructor spells it.

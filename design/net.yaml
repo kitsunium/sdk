@@ -409,6 +409,28 @@ packages:
             name: CodeHTTP1Misconfigured
             value: "0x00_02_0B_37"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeEngineUnsupported identifies an Engine a group cannot run on: one its
+              handler's type has no such engine for, one another option contradicts, or a
+              value outside the engine constants (ADR 0187).
+            name: CodeEngineUnsupported
+            value: "0x00_02_0B_38"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodePlaintextWithTLS identifies a group given both Plaintext and TLS: the
+              group cannot both refuse and serve TLS (ADR 0187).
+            name: CodePlaintextWithTLS
+            value: "0x00_02_0B_39"
+        type: errs.Code
+      - const:
+          - doc: |-
+              CodeGroupNameConflict identifies a Name option that contradicts the name the
+              group was declared with, or names nothing (ADR 0187).
+            name: CodeGroupNameConflict
+            value: "0x00_02_0B_3A"
+        type: errs.Code
     constants:
       - blockDoc: The loop backends. The zero value is LoopBackendAuto.
         doc: |-
@@ -525,6 +547,46 @@ packages:
         name: OptionPreHandshake
         type: OptionKind
         value: "15"
+      - blockDoc: The group options a loop group judges at Start, by kind.
+        doc: |-
+          OptionPlaintext is Plaintext. Every engine honours it; with TLS it is refused
+          with PlaintextWithTLS.
+        name: OptionPlaintext
+        type: OptionKind
+        value: "16"
+      - blockDoc: The group options a loop group judges at Start, by kind.
+        doc: OptionName is Name. Every engine honours it.
+        name: OptionName
+        type: OptionKind
+        value: "17"
+      - blockDoc: The group options a loop group judges at Start, by kind.
+        doc: |-
+          OptionEngine is Engine. Every engine honours it, or refuses the group with
+          EngineUnsupported.
+        name: OptionEngine
+        type: OptionKind
+        value: "18"
+      - blockDoc: The engine families a group may name with Engine. The zero value is EngineAuto.
+        doc: |-
+          EngineAuto lets the group's handler type choose its engine (ADR 0187): a loop
+          handler runs on the loop engine, every other handler on the goroutine engine.
+        name: EngineAuto
+        type: EngineValue
+        value: "0"
+      - blockDoc: The engine families a group may name with Engine. The zero value is EngineAuto.
+        doc: |-
+          EngineGoroutine is the default engine: one goroutine per connection on the
+          runtime's netpoller. It serves Handle, HandleFunc and HandleHTTP.
+        name: EngineGoroutine
+        type: EngineValue
+        value: "1"
+      - blockDoc: The engine families a group may name with Engine. The zero value is EngineAuto.
+        doc: |-
+          EngineLoop is the loop engine of ADR 0186. It serves HandleLoop; Loop picks its
+          backend.
+        name: EngineLoop
+        type: EngineValue
+        value: "2"
       - doc: |-
           HTTP1MaxFields is how many field lines one request of the restricted
           HTTP/1.1 profile may carry. It sizes HTTP1RequestValue.Fields, so a request is
@@ -1930,6 +1992,38 @@ packages:
             private: "core/net: a negative bound, a head past HTTP1MaxHead, a target past the head, or a body past HTTP1MaxBody"
             public: The HTTP/1.1 profile limits are not valid
             reason: HTTP1_MISCONFIGURED
+          - code: CodeEngineUnsupported
+            doc: |-
+              EngineUnsupported is returned by Start for a group whose Engine cannot serve
+              it: EngineGoroutine on a group served by HandleLoop or given Loop, EngineLoop
+              on a group served by Handle, HandleFunc or HandleHTTP or on a datagram group,
+              or a value outside the engine constants. The "engine" field names the value.
+              It is refused, never replaced by another engine (ADR 0187).
+            exit: CONFIG
+            name: EngineUnsupported
+            private: "core/net: the Engine option names an engine the group's handler or options cannot run on"
+            public: The group's engine cannot serve its handler
+            reason: ENGINE_UNSUPPORTED
+          - code: CodePlaintextWithTLS
+            doc: |-
+              PlaintextWithTLS is returned by Start for a group given both Plaintext and
+              TLS, in either order. The group is never served in plaintext nor over TLS by
+              default: the contradiction is the caller's to settle (ADR 0187).
+            exit: CONFIG
+            name: PlaintextWithTLS
+            private: "core/net: a group was given both Plaintext and TLS"
+            public: The group cannot be both plaintext and TLS
+            reason: PLAINTEXT_WITH_TLS
+          - code: CodeGroupNameConflict
+            doc: |-
+              GroupNameConflict is returned by Start for a group given a Name that is empty
+              or differs from the non-empty name it was declared with. The "group" and
+              "name" fields carry both.
+            exit: USAGE
+            name: GroupNameConflict
+            private: "core/net: the Name option contradicts the group's declared name, or is empty"
+            public: The group's name is not consistent
+            reason: GROUP_NAME_CONFLICT
     types:
       - doc: |-
           AddressValue names one socket to bind. It is a value type so a group's listen
@@ -2142,6 +2236,19 @@ packages:
             recv: pointer
         name: DurationValue
         underlying: time.Duration
+      - doc: |-
+          EngineValue names the engine family a group runs on, passed by Engine (ADR
+          0187): the goroutine engine or the loop engine. The zero value, EngineAuto,
+          lets the handler's type choose. The backend inside the loop family is
+          LoopValue.Backend's.
+        methods:
+          - doc: String renders the engine as an error field spells it.
+            name: String
+            out:
+              - type: string
+            recv: value
+        name: EngineValue
+        underlying: uint8
       - doc: |-
           HTTP1LimitsValue bounds what one request of the restricted HTTP/1.1 profile
           may carry. Zero means the profile's default, never unbounded; a negative
@@ -4037,6 +4144,41 @@ packages:
         out:
           - type: GroupOption
       - doc: |-
+          Plaintext declares that the group serves no TLS (ADR 0187). Every engine
+          honours it. A group given both Plaintext and TLS, in either order, fails
+          Start with PlaintextWithTLS. It is not yet required of a plaintext group:
+          the simple API will require it of every HTTP group without TLS.
+        name: Plaintext
+        out:
+          - type: GroupOption
+      - doc: |-
+          Name names the group in State, logs and errors (ADR 0187). On a group
+          declared with an empty name it sets the name, which must then be unique like
+          any other; on one declared with a name it must repeat it. An empty Name, or
+          one that differs from a non-empty declared name, fails Start with
+          GroupNameConflict.
+        in:
+          - name: name
+            type: string
+        name: Name
+        out:
+          - type: GroupOption
+      - doc: |-
+          Engine names the engine family the group runs on (ADR 0187): EngineGoroutine,
+          one goroutine per connection, or EngineLoop, the loop engine; Loop then
+          picks the loop's backend. The zero value, EngineAuto, lets the handler's
+          type choose, which is what a group without the option does. An engine the
+          group's handler cannot run on, or that another option contradicts —
+          EngineGoroutine with Loop or HandleLoop, EngineLoop with Handle, HandleFunc
+          or HandleHTTP or on a datagram group — fails Start with EngineUnsupported,
+          and is never replaced by the other engine.
+        in:
+          - name: e
+            type: corenet.EngineValue
+        name: Engine
+        out:
+          - type: GroupOption
+      - doc: |-
           WithDrainTimeout bounds how long Shutdown waits for in-flight connections
           before closing them hard.
         in:
@@ -4488,9 +4630,10 @@ packages:
               on Linux, and the portable backend, the default engine's accept path
               serialised onto one handler goroutine, everywhere else. Start refuses a loop
               group given TLS with LoopTLSUnsupported, one given Use or an option neither
-              the engine (IdleTimeout, MaxConns, Adopt) nor h, through
-              LoopOptionHonourer, honours with LoopOptionUnsupported, and an explicit
-              backend the platform or the kernel cannot run with UnsupportedPlatform or
+              the engine (IdleTimeout, MaxConns, Adopt, Plaintext, Name, Engine) nor h,
+              through LoopOptionHonourer, honours with LoopOptionUnsupported — an option
+              given counts, its zero value included —, and an explicit backend the
+              platform or the kernel cannot run with UnsupportedPlatform or
               LoopBackendUnavailable.
 
               A callback of h runs on the loop's thread and must not block it: a blocking
@@ -6669,6 +6812,54 @@ packages:
             type: OptionKind
             typed: true
             value: "15"
+      - const:
+          - doc: OptionPlaintext is Plaintext. Every engine honours it.
+            name: OptionPlaintext
+            reexport: corenet.OptionPlaintext
+            type: OptionKind
+            typed: true
+            value: "16"
+      - const:
+          - doc: OptionName is Name. Every engine honours it.
+            name: OptionName
+            reexport: corenet.OptionName
+            type: OptionKind
+            typed: true
+            value: "17"
+      - const:
+          - doc: OptionEngine is Engine. Every engine honours it, or refuses the group.
+            name: OptionEngine
+            reexport: corenet.OptionEngine
+            type: OptionKind
+            typed: true
+            value: "18"
+      - alias:
+          - doc: |-
+              EngineValue names the engine family a group runs on, passed by Engine. The
+              zero value, EngineAuto, lets the handler's type choose.
+            name: EngineValue
+            target: corenet.EngineValue
+      - const:
+          - doc: EngineAuto lets the group's handler type choose its engine.
+            name: EngineAuto
+            reexport: corenet.EngineAuto
+            type: EngineValue
+            typed: true
+            value: "0"
+      - const:
+          - doc: EngineGoroutine is the default engine, one goroutine per connection.
+            name: EngineGoroutine
+            reexport: corenet.EngineGoroutine
+            type: EngineValue
+            typed: true
+            value: "1"
+      - const:
+          - doc: EngineLoop is the loop engine; Loop picks its backend.
+            name: EngineLoop
+            reexport: corenet.EngineLoop
+            type: EngineValue
+            typed: true
+            value: "2"
       - alias:
           - doc: Phase is where a server sits in its lifecycle.
             name: Phase
@@ -6765,6 +6956,18 @@ packages:
           - doc: LoopOptionUnsupported reports a group option a loop group cannot honour.
             name: LoopOptionUnsupported
             reexport: corenet.LoopOptionUnsupported
+            type: "*errs.Error"
+          - doc: EngineUnsupported reports an Engine the group's handler or options cannot run on.
+            name: EngineUnsupported
+            reexport: corenet.EngineUnsupported
+            type: "*errs.Error"
+          - doc: PlaintextWithTLS reports a group given both Plaintext and TLS.
+            name: PlaintextWithTLS
+            reexport: corenet.PlaintextWithTLS
+            type: "*errs.Error"
+          - doc: GroupNameConflict reports a Name that is empty or contradicts the group's declared name.
+            name: GroupNameConflict
+            reexport: corenet.GroupNameConflict
             type: "*errs.Error"
           - doc: LoopBackendUnavailable reports an explicit loop backend the kernel's probe refused.
             name: LoopBackendUnavailable
@@ -7083,6 +7286,45 @@ packages:
           out:
             - type: GroupOption
           variadic: true
+      - func:
+          doc: |-
+            Plaintext declares that the group serves no TLS. Every engine honours it. A
+            group given both Plaintext and TLS, in either order, fails Start with
+            PlaintextWithTLS. It is not yet required of a plaintext group: the simple
+            API will require it of every HTTP group without TLS.
+          forward: svcserver.Plaintext
+          name: Plaintext
+          out:
+            - type: GroupOption
+      - func:
+          doc: |-
+            Name names the group in State, logs and errors. On a group declared with an
+            empty name it sets the name, which must then be unique like any other; on one
+            declared with a name it must repeat it. An empty Name, or one that differs
+            from a non-empty declared name, fails Start with GroupNameConflict.
+          forward: svcserver.Name
+          in:
+            - name: name
+              type: string
+          name: Name
+          out:
+            - type: GroupOption
+      - func:
+          doc: |-
+            Engine names the engine family the group runs on: EngineGoroutine, one
+            goroutine per connection, or EngineLoop, the loop engine; Loop then picks the
+            loop's backend. The zero value, EngineAuto, lets the handler's type choose.
+            An engine the group's handler cannot run on, or that another option
+            contradicts — EngineGoroutine with Loop or HandleLoop, EngineLoop with
+            Handle, HandleFunc or HandleHTTP or on a datagram group — fails Start with
+            EngineUnsupported, and is never replaced by the other engine.
+          forward: svcserver.Engine
+          in:
+            - name: e
+              type: EngineValue
+          name: Engine
+          out:
+            - type: GroupOption
     imports:
       corenet: github.com/kitsunium/sdk/internal/core/net
       errs: github.com/kitsunium/sdk/internal/kernel/errs

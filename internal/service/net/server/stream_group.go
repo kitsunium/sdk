@@ -57,6 +57,16 @@ type StreamGroup struct {
 	// loopHandler is the group's loop handler, set by HandleLoop; a group
 	// with one is served by the loop engine (ADR 0186 §D1).
 	loopHandler corenet.LoopHandler
+	// kinds is the set of option kinds the group was given, a zero value
+	// included, so a refusal reads what was posed rather than guessing from a
+	// non-zero field (ADR 0187).
+	kinds optionSet
+	// engine is the Engine option's value; it is read only when kinds holds
+	// OptionEngine.
+	engine corenet.EngineValue
+	// optName is the Name option's value; it is read only when kinds holds
+	// OptionName.
+	optName string
 }
 
 // Name returns the group's name.
@@ -148,6 +158,8 @@ func (g *StreamGroup) tracksCloses() bool {
 // Use appends middlewares, outermost first.
 func (g *StreamGroup) Use(middlewares ...corenet.Middleware[corenet.ConnHandler]) *StreamGroup {
 	g.middlewares = append(g.middlewares, middlewares...)
+	//: posed, even with no middleware: a loop group refuses the call itself.
+	g.kinds.add(corenet.OptionMiddleware)
 	//: returned for chaining.
 	return g
 }

@@ -5,6 +5,8 @@ import (
 	stdnet "net"
 	"sync"
 	"sync/atomic"
+
+	corenet "github.com/kitsunium/sdk/internal/core/net"
 )
 
 const (
@@ -141,6 +143,7 @@ func PreHandshake(a *Admission) GroupOption {
 	//: the option is applied by the constructor, in declaration order.
 	return func(g *StreamGroup) {
 		g.admission = a
+		g.kinds.add(corenet.OptionPreHandshake)
 	}
 }
 

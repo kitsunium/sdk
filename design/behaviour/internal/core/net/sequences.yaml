@@ -111,6 +111,23 @@ sequences:
       - set: "*d"
         value: DurationValue(parsed)
       - return: nil
+  - of: EngineValue.String
+    steps:
+      - switch:
+          cases:
+            - case: EngineAuto
+              do:
+                - return: "\"auto\""
+            - case: EngineGoroutine
+              do:
+                - return: "\"goroutine\""
+            - case: EngineLoop
+              do:
+                - return: "\"loop\""
+            - default: true
+              do:
+                - return: "\"unknown\""
+          "on": e
   - of: foldByte
     steps:
       - opt:

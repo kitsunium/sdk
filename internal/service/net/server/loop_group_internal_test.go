@@ -285,6 +285,18 @@ func TestLoopGroup_refusals(t *testing.T) {
 		{name: "ReadHeaderTimeout the handler honours", opts: []GroupOption{ReadHeaderTimeout(time.Second)}, h: &honouringH{loopLineH{honours: []corenet.OptionKind{corenet.OptionReadHeaderTimeout}}}},
 		{name: "Use even when the handler claims it", h: &honouringH{loopLineH{honours: []corenet.OptionKind{corenet.OptionMiddleware}}}, also: func(g *StreamGroup) { g.Use(func(next corenet.ConnHandler) corenet.ConnHandler { return next }) }, want: corenet.CodeLoopOptionUnsupported, wantOpt: "Use"},
 		{name: "IdleTimeout and MaxConns are the engine's", opts: []GroupOption{IdleTimeout(time.Minute), MaxConns(10)}},
+		//: the kind set: an option given with its zero value is given (ADR 0187).
+		{name: "ReadTimeout(0) is given", opts: []GroupOption{ReadTimeout(0)}, want: corenet.CodeLoopOptionUnsupported, wantOpt: "ReadTimeout"},
+		{name: "Shards(0) is given", opts: []GroupOption{Shards(0)}, want: corenet.CodeLoopOptionUnsupported, wantOpt: "Shards"},
+		{name: "TLS with a zero identity is given", opts: []GroupOption{TLS(corenet.IdentityValue{})}, want: corenet.CodeLoopTLSUnsupported},
+		{name: "Use with no middleware is given", also: func(g *StreamGroup) { g.Use() }, want: corenet.CodeLoopOptionUnsupported, wantOpt: "Use"},
+		//: the three options every engine honours.
+		{name: "Plaintext, Name and Engine are the engine's", opts: []GroupOption{Plaintext(), Name("loop"), Engine(corenet.EngineLoop)}},
+		{name: "EngineAuto is the engine's", opts: []GroupOption{Engine(corenet.EngineAuto)}},
+		{name: "EngineGoroutine contradicts the loop handler", opts: []GroupOption{Engine(corenet.EngineGoroutine)}, want: corenet.CodeEngineUnsupported},
+		{name: "an engine outside the block", opts: []GroupOption{Engine(corenet.EngineLoop + 1)}, want: corenet.CodeEngineUnsupported},
+		{name: "Plaintext with TLS", opts: []GroupOption{TLS(id), Plaintext()}, want: corenet.CodePlaintextWithTLS},
+		{name: "a Name that contradicts the group's", opts: []GroupOption{Name("other")}, want: corenet.CodeGroupNameConflict},
 		{name: "a second handler wins", also: func(g *StreamGroup) { g.HandleFunc(func(context.Context, corenet.Conn) error { return nil }) }, opts: []GroupOption{TLS(id)}, want: corenet.CodeHandlerAlreadySet},
 	}
 	for _, c := range tests {
@@ -381,5 +393,53 @@ func TestLoopGroup_loopIndex(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// allHonoursH is a loop handler that claims to honour every kind.
+type allHonoursH struct{ loopLineH }
+
+func (h *allHonoursH) Honours(corenet.OptionKind) bool { return true }
+
+// TestLoopGroup_middlewareRefused pins that OptionMiddleware stays out of every
+// loop group (ADR 0186 §D1, ADR 0187): there is no ConnHandler to decorate,
+// so Use is refused on every backend, whatever the handler claims, and the
+// handler's Honours is not even asked about it.
+func TestLoopGroup_middlewareRefused(t *testing.T) {
+	t.Parallel()
+	mw := func(next corenet.ConnHandler) corenet.ConnHandler { return next }
+	type tc struct {
+		name string
+		h    corenet.LoopHandler
+		use  func(g *StreamGroup)
+	}
+	tests := []tc{
+		{name: "a handler that honours nothing", h: &loopLineH{}, use: func(g *StreamGroup) { g.Use(mw) }},
+		{name: "a handler that claims Use", h: &honouringH{loopLineH{honours: []corenet.OptionKind{corenet.OptionMiddleware}}}, use: func(g *StreamGroup) { g.Use(mw) }},
+		{name: "a handler that claims every kind", h: &allHonoursH{}, use: func(g *StreamGroup) { g.Use(mw, mw) }},
+		{name: "Use with no middleware, every kind claimed", h: &allHonoursH{}, use: func(g *StreamGroup) { g.Use() }},
+	}
+	for _, b := range loopBackends() {
+		for _, c := range tests {
+			t.Run(b.String()+"/"+c.name, func(t *testing.T) {
+				t.Parallel()
+				srv := New()
+				t.Cleanup(func() { swallowErr(srv.Close()) })
+				g := srv.Group("loop", Listen("tcp", "127.0.0.1:0"), Loop(corenet.LoopValue{Backend: b})).HandleLoop(c.h)
+				c.use(g)
+				err := srv.Start(t.Context())
+				if !errs.HasCode(err, corenet.CodeLoopOptionUnsupported) {
+					t.Fatalf("Start = %v, want LoopOptionUnsupported", err)
+				}
+				if !slices.ContainsFunc(errs.FieldsOf(err), func(f errs.FieldValue) bool {
+					return f.Key() == "option" && f.StringValue() == "Use"
+				}) {
+					t.Fatalf("fields %v, want option=Use", errs.FieldsOf(err))
+				}
+				if n := len(srv.State().Listeners); n != 0 {
+					t.Fatalf("a refused Start bound %d listeners", n)
+				}
+			})
+		}
 	}
 }

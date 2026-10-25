@@ -31,9 +31,10 @@ type loopEngine interface {
 // on Linux, and the portable backend, the default engine's accept path
 // serialised onto one handler goroutine, everywhere else. Start refuses a loop
 // group given TLS with LoopTLSUnsupported, one given Use or an option neither
-// the engine (IdleTimeout, MaxConns, Adopt) nor h, through
-// LoopOptionHonourer, honours with LoopOptionUnsupported, and an explicit
-// backend the platform or the kernel cannot run with UnsupportedPlatform or
+// the engine (IdleTimeout, MaxConns, Adopt, Plaintext, Name, Engine) nor h,
+// through LoopOptionHonourer, honours with LoopOptionUnsupported — an option
+// given counts, its zero value included —, and an explicit backend the
+// platform or the kernel cannot run with UnsupportedPlatform or
 // LoopBackendUnavailable.
 //
 // A callback of h runs on the loop's thread and must not block it: a blocking
@@ -53,18 +54,20 @@ func (g *StreamGroup) HandleLoop(h corenet.LoopHandler) *StreamGroup {
 
 // loopRefusal judges a loop group's options at Start, once its handler is
 // known: TLS is never served (LoopTLSUnsupported), Use never applies, and
-// every other option set is refused unless the loop engine or the handler
-// honours it (LoopOptionUnsupported, naming it).
+// every other option given — a zero value included — is refused unless the
+// loop engine or the handler honours it (LoopOptionUnsupported, naming it).
+// It reads the set of kinds the group was given, never a guess from non-zero
+// fields (ADR 0187).
 func (g *StreamGroup) loopRefusal() error {
-	//: plaintext only (ADR 0186 §D2).
-	if !g.identity.IsZero() {
+	//: plaintext only (ADR 0186 §D2), whatever identity TLS was given.
+	if g.kinds.has(corenet.OptionTLS) {
 		//: refused by name.
 		return errs.Wrap(corenet.LoopTLSUnsupported, errs.WrapParams{}, errs.String("group", g.name))
 	}
 	honours, _ := g.loopHandler.(corenet.LoopOptionHonourer)
-	//: every option the group was given, in a fixed order.
-	for _, k := range g.loopOptionsSet() {
-		//: the engine's own, or the handler's.
+	//: every option the group was given, in the constant block's order.
+	for _, k := range g.kinds.list() {
+		//: the engine's own, or the handler's; Use never, whatever it claims.
 		if loopHonours(k) || (honours != nil && k != corenet.OptionMiddleware && honours.Honours(k)) {
 			continue
 		}
@@ -77,38 +80,22 @@ func (g *StreamGroup) loopRefusal() error {
 }
 
 // loopHonours reports the options the loop engine honours itself (ADR 0186
-// §D4): IdleTimeout, MaxConns and Adopt. Listen and Loop are not options a
-// loop judges; the drain is the server's.
+// §D4, ADR 0187): IdleTimeout, MaxConns and Adopt, and Plaintext, Name and
+// Engine, which every engine honours. Listen and Loop are not options a loop
+// judges; the drain is the server's.
 func loopHonours(k corenet.OptionKind) bool {
-	//: the three the engine applies.
-	return k == corenet.OptionIdleTimeout || k == corenet.OptionMaxConns || k == corenet.OptionAdopt
-}
-
-// loopOptionsSet lists the kinds of every option set on the group.
-func (g *StreamGroup) loopOptionsSet() []corenet.OptionKind {
-	var set []corenet.OptionKind
-	add := func(on bool, k corenet.OptionKind) {
-		//: only what was given.
-		if on {
-			set = append(set, k)
-		}
+	//: the six the engine applies.
+	switch k {
+	//: applied by the loop itself.
+	case corenet.OptionIdleTimeout, corenet.OptionMaxConns, corenet.OptionAdopt,
+		corenet.OptionPlaintext, corenet.OptionName, corenet.OptionEngine:
+		//: honoured.
+		return true
+	//: every other kind needs the handler.
+	default:
+		//: not the engine's.
+		return false
 	}
-	add(len(g.middlewares) > 0, corenet.OptionMiddleware)
-	add(g.timeouts.Read > 0, corenet.OptionReadTimeout)
-	add(g.timeouts.Write > 0, corenet.OptionWriteTimeout)
-	add(g.timeouts.Idle > 0, corenet.OptionIdleTimeout)
-	add(g.http.readHeaderTimeout > 0, corenet.OptionReadHeaderTimeout)
-	add(g.http.maxHeaderBytes > 0, corenet.OptionMaxHeaderBytes)
-	add(g.timeouts.Handshake > 0, corenet.OptionHandshakeTimeout)
-	add(g.limits.ReadBufferSize > 0, corenet.OptionReadBufferSize)
-	add(g.limits.MaxPacketSize > 0, corenet.OptionMaxPacketSize)
-	add(g.limits.BatchSize > 0, corenet.OptionBatchSize)
-	add(g.limits.Shards > 0, corenet.OptionShards)
-	add(g.limits.MaxConns > 0, corenet.OptionMaxConns)
-	add(len(g.adopt) > 0, corenet.OptionAdopt)
-	add(g.admission != nil, corenet.OptionPreHandshake)
-	//: in the constant block's order.
-	return set
 }
 
 // bindLoopGroup binds or adopts a loop group's listeners, registers them as

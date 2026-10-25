@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T12:00:00Z -->
+<!-- updated: 2026-10-25T12:00:00Z -->
 # pkg/v1/net/server/
 
 ## Purpose
@@ -38,10 +38,12 @@ in the dimension that motivated the domain, whatever else it gained.
 | `WithDrainTimeout` | server option |
 | `DrainSignal` | the shutdown signal a handler holding a connection open watches |
 | `ListenFailed` … `ConnLimitReached` | sentinels |
-| `Group.HandleLoop` | serves a plaintext group on the loop engine (ADR 0186, §D9 step 11): io_uring or epoll on Linux, the portable backend elsewhere; TLS, `Use` and every option neither the engine nor the handler honours are refused at `Start`. `TestHandleLoopServesInPublic` serves one with this package alone |
+| `Group.HandleLoop` | serves a plaintext group on the loop engine (ADR 0186, §D9 step 11): io_uring or epoll on Linux, the portable backend elsewhere; TLS, `Use` and every option given — its zero value included — that neither the engine nor the handler honours are refused at `Start` (ADR 0187 §D2). `TestHandleLoopServesInPublic` serves one with this package alone |
 | `Loop`, `LoopValue`, `LoopBackend`, `LoopBackend*` | a group's loop engine (ADR 0186 §D5): a `HandleLoop` group runs on it, any other group refuses it with `LoopOptionUnsupported` |
 | `LoopHandler`, `LoopIO`, `LoopOptionHonourer`, `LoopConnRef`, `PostFunc`, `OptionKind`, `Option*` | the loop ports and values (§D9 step 6); `LoopIO.Loop` names the loop a callback runs on, so a handler keeps per-loop state in a slice; `TestLoopPortsArePublic` writes one with this package alone |
 | `LoopState`, `LoopRingState` | `State.Loops`, empty while no loop group exists |
+| `Plaintext`, `Name`, `Engine`, `EngineValue`, `EngineAuto`, `EngineGoroutine`, `EngineLoop` | ADR 0187: a group declared plaintext, named, or pinned to an engine family; honoured by every engine, a contradiction refused at `Start` with `EngineUnsupported`, `PlaintextWithTLS` or `GroupNameConflict` |
+| `EngineUnsupported`, `PlaintextWithTLS`, `GroupNameConflict` | ADR 0187's sentinels |
 | `HandlerAlreadySet`, `LoopTLSUnsupported` … `LoopWrongThread` | the loop's sentinels, and a second handler on one group |
 
 `sse` is the Server-Sent Events half, `websocket` is WebSocket (RFC 6455) and
@@ -115,4 +117,5 @@ cd pkg && GOWORK=off go test -race -cover ./v1/net/server/...
 
 - ADR 0029 — `docs/adr/0029-sdk-net-domain.md`
 - ADR 0047 — WebSocket — `docs/adr/0047-sdk-net-websocket.md`
+- ADR 0187 — the handler type chooses the engine — `docs/adr/0187-the-handler-type-chooses-the-engine.md`
 - `internal/core/net/CLAUDE.md`, `internal/service/net/server/CLAUDE.md`

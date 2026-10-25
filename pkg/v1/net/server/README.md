@@ -85,6 +85,7 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
 - [func Chain\(h Handler, middlewares ...Middleware\) Handler](<#Chain>)
 - [func ChainPacket\(h PacketHandler, middlewares ...PacketMiddleware\) PacketHandler](<#ChainPacket>)
 - [func DrainSignal\(ctx context.Context\) \<-chan struct{}](<#DrainSignal>)
+- [func Engine\(e EngineValue\) GroupOption](<#Engine>)
 - [func HandshakeTimeout\(d time.Duration\) GroupOption](<#HandshakeTimeout>)
 - [func IdleTimeout\(d time.Duration\) GroupOption](<#IdleTimeout>)
 - [func Listen\(network string, addr string\) GroupOption](<#Listen>)
@@ -92,7 +93,9 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
 - [func MaxConns\(n int\) GroupOption](<#MaxConns>)
 - [func MaxHeaderBytes\(n int\) GroupOption](<#MaxHeaderBytes>)
 - [func MaxPacketSize\(n int\) GroupOption](<#MaxPacketSize>)
+- [func Name\(name string\) GroupOption](<#Name>)
 - [func New\(opts ...Option\) \*Server](<#New>)
+- [func Plaintext\(\) GroupOption](<#Plaintext>)
 - [func ReadBufferSize\(n int\) GroupOption](<#ReadBufferSize>)
 - [func ReadHeaderTimeout\(d time.Duration\) GroupOption](<#ReadHeaderTimeout>)
 - [func ReadTimeout\(d time.Duration\) GroupOption](<#ReadTimeout>)
@@ -104,6 +107,8 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
   - [func \(Conn\) Buffer\(\) \[\]byte](<#Conn.Buffer>)
   - [func \(Conn\) Group\(\) string](<#Conn.Group>)
   - [func \(Conn\) ID\(\) uint64](<#Conn.ID>)
+- [type EngineValue](<#EngineValue>)
+  - [func \(EngineValue\) String\(\) string](<#EngineValue.String>)
 - [type Group](<#Group>)
   - [func \(\*Group\) Handle\(h corenet.ConnHandler\) \*StreamGroup](<#Group.Handle>)
   - [func \(\*Group\) HandleFunc\(f corenet.ConnHandlerFunc\) \*StreamGroup](<#Group.HandleFunc>)
@@ -176,6 +181,33 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
 
 ## Constants
 
+<a name="EngineAuto"></a>
+```go
+const EngineAuto EngineValue = 0
+```
+
+EngineAuto lets the group's handler type choose its engine.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.EngineAuto`.
+
+<a name="EngineGoroutine"></a>
+```go
+const EngineGoroutine EngineValue = 1
+```
+
+EngineGoroutine is the default engine, one goroutine per connection.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.EngineGoroutine`.
+
+<a name="EngineLoop"></a>
+```go
+const EngineLoop EngineValue = 2
+```
+
+EngineLoop is the loop engine; Loop picks its backend.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.EngineLoop`.
+
 <a name="LoopBackendAuto"></a>
 ```go
 const LoopBackendAuto LoopBackend = 0
@@ -229,6 +261,15 @@ const OptionBatchSize OptionKind = 11
 OptionBatchSize is BatchSize.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionBatchSize`.
+
+<a name="OptionEngine"></a>
+```go
+const OptionEngine OptionKind = 18
+```
+
+OptionEngine is Engine. Every engine honours it, or refuses the group.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionEngine`.
 
 <a name="OptionHandshakeTimeout"></a>
 ```go
@@ -284,6 +325,15 @@ OptionMiddleware is Use. A loop group always refuses it.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionMiddleware`.
 
+<a name="OptionName"></a>
+```go
+const OptionName OptionKind = 17
+```
+
+OptionName is Name. Every engine honours it.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionName`.
+
 <a name="OptionNone"></a>
 ```go
 const OptionNone OptionKind = 0
@@ -292,6 +342,15 @@ const OptionNone OptionKind = 0
 OptionNone names no option; it is the zero value.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionNone`.
+
+<a name="OptionPlaintext"></a>
+```go
+const OptionPlaintext OptionKind = 16
+```
+
+OptionPlaintext is Plaintext. Every engine honours it.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionPlaintext`.
 
 <a name="OptionPreHandshake"></a>
 ```go
@@ -436,6 +495,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/net.DrainTimeout`.
 
 Code `0.2.11.10` · reason `DRAIN_TIMEOUT` · public "The server did not drain before its deadline"
 
+<a name="EngineUnsupported"></a>
+```go
+var EngineUnsupported *errs.Error
+```
+
+EngineUnsupported reports an Engine the group's handler or options cannot run on.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.EngineUnsupported`.
+
+Code `0.2.11.56` · reason `ENGINE_UNSUPPORTED` · public "The group's engine cannot serve its handler"
+
 <a name="GroupDuplicate"></a>
 ```go
 var GroupDuplicate *errs.Error
@@ -446,6 +516,17 @@ GroupDuplicate reports a second group declared under one name.
 Initialised with `github.com/kitsunium/sdk/internal/core/net.GroupDuplicate`.
 
 Code `0.2.11.12` · reason `GROUP_DUPLICATE` · public "The listener group is already declared"
+
+<a name="GroupNameConflict"></a>
+```go
+var GroupNameConflict *errs.Error
+```
+
+GroupNameConflict reports a Name that is empty or contradicts the group's declared name.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.GroupNameConflict`.
+
+Code `0.2.11.58` · reason `GROUP_NAME_CONFLICT` · public "The group's name is not consistent"
 
 <a name="HandlerAlreadySet"></a>
 ```go
@@ -590,6 +671,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopWrongThread`.
 
 Code `0.2.11.43` · reason `LOOP_WRONG_THREAD` · public "The operation was called outside its loop"
 
+<a name="PlaintextWithTLS"></a>
+```go
+var PlaintextWithTLS *errs.Error
+```
+
+PlaintextWithTLS reports a group given both Plaintext and TLS.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.PlaintextWithTLS`.
+
+Code `0.2.11.57` · reason `PLAINTEXT_WITH_TLS` · public "The group cannot be both plaintext and TLS"
+
 <a name="UnsupportedNetwork"></a>
 ```go
 var UnsupportedNetwork *errs.Error
@@ -655,6 +747,15 @@ DrainSignal returns the channel closed when the server serving this request begi
 It is how a handler that holds a connection open indefinitely — an event stream, a long poll — learns that finishing now is the cooperative thing to do. Without it such a handler holds the drain open until the budget expires and its socket is severed under it, on every shutdown.
 
 A nil channel blocks forever, so a select that watches it needs no nil check and behaves correctly on a server that publishes nothing.
+
+<a name="Engine"></a>
+## func [Engine](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+```go
+func Engine(e EngineValue) GroupOption
+```
+
+Engine names the engine family the group runs on: EngineGoroutine, one goroutine per connection, or EngineLoop, the loop engine; Loop then picks the loop's backend. The zero value, EngineAuto, lets the handler's type choose. An engine the group's handler cannot run on, or that another option contradicts — EngineGoroutine with Loop or HandleLoop, EngineLoop with Handle, HandleFunc or HandleHTTP or on a datagram group — fails Start with EngineUnsupported, and is never replaced by the other engine.
 
 <a name="HandshakeTimeout"></a>
 ## func [HandshakeTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
@@ -731,6 +832,15 @@ MaxPacketSize caps the datagram size a group accepts.
 
 A larger datagram is dropped and counted in [State](#State).OversizedPackets, never delivered. Truncating would hand the handler a prefix indistinguishable from a complete message, which is a correctness problem rather than a capacity one; a drop it can observe in State is the honest answer.
 
+<a name="Name"></a>
+## func [Name](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+```go
+func Name(name string) GroupOption
+```
+
+Name names the group in State, logs and errors. On a group declared with an empty name it sets the name, which must then be unique like any other; on one declared with a name it must repeat it. An empty Name, or one that differs from a non-empty declared name, fails Start with GroupNameConflict.
+
 <a name="New"></a>
 ## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
@@ -739,6 +849,15 @@ func New(opts ...Option) *Server
 ```
 
 New builds a server.
+
+<a name="Plaintext"></a>
+## func [Plaintext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+```go
+func Plaintext() GroupOption
+```
+
+Plaintext declares that the group serves no TLS. Every engine honours it. A group given both Plaintext and TLS, in either order, fails Start with PlaintextWithTLS. It is not yet required of a plaintext group: the simple API will require it of every HTTP group without TLS.
 
 <a name="ReadBufferSize"></a>
 ## func [ReadBufferSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
@@ -863,6 +982,30 @@ func (Conn) ID() uint64
 
 ID returns the monotonic identifier assigned at accept time, for correlating log lines belonging to one connection.
 
+<a name="EngineValue"></a>
+## type [EngineValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+EngineValue names the engine family a group runs on, passed by Engine. The zero value, EngineAuto, lets the handler's type choose.
+
+```go
+type EngineValue = corenet.EngineValue
+```
+
+EngineValue is an alias of `github.com/kitsunium/sdk/internal/core/net.EngineValue`, declared as:
+
+```go
+type EngineValue uint8
+```
+
+<a name="EngineValue.String"></a>
+### func \(EngineValue\) [String](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/engine.go>)
+
+```go
+func (EngineValue) String() string
+```
+
+String renders the engine as an error field spells it.
+
 <a name="Group"></a>
 ## type [Group](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
@@ -918,7 +1061,7 @@ func (*Group) HandleLoop(h corenet.LoopHandler) *StreamGroup
 
 HandleLoop serves the group on the loop engine (ADR 0186): h is called on the loop's own thread for every connection of the group, with the bytes each one receives, instead of a goroutine per connection. It is opt-in, and plaintext only.
 
-The group keeps the server's lifecycle — the bind, the adoption of inherited sockets, MaxConns, the drain, State — and Loop(v) sizes and places the engine: io\_uring after a probe of the running kernel, then epoll, on Linux, and the portable backend, the default engine's accept path serialised onto one handler goroutine, everywhere else. Start refuses a loop group given TLS with LoopTLSUnsupported, one given Use or an option neither the engine (IdleTimeout, MaxConns, Adopt) nor h, through LoopOptionHonourer, honours with LoopOptionUnsupported, and an explicit backend the platform or the kernel cannot run with UnsupportedPlatform or LoopBackendUnavailable.
+The group keeps the server's lifecycle — the bind, the adoption of inherited sockets, MaxConns, the drain, State — and Loop(v) sizes and places the engine: io\_uring after a probe of the running kernel, then epoll, on Linux, and the portable backend, the default engine's accept path serialised onto one handler goroutine, everywhere else. Start refuses a loop group given TLS with LoopTLSUnsupported, one given Use or an option neither the engine (IdleTimeout, MaxConns, Adopt, Plaintext, Name, Engine) nor h, through LoopOptionHonourer, honours with LoopOptionUnsupported — an option given counts, its zero value included —, and an explicit backend the platform or the kernel cannot run with UnsupportedPlatform or LoopBackendUnavailable.
 
 A callback of h runs on the loop's thread and must not block it: a blocking call stalls every connection of its loop. h is declared once, like every handler: a second declaration of any kind makes Start return HandlerAlreadySet.
 

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T12:00:00Z -->
+<!-- updated: 2026-10-25T12:00:00Z -->
 # internal/service/net/server/
 
 ## Purpose
@@ -15,16 +15,20 @@ Public façade: `pkg/v1/net/server`.
 |---|---|
 | `server.go` | `Server`, `New`, `Group`, `State` |
 | `lifecycle.go` | `Start`, `Serve`, `Shutdown`, `Close`, the accept loop and its backoff (`acceptDelay`, `backOff`), the drain |
-| `loop_group.go` | loop groups: `HandleLoop` (ADR 0186 §D9 step 11), `loopRefusal` — TLS, `Use` and every option neither the engine (IdleTimeout, MaxConns, Adopt) nor the handler's `LoopOptionHonourer` honours — the listeners bound or adopted and registered like any group's, the engines in `Shutdown`, `Close` and `State` |
+| `loop_group.go` | loop groups: `HandleLoop` (ADR 0186 §D9 step 11), `loopRefusal` — TLS, `Use` and every kind of the group's set neither the engine (`loopHonours`: IdleTimeout, MaxConns, Adopt, Plaintext, Name, Engine) nor the handler's `LoopOptionHonourer` honours, `Use` whatever the handler claims — the listeners bound or adopted and registered like any group's, the engines in `Shutdown`, `Close` and `State` |
+| `option_set.go` | `optionSet` — the kinds a group was given, one bit per `corenet.OptionKind` (ADR 0187 §D2); every `GroupOption`, `Use` and `PreHandshake` add theirs, a zero value included |
+| `engine_option.go` | `reconcileName` (Name against the declared name, `GroupNameConflict`) and `engineRefusal` — `PlaintextWithTLS`, and an `Engine` the handler's type or `Loop` contradicts (`EngineUnsupported`), judged at `Start`, never folded back (ADR 0187 §D4) |
+| `option_set_internal_test.go` | `TestGroupOption_recordsItsKind` — walks every function returning a `GroupOption` in `pkg/v1/net/server/gen_facade.go` and this package (exempt: `Listen`, `Loop`), each given its zero value records exactly its kind; the set's order and width |
+| `engine_option_external_test.go` | `TestEngine`, `TestName` — `Engine`, `Plaintext` and `Name` served, refused and what wins, on both natures |
 | `loop_engine_linux.go`, `loop_engine_other.go` | the backend: on Linux the leaf `loop` on duplicated descriptors (`F_DUPFD_CLOEXEC`, non-blocking), auto falling back to portable with the reason in `State`; elsewhere the portable backend, an explicit native one refused with `UnsupportedPlatform` |
 | `loop_portable.go` | the portable loop backend: a reader and a writer goroutine per connection on the netpoller, every callback on one handler goroutine, the reader's buffer held until the batch ends |
-| `loop_group_internal_test.go` | loop groups on every backend the platform has: split lines, a 4 MiB response byte-exact, close, spill, drain, and every refusal |
+| `loop_group_internal_test.go` | loop groups on every backend the platform has: split lines, a 4 MiB response byte-exact, close, spill, drain, and every refusal — a zero-valued option included; `TestLoopGroup_middlewareRefused`, `Use` refused on every backend whatever the handler claims |
 | `loop_option_external_test.go` | `TestLoop` — the `Loop` option refused before or after the handler, on both natures, and what wins over it |
 | `stream_group.go` | `StreamGroup` — `Handle`, `HandleFunc`, `HandleHTTP`, `Use`; `claimHandler`, the one-handler rule every declaration takes |
 | `listen.go` | listener construction; TLS/mTLS wrapping; family validation |
 | `conn.go` | the pooled `corenet.Conn` implementation, and the `hijacked` hand-over flag |
 | `pool.go` | per-connection recycling + the live-socket registry |
-| `options.go` | `Option` / `GroupOption` — including the two HTTP-only group options, `ReadHeaderTimeout` and `MaxHeaderBytes`, and `Loop`, refused by every group until a loop handler can serve one |
+| `options.go` | `Option` / `GroupOption` — including the two HTTP-only group options, `ReadHeaderTimeout` and `MaxHeaderBytes`, `Loop`, refused by every group no loop handler serves, and `Plaintext`, `Name` and `Engine` (ADR 0187); each records its kind |
 | `packet_group.go` | `PacketGroup` — the datagram mirror of `StreamGroup` |
 | `packet.go` | the pooled `corenet.Packet` implementation |
 | `packet_listen.go` | datagram socket construction; family validation; ceilings |
@@ -87,6 +91,30 @@ Public façade: `pkg/v1/net/server`.
   `LoopOptionUnsupported` and `option=Loop`. A missing handler (`HandlerMissing`) and a second one
   (`HandlerAlreadySet`) win, because they explain the refusal. A datagram group
   records the refusal at declaration, since its shim would otherwise drop it.
+- **Every option records its kind, and a refusal reads the set** (ADR 0187
+  §D2). `kinds`, an `optionSet`, holds one bit per `OptionKind` given — by every
+  `GroupOption`, by `Use` on every call, by `PreHandshake` — whatever the
+  argument. `loopRefusal` walks it in the block's order, so `ReadTimeout(0)`,
+  `Shards(0)` or `TLS` with a zero identity on a loop group is refused as its
+  non-zero form is; guessing "given" from non-zero fields let them through.
+  `OptionKind` stays an iota and new kinds go after `OptionPreHandshake`;
+  `Listen` and `Loop` record none. A new `GroupOption` without its kind fails
+  `TestGroupOption_recordsItsKind`, which reads the facade's file (the
+  go_test's `data`; `pkg/v1/net/server` exports it).
+- **`Plaintext`, `Name` and `Engine` are honoured by every engine, and
+  contradictions are refused, never folded back** (ADR 0187 §D3, §D4).
+  `engineRefusal` runs in `startRefusal` (each group of `groupDeclErr`) for every group with a handler,
+  before `loopRefusal`: `Plaintext` with `TLS` is `PlaintextWithTLS`;
+  `EngineGoroutine` with `Loop` or `HandleLoop`, `EngineLoop` with a
+  goroutine handler, or a value outside the block is `EngineUnsupported`.
+  `EngineAuto`, the zero, lets the handler's type choose. A datagram group's
+  shim is judged the same way at declaration (`judgePacketOptions`).
+  `Group` and `PacketGroup` apply their options before the duplicate check,
+  so `Name` may name a group declared with `""`; an empty `Name`, or one that
+  differs from a declared name, records `GroupNameConflict`. `Plaintext` is
+  not yet required of a plaintext HTTP group: that lands with the simple API
+  (ADR 0187 §D7). `MaxConns(0)` keeps "no ceiling": zero means the default for
+  options added from ADR 0187 on only.
 - **A loop group is a group like the others, served by another engine** (ADR
   0186 §D1, §D3). It binds and adopts through the same `listen` and
   `adoptStream`, without TLS and without sharding, and its listeners join
@@ -466,5 +494,6 @@ cd internal/service && GOWORK=off go test -race -cover ./net/server/...
 - ADR 0043 — the drain signal — `docs/adr/0043-drain-is-a-signal-not-a-cancellation.md`
 - ADR 0047 §D9 — the hijacked-connection hand-over — `docs/adr/0047-sdk-net-websocket.md`
 - ADR 0186 — the opt-in loop engine and its HTTP/1.1 profile — `docs/adr/0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md`
+- ADR 0187 — the handler type chooses the engine; the kind set, `Plaintext`, `Name`, `Engine` — `docs/adr/0187-the-handler-type-chooses-the-engine.md`
 - Contract layer — `internal/core/net/CLAUDE.md`
 - The two protocols that depend on both — `internal/service/net/{sse,websocket}/CLAUDE.md`

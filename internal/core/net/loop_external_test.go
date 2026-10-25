@@ -35,8 +35,11 @@ func Test_OptionKind_String(t *testing.T) {
 		{"max conns", corenet.OptionMaxConns, "MaxConns"},
 		{"adopt", corenet.OptionAdopt, "Adopt"},
 		{"pre-handshake", corenet.OptionPreHandshake, "PreHandshake"},
+		{"plaintext", corenet.OptionPlaintext, "Plaintext"},
+		{"name", corenet.OptionName, "Name"},
+		{"engine", corenet.OptionEngine, "Engine"},
 		//: past the block, the value is reported, never indexed out of range.
-		{"one past the last kind", corenet.OptionPreHandshake + 1, "unknown"},
+		{"one past the last kind", corenet.OptionEngine + 1, "unknown"},
 		{"the largest value", corenet.OptionKind(255), "unknown"},
 	}
 	runCase := func(t *testing.T, c tc) {

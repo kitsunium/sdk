@@ -992,6 +992,91 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.Engine",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "Engine",
+      "spelled": "func(e EngineValue) GroupOption",
+      "canonical": "func(e github.com/kitsunium/sdk/pkg/v1/net/server.EngineValue) github.com/kitsunium/sdk/pkg/v1/net/server.GroupOption",
+      "doc": "Engine names the engine family the group runs on: EngineGoroutine, one\ngoroutine per connection, or EngineLoop, the loop engine; Loop then picks the\nloop's backend. The zero value, EngineAuto, lets the handler's type choose.\nAn engine the group's handler cannot run on, or that another option\ncontradicts — EngineGoroutine with Loop or HandleLoop, EngineLoop with\nHandle, HandleFunc or HandleHTTP or on a datagram group — fails Start with\nEngineUnsupported, and is never replaced by the other engine.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.EngineAuto",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "EngineAuto",
+      "spelled": "EngineValue",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/net/server.EngineValue",
+      "value": "0",
+      "init": "go:github.com/kitsunium/sdk/internal/core/net.EngineAuto",
+      "doc": "EngineAuto lets the group's handler type choose its engine.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.EngineGoroutine",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "EngineGoroutine",
+      "spelled": "EngineValue",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/net/server.EngineValue",
+      "value": "1",
+      "init": "go:github.com/kitsunium/sdk/internal/core/net.EngineGoroutine",
+      "doc": "EngineGoroutine is the default engine, one goroutine per connection.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.EngineLoop",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "EngineLoop",
+      "spelled": "EngineValue",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/net/server.EngineValue",
+      "value": "2",
+      "init": "go:github.com/kitsunium/sdk/internal/core/net.EngineLoop",
+      "doc": "EngineLoop is the loop engine; Loop picks its backend.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.EngineUnsupported",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "EngineUnsupported",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/net.EngineUnsupported",
+      "code": {
+        "value": "0.2.11.56",
+        "reason": "ENGINE_UNSUPPORTED",
+        "public": "The group's engine cannot serve its handler"
+      },
+      "doc": "EngineUnsupported reports an Engine the group's handler or options cannot run on.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.EngineValue",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "EngineValue",
+      "spelled": "corenet.EngineValue",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.EngineValue",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/net.EngineValue",
+      "doc": "EngineValue names the engine family a group runs on, passed by Engine. The\nzero value, EngineAuto, lets the handler's type choose.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.Group",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
@@ -1018,6 +1103,24 @@
         "public": "The listener group is already declared"
       },
       "doc": "GroupDuplicate reports a second group declared under one name.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.GroupNameConflict",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "GroupNameConflict",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/net.GroupNameConflict",
+      "code": {
+        "value": "0.2.11.58",
+        "reason": "GROUP_NAME_CONFLICT",
+        "public": "The group's name is not consistent"
+      },
+      "doc": "GroupNameConflict reports a Name that is empty or contradicts the group's declared name.\n",
       "file": "server/gen_facade.go",
       "layer": "public",
       "family": "net"
@@ -1566,6 +1669,18 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.Name",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "Name",
+      "spelled": "func(name string) GroupOption",
+      "canonical": "func(name string) github.com/kitsunium/sdk/pkg/v1/net/server.GroupOption",
+      "doc": "Name names the group in State, logs and errors. On a group declared with an\nempty name it sets the name, which must then be unique like any other; on one\ndeclared with a name it must repeat it. An empty Name, or one that differs\nfrom a non-empty declared name, fails Start with GroupNameConflict.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.New",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
@@ -1614,6 +1729,20 @@
       "value": "11",
       "init": "go:github.com/kitsunium/sdk/internal/core/net.OptionBatchSize",
       "doc": "OptionBatchSize is BatchSize.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.OptionEngine",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "OptionEngine",
+      "spelled": "OptionKind",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/net/server.OptionKind",
+      "value": "18",
+      "init": "go:github.com/kitsunium/sdk/internal/core/net.OptionEngine",
+      "doc": "OptionEngine is Engine. Every engine honours it, or refuses the group.\n",
       "file": "server/gen_facade.go",
       "layer": "public",
       "family": "net"
@@ -1716,6 +1845,20 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.OptionName",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "OptionName",
+      "spelled": "OptionKind",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/net/server.OptionKind",
+      "value": "17",
+      "init": "go:github.com/kitsunium/sdk/internal/core/net.OptionName",
+      "doc": "OptionName is Name. Every engine honours it.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.OptionNone",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
@@ -1725,6 +1868,20 @@
       "value": "0",
       "init": "go:github.com/kitsunium/sdk/internal/core/net.OptionNone",
       "doc": "OptionNone names no option; it is the zero value.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.OptionPlaintext",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "OptionPlaintext",
+      "spelled": "OptionKind",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/net/server.OptionKind",
+      "value": "16",
+      "init": "go:github.com/kitsunium/sdk/internal/core/net.OptionPlaintext",
+      "doc": "OptionPlaintext is Plaintext. Every engine honours it.\n",
       "file": "server/gen_facade.go",
       "layer": "public",
       "family": "net"
@@ -1971,6 +2128,36 @@
       "value": "4",
       "init": "go:github.com/kitsunium/sdk/internal/core/net.PhaseStopped",
       "doc": "PhaseStopped has released every listener.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.Plaintext",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "Plaintext",
+      "spelled": "func() GroupOption",
+      "canonical": "func() github.com/kitsunium/sdk/pkg/v1/net/server.GroupOption",
+      "doc": "Plaintext declares that the group serves no TLS. Every engine honours it. A\ngroup given both Plaintext and TLS, in either order, fails Start with\nPlaintextWithTLS. It is not yet required of a plaintext group: the simple\nAPI will require it of every HTTP group without TLS.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.PlaintextWithTLS",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "PlaintextWithTLS",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/net.PlaintextWithTLS",
+      "code": {
+        "value": "0.2.11.57",
+        "reason": "PLAINTEXT_WITH_TLS",
+        "public": "The group cannot be both plaintext and TLS"
+      },
+      "doc": "PlaintextWithTLS reports a group given both Plaintext and TLS.\n",
       "file": "server/gen_facade.go",
       "layer": "public",
       "family": "net"

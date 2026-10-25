@@ -11,6 +11,10 @@
   ([ADR 0040](0040-changing-a-published-shape-while-v0.md)): everything it adds
   is opt-in, and the default engine does not change.
 - **Deciders**: SDK maintainers, owner
+- **Amended by**: [ADR 0187](0187-the-handler-type-chooses-the-engine.md) — D1 (the
+  engine chosen by the handler's type, every option judged by its kind, a
+  zero value included), D2 and D3 (an `http1` handler served behind
+  `crypto/tls` on the portable backend)
 - **Amends**: [ADR 0029](0029-sdk-net-domain.md) D1 (the tree), D2 (one
   goroutine per connection, now the default rather than the only engine), D3
   (do not reimplement HTTP, now with one restricted exception) and D4 (pooling

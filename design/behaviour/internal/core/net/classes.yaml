@@ -16,6 +16,24 @@ constants:
         type: int
         value: "2"
     name: decimalBase
+  - doc: The engine families a group may name with Engine. The zero value is EngineAuto.
+    grouped: true
+    items:
+      - doc: |-
+          EngineAuto lets the group's handler type choose its engine (ADR 0187): a loop
+          handler runs on the loop engine, every other handler on the goroutine engine.
+        name: EngineAuto
+        type: EngineValue
+        value: iota
+      - doc: |-
+          EngineGoroutine is the default engine: one goroutine per connection on the
+          runtime's netpoller. It serves Handle, HandleFunc and HandleHTTP.
+        name: EngineGoroutine
+      - doc: |-
+          EngineLoop is the loop engine of ADR 0186. It serves HandleLoop; Loop picks its
+          backend.
+        name: EngineLoop
+    name: EngineAuto
   - doc: |-
       HTTP1MaxFields is how many field lines one request of the restricted
       HTTP/1.1 profile may carry. It sizes HTTP1RequestValue.Fields, so a request is
@@ -129,6 +147,16 @@ constants:
         name: OptionAdopt
       - doc: OptionPreHandshake is PreHandshake.
         name: OptionPreHandshake
+      - doc: |-
+          OptionPlaintext is Plaintext. Every engine honours it; with TLS it is refused
+          with PlaintextWithTLS.
+        name: OptionPlaintext
+      - doc: OptionName is Name. Every engine honours it.
+        name: OptionName
+      - doc: |-
+          OptionEngine is Engine. Every engine honours it, or refuses the group with
+          EngineUnsupported.
+        name: OptionEngine
     name: OptionNone
   - doc: The loop backends. The zero value is LoopBackendAuto.
     grouped: true
@@ -448,6 +476,11 @@ files:
       - (*DurationValue).UnmarshalJSON
       - (*DurationValue).parseString
     name: duration.go
+  - decls:
+      - EngineValue
+      - EngineAuto
+      - EngineValue.String
+    name: engine.go
   - decls:
       - _
     name: handler_compliance.go
@@ -804,6 +837,13 @@ types:
         results: error
     name: DurationValue
     underlying: time.Duration
+  - kind: named
+    methods:
+      - name: String
+        recv: e EngineValue
+        results: string
+    name: EngineValue
+    underlying: uint8
   - fields:
       - doc: |-
           Head bounds the request line, the field lines and the blank line that
@@ -1589,6 +1629,9 @@ vars:
           	OptionMaxConns:          "MaxConns",
           	OptionAdopt:             "Adopt",
           	OptionPreHandshake:      "PreHandshake",
+          	OptionPlaintext:         "Plaintext",
+          	OptionName:              "Name",
+          	OptionEngine:            "Engine",
           }
     name: optionNames
   - doc: |-
