@@ -2296,6 +2296,11 @@ types:
           connection lands on a secondary (P3a's wake test).
         name: primaryIdle
         type: bool
+      - doc: |-
+          secondaryPlain sets io_uring's secondary rings up without
+          COOP_TASKRUN: the kernel then signals the thread for their task work.
+        name: secondaryPlain
+        type: bool
       - doc: sweepEvery shortens io_uring's sweep period, in ticks.
         name: sweepEvery
         type: int64

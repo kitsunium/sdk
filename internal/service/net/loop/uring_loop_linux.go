@@ -394,6 +394,10 @@ func (ul *uLoop) newRing(i int, sweep bool) (*uRing, error) {
 	if i == 0 {
 		flags = ul.primary
 	}
+	//: a test's secondaries the kernel signals for.
+	if i > 0 && ul.hooks.secondaryPlain {
+		flags &^= setupCoopTaskrun
+	}
 	u, step, errno := openURing(uringEntries, flags)
 	//: refused.
 	if errno != 0 {

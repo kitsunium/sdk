@@ -80,6 +80,9 @@ type loopHooks struct {
 	// primaryIdle keeps io_uring's primary ring from accepting, so every
 	// connection lands on a secondary (P3a's wake test).
 	primaryIdle bool
+	// secondaryPlain sets io_uring's secondary rings up without
+	// COOP_TASKRUN: the kernel then signals the thread for their task work.
+	secondaryPlain bool
 	// sweepEvery shortens io_uring's sweep period, in ticks.
 	sweepEvery int64
 }

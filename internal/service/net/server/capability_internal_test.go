@@ -21,6 +21,18 @@ func capRowOf(t *testing.T, ls corenet.LoopStateValue, c corenet.Capability) cor
 	return corenet.CapabilityValue{}
 }
 
+// capabilityFaults is st's capability faults: a platform without io_uring
+// (linux/386) falls back, degraded, which is the loop's own fault.
+func capabilityFaults(st corenet.StateValue) []corenet.FaultValue {
+	var out []corenet.FaultValue
+	for _, f := range st.Faults {
+		if f.Source == faultCapability {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 // startLoop starts one loop group under vars with v and returns its State.
 func startLoop(t *testing.T, vars map[string]string, v corenet.LoopValue) corenet.StateValue {
 	t.Helper()
@@ -51,8 +63,8 @@ func TestCapabilities_report(t *testing.T) {
 	if last := ls.Capabilities[len(ls.Capabilities)-1]; last.Name != corenet.CapabilityTCPNoDelay {
 		t.Fatalf("server's row is not last: %+v", last)
 	}
-	if st.Degraded() {
-		t.Fatalf("a default report degrades the server: %+v", st.Faults)
+	if f := capabilityFaults(st); len(f) != 0 {
+		t.Fatalf("a default report is a capability fault: %+v", f)
 	}
 	off := startLoop(t, map[string]string{corenet.EnvDisable: "tcp-nodelay,uring-direct"}, corenet.LoopValue{})
 	ols := off.Loops[0]
@@ -61,8 +73,8 @@ func TestCapabilities_report(t *testing.T) {
 			t.Errorf("%s = %+v, want disabled by %s", c, row, corenet.EnvDisable)
 		}
 	}
-	if off.Degraded() {
-		t.Fatalf("a switch is an override, not a fault: %+v", off.Faults)
+	if f := capabilityFaults(off); len(f) != 0 {
+		t.Fatalf("a switch is an override, not a fault: %+v", f)
 	}
 }
 

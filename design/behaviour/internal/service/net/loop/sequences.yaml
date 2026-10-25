@@ -3953,6 +3953,12 @@ sequences:
             - set: flags
               value: ul.primary
           when: i == 0
+      - opt:
+          do:
+            - op: "&^="
+              set: flags
+              value: setupCoopTaskrun
+          when: i > 0 && ul.hooks.secondaryPlain
       - bind: u, step, errno
         eval: openURing(uringEntries, flags)
         to: openURing

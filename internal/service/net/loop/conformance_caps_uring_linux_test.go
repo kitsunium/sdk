@@ -27,19 +27,16 @@ func TestCaps_noSQArrayLayout(t *testing.T) {
 	}
 }
 
-// TestCaps_deferPrimaryOnly pins P3a's shape and its wake: DEFER_TASKRUN on
-// the ring the thread waits on alone, and, with every connection on a
-// secondary ring, an echo round trip woken by the secondaries' eventfd, not
-// by the tick: the median stays under half a tick.
-func TestCaps_deferPrimaryOnly(t *testing.T) {
+// secondaryRoundTrips serves every connection on a secondary ring of a
+// two-ring loop, with cs opted into and hooks set, and returns 200 echo round
+// trips sorted, failing on any that never completes.
+func secondaryRoundTrips(t *testing.T, hooks loopHooks, cs ...corenet.Capability) (*Group, []time.Duration) {
+	t.Helper()
+	hooks.primaryIdle = true
 	g, addr := codeCase(t, func(cfg *Config) {
 		cfg.Value.Rings = 2
-		cfg.hooks = loopHooks{primaryIdle: true}
-	}, corenet.CapabilityURingDeferTaskrun)
-	ul := uringOf(g)
-	if !ul.rings[0].u.deferred() || ul.rings[1].u.deferred() {
-		t.Fatalf("deferred: primary %v, secondary %v; want true, false", ul.rings[0].u.deferred(), ul.rings[1].u.deferred())
-	}
+		cfg.hooks = hooks
+	}, cs...)
 	c := dial(t, addr)
 	r := bufio.NewReader(c)
 	const rounds = 200
@@ -57,12 +54,33 @@ func TestCaps_deferPrimaryOnly(t *testing.T) {
 		t.Fatalf("accepted primary=%d secondary=%d: the traffic is not on the secondary alone", st.RingStates[0].Accepted, st.RingStates[1].Accepted)
 	}
 	slices.Sort(lat)
-	p50 := lat[rounds/2]
-	t.Logf("%s: secondary-only round trip p50=%v p90=%v max=%v", kernelRelease(), p50, lat[rounds*9/10], lat[rounds-1])
-	// The median, not a tail: a loaded runner stretches the tail, while a
-	// wake that waits for the tick moves the median to half a tick.
-	if p50 >= tickEvery/2 {
-		t.Fatalf("p50 %v >= half a tick (%v): the secondary's completions wait for the tick", p50, tickEvery/2)
+	return g, lat
+}
+
+// TestCaps_deferPrimaryOnly pins P3a's shape and its wake: DEFER_TASKRUN on
+// the ring the thread waits on alone, and, with every connection on a
+// secondary ring, every round trip completes, bounded by the primary's wait
+// (one tick), and no slower than the same loop without DEFER_TASKRUN. With
+// DEFER_TASKRUN on every ring the second round trip never completes. The
+// medians of each shape are logged, the secondaries' wake being the
+// kernel's: some kernels run a cooperative secondary's completions only once
+// the primary's wait times out.
+func TestCaps_deferPrimaryOnly(t *testing.T) {
+	g, deferred := secondaryRoundTrips(t, loopHooks{}, corenet.CapabilityURingDeferTaskrun)
+	ul := uringOf(g)
+	if !ul.rings[0].u.deferred() || ul.rings[1].u.deferred() {
+		t.Fatalf("deferred: primary %v, secondary %v; want true, false", ul.rings[0].u.deferred(), ul.rings[1].u.deferred())
+	}
+	_, coop := secondaryRoundTrips(t, loopHooks{})
+	_, plain := secondaryRoundTrips(t, loopHooks{secondaryPlain: true}, corenet.CapabilityURingDeferTaskrun)
+	n := len(deferred)
+	t.Logf("%s: secondary-only round trip p50/p90/max — defer %v/%v/%v, coop %v/%v/%v, defer with plain secondaries %v/%v/%v",
+		kernelRelease(), deferred[n/2], deferred[n*9/10], deferred[n-1], coop[n/2], coop[n*9/10], coop[n-1], plain[n/2], plain[n*9/10], plain[n-1])
+	if deferred[n/2] > coop[n/2]+tickEvery/2 {
+		t.Fatalf("defer p50 %v past coop p50 %v by more than half a tick", deferred[n/2], coop[n/2])
+	}
+	if deferred[n*9/10] > 2*tickEvery {
+		t.Fatalf("defer p90 %v past two ticks: the wake is not bounded by the primary's wait", deferred[n*9/10])
 	}
 }
 
