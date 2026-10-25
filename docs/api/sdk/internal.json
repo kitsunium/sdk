@@ -52169,8 +52169,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "StartState",
-      "spelled": "struct{HardState core.HardState; Snapshot core.SnapshotMetaValue; Entries []core.EntryValue; Applied uint64; Now time.Time}",
-      "canonical": "struct{HardState github.com/kitsunium/sdk/internal/core/app/consensus.HardState; Snapshot github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue; Entries []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue; Applied uint64; Now time.Time}",
+      "spelled": "struct{HardState core.HardState; Snapshot core.SnapshotMetaValue; Entries []core.EntryValue; Evicted uint64; Applied uint64; Now time.Time}",
+      "canonical": "struct{HardState github.com/kitsunium/sdk/internal/core/app/consensus.HardState; Snapshot github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue; Entries []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue; Evicted uint64; Applied uint64; Now time.Time}",
       "fields": [
         {
           "name": "HardState",
@@ -52185,7 +52185,12 @@
         {
           "name": "Entries",
           "type": "[]core.EntryValue",
-          "doc": "Entries are the durable entries after the snapshot.\n"
+          "doc": "Entries are the durable entries after the snapshot. NewRaft keeps\nthem as its log, with the room past them: the caller hands them over\nand no longer uses them.\n"
+        },
+        {
+          "name": "Evicted",
+          "type": "uint64",
+          "doc": "Evicted is the last index the driver loaded without its payload, 0\nwhen it loaded every one: each command after the snapshot through it\ncarries none and is read back from the store when applied, every other\nentry keeps its own. Only a committed entry may be loaded so (#663).\n"
         },
         {
           "name": "Applied",

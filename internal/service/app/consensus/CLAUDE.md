@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T04:45:00Z -->
+<!-- updated: 2026-10-25T06:45:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -114,25 +114,33 @@ paired at 8 and 10: on a loaded machine the slowest of 8 summed 49 to
   first break, then the first unknown layout, are refused in log order, as
   before (#660, `TestReopeningAFollowersLogDoesNotHoldItsHardStates`,
   `TestAnEarlierSegmentIsJudgedOnEveryRecordItHeld`).
-- Hand apply every committed entry: raft's `Ready` did, on every node, and
-  a follower slower to apply than its leader held everything it was behind
-  by until it was OOM-killed (#664). Raft hands apply `MaxApplyLagBytes` at
-  most past what the apply goroutine holds (`SetApplyLag`, from
-  `handleReady`), drops the payloads of committed entries past
-  `RecentEntriesBytes` whether handed or not, and hands those by index
-  (`ReadyValue.ApplyRead`): `applyRead` reads them back on the apply
-  goroutine, a batch at a time within both bounds, in order, past what a
-  restore covers, and stops the node when the log cannot give back what it
-  holds committed. Nothing is handed in memory behind a read, and a batch
-  leaves the apply lag once the machine applied it, by the bytes it was
-  handed. Nor admit a command while raft holds committed entries back or a
-  read is pending (`applyOverloaded`): the bytes apply holds no longer
-  measure the gap between commit and applied, and a follower's forwards
-  grew it with no bound. The apply goroutine wakes the loop once it has
-  room (`applyMoved`, `awaitApply`)
-  (`TestAFollowerSlowToApplyHoldsNoMoreThanMaxApplyLagBytes`,
+- Read the tail past the snapshot whole, or hand apply every committed
+  entry: `readTail` read every entry with its payload, raft's first Ready
+  handed them all to apply, and so did every Ready of a follower slower to
+  apply than its leader. A node needed several times its log in heap to
+  start, and a slow follower held everything it was behind by until it was
+  OOM-killed (#663, #664). `readTail` reads `MaxBatchBytes` at a time into
+  one slice raft keeps as its log, a quarter of room past it, and past
+  `RecentEntriesBytes` drops the payloads of the oldest committed commands
+  (`StartState.Evicted`; every other kind keeps its own, which `NewRaft`
+  applies). Raft hands apply `MaxApplyLagBytes` at most past what the
+  apply goroutine holds (`SetApplyLag`, from `handleReady`), drops the
+  payloads of committed entries past `RecentEntriesBytes` whether handed or
+  not, and hands those by index (`ReadyValue.ApplyRead`): `applyRead`
+  reads them back on the apply goroutine, a batch at a time within both
+  bounds, in order, past what a restore covers, and stops the node when
+  the log cannot give back what it holds committed. Nothing is handed in
+  memory behind a read, and a batch leaves the apply lag once the machine
+  applied it, by the bytes it was handed. Nor admit a command while raft
+  holds committed entries back or a read is pending (`applyOverloaded`):
+  the bytes apply holds no longer measure the gap between commit and
+  applied, and a follower's forwards grew it with no bound. The apply
+  goroutine wakes the loop once it has room (`applyMoved`, `awaitApply`)
+  (`TestTheStartHoldsNoMoreOfTheTailThanItsBudget`,
+  `TestAFollowerSlowToApplyHoldsNoMoreThanMaxApplyLagBytes`,
   `TestALeaderSlowToApplyStillRefusesForwardsPastMaxApplyLagBytes`,
-  `TestAMachineThatDropsItsPayloadsLeavesNoApplyLag`).
+  `TestAMachineThatDropsItsPayloadsLeavesNoApplyLag`,
+  `TestADurableMachineResumesInsideTheTailReadBack`).
 - Compact the store past its end without the term: it holds no entry to read
   it from, and a node restarted with no table votes on that term. The engine
   passes it (`storeReq.compactTerm`, `compactLog`), the file log refuses a

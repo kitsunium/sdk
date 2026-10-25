@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T04:45:00Z -->
+<!-- updated: 2026-10-25T06:45:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -17,8 +17,9 @@ control (`lincheck_internal_test.go`). `simOptions.speaks` runs a node of a
 previous release in a mixed cluster, read at each start so a restart
 upgrades it (`TestAMixedClusterRaisesTo3OnceEveryMemberSpeaksIt`).
 `simOptions.applyLag` bounds apply by `MaxApplyLagBytes` and makes it
-asynchronous, the entries handed by index read back from the disk model,
-as the driver does (`TestSimBoundedApply*`, #664).
+asynchronous, the entries handed by index read back from the disk model
+and a restart loading the committed commands past `recent` without their
+payloads, as the driver does (`TestSimBoundedApply*`, #663, #664).
 
 Bazel deals top-level tests to shards by their index, so a new test file
 whose name sorts before the simulator's (`sim_*`, `soak_*`) moves every
@@ -47,7 +48,10 @@ under coverage before touching `shard_count`.
   `checkHeldPayloadsEvicted`) — but on a node with no table, whose install
   replays the engine effects of what it holds committed from their
   payloads (#416, `mutNoTableEvictsCommitted`,
-  `checkNoTableKeepsCommittedPayloads`).
+  `checkNoTableKeepsCommittedPayloads`). A start's `Evicted` loads
+  commands only without their payloads; every other entry keeps its own,
+  whose effects `NewRaft` applies (#663,
+  `TestAStartWithEvictedPayloadsHandsThemByIndex`).
 - Acknowledge a snapshot install past its index (review H1,
   `mutSnapshotAckLastIndex`).
 - Append, acknowledge or skip an entry kind `Known` refuses: report it in

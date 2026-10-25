@@ -146,9 +146,10 @@ type simOptions struct {
 	// each start, so a restart after a change upgrades the node.
 	speaks map[core.NodeID]uint32
 	// applyLag, when not 0, is every node's MaxApplyLagBytes: apply is then
-	// asynchronous, an item every few milliseconds, and the entries handed
-	// by index are read back from the disk model, as the driver does
-	// (#664).
+	// asynchronous, an item every few milliseconds, the entries handed by
+	// index read back from the disk model, and a restart loads the
+	// committed commands past recent without their payloads, as the
+	// driver does (#663, #664).
 	applyLag int64
 }
 
@@ -259,7 +260,11 @@ func (s *sim) start(n *simNode) {
 	n.applyQ, n.queued, n.reads, n.applyDue = nil, 0, 0, false
 	cfg := s.cfg(n.id)
 	cfg.NoTable = n.noTable
-	n.r = NewRaft(&cfg, &StartState{HardState: n.hs, Snapshot: n.base, Entries: slices.Clone(n.ents), Applied: n.base.Position.Index, Now: s.clock(n)})
+	ents, evicted := slices.Clone(n.ents), uint64(0)
+	if s.opt.applyLag > 0 {
+		ents, evicted = s.loadTail(n)
+	}
+	n.r = NewRaft(&cfg, &StartState{HardState: n.hs, Snapshot: n.base, Entries: ents, Evicted: evicted, Applied: n.base.Position.Index, Now: s.clock(n)})
 	s.push(&event{at: s.now.Add(time.Duration(s.rng.Int64N(int64(10 * time.Millisecond)))), kind: evTick, node: n.id, life: n.life})
 }
 
@@ -285,6 +290,33 @@ func (s *sim) crash(id core.NodeID) {
 	n.life++
 	n.writes = nil // what was written and not synced is lost
 	n.applyQ, n.queued, n.reads, n.applyDue = nil, 0, 0, false
+}
+
+// loadTail is the driver's load of the durable log at start (readTail):
+// past recent bytes of payloads, the oldest committed commands are loaded
+// without theirs. It returns the entries and the last index loaded so, 0
+// for none.
+func (s *sim) loadTail(n *simNode) ([]core.EntryValue, uint64) {
+	ents := slices.Clone(n.ents)
+	base := n.base.Position.Index
+	commit := min(n.hs.Commit, n.last())
+	var held int64
+	for i := range ents {
+		held += int64(len(ents[i].Data))
+	}
+	dropped := base
+	for held > s.opt.recent && dropped < commit {
+		e := &ents[dropped-base]
+		held -= int64(len(e.Data))
+		if e.Kind == core.EntryCommand {
+			e.Data = nil
+		}
+		dropped++
+	}
+	if dropped == base {
+		return ents, 0
+	}
+	return ents, dropped
 }
 
 func (s *sim) push(e *event) {

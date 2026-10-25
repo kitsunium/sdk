@@ -851,8 +851,10 @@ types:
         type: uint64
       - doc: |-
           evicted is the highest index whose payload was dropped from memory;
-          its metadata stays. window counts the payload bytes still resident
-          above it (D6, RecentEntriesBytes).
+          its metadata stays, and so does the payload of an entry below it that
+          the start loaded and is not a command (StartState.Evicted). window
+          counts the payload bytes still resident above it (D6,
+          RecentEntriesBytes).
         name: evicted
         type: uint64
       - name: window
@@ -1173,9 +1175,19 @@ types:
       - doc: Snapshot is the base the log continues, zero for none.
         name: Snapshot
         type: core.SnapshotMetaValue
-      - doc: Entries are the durable entries after the snapshot.
+      - doc: |-
+          Entries are the durable entries after the snapshot. NewRaft keeps
+          them as its log, with the room past them: the caller hands them over
+          and no longer uses them.
         name: Entries
         type: "[]core.EntryValue"
+      - doc: |-
+          Evicted is the last index the driver loaded without its payload, 0
+          when it loaded every one: each command after the snapshot through it
+          carries none and is read back from the store when applied, every other
+          entry keeps its own. Only a committed entry may be loaded so (#663).
+        name: Evicted
+        type: uint64
       - doc: Applied is where the state machine resumes, at least the snapshot.
         name: Applied
         type: uint64
@@ -2236,10 +2248,13 @@ types:
         recv: r *Raft
         results: bool
       - doc: |-
-          loadEntries appends the start's entries past the snapshot to the log,
-          noting what each changes at append time.
+          loadEntries takes the start's entries past the snapshot as the log, in
+          place, noting what each changes at append time: copied, the log's
+          metadata was held twice while the step function was built (#663). The
+          window counts the payloads past the ones the driver evicted, which a
+          node holds at most RecentEntriesBytes of: the rest stays on disk.
         name: loadEntries
-        params: ents []core.EntryValue
+        params: st *StartState
         recv: r *Raft
       - doc: |-
           raiseSilenceOverSnapshot raises a SilentIndex the start's snapshot
@@ -2351,7 +2366,8 @@ types:
           payloads were evicted, by index and alone in their Ready, or those held in
           memory within MaxApplyLagBytes. Bounded on a follower too, the apply
           goroutine of a node slower to apply than its leader held everything it
-          was behind by (#664).
+          was behind by (#664), and a node started on a long committed tail held it
+          all at its first Ready (#663).
         name: handApply
         params: rd *ReadyValue, hi uint64
         recv: r *Raft

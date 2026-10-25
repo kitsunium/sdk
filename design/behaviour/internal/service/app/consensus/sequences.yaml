@@ -8992,8 +8992,8 @@ sequences:
             eval: n.unpublishNewer(failed)
             to: n.unpublishNewer
           when: err != nil
-      - bind: ents, err
-        eval: n.readTail(first, last, snapIdx)
+      - bind: ents, evicted, err
+        eval: n.readTail(first, last, snapIdx, hs.Commit)
         to: n.readTail
       - opt:
           do:
@@ -9012,7 +9012,7 @@ sequences:
           do:
             - return: raft.StartState{}, err
           when: err != nil
-      - return: "raft.StartState{HardState: hs, Snapshot: base, Entries: ents, Applied: applied, Now: n.clk.Now()}, nil"
+      - return: "raft.StartState{HardState: hs, Snapshot: base, Entries: ents, Evicted: evicted, Applied: applied, Now: n.clk.Now()}, nil"
   - of: termless
     steps:
       - return: m.Position.Index > 0 && m.Position.Term == 0
@@ -9248,28 +9248,85 @@ sequences:
         kind: self
       - id: n.cfg.Log.Entries
         kind: value
+      - id: t.add
+        kind: internal
+    steps:
+      - bind: lo
+        eval: max(first, snapIdx+1)
+      - opt:
+          do:
+            - return: nil, 0, nil
+          when: last < lo
+      - bind: count
+        eval: int(last - lo + 1)
+      - bind: t
+        eval: |-
+          tailLoad{
+          		ents: make([]coreconsensus.EntryValue, 0, count+count/4),
+          		lo:   lo, commit: min(commit, last), dropped: lo - 1, keep: n.cfg.RecentEntriesBytes,
+          	}
+      - loop:
+          cond: next <= last
+          do:
+            - bind: batch, err
+              eval: n.cfg.Log.Entries(next, last+1, n.cfg.MaxBatchBytes, nil)
+              to: n.cfg.Log.Entries
+            - opt:
+                do:
+                  - return: nil, 0, err
+                when: err != nil
+            - opt:
+                do:
+                  - return: nil, 0, storageFailed("entries", errImpossible)
+                when: "!contiguousFrom(batch, next)"
+            - eval: t.add(batch)
+              to: t.add
+          init: next := lo
+          post: next = lo + uint64(len(t.ents))
+      - return: t.ents, t.evicted(), nil
+  - of: (*tailLoad).add
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*tailLoad).add
+        kind: self
       - id: bytes
         kind: stdlib
     steps:
-      - opt:
-          do:
-            - return: nil, nil
-          when: last <= snapIdx || last < first
-      - bind: ents, err
-        eval: n.cfg.Log.Entries(max(first, snapIdx+1), last+1, int(^uint(0)>>1), nil)
-        to: n.cfg.Log.Entries
-      - opt:
-          do:
-            - return: nil, err
-          when: err != nil
       - loop:
           do:
-            - set: ents[i].Data
+            - set: batch[i].Data
               to: bytes
-              value: bytes.Clone(ents[i].Data)
+              value: bytes.Clone(batch[i].Data)
+            - op: +=
+              set: t.held
+              value: int64(len(batch[i].Data))
           key: i
-          range: ents
-      - return: ents, nil
+          range: batch
+      - set: t.ents
+        value: append(t.ents, batch...)
+      - loop:
+          cond: t.held > t.keep && t.dropped < t.commit && t.dropped < t.lo+uint64(len(t.ents))-1
+          do:
+            - bind: e
+              eval: "&t.ents[t.dropped+1-t.lo]"
+            - op: "-="
+              set: t.held
+              value: int64(len(e.Data))
+            - opt:
+                do:
+                  - set: e.Data
+                    value: nil
+                when: e.Kind == coreconsensus.EntryCommand
+            - op: ++
+              set: t.dropped
+  - of: (*tailLoad).evicted
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: t.dropped < t.lo
+      - return: t.dropped
   - of: (*Node).startApplied
     participants:
       - id: caller

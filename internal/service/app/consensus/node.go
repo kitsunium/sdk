@@ -562,7 +562,7 @@ func (n *Node) load() (raft.StartState, error) {
 	if err := n.unpublishNewer(failed); err != nil {
 		return raft.StartState{}, err
 	}
-	ents, err := n.readTail(first, last, snapIdx)
+	ents, evicted, err := n.readTail(first, last, snapIdx, hs.Commit)
 	if err != nil {
 		return raft.StartState{}, err
 	}
@@ -578,7 +578,7 @@ func (n *Node) load() (raft.StartState, error) {
 	if err != nil {
 		return raft.StartState{}, err
 	}
-	return raft.StartState{HardState: hs, Snapshot: base, Entries: ents, Applied: applied, Now: n.clk.Now()}, nil
+	return raft.StartState{HardState: hs, Snapshot: base, Entries: ents, Evicted: evicted, Applied: applied, Now: n.clk.Now()}, nil
 }
 
 // termless reports whether m names an index above 0 at term 0, which no
@@ -754,20 +754,75 @@ func (n *Node) finishInstall(base *coreconsensus.SnapshotMetaValue, first, last 
 	return newFirst, newLast, nil
 }
 
-// readTail reads the log after the base into memory, each entry's payload
-// copied so the step function never holds a store's buffer.
-func (n *Node) readTail(first, last, snapIdx uint64) ([]coreconsensus.EntryValue, error) {
-	if last <= snapIdx || last < first {
-		return nil, nil
+// readTail reads the log after the base into memory, MaxBatchBytes at a
+// time into one slice sized once, each payload kept copied so the step
+// function never holds a store's buffer. The payloads it keeps are bounded
+// as raft's window bounds them at run time: past RecentEntriesBytes, the
+// oldest committed commands drop theirs, and apply reads them back from the
+// log, a batch at a time; every other entry keeps its own, which raft reads
+// at start. It read the whole tail with its payloads, with no bound, and
+// the first Ready handed it all to apply: a node whose log grew near
+// MaxLogBytes needed several times its log in heap to start (#663). evicted
+// is the last index whose payload was dropped, 0 for none.
+func (n *Node) readTail(first, last, snapIdx, commit uint64) (ents []coreconsensus.EntryValue, evicted uint64, err error) {
+	lo := max(first, snapIdx+1)
+	if last < lo {
+		return nil, 0, nil
 	}
-	ents, err := n.cfg.Log.Entries(max(first, snapIdx+1), last+1, int(^uint(0)>>1), nil)
-	if err != nil {
-		return nil, err
+	// Raft keeps the slice as its log: the quarter of room past it is what
+	// append would have left, and spares the first appends a copy of the
+	// whole log's metadata, 96 bytes an entry, while the old one is live.
+	count := int(last - lo + 1)
+	t := tailLoad{
+		ents: make([]coreconsensus.EntryValue, 0, count+count/4),
+		lo:   lo, commit: min(commit, last), dropped: lo - 1, keep: n.cfg.RecentEntriesBytes,
 	}
-	for i := range ents {
-		ents[i].Data = bytes.Clone(ents[i].Data)
+	for next := lo; next <= last; next = lo + uint64(len(t.ents)) {
+		batch, err := n.cfg.Log.Entries(next, last+1, n.cfg.MaxBatchBytes, nil)
+		if err != nil {
+			return nil, 0, err
+		}
+		if !contiguousFrom(batch, next) {
+			return nil, 0, storageFailed("entries", errImpossible)
+		}
+		t.add(batch)
 	}
-	return ents, nil
+	return t.ents, t.evicted(), nil
+}
+
+// tailLoad is the tail readTail loads: the entries read from lo on, the
+// payload bytes they hold past the last index whose payload was dropped,
+// and the commit index no drop passes.
+type tailLoad struct {
+	ents                []coreconsensus.EntryValue
+	lo, commit, dropped uint64
+	held, keep          int64
+}
+
+// add appends batch, each payload copied, then drops the payloads of the
+// oldest committed commands while more than keep bytes are held.
+func (t *tailLoad) add(batch []coreconsensus.EntryValue) {
+	for i := range batch {
+		batch[i].Data = bytes.Clone(batch[i].Data)
+		t.held += int64(len(batch[i].Data))
+	}
+	t.ents = append(t.ents, batch...)
+	for t.held > t.keep && t.dropped < t.commit && t.dropped < t.lo+uint64(len(t.ents))-1 {
+		e := &t.ents[t.dropped+1-t.lo]
+		t.held -= int64(len(e.Data))
+		if e.Kind == coreconsensus.EntryCommand {
+			e.Data = nil
+		}
+		t.dropped++
+	}
+}
+
+// evicted is the last index whose payload was dropped, 0 for none.
+func (t *tailLoad) evicted() uint64 {
+	if t.dropped < t.lo {
+		return 0
+	}
+	return t.dropped
 }
 
 // contiguousFrom reports whether es are entries from lo on, one per index,

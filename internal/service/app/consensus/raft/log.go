@@ -18,8 +18,10 @@ type memLog struct {
 	stable    uint64
 	applied   uint64
 	// evicted is the highest index whose payload was dropped from memory;
-	// its metadata stays. window counts the payload bytes still resident
-	// above it (D6, RecentEntriesBytes).
+	// its metadata stays, and so does the payload of an entry below it that
+	// the start loaded and is not a command (StartState.Evicted). window
+	// counts the payload bytes still resident above it (D6,
+	// RecentEntriesBytes).
 	evicted uint64
 	window  int64
 }

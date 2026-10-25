@@ -2930,7 +2930,7 @@ sequences:
       - set: node.engBase
         to: node.engine
         value: node.engine()
-      - eval: node.loadEntries(st.Entries)
+      - eval: node.loadEntries(st)
         to: node.loadEntries
       - set: node.log.stable
         to: node.log.lastIndex
@@ -2995,22 +2995,33 @@ sequences:
       - id: r.noteAppended
         kind: internal
     steps:
+      - bind: ents
+        eval: st.Entries
+      - bind: k
+        eval: "0"
+      - loop:
+          cond: k < len(ents) && ents[k].Position.Index <= r.log.snapIndex
+          do:
+            - op: ++
+              set: k
+      - set: r.log.ents
+        value: ents[k:]
+      - set: r.log.evicted
+        value: min(max(st.Evicted, r.log.snapIndex), r.log.lastIndex())
       - loop:
           do:
+            - bind: e
+              eval: "&r.log.ents[i]"
             - opt:
                 do:
-                  - continue: true
-                when: e.Position.Index <= r.log.snapIndex
-            - set: r.log.ents
-              value: append(r.log.ents, e)
-            - op: +=
-              set: r.log.window
-              value: int64(len(e.Data))
-            - eval: r.noteAppended(&e)
+                  - op: +=
+                    set: r.log.window
+                    value: int64(len(e.Data))
+                when: e.Position.Index > r.log.evicted
+            - eval: r.noteAppended(e)
               to: r.noteAppended
-          key: _
-          range: ents
-          value: e
+          key: i
+          range: r.log.ents
   - of: (*Raft).raiseSilenceOverSnapshot
     steps:
       - opt:

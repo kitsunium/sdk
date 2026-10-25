@@ -153,10 +153,10 @@ func checkNoTableKeepsCommittedPayloads(mut mutation) error {
 
 // A node's apply bounded by MaxApplyLagBytes, slower than its log, with
 // RecentEntriesBytes small: the entries it falls behind by are evicted and
-// read back from the disk model, through partitions, crashes, restarts,
-// snapshots, lost snapshots and installs. Safety and progress hold, every
-// node applies every index once and in order, and no Ready hands more than
-// the bound (#664). The
+// read back from the disk model, through partitions, crashes, restarts that
+// load the tail without its payloads, snapshots, lost snapshots and
+// installs. Safety and progress hold, every node applies every index once
+// and in order, and no Ready hands more than the bound (#663, #664). The
 // 24 seeds in three top-level tests (seedPart), named after the
 // simulator's so the shards of the seed parts stay where they are.
 func TestSimBoundedApplyP1(t *testing.T) { simBoundedApply(t, seedPart(t, 24, 0, 3)) }

@@ -163,8 +163,15 @@ type StartState struct {
 	HardState core.HardState
 	// Snapshot is the base the log continues, zero for none.
 	Snapshot core.SnapshotMetaValue
-	// Entries are the durable entries after the snapshot.
+	// Entries are the durable entries after the snapshot. NewRaft keeps
+	// them as its log, with the room past them: the caller hands them over
+	// and no longer uses them.
 	Entries []core.EntryValue
+	// Evicted is the last index the driver loaded without its payload, 0
+	// when it loaded every one: each command after the snapshot through it
+	// carries none and is read back from the store when applied, every other
+	// entry keeps its own. Only a committed entry may be loaded so (#663).
+	Evicted uint64
 	// Applied is where the state machine resumes, at least the snapshot.
 	Applied uint64
 	// Now is the start instant: the restart vote-refusal window opens here.
@@ -428,7 +435,7 @@ func NewRaft(cfg *Config, st *StartState) *Raft {
 	node.voteWindow = node.timing.ElectionTimeoutMin
 	node.contracts = map[uint64]core.TimingContractSpec{node.timing.Generation: node.timing}
 	node.engBase = node.engine()
-	node.loadEntries(st.Entries)
+	node.loadEntries(st)
 	node.log.stable = node.log.lastIndex()
 	node.raiseSilenceOverSnapshot()
 	node.log.committed = min(max(st.HardState.Commit, node.log.snapIndex), node.log.lastIndex())
@@ -477,16 +484,25 @@ func (r *Raft) refusesClusterVersion(sm *core.SnapshotMetaValue) bool {
 	return true
 }
 
-// loadEntries appends the start's entries past the snapshot to the log,
-// noting what each changes at append time.
-func (r *Raft) loadEntries(ents []core.EntryValue) {
-	for _, e := range ents {
-		if e.Position.Index <= r.log.snapIndex {
-			continue
+// loadEntries takes the start's entries past the snapshot as the log, in
+// place, noting what each changes at append time: copied, the log's
+// metadata was held twice while the step function was built (#663). The
+// window counts the payloads past the ones the driver evicted, which a
+// node holds at most RecentEntriesBytes of: the rest stays on disk.
+func (r *Raft) loadEntries(st *StartState) {
+	ents := st.Entries
+	k := 0
+	for k < len(ents) && ents[k].Position.Index <= r.log.snapIndex {
+		k++
+	}
+	r.log.ents = ents[k:]
+	r.log.evicted = min(max(st.Evicted, r.log.snapIndex), r.log.lastIndex())
+	for i := range r.log.ents {
+		e := &r.log.ents[i]
+		if e.Position.Index > r.log.evicted {
+			r.log.window += int64(len(e.Data))
 		}
-		r.log.ents = append(r.log.ents, e)
-		r.log.window += int64(len(e.Data))
-		r.noteAppended(&e)
+		r.noteAppended(e)
 	}
 }
 
@@ -804,7 +820,8 @@ func (r *Raft) applyLimit() int64 {
 // payloads were evicted, by index and alone in their Ready, or those held in
 // memory within MaxApplyLagBytes. Bounded on a follower too, the apply
 // goroutine of a node slower to apply than its leader held everything it
-// was behind by (#664).
+// was behind by (#664), and a node started on a long committed tail held it
+// all at its first Ready (#663).
 func (r *Raft) handApply(rd *ReadyValue, hi uint64) {
 	lo := r.log.applied + 1
 	if lo <= r.log.evicted {

@@ -1532,7 +1532,8 @@ reading new entries from its log into memory. The engine keeps a window of
 recent entries in memory, bounded by `RecentEntriesBytes` (D14, R2-40), so
 the apply goroutine and slow followers do not read the disk for what was just
 written. (Only the leader's half held until 2026-10-25; the amendment of
-that date, below, makes it hold on every node: #664.)
+that date, below, makes it hold on every node and at the start: #663,
+#664.)
 
 **Forwarded commands meet the same bounds (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), M2).** A
 command a follower forwards is checked by the leader before it is appended,
@@ -4310,6 +4311,9 @@ which open the log the same way, with it
   bounds, and neither `SegmentBytes` nor the number of entries is one of
   them, so it counts neither: a product that sizes a small host adds them,
   with `MaxLogBytes` divided by its record size for the per-record parts.
+  (Completed on 2026-10-25, below: the start read the whole tail after the
+  open, and the step function holds 96 bytes an entry the index does not
+  count, #663.)
 
 Nothing published changes: no frame, no payload, no record format.
 
@@ -4430,7 +4434,7 @@ the reopen kept 0.5 to 0.9 times the log in heap, and allocated past
 
 Nothing published changes: no frame, no payload, no record format.
 
-## Amendment — apply is bounded on every node (2026-10-25, #664)
+## Amendment — apply is bounded on every node, and the start reads its tail within the budget (2026-10-25, #663, #664)
 
 D6 bounds the gap between commit and applied by `MaxApplyLagBytes`: the
 leader refuses proposals `OVERLOADED` at the bound, and a follower "stops
@@ -4439,7 +4443,13 @@ The step function's `Ready` handed apply every committed, durable entry
 whatever apply held, and evicted payloads only once handed, so a follower
 slower to apply than its leader held everything it was behind by, until it
 was OOM-killed or its log quota raised NO_SPACE for the whole cluster
-([#664](https://github.com/kitsunium/sdk/issues/664)).
+([#664](https://github.com/kitsunium/sdk/issues/664)). The start did the
+same at once: past the reopen of #630, it read every entry after the
+snapshot base with its payload, copied each one, held it in the step
+function's log and again in the first `Ready`, which handed it all to apply.
+A node whose log grew near `MaxLogBytes` needed 2.7 to 5.8 times its log
+in heap to start, past the bound the amendment of #630 states
+([#663](https://github.com/kitsunium/sdk/issues/663)).
 
 - **`Ready` hands apply `MaxApplyLagBytes` at most** past what the apply
   goroutine holds unapplied, on every node: the driver reports it at every
@@ -4468,13 +4478,41 @@ was OOM-killed or its log quota raised NO_SPACE for the whole cluster
   or while a read of the log is in progress. Without the last two, a
   follower's forwards, bounded only while uncommitted, grew the gap with no
   bound: 4.1 MiB against a bound of 64 KiB in the test.
-- **Measured.** A follower whose machine applies 2 ms slower than its
+- **The start reads the tail within the window.** `load` reads it
+  `MaxBatchBytes` at a time into one slice, sized once with a quarter of
+  room past it, which the step function keeps as its log rather than
+  copying it. Past `RecentEntriesBytes` of payloads, the oldest committed
+  commands are kept without theirs (`StartState.Evicted`) and are read back
+  when applied; every other entry keeps its payload, whose effects the
+  start applies. The first `Ready` hands the commands loaded so by index.
+- **The start's cost, stated.** The open's, as the amendment of #630 states
+  it, then the tail's metadata: an entry costs the store's index 32 bytes
+  and the step function's log 96, with the quarter of room 120, for as long
+  as it stays in the log, beside `RecentEntriesBytes` of payloads and, once
+  apply runs, `MaxApplyLagBytes`. A node needs the larger of the open's
+  transient and the budget, plus about 150 bytes an entry of its log: with
+  64-byte entries about 1.3 times the log on disk, with 4 KiB entries under
+  4 % of it. `MemoryBudget` counts configuration bounds only, so it counts
+  no entry: a product that sizes a small host adds `MaxLogBytes` divided by
+  its record size times 150 bytes. A 16.5 MiB tail past the snapshot, in
+  4 MiB segments, with a budget of 3.1 MiB, peaked at 66.5 MiB over the
+  opened log to start and apply with 64-byte entries, and 22 to 25 MiB with
+  4 KiB ones, over runs; it now peaks at 26 to 29 MiB and 3 to 6.4 MiB,
+  under the 38.4 and 12.8 MiB the bound of #630 allows, the heap sampled
+  every millisecond with the collector at GOGC=10. Bounding apply alone
+  (#664) left them at 63 and 22 MiB: the tail was read whole before the
+  first `Ready`. A follower whose machine applies 2 ms slower than its
   leader's held 11.5 MiB unapplied against a bound of 1 MiB; it now holds
   1 MiB, and catches up once its machine does.
-- **What it costs.** A slow follower reads back from the log what it fell
-  behind by, which the page cache most likely holds. A leader refuses
-  commands while apply reads entries back: the step function does not know
-  the size of the payloads it no longer holds, and errs on the side of the
+- **What it costs.** The committed commands a start loads without their
+  payloads are read from the disk twice, once to load the tail and once to
+  apply it, which a start with a short tail does not do; a slow follower
+  reads back what it fell behind by. Both are reads of what the page cache
+  most likely holds. A leader refuses commands while apply reads entries
+  back: one elected on a committed tail longer than `RecentEntriesBytes`
+  refuses them until that tail is applied, where it admitted them once the
+  tail was under `MaxApplyLagBytes`. The step function does not know the
+  size of the payloads it no longer holds, and errs on the side of the
   bound.
 
 Nothing published changes: no frame, no payload, no record format.
