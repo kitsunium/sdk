@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T06:33:47Z -->
+<!-- updated: 2026-10-25T17:00:00Z -->
 # internal/service/app/consensus/wire/
 
 ## Purpose
@@ -26,6 +26,11 @@ They are not codec formats: two nodes must write the same bytes.
   every byte before it: a reader that does not know the version tells by
   that sum a `.meta` a newer build wrote, which refuses its open, from one
   that rotted, which it skips (#665, the store's `newerMeta`).
+- Judge an admin payload's `Change` in `ParseAdminAt`, or read the
+  membership of an entry by its change kind: every reader takes the
+  configuration from the payload whatever `Change` says, which is how
+  `ChangeSnapshotLimit` (8) shipped with no protocol raise, a node of an
+  earlier release adopting it as a follower (#677).
 - Choose a layout's version by anything but the value or the entry it
   belongs to: `AppendSnapshotMeta` writes version 2 exactly when the
   meta's ClusterVersion is 2 (#546 phase 2) and version 3 when it is 3 or

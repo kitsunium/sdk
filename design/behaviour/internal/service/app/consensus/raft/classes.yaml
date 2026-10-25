@@ -307,6 +307,18 @@ constants:
           of its apply, as before #674: a leader that handed its leadership over
           for a stuck apply (#554) took it straight back.
         name: mutStalledTakesOver
+      - doc: |-
+          mutLimitAnyOrigin admits a ChangeSnapshotLimit from any origin, not
+          only from the member it names (#677).
+        name: mutLimitAnyOrigin
+      - doc: |-
+          mutLimitZero admits a ChangeSnapshotLimit of 0 or below, which
+          records no limit at all (#677).
+        name: mutLimitZero
+      - doc: |-
+          mutLimitUnchanged admits a ChangeSnapshotLimit of the limit already
+          recorded, an entry for nothing (#677).
+        name: mutLimitUnchanged
     name: mutAckBeforeSync
   - doc: The facts a PeerStatValue carries.
     grouped: true
@@ -481,6 +493,8 @@ files:
       - listedBefore
       - vouched
       - (*Raft).updateAddress
+      - (*Raft).updateSnapshotLimit
+      - (*Raft).limitStated
       - (*Raft).denyPin
       - (*Raft).retireKey
       - (*Raft).atProtocol3
@@ -1750,17 +1764,18 @@ types:
       - doc: |-
           checkAdmin holds an engine entry of kind to the leader's state, rewriting
           admin in place where the entry it replicates differs from the one
-          proposed. It returns the transfer target of an EntryTransfer.
+          proposed. origin is the node the leader received it from, authenticated
+          by the transport. It returns the transfer target of an EntryTransfer.
         name: checkAdmin
-        params: kind core.EntryKind, admin *wire.AdminValue, index uint64
+        params: kind core.EntryKind, admin *wire.AdminValue, index uint64, origin core.NodeID
         recv: r *Raft
         results: core.NodeID, errs.Code
       - doc: |-
           checkMembership admits one membership change at a time, only once the
           term's no-op committed, and rewrites it into the whole configuration that
-          takes effect at index.
+          takes effect at index. origin is the node the change came from.
         name: checkMembership
-        params: admin *wire.AdminValue, index uint64
+        params: admin *wire.AdminValue, index uint64, origin core.NodeID
         recv: r *Raft
         results: errs.Code
       - doc: |-
@@ -1824,10 +1839,11 @@ types:
         results: core.NodeID, errs.Code
       - doc: |-
           nextConf computes the configuration a single-server change produces, and
-          refuses it on its merits (D8). On a refusal the configuration returned is
-          not to be used.
+          refuses it on its merits (D8). origin is the node the change came from,
+          authenticated by the transport. On a refusal the configuration returned
+          is not to be used.
         name: nextConf
-        params: admin wire.AdminValue
+        params: admin wire.AdminValue, origin core.NodeID
         recv: r *Raft
         results: core.MembershipValue, errs.Code
       - doc: |-
@@ -1924,6 +1940,33 @@ types:
         params: cur *core.MembershipValue, admin *wire.AdminValue, idx int
         recv: r *Raft
         results: errs.Code
+      - doc: |-
+          updateSnapshotLimit records, for the member at idx, the MaxSnapshotBytes
+          the one member admin carries names, on that member's word alone: origin,
+          the node the transport authenticated, must be the target. Only a limit
+          above 0 that differs from the recorded one is admitted, and only while a
+          majority answers. A voter's recorded limit bounds every cut of every node
+          (cutLimit), a learner's what it is offered and fed, and nothing updated
+          it once its JOIN wrote it: a member that raised its limit and restarted,
+          #512's remedy, was held to the old one, every cut failed
+          SNAPSHOT_TOO_LARGE once the state outgrew it, and the no-space alarm
+          refused every write of the cluster (#677). A change of another member's
+          limit is refused: only that member knows the limit it runs with. A limit
+          of 0 is refused, which would record no limit at all and lift every bound
+          on what the member is offered; and the recorded one, which would append
+          an entry for nothing.
+        name: updateSnapshotLimit
+        params: cur *core.MembershipValue, admin *wire.AdminValue, idx int, origin core.NodeID
+        recv: r *Raft
+        results: errs.Code
+      - doc: |-
+          limitStated reports whether limit may replace recorded, the limit a
+          member's record holds: stated by that member itself (byItself), above 0,
+          and another one.
+        name: limitStated
+        params: limit, recorded int64, byItself bool
+        recv: r *Raft
+        results: bool
       - doc: |-
           denyPin withdraws the pin of the member at idx, target: its connections
           are refused once the change commits, while it stays a member. Never this

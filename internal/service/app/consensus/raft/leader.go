@@ -570,7 +570,7 @@ func (r *Raft) validateAdmin(e *core.EntryValue, index uint64, origin core.NodeI
 	if err != nil {
 		return 0, codeVersion
 	}
-	transfer, code := r.checkAdmin(e.Kind, &admin, index)
+	transfer, code := r.checkAdmin(e.Kind, &admin, index, origin)
 	if code != 0 {
 		return 0, code
 	}
@@ -591,11 +591,12 @@ func (r *Raft) validateAdmin(e *core.EntryValue, index uint64, origin core.NodeI
 
 // checkAdmin holds an engine entry of kind to the leader's state, rewriting
 // admin in place where the entry it replicates differs from the one
-// proposed. It returns the transfer target of an EntryTransfer.
-func (r *Raft) checkAdmin(kind core.EntryKind, admin *wire.AdminValue, index uint64) (core.NodeID, errs.Code) {
+// proposed. origin is the node the leader received it from, authenticated
+// by the transport. It returns the transfer target of an EntryTransfer.
+func (r *Raft) checkAdmin(kind core.EntryKind, admin *wire.AdminValue, index uint64, origin core.NodeID) (core.NodeID, errs.Code) {
 	switch kind {
 	case core.EntryMembership:
-		return 0, r.checkMembership(admin, index)
+		return 0, r.checkMembership(admin, index, origin)
 	case core.EntryTimingContract:
 		return 0, r.checkTimingContract(admin)
 	case core.EntryClusterVersion:
@@ -614,12 +615,12 @@ func (r *Raft) checkAdmin(kind core.EntryKind, admin *wire.AdminValue, index uin
 
 // checkMembership admits one membership change at a time, only once the
 // term's no-op committed, and rewrites it into the whole configuration that
-// takes effect at index.
-func (r *Raft) checkMembership(admin *wire.AdminValue, index uint64) errs.Code {
+// takes effect at index. origin is the node the change came from.
+func (r *Raft) checkMembership(admin *wire.AdminValue, index uint64, origin core.NodeID) errs.Code {
 	if (!r.mutated(mutMembershipBeforeNoOp) && r.log.committed < r.termStart) || r.conf().Index > r.log.committed {
 		return codeChangePending
 	}
-	next, code := r.nextConf(*admin)
+	next, code := r.nextConf(*admin, origin)
 	if code != 0 {
 		return code
 	}
@@ -761,9 +762,10 @@ func (r *Raft) checkTransfer(admin *wire.AdminValue) (core.NodeID, errs.Code) {
 }
 
 // nextConf computes the configuration a single-server change produces, and
-// refuses it on its merits (D8). On a refusal the configuration returned is
-// not to be used.
-func (r *Raft) nextConf(admin wire.AdminValue) (core.MembershipValue, errs.Code) {
+// refuses it on its merits (D8). origin is the node the change came from,
+// authenticated by the transport. On a refusal the configuration returned
+// is not to be used.
+func (r *Raft) nextConf(admin wire.AdminValue, origin core.NodeID) (core.MembershipValue, errs.Code) {
 	cur := r.conf().Clone()
 	idx := slices.IndexFunc(cur.Members, func(m core.MemberValue) bool { return m.ID == admin.Target })
 	var code errs.Code
@@ -778,6 +780,8 @@ func (r *Raft) nextConf(admin wire.AdminValue) (core.MembershipValue, errs.Code)
 		code = r.updateAddress(&cur, &admin, idx)
 	case wire.ChangeDenyPin:
 		code = r.denyPin(&cur, admin.Target, idx)
+	case wire.ChangeSnapshotLimit:
+		code = r.updateSnapshotLimit(&cur, &admin, idx, origin)
 	default:
 		code = codeMembershipInvalid
 	}
@@ -1000,6 +1004,40 @@ func (r *Raft) updateAddress(cur *core.MembershipValue, admin *wire.AdminValue, 
 	}
 	cur.Members[idx].Address = admin.Membership.Members[0].Address
 	return 0
+}
+
+// updateSnapshotLimit records, for the member at idx, the MaxSnapshotBytes
+// the one member admin carries names, on that member's word alone: origin,
+// the node the transport authenticated, must be the target. Only a limit
+// above 0 that differs from the recorded one is admitted, and only while a
+// majority answers. A voter's recorded limit bounds every cut of every node
+// (cutLimit), a learner's what it is offered and fed, and nothing updated
+// it once its JOIN wrote it: a member that raised its limit and restarted,
+// #512's remedy, was held to the old one, every cut failed
+// SNAPSHOT_TOO_LARGE once the state outgrew it, and the no-space alarm
+// refused every write of the cluster (#677). A change of another member's
+// limit is refused: only that member knows the limit it runs with. A limit
+// of 0 is refused, which would record no limit at all and lift every bound
+// on what the member is offered; and the recorded one, which would append
+// an entry for nothing.
+func (r *Raft) updateSnapshotLimit(cur *core.MembershipValue, admin *wire.AdminValue, idx int, origin core.NodeID) errs.Code {
+	if idx < 0 || len(admin.Membership.Members) != 1 || admin.Membership.Members[0].ID != admin.Target {
+		return codeMembershipInvalid
+	}
+	limit := admin.Membership.Members[0].MaxSnapshotBytes
+	if !r.limitStated(limit, cur.Members[idx].MaxSnapshotBytes, origin == admin.Target) || !r.activeMajority(*cur) {
+		return codeMembershipInvalid
+	}
+	cur.Members[idx].MaxSnapshotBytes = limit
+	return 0
+}
+
+// limitStated reports whether limit may replace recorded, the limit a
+// member's record holds: stated by that member itself (byItself), above 0,
+// and another one.
+func (r *Raft) limitStated(limit, recorded int64, byItself bool) bool {
+	return (byItself || r.mutated(mutLimitAnyOrigin)) && (limit > 0 || r.mutated(mutLimitZero)) &&
+		(limit != recorded || r.mutated(mutLimitUnchanged))
 }
 
 // denyPin withdraws the pin of the member at idx, target: its connections

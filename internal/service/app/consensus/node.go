@@ -201,6 +201,9 @@ type Node struct {
 	joinRefused atomic.Int64
 	// space is the no-space guard's state (#515).
 	space spaceGuard
+	// snapLimit is the watch of the limit the membership records for this
+	// node (#677).
+	snapLimit snapLimitWatch
 	// crashAfterPublish is set by the package's own tests only.
 	crashAfterPublish atomic.Bool
 }
@@ -1074,6 +1077,7 @@ func (n *Node) onTick(tick clock.Ticker, ok bool) (time.Time, bool) {
 	n.observeResources()
 	n.guardSpace(turn)
 	n.watchUnfed()
+	n.watchSnapshotLimit(turn)
 	return turn, true
 }
 

@@ -881,7 +881,7 @@ sequences:
             - return: 0, codeVersion
           when: err != nil
       - bind: transfer, code
-        eval: r.checkAdmin(e.Kind, &admin, index)
+        eval: r.checkAdmin(e.Kind, &admin, index, origin)
         to: r.checkAdmin
       - opt:
           do:
@@ -922,7 +922,7 @@ sequences:
           cases:
             - case: core.EntryMembership
               do:
-                - return: 0, r.checkMembership(admin, index)
+                - return: 0, r.checkMembership(admin, index, origin)
             - case: core.EntryTimingContract
               do:
                 - return: 0, r.checkTimingContract(admin)
@@ -954,7 +954,7 @@ sequences:
             - return: codeChangePending
           when: (!r.mutated(mutMembershipBeforeNoOp) && r.log.committed < r.termStart) || r.conf().Index > r.log.committed
       - bind: next, code
-        eval: r.nextConf(*admin)
+        eval: r.nextConf(*admin, origin)
         to: r.nextConf
       - opt:
           do:
@@ -1097,6 +1097,8 @@ sequences:
         kind: internal
       - id: r.denyPin
         kind: internal
+      - id: r.updateSnapshotLimit
+        kind: internal
     steps:
       - bind: cur
         eval: r.conf().Clone()
@@ -1134,6 +1136,11 @@ sequences:
                 - set: code
                   to: r.denyPin
                   value: r.denyPin(&cur, admin.Target, idx)
+            - case: wire.ChangeSnapshotLimit
+              do:
+                - set: code
+                  to: r.updateSnapshotLimit
+                  value: r.updateSnapshotLimit(&cur, &admin, idx, origin)
             - default: true
               do:
                 - set: code
@@ -1383,6 +1390,26 @@ sequences:
       - set: cur.Members[idx].Address
         value: admin.Membership.Members[0].Address
       - return: "0"
+  - of: (*Raft).updateSnapshotLimit
+    steps:
+      - opt:
+          do:
+            - return: codeMembershipInvalid
+          when: idx < 0 || len(admin.Membership.Members) != 1 || admin.Membership.Members[0].ID != admin.Target
+      - bind: limit
+        eval: admin.Membership.Members[0].MaxSnapshotBytes
+      - opt:
+          do:
+            - return: codeMembershipInvalid
+          when: "!r.limitStated(limit, cur.Members[idx].MaxSnapshotBytes, origin == admin.Target) || !r.activeMajority(*cur)"
+      - set: cur.Members[idx].MaxSnapshotBytes
+        value: limit
+      - return: "0"
+  - of: (*Raft).limitStated
+    steps:
+      - return: |-
+          (byItself || r.mutated(mutLimitAnyOrigin)) && (limit > 0 || r.mutated(mutLimitZero)) &&
+          		(limit != recorded || r.mutated(mutLimitUnchanged))
   - of: (*Raft).denyPin
     participants:
       - id: caller
