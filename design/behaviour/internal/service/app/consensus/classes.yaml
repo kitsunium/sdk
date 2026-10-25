@@ -828,7 +828,10 @@ files:
       - openFileLog
       - (*fileLog).prepareOpen
       - scanned
-      - (*scanned).keep
+      - (*scanned).note
+      - replayed
+      - keptEarlier
+      - payloadAt
       - scanRec
       - scanRecOf
       - (*fileLog).recover
@@ -843,6 +846,8 @@ files:
       - (*segRead).record
       - (*segRead).upTo
       - (*fileLog).checkBatchSequence
+      - batchSeq
+      - (*batchSeq).follow
       - continuesBatch
       - (*fileLog).trimTornTail
       - (*fileLog).replay
@@ -1978,6 +1983,28 @@ functions:
     name: openFileLog
     params: dd *dataDir, segBytes int64
     results: "*fileLog, error"
+  - doc: |-
+      replayed copies out, at their count, the records of a segment before the
+      last that replay reads: the first, which must be its checkpoint, and every
+      other one but the hard states and commits. Those set only the hard state,
+      which the next segment's checkpoint sets again, and their layout was
+      judged as they were read. The seal, always the last record of such a
+      segment, is kept: replay leaves the batch sequence at it.
+    name: replayed
+    params: recs []scanRec
+    results: "[]scanRec"
+  - doc: |-
+      keptEarlier reports whether a segment before the last keeps a record of
+      kind k past its scan: every kind but those that set only the hard state.
+    name: keptEarlier
+    params: k uint8
+    results: bool
+  - doc: |-
+      payloadAt is the payload of record r in b, the bytes of its segment the
+      scan judged it on: what its header announces past the fixed fields.
+    name: payloadAt
+    params: b []byte, r *scanRec
+    results: "[]byte"
   - doc: scanRecOf is the scanRec of r, parsed at offset off.
     name: scanRecOf
     params: r *record, off int64
@@ -1998,16 +2025,17 @@ functions:
       checkLayouts refuses, before any tail is classified or trimmed, a record
       of a kind this build does not know or a hard state of another length:
       left to replay, one in an unfinished last batch was trimmed with the tear
-      and zeroed, and the open succeeded (D18, #511).
+      and zeroed, and the open succeeded (D18, #511). The scan judged every
+      record it read (scanned.note), and the first one in log order is refused.
     name: checkLayouts
     params: segs []*scanned
     results: error
   - doc: |-
       knownLayout is nil for a record of a kind this build reads, with the
-      payload length that kind has where it has one; pay is the payload of a
-      hard-state record.
+      payload length that kind has where it has one; payload is the length of
+      r's payload.
     name: knownLayout
-    params: seg uint64, r *scanRec, pay []byte
+    params: seg uint64, r *scanRec, payload int
     results: error
   - doc: |-
       unknownLayout is the VERSION_UNSUPPORTED of record r of segment seg, a
@@ -3890,7 +3918,8 @@ types:
           scanSegments reads and parses every segment in order. A segment is judged
           as soon as it is read, so the first damage found is the one quarantined,
           and nothing after it is read. The segments are read one at a time into
-          the same buffers, and only the last one's bytes are kept (#630).
+          the same buffers, and only the last one's bytes and every record are
+          kept (#630, #660).
         name: scanSegments
         params: nums []uint64
         recv: l *fileLog
@@ -3899,16 +3928,17 @@ types:
           scanSegment reads segment n and parses its records up to the first hole,
           or through its seal: a sealed segment is read up to its sealed length
           (R9-02), and the rest of a segment is read only for a hole, which is
-          classified on the whole file. The bytes go to sb's buffer, which the next
-          segment reuses: what the scanned segment keeps past the scan is copied
-          out of it, its data aside.
+          classified on the whole file. The bytes and the records go to sb's
+          buffers, which the next segment reuses: s.recs and s.data are valid until
+          then, and the caller copies out the records it keeps (scanSegments).
         name: scanSegment
         params: n uint64, sb *scanBufs
         recv: l *fileLog
         results: "*scanned, error"
       - doc: |-
           checkBatchSequence quarantines a log whose batch sequences are not
-          contiguous across the whole log (R9-01).
+          contiguous across the whole log (R9-01), at the first record that breaks
+          them, which the scan noted on every record it read (batchSeq).
         name: checkBatchSequence
         params: segs []*scanned
         recv: l *fileLog
@@ -3940,14 +3970,15 @@ types:
         recv: l *fileLog
         results: error
       - doc: |-
-          applyRecord applies one record of segment seg to the log being rebuilt,
-          pay its payload when it is a hard state's. An entry out of sequence is
-          quarantined; a record kind this build does not know, or a hard state of
-          another length, is a newer layout and stops the open VERSION_UNSUPPORTED
-          — skipped, it lost what a newer build wrote there (D18, #511). A seal
-          changes nothing.
+          applyRecord applies one record of segment seg to the log being rebuilt;
+          data is the segment's bytes, where a hard state's payload is read, and
+          only the last segment keeps a hard state (replayed). An entry out of
+          sequence is quarantined; a record kind this build does not know, or a
+          hard state of another length, is a newer layout and stops the open
+          VERSION_UNSUPPORTED — skipped, it lost what a newer build wrote there
+          (D18, #511). A seal changes nothing.
         name: applyRecord
-        params: seg uint64, r *scanRec, pay []byte
+        params: seg uint64, r *scanRec, data []byte
         recv: l *fileLog
         results: error
       - doc: |-
@@ -4346,13 +4377,19 @@ types:
     name: fileLog
   - doc: |-
       scanned is one segment as recovery read it, before anything is changed.
-      It keeps what the later steps read and nothing more: a scanRec per
-      record, the payloads replay decodes, copied out, and the bytes read only
-      for the last segment, whose tail is still to be classified. Holding every
-      segment's bytes whole, with a record pointing into them per record, took
-      one to three times the log in heap until recover returned, and a node
-      whose log grew while its compaction stalled was OOM-killed at every
-      restart on a small host, Inspect and WipeAndRejoin with it (#630).
+      It keeps what the later steps read and nothing more. The last segment,
+      whose tail is still to be classified, keeps a scanRec per record and the
+      bytes read, where replay finds its hard states. An earlier one keeps its
+      checkpoint, decoded, and the records that shape the index: its hard
+      states and commits set only the hard state, which the next segment's
+      checkpoint sets again (applyCheckpoint), so they are judged during the
+      scan and not kept. Holding every segment's bytes whole, with a record
+      pointing into them per record, took one to three times the log in heap
+      until recover returned, and a node whose log grew while its compaction
+      stalled was OOM-killed at every restart on a small host, Inspect and
+      WipeAndRejoin with it (#630). A scanRec per record and a copy of every
+      hard state still took about the log's size, as a follower writes a hard
+      state at nearly every Ready (#660).
     fields:
       - name: "n"
         type: uint64
@@ -4363,13 +4400,30 @@ types:
           whole file, unless it is sealed and was read up to its seal only.
         name: data
         type: "[]byte"
-      - name: recs
+      - doc: |-
+          recs is every record of the last segment and, of an earlier one, its
+          first and every other one but its hard states and commits (replayed).
+        name: recs
         type: "[]scanRec"
       - doc: |-
-          pay holds, by record position, the payloads of the checkpoint and
-          hard-state records, the only ones recovery reads past the scan.
-        name: pay
-        type: map[int][]byte
+          cp is the checkpoint the segment opens with, decoded during the scan;
+          cpOK is false when its first record is no checkpoint payload, which
+          replay quarantines.
+        name: cp
+        type: checkpoint
+      - name: cpOK
+        type: bool
+      - doc: |-
+          layout is the VERSION_UNSUPPORTED of the segment's first record of a
+          layout this build does not read, nil when there is none (knownLayout).
+        name: layout
+        type: error
+      - doc: |-
+          seqBreak is the offset of the segment's first record that does not
+          continue the batch sequence of the log read before it, -1 when none
+          (R9-01).
+        name: seqBreak
+        type: int64
       - name: hole
         type: int64
       - name: sealed
@@ -4379,12 +4433,14 @@ types:
     kind: struct
     methods:
       - doc: |-
-          keep copies out the payload of record i, a checkpoint or a hard state:
-          replay decodes it once the buffer it was read into holds the next
-          segment.
-        name: keep
-        params: i int, payload []byte
+          note appends to recs the scanRec of r, parsed at offset off, and judges
+          what only its payload tells, which the buffer it was read into loses to
+          the next segment: the checkpoint the segment opens with, and a record of
+          a layout this build does not read.
+        name: note
+        params: recs []scanRec, r *record, off int64
         recv: s *scanned
+        results: "[]scanRec"
       - doc: |-
           parse appends to recs the records of s read through reader, up to the
           first hole or through the seal, and returns them.
@@ -4476,6 +4532,25 @@ types:
         recv: r *segRead
         results: error
     name: segRead
+  - doc: |-
+      batchSeq follows the batch sequence across the log, segment after segment,
+      on every record the scan reads, before a segment keeps only some of them
+      (replayed).
+    fields:
+      - name: prev
+        type: scanRec
+      - name: any
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          follow returns the offset of the first record of recs that does not
+          continue the sequence read so far, -1 when every one does.
+        name: follow
+        params: recs []scanRec
+        recv: q *batchSeq
+        results: int64
+    name: batchSeq
   - doc: |-
       prepared is the next segment, zero-filled in the background as a .tmp
       while the current one fills (R3-24, R4-01). It is never published early:

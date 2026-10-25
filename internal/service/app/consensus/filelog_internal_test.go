@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -888,6 +889,296 @@ func TestReopeningTheLogHoldsOneSegmentAtATime(t *testing.T) {
 			t.Errorf("entries of %d B: reopening a log of %.1f MiB allocated %.1f MiB, over %.1f MiB: the open holds the log, not a segment at a time",
 				payload, mib(onDisk), mib(allocated), mib(bound))
 		}
+	}
+}
+
+// fillLogAsAFollower appends to l, until its segments occupy size bytes, the
+// records a follower writes under a low write rate, and returns the last
+// index. Each write is two Readies: the entry with the commit its append
+// carried, then the commit the next heartbeat carried, alone. node.go
+// (appendFor, hardStateFor) passes a hard state at every Ready whose commit
+// moved, and fileLog.Append writes it as a hard-state record: two records
+// of three are hard states. The Readies are synced 64 at a time to keep the
+// test short; what the open keeps is per record, whatever the batches.
+func fillLogAsAFollower(t *testing.T, l *fileLog, payload int, size int64) uint64 {
+	t.Helper()
+	data := make([]byte, payload)
+	var idx uint64
+	for l.logBytes() < size {
+		for range 64 {
+			idx++
+			e := coreconsensus.EntryValue{
+				Position: coreconsensus.PositionValue{Term: 1, Index: idx},
+				Kind:     coreconsensus.EntryCommand, BodySum: wire.BodySum(data), Data: data,
+			}
+			if err := l.Append([]coreconsensus.EntryValue{e}, &coreconsensus.HardState{Term: 1, Vote: 2, Commit: idx - 1}); err != nil {
+				t.Fatal(err)
+			}
+			if err := l.Append(nil, &coreconsensus.HardState{Term: 1, Vote: 2, Commit: idx}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := l.Sync(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return idx
+}
+
+// scanKept is what the scan of every segment of dir keeps until recover
+// returns: the heap it holds, less the buffer the last segment's bytes live
+// in, the records it keeps, and how many of them are hard states of a
+// segment before the last.
+func scanKept(t *testing.T, dir string, segBytes int64) (live int64, recs, earlierHS int) {
+	t.Helper()
+	l := &fileLog{dir: dir}
+	nums, err := l.segmentNumbers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	segs, err := l.scanSegments(nums)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.GC()
+	runtime.ReadMemStats(&after)
+	for i, s := range segs {
+		recs += len(s.recs)
+		for j := range s.recs {
+			if i < len(segs)-1 && s.recs[j].kind == recHardState {
+				earlierHS++
+			}
+		}
+	}
+	runtime.KeepAlive(segs)
+	return int64(after.HeapAlloc) - int64(before.HeapAlloc) - segBytes, recs, earlierHS
+}
+
+// A follower writes a hard state at nearly every Ready, so two records of
+// three in its log are hard states. The reopen of #630 kept, for the whole
+// log until recover returned, a 40-byte scanRec per record and a copy of
+// every hard state's payload in a map, though only the last segment's are
+// read: the next segment's checkpoint sets the hard state again. On such a
+// log it kept 0.5 to 0.9 times the log in heap and allocated past #630's
+// own bound (#660). A segment before the last now keeps its checkpoint and
+// the records that shape the index, the last one every record and its
+// bytes, and the reopen finds the hard state the log was closed with.
+func TestReopeningAFollowersLogDoesNotHoldItsHardStates(t *testing.T) {
+	const segBytes, logSize = 4 << 20, 16 << 20
+	type fill struct {
+		name string
+		fn   func(*testing.T, *fileLog, int, int64) uint64
+	}
+	for _, f := range []fill{{"entries only (fillLog)", fillLog}, {"a follower's, entry+hs then hs", fillLogAsAFollower}} {
+		for _, payload := range []int{64, 256} {
+			t.Run(fmt.Sprintf("%s, entries of %d B", f.name, payload), func(t *testing.T) {
+				reopenAFollowersLog(t, f.fn, payload, segBytes, logSize)
+			})
+		}
+	}
+}
+
+// reopenAFollowersLog is one case of
+// TestReopeningAFollowersLogDoesNotHoldItsHardStates: a log of logSize bytes
+// in segments of segBytes, filled by fill with entries of payload bytes.
+func reopenAFollowersLog(t *testing.T, fill func(*testing.T, *fileLog, int, int64) uint64, payload int, segBytes, logSize int64) {
+	dir := t.TempDir()
+	d := openDir(t, dir, segBytes)
+	last := fill(t, d.d.log, payload, logSize)
+	onDisk := d.d.log.logBytes()
+	hs := must(d.Log().HardState())(t)
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	d = DataDir{}
+	live, recs, earlierHS := scanKept(t, dir, segBytes)
+	// #630's own measure: what the reopen allocates, against its bound of
+	// three segments and 160 bytes an entry; and the heap's peak, sampled
+	// every millisecond, a lower bound of it.
+	var before, opened runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	var peak atomic.Uint64
+	stop := make(chan struct{})
+	sampled := make(chan struct{})
+	go func() {
+		defer close(sampled)
+		var ms runtime.MemStats
+		for {
+			runtime.ReadMemStats(&ms)
+			if ms.HeapAlloc > peak.Load() {
+				peak.Store(ms.HeapAlloc)
+			}
+			select {
+			case <-stop:
+				return
+			case <-time.After(time.Millisecond):
+			}
+		}
+	}()
+	d = openDir(t, dir, segBytes)
+	close(stop)
+	<-sampled
+	runtime.ReadMemStats(&opened)
+	peakOver := int64(peak.Load()) - int64(before.HeapAlloc)
+	allocated := int64(opened.TotalAlloc - before.TotalAlloc)
+	defer func() {
+		if err := d.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	if fi, la := d.Log().Bounds(); fi != 1 || la != last {
+		t.Fatalf("bounds %d..%d after the reopen, want 1..%d", fi, la, last)
+	}
+	if got := must(d.Log().HardState())(t); got != hs {
+		t.Fatalf("hard state %+v after the reopen, want %+v", got, hs)
+	}
+	bound := 3*segBytes + 160*int64(last)
+	t.Logf("%d entries, %d records kept, a log of %.1f MiB on disk; the scan keeps %.1f MiB live (%.2fx the log); the reopen allocated %.1f MiB (sampled heap peak %.1f MiB over the baseline), bound %.1f MiB",
+		last, recs, mib(onDisk), mib(live), float64(live)/float64(onDisk), mib(allocated), mib(peakOver), mib(bound))
+	if earlierHS != 0 {
+		t.Errorf("the scan kept %d hard-state records of the segments before the last, which the next checkpoint overwrites", earlierHS)
+	}
+	if allocated > bound {
+		t.Errorf("the reopen allocated %.1f MiB, over #630's bound %.1f MiB", mib(allocated), mib(bound))
+	}
+}
+
+// segRecords is every record of a segment's bytes b, up to the first hole,
+// at its offset.
+func segRecords(b []byte) []record {
+	var out []record
+	for off := 0; off < len(b); {
+		r, ok := parseRecord(b[off:])
+		if !ok {
+			break
+		}
+		r.off = int64(off)
+		out = append(out, r)
+		off += r.length
+	}
+	return out
+}
+
+// rewriteRecord encodes r over the record at off of segment n of dir's log,
+// which takes the same aligned length.
+func rewriteRecord(t *testing.T, dir string, n uint64, off int64, r *record) {
+	t.Helper()
+	path := filepath.Join(dir, "log", segName(n))
+	b := must(os.ReadFile(path))(t)
+	old, ok := parseRecord(b[off:])
+	enc := appendRecord(nil, r)
+	if !ok || len(enc) != old.length {
+		t.Fatalf("segment %d at %d: a record of %d bytes over %d (%v)", n, off, len(enc), old.length, ok)
+	}
+	copy(b[off:], enc)
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A segment before the last keeps neither its hard states nor its commits,
+// but every record it held is judged as a scan that kept them all judged
+// it, in the same order (#660): a hard state of another length stops the
+// open VERSION_UNSUPPORTED (D18, #511); the batch sequence is judged before
+// it (R9-01), even broken at a hard state no segment keeps; a checkpoint
+// payload of another length, which replay quarantines, after it. No refused
+// open changes a byte of the log.
+func TestAnEarlierSegmentIsJudgedOnEveryRecordItHeld(t *testing.T) {
+	// A 28-byte hard state takes the aligned 80 bytes of a 24-byte one, and
+	// a 66-byte checkpoint payload the 120 of a 64-byte one.
+	longHS := append(encodeHS(coreconsensus.HardState{Term: 1, Vote: 2}), 0, 0, 0, 0)
+	longCP := append(checkpoint{nextBatchSeq: 1}.encode(), 0, 0)
+	type change func(t *testing.T, dir string, segs map[uint64][]record)
+	newerHS := func(t *testing.T, dir string, segs map[uint64][]record) {
+		for _, r := range segs[1][1:] {
+			if r.kind == recHardState {
+				rewriteRecord(t, dir, 1, r.off, &record{kind: recHardState, batch: r.batch, end: r.end, data: longHS})
+				return
+			}
+		}
+		t.Fatal("no hard state in segment 1")
+	}
+	breakBatches := func(t *testing.T, dir string, segs map[uint64][]record) {
+		for _, r := range segs[2][len(segs[2])/2:] {
+			if r.kind == recHardState {
+				r.batch += 5
+				rewriteRecord(t, dir, 2, r.off, &r)
+				return
+			}
+		}
+		t.Fatal("no hard state in segment 2")
+	}
+	longCheckpoint := func(t *testing.T, dir string, segs map[uint64][]record) {
+		r := segs[2][0]
+		rewriteRecord(t, dir, 2, 0, &record{kind: recCheckpt, batch: r.batch, end: r.end, data: longCP})
+	}
+	newer := map[string]string{"segment": segName(1), "hard_state_bytes": "28"}
+	broken := map[string]string{"segment": segName(2), "why": "batch sequence"}
+	damaged := map[string]string{"segment": segName(2), "offset": "0", "why": "checkpoint payload"}
+	cases := []struct {
+		name    string
+		changes []change
+		code    errs.Code
+		want    map[string]string
+	}{
+		{"a newer hard state in a sealed segment", []change{newerHS}, coreconsensus.CodeVersionUnsupported, newer},
+		{"and a batch sequence broken in the next one", []change{newerHS, breakBatches}, coreconsensus.CodeLogQuarantined, broken},
+		{"and a longer checkpoint in the next one", []change{newerHS, longCheckpoint}, coreconsensus.CodeVersionUnsupported, newer},
+		{"a longer checkpoint in a later segment", []change{longCheckpoint}, coreconsensus.CodeLogQuarantined, damaged},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			d := openDir(t, dir, 4096)
+			for i := uint64(1); i <= 80; i++ {
+				if err := d.Log().Append(ents(i, i, 1), &coreconsensus.HardState{Term: 1, Vote: 2, Commit: i - 1}); err != nil {
+					t.Fatal(err)
+				}
+				mustSync(t, d.Log())
+			}
+			if n := len(d.d.log.segs); n < 3 {
+				t.Fatalf("%d segments, want at least 3", n)
+			}
+			if err := d.Close(); err != nil {
+				t.Fatal(err)
+			}
+			segs := map[uint64][]record{}
+			for name, b := range segmentBytes(t, dir) {
+				var n uint64
+				if _, err := fmt.Sscanf(name, "seg-%016x", &n); err != nil {
+					t.Fatal(err)
+				}
+				segs[n] = segRecords(b)
+			}
+			for _, ch := range c.changes {
+				ch(t, dir, segs)
+			}
+			before := segmentBytes(t, dir)
+			nd, err := NewDataDirWith(dir, DataDirOptions{SegmentBytes: 4096, RuntimeDir: testRuntimeDir()})
+			if err == nil {
+				err = nd.d.log.checkMarkers()
+				defer nd.Close()
+			}
+			fields := map[string]string{}
+			for _, f := range errs.FieldsOf(err) {
+				fields[f.Key()] = f.StringValue()
+			}
+			for k, v := range c.want {
+				if !errs.HasCode(err, c.code) || fields[k] != v {
+					t.Fatalf("open = %v %v, want %v with %s=%s", err, fields, c.code, k, v)
+				}
+			}
+			after := segmentBytes(t, dir)
+			for n, b := range before {
+				if !bytes.Equal(b, after[n]) {
+					t.Errorf("segment %s changed by the refused open", n)
+				}
+			}
+		})
 	}
 }
 

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-24T23:30:00Z -->
+<!-- updated: 2026-10-25T00:37:46Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -87,13 +87,24 @@ one machine, are 31 s at 8.
   while its compaction stalled was OOM-killed at every restart, `Inspect`
   and WipeAndRejoin with it. `scanSegments` reads one segment at a time
   into the same buffer (`scanBufs`), a sealed one up to its seal and the
-  rest of a file only for a hole (`segRead`), keeps a 40-byte `scanRec` per
-  record and copies out only the checkpoint and hard-state payloads
-  (`scanned.keep`); only the last segment keeps its bytes, and replay
-  sizes the index once (#630, `TestReopeningTheLogHoldsOneSegmentAtATime`,
+  rest of a file only for a hole (`segRead`); only the last segment keeps
+  its bytes and a 40-byte `scanRec` per record, and replay sizes the index
+  once (#630, `TestReopeningTheLogHoldsOneSegmentAtATime`,
   `TestASealedSegmentIsReadUpToItsSeal`, `FuzzScanSegment`). Nor parse
   bytes past `segRead.n`: they are the previous segment's, and
   `segRead.record` reads what `parseRecord` judges first.
+- Keep a segment's hard states past its scan when it is not the last: a
+  follower writes one at nearly every Ready, and a `scanRec` and a copied
+  payload for each kept 0.5 to 0.9 times the log in heap until `recover`
+  returned. The next segment's checkpoint sets the hard state again
+  (`applyCheckpoint`), so an earlier segment keeps its checkpoint, decoded
+  (`scanned.cp`), and every record but its hard states and commits
+  (`replayed`); the last one's hard states are read back from its bytes
+  (`payloadAt`). Nor judge the batch sequence or the layouts on the records
+  kept: `batchSeq` and `scanned.note` judge every record read, and the
+  first break, then the first unknown layout, are refused in log order, as
+  before (#660, `TestReopeningAFollowersLogDoesNotHoldItsHardStates`,
+  `TestAnEarlierSegmentIsJudgedOnEveryRecordItHeld`).
 - Compact the store past its end without the term: it holds no entry to read
   it from, and a node restarted with no table votes on that term. The engine
   passes it (`storeReq.compactTerm`, `compactLog`), the file log refuses a

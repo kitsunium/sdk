@@ -1,7 +1,6 @@
 package consensus
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -369,36 +368,96 @@ func (l *fileLog) prepareOpen() error {
 }
 
 // scanned is one segment as recovery read it, before anything is changed.
-// It keeps what the later steps read and nothing more: a scanRec per
-// record, the payloads replay decodes, copied out, and the bytes read only
-// for the last segment, whose tail is still to be classified. Holding every
-// segment's bytes whole, with a record pointing into them per record, took
-// one to three times the log in heap until recover returned, and a node
-// whose log grew while its compaction stalled was OOM-killed at every
-// restart on a small host, Inspect and WipeAndRejoin with it (#630).
+// It keeps what the later steps read and nothing more. The last segment,
+// whose tail is still to be classified, keeps a scanRec per record and the
+// bytes read, where replay finds its hard states. An earlier one keeps its
+// checkpoint, decoded, and the records that shape the index: its hard
+// states and commits set only the hard state, which the next segment's
+// checkpoint sets again (applyCheckpoint), so they are judged during the
+// scan and not kept. Holding every segment's bytes whole, with a record
+// pointing into them per record, took one to three times the log in heap
+// until recover returned, and a node whose log grew while its compaction
+// stalled was OOM-killed at every restart on a small host, Inspect and
+// WipeAndRejoin with it (#630). A scanRec per record and a copy of every
+// hard state still took about the log's size, as a follower writes a hard
+// state at nearly every Ready (#660).
 type scanned struct {
 	n    uint64
 	size int64 // the segment file's size: what it occupies on disk
 	// data is the bytes read of the last segment, nil for the others: the
 	// whole file, unless it is sealed and was read up to its seal only.
 	data []byte
+	// recs is every record of the last segment and, of an earlier one, its
+	// first and every other one but its hard states and commits (replayed).
 	recs []scanRec
-	// pay holds, by record position, the payloads of the checkpoint and
-	// hard-state records, the only ones recovery reads past the scan.
-	pay     map[int][]byte
-	hole    int64 // -1 when none
-	sealed  bool
-	trimmed int64 // truncation point decided for the last segment, -1 none
+	// cp is the checkpoint the segment opens with, decoded during the scan;
+	// cpOK is false when its first record is no checkpoint payload, which
+	// replay quarantines.
+	cp   checkpoint
+	cpOK bool
+	// layout is the VERSION_UNSUPPORTED of the segment's first record of a
+	// layout this build does not read, nil when there is none (knownLayout).
+	layout error
+	// seqBreak is the offset of the segment's first record that does not
+	// continue the batch sequence of the log read before it, -1 when none
+	// (R9-01).
+	seqBreak int64
+	hole     int64 // -1 when none
+	sealed   bool
+	trimmed  int64 // truncation point decided for the last segment, -1 none
 }
 
-// keep copies out the payload of record i, a checkpoint or a hard state:
-// replay decodes it once the buffer it was read into holds the next
-// segment.
-func (s *scanned) keep(i int, payload []byte) {
-	if s.pay == nil {
-		s.pay = map[int][]byte{}
+// note appends to recs the scanRec of r, parsed at offset off, and judges
+// what only its payload tells, which the buffer it was read into loses to
+// the next segment: the checkpoint the segment opens with, and a record of
+// a layout this build does not read.
+func (s *scanned) note(recs []scanRec, r *record, off int64) []scanRec {
+	sr := scanRecOf(r, off)
+	if len(recs) == 0 && r.kind == recCheckpt {
+		s.cp, s.cpOK = decodeCheckpoint(r.data)
 	}
-	s.pay[i] = bytes.Clone(payload)
+	if s.layout == nil {
+		s.layout = knownLayout(s.n, &sr, len(r.data))
+	}
+	if len(recs) == cap(recs) {
+		// Doubled: append grows a large slice by a quarter, and the first
+		// segment's records left four times their size to the collector.
+		recs = slices.Grow(recs, max(len(recs), 64))
+	}
+	return append(recs, sr)
+}
+
+// replayed copies out, at their count, the records of a segment before the
+// last that replay reads: the first, which must be its checkpoint, and every
+// other one but the hard states and commits. Those set only the hard state,
+// which the next segment's checkpoint sets again, and their layout was
+// judged as they were read. The seal, always the last record of such a
+// segment, is kept: replay leaves the batch sequence at it.
+func replayed(recs []scanRec) []scanRec {
+	n := 0
+	for i := range recs {
+		if i == 0 || keptEarlier(recs[i].kind) {
+			n++
+		}
+	}
+	out := make([]scanRec, 0, n)
+	for i := range recs {
+		if i == 0 || keptEarlier(recs[i].kind) {
+			out = append(out, recs[i])
+		}
+	}
+	return out
+}
+
+// keptEarlier reports whether a segment before the last keeps a record of
+// kind k past its scan: every kind but those that set only the hard state.
+func keptEarlier(k uint8) bool { return k != recHardState && k != recCommit }
+
+// payloadAt is the payload of record r in b, the bytes of its segment the
+// scan judged it on: what its header announces past the fixed fields.
+func payloadAt(b []byte, r *scanRec) []byte {
+	n := int64(binary.LittleEndian.Uint32(b[r.off:]))
+	return b[r.off+int64(recHeader+recFixed) : r.off+int64(recHeader)+n]
 }
 
 // scanRec is what recovery keeps of a record past the scan: its kind,
@@ -499,18 +558,26 @@ func (l *fileLog) segmentNumbers() ([]uint64, error) {
 // scanSegments reads and parses every segment in order. A segment is judged
 // as soon as it is read, so the first damage found is the one quarantined,
 // and nothing after it is read. The segments are read one at a time into
-// the same buffers, and only the last one's bytes are kept (#630).
+// the same buffers, and only the last one's bytes and every record are
+// kept (#630, #660).
 func (l *fileLog) scanSegments(nums []uint64) ([]*scanned, error) {
 	segs := make([]*scanned, len(nums))
 	var sb scanBufs
+	var seq batchSeq
 	for i, n := range nums {
 		s, err := l.scanSegment(n, &sb)
 		if err != nil {
 			return nil, err
 		}
+		s.seqBreak = seq.follow(s.recs)
 		if i < len(nums)-1 {
-			// The next segment is read into the same buffer.
+			// The next segment is read into the same buffers.
 			s.data = nil
+			s.recs = replayed(s.recs)
+		} else {
+			// Copied at their count: the buffer grew record by record and
+			// kept more room than it holds.
+			s.recs = slices.Clone(s.recs)
 		}
 		segs[i] = s
 		if len(s.recs) == 0 || s.recs[0].kind != recCheckpt {
@@ -528,9 +595,9 @@ func (l *fileLog) scanSegments(nums []uint64) ([]*scanned, error) {
 // scanSegment reads segment n and parses its records up to the first hole,
 // or through its seal: a sealed segment is read up to its sealed length
 // (R9-02), and the rest of a segment is read only for a hole, which is
-// classified on the whole file. The bytes go to sb's buffer, which the next
-// segment reuses: what the scanned segment keeps past the scan is copied
-// out of it, its data aside.
+// classified on the whole file. The bytes and the records go to sb's
+// buffers, which the next segment reuses: s.recs and s.data are valid until
+// then, and the caller copies out the records it keeps (scanSegments).
 func (l *fileLog) scanSegment(n uint64, sb *scanBufs) (*scanned, error) {
 	f, err := os.Open(filepath.Join(l.logDir(), segName(n)))
 	if err != nil {
@@ -542,16 +609,14 @@ func (l *fileLog) scanSegment(n uint64, sb *scanBufs) (*scanned, error) {
 	if err != nil {
 		return nil, storageFailed("read segment", err)
 	}
-	s := &scanned{n: n, size: int64(len(reader.b)), hole: -1, trimmed: -1}
+	s := &scanned{n: n, size: int64(len(reader.b)), seqBreak: -1, hole: -1, trimmed: -1}
 	recs, err := s.parse(reader, sb.recs[:0])
 	if err != nil {
 		return nil, err
 	}
-	// Copied at their count: grown record by record, every segment's slice
-	// left its earlier copies to the collector and kept a quarter more
-	// room than it held.
-	s.recs = slices.Clone(recs)
+	// Grown record by record, the buffer is kept for the next segment.
 	sb.recs = recs
+	s.recs = recs
 	s.data = reader.b[:reader.n]
 	return s, nil
 }
@@ -567,10 +632,7 @@ func (s *scanned) parse(reader *segRead, recs []scanRec) ([]scanRec, error) {
 		if !ok {
 			return recs, s.holeAt(reader, off)
 		}
-		if r.kind == recCheckpt || r.kind == recHardState {
-			s.keep(len(recs), r.data)
-		}
-		recs = append(recs, scanRecOf(&r, off))
+		recs = s.note(recs, &r, off)
 		off += int64(r.length)
 		if r.kind == recSeal {
 			s.sealed = true
@@ -666,19 +728,36 @@ func (r *segRead) upTo(end int64) error {
 }
 
 // checkBatchSequence quarantines a log whose batch sequences are not
-// contiguous across the whole log (R9-01).
+// contiguous across the whole log (R9-01), at the first record that breaks
+// them, which the scan noted on every record it read (batchSeq).
 func (l *fileLog) checkBatchSequence(segs []*scanned) error {
-	var prev *scanRec
 	for _, s := range segs {
-		for i := range s.recs {
-			r := &s.recs[i]
-			if prev != nil && !continuesBatch(prev, r) {
-				return l.quarantine(s.n, r.off, "batch sequence")
-			}
-			prev = r
+		if s.seqBreak >= 0 {
+			return l.quarantine(s.n, s.seqBreak, "batch sequence")
 		}
 	}
 	return nil
+}
+
+// batchSeq follows the batch sequence across the log, segment after segment,
+// on every record the scan reads, before a segment keeps only some of them
+// (replayed).
+type batchSeq struct {
+	prev scanRec
+	any  bool
+}
+
+// follow returns the offset of the first record of recs that does not
+// continue the sequence read so far, -1 when every one does.
+func (q *batchSeq) follow(recs []scanRec) int64 {
+	for i := range recs {
+		r := &recs[i]
+		if q.any && !continuesBatch(&q.prev, r) {
+			return r.off
+		}
+		q.prev, q.any = *r, true
+	}
+	return -1
 }
 
 // continuesBatch reports whether r may follow prev: in prev's batch, or
@@ -718,16 +797,15 @@ func (l *fileLog) replay(segs []*scanned) error {
 	// (#630). A truncate that drops it starts a new one.
 	l.slots = make([]slot, 0, entryRecords(segs))
 	for si, s := range segs {
-		cp, ok := decodeCheckpoint(s.pay[0])
-		if !ok {
+		if !s.cpOK {
 			return l.quarantine(s.n, 0, "checkpoint payload")
 		}
-		if err := l.applyCheckpoint(si == 0, s.n, &cp); err != nil {
+		if err := l.applyCheckpoint(si == 0, s.n, &s.cp); err != nil {
 			return err
 		}
 		for i := 1; i < len(s.recs); i++ {
 			r := &s.recs[i]
-			if err := l.applyRecord(s.n, r, s.pay[i]); err != nil {
+			if err := l.applyRecord(s.n, r, s.data); err != nil {
 				return err
 			}
 			l.batch = r.batch
@@ -775,20 +853,21 @@ func (l *fileLog) applyCheckpoint(first bool, seg uint64, cp *checkpoint) error 
 	return nil
 }
 
-// applyRecord applies one record of segment seg to the log being rebuilt,
-// pay its payload when it is a hard state's. An entry out of sequence is
-// quarantined; a record kind this build does not know, or a hard state of
-// another length, is a newer layout and stops the open VERSION_UNSUPPORTED
-// — skipped, it lost what a newer build wrote there (D18, #511). A seal
-// changes nothing.
-func (l *fileLog) applyRecord(seg uint64, r *scanRec, pay []byte) error {
+// applyRecord applies one record of segment seg to the log being rebuilt;
+// data is the segment's bytes, where a hard state's payload is read, and
+// only the last segment keeps a hard state (replayed). An entry out of
+// sequence is quarantined; a record kind this build does not know, or a
+// hard state of another length, is a newer layout and stops the open
+// VERSION_UNSUPPORTED — skipped, it lost what a newer build wrote there
+// (D18, #511). A seal changes nothing.
+func (l *fileLog) applyRecord(seg uint64, r *scanRec, data []byte) error {
 	switch r.kind {
 	case recEntry:
 		return l.applyEntry(seg, r)
 	case recTruncate:
 		l.applyTruncate(r.index)
 	case recHardState:
-		return l.applyHardState(seg, r, pay)
+		return l.applyHardState(seg, r, payloadAt(data, r))
 	case recCommit:
 		l.hs.Commit = max(l.hs.Commit, r.index)
 	case recCompact:
@@ -813,28 +892,27 @@ func (l *fileLog) applyEntry(seg uint64, r *scanRec) error {
 // checkLayouts refuses, before any tail is classified or trimmed, a record
 // of a kind this build does not know or a hard state of another length:
 // left to replay, one in an unfinished last batch was trimmed with the tear
-// and zeroed, and the open succeeded (D18, #511).
+// and zeroed, and the open succeeded (D18, #511). The scan judged every
+// record it read (scanned.note), and the first one in log order is refused.
 func checkLayouts(segs []*scanned) error {
 	for _, s := range segs {
-		for i := range s.recs {
-			if err := knownLayout(s.n, &s.recs[i], s.pay[i]); err != nil {
-				return err
-			}
+		if s.layout != nil {
+			return s.layout
 		}
 	}
 	return nil
 }
 
 // knownLayout is nil for a record of a kind this build reads, with the
-// payload length that kind has where it has one; pay is the payload of a
-// hard-state record.
-func knownLayout(seg uint64, r *scanRec, pay []byte) error {
+// payload length that kind has where it has one; payload is the length of
+// r's payload.
+func knownLayout(seg uint64, r *scanRec, payload int) error {
 	switch r.kind {
 	case recEntry, recTruncate, recCheckpt, recSeal, recCompact, recCommit:
 		return nil
 	case recHardState:
-		if len(pay) != hardStateLen {
-			return unknownLayout(seg, r, "hard_state_bytes", len(pay))
+		if payload != hardStateLen {
+			return unknownLayout(seg, r, "hard_state_bytes", payload)
 		}
 		return nil
 	default:
