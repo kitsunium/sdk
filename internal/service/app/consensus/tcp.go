@@ -84,6 +84,9 @@ const (
 	// a source that writes itself out in one call (io.WriterTo) is still
 	// cut into writes that each move or fail (#594).
 	boundedWriteBytes int = 32 << 10
+	// drainBytes is the most a snapshot receiver reads past the body it
+	// installed before it closes (#654).
+	drainBytes int64 = 64 << 10
 	// acceptBackoffFirst is the wait after the first of consecutive failed
 	// Accepts; each next one doubles it (#518).
 	acceptBackoffFirst time.Duration = 5 * time.Millisecond
@@ -1399,6 +1402,23 @@ func (t *TCPTransport) serveSnapshot(c *tls.Conn, peer coreconsensus.Authenticat
 	// The last write of the stream: a sender that does not read it sees the
 	// connection end and treats the install as failed, which it retries.
 	abandon(writeChunk(c, binary.LittleEndian.AppendUint32(nil, uint32(code))))
+	drainHalfClose(c, t.cfg.WriteTimeout)
+}
+
+// drainHalfClose reads what the sender wrote after the body, its TLS
+// close_notify, before serve closes the socket. Left unread in the receive
+// buffer, it turns the close into a RST, and Windows drops the data a RST
+// overtakes: the sender's read of the verdict, in flight or buffered but
+// not yet read, failed with FRAME_INVALID "install result" on an install
+// that succeeded (#654). The drain stops at the sender's end, at
+// drainBytes, or after d: a sender that keeps writing a body the install
+// gave up on still gets its connection ended.
+func drainHalfClose(c net.Conn, d time.Duration) {
+	if c.SetReadDeadline(time.Now().Add(d)) != nil {
+		return
+	}
+	_, err := io.Copy(io.Discard, io.LimitReader(c, drainBytes))
+	abandon(err)
 }
 
 // offerRefused logs, through warn, a snapshot offer from peer that the

@@ -155,6 +155,7 @@ go_test(
         "tcp_streamstall_internal_test.go",
         "transferpin_internal_test.go",
         "unacked_linux_test.go",
+        "verdictclose_internal_test.go",
         "waitapplied_internal_test.go",
         "waiter_internal_test.go",
     ],

@@ -20953,6 +20953,8 @@ sequences:
         kind: package
       - id: abandon
         kind: internal
+      - id: drainHalfClose
+        kind: internal
     steps:
       - bind: b, err
         eval: readChunk(c, t.cfg.MaxFrameBytes)
@@ -21025,6 +21027,28 @@ sequences:
                 when: code == 0
           when: ierr != nil
       - eval: abandon(writeChunk(c, binary.LittleEndian.AppendUint32(nil, uint32(code))))
+        to: abandon
+      - eval: drainHalfClose(c, t.cfg.WriteTimeout)
+        to: drainHalfClose
+  - of: drainHalfClose
+    participants:
+      - id: caller
+        kind: actor
+      - id: drainHalfClose
+        kind: self
+      - id: io
+        kind: stdlib
+      - id: abandon
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: c.SetReadDeadline(time.Now().Add(d)) != nil
+      - bind: _, err
+        eval: io.Copy(io.Discard, io.LimitReader(c, drainBytes))
+        to: io
+      - eval: abandon(err)
         to: abandon
   - of: offerRefused
     participants:

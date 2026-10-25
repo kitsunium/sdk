@@ -651,6 +651,12 @@ constants:
         type: int
         value: 32 << 10
       - doc: |-
+          drainBytes is the most a snapshot receiver reads past the body it
+          installed before it closes (#654).
+        name: drainBytes
+        type: int64
+        value: 64 << 10
+      - doc: |-
           acceptBackoffFirst is the wait after the first of consecutive failed
           Accepts; each next one doubles it (#518).
         name: acceptBackoffFirst
@@ -1540,6 +1546,7 @@ files:
       - boundedWriter.CloseWrite
       - installResult
       - (*TCPTransport).serveSnapshot
+      - drainHalfClose
       - offerRefused
       - (*TCPTransport).bindWarn
       - encodeJoin
@@ -2993,6 +3000,17 @@ functions:
     name: installResult
     params: c *tls.Conn
     results: error
+  - doc: |-
+      drainHalfClose reads what the sender wrote after the body, its TLS
+      close_notify, before serve closes the socket. Left unread in the receive
+      buffer, it turns the close into a RST, and Windows drops the data a RST
+      overtakes: the sender's read of the verdict, in flight or buffered but
+      not yet read, failed with FRAME_INVALID "install result" on an install
+      that succeeded (#654). The drain stops at the sender's end, at
+      drainBytes, or after d: a sender that keeps writing a body the install
+      gave up on still gets its connection ended.
+    name: drainHalfClose
+    params: c net.Conn, d time.Duration
   - doc: |-
       offerRefused logs, through warn, a snapshot offer from peer that the
       receiving transport refused before the node judged it: one above bound, or
