@@ -95,11 +95,13 @@ func stranded(t *testing.T, a *Raft, d time.Duration) (bool, int, int) {
 
 // A stale voter whose log ends below its members' commit is sent leader 4's
 // record and admits it (#542): the control. The same voter with an
-// uncommitted tail of its old term that reaches past that commit is sent no
-// record, PreVote after PreVote, for as long as the cluster stays quiet:
-// sendLeaderRecord compares the PreVote's last index alone with the commit
-// (m.Index >= r.log.committed), never its last term, though a tail of term
-// 2 at index 40 holds nothing the members committed at terms 3 to 5.
+// uncommitted tail of its old term that reaches past that commit is sent it
+// too and admits 4 on a quiet cluster (#675): behindCommit judges the
+// PreVote by its last term as well as its last index, and a tail of term 2
+// at index 40 holds nothing the members committed at terms 3 to 5. Judged
+// on the last index alone (m.Index >= r.log.committed), as before, the
+// voter was sent no record, PreVote after PreVote, for as long as the
+// cluster stayed quiet.
 func TestAStaleVoterWithAnOldTailPastTheCommitIsSentTheRecord(t *testing.T) {
 	const quiet = 60 * time.Second
 	ok, n, recs := stranded(t, exLeader(8), quiet)
