@@ -100,8 +100,22 @@ type Node struct {
 	// tickEvery is the loop's current tick, for the tests.
 	tickEvery atomic.Int64
 	// applyLag is the payload bytes handed to the apply goroutine and not
-	// yet applied: the gap between commit and applied (D6, R1-14).
+	// yet applied: the gap between commit and applied (D6, R1-14). Raft
+	// hands it no more than MaxApplyLagBytes of them, on a follower too
+	// (#664).
 	applyLag atomic.Int64
+	// applyReads counts the reads of the log the apply goroutine was handed
+	// and has not finished: committed entries raft holds without their
+	// payloads, which it reads back a batch at a time (#664).
+	applyReads atomic.Int64
+	// applyWake asks the apply goroutine to wake the loop once it has room
+	// again, while raft holds committed entries back for it.
+	applyWake atomic.Bool
+	// handedLag and handedRead are what the loop's Readies handed apply
+	// since the turn told raft the apply lag: payload bytes in memory, and
+	// whether a read of the log. Loop-owned.
+	handedLag  int64
+	handedRead bool
 	// logApplied is the last entry applied from the log, never an index a
 	// restored snapshot set: an entry applied from the log was synced at its
 	// term before it was handed to the apply goroutine, so the store holds it
@@ -345,7 +359,7 @@ func newRaft(cfg Config) (*Node, error) {
 		MaxInflight: cfg.MaxInflight, MaxInflightBytes: cfg.MaxInflightBytes, MaxBatchBytes: cfg.MaxBatchBytes,
 		MinVoters: cfg.MinVoters, PromoteLag: cfg.PromoteLag, Lease: cfg.Reads == ReadLease,
 		CanVote: n.canVote, MaxChainRefusals: maxChainRefusals, NoTable: n.noTable, RecentEntriesBytes: cfg.RecentEntriesBytes,
-		SilentTerm: silentTerm, SilentIndex: silentIndex,
+		MaxApplyLagBytes: cfg.MaxApplyLagBytes, SilentTerm: silentTerm, SilentIndex: silentIndex,
 		MaxEntryBytes: cfg.MaxEntryBytes, MaxForwardBytes: cfg.MaxPendingBytes,
 	}, &start)
 	n.publish()
@@ -756,6 +770,17 @@ func (n *Node) readTail(first, last, snapIdx uint64) ([]coreconsensus.EntryValue
 	return ents, nil
 }
 
+// contiguousFrom reports whether es are entries from lo on, one per index,
+// at least one: what a store's Entries answers for a range it holds.
+func contiguousFrom(es []coreconsensus.EntryValue, lo uint64) bool {
+	for i := range es {
+		if es[i].Position.Index != lo+uint64(i) {
+			return false
+		}
+	}
+	return len(es) > 0
+}
+
 // startApplied sets where apply resumes: past the base, or past what a
 // durable machine already holds, with the term of that position. It returns
 // the applied index raft starts from; a node with no table records nothing
@@ -989,7 +1014,7 @@ func (n *Node) onMessage(m *coreconsensus.MessageValue, ok bool) (time.Time, boo
 		return time.Time{}, false
 	}
 	turn := n.clk.Now()
-	n.r.SetOverloaded(n.applyLag.Load() >= n.cfg.MaxApplyLagBytes)
+	n.r.SetOverloaded(n.applyOverloaded())
 	n.r.Step(n.clk.Now(), *m)
 	return turn, true
 }
@@ -1207,6 +1232,9 @@ func (n *Node) tickInterval() time.Duration {
 // change of leadership and publishes the status. It runs on the loop, and
 // returns at once when a Ready stopped the node.
 func (n *Node) handleReady() {
+	lag, reading := n.applyLag.Load(), n.applyReads.Load() > 0
+	n.r.SetApplyLag(lag, reading)
+	n.handedLag, n.handedRead = 0, false
 	for n.r.HasReady() {
 		rd := new(n.r.Ready())
 		if n.stopOnUnsupported(rd) {
@@ -1214,8 +1242,55 @@ func (n *Node) handleReady() {
 		}
 		n.handleOne(rd)
 	}
+	n.awaitApply(lag+n.handedLag, reading || n.handedRead)
 	n.leadershipChanged()
 	n.publish()
+}
+
+// applyOverloaded reports whether apply backpressure holds (D6, R1-14): the
+// apply goroutine holds MaxApplyLagBytes unapplied, or committed entries
+// wait past them, held back by raft or still to be read back from the log.
+// Raft hands apply no more than the bound, so the bytes it holds alone no
+// longer measured the gap between commit and applied (#664).
+func (n *Node) applyOverloaded() bool {
+	return n.applyLag.Load() >= n.cfg.MaxApplyLagBytes || n.applyReads.Load() > 0 || n.r.ApplyHeld()
+}
+
+// awaitApply arms the apply goroutine's wake-up while raft holds committed
+// entries back for it, so they are handed as soon as it has room, not at
+// the loop's next input. lag and reading are what raft held apply to after
+// the turn's Readies: apply that moved since then found the wake-up not
+// armed yet, so the loop wakes itself if apply has room. Apply that did not
+// move wakes no one: raft would hold the same entries back again.
+func (n *Node) awaitApply(lag int64, reading bool) {
+	if !n.r.ApplyHeld() {
+		return
+	}
+	n.applyWake.Store(true)
+	if n.applyLag.Load() < lag || (reading && n.applyReads.Load() == 0) {
+		n.applyMoved()
+	}
+}
+
+// applyMoved wakes the loop once the apply goroutine has room again, half
+// of MaxApplyLagBytes and no read in progress, when raft held committed
+// entries back for it.
+func (n *Node) applyMoved() {
+	if n.applyReads.Load() != 0 || n.applyLag.Load() > n.cfg.MaxApplyLagBytes/2 {
+		return
+	}
+	if n.applyWake.CompareAndSwap(true, false) {
+		n.wakeLoop()
+	}
+}
+
+// wakeLoop queues an empty closure to the loop, whose turn then hands
+// raft's Ready; a loop whose queue is full turns anyway.
+func (n *Node) wakeLoop() {
+	select {
+	case n.execc <- func() {}:
+	default:
+	}
 }
 
 // auditAppended logs at Warn every engine entry this node appends as
@@ -1290,7 +1365,7 @@ func (n *Node) handleOne(rd *raft.ReadyValue) {
 		}
 		n.sq.push(q)
 	}
-	n.queueApply(rd.Apply)
+	n.queueApply(rd)
 	for _, f := range rd.Fetch {
 		n.fetchq.push(f)
 	}
@@ -1328,9 +1403,16 @@ func (n *Node) endSilence() {
 	n.obs.info("consensus: silence condition met, the node votes and acknowledges again")
 }
 
-// queueApply hands committed entries to the apply goroutine, counting
-// their payload into the apply lag first.
-func (n *Node) queueApply(entries []coreconsensus.EntryValue) {
+// queueApply hands the apply goroutine what a Ready commits to it, in
+// order: the entries to read back from the log first, then those in
+// memory, whose payload is counted into the apply lag first.
+func (n *Node) queueApply(rd *raft.ReadyValue) {
+	if rd.ApplyRead.Lo != 0 {
+		n.applyReads.Add(1)
+		n.handedRead = true
+		n.aq.push(applyItem{read: rd.ApplyRead})
+	}
+	entries := rd.Apply
 	if len(entries) == 0 {
 		return
 	}
@@ -1338,6 +1420,7 @@ func (n *Node) queueApply(entries []coreconsensus.EntryValue) {
 	for i := range entries {
 		b += int64(len(entries[i].Data))
 	}
+	n.handedLag += b
 	n.obs.setGauge(mApplyLagBytes, float64(n.applyLag.Add(b)))
 	n.aq.push(applyItem{entries: entries})
 }

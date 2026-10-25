@@ -125,8 +125,6 @@ sequences:
         kind: internal
       - id: n.afterCut
         kind: internal
-      - id: n.maybeSnapshot
-        kind: internal
     steps:
       - loop:
           do:
@@ -134,6 +132,10 @@ sequences:
                 do:
                   - return: "false"
                 when: n.stopped.Load()
+            - bind: it
+              eval: items[k]
+            - set: items[k]
+              value: applyItem{}
             - opt:
                 do:
                   - eval: n.am.Lock()
@@ -168,13 +170,148 @@ sequences:
             - opt:
                 do:
                   - return: "false"
-                when: "!n.applyEntries(it.entries)"
-            - eval: n.maybeSnapshot(payloadBytes(it.entries))
-              to: n.maybeSnapshot
-          key: _
+                when: "!n.applyHanded(&it)"
+          key: k
           range: items
-          value: it
       - return: "true"
+  - of: (*Node).applyHanded
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).applyHanded
+        kind: self
+      - id: n.applyRead
+        kind: internal
+      - id: n.applyReads.Add
+        kind: value
+      - id: n.applyEntries
+        kind: internal
+      - id: n.maybeSnapshot
+        kind: internal
+      - id: n.applyMoved
+        kind: internal
+    steps:
+      - bind: ok
+        eval: "true"
+      - alt:
+          - do:
+              - set: ok
+                to: n.applyRead
+                value: n.applyRead(it.read)
+              - eval: n.applyReads.Add(-1)
+                to: n.applyReads.Add
+            when: it.read.Lo != 0
+          - do:
+              - eval: n.maybeSnapshot(payloadBytes(it.entries))
+                to: n.maybeSnapshot
+            init:
+              bind: ok
+              eval: n.applyEntries(it.entries)
+              op: =
+              to: n.applyEntries
+            when: ok
+      - opt:
+          do:
+            - eval: n.applyMoved()
+              to: n.applyMoved
+          when: ok
+      - return: ok
+  - of: (*Node).applyRead
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).applyRead
+        kind: self
+      - id: n.am.Lock
+        kind: value
+      - id: n.am.Unlock
+        kind: value
+      - id: n.readBack
+        kind: internal
+      - id: n.maybeSnapshot
+        kind: internal
+    steps:
+      - bind: maxBytes
+        eval: int(min(int64(n.cfg.MaxBatchBytes), n.cfg.MaxApplyLagBytes))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: n.stopped.Load()
+            - eval: n.am.Lock()
+              to: n.am.Lock
+            - set: lo
+              value: max(lo, n.applied+1)
+            - eval: n.am.Unlock()
+              to: n.am.Unlock
+            - opt:
+                do:
+                  - return: "true"
+                when: lo >= rg.Hi
+            - bind: es, ok
+              eval: n.readBack(lo, rg.Hi, maxBytes)
+              to: n.readBack
+            - opt:
+                do:
+                  - return: "false"
+                when: "!ok || !n.applyEntries(es)"
+            - eval: n.maybeSnapshot(payloadBytes(es))
+              to: n.maybeSnapshot
+            - set: lo
+              value: es[len(es)-1].Position.Index + 1
+          init: lo := rg.Lo
+  - of: (*Node).readBack
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).readBack
+        kind: self
+      - id: n.cfg.Log.Entries
+        kind: value
+      - id: storageFailed
+        kind: internal
+      - id: n.stop
+        kind: internal
+      - id: bytes
+        kind: stdlib
+      - id: n.obs.setGauge
+        kind: internal
+    steps:
+      - bind: es, err
+        eval: n.cfg.Log.Entries(lo, hi, maxBytes, nil)
+        to: n.cfg.Log.Entries
+      - opt:
+          do:
+            - set: err
+              to: storageFailed
+              value: storageFailed("read back", errImpossible)
+          when: err == nil && !contiguousFrom(es, lo)
+      - opt:
+          do:
+            - opt:
+                do:
+                  - eval: n.stop(err, true)
+                    to: n.stop
+                when: "!n.stopped.Load()"
+            - return: nil, false
+          when: err != nil
+      - var:
+          name: b
+          type: int64
+      - loop:
+          do:
+            - set: es[i].Data
+              to: bytes
+              value: bytes.Clone(es[i].Data)
+            - op: +=
+              set: b
+              value: int64(len(es[i].Data))
+          key: i
+          range: es
+      - eval: n.obs.setGauge(mApplyLagBytes, float64(n.applyLag.Add(b)))
+        to: n.obs.setGauge
+      - return: es, true
   - of: (*Node).applyEntries
     participants:
       - id: caller
@@ -207,10 +344,10 @@ sequences:
               eval: e.Position.Index <= n.applied
             - eval: n.am.Unlock()
               to: n.am.Unlock
-            - eval: n.applyLag.Add(-int64(len(e.Data)))
-              to: n.applyLag.Add
             - opt:
                 do:
+                  - eval: n.applyLag.Add(-int64(len(e.Data)))
+                    to: n.applyLag.Add
                   - op: ++
                     set: i
                   - continue: true
@@ -223,6 +360,8 @@ sequences:
                 when: "!e.Kind.Known()"
             - opt:
                 do:
+                  - eval: n.applyLag.Add(-int64(len(e.Data)))
+                    to: n.applyLag.Add
                   - eval: n.applied1(e, nil)
                     to: n.applied1
                   - op: ++
@@ -246,8 +385,6 @@ sequences:
         kind: actor
       - id: (*Node).applyCommands
         kind: self
-      - id: n.applyLag.Add
-        kind: value
       - id: n.token
         kind: internal
       - id: n.clk.Now
@@ -258,6 +395,8 @@ sequences:
         kind: internal
       - id: n.stop
         kind: internal
+      - id: n.applyLag.Add
+        kind: value
       - id: n.applied1
         kind: internal
     steps:
@@ -271,21 +410,20 @@ sequences:
                   - op: ++
                     set: j
           when: batching
-      - loop:
-          cond: k < j
-          do:
-            - eval: n.applyLag.Add(-int64(len(es[k].Data)))
-              to: n.applyLag.Add
-          init: k := i + 1
-          post: k++
       - bind: results
         eval: make([]any, j-i)
+      - var:
+          name: held
+          type: int64
       - loop:
           cond: k < j
           do:
             - set: es[k].Token
               to: n.token
               value: n.token(es[k].Position)
+            - op: +=
+              set: held
+              value: int64(len(es[k].Data))
           init: k := i
           post: k++
       - bind: applyStart
@@ -302,6 +440,8 @@ sequences:
               to: n.stop
             - return: j, false
           when: err != nil
+      - eval: n.applyLag.Add(-held)
+        to: n.applyLag.Add
       - loop:
           cond: k < j
           do:
@@ -8473,7 +8613,7 @@ sequences:
           		MaxInflight: cfg.MaxInflight, MaxInflightBytes: cfg.MaxInflightBytes, MaxBatchBytes: cfg.MaxBatchBytes,
           		MinVoters: cfg.MinVoters, PromoteLag: cfg.PromoteLag, Lease: cfg.Reads == ReadLease,
           		CanVote: n.canVote, MaxChainRefusals: maxChainRefusals, NoTable: n.noTable, RecentEntriesBytes: cfg.RecentEntriesBytes,
-          		SilentTerm: silentTerm, SilentIndex: silentIndex,
+          		MaxApplyLagBytes: cfg.MaxApplyLagBytes, SilentTerm: silentTerm, SilentIndex: silentIndex,
           		MaxEntryBytes: cfg.MaxEntryBytes, MaxForwardBytes: cfg.MaxPendingBytes,
           	}, &start)
       - eval: n.publish()
@@ -9536,7 +9676,7 @@ sequences:
       - bind: turn
         eval: n.clk.Now()
         to: n.clk.Now
-      - eval: n.r.SetOverloaded(n.applyLag.Load() >= n.cfg.MaxApplyLagBytes)
+      - eval: n.r.SetOverloaded(n.applyOverloaded())
         to: n.r.SetOverloaded
       - eval: n.r.Step(n.clk.Now(), *m)
         to: n.r.Step
@@ -9902,13 +10042,23 @@ sequences:
         kind: actor
       - id: (*Node).handleReady
         kind: self
+      - id: n.r.SetApplyLag
+        kind: value
       - id: n.handleOne
+        kind: internal
+      - id: n.awaitApply
         kind: internal
       - id: n.leadershipChanged
         kind: internal
       - id: n.publish
         kind: internal
     steps:
+      - bind: lag, reading
+        eval: n.applyLag.Load(), n.applyReads.Load() > 0
+      - eval: n.r.SetApplyLag(lag, reading)
+        to: n.r.SetApplyLag
+      - set: n.handedLag, n.handedRead
+        value: 0, false
       - loop:
           cond: n.r.HasReady()
           do:
@@ -9920,10 +10070,61 @@ sequences:
                 when: n.stopOnUnsupported(rd)
             - eval: n.handleOne(rd)
               to: n.handleOne
+      - eval: n.awaitApply(lag+n.handedLag, reading || n.handedRead)
+        to: n.awaitApply
       - eval: n.leadershipChanged()
         to: n.leadershipChanged
       - eval: n.publish()
         to: n.publish
+  - of: (*Node).applyOverloaded
+    steps:
+      - return: n.applyLag.Load() >= n.cfg.MaxApplyLagBytes || n.applyReads.Load() > 0 || n.r.ApplyHeld()
+  - of: (*Node).awaitApply
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).awaitApply
+        kind: self
+      - id: n.applyWake.Store
+        kind: value
+      - id: n.applyMoved
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!n.r.ApplyHeld()"
+      - eval: n.applyWake.Store(true)
+        to: n.applyWake.Store
+      - opt:
+          do:
+            - eval: n.applyMoved()
+              to: n.applyMoved
+          when: n.applyLag.Load() < lag || (reading && n.applyReads.Load() == 0)
+  - of: (*Node).applyMoved
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Node).applyMoved
+        kind: self
+      - id: n.wakeLoop
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: n.applyReads.Load() != 0 || n.applyLag.Load() > n.cfg.MaxApplyLagBytes/2
+      - opt:
+          do:
+            - eval: n.wakeLoop()
+              to: n.wakeLoop
+          when: n.applyWake.CompareAndSwap(true, false)
+  - of: (*Node).wakeLoop
+    steps:
+      - select:
+          cases:
+            - comm: n.execc <- func() {}
+            - default: true
   - of: (*Node).auditAppended
     participants:
       - id: caller
@@ -10066,7 +10267,7 @@ sequences:
             - eval: n.sq.push(q)
               to: n.sq.push
           when: rd.NeedsWrite()
-      - eval: n.queueApply(rd.Apply)
+      - eval: n.queueApply(rd)
         to: n.queueApply
       - loop:
           do:
@@ -10154,11 +10355,24 @@ sequences:
         kind: actor
       - id: (*Node).queueApply
         kind: self
-      - id: n.obs.setGauge
-        kind: internal
+      - id: n.applyReads.Add
+        kind: value
       - id: n.aq.push
         kind: internal
+      - id: n.obs.setGauge
+        kind: internal
     steps:
+      - opt:
+          do:
+            - eval: n.applyReads.Add(1)
+              to: n.applyReads.Add
+            - set: n.handedRead
+              value: "true"
+            - eval: "n.aq.push(applyItem{read: rd.ApplyRead})"
+              to: n.aq.push
+          when: rd.ApplyRead.Lo != 0
+      - bind: entries
+        eval: rd.Apply
       - opt:
           do:
             - return: ""
@@ -10173,6 +10387,9 @@ sequences:
               value: int64(len(entries[i].Data))
           key: i
           range: entries
+      - op: +=
+        set: n.handedLag
+        value: b
       - eval: n.obs.setGauge(mApplyLagBytes, float64(n.applyLag.Add(b)))
         to: n.obs.setGauge
       - eval: "n.aq.push(applyItem{entries: entries})"
@@ -15732,7 +15949,7 @@ sequences:
                 chan: p.done
                 value: "propResult{err: origin(coreconsensus.Overloaded, errs.String(\"why\", \"apply lag\"))}"
             - return: "true"
-          when: n.applyLag.Load() >= n.cfg.MaxApplyLagBytes
+          when: n.applyOverloaded()
       - return: "false"
   - of: (*Node).proposeAlone
     participants:

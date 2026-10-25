@@ -99,8 +99,9 @@ func (l *memLog) resident(from, to uint64) int64 {
 }
 
 // evict drops payloads, oldest first, while the window is above limit,
-// never above through: only applied and durable entries are dropped, so
-// Apply never needs the disk and a lagging peer is fed by a fetch.
+// never above through: only durable entries are dropped, committed ones
+// handed to apply or not, which apply reads back from the store
+// (ReadyValue.ApplyRead), and a lagging peer is fed by a fetch (#664).
 func (l *memLog) evict(limit int64, through uint64) {
 	if limit <= 0 {
 		return

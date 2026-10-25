@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T02:07:32Z -->
+<!-- updated: 2026-10-25T04:45:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -114,6 +114,25 @@ paired at 8 and 10: on a loaded machine the slowest of 8 summed 49 to
   first break, then the first unknown layout, are refused in log order, as
   before (#660, `TestReopeningAFollowersLogDoesNotHoldItsHardStates`,
   `TestAnEarlierSegmentIsJudgedOnEveryRecordItHeld`).
+- Hand apply every committed entry: raft's `Ready` did, on every node, and
+  a follower slower to apply than its leader held everything it was behind
+  by until it was OOM-killed (#664). Raft hands apply `MaxApplyLagBytes` at
+  most past what the apply goroutine holds (`SetApplyLag`, from
+  `handleReady`), drops the payloads of committed entries past
+  `RecentEntriesBytes` whether handed or not, and hands those by index
+  (`ReadyValue.ApplyRead`): `applyRead` reads them back on the apply
+  goroutine, a batch at a time within both bounds, in order, past what a
+  restore covers, and stops the node when the log cannot give back what it
+  holds committed. Nothing is handed in memory behind a read, and a batch
+  leaves the apply lag once the machine applied it, by the bytes it was
+  handed. Nor admit a command while raft holds committed entries back or a
+  read is pending (`applyOverloaded`): the bytes apply holds no longer
+  measure the gap between commit and applied, and a follower's forwards
+  grew it with no bound. The apply goroutine wakes the loop once it has
+  room (`applyMoved`, `awaitApply`)
+  (`TestAFollowerSlowToApplyHoldsNoMoreThanMaxApplyLagBytes`,
+  `TestALeaderSlowToApplyStillRefusesForwardsPastMaxApplyLagBytes`,
+  `TestAMachineThatDropsItsPayloadsLeavesNoApplyLag`).
 - Compact the store past its end without the term: it holds no entry to read
   it from, and a node restarted with no table votes on that term. The engine
   passes it (`storeReq.compactTerm`, `compactLog`), the file log refuses a
@@ -129,8 +148,8 @@ paired at 8 and 10: on a loaded machine the slowest of 8 summed 49 to
 - Move raft onto an install it committed past while the machine restored
   it, or onto any install on a leader: `InstallSnapshot` ignores both, or
   the engine state of the entries committed past the snapshot is rolled
-  back and carried by the next cut — a node with a table evicted the
-  payloads it applied, so they cannot be replayed (#416,
+  back and carried by the next cut — a node with a table evicts the
+  payloads it committed, so they cannot be replayed (#416,
   `TestAnInstallBelowTheCommitLeavesTheEngineStateAlone`).
 - Sync once per queued Ready: every request the storage actor takes is
   staged, then synced ONCE, then completed in order, so no `AfterSync`

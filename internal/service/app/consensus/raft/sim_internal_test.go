@@ -28,6 +28,9 @@ const (
 	// carries the outcome back.
 	evInstall
 	evSnapDone
+	// evApply applies the head of a node's apply queue, under the applyLag
+	// schedule.
+	evApply
 )
 
 type event struct {
@@ -94,6 +97,21 @@ type simNode struct {
 	// unsupported is the first entry this node reported it cannot apply,
 	// zero while it reported none.
 	unsupported UnsupportedEntryValue
+	// applyQ is what Ready handed apply that the applyLag schedule has not
+	// applied yet, queued the payload bytes it holds in memory and reads
+	// the reads of the disk model it names; applyDue is set while an
+	// evApply is pending.
+	applyQ   []simApply
+	queued   int64
+	reads    int
+	applyDue bool
+}
+
+// simApply is one item of a node's apply queue: entries in memory, or a
+// range to read back from the disk model.
+type simApply struct {
+	read ReadBackSpec
+	ents []core.EntryValue
 }
 
 type entryKey struct {
@@ -127,6 +145,11 @@ type simOptions struct {
 	// ProtocolMax: a node of a previous release in a mixed cluster. Read at
 	// each start, so a restart after a change upgrades the node.
 	speaks map[core.NodeID]uint32
+	// applyLag, when not 0, is every node's MaxApplyLagBytes: apply is then
+	// asynchronous, an item every few milliseconds, and the entries handed
+	// by index are read back from the disk model, as the driver does
+	// (#664).
+	applyLag int64
 }
 
 type sim struct {
@@ -152,6 +175,9 @@ type sim struct {
 	// onSend, when set, sees every message a node sends, before the
 	// network drops or cuts it.
 	onSend func(core.MessageValue)
+	// reads counts the reads of the disk model apply made, of entries
+	// handed by index.
+	reads int
 }
 
 func rtt(a, b core.NodeID) time.Duration {
@@ -215,7 +241,7 @@ func (s *sim) cfg(id core.NodeID) Config {
 		ID: id, Group: 1, Seed: s.opt.seed*31 + uint64(id), Timing: s.timing,
 		MaxInflight: 16, MaxInflightBytes: 1 << 20, MaxBatchBytes: 64 << 10, MinVoters: 1,
 		PromoteLag: 64, Lease: s.opt.lease, CanVote: true, MaxChainRefusals: 3, mut: s.opt.mut, RecentEntriesBytes: s.opt.recent,
-		speaks: s.opt.speaks[id],
+		MaxApplyLagBytes: s.opt.applyLag, speaks: s.opt.speaks[id],
 	}
 }
 
@@ -230,6 +256,7 @@ func (s *sim) start(n *simNode) {
 	n.applied = nil
 	n.appliedFrom = n.base.Position.Index
 	n.checked = 0
+	n.applyQ, n.queued, n.reads, n.applyDue = nil, 0, 0, false
 	cfg := s.cfg(n.id)
 	cfg.NoTable = n.noTable
 	n.r = NewRaft(&cfg, &StartState{HardState: n.hs, Snapshot: n.base, Entries: slices.Clone(n.ents), Applied: n.base.Position.Index, Now: s.clock(n)})
@@ -257,6 +284,7 @@ func (s *sim) crash(id core.NodeID) {
 	n.alive = false
 	n.life++
 	n.writes = nil // what was written and not synced is lost
+	n.applyQ, n.queued, n.reads, n.applyDue = nil, 0, 0, false
 }
 
 func (s *sim) push(e *event) {
@@ -288,6 +316,9 @@ func (s *sim) deliver(m core.MessageValue) {
 }
 
 func (s *sim) process(n *simNode) {
+	if s.opt.applyLag > 0 && n.alive {
+		n.r.SetApplyLag(n.queued, n.reads > 0)
+	}
 	for n.alive && n.r.HasReady() {
 		rd := n.r.Ready()
 		if rd.Unsupported.Index != 0 && n.unsupported.Index == 0 {
@@ -336,28 +367,121 @@ func (s *sim) process(n *simNode) {
 		for _, to := range rd.SendSnapshot {
 			s.sendSnapshot(n, to)
 		}
+		if s.opt.applyLag > 0 {
+			s.queueApply(n, &rd)
+			continue
+		}
+		if rd.ApplyRead.Lo != 0 {
+			s.applyRead(n, rd.ApplyRead, rd.ApplyRead.Hi)
+		}
 		for i := range rd.Apply {
-			e := &rd.Apply[i]
-			prev := n.appliedFrom
-			if len(n.applied) > 0 {
-				prev = n.applied[len(n.applied)-1].Position.Index
-			}
-			if prev+1 != e.Position.Index {
-				s.fail("node %d applied %d after %d", n.id, e.Position.Index, prev)
-			}
-			n.applied = append(n.applied, *e)
-			if s.kv != nil {
-				s.kv.applied(s, n, e)
-			}
-			k := keyOf(e)
-			if prev, ok := s.applied[e.Position.Index]; ok && prev != k {
-				s.fail("agreement: node %d applied %v at %d, another node applied %v", n.id, k, e.Position.Index, prev)
-			}
-			s.applied[e.Position.Index] = k
+			s.applyEntry(n, &rd.Apply[i])
 		}
 	}
 	s.cutSnapshot(n, false)
 	s.checkNode(n)
+}
+
+// applyEntry applies one committed entry on n, right after the previous
+// one, and checks it against every other node's.
+func (s *sim) applyEntry(n *simNode, e *core.EntryValue) {
+	prev := n.appliedFrom
+	if len(n.applied) > 0 {
+		prev = n.applied[len(n.applied)-1].Position.Index
+	}
+	if prev+1 != e.Position.Index {
+		s.fail("node %d applied %d after %d", n.id, e.Position.Index, prev)
+	}
+	n.applied = append(n.applied, *e)
+	if s.kv != nil {
+		s.kv.applied(s, n, e)
+	}
+	k := keyOf(e)
+	if prev, ok := s.applied[e.Position.Index]; ok && prev != k {
+		s.fail("agreement: node %d applied %v at %d, another node applied %v", n.id, k, e.Position.Index, prev)
+	}
+	s.applied[e.Position.Index] = k
+}
+
+// applyRead applies the entries [rg.Lo, hi) of rg read back from n's disk
+// model, which holds every committed entry not yet applied, and returns
+// the first it did not apply.
+func (s *sim) applyRead(n *simNode, rg ReadBackSpec, hi uint64) uint64 {
+	s.reads++
+	for i := rg.Lo; i < min(hi, rg.Hi); i++ {
+		e, ok := n.entry(i)
+		if !ok {
+			s.fail("node %d: entry %d, handed to apply by index, is not on disk (base %d, last %d)", n.id, i, n.base.Position.Index, n.last())
+			return rg.Hi
+		}
+		s.applyEntry(n, &e)
+	}
+	return min(hi, rg.Hi)
+}
+
+// queueApply queues what rd hands apply under the applyLag schedule, and
+// checks its bounds: nothing in memory while a read is pending, and no more
+// in memory than applyLag past what is applied, but one entry.
+func (s *sim) queueApply(n *simNode, rd *ReadyValue) {
+	if len(rd.Apply) > 0 && n.reads > 0 {
+		s.fail("node %d: entries from %d handed in memory behind a read of the log", n.id, rd.Apply[0].Position.Index)
+	}
+	if rd.ApplyRead.Lo != 0 {
+		n.applyQ = append(n.applyQ, simApply{read: rd.ApplyRead})
+		n.reads++
+	}
+	if len(rd.Apply) > 0 {
+		b := int64(0)
+		for i := range rd.Apply {
+			b += int64(len(rd.Apply[i].Data))
+		}
+		if n.queued > 0 && n.queued+b > s.opt.applyLag {
+			s.fail("node %d: %d payload bytes handed apply past %d it held, over the bound %d", n.id, b, n.queued, s.opt.applyLag)
+		}
+		n.queued += b
+		n.applyQ = append(n.applyQ, simApply{ents: rd.Apply})
+	}
+	s.scheduleApply(n)
+}
+
+// scheduleApply arms n's next evApply, a few milliseconds from now, when
+// its queue holds anything and none is pending.
+func (s *sim) scheduleApply(n *simNode) {
+	if n.applyDue || len(n.applyQ) == 0 {
+		return
+	}
+	n.applyDue = true
+	d := time.Duration(200+s.rng.IntN(2800)) * time.Microsecond
+	s.push(&event{at: s.now.Add(d), kind: evApply, node: n.id, life: n.life})
+}
+
+// applyHead applies the head of n's apply queue: an item of entries in
+// memory, or eight entries of a read at most, as the driver reads a batch
+// at a time.
+func (s *sim) applyHead(n *simNode) {
+	it := &n.applyQ[0]
+	if it.read.Lo != 0 {
+		it.read.Lo = s.applyRead(n, it.read, it.read.Lo+8)
+		if it.read.Lo < it.read.Hi {
+			return
+		}
+		n.reads--
+	} else {
+		for i := range it.ents {
+			s.applyEntry(n, &it.ents[i])
+			n.queued -= int64(len(it.ents[i].Data))
+		}
+	}
+	n.applyQ = n.applyQ[1:]
+}
+
+// drainApply applies all of n's apply queue at once: an install's restore
+// runs behind what was queued before it.
+func (s *sim) drainApply(n *simNode) {
+	for len(n.applyQ) > 0 && s.err == nil {
+		s.applyHead(n)
+	}
+	n.applyQ, n.queued, n.reads = nil, 0, 0
 }
 
 func (s *sim) checkNode(n *simNode) {
@@ -530,6 +654,14 @@ func (s *sim) run(until time.Time, load bool) {
 				continue
 			}
 			s.storageDone(n)
+		case evApply:
+			if !n.alive || e.life != n.life {
+				continue
+			}
+			n.applyDue = false
+			s.applyHead(n)
+			s.process(n)
+			s.scheduleApply(n)
 		}
 	}
 	if s.now.Before(until) {
@@ -638,10 +770,12 @@ func (s *sim) install(n *simNode, e *event) {
 		return
 	}
 	// The install waits for the writes queued before it, as the storage
-	// actor serves them in order.
+	// actor serves them in order, and its restore for what apply was handed
+	// before it.
 	for n.alive && len(n.writes) > 0 {
 		s.storageDone(n)
 	}
+	s.drainApply(n)
 	meta := e.meta
 	code := n.r.CheckOffer(e.msg.From, core.InstallOfferValue{Term: e.msg.Term, SnapshotID: meta.ID, Meta: meta}, n.r.NoTable())
 	simTrace("t=%v n%d offer %d from %d: %v", s.now.Sub(time.Unix(1_700_000_000, 0)), n.id, meta.Position.Index, e.msg.From, code)

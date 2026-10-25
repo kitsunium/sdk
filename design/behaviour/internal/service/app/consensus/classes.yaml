@@ -701,6 +701,9 @@ files:
       - (*Node).token
       - (*Node).applyLoop
       - (*Node).applyItems
+      - (*Node).applyHanded
+      - (*Node).applyRead
+      - (*Node).readBack
       - (*Node).applyEntries
       - (*Node).applyCommands
       - (*Node).forceCut
@@ -1124,6 +1127,7 @@ files:
       - (*Node).baseOrNoTable
       - (*Node).finishInstall
       - (*Node).readTail
+      - contiguousFrom
       - (*Node).startApplied
       - (*Node).durableTerm
       - noTableBase
@@ -1151,6 +1155,10 @@ files:
       - (*Node).dropForward
       - (*Node).tickInterval
       - (*Node).handleReady
+      - (*Node).applyOverloaded
+      - (*Node).awaitApply
+      - (*Node).applyMoved
+      - (*Node).wakeLoop
       - (*Node).auditAppended
       - (*Node).stopOnUnsupported
       - (*Node).sendMessages
@@ -2345,6 +2353,12 @@ functions:
     params: err error
     results: bool
   - doc: |-
+      contiguousFrom reports whether es are entries from lo on, one per index,
+      at least one: what a store's Entries answers for a range it holds.
+    name: contiguousFrom
+    params: es []coreconsensus.EntryValue, lo uint64
+    results: bool
+  - doc: |-
       noTableBase is the base a node with no usable snapshot starts from: the
       log's compaction point, with the configuration and chain tip the newest
       snapshot's metadata records, which stays readable when its bytes do not.
@@ -3172,6 +3186,11 @@ types:
   - fields:
       - name: entries
         type: "[]coreconsensus.EntryValue"
+      - doc: |-
+          read names committed entries to read back from the log and apply:
+          raft holds them without their payloads (D6, #664).
+        name: read
+        type: raft.ReadBackSpec
       - name: restore
         type: "*restoreReq"
       - name: save
@@ -5423,9 +5442,30 @@ types:
         type: atomic.Int64
       - doc: |-
           applyLag is the payload bytes handed to the apply goroutine and not
-          yet applied: the gap between commit and applied (D6, R1-14).
+          yet applied: the gap between commit and applied (D6, R1-14). Raft
+          hands it no more than MaxApplyLagBytes of them, on a follower too
+          (#664).
         name: applyLag
         type: atomic.Int64
+      - doc: |-
+          applyReads counts the reads of the log the apply goroutine was handed
+          and has not finished: committed entries raft holds without their
+          payloads, which it reads back a batch at a time (#664).
+        name: applyReads
+        type: atomic.Int64
+      - doc: |-
+          applyWake asks the apply goroutine to wake the loop once it has room
+          again, while raft holds committed entries back for it.
+        name: applyWake
+        type: atomic.Bool
+      - doc: |-
+          handedLag and handedRead are what the loop's Readies handed apply
+          since the turn told raft the apply lag: payload bytes in memory, and
+          whether a read of the log. Loop-owned.
+        name: handedLag
+        type: int64
+      - name: handedRead
+        type: bool
       - doc: |-
           logApplied is the last entry applied from the log, never an index a
           restored snapshot set: an entry applied from the log was synced at its
@@ -5570,6 +5610,36 @@ types:
         params: items []applyItem
         recv: n *Node
         results: bool
+      - doc: |-
+          applyHanded applies what raft handed in one item, entries in memory or a
+          read of the log, then wakes the loop when apply has room again. It
+          returns false when the apply goroutine must end.
+        name: applyHanded
+        params: it *applyItem
+        recv: n *Node
+        results: bool
+      - doc: |-
+          applyRead applies the committed entries of rg, which raft handed by
+          index, read back from the log a batch at a time: at most MaxBatchBytes
+          and MaxApplyLagBytes, at least one entry, each batch counted in the
+          apply lag until applied (D6, #664). Those a restored snapshot covers are
+          not read: no compaction passes what was applied, and an install's comes
+          after its restore, which this goroutine runs after this read. It returns
+          false when the goroutine must end: the node stopped, or the log could not
+          give back what it holds committed, which stops it.
+        name: applyRead
+        params: rg raft.ReadBackSpec
+        recv: n *Node
+        results: bool
+      - doc: |-
+          readBack reads the committed entries from lo on, below hi, maxBytes of
+          payload at most but one entry, copied out of the store's buffers and
+          counted in the apply lag. A log that cannot give them back cannot be
+          trusted to agree with itself, and stops the node (D4): ok is false.
+        name: readBack
+        params: lo, hi uint64, maxBytes int
+        recv: n *Node
+        results: es []coreconsensus.EntryValue, ok bool
       - doc: |-
           applyEntries applies committed entries in log order, skipping those a
           restored snapshot already covers and handing a run of commands to a
@@ -6220,6 +6290,36 @@ types:
         name: handleReady
         recv: n *Node
       - doc: |-
+          applyOverloaded reports whether apply backpressure holds (D6, R1-14): the
+          apply goroutine holds MaxApplyLagBytes unapplied, or committed entries
+          wait past them, held back by raft or still to be read back from the log.
+          Raft hands apply no more than the bound, so the bytes it holds alone no
+          longer measured the gap between commit and applied (#664).
+        name: applyOverloaded
+        recv: n *Node
+        results: bool
+      - doc: |-
+          awaitApply arms the apply goroutine's wake-up while raft holds committed
+          entries back for it, so they are handed as soon as it has room, not at
+          the loop's next input. lag and reading are what raft held apply to after
+          the turn's Readies: apply that moved since then found the wake-up not
+          armed yet, so the loop wakes itself if apply has room. Apply that did not
+          move wakes no one: raft would hold the same entries back again.
+        name: awaitApply
+        params: lag int64, reading bool
+        recv: n *Node
+      - doc: |-
+          applyMoved wakes the loop once the apply goroutine has room again, half
+          of MaxApplyLagBytes and no read in progress, when raft held committed
+          entries back for it.
+        name: applyMoved
+        recv: n *Node
+      - doc: |-
+          wakeLoop queues an empty closure to the loop, whose turn then hands
+          raft's Ready; a loop whose queue is full turns anyway.
+        name: wakeLoop
+        recv: n *Node
+      - doc: |-
           auditAppended logs at Warn every engine entry this node appends as
           leader, with the origin the leader recorded in it: the operation is
           traced on the node that decided it, whichever member submitted it (ADR
@@ -6263,10 +6363,11 @@ types:
         name: endSilence
         recv: n *Node
       - doc: |-
-          queueApply hands committed entries to the apply goroutine, counting
-          their payload into the apply lag first.
+          queueApply hands the apply goroutine what a Ready commits to it, in
+          order: the entries to read back from the log first, then those in
+          memory, whose payload is counted into the apply lag first.
         name: queueApply
-        params: entries []coreconsensus.EntryValue
+        params: rd *raft.ReadyValue
         recv: n *Node
       - doc: answerReady answers the reads, forwards and transfers a Ready resolved.
         name: answerReady

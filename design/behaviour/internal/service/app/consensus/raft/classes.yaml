@@ -272,6 +272,25 @@ constants:
           the retired keys, in an entry of payload version 3, which a node of
           protocol 2 cannot read (#648, D18).
         name: mutProtocol3BelowRaise
+      - doc: |-
+          mutApplyUnbounded hands apply every committed entry whatever it
+          holds, as before #664: a follower slower to apply than its leader held
+          in memory everything it was behind by.
+        name: mutApplyUnbounded
+      - doc: |-
+          mutApplyBehindRead hands entries in memory while apply still reads
+          back from the log the ones handed by index, which then queue behind
+          the read with their payloads (#664).
+        name: mutApplyBehindRead
+      - doc: |-
+          mutEvictAppliedOnly drops no payload past what apply was handed, as
+          before #664: the committed entries held back kept theirs in memory.
+        name: mutEvictAppliedOnly
+      - doc: |-
+          mutNoTableEvictsCommitted lets a node with no table drop the payloads
+          of the entries it holds committed, whose engine effects its install
+          replays from them (#416, #664).
+        name: mutNoTableEvictsCommitted
     name: mutAckBeforeSync
   - doc: The facts a PeerStatValue carries.
     grouped: true
@@ -346,6 +365,11 @@ constants:
           raftOverloaded is the driver's apply backpressure, set each turn: a
           forwarded command is refused while it holds, as a local one is.
         name: raftOverloaded
+      - doc: |-
+          raftApplyReading is set while the apply goroutine reads back from the
+          log entries Ready handed it by index (ApplyRead): nothing is handed in
+          memory behind them until the driver says the read is over (D6, #664).
+        name: raftApplyReading
     name: raftSelfVoteDurable
   - doc: |-
       ProtocolMax is the highest protocol version this engine speaks: a cluster
@@ -534,11 +558,14 @@ files:
       - Config
       - fwdEntry
       - (*Raft).SetOverloaded
+      - (*Raft).SetApplyLag
+      - (*Raft).ApplyHeld
       - StartState
       - ReadState
       - TransferResult
       - ReadyValue
       - UnsupportedEntryValue
+      - ReadBackSpec
       - FetchSpec
       - (*ReadyValue).NeedsWrite
       - confAt
@@ -575,6 +602,10 @@ files:
       - (*ReadyValue).hasNotices
       - (*ReadyValue).hasStateNotice
       - (*Raft).Ready
+      - (*Raft).applyReady
+      - (*Raft).applyLimit
+      - (*Raft).handApply
+      - (*Raft).evictable
       - (*Raft).numberWrite
       - (*Raft).conf
       - (*Raft).confAt
@@ -879,8 +910,9 @@ types:
         results: int64
       - doc: |-
           evict drops payloads, oldest first, while the window is above limit,
-          never above through: only applied and durable entries are dropped, so
-          Apply never needs the disk and a lagging peer is fed by a fetch.
+          never above through: only durable entries are dropped, committed ones
+          handed to apply or not, which apply reads back from the store
+          (ReadyValue.ApplyRead), and a lagging peer is fed by a fetch (#664).
         name: evict
         params: limit int64, through uint64
         recv: l *memLog
@@ -1093,8 +1125,17 @@ types:
         type: uint64
       - doc: |-
           RecentEntriesBytes bounds the payloads held in memory; 0 holds them
-          all. Older ones are fetched from the store when a peer needs them.
+          all. Older ones are fetched from the store when a peer needs them, and
+          read back from it by the driver when apply reaches them.
         name: RecentEntriesBytes
+        type: int64
+      - doc: |-
+          MaxApplyLagBytes bounds the payload bytes Ready hands apply past what
+          the driver reports applied (SetApplyLag): one entry is handed when
+          nothing is outstanding, whatever its size, and entries whose payloads
+          were evicted are handed by index, for the driver to read from the
+          store (D6, #664). 0 does not bound them.
+        name: MaxApplyLagBytes
         type: int64
       - doc: |-
           MaxEntryBytes bounds a forwarded command's payload as the driver
@@ -1186,6 +1227,13 @@ types:
       - doc: Apply are committed, locally durable entries, in order.
         name: Apply
         type: "[]core.EntryValue"
+      - doc: |-
+          ApplyRead names committed, locally durable entries the step function
+          holds without their payloads: the driver reads them from its store
+          and applies them, in order, before Apply. Its Lo is 0 when there are
+          none (D6, #664).
+        name: ApplyRead
+        type: ReadBackSpec
       - doc: SendSnapshot names the peers that need a snapshot.
         name: SendSnapshot
         type: "[]core.NodeID"
@@ -1270,6 +1318,13 @@ types:
         type: core.EntryKind
     kind: struct
     name: UnsupportedEntryValue
+  - fields:
+      - name: Lo
+        type: uint64
+      - name: Hi
+        type: uint64
+    kind: struct
+    name: ReadBackSpec
   - fields:
       - name: To
         type: core.NodeID
@@ -1458,6 +1513,12 @@ types:
         type: ReadyValue
       - name: hs
         type: core.HardState
+      - doc: |-
+          applyLag is the payload bytes the apply goroutine holds unapplied, as
+          the driver last reported them (SetApplyLag) plus what Ready handed it
+          in memory since.
+        name: applyLag
+        type: int64
     kind: struct
     methods:
       - name: Debug
@@ -2149,6 +2210,12 @@ types:
       - name: SetOverloaded
         params: on bool
         recv: r *Raft
+      - name: SetApplyLag
+        params: bytes int64, reading bool
+        recv: r *Raft
+      - name: ApplyHeld
+        recv: r *Raft
+        results: bool
       - doc: |-
           adoptClusterVersion takes the start's snapshot's cluster version, unless
           it is above the protocol this node speaks: the node then stops on its
@@ -2266,6 +2333,37 @@ types:
       - name: Ready
         recv: r *Raft
         results: ReadyValue
+      - doc: |-
+          applyReady reports whether Ready hands apply anything: committed, durable
+          entries past those handed, by index when their payloads were evicted,
+          else within MaxApplyLagBytes of what apply holds, at least one when it
+          holds nothing, and none while it reads entries back. A node with no
+          table applies nothing until an install (D7).
+        name: applyReady
+        recv: r *Raft
+        results: bool
+      - doc: applyLimit is MaxApplyLagBytes, 0 when apply is not bounded.
+        name: applyLimit
+        recv: r *Raft
+        results: int64
+      - doc: |-
+          handApply hands apply what applyReady allows up to hi: the entries whose
+          payloads were evicted, by index and alone in their Ready, or those held in
+          memory within MaxApplyLagBytes. Bounded on a follower too, the apply
+          goroutine of a node slower to apply than its leader held everything it
+          was behind by (#664).
+        name: handApply
+        params: rd *ReadyValue, hi uint64
+        recv: r *Raft
+      - doc: |-
+          evictable is the last entry whose payload Ready may drop: a durable one,
+          committed for a node with a table, whose engine effects are applied and
+          which apply reads back from the store once it reaches it; applied for a
+          node with none, whose install replays the effects of the entries it holds
+          committed past the snapshot from their payloads (#416).
+        name: evictable
+        recv: r *Raft
+        results: uint64
       - doc: |-
           numberWrite gives a Ready that asks the storage actor for anything the
           next write sequence number, and remembers it as the write carrying a

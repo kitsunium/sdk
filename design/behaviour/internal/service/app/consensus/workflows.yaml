@@ -227,6 +227,17 @@ workflows:
           range: n.nodes
           value: x
       - return: targets
+  - of: contiguousFrom
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: es[i].Position.Index != lo+uint64(i)
+          key: i
+          range: es
+      - return: len(es) > 0
   - of: (*Node).stageAll
     steps:
       - set: written

@@ -190,7 +190,7 @@ func (n *Node) refuseOverload(p *proposal) bool {
 		p.done <- propResult{err: origin(coreconsensus.Overloaded, errs.String("why", "pending bytes"))}
 		return true
 	}
-	if n.applyLag.Load() >= n.cfg.MaxApplyLagBytes {
+	if n.applyOverloaded() {
 		// Apply backpressure: no new proposal until apply catches up
 		// (D6, R1-14).
 		p.done <- propResult{err: origin(coreconsensus.Overloaded, errs.String("why", "apply lag"))}

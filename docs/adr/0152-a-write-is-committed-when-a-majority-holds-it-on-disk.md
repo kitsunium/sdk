@@ -1531,7 +1531,8 @@ proposals with `OVERLOADED` until apply catches up, and a follower stops
 reading new entries from its log into memory. The engine keeps a window of
 recent entries in memory, bounded by `RecentEntriesBytes` (D14, R2-40), so
 the apply goroutine and slow followers do not read the disk for what was just
-written.
+written. (Only the leader's half held until 2026-10-25; the amendment of
+that date, below, makes it hold on every node: #664.)
 
 **Forwarded commands meet the same bounds (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), M2).** A
 command a follower forwards is checked by the leader before it is appended,
@@ -4426,6 +4427,55 @@ the reopen kept 0.5 to 0.9 times the log in heap, and allocated past
   the collector. A 16 MiB follower's log in 4 MiB segments, 64-byte
   entries, allocated 36 MiB to reopen and kept 14 MiB past its scan; it now
   allocates 13 MiB and keeps 2 MiB.
+
+Nothing published changes: no frame, no payload, no record format.
+
+## Amendment — apply is bounded on every node (2026-10-25, #664)
+
+D6 bounds the gap between commit and applied by `MaxApplyLagBytes`: the
+leader refuses proposals `OVERLOADED` at the bound, and a follower "stops
+reading new entries from its log into memory". Only the first half held.
+The step function's `Ready` handed apply every committed, durable entry
+whatever apply held, and evicted payloads only once handed, so a follower
+slower to apply than its leader held everything it was behind by, until it
+was OOM-killed or its log quota raised NO_SPACE for the whole cluster
+([#664](https://github.com/kitsunium/sdk/issues/664)).
+
+- **`Ready` hands apply `MaxApplyLagBytes` at most** past what the apply
+  goroutine holds unapplied, on every node: the driver reports it at every
+  turn (`SetApplyLag`), and an entry larger than the bound is handed alone
+  when apply holds nothing. A batch leaves the lag once the machine applied
+  it, by the bytes it was handed, whatever the machine does with them. What
+  is held back stays committed and durable; commit, durability, elections
+  and replication do not change.
+- **Its payload goes past `RecentEntriesBytes`.** The step function drops
+  the payloads of committed, durable entries past the window whether
+  handed or not, as it dropped those of applied entries, and hands those
+  by index (`ReadyValue.ApplyRead`), alone in their `Ready`. The apply
+  goroutine reads them back from the log, in order, a batch at a time of
+  `MaxBatchBytes` and `MaxApplyLagBytes` at most, counted in the apply lag
+  until applied, and skips what a restored snapshot covers: no compaction
+  passes what was applied, and an install's compaction follows its
+  restore, which the apply goroutine runs after what it was handed before.
+  Nothing is handed in memory while such a read is in progress. A log that
+  cannot give back an entry it holds committed stops the node (D4). A node
+  with no table keeps its payloads, whose engine effects its install
+  replays (#416), and applies nothing until then (D7).
+- **The leader still refuses at the bound.** Since `Ready` no longer hands
+  past the bound, what apply holds no longer measures the gap: the leader
+  refuses a proposal, local or forwarded, `OVERLOADED` while apply holds
+  `MaxApplyLagBytes`, while the step function holds committed entries back,
+  or while a read of the log is in progress. Without the last two, a
+  follower's forwards, bounded only while uncommitted, grew the gap with no
+  bound: 4.1 MiB against a bound of 64 KiB in the test.
+- **Measured.** A follower whose machine applies 2 ms slower than its
+  leader's held 11.5 MiB unapplied against a bound of 1 MiB; it now holds
+  1 MiB, and catches up once its machine does.
+- **What it costs.** A slow follower reads back from the log what it fell
+  behind by, which the page cache most likely holds. A leader refuses
+  commands while apply reads entries back: the step function does not know
+  the size of the payloads it no longer holds, and errs on the side of the
+  bound.
 
 Nothing published changes: no frame, no payload, no record format.
 

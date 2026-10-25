@@ -51251,8 +51251,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "Config",
-      "spelled": "struct{ID core.NodeID; Group core.GroupID; Log core.LogIdentityValue; Seed uint64; Timing core.TimingContractSpec; MaxInflight int; MaxInflightBytes int; MaxBatchBytes int; MinVoters int; PromoteLag uint64; Lease bool; CanVote bool; MaxChainRefusals int; NoTable bool; SilentTerm uint64; SilentIndex uint64; RecentEntriesBytes int64; MaxEntryBytes int; MaxForwardBytes int64}",
-      "canonical": "struct{ID github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Group github.com/kitsunium/sdk/internal/core/app/consensus.GroupID; Log github.com/kitsunium/sdk/internal/core/app/consensus.LogIdentityValue; Seed uint64; Timing github.com/kitsunium/sdk/internal/core/app/consensus.TimingContractSpec; MaxInflight int; MaxInflightBytes int; MaxBatchBytes int; MinVoters int; PromoteLag uint64; Lease bool; CanVote bool; MaxChainRefusals int; NoTable bool; SilentTerm uint64; SilentIndex uint64; RecentEntriesBytes int64; MaxEntryBytes int; MaxForwardBytes int64}",
+      "spelled": "struct{ID core.NodeID; Group core.GroupID; Log core.LogIdentityValue; Seed uint64; Timing core.TimingContractSpec; MaxInflight int; MaxInflightBytes int; MaxBatchBytes int; MinVoters int; PromoteLag uint64; Lease bool; CanVote bool; MaxChainRefusals int; NoTable bool; SilentTerm uint64; SilentIndex uint64; RecentEntriesBytes int64; MaxApplyLagBytes int64; MaxEntryBytes int; MaxForwardBytes int64}",
+      "canonical": "struct{ID github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Group github.com/kitsunium/sdk/internal/core/app/consensus.GroupID; Log github.com/kitsunium/sdk/internal/core/app/consensus.LogIdentityValue; Seed uint64; Timing github.com/kitsunium/sdk/internal/core/app/consensus.TimingContractSpec; MaxInflight int; MaxInflightBytes int; MaxBatchBytes int; MinVoters int; PromoteLag uint64; Lease bool; CanVote bool; MaxChainRefusals int; NoTable bool; SilentTerm uint64; SilentIndex uint64; RecentEntriesBytes int64; MaxApplyLagBytes int64; MaxEntryBytes int; MaxForwardBytes int64}",
       "fields": [
         {
           "name": "ID",
@@ -51337,7 +51337,12 @@
         {
           "name": "RecentEntriesBytes",
           "type": "int64",
-          "doc": "RecentEntriesBytes bounds the payloads held in memory; 0 holds them\nall. Older ones are fetched from the store when a peer needs them.\n"
+          "doc": "RecentEntriesBytes bounds the payloads held in memory; 0 holds them\nall. Older ones are fetched from the store when a peer needs them, and\nread back from it by the driver when apply reaches them.\n"
+        },
+        {
+          "name": "MaxApplyLagBytes",
+          "type": "int64",
+          "doc": "MaxApplyLagBytes bounds the payload bytes Ready hands apply past what\nthe driver reports applied (SetApplyLag): one entry is handed when\nnothing is outstanding, whatever its size, and entries whose payloads\nwere evicted are handed by index, for the driver to read from the\nstore (D6, #664). 0 does not bound them.\n"
         },
         {
           "name": "MaxEntryBytes",
@@ -51533,6 +51538,19 @@
       "spelled": "struct{}",
       "canonical": "struct{}",
       "doc": "Raft is the step function. It is not safe for concurrent use: one event\nloop owns it.\n",
+      "file": "service/app/consensus/raft/raft.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.(*Raft).ApplyHeld",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "ApplyHeld",
+      "recv": "Raft",
+      "spelled": "func() bool",
+      "canonical": "func() bool",
+      "doc": "ApplyHeld reports whether committed, durable entries wait to be handed to\napply, held back by MaxApplyLagBytes: the gap between commit and applied\nis at its bound, and the driver refuses new commands meanwhile (D6).\n",
       "file": "service/app/consensus/raft/raft.go",
       "layer": "service",
       "family": "app"
@@ -51824,6 +51842,19 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.(*Raft).SetApplyLag",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "SetApplyLag",
+      "recv": "Raft",
+      "spelled": "func(bytes int64, reading bool)",
+      "canonical": "func(bytes int64, reading bool)",
+      "doc": "SetApplyLag tells the step function what the apply goroutine has not\napplied yet of what Ready handed it: the payload bytes of the entries it\nholds, and whether it still reads back entries handed by index. Ready\nhands nothing in memory past MaxApplyLagBytes of them, nor while it reads\n(D6, #664).\n",
+      "file": "service/app/consensus/raft/raft.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.(*Raft).SetCanVote",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
@@ -51954,6 +51985,28 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.ReadBackSpec",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "ReadBackSpec",
+      "spelled": "struct{Lo uint64; Hi uint64}",
+      "canonical": "struct{Lo uint64; Hi uint64}",
+      "fields": [
+        {
+          "name": "Lo",
+          "type": "uint64"
+        },
+        {
+          "name": "Hi",
+          "type": "uint64"
+        }
+      ],
+      "doc": "ReadBackSpec names the committed entries [Lo, Hi) the driver reads back\nfrom its store to apply them: the step function holds them without\ntheir payloads (ReadyValue.ApplyRead).\n",
+      "file": "service/app/consensus/raft/raft.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.ReadState",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
@@ -51984,8 +52037,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "ReadyValue",
-      "spelled": "struct{Seq uint64; HardState *core.HardState; Commit uint64; TruncateFrom uint64; Entries []core.EntryValue; Messages []core.MessageValue; AfterSync []core.MessageValue; Apply []core.EntryValue; SendSnapshot []core.NodeID; ReadStates []ReadState; Forwarded []core.MessageValue; Transfers []TransferResult; Compact uint64; SilenceEnded bool; LeaderUnheard bool; Fetch []FetchSpec; Membership []core.MemberValue; LeaderHint core.MemberValue; Unsupported UnsupportedEntryValue; ChainRefusedBy []core.NodeID}",
-      "canonical": "struct{Seq uint64; HardState *github.com/kitsunium/sdk/internal/core/app/consensus.HardState; Commit uint64; TruncateFrom uint64; Entries []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue; Messages []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; AfterSync []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; Apply []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue; SendSnapshot []github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; ReadStates []github.com/kitsunium/sdk/internal/service/app/consensus/raft.ReadState; Forwarded []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; Transfers []github.com/kitsunium/sdk/internal/service/app/consensus/raft.TransferResult; Compact uint64; SilenceEnded bool; LeaderUnheard bool; Fetch []github.com/kitsunium/sdk/internal/service/app/consensus/raft.FetchSpec; Membership []github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue; LeaderHint github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue; Unsupported github.com/kitsunium/sdk/internal/service/app/consensus/raft.UnsupportedEntryValue; ChainRefusedBy []github.com/kitsunium/sdk/internal/core/app/consensus.NodeID}",
+      "spelled": "struct{Seq uint64; HardState *core.HardState; Commit uint64; TruncateFrom uint64; Entries []core.EntryValue; Messages []core.MessageValue; AfterSync []core.MessageValue; Apply []core.EntryValue; ApplyRead ReadBackSpec; SendSnapshot []core.NodeID; ReadStates []ReadState; Forwarded []core.MessageValue; Transfers []TransferResult; Compact uint64; SilenceEnded bool; LeaderUnheard bool; Fetch []FetchSpec; Membership []core.MemberValue; LeaderHint core.MemberValue; Unsupported UnsupportedEntryValue; ChainRefusedBy []core.NodeID}",
+      "canonical": "struct{Seq uint64; HardState *github.com/kitsunium/sdk/internal/core/app/consensus.HardState; Commit uint64; TruncateFrom uint64; Entries []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue; Messages []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; AfterSync []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; Apply []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue; ApplyRead github.com/kitsunium/sdk/internal/service/app/consensus/raft.ReadBackSpec; SendSnapshot []github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; ReadStates []github.com/kitsunium/sdk/internal/service/app/consensus/raft.ReadState; Forwarded []github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue; Transfers []github.com/kitsunium/sdk/internal/service/app/consensus/raft.TransferResult; Compact uint64; SilenceEnded bool; LeaderUnheard bool; Fetch []github.com/kitsunium/sdk/internal/service/app/consensus/raft.FetchSpec; Membership []github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue; LeaderHint github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue; Unsupported github.com/kitsunium/sdk/internal/service/app/consensus/raft.UnsupportedEntryValue; ChainRefusedBy []github.com/kitsunium/sdk/internal/core/app/consensus.NodeID}",
       "fields": [
         {
           "name": "Seq",
@@ -52026,6 +52079,11 @@
           "name": "Apply",
           "type": "[]core.EntryValue",
           "doc": "Apply are committed, locally durable entries, in order.\n"
+        },
+        {
+          "name": "ApplyRead",
+          "type": "ReadBackSpec",
+          "doc": "ApplyRead names committed, locally durable entries the step function\nholds without their payloads: the driver reads them from its store\nand applies them, in order, before Apply. Its Lo is 0 when there are\nnone (D6, #664).\n"
         },
         {
           "name": "SendSnapshot",
