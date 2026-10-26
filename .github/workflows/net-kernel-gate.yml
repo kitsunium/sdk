@@ -12,11 +12,13 @@ name: Net kernel gate
 #     which fails closed: a backend or a capability the leg requires and the
 #     kernel lacks FAILS the leg, it is never skipped. The guest leg boots its
 #     image with one retry of the boot (scripts/ci/boot-guest.sh).
-#   - `bench`: engine A against engine B on each load, interleaved, ten
-#     rounds, in this one job on one GitHub-hosted runner — never a
-#     self-hosted one, which a fork's pull request could reach — then
-#     tools/netgate judges the plan's gates on benchstat's interval and writes
-#     a report naming the commit it measured.
+#   - `bench`: engine A against engine B on each load, paired — one child
+#     serves both, a round alternates windows A, B, B, A, … and reports the
+#     ratio B/A (ADR 0190) — ten rounds, in this one job on one GitHub-hosted
+#     runner — never a self-hosted one, which a fork's pull request could
+#     reach — then tools/netgate judges the plan's gates on the interval of
+#     the rounds' ratios, the calibration rows (one engine against itself)
+#     included, and writes a report naming the commit it measured.
 #   - `net-kernel-gate`: the one status to require; it passes when the filter
 #     ran and either nothing relevant changed or the lanes and the bench both
 #     passed (scripts/ci/net-gate-verdict.sh).
@@ -186,8 +188,9 @@ jobs:
     env:
       GOWORK: "off"
       CGO_ENABLED: "0"
-      # Ten rounds, each running every engine once: interleaved, so a drift
-      # of the runner lands on both sides.
+      # Ten rounds, each one paired sample of every pair: within a round A and
+      # B alternate in one child, so a drift of the runner lands on both and
+      # cancels in their ratio. 400 000 requests a pair, in 16 windows.
       ROUNDS: "10"
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -226,7 +229,7 @@ jobs:
           for round in $(seq 1 "$ROUNDS"); do
             echo "::group::round $round"
             "$RUNNER_TEMP/server.test" -test.run='^$' -test.bench='^BenchmarkLoad' \
-              -test.benchtime=100000x -test.count=1 -test.timeout=10m \
+              -test.benchtime=400000x -test.count=1 -test.timeout=10m \
               2> >(grep -v '^net/loop:' >&2) | tee -a "$RUNNER_TEMP/bench.txt"
             echo "::endgroup::"
           done
