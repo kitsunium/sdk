@@ -901,7 +901,7 @@
       "name": "BatchReplies",
       "spelled": "func() GroupOption",
       "canonical": "func() github.com/kitsunium/sdk/pkg/v1/net/server.GroupOption",
-      "doc": "BatchReplies makes a datagram group's replies leave per read batch: Reply\nthen reports a queued reply sent, and a send that fails when the batch ends\nis counted in [State].Datagrams.ReplyFailures. On Linux a UDP socket batches\nthem with sendmmsg and, where it can, UDP GSO; elsewhere each leaves with a\nWriteTo. Under it Reply is valid only during the handler's call, as Data is.\nWithout it, Reply writes at once and returns the write's own error. A stream\ngroup refuses it.\n",
+      "doc": "BatchReplies makes a datagram group's replies leave per read batch: Reply\nthen reports a queued reply sent, and a queued send that fails — when the batch\nends, or earlier when the queue fills — is counted in\n[State].Datagrams.ReplyFailures; a reply too large to queue is written at once\nand returns its own error. On Linux a UDP socket batches\nthem with sendmmsg and, where it can, UDP GSO; elsewhere each leaves with a\nWriteTo. Under it Reply is valid only during the handler's call, as Data is.\nWithout it, Reply writes at once and returns the write's own error. A stream\ngroup refuses it.\n",
       "file": "server/gen_facade.go",
       "layer": "public",
       "family": "net"

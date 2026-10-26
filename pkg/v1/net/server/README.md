@@ -843,7 +843,7 @@ A named socket the supervisor did not pass is SocketAdoptFailed, never a silent 
 func BatchReplies() GroupOption
 ```
 
-BatchReplies makes a datagram group's replies leave per read batch: Reply then reports a queued reply sent, and a send that fails when the batch ends is counted in [State](#State).Datagrams.ReplyFailures. On Linux a UDP socket batches them with sendmmsg and, where it can, UDP GSO; elsewhere each leaves with a WriteTo. Under it Reply is valid only during the handler's call, as Data is. Without it, Reply writes at once and returns the write's own error. A stream group refuses it.
+BatchReplies makes a datagram group's replies leave per read batch: Reply then reports a queued reply sent, and a queued send that fails — when the batch ends, or earlier when the queue fills — is counted in [State](#State).Datagrams.ReplyFailures; a reply too large to queue is written at once and returns its own error. On Linux a UDP socket batches them with sendmmsg and, where it can, UDP GSO; elsewhere each leaves with a WriteTo. Under it Reply is valid only during the handler's call, as Data is. Without it, Reply writes at once and returns the write's own error. A stream group refuses it.
 
 <a name="BatchSize"></a>
 ## func [BatchSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)

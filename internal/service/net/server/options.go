@@ -178,7 +178,11 @@ func BatchSize(n int) GroupOption {
 // one datagram a message once the device refused GSO (EIO); a zoned IPv6 peer
 // is written at once, and a Unix datagram socket, a socket with no raw
 // descriptor and every other platform send the queue one WriteTo a reply.
-// Under the option Reply is valid only during the handler's call, as Data is:
+// A queue that is full — 128 replies or 256 KiB — sends what it holds early,
+// before the batch ends; a reply larger than that room, or to a peer the sink
+// cannot address, is written at once and returns the write's own error, never
+// counted. Under the option Reply is valid only during the handler's call, as
+// Data is:
 // the Packet is the read loop's, and one kept and replied to while a later
 // batch is served is queued with that batch. A reply made while no batch is
 // served is written at once. Without the option, Reply writes at once and
