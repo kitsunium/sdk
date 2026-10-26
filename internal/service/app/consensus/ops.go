@@ -660,7 +660,11 @@ func (n *Node) confirmLeader(ctx context.Context, to coreconsensus.NodeID, refus
 // owed and the node may be about to leave. A transfer to another voter
 // still under way is waited out first: raft starts none while one runs, and
 // the hand-off to the next voter, whose wait for the previous one ends a
-// tick before raft's deadline, sent nobody a TimeoutNow (#681).
+// tick before raft's deadline, sent nobody a TimeoutNow (#681). That wait
+// ends at most a tick before the deadline because handOff bounds each try by
+// the maximum election timeout of the contract raft runs on, the one
+// startTransfer adds to the deadline (#694): the wait here then lasts at
+// most that tick, and the try goes on to its own transfer.
 func (n *Node) transferLocal(ctx context.Context, to coreconsensus.NodeID) error {
 	for {
 		running, err := n.startLocal(to)
