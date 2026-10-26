@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T20:00:00Z -->
+<!-- updated: 2026-10-26T12:00:00Z -->
 # internal/service/net/server/
 
 ## Purpose
@@ -27,7 +27,7 @@ Public façade: `pkg/v1/net/server`.
 | `option_set_internal_test.go` | `TestGroupOption_recordsItsKind` — walks every function returning a `GroupOption` in `pkg/v1/net/server/gen_facade.go` and this package (exempt: `Listen`, `Loop`), each given its zero value records exactly its kind; the set's order and width |
 | `engine_option_external_test.go` | `TestEngine`, `TestName` — `Engine`, `Plaintext` and `Name` served, refused and what wins, on both natures |
 | `loop_engine_linux.go`, `loop_engine_other.go` | the backend: on Linux the leaf `loop` on duplicated descriptors (`F_DUPFD_CLOEXEC`, non-blocking), auto falling back to portable with the reason in `State`; elsewhere the portable backend, an explicit native one refused with `UnsupportedPlatform` |
-| `loop_portable.go` | the portable loop backend: a reader and a writer goroutine per connection on the netpoller, every callback on one handler goroutine, the reader's buffer held until the batch ends |
+| `loop_portable.go` | the portable loop backend: a reader and a writer goroutine per connection on the netpoller, every callback on one handler goroutine, the reader's buffer held until the batch ends; a batch costs what it touched — the timers are scanned once a `portableTick`, sooner for a deadline set before it, and only the spills whose head was consumed are compacted (`TestPortable_batchCostIndependentOfOpen`) |
 | `loop_group_internal_test.go` | loop groups on every backend the platform has: split lines, a 4 MiB response byte-exact, close, spill, drain, and every refusal — a zero-valued option included; `TestLoopGroup_middlewareRefused`, `Use` refused on every backend whatever the handler claims |
 | `loop_option_external_test.go` | `TestLoop` — the `Loop` option refused before or after the handler, on both natures, and what wins over it |
 | `stream_group.go` | `StreamGroup` — `Handle`, `HandleFunc`, `HandleHTTP`, `Use`; `claimHandler`, the one-handler rule every declaration takes |

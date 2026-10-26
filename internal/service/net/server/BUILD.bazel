@@ -129,6 +129,7 @@ go_test(
         "load_l3_linux_internal_test.go",
         "loop_group_internal_test.go",
         "loop_option_external_test.go",
+        "loop_portable_cost_internal_test.go",
         "multireader_linux_internal_test.go",
         "operator_internal_test.go",
         "option_set_internal_test.go",
