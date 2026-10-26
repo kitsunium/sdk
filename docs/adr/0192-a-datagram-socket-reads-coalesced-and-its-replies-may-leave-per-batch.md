@@ -3,7 +3,8 @@
 - **Status**: Accepted
 - **Date**: 2026-10-25
 - **Accepted**: 2026-10-25, on the owner's decisions of 2026-10-25 for step
-  P4a of the unified network work: the L3 gate's CPU is the machine's, and the
+  P4a of the unified network work: the L3 gate's CPU (revised on 2026-10-26:
+  the receiver's and the sender's rusage and the irq time), and the
   batching of replies is opt-in, `Packet.Reply` staying synchronous by
   default. It can be revisited while the SDK is v0
   ([ADR 0040](0040-changing-a-published-shape-while-v0.md)).
@@ -126,29 +127,33 @@ honours it on every platform — the contract is the same, only the syscall
 count differs —, a stream group, goroutine or loop, refuses it at `Start` with
 `LoopOptionUnsupported` naming it.
 
-### D6 — L3's CPU is the machine's
+### D6 — L3's CPU is the receiver's, the sender's and the irq time
 
-The P4a gate's `cpu-ns/datagram` on L3 is every CPU's busy time in
-`/proc/stat` over the window — all fields but idle and iowait, in `USER_HZ`
-ticks — divided by the datagrams received, over a window of 400 000
-datagrams a sample fixed in the bench (`l3Window`), whatever `-benchtime` says:
-`USER_HZ` is 100 on every Linux ABI, so at the job's 100 000 datagrams one tick
-was 100 ns a datagram, 2.5 % of engine A, and the quantisation alone pushed the
-bound past the threshold (0.757, median 0.65); at 400 000 a tick is 25 ns. The
-metric and the threshold are the owner's; only the instrument's resolution is
-the bench's. The receiver's own `rusage`, which
-the gate first read, is reported beside it as `rcv-cpu-ns/datagram`, not
-gated. The receiver's CPU is dominated by the copy-out of 1200 bytes a
-datagram, the same for both engines, and what GRO saves — the segmentation of
-each GSO send on receive, its socket buffers and queue operations — runs in
-softirq, charged mostly to the sender's context on a veth pair. Measured
-(docker, Linux 7.0, 4 CPUs, 10 interleaved rounds): the receiver's rusage
-gave B/A medians near 0.81 and an upper bound of 1.05; the machine's CPU,
-at 400 000 datagrams a sample, gives medians of 3 542 and 1 825 ns, an upper
-bound of 0.576. A GitHub-hosted runner (Linux 6.17, 4 CPUs) gives medians of
-2 188 and 725 ns, an upper bound of 0.368. Ten rounds of L3 take about a
-minute and a half of the bench job's 30. The sender is the same GSO sender on
-both engines, so it adds the same work to both sides of the ratio. The L3
+On the owner's decision of 2026-10-26, the P4a gate's `cpu-ns/datagram` on L3
+is the sum, over the window, of the receiver's rusage (user+system), the
+sender's — the bench process — and the irq and softirq time of every CPU in
+`/proc/stat`, divided by the datagrams received. The sum is what GRO changes:
+the receiver's copy-out, the same for both engines, and the segmentation of
+each GSO send on receive, its socket buffers and queue operations, which run
+in softirq. Under `CONFIG_IRQ_TIME_ACCOUNTING` the kernel charges that time to
+no task, so the three parts add without overlap; without it, part of the
+softirq time is in the rusages already, and the bench job records which the
+runner has (`accounting:` in `bench.txt`, BENCH.md). Each part is reported
+beside the sum, ungated: `rcv-`, `snd-` and `irq-cpu-ns/datagram`.
+
+A window is 400 000 datagrams, fixed in the bench (`l3Window`) whatever
+`-benchtime` says: `/proc/stat` counts in `USER_HZ` ticks, 100 a second on
+every Linux ABI, so at the job's 100 000 datagrams a tick was 100 ns a
+datagram; at 400 000 it is 25 ns.
+
+The first measure, decided on 2026-10-25, was every CPU's busy time in
+`/proc/stat`. It is abandoned: on a GitHub-hosted runner its user and system
+fields, sampled at the tick, gave engine B 25 to 100 ns a datagram on one run
+in two — below the receiver's own rusage of about 345 ns, which no measure of
+the whole can be — while the other runs gave 625 to 850 ns. The bench now
+refuses a window whose gated CPU is below the receiver's own
+(`errInconsistentCPU`, `TestL3CPU_check`). The sender is the same GSO sender
+on both engines, so it adds the same work to both sides of the ratio. The L3
 child never replies, so the gate does not depend on D5's mode.
 
 ### D7 — Datagrams a receive is reported, not gated

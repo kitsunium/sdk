@@ -28,12 +28,13 @@ const (
 	// metricCPUPerReq is the server process's user+system CPU per request
 	// (testing.B.ReportMetric units, as the benches report them).
 	metricCPUPerReq string = "cpu-ns/req"
-	// metricCPUPerDatagram is the machine's CPU per datagram: every CPU's busy
-	// time in /proc/stat over the window (all but idle and iowait), so the
-	// sender, the receiver and the softirq work between them — where GRO
-	// saves, a GSO send being segmented on receive without it, in softirq
-	// charged mostly to the sender. The receiver's own rusage missed that
-	// saving and is reported beside, ungated (rcv-cpu-ns/datagram; ADR 0192).
+	// metricCPUPerDatagram is the CPU a datagram costs: the receiver's and the
+	// sender's rusage, and the irq and softirq time /proc/stat accounts to no
+	// task — where GRO saves, a GSO send being segmented on receive without it
+	// (the owner's decision of 2026-10-26, ADR 0192 §D6). Each part is
+	// reported beside, ungated (rcv-, snd-, irq-cpu-ns/datagram). /proc/stat's
+	// busy time, the first measure, fell below the receiver's own rusage on
+	// one GitHub runner in two, and the bench now refuses such a window.
 	metricCPUPerDatagram string = "cpu-ns/datagram"
 	// metricDatagramsPerSyscall is how many datagrams one receive returned on
 	// average.

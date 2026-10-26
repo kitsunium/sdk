@@ -31,7 +31,7 @@ Stdlib-only, no `go.sum`, outside `go.work` (the `tools/` convention, and an
 | Step | Load | A → B | Criterion (bound) | State |
 |---|---|---|---|---|
 | P2 | L2 | handwritten → chain | `cpu-ns/req` ratio ≤ 1.05 (upper); 0 allocations as a kit budget, not a bench metric | inactive until P2's chain |
-| P4a | L3 | recvmmsg → gro | `datagrams/syscall` ratio ≥ 4 (lower), **reported, not gated** (ADR 0192 §D7); `cpu-ns/datagram` — the machine's, `/proc/stat` busy over the window (ADR 0192 §D6) — ratio ≤ 0.75 (upper) | **active** |
+| P4a | L3 | recvmmsg → gro | `datagrams/syscall` ratio ≥ 4 (lower), **reported, not gated** (ADR 0192 §D7); `cpu-ns/datagram` — the receiver's and the sender's rusage plus /proc/stat's irq and softirq time over the window (ADR 0192 §D6) — ratio ≤ 0.75 (upper) | **active** |
 | P6 | L1 | goroutine → loop | `cpu-ns/req` ratio ≤ 0.70 (upper) | inactive until P6 |
 | P5 | L1 | published → loop | `cpu-ns/req` ratio ≤ 1.0 (upper) | inactive: the published http1's samples are not stored |
 

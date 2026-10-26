@@ -5,12 +5,12 @@
 // segments, 4 flows at a fixed rate, over a veth pair whose far end sits in a
 // network namespace (scripts/ci/net-veth.sh). The receiver is a child — this
 // binary re-run on TestLoadL3Child, inside the namespace — reading through
-// the package's own datagramSource. The metrics are the machine's CPU per
-// datagram — every CPU's busy time in /proc/stat over the window, the sender,
-// the receiver and the kernel's softirq work between them, which is where GRO
-// saves: a GSO send is segmented on receive without it, in softirq charged
-// mostly to the sender — and the datagrams each receive returned; the
-// receiver's own CPU (rusage) is reported beside, not gated. Engine A is the recvmmsg reader
+// the package's own datagramSource. The gated metric is the CPU a datagram
+// costs (l3CPU): the receiver's rusage, the sender's — this process's —, and
+// the irq and softirq time /proc/stat accounts apart from any task, which is
+// where GRO saves: a GSO send is segmented on receive without it, in softirq.
+// The datagrams each receive returned and the receiver's own CPU are reported
+// beside, not gated (ADR 0192 §D6). Engine A is the recvmmsg reader
 // with UDP GRO off, one datagram a message; engine B is the same reader with
 // GRO on, each message a GSO send's datagrams, split as the read loop splits
 // them (P4a, ADR 0192).
@@ -228,11 +228,47 @@ func (c *l3Child) sample(tb testing.TB) [4]uint64 {
 // ABI, whatever the kernel's own HZ (proc(5)).
 const clockTicks = 100
 
-// machineBusy returns every CPU's busy time so far, in ns: the first line of
-// /proc/stat, every field but idle and iowait. /proc/stat is not namespaced, so
-// it counts the receiver in its namespace, the sender outside it and the
-// softirq work between them.
-func machineBusy(tb testing.TB) uint64 {
+// l3CPU is the CPU one window of L3 cost, in ns, by part.
+type l3CPU struct {
+	// receiver and sender are the two processes' user+system rusage.
+	receiver, sender uint64
+	// irq is the irq and softirq time of every CPU in /proc/stat. With
+	// CONFIG_IRQ_TIME_ACCOUNTING the kernel charges it to no task, so it adds
+	// to the two rusages without overlap; without it, part of it is in them
+	// already (BENCH.md records the runner's).
+	irq uint64
+}
+
+// total is the window's CPU, the gated metric.
+func (c l3CPU) total() uint64 { return c.receiver + c.sender + c.irq }
+
+// errInconsistentCPU reports a gated CPU below what the receiver alone
+// spent, which no sound measure of the whole can give: the first measure,
+// /proc/stat's busy time, did on one runner in two (ADR 0192 §D6).
+var errInconsistentCPU = errors.New("the gated CPU is below the receiver's own")
+
+// check refuses a window whose gated CPU is below the receiver's own.
+func (c l3CPU) check() error {
+	if c.total() < c.receiver {
+		return fmt.Errorf("%w: %d < %d ns", errInconsistentCPU, c.total(), c.receiver)
+	}
+	return nil
+}
+
+// processCPU is this process's user+system time so far, in ns.
+func processCPU(tb testing.TB) uint64 {
+	tb.Helper()
+	var ru syscall.Rusage
+	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &ru); err != nil {
+		tb.Fatal(err)
+	}
+	return uint64(ru.Utime.Nano() + ru.Stime.Nano())
+}
+
+// irqTime returns every CPU's irq and softirq time so far, in ns: the first
+// line of /proc/stat, its sixth and seventh fields. /proc/stat is not
+// namespaced, so it counts the softirq work of both ends of the pair.
+func irqTime(tb testing.TB) uint64 {
 	tb.Helper()
 	b, err := os.ReadFile("/proc/stat")
 	if err != nil {
@@ -240,22 +276,19 @@ func machineBusy(tb testing.TB) uint64 {
 	}
 	line, _, _ := strings.Cut(string(b), "\n")
 	f := strings.Fields(line)
-	if len(f) < 5 || f[0] != "cpu" {
+	// cpu user nice system idle iowait irq softirq …
+	if len(f) < 8 || f[0] != "cpu" {
 		tb.Fatalf("/proc/stat starts %q, want the cpu line", line)
 	}
-	var busy uint64
-	// user nice system idle iowait irq softirq steal …
-	for i, v := range f[1:] {
-		if i == 3 || i == 4 {
-			continue
-		}
+	var ticks uint64
+	for _, v := range f[6:8] {
 		n, perr := strconv.ParseUint(v, 10, 64)
 		if perr != nil {
-			tb.Fatalf("/proc/stat field %d %q: %v", i, v, perr)
+			tb.Fatalf("/proc/stat field %q: %v", v, perr)
 		}
-		busy += n
+		ticks += n
 	}
-	return busy * uint64(time.Second) / clockTicks
+	return ticks * uint64(time.Second) / clockTicks
 }
 
 // errNoGSO reports a kernel that refused UDP_SEGMENT.
@@ -364,7 +397,7 @@ func benchL3(b *testing.B, engine string) {
 		b.Cleanup(func() { _ = c.Close() })
 	}
 	before := child.sample(b)
-	busyBefore := machineBusy(b)
+	senderBefore, irqBefore := processCPU(b), irqTime(b)
 	b.ResetTimer()
 	// The window is the bench's, not b.N: the metrics are a datagram's, and the
 	// instrument's resolution sets the window (l3Window).
@@ -373,7 +406,11 @@ func benchL3(b *testing.B, engine string) {
 		b.Fatal(err)
 	}
 	after := settle(b, child, before[1]+uint64(sent))
-	busyAfter := machineBusy(b)
+	cpu := l3CPU{
+		receiver: after[0] - before[0],
+		sender:   processCPU(b) - senderBefore,
+		irq:      irqTime(b) - irqBefore,
+	}
 	b.StopTimer()
 	got := after[1] - before[1]
 	if got == 0 {
@@ -382,8 +419,13 @@ func benchL3(b *testing.B, engine string) {
 	if cut := after[3] - before[3]; cut != 0 {
 		b.Fatalf("engine %s dropped %d messages cut short (MSG_TRUNC/MSG_CTRUNC)", engine, cut)
 	}
-	b.ReportMetric(float64(busyAfter-busyBefore)/float64(got), "cpu-ns/datagram")
-	b.ReportMetric(float64(after[0]-before[0])/float64(got), "rcv-cpu-ns/datagram")
+	if err := cpu.check(); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportMetric(float64(cpu.total())/float64(got), "cpu-ns/datagram")
+	b.ReportMetric(float64(cpu.receiver)/float64(got), "rcv-cpu-ns/datagram")
+	b.ReportMetric(float64(cpu.sender)/float64(got), "snd-cpu-ns/datagram")
+	b.ReportMetric(float64(cpu.irq)/float64(got), "irq-cpu-ns/datagram")
 	b.ReportMetric(float64(got)/float64(after[2]-before[2]), "datagrams/syscall")
 	b.ReportMetric(1-float64(got)/float64(sent), "lost/op")
 }
@@ -424,6 +466,27 @@ func TestLoadL3_wired(t *testing.T) {
 				if engine == l3EngineB && after[2]-before[2] != 1 {
 					t.Fatalf("GRO read one GSO send in %d receives, want 1", after[2]-before[2])
 				}
+			}
+		})
+	}
+}
+
+// TestL3CPU_check pins the consistency guard: a gated CPU below the receiver's
+// own fails the run, as /proc/stat's busy time did on one runner in two; the
+// sum of the parts never does.
+func TestL3CPU_check(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		cpu  l3CPU
+		fail bool
+	}{
+		{name: "the parts", cpu: l3CPU{receiver: 345, sender: 200, irq: 50}},
+		{name: "no irq time", cpu: l3CPU{receiver: 345, sender: 200}},
+		{name: "a part that went backwards and wrapped", cpu: l3CPU{receiver: 345, sender: ^uint64(0) - 100}, fail: true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if err := c.cpu.check(); (err != nil) != c.fail || (c.fail && !errors.Is(err, errInconsistentCPU)) {
+				t.Fatalf("check = %v, want failing %v", err, c.fail)
 			}
 		})
 	}
