@@ -135,22 +135,16 @@ func printSummary(w io.Writer, rep *reportEntity) {
 		}
 		//: each criterion's line.
 		for _, m := range g.Measured {
-			fmt.Fprintf(w, "     %-8s %s%s\n", m.Verdict, m.Reason, reportedWord(m.Reported))
+			fmt.Fprintf(w, "     %-8s %s", m.Verdict, m.Reason)
+			//: measured, never failing.
+			if m.Reported {
+				fmt.Fprint(w, " (reported, not gated)")
+			}
+			fmt.Fprintln(w)
 		}
 	}
 	fmt.Fprintf(w, "netgate: 0-alloc exclusions: %s\n", strings.Join(rep.AllocExclusions, ", "))
 	fmt.Fprintf(w, "netgate: passed=%t\n", rep.Passed)
-}
-
-// reportedWord marks a criterion that is reported, not gated.
-func reportedWord(reported bool) string {
-	//: gated: nothing to add.
-	if !reported {
-		//: the plain line.
-		return ""
-	}
-	//: measured, never failing.
-	return " (reported, not gated)"
 }
 
 // activeWord names a gate's state.
