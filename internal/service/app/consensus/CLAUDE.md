@@ -444,9 +444,8 @@ machine, are 32.9 s at 24, and 34 s for the slowest on average over
   neither fenced, and ran two histories under one identity. `checkFenced`
   asks a receipt for every old voter but the survivor, and
   `checkOldMembers` refuses any old or retired ID beside it (R1-17, #691,
-  `TestTwoSurvivorsNamingEachOtherALearnerAreRefused`,
-  `TestRecoverNamingEveryOldVoterALearnerWithoutAFenceIsRefused`,
-  `TestRecoverRefusesAnOldMemberNamedALearnerEvenFenced`).
+  `TestRecoverRefusesAnOldMemberBesideTheSurvivor`,
+  `TestCheckOldMembersRefusesAnyOldOrRetiredID`).
 - Remove anything in `WipeAndRejoin` before `STOP-WIPE` is durable, the
   stamp before the stores' removal is synced, or `STOP-WIPE` before the
   stamp and the other markers are durably gone: cut between the log and

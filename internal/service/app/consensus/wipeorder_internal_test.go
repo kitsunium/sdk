@@ -57,20 +57,10 @@ func refusedByWipe(t *testing.T, what string, err error) {
 // X is stopped for WipeAndRejoin, which is cut after the log removal. A
 // dies. B comes back, X restarts on what the wipe left. The start, Init and
 // Recover are now refused STOP-WIPE until the wipe is run again, which
-// completes it; Init then draws a new NodeID.
+// completes it; Init then draws a new NodeID. The node the exit is made
+// for, one stopped STORAGE_FAILED in an earlier boot, whose marker refuses
+// nothing in this one, is TestAWipeCutAtEveryStepIsSafe's.
 func TestAnInterruptedWipeRefusesTheStartUntilItIsRunAgain(t *testing.T) {
-	interruptedWipe(t, false)
-}
-
-// The same, on the node the exit is made for: one stopped STORAGE_FAILED,
-// whose wipe runs in that boot and is cut by a reboot. The marker it left
-// names an earlier boot, and a STORAGE_FAILED marker of another boot
-// refuses nothing: STOP-WIPE must.
-func TestAnInterruptedWipeAfterAStorageFailureOfAnEarlierBootRefusesTheStart(t *testing.T) {
-	interruptedWipe(t, true)
-}
-
-func interruptedWipe(t *testing.T, storageFailedEarlierBoot bool) {
 	c, nodes := threeOnDisk(t, 60)
 	var a *diskNode
 	for a == nil {
@@ -112,13 +102,6 @@ func interruptedWipe(t *testing.T, storageFailedEarlierBoot bool) {
 	if len(before.Snapshots) == 0 || before.Snapshots[0].Position.Index >= tok.Index {
 		t.Skipf("X's newest snapshot does not lie below e4 (%d): the scenario needs one", tok.Index)
 	}
-	if storageFailedEarlierBoot {
-		body := []byte("boot=an-earlier-boot\nfsync: input/output error\n")
-		if err := os.WriteFile(filepath.Join(x.dir, markerStopPrefix+"STORAGE_FAILED"), body, 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-
 	// The interruption: the wipe stops right after it deleted the log, as
 	// a crash there would, or a failure to empty the snapshot directory.
 	errCut := errors.New("cut after the log")

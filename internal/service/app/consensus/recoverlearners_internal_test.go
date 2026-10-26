@@ -84,46 +84,42 @@ func (f *recoverFixture) refused(t *testing.T, keep *diskNode, err error, what s
 // histories under one identity, each with its own single voter. Each
 // elected itself and acknowledged writes alone; healed, they ran two
 // leaders at one term, or one overwrote the other's acknowledged write
-// (#691). Both Recovers are refused now, before anything is written.
-func TestTwoSurvivorsNamingEachOtherALearnerAreRefused(t *testing.T) {
+// (#691). The same hole let a Recover run with no receipt at all, every
+// other old voter listed as a learner. An old member's ID is never one
+// Init drew for the new cluster: the nodes a Recover names beside the
+// survivor are joiners Init prepared under the new cluster id, each with a
+// new NodeID (ADR 0152 R1-17, R3-02), so even attested fenced, an old voter
+// named a learner is refused. Every refusal comes before anything is
+// written; the survivor alone, every other old voter fenced, is accepted,
+// as before. One cluster serves every case: a refused Recover writes
+// nothing, and the accepted one runs last.
+func TestRecoverRefusesAnOldMemberBesideTheSurvivor(t *testing.T) {
 	f := newRecoverFixture(t, coreconsensus.ClusterID{26})
 	n0, n1, n2 := f.nodes[0], f.nodes[1], f.nodes[2]
-	for _, p := range [][2]*diskNode{{n0, n1}, {n1, n0}} {
-		keep, other := p[0], p[1]
-		members := []coreconsensus.MemberValue{f.member(t, keep, true), f.member(t, other, false)}
-		// Only the third old voter is attested fenced: the other survivor
-		// is a member, and used to need no receipt.
-		f.refused(t, keep, Recover(keep.dd, f.next, members, f.options(n2)), "naming the other survivor a learner")
-	}
-}
-
-// The same hole let a Recover run with no receipt at all: every other old
-// voter listed as a learner, while the old majority may still be serving.
-func TestRecoverNamingEveryOldVoterALearnerWithoutAFenceIsRefused(t *testing.T) {
-	f := newRecoverFixture(t, coreconsensus.ClusterID{27})
-	n0, n1, n2 := f.nodes[0], f.nodes[1], f.nodes[2]
-	members := []coreconsensus.MemberValue{f.member(t, n0, true), f.member(t, n1, false), f.member(t, n2, false)}
-	f.refused(t, n0, Recover(n0.dd, f.next, members, f.options()), "naming every old voter a learner, no receipt")
-}
-
-// An old member's ID is never one Init drew for the new cluster: the nodes
-// a Recover names beside the survivor are joiners Init prepared under the
-// new cluster id, each with a new NodeID (ADR 0152 R1-17, R3-02). Even
-// attested fenced, an old voter named a learner is refused, and so is an
-// old voter named by its ID only; the survivor with every other old voter
-// fenced is accepted, as before.
-func TestRecoverRefusesAnOldMemberNamedALearnerEvenFenced(t *testing.T) {
-	f := newRecoverFixture(t, coreconsensus.ClusterID{28})
-	n0, n1, n2 := f.nodes[0], f.nodes[1], f.nodes[2]
-	members := []coreconsensus.MemberValue{f.member(t, n0, true), f.member(t, n1, false)}
-	err := Recover(n0.dd, f.next, members, f.options(n1, n2))
-	f.refused(t, n0, err, "naming a fenced old voter a learner")
-	if why := whyOf(err); why != whyOldMember {
-		t.Fatalf("refused for %q, want %q", why, whyOldMember)
-	}
-	if err := Recover(n0.dd, f.next, members[:1], f.options(n1, n2)); err != nil {
-		t.Fatalf("Recover on the survivor alone, every other old voter fenced: %v", err)
-	}
+	t.Run("two survivors naming each other a learner", func(t *testing.T) {
+		for _, p := range [][2]*diskNode{{n0, n1}, {n1, n0}} {
+			keep, other := p[0], p[1]
+			members := []coreconsensus.MemberValue{f.member(t, keep, true), f.member(t, other, false)}
+			// Only the third old voter is attested fenced: the other
+			// survivor is a member, and used to need no receipt.
+			f.refused(t, keep, Recover(keep.dd, f.next, members, f.options(n2)), "naming the other survivor a learner")
+		}
+	})
+	t.Run("every old voter a learner without a fence", func(t *testing.T) {
+		members := []coreconsensus.MemberValue{f.member(t, n0, true), f.member(t, n1, false), f.member(t, n2, false)}
+		f.refused(t, n0, Recover(n0.dd, f.next, members, f.options()), "naming every old voter a learner, no receipt")
+	})
+	t.Run("an old voter a learner even fenced", func(t *testing.T) {
+		members := []coreconsensus.MemberValue{f.member(t, n0, true), f.member(t, n1, false)}
+		err := Recover(n0.dd, f.next, members, f.options(n1, n2))
+		f.refused(t, n0, err, "naming a fenced old voter a learner")
+		if why := whyOf(err); why != whyOldMember {
+			t.Fatalf("refused for %q, want %q", why, whyOldMember)
+		}
+		if err := Recover(n0.dd, f.next, members[:1], f.options(n1, n2)); err != nil {
+			t.Fatalf("Recover on the survivor alone, every other old voter fenced: %v", err)
+		}
+	})
 }
 
 // whyOf is the why field of a refusal, "" when it has none.
