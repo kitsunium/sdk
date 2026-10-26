@@ -31,7 +31,7 @@
       "dir": "http1",
       "layer": "public",
       "family": "net",
-      "doc": "Package http1 is the restricted HTTP/1.1 profile the SDK serves on its loop\nengine (ADR 0186 §D6): a codec that frames requests out of bytes and appends\nresponses to bytes, and HandleLoop, the adapter that serves a Handler on a\nloop group of package server.\n\nIt is a profile, not an HTTP server, and what it refuses defines it. A\nrequest is answered with its status and Connection: close, and its\nconnection closed, before any handler sees it, when it carries any\nTransfer-Encoding (chunked, and so trailers, included), Expect, a bare CR or\nLF, a NUL or another control byte in a value, obs-fold, whitespace before a\ncolon, a name outside tchar, a Content-Length that is not one run of at most\nten digits or that repeats, a second Authorization or Host, CONNECT, or a\nhead, target or body past its Limits. HTTP/2, Upgrade and TLS are out of the\nprofile: a program that needs them mounts net/http with Group.HandleHTTP.\nFraming depends on neither the method nor the route: a request takes its\nhead plus its Content-Length.\n\n# Serving\n\n\ttype api struct{ loops []perLoop } // one per loop, indexed by Request.Loop\n\n\tfunc (a *api) ServeHTTP1(req *http1.Request, res *http1.Response) {\n\t\tl := &a.loops[req.Loop]\n\t\t// route, authenticate with l's own scratch, ...\n\t\tres.Defer = true // answered at the end of the batch\n\t\tl.pending = append(l.pending, job{res: res})\n\t}\n\n\tfunc (a *api) EndBatch(loop int) {\n\t\tl := &a.loops[loop]\n\t\t// one transaction for every job of l.pending, then for each:\n\t\t// job.res.Status, job.res.Body = ..., ...; job.res.Defer = false\n\t}\n\n\tsrv.Group(\"api\", server.Listen(\"tcp\", \":8080\"), server.Loop(server.LoopValue{Loops: 2})).\n\t\tHandleLoop(http1.HandleLoop(a, http1.Parser{}))\n\nA handler runs on its loop's thread and must not block it. Every callback\nof one loop runs on that thread, one at a time, so state kept per loop needs\nno lock; Request.Loop and the loop argument of EndBatch name the loop. The\nanswers of a batch leave at its end, in request order on each connection.\n\n# The codec alone\n\nParser.Parse, AppendResponse and AppendRefusal frame and write without the\nloop, on any []byte: nothing allocates once the caller's buffers have room.\n"
+      "doc": "Package http1 is the restricted HTTP/1.1 profile the SDK serves on its loop\nengine (ADR 0186 §D6): a codec that frames requests out of bytes and appends\nresponses to bytes, and HandleLoop, the adapter that serves a Handler on a\nloop group of package server.\n\nIt is a profile, not an HTTP server, and what it refuses defines it. A\nrequest is answered with its status and Connection: close, and its\nconnection closed, before any handler sees it, when it carries any\nTransfer-Encoding (chunked, and so trailers, included), Expect, a bare CR or\nLF, a NUL or another control byte in a value, obs-fold, whitespace before a\ncolon, a name outside tchar, a Content-Length that is not one run of at most\nten digits or that repeats, a second Authorization or Host, CONNECT, or a\nhead, target or body past its Limits. HTTP/2, Upgrade and TLS are out of the\nprofile: a program that needs them mounts net/http with Group.HandleHTTP.\nFraming depends on neither the method nor the route: a request takes its\nhead plus its Content-Length.\n\n# Serving\n\n\ttype api struct{ lanes []perLane } // one per lane, indexed by Request.Lane\n\n\tfunc (a *api) ServeHTTP1(req *http1.Request, res *http1.Response) {\n\t\tl := &a.lanes[req.Lane]\n\t\t// route, authenticate with l's own scratch, ...\n\t\tres.Defer = true // answered at the end of the batch\n\t\tl.pending = append(l.pending, job{res: res})\n\t}\n\n\tfunc (a *api) EndBatch(lane int) {\n\t\tl := &a.lanes[lane]\n\t\t// one transaction for every job of l.pending, then for each:\n\t\t// job.res.Status, job.res.Body = ..., ...; job.res.Defer = false\n\t}\n\n\tsrv.Group(\"api\", server.Listen(\"tcp\", \":8080\"), server.Loop(server.LoopValue{Loops: 2})).\n\t\tHandleLoop(http1.HandleLoop(a, http1.Parser{}))\n\nA handler runs on its lane's thread and must not block it. Every callback\nof one lane runs on that thread, one at a time, so state kept per lane needs\nno lock; Request.Lane and the lane argument of EndBatch name the lane. The\nanswers of a batch leave at its end, in request order on each connection.\n\n# The codec alone\n\nParser.Parse, AppendResponse and AppendRefusal frame and write without the\nloop, on any []byte: nothing allocates once the caller's buffers have room.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/pkg/v1/net/server",
@@ -774,7 +774,7 @@
       "spelled": "corenet.HTTP1RequestValue",
       "canonical": "github.com/kitsunium/sdk/internal/core/net.HTTP1RequestValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1RequestValue",
-      "doc": "Request is one request, framed by the codec. Every slice aliases the bytes\nit was framed from; Loop names the loop that framed it.\n",
+      "doc": "Request is one request, framed by the codec. Every slice aliases the bytes\nit was framed from; Lane names the lane that framed it.\n",
       "file": "http1/gen_facade.go",
       "layer": "public",
       "family": "net"
@@ -1652,6 +1652,63 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.LoopLayer",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "LoopLayer",
+      "spelled": "corenet.LoopLayer",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.LoopLayer",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/net.LoopLayer",
+      "doc": "LoopLayer is the base a loop middleware's layer embeds: it forwards the\neight callbacks to the handler it wraps.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.LoopLayered",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "LoopLayered",
+      "spelled": "corenet.LoopLayered",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.LoopLayered",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/net.LoopLayered",
+      "doc": "LoopLayered is what every layer of a loop middleware implements: Next is\nthe handler it wraps.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.LoopMiddleware",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "LoopMiddleware",
+      "spelled": "corenet.Middleware[corenet.LoopHandler]",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.Middleware[github.com/kitsunium/sdk/internal/core/net.LoopHandler]",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/net.Middleware",
+      "doc": "LoopMiddleware decorates a loop handler with a layer, for UseLoop.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.LoopMiddlewareInvalid",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "LoopMiddlewareInvalid",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/net.LoopMiddlewareInvalid",
+      "code": {
+        "value": "0.2.11.61",
+        "reason": "LOOP_MIDDLEWARE_INVALID",
+        "public": "A loop middleware does not forward every callback"
+      },
+      "doc": "LoopMiddlewareInvalid reports a loop middleware whose layer does not forward every callback.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.LoopNoDescriptors",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
@@ -1781,6 +1838,19 @@
         "public": "The connection is closed"
       },
       "doc": "LoopStaleRef reports an operation on a connection that has closed.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.LoopStarter",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "LoopStarter",
+      "spelled": "corenet.LoopStarter",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.LoopStarter",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/net.LoopStarter",
+      "doc": "LoopStarter is the optional capability of a LoopHandler that keeps state\nper lane: OnStart gives it the lane count, once, before any other callback.\n",
       "file": "server/gen_facade.go",
       "layer": "public",
       "family": "net"
@@ -1921,6 +1991,18 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.NewLoopLayer",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "NewLoopLayer",
+      "spelled": "func(next LoopHandler) LoopLayer",
+      "canonical": "func(next github.com/kitsunium/sdk/pkg/v1/net/server.LoopHandler) github.com/kitsunium/sdk/pkg/v1/net/server.LoopLayer",
+      "doc": "NewLoopLayer returns the LoopLayer a loop middleware's layer embeds over\nnext, forwarding every callback to it.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.Option",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
@@ -2012,6 +2094,20 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/net.OptionKind",
       "owner": "go:github.com/kitsunium/sdk/internal/core/net.OptionKind",
       "doc": "OptionKind names a group option, for LoopOptionHonourer.Honours.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.OptionLoopMiddleware",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "OptionLoopMiddleware",
+      "spelled": "OptionKind",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/net/server.OptionKind",
+      "value": "19",
+      "init": "go:github.com/kitsunium/sdk/internal/core/net.OptionLoopMiddleware",
+      "doc": "OptionLoopMiddleware is UseLoop. A group no loop handler serves refuses it.\n",
       "file": "server/gen_facade.go",
       "layer": "public",
       "family": "net"

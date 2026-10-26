@@ -17,7 +17,9 @@
   be served behind `crypto/tls`, §D5 below) and D3 (the portable backend
   carries that TLS path, and the codec runs behind it)
 - **Amended by**: [ADR 0188](0188-the-operators-switches-only-restrict-and-state-says-what-the-server-runs-without.md) §D8 (the
-  switches made concrete) and §Consequences (`StateValue` gains four fields)
+  switches made concrete) and §Consequences (`StateValue` gains four fields);
+  [ADR 0191](0191-a-loop-middleware-forwards-every-callback-and-the-http1-chain-judges-one-canonical-target.md) §Deferred (the loop
+  middlewares, their own record)
 - **Related**: [ADR 0029](0029-sdk-net-domain.md) (the domain, one goroutine
   per connection), [ADR 0031](0031-policy-zero-values-are-never-inert.md)
   (zero values), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (the

@@ -85,7 +85,7 @@ type batchH struct {
 func (h *batchH) ServeHTTP1(req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue) {
 	target := string(req.Target)
 	h.served = append(h.served, target)
-	h.loops = append(h.loops, req.Loop)
+	h.loops = append(h.loops, req.Lane)
 	switch {
 	case strings.HasPrefix(target, "/defer"):
 		res.Defer = true

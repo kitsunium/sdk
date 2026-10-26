@@ -13,17 +13,17 @@ It is a profile, not an HTTP server, and what it refuses defines it. A request i
 ### Serving
 
 ```
-type api struct{ loops []perLoop } // one per loop, indexed by Request.Loop
+type api struct{ lanes []perLane } // one per lane, indexed by Request.Lane
 
 func (a *api) ServeHTTP1(req *http1.Request, res *http1.Response) {
-	l := &a.loops[req.Loop]
+	l := &a.lanes[req.Lane]
 	// route, authenticate with l's own scratch, ...
 	res.Defer = true // answered at the end of the batch
 	l.pending = append(l.pending, job{res: res})
 }
 
-func (a *api) EndBatch(loop int) {
-	l := &a.loops[loop]
+func (a *api) EndBatch(lane int) {
+	l := &a.lanes[lane]
 	// one transaction for every job of l.pending, then for each:
 	// job.res.Status, job.res.Body = ..., ...; job.res.Defer = false
 }
@@ -32,7 +32,7 @@ srv.Group("api", server.Listen("tcp", ":8080"), server.Loop(server.LoopValue{Loo
 	HandleLoop(http1.HandleLoop(a, http1.Parser{}))
 ```
 
-A handler runs on its loop's thread and must not block it. Every callback of one loop runs on that thread, one at a time, so state kept per loop needs no lock; Request.Loop and the loop argument of EndBatch name the loop. The answers of a batch leave at its end, in request order on each connection.
+A handler runs on its lane's thread and must not block it. Every callback of one lane runs on that thread, one at a time, so state kept per lane needs no lock; Request.Lane and the lane argument of EndBatch name the lane. The answers of a batch leave at its end, in request order on each connection.
 
 ### The codec alone
 
@@ -51,7 +51,7 @@ Parser.Parse, AppendResponse and AppendRefusal frame and write without the loop,
 - [func NewParser\(l Limits\) \(Parser, error\)](<#NewParser>)
 - [func Pending\(req \*Request, buffered int\) int](<#Pending>)
 - [type Batcher](<#Batcher>)
-  - [func \(Batcher\) EndBatch\(loop int\)](<#Batcher.EndBatch>)
+  - [func \(Batcher\) EndBatch\(lane int\)](<#Batcher.EndBatch>)
 - [type Field](<#Field>)
 - [type Handler](<#Handler>)
   - [func \(Handler\) ServeHTTP1\(req \*HTTP1RequestValue, res \*HTTP1ResponseValue\)](<#Handler.ServeHTTP1>)
@@ -63,6 +63,7 @@ Parser.Parse, AppendResponse and AppendRefusal frame and write without the loop,
   - [func \(\*LoopHandler\) OnClose\(io corenet.LoopIO, ref corenet.LoopConnRef, err error\)](<#LoopHandler.OnClose>)
   - [func \(\*LoopHandler\) OnData\(io corenet.LoopIO, ref corenet.LoopConnRef, buf \[\]byte\) int](<#LoopHandler.OnData>)
   - [func \(\*LoopHandler\) OnOpen\(io corenet.LoopIO, ref corenet.LoopConnRef\)](<#LoopHandler.OnOpen>)
+  - [func \(\*LoopHandler\) OnStart\(lanes int\)](<#LoopHandler.OnStart>)
   - [func \(\*LoopHandler\) OnTimeout\(io corenet.LoopIO, ref corenet.LoopConnRef\)](<#LoopHandler.OnTimeout>)
   - [func \(\*LoopHandler\) OnWritable\(io corenet.LoopIO, ref corenet.LoopConnRef\)](<#LoopHandler.OnWritable>)
 - [type Parser](<#Parser>)
@@ -349,9 +350,9 @@ Batcher is an alias of `github.com/kitsunium/sdk/internal/core/net.HTTP1Batcher`
 
 ```go
 type Batcher interface {
-	// EndBatch ends the batch of the loop whose index is loop: the Loop every
+	// EndBatch ends the batch of the lane whose index is lane: the Lane every
 	// request of the batch carried.
-	EndBatch(loop int)
+	EndBatch(lane int)
 }
 ```
 
@@ -359,10 +360,10 @@ type Batcher interface {
 ### func \(Batcher\) [EndBatch](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
 
 ```go
-func (Batcher) EndBatch(loop int)
+func (Batcher) EndBatch(lane int)
 ```
 
-EndBatch ends the batch of the loop whose index is loop: the Loop every request of the batch carried.
+EndBatch ends the batch of the lane whose index is lane: the Lane every request of the batch carried.
 
 <a name="Field"></a>
 ## type [Field](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
@@ -507,7 +508,16 @@ OnData implements corenet.LoopHandler. It frames every whole request at the star
 func (*LoopHandler) OnOpen(io corenet.LoopIO, ref corenet.LoopConnRef)
 ```
 
-OnOpen implements corenet.LoopHandler. It marks the connection open on its loop.
+OnOpen implements corenet.LoopHandler. It marks the connection open on its lane.
+
+<a name="LoopHandler.OnStart"></a>
+### func \(LoopHandler\) [OnStart](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/loop.go>)
+
+```go
+func (*LoopHandler) OnStart(lanes int)
+```
+
+OnStart implements corenet.LoopStarter: it builds every lane's state before the first callback, so no lane builds its own under a lock.
 
 <a name="LoopHandler.OnTimeout"></a>
 ### func \(LoopHandler\) [OnTimeout](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/loop.go>)
@@ -611,7 +621,7 @@ String names the refusal for a log line or a metric label.
 <a name="Request"></a>
 ## type [Request](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
 
-Request is one request, framed by the codec. Every slice aliases the bytes it was framed from; Loop names the loop that framed it.
+Request is one request, framed by the codec. Every slice aliases the bytes it was framed from; Lane names the lane that framed it.
 
 ```go
 type Request = corenet.HTTP1RequestValue
@@ -656,11 +666,13 @@ type Request struct {
 	// Close reports whether the client asked to close the connection after
 	// this request: a Connection field holding the close token.
 	Close            bool
-	// Loop is the index of the loop that framed the request — its
-	// LoopIO.Loop — set by the loop adapter before the handler runs, so a
-	// handler finds its per-loop state in a slice, with no lock. Parse leaves
-	// it as it is; outside the loop adapter it is what the caller set.
-	Loop             int
+	// Lane is the index of the lane that framed the request, from 0 to the
+	// group's lane count less one — its LoopIO.Loop — set by the loop adapter
+	// before the handler runs. One lane is one thread or one goroutine, so a
+	// handler finds its per-lane state in a slice sized at LoopStarter.OnStart,
+	// with no lock. Parse leaves it as it is; outside the loop adapter it is
+	// what the caller set.
+	Lane             int
 }
 ```
 

@@ -59,7 +59,7 @@ func (c *counter) loop(i int) *perLoop {
 }
 
 func (c *counter) ServeHTTP1(req *http1.Request, res *http1.Response) {
-	l := c.loop(req.Loop)
+	l := c.loop(req.Lane)
 	target := string(req.Target)
 	switch {
 	case strings.HasPrefix(target, "/n/"):

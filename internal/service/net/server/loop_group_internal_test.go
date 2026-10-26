@@ -374,7 +374,8 @@ func TestLoopGroup_loopIndex(t *testing.T) {
 			h := &loopIndexH{opened: map[loopKey]bool{}}
 			srv, addr := startLoopServer(t, b, h, Loop(corenet.LoopValue{Backend: b, Loops: 3}))
 			loops := srv.State().Loops[0].Loops
-			if b == corenet.LoopBackendPortable && loops != 1 || b != corenet.LoopBackendPortable && runtime.GOOS == "linux" && loops != 3 {
+			//: every backend runs Loops lanes, the portable one included.
+			if loops != 3 {
 				t.Fatalf("State Loops = %d on %v", loops, b)
 			}
 			for range 12 {
@@ -387,10 +388,16 @@ func TestLoopGroup_loopIndex(t *testing.T) {
 			if len(h.opened) != 12 || h.stray != 0 {
 				t.Fatalf("%d connections opened, %d callbacks on another loop; want 12 and 0", len(h.opened), h.stray)
 			}
+			used := map[int]bool{}
 			for k := range h.opened {
 				if k.loop < 0 || k.loop >= loops {
 					t.Fatalf("%+v names a loop outside [0, %d)", k, loops)
 				}
+				used[k.loop] = true
+			}
+			//: the portable backend hands connections to its lanes in turn.
+			if b == corenet.LoopBackendPortable && len(used) != loops {
+				t.Fatalf("portable: %d lanes served, want %d", len(used), loops)
 			}
 		})
 	}
