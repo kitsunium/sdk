@@ -2187,20 +2187,26 @@ func (n *Node) releaseDir() {
 // over for a stuck apply declines every transfer until that apply moves,
 // and only it knows (#674): picked first on an equal match, it made the
 // Remove of this leader submitted here, which moves the leadership away
-// first (#529), fail at every attempt (#681).
+// first (#529), fail at every attempt (#681). Each try lasts the maximum
+// election timeout of the contract raft runs on, read with the target: raft
+// bounds its transfer by that one, not by the InitialTiming, which only
+// Bootstrap proposes. Bounded by a shorter InitialTiming, every try past
+// the first expired while it waited out the transfer to the voter before,
+// and no voter past the first was sent a TimeoutNow (#694).
 func (n *Node) handOff(ctx context.Context) {
 	var tried []coreconsensus.NodeID
 	for ctx.Err() == nil {
 		var to coreconsensus.NodeID
+		var bound time.Duration
 		n.exec(func() {
 			if st := n.r.Status(); st.Role == coreconsensus.RoleLeader {
-				to = n.handOffTarget(&st, tried)
+				to, bound = n.handOffTarget(&st, tried), st.Timing.ElectionTimeoutMax
 			}
 		})
 		if to == 0 {
 			return
 		}
-		tctx, cancel := context.WithTimeout(ctx, n.cfg.InitialTiming.ElectionTimeoutMax)
+		tctx, cancel := context.WithTimeout(ctx, bound)
 		err := n.transferLocal(tctx, to)
 		cancel()
 		if err == nil {

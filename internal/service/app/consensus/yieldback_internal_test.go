@@ -2,6 +2,7 @@ package consensus
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -157,8 +158,18 @@ func firstHandOff(n *Node) coreconsensus.NodeID {
 // MEMBERSHIP_INVALID, at every attempt for as long as s's apply stayed
 // stuck. The hand-off now goes on to the next voter.
 func TestRemovingTheLeaderOnItselfHandsOverPastAVoterThatDeclines(t *testing.T) {
+	removeSelfPastADecliner(t, coreconsensus.ClusterID{1, 2, 6}, 0)
+}
+
+// removeSelfPastADecliner is #681's scenario: four voters, s, the first of
+// the configuration, leads, its apply gets stuck, it hands its leadership
+// over to x and declines every transfer, and Remove(x) is submitted on x,
+// whose hand-off goes to s first. A factor other than 0 first commits a
+// contract whose maximum election timeout is factor times the
+// InitialTiming's (#694).
+func removeSelfPastADecliner(t *testing.T, cid coreconsensus.ClusterID, factor time.Duration) {
 	c := newClusterWith(t, &cluster{
-		t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{1, 2, 6}, size: 4,
+		t: t, net: NewMemoryNetwork(), cid: cid, size: 4,
 		configure: func(_ *testNode, cfg *Config) { cfg.MinVoters = 3 },
 	})
 	l := c.settledLeader(5 * time.Second)
@@ -175,6 +186,9 @@ func TestRemovingTheLeaderOnItselfHandsOverPastAVoterThatDeclines(t *testing.T) 
 		if refused, err := transferRetried(l.node, s.id); err != nil {
 			t.Fatalf("setup: TransferLeadership to %d, after %d refusals: %v", s.id, refused, err)
 		}
+	}
+	if factor != 0 {
+		runLonger(t, c, s, factor)
 	}
 	c.waitApplied(propose(t, s.node, "a=1").Index, 5*time.Second)
 	defer holdApply(s)()
@@ -203,12 +217,7 @@ func TestRemovingTheLeaderOnItselfHandsOverPastAVoterThatDeclines(t *testing.T) 
 	if pick := firstHandOff(x.node); pick != s.id {
 		t.Fatalf("setup: the hand-off on %d goes to %d first, not to %d, which declines", x.id, pick, s.id)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	err := x.node.Remove(ctx, "op:test", x.id)
-	if err != nil && !errs.HasCode(err, coreconsensus.CodeOutcomeUnknown) {
-		t.Fatalf("Remove(%d) on itself while %d declines every transfer: %v %v", x.id, s.id, err, errs.FieldsOf(err))
-	}
+	removeSelfOnce(t, x, fmt.Sprintf("while %d declines every transfer", s.id))
 	var y *testNode
 	for _, tn := range byConf[1:] {
 		if tn != x {
@@ -264,4 +273,98 @@ func TestALocalTransferWaitsOutTheOneUnderWay(t *testing.T) {
 		t.Fatalf("transferLocal(%d) while a transfer to %d runs: %v %v", next.id, gone.id, err, errs.FieldsOf(err))
 	}
 	propose(t, next.node, "a=1")
+}
+
+// runLonger commits, through the leader l, a timing contract whose maximum
+// election timeout is factor times the nodes' InitialTiming's, as after a
+// ProposeTimingContract or on a node that joined with the default
+// InitialTiming into a cluster founded with longer timeouts, and waits
+// until every node runs on it.
+func runLonger(t *testing.T, c *cluster, l *testNode, factor time.Duration) {
+	t.Helper()
+	initial := l.node.cfg.InitialTiming
+	next := coreconsensus.TimingContractSpec{
+		HeartbeatInterval: initial.HeartbeatInterval, ElectionTimeoutMin: factor * initial.ElectionTimeoutMax / 2,
+		ElectionTimeoutMax: factor * initial.ElectionTimeoutMax, MaxClockDrift: initial.MaxClockDrift,
+	}
+	pre := coreconsensus.PreconditionSpec{Log: l.node.lineage(), Generation: l.node.Status().Timing.Generation}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := l.node.ProposeTimingContract(ctx, "op:test", pre, next); err != nil {
+		t.Fatalf("setup: ProposeTimingContract: %v", err)
+	}
+	waitFor(t, "every node runs on the longer contract", func() bool {
+		for _, tn := range c.nodes {
+			if tn.node != nil && tn.node.Status().Timing.ElectionTimeoutMax != next.ElectionTimeoutMax {
+				return false
+			}
+		}
+		return true
+	})
+}
+
+// removeSelfOnce submits Remove of the leader x on x, once, and fails the
+// test unless it went through.
+func removeSelfOnce(t *testing.T, x *testNode, why string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	start := time.Now()
+	if err := x.node.Remove(ctx, "op:test", x.id); err != nil && !errs.HasCode(err, coreconsensus.CodeOutcomeUnknown) {
+		t.Fatalf("Remove(%d) on itself %s, after %v: %v %v", x.id, why, time.Since(start).Round(time.Millisecond), err, errs.FieldsOf(err))
+	}
+}
+
+// TestRemovingTheLeaderOnItselfHandsOverPastAVoterThatDeclinesUnderALongerContract
+// is #694: #681's scenario under a committed contract whose maximum
+// election timeout is four times the InitialTiming's. Each try of the
+// hand-off was bounded by the InitialTiming's, raft's transfer to the voter
+// that declines by the contract's: the tries to the next voters, which wait
+// that transfer out (#681), expired before it ended, no voter past the
+// first was ever sent a TimeoutNow, and the Remove failed NOT_LEADER at
+// every attempt. Each try now lasts the committed contract's maximum,
+// raft's own deadline.
+func TestRemovingTheLeaderOnItselfHandsOverPastAVoterThatDeclinesUnderALongerContract(t *testing.T) {
+	removeSelfPastADecliner(t, coreconsensus.ClusterID{0x69, 0x94, 1}, 4)
+}
+
+// TestRemovingTheLeaderOnItselfHandsOverPastADeadVoterUnderALongerContract
+// is #694 with every apply moving: four voters, the first of the
+// configuration, d, acknowledges the last entry and dies, so on a quiet
+// cluster the hand-off picks it first. Its TimeoutNow is lost and raft's
+// transfer to it runs for the contract's maximum election timeout, four
+// times the InitialTiming's: the tries to the live voters, bounded by the
+// InitialTiming's, expired while they waited it out.
+func TestRemovingTheLeaderOnItselfHandsOverPastADeadVoterUnderALongerContract(t *testing.T) {
+	c := newClusterWith(t, &cluster{
+		t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{0x69, 0x94, 2}, size: 4,
+		configure: func(_ *testNode, cfg *Config) { cfg.MinVoters = 3 },
+	})
+	l := c.settledLeader(5 * time.Second)
+	var byConf []*testNode
+	for _, m := range l.node.Membership().Members {
+		for _, tn := range c.nodes {
+			if tn.id == m.ID {
+				byConf = append(byConf, tn)
+			}
+		}
+	}
+	d, x := byConf[0], byConf[1]
+	if l != x {
+		if refused, err := transferRetried(l.node, x.id); err != nil {
+			t.Fatalf("setup: TransferLeadership to %d, after %d refusals: %v", x.id, refused, err)
+		}
+	}
+	runLonger(t, c, x, 4)
+	propose(t, x.node, "a=1")
+	waitFor(t, "every voter acknowledges the leader's last entry", func() bool { return firstHandOff(x.node) != 0 })
+	c.kill(d)
+	if pick := firstHandOff(x.node); pick != d.id {
+		t.Fatalf("setup: the hand-off on %d goes to %d first, not to %d, which is dead", x.id, pick, d.id)
+	}
+	removeSelfOnce(t, x, fmt.Sprintf("while %d, the first pick, is dead", d.id))
+	waitFor(t, "the old leader removed", func() bool {
+		_, member := byConf[2].node.Membership().Member(x.id)
+		return !member
+	})
 }

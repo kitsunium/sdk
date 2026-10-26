@@ -11693,10 +11693,13 @@ sequences:
             - var:
                 name: to
                 type: coreconsensus.NodeID
+            - var:
+                name: bound
+                type: time.Duration
             - eval: |-
                 n.exec(func() {
                 			if st := n.r.Status(); st.Role == coreconsensus.RoleLeader {
-                				to = n.handOffTarget(&st, tried)
+                				to, bound = n.handOffTarget(&st, tried), st.Timing.ElectionTimeoutMax
                 			}
                 		})
               to: n.exec
@@ -11705,7 +11708,7 @@ sequences:
                   - return: ""
                 when: to == 0
             - bind: tctx, cancel
-              eval: context.WithTimeout(ctx, n.cfg.InitialTiming.ElectionTimeoutMax)
+              eval: context.WithTimeout(ctx, bound)
               to: context
             - bind: err
               eval: n.transferLocal(tctx, to)
