@@ -39,6 +39,22 @@ workflows:
           range: members
           value: m
       - return: "false"
+  - of: sharedID
+    steps:
+      - bind: seen
+        eval: make(map[coreconsensus.NodeID]bool, len(members))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: seen[m.ID]
+            - set: seen[m.ID]
+              value: "true"
+          key: _
+          range: members
+          value: m
+      - return: "false"
   - of: (*fileLog).markerPaths
     steps:
       - bind: paths

@@ -242,3 +242,18 @@ func sharedKey(members []coreconsensus.MemberValue) bool {
 	}
 	return false
 }
+
+// sharedID reports whether two members carry one NodeID. Each line is a
+// member: an ID listed twice is a voter counted twice toward a quorum, two
+// keys the transport admits as one node, or, its learner line first, a
+// survivor Member says does not vote (review of #693).
+func sharedID(members []coreconsensus.MemberValue) bool {
+	seen := make(map[coreconsensus.NodeID]bool, len(members))
+	for _, m := range members {
+		if seen[m.ID] {
+			return true
+		}
+		seen[m.ID] = true
+	}
+	return false
+}

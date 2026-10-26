@@ -51016,7 +51016,7 @@
       "name": "Recover",
       "spelled": "func(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RecoverOptions) error",
       "canonical": "func(d github.com/kitsunium/sdk/internal/service/app/consensus.DataDir, newCluster github.com/kitsunium/sdk/internal/core/app/consensus.ClusterID, members []github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue, opt *github.com/kitsunium/sdk/internal/service/app/consensus.RecoverOptions) error",
-      "doc": "Recover starts a NEW history from this node's log — run it on the\nsurvivor whose report from Inspect holds the highest (LastTerm, Last):\nevery entry up to its\npersisted commit, then the contiguous entries past it whose body and chain\nchecksums verify and whose term does not decrease, cut at the first that\nfails, so no write the old cluster acknowledged is lost;\na new cluster id that records its predecessor and the last index it kept;\nand a forced configuration. The audit file records how many entries past\nthe persisted commit were adopted. Every old voter left out must be\nattested fenced by every witness; without witness keys it fails closed.\nA stop marker, STOP-RECOVER, is durable before the forced entry and\nremoved once the new stamp is: a Recover interrupted between the two\nrefuses a start, and is completed by running Recover again to the same\nnew cluster, which resumes from the index the first one kept; one to\nanother cluster is refused. A silence condition TruncateAndStaySilent\nleft is removed before the marker: the new history is closed to the\nterms it guarded, and a silent node never campaigns. An install a crash\ninterrupted after its snapshot was published is finished first, before\nthe marker: the new history keeps that snapshot's index, and the forced\nentry follows it.\n",
+      "doc": "Recover starts a NEW history from this node's log — run it on the\nsurvivor whose report from Inspect holds the highest (LastTerm, Last):\nevery entry up to its\npersisted commit, then the contiguous entries past it whose body and chain\nchecksums verify and whose term does not decrease, cut at the first that\nfails, so no write the old cluster acknowledged is lost;\na new cluster id that records its predecessor and the last index it kept;\nand a forced configuration. The audit file records how many entries past\nthe persisted commit were adopted. Every old voter but this node must be\nattested fenced by every witness, whatever the new members name, and no\nother member may carry the ID of an old or retired member, or of another\nmember; without witness keys it fails closed.\nA stop marker, STOP-RECOVER, is durable before the forced entry and\nremoved once the new stamp is: a Recover interrupted between the two\nrefuses a start, and is completed by running Recover again to the same\nnew cluster, which resumes from the index the first one kept; one to\nanother cluster is refused. A silence condition TruncateAndStaySilent\nleft is removed before the marker: the new history is closed to the\nterms it guarded, and a silent node never campaigns. An install a crash\ninterrupted after its snapshot was published is finished first, before\nthe marker: the new history keeps that snapshot's index, and the forced\nentry follows it.\n",
       "file": "service/app/consensus/offline.go",
       "layer": "service",
       "family": "app"
@@ -51042,7 +51042,7 @@
         {
           "name": "Fenced",
           "type": "[]coreconsensus.FencedAttestationValue",
-          "doc": "Fenced attests every old voter left out of the new members.\n"
+          "doc": "Fenced attests every old voter but this node, whether the new members list it or not.\n"
         },
         {
           "name": "WitnessKeys",
@@ -51050,7 +51050,7 @@
           "doc": "WitnessKeys verify the receipts: one per witness, each must sign.\n"
         }
       ],
-      "doc": "RecoverOptions are Recover's preconditions (R2-25, R3-02, R4-04, R9-08).\nRecover refuses, before it writes anything, an invalid operator, a\nconfirmation that does not name the new cluster, no witness key, and an\nold voter left out without a receipt from every witness.\n",
+      "doc": "RecoverOptions are Recover's preconditions (R2-25, R3-02, R4-04, R9-08).\nRecover refuses, before it writes anything, an invalid operator, a\nconfirmation that does not name the new cluster, no witness key, an old\nvoter other than this node without a receipt from every witness, and\nanother member under the ID of an old or retired member.\n",
       "file": "service/app/consensus/offline.go",
       "layer": "service",
       "family": "app"
@@ -51534,7 +51534,7 @@
       "spelled": "QuarantineExit",
       "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.QuarantineExit",
       "value": "1",
-      "doc": "WipeAndRejoin wipes the directory; the operator then Removes the old\nNodeID and Inits under a NEW one (R4-03). A voter's incarnation is\nnever swapped in place.\n",
+      "doc": "WipeAndRejoin wipes the directory; the operator then Removes the old\nNodeID and Inits under a NEW one (R4-03). A voter's incarnation is\nnever swapped in place. A wipe that does not finish leaves the stop\nmarker STOP-WIPE, which refuses a start, Init, Redraw, Recover,\nRestoreSnapshot and TruncateAndStaySilent until WipeAndRejoin runs\nagain and completes it.\n",
       "file": "service/app/consensus/offline.go",
       "layer": "service",
       "family": "app"
