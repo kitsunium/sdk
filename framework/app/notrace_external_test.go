@@ -187,6 +187,10 @@ func binaryCarriesNoTrace(t *testing.T, goTool, bin string, words [][]byte) {
 	used := make([]bool, len(formerInBinary))
 	for name, section := range data {
 		for _, at := range traces(section, words) {
+			//: outside .rodata a trace is a string only where it reads as one.
+			if name != ".rodata" && !inString(section, at) {
+				continue
+			}
 			if i := admitted(section, at); i >= 0 {
 				used[i] = true
 				continue
@@ -227,6 +231,45 @@ func stringData(t *testing.T, bin string) map[string][]byte {
 		t.Fatal("the binary has no .rodata: the check would test nothing")
 	}
 	return data
+}
+
+// minStringRun is how many printable bytes a trace outside .rodata must lie
+// in to be read as a string: its three letters and one more.
+const minStringRun = 4
+
+// inString reports whether the three bytes at at lie in a run of at least
+// minStringRun printable ASCII bytes. Go writes its string literals to
+// .rodata; the writable sections hold pointers and numbers too, whose bytes
+// spell three letters by chance — a 386 pointer 0x0874496b is "kIt\b" — and
+// a pointer is never one more printable byte away from a fourth.
+func inString(text []byte, at int) bool {
+	printable := func(c byte) bool { return c >= 0x20 && c < 0x7f }
+	start, end := at, at+3
+	for start > 0 && printable(text[start-1]) {
+		start--
+	}
+	for end < len(text) && printable(text[end]) {
+		end++
+	}
+	return end-start >= minStringRun
+}
+
+// TestInString pins the reading of a trace outside .rodata: the 386 pointer
+// the guard once failed on is no string, a literal with a neighbour is.
+func TestInString(t *testing.T) {
+	pointer := []byte("\x8d\x9ds\b:\x00\x00\x00kIt\b[\x00\x00")
+	if at := bytes.Index(pointer, []byte("kIt")); inString(pointer, at) {
+		t.Fatal("a pointer whose bytes spell kIt was read as a string")
+	}
+	for _, s := range []string{"\x00akit\x00", "\x00kit.\x00", "kitx", "\x01/_kit/\x02"} {
+		b := []byte(s)
+		if !inString(b, bytes.Index(b, []byte("kit"))) {
+			t.Errorf("%q: a string not read as one", s)
+		}
+	}
+	if b := []byte("\x00kit\x00"); inString(b, 1) {
+		t.Error("three letters alone are below the run")
+	}
 }
 
 // admitted is the index in formerInBinary of the entry the trace at at lies

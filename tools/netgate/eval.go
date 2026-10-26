@@ -19,8 +19,9 @@ const (
 )
 
 var (
-	// errBadReference reports a ratio whose reference interval reaches zero.
-	errBadReference = errors.New("the reference interval reaches zero")
+	// errBadRatio reports a ratio sample at or below zero: no CPU a request
+	// or datagrams a receive make one.
+	errBadRatio = errors.New("a ratio sample at or below zero")
 	// errUnknownOp reports a criterion whose Op is neither opAtMost nor
 	// opAtLeast.
 	errUnknownOp = errors.New("unknown op")
@@ -32,10 +33,10 @@ type criterionEntity struct {
 	Metric string `json:"metric"`
 	// Op is opAtMost or opAtLeast.
 	Op string `json:"op"`
-	// Threshold is the bound's limit: a ratio B/A when Ratio is set, the
-	// metric's own value on B otherwise.
+	// Threshold is the bound's limit: the per-round ratio B/A when Ratio is
+	// set, the metric's own value on B otherwise.
 	Threshold float64 `json:"threshold"`
-	// Ratio judges B against A; unset, B alone.
+	// Ratio judges the pair's per-round ratios, B over A; unset, B alone.
 	Ratio bool `json:"ratio"`
 }
 
@@ -77,10 +78,13 @@ type summaryEntity struct {
 // criterionResult is one criterion judged.
 type criterionResult struct {
 	criterionEntity
-	// A summarises engine A's samples; nil on a criterion of B alone.
+	// A summarises engine A's own values, when the rounds reported them.
 	A *summaryEntity `json:"a,omitempty"`
-	// B summarises engine B's samples.
+	// B summarises engine B's own values.
 	B *summaryEntity `json:"b,omitempty"`
+	// RatioSummary summarises the per-round ratios, B over A, on a ratio
+	// criterion: the samples the bound is read from.
+	RatioSummary *summaryEntity `json:"ratio_summary,omitempty"`
 	// Bound is the value the threshold was held to.
 	Bound float64 `json:"bound"`
 	// Verdict is verdictPass, verdictFail or verdictMissing.
@@ -134,11 +138,10 @@ func evaluate(table []gateEntity, s samplesEntity, sha string) *reportEntity {
 // judgeGate judges each criterion of g; the gate passes when every one does.
 func judgeGate(g *gateEntity, s samplesEntity) gateResult {
 	res := gateResult{gateEntity: *g, Verdict: verdictPass}
-	a := s[seriesKey{Load: g.Load, Engine: g.A}]
-	b := s[seriesKey{Load: g.Load, Engine: g.B}]
+	pair := s[seriesKey{Load: g.Load, A: g.A, B: g.B}]
 	//: every criterion, none short-circuited, so the report is whole.
 	for _, c := range g.Criteria {
-		m := judge(c, a[c.Metric], b[c.Metric])
+		m := judge(c, pair)
 		//: the first failure or gap settles the gate's verdict.
 		if m.Verdict != verdictPass && res.Verdict == verdictPass {
 			res.Verdict = m.Verdict
@@ -153,51 +156,61 @@ func judgeGate(g *gateEntity, s samplesEntity) gateResult {
 	return res
 }
 
-// judge holds one criterion to the samples of A and B.
-func judge(c criterionEntity, a, b []float64) criterionResult {
+// judge holds one criterion to a pair's rounds: on a ratio criterion the
+// interval of the per-round ratios, B over A, each measured with both
+// engines side by side so a drift of the runner cancels within its round; on
+// any other, the interval of B's own values. Each engine's own values are
+// summarised beside it when the rounds reported them.
+func judge(c criterionEntity, pair map[string][]float64) criterionResult {
 	res := criterionResult{criterionEntity: c}
-	sb, err := summarize(b, confidence)
-	//: B is what every criterion reads.
+	//: A's values, reported beside the bound, never judged.
+	if sa, err := summarize(pair[aUnit+c.Metric], confidence); err == nil {
+		res.A = &sa
+	}
+	//: B's values, the same.
+	if sb, err := summarize(pair[bUnit+c.Metric], confidence); err == nil {
+		res.B = &sb
+	}
+	unit := bUnit + c.Metric
+	//: a ratio criterion reads the rounds' ratios.
+	if c.Ratio {
+		unit = ratioUnit + c.Metric
+	}
+	xs := pair[unit]
+	sum, err := summarize(xs, confidence)
+	//: too few rounds is no verdict.
 	if err != nil {
-		//: no verdict without B.
-		res.Verdict, res.Reason = verdictMissing, fmt.Sprintf("engine B: %d samples of %s: %v", len(b), c.Metric, err)
+		res.Verdict, res.Reason = verdictMissing, fmt.Sprintf("%d samples of %s: %v", len(xs), unit, err)
+		//: missing.
 		return res
 	}
-	res.B = &sb
-	lo, hi := sb.Lo, sb.Hi
-	//: a ratio needs A as well.
+	//: the ratios' own interval, which a ratio of two intervals is not.
 	if c.Ratio {
-		sa, aerr := summarize(a, confidence)
-		//: no ratio without A.
-		if aerr != nil {
-			//: missing reference.
-			res.Verdict, res.Reason = verdictMissing, fmt.Sprintf("engine A: %d samples of %s: %v", len(a), c.Metric, aerr)
+		res.RatioSummary = &sum
+		//: a ratio no engine can produce.
+		if sum.Lo <= 0 {
+			res.Verdict, res.Reason = verdictMissing, fmt.Sprintf("%s: %v", unit, errBadRatio)
+			//: missing.
 			return res
 		}
-		res.A = &sa
-		//: a reference interval reaching zero bounds no ratio.
-		if sa.Lo <= 0 {
-			//: refused rather than divided by zero.
-			res.Verdict, res.Reason = verdictMissing, fmt.Sprintf("%s: %v", c.Metric, errBadReference)
-			return res
-		}
-		//: the widest ratio both intervals allow.
-		lo, hi = sb.Lo/sa.Hi, sb.Hi/sa.Lo
 	}
 	//: the bound that can fail the threshold.
 	switch c.Op {
+	//: the worst the rounds allow is the upper bound.
 	case opAtMost:
-		res.Bound = hi
-		res.Verdict = verdictOf(hi <= c.Threshold)
+		res.Bound = sum.Hi
+		res.Verdict = verdictOf(sum.Hi <= c.Threshold)
+	//: the worst is the lower bound.
 	case opAtLeast:
-		res.Bound = lo
-		res.Verdict = verdictOf(lo >= c.Threshold)
+		res.Bound = sum.Lo
+		res.Verdict = verdictOf(sum.Lo >= c.Threshold)
+	//: a table error.
 	default:
-		//: a table error, never a pass.
 		res.Verdict, res.Reason = verdictFail, fmt.Sprintf("%s: %v %q", c.Metric, errUnknownOp, c.Op)
+		//: failed.
 		return res
 	}
-	res.Reason = fmt.Sprintf("%s bound %.4g %s %.4g", c.Metric, res.Bound, c.Op, c.Threshold)
+	res.Reason = fmt.Sprintf("%s bound %.4g %s %.4g (median %.4g)", unit, res.Bound, c.Op, c.Threshold, sum.Median)
 	//: judged.
 	return res
 }
