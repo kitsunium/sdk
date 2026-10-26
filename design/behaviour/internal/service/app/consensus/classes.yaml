@@ -6895,7 +6895,12 @@ types:
           over for a stuck apply declines every transfer until that apply moves,
           and only it knows (#674): picked first on an equal match, it made the
           Remove of this leader submitted here, which moves the leadership away
-          first (#529), fail at every attempt (#681).
+          first (#529), fail at every attempt (#681). Each try lasts the maximum
+          election timeout of the contract raft runs on, read with the target: raft
+          bounds its transfer by that one, not by the InitialTiming, which only
+          Bootstrap proposes. Bounded by a shorter InitialTiming, every try past
+          the first expired while it waited out the transfer to the voter before,
+          and no voter past the first was sent a TimeoutNow (#694).
         name: handOff
         params: ctx context.Context
         recv: n *Node
@@ -7400,7 +7405,13 @@ types:
           owed and the node may be about to leave. A transfer to another voter
           still under way is waited out first: raft starts none while one runs, and
           the hand-off to the next voter, whose wait for the previous one ends a
-          tick before raft's deadline, sent nobody a TimeoutNow (#681).
+          tick before raft's deadline, sent nobody a TimeoutNow (#681). That wait
+          ends at most a tick before the deadline because handOff bounds each try by
+          the maximum election timeout of the contract raft runs on, the one
+          startTransfer adds to the deadline (#694): a wait here for the previous
+          try's transfer then lasts at most that tick, and the try goes on to its
+          own. A transfer started elsewhere, an operator's or the preferred-leader
+          watch's, can still hold the first try for up to that maximum.
         name: transferLocal
         params: ctx context.Context, to coreconsensus.NodeID
         recv: n *Node

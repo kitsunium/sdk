@@ -4970,6 +4970,36 @@ The amendment of #669 says Config already holds a batch below
 No frame, payload or record format changes, and the in-memory path is
 unchanged.
 
+## Amendment — each hand-off try lasts the committed contract's transfer (2026-10-26, #694)
+
+D8's amendment of 2026-10-25 (#681) bounds each try of the hand-off by
+`ElectionTimeoutMax`. The node read it from its own `InitialTiming`, which
+only Bootstrap proposes, while the step function bounds its transfer by the
+committed contract's (`startTransfer`). Under a contract longer than the
+`InitialTiming` — after a `ProposeTimingContract`, or on a node that joined
+with the default `InitialTiming` a cluster founded with longer timeouts —
+the try to the voter picked first ended long before the step function's
+deadline, and the try to the next voter, which waits that transfer out
+(#681), expired before it ended. No voter past the first was sent a
+`TimeoutNow`, and the `Remove` of the leader submitted on it failed
+`NOT_LEADER` at every attempt, for as long as the voter picked first did not
+take over: its apply stuck (#674), or that voter dead on a quiet cluster
+([#694](https://github.com/kitsunium/sdk/issues/694)).
+
+- **A try lasts the contract the step function runs on.** `handOff` reads
+  the maximum election timeout from the step function's status in the same
+  turn as the target: the value `startTransfer` adds to the transfer's
+  deadline. The try to a voter that does not take over ends a tick before
+  that deadline, as #681 states, and the next try's wait for it lasts at
+  most that tick. `InitialTiming` is read at start only.
+- **What it costs.** Under a contract longer than its `InitialTiming`, a
+  `Close` takes up to the contract's `ElectionTimeoutMax` per voter that
+  does not take over, instead of the `InitialTiming`'s, bounded by its
+  context, as #681's amendment states; under a shorter one each try is
+  shorter.
+- The rule is the node's alone: no frame changes, and a mixed cluster needs
+  nothing.
+
 ## Amendment — the trailing window yields to the log quota, and a headroom of two segments is refused (2026-10-26, #696)
 
 Config refused only a `LogReserveBytes` not below `MaxLogBytes`. The
@@ -5053,6 +5083,7 @@ added.
 | #677 | the owner's decision, 2026-10-25 | a member states its own snapshot limit: `ChangeSnapshotLimit`, admitted from that member only, a lowering below the state not proposed, no protocol raise (amendment of 2026-10-25, #677) |
 | #683 | Raft hunt loop, 2026-10-25 | a batch fetched for a follower behind the evicted payloads is cut by its encoding, a fetch asks for no more entries than one append carries, and a frame refused above the read bound is counted and logged; no format change (amendment of 2026-10-25, #683) |
 | #690, #691 | Raft hunt, 2026-10-25 | the offline operations: `WipeAndRejoin` ordered behind the stop marker `STOP-WIPE`, a crash at any step refusing the start and every offline write until the wipe runs again (#690); `Recover` refuses an old member's ID beside the survivor and asks a fence for every other old voter, whatever the members name (#691); neither `Recover` nor `RestoreSnapshot` accepts two members under one ID (amendment of 2026-10-26, review of #693) |
+| #694 | Raft hunt loop, 2026-10-26 | each hand-off try lasts the committed contract's maximum election timeout, raft's transfer deadline, not the `InitialTiming`'s (amendment of 2026-10-26, #694) |
 | #696 | Raft hunt loop, 2026-10-26 | the trailing window is kept only while the log is under half its headroom and the disk is not short, and Config refuses a log quota whose headroom over the reserve is two segments or less; no format change (amendment of 2026-10-26, #696) |
 
 ## raft-sql-poc (owner's prior Raft)
