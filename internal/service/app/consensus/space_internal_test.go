@@ -18,8 +18,10 @@ import (
 // nowhere: the log grew until a rotation met a full disk and stopped every
 // node on STORAGE_FAILED (#515). SnapshotEveryBytes is the other half: a
 // log of large entries is cut on its bytes, before SnapshotEvery entries.
+// The headroom is three segments of 256 KiB: Config refuses two or less
+// (#696).
 func TestALogPastItsQuotaRaisesNoSpaceAndRefusesWrites(t *testing.T) {
-	const quota, reserve = 1 << 20, 512 << 10
+	const quota, reserve = 1<<20 + 256<<10, 512 << 10
 	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{5, 1, 5}}
 	dn := &diskNode{dir: t.TempDir()}
 	dn.dd = openDir(t, dn.dir, 256<<10)
@@ -60,7 +62,7 @@ func TestALogPastItsQuotaRaisesNoSpaceAndRefusesWrites(t *testing.T) {
 		}
 	}
 	if refused == nil {
-		t.Fatal("4 MiB written past a 1 MiB quota and no write was refused NO_SPACE")
+		t.Fatal("4 MiB written past a 1.25 MiB quota and no write was refused NO_SPACE")
 	}
 	// The node refuses its writes as soon as it finds its disk short; the
 	// alarm it proposed then commits.

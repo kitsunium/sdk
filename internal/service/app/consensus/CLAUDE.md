@@ -490,6 +490,21 @@ machine, are 32.9 s at 24, and 34 s for the slowest on average over
   while the alarm stands, and `SnapshotEveryBytes` cuts. A full disk used to stop every node
   on STORAGE_FAILED at the same rotation (#515,
   `TestALogPastItsQuotaRaisesNoSpaceAndRefusesWrites`).
+- Keep `SnapshotTrailing` entries behind the compaction point once the
+  log has no room for them, or accept a quota whose headroom over
+  `LogReserveBytes` is two segments or less. Counted whatever their size,
+  4 096 entries of 256 KiB outweighed the 768 MiB the recommended quota
+  leaves: nothing was compacted before the no-space alarm, and no
+  `SaveSnapshot` compacted anything under it, for good. A headroom of one
+  segment was filled at the open, of two at every rotation (#696).
+  `trailingKept` keeps none once the disk is short or the log half way to
+  the alarm, the log still back to the older snapshot (R6-02);
+  `refuseCeilings` judges the headroom by the shipped log's `segmentBytes`
+  (`TestAHeadroomOfTwoSegmentsOrLessIsRefused`,
+  `TestTheTrailingWindowYieldsToTheLogQuota`,
+  `TestTheRepairOfAShortLogCompactsPastTheTrailingWindow`). A headroom
+  under twice `SnapshotEveryBytes` and two segments may still reach the
+  alarm under steady large entries; it is repaired online.
 - Hand raft a caller's buffer: `Propose` copies its payload. The leader
   keeps the entry and resends it while a peer lags, and a caller that
   reused its buffer changed it under its body sum: every follower refused

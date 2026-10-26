@@ -284,8 +284,24 @@ func refuseCeilings(c *Config) error {
 		return misconfigured("MaxLogBytes", "zero")
 	case c.LogReserveBytes >= c.MaxLogBytes:
 		return misconfigured("LogReserveBytes", "not below MaxLogBytes")
+	case segmentsFill(c.Log, c.MaxLogBytes-c.LogReserveBytes):
+		// The no-space guard counts whole segments, and the log never holds
+		// fewer than the active one, nor fewer than two from each rotation
+		// until a cut passes the last entry of the one before: a headroom
+		// of one segment was filled at the open, before the first write,
+		// and one of two at every rotation (#696).
+		return misconfigured("MaxLogBytes", "less LogReserveBytes, not above two of the log's segments")
 	}
 	return nil
+}
+
+// segmentsFill reports whether a headroom of h bytes over LogReserveBytes
+// is two of log l's segments or less, when l reports the size it creates
+// its segments at; the shipped log does, a store that does not is not
+// judged.
+func segmentsFill(l coreconsensus.LogStore, h int64) bool {
+	s, ok := l.(interface{ segmentBytes() int64 })
+	return ok && h-s.segmentBytes() <= s.segmentBytes()
 }
 
 // refuseDurability refuses a Durability that disagrees with the machine's

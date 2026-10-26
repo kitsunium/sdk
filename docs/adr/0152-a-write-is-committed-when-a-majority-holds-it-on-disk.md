@@ -1665,7 +1665,9 @@ is refused with `OVERLOADED`. Nothing is appended in either case.
   disk, `CompactPrefix` drops the log through
   `min(older retained snapshot.Index, applied) − SnapshotTrailing` (default
   4 096), computed
-  with saturating arithmetic so a small log never underflows. The term of the
+  with saturating arithmetic so a small log never underflows; the trailing
+  entries are kept only while the log has room for them (amendment of
+  2026-10-26, #696). The term of the
   last compacted entry is kept, so the consistency check on the first
   retained entry still has a `prevLogTerm`. A follower whose `next` falls
   below the first retained index gets `COMPACTED` internally, and the leader
@@ -2713,9 +2715,9 @@ transport. The cross-field rules are checked after defaults are applied
 | `MaxApplyLagBytes` | engine | 256 MiB | clamp |
 | `RecentEntriesBytes` | engine | 32 MiB | clamp (R2-40) |
 | `SnapshotEvery`, `SnapshotEveryBytes` | engine | 16 384, 64 MiB | clamp |
-| `SnapshotTrailing` | engine | 4 096 | clamp |
+| `SnapshotTrailing` | engine | 4 096 | clamp; none kept once the disk is short or the log half way to the no-space alarm (#696) |
 | `MaxSnapshotBytes` | engine, enforced by receiver | none; 1 GiB recommended for the three VPS (R2-29) | refuse zero; refuse if < `SnapshotEveryBytes` |
-| `MaxLogBytes` | log | none; 1 GiB recommended for the three VPS (R2-29) | refuse zero |
+| `MaxLogBytes` | log | none; 1 GiB recommended for the three VPS (R2-29) | refuse zero; refuse if, less `LogReserveBytes`, it is not above two of the shipped log's segments (#696) |
 | `LogReserveBytes` | log | 256 MiB | clamp; refuse if ≥ `MaxLogBytes` |
 | `SnapshotCodec` | engine | flate | must be a `BoundedDecompressor`, recorded in `SnapshotMeta` (R7-06) |
 | `MinVoters` | engine | 3 | clamp, and refuse above the founding voter count at `Bootstrap` (R7-27) |
@@ -4998,6 +5000,72 @@ take over: its apply stuck (#674), or that voter dead on a quiet cluster
 - The rule is the node's alone: no frame changes, and a mixed cluster needs
   nothing.
 
+## Amendment — the trailing window yields to the log quota, and a headroom of two segments is refused (2026-10-26, #696)
+
+Config refused only a `LogReserveBytes` not below `MaxLogBytes`. The
+no-space guard counts the log's whole segments, the active one
+preallocated (`logBytes`); compaction kept `SnapshotTrailing` entries
+behind the older retained snapshot whatever their size (D7); and only
+applied commands trigger a cut, which the alarm refuses. A configuration
+the node accepted could so reach the alarm before any compaction was
+possible ([#696](https://github.com/kitsunium/sdk/issues/696), the class
+of #557, #669 and #683):
+
+- a headroom (`MaxLogBytes` less `LogReserveBytes`) of one segment, 257 to
+  320 MiB under the defaults, is filled by the active segment at the open:
+  every write was refused before the first, for good;
+- one of two segments, up to 384 MiB, is filled at every rotation: the
+  segment before is dropped only once a cut passes its last entry;
+- the trailing window outweighed the headroom: 4 096 entries of 256 KiB, a
+  quarter of `MaxEntryBytes`, are 1 GiB, more than the 768 MiB the
+  recommended 1 GiB quota leaves over the default reserve, and the
+  threshold is an average entry of about 150 KiB. Nothing was compacted
+  before the older snapshot passed index 4 096, the alarm rose first and
+  refused every command, no snapshot index moved, and `SaveSnapshot`
+  compacted nothing: every write was refused for good. Where the window
+  fitted the log, D17's repair moved the compaction point one cut at a
+  time, an entry or two each: up to `SnapshotTrailing` operations to drop
+  one segment.
+
+`SnapshotEveryBytes` made the cuts follow the log's bytes (#515), but not
+what compaction keeps behind them.
+
+- **The trailing window yields once the log has no room for it**
+  (`trailingKept`). Compaction keeps `SnapshotTrailing` entries behind the
+  older retained snapshot only while this node's disk is not short and its
+  log is under half its headroom; past that, it compacts to the older
+  snapshot itself. The log is still kept back to that snapshot (R6-02): a
+  node whose newest snapshot fails its checksums still starts from the
+  older one and the log after it. What it costs: while the log is past half
+  way, a peer behind the older snapshot gets an install instead of the
+  entries. A pin (R6-01) holds back to its own index then, with no trailing
+  entries, and nothing once the log is tight (#622). With the alarm
+  committed, D17's repair — `SaveSnapshot`, then `ClearNoSpace`, twice —
+  compacts the log to the first of its two cuts, and a headroom above two
+  segments then holds it under the alarm.
+- **Config refuses a headroom of two segments or less** when the log
+  reports the size it creates its segments at. The shipped log does
+  (`DataDirOptions.SegmentBytes`, 64 MiB by default); a store that does not
+  is not judged. Under the defaults `MaxLogBytes` must be above 384 MiB,
+  the reserve and two segments; the defaults with the recommended 1 GiB
+  pass. It refuses, `CONSENSUS_MISCONFIGURED` on `MaxLogBytes`, a
+  configuration accepted until now, every one of which raised the alarm at
+  the open or at every rotation. A product that checks its settings before
+  it starts the node holds the same bound.
+- **What it leaves: sizing.** Just before a cut the log holds two cut
+  intervals, back to the older snapshot, rounded up to whole segments, the
+  active one preallocated. A headroom under twice `SnapshotEveryBytes` and
+  two segments — 256 MiB under the defaults, a `MaxLogBytes` up to
+  512 MiB — can still reach the alarm under a steady stream of entries of
+  `SnapshotEveryBytes` over `SnapshotEvery` or more, 4 KiB under the
+  defaults. Config does not refuse it: the count trigger keeps the cut
+  intervals of small entries far shorter, and such a quota holds them for
+  good. Each such alarm is repaired online, as above. The recommended
+  1 GiB leaves 768 MiB, three times that floor.
+
+No frame, payload or record format changes, and no raft mutation is
+added.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -5016,6 +5084,7 @@ take over: its apply stuck (#674), or that voter dead on a quiet cluster
 | #683 | Raft hunt loop, 2026-10-25 | a batch fetched for a follower behind the evicted payloads is cut by its encoding, a fetch asks for no more entries than one append carries, and a frame refused above the read bound is counted and logged; no format change (amendment of 2026-10-25, #683) |
 | #690, #691 | Raft hunt, 2026-10-25 | the offline operations: `WipeAndRejoin` ordered behind the stop marker `STOP-WIPE`, a crash at any step refusing the start and every offline write until the wipe runs again (#690); `Recover` refuses an old member's ID beside the survivor and asks a fence for every other old voter, whatever the members name (#691); neither `Recover` nor `RestoreSnapshot` accepts two members under one ID (amendment of 2026-10-26, review of #693) |
 | #694 | Raft hunt loop, 2026-10-26 | each hand-off try lasts the committed contract's maximum election timeout, raft's transfer deadline, not the `InitialTiming`'s (amendment of 2026-10-26, #694) |
+| #696 | Raft hunt loop, 2026-10-26 | the trailing window is kept only while the log is under half its headroom and the disk is not short, and Config refuses a log quota whose headroom over the reserve is two segments or less; no format change (amendment of 2026-10-26, #696) |
 
 ## raft-sql-poc (owner's prior Raft)
 

@@ -815,6 +815,7 @@ files:
       - refuseTiming
       - refuseBounds
       - refuseCeilings
+      - segmentsFill
       - refuseDurability
       - (*Config).MemoryBudget
       - defaultCodec
@@ -1570,6 +1571,8 @@ files:
       - spaceCheckEvery
       - spaceGuard
       - spaceReporter
+      - (*fileLog).segmentBytes
+      - (*Node).trailingKept
       - (*Node).guardSpace
       - (*Node).spaceShort
       - (*Node).refuseShort
@@ -1862,6 +1865,14 @@ functions:
     name: refuseCeilings
     params: c *Config
     results: error
+  - doc: |-
+      segmentsFill reports whether a headroom of h bytes over LogReserveBytes
+      is two of log l's segments or less, when l reports the size it creates
+      its segments at; the shipped log does, a store that does not is not
+      judged.
+    name: segmentsFill
+    params: l coreconsensus.LogStore, h int64
+    results: bool
   - doc: |-
       refuseDurability refuses a Durability that disagrees with the machine's
       siblings, and the unset zero (D3): guessing it would either lose state at
@@ -4621,6 +4632,15 @@ types:
         name: endSilence
         recv: l *fileLog
         results: error
+      - doc: |-
+          segmentBytes is the size the shipped log creates its segments at, the
+          unit its logBytes grows and shrinks by, which refuseCeilings judges the
+          quota's headroom against (#696). It is the data directory's option, as
+          the log was opened with it; a rotation enlarges one segment for a batch
+          that does not fit, never the next.
+        name: segmentBytes
+        recv: l *fileLog
+        results: int64
       - doc: |-
           probeRuntimeDir creates the boot-scoped directory and writes, then
           removes, a file there. A directory the process cannot write in left every
@@ -7544,7 +7564,11 @@ types:
           (sendPin), pins compaction back to it, less SnapshotTrailing (R6-01): a leader that cut twice during one transfer
           compacted past the snapshot it was sending, the entry after it was gone
           once the peer installed it, and under a sustained write rate the peer
-          installed snapshot after snapshot and never caught up (#550).
+          installed snapshot after snapshot and never caught up (#550). The
+          trailing entries are kept only while the log has room for them
+          (trailingKept): counted whatever their size, they outgrew the quota's
+          headroom before any compaction, and no cut compacted the log under the
+          alarm that followed (#696).
         name: afterCut
         recv: n *Node
       - doc: |-
@@ -7640,6 +7664,20 @@ types:
         name: sendSnapshot
         params: to coreconsensus.NodeID
         recv: n *Node
+      - doc: |-
+          trailingKept is how many entries compaction keeps behind its point, the
+          older retained snapshot (afterCut): SnapshotTrailing, or none once the
+          log has no room for them, this node's disk short or its log half way to
+          the no-space alarm. The window counts entries whatever their size: with
+          entries of a quarter of MaxEntryBytes the default 4 096 weighed 1 GiB,
+          more than the headroom of the quota ADR 0152 recommends, nothing was
+          compacted before the alarm rose, and with the alarm refusing every
+          command no cut an operator asked for compacted anything either, for good
+          (#696). It only spares a peer a little behind the older snapshot an
+          install; the log back to that snapshot (R6-02) is kept whatever the room.
+        name: trailingKept
+        recv: n *Node
+        results: uint64
       - doc: |-
           guardSpace proposes the no-space alarm when this node's disk runs short
           and the alarm is not committed, at most every spaceRaiseEvery. It runs on
