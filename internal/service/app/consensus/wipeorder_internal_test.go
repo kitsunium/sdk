@@ -98,6 +98,12 @@ func TestAnInterruptedWipeRefusesTheStartUntilItIsRunAgain(t *testing.T) {
 
 	run := t.TempDir()
 	x.dd = openDirIn(t, x.dir, run)
+	// threeOnDisk's cleanup closes X's directory only through its node,
+	// which this test opens only on a regression: whatever x.dd holds when
+	// the test stops, at a skip or a fatal included, is closed here, the
+	// explicit closes below making it a no-op (Close is idempotent). A
+	// lock left held is a directory Windows refuses to remove.
+	t.Cleanup(func() { _ = x.dd.Close() })
 	before := must(Inspect(x.dd))(t)
 	if len(before.Snapshots) == 0 || before.Snapshots[0].Position.Index >= tok.Index {
 		t.Skipf("X's newest snapshot does not lie below e4 (%d): the scenario needs one", tok.Index)
