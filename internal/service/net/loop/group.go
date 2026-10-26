@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"slices"
 	"sync"
 	"time"
 	"unsafe"
@@ -52,6 +53,12 @@ type Config struct {
 	Listeners []Listener
 	// Log receives the one start line; nil is standard error.
 	Log io.Writer
+	// Disabled are the capabilities the operator switched off: never probed,
+	// never used, reported "disabled" (ADR 0189).
+	Disabled []corenet.Capability
+	// DisabledBy says how they were switched off in State; empty is
+	// KITSUNIUM_NET_DISABLE.
+	DisabledBy string
 	// tableCap, when positive, caps every ring's table below the descriptor
 	// limit: the conformance suite's tiny slot table.
 	tableCap int
@@ -70,8 +77,12 @@ type loopHooks struct {
 	shuffle bool
 	// failStage fails the io_uring probe at the named stage.
 	failStage string
-	// deferTaskrun sets IORING_SETUP_DEFER_TASKRUN instead of COOP_TASKRUN.
-	deferTaskrun bool
+	// primaryIdle keeps io_uring's primary ring from accepting, so every
+	// connection lands on a secondary (P3a's wake test).
+	primaryIdle bool
+	// secondaryPlain sets io_uring's secondary rings up without
+	// COOP_TASKRUN: the kernel then signals the thread for their task work.
+	secondaryPlain bool
 	// sweepEvery shortens io_uring's sweep period, in ticks.
 	sweepEvery int64
 }
@@ -98,6 +109,8 @@ type Group struct {
 	once sync.Once
 	// procs is GOMAXPROCS read at Start.
 	procs int
+	// caps is what the backend's probe found of each capability.
+	caps capReport
 }
 
 // runner is a backend's handle on its threads.
@@ -135,6 +148,12 @@ func Start(cfg Config) (*Group, error) {
 		closeListeners(cfg.Listeners)
 		//: refused.
 		return nil, errs.Wrap(corenet.HandlerMissing, errs.WrapParams{}, errs.String("group", cfg.Group))
+	}
+	//: an opt-in the group cannot honour.
+	if err := CheckCapabilities(cfg.Group, cfg.Value); err != nil {
+		closeListeners(cfg.Listeners)
+		//: refused before any thread starts.
+		return nil, err
 	}
 	//: a test's tiny table.
 	if cfg.tableCap > 0 {
@@ -197,7 +216,8 @@ func (g *Group) State() corenet.LoopStateValue {
 		Degraded: g.reason != "", DegradedReason: g.reason,
 		Loops: g.sz.loops, Rings: g.sz.rings, RingsSource: g.sz.ringsSource,
 		RLimitNoFile: g.sz.rlimit, GOMAXPROCS: g.procs,
-		BatchP99: corenet.DurationValue(g.grp.batchP99()),
+		BatchP99:     corenet.DurationValue(g.grp.batchP99()),
+		Capabilities: slices.Clone(g.caps.rows),
 	}
 	//: loop by loop, ring by ring.
 	for _, lp := range g.loops {

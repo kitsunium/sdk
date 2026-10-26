@@ -4,6 +4,7 @@ package server
 
 import (
 	stdnet "net"
+	"slices"
 	"syscall"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
@@ -28,7 +29,7 @@ func startLoopEngine(group *StreamGroup, lns []stdnet.Listener, plan loopPlan) (
 	//: the portable backend, as the code or the environment asked.
 	if plan.backend == corenet.LoopBackendPortable {
 		//: on the netpoller.
-		return startPortable(group, lns, ""), nil
+		return startPortable(group, lns, "", plan), nil
 	}
 	handoff, err := dupListeners(lns)
 	//: a descriptor that cannot be duplicated.
@@ -41,19 +42,87 @@ func startLoopEngine(group *StreamGroup, lns []stdnet.Listener, plan loopPlan) (
 	g, err := loop.Start(loop.Config{
 		Group: group.name, Value: value, MaxConns: group.limits.MaxConns,
 		IdleTimeout: loopIdle(group), Handler: group.loopHandler, Listeners: handoff,
+		Disabled: plan.disabled, DisabledBy: plan.disabledBy,
 	})
 	//: started natively.
 	if err == nil {
-		//: serving.
-		return g, nil
+		//: serving, server's socket probe merged into the report.
+		return &nativeEngine{Group: g, noDelay: probeNoDelay(lns, plan)}, nil
 	}
 	//: auto falls back, and says so; an explicit backend is refused.
 	if plan.fallback && !errs.HasCode(err, corenet.CodeLoopNoDescriptors) {
 		//: degraded, by name.
-		return startPortable(group, lns, "native loop backend unavailable: "+err.Error()), nil
+		return startPortable(group, lns, "native loop backend unavailable: "+err.Error(), plan), nil
 	}
 	//: refused.
 	return nil, err
+}
+
+// nativeEngine is the leaf's group with server's socket probe merged into
+// its capability report (ADR 0189).
+type nativeEngine struct {
+	*loop.Group
+	// noDelay is the tcp-nodelay row.
+	noDelay corenet.CapabilityValue
+}
+
+// State implements loopEngine: the leaf's report, then server's row.
+func (e *nativeEngine) State() corenet.LoopStateValue {
+	st := e.Group.State()
+	st.Capabilities = append(st.Capabilities, e.noDelay)
+	//: merged.
+	return st
+}
+
+// probeNoDelay reads TCP_NODELAY back from every listener the leaf set it on,
+// whose accepted sockets inherit it: on when all carry it, absent with the
+// first refusal otherwise, disabled when the operator switched it off.
+func probeNoDelay(lns []stdnet.Listener, plan loopPlan) corenet.CapabilityValue {
+	row := corenet.CapabilityValue{Name: corenet.CapabilityTCPNoDelay, Class: classKernel, Status: statusOn}
+	//: switched off: the leaf never set it.
+	if slices.Contains(plan.disabled, corenet.CapabilityTCPNoDelay) {
+		row.Status, row.Reason = statusDisabled, plan.disabledBy
+		//: disabled.
+		return row
+	}
+	//: each listener, read back.
+	for _, ln := range lns {
+		v, err := noDelayOf(ln)
+		//: not set.
+		if err != nil || v == 0 {
+			row.Status, row.Reason = statusAbsent, "getsockopt TCP_NODELAY: not set"
+			//: absent.
+			return row
+		}
+	}
+	//: on everywhere.
+	return row
+}
+
+// noDelayOf reads TCP_NODELAY from ln's socket.
+func noDelayOf(ln stdnet.Listener) (int, error) {
+	sc, ok := ln.(syscall.Conn)
+	//: not a socket.
+	if !ok {
+		//: unknown.
+		return 0, syscall.EINVAL
+	}
+	rc, err := sc.SyscallConn()
+	//: no raw access.
+	if err != nil {
+		//: unknown.
+		return 0, err
+	}
+	var v int
+	var gerr error
+	cerr := rc.Control(func(fd uintptr) { v, gerr = syscall.GetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_NODELAY) })
+	//: the first failure.
+	if cerr != nil {
+		//: unknown.
+		return 0, cerr
+	}
+	//: the option, or the kernel's refusal.
+	return v, gerr
 }
 
 // dupListeners duplicates each listener's descriptor, close-on-exec and

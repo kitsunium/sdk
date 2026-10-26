@@ -128,6 +128,14 @@ constants:
       - doc: rankIOURing is io_uring, the top.
         name: rankIOURing
     name: rankGoroutine
+  - doc: |-
+      rankKernel is a kernel capability's rank: below every engine, never a
+      ceiling, never compared with one.
+    items:
+      - name: rankKernel
+        type: int
+        value: "0"
+    name: rankKernel
   - doc: The words State uses for the environment.
     grouped: true
     items:
@@ -139,6 +147,12 @@ constants:
         name: faultEnvironment
         type: string
         value: "\"environment\""
+      - doc: |-
+          unknownDisables is CapabilityValue.Reason for every optional capability
+          an unknown token switched off (R5: no optional capability).
+        name: unknownDisables
+        type: string
+        value: "\"unknown token: no optional capability\""
     name: sourceEnvironment
   - grouped: true
     items:
@@ -237,7 +251,37 @@ constants:
         name: faultStall
         type: string
         value: "\"stall\""
+      - doc: |-
+          faultCapability is a class A-code capability the code opted into and
+          the kernel lacks (ADR 0189).
+        name: faultCapability
+        type: string
+        value: "\"capability\""
     name: faultListener
+  - doc: |-
+      The words CapabilityValue takes for what server reports itself: its socket
+      probe, and the status that is a fault (ADR 0189).
+    grouped: true
+    items:
+      - doc: classKernel is class A-kernel.
+        name: classKernel
+        type: string
+        value: "\"a-kernel\""
+      - doc: statusOn, statusAbsent and statusDisabled are the rows server writes.
+        name: statusOn
+        type: string
+        value: "\"on\""
+      - name: statusAbsent
+        type: string
+        value: "\"absent\""
+      - name: statusDisabled
+        type: string
+        value: "\"disabled\""
+      - doc: statusMissing is an opt-in the kernel lacks.
+        name: statusMissing
+        type: string
+        value: "\"missing\""
+    name: classKernel
 files:
   - decls:
       - defaultPerAddress
@@ -421,6 +465,10 @@ files:
   - decls:
       - nativeLoopBackends
       - startLoopEngine
+      - nativeEngine
+      - (*nativeEngine).State
+      - probeNoDelay
+      - noDelayOf
       - dupListeners
       - closeHandoff
     name: loop_engine_linux.go
@@ -443,6 +491,7 @@ files:
       - portableConn
       - portableLoop
       - startPortable
+      - portableNoDelay
       - orDefaultInt
       - (*portableLoop).acceptLoop
       - (*portableLoop).run
@@ -493,6 +542,7 @@ files:
     name: multireader_mmsghdr_linux.go
   - decls:
       - rankGoroutine
+      - rankKernel
       - sourceEnvironment
       - capabilityEntry
       - capabilityRegistry
@@ -503,9 +553,12 @@ files:
       - (*operatorEnv).unknown
       - (*operatorEnv).applied
       - (*operatorEnv).allows
+      - (*operatorEnv).kernelDisabled
+      - (*operatorEnv).kernelSwitches
       - lookupCapability
       - loopPlan
       - (*operatorEnv).plan
+      - (*operatorEnv).backendPlan
     name: operator.go
   - decls:
       - optionSet
@@ -613,6 +666,7 @@ files:
   - decls:
       - loopStallGrace
       - faultListener
+      - classKernel
       - stallWatch
       - groupStalled
       - (*Server).startStallWatch
@@ -957,6 +1011,17 @@ functions:
     params: group *StreamGroup, lns []stdnet.Listener, plan loopPlan
     results: loopEngine, error
   - doc: |-
+      probeNoDelay reads TCP_NODELAY back from every listener the leaf set it on,
+      whose accepted sockets inherit it: on when all carry it, absent with the
+      first refusal otherwise, disabled when the operator switched it off.
+    name: probeNoDelay
+    params: lns []stdnet.Listener, plan loopPlan
+    results: corenet.CapabilityValue
+  - doc: noDelayOf reads TCP_NODELAY from ln's socket.
+    name: noDelayOf
+    params: ln stdnet.Listener
+    results: int, error
+  - doc: |-
       dupListeners duplicates each listener's descriptor, close-on-exec and
       non-blocking: the one hand-off type the leaf takes.
     name: dupListeners
@@ -986,8 +1051,15 @@ functions:
       goroutine, which returns once the backend stopped or drained to its last
       connection, closing done as it does.
     name: startPortable
-    params: group *StreamGroup, lns []stdnet.Listener, degraded string
+    params: group *StreamGroup, lns []stdnet.Listener, degraded string, plan loopPlan
     results: portableEngine
+  - doc: |-
+      portableNoDelay is the portable backend's tcp-nodelay row: the netpoller
+      sets TCP_NODELAY on every connection it accepts, cleared once the operator
+      switched it off.
+    name: portableNoDelay
+    params: plan loopPlan
+    results: corenet.CapabilityValue
   - doc: orDefaultInt returns v, or def when v is zero or less.
     name: orDefaultInt
     params: v, def int
@@ -1867,6 +1939,23 @@ types:
         results: conn stdnet.Conn, err error
     name: trackedListener
   - doc: |-
+      nativeEngine is the leaf's group with server's socket probe merged into
+      its capability report (ADR 0189).
+    fields:
+      - name: ""
+        role: embedded
+        type: "*loop.Group"
+      - doc: noDelay is the tcp-nodelay row.
+        name: noDelay
+        type: corenet.CapabilityValue
+    kind: struct
+    methods:
+      - doc: "State implements loopEngine: the leaf's report, then server's row."
+        name: State
+        recv: e *nativeEngine
+        results: corenet.LoopStateValue
+    name: nativeEngine
+  - doc: |-
       loopEngine is a running loop group, whatever its backend: the leaf's native
       loops or the portable backend below.
     kind: named
@@ -1966,6 +2055,14 @@ types:
         type: time.Duration
       - name: degraded
         type: string
+      - doc: |-
+          caps is the group's capability report: every row unprobed, or
+          disabled; noDelayOff is tcp-nodelay switched off, so each accepted
+          connection has the netpoller's TCP_NODELAY cleared (ADR 0189).
+        name: caps
+        type: "[]corenet.CapabilityValue"
+      - name: noDelayOff
+        type: bool
       - name: events
         type: chan portableEvent
       - doc: post is the queue of posted operations; wake rouses the handler.
@@ -2269,6 +2366,11 @@ types:
       - doc: switchable is true for an engine an operator may switch off; a floor is not.
         name: switchable
         type: bool
+      - doc: |-
+          kernel is true for an optional kernel capability (ADR 0189), which
+          KITSUNIUM_NET_DISABLE switches off and KITSUNIUM_NET_ENGINE never names.
+        name: kernel
+        type: bool
     kind: struct
     name: capabilityEntry
   - doc: |-
@@ -2287,6 +2389,13 @@ types:
       - doc: disabled holds the ranks KITSUNIUM_NET_DISABLE switched off.
         name: disabled
         type: "[rankIOURing + 1]bool"
+      - doc: |-
+          kernelOff are the kernel capabilities it switched off; noOptional is
+          set by an unknown token, which switches every one off (R5).
+        name: kernelOff
+        type: "[]corenet.Capability"
+      - name: noOptional
+        type: bool
     kind: struct
     methods:
       - doc: |-
@@ -2320,6 +2429,19 @@ types:
         recv: e *operatorEnv
         results: bool
       - doc: |-
+          kernelDisabled reports whether the environment switched kernel capability c
+          off, by name or by an unknown token.
+        name: kernelDisabled
+        params: c corenet.Capability
+        recv: e *operatorEnv
+        results: bool
+      - doc: |-
+          kernelSwitches is what a loop group is told is off, and how State says it:
+          every kernel capability under an unknown token, the listed ones otherwise.
+        name: kernelSwitches
+        recv: e *operatorEnv
+        results: "[]corenet.Capability, string"
+      - doc: |-
           plan is min(code, environment) for a loop group whose code asked for code,
           on a platform with the native backends when native is true (ADR 0187 §D8):
           the highest backend at or below the code's that the environment allows. A
@@ -2327,6 +2449,11 @@ types:
           reach io_uring_setup. Off Linux every loop group is portable, whatever the
           environment says, an explicit native backend having been refused already.
         name: plan
+        params: code corenet.LoopBackend, native bool
+        recv: e *operatorEnv
+        results: loopPlan
+      - doc: backendPlan is plan's backend half.
+        name: backendPlan
         params: code corenet.LoopBackend, native bool
         recv: e *operatorEnv
         results: loopPlan
@@ -2343,6 +2470,13 @@ types:
           falls back to portable, reported, rather than refusing Start.
         name: fallback
         type: bool
+      - doc: |-
+          disabled are the kernel capabilities the environment switched off,
+          disabledBy how State says it (ADR 0189).
+        name: disabled
+        type: "[]corenet.Capability"
+      - name: disabledBy
+        type: string
     kind: struct
     name: loopPlan
   - doc: |-
@@ -3273,6 +3407,23 @@ vars:
           	{token: corenet.CapabilityEpoll, rank: rankEpoll, switchable: true},
           	{token: corenet.CapabilityPortable, rank: rankPortable, switchable: false},
           	{token: corenet.CapabilityGoroutine, rank: rankGoroutine, switchable: false},
+          	{token: corenet.CapabilityURingMultishotRecv, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityURingPbuf, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityURingDirect, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityEpollExclusive, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityTCPNoDelay, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityURingDeferTaskrun, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityURingNoSQArray, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityURingRingFDs, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityURingSQRewind, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityURingSendZC, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityURingBundle, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityURingPbufInc, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityBusyPoll, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityURingZCRX, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityReuseportCBPF, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityTCPDeferAccept, rank: rankKernel, switchable: true, kernel: true},
+          	{token: corenet.CapabilityURingMinTimeout, rank: rankKernel, switchable: true, kernel: true},
           }
     name: capabilityRegistry
   - doc: packetNetworks are the datagram families the engine serves.

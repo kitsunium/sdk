@@ -1,6 +1,62 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 workflows:
+  - of: capClassOf
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: lc.class, true
+                when: lc.name == c
+          key: _
+          range: loopCaps
+          value: lc
+      - opt:
+          do:
+            - return: classKernel, true
+          when: c == corenet.CapabilityTCPNoDelay
+      - return: "\"\", false"
+  - of: newReport
+    steps:
+      - bind: rows
+        eval: make([]corenet.CapabilityValue, 0, len(loopCaps))
+      - loop:
+          do:
+            - bind: row
+              eval: "corenet.CapabilityValue{Name: lc.name, Class: lc.class, Status: statusUnprobed, Reason: \"backend \" + backend}"
+            - switch:
+                cases:
+                  - case: s.disabled(lc.name)
+                    do:
+                      - set: row.Status, row.Reason
+                        value: statusDisabled, s.offBy
+                  - case: lc.class == classB
+                    do:
+                      - set: row.Reason
+                        value: reasonClassB
+            - set: rows
+              value: append(rows, row)
+          key: _
+          range: loopCaps
+          value: lc
+      - return: "capReport{rows: rows, want: s.want}"
+  - of: (*capReport).set
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - set: status
+                          value: statusMissing
+                      when: status == statusAbsent && r.wanted(c)
+                  - set: r.rows[i].Status, r.rows[i].Reason
+                    value: status, reason
+                when: r.rows[i].Name == c && r.rows[i].Status != statusDisabled
+          key: i
+          range: r.rows
   - of: (*uRing).sweep
     steps:
       - bind: lp

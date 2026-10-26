@@ -32,6 +32,22 @@ const (
 	faultRing string = "ring"
 	// faultStall is a loop group every ring of which is drained.
 	faultStall string = "stall"
+	// faultCapability is a class A-code capability the code opted into and
+	// the kernel lacks (ADR 0189).
+	faultCapability string = "capability"
+)
+
+// The words CapabilityValue takes for what server reports itself: its socket
+// probe, and the status that is a fault (ADR 0189).
+const (
+	// classKernel is class A-kernel.
+	classKernel string = "a-kernel"
+	// statusOn, statusAbsent and statusDisabled are the rows server writes.
+	statusOn       string = "on"
+	statusAbsent   string = "absent"
+	statusDisabled string = "disabled"
+	// statusMissing is an opt-in the kernel lacks.
+	statusMissing string = "missing"
 )
 
 // stallWatch is the state of the stall watcher: the first group seen stalled
@@ -166,6 +182,13 @@ func (s *Server) faults(st corenet.StateValue) []corenet.FaultValue {
 		//: a drain stops every ring on purpose.
 		if serving {
 			out = append(out, ringFaults(lp)...)
+		}
+		//: every opt-in the kernel lacks.
+		for _, c := range lp.Capabilities {
+			//: asked for, absent.
+			if c.Status == statusMissing {
+				out = append(out, corenet.FaultValue{Source: faultCapability, Group: lp.Group, Reason: string(c.Name) + ": " + c.Reason})
+			}
 		}
 	}
 	//: none: nil, as a report with nothing to say has always been.

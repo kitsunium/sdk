@@ -1073,10 +1073,21 @@ rules:
   # so the three are not one enum either. framework/internal/app/plug's
   # JobResultValue is that value as the framework's core reads it through the
   # jobs subsystem (issue #483 part 4), the same three facts by the same names.
+  # KTN-CONST-STRENUM — the operator's tokens are strings by contract.
+  #
+  # core/net's Capability values are the words KITSUNIUM_NET_ENGINE and
+  # KITSUNIUM_NET_DISABLE take and State spells (ADR 0188 §D1, ADR 0189):
+  # an int with String() would need a parse table beside the design's
+  # registry, the one thing the registry test and check-net-default-change.sh
+  # exist to keep single. Scoped to the one file.
+  KTN-CONST-STRENUM:
+    exclude:
+      - "**/internal/core/net/capability.go"
+      - "internal/core/net/capability.go"
   KTN-STRUCT-FLAGS:
     exclude:
       # service/net/loop's loopHooks are the conformance suite's fault
-      # injections, zero in production: fill, shuffle and deferTaskrun are
+      # injections, zero in production: fill, shuffle and primaryIdle are
       # three independent knobs the suite sets BY NAME in a composite literal
       # (loopHooks{bufs: 2, bufSize: 64, fill: true, shuffle: true}). A
       # bitfield would turn each test case's declaration into a mask of an

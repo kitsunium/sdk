@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T20:00:00Z -->
+<!-- updated: 2026-10-25T23:00:00Z -->
 # internal/service/net/server/
 
 ## Purpose
@@ -14,7 +14,7 @@ Public façade: `pkg/v1/net/server`.
 | File | Surface |
 |---|---|
 | `server.go` | `Server`, `New` (which reads the operator's variables and the platform once), `Group`, `State` (and the faults, fallbacks, override and platform it reports), `recordFallback` |
-| `operator.go` | the operator's switches (ADR 0188): `capabilityRegistry`, the design's registry with each token's rank and whether it is switchable; `readOperator`, `KITSUNIUM_NET_ENGINE` and `KITSUNIUM_NET_DISABLE` through the injected `lookup`, R5's reading; `operatorEnv.plan`, min(code, environment) for a loop group; `withLookup`, the tests' injection |
+| `operator.go` | the operator's switches (ADR 0188): `capabilityRegistry`, the design's registry with each token's rank and whether it is switchable, its kernel capabilities at `rankKernel`, never an engine (ADR 0189); `kernelSwitches`, what a loop group is told is off — the listed ones, or every one under an unknown token — and `uring-pbuf` off ruling io_uring out; `readOperator`, `KITSUNIUM_NET_ENGINE` and `KITSUNIUM_NET_DISABLE` through the injected `lookup`, R5's reading; `operatorEnv.plan`, min(code, environment) for a loop group; `withLookup`, the tests' injection |
 | `stall.go` | R1 (ADR 0188 §D5): the stall watcher (`worker.Every`, `stallPoll`, the engine's clock, `PhaseServing` only), `groupStalled`, `markStalled` — what `Serve` selects on —, `loopStallGrace`, and `faults`, the `State.Faults` builder: the environment's, each degraded listener and loop group, each drained ring and stalled group |
 | `health.go` | `RegisterHealth` — the `net/server` readiness check, `readinessOf(State)`, and the process-local liveness check |
 | `platform.go`, `platform_{linux,bsd,windows,other}.go` | `readPlatform` and `kernelRelease` per GOOS: uname on Linux, `kern.osrelease` on darwin and the BSDs, `GetVersion` on Windows, empty on illumos and Solaris |
@@ -26,8 +26,8 @@ Public façade: `pkg/v1/net/server`.
 | `engine_option.go` | `reconcileName` (Name against the declared name, `GroupNameConflict`) and `engineRefusal` — `PlaintextWithTLS`, and an `Engine` the handler's type or `Loop` contradicts (`EngineUnsupported`), judged at `Start`, never folded back (ADR 0187 §D4) |
 | `option_set_internal_test.go` | `TestGroupOption_recordsItsKind` — walks every function returning a `GroupOption` in `pkg/v1/net/server/gen_facade.go` and this package (exempt: `Listen`, `Loop`), each given its zero value records exactly its kind; the set's order and width |
 | `engine_option_external_test.go` | `TestEngine`, `TestName` — `Engine`, `Plaintext` and `Name` served, refused and what wins, on both natures |
-| `loop_engine_linux.go`, `loop_engine_other.go` | the backend: on Linux the leaf `loop` on duplicated descriptors (`F_DUPFD_CLOEXEC`, non-blocking), auto falling back to portable with the reason in `State`; elsewhere the portable backend, an explicit native one refused with `UnsupportedPlatform` |
-| `loop_portable.go` | the portable loop backend: a reader and a writer goroutine per connection on the netpoller, every callback on one handler goroutine, the reader's buffer held until the batch ends |
+| `loop_engine_linux.go`, `loop_engine_other.go` | the backend, handed `loopPlan.disabled` (ADR 0189); on Linux `nativeEngine` merges server's `tcp-nodelay` row, read back from each listener (`probeNoDelay`), into the leaf's report: on Linux the leaf `loop` on duplicated descriptors (`F_DUPFD_CLOEXEC`, non-blocking), auto falling back to portable with the reason in `State`; elsewhere the portable backend, an explicit native one refused with `UnsupportedPlatform` |
+| `loop_portable.go` | the portable loop backend, its report every row `unprobed` (`loop.Unprobed`) and `tcp-nodelay` the netpoller's default, cleared per connection when switched off: a reader and a writer goroutine per connection on the netpoller, every callback on one handler goroutine, the reader's buffer held until the batch ends |
 | `loop_group_internal_test.go` | loop groups on every backend the platform has: split lines, a 4 MiB response byte-exact, close, spill, drain, and every refusal — a zero-valued option included; `TestLoopGroup_middlewareRefused`, `Use` refused on every backend whatever the handler claims |
 | `loop_option_external_test.go` | `TestLoop` — the `Loop` option refused before or after the handler, on both natures, and what wins over it |
 | `stream_group.go` | `StreamGroup` — `Handle`, `HandleFunc`, `HandleHTTP`, `Use`; `claimHandler`, the one-handler rule every declaration takes |
@@ -543,6 +543,7 @@ cd internal/service && GOWORK=off go test -race -cover ./net/server/...
 - ADR 0047 §D9 — the hijacked-connection hand-over — `docs/adr/0047-sdk-net-websocket.md`
 - ADR 0186 — the opt-in loop engine and its HTTP/1.1 profile — `docs/adr/0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md`
 - ADR 0187 — the handler type chooses the engine; the kind set, `Plaintext`, `Name`, `Engine` — `docs/adr/0187-the-handler-type-chooses-the-engine.md`
+- ADR 0189 — the kernel capabilities switched off by name, the merged report, the `capability` fault, `CheckCapabilities` at bind — `docs/adr/0189-a-kernel-capability-is-probed-reported-and-switched-off-by-name.md`
 - ADR 0188 — the operator's switches, `State`'s faults, fallbacks, override and platform, readiness and liveness — `docs/adr/0188-the-operators-switches-only-restrict-and-state-says-what-the-server-runs-without.md`
 - Contract layer — `internal/core/net/CLAUDE.md`
 - The two protocols that depend on both — `internal/service/net/{sse,websocket}/CLAUDE.md`

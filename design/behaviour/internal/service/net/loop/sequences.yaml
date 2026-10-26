@@ -1,6 +1,108 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 sequences:
+  - of: CheckCapabilities
+    participants:
+      - id: caller
+        kind: actor
+      - id: CheckCapabilities
+        kind: self
+      - id: capClassOf
+        kind: internal
+      - id: errs
+        kind: package
+    steps:
+      - loop:
+          do:
+            - bind: class, ok
+              eval: capClassOf(c)
+              to: capClassOf
+            - opt:
+                do:
+                  - return: |-
+                      errs.Wrap(corenet.LoopCapabilityRefused, errs.WrapParams{},
+                      				errs.String("group", group), errs.String("capability", string(c)))
+                    to: errs
+                when: "!ok || class == classB"
+          key: _
+          range: v.Capabilities
+          value: c
+      - return: nil
+  - of: newSwitches
+    steps:
+      - bind: by
+        eval: cfg.DisabledBy
+      - opt:
+          do:
+            - set: by
+              value: corenet.EnvDisable
+          when: by == ""
+      - return: "capSwitches{off: cfg.Disabled, offBy: by, want: cfg.Value.Capabilities}"
+  - of: capSwitches.disabled
+    participants:
+      - id: caller
+        kind: actor
+      - id: capSwitches.disabled
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Contains(s.off, c)
+        to: slices
+  - of: capSwitches.wants
+    participants:
+      - id: caller
+        kind: actor
+      - id: capSwitches.wants
+        kind: self
+      - id: capClassOf
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: s.disabled(c)
+      - bind: class, _
+        eval: capClassOf(c)
+        to: capClassOf
+      - return: class == classKernel || slices.Contains(s.want, c)
+  - of: (*capReport).wanted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*capReport).wanted
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Contains(r.want, c)
+        to: slices
+  - of: (*capReport).found
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*capReport).found
+        kind: self
+      - id: r.set
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: "!present"
+              do:
+                - eval: r.set(c, statusAbsent, reason)
+                  to: r.set
+            - case: s.wants(c)
+              do:
+                - eval: r.set(c, statusOn, "")
+                  to: r.set
+            - default: true
+              do:
+                - eval: r.set(c, statusAvailable, "")
+                  to: r.set
+  - of: Unprobed
+    steps:
+      - return: "newReport(newSwitches(&Config{Disabled: disabled, DisabledBy: disabledBy}), backend).rows"
   - of: (*connCtl).pending
     steps:
       - return: int(c.out.len-c.out.off) + int(c.flight.len-c.flight.off)
@@ -1072,7 +1174,13 @@ sequences:
         kind: actor
       - id: startEpoll
         kind: self
-      - id: swallowErr
+      - id: newSwitches
+        kind: internal
+      - id: newReport
+        kind: internal
+      - id: probeExclusive
+        kind: internal
+      - id: noDelay
         kind: internal
       - id: newLoop
         kind: internal
@@ -1089,10 +1197,19 @@ sequences:
         eval: make(chan struct{})
       - bind: er
         eval: "&epollRunner{fin: fin}"
+      - bind: sw
+        eval: newSwitches(cfg)
+        to: newSwitches
+      - set: g.caps
+        to: newReport
+        value: newReport(sw, "epoll")
+      - bind: excl
+        eval: probeExclusive(sw, &g.caps)
+        to: probeExclusive
       - loop:
           do:
-            - eval: swallowErr(syscall.SetsockoptInt(l.FD, syscall.IPPROTO_TCP, syscall.TCP_NODELAY, 1))
-              to: swallowErr
+            - eval: noDelay(l.FD, sw)
+              to: noDelay
             - set: er.lfds
               value: append(er.lfds, l.FD)
           key: _
@@ -1106,7 +1223,7 @@ sequences:
               eval: newLoop(g, *cfg, i, mmapAnon)
               to: newLoop
             - bind: el
-              eval: "&epollLoop{lp: lp, lfds: er.lfds, epfd: -1, evfd: -1, events: make([]syscall.EpollEvent, g.sz.cqBatch), backoff: backoffMin}"
+              eval: "&epollLoop{lp: lp, lfds: er.lfds, epfd: -1, evfd: -1, events: make([]syscall.EpollEvent, g.sz.cqBatch), backoff: backoffMin, excl: excl}"
             - set: er.loops
               value: append(er.loops, el)
             - set: g.loops
@@ -1150,6 +1267,62 @@ sequences:
       - set: g.backend
         value: backendEpoll
       - return: nil
+  - of: probeExclusive
+    participants:
+      - id: caller
+        kind: actor
+      - id: probeExclusive
+        kind: self
+      - id: syscall
+        kind: stdlib
+      - id: rep.set
+        kind: internal
+      - id: closeFDs
+        kind: internal
+      - id: rep.found
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: sw.disabled(corenet.CapabilityEpollExclusive)
+      - bind: epfd, err
+        eval: syscall.EpollCreate1(syscall.EPOLL_CLOEXEC)
+        to: syscall
+      - opt:
+          do:
+            - eval: "rep.set(corenet.CapabilityEpollExclusive, statusAbsent, \"epoll_create1: \"+err.Error())"
+              to: rep.set
+            - return: "0"
+          when: err != nil
+      - defer: closeFDs([]int{epfd})
+        to: closeFDs
+      - bind: efd, _, errno
+        eval: syscall.RawSyscall(syscall.SYS_EVENTFD2, 0, efdNonblock|efdCloexec, 0)
+        to: syscall
+      - opt:
+          do:
+            - eval: "rep.set(corenet.CapabilityEpollExclusive, statusAbsent, \"eventfd: \"+errno.Error())"
+              to: rep.set
+            - return: "0"
+          when: errno != 0
+      - defer: closeFDs([]int{int(efd)})
+        to: closeFDs
+      - bind: ev
+        eval: "new(syscall.EpollEvent{Events: syscall.EPOLLIN | epollExclusive})"
+      - opt:
+          do:
+            - eval: "rep.set(corenet.CapabilityEpollExclusive, statusAbsent, \"epoll_ctl: \"+err.Error())"
+              to: rep.set
+            - return: "0"
+          init:
+            bind: err
+            eval: syscall.EpollCtl(epfd, syscall.EPOLL_CTL_ADD, int(efd), ev)
+            to: syscall
+          when: err != nil
+      - eval: rep.found(sw, corenet.CapabilityEpollExclusive, true, "")
+        to: rep.found
+      - return: epollExclusive
   - of: (*epollRunner).drain
     participants:
       - id: caller
@@ -1321,7 +1494,7 @@ sequences:
           when: el.armed || el.lp.draining
       - loop:
           do:
-            - eval: swallowErr(el.ctl(syscall.EPOLL_CTL_ADD, fd, syscall.EPOLLIN|epollExclusive, tagListen-int32(i), 0))
+            - eval: swallowErr(el.ctl(syscall.EPOLL_CTL_ADD, fd, syscall.EPOLLIN|el.excl, tagListen-int32(i), 0))
               to: swallowErr
           key: i
           range: el.lfds
@@ -2162,6 +2335,8 @@ sequences:
         kind: internal
       - id: closeListeners
         kind: internal
+      - id: CheckCapabilities
+        kind: internal
       - id: startNative
         kind: internal
       - id: fmt
@@ -2187,6 +2362,16 @@ sequences:
               to: closeListeners
             - return: nil, errs.Wrap(corenet.HandlerMissing, errs.WrapParams{}, errs.String("group", cfg.Group))
           when: cfg.Handler == nil
+      - opt:
+          do:
+            - eval: closeListeners(cfg.Listeners)
+              to: closeListeners
+            - return: nil, err
+          init:
+            bind: err
+            eval: CheckCapabilities(cfg.Group, cfg.Value)
+            to: CheckCapabilities
+          when: err != nil
       - opt:
           do:
             - set: sz.tableSize
@@ -2274,7 +2459,8 @@ sequences:
           		Degraded: g.reason != "", DegradedReason: g.reason,
           		Loops: g.sz.loops, Rings: g.sz.rings, RingsSource: g.sz.ringsSource,
           		RLimitNoFile: g.sz.rlimit, GOMAXPROCS: g.procs,
-          		BatchP99: corenet.DurationValue(g.grp.batchP99()),
+          		BatchP99:     corenet.DurationValue(g.grp.batchP99()),
+          		Capabilities: slices.Clone(g.caps.rows),
           	}
       - loop:
           do:
@@ -2371,9 +2557,9 @@ sequences:
         kind: actor
       - id: startNative
         kind: self
-      - id: startIOURing
-        kind: internal
       - id: startEpoll
+        kind: internal
+      - id: startIOURing
         kind: internal
       - id: errs
         kind: package
@@ -2382,6 +2568,13 @@ sequences:
           cases:
             - case: corenet.LoopBackendAuto
               do:
+                - opt:
+                    do:
+                      - set: g.stage
+                        value: "\"epoll\""
+                      - return: startEpoll(g, cfg)
+                        to: startEpoll
+                    when: slices.Contains(cfg.Disabled, corenet.CapabilityURingPbuf)
                 - bind: err
                   eval: startIOURing(g, cfg, cfg.hooks)
                   to: startIOURing
@@ -2413,6 +2606,21 @@ sequences:
                     			errs.String("reason", "not a backend of the leaf"))
                   to: errs
           "on": cfg.Value.Backend
+  - of: noDelay
+    participants:
+      - id: caller
+        kind: actor
+      - id: noDelay
+        kind: self
+      - id: swallowErr
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: sw.disabled(corenet.CapabilityTCPNoDelay)
+      - eval: swallowErr(syscall.SetsockoptInt(fd, syscall.IPPROTO_TCP, syscall.TCP_NODELAY, 1))
+        to: swallowErr
   - of: descriptorLimit
     participants:
       - id: caller
@@ -2941,12 +3149,426 @@ sequences:
         eval: syscall.RawSyscall6(sysIOURingEnter, uintptr(fd), uintptr(submit), 0, 0, 0, 0)
         to: syscall
       - return: int(n), errno
+  - of: uringEnterFlags
+    participants:
+      - id: caller
+        kind: actor
+      - id: uringEnterFlags
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - bind: n, _, errno
+        eval: syscall.RawSyscall6(sysIOURingEnter, uintptr(fd), uintptr(submit), 0, uintptr(flags), 0, 0)
+        to: syscall
+      - return: int(n), errno
   - of: fixedFd
     steps:
       - return: int32(index)
   - of: targetIndex
     steps:
       - return: index + 1
+  - of: (*uLoop).probe
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).probe
+        kind: self
+      - id: probeError
+        kind: internal
+      - id: ul.openDescending
+        kind: internal
+      - id: probed.close
+        kind: internal
+      - id: probed.supports
+        kind: internal
+      - id: ul.probeRingFDs
+        kind: internal
+      - id: ul.settle
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: probeError("setup", syscall.EPERM)
+              to: probeError
+          when: ul.hooks.failStage == "setup"
+      - bind: probed, found, err
+        eval: ul.openDescending()
+        to: ul.openDescending
+      - opt:
+          do:
+            - return: err
+          when: err != nil
+      - defer: probed.close()
+        to: probed.close
+      - set: ul.stage
+        value: "\"setup\""
+      - bind: ok, perr
+        eval: probed.supports(opAccept, opRecv, opSend, opAsyncCancel, opClose, opPollAdd, opRead, opNop, opShutdown)
+        to: probed.supports
+      - opt:
+          do:
+            - return: probeError("register_probe", orErrno(perr, syscall.EOPNOTSUPP))
+              to: probeError
+          when: perr != 0 || !ok || ul.hooks.failStage == "probe"
+      - set: ul.stage
+        value: "\"register_probe\""
+      - eval: ul.probeRingFDs(probed)
+        to: ul.probeRingFDs
+      - bind: rewind
+        eval: found&setupSQRewind != 0 && ul.rewindSelfTest(probed)
+      - eval: ul.settle(found, rewind, probed.params.features)
+        to: ul.settle
+      - return: nil
+  - of: (*uLoop).openDescending
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).openDescending
+        kind: self
+      - id: ul.probeFlags
+        kind: internal
+      - id: openURing
+        kind: internal
+      - id: ul.giveUp
+        kind: internal
+    steps:
+      - bind: flags
+        eval: ul.probeFlags()
+        to: ul.probeFlags
+      - bind: opened, step, errno
+        eval: openURing(probeEntries, flags)
+        to: openURing
+      - loop:
+          do:
+            - opt:
+                do:
+                  - break: true
+                when: errno != syscall.EINVAL || step != "setup"
+            - opt:
+                do:
+                  - continue: true
+                when: flags&d.flag == 0
+            - set: flags
+              to: ul.giveUp
+              value: ul.giveUp(flags, d.flag, d.name, errno)
+            - set: opened, step, errno
+              to: openURing
+              value: openURing(probeEntries, flags)
+          key: _
+          range: setupDrops
+          value: d
+      - opt:
+          do:
+            - return: nil, 0, probeError(step, errno)
+          when: errno != 0
+      - return: opened, flags, nil
+  - of: (*uLoop).probeFlags
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).probeFlags
+        kind: self
+      - id: ul.rep.set
+        kind: internal
+    steps:
+      - bind: flags
+        eval: setupSingleIssuer | setupSubmitAll | setupCoopTaskrun
+      - loop:
+          do:
+            - opt:
+                do:
+                  - op: "|="
+                    set: flags
+                    value: d.flag
+                when: "!ul.sw.disabled(d.name)"
+          key: _
+          range: setupDrops[:3]
+          value: d
+      - opt:
+          do:
+            - op: "&^="
+              set: flags
+              value: setupSQRewind
+            - eval: ul.rep.set(corenet.CapabilityURingSQRewind, statusAbsent, "needs uring-no-sqarray, switched off")
+              to: ul.rep.set
+          when: flags&setupNoSQArray == 0 && flags&setupSQRewind != 0
+      - opt:
+          do:
+            - op: "&^="
+              set: flags
+              value: setupCoopTaskrun
+          when: flags&setupDeferTaskrun != 0
+      - return: flags
+  - of: (*uLoop).giveUp
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).giveUp
+        kind: self
+      - id: ul.rep.set
+        kind: internal
+    steps:
+      - op: "&^="
+        set: flags
+        value: flag
+      - opt:
+          do:
+            - op: "|="
+              set: flags
+              value: setupCoopTaskrun
+          when: flag == setupDeferTaskrun
+      - opt:
+          do:
+            - eval: ul.rep.set(name, statusAbsent, probeReason("io_uring_setup", errno))
+              to: ul.rep.set
+          when: name != ""
+      - return: flags
+  - of: (*uLoop).probeRingFDs
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).probeRingFDs
+        kind: self
+      - id: probed.registerRing
+        kind: internal
+      - id: ul.rep.set
+        kind: internal
+      - id: probed.unregisterRing
+        kind: internal
+      - id: ul.rep.found
+        kind: internal
+      - id: ul.sw.wants
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: ul.sw.disabled(corenet.CapabilityURingRingFDs)
+      - bind: errno
+        eval: probed.registerRing()
+        to: probed.registerRing
+      - opt:
+          do:
+            - eval: ul.rep.set(corenet.CapabilityURingRingFDs, statusAbsent, probeReason("register_ring_fds", errno))
+              to: ul.rep.set
+            - return: ""
+          when: errno != 0
+      - eval: probed.unregisterRing()
+        to: probed.unregisterRing
+      - eval: ul.rep.found(ul.sw, corenet.CapabilityURingRingFDs, true, "")
+        to: ul.rep.found
+      - set: ul.uses.ringFDs
+        to: ul.sw.wants
+        value: ul.sw.wants(corenet.CapabilityURingRingFDs)
+  - of: (*uLoop).rewindSelfTest
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).rewindSelfTest
+        kind: self
+      - id: probed.get
+        kind: internal
+      - id: ul.rep.set
+        kind: internal
+      - id: probed.enterTarget
+        kind: internal
+      - id: uringEnterFlags
+        kind: internal
+      - id: probed.consumed
+        kind: internal
+      - id: probed.submit
+        kind: internal
+      - id: time.Now().Add
+        kind: value
+      - id: probed.wait
+        kind: internal
+      - id: probed.reap
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: s
+              eval: probed.get()
+              to: probed.get
+            - opt:
+                do:
+                  - eval: "ul.rep.set(corenet.CapabilityURingSQRewind, statusAbsent, \"partial submit: no SQE\")"
+                    to: ul.rep.set
+                  - return: "false"
+                when: s == nil
+            - set: s.opcode, s.userData
+              value: opNop, ud
+          key: _
+          range: "[]uint64{rewindFirst, rewindSecond}"
+          value: ud
+      - bind: fd, reg
+        eval: probed.enterTarget()
+        to: probed.enterTarget
+      - bind: got, errno
+        eval: uringEnterFlags(fd, 1, reg)
+        to: uringEnterFlags
+      - opt:
+          do:
+            - eval: ul.rep.set(corenet.CapabilityURingSQRewind, statusAbsent, probeReason("partial submit", orErrno(errno, syscall.EIO)))
+              to: ul.rep.set
+            - return: "false"
+          when: errno != 0 || got != 1
+      - eval: probed.consumed(1)
+        to: probed.consumed
+      - eval: probed.submit()
+        to: probed.submit
+      - var:
+          name: seen
+          type: "[]uint64"
+      - bind: deadline
+        eval: time.Now().Add(500 * time.Millisecond)
+        to: time.Now().Add
+      - bind: tick
+        eval: "kernelTimespec{nsec: int64(tickEvery)}"
+      - loop:
+          cond: len(seen) < 2 && time.Now().Before(deadline)
+          do:
+            - eval: probed.wait(&tick)
+              to: probed.wait
+            - eval: probed.reap(8, func(c *cqe) { seen = append(seen, c.userData) })
+              to: probed.reap
+      - opt:
+          do:
+            - eval: "ul.rep.set(corenet.CapabilityURingSQRewind, statusAbsent, \"partial submit: completions out of contract\")"
+              to: ul.rep.set
+            - return: "false"
+          when: len(seen) != 2 || seen[0] != rewindFirst || seen[1] != rewindSecond
+      - return: "true"
+  - of: (*uLoop).settle
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).settle
+        kind: self
+      - id: ul.rep.found
+        kind: internal
+      - id: layoutFlags
+        kind: internal
+      - id: sw.wants
+        kind: internal
+      - id: ul.reportMinTimeout
+        kind: internal
+    steps:
+      - bind: sw
+        eval: ul.sw
+      - bind: base
+        eval: setupBase | found&setupSingleIssuer
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: ul.rep.found(sw, d.name, true, "")
+                    to: ul.rep.found
+                when: found&d.flag != 0
+          key: _
+          range: setupDrops[1:3]
+          value: d
+      - opt:
+          do:
+            - eval: ul.rep.found(sw, corenet.CapabilityURingSQRewind, true, "")
+              to: ul.rep.found
+          when: rewind
+      - op: "|="
+        set: base
+        to: layoutFlags
+        value: layoutFlags(sw, found, rewind)
+      - set: ul.primary, ul.secondary
+        value: base, base
+      - opt:
+          do:
+            - set: ul.primary
+              value: base&^setupCoopTaskrun | setupDeferTaskrun
+          when: found&setupDeferTaskrun != 0 && sw.wants(corenet.CapabilityURingDeferTaskrun)
+      - set: ul.uses.multishot
+        to: sw.wants
+        value: sw.wants(corenet.CapabilityURingMultishotRecv)
+      - eval: ul.reportMinTimeout(features)
+        to: ul.reportMinTimeout
+  - of: layoutFlags
+    steps:
+      - var:
+          name: flags
+          type: uint32
+      - bind: useRewind
+        eval: rewind && sw.wants(corenet.CapabilityURingSQRewind)
+      - opt:
+          do:
+            - op: "|="
+              set: flags
+              value: setupNoSQArray
+          when: found&setupNoSQArray != 0 && (useRewind || sw.wants(corenet.CapabilityURingNoSQArray))
+      - opt:
+          do:
+            - op: "|="
+              set: flags
+              value: setupSQRewind
+          when: useRewind
+      - return: flags
+  - of: (*uLoop).reportMinTimeout
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).reportMinTimeout
+        kind: self
+      - id: ul.rep.set
+        kind: internal
+    steps:
+      - bind: status, reason
+        eval: statusAbsent, "IORING_FEAT_MIN_TIMEOUT not advertised; "+reasonClassB
+      - opt:
+          do:
+            - set: status, reason
+              value: statusAvailable, reasonClassB
+          when: features&featMinTimeout != 0
+      - eval: ul.rep.set(corenet.CapabilityURingMinTimeout, status, reason)
+        to: ul.rep.set
+  - of: (*uLoop).reportSelfTest
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uLoop).reportSelfTest
+        kind: self
+      - id: ul.rep.found
+        kind: internal
+    steps:
+      - eval: ul.rep.found(ul.sw, corenet.CapabilityURingPbuf, true, "")
+        to: ul.rep.found
+      - eval: ul.rep.found(ul.sw, corenet.CapabilityURingMultishotRecv, true, "")
+        to: ul.rep.found
+      - opt:
+          do:
+            - return: ""
+          when: ul.sw.disabled(corenet.CapabilityURingDirect)
+      - bind: reason
+        eval: "\"\""
+      - opt:
+          do:
+            - set: reason
+              value: "\"release check: the peer saw no end within 200 ms\""
+          when: "!direct"
+      - eval: ul.rep.found(ul.sw, corenet.CapabilityURingDirect, direct, reason)
+        to: ul.rep.found
+  - of: (*uLoop).registerRing
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: "!ul.uses.ringFDs || ul.registered >= ringFDsMax || u.registerRing() != 0"
+      - op: ++
+        set: ul.registered
+  - of: probeReason
+    steps:
+      - opt:
+          do:
+            - return: "\"probe defect: \" + step + \": \" + errno.Error()"
+          when: errno == syscall.EEXIST
+      - return: "step + \": \" + errno.Error()"
   - of: udPack
     steps:
       - return: op<<56 | uint64(gen&genMask)<<32 | uint64(slot)
@@ -3035,7 +3657,11 @@ sequences:
         kind: actor
       - id: startIOURing
         kind: self
-      - id: swallowErr
+      - id: newSwitches
+        kind: internal
+      - id: probeError
+        kind: internal
+      - id: noDelay
         kind: internal
       - id: newLoop
         kind: internal
@@ -3048,14 +3674,22 @@ sequences:
       - id: runner.wait
         kind: internal
     steps:
+      - bind: sw
+        eval: newSwitches(cfg)
+        to: newSwitches
+      - opt:
+          do:
+            - return: probeError("uring-pbuf switched off", syscall.EOPNOTSUPP)
+              to: probeError
+          when: sw.disabled(corenet.CapabilityURingPbuf)
       - bind: fin
         eval: make(chan struct{})
       - bind: runner
         eval: "&uringRunner{fin: fin}"
       - loop:
           do:
-            - eval: swallowErr(syscall.SetsockoptInt(l.FD, syscall.IPPROTO_TCP, syscall.TCP_NODELAY, 1))
-              to: swallowErr
+            - eval: noDelay(l.FD, sw)
+              to: noDelay
             - set: runner.lfds
               value: append(runner.lfds, l.FD)
           key: _
@@ -3069,7 +3703,7 @@ sequences:
               eval: newLoop(g, *cfg, i, mmapAnon)
               to: newLoop
             - bind: ul
-              eval: "&uLoop{lp: lp, lfds: runner.lfds, hooks: hooks, wakefd: -1, fanfd: -1}"
+              eval: "&uLoop{lp: lp, lfds: runner.lfds, hooks: hooks, wakefd: -1, fanfd: -1, sw: sw, rep: newReport(sw, \"iouring\")}"
             - set: runner.loops
               value: append(runner.loops, ul)
             - set: g.loops
@@ -3120,6 +3754,8 @@ sequences:
         value: corenet.LoopBackendIOURing
       - set: g.stage
         value: runner.loops[0].stage
+      - set: g.caps
+        value: runner.loops[0].rep
       - return: nil
   - of: probeError
     participants:
@@ -3195,10 +3831,12 @@ sequences:
         kind: internal
       - id: ul.selfTest
         kind: internal
+      - id: ul.reportSelfTest
+        kind: internal
       - id: ul.build
         kind: internal
     steps:
-      - bind: flags, err
+      - bind: err
         eval: ul.probe()
         to: ul.probe
       - opt:
@@ -3206,7 +3844,7 @@ sequences:
             - return: err
           when: err != nil
       - bind: direct, deferred, err
-        eval: ul.selfTest(flags)
+        eval: ul.selfTest(ul.primary)
         to: ul.selfTest
       - opt:
           do:
@@ -3221,82 +3859,10 @@ sequences:
             - set: ul.stage
               value: "\"self_test+direct\""
           when: direct
-      - return: ul.build(rings, flags, direct && deferred)
+      - eval: ul.reportSelfTest(direct)
+        to: ul.reportSelfTest
+      - return: ul.build(rings, direct && deferred)
         to: ul.build
-  - of: (*uLoop).setupFlags
-    steps:
-      - opt:
-          do:
-            - return: setupDeferTaskrun | setupSingleIssuer | setupSubmitAll
-          when: ul.hooks.deferTaskrun
-      - return: setupCoopTaskrun | setupSingleIssuer | setupSubmitAll
-  - of: (*uLoop).probe
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*uLoop).probe
-        kind: self
-      - id: ul.openStaged
-        kind: internal
-      - id: probed.supports
-        kind: internal
-      - id: probed.close
-        kind: internal
-    steps:
-      - bind: probed, flags, err
-        eval: ul.openStaged(ul.setupFlags())
-        to: ul.openStaged
-      - opt:
-          do:
-            - return: 0, err
-          when: err != nil
-      - set: ul.flags
-        value: flags
-      - set: ul.stage
-        value: "\"setup\""
-      - bind: ok, perr
-        eval: probed.supports(opAccept, opRecv, opSend, opAsyncCancel, opClose, opPollAdd, opRead, opNop, opShutdown)
-        to: probed.supports
-      - opt:
-          do:
-            - eval: probed.close()
-              to: probed.close
-            - return: 0, probeError("register_probe", orErrno(perr, syscall.EOPNOTSUPP))
-          when: perr != 0 || !ok || ul.hooks.failStage == "probe"
-      - set: ul.stage
-        value: "\"register_probe\""
-      - eval: probed.close()
-        to: probed.close
-      - return: flags, nil
-  - of: (*uLoop).openStaged
-    participants:
-      - id: caller
-        kind: actor
-      - id: (*uLoop).openStaged
-        kind: self
-      - id: openURing
-        kind: internal
-    steps:
-      - opt:
-          do:
-            - return: nil, 0, probeError("setup", syscall.EPERM)
-          when: ul.hooks.failStage == "setup"
-      - bind: opened, step, errno
-        eval: openURing(probeEntries, flags)
-        to: openURing
-      - opt:
-          do:
-            - set: flags
-              value: setupCoopTaskrun | setupSubmitAll
-            - set: opened, step, errno
-              to: openURing
-              value: openURing(probeEntries, flags)
-          when: errno == syscall.EINVAL && step == "setup" && !ul.hooks.deferTaskrun
-      - opt:
-          do:
-            - return: nil, 0, probeError(step, errno)
-          when: errno != 0
-      - return: opened, flags, nil
   - of: (*uLoop).build
     participants:
       - id: caller
@@ -3335,7 +3901,7 @@ sequences:
       - loop:
           do:
             - bind: rr, err
-              eval: ul.newRing(i, flags, sweep)
+              eval: ul.newRing(i, sweep)
               to: ul.newRing
             - opt:
                 do:
@@ -3367,6 +3933,8 @@ sequences:
         kind: self
       - id: openURing
         kind: internal
+      - id: ul.registerRing
+        kind: internal
       - id: newRing
         kind: internal
       - id: ul.bufShape
@@ -3384,6 +3952,19 @@ sequences:
       - id: rr.armAccepts
         kind: internal
     steps:
+      - bind: flags
+        eval: ul.secondary
+      - opt:
+          do:
+            - set: flags
+              value: ul.primary
+          when: i == 0
+      - opt:
+          do:
+            - op: "&^="
+              set: flags
+              value: setupCoopTaskrun
+          when: i > 0 && ul.hooks.secondaryPlain
       - bind: u, step, errno
         eval: openURing(uringEntries, flags)
         to: openURing
@@ -3391,6 +3972,8 @@ sequences:
           do:
             - return: nil, probeError(step, errno)
           when: errno != 0
+      - eval: ul.registerRing(u)
+        to: ul.registerRing
       - bind: lp
         eval: ul.lp
       - bind: rr
@@ -3560,7 +4143,7 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: rr.paused || rr.r.draining || rr.ul.lp.draining
+          when: rr.acceptsNothing()
       - bind: room
         eval: rr.acceptRoom()
         to: rr.acceptRoom
@@ -3589,6 +4172,9 @@ sequences:
           key: i
           range: rr.ul.lfds
           value: fd
+  - of: (*uRing).acceptsNothing
+    steps:
+      - return: rr.paused || rr.r.draining || rr.ul.lp.draining || (rr.ul.hooks.primaryIdle && rr.r.index == 0)
   - of: (*uRing).acceptRoom
     steps:
       - bind: table
@@ -4054,6 +4640,8 @@ sequences:
         kind: internal
       - id: prepRecv
         kind: internal
+      - id: singleShot
+        kind: internal
       - id: rr.ul.onFD
         kind: internal
       - id: rr.setEpoch
@@ -4074,6 +4662,11 @@ sequences:
           when: s == nil
       - eval: prepRecv(s, uint32(c.fd), udPack(udRecv, c.gen, uint32(slot)))
         to: prepRecv
+      - opt:
+          do:
+            - eval: singleShot(s)
+              to: singleShot
+          when: "!rr.ul.uses.multishot"
       - eval: rr.ul.onFD(s)
         to: rr.ul.onFD
       - op: ++
@@ -5000,6 +5593,8 @@ sequences:
         kind: actor
       - id: (*uLoop).selfTest
         kind: self
+      - id: ul.sw.disabled
+        kind: internal
       - id: selfTestRing
         kind: internal
       - id: rg.close
@@ -5008,11 +5603,17 @@ sequences:
         kind: internal
       - id: closeFDs
         kind: internal
+      - id: rg.get
+        kind: internal
       - id: prepAccept
+        kind: internal
+      - id: onProcessFD
         kind: internal
       - id: rg.submit
         kind: internal
       - id: selfTestClient
+        kind: internal
+      - id: run.closeAccepted
         kind: internal
       - id: run.exchange
         kind: internal
@@ -5025,8 +5626,11 @@ sequences:
           do:
             - return: false, false, probeError("self_test", syscall.EIO)
           when: ul.hooks.failStage == "self_test"
+      - bind: fds
+        eval: ul.sw.disabled(corenet.CapabilityURingDirect)
+        to: ul.sw.disabled
       - bind: rg, err
-        eval: selfTestRing(flags)
+        eval: selfTestRing(flags, !fds)
         to: selfTestRing
       - opt:
           do:
@@ -5043,8 +5647,16 @@ sequences:
           when: err != nil
       - defer: closeFDs([]int{lfd})
         to: closeFDs
-      - eval: prepAccept(rg.get(), lfd, udPack(udAccept, 0, 0), true)
+      - bind: s
+        eval: rg.get()
+        to: rg.get
+      - eval: prepAccept(s, lfd, udPack(udAccept, 0, 0), true)
         to: prepAccept
+      - opt:
+          do:
+            - eval: onProcessFD(s)
+              to: onProcessFD
+          when: fds
       - eval: rg.submit()
         to: rg.submit
       - bind: cfd, err
@@ -5057,7 +5669,9 @@ sequences:
       - defer: closeFDs([]int{cfd})
         to: closeFDs
       - bind: run
-        eval: "&selfTestRun{u: rg, index: -1}"
+        eval: "&selfTestRun{u: rg, index: -1, mode: selfTestMode{fds: fds, multishot: ul.sw.wants(corenet.CapabilityURingMultishotRecv)}}"
+      - defer: run.closeAccepted()
+        to: run.closeAccepted
       - eval: run.exchange()
         to: run.exchange
       - opt:
@@ -5068,6 +5682,10 @@ sequences:
             eval: run.verdict()
             to: run.verdict
           when: err != nil
+      - opt:
+          do:
+            - return: false, false, nil
+          when: fds
       - set: direct, deferred
         to: run.releases
         value: run.releases(port)
@@ -5241,6 +5859,10 @@ sequences:
           when: errno != 0
       - opt:
           do:
+            - return: rg, nil
+          when: "!direct"
+      - opt:
+          do:
             - eval: rg.close()
               to: rg.close
             - return: nil, probeError("self_test sparse_files", errno)
@@ -5293,6 +5915,50 @@ sequences:
             to: syscall
           when: err != nil
       - return: cfd, nil
+  - of: (*selfTestRun).closeAccepted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*selfTestRun).closeAccepted
+        kind: self
+      - id: closeFDs
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: closeFDs([]int{int(st.index)})
+              to: closeFDs
+          when: st.mode.fds && st.index >= 0
+  - of: (*selfTestRun).armRecv
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*selfTestRun).armRecv
+        kind: self
+      - id: st.u.get
+        kind: internal
+      - id: prepRecv
+        kind: internal
+      - id: singleShot
+        kind: internal
+      - id: onProcessFD
+        kind: internal
+    steps:
+      - bind: s
+        eval: st.u.get()
+        to: st.u.get
+      - eval: prepRecv(s, uint32(res), udPack(udRecv, 0, slot))
+        to: prepRecv
+      - opt:
+          do:
+            - eval: singleShot(s)
+              to: singleShot
+          when: "!st.mode.multishot"
+      - opt:
+          do:
+            - eval: onProcessFD(s)
+              to: onProcessFD
+          when: st.mode.fds
   - of: (*selfTestRun).pump
     participants:
       - id: caller
@@ -5351,6 +6017,8 @@ sequences:
         kind: self
       - id: st.onAccept
         kind: internal
+      - id: st.onRecv
+        kind: internal
     steps:
       - switch:
           cases:
@@ -5368,19 +6036,43 @@ sequences:
                   value: "true"
             - case: udRecv
               do:
-                - opt:
-                    do:
-                      - set: st.got
-                        value: append(st.got, st.u.buf(uint16(c.flags >> cqeBufferShift))[:c.res]...)
-                    when: c.res > 0 && c.flags&cqeFBuffer != 0
+                - eval: st.onRecv(c)
+                  to: st.onRecv
           "on": udOp(c.userData)
+  - of: (*selfTestRun).onRecv
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*selfTestRun).onRecv
+        kind: self
+      - id: st.u.addBuf
+        kind: internal
+      - id: st.u.publishBufs
+        kind: internal
+      - id: st.armRecv
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - set: st.got
+              value: append(st.got, st.u.buf(uint16(c.flags >> cqeBufferShift))[:c.res]...)
+            - eval: st.u.addBuf(uint16(c.flags >> cqeBufferShift))
+              to: st.u.addBuf
+            - eval: st.u.publishBufs()
+              to: st.u.publishBufs
+          when: c.res > 0 && c.flags&cqeFBuffer != 0
+      - opt:
+          do:
+            - eval: st.armRecv(st.index, 0)
+              to: st.armRecv
+          when: "!st.mode.multishot && c.res > 0 && c.flags&cqeFMore == 0 && udSlot(c.userData) == 0"
   - of: (*selfTestRun).onAccept
     participants:
       - id: caller
         kind: actor
       - id: (*selfTestRun).onAccept
         kind: self
-      - id: prepRecv
+      - id: st.armRecv
         kind: internal
     steps:
       - opt:
@@ -5396,8 +6088,8 @@ sequences:
               - set: st.accepted
                 value: append(st.accepted, res)
             else: true
-      - eval: prepRecv(st.u.get(), uint32(res), udPack(udRecv, 0, uint32(len(st.accepted))))
-        to: prepRecv
+      - eval: st.armRecv(res, uint32(len(st.accepted)))
+        to: st.armRecv
   - of: (*selfTestRun).verdict
     participants:
       - id: caller
@@ -5492,7 +6184,7 @@ sequences:
         kind: internal
     steps:
       - bind: u
-        eval: "&uring{fd: -1}"
+        eval: "&uring{fd: -1, ringIdx: -1}"
       - set: u.params.flags
         value: flags | setupCQSize | setupClamp
       - set: u.params.cqEntries
@@ -5506,6 +6198,8 @@ sequences:
           when: errno != 0
       - set: u.fd
         value: fd
+      - set: u.setup
+        value: flags
       - bind: p
         eval: "&u.params"
       - opt:
@@ -5603,15 +6297,18 @@ sequences:
       - set: u.sqes
         to: unsafe
         value: unsafe.Slice((*sqe)(unsafe.Pointer(&u.sqeMem[0])), p.sqEntries)
-      - bind: array
-        eval: unsafe.Slice((*uint32)(unsafe.Add(base, p.sqOff.array)), p.sqEntries)
-        to: unsafe
-      - loop:
+      - opt:
           do:
-            - set: array[i]
-              value: uint32(i)
-          key: i
-          range: array
+            - bind: array
+              eval: unsafe.Slice((*uint32)(unsafe.Add(base, p.sqOff.array)), p.sqEntries)
+              to: unsafe
+            - loop:
+                do:
+                  - set: array[i]
+                    value: uint32(i)
+                key: i
+                range: array
+          when: "!u.noArray()"
       - set: u.tail
         to: atomic
         value: atomic.LoadUint32(u.sqTail)
@@ -5633,9 +6330,13 @@ sequences:
         kind: actor
       - id: (*uring).close
         kind: self
+      - id: u.unregisterRing
+        kind: internal
       - id: swallowErr
         kind: internal
     steps:
+      - eval: u.unregisterRing()
+        to: u.unregisterRing
       - loop:
           do:
             - opt:
@@ -5663,9 +6364,11 @@ sequences:
         kind: self
       - id: u.submit
         kind: internal
+      - id: u.slot
+        kind: internal
     steps:
       - loop:
-          cond: u.tail-atomic.LoadUint32(u.sqHead) >= u.sqLen
+          cond: "!u.room(1)"
           do:
             - opt:
                 do:
@@ -5676,7 +6379,8 @@ sequences:
           init: i := 0
           post: i++
       - bind: s
-        eval: "&u.sqes[u.tail&u.sqMask]"
+        eval: u.slot()
+        to: u.slot
       - set: "*s"
         value: sqe{}
       - op: ++
@@ -5692,7 +6396,7 @@ sequences:
         kind: internal
     steps:
       - loop:
-          cond: u.tail-atomic.LoadUint32(u.sqHead)+n > u.sqLen
+          cond: "!u.room(n)"
           do:
             - opt:
                 do:
@@ -5703,6 +6407,38 @@ sequences:
           init: i := 0
           post: i++
       - return: "true"
+  - of: (*uring).noArray
+    steps:
+      - return: u.setup&setupNoSQArray != 0
+  - of: (*uring).rewind
+    steps:
+      - return: u.setup&setupSQRewind != 0
+  - of: (*uring).deferred
+    steps:
+      - return: u.setup&setupDeferTaskrun != 0
+  - of: (*uring).room
+    steps:
+      - opt:
+          do:
+            - return: u.pending()+n <= u.sqLen
+          when: u.rewind()
+      - return: u.tail-atomic.LoadUint32(u.sqHead)+n <= u.sqLen
+  - of: (*uring).slot
+    steps:
+      - opt:
+          do:
+            - return: "&u.sqes[u.pending()]"
+          when: u.rewind()
+      - return: "&u.sqes[u.tail&u.sqMask]"
+  - of: (*uring).consumed
+    steps:
+      - opt:
+          do:
+            - eval: copy(u.sqes[:u.pending()-got], u.sqes[got:u.pending()])
+          when: u.rewind() && got < u.pending()
+      - op: +=
+        set: u.submitted
+        value: got
   - of: (*uring).publish
     participants:
       - id: caller
@@ -5712,8 +6448,77 @@ sequences:
       - id: atomic
         kind: stdlib
     steps:
+      - opt:
+          do:
+            - return: ""
+          when: u.rewind()
       - eval: atomic.StoreUint32(u.sqTail, u.tail)
         to: atomic
+  - of: (*uring).enterSubmit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uring).enterSubmit
+        kind: self
+      - id: uringEnterSubmit
+        kind: internal
+      - id: uringEnterFlags
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: uringEnterSubmit(fd, n)
+              to: uringEnterSubmit
+          when: flags == 0
+      - return: uringEnterFlags(fd, n, flags)
+        to: uringEnterFlags
+  - of: (*uring).enterTarget
+    steps:
+      - opt:
+          do:
+            - return: int(u.ringIdx), enterRegisteredRing
+          when: u.ringIdx >= 0
+      - return: u.fd, 0
+  - of: (*uring).registerRing
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uring).registerRing
+        kind: self
+      - id: uringRegister
+        kind: internal
+    steps:
+      - bind: upd
+        eval: "new(rsrcUpdate{offset: ringFDAlloc, data: uint64(u.fd)})"
+      - bind: errno
+        eval: uringRegister(u.fd, regRingFDs, unsafe.Pointer(upd), 1)
+        to: uringRegister
+      - opt:
+          do:
+            - return: errno
+          when: errno != 0
+      - set: u.ringIdx
+        value: int32(upd.offset)
+      - return: "0"
+  - of: (*uring).unregisterRing
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*uring).unregisterRing
+        kind: self
+      - id: swallowErr
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: u.ringIdx < 0 || u.fd < 0
+      - bind: upd
+        eval: "new(rsrcUpdate{offset: uint32(u.ringIdx)})"
+      - eval: swallowErr(uringRegister(u.fd, unregRingFDs, unsafe.Pointer(upd), 1))
+        to: swallowErr
+      - set: u.ringIdx
+        value: "-1"
   - of: (*uring).pending
     steps:
       - return: u.tail - u.submitted
@@ -5727,7 +6532,11 @@ sequences:
         kind: internal
       - id: u.pending
         kind: internal
-      - id: uringEnterSubmit
+      - id: u.enterTarget
+        kind: internal
+      - id: u.enterSubmit
+        kind: internal
+      - id: u.consumed
         kind: internal
     steps:
       - eval: u.publish()
@@ -5741,16 +6550,26 @@ sequences:
                 do:
                   - return: ""
                 when: n == 0
+            - bind: fd, reg
+              eval: u.enterTarget()
+              to: u.enterTarget
+            - bind: flags
+              eval: reg
+            - opt:
+                do:
+                  - op: "|="
+                    set: flags
+                    value: enterGetEvents
+                when: u.deferred()
             - bind: got, errno
-              eval: uringEnterSubmit(u.fd, n)
-              to: uringEnterSubmit
+              eval: u.enterSubmit(fd, n, flags)
+              to: u.enterSubmit
             - switch:
                 cases:
                   - case: "0"
                     do:
-                      - op: +=
-                        set: u.submitted
-                        value: uint32(got)
+                      - eval: u.consumed(uint32(got))
+                        to: u.consumed
                   - case: syscall.EINTR
                   - default: true
                     do:
@@ -5767,7 +6586,11 @@ sequences:
         kind: self
       - id: u.publish
         kind: internal
+      - id: u.enterTarget
+        kind: internal
       - id: uringEnterWait
+        kind: internal
+      - id: u.consumed
         kind: internal
     steps:
       - eval: u.publish()
@@ -5781,16 +6604,18 @@ sequences:
             - set: minComplete
               value: "0"
           when: u.ready() > 0
+      - bind: fd, reg
+        eval: u.enterTarget()
+        to: u.enterTarget
       - bind: got, errno
-        eval: uringEnterWait(u.fd, u.pending(), minComplete, enterGetEvents|enterExtArg, unsafe.Pointer(&arg), unsafe.Sizeof(arg))
+        eval: uringEnterWait(fd, u.pending(), minComplete, enterGetEvents|enterExtArg|reg, unsafe.Pointer(&arg), unsafe.Sizeof(arg))
         to: uringEnterWait
       - switch:
           cases:
             - case: "0"
               do:
-                - op: +=
-                  set: u.submitted
-                  value: uint32(got)
+                - eval: u.consumed(uint32(got))
+                  to: u.consumed
             - case: errnoETIME, syscall.EINTR
             - default: true
               do:
@@ -6039,6 +6864,11 @@ sequences:
           range: ops
           value: op
       - return: true, 0
+  - of: singleShot
+    steps:
+      - op: "&^="
+        set: s.ioprio
+        value: recvMultishot
   - of: prepAccept
     steps:
       - set: s.opcode

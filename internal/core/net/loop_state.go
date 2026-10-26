@@ -71,4 +71,8 @@ type LoopStateValue struct {
 	BatchP99 DurationValue `json:"batch_p99"`
 	// RingStates reports every ring of every loop, loop by loop.
 	RingStates []LoopRingStateValue `json:"ring_states"`
+	// Capabilities reports every optional kernel capability the group's backend
+	// probed or was told not to, the server's socket probes merged in
+	// (ADR 0189).
+	Capabilities []CapabilityValue `json:"capabilities,omitempty"`
 }

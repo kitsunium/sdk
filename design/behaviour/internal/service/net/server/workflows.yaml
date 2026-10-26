@@ -22,7 +22,7 @@ workflows:
             - opt:
                 do:
                   - return: entry.token
-                when: e.allows(entry.rank)
+                when: "!entry.kernel && e.allows(entry.rank)"
           key: _
           range: capabilityRegistry
           value: entry
@@ -107,6 +107,16 @@ workflows:
                   - set: out
                     value: append(out, ringFaults(lp)...)
                 when: serving
+            - loop:
+                do:
+                  - opt:
+                      do:
+                        - set: out
+                          value: "append(out, corenet.FaultValue{Source: faultCapability, Group: lp.Group, Reason: string(c.Name) + \": \" + c.Reason})"
+                      when: c.Status == statusMissing
+                key: _
+                range: lp.Capabilities
+                value: c
           key: _
           range: st.Loops
           value: lp

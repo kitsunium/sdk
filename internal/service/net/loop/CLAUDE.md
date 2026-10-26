@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T20:00:00Z -->
+<!-- updated: 2026-10-25T23:00:00Z -->
 # internal/service/net/loop/
 
 ## Purpose
@@ -22,6 +22,8 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
 | `core.go` | the backend-neutral core: `ring` (slot table, free list, LRU, dirty list, timers), `loop` (the `corenet.LoopIO` implementation; `Loop` is its index, set at build), `driver` (what a backend does: flush, shutdown, unread), the spill, the double-buffered output, the close and eviction rules |
 | `slab.go` | the mmap'd slab: power-of-two size classes from 2 KiB, arenas mapped lazily, a global budget that sheds load by name |
 | `wheel.go` | the hashed timer wheel, index-linked, one timer per slot, 10 ms ticks |
+| `caps.go` | the kernel capabilities a group reports (ADR 0189): `loopCaps` and their classes, `CheckCapabilities` (an engine, a class B capability or an unknown opt-in is `LoopCapabilityRefused`), `capSwitches` (the operator's `Disabled`, the code's opt-ins: the operator wins), `capReport` (one row each, `disabled` never overwritten, an absent opt-in `missing`), `Unprobed` (the portable backend's report) |
+| `uring_caps_linux.go` | the probe's stages 1 to 3 (ADR 0189 §D3): `openDescending` (every flag the switches allow, then on `EINVAL` `SQ_REWIND`, `NO_SQARRAY`, `DEFER_TASKRUN`, `SINGLE_ISSUER` given up in that order), `probeRingFDs` (register, unregister before close), `rewindSelfTest` (the partial submit), `settle` (the primary's and the secondaries' flags: `DEFER_TASKRUN` on ring 0 only), `reportSelfTest`, `registerRing` (16 a thread), `probeReason` (`EEXIST` is a probe defect) |
 | `postq.go` | the `Post` queue: preallocated, mutex, `pending` CAS false→true wakes once per drain |
 | `stats.go` | the per-ring counters (plain on the loop, atomic for `State`, published at the end of each batch) and the batch-duration histogram behind `BatchP99` |
 | `epoll_linux.go` | the epoll backend: one thread, one epoll instance, one ring per loop; `EPOLLEXCLUSIVE` listeners; a 2 MiB mmap'd read arena per loop |
@@ -154,15 +156,39 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
 - **A cancel the slot never asked for re-arms.** An open connection whose recv
   ends with `-ECANCELED` re-arms it, and one whose send was cancelled sends
   the same flight again.
-- **The probe is staged, and any failure is epoll.** setup with
-  `COOP_TASKRUN|SINGLE_ISSUER|SUBMIT_ALL` (EINVAL: again without
-  `SINGLE_ISSUER`), features (`EXT_ARG`, `NODROP`, `SINGLE_MMAP`),
-  `REGISTER_PROBE` (accept, recv, send, cancel, close, poll, read, nop), the
-  buffer ring and the sparse table, then the loopback self-test. Under auto, a
-  failure starts epoll with the reason in `State` and on the start line. An
-  explicit io_uring fails with `LoopBackendUnavailable` naming the stage.
-  `DEFER_TASKRUN` is a test hook (`loopHooks.deferTaskrun`) that passes the
-  suite; making it the default is still deferred.
+- **The probe is staged, and any failure is epoll.** setup with every flag the
+  switches allow, given up newest first on `EINVAL` (ADR 0189 §D3), features
+  (`EXT_ARG`, `NODROP`, `SINGLE_MMAP`), `REGISTER_PROBE` (accept, recv, send,
+  cancel, close, poll, read, nop, shutdown), `RING_FDS` registered and
+  unregistered, `SQ_REWIND`'s partial submit, the buffer ring and the sparse
+  table, then the loopback self-test, all on rings of 16 closed before
+  serving, on the loop's locked thread. Under auto, a failure starts epoll
+  with the reason in `State` and on the start line. An explicit io_uring
+  fails with `LoopBackendUnavailable` naming the stage.
+- **Capabilities: classes, switches, report (ADR 0189).** Class A-kernel
+  (multishot recv, the buffer ring, direct descriptors, `EPOLLEXCLUSIVE`,
+  `TCP_NODELAY`) is on once probed; class A-code (`DEFER_TASKRUN`,
+  `NO_SQARRAY`, `RING_FDS`, `SQ_REWIND`) only on `LoopValue.Capabilities`;
+  class B is declared and refused. `Config.Disabled` is never probed:
+  `uring-pbuf` off rules io_uring out (auto runs epoll, not degraded),
+  `uring-multishot-recv` off makes every recv single-shot (`singleShot`, the
+  state machine re-arms), `uring-direct` off puts the self-test and the
+  connections in the process table, `epoll-exclusive` off registers the
+  listeners plainly (probed on a throwaway epoll and eventfd otherwise).
+  `State().Capabilities` holds one row per `loopCaps` entry, server appends
+  its `tcp-nodelay` row.
+- **`DEFER_TASKRUN` on the primary only (P3a).** The thread waits on ring 0;
+  a deferred secondary would post no completion until entered with
+  `GETEVENTS`, which nothing does — `DEFER_TASKRUN` on every ring times out the
+  second round trip of `TestCaps_deferPrimaryOnly`. The secondaries keep
+  `COOP_TASKRUN` and wake the primary through their eventfd; every submit on
+  the primary carries `GETEVENTS` with `min_complete` zero.
+- **`SQ_REWIND` fills from SQE 0 (P3d).** Under it the head and tail stay
+  zero, `uring.slot` is `sqes[pending]`, and a partial submit moves what is
+  left down (`uring.consumed`), links and all. `NO_SQARRAY` (P3b) skips the
+  SQ array. A ring registered with its thread (P3c) is entered by its index
+  (`enterTarget`) and unregistered in `uring.close` before the descriptor
+  closes: a ring still registered outlives its close.
 - **A handler queues what `Write` refuses.** A line the handler stopped at
   stays in the spill and comes back only with the next bytes. A handler that
   answers a pipelined request behind a refused write must therefore queue it
@@ -174,9 +200,10 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
 and `requiredCaps` are linked in, and the suite fails closed on both
 (`TestBackendsRequired`, `TestCapsRequired`): unset fails, a backend or a
 capability the kernel lacks fails, and a capability no probe of `capProbes`
-checks fails too — a lane may not require what nothing verifies. The one
-capability today is `uring-direct` (the release check chose direct
-descriptors, from 6.13); P3's capability reports add theirs to `capProbes`.
+checks fails too — a lane may not require what nothing verifies. Every class
+A capability has a probe (`conformance_caps_linux_test.go`'s `probeCap`: a
+group with it opted into, its row `on`); `uring-direct` reads the release
+check's stage. The lanes require all of them but `uring-sq-rewind` (7.0).
 Bazel links `epoll` and `none`; e2e-cross's lanes `iouring,epoll` and `none`;
 each leg of `net-kernel-gate.yml` declares both lists. It covers: partial consume, an
 8 MiB response byte-exact behind short sends and EAGAIN, `LoopSpillFull`,
@@ -188,6 +215,15 @@ leaked, GOGC=1 with forced GC at the high-water mark, EMFILE at RLIMIT 64 and
 the foreign-thread `Write` under `loopdebug`, a 2-entry buffer ring of 64-byte
 buffers shuffled and 0xAA-filled (thousands of ENOBUFS), every probe stage
 failed, `DEFER_TASKRUN`, and 10 000 idle connections with zero watchdog fires.
+`conformance_caps_linux_test.go` and `conformance_caps_uring_linux_test.go`
+hold the capabilities (ADR 0189): the report (one row each, no probe defect,
+no class B or unasked class A-code on), each class A-kernel switch serving the
+exchange, `uring-pbuf` off, the refusals, each class A-code opt-in and three
+and four together on 2 loops × 3 rings, `sqOff.array == 0`, the
+secondary-only wake under half a tick, the FIN after a close with registered
+rings, and the operator's switch over an opt-in. Measured on 6.8.0-147 and
+6.12.113 (arm64): every class A capability but `uring-sq-rewind`; on 7.0
+(Docker) all of them.
 `uring_abi_linux_internal_test.go` freezes the uapi layouts and compares the
 encoders with liburing's bytes.
 

@@ -14,7 +14,9 @@
 - **Amended by**: [ADR 0187](0187-the-handler-type-chooses-the-engine.md) — D1 (the
   engine chosen by the handler's type, every option judged by its kind, a
   zero value included), D2 and D3 (an `http1` handler served behind
-  `crypto/tls` on the portable backend)
+  `crypto/tls` on the portable backend); [ADR 0189](0189-a-kernel-capability-is-probed-reported-and-switched-off-by-name.md) — D5 (the staged
+  probe descends flag by flag, and `DEFER_TASKRUN` is an opt-in, no longer a
+  test hook)
 - **Amends**: [ADR 0029](0029-sdk-net-domain.md) D1 (the tree), D2 (one
   goroutine per connection, now the default rather than the only engine), D3
   (do not reimplement HTTP, now with one restricted exception) and D4 (pooling

@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "loop",
     srcs = [
+        "caps.go",
         "conn.go",
         "core.go",
         "debug_off_linux.go",
@@ -19,6 +20,7 @@ go_library(
         "slab.go",
         "stats.go",
         "uring_abi_linux.go",
+        "uring_caps_linux.go",
         "uring_loop_linux.go",
         "uring_none_linux.go",
         "uring_probe_linux.go",
@@ -99,6 +101,8 @@ alias(
 go_test(
     name = "loop_test",
     srcs = [
+        "conformance_caps_linux_test.go",
+        "conformance_caps_uring_linux_test.go",
         "conformance_linux_test.go",
         "conformance_uring_linux_test.go",
         "core_internal_test.go",

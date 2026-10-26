@@ -7,6 +7,7 @@ import (
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/net/loop"
 )
 
 // loopEngine is a running loop group, whatever its backend: the leaf's native
@@ -123,6 +124,11 @@ func (s *Server) bindLoopGroup(ctx context.Context, group *StreamGroup) error {
 		}
 		lns = append(lns, ln)
 		s.registerLoopListeners(group, []stdnet.Listener{ln}, false)
+	}
+	//: an opt-in no backend may honour is refused before any engine starts.
+	if err := loop.CheckCapabilities(group.name, group.loop); err != nil {
+		//: Start unwinds the listeners.
+		return err
 	}
 	plan := s.operator.plan(group.loop.Backend, nativeLoopBackends)
 	eng, err := startLoopEngine(group, lns, plan)

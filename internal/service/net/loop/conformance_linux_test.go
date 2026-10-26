@@ -1067,14 +1067,15 @@ func TestConformance_probeStages(t *testing.T) {
 }
 
 // TestConformance_deferTaskrun runs the echo, the large response and the
-// close under IORING_SETUP_DEFER_TASKRUN, the option that must pass the
-// suite before it may become the default (ADR 0186 §Deferred).
+// close with uring-defer-taskrun opted into: IORING_SETUP_DEFER_TASKRUN on
+// the primary ring, the class A-code option that must pass the suite before
+// it may become the default (ADR 0189, P3a).
 func TestConformance_deferTaskrun(t *testing.T) {
 	eachBackend(t, func(t *testing.T, b backendCase) {
 		onlyIOURing(t, b)
 		h := &lineH{}
 		_, addr := serve(t, b, h, func(c *Config) {
-			c.hooks = loopHooks{deferTaskrun: true}
+			c.Value.Capabilities = []corenet.Capability{corenet.CapabilityURingDeferTaskrun}
 			c.Value.OutputCap = 256 << 10
 		})
 		c := dial(t, addr)

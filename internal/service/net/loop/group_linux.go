@@ -3,6 +3,7 @@
 package loop
 
 import (
+	"slices"
 	"syscall"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
@@ -35,6 +36,12 @@ func startNative(g *Group, cfg *Config) error {
 	switch cfg.Value.Backend {
 	//: the best one the probe reaches.
 	case corenet.LoopBackendAuto:
+		//: the operator ruled io_uring out: epoll, overridden, not degraded.
+		if slices.Contains(cfg.Disabled, corenet.CapabilityURingPbuf) {
+			g.stage = "epoll"
+			//: never probed.
+			return startEpoll(g, cfg)
+		}
 		err := startIOURing(g, cfg, cfg.hooks)
 		//: io_uring runs.
 		if err == nil {
@@ -61,6 +68,18 @@ func startNative(g *Group, cfg *Config) error {
 			errs.String("group", cfg.Group), errs.String("backend", cfg.Value.Backend.String()),
 			errs.String("reason", "not a backend of the leaf"))
 	}
+}
+
+// noDelay sets TCP_NODELAY on a listener, inherited by every socket it
+// accepts, unless the operator switched tcp-nodelay off. A socket that
+// refuses it still serves; server reads the option back for State.
+func noDelay(fd int, sw capSwitches) {
+	//: switched off: left as the kernel has it.
+	if sw.disabled(corenet.CapabilityTCPNoDelay) {
+		//: nothing.
+		return
+	}
+	swallowErr(syscall.SetsockoptInt(fd, syscall.IPPROTO_TCP, syscall.TCP_NODELAY, 1))
 }
 
 // descriptorLimit is the effective RLIMIT_NOFILE soft limit, zero when it
