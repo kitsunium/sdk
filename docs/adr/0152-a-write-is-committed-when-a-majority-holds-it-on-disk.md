@@ -5066,6 +5066,56 @@ what compaction keeps behind them.
 No frame, payload or record format changes, and no raft mutation is
 added.
 
+## Amendment — Recover reads the log a batch at a time (2026-10-26, #700)
+
+The amendments of #630 and #663 bounded what the reopen and the start of a
+directory hold of its log. `Recover`, the way out of a quorum loss, still
+read the survivor's whole retained log into memory, payloads included: the
+configuration in force at the index it keeps from the log's first entry,
+below the newest snapshot as well, then the cluster version past that
+snapshot twice, once to decide `AdoptedFrom` and once for the forced
+entry's payload version, each in one read of the whole range with no byte
+bound. A 16.5 MiB log peaked at 3.1 times its records with 64-byte entries
+and 1.3 times with 4 KiB ones, over the bound the start of the same
+directory is held to. The survivor whose log grew near `MaxLogBytes` while
+its compaction stalled (#512's state over `MaxSnapshotBytes`) was
+OOM-killed on the very host where it starts, and `STOP-RECOVER` made every
+rerun read the same log again: the cluster could not leave its quorum loss
+there ([#700](https://github.com/kitsunium/sdk/issues/700)).
+
+- **One batch at a time.** Every read `Recover` makes of the log holds one
+  batch: 1 MiB of payloads, the default `MaxBatchBytes`, and 4 096 entries
+  at most, an entry larger than that alone, in one slice the next batch
+  reuses. The chain walk past the persisted commit already read one entry
+  at a time. On a 3.5 MiB log the largest read held every entry, 30 584
+  and 1.9 MiB of payloads with 64-byte entries, 883 and 3.4 MiB with 4 KiB
+  ones; it now holds 4 096 entries and 0.25 MiB, and 256 entries and
+  1 MiB.
+- **Past the snapshot, once.** The configuration and the cluster version
+  are read in one pass, from the newest snapshot's metadata and the
+  entries after it, and handed down to the forced entry rather than read
+  again. When the log holds that snapshot's index under its term, the
+  entries up to it are the history the snapshot was cut from: its
+  metadata states the configuration they leave (D7, the engine's
+  configuration at that index), a start runs the same, and they are not
+  read. Otherwise the log is still read from its first entry: for a kept
+  index below the snapshot, and for a snapshot the log does not continue,
+  an interrupted install whose snapshot no longer verifies. Every answer is
+  the one the whole read gave. An install a crash interrupted reads its
+  version once it is finished, from the snapshot alone.
+- **What `Recover` costs.** The open's transient, as the amendment of #630
+  states it, then a batch: about 2 MiB beside the index, whatever the
+  log's size. The log past the snapshot is read from the disk once, where
+  it was read whole three times.
+- **The other offline operations.** `Inspect` reads the bounds and terms
+  only, `RestoreSnapshot` streams its snapshot, `WipeAndRejoin` reads
+  nothing, and `TruncateAndStaySilent` reads one segment at a time for the
+  highest term, then reopens the log as the amendment of #630 does: none
+  holds more than a segment of the log.
+
+No frame, payload or record format changes, and no raft mutation is
+added.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -5085,6 +5135,7 @@ added.
 | #690, #691 | Raft hunt, 2026-10-25 | the offline operations: `WipeAndRejoin` ordered behind the stop marker `STOP-WIPE`, a crash at any step refusing the start and every offline write until the wipe runs again (#690); `Recover` refuses an old member's ID beside the survivor and asks a fence for every other old voter, whatever the members name (#691); neither `Recover` nor `RestoreSnapshot` accepts two members under one ID (amendment of 2026-10-26, review of #693) |
 | #694 | Raft hunt loop, 2026-10-26 | each hand-off try lasts the committed contract's maximum election timeout, raft's transfer deadline, not the `InitialTiming`'s (amendment of 2026-10-26, #694) |
 | #696 | Raft hunt loop, 2026-10-26 | the trailing window is kept only while the log is under half its headroom and the disk is not short, and Config refuses a log quota whose headroom over the reserve is two segments or less; no format change (amendment of 2026-10-26, #696) |
+| #700 | Raft hunt loop, 2026-10-26 | `Recover` reads the log a batch of 1 MiB and 4 096 entries at a time, the configuration and the cluster version once, past the newest snapshot when the log continues it; no format change (amendment of 2026-10-26, #700) |
 
 ## raft-sql-poc (owner's prior Raft)
 

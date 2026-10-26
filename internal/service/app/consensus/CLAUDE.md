@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-26T01:40:00Z -->
+<!-- updated: 2026-10-26T18:36:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -155,6 +155,20 @@ machine, are 32.9 s at 24, and 34 s for the slowest on average over
   `TestALeaderSlowToApplyStillRefusesForwardsPastMaxApplyLagBytes`,
   `TestAMachineThatDropsItsPayloadsLeavesNoApplyLag`,
   `TestADurableMachineResumesInsideTheTailReadBack`).
+- Read the log whole in an offline operation, or from its first entry
+  where the newest snapshot answers: `Recover` read the configuration in
+  force at the index it keeps from the log's first entry, then the cluster
+  version past the snapshot twice, each in one `Entries` call with no byte
+  bound, about three times the log in heap, and a survivor whose compaction
+  had stalled was OOM-killed at every rerun on the host where it starts
+  (#700). `inForceAt` reads both in one pass, `scanLog` handing it
+  `offlineBatchBytes` and `offlineBatchEntries` at a time into one reused
+  slice, from the snapshot's metadata and the entries after it when the log
+  holds the snapshot's index under its term, else from the log's first
+  entry as before; `planRecover` reads it once and hands the version down
+  to `appendForced`. Count what a reader holds with `fileLog.afterEntries`,
+  not a sampled heap (`TestRecoverHoldsOneBatchOfTheLogAtATime`,
+  `TestTheHistoryInForceIsReadPastTheSnapshot`).
 - Sample a heap peak in the package's own process: the tests before it
   leave hundreds of MiB live, and the collector lets a share of that grow
   in garbage on top of what is measured.
