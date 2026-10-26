@@ -7,22 +7,33 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	coreproc "github.com/kitsunium/sdk/internal/core/proc"
+	"github.com/kitsunium/sdk/internal/kernel/fs/flock"
 )
 
 // floorNode starts one voter over a real data directory on segments of seg
 // bytes, every path under t.TempDir(), the runtime directory of the
 // STORAGE_FAILED marker included, with the quota and reserve given, a cut
 // every everyBytes of payload and the trailing window given (0 is the
-// default, 4 096). It returns the node, or nil and NewNode's refusal.
+// default, 4 096). It returns the node, or nil and NewNode's refusal. Where
+// there is no flock(2) (illumos, Solaris) the data directory is refused,
+// as openDir asserts, and the case skips.
 func floorNode(t *testing.T, cid byte, seg, quota, reserve, everyBytes int64, trailing uint64) (*Node, *diskNode, error) {
 	t.Helper()
 	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{0x69, 0x60, cid}}
 	dn := &diskNode{dir: t.TempDir()}
 	d, err := NewDataDirWith(dn.dir, DataDirOptions{SegmentBytes: seg, RuntimeDir: filepath.Join(t.TempDir(), "run")})
+	if !flock.Native {
+		if !errors.Is(err, coreproc.UnsupportedPlatform) {
+			t.Fatalf("NewDataDirWith on %s = %v, want UNSUPPORTED_PLATFORM", runtime.GOOS, err)
+		}
+		t.Skipf("%s has no flock(2), so a data directory is refused there (ADR 0144)", runtime.GOOS)
+	}
 	if err != nil {
 		t.Fatalf("NewDataDirWith: %v", err)
 	}
