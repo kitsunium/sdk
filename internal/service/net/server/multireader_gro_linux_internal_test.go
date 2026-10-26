@@ -42,6 +42,14 @@ func groReader(t *testing.T, seg int) (*multiReader, *stdnet.UDPConn) {
 	return reader, sender
 }
 
+// readOneErr reads one batch within a second and returns what it returned.
+func readOneErr(reader *multiReader, slots []datagram) (int, error) {
+	if err := reader.pc.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		return 0, err
+	}
+	return reader.readBatch(slots)
+}
+
 // readOne reads one batch within a second.
 func readOne(t *testing.T, reader *multiReader, slots []datagram) int {
 	t.Helper()
@@ -292,7 +300,7 @@ func Test_groSegment(t *testing.T) {
 // Test_multiReader_stopGRO pins Close's switch: GRO off, no drain.
 func Test_multiReader_stopGRO(t *testing.T) {
 	t.Parallel()
-	reader, _ := groReader(t, 1200)
+	reader, sender := groReader(t, 1200)
 
 	reader.stopGRO()
 
@@ -303,6 +311,14 @@ func Test_multiReader_stopGRO(t *testing.T) {
 	})
 	if gerr != nil || on != 0 || reader.handing.Load() {
 		t.Fatalf("UDP_GRO = %d, %v, handing=%v, want 0 and no drain", on, gerr, reader.handing.Load())
+	}
+	//: a read that returns once GRO is being switched off may hold a message
+	//: without its segment size: dropped, the loop ended.
+	if _, err := sender.Write(make([]byte, 4*1200)); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := readOneErr(reader, newSlots(2, reader.slotSize(1200))); n != 0 || !errors.Is(err, stdnet.ErrClosed) {
+		t.Fatalf("a read after stopGRO = %d, %v, want 0 and net.ErrClosed", n, err)
 	}
 	(&multiReader{}).stopGRO()
 }

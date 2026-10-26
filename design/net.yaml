@@ -3408,8 +3408,8 @@ packages:
         struct:
           fields:
             - doc: |-
-                Source says what reported it: "listener", "loop", "ring", "stall", "gso"
-                or "environment".
+                Source says what reported it: "listener", "loop", "ring", "stall",
+                "capability", "gso" or "environment".
               name: Source
               tag: json:"source"
               type: string

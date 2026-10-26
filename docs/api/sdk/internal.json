@@ -27095,7 +27095,7 @@
           "name": "Source",
           "type": "string",
           "tag": "json:\"source\"",
-          "doc": "Source says what reported it: \"listener\", \"loop\", \"ring\", \"stall\", \"gso\"\nor \"environment\".\n"
+          "doc": "Source says what reported it: \"listener\", \"loop\", \"ring\", \"stall\",\n\"capability\", \"gso\" or \"environment\".\n"
         },
         {
           "name": "Group",

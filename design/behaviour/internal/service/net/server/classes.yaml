@@ -659,6 +659,7 @@ files:
       - (*multiReader).setGRO
       - (*multiReader).handover
       - (*multiReader).stopGRO
+      - (*multiReader).switchGROOff
       - (*multiReader).slotSize
       - (*multiReader).wire
       - (*multiReader).prepare
@@ -2657,6 +2658,12 @@ types:
           without waiting, then end the loop.
         name: handing
         type: atomic.Bool
+      - doc: |-
+          stopping is set by stopGRO before it switches GRO off: a read that
+          returns from then on may hold a coalesced message without its segment
+          size, so it is dropped and the loop ended — the socket is being closed.
+        name: stopping
+        type: atomic.Bool
     kind: struct
     methods:
       - doc: |-
@@ -2689,6 +2696,11 @@ types:
           stopGRO switches GRO off without a drain: Close's, which waits for nothing,
           so a successor at least finds nothing coalesced from here on.
         name: stopGRO
+        recv: r *multiReader
+      - doc: |-
+          switchGROOff marks the reader stopping, then switches GRO off: in that
+          order, so no read completing during the switch is split wrongly.
+        name: switchGROOff
         recv: r *multiReader
       - doc: |-
           slotSize implements datagramSource: a whole coalesced message under GRO, the

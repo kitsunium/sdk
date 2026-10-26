@@ -4409,13 +4409,27 @@ sequences:
         kind: actor
       - id: (*multiReader).stopGRO
         kind: self
-      - id: swallowErr
+      - id: r.switchGROOff
         kind: internal
     steps:
       - opt:
           do:
-            - return: ""
-          when: "!r.gro"
+            - eval: r.switchGROOff()
+              to: r.switchGROOff
+          when: r.gro
+  - of: (*multiReader).switchGROOff
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiReader).switchGROOff
+        kind: self
+      - id: r.stopping.Store
+        kind: value
+      - id: swallowErr
+        kind: internal
+    steps:
+      - eval: r.stopping.Store(true)
+        to: r.stopping.Store
       - eval: swallowErr(r.setGRO(false))
         to: swallowErr
   - of: (*multiReader).slotSize
@@ -4558,6 +4572,10 @@ sequences:
           do:
             - return: 0, errno
           when: errno != 0
+      - opt:
+          do:
+            - return: 0, stdnet.ErrClosed
+          when: r.stopping.Load()
       - eval: r.fill(slots, received)
         to: r.fill
       - return: received, nil
@@ -4607,6 +4625,10 @@ sequences:
           do:
             - return: 0, errno
           when: errno != 0
+      - opt:
+          do:
+            - return: 0, stdnet.ErrClosed
+          when: r.stopping.Load()
       - eval: r.fill(slots, received)
         to: r.fill
       - return: received, nil

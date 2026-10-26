@@ -59,6 +59,10 @@ type multiReader struct {
 	// handing is set by handover: the next reads drain what the socket holds
 	// without waiting, then end the loop.
 	handing atomic.Bool
+	// stopping is set by stopGRO before it switches GRO off: a read that
+	// returns from then on may hold a coalesced message without its segment
+	// size, so it is dropped and the loop ended — the socket is being closed.
+	stopping atomic.Bool
 }
 
 // newMultiReader builds a batched reader over pc.
@@ -124,11 +128,16 @@ func (r *multiReader) handover() bool {
 // stopGRO switches GRO off without a drain: Close's, which waits for nothing,
 // so a successor at least finds nothing coalesced from here on.
 func (r *multiReader) stopGRO() {
-	//: nothing to switch off.
-	if !r.gro {
-		//: GRO was never on.
-		return
+	//: only a socket that coalesced has GRO to switch off.
+	if r.gro {
+		r.switchGROOff()
 	}
+}
+
+// switchGROOff marks the reader stopping, then switches GRO off: in that
+// order, so no read completing during the switch is split wrongly.
+func (r *multiReader) switchGROOff() {
+	r.stopping.Store(true)
 	swallowErr(r.setGRO(false))
 }
 
@@ -232,6 +241,12 @@ func (r *multiReader) readBatch(slots []datagram) (n int, err error) {
 		//: report the raw errno so the loop can classify it.
 		return 0, errno
 	}
+	//: GRO was being switched off under the read: its messages may have lost
+	//: their segment size, and the socket is closing.
+	if r.stopping.Load() {
+		//: dropped; the loop ends as on a closed socket.
+		return 0, stdnet.ErrClosed
+	}
 	r.fill(slots, received)
 	//: every filled slot is ready for the handler.
 	return received, nil
@@ -266,6 +281,12 @@ func (r *multiReader) drain(slots []datagram) (n int, err error) {
 	if errno != 0 {
 		//: the raw errno.
 		return 0, errno
+	}
+	//: the handover's budget ran out and GRO was switched off under the
+	//: drain: its messages may have lost their segment size.
+	if r.stopping.Load() {
+		//: dropped; the loop ends as on a closed socket.
+		return 0, stdnet.ErrClosed
 	}
 	r.fill(slots, received)
 	//: the drained messages, served like any others.

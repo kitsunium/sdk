@@ -1812,8 +1812,8 @@ types:
     name: OverrideValue
   - fields:
       - doc: |-
-          Source says what reported it: "listener", "loop", "ring", "stall", "gso"
-          or "environment".
+          Source says what reported it: "listener", "loop", "ring", "stall",
+          "capability", "gso" or "environment".
         name: Source
         type: string
       - doc: Group names the group concerned; empty for the environment.

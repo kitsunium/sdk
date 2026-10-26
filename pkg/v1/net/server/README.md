@@ -1253,8 +1253,8 @@ Fault is an alias of `github.com/kitsunium/sdk/internal/core/net.FaultValue`, de
 
 ```go
 type Fault struct {
-	// Source says what reported it: "listener", "loop", "ring", "stall", "gso"
-	// or "environment".
+	// Source says what reported it: "listener", "loop", "ring", "stall",
+	// "capability", "gso" or "environment".
 	Source string `json:"source"`
 	// Group names the group concerned; empty for the environment.
 	Group  string `json:"group,omitempty"`
