@@ -2,27 +2,20 @@ module github.com/kitsunium/sdk/pkg/v1/app
 
 go 1.27.3
 
-replace github.com/kitsunium/sdk/internal => ../../../internal
-
-replace github.com/kitsunium/sdk/pkg/v1/clock => ../clock
-
-replace github.com/kitsunium/sdk/pkg/v1/crypto => ../crypto
-
-replace github.com/kitsunium/sdk/pkg/v1/data => ../data
-
-replace github.com/kitsunium/sdk/pkg/v1/errs => ../errs
-
-replace github.com/kitsunium/sdk/pkg/v1/observe => ../observe
-
-replace github.com/kitsunium/sdk/pkg/v1/security => ../security
-
 require (
-	github.com/kitsunium/sdk/internal v0.0.0-00010101000000-000000000000
-	github.com/kitsunium/sdk/pkg/v1/clock v0.0.0-00010101000000-000000000000
-	github.com/kitsunium/sdk/pkg/v1/data v0.0.0-00010101000000-000000000000
-	github.com/kitsunium/sdk/pkg/v1/errs v0.0.0-00010101000000-000000000000
-	github.com/kitsunium/sdk/pkg/v1/observe v0.0.0-00010101000000-000000000000
-	github.com/kitsunium/sdk/pkg/v1/security v0.0.0-00010101000000-000000000000
+	github.com/kitsunium/sdk/internal v0.26.28
+	github.com/kitsunium/sdk/pkg/v1/clock v0.1.2
+	github.com/kitsunium/sdk/pkg/v1/data v0.11.2
+	github.com/kitsunium/sdk/pkg/v1/errs v0.2.4
+	github.com/kitsunium/sdk/pkg/v1/observe v0.4.10
+	github.com/kitsunium/sdk/pkg/v1/security v0.4.7
 )
 
-require github.com/kitsunium/sdk/pkg/v1/crypto v0.0.0-00010101000000-000000000000 // indirect
+require (
+	github.com/kitsunium/sdk v0.20.0
+	github.com/kitsunium/sdk/internal/core v0.18.0
+	github.com/kitsunium/sdk/internal/kernel v0.18.0
+	github.com/kitsunium/sdk/internal/service v0.18.0
+	github.com/kitsunium/sdk/pkg v0.18.0
+	github.com/kitsunium/sdk/pkg/v1/crypto v0.3.3 // indirect
+)
