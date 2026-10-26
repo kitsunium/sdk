@@ -560,6 +560,11 @@ constants:
       - doc: whyOldMember is the reason checkOldMembers refuses a Recover.
         name: whyOldMember
         value: "\"a member other than this node carries the ID of an old member: the others are nodes Init prepared under the new cluster\""
+      - doc: |-
+          whyRepeatedID is the reason Recover and RestoreSnapshot refuse two
+          members under one NodeID.
+        name: whyRepeatedID
+        value: "\"two members under one id\""
     name: fileSilent
   - grouped: true
     items:
@@ -788,6 +793,7 @@ files:
       - foundingTiming
       - writeFoundingEntry
       - sharedKey
+      - sharedID
     name: bootstrap.go
   - decls:
       - batchFrameOverhead
@@ -1780,6 +1786,14 @@ functions:
     name: sharedKey
     params: members []coreconsensus.MemberValue
     results: bool
+  - doc: |-
+      sharedID reports whether two members carry one NodeID. Each line is a
+      member: an ID listed twice is a voter counted twice toward a quorum, two
+      keys the transport admits as one node, or, its learner line first, a
+      survivor Member says does not vote (review of #693).
+    name: sharedID
+    params: members []coreconsensus.MemberValue
+    results: bool
   - name: TimingDefaults
     results: coreconsensus.TimingContractSpec
   - doc: |-
@@ -2681,8 +2695,8 @@ functions:
     results: error
   - doc: |-
       checkRecoverMembers refuses new members that are not all pinned, among
-      which this node, at its incarnation, is not a voter, or which name
-      another voter. The others enter as learners and are promoted through
+      which this node, at its incarnation, is not a voter, which name another
+      voter, or two members under one ID. The others enter as learners and are promoted through
       Promote, never as empty voters (R3-02, R4-04): a member Init only
       prepared cannot vote before a leader admits it, so a forced configuration
       that needed its vote never elected one, and two survivors naming each
@@ -2790,7 +2804,8 @@ functions:
     results: error
   - doc: |-
       checkRestoreMembers refuses new members among which this node, at its
-      incarnation, is not a voter, or of which one is not pinned.
+      incarnation, is not a voter, of which one is not pinned, or of which two
+      carry one ID.
     name: checkRestoreMembers
     params: stamp *coreconsensus.StampValue, members []coreconsensus.MemberValue
     results: error

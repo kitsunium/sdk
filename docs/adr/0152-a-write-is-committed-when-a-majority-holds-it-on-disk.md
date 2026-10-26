@@ -3301,6 +3301,18 @@ node, under the directory lock.
     a `Recover` of its own, a second history (R1-17). The joiners stay
     learners prepared by `Init`; nothing else is refused, and no format
     changes. The first consumer's `--joining` list meets the same refusal.
+    **Nor does it accept two members under one `NodeID`, and neither does
+    `RestoreSnapshot` (amendment of 2026-10-26, review of
+    [#693](https://github.com/kitsunium/sdk/pull/693)).** Each line was
+    judged alone, and the survivor's ID passes every check: listed again
+    under another key, it was a voter counted twice toward every quorum and
+    two keys the transport admitted as that one node; its learner line
+    first, `Member` answered that the survivor does not vote, and the
+    recovered cluster never elected a leader. The same line repeated was
+    refused only because it repeats a key. `Bootstrap` already refused a
+    repeated ID; `Recover` and `RestoreSnapshot` refuse it,
+    `RECOVER_REFUSED` and `RESTORE_REFUSED`, before anything is written. No
+    format changes.
   - **Which node:** the one with the highest `(lastLogTerm, lastLogIndex)`,
     compared in that order, not "the highest committed index", which no
     surviving node can know for certain.
@@ -4972,7 +4984,7 @@ unchanged.
 | #648 | the owner's decision, 2026-10-24 | protocol version 3: one key, one ID for the cluster's whole life, the retired keys in the configuration, the admin payload and the snapshot metadata of version 3, `FlagProtocol3` and the raise refused until every member announces it (amendment of 2026-10-24, #648) |
 | #677 | the owner's decision, 2026-10-25 | a member states its own snapshot limit: `ChangeSnapshotLimit`, admitted from that member only, a lowering below the state not proposed, no protocol raise (amendment of 2026-10-25, #677) |
 | #683 | Raft hunt loop, 2026-10-25 | a batch fetched for a follower behind the evicted payloads is cut by its encoding, a fetch asks for no more entries than one append carries, and a frame refused above the read bound is counted and logged; no format change (amendment of 2026-10-25, #683) |
-| #690, #691 | Raft hunt, 2026-10-25 | the offline operations: `WipeAndRejoin` ordered behind the stop marker `STOP-WIPE`, a crash at any step refusing the start and every offline write until the wipe runs again (#690); `Recover` refuses an old member's ID beside the survivor and asks a fence for every other old voter, whatever the members name (#691) |
+| #690, #691 | Raft hunt, 2026-10-25 | the offline operations: `WipeAndRejoin` ordered behind the stop marker `STOP-WIPE`, a crash at any step refusing the start and every offline write until the wipe runs again (#690); `Recover` refuses an old member's ID beside the survivor and asks a fence for every other old voter, whatever the members name (#691); neither `Recover` nor `RestoreSnapshot` accepts two members under one ID (amendment of 2026-10-26, review of #693) |
 
 ## raft-sql-poc (owner's prior Raft)
 

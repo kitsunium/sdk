@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T21:00:00Z -->
+<!-- updated: 2026-10-26T01:40:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -446,6 +446,13 @@ machine, are 32.9 s at 24, and 34 s for the slowest on average over
   `checkOldMembers` refuses any old or retired ID beside it (R1-17, #691,
   `TestRecoverRefusesAnOldMemberBesideTheSurvivor`,
   `TestCheckOldMembersRefusesAnyOldOrRetiredID`).
+- Judge the members of a `Recover` or a `RestoreSnapshot` one line at a
+  time: the survivor's ID passes every per-line check, and listed twice
+  under two keys it was a voter counted twice toward a quorum and two keys
+  admitted as one node, or, its learner line first, a survivor that never
+  campaigned. `sharedID` refuses a repeated ID before anything is written,
+  as `checkFounders` does at `Bootstrap` (review of #693,
+  `TestRecoverAndRestoreRefuseTwoMembersUnderOneID`).
 - Remove anything in `WipeAndRejoin` before `STOP-WIPE` is durable, the
   stamp before the stores' removal is synced, or `STOP-WIPE` before the
   stamp and the other markers are durably gone: cut between the log and

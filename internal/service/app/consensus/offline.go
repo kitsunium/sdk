@@ -58,6 +58,9 @@ const (
 	wipeDetail = "WipeAndRejoin was interrupted: run ClearQuarantine(WipeAndRejoin) again to complete it, then Init under a new NodeID\n"
 	// whyOldMember is the reason checkOldMembers refuses a Recover.
 	whyOldMember = "a member other than this node carries the ID of an old member: the others are nodes Init prepared under the new cluster"
+	// whyRepeatedID is the reason Recover and RestoreSnapshot refuse two
+	// members under one NodeID.
+	whyRepeatedID = "two members under one id"
 )
 
 // The offline functions work on the shipped layout, and only on it (D17,
@@ -468,8 +471,8 @@ func ReceiptMessage(old, next coreconsensus.ClusterID, voter coreconsensus.NodeI
 // and a forced configuration. The audit file records how many entries past
 // the persisted commit were adopted. Every old voter but this node must be
 // attested fenced by every witness, whatever the new members name, and no
-// other member may carry the ID of an old or retired member; without
-// witness keys it fails closed.
+// other member may carry the ID of an old or retired member, or of another
+// member; without witness keys it fails closed.
 // A stop marker, STOP-RECOVER, is durable before the forced entry and
 // removed once the new stamp is: a Recover interrupted between the two
 // refuses a start, and is completed by running Recover again to the same
@@ -882,8 +885,8 @@ func checkRecover(stamp *coreconsensus.StampValue, newCluster coreconsensus.Clus
 }
 
 // checkRecoverMembers refuses new members that are not all pinned, among
-// which this node, at its incarnation, is not a voter, or which name
-// another voter. The others enter as learners and are promoted through
+// which this node, at its incarnation, is not a voter, which name another
+// voter, or two members under one ID. The others enter as learners and are promoted through
 // Promote, never as empty voters (R3-02, R4-04): a member Init only
 // prepared cannot vote before a leader admits it, so a forced configuration
 // that needed its vote never elected one, and two survivors naming each
@@ -902,6 +905,9 @@ func checkRecoverMembers(stamp *coreconsensus.StampValue, members []coreconsensu
 		if m.ID == stamp.ID && m.Voter {
 			self = m.Incarnation == stamp.Incarnation
 		}
+	}
+	if sharedID(members) {
+		return recoverRefused(whyRepeatedID)
 	}
 	if sharedKey(members) {
 		return recoverRefused("two members under one key")
@@ -1332,7 +1338,8 @@ func checkRestoreBounds(flog *fileLog, stamp *coreconsensus.StampValue, opt *Res
 }
 
 // checkRestoreMembers refuses new members among which this node, at its
-// incarnation, is not a voter, or of which one is not pinned.
+// incarnation, is not a voter, of which one is not pinned, or of which two
+// carry one ID.
 func checkRestoreMembers(stamp *coreconsensus.StampValue, members []coreconsensus.MemberValue) error {
 	if !slices.ContainsFunc(members, func(m coreconsensus.MemberValue) bool {
 		return m.ID == stamp.ID && m.Voter && m.Incarnation == stamp.Incarnation
@@ -1343,6 +1350,9 @@ func checkRestoreMembers(stamp *coreconsensus.StampValue, members []coreconsensu
 		if isZeroDigest(m.SPKI) {
 			return restoreRefused("a member without an SPKI pin")
 		}
+	}
+	if sharedID(members) {
+		return restoreRefused(whyRepeatedID)
 	}
 	if sharedKey(members) {
 		return restoreRefused("two members under one key")

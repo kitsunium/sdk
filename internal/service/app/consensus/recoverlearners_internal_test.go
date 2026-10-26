@@ -1,9 +1,14 @@
 package consensus
 
 import (
+	"bytes"
+	"context"
 	"crypto/ed25519"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
+	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -26,6 +31,12 @@ func newRecoverFixture(t *testing.T, next coreconsensus.ClusterID) *recoverFixtu
 	for _, dn := range nodes {
 		dn.crash(t, c)
 	}
+	return recoverFixtureOn(t, c, nodes, next)
+}
+
+// recoverFixtureOn is the fixture over three nodes already stopped.
+func recoverFixtureOn(t *testing.T, c *cluster, nodes []*diskNode, next coreconsensus.ClusterID) *recoverFixture {
+	t.Helper()
 	pub, priv, err := ed25519.GenerateKey(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -157,4 +168,97 @@ func TestCheckOldMembersRefusesAnyOldOrRetiredID(t *testing.T) {
 			t.Errorf("%s named a learner: %v, want accepted %v", tc.name, err, tc.ok)
 		}
 	}
+}
+
+// A Recover or a RestoreSnapshot given two members under one NodeID, each
+// under its own key, wrote both into the new configuration: every check
+// judged each line alone, the survivor's ID passes them all, and the same
+// line repeated is refused only because it repeats a key. The ID is then
+// a voter listed twice, counted twice toward every quorum, and the
+// transport admits both keys as that node, so a second key speaks for it;
+// named first, a learner line under the survivor's ID made Member answer
+// that it does not vote. Bootstrap refuses a repeated ID; Recover and
+// RestoreSnapshot refuse it too, before anything is written, and accept
+// the same members without the second line (review of #693).
+func TestRecoverAndRestoreRefuseTwoMembersUnderOneID(t *testing.T) {
+	c, nodes := threeOnDisk(t, 20)
+	var buf bytes.Buffer
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	meta, err := nodes[0].node.SaveSnapshot(ctx, "op:save", &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dn := range nodes {
+		dn.crash(t, c)
+	}
+	next := coreconsensus.ClusterID{27}
+	// twin is m again under another key, which no member holds.
+	twin := func(m coreconsensus.MemberValue, voter bool) coreconsensus.MemberValue {
+		m.SPKI, m.Voter = MemorySPKI(m.ID^0x5a5a), voter
+		return m
+	}
+	t.Run("recover", func(t *testing.T) {
+		f := recoverFixtureOn(t, c, nodes, next)
+		keep := f.nodes[0]
+		self := f.member(t, keep, true)
+		stale := twin(self, true)
+		stale.Incarnation[0]++
+		for _, tc := range []struct {
+			name    string
+			members []coreconsensus.MemberValue
+		}{
+			{"the survivor and a learner under its ID", []coreconsensus.MemberValue{self, twin(self, false)}},
+			{"a learner under the survivor's ID first", []coreconsensus.MemberValue{twin(self, false), self}},
+			{"another incarnation of the survivor first", []coreconsensus.MemberValue{stale, self}},
+		} {
+			err := Recover(keep.dd, next, tc.members, f.options(f.nodes[1], f.nodes[2]))
+			if err == nil {
+				_, last := keep.dd.d.log.Bounds()
+				conf := must(lastMembership(keep.dd.d.log, keep.dd.d.snaps, last))(t)
+				t.Fatalf("Recover naming %s accepted: the forced configuration lists %s, voters %v", tc.name, memberLines(conf.Members), conf.Voters())
+			}
+			f.refused(t, keep, err, "naming "+tc.name)
+			if why := whyOf(err); why != whyRepeatedID {
+				t.Fatalf("Recover naming %s refused for %q, want %q", tc.name, why, whyRepeatedID)
+			}
+		}
+		if err := Recover(keep.dd, next, []coreconsensus.MemberValue{self}, f.options(f.nodes[1], f.nodes[2])); err != nil {
+			t.Fatalf("Recover on the survivor alone, every other old voter fenced: %v", err)
+		}
+	})
+	t.Run("restore", func(t *testing.T) {
+		dn, m := freshDisk(t, c, next, "r0")
+		opt := RestoreOptions{Expected: meta, Confirm: next.String(), Operator: "op:restore", MaxEncoded: 1 << 30, MaxDecoded: 1 << 30}
+		for _, members := range [][]coreconsensus.MemberValue{{m, twin(m, false)}, {twin(m, false), m}} {
+			got, err := RestoreSnapshot(dn.dd, bytes.NewReader(buf.Bytes()), next, members, &opt)
+			if err == nil {
+				t.Fatalf("RestoreSnapshot naming %s accepted: the restored configuration lists %s, voters %v",
+					memberLines(members), memberLines(got.Membership.Members), got.Membership.Voters())
+			}
+			if !errors.Is(err, coreconsensus.RestoreRefused) || whyOf(err) != whyRepeatedID {
+				t.Fatalf("RestoreSnapshot naming %s: %v (why %q), want RESTORE_REFUSED for %q", memberLines(members), err, whyOf(err), whyRepeatedID)
+			}
+			if st := must(dn.dd.Log().Stamp())(t); st.State != coreconsensus.StampJoining {
+				t.Fatalf("the refused restore moved the stamp to state %d", st.State)
+			}
+		}
+		if _, err := RestoreSnapshot(dn.dd, bytes.NewReader(buf.Bytes()), next, []coreconsensus.MemberValue{m}, &opt); err != nil {
+			t.Fatalf("RestoreSnapshot naming this node alone: %v", err)
+		}
+	})
+}
+
+// memberLines shows each member as its ID, its role and its key's first
+// byte, in list order.
+func memberLines(ms []coreconsensus.MemberValue) string {
+	lines := make([]string, 0, len(ms))
+	for _, m := range ms {
+		role := "learner"
+		if m.Voter {
+			role = "voter"
+		}
+		lines = append(lines, fmt.Sprintf("%d %s key %x", m.ID, role, m.SPKI[:1]))
+	}
+	return "[" + strings.Join(lines, ", ") + "]"
 }

@@ -2454,8 +2454,8 @@ packages:
           and a forced configuration. The audit file records how many entries past
           the persisted commit were adopted. Every old voter but this node must be
           attested fenced by every witness, whatever the new members name, and no
-          other member may carry the ID of an old or retired member; without
-          witness keys it fails closed.
+          other member may carry the ID of an old or retired member, or of another
+          member; without witness keys it fails closed.
           A stop marker, STOP-RECOVER, is durable before the forced entry and
           removed once the new stamp is: a Recover interrupted between the two
           refuses a start, and is completed by running Recover again to the same

@@ -15042,6 +15042,11 @@ sequences:
           value: m
       - opt:
           do:
+            - return: recoverRefused(whyRepeatedID)
+              to: recoverRefused
+          when: sharedID(members)
+      - opt:
+          do:
             - return: recoverRefused("two members under one key")
               to: recoverRefused
           when: sharedKey(members)
@@ -15785,6 +15790,11 @@ sequences:
           key: _
           range: members
           value: m
+      - opt:
+          do:
+            - return: restoreRefused(whyRepeatedID)
+              to: restoreRefused
+          when: sharedID(members)
       - opt:
           do:
             - return: restoreRefused("two members under one key")
