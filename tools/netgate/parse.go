@@ -1,5 +1,5 @@
 // Package main — the parser: `go test -bench` output read into samples, one
-// per result line and metric, keyed by load and engine.
+// per result line and metric, keyed by load and engine pair.
 package main
 
 import (
@@ -10,22 +10,33 @@ import (
 	"strings"
 )
 
-// One top-level benchmark per load, so a run can interleave them:
-// BenchmarkLoad<load>/engine=<label>.
+// One top-level benchmark per load, a sub-benchmark per pair of engines
+// measured side by side in one child: BenchmarkLoad<load>/pair=<A>:<B>. Each
+// line is one round, its metrics a:<metric>, b:<metric> and ratio:<metric>,
+// B over A.
 const (
 	// benchPrefix starts the benchmark of every load.
 	benchPrefix string = "BenchmarkLoad"
-	// enginePrefix introduces the engine's label in a load's sub-benchmark
-	// name.
-	enginePrefix string = "engine="
+	// pairPrefix introduces the pair's labels in a load's sub-benchmark name.
+	pairPrefix string = "pair="
+	// pairSep separates engine A's label from engine B's.
+	pairSep string = ":"
+	// ratioUnit prefixes a metric's per-round ratio, B over A.
+	ratioUnit string = "ratio:"
+	// aUnit prefixes engine A's own value of a metric.
+	aUnit string = "a:"
+	// bUnit prefixes engine B's own value of a metric.
+	bUnit string = "b:"
 )
 
-// seriesKey names one engine on one load.
+// seriesKey names one pair of engines on one load.
 type seriesKey struct {
 	// Load is L1, L2 or L3.
 	Load string
-	// Engine is the label after engine=.
-	Engine string
+	// A is the reference engine's label.
+	A string
+	// B is the measured engine's label.
+	B string
 }
 
 // metricSample is one value of one metric on one result line.
@@ -103,7 +114,7 @@ func parseLine(line string) (seriesKey, []metricSample, bool) {
 	return key, metrics, len(metrics) > 0
 }
 
-// parseName splits BenchmarkLoad<load>/engine=<label>[-<procs>].
+// parseName splits BenchmarkLoad<load>/pair=<A>:<B>[-<procs>].
 func parseName(name string) (seriesKey, bool) {
 	rest := strings.TrimPrefix(name, benchPrefix)
 	//: the GOMAXPROCS suffix the testing package appends.
@@ -113,13 +124,21 @@ func parseName(name string) (seriesKey, bool) {
 			rest = rest[:i]
 		}
 	}
-	load, engine, ok := strings.Cut(rest, "/")
-	//: exactly a load, then the engine.
-	if !ok || load == "" || !strings.HasPrefix(engine, enginePrefix) || strings.Contains(engine, "/") {
+	load, pair, ok := strings.Cut(rest, "/")
+	//: exactly a load, then the pair.
+	if !ok || load == "" || !strings.HasPrefix(pair, pairPrefix) || strings.Contains(pair, "/") {
 		//: another shape.
 		return seriesKey{}, false
 	}
-	label := strings.TrimPrefix(engine, enginePrefix)
-	//: an empty label names nothing.
-	return seriesKey{Load: load, Engine: label}, label != ""
+	a, b, ok := splitPair(strings.TrimPrefix(pair, pairPrefix))
+	//: the load and both labels.
+	return seriesKey{Load: load, A: a, B: b}, ok
+}
+
+// splitPair splits "<A>:<B>" into its two labels, neither empty, with one
+// separator only.
+func splitPair(pair string) (string, string, bool) {
+	a, b, ok := strings.Cut(pair, pairSep)
+	//: two labels, neither empty, no third.
+	return a, b, ok && a != "" && b != "" && !strings.Contains(b, pairSep)
 }
