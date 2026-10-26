@@ -26211,7 +26211,7 @@
       "code": {
         "value": "0.2.11.36"
       },
-      "doc": "CodeLoopOptionUnsupported identifies an option a group cannot honour on its\nengine: Loop on a group not served by a loop handler, BatchReplies on a\nstream group (ADR 0190), or, on a loop group, Use or an option neither the\nengine nor the handler honours (ADR 0186 §D1).\n",
+      "doc": "CodeLoopOptionUnsupported identifies an option a group cannot honour on its\nengine: Loop on a group not served by a loop handler, BatchReplies on a\nstream group (ADR 0192), or, on a loop group, Use or an option neither the\nengine nor the handler honours (ADR 0186 §D1).\n",
       "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
@@ -26840,7 +26840,7 @@
           "doc": "ReplyFailures is the number of replies a BatchReplies group queued during\na batch that did not leave: Reply had already reported them sent.\n"
         }
       ],
-      "doc": "DatagramStateValue counts what the batched datagram paths drop (ADR 0190):\nthe messages a read cut short, and the replies a batch queued that did not\nleave. Each is a drop nobody above a read loop could be told of, so the\ncounter is the report.\n",
+      "doc": "DatagramStateValue counts what the batched datagram paths drop (ADR 0192):\nthe messages a read cut short, and the replies a batch queued that did not\nleave. Each is a drop nobody above a read loop could be told of, so the\ncounter is the report.\n",
       "file": "core/net/state_datagram.go",
       "layer": "core",
       "family": "net"
@@ -28923,7 +28923,7 @@
       "spelled": "OptionKind",
       "canonical": "github.com/kitsunium/sdk/internal/core/net.OptionKind",
       "value": "19",
-      "doc": "OptionBatchReplies is BatchReplies. A datagram group honours it; a stream\ngroup, goroutine or loop, refuses it with LoopOptionUnsupported (ADR 0190).\n",
+      "doc": "OptionBatchReplies is BatchReplies. A datagram group honours it; a stream\ngroup, goroutine or loop, refuses it with LoopOptionUnsupported (ADR 0192).\n",
       "file": "core/net/loop.go",
       "layer": "core",
       "family": "net"
@@ -29949,7 +29949,7 @@
           "name": "Datagrams",
           "type": "DatagramStateValue",
           "tag": "json:\"datagrams\"",
-          "doc": "Datagrams counts what the batched datagram paths drop (ADR 0190).\n"
+          "doc": "Datagrams counts what the batched datagram paths drop (ADR 0192).\n"
         },
         {
           "name": "Loops",
@@ -64037,7 +64037,7 @@
       "name": "BatchReplies",
       "spelled": "func() GroupOption",
       "canonical": "func() github.com/kitsunium/sdk/internal/service/net/server.GroupOption",
-      "doc": "BatchReplies makes a datagram group's replies leave per read batch rather than\none at a time (ADR 0190). Packet.Reply made while the batch is served then\nqueues a copy of its datagram and reports it sent, len(b) and nil; the batch's\nreplies leave together when it ends, and one that fails then is counted in\nState's Datagrams.ReplyFailures, since its handler has returned. On Linux a UDP\nsocket sends them with one sendmmsg, a run of consecutive replies to one peer\nof one size as one UDP GSO send, split at 64 segments or the IP length, and\none datagram a message once the device refused GSO (EIO); a zoned IPv6 peer\nis written at once, and a Unix datagram socket, a socket with no raw\ndescriptor and every other platform send the queue one WriteTo a reply.\nUnder the option Reply is valid only during the handler's call, as Data is:\nthe Packet is the read loop's, and one kept and replied to while a later\nbatch is served is queued with that batch. A reply made while no batch is\nserved is written at once. Without the option, Reply writes at once and\nreturns the write's own error. A stream group refuses it with\nLoopOptionUnsupported.\n",
+      "doc": "BatchReplies makes a datagram group's replies leave per read batch rather than\none at a time (ADR 0192). Packet.Reply made while the batch is served then\nqueues a copy of its datagram and reports it sent, len(b) and nil; the batch's\nreplies leave together when it ends, and one that fails then is counted in\nState's Datagrams.ReplyFailures, since its handler has returned. On Linux a UDP\nsocket sends them with one sendmmsg, a run of consecutive replies to one peer\nof one size as one UDP GSO send, split at 64 segments or the IP length, and\none datagram a message once the device refused GSO (EIO); a zoned IPv6 peer\nis written at once, and a Unix datagram socket, a socket with no raw\ndescriptor and every other platform send the queue one WriteTo a reply.\nUnder the option Reply is valid only during the handler's call, as Data is:\nthe Packet is the read loop's, and one kept and replied to while a later\nbatch is served is queued with that batch. A reply made while no batch is\nserved is written at once. Without the option, Reply writes at once and\nreturns the write's own error. A stream group refuses it with\nLoopOptionUnsupported.\n",
       "file": "service/net/server/options.go",
       "layer": "service",
       "family": "net"
