@@ -660,8 +660,11 @@ machine, are 32.9 s at 24, and 34 s for the slowest on average over
   contract every try past the first expired while it waited out the
   transfer to the voter before, so the `Remove` of the leader submitted on
   it failed `NOT_LEADER` at every attempt again. `handOff` reads the bound
-  from raft's status with the target, so the wait in `transferLocal` is at
-  most a tick (#694,
+  from raft's status with the target, so a try's wait in `transferLocal`
+  for the previous try's transfer is at most a tick, the gap between the
+  two deadlines. A transfer started elsewhere, an operator's or the
+  preferred-leader watch's, can still hold the first try for up to the
+  contract's `ElectionTimeoutMax` (#694,
   `TestRemovingTheLeaderOnItselfHandsOverPastAVoterThatDeclinesUnderALongerContract`,
   `TestRemovingTheLeaderOnItselfHandsOverPastADeadVoterUnderALongerContract`).
 - Leave a peer's series at their last value once it is no longer published,

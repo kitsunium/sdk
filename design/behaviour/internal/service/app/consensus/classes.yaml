@@ -7388,8 +7388,10 @@ types:
           tick before raft's deadline, sent nobody a TimeoutNow (#681). That wait
           ends at most a tick before the deadline because handOff bounds each try by
           the maximum election timeout of the contract raft runs on, the one
-          startTransfer adds to the deadline (#694): the wait here then lasts at
-          most that tick, and the try goes on to its own transfer.
+          startTransfer adds to the deadline (#694): a wait here for the previous
+          try's transfer then lasts at most that tick, and the try goes on to its
+          own. A transfer started elsewhere, an operator's or the preferred-leader
+          watch's, can still hold the first try for up to that maximum.
         name: transferLocal
         params: ctx context.Context, to coreconsensus.NodeID
         recv: n *Node
