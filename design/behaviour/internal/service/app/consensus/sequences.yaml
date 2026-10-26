@@ -1384,7 +1384,16 @@ sequences:
               do:
                 - return: misconfigured("LogReserveBytes", "not below MaxLogBytes")
                   to: misconfigured
+            - case: segmentsFill(c.Log, c.MaxLogBytes-c.LogReserveBytes)
+              do:
+                - return: misconfigured("MaxLogBytes", "less LogReserveBytes, not above two of the log's segments")
+                  to: misconfigured
       - return: nil
+  - of: segmentsFill
+    steps:
+      - bind: s, ok
+        eval: l.(interface{ segmentBytes() int64 })
+      - return: ok && h-s.segmentBytes() <= s.segmentBytes()
   - of: refuseDurability
     participants:
       - id: caller
@@ -18930,6 +18939,8 @@ sequences:
         kind: value
       - id: n.am.Unlock
         kind: value
+      - id: n.trailingKept
+        kind: internal
       - id: n.exec
         kind: internal
     steps:
@@ -18950,13 +18961,16 @@ sequences:
         to: n.am.Unlock
       - bind: through
         eval: min(older, applied)
+      - bind: trailing
+        eval: n.trailingKept()
+        to: n.trailingKept
       - opt:
           do:
             - return: ""
-          when: through <= n.cfg.SnapshotTrailing
+          when: through <= trailing
       - op: "-="
         set: through
-        value: n.cfg.SnapshotTrailing
+        value: trailing
       - eval: |-
           n.exec(func() {
           		now := n.clk.Now()
@@ -18966,10 +18980,10 @@ sequences:
           				n.releasePin(to, pin, now)
           				continue
           			}
-          			if at <= n.cfg.SnapshotTrailing {
+          			if at <= trailing {
           				return
           			}
-          			through = min(through, at-n.cfg.SnapshotTrailing)
+          			through = min(through, at-trailing)
           		}
           		n.r.Compact(through)
           		n.handleReady()
@@ -19624,6 +19638,27 @@ sequences:
           			n.handleReady()
           		})
           	}()
+  - of: (*fileLog).segmentBytes
+    steps:
+      - opt:
+          do:
+            - return: DefaultSegmentBytes
+          when: l.dd == nil || l.dd.opts.SegmentBytes <= 0
+      - return: l.dd.opts.SegmentBytes
+  - of: (*Node).trailingKept
+    steps:
+      - opt:
+          do:
+            - return: "0"
+          when: n.space.short.Load()
+      - opt:
+          do:
+            - return: "0"
+          init:
+            bind: sr, ok
+            eval: n.cfg.Log.(spaceReporter)
+          when: ok && 2*sr.logBytes() >= n.cfg.MaxLogBytes-n.cfg.LogReserveBytes
+      - return: n.cfg.SnapshotTrailing
   - of: (*Node).guardSpace
     participants:
       - id: caller

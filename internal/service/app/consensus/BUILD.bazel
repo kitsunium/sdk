@@ -119,6 +119,7 @@ go_test(
         "joinlimit_internal_test.go",
         "joinsmalllimit_internal_test.go",
         "learnerownlimit_internal_test.go",
+        "logfloor_internal_test.go",
         "logtight_internal_test.go",
         "lostframe_internal_test.go",
         "metabitflip_internal_test.go",

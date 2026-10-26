@@ -477,7 +477,11 @@ func belowProtocol3(stats []raft.PeerStatValue, to coreconsensus.NodeID) bool {
 // (sendPin), pins compaction back to it, less SnapshotTrailing (R6-01): a leader that cut twice during one transfer
 // compacted past the snapshot it was sending, the entry after it was gone
 // once the peer installed it, and under a sustained write rate the peer
-// installed snapshot after snapshot and never caught up (#550).
+// installed snapshot after snapshot and never caught up (#550). The
+// trailing entries are kept only while the log has room for them
+// (trailingKept): counted whatever their size, they outgrew the quota's
+// headroom before any compaction, and no cut compacted the log under the
+// alarm that followed (#696).
 func (n *Node) afterCut() {
 	metas := n.retain()
 	if len(metas) == 0 {
@@ -488,10 +492,11 @@ func (n *Node) afterCut() {
 	applied := n.applied
 	n.am.Unlock()
 	through := min(older, applied)
-	if through <= n.cfg.SnapshotTrailing {
+	trailing := n.trailingKept()
+	if through <= trailing {
 		return
 	}
-	through -= n.cfg.SnapshotTrailing
+	through -= trailing
 	n.exec(func() {
 		now := n.clk.Now()
 		for to, pin := range n.sending {
@@ -500,10 +505,10 @@ func (n *Node) afterCut() {
 				n.releasePin(to, pin, now)
 				continue
 			}
-			if at <= n.cfg.SnapshotTrailing {
+			if at <= trailing {
 				return
 			}
-			through = min(through, at-n.cfg.SnapshotTrailing)
+			through = min(through, at-trailing)
 		}
 		n.r.Compact(through)
 		n.handleReady()

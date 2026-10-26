@@ -54,6 +54,38 @@ type spaceReporter interface {
 	freeBytes() int64
 }
 
+// segmentBytes is the size the shipped log creates its segments at, the
+// unit its logBytes grows and shrinks by, which refuseCeilings judges the
+// quota's headroom against (#696). It is the data directory's option, as
+// the log was opened with it; a rotation enlarges one segment for a batch
+// that does not fit, never the next.
+func (l *fileLog) segmentBytes() int64 {
+	if l.dd == nil || l.dd.opts.SegmentBytes <= 0 {
+		return DefaultSegmentBytes
+	}
+	return l.dd.opts.SegmentBytes
+}
+
+// trailingKept is how many entries compaction keeps behind its point, the
+// older retained snapshot (afterCut): SnapshotTrailing, or none once the
+// log has no room for them, this node's disk short or its log half way to
+// the no-space alarm. The window counts entries whatever their size: with
+// entries of a quarter of MaxEntryBytes the default 4 096 weighed 1 GiB,
+// more than the headroom of the quota ADR 0152 recommends, nothing was
+// compacted before the alarm rose, and with the alarm refusing every
+// command no cut an operator asked for compacted anything either, for good
+// (#696). It only spares a peer a little behind the older snapshot an
+// install; the log back to that snapshot (R6-02) is kept whatever the room.
+func (n *Node) trailingKept() uint64 {
+	if n.space.short.Load() {
+		return 0
+	}
+	if sr, ok := n.cfg.Log.(spaceReporter); ok && 2*sr.logBytes() >= n.cfg.MaxLogBytes-n.cfg.LogReserveBytes {
+		return 0
+	}
+	return n.cfg.SnapshotTrailing
+}
+
 // guardSpace proposes the no-space alarm when this node's disk runs short
 // and the alarm is not committed, at most every spaceRaiseEvery. It runs on
 // the loop, at each tick and each completed write; the proposal runs on a
