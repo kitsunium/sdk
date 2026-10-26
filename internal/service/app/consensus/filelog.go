@@ -321,6 +321,14 @@ func openFileLog(dd *dataDir, segBytes int64) (*fileLog, error) {
 	if err := l.prepareOpen(); err != nil {
 		return nil, err
 	}
+	if err := wipeMarker(dd.dir); err != nil {
+		// A wipe a crash interrupted: whatever it left of the log is not
+		// recovered, which could fail the open, or publish a segment, over
+		// stores the wipe run again deletes. The log refuses every call,
+		// and the start is refused on it (#690).
+		l.refuse = err
+		return l, nil
+	}
 	if q, err := os.ReadFile(filepath.Join(dd.dir, markerQuarantine)); err == nil {
 		l.refuse = origin(coreconsensus.LogQuarantined, errs.String("marker", strings.TrimSpace(string(q))))
 		return l, nil

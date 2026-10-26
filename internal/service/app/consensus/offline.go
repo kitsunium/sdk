@@ -22,7 +22,10 @@ import (
 const (
 	// WipeAndRejoin wipes the directory; the operator then Removes the old
 	// NodeID and Inits under a NEW one (R4-03). A voter's incarnation is
-	// never swapped in place.
+	// never swapped in place. A wipe that does not finish leaves the stop
+	// marker STOP-WIPE, which refuses a start, Init, Redraw, Recover,
+	// RestoreSnapshot and TruncateAndStaySilent until WipeAndRejoin runs
+	// again and completes it.
 	WipeAndRejoin QuarantineExit = iota + 1
 	// TruncateAndStaySilent truncates at the damage and persists a silence
 	// condition (R4-03).
@@ -41,6 +44,23 @@ const (
 	// is refused while it is there and a Recover to that cluster resumes from
 	// what the first one decided (#405).
 	markerRecover = markerStopPrefix + "RECOVER"
+	// markerWipe is the stop marker of a WipeAndRejoin in progress: written,
+	// synced, before anything is removed, and removed last, once the stores,
+	// then the stamp and every other marker, are durably gone. A wipe a crash
+	// interrupted left a member stamp over an empty log, and the node
+	// restarted as the same voter with no term, no vote and no entry (#690).
+	// While it is there a start is refused, the log is not recovered at
+	// open, every offline write but the wipe refuses, and the wipe run again
+	// completes.
+	markerWipe = markerStopPrefix + "WIPE"
+	// wipeDetail is what STOP-WIPE shows the operator, as the detail of
+	// STOP_MARKER_PRESENT.
+	wipeDetail = "WipeAndRejoin was interrupted: run ClearQuarantine(WipeAndRejoin) again to complete it, then Init under a new NodeID\n"
+	// whyOldMember is the reason checkOldMembers refuses a Recover.
+	whyOldMember = "a member other than this node carries the ID of an old member: the others are nodes Init prepared under the new cluster"
+	// whyRepeatedID is the reason Recover and RestoreSnapshot refuse two
+	// members under one NodeID.
+	whyRepeatedID = "two members under one id"
 )
 
 // The offline functions work on the shipped layout, and only on it (D17,
@@ -61,6 +81,31 @@ func (d DataDir) offline() error {
 		return origin(coreconsensus.DataDirInUse, errs.String("dir", d.d.dir))
 	}
 	return nil
+}
+
+// offlineWrite is offline, and refuses as well a directory whose wipe was
+// interrupted: what it holds is neither the old member nor an empty
+// directory, and only WipeAndRejoin, run again, may write there (#690).
+func (d DataDir) offlineWrite() error {
+	if err := d.offline(); err != nil {
+		return err
+	}
+	return wipeMarker(d.d.dir)
+}
+
+// wipeMarker is the STOP_MARKER_PRESENT of the STOP-WIPE marker of dir, nil
+// when there is none. One that is there but cannot be read is a
+// STORAGE_FAILED, never read as no wipe in progress.
+func wipeMarker(dir string) error {
+	p := filepath.Join(dir, markerWipe)
+	b, err := os.ReadFile(p)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return nil
+	case err != nil:
+		return storageFailed("read stop marker", err)
+	}
+	return stopMarkerPresent(p, b)
 }
 
 // audit appends one line to the operator audit file and syncs it before the
@@ -94,7 +139,9 @@ func (d DataDir) audit(op coreconsensus.Operator, what string) (err error) {
 // stamp, and the pair the operator or the JOIN gives to AddLearner. It is
 // idempotent (R3-02, R7-41, R8-10).
 func Init(d DataDir, cluster coreconsensus.ClusterID, slot string) (coreconsensus.NodeID, coreconsensus.Incarnation, error) {
-	if err := d.offline(); err != nil {
+	// A half-wiped directory still holds the old member stamp, which the
+	// idempotent path would hand back as the "new" pair (#690).
+	if err := d.offlineWrite(); err != nil {
 		return 0, coreconsensus.Incarnation{}, err
 	}
 	return InitLog(d.Log(), cluster, slot)
@@ -103,7 +150,7 @@ func Init(d DataDir, cluster coreconsensus.ClusterID, slot string) (coreconsensu
 // Redraw draws a new id, only while the stamp is joining and the log empty,
 // after a JOIN_REFUSED for a reused or retired id (R8-10).
 func Redraw(d DataDir) (coreconsensus.NodeID, error) {
-	if err := d.offline(); err != nil {
+	if err := d.offlineWrite(); err != nil {
 		return 0, err
 	}
 	return RedrawLog(d.Log())
@@ -237,6 +284,11 @@ func ClearQuarantine(d DataDir, exit QuarantineExit, op coreconsensus.Operator) 
 	case WipeAndRejoin:
 		return d.wipeAndRejoin(op)
 	case TruncateAndStaySilent:
+		if err := wipeMarker(d.d.dir); err != nil {
+			// The log a wipe began to delete is not one to truncate: the
+			// wipe is completed, never undone (#690).
+			return err
+		}
 		if err := d.d.log.storageFailedThisBoot(); err != nil {
 			// The truncation would be written after pages the disk may
 			// not hold: reboot first (#563). WipeAndRejoin keeps nothing
@@ -252,11 +304,20 @@ func ClearQuarantine(d DataDir, exit QuarantineExit, op coreconsensus.Operator) 
 	}
 }
 
-// wipeAndRejoin is the WipeAndRejoin exit: audited first, then the log is
-// closed, its stores, stamp and markers are deleted, the directory synced,
-// and the directory reopened empty.
+// wipeAndRejoin is the WipeAndRejoin exit, in an order a crash at any step
+// leaves safe (#690): audited first; then STOP-WIPE, durable before
+// anything is removed; the log closed, its stores deleted and the
+// directory synced; the stamp, the quarantine marker, the silence condition
+// and every other stop marker deleted and the directory synced; STOP-WIPE
+// removed last and the directory synced; and the directory reopened empty.
+// Interrupted anywhere before the last step, the directory keeps STOP-WIPE,
+// which refuses a start and every offline write, and the wipe run again
+// resumes it: it keeps nothing, so it starts over. It is never undone.
 func (d DataDir) wipeAndRejoin(op coreconsensus.Operator) error {
 	if err := d.audit(op, "clear-quarantine wipe-and-rejoin"); err != nil {
+		return err
+	}
+	if err := d.markWipe(); err != nil {
 		return err
 	}
 	if err := d.d.log.Close(); err != nil {
@@ -268,60 +329,121 @@ func (d DataDir) wipeAndRejoin(op coreconsensus.Operator) error {
 	if err := d.removeStampAndMarkers(); err != nil {
 		return err
 	}
-	// The boot-scoped marker exists only after a storage failure of this
-	// boot; one that cannot be removed would refuse the next start anyway,
-	// so the wipe says so now.
-	if err := os.Remove(d.d.log.runtimeMarker("STORAGE_FAILED")); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return storageFailed("wipe", err)
-	}
-	if err := syncDir(d.d.dir); err != nil {
-		return storageFailed("wipe", err)
+	if err := d.clearWipeMarker(); err != nil {
+		return err
 	}
 	return d.d.open()
 }
 
-// removeStores deletes the log and the snapshots, whole.
+// markWipe publishes STOP-WIPE, durably, before the wipe removes anything.
+func (d DataDir) markWipe() error {
+	if err := writeFileSync(filepath.Join(d.d.dir, markerWipe), []byte(wipeDetail)); err != nil {
+		return storageFailed("wipe marker", err)
+	}
+	return d.wipeStep("marker")
+}
+
+// clearWipeMarker removes STOP-WIPE, durably, once everything else the wipe
+// removes is durably gone: until then nothing tells a directory this wipe
+// has not finished from the old member's.
+func (d DataDir) clearWipeMarker() error {
+	if err := os.Remove(filepath.Join(d.d.dir, markerWipe)); err != nil {
+		return storageFailed("wipe marker", err)
+	}
+	if err := syncDir(d.d.dir); err != nil {
+		return storageFailed("wipe", err)
+	}
+	return d.wipeStep("done")
+}
+
+// wipeStep runs the test hook after a step of the wipe, nil when no test
+// set it.
+func (d DataDir) wipeStep(step string) error {
+	if d.d.afterWipeStep == nil {
+		return nil
+	}
+	return d.d.afterWipeStep(step)
+}
+
+// removeStores deletes the log and the snapshots, whole, then syncs the
+// directory: the stamp goes only once their removal is durable, and with
+// the stamp the last trace of the old member but STOP-WIPE.
 func (d DataDir) removeStores() error {
 	for _, name := range []string{"log", "snap"} {
 		if err := os.RemoveAll(filepath.Join(d.d.dir, name)); err != nil {
 			return storageFailed("wipe", err)
 		}
+		if err := d.wipeStep(name); err != nil {
+			return err
+		}
+	}
+	if err := syncDir(d.d.dir); err != nil {
+		return storageFailed("wipe", err)
 	}
 	return nil
 }
 
 // removeStampAndMarkers deletes the stamp, the quarantine marker, the
-// silence condition and every stop marker. A directory that could not be listed keeps its stamp and its
-// markers: the wipe fails here rather than reopen a directory it did not
-// clear.
+// silence condition and every stop marker but STOP-WIPE, which goes last,
+// and the boot-scoped STORAGE_FAILED marker, then syncs the directory. A
+// directory that could not be listed keeps its stamp and its markers: the
+// wipe fails here rather than reopen a directory it did not clear.
 func (d DataDir) removeStampAndMarkers() error {
 	ents, err := os.ReadDir(d.d.dir)
 	if err != nil {
 		return storageFailed("wipe", err)
 	}
 	for _, e := range ents {
-		n := e.Name()
-		// SILENT goes too: the new member must not start silent at the old
-		// log's index (#422).
-		if n == fileStamp || n == markerQuarantine || n == fileSilent || strings.HasPrefix(n, markerStopPrefix) {
-			if err := os.Remove(filepath.Join(d.d.dir, n)); err != nil {
+		if wipedWithStamp(e.Name()) {
+			if err := os.Remove(filepath.Join(d.d.dir, e.Name())); err != nil {
 				return storageFailed("wipe", err)
 			}
 		}
+	}
+	if err := d.removeBootMarker(); err != nil {
+		return err
+	}
+	if err := syncDir(d.d.dir); err != nil {
+		return storageFailed("wipe", err)
+	}
+	return d.wipeStep("stamp")
+}
+
+// wipedWithStamp reports whether the wipe removes the data directory's
+// entry name with the stamp: the quarantine marker, the silence condition
+// — the new member must not start silent at the old log's index (#422) —
+// and every stop marker but STOP-WIPE.
+func wipedWithStamp(name string) bool {
+	switch name {
+	case fileStamp, markerQuarantine, fileSilent:
+		return true
+	case markerWipe:
+		return false
+	}
+	return strings.HasPrefix(name, markerStopPrefix)
+}
+
+// removeBootMarker removes the boot-scoped STORAGE_FAILED marker, which
+// exists only after a storage failure of this boot; one that cannot be
+// removed would refuse the next start anyway, so the wipe says so now.
+func (d DataDir) removeBootMarker() error {
+	if err := os.Remove(d.d.log.runtimeMarker("STORAGE_FAILED")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return storageFailed("wipe", err)
 	}
 	return nil
 }
 
 // RecoverOptions are Recover's preconditions (R2-25, R3-02, R4-04, R9-08).
 // Recover refuses, before it writes anything, an invalid operator, a
-// confirmation that does not name the new cluster, no witness key, and an
-// old voter left out without a receipt from every witness.
+// confirmation that does not name the new cluster, no witness key, an old
+// voter other than this node without a receipt from every witness, and
+// another member under the ID of an old or retired member.
 type RecoverOptions struct {
 	// Confirm must equal the new cluster id in hex: a typed confirmation.
 	Confirm string
 	// Operator is recorded in the audit file.
 	Operator coreconsensus.Operator
-	// Fenced attests every old voter left out of the new members.
+	// Fenced attests every old voter but this node, whether the new members list it or not.
 	Fenced []coreconsensus.FencedAttestationValue
 	// WitnessKeys verify the receipts: one per witness, each must sign.
 	WitnessKeys []ed25519.PublicKey
@@ -347,8 +469,10 @@ func ReceiptMessage(old, next coreconsensus.ClusterID, voter coreconsensus.NodeI
 // fails, so no write the old cluster acknowledged is lost;
 // a new cluster id that records its predecessor and the last index it kept;
 // and a forced configuration. The audit file records how many entries past
-// the persisted commit were adopted. Every old voter left out must be
-// attested fenced by every witness; without witness keys it fails closed.
+// the persisted commit were adopted. Every old voter but this node must be
+// attested fenced by every witness, whatever the new members name, and no
+// other member may carry the ID of an old or retired member, or of another
+// member; without witness keys it fails closed.
 // A stop marker, STOP-RECOVER, is durable before the forced entry and
 // removed once the new stamp is: a Recover interrupted between the two
 // refuses a start, and is completed by running Recover again to the same
@@ -360,12 +484,13 @@ func ReceiptMessage(old, next coreconsensus.ClusterID, voter coreconsensus.NodeI
 // the marker: the new history keeps that snapshot's index, and the forced
 // entry follows it.
 func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RecoverOptions) error {
-	if err := d.offline(); err != nil {
+	if err := d.offlineWrite(); err != nil {
 		return err
 	}
 	flog := d.d.log
 	if errs.HasCode(flog.refuse, coreconsensus.CodeStopMarkerPresent) {
-		// A STORAGE_FAILED stop of this boot: reboot first (#563).
+		// A STORAGE_FAILED stop of this boot: reboot first (#563); or a
+		// wipe interrupted: complete it (#690).
 		return flog.refuse
 	}
 	if flog.refuse != nil {
@@ -500,9 +625,10 @@ type recoverPlan struct {
 	install *coreconsensus.SnapshotMetaValue
 }
 
-// planRecover decides what the new history keeps, checks the fence of every
-// old voter left out against the configuration in force there, and audits
-// the operation, before anything else is written. A first Recover keeps the
+// planRecover decides what the new history keeps, checks against the
+// configuration in force there that no other member carries an old ID and
+// that every old voter but this node is fenced, and audits the operation,
+// before anything else is written. A first Recover keeps the
 // verified suffix past the persisted commit; a resumed one keeps what the
 // first decided, read from its marker. Its forced entry, durable or not, is
 // never read as the old configuration, so the fences are asked for again.
@@ -527,7 +653,10 @@ func (d DataDir) planRecover(stamp *coreconsensus.StampValue, newCluster corecon
 		// change counts.
 		return p, err
 	}
-	if err := checkFenced(p.old.Voters(), members, opt, stamp.Log.Cluster, newCluster); err != nil {
+	if err := checkOldMembers(&p.old, members, stamp.ID); err != nil {
+		return p, err
+	}
+	if err := checkFenced(p.old.Voters(), stamp.ID, opt, stamp.Log.Cluster, newCluster); err != nil {
 		return p, err
 	}
 	if err := d.planAdopted(&p); err != nil {
@@ -756,12 +885,14 @@ func checkRecover(stamp *coreconsensus.StampValue, newCluster coreconsensus.Clus
 }
 
 // checkRecoverMembers refuses new members that are not all pinned, among
-// which this node, at its incarnation, is not a voter, or which name
-// another voter. The others enter as learners and are promoted through
+// which this node, at its incarnation, is not a voter, which name another
+// voter, or two members under one ID. The others enter as learners and are promoted through
 // Promote, never as empty voters (R3-02, R4-04): a member Init only
 // prepared cannot vote before a leader admits it, so a forced configuration
 // that needed its vote never elected one, and two survivors naming each
-// other recovered two histories into one identity (#642).
+// other recovered two histories into one identity (#642). Named learners,
+// the two survivors still did; the old configuration, which refuses them,
+// is read later (checkOldMembers, #691).
 func checkRecoverMembers(stamp *coreconsensus.StampValue, members []coreconsensus.MemberValue) error {
 	self := false
 	for _, m := range members {
@@ -775,6 +906,9 @@ func checkRecoverMembers(stamp *coreconsensus.StampValue, members []coreconsensu
 			self = m.Incarnation == stamp.Incarnation
 		}
 	}
+	if sharedID(members) {
+		return recoverRefused(whyRepeatedID)
+	}
 	if sharedKey(members) {
 		return recoverRefused("two members under one key")
 	}
@@ -784,11 +918,34 @@ func checkRecoverMembers(stamp *coreconsensus.StampValue, members []coreconsensu
 	return nil
 }
 
-// checkFenced refuses a Recover that leaves out an old voter without a
-// fence receipt from EVERY witness for it.
-func checkFenced(voters []coreconsensus.NodeID, members []coreconsensus.MemberValue, opt *RecoverOptions, oldCluster, newCluster coreconsensus.ClusterID) error {
+// checkOldMembers refuses new members that name, beside this node, an ID
+// the old configuration lists, voter or learner, or retired. The others
+// are joiners Init prepared under the new cluster id, each under a NEW
+// NodeID (R1-17, R3-02, R4-04): an old member's ID is a node of the old
+// cluster, and it reaches the new one only by a Recover of its own, a
+// second history under the same identity. Two survivors that each named
+// the other a learner were both accepted, with no fence for the other, and
+// ran two leaders at one term (#691).
+func checkOldMembers(old *coreconsensus.MembershipValue, members []coreconsensus.MemberValue, self coreconsensus.NodeID) error {
+	for _, m := range members {
+		if m.ID == self {
+			continue
+		}
+		if _, ok := old.Member(m.ID); ok || old.IsRetired(m.ID) {
+			return recoverRefused(whyOldMember)
+		}
+	}
+	return nil
+}
+
+// checkFenced refuses a Recover unless every old voter but this node holds
+// a fence receipt from EVERY witness, whatever the new members name: the
+// ADR asks one attestation per old voter (R4-04, R9-08), and an old voter
+// excused as a member let two survivors recover two histories into one
+// identity (#691).
+func checkFenced(voters []coreconsensus.NodeID, self coreconsensus.NodeID, opt *RecoverOptions, oldCluster, newCluster coreconsensus.ClusterID) error {
 	for _, v := range voters {
-		if slices.ContainsFunc(members, func(m coreconsensus.MemberValue) bool { return m.ID == v }) {
+		if v == self {
 			continue
 		}
 		i := slices.IndexFunc(opt.Fenced, func(a coreconsensus.FencedAttestationValue) bool { return a.Voter == v })
@@ -1063,7 +1220,7 @@ type RestoreOptions struct {
 // RestoreSnapshot starts a new history from a saved snapshot on an empty,
 // joining directory, without a Node (R3-15).
 func RestoreSnapshot(d DataDir, r io.Reader, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RestoreOptions) (coreconsensus.SnapshotMetaValue, error) {
-	if err := d.offline(); err != nil {
+	if err := d.offlineWrite(); err != nil {
 		return coreconsensus.SnapshotMetaValue{}, err
 	}
 	flog := d.d.log
@@ -1181,7 +1338,8 @@ func checkRestoreBounds(flog *fileLog, stamp *coreconsensus.StampValue, opt *Res
 }
 
 // checkRestoreMembers refuses new members among which this node, at its
-// incarnation, is not a voter, or of which one is not pinned.
+// incarnation, is not a voter, of which one is not pinned, or of which two
+// carry one ID.
 func checkRestoreMembers(stamp *coreconsensus.StampValue, members []coreconsensus.MemberValue) error {
 	if !slices.ContainsFunc(members, func(m coreconsensus.MemberValue) bool {
 		return m.ID == stamp.ID && m.Voter && m.Incarnation == stamp.Incarnation
@@ -1192,6 +1350,9 @@ func checkRestoreMembers(stamp *coreconsensus.StampValue, members []coreconsensu
 		if isZeroDigest(m.SPKI) {
 			return restoreRefused("a member without an SPKI pin")
 		}
+	}
+	if sharedID(members) {
+		return restoreRefused(whyRepeatedID)
 	}
 	if sharedKey(members) {
 		return restoreRefused("two members under one key")

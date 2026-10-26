@@ -57,6 +57,12 @@ type dataDir struct {
 	// durable, before the quarantine marker goes; an error ends the exit
 	// there, as a crash would. Only a test sets it.
 	afterTruncate func() error
+	// afterWipeStep runs after each step of WipeAndRejoin, named: "marker"
+	// once STOP-WIPE is durable, "log" and "snap" once each store is
+	// removed, "stamp" once the stamp and the other markers are durably
+	// gone, "done" once STOP-WIPE is; an error ends the wipe there, as a
+	// crash would. Only a test sets it.
+	afterWipeStep func(step string) error
 }
 
 // DataDir is the shipped layout: a lock, a stamp, the segmented log, the

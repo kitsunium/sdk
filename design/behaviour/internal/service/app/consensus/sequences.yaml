@@ -2558,6 +2558,8 @@ sequences:
         kind: self
       - id: l.prepareOpen
         kind: internal
+      - id: wipeMarker
+        kind: internal
       - id: os
         kind: stdlib
       - id: origin
@@ -2581,6 +2583,16 @@ sequences:
             bind: err
             eval: l.prepareOpen()
             to: l.prepareOpen
+          when: err != nil
+      - opt:
+          do:
+            - set: l.refuse
+              value: err
+            - return: l, nil
+          init:
+            bind: err
+            eval: wipeMarker(dd.dir)
+            to: wipeMarker
           when: err != nil
       - opt:
           do:
@@ -13558,6 +13570,59 @@ sequences:
                 - return: origin(coreconsensus.DataDirInUse, errs.String("dir", d.d.dir))
                   to: origin
       - return: nil
+  - of: DataDir.offlineWrite
+    participants:
+      - id: caller
+        kind: actor
+      - id: DataDir.offlineWrite
+        kind: self
+      - id: d.offline
+        kind: internal
+      - id: wipeMarker
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: d.offline()
+            to: d.offline
+          when: err != nil
+      - return: wipeMarker(d.d.dir)
+        to: wipeMarker
+  - of: wipeMarker
+    participants:
+      - id: caller
+        kind: actor
+      - id: wipeMarker
+        kind: self
+      - id: filepath
+        kind: stdlib
+      - id: os
+        kind: stdlib
+      - id: storageFailed
+        kind: internal
+      - id: stopMarkerPresent
+        kind: internal
+    steps:
+      - bind: p
+        eval: filepath.Join(dir, markerWipe)
+        to: filepath
+      - bind: b, err
+        eval: os.ReadFile(p)
+        to: os
+      - switch:
+          cases:
+            - case: errors.Is(err, os.ErrNotExist)
+              do:
+                - return: nil
+            - case: err != nil
+              do:
+                - return: storageFailed("read stop marker", err)
+                  to: storageFailed
+      - return: stopMarkerPresent(p, b)
+        to: stopMarkerPresent
   - of: DataDir.audit
     participants:
       - id: caller
@@ -13623,7 +13688,7 @@ sequences:
         kind: actor
       - id: Init
         kind: self
-      - id: d.offline
+      - id: d.offlineWrite
         kind: internal
       - id: InitLog
         kind: internal
@@ -13633,8 +13698,8 @@ sequences:
             - return: 0, coreconsensus.Incarnation{}, err
           init:
             bind: err
-            eval: d.offline()
-            to: d.offline
+            eval: d.offlineWrite()
+            to: d.offlineWrite
           when: err != nil
       - return: InitLog(d.Log(), cluster, slot)
         to: InitLog
@@ -13644,7 +13709,7 @@ sequences:
         kind: actor
       - id: Redraw
         kind: self
-      - id: d.offline
+      - id: d.offlineWrite
         kind: internal
       - id: RedrawLog
         kind: internal
@@ -13654,8 +13719,8 @@ sequences:
             - return: 0, err
           init:
             bind: err
-            eval: d.offline()
-            to: d.offline
+            eval: d.offlineWrite()
+            to: d.offlineWrite
           when: err != nil
       - return: RedrawLog(d.Log())
         to: RedrawLog
@@ -13835,6 +13900,8 @@ sequences:
         kind: internal
       - id: d.wipeAndRejoin
         kind: internal
+      - id: wipeMarker
+        kind: internal
       - id: d.d.log.storageFailedThisBoot
         kind: internal
       - id: d.audit
@@ -13868,6 +13935,14 @@ sequences:
                       - return: err
                     init:
                       bind: err
+                      eval: wipeMarker(d.d.dir)
+                      to: wipeMarker
+                    when: err != nil
+                - opt:
+                    do:
+                      - return: err
+                    init:
+                      bind: err
                       eval: d.d.log.storageFailedThisBoot()
                       to: d.d.log.storageFailedThisBoot
                     when: err != nil
@@ -13894,17 +13969,15 @@ sequences:
         kind: self
       - id: d.audit
         kind: internal
+      - id: d.markWipe
+        kind: internal
       - id: d.d.log.Close
         kind: internal
       - id: d.removeStores
         kind: internal
       - id: d.removeStampAndMarkers
         kind: internal
-      - id: os
-        kind: stdlib
-      - id: storageFailed
-        kind: internal
-      - id: syncDir
+      - id: d.clearWipeMarker
         kind: internal
       - id: d.d.open
         kind: internal
@@ -13916,6 +13989,14 @@ sequences:
             bind: err
             eval: d.audit(op, "clear-quarantine wipe-and-rejoin")
             to: d.audit
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: d.markWipe()
+            to: d.markWipe
           when: err != nil
       - opt:
           do:
@@ -13943,13 +14024,62 @@ sequences:
           when: err != nil
       - opt:
           do:
-            - return: storageFailed("wipe", err)
+            - return: err
+          init:
+            bind: err
+            eval: d.clearWipeMarker()
+            to: d.clearWipeMarker
+          when: err != nil
+      - return: d.d.open()
+        to: d.d.open
+  - of: DataDir.markWipe
+    participants:
+      - id: caller
+        kind: actor
+      - id: DataDir.markWipe
+        kind: self
+      - id: writeFileSync
+        kind: internal
+      - id: storageFailed
+        kind: internal
+      - id: d.wipeStep
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: storageFailed("wipe marker", err)
               to: storageFailed
           init:
             bind: err
-            eval: os.Remove(d.d.log.runtimeMarker("STORAGE_FAILED"))
+            eval: writeFileSync(filepath.Join(d.d.dir, markerWipe), []byte(wipeDetail))
+            to: writeFileSync
+          when: err != nil
+      - return: d.wipeStep("marker")
+        to: d.wipeStep
+  - of: DataDir.clearWipeMarker
+    participants:
+      - id: caller
+        kind: actor
+      - id: DataDir.clearWipeMarker
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: storageFailed
+        kind: internal
+      - id: syncDir
+        kind: internal
+      - id: d.wipeStep
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: storageFailed("wipe marker", err)
+              to: storageFailed
+          init:
+            bind: err
+            eval: os.Remove(filepath.Join(d.d.dir, markerWipe))
             to: os
-          when: err != nil && !errors.Is(err, os.ErrNotExist)
+          when: err != nil
       - opt:
           do:
             - return: storageFailed("wipe", err)
@@ -13959,8 +14089,15 @@ sequences:
             eval: syncDir(d.d.dir)
             to: syncDir
           when: err != nil
-      - return: d.d.open()
-        to: d.d.open
+      - return: d.wipeStep("done")
+        to: d.wipeStep
+  - of: DataDir.wipeStep
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: d.d.afterWipeStep == nil
+      - return: d.d.afterWipeStep(step)
   - of: DataDir.removeStores
     participants:
       - id: caller
@@ -13970,6 +14107,10 @@ sequences:
       - id: os
         kind: stdlib
       - id: storageFailed
+        kind: internal
+      - id: d.wipeStep
+        kind: internal
+      - id: syncDir
         kind: internal
     steps:
       - loop:
@@ -13983,9 +14124,26 @@ sequences:
                   eval: os.RemoveAll(filepath.Join(d.d.dir, name))
                   to: os
                 when: err != nil
+            - opt:
+                do:
+                  - return: err
+                init:
+                  bind: err
+                  eval: d.wipeStep(name)
+                  to: d.wipeStep
+                when: err != nil
           key: _
           range: "[]string{\"log\", \"snap\"}"
           value: name
+      - opt:
+          do:
+            - return: storageFailed("wipe", err)
+              to: storageFailed
+          init:
+            bind: err
+            eval: syncDir(d.d.dir)
+            to: syncDir
+          when: err != nil
       - return: nil
   - of: DataDir.removeStampAndMarkers
     participants:
@@ -13997,8 +14155,12 @@ sequences:
         kind: stdlib
       - id: storageFailed
         kind: internal
-      - id: e.Name
-        kind: value
+      - id: d.removeBootMarker
+        kind: internal
+      - id: syncDir
+        kind: internal
+      - id: d.wipeStep
+        kind: internal
     steps:
       - bind: ents, err
         eval: os.ReadDir(d.d.dir)
@@ -14010,9 +14172,6 @@ sequences:
           when: err != nil
       - loop:
           do:
-            - bind: "n"
-              eval: e.Name()
-              to: e.Name
             - opt:
                 do:
                   - opt:
@@ -14021,13 +14180,72 @@ sequences:
                           to: storageFailed
                       init:
                         bind: err
-                        eval: os.Remove(filepath.Join(d.d.dir, n))
+                        eval: os.Remove(filepath.Join(d.d.dir, e.Name()))
                         to: os
                       when: err != nil
-                when: n == fileStamp || n == markerQuarantine || n == fileSilent || strings.HasPrefix(n, markerStopPrefix)
+                when: wipedWithStamp(e.Name())
           key: _
           range: ents
           value: e
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: d.removeBootMarker()
+            to: d.removeBootMarker
+          when: err != nil
+      - opt:
+          do:
+            - return: storageFailed("wipe", err)
+              to: storageFailed
+          init:
+            bind: err
+            eval: syncDir(d.d.dir)
+            to: syncDir
+          when: err != nil
+      - return: d.wipeStep("stamp")
+        to: d.wipeStep
+  - of: wipedWithStamp
+    participants:
+      - id: caller
+        kind: actor
+      - id: wipedWithStamp
+        kind: self
+      - id: strings
+        kind: stdlib
+    steps:
+      - switch:
+          cases:
+            - case: fileStamp, markerQuarantine, fileSilent
+              do:
+                - return: "true"
+            - case: markerWipe
+              do:
+                - return: "false"
+          "on": name
+      - return: strings.HasPrefix(name, markerStopPrefix)
+        to: strings
+  - of: DataDir.removeBootMarker
+    participants:
+      - id: caller
+        kind: actor
+      - id: DataDir.removeBootMarker
+        kind: self
+      - id: os
+        kind: stdlib
+      - id: storageFailed
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: storageFailed("wipe", err)
+              to: storageFailed
+          init:
+            bind: err
+            eval: os.Remove(d.d.log.runtimeMarker("STORAGE_FAILED"))
+            to: os
+          when: err != nil && !errors.Is(err, os.ErrNotExist)
       - return: nil
   - of: receiptMessage
     participants:
@@ -14059,7 +14277,7 @@ sequences:
         kind: actor
       - id: Recover
         kind: self
-      - id: d.offline
+      - id: d.offlineWrite
         kind: internal
       - id: recoverRefused
         kind: internal
@@ -14081,8 +14299,8 @@ sequences:
             - return: err
           init:
             bind: err
-            eval: d.offline()
-            to: d.offline
+            eval: d.offlineWrite()
+            to: d.offlineWrite
           when: err != nil
       - bind: flog
         eval: d.d.log
@@ -14307,6 +14525,8 @@ sequences:
         kind: internal
       - id: lastMembership
         kind: internal
+      - id: checkOldMembers
+        kind: internal
       - id: checkFenced
         kind: internal
       - id: d.planAdopted
@@ -14350,7 +14570,15 @@ sequences:
             - return: p, err
           init:
             bind: err
-            eval: checkFenced(p.old.Voters(), members, opt, stamp.Log.Cluster, newCluster)
+            eval: checkOldMembers(&p.old, members, stamp.ID)
+            to: checkOldMembers
+          when: err != nil
+      - opt:
+          do:
+            - return: p, err
+          init:
+            bind: err
+            eval: checkFenced(p.old.Voters(), stamp.ID, opt, stamp.Log.Cluster, newCluster)
             to: checkFenced
           when: err != nil
       - opt:
@@ -14817,6 +15045,11 @@ sequences:
           value: m
       - opt:
           do:
+            - return: recoverRefused(whyRepeatedID)
+              to: recoverRefused
+          when: sharedID(members)
+      - opt:
+          do:
             - return: recoverRefused("two members under one key")
               to: recoverRefused
           when: sharedKey(members)
@@ -14825,6 +15058,36 @@ sequences:
             - return: recoverRefused("this node is not a voter of the new members")
               to: recoverRefused
           when: "!self"
+      - return: nil
+  - of: checkOldMembers
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkOldMembers
+        kind: self
+      - id: old.Member
+        kind: value
+      - id: recoverRefused
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: m.ID == self
+            - opt:
+                do:
+                  - return: recoverRefused(whyOldMember)
+                    to: recoverRefused
+                init:
+                  bind: _, ok
+                  eval: old.Member(m.ID)
+                  to: old.Member
+                when: ok || old.IsRetired(m.ID)
+          key: _
+          range: members
+          value: m
       - return: nil
   - of: checkFenced
     participants:
@@ -14844,7 +15107,7 @@ sequences:
             - opt:
                 do:
                   - continue: true
-                when: slices.ContainsFunc(members, func(m coreconsensus.MemberValue) bool { return m.ID == v })
+                when: v == self
             - bind: i
               eval: slices.IndexFunc(opt.Fenced, func(a coreconsensus.FencedAttestationValue) bool { return a.Voter == v })
               to: slices
@@ -15258,7 +15521,7 @@ sequences:
         kind: actor
       - id: RestoreSnapshot
         kind: self
-      - id: d.offline
+      - id: d.offlineWrite
         kind: internal
       - id: checkRestore
         kind: internal
@@ -15282,8 +15545,8 @@ sequences:
             - return: coreconsensus.SnapshotMetaValue{}, err
           init:
             bind: err
-            eval: d.offline()
-            to: d.offline
+            eval: d.offlineWrite()
+            to: d.offlineWrite
           when: err != nil
       - bind: flog
         eval: d.d.log
@@ -15530,6 +15793,11 @@ sequences:
           key: _
           range: members
           value: m
+      - opt:
+          do:
+            - return: restoreRefused(whyRepeatedID)
+              to: restoreRefused
+          when: sharedID(members)
       - opt:
           do:
             - return: restoreRefused("two members under one key")

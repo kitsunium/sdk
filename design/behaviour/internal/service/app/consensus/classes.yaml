@@ -511,7 +511,10 @@ constants:
       - doc: |-
           WipeAndRejoin wipes the directory; the operator then Removes the old
           NodeID and Inits under a NEW one (R4-03). A voter's incarnation is
-          never swapped in place.
+          never swapped in place. A wipe that does not finish leaves the stop
+          marker STOP-WIPE, which refuses a start, Init, Redraw, Recover,
+          RestoreSnapshot and TruncateAndStaySilent until WipeAndRejoin runs
+          again and completes it.
         name: WipeAndRejoin
         type: QuarantineExit
         value: iota + 1
@@ -538,6 +541,30 @@ constants:
           what the first one decided (#405).
         name: markerRecover
         value: markerStopPrefix + "RECOVER"
+      - doc: |-
+          markerWipe is the stop marker of a WipeAndRejoin in progress: written,
+          synced, before anything is removed, and removed last, once the stores,
+          then the stamp and every other marker, are durably gone. A wipe a crash
+          interrupted left a member stamp over an empty log, and the node
+          restarted as the same voter with no term, no vote and no entry (#690).
+          While it is there a start is refused, the log is not recovered at
+          open, every offline write but the wipe refuses, and the wipe run again
+          completes.
+        name: markerWipe
+        value: markerStopPrefix + "WIPE"
+      - doc: |-
+          wipeDetail is what STOP-WIPE shows the operator, as the detail of
+          STOP_MARKER_PRESENT.
+        name: wipeDetail
+        value: "\"WipeAndRejoin was interrupted: run ClearQuarantine(WipeAndRejoin) again to complete it, then Init under a new NodeID\\n\""
+      - doc: whyOldMember is the reason checkOldMembers refuses a Recover.
+        name: whyOldMember
+        value: "\"a member other than this node carries the ID of an old member: the others are nodes Init prepared under the new cluster\""
+      - doc: |-
+          whyRepeatedID is the reason Recover and RestoreSnapshot refuse two
+          members under one NodeID.
+        name: whyRepeatedID
+        value: "\"two members under one id\""
     name: fileSilent
   - grouped: true
     items:
@@ -766,6 +793,7 @@ files:
       - foundingTiming
       - writeFoundingEntry
       - sharedKey
+      - sharedID
     name: bootstrap.go
   - decls:
       - batchFrameOverhead
@@ -1339,6 +1367,8 @@ files:
       - WipeAndRejoin
       - fileSilent
       - DataDir.offline
+      - DataDir.offlineWrite
+      - wipeMarker
       - DataDir.audit
       - Init
       - Redraw
@@ -1350,8 +1380,13 @@ files:
       - QuarantineExit
       - ClearQuarantine
       - DataDir.wipeAndRejoin
+      - DataDir.markWipe
+      - DataDir.clearWipeMarker
+      - DataDir.wipeStep
       - DataDir.removeStores
       - DataDir.removeStampAndMarkers
+      - wipedWithStamp
+      - DataDir.removeBootMarker
       - RecoverOptions
       - receiptMessage
       - ReceiptMessage
@@ -1376,6 +1411,7 @@ files:
       - isZeroDigest
       - checkRecover
       - checkRecoverMembers
+      - checkOldMembers
       - checkFenced
       - signedByEvery
       - DataDir.adoptedEnd
@@ -1748,6 +1784,14 @@ functions:
       transport admits a connection by its key: two members under one key
       could speak as each other (review M5).
     name: sharedKey
+    params: members []coreconsensus.MemberValue
+    results: bool
+  - doc: |-
+      sharedID reports whether two members carry one NodeID. Each line is a
+      member: an ID listed twice is a voter counted twice toward a quorum, two
+      keys the transport admits as one node, or, its learner line first, a
+      survivor Member says does not vote (review of #693).
+    name: sharedID
     params: members []coreconsensus.MemberValue
     results: bool
   - name: TimingDefaults
@@ -2560,6 +2604,13 @@ functions:
     name: checkObservedTail
     params: exp *coreconsensus.SnapshotMetaValue, tail []coreconsensus.EntryValue
     results: error
+  - doc: |-
+      wipeMarker is the STOP_MARKER_PRESENT of the STOP-WIPE marker of dir, nil
+      when there is none. One that is there but cannot be read is a
+      STORAGE_FAILED, never read as no wipe in progress.
+    name: wipeMarker
+    params: dir string
+    results: error
   - name: Init
     params: d DataDir, cluster coreconsensus.ClusterID, slot string
     results: coreconsensus.NodeID, coreconsensus.Incarnation, error
@@ -2599,6 +2650,14 @@ functions:
     params: d DataDir, exit QuarantineExit, op coreconsensus.Operator
     results: error
   - doc: |-
+      wipedWithStamp reports whether the wipe removes the data directory's
+      entry name with the stamp: the quarantine marker, the silence condition
+      — the new member must not start silent at the old log's index (#422) —
+      and every stop marker but STOP-WIPE.
+    name: wipedWithStamp
+    params: name string
+    results: bool
+  - doc: |-
       receiptMessage is what a witness signs: the old cluster, the new cluster
       and the fenced voter.
     name: receiptMessage
@@ -2636,20 +2695,37 @@ functions:
     results: error
   - doc: |-
       checkRecoverMembers refuses new members that are not all pinned, among
-      which this node, at its incarnation, is not a voter, or which name
-      another voter. The others enter as learners and are promoted through
+      which this node, at its incarnation, is not a voter, which name another
+      voter, or two members under one ID. The others enter as learners and are promoted through
       Promote, never as empty voters (R3-02, R4-04): a member Init only
       prepared cannot vote before a leader admits it, so a forced configuration
       that needed its vote never elected one, and two survivors naming each
-      other recovered two histories into one identity (#642).
+      other recovered two histories into one identity (#642). Named learners,
+      the two survivors still did; the old configuration, which refuses them,
+      is read later (checkOldMembers, #691).
     name: checkRecoverMembers
     params: stamp *coreconsensus.StampValue, members []coreconsensus.MemberValue
     results: error
   - doc: |-
-      checkFenced refuses a Recover that leaves out an old voter without a
-      fence receipt from EVERY witness for it.
+      checkOldMembers refuses new members that name, beside this node, an ID
+      the old configuration lists, voter or learner, or retired. The others
+      are joiners Init prepared under the new cluster id, each under a NEW
+      NodeID (R1-17, R3-02, R4-04): an old member's ID is a node of the old
+      cluster, and it reaches the new one only by a Recover of its own, a
+      second history under the same identity. Two survivors that each named
+      the other a learner were both accepted, with no fence for the other, and
+      ran two leaders at one term (#691).
+    name: checkOldMembers
+    params: old *coreconsensus.MembershipValue, members []coreconsensus.MemberValue, self coreconsensus.NodeID
+    results: error
+  - doc: |-
+      checkFenced refuses a Recover unless every old voter but this node holds
+      a fence receipt from EVERY witness, whatever the new members name: the
+      ADR asks one attestation per old voter (R4-04, R9-08), and an old voter
+      excused as a member let two survivors recover two histories into one
+      identity (#691).
     name: checkFenced
-    params: voters []coreconsensus.NodeID, members []coreconsensus.MemberValue, opt *RecoverOptions, oldCluster, newCluster coreconsensus.ClusterID
+    params: voters []coreconsensus.NodeID, self coreconsensus.NodeID, opt *RecoverOptions, oldCluster, newCluster coreconsensus.ClusterID
     results: error
   - doc: signedByEvery reports whether every key signed msg in one of receipts.
     name: signedByEvery
@@ -2728,7 +2804,8 @@ functions:
     results: error
   - doc: |-
       checkRestoreMembers refuses new members among which this node, at its
-      incarnation, is not a voter, or of which one is not pinned.
+      incarnation, is not a voter, of which one is not pinned, or of which two
+      carry one ID.
     name: checkRestoreMembers
     params: stamp *coreconsensus.StampValue, members []coreconsensus.MemberValue
     results: error
@@ -3516,6 +3593,14 @@ types:
           there, as a crash would. Only a test sets it.
         name: afterTruncate
         type: func() error
+      - doc: |-
+          afterWipeStep runs after each step of WipeAndRejoin, named: "marker"
+          once STOP-WIPE is durable, "log" and "snap" once each store is
+          removed, "stamp" once the stamp and the other markers are durably
+          gone, "done" once STOP-WIPE is; an error ends the wipe there, as a
+          crash would. Only a test sets it.
+        name: afterWipeStep
+        type: func(step string) error
     kind: struct
     methods:
       - doc: |-
@@ -3551,6 +3636,13 @@ types:
         recv: d DataDir
         results: error
       - doc: |-
+          offlineWrite is offline, and refuses as well a directory whose wipe was
+          interrupted: what it holds is neither the old member nor an empty
+          directory, and only WipeAndRejoin, run again, may write there (#690).
+        name: offlineWrite
+        recv: d DataDir
+        results: error
+      - doc: |-
           audit appends one line to the operator audit file and syncs it before the
           operation it records runs. Its Close is part of the write: a failure there
           is a storage failure like the sync's, never a detail dropped at return.
@@ -3559,23 +3651,58 @@ types:
         recv: d DataDir
         results: err error
       - doc: |-
-          wipeAndRejoin is the WipeAndRejoin exit: audited first, then the log is
-          closed, its stores, stamp and markers are deleted, the directory synced,
-          and the directory reopened empty.
+          wipeAndRejoin is the WipeAndRejoin exit, in an order a crash at any step
+          leaves safe (#690): audited first; then STOP-WIPE, durable before
+          anything is removed; the log closed, its stores deleted and the
+          directory synced; the stamp, the quarantine marker, the silence condition
+          and every other stop marker deleted and the directory synced; STOP-WIPE
+          removed last and the directory synced; and the directory reopened empty.
+          Interrupted anywhere before the last step, the directory keeps STOP-WIPE,
+          which refuses a start and every offline write, and the wipe run again
+          resumes it: it keeps nothing, so it starts over. It is never undone.
         name: wipeAndRejoin
         params: op coreconsensus.Operator
         recv: d DataDir
         results: error
-      - doc: removeStores deletes the log and the snapshots, whole.
+      - doc: markWipe publishes STOP-WIPE, durably, before the wipe removes anything.
+        name: markWipe
+        recv: d DataDir
+        results: error
+      - doc: |-
+          clearWipeMarker removes STOP-WIPE, durably, once everything else the wipe
+          removes is durably gone: until then nothing tells a directory this wipe
+          has not finished from the old member's.
+        name: clearWipeMarker
+        recv: d DataDir
+        results: error
+      - doc: |-
+          wipeStep runs the test hook after a step of the wipe, nil when no test
+          set it.
+        name: wipeStep
+        params: step string
+        recv: d DataDir
+        results: error
+      - doc: |-
+          removeStores deletes the log and the snapshots, whole, then syncs the
+          directory: the stamp goes only once their removal is durable, and with
+          the stamp the last trace of the old member but STOP-WIPE.
         name: removeStores
         recv: d DataDir
         results: error
       - doc: |-
           removeStampAndMarkers deletes the stamp, the quarantine marker, the
-          silence condition and every stop marker. A directory that could not be listed keeps its stamp and its
-          markers: the wipe fails here rather than reopen a directory it did not
-          clear.
+          silence condition and every stop marker but STOP-WIPE, which goes last,
+          and the boot-scoped STORAGE_FAILED marker, then syncs the directory. A
+          directory that could not be listed keeps its stamp and its markers: the
+          wipe fails here rather than reopen a directory it did not clear.
         name: removeStampAndMarkers
+        recv: d DataDir
+        results: error
+      - doc: |-
+          removeBootMarker removes the boot-scoped STORAGE_FAILED marker, which
+          exists only after a storage failure of this boot; one that cannot be
+          removed would refuse the next start anyway, so the wipe says so now.
+        name: removeBootMarker
         recv: d DataDir
         results: error
       - doc: |-
@@ -3611,9 +3738,10 @@ types:
         recv: d DataDir
         results: err error
       - doc: |-
-          planRecover decides what the new history keeps, checks the fence of every
-          old voter left out against the configuration in force there, and audits
-          the operation, before anything else is written. A first Recover keeps the
+          planRecover decides what the new history keeps, checks against the
+          configuration in force there that no other member carries an old ID and
+          that every old voter but this node is fenced, and audits the operation,
+          before anything else is written. A first Recover keeps the
           verified suffix past the persisted commit; a resumed one keeps what the
           first decided, read from its marker. Its forced entry, durable or not, is
           never read as the old configuration, so the fences are asked for again.
@@ -8123,7 +8251,7 @@ types:
       - doc: Operator is recorded in the audit file.
         name: Operator
         type: coreconsensus.Operator
-      - doc: Fenced attests every old voter left out of the new members.
+      - doc: Fenced attests every old voter but this node, whether the new members list it or not.
         name: Fenced
         type: "[]coreconsensus.FencedAttestationValue"
       - doc: "WitnessKeys verify the receipts: one per witness, each must sign."
