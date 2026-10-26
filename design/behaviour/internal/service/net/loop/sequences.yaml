@@ -246,6 +246,8 @@ sequences:
         kind: internal
       - id: lp.slab.data
         kind: internal
+      - id: r.consumed
+        kind: internal
     steps:
       - bind: c
         eval: "&r.conns[slot]"
@@ -281,18 +283,8 @@ sequences:
       - bind: "n"
         eval: clampConsumed(lp.h.OnData(lp, r.ref(slot), buf), len(buf))
         to: clampConsumed
-      - set: c
-        value: "&r.conns[slot]"
-      - op: +=
-        set: c.spill.off
-        value: int32(n)
-      - opt:
-          do:
-            - set: lp.deferred
-              value: append(lp.deferred, c.spill)
-            - set: c.spill
-              value: "chunkRef{idx: noChunk}"
-          when: c.spill.off == c.spill.len
+      - eval: r.consumed(slot, n)
+        to: r.consumed
   - of: (*ring).keep
     participants:
       - id: caller
@@ -432,7 +424,7 @@ sequences:
         kind: internal
       - id: lp.slab.data
         kind: internal
-      - id: clampConsumed
+      - id: r.consumed
         kind: internal
     steps:
       - bind: c
@@ -449,21 +441,35 @@ sequences:
       - bind: buf
         eval: lp.slab.data(c.spill)
         to: lp.slab.data
-      - bind: used
-        eval: clampConsumed(lp.h.OnData(lp, r.ref(slot), buf), len(buf))
-        to: clampConsumed
-      - set: c
-        value: "&r.conns[slot]"
-      - op: +=
-        set: c.spill.off
-        value: int32(used)
+      - eval: r.consumed(slot, clampConsumed(lp.h.OnData(lp, r.ref(slot), buf), len(buf)))
+        to: r.consumed
+  - of: (*ring).consumed
+    steps:
+      - bind: c
+        eval: "&r.conns[slot]"
       - opt:
           do:
-            - set: lp.deferred
-              value: append(lp.deferred, c.spill)
+            - return: ""
+          when: c.spill.empty()
+      - op: +=
+        set: c.spill.off
+        value: int32(n)
+      - opt:
+          do:
+            - set: r.lp.deferred
+              value: append(r.lp.deferred, c.spill)
             - set: c.spill
               value: "chunkRef{idx: noChunk}"
+            - return: ""
           when: c.spill.off == c.spill.len
+      - opt:
+          do:
+            - op: "|="
+              set: c.flags
+              value: fCompact
+            - set: r.compact
+              value: append(r.compact, slot)
+          when: c.spill.off > 0 && c.flags&fCompact == 0
   - of: (*ring).hasSpill
     participants:
       - id: caller
@@ -903,7 +909,7 @@ sequences:
         kind: internal
       - id: lp.slab.free
         kind: internal
-      - id: r.compactAll
+      - id: r.compactListed
         kind: internal
       - id: r.publish
         kind: internal
@@ -928,8 +934,8 @@ sequences:
         value: lp.deferred[:0]
       - loop:
           do:
-            - eval: r.compactAll()
-              to: r.compactAll
+            - eval: r.compactListed()
+              to: r.compactListed
             - op: ++
               set: r.st.batches
             - eval: r.publish()
@@ -939,22 +945,27 @@ sequences:
           value: r
       - eval: lp.grp.observe(time.Since(started))
         to: lp.grp.observe
-  - of: (*ring).compactAll
+  - of: (*ring).compactListed
     participants:
       - id: caller
         kind: actor
-      - id: (*ring).compactAll
+      - id: (*ring).compactListed
         kind: self
       - id: r.compactSpill
         kind: internal
     steps:
       - loop:
-          cond: s != noLink
           do:
+            - op: "&^="
+              set: r.conns[s].flags
+              value: fCompact
             - eval: r.compactSpill(s)
               to: r.compactSpill
-          init: s := r.lruHead
-          post: s = r.conns[s].lruNext
+          key: _
+          range: r.compact
+          value: s
+      - set: r.compact
+        value: r.compact[:0]
   - of: (*loop).now
     steps:
       - return: int64(time.Since(lp.epoch)/tickEvery) + 1

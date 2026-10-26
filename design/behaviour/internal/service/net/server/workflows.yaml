@@ -1,10 +1,14 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 workflows:
-  - of: (*portableLoop).compactSpills
+  - of: (*portableLoop).compactListed
     steps:
       - loop:
           do:
+            - bind: pc
+              eval: pl.conns[slot]
+            - set: pc.compact
+              value: "false"
             - opt:
                 do:
                   - set: pc.spill
@@ -13,8 +17,10 @@ workflows:
                     value: "0"
                 when: pc.open && pc.spillOff > 0
           key: _
-          range: pl.conns
-          value: pc
+          range: pl.compact
+          value: slot
+      - set: pl.compact
+        value: pl.compact[:0]
   - of: (*operatorEnv).applied
     steps:
       - loop:
