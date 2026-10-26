@@ -18,6 +18,8 @@
   carries that TLS path, and the codec runs behind it)
 - **Amended by**: [ADR 0188](0188-the-operators-switches-only-restrict-and-state-says-what-the-server-runs-without.md) §D8 (the
   switches made concrete) and §Consequences (`StateValue` gains four fields)
+- **Amended by**: [ADR 0192](0192-a-datagram-socket-reads-coalesced-and-its-replies-may-leave-per-batch.md) (`OptionBatchReplies`, kind 19,
+  honoured by a datagram group, refused by a stream group)
 - **Related**: [ADR 0029](0029-sdk-net-domain.md) (the domain, one goroutine
   per connection), [ADR 0031](0031-policy-zero-values-are-never-inert.md)
   (zero values), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (the

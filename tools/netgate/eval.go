@@ -37,6 +37,9 @@ type criterionEntity struct {
 	Threshold float64 `json:"threshold"`
 	// Ratio judges B against A; unset, B alone.
 	Ratio bool `json:"ratio"`
+	// Reported is judged and written in the report, and never settles the
+	// gate's verdict: a metric the owner keeps measured but not gated.
+	Reported bool `json:"reported,omitempty"`
 }
 
 // gateEntity is one step's gate.
@@ -131,7 +134,8 @@ func evaluate(table []gateEntity, s samplesEntity, sha string) *reportEntity {
 	return rep
 }
 
-// judgeGate judges each criterion of g; the gate passes when every one does.
+// judgeGate judges each criterion of g; the gate passes when every one does,
+// a Reported criterion aside.
 func judgeGate(g *gateEntity, s samplesEntity) gateResult {
 	res := gateResult{gateEntity: *g, Verdict: verdictPass}
 	a := s[seriesKey{Load: g.Load, Engine: g.A}]
@@ -139,8 +143,8 @@ func judgeGate(g *gateEntity, s samplesEntity) gateResult {
 	//: every criterion, none short-circuited, so the report is whole.
 	for _, c := range g.Criteria {
 		m := judge(c, a[c.Metric], b[c.Metric])
-		//: the first failure or gap settles the gate's verdict.
-		if m.Verdict != verdictPass && res.Verdict == verdictPass {
+		//: the first failure or gap of a gated criterion settles the verdict.
+		if !c.Reported && m.Verdict != verdictPass && res.Verdict == verdictPass {
 			res.Verdict = m.Verdict
 		}
 		res.Measured = append(res.Measured, m)

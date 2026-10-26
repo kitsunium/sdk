@@ -28,7 +28,12 @@ const (
 	// metricCPUPerReq is the server process's user+system CPU per request
 	// (testing.B.ReportMetric units, as the benches report them).
 	metricCPUPerReq string = "cpu-ns/req"
-	// metricCPUPerDatagram is the receiver's user+system CPU per datagram.
+	// metricCPUPerDatagram is the machine's CPU per datagram: every CPU's busy
+	// time in /proc/stat over the window (all but idle and iowait), so the
+	// sender, the receiver and the softirq work between them — where GRO
+	// saves, a GSO send being segmented on receive without it, in softirq
+	// charged mostly to the sender. The receiver's own rusage missed that
+	// saving and is reported beside, ungated (rcv-cpu-ns/datagram; ADR 0192).
 	metricCPUPerDatagram string = "cpu-ns/datagram"
 	// metricDatagramsPerSyscall is how many datagrams one receive returned on
 	// average.
@@ -43,7 +48,8 @@ const (
 	// chainCPUCeiling is P2's: the middleware chain costs at most 5 % more CPU
 	// a request than the same auth and routing written by hand in one handler.
 	chainCPUCeiling float64 = 1.05
-	// gsoDatagramsFloor is P4a's: at least four times the datagrams a receive.
+	// gsoDatagramsFloor is P4a's reported floor: four times the datagrams a
+	// receive, measured and written in the report, not gated.
 	gsoDatagramsFloor float64 = 4
 	// gsoCPUCeiling is P4a's: at least 25 % less CPU a datagram.
 	gsoCPUCeiling float64 = 0.75
@@ -69,9 +75,14 @@ var (
 	// p2Criteria: the chain's CPU a request. Its 0 allocations are a budget,
 	// not a bench metric (gateEntity.AllocBudget).
 	p2Criteria = []criterionEntity{{Metric: metricCPUPerReq, Op: opAtMost, Threshold: chainCPUCeiling, Ratio: true}}
-	// p4aCriteria: datagrams a receive, and CPU a datagram.
+	// p4aCriteria: CPU a datagram, gated; datagrams a receive, reported and
+	// not gated (the owner's decision of 2026-10-26, ADR 0192 §D6): on L3,
+	// engine A already reads a GSO send's 54 datagrams a receive, so B's
+	// count measures how many sends queue before its reader wakes — the
+	// runner's scheduling, not the engine (3.54 on a GitHub runner, 4.73
+	// under Docker, the same code).
 	p4aCriteria = []criterionEntity{
-		{Metric: metricDatagramsPerSyscall, Op: opAtLeast, Threshold: gsoDatagramsFloor, Ratio: true},
+		{Metric: metricDatagramsPerSyscall, Op: opAtLeast, Threshold: gsoDatagramsFloor, Ratio: true, Reported: true},
 		{Metric: metricCPUPerDatagram, Op: opAtMost, Threshold: gsoCPUCeiling, Ratio: true},
 	}
 	// p6Criteria: CPU a request against the goroutine engine.
@@ -80,13 +91,13 @@ var (
 	p5Criteria = []criterionEntity{{Metric: metricCPUPerReq, Op: opAtMost, Threshold: publishedCPUCeiling, Ratio: true}}
 
 	// gates is the plan's table (P8 §Gates). P0, P1 and P3 have functional
-	// gates only (the lanes), so they have no row here. No step a row gates
-	// is built yet, so every row is inactive: reported, never failing.
+	// gates only (the lanes), so they have no row here. A row is active once
+	// its step's engine B is built — P4a's, GRO in datagramSource (ADR 0192) —
+	// and every other is inactive: reported, never failing.
 	gates = []gateEntity{
 		{Step: "P2", Load: loadL2, A: "handwritten", B: "chain", Criteria: p2Criteria,
 			AllocBudget: p2AllocBudget, Pending: "the http1 middleware chain (P2) is engine B"},
-		{Step: "P4a", Load: loadL3, A: "recvmmsg", B: "gro", Criteria: p4aCriteria,
-			Pending: "GSO/GRO and sendmmsg in datagramSource (P4a) is engine B"},
+		{Step: "P4a", Load: loadL3, A: "recvmmsg", B: "gro", Criteria: p4aCriteria, Active: true},
 		{Step: "P6", Load: loadL1, A: "goroutine", B: "loop", Criteria: p6Criteria,
 			Pending: "LoopsAuto and the drain (P6) set engine B's loop count"},
 		{Step: "P5", Load: loadL1, A: "published", B: "loop", Criteria: p5Criteria,

@@ -78,6 +78,9 @@ const (
 	// OptionEngine is Engine. Every engine honours it, or refuses the group with
 	// EngineUnsupported.
 	OptionEngine
+	// OptionBatchReplies is BatchReplies. A datagram group honours it; a stream
+	// group, goroutine or loop, refuses it with LoopOptionUnsupported (ADR 0192).
+	OptionBatchReplies
 )
 
 // optionNames holds each kind's constructor name, indexed by kind. Its length
@@ -103,6 +106,7 @@ var optionNames = [...]string{
 	OptionPlaintext:         "Plaintext",
 	OptionName:              "Name",
 	OptionEngine:            "Engine",
+	OptionBatchReplies:      "BatchReplies",
 }
 
 // String renders the option's name, as its constructor spells it.

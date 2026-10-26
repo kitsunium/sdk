@@ -263,8 +263,9 @@ packages:
       - const:
           - doc: |-
               CodeLoopOptionUnsupported identifies an option a group cannot honour on its
-              engine: Loop on a group not served by a loop handler, or, on a loop group,
-              Use or an option neither the engine nor the handler honours (ADR 0186 §D1).
+              engine: Loop on a group not served by a loop handler, BatchReplies on a
+              stream group (ADR 0192), or, on a loop group, Use or an option neither the
+              engine nor the handler honours (ADR 0186 §D1).
             name: CodeLoopOptionUnsupported
             value: "0x00_02_0B_24"
         type: errs.Code
@@ -581,6 +582,13 @@ packages:
         name: OptionEngine
         type: OptionKind
         value: "18"
+      - blockDoc: The group options a loop group judges at Start, by kind.
+        doc: |-
+          OptionBatchReplies is BatchReplies. A datagram group honours it; a stream
+          group, goroutine or loop, refuses it with LoopOptionUnsupported (ADR 0192).
+        name: OptionBatchReplies
+        type: OptionKind
+        value: "19"
       - blockDoc: The engine families a group may name with Engine. The zero value is EngineAuto.
         doc: |-
           EngineAuto lets the group's handler type choose its engine (ADR 0187): a loop
@@ -3365,6 +3373,34 @@ packages:
               tag: json:"disabled,omitempty"
               type: "[]Capability"
       - doc: |-
+          DatagramStateValue counts what the batched datagram paths drop (ADR 0192):
+          the messages a read cut short, and the replies a batch queued that did not
+          leave. Each is a drop nobody above a read loop could be told of, so the
+          counter is the report.
+        name: DatagramStateValue
+        struct:
+          fields:
+            - doc: |-
+                TruncatedPackets is the number of messages dropped because the kernel cut
+                them: a coalesced message past its buffer (MSG_TRUNC under UDP GRO), or a
+                message whose control data did not fit (MSG_CTRUNC). Neither can be split
+                into whole datagrams, so none of what survives is delivered.
+              name: TruncatedPackets
+              tag: json:"truncated_packets"
+              type: uint64
+            - doc: |-
+                GSOOversized is the number of GSO sends the kernel refused with EMSGSIZE:
+                a sizing bug, counted, which leaves GSO on.
+              name: GSOOversized
+              tag: json:"gso_oversized"
+              type: uint64
+            - doc: |-
+                ReplyFailures is the number of replies a BatchReplies group queued during
+                a batch that did not leave: Reply had already reported them sent.
+              name: ReplyFailures
+              tag: json:"reply_failures"
+              type: uint64
+      - doc: |-
           FaultValue reports one thing the server runs without, or cannot do, now: a
           degraded listener or loop group, a drained ring, a stalled loop group, or an
           environment token the registry does not know (ADR 0188).
@@ -3372,8 +3408,8 @@ packages:
         struct:
           fields:
             - doc: |-
-                Source says what reported it: "listener", "loop", "ring", "stall" or
-                "environment".
+                Source says what reported it: "listener", "loop", "ring", "stall", "gso"
+                or "environment".
               name: Source
               tag: json:"source"
               type: string
@@ -3492,6 +3528,10 @@ packages:
               name: AcceptBackoffs
               tag: json:"accept_backoffs"
               type: uint64
+            - doc: Datagrams counts what the batched datagram paths drop (ADR 0192).
+              name: Datagrams
+              tag: json:"datagrams"
+              type: DatagramStateValue
             - doc: |-
                 Loops reports every loop group (ADR 0186 §D8). It is empty while the
                 server serves none.
@@ -4731,6 +4771,26 @@ packages:
           - name: "n"
             type: int
         name: BatchSize
+        out:
+          - type: GroupOption
+      - doc: |-
+          BatchReplies makes a datagram group's replies leave per read batch rather than
+          one at a time (ADR 0192). Packet.Reply made while the batch is served then
+          queues a copy of its datagram and reports it sent, len(b) and nil; the batch's
+          replies leave together when it ends, and one that fails then is counted in
+          State's Datagrams.ReplyFailures, since its handler has returned. On Linux a UDP
+          socket sends them with one sendmmsg, a run of consecutive replies to one peer
+          of one size as one UDP GSO send, split at 64 segments or the IP length, and
+          one datagram a message once the device refused GSO (EIO); a zoned IPv6 peer
+          is written at once, and a Unix datagram socket, a socket with no raw
+          descriptor and every other platform send the queue one WriteTo a reply.
+          Under the option Reply is valid only during the handler's call, as Data is:
+          the Packet is the read loop's, and one kept and replied to while a later
+          batch is served is queued with that batch. A reply made while no batch is
+          served is written at once. Without the option, Reply writes at once and
+          returns the write's own error. A stream group refuses it with
+          LoopOptionUnsupported.
+        name: BatchReplies
         out:
           - type: GroupOption
       - doc: |-
@@ -7063,6 +7123,12 @@ packages:
             name: Fallbacks
             target: corenet.FallbacksValue
       - alias:
+          - doc: |-
+              DatagramState counts what the batched datagram paths drop: messages cut
+              short, GSO sends refused for their size, queued replies that did not leave.
+            name: DatagramState
+            target: corenet.DatagramStateValue
+      - alias:
           - doc: Platform names the operating system, its release and the toolchain.
             name: Platform
             target: corenet.PlatformValue
@@ -7360,6 +7426,13 @@ packages:
             type: OptionKind
             typed: true
             value: "18"
+      - const:
+          - doc: OptionBatchReplies is BatchReplies. A datagram group honours it; a stream group refuses it.
+            name: OptionBatchReplies
+            reexport: corenet.OptionBatchReplies
+            type: OptionKind
+            typed: true
+            value: "19"
       - alias:
           - doc: |-
               EngineValue names the engine family a group runs on, passed by Engine. The
@@ -7752,6 +7825,19 @@ packages:
             - name: "n"
               type: int
           name: BatchSize
+          out:
+            - type: GroupOption
+      - func:
+          doc: |-
+            BatchReplies makes a datagram group's replies leave per read batch: Reply
+            then reports a queued reply sent, and a send that fails when the batch ends
+            is counted in [State].Datagrams.ReplyFailures. On Linux a UDP socket batches
+            them with sendmmsg and, where it can, UDP GSO; elsewhere each leaves with a
+            WriteTo. Under it Reply is valid only during the handler's call, as Data is.
+            Without it, Reply writes at once and returns the write's own error. A stream
+            group refuses it.
+          forward: svcserver.BatchReplies
+          name: BatchReplies
           out:
             - type: GroupOption
       - func:

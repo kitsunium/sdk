@@ -93,6 +93,8 @@ workflows:
           key: _
           range: st.Listeners
           value: l
+      - set: out
+        value: append(out, s.gsoFaults()...)
       - bind: serving
         eval: st.Phase == corenet.PhaseServing
       - loop:

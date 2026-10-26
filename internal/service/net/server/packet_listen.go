@@ -4,6 +4,7 @@ import (
 	"context"
 	stdnet "net"
 	"strings"
+	"sync"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -63,6 +64,49 @@ type boundPacketConn struct {
 	addr corenet.AddressValue
 	// pc is the live socket.
 	pc stdnet.PacketConn
+	// source reads it, sink sends its replies; both are built with it, before
+	// its read loop starts.
+	source datagramSource
+	sink   datagramSink
+	// done is closed when its read loop has ended, which a handover waits on;
+	// doneOnce guards the close.
+	done     chan struct{}
+	doneOnce sync.Once
+}
+
+// finish closes done, once: the read loop has ended.
+func (b *boundPacketConn) finish() {
+	b.doneOnce.Do(func() { close(b.done) })
+}
+
+// handoverSource is the part of a source that hands its socket over: a drain
+// to EAGAIN with GRO on, then GRO off, which ends the read loop (ADR 0192).
+type handoverSource interface {
+	// handover starts it and reports whether there is a drain to wait for.
+	handover() bool
+	// stopGRO switches GRO off without a drain.
+	stopGRO()
+}
+
+// handover prepares the socket for whoever reads it next and reports whether
+// its read loop is draining: wait on done before closing it.
+func (b *boundPacketConn) handover() bool {
+	h, ok := b.source.(handoverSource)
+	//: a source without GRO coalesced nothing.
+	if !ok {
+		//: nothing to drain.
+		return false
+	}
+	//: the source decides.
+	return h.handover()
+}
+
+// stopGRO switches GRO off on the socket, without a drain.
+func (b *boundPacketConn) stopGRO() {
+	//: only a source that can coalesce has GRO to switch off.
+	if h, ok := b.source.(handoverSource); ok {
+		h.stopGRO()
+	}
 }
 
 // Close releases the socket, which is what ends its read loop.

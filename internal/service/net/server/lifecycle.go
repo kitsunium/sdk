@@ -108,6 +108,13 @@ func (g *StreamGroup) startRefusal() error {
 		//: refused by name.
 		return err
 	}
+	//: a stream group, goroutine or loop, has no datagram replies to batch,
+	//: whatever a loop handler claims to honour.
+	if g.kinds.has(corenet.OptionBatchReplies) {
+		//: refuse rather than ignore a configuration the group cannot apply.
+		return errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
+			errs.String("group", g.name), errs.String("option", corenet.OptionBatchReplies.String()))
+	}
 	//: a loop group judges every option it was given against the engine and
 	//: its handler.
 	if g.loopHandler != nil {
@@ -182,7 +189,7 @@ func (s *Server) bindPacketGroup(ctx context.Context, group *PacketGroup) error 
 			//: abort startup; Start unwinds whatever is already bound.
 			return err
 		}
-		bound := &boundPacketConn{group: group.name, addr: addr, pc: pc}
+		bound := s.newBoundPacket(group, addr, pc)
 		degraded, reason := batchDegradation(group.limits)
 		s.mu.Lock()
 		s.packetConns = append(s.packetConns, bound)
@@ -219,7 +226,7 @@ func (s *Server) adoptPacketSockets(group *PacketGroup, handler corenet.PacketHa
 		//: one read goroutine per adopted descriptor.
 		for _, pc := range conns {
 			addr := corenet.AddressValue{Network: pc.LocalAddr().Network(), Addr: pc.LocalAddr().String()}
-			bound := &boundPacketConn{group: group.name, addr: addr, pc: pc}
+			bound := s.newBoundPacket(group, addr, pc)
 			s.mu.Lock()
 			s.packetConns = append(s.packetConns, bound)
 			s.states = append(s.states, corenet.ListenerStateValue{
@@ -564,7 +571,13 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	s.phase.Store(uint32(corenet.PhaseDraining))
 	//: a drain stops every ring on purpose: no stall is watched from here.
 	s.stopStallWatch()
-	//: closing the listeners is what ends the accept loops.
+	//: closing the stream listeners is what ends the accept loops; first, so
+	//: the datagram handover below never keeps them accepting.
+	s.closeStreamListeners()
+	//: a datagram socket that coalesced is handed over, within its own short
+	//: budget, before it is closed.
+	s.handoverPackets(ctx)
+	//: closing a datagram socket is what ends its read loop.
 	s.closeListeners()
 	//: loop groups drain on their own threads within the same budget.
 	loopErr := s.shutdownLoops(ctx)
@@ -649,6 +662,9 @@ func (s *Server) waitIdle(ctx context.Context) error {
 // without draining.
 func (s *Server) Close() error {
 	s.stopStallWatch()
+	//: GRO off before the close, so a successor inheriting the socket finds
+	//: nothing coalesced from here on; no drain is waited for.
+	s.stopGROPackets()
 	s.closeListeners()
 	//: loop groups close their connections and stop their threads.
 	s.closeLoops()
@@ -674,9 +690,8 @@ func (s *Server) Close() error {
 // listener already closed by a concurrent Close, and reporting that would turn
 // a benign race into a spurious failure.
 func (s *Server) closeListeners() {
+	s.closeStreamListeners()
 	s.mu.Lock()
-	listeners := s.listeners
-	s.listeners = nil
 	packetConns := s.packetConns
 	s.packetConns = nil
 	s.mu.Unlock()
@@ -684,7 +699,15 @@ func (s *Server) closeListeners() {
 	for _, bound := range packetConns {
 		swallowErr(bound.Close())
 	}
-	//: close every listener that was still open.
+}
+
+// closeStreamListeners closes and forgets every bound stream listener, which
+// ends the accept loops.
+func (s *Server) closeStreamListeners() {
+	s.mu.Lock()
+	listeners := s.listeners
+	s.listeners = nil
+	s.mu.Unlock()
 	//: close every listener that was still open.
 	for _, bound := range listeners {
 		swallowErr(bound.Close())

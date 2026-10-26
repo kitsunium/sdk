@@ -140,8 +140,13 @@ func TestEvaluate_thresholds(t *testing.T) {
 		{"P6 without A is missing", benchLines("L1", "loop", "cpu-ns/req", tenSamples), "P6", verdictMissing},
 		{"P4a at 5x and -40 % passes", benchLines("L3", "recvmmsg", "datagrams/syscall", tenSamples) + benchLines("L3", "gro", "datagrams/syscall", scaled(tenSamples, 5)) +
 			benchLines("L3", "recvmmsg", "cpu-ns/datagram", tenSamples) + benchLines("L3", "gro", "cpu-ns/datagram", scaled(tenSamples, 0.5)), "P4a", verdictPass},
-		{"P4a at 4x on the median fails on the lower bound", benchLines("L3", "recvmmsg", "datagrams/syscall", tenSamples) + benchLines("L3", "gro", "datagrams/syscall", scaled(tenSamples, 4)) +
-			benchLines("L3", "recvmmsg", "cpu-ns/datagram", tenSamples) + benchLines("L3", "gro", "cpu-ns/datagram", scaled(tenSamples, 0.5)), "P4a", verdictFail},
+		// datagrams/syscall is reported, not gated: below its floor, P4a still
+		// passes on its CPU.
+		{"P4a below 4x a receive still passes on its CPU", benchLines("L3", "recvmmsg", "datagrams/syscall", tenSamples) + benchLines("L3", "gro", "datagrams/syscall", scaled(tenSamples, 3.5)) +
+			benchLines("L3", "recvmmsg", "cpu-ns/datagram", tenSamples) + benchLines("L3", "gro", "cpu-ns/datagram", scaled(tenSamples, 0.5)), "P4a", verdictPass},
+		// Median ratio 0.75, upper bound 110*0.75/97 = 0.85.
+		{"P4a median at -25 % CPU fails on the bound", benchLines("L3", "recvmmsg", "datagrams/syscall", tenSamples) + benchLines("L3", "gro", "datagrams/syscall", scaled(tenSamples, 5)) +
+			benchLines("L3", "recvmmsg", "cpu-ns/datagram", tenSamples) + benchLines("L3", "gro", "cpu-ns/datagram", scaled(tenSamples, 0.75)), "P4a", verdictFail},
 		{"P2 within 5 % passes", benchLines("L2", "handwritten", "cpu-ns/req", scaled(tenSamples, 1.2)) + benchLines("L2", "chain", "cpu-ns/req", tenSamples), "P2", verdictPass},
 		// Median ratio 1.0, upper bound 110/97 = 1.13.
 		{"P2 equal on the median fails on the bound", benchLines("L2", "handwritten", "cpu-ns/req", tenSamples) + benchLines("L2", "chain", "cpu-ns/req", tenSamples), "P2", verdictFail},
@@ -167,9 +172,10 @@ func TestEvaluate_thresholds(t *testing.T) {
 	}
 }
 
-// TestEvaluate_inactiveNeverFails pins the table as it ships: no step it
-// gates is built, so no gate is active, and a run with no sample at all, or
-// with samples that would fail, passes while reporting each gate inactive.
+// TestEvaluate_inactiveNeverFails pins the table as it ships: P4a's gate is
+// active — its engine B is built — and fails a run that has none of its
+// samples; every other is inactive, and a run with no sample at all, or with
+// samples that would fail, reports each of them inactive without failing.
 func TestEvaluate_inactiveNeverFails(t *testing.T) {
 	failing := benchLines("L1", "goroutine", "cpu-ns/req", tenSamples) + benchLines("L1", "loop", "cpu-ns/req", scaled(tenSamples, 2))
 	for _, in := range []string{"", failing} {
@@ -178,18 +184,37 @@ func TestEvaluate_inactiveNeverFails(t *testing.T) {
 			t.Fatal(err)
 		}
 		rep := evaluate(gates, s, "abc")
-		if !rep.Passed {
-			t.Fatalf("inactive table failed: %+v", rep)
+		if rep.Passed {
+			t.Fatalf("a run without L3 passed with P4a's gate active: %+v", rep)
 		}
 		for _, g := range rep.Gates {
+			if g.Step == "P4a" {
+				if !g.Active || g.Verdict == verdictPass || g.Verdict == verdictInactive {
+					t.Errorf("P4a: active=%t verdict=%s, want active and not passing without its samples", g.Active, g.Verdict)
+				}
+				continue
+			}
 			if g.Active || g.Verdict != verdictInactive || g.Pending == "" {
 				t.Errorf("%s: active=%t verdict=%s pending=%q, want inactive with what it waits for", g.Step, g.Active, g.Verdict, g.Pending)
 			}
 		}
 	}
+	if rep := evaluate(gates, mustParse(t, p4aPassing()), "abc"); !rep.Passed {
+		t.Fatalf("the shipped table failed a run P4a passes: %+v", rep)
+	}
 	if g := gateNamed(t, evaluate(gates, mustParse(t, failing), "abc"), "P6"); g.Measured[0].Verdict != verdictFail {
 		t.Fatalf("an inactive gate still reports what it measured: %+v", g.Measured)
 	}
+}
+
+// p4aPassing is L3's samples as a run that passes P4a's gate reports them:
+// five times the datagrams a receive, half the CPU a datagram.
+func p4aPassing() string {
+	//: both metrics, both engines.
+	return benchLines("L3", "recvmmsg", "datagrams/syscall", tenSamples) +
+		benchLines("L3", "gro", "datagrams/syscall", scaled(tenSamples, 5)) +
+		benchLines("L3", "recvmmsg", "cpu-ns/datagram", tenSamples) +
+		benchLines("L3", "gro", "cpu-ns/datagram", scaled(tenSamples, 0.5))
 }
 
 // mustParse parses in or fails the test.
@@ -208,7 +233,7 @@ func mustParse(t *testing.T, in string) samplesEntity {
 func TestGates_table(t *testing.T) {
 	want := map[string]string{
 		"P2":  "L2 handwritten chain cpu-ns/req<=1.05r",
-		"P4a": "L3 recvmmsg gro datagrams/syscall>=4r cpu-ns/datagram<=0.75r",
+		"P4a": "L3 recvmmsg gro datagrams/syscall>=4r(reported) cpu-ns/datagram<=0.75r",
 		"P6":  "L1 goroutine loop cpu-ns/req<=0.7r",
 		"P5":  "L1 published loop cpu-ns/req<=1r",
 	}
@@ -221,6 +246,9 @@ func TestGates_table(t *testing.T) {
 			got += fmt.Sprintf(" %s%s%g", c.Metric, c.Op, c.Threshold)
 			if c.Ratio {
 				got += "r"
+			}
+			if c.Reported {
+				got += "(reported)"
 			}
 			if !slices.Contains([]string{opAtMost, opAtLeast}, c.Op) {
 				t.Errorf("%s: op %q", g.Step, c.Op)
@@ -258,7 +286,7 @@ func TestJudge_refusesBadReferenceAndOp(t *testing.T) {
 func TestRun(t *testing.T) {
 	dir := t.TempDir()
 	in := filepath.Join(dir, "bench.txt")
-	if err := os.WriteFile(in, []byte(benchLines("L1", "loop", "cpu-ns/req", tenSamples)), 0o600); err != nil {
+	if err := os.WriteFile(in, []byte(benchLines("L1", "loop", "cpu-ns/req", tenSamples)+p4aPassing()), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var out, errb bytes.Buffer
@@ -274,7 +302,7 @@ func TestRun(t *testing.T) {
 	report := filepath.Join(dir, "report.json")
 	out.Reset()
 	if code := run([]string{"-sha", "abc123", "-in", in, "-out", report}, &out, &errb); code != 0 {
-		t.Fatalf("inactive table: %d %s", code, errb.String())
+		t.Fatalf("shipped table: %d %s", code, errb.String())
 	}
 	if !strings.Contains(out.String(), "commit abc123") || !strings.Contains(out.String(), "P6   inactive") {
 		t.Fatalf("summary:\n%s", out.String())

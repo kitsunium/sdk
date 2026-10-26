@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T20:00:00Z -->
+<!-- updated: 2026-10-25T23:00:00Z -->
 # tools/netgate/
 
 ## Purpose
@@ -19,19 +19,19 @@ Stdlib-only, no `go.sum`, outside `go.work` (the `tools/` convention, and an
 
 | File | Role |
 |---|---|
-| `gates.go` | the table, as data: per step its load, engines A and B, criteria (one metric, one op, one threshold each), `Active`, what it is `Pending` on, P2's allocation budget, and the named 0-alloc exclusions (full queue, setup/Start, error paths) |
+| `gates.go` | the table, as data: per step its load, engines A and B, criteria (one metric, one op, one threshold each, `Reported` for one judged and written but never settling the gate), `Active`, what it is `Pending` on, P2's allocation budget, and the named 0-alloc exclusions (full queue, setup/Start, error paths) |
 | `stats.go` | `summarize`: benchstat's median and distribution-free interval (golang.org/x/perf benchmath, `AssumeNothing`) — order statistics k and n−k+1, k the largest whose binomial(n, ½) tail stays within (1−0.95)/2; the 2nd and 9th of ten. Fewer than 10 samples is refused |
 | `parse.go` | `BenchmarkLoad<load>/engine=<label>[-procs]` lines read into samples by load, engine and metric; every other line skipped |
-| `eval.go` | the types, and `evaluate`: a ratio criterion bounds B/A by the widest the two intervals allow (`hi(B)/lo(A)` for `<=`, `lo(B)/hi(A)` for `>=`); a missing or short side is `missing`; an active gate that does not pass fails the report; an inactive gate reports what it measured and never fails |
+| `eval.go` | the types, and `evaluate`: a ratio criterion bounds B/A by the widest the two intervals allow (`hi(B)/lo(A)` for `<=`, `lo(B)/hi(A)` for `>=`); a missing or short side is `missing`; a `Reported` criterion is judged and written, never settling its gate; an active gate that does not pass fails the report; an inactive gate reports what it measured and never fails |
 | `main.go` | the CLI: `-in`, `-sha` (required: no report without its commit), `-out`, `-list`; exit 0, 1 (an active gate failed), 2 (usage, unreadable input) |
-| `main_test.go` | the interval against benchstat's own output on a fixed set (100.5 ± 9 %), k for n = 10 and 20, the parser, each gate of the table turned on and held to its threshold — passing, failing on the bound with the median on the threshold, missing a side, nine samples —, the shipped table all inactive and passing, and the CLI |
+| `main_test.go` | the interval against benchstat's own output on a fixed set (100.5 ± 9 %), k for n = 10 and 20, the parser, each gate of the table turned on and held to its threshold — passing, failing on the bound with the median on the threshold, missing a side, nine samples —, the shipped table — P4a active, failing without L3's samples and passing with them, every other inactive and passing —, and the CLI |
 
 ## The table
 
 | Step | Load | A → B | Criterion (bound) | State |
 |---|---|---|---|---|
 | P2 | L2 | handwritten → chain | `cpu-ns/req` ratio ≤ 1.05 (upper); 0 allocations as a kit budget, not a bench metric | inactive until P2's chain |
-| P4a | L3 | recvmmsg → gro | `datagrams/syscall` ratio ≥ 4 (lower); `cpu-ns/datagram` ratio ≤ 0.75 (upper) | inactive until P4a |
+| P4a | L3 | recvmmsg → gro | `datagrams/syscall` ratio ≥ 4 (lower), **reported, not gated** (ADR 0192 §D7); `cpu-ns/datagram` — the machine's, `/proc/stat` busy over the window (ADR 0192 §D6) — ratio ≤ 0.75 (upper) | **active** |
 | P6 | L1 | goroutine → loop | `cpu-ns/req` ratio ≤ 0.70 (upper) | inactive until P6 |
 | P5 | L1 | published → loop | `cpu-ns/req` ratio ≤ 1.0 (upper) | inactive: the published http1's samples are not stored |
 
