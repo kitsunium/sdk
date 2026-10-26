@@ -137,8 +137,8 @@ func parseName(name string) (seriesKey, bool) {
 
 // splitPair splits "<A>:<B>" into its two labels, neither empty, with one
 // separator only.
-func splitPair(pair string) (string, string, bool) {
-	a, b, ok := strings.Cut(pair, pairSep)
+func splitPair(pair string) (engineA, engineB string, ok bool) {
+	engineA, engineB, ok = strings.Cut(pair, pairSep)
 	//: two labels, neither empty, no third.
-	return a, b, ok && a != "" && b != "" && !strings.Contains(b, pairSep)
+	return engineA, engineB, ok && engineA != "" && engineB != "" && !strings.Contains(engineB, pairSep)
 }
