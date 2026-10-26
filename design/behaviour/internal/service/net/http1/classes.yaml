@@ -1,6 +1,18 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 constants:
+  - doc: statusUnauthorized answers a request the authenticating link refused.
+    items:
+      - name: statusUnauthorized
+        type: int
+        value: "401"
+    name: statusUnauthorized
+  - doc: bearerScheme is the authentication scheme Bearer reads, lowercase.
+    items:
+      - name: bearerScheme
+        type: string
+        value: "\"bearer\""
+    name: bearerScheme
   - doc: |-
       internalError is the whole answer to a response the writer refused or a
       handler left deferred: a 500 with no body, and the connection closed.
@@ -147,12 +159,27 @@ constants:
         name: RefusalBodyTooLarge
       - doc: "RefusalMethodUnsupported is CONNECT: the profile opens no tunnel."
         name: RefusalMethodUnsupported
+      - doc: |-
+          RefusalTargetPath is a target whose path holds a dot-segment, an empty
+          segment, a backslash, an invalid percent-escape, or an encoded slash, dot,
+          backslash or NUL: a path two links of a chain, or a link and a backend,
+          could read as two different resources.
+        name: RefusalTargetPath
+      - doc: |-
+          RefusalTargetForm is a target in none of the forms the profile serves:
+          origin-form, absolute-form with an http or https scheme, or "*" for OPTIONS.
+        name: RefusalTargetForm
+      - doc: |-
+          RefusalTargetHost is an absolute-form target whose authority carries
+          userinfo, is empty, or differs from the Host field, or comes with no Host
+          field at all.
+        name: RefusalTargetHost
     name: RefusalNone
   - doc: "refusalCount is one past the last Refusal: the length of every table below."
     items:
       - name: refusalCount
         type: int
-        value: int(RefusalMethodUnsupported) + 1
+        value: int(RefusalTargetHost) + 1
     name: refusalCount
   - doc: The status codes a refusal is answered with (RFC 9110 §15).
     grouped: true
@@ -182,6 +209,36 @@ constants:
         type: int
         value: "501"
     name: statusBadRequest
+  - grouped: true
+    items:
+      - doc: |-
+          schemeHTTP and schemeHTTPS are the schemes an absolute-form target may
+          name, lowercase: foldIs compares a target's scheme to them whatever its
+          case.
+        name: schemeHTTP
+        type: string
+        value: "\"http://\""
+      - doc: schemeHTTPS is "https://".
+        name: schemeHTTPS
+        type: string
+        value: "\"https://\""
+      - doc: noDigit is hexDigits' value for a byte that is no hexadecimal digit.
+        name: noDigit
+        type: byte
+        value: "0xFF"
+      - doc: decimalDigits is how many digits 0-9 are.
+        name: decimalDigits
+        type: int
+        value: "10"
+      - doc: hexLetters is how many letters a-f are.
+        name: hexLetters
+        type: int
+        value: "6"
+      - doc: "escapeLen is the length of a percent-escape: '%' and two digits."
+        name: escapeLen
+        type: int
+        value: "3"
+    name: schemeHTTP
   - doc: The status codes the writer reasons about.
     grouped: true
     items:
@@ -215,6 +272,39 @@ constants:
         value: "10"
     name: statusOK
 files:
+  - decls:
+      - statusUnauthorized
+      - bearerScheme
+      - wwwAuthenticate
+      - RouteValue
+      - route
+      - link
+      - newLink
+      - (*link).endBatch
+      - misconfigured
+      - Routes
+      - checkRoute
+      - RouteLayer
+      - (*RouteLayer).ServeHTTP1
+      - (*RouteLayer).EndBatch
+      - Bearer
+      - BearerLayer
+      - (*BearerLayer).ServeHTTP1
+      - (*BearerLayer).EndBatch
+      - (*BearerLayer).exempted
+      - bearerToken
+      - addHeader
+      - Headers
+      - HeadersLayer
+      - (*HeadersLayer).ServeHTTP1
+      - (*HeadersLayer).EndBatch
+      - Log
+      - credential
+      - repeated
+      - LogLayer
+      - (*LogLayer).ServeHTTP1
+      - (*LogLayer).EndBatch
+    name: chain.go
   - decls: []
     name: doc.go
   - decls:
@@ -300,6 +390,22 @@ files:
       - Refusal.Err
     name: refusal.go
   - decls:
+      - schemeHTTP
+      - hexDigits
+      - hexTable
+      - canonical
+      - absoluteForm
+      - cutScheme
+      - authorityIsHost
+      - splitPath
+      - checkPath
+      - pathByte
+      - dotSegment
+      - escapeAllowed
+      - foldEqualBytes
+      - lowerASCII
+    name: target.go
+  - decls:
       - statusOK
       - statusLines
       - refusalAnswerTable
@@ -313,6 +419,51 @@ files:
       - AppendRefusal
     name: write.go
 functions:
+  - doc: newLink finds next's batcher once, never per batch.
+    name: newLink
+    params: next corenet.HTTP1Handler
+    results: link
+  - doc: misconfigured wraps HTTP1Misconfigured with the link and what it refused.
+    name: misconfigured
+    params: linkName, what string
+    results: error
+  - name: Routes
+    params: routes ...RouteValue
+    results: corenet.Middleware[corenet.HTTP1Handler], error
+  - doc: |-
+      checkRoute refuses a route whose ID, method or path breaks a rule, against
+      the routes before it.
+    name: checkRoute
+    params: r RouteValue, before []RouteValue
+    results: error
+  - name: Bearer
+    params: v corenet.HTTP1BearerVerifier, exempt ...int
+    results: corenet.Middleware[corenet.HTTP1Handler], error
+  - doc: |-
+      bearerToken returns the token of an "Authorization: Bearer <token>" field,
+      and false when there is none.
+    name: bearerToken
+    params: req *corenet.HTTP1RequestValue
+    results: "[]byte, bool"
+  - doc: |-
+      addHeader gives res the field lines b: b itself when res has none, which
+      costs nothing, or a copy after the ones it has.
+    name: addHeader
+    params: res *corenet.HTTP1ResponseValue, b []byte
+  - name: Headers
+    params: pairs ...string
+    results: corenet.Middleware[corenet.HTTP1Handler], error
+  - name: Log
+    params: l corenet.HTTP1AccessLogger, allow ...string
+    results: corenet.Middleware[corenet.HTTP1Handler], error
+  - doc: credential reports whether name is a field Log never records.
+    name: credential
+    params: name string
+    results: bool
+  - doc: repeated reports whether name is among before, case-insensitive.
+    name: repeated
+    params: name string, before []string
+    results: bool
   - name: HandleLoop
     params: h corenet.HTTP1Handler, p Parser
     results: "*LoopHandler"
@@ -521,6 +672,75 @@ functions:
     params: b T, lit string
     results: bool
     typeParams: T ~string | ~[]byte
+  - doc: hexTable builds hexDigits.
+    name: hexTable
+    results: "[byteValues]byte"
+  - doc: |-
+      canonical computes req.Path and req.Query from req.Target once the head is
+      whole, since an absolute-form target is judged against the Host field. It
+      refuses a target two readers could resolve to two resources: a dot-segment,
+      an empty segment, a backslash, an invalid escape, an encoded slash, dot,
+      backslash or NUL (RefusalTargetPath); a form the profile does not serve
+      (RefusalTargetForm); an absolute-form authority that is not the Host's
+      (RefusalTargetHost). Nothing is decoded and nothing allocates: both slices
+      alias the target, or a constant.
+    name: canonical
+    params: req *corenet.HTTP1RequestValue
+    results: Refusal
+  - doc: |-
+      absoluteForm reduces an absolute-form target to its path once its
+      authority matched the Host field, A–Z folded (RFC 9112 §3.2.2: a server
+      that kept both could route by one and authorise by the other).
+    name: absoluteForm
+    params: t []byte, req *corenet.HTTP1RequestValue
+    results: Refusal
+  - doc: |-
+      cutScheme returns what follows an http:// or https:// scheme, in any case,
+      and false for any other target.
+    name: cutScheme
+    params: t []byte
+    results: "[]byte, bool"
+  - doc: |-
+      authorityIsHost reports whether an absolute-form authority is non-empty,
+      carries no userinfo, and equals the request's Host field, A–Z folded.
+    name: authorityIsHost
+    params: authority []byte, req *corenet.HTTP1RequestValue
+    results: bool
+  - doc: splitPath cuts p, which starts with "/", at its query and checks the path.
+    name: splitPath
+    params: p []byte, req *corenet.HTTP1RequestValue
+    results: Refusal
+  - doc: |-
+      checkPath refuses a path, which starts with "/", holding an empty segment
+      but the last, a "." or ".." segment, a backslash, an invalid escape, or an
+      escape of '/', '.', '\' or NUL.
+    name: checkPath
+    params: p []byte
+    results: Refusal
+  - doc: |-
+      pathByte returns how many bytes of p at i one path byte takes — three for
+      an escape, one otherwise — or 0 for a backslash or a refused escape.
+    name: pathByte
+    params: p []byte, i int
+    results: int
+  - doc: dotSegment reports whether seg is "." or "..".
+    name: dotSegment
+    params: seg []byte
+    results: bool
+  - doc: |-
+      escapeAllowed reports whether p holds two hexadecimal digits after the '%'
+      at i, decoding to a byte other than '/', '.', '\' and NUL.
+    name: escapeAllowed
+    params: p []byte, i int
+    results: bool
+  - doc: foldEqualBytes reports whether a and b are equal once A–Z are folded.
+    name: foldEqualBytes
+    params: a, b []byte
+    results: bool
+  - doc: lowerASCII maps A–Z onto a–z and every other byte onto itself.
+    name: lowerASCII
+    params: c byte
+    results: byte
   - doc: refusalAnswerTable spells, once, the answer to every refusal.
     name: refusalAnswerTable
     results: "[refusalCount]string"
@@ -559,6 +779,7 @@ imports:
   bytes: bytes
   corenet: github.com/kitsunium/sdk/internal/core/net
   errs: github.com/kitsunium/sdk/internal/kernel/errs
+  slices: slices
   strconv: strconv
   swar: github.com/kitsunium/sdk/internal/kernel/swar
   sync: sync
@@ -568,6 +789,134 @@ package:
   name: http1
   purpose: "Package http1 is the restricted HTTP/1.1 profile (ADR 0186 §D6): a codec that frames requests out of bytes and appends responses to bytes, doing no I/O, and HandleLoop, the adapter that serves it on a loop group."
 types:
+  - fields:
+      - doc: ID identifies the route, from 1; zero is "no route".
+        name: ID
+        type: int
+      - doc: Method is the method the route takes, empty for any.
+        name: Method
+        type: string
+      - doc: |-
+          Path is the canonical path the route matches, from "/": the whole of
+          it, or its start when Prefix is set.
+        name: Path
+        type: string
+      - doc: Prefix makes Path match the start of a request's path.
+        name: Prefix
+        type: bool
+    kind: struct
+    name: RouteValue
+  - doc: |-
+      route is a RouteValue as the layer matches it: bytes, compared to the
+      request's without a conversion.
+    fields:
+      - doc: id is the route's ID.
+        name: id
+        type: int
+      - doc: method is the route's method, empty for any.
+        name: method
+        type: "[]byte"
+      - doc: path is the canonical path, or its start.
+        name: path
+        type: "[]byte"
+      - doc: prefix makes path match the start of a request's path.
+        name: prefix
+        type: bool
+    kind: struct
+    name: route
+  - doc: link is what every layer of the chain keeps of the handler it wraps.
+    fields:
+      - doc: next is the handler the layer wraps.
+        name: next
+        type: corenet.HTTP1Handler
+      - doc: batcher is next as a batcher, nil when it is not one.
+        name: batcher
+        type: corenet.HTTP1Batcher
+    kind: struct
+    methods:
+      - doc: endBatch ends the next handler's batch when it is a batcher.
+        name: endBatch
+        params: lane int
+        recv: l *link
+    name: link
+  - fields:
+      - name: ""
+        role: embedded
+        type: link
+      - doc: routes are the routes, in the order given.
+        name: routes
+        type: "[]route"
+    kind: struct
+    methods:
+      - name: ServeHTTP1
+        params: req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue
+        recv: l *RouteLayer
+      - name: EndBatch
+        params: lane int
+        recv: l *RouteLayer
+    name: RouteLayer
+  - fields:
+      - name: ""
+        role: embedded
+        type: link
+      - doc: v verifies the token.
+        name: v
+        type: corenet.HTTP1BearerVerifier
+      - doc: exempt are the routes that need no token.
+        name: exempt
+        type: "[]int"
+    kind: struct
+    methods:
+      - name: ServeHTTP1
+        params: req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue
+        recv: l *BearerLayer
+      - name: EndBatch
+        params: lane int
+        recv: l *BearerLayer
+      - doc: exempted reports whether route is one of the exemptions.
+        name: exempted
+        params: route int
+        recv: l *BearerLayer
+        results: bool
+    name: BearerLayer
+  - fields:
+      - name: ""
+        role: embedded
+        type: link
+      - doc: fields are the field lines every answer carries.
+        name: fields
+        type: "[]byte"
+    kind: struct
+    methods:
+      - name: ServeHTTP1
+        params: req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue
+        recv: l *HeadersLayer
+      - name: EndBatch
+        params: lane int
+        recv: l *HeadersLayer
+    name: HeadersLayer
+  - fields:
+      - name: ""
+        role: embedded
+        type: link
+      - doc: l receives the records.
+        name: l
+        type: corenet.HTTP1AccessLogger
+      - doc: allow are the field names a record carries, as given.
+        name: allow
+        type: "[]string"
+      - doc: names are allow's bytes, a record's field names.
+        name: names
+        type: "[][]byte"
+    kind: struct
+    methods:
+      - name: ServeHTTP1
+        params: req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue
+        recv: l *LogLayer
+      - name: EndBatch
+        params: lane int
+        recv: l *LogLayer
+    name: LogLayer
   - fields:
       - doc: h serves every request.
         name: h
@@ -784,6 +1133,17 @@ types:
 vars:
   - grouped: true
     items:
+      - doc: |-
+          wwwAuthenticate is the field a 401 from Bearer carries, with no spare
+          capacity, so a handler appending to it copies it.
+        name: wwwAuthenticate
+        value: "slices.Clip([]byte(\"WWW-Authenticate: Bearer\\r\\n\"))"
+      - doc: credentialFields are the request fields Log never records, lowercase.
+        name: credentialFields
+        value: "[...]string{\"authorization\", \"proxy-authorization\", \"cookie\"}"
+    name: wwwAuthenticate
+  - grouped: true
+    items:
       - doc: tchar holds the RFC 9110 §5.6.2 token characters.
         name: tchar
         value: tokenTable()
@@ -858,6 +1218,9 @@ vars:
           		RefusalTargetTooLong:           "target_too_long",
           		RefusalBodyTooLarge:            "body_too_large",
           		RefusalMethodUnsupported:       "method_unsupported",
+          		RefusalTargetPath:              "target_path",
+          		RefusalTargetForm:              "target_form",
+          		RefusalTargetHost:              "target_host",
           	}
       - doc: |-
           refusalStatus is the status each refusal is answered with; RefusalNone's
@@ -887,6 +1250,9 @@ vars:
           		RefusalTargetTooLong:           statusURITooLong,
           		RefusalBodyTooLarge:            statusContentTooLarge,
           		RefusalMethodUnsupported:       statusNotImplemented,
+          		RefusalTargetPath:              statusBadRequest,
+          		RefusalTargetForm:              statusBadRequest,
+          		RefusalTargetHost:              statusBadRequest,
           	}
       - doc: |-
           refusalErrs is the core/net sentinel each refusal belongs to, grouped by
@@ -916,8 +1282,31 @@ vars:
           		RefusalTargetTooLong:           corenet.HTTP1TargetTooLong,
           		RefusalBodyTooLarge:            corenet.HTTP1BodyTooLarge,
           		RefusalMethodUnsupported:       corenet.HTTP1MethodUnsupported,
+          		RefusalTargetPath:              corenet.HTTP1RequestMalformed,
+          		RefusalTargetForm:              corenet.HTTP1RequestMalformed,
+          		RefusalTargetHost:              corenet.HTTP1RequestMalformed,
           	}
     name: refusalNames
+  - grouped: true
+    items:
+      - doc: |-
+          hexDigits are the values of the hexadecimal digits, by byte; noDigit for
+          any other.
+        name: hexDigits
+        value: hexTable()
+      - doc: pathRoot is the canonical path of an absolute-form target with none.
+        name: pathRoot
+        value: slices.Clip([]byte("/"))
+      - doc: pathAsterisk is the canonical path of the asterisk-form target.
+        name: pathAsterisk
+        value: slices.Clip([]byte("*"))
+      - doc: methodOptions is the one method an asterisk-form target may carry.
+        name: methodOptions
+        value: "[]byte(\"OPTIONS\")"
+      - doc: querySep starts a target's query.
+        name: querySep
+        value: "[]byte(\"?\")"
+    name: hexDigits
   - grouped: true
     items:
       - doc: |-

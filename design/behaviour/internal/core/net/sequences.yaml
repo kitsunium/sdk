@@ -138,6 +138,29 @@ sequences:
   - of: HTTP1HandlerFunc.ServeHTTP1
     steps:
       - eval: f(req, res)
+  - of: (*HTTP1AuthValue).SetSubject
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(b) > HTTP1MaxSubject
+      - set: a.n
+        value: uint8(copy(a.subject[:], b))
+      - return: "true"
+  - of: (*HTTP1AuthValue).Subject
+    steps:
+      - return: a.subject[:a.n]
+  - of: (*HTTP1AuthValue).SetClaims
+    steps:
+      - set: a.claims
+        value: c
+  - of: (*HTTP1AuthValue).Claims
+    steps:
+      - return: a.claims
+  - of: (*HTTP1AuthValue).Reset
+    steps:
+      - set: a.n, a.claims
+        value: 0, 0
   - of: IdentityValue.String
     steps:
       - return: "\"<redacted>\""

@@ -1,6 +1,58 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 workflows:
+  - of: Log
+    steps:
+      - opt:
+          do:
+            - return: nil, misconfigured("Log", "logger")
+          when: l == nil
+      - opt:
+          do:
+            - return: nil, misconfigured("Log", "allow")
+          when: len(allow) > corenet.HTTP1MaxAccessFields
+      - bind: names
+        eval: make([][]byte, 0, len(allow))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil, misconfigured("Log", name)
+                when: "!token(name) || credential(name) || repeated(name, allow[:i])"
+            - set: names
+              value: append(names, []byte(name))
+          key: i
+          range: allow
+          value: name
+      - return: |-
+          func(next corenet.HTTP1Handler) corenet.HTTP1Handler {
+          		//: the names are shared, read only.
+          		return &LogLayer{link: newLink(next), l: l, allow: allow, names: names}
+          	}, nil
+  - of: credential
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: foldIs(name, c)
+          key: _
+          range: credentialFields
+          value: c
+      - return: "false"
+  - of: repeated
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "true"
+                when: foldEqualBytes([]byte(name), []byte(b))
+          key: _
+          range: before
+          value: b
+      - return: "false"
   - of: contentLength
     steps:
       - opt:
@@ -81,6 +133,33 @@ workflows:
                 when: b[k]|asciiCase != lit[k]
           key: k
           range: len(lit)
+      - return: "true"
+  - of: cutScheme
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: t[len(scheme):], true
+                when: len(t) > len(scheme) && foldIs(t[:len(scheme)], scheme)
+          key: _
+          range: "[...]string{schemeHTTP, schemeHTTPS}"
+          value: scheme
+      - return: nil, false
+  - of: foldEqualBytes
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: len(a) != len(b)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "false"
+                when: lowerASCII(a[i]) != lowerASCII(b[i])
+          key: i
+          range: len(a)
       - return: "true"
   - of: token
     steps:

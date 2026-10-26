@@ -31,7 +31,7 @@
       "dir": "http1",
       "layer": "public",
       "family": "net",
-      "doc": "Package http1 is the restricted HTTP/1.1 profile the SDK serves on its loop\nengine (ADR 0186 §D6): a codec that frames requests out of bytes and appends\nresponses to bytes, and HandleLoop, the adapter that serves a Handler on a\nloop group of package server.\n\nIt is a profile, not an HTTP server, and what it refuses defines it. A\nrequest is answered with its status and Connection: close, and its\nconnection closed, before any handler sees it, when it carries any\nTransfer-Encoding (chunked, and so trailers, included), Expect, a bare CR or\nLF, a NUL or another control byte in a value, obs-fold, whitespace before a\ncolon, a name outside tchar, a Content-Length that is not one run of at most\nten digits or that repeats, a second Authorization or Host, CONNECT, or a\nhead, target or body past its Limits. HTTP/2, Upgrade and TLS are out of the\nprofile: a program that needs them mounts net/http with Group.HandleHTTP.\nFraming depends on neither the method nor the route: a request takes its\nhead plus its Content-Length.\n\n# Serving\n\n\ttype api struct{ lanes []perLane } // one per lane, indexed by Request.Lane\n\n\tfunc (a *api) ServeHTTP1(req *http1.Request, res *http1.Response) {\n\t\tl := &a.lanes[req.Lane]\n\t\t// route, authenticate with l's own scratch, ...\n\t\tres.Defer = true // answered at the end of the batch\n\t\tl.pending = append(l.pending, job{res: res})\n\t}\n\n\tfunc (a *api) EndBatch(lane int) {\n\t\tl := &a.lanes[lane]\n\t\t// one transaction for every job of l.pending, then for each:\n\t\t// job.res.Status, job.res.Body = ..., ...; job.res.Defer = false\n\t}\n\n\tsrv.Group(\"api\", server.Listen(\"tcp\", \":8080\"), server.Loop(server.LoopValue{Loops: 2})).\n\t\tHandleLoop(http1.HandleLoop(a, http1.Parser{}))\n\nA handler runs on its lane's thread and must not block it. Every callback\nof one lane runs on that thread, one at a time, so state kept per lane needs\nno lock; Request.Lane and the lane argument of EndBatch name the lane. The\nanswers of a batch leave at its end, in request order on each connection.\n\n# The codec alone\n\nParser.Parse, AppendResponse and AppendRefusal frame and write without the\nloop, on any []byte: nothing allocates once the caller's buffers have room.\n"
+      "doc": "Package http1 is the restricted HTTP/1.1 profile the SDK serves on its loop\nengine (ADR 0186 §D6): a codec that frames requests out of bytes and appends\nresponses to bytes, and HandleLoop, the adapter that serves a Handler on a\nloop group of package server.\n\nIt is a profile, not an HTTP server, and what it refuses defines it. A\nrequest is answered with its status and Connection: close, and its\nconnection closed, before any handler sees it, when it carries any\nTransfer-Encoding (chunked, and so trailers, included), Expect, a bare CR or\nLF, a NUL or another control byte in a value, obs-fold, whitespace before a\ncolon, a name outside tchar, a Content-Length that is not one run of at most\nten digits or that repeats, a second Authorization or Host, CONNECT, a\ntarget two readers could resolve apart — a dot-segment, an empty segment, a\nbackslash, an encoded slash, dot, backslash or NUL, an absolute-form not for\nits Host — or a head, target or body past its Limits. HTTP/2, Upgrade and\nTLS are out of the profile: a program that needs them mounts net/http with Group.HandleHTTP.\nFraming depends on neither the method nor the route: a request takes its\nhead plus its Content-Length.\n\n# Serving\n\n\ttype api struct{ lanes []perLane } // one per lane, indexed by Request.Lane\n\n\tfunc (a *api) ServeHTTP1(req *http1.Request, res *http1.Response) {\n\t\tl := &a.lanes[req.Lane]\n\t\tswitch req.Route { // set by the router link\n\t\tcase routeItem:\n\t\t\tres.Defer = true // answered at the end of the batch\n\t\t\tl.pending = append(l.pending, job{res: res, user: req.Auth})\n\t\tdefault:\n\t\t\tres.Status = 404\n\t\t}\n\t}\n\n\tfunc (a *api) EndBatch(lane int) {\n\t\tl := &a.lanes[lane]\n\t\t// one transaction for every job of l.pending, then for each:\n\t\t// job.res.Status, job.res.Body = ..., ...; job.res.Defer = false\n\t}\n\n\troutes, _ := http1.Routes(http1.Route{ID: routeItem, Method: \"GET\", Path: \"/items/\", Prefix: true},\n\t\thttp1.Route{ID: routeHealth, Path: \"/health\"})\n\tbearer, _ := http1.Bearer(verifier, routeHealth) // /health needs no token\n\tsrv.Group(\"api\", server.Listen(\"tcp\", \":8080\"), server.Loop(server.LoopValue{Loops: 2})).\n\t\tHandleLoop(http1.HandleLoop(http1.Chain(a, routes, bearer), http1.Parser{}))\n\nA handler runs on its lane's thread and must not block it. Every callback\nof one lane runs on that thread, one at a time, so state kept per lane needs\nno lock; Request.Lane and the lane argument of EndBatch name the lane. The\nanswers of a batch leave at its end, in request order on each connection.\n\n# The chain\n\nA link is a Middleware, composed with Chain, the first listed outermost.\nThe codec has already computed the request's canonical Path — no\ndot-segment, no empty segment, no encoded slash, dot, backslash or NUL, an\nabsolute-form target reduced to its path once its authority matched Host —\nso every link routes and judges the same bytes. Routes sets\nRequest.Route, Bearer verifies the token for every route its exemptions do\nnot name and copies the subject and the claims into Request.Auth by value,\nHeaders gives every answer its fields, and Log hands an AccessLogger a\nrecord of the fields it allows, never a credential. No link writes the\nbytes a request takes: the adapter frames with what Parse returned.\n\n# The codec alone\n\nParser.Parse, AppendResponse and AppendRefusal frame and write without the\nloop, on any []byte: nothing allocates once the caller's buffers have room.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/pkg/v1/net/server",
@@ -343,6 +343,32 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/http1.Access",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/http1",
+      "name": "Access",
+      "spelled": "corenet.HTTP1AccessValue",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.HTTP1AccessValue",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1AccessValue",
+      "doc": "Access is one request's access-log record, as Log's link hands it to an\nAccessLogger.\n",
+      "file": "http1/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/http1.AccessLogger",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/http1",
+      "name": "AccessLogger",
+      "spelled": "corenet.HTTP1AccessLogger",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.HTTP1AccessLogger",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1AccessLogger",
+      "doc": "AccessLogger receives Log's records, on the lane's thread.\n",
+      "file": "http1/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/net/http1.AppendField",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/pkg/v1/net/http1",
@@ -391,6 +417,19 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/http1.Auth",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/http1",
+      "name": "Auth",
+      "spelled": "corenet.HTTP1AuthValue",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.HTTP1AuthValue",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1AuthValue",
+      "doc": "Auth is what an authenticating link established: a subject and claims,\nheld by value in the Request.\n",
+      "file": "http1/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/net/http1.Batcher",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/net/http1",
@@ -399,6 +438,44 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/net.HTTP1Batcher",
       "owner": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1Batcher",
       "doc": "Batcher is the optional capability of a Handler served on a loop group:\nEndBatch runs once per batch of the loop's requests, before any answer of\nthe batch is written, and completes the responses the handler deferred.\n",
+      "file": "http1/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/http1.Bearer",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/http1",
+      "name": "Bearer",
+      "spelled": "func(v BearerVerifier, exempt ...int) (Middleware, error)",
+      "canonical": "func(v github.com/kitsunium/sdk/pkg/v1/net/http1.BearerVerifier, exempt ...int) (github.com/kitsunium/sdk/pkg/v1/net/http1.Middleware, error)",
+      "doc": "Bearer returns the authenticating link: a request whose Route is not in\nexempt is answered 401 unless v verifies its Bearer token; v sets the\nsubject and the claims on the request's Auth, a value.\n",
+      "file": "http1/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/http1.BearerLayer",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/http1",
+      "name": "BearerLayer",
+      "spelled": "svchttp1.BearerLayer",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.BearerLayer",
+      "owner": "go:github.com/kitsunium/sdk/internal/service/net/http1.BearerLayer",
+      "doc": "BearerLayer is the link Bearer builds.\n",
+      "file": "http1/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/http1.BearerVerifier",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/http1",
+      "name": "BearerVerifier",
+      "spelled": "corenet.HTTP1BearerVerifier",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.HTTP1BearerVerifier",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1BearerVerifier",
+      "doc": "BearerVerifier verifies a Bearer token for Bearer's link and fills the\nrequest's Auth.\n",
       "file": "http1/gen_facade.go",
       "layer": "public",
       "family": "net"
@@ -417,6 +494,18 @@
         "public": "The request content is too large"
       },
       "doc": "BodyTooLarge is the refusal of a Content-Length past the body bound.\n",
+      "file": "http1/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/http1.Chain",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/http1",
+      "name": "Chain",
+      "spelled": "func(h Handler, links ...Middleware) Handler",
+      "canonical": "func(h github.com/kitsunium/sdk/pkg/v1/net/http1.Handler, links ...github.com/kitsunium/sdk/pkg/v1/net/http1.Middleware) github.com/kitsunium/sdk/pkg/v1/net/http1.Handler",
+      "doc": "Chain applies links to a handler, outermost first: Chain(h, a, b) yields\na(b(h)), the first link listed the first to see a request.\n",
       "file": "http1/gen_facade.go",
       "layer": "public",
       "family": "net"
@@ -599,6 +688,31 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/http1.Headers",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/http1",
+      "name": "Headers",
+      "spelled": "func(pairs ...string) (Middleware, error)",
+      "canonical": "func(pairs ...string) (github.com/kitsunium/sdk/pkg/v1/net/http1.Middleware, error)",
+      "doc": "Headers returns the link that gives every answer the field lines pairs\nnames, name then value; a name AppendField refuses is Misconfigured.\n",
+      "file": "http1/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/http1.HeadersLayer",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/http1",
+      "name": "HeadersLayer",
+      "spelled": "svchttp1.HeadersLayer",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.HeadersLayer",
+      "owner": "go:github.com/kitsunium/sdk/internal/service/net/http1.HeadersLayer",
+      "doc": "HeadersLayer is the link Headers builds.\n",
+      "file": "http1/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/net/http1.Limits",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/net/http1",
@@ -612,6 +726,31 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/http1.Log",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/http1",
+      "name": "Log",
+      "spelled": "func(l AccessLogger, allow ...string) (Middleware, error)",
+      "canonical": "func(l github.com/kitsunium/sdk/pkg/v1/net/http1.AccessLogger, allow ...string) (github.com/kitsunium/sdk/pkg/v1/net/http1.Middleware, error)",
+      "doc": "Log returns the access-log link: one Access record per request, with the\nrequest fields allow names. Authorization, Proxy-Authorization and Cookie\nare refused with Misconfigured: a credential is never logged.\n",
+      "file": "http1/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/http1.LogLayer",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/http1",
+      "name": "LogLayer",
+      "spelled": "svchttp1.LogLayer",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.LogLayer",
+      "owner": "go:github.com/kitsunium/sdk/internal/service/net/http1.LogLayer",
+      "doc": "LogLayer is the link Log builds.\n",
+      "file": "http1/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/net/http1.LoopHandler",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/net/http1",
@@ -620,6 +759,20 @@
       "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.LoopHandler",
       "owner": "go:github.com/kitsunium/sdk/internal/service/net/http1.LoopHandler",
       "doc": "LoopHandler serves the profile on a loop group: the server.LoopHandler\nHandleLoop returns.\n",
+      "file": "http1/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/http1.MaxAccessFields",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/http1",
+      "name": "MaxAccessFields",
+      "spelled": "int",
+      "canonical": "int",
+      "value": "8",
+      "init": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1MaxAccessFields",
+      "doc": "MaxAccessFields is how many request fields Log may allow.\n",
       "file": "http1/gen_facade.go",
       "layer": "public",
       "family": "net"
@@ -667,6 +820,20 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/http1.MaxSubject",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/http1",
+      "name": "MaxSubject",
+      "spelled": "int",
+      "canonical": "int",
+      "value": "128",
+      "init": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1MaxSubject",
+      "doc": "MaxSubject is the longest subject an Auth holds, in bytes.\n",
+      "file": "http1/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/net/http1.MethodUnsupported",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/pkg/v1/net/http1",
@@ -680,6 +847,19 @@
         "public": "The request method is not supported"
       },
       "doc": "MethodUnsupported is the refusal of CONNECT.\n",
+      "file": "http1/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/http1.Middleware",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/http1",
+      "name": "Middleware",
+      "spelled": "corenet.Middleware[corenet.HTTP1Handler]",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.Middleware[github.com/kitsunium/sdk/internal/core/net.HTTP1Handler]",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/net.Middleware",
+      "doc": "Middleware is a link of a chain: it decorates a Handler with another,\ncomposed by Chain.\n",
       "file": "http1/gen_facade.go",
       "layer": "public",
       "family": "net"
@@ -774,7 +954,7 @@
       "spelled": "corenet.HTTP1RequestValue",
       "canonical": "github.com/kitsunium/sdk/internal/core/net.HTTP1RequestValue",
       "owner": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1RequestValue",
-      "doc": "Request is one request, framed by the codec. Every slice aliases the bytes\nit was framed from; Lane names the lane that framed it.\n",
+      "doc": "Request is one request, framed by the codec. Every slice aliases the bytes\nRequest is one request, framed by the codec. Every slice aliases the bytes\nit was framed from; Lane names the lane that framed it, Path is its\ncanonical path, Route and Auth what the chain's links set.\n",
       "file": "http1/gen_facade.go",
       "layer": "public",
       "family": "net"
@@ -824,6 +1004,44 @@
         "public": "The response is not valid"
       },
       "doc": "ResponseInvalid is a response the writer refuses to write.\n",
+      "file": "http1/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/http1.Route",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/http1",
+      "name": "Route",
+      "spelled": "svchttp1.RouteValue",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.RouteValue",
+      "owner": "go:github.com/kitsunium/sdk/internal/service/net/http1.RouteValue",
+      "doc": "Route is one route of Routes' link: an identifier, a method, a canonical\npath and whether it is a prefix.\n",
+      "file": "http1/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/http1.RouteLayer",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/http1",
+      "name": "RouteLayer",
+      "spelled": "svchttp1.RouteLayer",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.RouteLayer",
+      "owner": "go:github.com/kitsunium/sdk/internal/service/net/http1.RouteLayer",
+      "doc": "RouteLayer is the link Routes builds.\n",
+      "file": "http1/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/http1.Routes",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/http1",
+      "name": "Routes",
+      "spelled": "func(routes ...Route) (Middleware, error)",
+      "canonical": "func(routes ...github.com/kitsunium/sdk/pkg/v1/net/http1.Route) (github.com/kitsunium/sdk/pkg/v1/net/http1.Middleware, error)",
+      "doc": "Routes returns the router link: Request.Route is the first route whose\nMethod and Path match, zero for none, and the next handler runs either\nway. A bad ID, a repeated one, a Path not from \"/\" or a Method that is not\na token is refused with Misconfigured.\n",
       "file": "http1/gen_facade.go",
       "layer": "public",
       "family": "net"

@@ -78,3 +78,38 @@ func TestLoopLayer(t *testing.T) {
 		t.Fatal("a handler without the capability honours nothing")
 	}
 }
+
+// TestHTTP1AuthValue pins the subject held by value: a copy, refused past
+// HTTP1MaxSubject without a change, cleared by Reset with the claims.
+func TestHTTP1AuthValue(t *testing.T) {
+	t.Parallel()
+	var a corenet.HTTP1AuthValue
+	if len(a.Subject()) != 0 || a.Claims() != 0 {
+		t.Fatal("the zero value holds something")
+	}
+	src := []byte("alice")
+	if !a.SetSubject(src) {
+		t.Fatal("SetSubject refused a short subject")
+	}
+	a.SetClaims(9)
+	src[0] = 'X'
+	if string(a.Subject()) != "alice" || a.Claims() != 9 {
+		t.Fatalf("Subject %q, Claims %d", a.Subject(), a.Claims())
+	}
+	b := a
+	b.SetSubject([]byte("bob"))
+	if string(a.Subject()) != "alice" {
+		t.Fatal("a copy shares the subject")
+	}
+	long := make([]byte, corenet.HTTP1MaxSubject+1)
+	if a.SetSubject(long) || string(a.Subject()) != "alice" {
+		t.Fatal("a subject past the bound was taken or cut")
+	}
+	if !a.SetSubject(long[:corenet.HTTP1MaxSubject]) || len(a.Subject()) != corenet.HTTP1MaxSubject {
+		t.Fatal("a subject at the bound was refused")
+	}
+	a.Reset()
+	if len(a.Subject()) != 0 || a.Claims() != 0 {
+		t.Fatal("Reset left something")
+	}
+}
