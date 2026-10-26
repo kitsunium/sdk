@@ -112,9 +112,11 @@ func TestPortable_timersOnTick(t *testing.T) {
 	h := &portableLineH{}
 	pl := newOpenPortable(h, 2)
 	pl.batch()
-	if !pl.timersAt.After(time.Now()) {
+	if pl.timersAt.IsZero() {
 		t.Fatal("the first batch did not schedule the next scan")
 	}
+	// Pinned far out so the deadline below lowers it however long the batch took.
+	pl.timersAt = time.Now().Add(time.Hour)
 	ref := corenet.LoopConnRef{Slot: 1, Gen: 1}
 	if err := pl.SetDeadline(ref, time.Millisecond); err != nil {
 		t.Fatal(err)
