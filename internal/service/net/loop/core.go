@@ -66,6 +66,10 @@ type ring struct {
 	lruTail int32
 	// dirtyHead starts the list of slots to flush at the end of the batch.
 	dirtyHead int32
+	// compact lists the slots whose spill's head was consumed in the batch,
+	// compacted at its end. A slice, not a link in the slot: a slot released
+	// inside the batch is reset whole, and a link would cut the list there.
+	compact []int32
 	// drv is the backend.
 	drv driver
 	// st is the ring's counters, published at the end of each batch.
@@ -231,13 +235,7 @@ func (r *ring) deliver(slot int32, data []byte) {
 	}
 	buf := lp.slab.data(c.spill)
 	n := clampConsumed(lp.h.OnData(lp, r.ref(slot), buf), len(buf))
-	c = &r.conns[slot]
-	c.spill.off += int32(n)
-	//: fully consumed: the chunk goes back once the batch is over.
-	if c.spill.off == c.spill.len {
-		lp.deferred = append(lp.deferred, c.spill)
-		c.spill = chunkRef{idx: noChunk}
-	}
+	r.consumed(slot, n)
 }
 
 // keep copies an unconsumed tail into a fresh spill.
@@ -339,13 +337,31 @@ func (r *ring) deliverSpill(slot int32, n int) {
 	r.lruTouch(slot)
 	lp := r.lp
 	buf := lp.slab.data(c.spill)
-	used := clampConsumed(lp.h.OnData(lp, r.ref(slot), buf), len(buf))
-	c = &r.conns[slot]
-	c.spill.off += int32(used)
-	//: fully consumed: released once the batch is over.
+	r.consumed(slot, clampConsumed(lp.h.OnData(lp, r.ref(slot), buf), len(buf)))
+}
+
+// consumed advances slot's spill past the n bytes the handler consumed: a
+// spill consumed whole goes back once the batch is over, a head consumed is
+// listed for the compaction at the batch's end.
+func (r *ring) consumed(slot int32, n int) {
+	c := &r.conns[slot]
+	//: closed from inside the callback: finish released the spill.
+	if c.spill.empty() {
+		//: nothing held.
+		return
+	}
+	c.spill.off += int32(n)
+	//: fully consumed: the chunk goes back once the batch is over.
 	if c.spill.off == c.spill.len {
-		lp.deferred = append(lp.deferred, c.spill)
+		r.lp.deferred = append(r.lp.deferred, c.spill)
 		c.spill = chunkRef{idx: noChunk}
+		//: released.
+		return
+	}
+	//: a head consumed, listed once.
+	if c.spill.off > 0 && c.flags&fCompact == 0 {
+		c.flags |= fCompact
+		r.compact = append(r.compact, slot)
 	}
 }
 
@@ -656,19 +672,24 @@ func (lp *loop) endBatch(started time.Time) {
 	lp.deferred = lp.deferred[:0]
 	//: a spill whose head was consumed starts again at its chunk's front.
 	for _, r := range lp.rings {
-		r.compactAll()
+		r.compactListed()
 		r.st.batches++
 		r.publish()
 	}
 	lp.grp.observe(time.Since(started))
 }
 
-// compactAll compacts every open slot's spill.
-func (r *ring) compactAll() {
-	//: only slots with a spill moved.
-	for s := r.lruHead; s != noLink; s = r.conns[s].lruNext {
+// compactListed compacts the spill of every slot listed in the batch, so the
+// batch's end costs the slots it touched, not the open ones. A slot released
+// and taken again since its listing is compacted harmlessly: compactSpill
+// moves nothing it does not have to.
+func (r *ring) compactListed() {
+	//: each listed slot, then the list is empty for the next batch.
+	for _, s := range r.compact {
+		r.conns[s].flags &^= fCompact
 		r.compactSpill(s)
 	}
+	r.compact = r.compact[:0]
 }
 
 // now converts the wall clock into the loop's ticks.

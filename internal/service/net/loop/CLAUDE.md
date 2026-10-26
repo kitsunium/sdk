@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T20:00:00Z -->
+<!-- updated: 2026-10-26T12:00:00Z -->
 # internal/service/net/loop/
 
 ## Purpose
@@ -19,7 +19,7 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
 | `group.go` | `Listener` (the one hand-off: a duplicated descriptor), `Config`, `Group` (`Shutdown`, `Close`, `State`, `Rejected`, `Live`) and `Start`, which resolves the sizing, starts the backend and writes the one start line |
 | `sizing.go` | `resolve`: the defaults, the `LoopNoDescriptors` refusal of a zero `RLIMIT_NOFILE`, and the one ring formula (explicit, else ⌈max(MaxConns, SoftConns) / min(RLIMIT_NOFILE, IORING_MAX_FIXED_FILES)⌉, else 1) |
 | `conn.go` | `connCtl`, one slot's pointer-free control state; its states, flags and close reasons |
-| `core.go` | the backend-neutral core: `ring` (slot table, free list, LRU, dirty list, timers), `loop` (the `corenet.LoopIO` implementation; `Loop` is its index, set at build), `driver` (what a backend does: flush, shutdown, unread), the spill, the double-buffered output, the close and eviction rules |
+| `core.go` | the backend-neutral core: `ring` (slot table, free list, LRU, dirty and compaction lists, timers), `loop` (the `corenet.LoopIO` implementation; `Loop` is its index, set at build), `driver` (what a backend does: flush, shutdown, unread), the spill, the double-buffered output, the close and eviction rules |
 | `slab.go` | the mmap'd slab: power-of-two size classes from 2 KiB, arenas mapped lazily, a global budget that sheds load by name |
 | `wheel.go` | the hashed timer wheel, index-linked, one timer per slot, 10 ms ticks |
 | `postq.go` | the `Post` queue: preallocated, mutex, `pending` CAS false→true wakes once per drain |
@@ -52,6 +52,16 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
   read: in the arena, or behind the spill. A spill that grows moves to a new
   chunk and the old one waits on `deferred`. Compaction runs only after
   `OnBatchEnd`. `TestCore_spillHandedOutStaysPut` pins this.
+- **A batch costs the slots it touched, never the open ones.** Nothing at a
+  batch's end walks the LRU: the dirty list names the slots to flush, and the
+  compaction list (`ring.compact`, deduplicated by `fCompact`) the slots whose
+  spill's head was consumed. The compaction list is a slice, not a link in
+  `connCtl`: a slot released inside the batch is reset whole by `emptyConn`,
+  which would cut a linked list there. At a few hundred requests a second a
+  batch holds one or two requests, so a walk of ten thousand idle keep-alive
+  connections per batch was paid per request.
+  `TestCore_batchCostIndependentOfOpen` pins it, `BenchmarkCore_batch`
+  measures it.
 - **The close is never re-entrant.** `Close` marks the slot and the batch's end
   settles it once its output has left, so `OnClose` never runs inside another
   callback. `finish` calls `OnClose`, then the backend's `shutdown`. The slot
@@ -225,6 +235,7 @@ bazel test //internal/service/net/loop:all
   backend.
 - Compact, reallocate or recycle a buffer handed to `OnData` before
   `OnBatchEnd` returns.
+- Walk every open slot at each batch: list what the batch touched instead.
 - Call `OnClose` from inside another callback.
 - Call `setrlimit` or `GOMAXPROCS`: `State` reports both, and the consumer
   decides.
