@@ -7,12 +7,14 @@ import (
 	stdnet "net"
 	"os"
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/net/loop"
 )
 
 const (
@@ -95,6 +97,11 @@ type portableLoop struct {
 	maxConns int
 	idle     time.Duration
 	degraded string
+	// caps is the group's capability report: every row unprobed, or
+	// disabled; noDelayOff is tcp-nodelay switched off, so each accepted
+	// connection has the netpoller's TCP_NODELAY cleared (ADR 0189).
+	caps       []corenet.CapabilityValue
+	noDelayOff bool
 
 	events chan portableEvent
 	// post is the queue of posted operations; wake rouses the handler.
@@ -139,7 +146,7 @@ type portableLoop struct {
 // once server closes that listener or the backend stops, and the handler
 // goroutine, which returns once the backend stopped or drained to its last
 // connection, closing done as it does.
-func startPortable(group *StreamGroup, lns []stdnet.Listener, degraded string) portableEngine {
+func startPortable(group *StreamGroup, lns []stdnet.Listener, degraded string, plan loopPlan) portableEngine {
 	v := group.loop
 	pl := &portableLoop{
 		group: group.name, h: group.loopHandler,
@@ -150,6 +157,8 @@ func startPortable(group *StreamGroup, lns []stdnet.Listener, degraded string) p
 		events:  make(chan portableEvent, portableEvents),
 		postOps: make([]corenet.PostFunc, portablePostCap), postArgs: make([]uintptr, portablePostCap),
 		wake: make(chan struct{}, 1), done: make(chan struct{}), lns: lns,
+		caps:       append(loop.Unprobed("portable", plan.disabled, plan.disabledBy), portableNoDelay(plan)),
+		noDelayOff: slices.Contains(plan.disabled, corenet.CapabilityTCPNoDelay),
 	}
 	//: one acceptor per listener; it ends when server closes the listener.
 	for _, ln := range lns {
@@ -158,6 +167,19 @@ func startPortable(group *StreamGroup, lns []stdnet.Listener, degraded string) p
 	go pl.run(pl.done)
 	//: serving.
 	return portableEngine{pl: pl}
+}
+
+// portableNoDelay is the portable backend's tcp-nodelay row: the netpoller
+// sets TCP_NODELAY on every connection it accepts, cleared once the operator
+// switched it off.
+func portableNoDelay(plan loopPlan) corenet.CapabilityValue {
+	row := corenet.CapabilityValue{Name: corenet.CapabilityTCPNoDelay, Class: classKernel, Status: statusOn, Reason: "the netpoller's default"}
+	//: switched off: cleared per connection.
+	if slices.Contains(plan.disabled, corenet.CapabilityTCPNoDelay) {
+		row.Status, row.Reason = statusDisabled, plan.disabledBy
+	}
+	//: the row.
+	return row
 }
 
 // orDefaultInt returns v, or def when v is zero or less.
@@ -330,6 +352,10 @@ func (pl *portableLoop) handleSent(ev *portableEvent) {
 // is closed by finish, the connection closing with its output sent, or a
 // write failure.
 func (pl *portableLoop) open(c stdnet.Conn) {
+	//: tcp-nodelay switched off: the netpoller's default cleared.
+	if tc, ok := c.(*stdnet.TCPConn); ok && pl.noDelayOff {
+		swallowErr(tc.SetNoDelay(false))
+	}
 	var slot int32
 	//: a released slot first.
 	if n := len(pl.free); n > 0 {
@@ -859,6 +885,7 @@ func (e portableEngine) State() corenet.LoopStateValue {
 		Group: pl.group, Backend: corenet.LoopBackendPortable, ProbeStage: "portable",
 		Degraded: pl.degraded != "", DegradedReason: pl.degraded,
 		Loops: 1, Rings: 1, RingsSource: "single", GOMAXPROCS: runtime.GOMAXPROCS(0),
+		Capabilities: slices.Clone(pl.caps),
 		RingStates: []corenet.LoopRingStateValue{{
 			Conns: pl.live.Load(), Accepted: pl.accepted.Load(), Closed: pl.closed.Load(),
 			Batches: pl.batches.Load(), Evicted: 0,

@@ -856,11 +856,11 @@ net_body() {
   net_body 'Override:\nKITSUNIUM_NET_ENGINE=kqueue\n'
   run bash "$CI_DIR/check-net-default-change.sh" "$BATS_TEST_TMPDIR/body.md"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"KITSUNIUM_NET_ENGINE=kqueue names no capability"* ]]
+  [[ "$output" == *"KITSUNIUM_NET_ENGINE=kqueue names no engine"* ]]
   net_body 'Override:\nKITSUNIUM_NET_DISABLE=portable\n'
   run bash "$CI_DIR/check-net-default-change.sh" "$BATS_TEST_TMPDIR/body.md"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"'portable' is no capability an operator may switch off (iouring, epoll)"* ]]
+  [[ "$output" == *"'portable' is no capability an operator may switch off (iouring, epoll, uring-multishot-recv,"* ]]
   net_body 'Override:\nGODEBUG=x\n'
   run bash "$CI_DIR/check-net-default-change.sh" "$BATS_TEST_TMPDIR/body.md"
   [ "$status" -eq 1 ]
@@ -869,6 +869,16 @@ net_body() {
   run bash "$CI_DIR/check-net-default-change.sh" "$BATS_TEST_TMPDIR/body.md"
   [ "$status" -eq 1 ]
   [[ "$output" == *"at most once"* ]]
+}
+
+@test "net-default-change: a kernel capability is switched off, never named as an engine (ADR 0189)" {
+  net_body 'Override:\nKITSUNIUM_NET_DISABLE=uring-direct,tcp-nodelay\n'
+  run bash "$CI_DIR/check-net-default-change.sh" "$BATS_TEST_TMPDIR/body.md"
+  [ "$status" -eq 0 ]
+  net_body 'Override:\nKITSUNIUM_NET_ENGINE=uring-pbuf\n'
+  run bash "$CI_DIR/check-net-default-change.sh" "$BATS_TEST_TMPDIR/body.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"names no engine of the registry (iouring, epoll, portable, goroutine)"* ]]
 }
 
 @test "net-default-change: the registry is the design's, so a token it drops is refused" {

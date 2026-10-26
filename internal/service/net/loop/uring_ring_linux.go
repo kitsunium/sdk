@@ -64,12 +64,18 @@ type uring struct {
 	shadowBid uint16
 	// retries counts busy submits retried.
 	retries uint64
+	// setup is the flags the ring was set up with, as asked: what the kernel
+	// writes back into params is not read for them.
+	setup uint32
+	// ringIdx is the ring's index among its thread's registered rings
+	// (IORING_REGISTER_RING_FDS), -1 when it is entered by descriptor.
+	ringIdx int32
 }
 
 // openURing sets an io_uring of entries SQEs up with flags, mapping it and building the
 // views. It returns the errno of the step that failed.
 func openURing(entries, flags uint32) (*uring, string, syscall.Errno) {
-	u := &uring{fd: -1}
+	u := &uring{fd: -1, ringIdx: -1}
 	u.params.flags = flags | setupCQSize | setupClamp
 	u.params.cqEntries = entries * cqFactor
 	fd, errno := uringSetup(entries, &u.params)
@@ -79,6 +85,7 @@ func openURing(entries, flags uint32) (*uring, string, syscall.Errno) {
 		return nil, "setup", errno
 	}
 	u.fd = fd
+	u.setup = flags
 	p := &u.params
 	//: the probe requires all three; without them the loop cannot wait with a
 	//: timeout, could lose completions, or would need two mappings.
@@ -139,10 +146,13 @@ func (u *uring) buildViews() {
 	u.cqLen = p.cqEntries
 	u.cqes = unsafe.Slice((*cqe)(unsafe.Add(base, p.cqOff.cqes)), p.cqEntries)
 	u.sqes = unsafe.Slice((*sqe)(unsafe.Pointer(&u.sqeMem[0])), p.sqEntries)
-	array := unsafe.Slice((*uint32)(unsafe.Add(base, p.sqOff.array)), p.sqEntries)
-	//: the SQ array maps slot i to SQE i once and for all.
-	for i := range array {
-		array[i] = uint32(i)
+	//: without NO_SQARRAY, the SQ array maps slot i to SQE i once and for all.
+	if !u.noArray() {
+		array := unsafe.Slice((*uint32)(unsafe.Add(base, p.sqOff.array)), p.sqEntries)
+		//: identity.
+		for i := range array {
+			array[i] = uint32(i)
+		}
 	}
 	u.tail = atomic.LoadUint32(u.sqTail)
 	u.submitted = u.tail
@@ -159,8 +169,11 @@ func errnoOfErr(err error) syscall.Errno {
 	return syscall.EIO
 }
 
-// close releases every mapping and the ring.
+// close releases every mapping and the ring, its registration with the
+// thread first: a ring still registered stays referenced by the thread and
+// outlives its close, its direct descriptors with it (P3c).
 func (u *uring) close() {
+	u.unregisterRing()
 	//: each mapping that exists.
 	for _, m := range [][]byte{u.bufRing, u.bufMem, u.sqeMem, u.ringMem} {
 		//: mapped.
@@ -181,7 +194,7 @@ func (u *uring) close() {
 // retries.
 func (u *uring) get() *sqe {
 	//: room, or room made by submitting.
-	for i := 0; u.tail-atomic.LoadUint32(u.sqHead) >= u.sqLen; i++ {
+	for i := 0; !u.room(1); i++ {
 		//: the kernel never drained the SQ.
 		if i >= enterRetries {
 			//: the caller counts the failure.
@@ -189,7 +202,7 @@ func (u *uring) get() *sqe {
 		}
 		u.submit()
 	}
-	s := &u.sqes[u.tail&u.sqMask]
+	s := u.slot()
 	*s = sqe{}
 	u.tail++
 	//: the caller fills it; publish makes it the kernel's.
@@ -201,7 +214,7 @@ func (u *uring) get() *sqe {
 // chain needs it: a submit in the middle would end the chain early.
 func (u *uring) reserve(n uint32) bool {
 	//: room, or room made by submitting.
-	for i := 0; u.tail-atomic.LoadUint32(u.sqHead)+n > u.sqLen; i++ {
+	for i := 0; !u.room(n); i++ {
 		//: the kernel never drained the SQ.
 		if i >= enterRetries {
 			//: the caller counts the failure.
@@ -213,10 +226,123 @@ func (u *uring) reserve(n uint32) bool {
 	return true
 }
 
-// publish hands every filled SQE to the kernel's view of the SQ tail.
+// noArray is NO_SQARRAY: there is no SQ array to fill.
+func (u *uring) noArray() bool {
+	//: as set up.
+	return u.setup&setupNoSQArray != 0
+}
+
+// rewind is SQ_REWIND: the kernel takes every submission from SQE 0, so the
+// pending SQEs are always sqes[0:pending] (uring.slot).
+func (u *uring) rewind() bool {
+	//: as set up.
+	return u.setup&setupSQRewind != 0
+}
+
+// deferred is DEFER_TASKRUN: completions are posted only when this thread
+// enters with GETEVENTS, which every submit then does with min_complete 0.
+func (u *uring) deferred() bool {
+	//: as set up.
+	return u.setup&setupDeferTaskrun != 0
+}
+
+// room reports whether n more SQEs fit: against the kernel's head, or,
+// under SQ_REWIND, against the SQEs filled since the last submit.
+func (u *uring) room(n uint32) bool {
+	//: the head and tail stay zero under SQ_REWIND.
+	if u.rewind() {
+		//: what is pending is all there is.
+		return u.pending()+n <= u.sqLen
+	}
+	//: what the kernel has not consumed yet.
+	return u.tail-atomic.LoadUint32(u.sqHead)+n <= u.sqLen
+}
+
+// slot is the SQE the next get fills: the tail's, or, under SQ_REWIND, the
+// one after those pending, the submitter filling from SQE 0.
+func (u *uring) slot() *sqe {
+	//: from 0.
+	if u.rewind() {
+		//: after the pending ones.
+		return &u.sqes[u.pending()]
+	}
+	//: the tail's.
+	return &u.sqes[u.tail&u.sqMask]
+}
+
+// consumed records got SQEs taken by the kernel. Under SQ_REWIND a partial
+// submit leaves the rest at sqes[got:pending], and the kernel starts at 0
+// again: they are moved down, in order, links and all.
+func (u *uring) consumed(got uint32) {
+	//: the kernel took fewer than were pending.
+	if u.rewind() && got < u.pending() {
+		copy(u.sqes[:u.pending()-got], u.sqes[got:u.pending()])
+	}
+	u.submitted += got
+}
+
+// publish hands every filled SQE to the kernel's view of the SQ tail; under
+// SQ_REWIND the tail stays zero and the count passed to enter is the view.
 func (u *uring) publish() {
+	//: no tail to move.
+	if u.rewind() {
+		//: nothing.
+		return
+	}
 	//: the SQEs are written before the tail moves.
 	atomic.StoreUint32(u.sqTail, u.tail)
+}
+
+// enterSubmit submits n SQEs: the plain submit, which inlines, when no
+// flag is asked for, one with flags otherwise.
+func (u *uring) enterSubmit(fd int, n, flags uint32) (int, syscall.Errno) {
+	//: nothing else asked.
+	if flags == 0 {
+		//: plain.
+		return uringEnterSubmit(fd, n)
+	}
+	//: with flags.
+	return uringEnterFlags(fd, n, flags)
+}
+
+// enterTarget is the fd argument and the flag of every enter: the
+// registered index when the ring has one, the descriptor otherwise.
+func (u *uring) enterTarget() (int, uint32) {
+	//: registered with the thread.
+	if u.ringIdx >= 0 {
+		//: the index.
+		return int(u.ringIdx), enterRegisteredRing
+	}
+	//: the descriptor.
+	return u.fd, 0
+}
+
+// registerRing registers the ring with the calling thread
+// (IORING_REGISTER_RING_FDS), the kernel picking the index. It must run on
+// the thread that enters it, and unregisterRing on the same one.
+func (u *uring) registerRing() syscall.Errno {
+	upd := new(rsrcUpdate{offset: ringFDAlloc, data: uint64(u.fd)})
+	errno := uringRegister(u.fd, regRingFDs, unsafe.Pointer(upd), 1)
+	//: refused.
+	if errno != 0 {
+		//: as answered.
+		return errno
+	}
+	u.ringIdx = int32(upd.offset)
+	//: registered.
+	return 0
+}
+
+// unregisterRing drops the thread's registration, if any.
+func (u *uring) unregisterRing() {
+	//: none.
+	if u.ringIdx < 0 || u.fd < 0 {
+		//: nothing.
+		return
+	}
+	upd := new(rsrcUpdate{offset: uint32(u.ringIdx)})
+	swallowErr(uringRegister(u.fd, unregRingFDs, unsafe.Pointer(upd), 1))
+	u.ringIdx = -1
 }
 
 // pending is how many SQEs are published but not yet submitted.
@@ -237,12 +363,18 @@ func (u *uring) submit() {
 			//: done.
 			return
 		}
-		got, errno := uringEnterSubmit(u.fd, n)
+		fd, reg := u.enterTarget()
+		flags := reg
+		//: DEFER_TASKRUN posts completions only on GETEVENTS, from this thread.
+		if u.deferred() {
+			flags |= enterGetEvents
+		}
+		got, errno := u.enterSubmit(fd, n, flags)
 		//: by outcome.
 		switch errno {
 		//: taken, some or all.
 		case 0:
-			u.submitted += uint32(got)
+			u.consumed(uint32(got))
 		//: interrupted: again.
 		case syscall.EINTR:
 		//: the CQ is full or the kernel is short: the caller reaps first.
@@ -264,12 +396,13 @@ func (u *uring) wait(ts *kernelTimespec) {
 	if u.ready() > 0 {
 		minComplete = 0
 	}
-	got, errno := uringEnterWait(u.fd, u.pending(), minComplete, enterGetEvents|enterExtArg, unsafe.Pointer(&arg), unsafe.Sizeof(arg))
+	fd, reg := u.enterTarget()
+	got, errno := uringEnterWait(fd, u.pending(), minComplete, enterGetEvents|enterExtArg|reg, unsafe.Pointer(&arg), unsafe.Sizeof(arg))
 	//: by outcome; the CQ is peeked by the caller whatever happened.
 	switch errno {
 	//: submitted, and woken.
 	case 0:
-		u.submitted += uint32(got)
+		u.consumed(uint32(got))
 	//: the tick, an interruption, or a busy kernel: the caller reaps.
 	case errnoETIME, syscall.EINTR:
 	default:
@@ -451,6 +584,12 @@ func (u *uring) supports(ops ...uint8) (bool, syscall.Errno) {
 	}
 	//: all supported.
 	return true, 0
+}
+
+// singleShot turns a multishot recv into a single-shot one: one
+// completion, never F_MORE, re-armed by the state machine after it.
+func singleShot(s *sqe) {
+	s.ioprio &^= recvMultishot
 }
 
 // prepAccept fills s as an accept on lfd into a kernel-allocated direct

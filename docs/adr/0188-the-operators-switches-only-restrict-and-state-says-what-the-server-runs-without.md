@@ -10,6 +10,8 @@
   left to their own change. It can be revisited while the SDK is v0
   ([ADR 0040](0040-changing-a-published-shape-while-v0.md)).
 - **Deciders**: SDK maintainers, owner
+- **Amended by**: [ADR 0189](0189-a-kernel-capability-is-probed-reported-and-switched-off-by-name.md) — §D1 (the registry gains the kernel
+  capabilities) and §Deferred (they join it)
 - **Amends**: [ADR 0187](0187-the-handler-type-chooses-the-engine.md) §D8
   (the switches it names, made concrete: their registry, when they are read,
   what they do to each kind of group) and its §Consequences (`StateValue`

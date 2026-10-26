@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T18:00:00Z -->
+<!-- updated: 2026-10-25T23:00:00Z -->
 # internal/core/net/
 
 ## Purpose
@@ -52,8 +52,8 @@ adapter.
 | `limits.go` | `LimitsValue` — one listener group's resource ceilings; a zero field means the domain default, never unbounded |
 | `loop.go` | the loop engine's contract values (ADR 0186 §D4): `LoopConnRef` — ring, slot, generation, comparable, the zero value stale; `PostFunc` — an operation posted to a loop, a plain function and an integer, no closure; `OptionKind` + its constants + `String` — the group options a loop group judges at `Start`, an iota whose kinds 16–18 (`OptionPlaintext`, `OptionName`, `OptionEngine`, ADR 0187) follow `OptionPreHandshake` so no earlier value moves |
 | `engine.go` | `EngineValue` + `EngineAuto` (the zero: the handler's type chooses), `EngineGoroutine`, `EngineLoop` + `String` — the engine family `Engine` names (ADR 0187 §D3) |
-| `loop_state.go` | `LoopStateValue` — one loop group's backend, probe stage, fallback, sizing (`Loops`, `Rings` and where it came from), the effective `RLIMIT_NOFILE` and `GOMAXPROCS`, the batch p99 — and `LoopRingStateValue`, one ring's counters (ADR 0186 §D8) |
-| `loop_value.go` | `LoopValue` — a loop group's engine configuration, passed by the `Loop` group option; `LoopBackend` + its constants (`auto`, the zero, `iouring`, `epoll`, `portable`) + `String` (ADR 0186 §D5) |
+| `loop_state.go` | `LoopStateValue` — one loop group's backend, probe stage, fallback, sizing (`Loops`, `Rings` and where it came from), the effective `RLIMIT_NOFILE` and `GOMAXPROCS`, the batch p99 — and `LoopRingStateValue`, one ring's counters (ADR 0186 §D8); `Capabilities`, the kernel capabilities' report (ADR 0189) |
+| `loop_value.go` | `LoopValue` — a loop group's engine configuration, passed by the `Loop` group option; `LoopBackend` + its constants (`auto`, the zero, `iouring`, `epoll`, `portable`) + `String` (ADR 0186 §D5); `Capabilities`, the class A-code opt-ins (ADR 0189) |
 | `timeouts.go` | `TimeoutsValue` — per-operation deadlines, one per phase (`Read` / `Write` / `Idle` / `Handshake`) |
 | `conn.go` | `ConnHandlerFunc`, the func adapter of the `ConnHandler` port |
 | `packet.go` | `PacketHandlerFunc`, the func adapter of the `PacketHandler` port |
@@ -63,7 +63,7 @@ adapter.
 | `phase.go` | `Phase` — `PhaseNew` / `PhaseStarting` / `PhaseServing` / `PhaseDraining` / `PhaseStopped` + `String` |
 | `state.go` | `StateValue` (+ `Degraded`, true for any `Faults` entry and, for a value built by hand, any row's `Degraded` — ADR 0188 §D4) and `ListenerStateValue` — the server's reported state; `StateValue.Loops` is empty while no loop group exists |
 | `state_report.go` | `OverrideValue` (what the operator's variables did: source, raw, applied ceiling, disabled), `FaultValue` (one thing the server runs without: source, group, reason), `FallbacksValue` (count and last occurrence), `PlatformValue` (GOOS, GOARCH, kernel release, toolchain) — the four fields ADR 0188 adds to `StateValue` |
-| `capability.go` | `Capability` and the registry of the operator's tokens, top first — `CapabilityIOURing`, `CapabilityEpoll` (switchable), `CapabilityPortable`, `CapabilityGoroutine` (floors) — and `EnvEngine`, `EnvDisable`, the variables' names (ADR 0188 §D1); the parser in `net/server` and `scripts/ci/check-net-default-change.sh` read the same design blocks |
+| `capability.go` | `Capability` and the registry of the operator's tokens, top first — `CapabilityIOURing`, `CapabilityEpoll` (switchable), `CapabilityPortable`, `CapabilityGoroutine` (floors) — and `EnvEngine`, `EnvDisable`, the variables' names (ADR 0188 §D1); the kernel capabilities in three blocks — class A-kernel (`uring-multishot-recv`, `uring-pbuf`, `uring-direct`, `epoll-exclusive`, `tcp-nodelay`), class A-code (`uring-defer-taskrun`, `uring-no-sqarray`, `uring-ring-fds`, `uring-sq-rewind`) and class B, declared and not built — and `CapabilityValue`, one row of a loop group's report (ADR 0189); the parser in `net/server` and `scripts/ci/check-net-default-change.sh` read the same design blocks |
 | `policy.go` | `PolicyFunc`, the func form of the outbound authorisation port `Policy` |
 | `policy_compliance.go` | the compile-time proof that `PolicyFunc` satisfies `Policy` |
 | `response.go` | `ResponseValue` — a fully-read outbound response — and `RequestValue`, the request a `Policy` judges |
@@ -317,6 +317,9 @@ cd internal/core && GOWORK=off go test -race -cover ./net/...
   `OptionEngine`, and the sentinels `0.2.11.56` – `0.2.11.58`
   (`EngineUnsupported`, `PlaintextWithTLS`, `GroupNameConflict`) —
   `docs/adr/0187-the-handler-type-chooses-the-engine.md`
+- ADR 0189 — the kernel capabilities, `CapabilityValue`, `LoopStateValue.Capabilities`,
+  `LoopValue.Capabilities`, `LoopCapabilityRefused` —
+  `docs/adr/0189-a-kernel-capability-is-probed-reported-and-switched-off-by-name.md`
 - ADR 0188 — `Capability`, `EnvEngine`, `EnvDisable`, `OverrideValue`,
   `FaultValue`, `FallbacksValue`, `PlatformValue`, the four `StateValue`
   fields and `LoopGroupStalled` (`0.2.11.59`) —

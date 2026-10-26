@@ -1,6 +1,7 @@
 package server
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
@@ -20,12 +21,19 @@ const (
 	rankIOURing
 )
 
+// rankKernel is a kernel capability's rank: below every engine, never a
+// ceiling, never compared with one.
+const rankKernel int = 0
+
 // The words State uses for the environment.
 const (
 	// sourceEnvironment is OverrideValue.Source when a variable is set.
 	sourceEnvironment string = "environment"
 	// faultEnvironment is FaultValue.Source for an unknown token.
 	faultEnvironment string = "environment"
+	// unknownDisables is CapabilityValue.Reason for every optional capability
+	// an unknown token switched off (R5: no optional capability).
+	unknownDisables string = "unknown token: no optional capability"
 )
 
 // capabilityEntry is one row of the registry: a token, its rank, and whether
@@ -37,6 +45,9 @@ type capabilityEntry struct {
 	rank int
 	// switchable is true for an engine an operator may switch off; a floor is not.
 	switchable bool
+	// kernel is true for an optional kernel capability (ADR 0189), which
+	// KITSUNIUM_NET_DISABLE switches off and KITSUNIUM_NET_ENGINE never names.
+	kernel bool
 }
 
 // capabilityRegistry is design/net.yaml's registry, top first.
@@ -46,6 +57,23 @@ var capabilityRegistry = [...]capabilityEntry{
 	{token: corenet.CapabilityEpoll, rank: rankEpoll, switchable: true},
 	{token: corenet.CapabilityPortable, rank: rankPortable, switchable: false},
 	{token: corenet.CapabilityGoroutine, rank: rankGoroutine, switchable: false},
+	{token: corenet.CapabilityURingMultishotRecv, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityURingPbuf, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityURingDirect, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityEpollExclusive, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityTCPNoDelay, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityURingDeferTaskrun, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityURingNoSQArray, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityURingRingFDs, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityURingSQRewind, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityURingSendZC, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityURingBundle, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityURingPbufInc, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityBusyPoll, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityURingZCRX, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityReuseportCBPF, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityTCPDeferAccept, rank: rankKernel, switchable: true, kernel: true},
+	{token: corenet.CapabilityURingMinTimeout, rank: rankKernel, switchable: true, kernel: true},
 }
 
 // operatorEnv is what KITSUNIUM_NET_ENGINE and KITSUNIUM_NET_DISABLE say, read
@@ -59,6 +87,10 @@ type operatorEnv struct {
 	ceiling int
 	// disabled holds the ranks KITSUNIUM_NET_DISABLE switched off.
 	disabled [rankIOURing + 1]bool
+	// kernelOff are the kernel capabilities it switched off; noOptional is
+	// set by an unknown token, which switches every one off (R5).
+	kernelOff  []corenet.Capability
+	noOptional bool
 }
 
 // readOperator reads both variables through lookup and applies R5 (ADR 0187
@@ -95,8 +127,8 @@ func readOperator(lookup lookupFunc) operatorEnv {
 // portable and is reported.
 func (e *operatorEnv) applyEngine(token string) {
 	entry, ok := lookupCapability(token)
-	//: a token outside the registry.
-	if !ok {
+	//: a token outside the registry, or a kernel capability, which is no engine.
+	if !ok || entry.kernel {
 		e.unknown(corenet.EnvEngine, token)
 		return
 	}
@@ -120,6 +152,14 @@ func (e *operatorEnv) applyDisable(list string) {
 			e.unknown(corenet.EnvDisable, token)
 			continue
 		}
+		//: a kernel capability, listed once.
+		if entry.kernel {
+			if !slices.Contains(e.kernelOff, entry.token) {
+				e.kernelOff = append(e.kernelOff, entry.token)
+				e.override.Disabled = append(e.override.Disabled, entry.token)
+			}
+			continue
+		}
 		//: listed once in State, whatever the repetition.
 		if !e.disabled[entry.rank] {
 			e.disabled[entry.rank] = true
@@ -132,6 +172,7 @@ func (e *operatorEnv) applyDisable(list string) {
 // portable, with no optional capability (R5).
 func (e *operatorEnv) unknown(variable, token string) {
 	e.ceiling = min(e.ceiling, rankPortable)
+	e.noOptional = true
 	e.faults = append(e.faults, corenet.FaultValue{
 		Source: faultEnvironment,
 		Reason: variable + ": unknown token " + strconv.Quote(token) + ": engines capped at portable",
@@ -142,8 +183,8 @@ func (e *operatorEnv) unknown(variable, token string) {
 func (e *operatorEnv) applied() corenet.Capability {
 	//: top first.
 	for _, entry := range capabilityRegistry {
-		//: the first one the environment lets through.
-		if e.allows(entry.rank) {
+		//: the first engine the environment lets through.
+		if !entry.kernel && e.allows(entry.rank) {
 			//: the ceiling, as State spells it.
 			return entry.token
 		}
@@ -155,13 +196,45 @@ func (e *operatorEnv) applied() corenet.Capability {
 // allows reports whether the environment lets a group run on the engine of
 // rank r.
 func (e *operatorEnv) allows(r int) bool {
+	//: io_uring receives into provided buffers only: without them it is
+	//: never set up.
+	if r == rankIOURing && e.kernelDisabled(corenet.CapabilityURingPbuf) {
+		//: ruled out.
+		return false
+	}
 	//: under the ceiling and not switched off.
 	return r <= e.ceiling && !e.disabled[r]
 }
 
+// kernelDisabled reports whether the environment switched kernel capability c
+// off, by name or by an unknown token.
+func (e *operatorEnv) kernelDisabled(c corenet.Capability) bool {
+	//: named, or every one.
+	return e.noOptional || slices.Contains(e.kernelOff, c)
+}
+
+// kernelSwitches is what a loop group is told is off, and how State says it:
+// every kernel capability under an unknown token, the listed ones otherwise.
+func (e *operatorEnv) kernelSwitches() ([]corenet.Capability, string) {
+	//: an unknown token: none at all.
+	if e.noOptional {
+		var all []corenet.Capability
+		//: every kernel row.
+		for _, entry := range capabilityRegistry {
+			if entry.kernel {
+				all = append(all, entry.token)
+			}
+		}
+		//: all of them.
+		return all, unknownDisables
+	}
+	//: as listed.
+	return e.kernelOff, corenet.EnvDisable
+}
+
 // lookupCapability finds a token in the registry, exactly as spelled.
 func lookupCapability(token string) (capabilityEntry, bool) {
-	//: four rows.
+	//: every row.
 	for _, entry := range capabilityRegistry {
 		//: found.
 		if string(entry.token) == token {
@@ -181,6 +254,10 @@ type loopPlan struct {
 	// fallback is true when the code asked for auto: a native failure then
 	// falls back to portable, reported, rather than refusing Start.
 	fallback bool
+	// disabled are the kernel capabilities the environment switched off,
+	// disabledBy how State says it (ADR 0189).
+	disabled   []corenet.Capability
+	disabledBy string
 }
 
 // plan is min(code, environment) for a loop group whose code asked for code,
@@ -190,6 +267,14 @@ type loopPlan struct {
 // reach io_uring_setup. Off Linux every loop group is portable, whatever the
 // environment says, an explicit native backend having been refused already.
 func (e *operatorEnv) plan(code corenet.LoopBackend, native bool) loopPlan {
+	p := e.backendPlan(code, native)
+	p.disabled, p.disabledBy = e.kernelSwitches()
+	//: the backend and what it may not use.
+	return p
+}
+
+// backendPlan is plan's backend half.
+func (e *operatorEnv) backendPlan(code corenet.LoopBackend, native bool) loopPlan {
 	//: no native backend on this platform, or the code asked for portable.
 	if !native || code == corenet.LoopBackendPortable {
 		//: the portable backend.

@@ -21,7 +21,7 @@ var designFile = filepath.Join("..", "..", "..", "..", "design", "net.yaml")
 
 // designCapability matches one constant of the Capability blocks in the
 // design: its blockDoc, its name and its token.
-var designCapability = regexp.MustCompile(`(?m)^      - blockDoc: (.*)\n        doc: \|-\n(?:          .*\n)+        name: (\w+)\n        type: Capability\n        value: "\\"([a-z_]+)\\""$`)
+var designCapability = regexp.MustCompile(`(?m)^      - blockDoc: (.*)\n        doc: \|-\n(?:          .*\n)+        name: (\w+)\n        type: Capability\n        value: "\\"([a-z_-]+)\\""$`)
 
 // envOf is a lookup over a map, the injected environment.
 func envOf(vars map[string]string) lookupFunc {
@@ -59,6 +59,10 @@ func TestCapabilityRegistry_matchesTheDesign(t *testing.T) {
 		switchable := strings.Contains(blockDoc, corenet.EnvDisable)
 		if row.switchable != switchable {
 			t.Errorf("%q: switchable = %v, the design's block %q says %v", token, row.switchable, blockDoc, switchable)
+		}
+		kernel := strings.Contains(blockDoc, "capabilities")
+		if row.kernel != kernel || kernel && row.rank != rankKernel {
+			t.Errorf("%q: kernel = %v rank %d, the design's block %q says kernel %v", token, row.kernel, row.rank, blockDoc, kernel)
 		}
 		ranks = append(ranks, row.rank)
 	}
@@ -235,10 +239,17 @@ func TestOperatorPlan(t *testing.T) {
 		{corenet.LoopBackendIOURing, map[string]string{corenet.EnvDisable: "iouring"}, loopPlan{backend: corenet.LoopBackendEpoll}},
 		{corenet.LoopBackendEpoll, map[string]string{corenet.EnvEngine: "iouring"}, loopPlan{backend: corenet.LoopBackendEpoll}},
 		{corenet.LoopBackendPortable, map[string]string{corenet.EnvEngine: "iouring"}, loopPlan{backend: corenet.LoopBackendPortable}},
+		// io_uring receives into provided buffers only: without them it is never set up.
+		{corenet.LoopBackendAuto, map[string]string{corenet.EnvDisable: "uring-pbuf"}, loopPlan{backend: corenet.LoopBackendEpoll, fallback: true}},
+		{corenet.LoopBackendIOURing, map[string]string{corenet.EnvDisable: "uring-pbuf"}, loopPlan{backend: corenet.LoopBackendEpoll}},
+		// Another kernel capability leaves the backend as it was.
+		{corenet.LoopBackendAuto, map[string]string{corenet.EnvDisable: "uring-direct,tcp-nodelay"}, loopPlan{backend: corenet.LoopBackendAuto, fallback: true}},
+		// A kernel capability is no engine: KITSUNIUM_NET_ENGINE takes it as unknown.
+		{corenet.LoopBackendAuto, map[string]string{corenet.EnvEngine: "uring-pbuf"}, loopPlan{backend: corenet.LoopBackendPortable}},
 	}
 	for _, tc := range spelled {
 		env := readOperator(envOf(tc.vars))
-		if got := env.plan(tc.code, true); got != tc.want {
+		if got := env.plan(tc.code, true); got.backend != tc.want.backend || got.fallback != tc.want.fallback {
 			t.Errorf("%v under %v = %+v, want %+v", tc.code, tc.vars, got, tc.want)
 		}
 	}
@@ -312,5 +323,39 @@ func TestOperator_neverTouchesTheGoroutineEngine(t *testing.T) {
 	}
 	if st := srv.State(); st.Degraded() || st.Override.Applied != corenet.CapabilityGoroutine {
 		t.Fatalf("state = %+v", st)
+	}
+}
+
+// TestOperator_kernelSwitches pins what a loop group is told is off: the
+// kernel capabilities KITSUNIUM_NET_DISABLE lists, once each, beside the
+// engines in Override.Disabled; every one of them under an unknown token,
+// which leaves no optional capability (R5); none otherwise.
+func TestOperator_kernelSwitches(t *testing.T) {
+	t.Parallel()
+	env := readOperator(envOf(map[string]string{corenet.EnvDisable: "uring-direct,epoll,uring-direct,tcp-nodelay"}))
+	p := env.plan(corenet.LoopBackendAuto, true)
+	if !slices.Equal(p.disabled, []corenet.Capability{corenet.CapabilityURingDirect, corenet.CapabilityTCPNoDelay}) || p.disabledBy != corenet.EnvDisable {
+		t.Fatalf("listed: %v by %q", p.disabled, p.disabledBy)
+	}
+	if want := []corenet.Capability{corenet.CapabilityURingDirect, corenet.CapabilityEpoll, corenet.CapabilityTCPNoDelay}; !slices.Equal(env.override.Disabled, want) {
+		t.Fatalf("Override.Disabled = %v, want %v", env.override.Disabled, want)
+	}
+	if len(env.faults) != 0 {
+		t.Fatalf("faults = %v", env.faults)
+	}
+	unknown := readOperator(envOf(map[string]string{corenet.EnvDisable: "uring-sqpoll"}))
+	q := unknown.plan(corenet.LoopBackendAuto, true)
+	kernel := 0
+	for _, e := range capabilityRegistry {
+		if e.kernel {
+			kernel++
+		}
+	}
+	if len(q.disabled) != kernel || q.disabledBy != unknownDisables || q.backend != corenet.LoopBackendPortable {
+		t.Fatalf("unknown token: %d off of %d by %q on %v", len(q.disabled), kernel, q.disabledBy, q.backend)
+	}
+	none := readOperator(envOf(nil))
+	if p := none.plan(corenet.LoopBackendAuto, true); len(p.disabled) != 0 {
+		t.Fatalf("no variable: %v off", p.disabled)
 	}
 }

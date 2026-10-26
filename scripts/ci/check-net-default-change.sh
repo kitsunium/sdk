@@ -7,8 +7,9 @@
 # The body must hold an `Override:` block: a line `Override:` alone, then one
 # line per variable until a blank line, a fence or the end, each
 # `KITSUNIUM_NET_ENGINE=<token>` or `KITSUNIUM_NET_DISABLE=<token>[,<token>…]`,
-# each variable at most once. An ENGINE token is any capability of the
-# registry; a DISABLE token is one of the block an operator may switch off.
+# each variable at most once. An ENGINE token is an engine of the registry,
+# never a kernel capability (ADR 0189); a DISABLE token is one of the blocks
+# an operator may switch off.
 # The registry is design/net.yaml's Capability constants, read here, so the
 # gate and the parser (internal/service/net/server, held to the same file by
 # TestCapabilityRegistry_matchesTheDesign) cannot disagree.
@@ -39,9 +40,10 @@ if [ ! -r "$design" ]; then
   exit 1
 fi
 
-# registry <design> — "<token> <switchable>" per Capability constant of the
-# design, in its order: switchable when its block's doc names
-# KITSUNIUM_NET_DISABLE.
+# registry <design> — "<token> <switchable> <engine>" per Capability constant
+# of the design, in its order: switchable when its block's doc names
+# KITSUNIUM_NET_DISABLE, an engine unless its block holds kernel
+# capabilities (ADR 0189).
 registry() {
   awk '
     /^      - blockDoc: / { block = $0; next }
@@ -52,7 +54,7 @@ registry() {
         v = $0
         sub(/^        value: "\\"/, "", v)
         sub(/\\""$/, "", v)
-        print v, (index(block, "KITSUNIUM_NET_DISABLE") > 0 ? "yes" : "no")
+        print v, (index(block, "KITSUNIUM_NET_DISABLE") > 0 ? "yes" : "no"), (index(block, "capabilities") > 0 ? "no" : "yes")
       }
       type = ""
     }
@@ -79,7 +81,7 @@ if [ -z "$block" ]; then
 fi
 
 known() {
-  awk -v t="$1" -v need="$2" '$1 == t && (need == "any" || $2 == "yes") { found = 1 } END { exit !found }' <<<"$reg"
+  awk -v t="$1" -v need="$2" '$1 == t && ((need == "engine" && $3 == "yes") || (need == "switchable" && $2 == "yes")) { found = 1 } END { exit !found }' <<<"$reg"
 }
 
 fail=0 seen_engine=0 seen_disable=0
@@ -94,8 +96,8 @@ while IFS= read -r line; do
   case "$name" in
     KITSUNIUM_NET_ENGINE)
       seen_engine=$((seen_engine + 1))
-      if ! known "$value" any; then
-        echo "net-default-change: KITSUNIUM_NET_ENGINE=$value names no capability of the registry ($(awk '{ printf "%s%s", sep, $1; sep = ", " }' <<<"$reg"))" >&2
+      if ! known "$value" engine; then
+        echo "net-default-change: KITSUNIUM_NET_ENGINE=$value names no engine of the registry ($(awk '$3 == "yes" { printf "%s%s", sep, $1; sep = ", " }' <<<"$reg"))" >&2
         fail=1
       fi
       ;;

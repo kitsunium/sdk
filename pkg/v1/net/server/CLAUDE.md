@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-25T18:00:00Z -->
+<!-- updated: 2026-10-25T23:00:00Z -->
 # pkg/v1/net/server/
 
 ## Purpose
@@ -26,7 +26,8 @@ in the dimension that motivated the domain, whatever else it gained.
 | `PacketGroup`, `Packet`, `PacketHandler`, `PacketHandlerFunc`, `PacketMiddleware`, `ChainPacket` | the datagram half: one handler per packet, the same chain shape |
 | `State`, `ListenerState`, `Phase`, `Phase*` | lifecycle reporting — and the counters, `AcceptBackoffs` among them: the waits a failing Accept took (ADR 0130) |
 | `Override`, `Fault`, `Fallbacks`, `Platform` | what `State` adds (ADR 0188): what the operator's variables did, everything the server runs without (`Degraded` reads it), the engine fallbacks and the last one, the OS, its release and the toolchain |
-| `Capability`, `Capability*`, `EnvEngine`, `EnvDisable` | the operator's switches: `KITSUNIUM_NET_ENGINE` caps every group at a capability of `iouring` > `epoll` > `portable` > `goroutine`, `KITSUNIUM_NET_DISABLE` switches `iouring` or `epoll` off; read once by `New`, before any probe, and they only ever lower an engine (ADR 0188) |
+| `Capability`, `Capability*`, `EnvEngine`, `EnvDisable` | the operator's switches: `KITSUNIUM_NET_ENGINE` caps every group at a capability of `iouring` > `epoll` > `portable` > `goroutine`, `KITSUNIUM_NET_DISABLE` switches `iouring` or `epoll` off, or a kernel capability by name (ADR 0189); read once by `New`, before any probe, and they only ever lower an engine (ADR 0188) |
+| `CapabilityValue`, `CapabilityURingDeferTaskrun`, `CapabilityURingNoSQArray`, `CapabilityURingRingFDs`, `CapabilityURingSQRewind` | one kernel capability's row in `LoopState.Capabilities`, and the class A-code capabilities a group opts into with `LoopValue.Capabilities`, which refuses an engine, a class B capability or an unknown token with `LoopCapabilityRefused` (ADR 0189) |
 | `Server.RegisterHealth`, `LoopGroupStalled` | the server's readiness and liveness checks on a health registry; a loop group every ring of which its watchdog drained makes `Serve` return `LoopGroupStalled` and liveness fail after 30 s |
 | `Listen`, `Adopt` | where a group listens: an address it binds, or a socket a supervisor passed (`LISTEN_FDNAMES`) — a missing one is `SocketAdoptFailed`, never a silent bind |
 | `TLS` | TLS, or mutual TLS when the identity requires a client certificate |

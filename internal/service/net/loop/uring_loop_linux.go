@@ -160,6 +160,24 @@ type uLoop struct {
 	// direct is whether connections live in the rings' direct-descriptor
 	// tables (the probe's release check passed) or in the process table.
 	direct bool
+	// sw is what the group may use; rep what the probe found (ADR 0189).
+	sw  capSwitches
+	rep capReport
+	// primary and secondary are the setup flags of ring 0, the one the
+	// thread waits on, and of the others: DEFER_TASKRUN only on the primary
+	// (P3a), the others posting their completions themselves (COOP).
+	primary, secondary uint32
+	// uses is what the probe settled the rings use; registered is how many
+	// rings are registered with the thread.
+	uses       ringUses
+	registered int
+}
+
+// ringUses is what a loop's rings use beyond their setup flags.
+type ringUses struct {
+	// multishot is whether recvs are multishot; ringFDs whether rings are
+	// registered with the thread.
+	multishot, ringFDs bool
 }
 
 // uringRunner runs the group's io_uring loops.
@@ -217,19 +235,26 @@ func (ul *uLoop) wake() {
 // waits for them all and closes fin; and, once the group runs, one goroutine
 // that waits on fin, closes the listeners and returns.
 func startIOURing(g *Group, cfg *Config, hooks loopHooks) error {
+	sw := newSwitches(cfg)
+	//: the backend receives into provided buffers only: switched off, it is
+	//: never set up.
+	if sw.disabled(corenet.CapabilityURingPbuf) {
+		//: refused by the switch, before any setup.
+		return probeError("uring-pbuf switched off", syscall.EOPNOTSUPP)
+	}
 	fin := make(chan struct{})
 	runner := &uringRunner{fin: fin}
 	//: TCP_NODELAY on the listener, inherited by every accepted socket; a
 	//: socket that refuses it still serves.
 	for _, l := range cfg.Listeners {
-		swallowErr(syscall.SetsockoptInt(l.FD, syscall.IPPROTO_TCP, syscall.TCP_NODELAY, 1))
+		noDelay(l.FD, sw)
 		runner.lfds = append(runner.lfds, l.FD)
 	}
 	ready := make(chan error, g.sz.loops)
 	//: one thread per loop, each building its rings after it locked itself.
 	for i := range g.sz.loops {
 		lp := newLoop(g, *cfg, i, mmapAnon)
-		ul := &uLoop{lp: lp, lfds: runner.lfds, hooks: hooks, wakefd: -1, fanfd: -1}
+		ul := &uLoop{lp: lp, lfds: runner.lfds, hooks: hooks, wakefd: -1, fanfd: -1, sw: sw, rep: newReport(sw, "iouring")}
 		runner.loops = append(runner.loops, ul)
 		g.loops = append(g.loops, lp)
 		runner.wg.Add(1)
@@ -265,6 +290,7 @@ func startIOURing(g *Group, cfg *Config, hooks loopHooks) error {
 	}()
 	g.backend = corenet.LoopBackendIOURing
 	g.stage = runner.loops[0].stage
+	g.caps = runner.loops[0].rep
 	//: running.
 	return nil
 }
@@ -296,14 +322,14 @@ func (ul *uLoop) run(wg *sync.WaitGroup, ready chan<- error, rings int) {
 
 // setup runs the staged probe on this thread, then builds the rings.
 func (ul *uLoop) setup(rings int) error {
-	flags, err := ul.probe()
+	err := ul.probe()
 	//: stages 1 to 3 refused.
 	if err != nil {
 		//: named by the stage.
 		return err
 	}
 	//: stage 4 and 5 run on every ring as it is built, the self-test once.
-	direct, deferred, err := ul.selfTest(flags)
+	direct, deferred, err := ul.selfTest(ul.primary)
 	//: the self-test refused.
 	if err != nil {
 		//: named by the test.
@@ -315,74 +341,14 @@ func (ul *uLoop) setup(rings int) error {
 	if direct {
 		ul.stage = "self_test+direct"
 	}
+	ul.reportSelfTest(direct)
 	//: built, or refused by the ring that could not be.
-	return ul.build(rings, flags, direct && deferred)
-}
-
-// setupFlags is the full flag set the probe tries first: DEFER_TASKRUN
-// replaces COOP_TASKRUN when the hook asks for it.
-func (ul *uLoop) setupFlags() uint32 {
-	//: DEFER_TASKRUN replaces COOP_TASKRUN when asked for.
-	if ul.hooks.deferTaskrun {
-		//: deferred.
-		return setupDeferTaskrun | setupSingleIssuer | setupSubmitAll
-	}
-	//: cooperative.
-	return setupCoopTaskrun | setupSingleIssuer | setupSubmitAll
-}
-
-// probe runs stages 1 to 3: a ring with the full flag set, one with fewer on
-// an older kernel, and REGISTER_PROBE for every op this backend issues. It
-// returns the flags that passed.
-func (ul *uLoop) probe() (uint32, error) {
-	probed, flags, err := ul.openStaged(ul.setupFlags())
-	//: no ring at all.
-	if err != nil {
-		//: named by the step.
-		return 0, err
-	}
-	ul.flags = flags
-	ul.stage = "setup"
-	ok, perr := probed.supports(opAccept, opRecv, opSend, opAsyncCancel, opClose, opPollAdd, opRead, opNop, opShutdown)
-	//: stage 3: the ops this backend issues.
-	if perr != 0 || !ok || ul.hooks.failStage == "probe" {
-		probed.close()
-		//: named.
-		return 0, probeError("register_probe", orErrno(perr, syscall.EOPNOTSUPP))
-	}
-	ul.stage = "register_probe"
-	probed.close()
-	//: the flags every ring is built with.
-	return flags, nil
-}
-
-// openStaged runs stages 1 and 2: a ring with flags, and, when an older
-// kernel refuses a flag it does not know, one without SINGLE_ISSUER. It
-// returns the ring and the flags it was opened with.
-func (ul *uLoop) openStaged(flags uint32) (*uring, uint32, error) {
-	//: stage 1: the full flag set.
-	if ul.hooks.failStage == "setup" {
-		//: injected.
-		return nil, 0, probeError("setup", syscall.EPERM)
-	}
-	opened, step, errno := openURing(probeEntries, flags)
-	//: stage 2: an older kernel refuses a flag it does not know.
-	if errno == syscall.EINVAL && step == "setup" && !ul.hooks.deferTaskrun {
-		flags = setupCoopTaskrun | setupSubmitAll
-		opened, step, errno = openURing(probeEntries, flags)
-	}
-	//: no ring at all.
-	if errno != 0 {
-		//: named by the step.
-		return nil, 0, probeError(step, errno)
-	}
-	//: opened.
-	return opened, flags, nil
+	return ul.build(rings, direct && deferred)
 }
 
 // build creates the Post queue, the two eventfds and every ring, and arms
 // the primary's polls. sweep is whether the rings sweep deferred puts.
-func (ul *uLoop) build(rings int, flags uint32, sweep bool) error {
+func (ul *uLoop) build(rings int, sweep bool) error {
 	lp := ul.lp
 	lp.post = newPostQueue(ul.wake)
 	wfd, _, e1 := syscall.RawSyscall(syscall.SYS_EVENTFD2, 0, efdNonblock|efdCloexec, 0)
@@ -395,7 +361,7 @@ func (ul *uLoop) build(rings int, flags uint32, sweep bool) error {
 	ul.wakefd, ul.fanfd = int(wfd), int(ffd)
 	//: each ring: its own io_uring, table, buffers, accepts.
 	for i := range rings {
-		rr, err := ul.newRing(i, flags, sweep)
+		rr, err := ul.newRing(i, sweep)
 		//: one ring that cannot be built fails the loop.
 		if err != nil {
 			//: named.
@@ -422,13 +388,23 @@ func orErrno(a, b syscall.Errno) syscall.Errno {
 
 // newRing builds ring i: its io_uring, its sparse table, its buffers, and
 // its accepts. sweep is whether it sweeps deferred puts.
-func (ul *uLoop) newRing(i int, flags uint32, sweep bool) (*uRing, error) {
+func (ul *uLoop) newRing(i int, sweep bool) (*uRing, error) {
+	flags := ul.secondary
+	//: the thread waits on ring 0 alone.
+	if i == 0 {
+		flags = ul.primary
+	}
+	//: a test's secondaries the kernel signals for.
+	if i > 0 && ul.hooks.secondaryPlain {
+		flags &^= setupCoopTaskrun
+	}
 	u, step, errno := openURing(uringEntries, flags)
 	//: refused.
 	if errno != 0 {
 		//: named.
 		return nil, probeError(step, errno)
 	}
+	ul.registerRing(u)
 	lp := ul.lp
 	rr := &uRing{ul: ul, u: u, armed: make([]int, len(ul.lfds)), backoff: backoffMin, sweepOn: sweep, sweepAt: -1}
 	rr.r = newRing(lp, i, rr)
@@ -547,8 +523,9 @@ func (rr *uRing) pollFD(fd int, op uint64) {
 // (ENFILE), which CI saw on a 6.11 kernel. Single-shot accepts, each holding
 // one entry until it completes, cannot overshoot.
 func (rr *uRing) armAccepts() {
-	//: a paused or draining ring accepts nothing.
-	if rr.paused || rr.r.draining || rr.ul.lp.draining {
+	//: a paused or draining ring accepts nothing, nor a primary a test
+	//: keeps idle.
+	if rr.acceptsNothing() {
 		//: nothing.
 		return
 	}
@@ -570,6 +547,13 @@ func (rr *uRing) armAccepts() {
 			room--
 		}
 	}
+}
+
+// acceptsNothing reports a ring that arms no accept: paused, draining, or
+// the primary a test keeps idle.
+func (rr *uRing) acceptsNothing() bool {
+	//: any of them.
+	return rr.paused || rr.r.draining || rr.ul.lp.draining || (rr.ul.hooks.primaryIdle && rr.r.index == 0)
 }
 
 // acceptRoom is how many more accepts may be in flight: the free entries
@@ -856,6 +840,10 @@ func (rr *uRing) armRecv(slot int32) {
 		return
 	}
 	prepRecv(s, uint32(c.fd), udPack(udRecv, c.gen, uint32(slot)))
+	//: uring-multishot-recv switched off: one completion, re-armed after it.
+	if !rr.ul.uses.multishot {
+		singleShot(s)
+	}
 	rr.ul.onFD(s)
 	c.ops++
 	rr.setEpoch(slot, rr.closes)

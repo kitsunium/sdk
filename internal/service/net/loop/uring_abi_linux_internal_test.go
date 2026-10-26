@@ -26,6 +26,7 @@ func TestURingABI(t *testing.T) {
 	var r bufReg
 	var rs rsrcRegister
 	var ga getEventsArg
+	var ru rsrcUpdate
 	tests := []tc{
 		{"sizeof(io_uring_sqe)", unsafe.Sizeof(s), 64},
 		{"sqe.opcode", unsafe.Offsetof(s.opcode), 0},
@@ -55,6 +56,8 @@ func TestURingABI(t *testing.T) {
 		{"sizeof(io_uring_buf_reg)", unsafe.Sizeof(r), 40},
 		{"sizeof(io_uring_rsrc_register)", unsafe.Sizeof(rs), 32},
 		{"sizeof(io_uring_getevents_arg)", unsafe.Sizeof(ga), 24},
+		{"sizeof(io_uring_rsrc_update)", unsafe.Sizeof(ru), 16},
+		{"rsrc_update.data", unsafe.Offsetof(ru.data), 8},
 		{"sizeof(io_uring_probe)", unsafe.Sizeof(probeHeader{}), 16},
 		{"sizeof(io_uring_probe_op)", unsafe.Sizeof(probeOp{}), 8},
 	}
@@ -65,6 +68,24 @@ func TestURingABI(t *testing.T) {
 	}
 	if fileIndexAlloc != ^uint32(0) {
 		t.Errorf("IORING_FILE_INDEX_ALLOC = %#x, want ~0U", fileIndexAlloc)
+	}
+	// The class A-code numbers, against the uapi of 7.0.
+	for _, f := range []struct {
+		name      string
+		got, want uint64
+	}{
+		{"IORING_SETUP_DEFER_TASKRUN", uint64(setupDeferTaskrun), 1 << 13},
+		{"IORING_SETUP_NO_SQARRAY", uint64(setupNoSQArray), 1 << 16},
+		{"IORING_SETUP_SQ_REWIND", uint64(setupSQRewind), 1 << 20},
+		{"IORING_ENTER_REGISTERED_RING", uint64(enterRegisteredRing), 1 << 4},
+		{"IORING_FEAT_MIN_TIMEOUT", uint64(featMinTimeout), 1 << 15},
+		{"IORING_REGISTER_RING_FDS", uint64(regRingFDs), 20},
+		{"IORING_UNREGISTER_RING_FDS", uint64(unregRingFDs), 21},
+		{"IO_RINGFD_REG_MAX", uint64(ringFDsMax), 16},
+	} {
+		if f.got != f.want {
+			t.Errorf("%s = %#x, want %#x", f.name, f.got, f.want)
+		}
 	}
 }
 
