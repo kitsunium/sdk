@@ -105,26 +105,30 @@ func floorRepair(t *testing.T, n *Node) error {
 // segment size; a store that does not is not judged.
 func TestAHeadroomOfTwoSegmentsOrLessIsRefused(t *testing.T) {
 	const seg, reserve = 64 << 10, 256 << 10
-	cases := []struct {
+	type tc struct {
 		name     string
+		cid      byte
 		headroom int64
 		refused  bool
-	}{
-		{"one segment", seg, true},
-		{"two segments", 2 * seg, true},
-		{"two segments and a byte", 2*seg + 1, false},
 	}
-	for i, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			_, dn, err := floorNode(t, byte(i), seg, reserve+tc.headroom, reserve, 64<<10, 0)
-			switch {
-			case tc.refused && !errors.Is(err, coreconsensus.ConsensusMisconfigured):
-				t.Fatalf("MaxLogBytes %d over LogReserveBytes %d with segments of %d: NewNode = %v, want CONSENSUS_MISCONFIGURED; the log occupies %d bytes at start",
-					reserve+tc.headroom, reserve, seg, err, dn.dd.d.log.logBytes())
-			case !tc.refused && err != nil:
-				t.Fatalf("a headroom of two segments and a byte: NewNode = %v", err)
-			}
-		})
+	runCase := func(t *testing.T, c tc) {
+		_, dn, err := floorNode(t, c.cid, seg, reserve+c.headroom, reserve, 64<<10, 0)
+		switch {
+		case c.refused && !errors.Is(err, coreconsensus.ConsensusMisconfigured):
+			t.Fatalf("MaxLogBytes %d over LogReserveBytes %d with segments of %d: NewNode = %v, want CONSENSUS_MISCONFIGURED; the log occupies %d bytes at start",
+				reserve+c.headroom, reserve, seg, err, dn.dd.d.log.logBytes())
+		case !c.refused && err != nil:
+			t.Fatalf("MaxLogBytes %d over LogReserveBytes %d with segments of %d: NewNode = %v, want a node",
+				reserve+c.headroom, reserve, seg, err)
+		}
+	}
+	cases := []tc{
+		{"one segment", 0, seg, true},
+		{"two segments", 1, 2 * seg, true},
+		{"two segments and a byte", 2, 2*seg + 1, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 	t.Run("a store with no segments", func(t *testing.T) {
 		c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{0x69, 0x60, 0x0f}}
