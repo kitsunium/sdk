@@ -3459,10 +3459,16 @@ sequences:
         eval: ul.sw
       - bind: base
         eval: setupBase | found&setupSingleIssuer
-      - eval: ul.rep.found(sw, corenet.CapabilityURingNoSQArray, found&setupNoSQArray != 0, "")
-        to: ul.rep.found
-      - eval: ul.rep.found(sw, corenet.CapabilityURingDeferTaskrun, found&setupDeferTaskrun != 0, "")
-        to: ul.rep.found
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: ul.rep.found(sw, d.name, true, "")
+                    to: ul.rep.found
+                when: found&d.flag != 0
+          key: _
+          range: setupDrops[1:3]
+          value: d
       - opt:
           do:
             - eval: ul.rep.found(sw, corenet.CapabilityURingSQRewind, true, "")

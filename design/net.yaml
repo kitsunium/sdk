@@ -7500,6 +7500,10 @@ packages:
             name: LoopGroupStalled
             reexport: corenet.LoopGroupStalled
             type: "*errs.Error"
+          - doc: LoopCapabilityRefused reports a LoopValue.Capabilities entry a loop group cannot opt into.
+            name: LoopCapabilityRefused
+            reexport: corenet.LoopCapabilityRefused
+            type: "*errs.Error"
           - doc: LoopBackendUnavailable reports an explicit loop backend the kernel's probe refused.
             name: LoopBackendUnavailable
             reexport: corenet.LoopBackendUnavailable

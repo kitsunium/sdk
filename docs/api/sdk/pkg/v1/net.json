@@ -1577,6 +1577,24 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.LoopCapabilityRefused",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "LoopCapabilityRefused",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/net.LoopCapabilityRefused",
+      "code": {
+        "value": "0.2.11.60",
+        "reason": "LOOP_CAPABILITY_REFUSED",
+        "public": "The loop group asks for a capability it cannot opt into"
+      },
+      "doc": "LoopCapabilityRefused reports a LoopValue.Capabilities entry a loop group cannot opt into.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.LoopConnRef",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/net/server",

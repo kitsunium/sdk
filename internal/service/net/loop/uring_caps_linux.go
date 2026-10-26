@@ -207,8 +207,13 @@ func (ul *uLoop) rewindSelfTest(probed *uring) bool {
 func (ul *uLoop) settle(found uint32, rewind bool, features uint32) {
 	sw := ul.sw
 	base := setupBase | found&setupSingleIssuer
-	ul.rep.found(sw, corenet.CapabilityURingNoSQArray, found&setupNoSQArray != 0, "")
-	ul.rep.found(sw, corenet.CapabilityURingDeferTaskrun, found&setupDeferTaskrun != 0, "")
+	//: present only: an absent flag's row already holds giveUp's reason.
+	for _, d := range setupDrops[1:3] {
+		//: accepted at setup.
+		if found&d.flag != 0 {
+			ul.rep.found(sw, d.name, true, "")
+		}
+	}
 	//: the self-test failed: its row already says why.
 	if rewind {
 		ul.rep.found(sw, corenet.CapabilityURingSQRewind, true, "")

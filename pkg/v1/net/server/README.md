@@ -680,6 +680,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopBackendUnavaila
 
 Code `0.2.11.37` · reason `LOOP_BACKEND_UNAVAILABLE` · public "The requested loop backend is not available on this kernel"
 
+<a name="LoopCapabilityRefused"></a>
+```go
+var LoopCapabilityRefused *errs.Error
+```
+
+LoopCapabilityRefused reports a LoopValue.Capabilities entry a loop group cannot opt into.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopCapabilityRefused`.
+
+Code `0.2.11.60` · reason `LOOP_CAPABILITY_REFUSED` · public "The loop group asks for a capability it cannot opt into"
+
 <a name="LoopGroupStalled"></a>
 ```go
 var LoopGroupStalled *errs.Error
