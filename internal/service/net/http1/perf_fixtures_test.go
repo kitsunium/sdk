@@ -105,3 +105,106 @@ func perfLoopHandlerOnData(tb testing.TB) func() { return perfLoop(tb) }
 // perfLoopHandlerOnBatchEnd is OnBatchEnd's fixture: the same batch, deferred
 // answers completed and written.
 func perfLoopHandlerOnBatchEnd(tb testing.TB) func() { return perfLoop(tb) }
+
+// perfChain is the chain's fixture: L2's links — an access log, a router, a
+// Bearer check and the response's fields — over a handler that answers by route,
+// fed an authenticated request, an unrouted one, an unauthenticated one (401)
+// and one on an exempt route, every request framed into one reused value.
+func perfChain(tb testing.TB) func() {
+	routes, err := http1.Routes(
+		http1.RouteValue{ID: 1, Method: "GET", Path: "/api/v1/items/", Prefix: true},
+		http1.RouteValue{ID: 2, Method: "GET", Path: "/api/v1/users/", Prefix: true},
+		http1.RouteValue{ID: 3, Path: "/health"},
+	)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	bearer, err := http1.Bearer(perfVerifier{}, 3)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	headers, err := http1.Headers("Content-Type", "application/json")
+	if err != nil {
+		tb.Fatal(err)
+	}
+	logLink, err := http1.Log(perfLogger{}, "User-Agent")
+	if err != nil {
+		tb.Fatal(err)
+	}
+	body := []byte(`{"id":42}`)
+	app := corenet.HTTP1HandlerFunc(func(req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue) {
+		switch req.Route {
+		case 1, 2:
+			res.Body = body
+		case 3:
+			res.Status = 204
+		default:
+			res.Status = 404
+		}
+	})
+	//: the 401 leaves before Headers: a 401 behind it copies its field after
+	//: Headers' own, the one error path that allocates (design/sdk.yaml).
+	chain := corenet.Chain[corenet.HTTP1Handler](app, logLink, routes, bearer, headers)
+	var p http1.Parser
+	var req corenet.HTTP1RequestValue
+	var res corenet.HTTP1ResponseValue
+	serve := func(in []byte) {
+		if n, r := p.Parse(in, &req); n != len(in) || r != http1.RefusalNone {
+			tb.Fatalf("%q: %d, %s", in, n, r)
+		}
+		res = corenet.HTTP1ResponseValue{}
+		chain.ServeHTTP1(&req, &res)
+	}
+	serve(perfChainAuthed)
+	if res.Status != 0 || string(res.Body) != string(body) || string(req.Auth.Subject()) != "user-42" {
+		tb.Fatalf("authenticated: %d %q %q", res.Status, res.Body, req.Auth.Subject())
+	}
+	serve(perfChainAnon)
+	if res.Status != 401 {
+		tb.Fatalf("unauthenticated: %d", res.Status)
+	}
+	return func() {
+		serve(perfChainAuthed)
+		serve(perfChainUnrouted)
+		serve(perfChainAnon)
+		serve(perfChainHealth)
+	}
+}
+
+// The chain fixture's requests.
+var (
+	perfChainAuthed   = []byte("GET /api/v1/items/42 HTTP/1.1\r\nHost: h\r\nUser-Agent: k6\r\nAuthorization: Bearer good\r\n\r\n")
+	perfChainUnrouted = []byte("GET /nowhere HTTP/1.1\r\nHost: h\r\nAuthorization: Bearer good\r\n\r\n")
+	perfChainAnon     = []byte("GET /api/v1/users/7 HTTP/1.1\r\nHost: h\r\n\r\n")
+	perfChainHealth   = []byte("GET /health HTTP/1.1\r\nHost: h\r\n\r\n")
+	perfGood          = []byte("good")
+	perfSubject       = []byte("user-42")
+)
+
+// perfVerifier accepts the one token "good" for user-42.
+type perfVerifier struct{}
+
+func (perfVerifier) VerifyBearer(token []byte, auth *corenet.HTTP1AuthValue) bool {
+	if string(token) != string(perfGood) {
+		return false
+	}
+	auth.SetClaims(1)
+	return auth.SetSubject(perfSubject)
+}
+
+// perfLogger drops every record, as a logger that queues it would, once.
+type perfLogger struct{}
+
+func (perfLogger) LogHTTP1(rec corenet.HTTP1AccessValue) { perfInt = rec.Status }
+
+// perfRouteLayerServeHTTP1 is the router link's fixture: the chain.
+func perfRouteLayerServeHTTP1(tb testing.TB) func() { return perfChain(tb) }
+
+// perfBearerLayerServeHTTP1 is the authenticating link's fixture: the chain.
+func perfBearerLayerServeHTTP1(tb testing.TB) func() { return perfChain(tb) }
+
+// perfHeadersLayerServeHTTP1 is the headers link's fixture: the chain.
+func perfHeadersLayerServeHTTP1(tb testing.TB) func() { return perfChain(tb) }
+
+// perfLogLayerServeHTTP1 is the access-log link's fixture: the chain.
+func perfLogLayerServeHTTP1(tb testing.TB) func() { return perfChain(tb) }

@@ -155,7 +155,8 @@ func TestMutations(t *testing.T) {
 // the codec accepts. The codec is the stricter of the two by design, so a
 // request net/http refuses and the codec accepts must belong to a class listed
 // here; one that does not is a finding. Where both accept, they must frame the
-// same bytes and read the same method, target, Host, length and close.
+// same bytes and read the same method, target, Host, length and close, and
+// the codec's canonical path must be the target's own.
 func FuzzDifferential(f *testing.F) {
 	for _, s := range fuzzSeeds() {
 		f.Add([]byte(s))
@@ -192,6 +193,15 @@ func FuzzDifferential(f *testing.F) {
 		}
 		if strings.HasPrefix(hr.RequestURI, "/") && hr.Host != string(req.Host) {
 			t.Fatalf("%q: Host %q vs %q", in, hr.Host, req.Host)
+		}
+		//: the canonical path of an origin-form target is net/http's raw path:
+		//: the target up to its query, nothing decoded, nothing cleaned.
+		if path, _, _ := strings.Cut(hr.RequestURI, "?"); strings.HasPrefix(path, "/") && path != string(req.Path) {
+			t.Fatalf("%q: Path %q, net/http's target path %q", in, req.Path, path)
+		}
+		//: an absolute-form target was accepted only for net/http's own host.
+		if !strings.HasPrefix(hr.RequestURI, "/") && hr.RequestURI != "*" && !strings.EqualFold(hr.URL.Host, string(req.Host)) {
+			t.Fatalf("%q: absolute-form for %q, Host %q", in, hr.URL.Host, req.Host)
 		}
 	})
 }
