@@ -61,7 +61,7 @@ func (s *Server) release(c *conn) {
 		//: closing here rather than in the handler means a handler that forgets
 		//: — or panics — still cannot leak a descriptor. Close is nil-safe, so a
 		//: connection net/http already closed costs nothing here.
-		swallowErr(c.Close())
+		swallowErr(c.closeGracefully())
 	}
 	//: hand the scratch buffer back before dropping the reference to it.
 	if c.scratch != nil {

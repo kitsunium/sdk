@@ -358,7 +358,7 @@ func Test_listen(t *testing.T) {
 			id = testIdentity(t)
 		}
 
-		ln, err := listen(t.Context(), corenet.AddressValue{Network: c.network, Addr: addr}, id, false, false)
+		ln, _, err := listen(t.Context(), corenet.AddressValue{Network: c.network, Addr: addr}, id, false, false)
 
 		if c.wantCode != 0 {
 			if !errs.HasCode(err, c.wantCode) {

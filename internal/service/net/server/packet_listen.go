@@ -25,34 +25,44 @@ var packetNetworks = map[string]struct{}{
 }
 
 // listenPacket binds one datagram socket.
-func listenPacket(ctx context.Context, addr corenet.AddressValue) (pc stdnet.PacketConn, err error) {
+//
+// A unicast UDP socket holds its address exclusively where the platform can
+// (exclusiveApplies) — a multicast one never — and an address still held is
+// bound again, bounded (bindRetrying); the report says both.
+func listenPacket(ctx context.Context, addr corenet.AddressValue) (pc stdnet.PacketConn, rep bindReport, err error) {
 	//: reject an unserved family before touching the OS.
 	if _, ok := packetNetworks[addr.Network]; !ok {
 		//: refuse rather than bind something the read loop cannot serve.
-		return nil, errs.Wrap(corenet.UnsupportedNetwork, errs.WrapParams{},
+		return nil, rep, errs.Wrap(corenet.UnsupportedNetwork, errs.WrapParams{},
 			errs.String("network", addr.Network))
 	}
 	//: a served family this platform has no socket for, refused by name.
 	if unavailable := familyUnavailable(addr); unavailable != nil {
 		//: UNSUPPORTED_PLATFORM, before the OS is asked.
-		return nil, unavailable
+		return nil, rep, unavailable
 	}
 	//: an empty target would otherwise fail obscurely inside the stdlib.
 	if strings.TrimSpace(addr.Addr) == "" {
 		//: refuse with the address that was actually supplied.
-		return nil, errs.Wrap(corenet.InvalidAddress, errs.WrapParams{},
+		return nil, rep, errs.Wrap(corenet.InvalidAddress, errs.WrapParams{},
 			errs.String("address", addr.String()))
 	}
-	var cfg stdnet.ListenConfig
-	bound, lerr := cfg.ListenPacket(ctx, addr.Network, addr.Addr)
+	//: SO_EXCLUSIVEADDRUSE where it applies, before bind.
+	cfg := stdnet.ListenConfig{Control: listenControl(false)}
+	bound, wait, lerr := bindRetrying(ctx, rebindAttempts, addrInUse, func() (stdnet.PacketConn, error) {
+		//: one attempt.
+		return cfg.ListenPacket(ctx, addr.Network, addr.Addr)
+	})
+	rep.wait = wait
 	//: the OS refused the bind — in use, permission, bad interface.
 	if lerr != nil {
 		//: surface the address that could not be bound.
-		return nil, errs.Wrap(corenet.ListenFailed, errs.WrapParams{},
+		return nil, rep, errs.Wrap(corenet.ListenFailed, errs.WrapParams{},
 			errs.String("address", addr.String()), errs.String("cause", lerr.Error()))
 	}
+	rep.exclusive = exclusiveApplies(bound.LocalAddr().Network(), bound.LocalAddr().String())
 	//: the socket is bound and ready to read.
-	return bound, nil
+	return bound, rep, nil
 }
 
 // boundPacketConn pairs a live datagram socket with the group that owns it.

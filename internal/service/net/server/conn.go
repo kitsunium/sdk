@@ -144,6 +144,20 @@ func (c *conn) Close() error {
 	return c.Conn.Close()
 }
 
+// closeGracefully closes the socket as the engine ends a connection: on
+// Windows, shutdown(SD_SEND) and a bounded read to the peer's zero first, so
+// the address it was accepted on is free again once the peer has answered
+// (closeConn); elsewhere, Close.
+func (c *conn) closeGracefully() error {
+	//: already reset by the pool; there is nothing left to close.
+	if c.Conn == nil {
+		//: nothing to close.
+		return nil
+	}
+	//: the platform's close.
+	return closeConn(c.Conn)
+}
+
 // reset clears the connection so the pool can hand it out again. It is the
 // recycler's reset hook, and it must drop every reference or a pooled entry
 // would pin a closed socket for as long as the pool lives.

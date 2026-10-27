@@ -18,6 +18,15 @@ constants:
         value: "8"
     name: defaultPerAddress
   - doc: |-
+      rebindAttempts is one: an address in use elsewhere is a real conflict, and
+      a TIME_WAIT connection does not hold a listener's address (Go binds with
+      SO_REUSEADDR), so nothing is worth waiting out.
+    items:
+      - name: rebindAttempts
+        type: int
+        value: "1"
+    name: rebindAttempts
+  - doc: |-
       defaultHandshakeTimeout bounds the TLS negotiation when a group sets none.
 
       It has a default where Read, Write and Idle deliberately do not, because the
@@ -354,6 +363,7 @@ files:
       - (*conn).Group
       - (*conn).Buffer
       - (*conn).Close
+      - (*conn).closeGracefully
       - (*conn).reset
     name: conn.go
   - decls:
@@ -381,6 +391,24 @@ files:
       - (*StreamGroup).reconcileName
       - (*StreamGroup).engineRefusal
     name: engine_option.go
+  - decls:
+      - bindReport
+      - exclusiveApplies
+      - listenControl
+      - exclusiveOf
+      - rebindDelay
+      - bindRetrying
+      - listenerSocket
+      - packetSocket
+    name: exclusive.go
+  - decls:
+      - rebindAttempts
+      - exclusiveAddrSupported
+      - setExclusiveAddr
+      - exclusiveAddrOf
+      - addrInUse
+      - closeConn
+    name: exclusive_other.go
   - decls:
       - platformLacks
     name: family_other.go
@@ -852,6 +880,71 @@ functions:
     name: batchAvailable
     results: bool
   - doc: |-
+      exclusiveApplies reports whether a socket of network bound to address takes
+      SO_EXCLUSIVEADDRUSE: a unicast TCP or UDP one, on a platform that has the
+      option. A multicast socket shares its port with the group's other members
+      by design, and AF_UNIX has no port to take.
+    name: exclusiveApplies
+    params: network, address string
+    results: bool
+  - doc: |-
+      listenControl is net.ListenConfig.Control for one bind: SO_REUSEPORT when
+      the address is sharded, SO_EXCLUSIVEADDRUSE when it applies, both before
+      bind; nil when neither can, so the bind is the standard library's own.
+    name: listenControl
+    params: sharded bool
+    results: func(network, address string, rawConn syscall.RawConn) error
+  - doc: |-
+      exclusiveOf reads SO_EXCLUSIVEADDRUSE back from an adopted socket: what a
+      supervisor set is reported, never set and never fatal (a socket that cannot
+      be read reports false).
+    name: exclusiveOf
+    params: sc syscall.Conn
+    results: bool
+  - doc: |-
+      rebindDelay is the wait after the attempt-th refused bind: 25 ms, doubling,
+      held at 1 s, on the SDK's one published backoff (ADR 0103).
+    name: rebindDelay
+    params: attempt int
+    results: time.Duration
+  - doc: |-
+      bindRetrying calls bind until it binds, fails otherwise than with inUse, or
+      has been called attempts times, waiting rebindDelay between two calls, and
+      returns how long it waited: the bounded rebind of an address a restarted
+      server's predecessor still holds. ctx ends the wait early with the last
+      refusal.
+    name: bindRetrying
+    params: ctx context.Context, attempts int, inUse func(error) bool, bind func() (T, error)
+    results: T, time.Duration, error
+    typeParams: T any
+  - doc: listenerSocket is ln's descriptor, nil when it has none.
+    name: listenerSocket
+    params: ln stdnet.Listener
+    results: syscall.Conn
+  - doc: packetSocket is pc's descriptor, nil when it has none.
+    name: packetSocket
+    params: pc stdnet.PacketConn
+    results: syscall.Conn
+  - doc: exclusiveAddrSupported reports that the platform has no SO_EXCLUSIVEADDRUSE.
+    name: exclusiveAddrSupported
+    results: bool
+  - doc: setExclusiveAddr does nothing where the option does not exist.
+    name: setExclusiveAddr
+    params: _ uintptr
+    results: error
+  - doc: exclusiveAddrOf reads nothing where the option does not exist.
+    name: exclusiveAddrOf
+    params: _ uintptr
+    results: bool, error
+  - doc: "addrInUse never asks for a rebind: rebindAttempts is one."
+    name: addrInUse
+    params: _ error
+    results: bool
+  - doc: closeConn closes c.
+    name: closeConn
+    params: c stdnet.Conn
+    results: error
+  - doc: |-
       platformLacks reports whether this platform has no socket for a family the
       engine serves everywhere else. Off Windows the answer is left to the kernel:
       a family it refuses fails the bind and says why, as it always has.
@@ -1025,10 +1118,12 @@ functions:
 
       trackCloses hands out sockets that report their own Close (see trackedConn),
       for a group whose ceiling must keep counting a connection a handler took
-      over.
+      over. A unicast TCP socket holds its address exclusively where the platform
+      can (exclusiveApplies), and an address still held is bound again, bounded
+      (bindRetrying); the report says both.
     name: listen
     params: ctx context.Context, addr corenet.AddressValue, id corenet.IdentityValue, sharded, trackCloses bool
-    results: ln stdnet.Listener, err error
+    results: ln stdnet.Listener, rep bindReport, err error
   - doc: |-
       familyUnavailable refuses a family the engine serves but this platform has
       no socket for, before the OS is asked — or returns nil.
@@ -1244,10 +1339,15 @@ functions:
   - name: Engine
     params: e corenet.EngineValue
     results: GroupOption
-  - doc: listenPacket binds one datagram socket.
+  - doc: |-
+      listenPacket binds one datagram socket.
+
+      A unicast UDP socket holds its address exclusively where the platform can
+      (exclusiveApplies) — a multicast one never — and an address still held is
+      bound again, bounded (bindRetrying); the report says both.
     name: listenPacket
     params: ctx context.Context, addr corenet.AddressValue
-    results: pc stdnet.PacketConn, err error
+    results: pc stdnet.PacketConn, rep bindReport, err error
   - doc: packetSize returns the group's datagram ceiling.
     name: packetSize
     params: limits corenet.LimitsValue
@@ -1590,6 +1690,14 @@ types:
         recv: c *conn
         results: error
       - doc: |-
+          closeGracefully closes the socket as the engine ends a connection: on
+          Windows, shutdown(SD_SEND) and a bounded read to the peer's zero first, so
+          the address it was accepted on is free again once the peer has answered
+          (closeConn); elsewhere, Close.
+        name: closeGracefully
+        recv: c *conn
+        results: error
+      - doc: |-
           reset clears the connection so the pool can hand it out again. It is the
           recycler's reset hook, and it must drop every reference or a pooled entry
           would pin a closed socket for as long as the pool lives.
@@ -1702,6 +1810,18 @@ types:
         name: release
         recv: w *connWaiter
     name: connWaiter
+  - doc: |-
+      bindReport is what binding one address tells State: whether the socket
+      holds its address exclusively, and how long the bind waited for it.
+    fields:
+      - doc: exclusive is ListenerStateValue.Exclusive.
+        name: exclusive
+        type: bool
+      - doc: wait is ListenerStateValue.BindWait.
+        name: wait
+        type: time.Duration
+    kind: struct
+    name: bindReport
   - doc: |-
       handshakeHandler completes the TLS negotiation under its own bound before
       handing the connection to the group's handler.
@@ -3179,9 +3299,11 @@ types:
         results: error
       - doc: |-
           registerLoopListeners records a loop group's listeners, so Close and
-          Shutdown close them and State reports them, as for every group.
+          Shutdown close them and State reports them, as for every group: bound ones
+          with the bind's report, adopted ones (rep nil) with SO_EXCLUSIVEADDRUSE
+          read back.
         name: registerLoopListeners
-        params: group *StreamGroup, lns []stdnet.Listener, adopted bool
+        params: group *StreamGroup, lns []stdnet.Listener, rep *bindReport
         recv: s *Server
       - doc: loopStates reports every loop group.
         name: loopStates

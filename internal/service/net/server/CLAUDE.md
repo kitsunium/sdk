@@ -34,13 +34,15 @@ Public façade: `pkg/v1/net/server`.
 | `loop_group_internal_test.go` | loop groups on every backend the platform has: split lines, a 4 MiB response byte-exact, close, spill, drain, and every refusal — a zero-valued option included; `TestLoopGroup_middlewareRefused`, `Use` refused on every backend whatever the handler claims |
 | `loop_option_external_test.go` | `TestLoop` — the `Loop` option refused before or after the handler, on both natures, and what wins over it |
 | `stream_group.go` | `StreamGroup` — `Handle`, `HandleFunc`, `HandleHTTP`, `Use`, `UseLoop` (kind `OptionLoopMiddleware`, every call); `claimHandler`, the one-handler rule every declaration takes |
-| `listen.go` | listener construction; TLS/mTLS wrapping; family validation |
-| `conn.go` | the pooled `corenet.Conn` implementation, and the `hijacked` hand-over flag |
+| `listen.go` | listener construction; TLS/mTLS wrapping; family validation; the `bindReport` (exclusive, bind wait) |
+| `exclusive.go`, `exclusive_{windows,other}.go` | ADR 0193: `listenControl` — `SO_REUSEPORT` when sharded, `SO_EXCLUSIVEADDRUSE` on Windows for unicast TCP/UDP (`exclusiveApplies`, multicast and AF_UNIX excluded) before bind; `exclusiveOf` reads it back from an adopted socket, never fatal; `bindRetrying` — Windows rebinds a `WSAEADDRINUSE` address eight times at most, 25 ms doubling to 1 s, the wait in `BindWait` (one attempt elsewhere); `closeConn` — Windows' graceful close, `CloseWrite` then a read to zero bounded by 500 ms and 64 KiB |
+| `exclusive_internal_test.go`, `exclusive_windows_internal_test.go` | the retry and the applicability rule everywhere; on Windows both sockets exclusive, a second bind refused, a plain socket read as not exclusive, a restart on the same address after three echoed connections |
+| `conn.go` | the pooled `corenet.Conn` implementation, the `hijacked` hand-over flag, and `closeGracefully`, the engine's own close (ADR 0193) |
 | `pool.go` | per-connection recycling + the live-socket registry |
 | `options.go` | `Option` / `GroupOption` — including the two HTTP-only group options, `ReadHeaderTimeout` and `MaxHeaderBytes`, `Loop`, refused by every group no loop handler serves, and `Plaintext`, `Name` and `Engine` (ADR 0187); each records its kind |
 | `packet_group.go` | `PacketGroup` — the datagram mirror of `StreamGroup` |
 | `packet.go` | the pooled `corenet.Packet` implementation |
-| `packet_listen.go` | datagram socket construction; family validation; ceilings |
+| `packet_listen.go` | datagram socket construction (exclusive and rebound like a listener, ADR 0193); family validation; ceilings |
 | `packet_loop.go` | the datagram read loop and dispatch |
 | `batch.go` | the `datagramSource` seam + reusable read slots |
 | `batch_portable.go` | one datagram per syscall — the floor everywhere |

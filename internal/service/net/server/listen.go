@@ -112,39 +112,43 @@ func reusePortControl(network, address string, rawConn syscall.RawConn) error {
 //
 // trackCloses hands out sockets that report their own Close (see trackedConn),
 // for a group whose ceiling must keep counting a connection a handler took
-// over.
-func listen(ctx context.Context, addr corenet.AddressValue, id corenet.IdentityValue, sharded, trackCloses bool) (ln stdnet.Listener, err error) {
+// over. A unicast TCP socket holds its address exclusively where the platform
+// can (exclusiveApplies), and an address still held is bound again, bounded
+// (bindRetrying); the report says both.
+func listen(ctx context.Context, addr corenet.AddressValue, id corenet.IdentityValue, sharded, trackCloses bool) (ln stdnet.Listener, rep bindReport, err error) {
 	//: reject an unserved family before touching the OS.
 	if _, ok := streamNetworks[addr.Network]; !ok {
 		//: refuse an unserved family before touching the OS.
-		return nil, errs.Wrap(corenet.UnsupportedNetwork, errs.WrapParams{},
+		return nil, rep, errs.Wrap(corenet.UnsupportedNetwork, errs.WrapParams{},
 			errs.String("network", addr.Network))
 	}
 	//: a served family this platform has no socket for, refused by name.
 	if unavailable := familyUnavailable(addr); unavailable != nil {
 		//: UNSUPPORTED_PLATFORM, before the OS is asked.
-		return nil, unavailable
+		return nil, rep, unavailable
 	}
 	//: an empty target cannot be bound and would otherwise fail obscurely.
 	if strings.TrimSpace(addr.Addr) == "" {
 		//: an empty target would otherwise fail obscurely inside the stdlib.
-		return nil, errs.Wrap(corenet.InvalidAddress, errs.WrapParams{},
+		return nil, rep, errs.Wrap(corenet.InvalidAddress, errs.WrapParams{},
 			errs.String("address", addr.String()))
 	}
-	cfg := stdnet.ListenConfig{}
-	//: sharding needs every listener on the address to opt in before binding.
-	if sharded {
-		cfg.Control = reusePortControl
-	}
-	raw, lerr := cfg.Listen(ctx, addr.Network, addr.Addr)
+	//: SO_REUSEPORT when sharded, SO_EXCLUSIVEADDRUSE where it applies.
+	cfg := stdnet.ListenConfig{Control: listenControl(sharded)}
+	raw, wait, lerr := bindRetrying(ctx, rebindAttempts, addrInUse, func() (stdnet.Listener, error) {
+		//: one attempt.
+		return cfg.Listen(ctx, addr.Network, addr.Addr)
+	})
+	rep.wait = wait
 	//: the OS refused the bind — in use, permission, bad interface.
 	if lerr != nil {
 		//: surface the address that could not be bound.
-		return nil, errs.Wrap(corenet.ListenFailed, errs.WrapParams{},
+		return nil, rep, errs.Wrap(corenet.ListenFailed, errs.WrapParams{},
 			errs.String("address", addr.String()), errs.String("cause", lerr.Error()))
 	}
+	rep.exclusive = exclusiveApplies(raw.Addr().Network(), raw.Addr().String())
 	//: the same layers an adopted socket gets, from the same function.
-	return layered(raw, id, trackCloses), nil
+	return layered(raw, id, trackCloses), rep, nil
 }
 
 // familyUnavailable refuses a family the engine serves but this platform has
