@@ -344,6 +344,8 @@ cd internal/core && GOWORK=off go test -race -cover ./net/...
   `OptionLoopMiddleware`, `LoopMiddlewareInvalid` (`0.2.11.61`);
   `HTTP1AuthValue`, `HTTP1AccessValue`, the two chain ports and the request's
   `Lane`, `Path`, `Query`, `Route`, `Auth`, `Authenticated` — `docs/adr/0191-a-loop-middleware-forwards-every-callback-and-the-http1-chain-judges-one-canonical-target.md`
+- ADR 0193 — `ListenerStateValue.Exclusive` and `BindWait` —
+  `docs/adr/0193-a-windows-listener-holds-its-address-exclusively-closes-gracefully-and-rebinds-bounded.md`
 - ADR 0188 — `Capability`, `EnvEngine`, `EnvDisable`, `OverrideValue`,
   `FaultValue`, `FallbacksValue`, `PlatformValue`, the four `StateValue`
   fields and `LoopGroupStalled` (`0.2.11.59`) —

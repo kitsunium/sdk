@@ -1472,24 +1472,34 @@ ListenerState is an alias of `github.com/kitsunium/sdk/internal/core/net.Listene
 ```go
 type ListenerState struct {
 	// Group is the listener group's name.
-	Group          string `json:"group"`
+	Group          string        `json:"group"`
 	// Address is the address actually bound, which for a port of zero is the
 	// one the kernel chose rather than the one requested.
-	Address        string `json:"address"`
+	Address        string        `json:"address"`
 	// Network is the socket family.
-	Network        string `json:"network"`
+	Network        string        `json:"network"`
 	// Shards is how many listeners were actually opened on this address.
-	Shards         int    `json:"shards"`
+	Shards         int           `json:"shards"`
 	// Degraded reports that a requested optimisation was unavailable and the
 	// server fell back. It is surfaced rather than logged once at startup,
 	// because a silent fallback is indistinguishable from a working one and
 	// nobody re-reads yesterday's logs to find out.
-	Degraded       bool   `json:"degraded"`
+	Degraded       bool          `json:"degraded"`
 	// DegradedReason names the fallback in plain words when Degraded is set.
-	DegradedReason string `json:"degraded_reason,omitempty"`
+	DegradedReason string        `json:"degraded_reason,omitempty"`
 	// Adopted reports a listener inherited from a supervisor rather than bound
 	// by this process.
-	Adopted        bool   `json:"adopted"`
+	Adopted        bool          `json:"adopted"`
+	// Exclusive reports that no other socket can bind the listener's address
+	// while it lives: SO_EXCLUSIVEADDRUSE on Windows, set on a unicast TCP or
+	// UDP socket this process binds and read back, never set, on an adopted
+	// one. It is false on every other platform, which has no such option.
+	Exclusive      bool          `json:"exclusive"`
+	// BindWait is how long the bind waited for its address to come free: on
+	// Windows, a restarted server's address stays taken until the previous
+	// process's connections end, and the bind is retried, bounded. Zero when
+	// the first attempt bound.
+	BindWait       DurationValue `json:"bind_wait"`
 }
 ```
 
