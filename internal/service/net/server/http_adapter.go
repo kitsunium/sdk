@@ -36,7 +36,7 @@ type httpAdapter struct {
 	// the header size cap — set at Start with the timeouts above.
 	bounds httpBounds
 	// protocols is http.Server.Protocols, computed once at Start with the ALPN
-	// list the group's listeners offer (ADR 0192); nil until then.
+	// list the group's listeners offer (ADR 0195); nil until then.
 	protocols *http.Protocols
 	// start guarantees the serving goroutine is launched at most once.
 	start sync.Once
@@ -244,7 +244,7 @@ func (a *httpAdapter) launch(raw stdnet.Conn) {
 		//: HTTP/2's bounds set rather than left to the standard library's.
 		//: TLSConfig stays unset: the listener's is the one that negotiates.
 		Protocols: a.protocols,
-		HTTP2:     http2Config(a.timeouts.Write),
+		HTTP2:     http2Config(a.timeouts.Write, h2Silence(a.bounds, a.timeouts)),
 		//: every request on this listener derives from a context carrying the
 		//: drain signal, which is the only way a handler holding a connection
 		//: open indefinitely can learn that the server is shutting down. A

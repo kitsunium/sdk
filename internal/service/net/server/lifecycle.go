@@ -126,7 +126,7 @@ func (g *StreamGroup) startRefusal() error {
 		return errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
 			errs.String("group", g.name), errs.String("option", corenet.OptionLoopMiddleware.String()))
 	}
-	//: the HTTP versions it serves, computed once (ADR 0192).
+	//: the HTTP versions it serves, computed once (ADR 0195).
 	return g.protocolsRefusal()
 }
 

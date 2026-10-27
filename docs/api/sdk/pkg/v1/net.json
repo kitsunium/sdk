@@ -2449,7 +2449,7 @@
       "name": "OptionProtocols",
       "spelled": "OptionKind",
       "canonical": "github.com/kitsunium/sdk/pkg/v1/net/server.OptionKind",
-      "value": "20",
+      "value": "21",
       "init": "go:github.com/kitsunium/sdk/internal/core/net.OptionProtocols",
       "doc": "OptionProtocols is Protocols. Only an HTTP group honours it.\n",
       "file": "server/gen_facade.go",
@@ -2764,7 +2764,7 @@
       "name": "Protocols",
       "spelled": "func(protos ...string) GroupOption",
       "canonical": "func(protos ...string) github.com/kitsunium/sdk/pkg/v1/net/server.GroupOption",
-      "doc": "Protocols sets the HTTP versions an HTTP group serves, by ALPN identifier —\n\"http/1.1\" and \"h2\" — in the order its TLS listeners prefer them. Unset, a\ngroup with TLS serves both, h2 first, and one without serves HTTP/1.1. Start\nrefuses with ProtocolsRefused an empty list, a repeated or unknown\nidentifier, h2 without TLS, an identity whose NextProtos names a version the\nlist excludes or none it includes, and a group that serves no http.Handler;\na loop group refuses it with LoopOptionUnsupported.\n",
+      "doc": "Protocols sets the HTTP versions an HTTP group serves, by ALPN identifier —\n\"http/1.1\" and \"h2\" — in the order its TLS listeners prefer them. Unset, a\ngroup with TLS serves both, h2 first, and one without serves HTTP/1.1. Start\nrefuses with ProtocolsRefused an empty list, a repeated or unknown\nidentifier, h2 without TLS, an identity whose NextProtos names a version the\nlist excludes or none it includes, and a group that serves no http.Handler;\na loop group refuses it with LoopOptionUnsupported.\n\nA request that arrived over HTTP/2 has no http.Hijacker: a handler that\nhijacks its connection serves HTTP/1.1 clients only, and a TLS group that\nrelies on it for every client says Protocols(\"http/1.1\").\n",
       "file": "server/gen_facade.go",
       "layer": "public",
       "family": "net"

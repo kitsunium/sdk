@@ -805,6 +805,7 @@ files:
       - (*StreamGroup).protocolsErr
       - (*StreamGroup).serverTLS
       - http2Config
+      - h2Silence
     name: stream_group_protocols.go
   - decls:
       - swallowErr
@@ -1414,10 +1415,21 @@ functions:
   - doc: |-
       http2Config is the HTTP/2 bounds every HTTP group serves with: set, never
       left to net/http's defaults, so a release of the standard library cannot
-      move them.
+      move them. silence is how long a connection may send no frame before the
+      server PINGs it, and how long the PING's answer may take before the
+      connection is closed: the one bound net/http's HTTP/2 server keeps while a
+      stream is open, its idle timer stopped — a header block left unfinished
+      behind an open stream is closed by it (ADR 0195 §D3). Zero sets none.
     name: http2Config
-    params: write corenet.DurationValue
+    params: write corenet.DurationValue, silence time.Duration
     results: "*http.HTTP2Config"
+  - doc: |-
+      h2Silence is the group's HTTP/2 silence bound: the header phase's
+      (ReadHeaderTimeout, else ReadTimeout), else IdleTimeout; zero when the
+      group bounds none of them.
+    name: h2Silence
+    params: b httpBounds, t corenet.TimeoutsValue
+    results: time.Duration
   - doc: |-
       swallowErr intentionally discards a non-actionable error, recording the
       discard so the error audit treats it as deliberate rather than dropped.
@@ -1833,7 +1845,7 @@ types:
         type: httpBounds
       - doc: |-
           protocols is http.Server.Protocols, computed once at Start with the ALPN
-          list the group's listeners offer (ADR 0192); nil until then.
+          list the group's listeners offer (ADR 0195); nil until then.
         name: protocols
         type: "*http.Protocols"
       - doc: start guarantees the serving goroutine is launched at most once.
@@ -3692,7 +3704,7 @@ types:
     name: connLimiter
   - doc: |-
       httpProtocols is what an HTTP group serves, computed once at Start from its
-      Protocols option, its TLS identity and nothing else (ADR 0192): the ALPN
+      Protocols option, its TLS identity and nothing else (ADR 0195): the ALPN
       list its listeners offer and the set net/http accepts. Both derive from the
       same list, so they cannot disagree.
     fields:

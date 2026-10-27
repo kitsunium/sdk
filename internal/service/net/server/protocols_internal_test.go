@@ -75,7 +75,7 @@ func TestHTTPAdapter_protocols(t *testing.T) {
 	if hs.Protocols == nil || !hs.Protocols.HTTP1() || !hs.Protocols.HTTP2() || hs.Protocols.UnencryptedHTTP2() {
 		t.Fatalf("Protocols %v", hs.Protocols)
 	}
-	want := http2Config(corenet.DurationValue(3 * time.Second))
+	want := http2Config(corenet.DurationValue(3*time.Second), 0)
 	if hs.HTTP2 == nil || hs.HTTP2.MaxConcurrentStreams != want.MaxConcurrentStreams ||
 		hs.HTTP2.MaxReadFrameSize != want.MaxReadFrameSize ||
 		hs.HTTP2.MaxDecoderHeaderTableSize != want.MaxDecoderHeaderTableSize ||

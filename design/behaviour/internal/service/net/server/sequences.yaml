@@ -1164,7 +1164,7 @@ sequences:
           		//: HTTP/2's bounds set rather than left to the standard library's.
           		//: TLSConfig stays unset: the listener's is the one that negotiates.
           		Protocols: a.protocols,
-          		HTTP2:     http2Config(a.timeouts.Write),
+          		HTTP2:     http2Config(a.timeouts.Write, h2Silence(a.bounds, a.timeouts)),
           		//: every request on this listener derives from a context carrying the
           		//: drain signal, which is the only way a handler holding a connection
           		//: open indefinitely can learn that the server is shutting down. A
@@ -6516,7 +6516,30 @@ sequences:
           		MaxReceiveBufferPerStream:     h2ReceivePerStream,
           		MaxReceiveBufferPerConnection: h2ReceivePerConn,
           		WriteByteTimeout:              write.Duration(),
+          		SendPingTimeout:               silence,
+          		PingTimeout:                   silence,
           	}
+  - of: h2Silence
+    participants:
+      - id: caller
+        kind: actor
+      - id: h2Silence
+        kind: self
+      - id: b.headerTimeout
+        kind: internal
+      - id: t.Idle.Duration
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: d
+          init:
+            bind: d
+            eval: b.headerTimeout(t.Read.Duration())
+            to: b.headerTimeout
+          when: d > 0
+      - return: t.Idle.Duration()
+        to: t.Idle.Duration
   - of: swallowErr
     steps:
       - opt:

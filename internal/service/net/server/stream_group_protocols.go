@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"net/http"
 	"slices"
+	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -32,7 +33,7 @@ const (
 )
 
 // httpProtocols is what an HTTP group serves, computed once at Start from its
-// Protocols option, its TLS identity and nothing else (ADR 0192): the ALPN
+// Protocols option, its TLS identity and nothing else (ADR 0195): the ALPN
 // list its listeners offer and the set net/http accepts. Both derive from the
 // same list, so they cannot disagree.
 type httpProtocols struct {
@@ -44,12 +45,18 @@ type httpProtocols struct {
 
 // Protocols sets the HTTP versions an HTTP group serves, by ALPN identifier —
 // "http/1.1" and "h2" — in the order its TLS listeners prefer them (ADR
-// 0192). Unset, a group with TLS serves both, h2 first, and a group without
+// 0195). Unset, a group with TLS serves both, h2 first, and a group without
 // serves HTTP/1.1. It is judged at Start: an empty list, a repeated or unknown
 // identifier, "h2" without TLS (cleartext HTTP/2 is not served), an identity
 // whose NextProtos names a version the list excludes or none it includes, and
 // any group that does not serve an http.Handler are refused with
 // ProtocolsRefused; a loop group refuses it with LoopOptionUnsupported.
+//
+// A request that arrived over HTTP/2 has no http.Hijacker: a handler that
+// hijacks its connection — a WebSocket upgrade written by hand, say — serves
+// HTTP/1.1 clients only, and a TLS group that relies on it for every client
+// says Protocols("http/1.1"), the behaviour it had before HTTP/2 was
+// negotiated by default.
 func Protocols(protos ...string) GroupOption {
 	kept := slices.Clone(protos)
 	//: the option is applied by the constructor, in declaration order; it is
@@ -191,8 +198,12 @@ func (g *StreamGroup) serverTLS() *tls.Config {
 
 // http2Config is the HTTP/2 bounds every HTTP group serves with: set, never
 // left to net/http's defaults, so a release of the standard library cannot
-// move them.
-func http2Config(write corenet.DurationValue) *http.HTTP2Config {
+// move them. silence is how long a connection may send no frame before the
+// server PINGs it, and how long the PING's answer may take before the
+// connection is closed: the one bound net/http's HTTP/2 server keeps while a
+// stream is open, its idle timer stopped — a header block left unfinished
+// behind an open stream is closed by it (ADR 0195 §D3). Zero sets none.
+func http2Config(write corenet.DurationValue, silence time.Duration) *http.HTTP2Config {
 	//: the same for every group; a write bound when the group has one.
 	return &http.HTTP2Config{
 		MaxConcurrentStreams:          h2MaxConcurrentStreams,
@@ -202,5 +213,20 @@ func http2Config(write corenet.DurationValue) *http.HTTP2Config {
 		MaxReceiveBufferPerStream:     h2ReceivePerStream,
 		MaxReceiveBufferPerConnection: h2ReceivePerConn,
 		WriteByteTimeout:              write.Duration(),
+		SendPingTimeout:               silence,
+		PingTimeout:                   silence,
 	}
+}
+
+// h2Silence is the group's HTTP/2 silence bound: the header phase's
+// (ReadHeaderTimeout, else ReadTimeout), else IdleTimeout; zero when the
+// group bounds none of them.
+func h2Silence(b httpBounds, t corenet.TimeoutsValue) time.Duration {
+	//: the header phase's bound, which a stalled header block is.
+	if d := b.headerTimeout(t.Read.Duration()); d > 0 {
+		//: it.
+		return d
+	}
+	//: the wait between requests, or nothing.
+	return t.Idle.Duration()
 }

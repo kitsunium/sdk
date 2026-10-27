@@ -1,4 +1,4 @@
-# ADR 0192 — an HTTP group's protocols are computed once, and its ALPN follows them
+# ADR 0195 — an HTTP group's protocols are computed once, and its ALPN follows them
 
 - **Status**: Accepted
 - **Date**: 2026-10-27
@@ -37,7 +37,7 @@ stream that is never read holds, or how many streams a peer opens.
 
 `Protocols(protos ...string)` names the versions an HTTP group serves by ALPN
 identifier, `http/1.1` and `h2`, in the order its TLS listeners prefer them;
-it records `OptionProtocols` (20). Unset, a group with TLS serves `h2` then
+it records `OptionProtocols` (21; 20 is ADR 0192's `OptionBatchReplies`). Unset, a group with TLS serves `h2` then
 `http/1.1`, and one without serves `http/1.1`: cleartext HTTP/2 (h2c) is not
 served. At `Start` the group computes, once, from that list and its identity:
 
@@ -63,24 +63,48 @@ group that serves no `http.Handler`. A loop group refuses the option with
 profile is HTTP/1.1 only. None of these narrows the configuration in silence
 (R6).
 
-### D3 — HTTP/2's bounds are set
+### D3 — HTTP/2's bounds are set, and why these
 
-`http.Server.HTTP2` is set for every HTTP group: 100 concurrent streams,
-16 KiB frames (the protocol's minimum), 4 KiB HPACK tables, a 256 KiB window
-a stream's body may hold unread and 1 MiB for the connection — four streams'
-worth, so one handler that never reads its body does not stop the others —
-and the group's write timeout as the write-byte bound. An unfinished header
-block — HEADERS without END_HEADERS and no CONTINUATION — opens no stream, so
-the connection is idle: the group's `IdleTimeout`, or its `ReadTimeout` when
-it sets none, closes it. `ReadHeaderTimeout` remains HTTP/1.1's;
-`net/http`'s HTTP/2 server has no header phase of its own, which this record
-documents rather than works around.
+`http.Server.HTTP2` is set for every HTTP group rather than left to net/http's
+defaults, so a release of the standard library cannot move them:
+
+- **100 concurrent streams a connection.** `MaxConns` counts connections, not
+  streams, so one connection may run up to 100 handlers at once; 100 is
+  net/http's own floor and RFC 9113 §6.5.2's recommended minimum, set so that
+  a group's handler concurrency is `MaxConns × 100` by declaration rather than
+  by a default that could rise.
+- **16 KiB frames**, the protocol's minimum (RFC 9113 §4.2): the most one frame
+  can cost the server to read before it is judged.
+- **4 KiB HPACK tables** both ways, the protocol's default (RFC 7541 §4.2):
+  larger tables buy compression a server needs only for headers it repeats.
+- **A 256 KiB window a stream's body may hold unread, 1 MiB for the
+  connection** — four streams' worth, so one handler that never reads its body
+  does not stop the others. The price is throughput on a single upload: a
+  stream sends at most its window per round trip, about 2.5 MB/s at 100 ms
+  RTT. A group that receives large bodies over long paths serves them over
+  HTTP/1.1, or is the reason to expose these as options; none is exposed until
+  a group needs it.
+- **The write timeout as the write-byte bound**, when the group sets one.
+- **PING on silence.** net/http's HTTP/2 server has no header phase of its
+  own, and its idle timer stops once a stream is open, so neither
+  `ReadHeaderTimeout` nor `IdleTimeout` bounds a header block left unfinished
+  behind an open stream — HEADERS without END_HEADERS, then nothing. The group
+  sets `SendPingTimeout` and `PingTimeout` to its header bound
+  (`ReadHeaderTimeout`, else `ReadTimeout`), else its `IdleTimeout`: a
+  connection that sends no frame for that long is PINGed, and closed when the
+  PING goes unanswered as long again. With no stream open the idle timer
+  already closes such a connection. A peer that answers every PING while it
+  trickles a header block is bounded by net/http's own limit on the bytes of
+  one block (`MaxHeaderBytes`), not by time; a group that bounds none of these
+  timeouts bounds none of this, as on HTTP/1.1.
 
 ## Default change
 
 A TLS HTTP group whose identity names no `NextProtos` offered no ALPN, so it
 served HTTP/1.1 only; it now offers `h2` then `http/1.1` and serves HTTP/2 to
-every client that asks. This is a change of default, allowed while v0 (ADR
+every client that asks. A request that arrives over HTTP/2 has no
+`http.Hijacker`: a handler that hijacks its connection — a WebSocket upgrade
+written by hand — now works for HTTP/1.1 clients only on such a group. This is a change of default, allowed while v0 (ADR
 0040). The earlier behaviour comes back in code with `Protocols("http/1.1")`.
 There is no operator switch for it: `KITSUNIUM_NET_ENGINE` and
 `KITSUNIUM_NET_DISABLE` only restrict engines and kernel capabilities and never
@@ -90,13 +114,14 @@ request does not carry the label.
 
 ## Consequences
 
-- New: `Protocols`, `OptionProtocols` (20), `ProtocolsRefused`
+- New: `Protocols`, `OptionProtocols` (21; 20 is ADR 0192's `OptionBatchReplies`), `ProtocolsRefused`
   (`0.2.11.62`), re-exported by `pkg/v1/net/server`.
 - Tests: ALPN with HTTP/1.1 alone, h2 alone, both in either order and the
   identity's order; every refusal; the adapter's `Protocols` and `HTTP2`;
-  an unfinished header block closed by the idle or the read bound; an unread
-  stream held to its window while another stream on the connection sends a
-  body larger than it.
+  an unfinished header block closed by the idle or the read bound, and one
+  left behind an open stream closed by the PING bound; an unread stream held
+  to its window while another stream on the connection sends a body larger
+  than it.
 
 ## Alternatives considered
 

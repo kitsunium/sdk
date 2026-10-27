@@ -487,7 +487,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionPreHandshake`
 
 <a name="OptionProtocols"></a>
 ```go
-const OptionProtocols OptionKind = 20
+const OptionProtocols OptionKind = 21
 ```
 
 OptionProtocols is Protocols. Only an HTTP group honours it.
@@ -1053,6 +1053,8 @@ func Protocols(protos ...string) GroupOption
 ```
 
 Protocols sets the HTTP versions an HTTP group serves, by ALPN identifier — "http/1.1" and "h2" — in the order its TLS listeners prefer them. Unset, a group with TLS serves both, h2 first, and one without serves HTTP/1.1. Start refuses with ProtocolsRefused an empty list, a repeated or unknown identifier, h2 without TLS, an identity whose NextProtos names a version the list excludes or none it includes, and a group that serves no http.Handler; a loop group refuses it with LoopOptionUnsupported.
+
+A request that arrived over HTTP/2 has no http.Hijacker: a handler that hijacks its connection serves HTTP/1.1 clients only, and a TLS group that relies on it for every client says Protocols("http/1.1").
 
 <a name="ReadBufferSize"></a>
 ## func [ReadBufferSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)

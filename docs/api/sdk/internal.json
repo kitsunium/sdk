@@ -29566,7 +29566,7 @@
       "name": "OptionProtocols",
       "spelled": "OptionKind",
       "canonical": "github.com/kitsunium/sdk/internal/core/net.OptionKind",
-      "value": "20",
+      "value": "21",
       "doc": "OptionProtocols is Protocols. Only an HTTP group served by net/http\nhonours it; a loop group refuses it with LoopOptionUnsupported, and any\nother group with ProtocolsRefused.\n",
       "file": "core/net/loop.go",
       "layer": "core",
@@ -30062,7 +30062,7 @@
         "reason": "PROTOCOLS_REFUSED",
         "public": "The group's HTTP protocols are misconfigured"
       },
-      "doc": "ProtocolsRefused is returned by Start for an HTTP group whose Protocols\noption is empty, repeats or names an unknown identifier, asks for h2\nwithout TLS, or contradicts its identity's NextProtos — naming an HTTP\nversion the group does not serve, or none it does — and for a group that\nserves no http.Handler given Protocols. The \"reason\" field names it\n(ADR 0192).\n",
+      "doc": "ProtocolsRefused is returned by Start for an HTTP group whose Protocols\noption is empty, repeats or names an unknown identifier, asks for h2\nwithout TLS, or contradicts its identity's NextProtos — naming an HTTP\nversion the group does not serve, or none it does — and for a group that\nserves no http.Handler given Protocols. The \"reason\" field names it\n(ADR 0195).\n",
       "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
@@ -65053,7 +65053,7 @@
       "name": "Protocols",
       "spelled": "func(protos ...string) GroupOption",
       "canonical": "func(protos ...string) github.com/kitsunium/sdk/internal/service/net/server.GroupOption",
-      "doc": "Protocols sets the HTTP versions an HTTP group serves, by ALPN identifier —\n\"http/1.1\" and \"h2\" — in the order its TLS listeners prefer them (ADR\n0192). Unset, a group with TLS serves both, h2 first, and a group without\nserves HTTP/1.1. It is judged at Start: an empty list, a repeated or unknown\nidentifier, \"h2\" without TLS (cleartext HTTP/2 is not served), an identity\nwhose NextProtos names a version the list excludes or none it includes, and\nany group that does not serve an http.Handler are refused with\nProtocolsRefused; a loop group refuses it with LoopOptionUnsupported.\n",
+      "doc": "Protocols sets the HTTP versions an HTTP group serves, by ALPN identifier —\n\"http/1.1\" and \"h2\" — in the order its TLS listeners prefer them (ADR\n0195). Unset, a group with TLS serves both, h2 first, and a group without\nserves HTTP/1.1. It is judged at Start: an empty list, a repeated or unknown\nidentifier, \"h2\" without TLS (cleartext HTTP/2 is not served), an identity\nwhose NextProtos names a version the list excludes or none it includes, and\nany group that does not serve an http.Handler are refused with\nProtocolsRefused; a loop group refuses it with LoopOptionUnsupported.\n\nA request that arrived over HTTP/2 has no http.Hijacker: a handler that\nhijacks its connection — a WebSocket upgrade written by hand, say — serves\nHTTP/1.1 clients only, and a TLS group that relies on it for every client\nsays Protocols(\"http/1.1\"), the behaviour it had before HTTP/2 was\nnegotiated by default.\n",
       "file": "service/net/server/stream_group_protocols.go",
       "layer": "service",
       "family": "net"

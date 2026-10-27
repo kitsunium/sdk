@@ -1,4 +1,4 @@
-// Package server_test — an HTTP group's protocols (ADR 0192): what its TLS
+// Package server_test — an HTTP group's protocols (ADR 0195): what its TLS
 // listeners negotiate by ALPN, what net/http then serves, what Start refuses,
 // and the HTTP/2 bounds a peer meets.
 package server_test
@@ -304,6 +304,33 @@ func TestProtocols_slowHeaders(t *testing.T) {
 				t.Fatalf("closed after %v", took)
 			}
 		})
+	}
+}
+
+// TestProtocols_stalledContinuation pins the bound net/http keeps while a
+// stream is open, when its idle timer has stopped: a peer that opens a
+// stream, then leaves a second header block unfinished — HEADERS without
+// END_HEADERS, and no CONTINUATION — and answers no PING, is closed after
+// the group's header bound twice over (PING sent, PING unanswered).
+func TestProtocols_stalledContinuation(t *testing.T) {
+	t.Parallel()
+	hold := make(chan struct{})
+	t.Cleanup(func() { close(hold) })
+	h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { <-hold })
+	id, pool := alpnIdentity(t)
+	addr := startTLSHTTP(t, id, h, server.ReadHeaderTimeout(200*time.Millisecond), server.IdleTimeout(200*time.Millisecond))
+	c := dialH2(t, addr, pool)
+	//: stream 1, whole and open: its handler holds it.
+	c.frame(t, 0x1, 0x5, 1, []byte{0x82, 0x87, 0x84, 0x41, 0x01, 'h'})
+	time.Sleep(50 * time.Millisecond)
+	//: stream 3: the block never ends.
+	c.frame(t, 0x1, 0x1, 3, []byte{0x82, 0x87, 0x84})
+	start := time.Now()
+	if !c.closedWithin(5 * time.Second) {
+		t.Fatal("an unfinished header block behind an open stream held the connection")
+	}
+	if took := time.Since(start); took > 3*time.Second {
+		t.Fatalf("closed after %v", took)
 	}
 }
 
