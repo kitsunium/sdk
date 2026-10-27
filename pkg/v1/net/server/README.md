@@ -81,6 +81,7 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
 - [Constants](<#constants>)
 - [Variables](<#variables>)
 - [func Adopt\(names ...string\) GroupOption](<#Adopt>)
+- [func BatchReplies\(\) GroupOption](<#BatchReplies>)
 - [func BatchSize\(n int\) GroupOption](<#BatchSize>)
 - [func Chain\(h Handler, middlewares ...Middleware\) Handler](<#Chain>)
 - [func ChainPacket\(h PacketHandler, middlewares ...PacketMiddleware\) PacketHandler](<#ChainPacket>)
@@ -110,6 +111,7 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
   - [func \(Conn\) Buffer\(\) \[\]byte](<#Conn.Buffer>)
   - [func \(Conn\) Group\(\) string](<#Conn.Group>)
   - [func \(Conn\) ID\(\) uint64](<#Conn.ID>)
+- [type DatagramState](<#DatagramState>)
 - [type EngineValue](<#EngineValue>)
   - [func \(EngineValue\) String\(\) string](<#EngineValue.String>)
 - [type Fallbacks](<#Fallbacks>)
@@ -366,6 +368,15 @@ const OptionAdopt OptionKind = 14
 OptionAdopt is Adopt. The loop engine honours it.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionAdopt`.
+
+<a name="OptionBatchReplies"></a>
+```go
+const OptionBatchReplies OptionKind = 20
+```
+
+OptionBatchReplies is BatchReplies. A datagram group honours it; a stream group refuses it.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionBatchReplies`.
 
 <a name="OptionBatchSize"></a>
 ```go
@@ -862,6 +873,15 @@ Socket activation is what makes a zero-downtime restart possible: the supervisor
 
 A named socket the supervisor did not pass is SocketAdoptFailed, never a silent fallback to binding: a service that quietly binds its own port has lost exactly the property activation exists to provide. The same holds on Windows, which has no socket activation at all: Start fails there with SocketAdoptFailed, whose cause field names UNSUPPORTED\_PLATFORM.
 
+<a name="BatchReplies"></a>
+## func [BatchReplies](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+```go
+func BatchReplies() GroupOption
+```
+
+BatchReplies makes a datagram group's replies leave per read batch: Reply then reports a queued reply sent, and a queued send that fails — when the batch ends, or earlier when the queue fills — is counted in [State](#State).Datagrams.ReplyFailures; a reply too large to queue is written at once and returns its own error. On Linux a UDP socket batches them with sendmmsg and, where it can, UDP GSO; elsewhere each leaves with a WriteTo. Under it Reply is valid only during the handler's call, as Data is. Without it, Reply writes at once and returns the write's own error. A stream group refuses it.
+
 <a name="BatchSize"></a>
 ## func [BatchSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
@@ -1191,6 +1211,33 @@ func (Conn) ID() uint64
 
 ID returns the monotonic identifier assigned at accept time, for correlating log lines belonging to one connection.
 
+<a name="DatagramState"></a>
+## type [DatagramState](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+DatagramState counts what the batched datagram paths drop: messages cut short, GSO sends refused for their size, queued replies that did not leave.
+
+```go
+type DatagramState = corenet.DatagramStateValue
+```
+
+DatagramState is an alias of `github.com/kitsunium/sdk/internal/core/net.DatagramStateValue`, declared as:
+
+```go
+type DatagramState struct {
+	// TruncatedPackets is the number of messages dropped because the kernel cut
+	// them: a coalesced message past its buffer (MSG_TRUNC under UDP GRO), or a
+	// message whose control data did not fit (MSG_CTRUNC). Neither can be split
+	// into whole datagrams, so none of what survives is delivered.
+	TruncatedPackets uint64 `json:"truncated_packets"`
+	// GSOOversized is the number of GSO sends the kernel refused with EMSGSIZE:
+	// a sizing bug, counted, which leaves GSO on.
+	GSOOversized     uint64 `json:"gso_oversized"`
+	// ReplyFailures is the number of replies a BatchReplies group queued during
+	// a batch that did not leave: Reply had already reported them sent.
+	ReplyFailures    uint64 `json:"reply_failures"`
+}
+```
+
 <a name="EngineValue"></a>
 ## type [EngineValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
@@ -1252,8 +1299,8 @@ Fault is an alias of `github.com/kitsunium/sdk/internal/core/net.FaultValue`, de
 
 ```go
 type Fault struct {
-	// Source says what reported it: "listener", "loop", "ring", "stall" or
-	// "environment".
+	// Source says what reported it: "listener", "loop", "ring", "stall",
+	// "capability", "gso" or "environment".
 	Source string `json:"source"`
 	// Group names the group concerned; empty for the environment.
 	Group  string `json:"group,omitempty"`
@@ -2525,6 +2572,8 @@ type State struct {
 	// 5 ms, doubling to 1 s, and the next accepted connection starts the curve
 	// over. A count that keeps rising is a server that cannot accept.
 	AcceptBackoffs   uint64               `json:"accept_backoffs"`
+	// Datagrams counts what the batched datagram paths drop (ADR 0192).
+	Datagrams        DatagramStateValue   `json:"datagrams"`
 	// Loops reports every loop group (ADR 0186 §D8). It is empty while the
 	// server serves none.
 	Loops            []LoopStateValue     `json:"loops,omitempty"`

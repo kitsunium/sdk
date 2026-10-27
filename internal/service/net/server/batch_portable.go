@@ -43,3 +43,28 @@ func (r *portableReader) readBatch(slots []datagram) (n int, err error) {
 	//: exactly one datagram per call on the portable path.
 	return 1, nil
 }
+
+// slotSize implements datagramSource: one datagram a read, so the ceiling.
+func (r *portableReader) slotSize(ceiling int) int {
+	//: newSlots adds the probe byte past it.
+	return ceiling
+}
+
+// portableSink sends every reply at once, one datagram a call: the floor
+// every platform has, and darwin's answer (ADR 0192).
+type portableSink struct {
+	// pc is the socket replies leave through.
+	pc stdnet.PacketConn
+}
+
+// begin implements datagramSink: there is no queue to open.
+func (portableSink) begin() {}
+
+// reply implements datagramSink with one WriteTo.
+func (w portableSink) reply(b []byte, to stdnet.Addr) (n int, err error) {
+	//: straight to the peer, reported as the write reports it.
+	return w.pc.WriteTo(b, to)
+}
+
+// flush implements datagramSink: nothing was queued.
+func (portableSink) flush() {}

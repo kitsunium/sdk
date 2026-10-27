@@ -45,6 +45,18 @@ workflows:
           value: slot
       - set: pl.compact
         value: pl.compact[:0]
+  - of: (*multiWriter).left
+    steps:
+      - loop:
+          cond: k < end
+          do:
+            - opt:
+                do:
+                  - set: w.invalidRun
+                    value: "0"
+                  - return: ""
+                when: w.spans[k].count > 1
+          post: k++
   - of: (*operatorEnv).applied
     steps:
       - loop:
@@ -123,6 +135,8 @@ workflows:
           key: _
           range: st.Listeners
           value: l
+      - set: out
+        value: append(out, s.gsoFaults()...)
       - bind: serving
         eval: st.Phase == corenet.PhaseServing
       - loop:

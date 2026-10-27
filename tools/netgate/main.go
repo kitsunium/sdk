@@ -135,7 +135,12 @@ func printSummary(w io.Writer, rep *reportEntity) {
 		}
 		//: each criterion's line.
 		for _, m := range g.Measured {
-			fmt.Fprintf(w, "     %-8s %s\n", m.Verdict, m.Reason)
+			fmt.Fprintf(w, "     %-8s %s", m.Verdict, m.Reason)
+			//: measured, never failing.
+			if m.Reported {
+				fmt.Fprint(w, " (reported, not gated)")
+			}
+			fmt.Fprintln(w)
 		}
 	}
 	fmt.Fprintf(w, "netgate: 0-alloc exclusions: %s\n", strings.Join(rep.AllocExclusions, ", "))
