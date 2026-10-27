@@ -21,6 +21,21 @@ constants:
         type: string
         value: "\"HTTP/1.1 500 Internal Server Error\\r\\nContent-Length: 0\\r\\nConnection: close\\r\\n\\r\\n\""
     name: internalError
+  - grouped: true
+    items:
+      - doc: |-
+          statusUnavailable answers a pending request its lane's full queue to the
+          worker refused.
+        name: statusUnavailable
+        type: int
+        value: "503"
+      - doc: |-
+          defaultHoldCap bounds what one connection holds back behind a pending
+          answer when the group gave no OutputCap: the loop's own default.
+        name: defaultHoldCap
+        type: int
+        value: 1 << 20
+    name: statusUnavailable
   - doc: version is the one version the profile speaks.
     items:
       - name: version
@@ -329,10 +344,42 @@ files:
       - (*loopState).take
       - (*loopState).give
       - (*loopState).flag
+      - (*loopState).peek
       - (*LoopHandler).state
       - (*LoopHandler).grow
       - swallowErr
     name: loop.go
+  - decls:
+      - statusUnavailable
+      - retryAfter
+      - pendSlot
+      - heldItem
+      - pendingWorker
+      - pendingWorker.Work
+      - (*LoopHandler).Worker
+      - (*LoopHandler).OnOutbound
+      - (*LoopHandler).OnDone
+      - (*LoopHandler).Pending
+      - answer
+      - (*LoopHandler).hold
+      - (*LoopHandler).holdPending
+      - (*loopState).holdBytes
+      - (*loopState).stubOf
+      - (*LoopHandler).closed
+      - isHead
+      - (*loopState).takeSlot
+      - (*loopState).growSlots
+      - (*loopState).freeSlot
+      - (*loopState).markReady
+      - (*loopState).dropHeld
+      - (*loopState).completeHeld
+      - (*loopState).completeConn
+      - appendHeld
+      - (*loopState).flushReady
+      - (*loopState).flushHeld
+      - heldItem.ready
+      - (*loopState).appendItem
+    name: loop_pending.go
   - decls:
       - version
       - byteValues
@@ -482,6 +529,17 @@ functions:
       connection is already gone.
     name: swallowErr
     params: err error
+  - doc: isHead reports whether method is HEAD.
+    name: isHead
+    params: method []byte
+    results: bool
+  - doc: |-
+      appendHeld appends res's answer and reports whether the connection closes
+      after it: a response left deferred or pending, or one the writer refuses,
+      is a 500 that closes it.
+    name: appendHeld
+    params: dst []byte, stub *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue, closing bool
+    results: "[]byte, bool"
   - doc: "tokenTable builds the tchar table: the alphanumerics and fifteen symbols."
     name: tokenTable
     results: "[byteValues]bool"
@@ -936,6 +994,16 @@ types:
       - doc: batcher is h as an HTTP1Batcher, nil when it is not one.
         name: batcher
         type: corenet.HTTP1Batcher
+      - doc: |-
+          worker is h as an HTTP1Worker, nil when it is not one: what a Pending
+          answer is offloaded to (R3).
+        name: worker
+        type: corenet.HTTP1Worker
+      - doc: |-
+          holdCap bounds what one connection holds back behind a pending answer:
+          the group's OutputCap, given at OnOutbound.
+        name: holdCap
+        type: int
       - doc: p frames every request.
         name: p
         type: Parser
@@ -977,7 +1045,7 @@ types:
         recv: a *LoopHandler
       - name: OnClose
         params: io corenet.LoopIO, ref corenet.LoopConnRef, err error
-        recv: "*LoopHandler"
+        recv: a *LoopHandler
       - doc: state returns loop i's state, built on the loop's first call.
         name: state
         params: i int
@@ -988,6 +1056,40 @@ types:
         params: i int
         recv: a *LoopHandler
         results: "*loopState"
+      - name: Worker
+        recv: a *LoopHandler
+        results: corenet.LoopWorker
+      - name: OnOutbound
+        params: v corenet.LoopOutboundValue
+        recv: a *LoopHandler
+      - name: OnDone
+        params: io corenet.LoopIO, job corenet.LoopJobValue
+        recv: a *LoopHandler
+      - name: Pending
+        params: lane int, ref corenet.LoopConnRef
+        recv: a *LoopHandler
+        results: bool
+      - doc: |-
+          hold queues an answer behind the connection's pending one, or as one when
+          it is pending, and reports whether the connection closes after it. It
+          holds every answer of a connection from its first pending one until the
+          batch's end that flushes them; a connection whose held answers pass the
+          output ceiling is closed.
+        name: hold
+        params: st *loopState, an *answer
+        recv: a *LoopHandler
+        results: bool
+      - doc: |-
+          holdPending sends a pending answer's job to the lane's worker and holds its
+          place; a full queue holds a 503 in its place, and Pending with Defer, or
+          with no worker, a 500 that closes the connection.
+        name: holdPending
+        params: st *loopState, an *answer
+        recv: a *LoopHandler
+      - doc: closed gives up the held answers of ref when the flag is still its own.
+        name: closed
+        params: io corenet.LoopIO, ref corenet.LoopConnRef
+        recv: a *LoopHandler
     name: LoopHandler
   - doc: loopState is one loop's state. Only that loop's thread touches it.
     fields:
@@ -1022,6 +1124,46 @@ types:
       - doc: served counts the requests the batch handed to the handler.
         name: served
         type: int
+      - doc: |-
+          outbound is the lane's outbound to its worker, nil when nothing
+          offloads.
+        name: outbound
+        type: corenet.LoopOutbound
+      - doc: |-
+          slots are the pending answers' slots, by index; replaced, never written
+          in place, so the worker reads it without a lock.
+        name: slots
+        type: atomic.Pointer[[]*pendSlot]
+      - doc: freeSlots are the indexes of the slots no answer holds.
+        name: freeSlots
+        type: "[]uint32"
+      - doc: ready are the connections whose held answers the batch's end flushes.
+        name: ready
+        type: "[]corenet.LoopConnRef"
+      - doc: |-
+          deferHeld are the connections holding a deferred answer behind a
+          pending one, completed after EndBatch.
+        name: deferHeld
+        type: "[]corenet.LoopConnRef"
+      - doc: held is the scratch a connection's held answers are written from.
+        name: held
+        type: "[]byte"
+      - doc: unavailable is the 503 a pending answer refused by a full queue gets.
+        name: unavailable
+        type: corenet.HTTP1ResponseValue
+      - doc: readyEpoch numbers the batches' ready lists, from one.
+        name: readyEpoch
+        type: uint64
+      - doc: |-
+          headStub and plainStub are the requests a held deferred answer is
+          written with: HEAD, or no method.
+        name: headStub
+        type: corenet.HTTP1RequestValue
+      - doc: |-
+          headStub and plainStub are the requests a held deferred answer is
+          written with: HEAD, or no method.
+        name: plainStub
+        type: corenet.HTTP1RequestValue
     kind: struct
     methods:
       - doc: |-
@@ -1061,6 +1203,78 @@ types:
         params: ref corenet.LoopConnRef
         recv: st *loopState
         results: "*connFlag"
+      - doc: |-
+          peek returns ref's flag when it is ref's connection's, nil when the slot
+          holds another generation or was never seen: unlike flag, it resets nothing.
+        name: peek
+        params: ref corenet.LoopConnRef
+        recv: st *loopState
+        results: "*connFlag"
+      - doc: |-
+          holdBytes writes res into the connection's buffer and holds it in order; a
+          response the writer refuses is a 500 that closes the connection.
+        name: holdBytes
+        params: an *answer, res *corenet.HTTP1ResponseValue
+        recv: st *loopState
+      - doc: |-
+          stubOf is the request the writer reads for a deferred answer: HEAD, or no
+          method; one shared value of each, never written.
+        name: stubOf
+        params: head bool
+        recv: st *loopState
+        results: "*corenet.HTTP1RequestValue"
+      - doc: |-
+          takeSlot returns a free slot and its index, its generation moved on and
+          its response zeroed; the table grows by doubling when none is free,
+          published anew so the worker never reads a table being written.
+        name: takeSlot
+        recv: st *loopState
+        results: uint32, *pendSlot
+      - doc: growSlots doubles the slot table, the new slots free.
+        name: growSlots
+        recv: st *loopState
+      - doc: freeSlot returns slot idx to the free list.
+        name: freeSlot
+        params: idx uint32
+        recv: st *loopState
+      - doc: markReady queues ref's connection for the batch's end, once a batch.
+        name: markReady
+        params: ref corenet.LoopConnRef, f *connFlag
+        recv: st *loopState
+      - doc: |-
+          dropHeld gives up every answer f holds: a pending slot whose job is back is
+          freed, one still out is cancelled and freed when it comes back, a deferred
+          response is returned to the pool.
+        name: dropHeld
+        params: f *connFlag
+        recv: st *loopState
+      - doc: |-
+          completeHeld completes, after EndBatch, the deferred responses held behind
+          a pending answer: each becomes bytes in its connection's buffer.
+        name: completeHeld
+        recv: st *loopState
+      - doc: completeConn writes f's deferred held responses into its buffer.
+        name: completeConn
+        params: ref corenet.LoopConnRef, f *connFlag
+        recv: st *loopState
+      - doc: |-
+          flushReady writes, for each connection queued, the answers it holds from
+          the first up to the first still out, in one Write, then closes it when one
+          of them asked to.
+        name: flushReady
+        params: io corenet.LoopIO
+        recv: st *loopState
+      - doc: flushHeld writes f's ready answers, in order.
+        name: flushHeld
+        params: io corenet.LoopIO, ref corenet.LoopConnRef, f *connFlag
+        recv: st *loopState
+      - doc: |-
+          appendItem appends one ready held answer to out and reports whether the
+          connection closes after it; a pending one's slot is freed.
+        name: appendItem
+        params: out []byte, f *connFlag, it heldItem
+        recv: st *loopState
+        results: "[]byte, bool"
     name: loopState
   - doc: item is one answer of a batch.
     fields:
@@ -1103,8 +1317,123 @@ types:
           more is written to it.
         name: dead
         type: bool
+      - doc: |-
+          readyAt is the lane's readyEpoch the connection was last queued in,
+          so it is queued once a batch.
+        name: readyAt
+        type: uint64
+      - doc: held are the answers held behind a pending one, in request order (R3).
+        name: held
+        type: "[]heldItem"
+      - doc: buf holds the held answers' bytes.
+        name: buf
+        type: "[]byte"
     kind: struct
     name: connFlag
+  - doc: |-
+      pendSlot is one pending answer (R3): what the lane keeps of it while the
+      worker fills res. The lane's thread writes ref, head and closing before the
+      job is sent and reads res once it is back; the worker writes res only, and
+      reads cancelled. Slots are never moved, so the worker holds one by pointer.
+    fields:
+      - doc: idx is the slot's index in the table, fixed.
+        name: idx
+        type: uint32
+      - doc: gen is the slot's generation, moved on at each take.
+        name: gen
+        type: uint32
+      - doc: ref is the connection it answers.
+        name: ref
+        type: corenet.LoopConnRef
+      - doc: res is the answer the worker fills.
+        name: res
+        type: corenet.HTTP1ResponseValue
+      - doc: |-
+          stub carries the request's Method — HEAD or none — and whether the
+          connection closes after the answer (Close), as the writer reads them.
+        name: stub
+        type: corenet.HTTP1RequestValue
+      - doc: done is set on the lane's thread once the job is back.
+        name: done
+        type: bool
+      - doc: |-
+          cancelled is set once the connection closed: the worker skips the work,
+          and the answer is dropped.
+        name: cancelled
+        type: atomic.Bool
+    kind: struct
+    name: pendSlot
+  - doc: |-
+      heldItem is one answer a connection holds back behind a pending one, in
+      request order: a pending slot, a deferred response the batch's end
+      completes, or bytes already written into the connection's buffer.
+    fields:
+      - doc: slot is the pending answer; nil otherwise.
+        name: slot
+        type: "*pendSlot"
+      - doc: res is a deferred response not yet completed; nil otherwise.
+        name: res
+        type: "*corenet.HTTP1ResponseValue"
+      - doc: off and end bound the answer's bytes in the connection's buffer.
+        name: "off"
+        type: int
+      - doc: off and end bound the answer's bytes in the connection's buffer.
+        name: end
+        type: int
+      - doc: |-
+          stub carries a deferred request's Method — HEAD or none — for the
+          writer, and whether the connection closes after this answer (Close).
+        name: stub
+        type: "*corenet.HTTP1RequestValue"
+      - doc: closing is whether the connection closes after this answer.
+        name: closing
+        type: bool
+    kind: struct
+    methods:
+      - doc: |-
+          ready reports whether the held answer can be written: its bytes are in the
+          buffer, or its job is back.
+        name: ready
+        recv: it heldItem
+        results: bool
+    name: heldItem
+  - doc: |-
+      pendingWorker is the corenet.LoopWorker the adapter offloads to: it runs
+      the handler's HTTP1Worker on the slot's response.
+    fields:
+      - doc: a is the adapter.
+        name: a
+        type: "*LoopHandler"
+    kind: struct
+    methods:
+      - doc: |-
+          Work implements corenet.LoopWorker, on the lane's worker goroutine: it
+          fills the slot's response unless its connection has closed.
+        name: Work
+        params: lane int, job corenet.LoopJobValue
+        recv: w pendingWorker
+    name: pendingWorker
+  - doc: |-
+      answer is one answer hold queues: the connection, its flag, the response
+      and whether the connection closes after it.
+    fields:
+      - doc: io is the lane's LoopIO.
+        name: io
+        type: corenet.LoopIO
+      - doc: ref is the connection.
+        name: ref
+        type: corenet.LoopConnRef
+      - doc: f is its flag.
+        name: f
+        type: "*connFlag"
+      - doc: res is the handler's response.
+        name: res
+        type: "*corenet.HTTP1ResponseValue"
+      - doc: closing is whether the connection closes after it.
+        name: closing
+        type: bool
+    kind: struct
+    name: answer
   - doc: fieldKind is which of the profile's known fields a name is.
     kind: named
     name: fieldKind
@@ -1154,6 +1483,13 @@ vars:
         name: credentialFields
         value: "[...]string{\"authorization\", \"proxy-authorization\", \"cookie\"}"
     name: wwwAuthenticate
+  - doc: |-
+      retryAfter is the field a 503 for a full queue carries: one second, the
+      least a client can be told.
+    items:
+      - name: retryAfter
+        value: "[]byte(\"Retry-After: 1\\r\\n\")"
+    name: retryAfter
   - grouped: true
     items:
       - doc: tchar holds the RFC 9110 §5.6.2 token characters.

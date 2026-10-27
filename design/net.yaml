@@ -453,6 +453,13 @@ packages:
             name: CodeLoopMiddlewareInvalid
             value: "0x00_02_0B_3D"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeLoopOutboundFull identifies a job refused because the lane's queue to its
+              worker is full.
+            name: CodeLoopOutboundFull
+            value: "0x00_02_0B_3F"
+        type: errs.Code
     constants:
       - blockDoc: The loop backends. The zero value is LoopBackendAuto.
         doc: |-
@@ -1583,6 +1590,85 @@ packages:
               - type: LoopHandler
         name: LoopLayered
       - doc: |-
+          LoopWorker runs a lane's offloaded jobs (R3): Work is called on the lane's
+          worker goroutine, one per lane, off the loop's thread, one job at a time in
+          the order the lane sent them, and may block. When it returns, the job goes
+          back to the lane, whose offloader's OnDone sees it on the loop's thread.
+        methods:
+          - doc: |-
+              Work runs job, sent by the lane whose index is lane.
+            in:
+              - name: lane
+                type: int
+              - name: job
+                type: LoopJobValue
+            name: Work
+        name: LoopWorker
+      - doc: |-
+          LoopOutbound is one lane's queue to its worker (R3), preallocated
+          (LoopValue.Outbound). Send is called on the lane's thread only, with the
+          lane's LoopIO, and never blocks: it queues the job and wakes the worker, or
+          refuses with LoopOutboundFull, queueing nothing.
+
+          IFACE-PLUGIN: the queue is internal/service/net/server's.
+        methods:
+          - doc: |-
+              Send queues job for the lane's worker, or refuses with LoopOutboundFull.
+            in:
+              - name: io
+                type: LoopIO
+              - name: job
+                type: LoopJobValue
+            name: Send
+            out:
+              - type: error
+        name: LoopOutbound
+      - doc: |-
+          LoopOffloader is the optional capability of a LoopHandler that offloads
+          blocking work (R3). At Start the server walks the chain by Next for the
+          first offloader whose Worker is not nil, starts one worker goroutine per
+          lane, and calls OnOutbound once, after LoopStarter.OnStart and before any
+          other callback. Each job a lane sends comes back through OnDone, on that
+          lane's thread, once Work has returned; a job whose connection closed
+          meanwhile comes back too, so the offloader frees what it kept for it. A
+          draining loop keeps open every connection Pending names. The workers stop
+          after the loop engine has: on Shutdown once the drain is over, queued jobs
+          then dropped.
+        methods:
+          - doc: |-
+              Worker returns the worker the group's lanes offload to; nil offloads
+              nothing.
+            name: Worker
+            out:
+              - type: LoopWorker
+          - doc: |-
+              OnOutbound gives the offloader its lanes' outbounds, once.
+            in:
+              - name: v
+                type: LoopOutboundValue
+            name: OnOutbound
+          - doc: |-
+              OnDone is called on the lane's thread with each job its worker ran.
+            in:
+              - name: io
+                type: LoopIO
+              - name: job
+                type: LoopJobValue
+            name: OnDone
+          - doc: |-
+              Pending reports, on the lane's thread, whether ref, a connection of lane,
+              waits for an answer its worker has not given back: a draining loop keeps
+              it open until it has, and eviction passes it by.
+            in:
+              - name: lane
+                type: int
+              - name: ref
+                type: LoopConnRef
+            name: Pending
+            out:
+              - type: bool
+        name: LoopOffloader
+      - doc: |-
           HTTP1Handler answers one request of the restricted HTTP/1.1 profile.
 
           It sees only requests the codec framed and accepted: a refusal is answered
@@ -1628,6 +1714,30 @@ packages:
                 type: int
             name: EndBatch
         name: HTTP1Batcher
+      - doc: |-
+          HTTP1Worker is the optional capability of an HTTP1Handler served on a loop
+          group that answers off the loop's thread (R3): a response the handler marks
+          Pending is handed to the lane's worker goroutine, which calls WorkHTTP1 with
+          the response's Job and a response value of its own to fill; the loop adapter
+          writes it, from the loop's thread, once WorkHTTP1 returns. WorkHTTP1 may
+          block. It reads nothing of the request, whose bytes do not outlive the
+          batch: the handler copied what the work needs and named it by job.
+
+          IFACE-PLUGIN: what a consumer writes beside HTTP1Handler; the adapter that
+          calls it is internal/service/net/http1's.
+        methods:
+          - doc: |-
+              WorkHTTP1 fills res, the answer to the pending request of lane whose Job
+              was job.
+            in:
+              - name: lane
+                type: int
+              - name: job
+                type: uint64
+              - name: res
+                type: "*HTTP1ResponseValue"
+            name: WorkHTTP1
+        name: HTTP1Worker
       - doc: |-
           HTTP1BearerVerifier verifies a Bearer token for the http1 chain's
           authenticating link. VerifyBearer reports whether token is valid and, when
@@ -2142,6 +2252,16 @@ packages:
             private: "core/net: the loop's post queue is full"
             public: The loop cannot take more posted work now
             reason: LOOP_POST_QUEUE_FULL
+          - code: CodeLoopOutboundFull
+            doc: |-
+              LoopOutboundFull is returned by LoopOutbound.Send when the lane's
+              preallocated queue to its worker is full (R3). The job is not queued; the
+              refusal is counted in LoopStateValue.OutboundRefused.
+            exit: TEMPFAIL
+            name: LoopOutboundFull
+            private: "core/net: the lane's queue to its worker is full"
+            public: The server cannot take more offloaded work now
+            reason: LOOP_OUTBOUND_FULL
           - code: CodeLoopWrongThread
             doc: |-
               LoopWrongThread is returned under the loopdebug build tag by Write, Close or
@@ -2955,6 +3075,23 @@ packages:
                 closed. Only the loop adapter reads it; AppendResponse does not.
               name: Defer
               type: bool
+            - doc: |-
+                Pending, set by the handler, hands the answer to the lane's worker
+                (HTTP1Worker, R3): the loop adapter sends Job to it and writes the
+                answer the worker fills, from the loop's thread, once it comes back.
+                Answers after it on the same connection wait for it, in order. A queue
+                to the worker that is full answers 503 with Retry-After at once, the
+                connection kept; a connection that closes first drops the answer. Pending
+                with Defer, or with no worker, is answered 500 and the connection closed.
+                Only the loop adapter reads it.
+              name: Pending
+              type: bool
+            - doc: |-
+                Job is the integer a pending answer's worker is given: the handler's own
+                index of what the work needs, which it copied out of the request, since
+                the request's bytes do not outlive the batch.
+              name: Job
+              type: uint64
       - doc: HTTP1HandlerFunc adapts a plain function to HTTP1Handler.
         methods:
           - doc: ServeHTTP1 implements HTTP1Handler by calling f.
@@ -3218,6 +3355,44 @@ packages:
               name: Gen
               type: uint32
       - doc: |-
+          LoopJobValue is one job a lane sends its worker through LoopOutbound (R3):
+          the connection it answers, by its full reference, the slot the sender
+          keeps it in with that slot's own generation, and an integer the sender
+          gives meaning to. It is a value with no pointer, so the queue that carries
+          it holds nothing the garbage collector must scan, and a completion that
+          comes back after its connection closed finds a stale reference, never
+          another connection.
+        name: LoopJobValue
+        struct:
+          fields:
+            - doc: Ref is the connection the job answers.
+              name: Ref
+              type: LoopConnRef
+            - doc: Slot is the sender's index of the job's state.
+              name: Slot
+              type: uint32
+            - doc: Gen is the generation of that slot when the job was sent.
+              name: Gen
+              type: uint32
+            - doc: Arg is the sender's own argument.
+              name: Arg
+              type: uint64
+      - doc: |-
+          LoopOutboundValue is what a loop group gives its offloader at Start, once,
+          after LoopStarter.OnStart and before any other callback: one outbound per
+          lane, indexed by LoopIO.Loop, and the output ceiling of one connection
+          (LoopValue.OutputCap, its default applied), which bounds what an offloader
+          holds back for a connection while one of its answers is pending.
+        name: LoopOutboundValue
+        struct:
+          fields:
+            - doc: Lanes are the lanes' outbounds, by lane.
+              name: Lanes
+              type: "[]LoopOutbound"
+            - doc: OutputCap is LoopValue.OutputCap, its default applied.
+              name: OutputCap
+              type: int
+      - doc: |-
           LoopRingStateValue reports one ring of one loop: counters the loop refreshes
           at the end of each batch, read without stopping it (ADR 0186 §D8).
         name: LoopRingStateValue
@@ -3349,6 +3524,13 @@ packages:
               name: BatchP99
               tag: json:"batch_p99"
               type: DurationValue
+            - doc: |-
+                OutboundRefused counts the jobs a full queue to a worker refused
+                (LoopOutboundFull), every lane's: for the http1 adapter, the 503s it
+                answered for them. Zero when the group offloads nothing.
+              name: OutboundRefused
+              tag: json:"outbound_refused"
+              type: uint64
             - doc: RingStates reports every ring of every loop, loop by loop.
               name: RingStates
               tag: json:"ring_states"
@@ -3440,6 +3622,14 @@ packages:
               name: Capabilities
               tag: json:"capabilities,omitempty"
               type: "[]Capability"
+            - doc: |-
+                Outbound is how many jobs one lane's queue to its worker holds (R3),
+                when the group's handler offloads (LoopOffloader). A Send past it is
+                refused with LoopOutboundFull and counted in LoopStateValue. Zero
+                selects 256.
+              name: Outbound
+              tag: json:"outbound"
+              type: int
       - doc: |-
           Middleware decorates a handler with another of the same type.
 
@@ -4629,9 +4819,11 @@ packages:
             name: OnBatchEnd
             recv: pointer
           - doc: |-
-              OnClose implements corenet.LoopHandler. The connection's flag stays until
-              the next OnOpen of its slot replaces it; an answer of the batch still
-              queued for it is dropped when its Write is refused as stale.
+              OnClose implements corenet.LoopHandler. The connection's held answers are
+              given up — a pending one's job cancelled, its slot freed when it comes back
+              — and its flag stays until the next OnOpen of its slot replaces it; an
+              answer of the batch still queued for it is dropped when its Write is
+              refused as stale.
             in:
               - name: io
                 type: corenet.LoopIO
@@ -4648,6 +4840,45 @@ packages:
               - name: lanes
                 type: int
             name: OnStart
+            recv: pointer
+          - doc: |-
+              Worker implements corenet.LoopOffloader: the adapter offloads when its
+              handler is a corenet.HTTP1Worker, and nothing otherwise.
+            name: Worker
+            out:
+              - type: corenet.LoopWorker
+            recv: pointer
+          - doc: |-
+              OnOutbound implements corenet.LoopOffloader: each lane keeps its outbound,
+              and every connection's holdback is bounded by the output ceiling.
+            in:
+              - name: v
+                type: corenet.LoopOutboundValue
+            name: OnOutbound
+            recv: pointer
+          - doc: |-
+              OnDone implements corenet.LoopOffloader, on the lane's thread: the job's
+              answer is ready, and its connection is flushed at the batch's end, in
+              request order. A connection that closed meanwhile has its slot freed and
+              nothing written.
+            in:
+              - name: io
+                type: corenet.LoopIO
+              - name: job
+                type: corenet.LoopJobValue
+            name: OnDone
+            recv: pointer
+          - doc: |-
+              Pending implements corenet.LoopOffloader: a connection holding answers
+              behind a pending one is still being answered, so a draining loop keeps it.
+            in:
+              - name: lane
+                type: int
+              - name: ref
+                type: corenet.LoopConnRef
+            name: Pending
+            out:
+              - type: bool
             recv: pointer
         name: LoopHandler
         struct:
@@ -4942,6 +5173,12 @@ packages:
             - doc: Handler is the group's loop handler.
               name: Handler
               type: corenet.LoopHandler
+            - doc: |-
+                Busy reports whether a connection of a lane waits on its worker (the
+                chain's LoopOffloader.Pending, R3): the drain keeps it open, eviction
+                passes it by. Nil when nothing offloads.
+              name: Busy
+              type: "func(lane int, ref corenet.LoopConnRef) bool"
             - doc: Listeners are the sockets to accept on.
               name: Listeners
               type: "[]Listener"
@@ -7199,6 +7436,14 @@ packages:
             target: corenet.HTTP1Batcher
       - alias:
           - doc: |-
+              Worker is the optional capability of a Handler served on a loop group that
+              answers off the loop's thread: a Response marked Pending is filled by
+              WorkHTTP1 on the lane's worker goroutine, which may block, and written once
+              it returns.
+            name: Worker
+            target: corenet.HTTP1Worker
+      - alias:
+          - doc: |-
               Request is one request, framed by the codec. Every slice aliases the bytes
               Request is one request, framed by the codec. Every slice aliases the bytes
               it was framed from; Lane names the lane that framed it, Path is its
@@ -7960,6 +8205,32 @@ packages:
             target: corenet.LoopStarter
       - alias:
           - doc: |-
+              LoopOffloader is the optional capability of a LoopHandler that offloads
+              blocking work to one worker goroutine per lane (R3).
+            name: LoopOffloader
+            target: corenet.LoopOffloader
+      - alias:
+          - doc: LoopWorker runs a lane's offloaded jobs, off the loop's thread; it may block.
+            name: LoopWorker
+            target: corenet.LoopWorker
+      - alias:
+          - doc: |-
+              LoopOutbound is one lane's preallocated queue to its worker; Send never
+              blocks.
+            name: LoopOutbound
+            target: corenet.LoopOutbound
+      - alias:
+          - doc: LoopJobValue is one job a lane sends its worker.
+            name: LoopJobValue
+            target: corenet.LoopJobValue
+      - alias:
+          - doc: |-
+              LoopOutboundValue is what an offloader is given at Start: the lanes'
+              outbounds and the output ceiling of one connection.
+            name: LoopOutboundValue
+            target: corenet.LoopOutboundValue
+      - alias:
+          - doc: |-
               LoopLayered is what every layer of a loop middleware implements: Next is
               the handler it wraps.
             name: LoopLayered
@@ -8304,6 +8575,10 @@ packages:
           - doc: LoopPostQueueFull reports a Post refused by a full queue.
             name: LoopPostQueueFull
             reexport: corenet.LoopPostQueueFull
+            type: "*errs.Error"
+          - doc: LoopOutboundFull reports a job refused by a lane's full queue to its worker.
+            name: LoopOutboundFull
+            reexport: corenet.LoopOutboundFull
             type: "*errs.Error"
           - doc: LoopWrongThread reports, under loopdebug, a loop operation off the loop's thread.
             name: LoopWrongThread

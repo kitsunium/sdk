@@ -32,6 +32,7 @@ link reads `Path`, the canonical target `Parse` computed, never `Target`.
 | `refusal.go` | `Refusal` and its 26 values; `Status`, `Err` (the core sentinel), `String` |
 | `write.go` | `AppendStatusLine`, `AppendField`, `AppendResponse`, `AppendRefusal`; the precomputed status lines |
 | `loop.go` | `HandleLoop`, `LoopHandler`: the loop adapter — per-lane state built at `OnStart` (`loopState`: the request value, the batch's answers in `out`, the pooled response values, a flag per connection by ring and slot), deferred answers completed in request order (`complete`), one `Write` per connection run (`flush`) |
+| `loop_pending.go` | the adapter's pending answers (R3, ADR 0194): `LoopHandler` is a `corenet.LoopOffloader` when its handler is an `HTTP1Worker` (`pendingWorker`); `hold` keeps a connection's answers in order behind its first pending one (`heldItem`, the flag's own buffer, bounded by `OutputCap` → close); `pendSlot` (fixed, by pointer, its own generation, `cancelled` on close); a full queue's 503 + `Retry-After: 1`; `completeHeld`/`flushReady` at the batch's end; `Pending` for the drain |
 | `loop_fixtures_test.go` | the adapter's batch fixture (`perfLoop`, `perfH`) and the request bytes, untagged so the benchmarks reach them under race too |
 | `loop_external_test.go` | the adapter on a fake `LoopIO`: order of immediate and deferred answers, every way a connection closes, HEAD, slot reuse, several loops |
 | `target_external_test.go` | the canonical target: what each form reduces to, every refusal, and `Parse` resetting what a link set |

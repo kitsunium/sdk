@@ -25,6 +25,7 @@ go_library(
         "limits.go",
         "loop.go",
         "loop_layer.go",
+        "loop_outbound.go",
         "loop_state.go",
         "loop_value.go",
         "material.go",

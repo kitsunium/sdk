@@ -26233,6 +26233,22 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeLoopOutboundFull",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeLoopOutboundFull",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133951",
+      "code": {
+        "value": "0.2.11.63"
+      },
+      "doc": "CodeLoopOutboundFull identifies a job refused because the lane's queue to its\nworker is full.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeLoopOutputFull",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -27868,8 +27884,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/net",
       "name": "HTTP1ResponseValue",
-      "spelled": "struct{Status int; Header []byte; Body []byte; Close bool; Defer bool}",
-      "canonical": "struct{Status int; Header []byte; Body []byte; Close bool; Defer bool}",
+      "spelled": "struct{Status int; Header []byte; Body []byte; Close bool; Defer bool; Pending bool; Job uint64}",
+      "canonical": "struct{Status int; Header []byte; Body []byte; Close bool; Defer bool; Pending bool; Job uint64}",
       "fields": [
         {
           "name": "Status",
@@ -27895,6 +27911,16 @@
           "name": "Defer",
           "type": "bool",
           "doc": "Defer, set by the handler, holds the answer back until the end of the\nloop's batch, for work it batches — one database transaction for every\nrequest of the batch, say. The response value then stays valid, at the\nsame address, until HTTP1Batcher.EndBatch returns, and the handler\ncompletes it there: it fills it and clears Defer. An answer still\ndeferred when EndBatch returns is answered 500 and its connection\nclosed. Only the loop adapter reads it; AppendResponse does not.\n"
+        },
+        {
+          "name": "Pending",
+          "type": "bool",
+          "doc": "Pending, set by the handler, hands the answer to the lane's worker\n(HTTP1Worker, R3): the loop adapter sends Job to it and writes the\nanswer the worker fills, from the loop's thread, once it comes back.\nAnswers after it on the same connection wait for it, in order. A queue\nto the worker that is full answers 503 with Retry-After at once, the\nconnection kept; a connection that closes first drops the answer. Pending\nwith Defer, or with no worker, is answered 500 and the connection closed.\nOnly the loop adapter reads it.\n"
+        },
+        {
+          "name": "Job",
+          "type": "uint64",
+          "doc": "Job is the integer a pending answer's worker is given: the handler's own\nindex of what the work needs, which it copied out of the request, since\nthe request's bytes do not outlive the batch.\n"
         }
       ],
       "doc": "HTTP1ResponseValue is the answer an HTTP1Handler gives to one request.\n\nThe handler sets the status, appends any field lines to Header with the\ncodec's writer and the content to Body. The codec writes the status line,\nthe Content-Length computed from Body and Connection: close when it is\nneeded: the handler never spells the response's framing, so it cannot get it\nwrong.\n",
@@ -27933,6 +27959,31 @@
       },
       "doc": "HTTP1TransferEncoding is the refusal of any Transfer-Encoding. A\nrequest that carries one alongside a Content-Length is the classic smuggling\nvector (RFC 9112 §11.2), so the profile never chooses between them.\n",
       "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1Worker",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1Worker",
+      "spelled": "interface{WorkHTTP1(lane int, job uint64, res *HTTP1ResponseValue)}",
+      "canonical": "interface{WorkHTTP1(lane int, job uint64, res *github.com/kitsunium/sdk/internal/core/net.HTTP1ResponseValue)}",
+      "doc": "HTTP1Worker is the optional capability of an HTTP1Handler served on a loop\ngroup that answers off the loop's thread (R3): a response the handler marks\nPending is handed to the lane's worker goroutine, which calls WorkHTTP1 with\nthe response's Job and a response value of its own to fill; the loop adapter\nwrites it, from the loop's thread, once WorkHTTP1 returns. WorkHTTP1 may\nblock. It reads nothing of the request, whose bytes do not outlive the\nbatch: the handler copied what the work needs and named it by job.\n\nIFACE-PLUGIN: what a consumer writes beside HTTP1Handler; the adapter that\ncalls it is internal/service/net/http1's.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1Worker.WorkHTTP1",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "WorkHTTP1",
+      "recv": "HTTP1Worker",
+      "spelled": "func(lane int, job uint64, res *HTTP1ResponseValue)",
+      "canonical": "func(lane int, job uint64, res *github.com/kitsunium/sdk/internal/core/net.HTTP1ResponseValue)",
+      "doc": "WorkHTTP1 fills res, the answer to the pending request of lane whose Job\nwas job.\n",
+      "file": "core/net/gen_ports.go",
       "layer": "core",
       "family": "net"
     },
@@ -28675,6 +28726,40 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopJobValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "LoopJobValue",
+      "spelled": "struct{Ref LoopConnRef; Slot uint32; Gen uint32; Arg uint64}",
+      "canonical": "struct{Ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef; Slot uint32; Gen uint32; Arg uint64}",
+      "fields": [
+        {
+          "name": "Ref",
+          "type": "LoopConnRef",
+          "doc": "Ref is the connection the job answers.\n"
+        },
+        {
+          "name": "Slot",
+          "type": "uint32",
+          "doc": "Slot is the sender's index of the job's state.\n"
+        },
+        {
+          "name": "Gen",
+          "type": "uint32",
+          "doc": "Gen is the generation of that slot when the job was sent.\n"
+        },
+        {
+          "name": "Arg",
+          "type": "uint64",
+          "doc": "Arg is the sender's own argument.\n"
+        }
+      ],
+      "doc": "LoopJobValue is one job a lane sends its worker through LoopOutbound (R3):\nthe connection it answers, by its full reference, the slot the sender\nkeeps it in with that slot's own generation, and an integer the sender\ngives meaning to. It is a value with no pointer, so the queue that carries\nit holds nothing the garbage collector must scan, and a completion that\ncomes back after its connection closed finds a stale reference, never\nanother connection.\n",
+      "file": "core/net/loop_outbound.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopLayer",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -28863,6 +28948,70 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopOffloader",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "LoopOffloader",
+      "spelled": "interface{OnDone(io LoopIO, job LoopJobValue); OnOutbound(v LoopOutboundValue); Pending(lane int, ref LoopConnRef) bool; Worker() LoopWorker}",
+      "canonical": "interface{OnDone(io github.com/kitsunium/sdk/internal/core/net.LoopIO, job github.com/kitsunium/sdk/internal/core/net.LoopJobValue); OnOutbound(v github.com/kitsunium/sdk/internal/core/net.LoopOutboundValue); Pending(lane int, ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef) bool; Worker() github.com/kitsunium/sdk/internal/core/net.LoopWorker}",
+      "doc": "LoopOffloader is the optional capability of a LoopHandler that offloads\nblocking work (R3). At Start the server walks the chain by Next for the\nfirst offloader whose Worker is not nil, starts one worker goroutine per\nlane, and calls OnOutbound once, after LoopStarter.OnStart and before any\nother callback. Each job a lane sends comes back through OnDone, on that\nlane's thread, once Work has returned; a job whose connection closed\nmeanwhile comes back too, so the offloader frees what it kept for it. A\ndraining loop keeps open every connection Pending names. The workers stop\nafter the loop engine has: on Shutdown once the drain is over, queued jobs\nthen dropped.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopOffloader.OnDone",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OnDone",
+      "recv": "LoopOffloader",
+      "spelled": "func(io LoopIO, job LoopJobValue)",
+      "canonical": "func(io github.com/kitsunium/sdk/internal/core/net.LoopIO, job github.com/kitsunium/sdk/internal/core/net.LoopJobValue)",
+      "doc": "OnDone is called on the lane's thread with each job its worker ran.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopOffloader.OnOutbound",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OnOutbound",
+      "recv": "LoopOffloader",
+      "spelled": "func(v LoopOutboundValue)",
+      "canonical": "func(v github.com/kitsunium/sdk/internal/core/net.LoopOutboundValue)",
+      "doc": "OnOutbound gives the offloader its lanes' outbounds, once.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopOffloader.Pending",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "Pending",
+      "recv": "LoopOffloader",
+      "spelled": "func(lane int, ref LoopConnRef) bool",
+      "canonical": "func(lane int, ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef) bool",
+      "doc": "Pending reports, on the lane's thread, whether ref, a connection of lane,\nwaits for an answer its worker has not given back: a draining loop keeps\nit open until it has, and eviction passes it by.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopOffloader.Worker",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "Worker",
+      "recv": "LoopOffloader",
+      "spelled": "func() LoopWorker",
+      "canonical": "func() github.com/kitsunium/sdk/internal/core/net.LoopWorker",
+      "doc": "Worker returns the worker the group's lanes offload to; nil offloads\nnothing.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopOptionHonourer",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -28901,6 +29050,72 @@
       },
       "doc": "LoopOptionUnsupported is returned by Start for an option a group cannot honour\non its engine: Loop on a group served by Handle, HandleFunc or HandleHTTP, or\non a datagram group; Use on a loop group; or an option neither the loop\nengine nor its handler honours. A group with no handler fails with\nHandlerMissing instead. The \"option\" field names it. It is judged at\nStart, once the handler is known, whatever order the declarations came in.\n",
       "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopOutbound",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "LoopOutbound",
+      "spelled": "interface{Send(io LoopIO, job LoopJobValue) error}",
+      "canonical": "interface{Send(io github.com/kitsunium/sdk/internal/core/net.LoopIO, job github.com/kitsunium/sdk/internal/core/net.LoopJobValue) error}",
+      "doc": "LoopOutbound is one lane's queue to its worker (R3), preallocated\n(LoopValue.Outbound). Send is called on the lane's thread only, with the\nlane's LoopIO, and never blocks: it queues the job and wakes the worker, or\nrefuses with LoopOutboundFull, queueing nothing.\n\nIFACE-PLUGIN: the queue is internal/service/net/server's.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopOutbound.Send",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "Send",
+      "recv": "LoopOutbound",
+      "spelled": "func(io LoopIO, job LoopJobValue) error",
+      "canonical": "func(io github.com/kitsunium/sdk/internal/core/net.LoopIO, job github.com/kitsunium/sdk/internal/core/net.LoopJobValue) error",
+      "doc": "Send queues job for the lane's worker, or refuses with LoopOutboundFull.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopOutboundFull",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "LoopOutboundFull",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.63",
+        "reason": "LOOP_OUTBOUND_FULL",
+        "public": "The server cannot take more offloaded work now"
+      },
+      "doc": "LoopOutboundFull is returned by LoopOutbound.Send when the lane's\npreallocated queue to its worker is full (R3). The job is not queued; the\nrefusal is counted in LoopStateValue.OutboundRefused.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopOutboundValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "LoopOutboundValue",
+      "spelled": "struct{Lanes []LoopOutbound; OutputCap int}",
+      "canonical": "struct{Lanes []github.com/kitsunium/sdk/internal/core/net.LoopOutbound; OutputCap int}",
+      "fields": [
+        {
+          "name": "Lanes",
+          "type": "[]LoopOutbound",
+          "doc": "Lanes are the lanes' outbounds, by lane.\n"
+        },
+        {
+          "name": "OutputCap",
+          "type": "int",
+          "doc": "OutputCap is LoopValue.OutputCap, its default applied.\n"
+        }
+      ],
+      "doc": "LoopOutboundValue is what a loop group gives its offloader at Start, once,\nafter LoopStarter.OnStart and before any other callback: one outbound per\nlane, indexed by LoopIO.Loop, and the output ceiling of one connection\n(LoopValue.OutputCap, its default applied), which bounds what an offloader\nholds back for a connection while one of its answers is pending.\n",
+      "file": "core/net/loop_outbound.go",
       "layer": "core",
       "family": "net"
     },
@@ -29094,8 +29309,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/net",
       "name": "LoopStateValue",
-      "spelled": "struct{Group string \"json:\\\"group\\\"\"; Backend LoopBackend \"json:\\\"backend\\\"\"; ProbeStage string \"json:\\\"probe_stage\\\"\"; Degraded bool \"json:\\\"degraded\\\"\"; DegradedReason string \"json:\\\"degraded_reason,omitempty\\\"\"; Loops int \"json:\\\"loops\\\"\"; Rings int \"json:\\\"rings\\\"\"; RingsSource string \"json:\\\"rings_source\\\"\"; RLimitNoFile uint64 \"json:\\\"rlimit_nofile\\\"\"; GOMAXPROCS int \"json:\\\"gomaxprocs\\\"\"; BatchP99 DurationValue \"json:\\\"batch_p99\\\"\"; RingStates []LoopRingStateValue \"json:\\\"ring_states\\\"\"; Capabilities []CapabilityValue \"json:\\\"capabilities,omitempty\\\"\"}",
-      "canonical": "struct{Group string \"json:\\\"group\\\"\"; Backend github.com/kitsunium/sdk/internal/core/net.LoopBackend \"json:\\\"backend\\\"\"; ProbeStage string \"json:\\\"probe_stage\\\"\"; Degraded bool \"json:\\\"degraded\\\"\"; DegradedReason string \"json:\\\"degraded_reason,omitempty\\\"\"; Loops int \"json:\\\"loops\\\"\"; Rings int \"json:\\\"rings\\\"\"; RingsSource string \"json:\\\"rings_source\\\"\"; RLimitNoFile uint64 \"json:\\\"rlimit_nofile\\\"\"; GOMAXPROCS int \"json:\\\"gomaxprocs\\\"\"; BatchP99 github.com/kitsunium/sdk/internal/core/net.DurationValue \"json:\\\"batch_p99\\\"\"; RingStates []github.com/kitsunium/sdk/internal/core/net.LoopRingStateValue \"json:\\\"ring_states\\\"\"; Capabilities []github.com/kitsunium/sdk/internal/core/net.CapabilityValue \"json:\\\"capabilities,omitempty\\\"\"}",
+      "spelled": "struct{Group string \"json:\\\"group\\\"\"; Backend LoopBackend \"json:\\\"backend\\\"\"; ProbeStage string \"json:\\\"probe_stage\\\"\"; Degraded bool \"json:\\\"degraded\\\"\"; DegradedReason string \"json:\\\"degraded_reason,omitempty\\\"\"; Loops int \"json:\\\"loops\\\"\"; Rings int \"json:\\\"rings\\\"\"; RingsSource string \"json:\\\"rings_source\\\"\"; RLimitNoFile uint64 \"json:\\\"rlimit_nofile\\\"\"; GOMAXPROCS int \"json:\\\"gomaxprocs\\\"\"; BatchP99 DurationValue \"json:\\\"batch_p99\\\"\"; OutboundRefused uint64 \"json:\\\"outbound_refused\\\"\"; RingStates []LoopRingStateValue \"json:\\\"ring_states\\\"\"; Capabilities []CapabilityValue \"json:\\\"capabilities,omitempty\\\"\"}",
+      "canonical": "struct{Group string \"json:\\\"group\\\"\"; Backend github.com/kitsunium/sdk/internal/core/net.LoopBackend \"json:\\\"backend\\\"\"; ProbeStage string \"json:\\\"probe_stage\\\"\"; Degraded bool \"json:\\\"degraded\\\"\"; DegradedReason string \"json:\\\"degraded_reason,omitempty\\\"\"; Loops int \"json:\\\"loops\\\"\"; Rings int \"json:\\\"rings\\\"\"; RingsSource string \"json:\\\"rings_source\\\"\"; RLimitNoFile uint64 \"json:\\\"rlimit_nofile\\\"\"; GOMAXPROCS int \"json:\\\"gomaxprocs\\\"\"; BatchP99 github.com/kitsunium/sdk/internal/core/net.DurationValue \"json:\\\"batch_p99\\\"\"; OutboundRefused uint64 \"json:\\\"outbound_refused\\\"\"; RingStates []github.com/kitsunium/sdk/internal/core/net.LoopRingStateValue \"json:\\\"ring_states\\\"\"; Capabilities []github.com/kitsunium/sdk/internal/core/net.CapabilityValue \"json:\\\"capabilities,omitempty\\\"\"}",
       "fields": [
         {
           "name": "Group",
@@ -29164,6 +29379,12 @@
           "doc": "BatchP99 is the 99th percentile of one loop iteration's duration, over the\nloops' recent batches.\n"
         },
         {
+          "name": "OutboundRefused",
+          "type": "uint64",
+          "tag": "json:\"outbound_refused\"",
+          "doc": "OutboundRefused counts the jobs a full queue to a worker refused\n(LoopOutboundFull), every lane's: for the http1 adapter, the 503s it\nanswered for them. Zero when the group offloads nothing.\n"
+        },
+        {
           "name": "RingStates",
           "type": "[]LoopRingStateValue",
           "tag": "json:\"ring_states\"",
@@ -29203,8 +29424,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/net",
       "name": "LoopValue",
-      "spelled": "struct{Backend LoopBackend \"json:\\\"backend\\\"\"; Loops int \"json:\\\"loops\\\"\"; Rings int \"json:\\\"rings\\\"\"; CQBatch int \"json:\\\"cq_batch\\\"\"; SpillCap int \"json:\\\"spill_cap\\\"\"; OutputCap int \"json:\\\"output_cap\\\"\"; SoftConns int \"json:\\\"soft_conns\\\"\"; EvictIdle DurationValue \"json:\\\"evict_idle\\\"\"; Capabilities []Capability \"json:\\\"capabilities,omitempty\\\"\"}",
-      "canonical": "struct{Backend github.com/kitsunium/sdk/internal/core/net.LoopBackend \"json:\\\"backend\\\"\"; Loops int \"json:\\\"loops\\\"\"; Rings int \"json:\\\"rings\\\"\"; CQBatch int \"json:\\\"cq_batch\\\"\"; SpillCap int \"json:\\\"spill_cap\\\"\"; OutputCap int \"json:\\\"output_cap\\\"\"; SoftConns int \"json:\\\"soft_conns\\\"\"; EvictIdle github.com/kitsunium/sdk/internal/core/net.DurationValue \"json:\\\"evict_idle\\\"\"; Capabilities []github.com/kitsunium/sdk/internal/core/net.Capability \"json:\\\"capabilities,omitempty\\\"\"}",
+      "spelled": "struct{Backend LoopBackend \"json:\\\"backend\\\"\"; Loops int \"json:\\\"loops\\\"\"; Rings int \"json:\\\"rings\\\"\"; CQBatch int \"json:\\\"cq_batch\\\"\"; SpillCap int \"json:\\\"spill_cap\\\"\"; OutputCap int \"json:\\\"output_cap\\\"\"; SoftConns int \"json:\\\"soft_conns\\\"\"; EvictIdle DurationValue \"json:\\\"evict_idle\\\"\"; Capabilities []Capability \"json:\\\"capabilities,omitempty\\\"\"; Outbound int \"json:\\\"outbound\\\"\"}",
+      "canonical": "struct{Backend github.com/kitsunium/sdk/internal/core/net.LoopBackend \"json:\\\"backend\\\"\"; Loops int \"json:\\\"loops\\\"\"; Rings int \"json:\\\"rings\\\"\"; CQBatch int \"json:\\\"cq_batch\\\"\"; SpillCap int \"json:\\\"spill_cap\\\"\"; OutputCap int \"json:\\\"output_cap\\\"\"; SoftConns int \"json:\\\"soft_conns\\\"\"; EvictIdle github.com/kitsunium/sdk/internal/core/net.DurationValue \"json:\\\"evict_idle\\\"\"; Capabilities []github.com/kitsunium/sdk/internal/core/net.Capability \"json:\\\"capabilities,omitempty\\\"\"; Outbound int \"json:\\\"outbound\\\"\"}",
       "fields": [
         {
           "name": "Backend",
@@ -29259,10 +29480,41 @@
           "type": "[]Capability",
           "tag": "json:\"capabilities,omitempty\"",
           "doc": "Capabilities opts the group into kernel capabilities of class A-code\n(ADR 0189). Each is probed and used where the kernel has it, reported\n\"missing\" and as a fault where it does not, and never used once\nKITSUNIUM_NET_DISABLE names it. An engine, a class B capability or an\nunknown token is refused at Start with LoopCapabilityRefused. Nil asks\nfor none; the class A-kernel capabilities need no opt-in.\n"
+        },
+        {
+          "name": "Outbound",
+          "type": "int",
+          "tag": "json:\"outbound\"",
+          "doc": "Outbound is how many jobs one lane's queue to its worker holds (R3),\nwhen the group's handler offloads (LoopOffloader). A Send past it is\nrefused with LoopOutboundFull and counted in LoopStateValue. Zero\nselects 256.\n"
         }
       ],
       "doc": "LoopValue configures a loop group's engine (ADR 0186 §D5). It is a value of\nits own, passed by the Loop group option, so LimitsValue and TimeoutsValue\nkeep the meanings they publish for every engine. Every field is optional:\nzero selects the domain default, never \"unbounded\".\n",
       "file": "core/net/loop_value.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopWorker",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "LoopWorker",
+      "spelled": "interface{Work(lane int, job LoopJobValue)}",
+      "canonical": "interface{Work(lane int, job github.com/kitsunium/sdk/internal/core/net.LoopJobValue)}",
+      "doc": "LoopWorker runs a lane's offloaded jobs (R3): Work is called on the lane's\nworker goroutine, one per lane, off the loop's thread, one job at a time in\nthe order the lane sent them, and may block. When it returns, the job goes\nback to the lane, whose offloader's OnDone sees it on the loop's thread.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopWorker.Work",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "Work",
+      "recv": "LoopWorker",
+      "spelled": "func(lane int, job LoopJobValue)",
+      "canonical": "func(lane int, job github.com/kitsunium/sdk/internal/core/net.LoopJobValue)",
+      "doc": "Work runs job, sent by the lane whose index is lane.\n",
+      "file": "core/net/gen_ports.go",
       "layer": "core",
       "family": "net"
     },
@@ -63861,7 +64113,7 @@
       "recv": "LoopHandler",
       "spelled": "func(io corenet.LoopIO, ref corenet.LoopConnRef, err error)",
       "canonical": "func(io github.com/kitsunium/sdk/internal/core/net.LoopIO, ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef, err error)",
-      "doc": "OnClose implements corenet.LoopHandler. The connection's flag stays until\nthe next OnOpen of its slot replaces it; an answer of the batch still\nqueued for it is dropped when its Write is refused as stale.\n",
+      "doc": "OnClose implements corenet.LoopHandler. The connection's held answers are\ngiven up — a pending one's job cancelled, its slot freed when it comes back\n— and its flag stays until the next OnOpen of its slot replaces it; an\nanswer of the batch still queued for it is dropped when its Write is\nrefused as stale.\n",
       "file": "service/net/http1/loop.go",
       "layer": "service",
       "family": "net"
@@ -63880,6 +64132,19 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.(*LoopHandler).OnDone",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "OnDone",
+      "recv": "LoopHandler",
+      "spelled": "func(io corenet.LoopIO, job corenet.LoopJobValue)",
+      "canonical": "func(io github.com/kitsunium/sdk/internal/core/net.LoopIO, job github.com/kitsunium/sdk/internal/core/net.LoopJobValue)",
+      "doc": "OnDone implements corenet.LoopOffloader, on the lane's thread: the job's\nanswer is ready, and its connection is flushed at the batch's end, in\nrequest order. A connection that closed meanwhile has its slot freed and\nnothing written.\n",
+      "file": "service/net/http1/loop_pending.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.(*LoopHandler).OnOpen",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/service/net/http1",
@@ -63889,6 +64154,19 @@
       "canonical": "func(io github.com/kitsunium/sdk/internal/core/net.LoopIO, ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef)",
       "doc": "OnOpen implements corenet.LoopHandler. It marks the connection open on its lane.\n",
       "file": "service/net/http1/loop.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.(*LoopHandler).OnOutbound",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "OnOutbound",
+      "recv": "LoopHandler",
+      "spelled": "func(v corenet.LoopOutboundValue)",
+      "canonical": "func(v github.com/kitsunium/sdk/internal/core/net.LoopOutboundValue)",
+      "doc": "OnOutbound implements corenet.LoopOffloader: each lane keeps its outbound,\nand every connection's holdback is bounded by the output ceiling.\n",
+      "file": "service/net/http1/loop_pending.go",
       "layer": "service",
       "family": "net"
     },
@@ -63928,6 +64206,32 @@
       "canonical": "func(io github.com/kitsunium/sdk/internal/core/net.LoopIO, ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef)",
       "doc": "OnWritable implements corenet.LoopHandler. Nothing waits on it: an answer\nthe output refuses closes its connection.\n",
       "file": "service/net/http1/loop.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.(*LoopHandler).Pending",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "Pending",
+      "recv": "LoopHandler",
+      "spelled": "func(lane int, ref corenet.LoopConnRef) bool",
+      "canonical": "func(lane int, ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef) bool",
+      "doc": "Pending implements corenet.LoopOffloader: a connection holding answers\nbehind a pending one is still being answered, so a draining loop keeps it.\n",
+      "file": "service/net/http1/loop_pending.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.(*LoopHandler).Worker",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "Worker",
+      "recv": "LoopHandler",
+      "spelled": "func() corenet.LoopWorker",
+      "canonical": "func() github.com/kitsunium/sdk/internal/core/net.LoopWorker",
+      "doc": "Worker implements corenet.LoopOffloader: the adapter offloads when its\nhandler is a corenet.HTTP1Worker, and nothing otherwise.\n",
+      "file": "service/net/http1/loop_pending.go",
       "layer": "service",
       "family": "net"
     },
@@ -64483,8 +64787,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/net/loop",
       "name": "Config",
-      "spelled": "struct{Group string; Value corenet.LoopValue; MaxConns int; IdleTimeout time.Duration; Handler corenet.LoopHandler; Listeners []Listener; Log io.Writer; Disabled []corenet.Capability; DisabledBy string}",
-      "canonical": "struct{Group string; Value github.com/kitsunium/sdk/internal/core/net.LoopValue; MaxConns int; IdleTimeout time.Duration; Handler github.com/kitsunium/sdk/internal/core/net.LoopHandler; Listeners []github.com/kitsunium/sdk/internal/service/net/loop.Listener; Log io.Writer; Disabled []github.com/kitsunium/sdk/internal/core/net.Capability; DisabledBy string}",
+      "spelled": "struct{Group string; Value corenet.LoopValue; MaxConns int; IdleTimeout time.Duration; Handler corenet.LoopHandler; Busy func(lane int, ref corenet.LoopConnRef) bool; Listeners []Listener; Log io.Writer; Disabled []corenet.Capability; DisabledBy string}",
+      "canonical": "struct{Group string; Value github.com/kitsunium/sdk/internal/core/net.LoopValue; MaxConns int; IdleTimeout time.Duration; Handler github.com/kitsunium/sdk/internal/core/net.LoopHandler; Busy func(lane int, ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef) bool; Listeners []github.com/kitsunium/sdk/internal/service/net/loop.Listener; Log io.Writer; Disabled []github.com/kitsunium/sdk/internal/core/net.Capability; DisabledBy string}",
       "fields": [
         {
           "name": "Group",
@@ -64510,6 +64814,11 @@
           "name": "Handler",
           "type": "corenet.LoopHandler",
           "doc": "Handler is the group's loop handler.\n"
+        },
+        {
+          "name": "Busy",
+          "type": "func(lane int, ref corenet.LoopConnRef) bool",
+          "doc": "Busy reports whether a connection of a lane waits on its worker (the\nchain's LoopOffloader.Pending, R3): the drain keeps it open, eviction\npasses it by. Nil when nothing offloads.\n"
         },
         {
           "name": "Listeners",
