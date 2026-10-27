@@ -101,4 +101,14 @@ type ListenerStateValue struct {
 	// Adopted reports a listener inherited from a supervisor rather than bound
 	// by this process.
 	Adopted bool `json:"adopted"`
+	// Exclusive reports that no other socket can bind the listener's address
+	// while it lives: SO_EXCLUSIVEADDRUSE on Windows, set on a unicast TCP or
+	// UDP socket this process binds and read back, never set, on an adopted
+	// one. It is false on every other platform, which has no such option.
+	Exclusive bool `json:"exclusive"`
+	// BindWait is how long the bind waited for its address to come free: on
+	// Windows, a restarted server's address stays taken until the previous
+	// process's connections end, and the bind is retried, bounded. Zero when
+	// the first attempt bound.
+	BindWait DurationValue `json:"bind_wait"`
 }

@@ -10000,6 +10000,8 @@ sequences:
         kind: value
       - id: n.cfg.Transport.Send
         kind: value
+      - id: n.checkAdmission
+        kind: internal
     steps:
       - eval: n.r.StorageDone(d.seq, d.index, d.term)
         to: n.r.StorageDone
@@ -10010,6 +10012,8 @@ sequences:
           key: i
           range: d.after
           value: f
+      - eval: n.checkAdmission()
+        to: n.checkAdmission
   - of: (*Node).batchProposals
     participants:
       - id: caller
@@ -10685,7 +10689,9 @@ sequences:
         kind: self
       - id: n.r.Status
         kind: value
-      - id: st.Committed.Member
+      - id: n.r.ConfAt
+        kind: value
+      - id: conf.Member
         kind: value
       - id: n.cfg.Log.WriteStamp
         kind: value
@@ -10703,6 +10709,14 @@ sequences:
       - bind: st
         eval: n.r.Status()
         to: n.r.Status
+      - bind: conf
+        eval: st.Committed
+      - opt:
+          do:
+            - set: conf
+              to: n.r.ConfAt
+              value: n.r.ConfAt(st.Stable)
+          when: st.Stable < st.Commit
       - opt:
           do:
             - bind: s
@@ -10735,8 +10749,8 @@ sequences:
                 when: ok
           init:
             bind: m, ok
-            eval: st.Committed.Member(n.stamp.ID)
-            to: st.Committed.Member
+            eval: conf.Member(n.stamp.ID)
+            to: conf.Member
           when: ok && m.Incarnation == n.stamp.Incarnation
   - of: (*Node).leadershipChanged
     participants:
