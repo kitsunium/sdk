@@ -5243,8 +5243,12 @@ member (#665). The remedy was manual: `Remove`, then `WipeAndRejoin` and
 - **What it costs.** The member stamp, and the release of the JOIN answer's
   admission set that follows it (#552), wait for one sync of the storage
   actor. Meanwhile the node votes for nobody, and campaigns no more than
-  the learner it is; it cannot be promoted either, since its
-  acknowledgements of those entries wait for the same sync (D5b).
+  the learner it is. It could still be promoted: `Promote` judged the
+  learner's acknowledged progress against the commit alone, never against
+  the entry that admits it, and made a voter of a joiner that held nothing
+  yet. It now also waits for the learner's acknowledgement of the
+  configuration that admitted it, which leaves after the same sync (D5b)
+  (corrected 2026-10-27, #722: see that amendment).
 - **What it leaves.** A directory a crash already left in that state, a
   member stamp whose snapshots and log name no configuration, is not
   detected at start, and still needs `Remove`, then `WipeAndRejoin` and
@@ -5340,6 +5344,76 @@ appends overflowed the window before the install.
   with a durable machine at its persisted commit, and past it as #707
   raises it, and `mutNoTableEvictsCommitted` still fails it.
 
+## Amendment — a learner is promoted only once it holds the configuration that admits it (2026-10-27, #722)
+
+D8 refuses `Promote` until the learner has shown recent durable progress
+within `PromoteLag` of the commit. The leader judged that progress against
+the commit alone: while the commit is at most `PromoteLag` (1 024 by
+default), a learner heard once at match 0 passed, and a joiner fed slowly
+passed long before its log reached the `AddLearner` that admits it. A
+joiner's stamp turns a member's only once its log holds that entry
+committed and durable (#695), so the new voter refused every vote and
+PreVote; the voter set had grown, and its majority with it. When the
+leader failed in that window, three live voters of four elected no one,
+and the joiner, which learns that its admission is committed from a leader
+only, never voted. Only the old leader's return, or a `Recover`, ended it;
+the first consumer's autopilot promotes as soon as a learner's lag is at
+most 1 024, so every early `JOIN` opened the window
+([#722](https://github.com/kitsunium/sdk/issues/722)).
+
+- **The learner's acknowledged progress reaches its admission.** `promote`
+  also requires the learner's match at or past the configuration that
+  admitted it (`admittedAt`): the first appended configuration that lists
+  it, or the snapshot base when the base already does, its admission then
+  compacted at or below the base. An ID is never reused (R1-17), so the
+  first configuration that lists it is its admission. An acknowledgement
+  leaves after the sync that covers it (D5b): the learner holds its
+  admission on disk when the promotion is appended, and that append, as
+  every one, carries the leader's commit, at or past the admission since
+  no change is admitted while the previous one is pending.
+- **A lost probe is sent again in a quiet cluster** (`handleHeartbeatResp`).
+  The leader probes a new learner as its admission commits, at a time the
+  joiner's transport does not admit the leader yet, since the `JOIN`
+  answer that carries the configuration reaches it after that commit: the
+  probe is dropped. A heartbeat answer resent the probe only with entries
+  to append, so with nothing written after the admission the learner was
+  never fed. The promotion's own entry fed it before; now refused until
+  the learner holds its admission, it never was, and a quiet cluster
+  refused the promotion for as long as nothing was written. A heartbeat
+  answer from a probing peer behind the log now probes it again, empty if
+  need be, as etcd's leader does: one empty append a heartbeat to such a
+  peer, the next answer either confirming the log or backing the probe
+  off.
+- **What it costs.** A promotion waits for the learner's acknowledgement
+  of its admission; a caller that retries, as the first consumer's
+  autopilot and `retryAdmin` do, is refused `MEMBERSHIP_INVALID` until
+  then. A learner whose match is below the base, which a snapshot feeds,
+  waits for that install.
+- **What it leaves.** The member stamp still follows the acknowledgement.
+  The learner learns that its admission is committed from the commit a
+  leader's message carries, then writes its stamp at the storage completion
+  or the Ready after it. When the append that carried the admission carried
+  a commit below it, the learner learns it from the promotion's own append
+  or the next heartbeat; a leader that fails after the other voters
+  committed the promotion and before either reached the learner leaves it
+  joining, and the window of this amendment open. Once the learner knows,
+  the stamp is a local write of a few milliseconds that needs no leader,
+  and only a crash during it leaves the node joining again. Closing both
+  needs either the learner to announce its member stamp in its answers,
+  with `Promote` waiting for it — a frame change under the
+  `ProtocolMax`, `FlagProtocol2`, `checkAnnounced` rule — or the leader to
+  wait for a heartbeat round the learner answered that carried a commit at
+  or past its admission. Both are left to a decision.
+- No frame, payload or record format changes, and no raft mutation is
+  added (the type is full): `TestPromoteWaitsForTheLearnerToHoldItsAdmission`
+  and `TestPromoteWaitsForTheLearnerToHoldTheBase` hold the step function
+  to it, `TestALostProbeOfALearnerIsSentAgainInAQuietLog` to the probe sent
+  again, and `TestAPromotionWaitsForTheJoinerToHoldItsAdmission` the
+  scenario of the issue, the leader failing once the joiner is promoted;
+  the suites of #603, #638 and #639, whose clusters are quiet once the
+  joiner is admitted under the transport's admission model, promote it
+  only through the probe sent again.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -5365,6 +5439,7 @@ appends overflowed the window before the install.
 | #695 | Raft hunt loop, 2026-10-27 | a joiner's stamp turns a member's only once the log is durable through the entries that admit it, the configuration judged at the commit bounded by the durable index, at each Ready and each storage completion; no format change, no raft mutation (amendment of 2026-10-27, #695) |
 | #718 | Raft hunt loop, 2026-10-27 | a silent voter and a voter with no table, which never campaign, ask their members for the leader's record once they hear no leader, as a learner does (#639); no format change, no protocol raise (amendment of 2026-10-27, #718) |
 | #720 | Raft hunt loop, 2026-10-27 | a node with no table evicts no payload past its base until its install, whatever its applied index, so the install of a snapshot below a `DurableStateMachine`'s still replays the engine entries past it; no format change, no raft mutation (amendment of 2026-10-27, #720) |
+| #722 | Raft hunt loop, 2026-10-27 | `Promote` waits for the learner's acknowledgement of the configuration that admitted it, so a joiner whose stamp still refuses every vote is never made a voter, and a probing peer behind the log is probed again at its heartbeat answer with nothing to append, so a quiet cluster feeds the learner whose probe was lost; #695's claim that it could not be promoted corrected; no format change, no raft mutation (amendment of 2026-10-27, #722) |
 
 ## raft-sql-poc (owner's prior Raft)
 

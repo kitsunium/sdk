@@ -136,6 +136,7 @@ go_test(
         "peerseries_internal_test.go",
         "pendingbounds_internal_test.go",
         "preferredleader_internal_test.go",
+        "promoteadmission_internal_test.go",
         "protocol2_internal_test.go",
         "raisedlimit_internal_test.go",
         "readctx_internal_test.go",
