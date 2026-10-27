@@ -896,6 +896,10 @@ func (rr *uRing) onAccept(li int, c *cqe) {
 	//: cancelled it.
 	if c.res < 0 {
 		rr.acceptFailed(c.res)
+		//: during the drain, the take judges it too.
+		if lp.draining {
+			rr.takeFailed(c.res)
+		}
 		//: nothing accepted.
 		return
 	}
@@ -925,12 +929,6 @@ func (rr *uRing) onAccept(li int, c *cqe) {
 // acceptFailed pauses the ring when an accept failed for want of entries:
 // closes make room.
 func (rr *uRing) acceptFailed(res int32) {
-	//: during the drain's take, a failure that says the listener is broken
-	//: ends the ring's take; its own cancel, a connection the peer
-	//: abandoned, an empty queue and a lack of descriptors only wait.
-	if rr.ul.lp.draining && !takeWaits(res) {
-		rr.take = takeOff
-	}
 	//: out of entries: pause until closes make room.
 	if res == -int32(syscall.ENFILE) || res == -int32(syscall.EMFILE) {
 		rr.paused = true
@@ -945,6 +943,16 @@ func (rr *uRing) acceptFailed(res int32) {
 	}
 }
 
+// takeFailed ends the ring's take on an accept failure that says the
+// listener is broken; its own cancel, a connection the peer abandoned, an
+// empty queue and a lack of descriptors only wait.
+func (rr *uRing) takeFailed(res int32) {
+	//: broken.
+	if !takeWaits(res) {
+		rr.take = takeOff
+	}
+}
+
 // takeWaits reports whether an accept's failure leaves the drain's take
 // going: its own cancel, a connection the peer abandoned, a signal, an empty
 // queue (EAGAIN, should a kernel honour the listener's O_NONBLOCK), or no
@@ -953,7 +961,9 @@ func takeWaits(res int32) bool {
 	//: by errno.
 	switch syscall.Errno(-res) {
 	//: each of them waits for the next batch.
-	case syscall.ECANCELED, syscall.ECONNABORTED, syscall.EINTR, syscall.EAGAIN, syscall.ENFILE, syscall.EMFILE:
+	case syscall.ECANCELED, syscall.ECONNABORTED, syscall.EINTR, syscall.EAGAIN, syscall.ENFILE, syscall.EMFILE,
+		syscall.EPROTO, syscall.ENOPROTOOPT, syscall.EHOSTDOWN, syscall.ENONET, syscall.EHOSTUNREACH,
+		syscall.EOPNOTSUPP, syscall.ENETUNREACH, syscall.ENETDOWN:
 		//: waits.
 		return true
 	//: anything else.

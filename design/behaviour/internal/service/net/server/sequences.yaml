@@ -3719,27 +3719,111 @@ sequences:
         eval: g.lanes[(g.turn.Add(1)-1)%uint64(len(g.lanes))]
       - eval: pl.live.Add(1)
         to: pl.live.Add
-      - send:
-          chan: pl.events
-          value: "portableEvent{kind: pevOpen, conn: c}"
+      - select:
+          cases:
+            - comm: "pl.events <- portableEvent{kind: pevOpen, conn: c}"
+            - comm: <-pl.done
+              do:
+                - eval: pl.live.Add(-1)
+                  to: pl.live.Add
+                - eval: swallowErr(c.Close())
+                  to: swallowErr
   - of: (*portableGroup).takeQueues
     participants:
       - id: caller
         kind: actor
       - id: (*portableGroup).takeQueues
         kind: self
-      - id: takeQueue
+      - id: time
+        kind: stdlib
+      - id: tick.Stop
+        kind: value
+      - id: g.takeRound
+        kind: internal
+      - id: g.giveUp
+        kind: internal
+    steps:
+      - bind: takes
+        eval: make([]portableTake, len(g.owned))
+      - bind: tick
+        eval: time.NewTicker(portableTick)
+        to: time
+      - defer: tick.Stop()
+        to: tick.Stop
+      - loop:
+          do:
+            - bind: blocked
+              eval: g.takeRound(takes)
+              to: g.takeRound
+            - opt:
+                do:
+                  - return: ""
+                when: "!blocked"
+            - opt:
+                do:
+                  - eval: g.giveUp(takes)
+                    to: g.giveUp
+                  - return: ""
+                when: g.live() == 0 || ctx.Err() != nil
+            - select:
+                cases:
+                  - comm: <-ctx.Done()
+                  - comm: <-tick.C
+          forever: true
+  - of: (*portableGroup).takeRound
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*portableGroup).takeRound
+        kind: self
+      - id: swallowErr
+        kind: internal
+    steps:
+      - bind: blocked
+        eval: "false"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - continue: true
+                when: takes[i].done
+            - opt:
+                do:
+                  - set: blocked
+                    value: "true"
+                  - continue: true
+                when: takeQueue(ln, g.admit, &takes[i])
+            - set: takes[i].done
+              value: "true"
+            - eval: swallowErr(ln.Close())
+              to: swallowErr
+          key: i
+          range: g.owned
+          value: ln
+      - return: blocked
+  - of: (*portableGroup).giveUp
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*portableGroup).giveUp
+        kind: self
+      - id: closeRaw
         kind: internal
       - id: swallowErr
         kind: internal
     steps:
       - loop:
           do:
-            - eval: takeQueue(ln, g.admit)
-              to: takeQueue
-            - eval: swallowErr(ln.Close())
-              to: swallowErr
-          key: _
+            - eval: closeRaw(takes[i].held)
+              to: closeRaw
+            - set: takes[i].held
+              value: nil
+            - opt:
+                do:
+                  - eval: swallowErr(ln.Close())
+                    to: swallowErr
+                when: "!takes[i].done"
+          key: i
           range: g.owned
           value: ln
   - of: (*portableGroup).closeOwned
@@ -3822,7 +3906,11 @@ sequences:
           forever: true
   - of: (*portableLoop).finished
     steps:
-      - return: pl.g.stopReq.Load() || (pl.draining && pl.live.Load() == 0 && pl.g.accepting.Load() == 0)
+      - opt:
+          do:
+            - return: "true"
+          when: pl.g.stopReq.Load()
+      - return: pl.draining && pl.g.accepting.Load() == 0 && pl.live.Load() == 0
   - of: (*portableLoop).collect
     participants:
       - id: caller
@@ -4493,7 +4581,12 @@ sequences:
           		//: until a second passes with none.
           		for {
           			select {
-          			case <-pl.events:
+          			case ev := <-pl.events:
+          				//: a connection handed over as the lane stopped is closed,
+          				//: never left open.
+          				if ev.kind == pevOpen {
+          					swallowErr(ev.conn.Close())
+          				}
           				quiet.Reset(time.Second)
           			case <-quiet.C:
           				return
@@ -4719,7 +4812,7 @@ sequences:
         to: g.drainReq.Store
       - eval: g.wakeAll()
         to: g.wakeAll
-      - eval: g.takeQueues()
+      - eval: g.takeQueues(ctx)
         to: g.takeQueues
       - loop:
           do:
@@ -4792,6 +4885,19 @@ sequences:
               value: recycledMark
           key: i
           range: b
+  - of: acceptCloexec
+    participants:
+      - id: caller
+        kind: actor
+      - id: acceptCloexec
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - bind: nfd, _, err
+        eval: syscall.Accept4(fd, syscall.SOCK_CLOEXEC)
+        to: syscall
+      - return: nfd, err
   - of: ownListeners
     participants:
       - id: caller
@@ -4857,44 +4963,108 @@ sequences:
         kind: value
       - id: acceptRaw
         kind: internal
-      - id: connOf
-        kind: internal
     steps:
+      - opt:
+          do:
+            - return: "true"
+          when: wrapHeld(take, admit)
       - bind: sc, ok
         eval: ln.(syscall.Conn)
       - opt:
           do:
-            - return: ""
+            - return: "false"
           when: "!ok"
       - bind: rc, err
         eval: sc.SyscallConn()
         to: sc.SyscallConn
       - opt:
           do:
-            - return: ""
+            - return: "false"
           when: err != nil
       - loop:
           do:
             - bind: nfd, aerr
               eval: acceptRaw(rc)
               to: acceptRaw
+            - switch:
+                cases:
+                  - case: aerr != nil && acceptRetries(aerr)
+                    do:
+                      - continue: true
+                  - case: aerr == syscall.EMFILE || aerr == syscall.ENFILE
+                    do:
+                      - return: "true"
+                  - case: aerr != nil
+                    do:
+                      - return: "false"
+            - set: take.held
+              value: append(take.held, os.NewFile(uintptr(nfd), ""))
             - opt:
                 do:
-                  - continue: true
-                when: aerr == syscall.ECONNABORTED || aerr == syscall.EINTR
-            - opt:
-                do:
-                  - return: ""
-                when: aerr != nil
-            - bind: c, cerr
-              eval: connOf(nfd)
-              to: connOf
-            - opt:
-                do:
-                  - continue: true
-                when: cerr != nil
-            - eval: admit(c)
+                  - return: "true"
+                when: wrapHeld(take, admit)
           range: portableTakeMax
+      - return: "false"
+  - of: wrapHeld
+    participants:
+      - id: caller
+        kind: actor
+      - id: wrapHeld
+        kind: self
+      - id: stdnet
+        kind: stdlib
+      - id: swallowErr
+        kind: internal
+    steps:
+      - loop:
+          cond: len(take.held) > 0
+          do:
+            - bind: f
+              eval: take.held[0]
+            - bind: c, err
+              eval: stdnet.FileConn(f)
+              to: stdnet
+            - opt:
+                do:
+                  - return: "true"
+                when: errors.Is(err, syscall.EMFILE) || errors.Is(err, syscall.ENFILE)
+            - set: take.held
+              value: take.held[1:]
+            - eval: swallowErr(f.Close())
+              to: swallowErr
+            - opt:
+                do:
+                  - continue: true
+                when: err != nil
+            - eval: admit(c)
+      - return: "false"
+  - of: closeRaw
+    participants:
+      - id: caller
+        kind: actor
+      - id: closeRaw
+        kind: self
+      - id: swallowErr
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: swallowErr(f.Close())
+              to: swallowErr
+          key: _
+          range: held
+          value: f
+  - of: acceptRetries
+    steps:
+      - switch:
+          cases:
+            - case: syscall.ECONNABORTED, syscall.EINTR, syscall.EPROTO, syscall.ENETDOWN, syscall.ENOPROTOOPT, syscall.EHOSTDOWN, syscall.EHOSTUNREACH, syscall.EOPNOTSUPP, syscall.ENETUNREACH
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+          "on": err
   - of: acceptRaw
     participants:
       - id: caller
@@ -4910,34 +5080,13 @@ sequences:
           name: aerr
           type: error
       - bind: cerr
-        eval: rc.Control(func(fd uintptr) { nfd, _, aerr = syscall.Accept(int(fd)) })
+        eval: rc.Control(func(fd uintptr) { nfd, aerr = acceptCloexec(int(fd)) })
         to: rc.Control
       - opt:
           do:
             - return: "-1, cerr"
           when: cerr != nil
       - return: nfd, aerr
-  - of: connOf
-    participants:
-      - id: caller
-        kind: actor
-      - id: connOf
-        kind: self
-      - id: syscall
-        kind: stdlib
-      - id: os
-        kind: stdlib
-      - id: stdnet
-        kind: stdlib
-    steps:
-      - eval: syscall.CloseOnExec(nfd)
-        to: syscall
-      - bind: f
-        eval: os.NewFile(uintptr(nfd), "")
-        to: os
-      - defer: func() { swallowErr(f.Close()) }()
-      - return: stdnet.FileConn(f)
-        to: stdnet
   - of: newMultiReader
     participants:
       - id: caller

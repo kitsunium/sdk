@@ -706,6 +706,8 @@ files:
       - (*portableGroup).acceptLoop
       - (*portableGroup).admit
       - (*portableGroup).takeQueues
+      - (*portableGroup).takeRound
+      - (*portableGroup).giveUp
       - (*portableGroup).closeOwned
       - (*portableLoop).run
       - (*portableLoop).finished
@@ -746,13 +748,19 @@ files:
       - fillMark
     name: loop_portable.go
   - decls:
+      - acceptCloexec
+    name: loop_portable_accept_linux.go
+  - decls:
       - portableTakeMax
       - filer
       - ownListeners
       - dupListener
+      - portableTake
       - takeQueue
+      - wrapHeld
+      - closeRaw
+      - acceptRetries
       - acceptRaw
-      - connOf
     name: loop_portable_take_unix.go
   - decls:
       - udpGRO
@@ -1430,6 +1438,12 @@ functions:
     name: fillMark
     params: b []byte
   - doc: |-
+      acceptCloexec accepts on fd with the close-on-exec flag set by the same
+      call, so a fork in between never inherits the connection.
+    name: acceptCloexec
+    params: fd int
+    results: int, error
+  - doc: |-
       ownListeners duplicates each listener server bound, so the portable
       backend closes its own copy once its drain took the queue, and server's
       close after the grace leaves the socket listening until then. A listener
@@ -1444,19 +1458,32 @@ functions:
   - doc: |-
       takeQueue accepts from ln, non-blocking, until its queue is empty, and
       hands each connection to admit: the acceptor may take some too, and both
-      admit.
+      admit. It reports whether the take waits for descriptors: an accept, or
+      the duplicate a connection's wrapping needs, out of them. A connection
+      accepted but not wrapped stays in take.held, open, for the next round.
     name: takeQueue
-    params: ln stdnet.Listener, admit func(stdnet.Conn)
-  - doc: acceptRaw accepts once on rc's non-blocking descriptor.
+    params: ln stdnet.Listener, admit func(stdnet.Conn), take *portableTake
+    results: bool
+  - doc: |-
+      wrapHeld wraps every held connection in a net.Conn on the netpoller and
+      admits it, and reports whether one is still held for want of a descriptor.
+    name: wrapHeld
+    params: take *portableTake, admit func(stdnet.Conn)
+    results: bool
+  - doc: closeRaw closes the connections a take could never wrap.
+    name: closeRaw
+    params: held []*os.File
+  - doc: |-
+      acceptRetries reports whether an accept's failure lost one connection and
+      left the queue: the peer abandoned it, a signal, or one of the network
+      errors accept(2) says to retry on.
+    name: acceptRetries
+    params: err error
+    results: bool
+  - doc: acceptRaw accepts once on rc's non-blocking descriptor, close-on-exec.
     name: acceptRaw
     params: rc syscall.RawConn
     results: int, error
-  - doc: |-
-      connOf wraps the accepted descriptor nfd in a net.Conn on the netpoller,
-      and closes nfd whatever happens: FileConn holds a duplicate.
-    name: connOf
-    params: nfd int
-    results: stdnet.Conn, error
   - doc: newMultiReader builds a batched reader over pc.
     name: newMultiReader
     params: pc stdnet.PacketConn, sc rawConnProvider
@@ -2712,16 +2739,35 @@ types:
         recv: g *portableGroup
       - doc: |-
           admit hands c to a lane, in turn, or closes it past MaxConns, a refusal
-          the peer sees. A draining group admits too: what arrives before its
-          listener closes is served, never closed unread.
+          the peer sees — while draining too, as the native backends' admit does: the
+          ceiling holds whatever the phase. A draining group admits otherwise: what
+          waited in the queue with its request is served, never closed unread. A
+          lane that stopped closes it.
         name: admit
         params: c stdnet.Conn
         recv: g *portableGroup
       - doc: |-
           takeQueues takes every owned listener's queue to its end, then closes the
           listener (ADR 0196 §D3): what the kernel completed before the close is
-          served, not reset by it.
+          served, not reset by it. Out of descriptors, it tries again each tick
+          while a lane still has connections to close — closes free descriptors —
+          and ctx lives; past either, what waits meets the close.
         name: takeQueues
+        params: ctx context.Context
+        recv: g *portableGroup
+      - doc: |-
+          takeRound takes once from every owned listener not closed yet, closes
+          each one whose queue is empty, and reports whether one waits for
+          descriptors.
+        name: takeRound
+        params: takes []portableTake
+        recv: g *portableGroup
+        results: bool
+      - doc: |-
+          giveUp closes every owned listener not closed yet, and every descriptor
+          accepted but never wrapped.
+        name: giveUp
+        params: takes []portableTake
         recv: g *portableGroup
       - doc: closeOwned closes every listener the group owns.
         name: closeOwned
@@ -2799,6 +2845,10 @@ types:
       - doc: |-
           finished reports whether the lane stops: the backend stopped, or the lane
           drained to its last connection with no acceptor left to hand it another.
+
+          accepting is read before live: an acceptor counts its connection in live
+          before it stops counting itself, so no acceptor and no connection read in
+          that order means none can come.
         name: finished
         recv: pl *portableLoop
         results: bool
@@ -2970,6 +3020,17 @@ types:
       	// File returns a duplicate of the listener's descriptor.
       	File() (*os.File, error)
       }
+  - doc: |-
+      portableTake is one owned listener's take, across the rounds of the
+      drain: done once the listener is closed; held the connections accepted but
+      not yet wrapped for want of a descriptor, kept open for the next round.
+    fields:
+      - name: done
+        type: bool
+      - name: held
+        type: "[]*os.File"
+    kind: struct
+    name: portableTake
   - doc: |-
       multiReader reads several datagrams per syscall using recvmmsg(2).
 

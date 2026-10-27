@@ -272,8 +272,10 @@ func (g *portableGroup) acceptLoop(ln stdnet.Listener) {
 }
 
 // admit hands c to a lane, in turn, or closes it past MaxConns, a refusal
-// the peer sees. A draining group admits too: what arrives before its
-// listener closes is served, never closed unread.
+// the peer sees — while draining too, as the native backends' admit does: the
+// ceiling holds whatever the phase. A draining group admits otherwise: what
+// waited in the queue with its request is served, never closed unread. A
+// lane that stopped closes it.
 func (g *portableGroup) admit(c stdnet.Conn) {
 	//: MaxConns: accepted and closed.
 	if g.maxConns > 0 && g.live() >= int64(g.maxConns) {
@@ -284,17 +286,79 @@ func (g *portableGroup) admit(c stdnet.Conn) {
 	}
 	pl := g.lanes[(g.turn.Add(1)-1)%uint64(len(g.lanes))]
 	pl.live.Add(1)
-	pl.events <- portableEvent{kind: pevOpen, conn: c}
+	//: to the lane, unless it stopped: its queue is drained by nobody then.
+	select {
+	case pl.events <- portableEvent{kind: pevOpen, conn: c}:
+	case <-pl.done:
+		pl.live.Add(-1)
+		swallowErr(c.Close())
+	}
 }
 
 // takeQueues takes every owned listener's queue to its end, then closes the
 // listener (ADR 0196 §D3): what the kernel completed before the close is
-// served, not reset by it.
-func (g *portableGroup) takeQueues() {
+// served, not reset by it. Out of descriptors, it tries again each tick
+// while a lane still has connections to close — closes free descriptors —
+// and ctx lives; past either, what waits meets the close.
+func (g *portableGroup) takeQueues(ctx context.Context) {
+	takes := make([]portableTake, len(g.owned))
+	tick := time.NewTicker(portableTick)
+	defer tick.Stop()
+	//: until every listener is closed.
+	for {
+		blocked := g.takeRound(takes)
+		//: every one closed.
+		if !blocked {
+			//: taken.
+			return
+		}
+		//: nothing will free a descriptor, or no budget is left.
+		if g.live() == 0 || ctx.Err() != nil {
+			g.giveUp(takes)
+			//: what waits meets the close.
+			return
+		}
+		select {
+		case <-ctx.Done():
+		case <-tick.C:
+		}
+	}
+}
+
+// takeRound takes once from every owned listener not closed yet, closes
+// each one whose queue is empty, and reports whether one waits for
+// descriptors.
+func (g *portableGroup) takeRound(takes []portableTake) bool {
+	blocked := false
 	//: each listener the group owns.
-	for _, ln := range g.owned {
-		takeQueue(ln, g.admit)
+	for i, ln := range g.owned {
+		//: closed already.
+		if takes[i].done {
+			continue
+		}
+		//: out of descriptors: next round.
+		if takeQueue(ln, g.admit, &takes[i]) {
+			blocked = true
+			continue
+		}
+		takes[i].done = true
 		swallowErr(ln.Close())
+	}
+	//: whether one waits.
+	return blocked
+}
+
+// giveUp closes every owned listener not closed yet, and every descriptor
+// accepted but never wrapped.
+func (g *portableGroup) giveUp(takes []portableTake) {
+	//: each one left.
+	for i, ln := range g.owned {
+		closeRaw(takes[i].held)
+		takes[i].held = nil
+		//: closed already.
+		if !takes[i].done {
+			swallowErr(ln.Close())
+		}
 	}
 }
 
@@ -338,9 +402,18 @@ func (pl *portableLoop) run(done chan<- struct{}) {
 
 // finished reports whether the lane stops: the backend stopped, or the lane
 // drained to its last connection with no acceptor left to hand it another.
+//
+// accepting is read before live: an acceptor counts its connection in live
+// before it stops counting itself, so no acceptor and no connection read in
+// that order means none can come.
 func (pl *portableLoop) finished() bool {
-	//: either.
-	return pl.g.stopReq.Load() || (pl.draining && pl.live.Load() == 0 && pl.g.accepting.Load() == 0)
+	//: stopped.
+	if pl.g.stopReq.Load() {
+		//: out.
+		return true
+	}
+	//: no acceptor first, then no connection.
+	return pl.draining && pl.g.accepting.Load() == 0 && pl.live.Load() == 0
 }
 
 // collect takes the events already queued, up to a batch.
@@ -776,7 +849,12 @@ func (pl *portableLoop) closeAll() {
 		//: until a second passes with none.
 		for {
 			select {
-			case <-pl.events:
+			case ev := <-pl.events:
+				//: a connection handed over as the lane stopped is closed,
+				//: never left open.
+				if ev.kind == pevOpen {
+					swallowErr(ev.conn.Close())
+				}
 				quiet.Reset(time.Second)
 			case <-quiet.C:
 				return
@@ -927,7 +1005,7 @@ func (e portableEngine) Shutdown(ctx context.Context) error {
 	g := e.g
 	g.drainReq.Store(true)
 	g.wakeAll()
-	g.takeQueues()
+	g.takeQueues(ctx)
 	//: every lane drained, or out of budget.
 	for _, pl := range g.lanes {
 		select {

@@ -59,7 +59,8 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
   §D3). epoll: `CTL_DEL`, then at each batch `accept4` to `EAGAIN`
   (`takeQueues`, `queueTakeBatch` a batch, `queueTakeMax` in all), each
   connection admitted — a draining loop admits; `EMFILE`, `ENFILE` or a full
-  table wait for the drain's closes (`takeAfter`, `ring.full`). io_uring:
+  table wait for the drain's closes (`takeAfter`, `ring.full`); `control`
+  calls it at every batch while draining. io_uring:
   the accepts in flight are cancelled, and one that completed as its cancel
   crossed it is served (`refuses` refuses only on a ring the watchdog drained
   while the group serves; a ring the watchdog drained before the group, or
@@ -243,7 +244,9 @@ and the drain (`conformance_drain_linux_test.go`, ADR 0196, on a TCP and on a
 Unix listener): the loop held at
 its batch end, 384 connections queued with their request — more than one
 epoll burst and than io_uring's accepts in flight —, then the drain, every one
-reading its echo and a clean end, the listener refusing after.
+reading its echo and a clean end, the listener refusing after; 1 280 queued
+past epoll's batch; and `TestConformance_drainOutOfDescriptors`, a child
+under RLIMIT 64 whose take waits for the drain's closes.
 `conformance_caps_linux_test.go` and `conformance_caps_uring_linux_test.go`
 hold the capabilities (ADR 0189): the report (one row each, no probe defect,
 no class B or unasked class A-code on), each class A-kernel switch serving the

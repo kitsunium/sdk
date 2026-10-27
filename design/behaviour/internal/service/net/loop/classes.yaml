@@ -1102,6 +1102,7 @@ files:
       - (*uRing).onConnOp
       - (*uRing).onAccept
       - (*uRing).acceptFailed
+      - (*uRing).takeFailed
       - takeWaits
       - (*uRing).refuses
       - (*uRing).orphanClose
@@ -3198,6 +3199,13 @@ types:
           acceptFailed pauses the ring when an accept failed for want of entries:
           closes make room.
         name: acceptFailed
+        params: res int32
+        recv: rr *uRing
+      - doc: |-
+          takeFailed ends the ring's take on an accept failure that says the
+          listener is broken; its own cancel, a connection the peer abandoned, an
+          empty queue and a lack of descriptors only wait.
+        name: takeFailed
         params: res int32
         recv: rr *uRing
       - doc: |-

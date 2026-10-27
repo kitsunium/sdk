@@ -76,7 +76,9 @@ The drain of a loop group, per backend:
    batch, so the loop serves between two takes — and serves what it accepted.
    Out of descriptors (`EMFILE`, `ENFILE`) or with its table full, it waits
    for the drain's closes to free some instead of handing the queue to the
-   close.
+   close. The errors accept(2) says to retry on (`EPROTO`, `ENETDOWN`,
+   `ENOPROTOOPT`, `EHOSTDOWN`, `ENONET`, `EHOSTUNREACH`, `EOPNOTSUPP`,
+   `ENETUNREACH`), and `ECONNABORTED`, skip one connection, on every backend.
 2. **io_uring**: each ring cancels its single-shot accepts. An accept that
    completed as its cancel crossed it is served, not closed. Once every cancel
    came back, the ring arms as many accepts as the listener's queue holds —
@@ -109,12 +111,20 @@ The loop does not stop until its connections are gone **and** its listeners
 handed back.
 
 The portable backend does the same on every Unix platform. At Start it
-duplicates each listener server bound (`File`, `FileListener`) so that
+duplicates each listener server bound (`File`, then `FileListener`; both
+duplicates share the original's open file description, so its `O_NONBLOCK`,
+which `FileListener` sets, is the original's too, as it already was) so that
 server's close after the grace leaves the socket listening; its acceptors
 keep admitting while it drains; its `Shutdown` accepts on each listener's own
-non-blocking descriptor until `EAGAIN` (`syscall.Accept` under
-`RawConn.Control`, each descriptor wrapped by `FileConn`), then closes it; a
-lane stops only once no acceptor runs. Its connections follow rule 4 too
+non-blocking descriptor until `EAGAIN` — `accept4(SOCK_CLOEXEC)` on Linux,
+`accept` then `FD_CLOEXEC` under `syscall.ForkLock` elsewhere, under
+`RawConn.Control`, each descriptor wrapped by `FileConn` —, then closes it,
+within its ctx. Out of descriptors — the accept, or the duplicate
+`FileConn` needs, the accepted descriptor then held open — it tries again
+each tick while a lane still has a connection to close. A lane stops only
+once no acceptor runs, read before its count of connections; a connection
+handed to a lane that stopped is closed. `MaxConns` refuses during the
+drain as it does on the native backends. Its connections follow rule 4 too
 (`portableQuiet`, a second). On Windows a listener's descriptor cannot be
 duplicated into a `net.Listener`: there the portable backend's listeners stay
 server's, close after the grace, and no queue is taken.
@@ -155,7 +165,10 @@ and their ratio is what P2 judges.
 - Tests: `TestConformance_drainTakesQueue` (both native backends, on a TCP
   and on a Unix listener: the loop held at its batch end, 384 connections
   queued with their request, then the drain — every one reads its echo and a
-  clean end, the listener refuses after), `TestDrain_arrivalsAcrossTheDrain`
+  clean end, the listener refuses after; 1 280 queued on one loop, past
+  epoll's 1 024 a batch), `TestConformance_drainOutOfDescriptors` (a child
+  under `RLIMIT_NOFILE` 64, 150 connections dialled: the take waits for the
+  drain's closes, every one served, `Shutdown` nil), `TestDrain_arrivalsAcrossTheDrain`
   (every backend: arrivals that never stop until a dial is refused; every
   connection dialled earlier than 20 ms before the first refusal reads its
   echo — the close's own window, D4, is the only reset allowed, and it is

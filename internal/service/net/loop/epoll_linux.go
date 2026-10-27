@@ -724,11 +724,11 @@ func (el *epollLoop) control() {
 		lp.draining = true
 		r.draining = true
 		el.disarmListeners()
-		el.takeQueues()
 	}
-	//: while draining, a connection with no partial input closes once its
-	//: output left.
+	//: while draining, the queues are taken, batch after batch, and a
+	//: connection with no partial input closes once its output left.
 	if lp.draining {
+		el.takeQueues()
 		//: every open connection is looked at.
 		for s := r.lruHead; s != noLink; {
 			c := &r.conns[s]

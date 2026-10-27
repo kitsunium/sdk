@@ -1244,7 +1244,7 @@ sequences:
             - case: syscall.EMFILE, syscall.ENFILE
               do:
                 - return: takeLater
-            - case: syscall.ECONNABORTED, syscall.EINTR
+            - case: syscall.ECONNABORTED, syscall.EINTR, syscall.EPROTO, syscall.ENOPROTOOPT, syscall.EHOSTDOWN, syscall.ENONET, syscall.EHOSTUNREACH, syscall.EOPNOTSUPP, syscall.ENETUNREACH, syscall.ENETDOWN
               do:
                 - return: takeNext
             - default: true
@@ -2317,11 +2317,11 @@ sequences:
               value: "true"
             - eval: el.disarmListeners()
               to: el.disarmListeners
-            - eval: el.takeQueues()
-              to: el.takeQueues
           when: el.drainReq.Load() && !lp.draining
       - opt:
           do:
+            - eval: el.takeQueues()
+              to: el.takeQueues
             - loop:
                 cond: s != noLink
                 do:
@@ -4814,6 +4814,8 @@ sequences:
         kind: internal
       - id: rr.acceptFailed
         kind: internal
+      - id: rr.takeFailed
+        kind: internal
       - id: lp.grp.rejected.Add
         kind: value
       - id: rr.orphanClose
@@ -4842,6 +4844,11 @@ sequences:
           do:
             - eval: rr.acceptFailed(c.res)
               to: rr.acceptFailed
+            - opt:
+                do:
+                  - eval: rr.takeFailed(c.res)
+                    to: rr.takeFailed
+                when: lp.draining
             - return: ""
           when: c.res < 0
       - bind: index
@@ -4877,11 +4884,6 @@ sequences:
     steps:
       - opt:
           do:
-            - set: rr.take
-              value: takeOff
-          when: rr.ul.lp.draining && !takeWaits(res)
-      - opt:
-          do:
             - set: rr.paused
               value: "true"
             - op: ++
@@ -4896,11 +4898,18 @@ sequences:
                     value: "true"
                 when: "!rr.ul.direct"
           when: res == -int32(syscall.ENFILE) || res == -int32(syscall.EMFILE)
+  - of: (*uRing).takeFailed
+    steps:
+      - opt:
+          do:
+            - set: rr.take
+              value: takeOff
+          when: "!takeWaits(res)"
   - of: takeWaits
     steps:
       - switch:
           cases:
-            - case: syscall.ECANCELED, syscall.ECONNABORTED, syscall.EINTR, syscall.EAGAIN, syscall.ENFILE, syscall.EMFILE
+            - case: syscall.ECANCELED, syscall.ECONNABORTED, syscall.EINTR, syscall.EAGAIN, syscall.ENFILE, syscall.EMFILE, syscall.EPROTO, syscall.ENOPROTOOPT, syscall.EHOSTDOWN, syscall.ENONET, syscall.EHOSTUNREACH, syscall.EOPNOTSUPP, syscall.ENETUNREACH, syscall.ENETDOWN
               do:
                 - return: "true"
             - default: true

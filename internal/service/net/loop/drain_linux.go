@@ -101,8 +101,10 @@ func takeAfter(err error) uint8 {
 	case syscall.EMFILE, syscall.ENFILE:
 		//: next batch.
 		return takeLater
-	//: one connection lost, the queue still there.
-	case syscall.ECONNABORTED, syscall.EINTR:
+	//: one connection lost, the queue still there: the peer abandoned it, a
+	//: signal, or a network error accept(2) says to retry on.
+	case syscall.ECONNABORTED, syscall.EINTR, syscall.EPROTO, syscall.ENOPROTOOPT, syscall.EHOSTDOWN,
+		syscall.ENONET, syscall.EHOSTUNREACH, syscall.EOPNOTSUPP, syscall.ENETUNREACH, syscall.ENETDOWN:
 		//: the next one.
 		return takeNext
 	//: EAGAIN, the queue empty; anything else, the listener failed.

@@ -12,5 +12,17 @@ func ownListeners(lns []stdnet.Listener) (all, owned []stdnet.Listener) {
 	return lns, nil
 }
 
+// portableTake is one owned listener's take; none here.
+type portableTake struct {
+	done bool
+	held []struct{}
+}
+
 // takeQueue takes nothing where no listener is the group's own.
-func takeQueue(_ stdnet.Listener, _ func(stdnet.Conn)) {}
+func takeQueue(_ stdnet.Listener, _ func(stdnet.Conn), _ *portableTake) bool {
+	//: never waits.
+	return false
+}
+
+// closeRaw has nothing to close here.
+func closeRaw(_ []struct{}) {}
