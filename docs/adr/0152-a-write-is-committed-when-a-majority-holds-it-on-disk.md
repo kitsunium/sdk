@@ -5066,6 +5066,36 @@ what compaction keeps behind them.
 No frame, payload or record format changes, and no raft mutation is
 added.
 
+## Amendment — a removal after the hand-off waits for the leader it elected (2026-10-27, #701)
+
+D8's amendments of 2026-10-25 (#676, #681) and 2026-10-26 (#694): a
+`Remove` of the leader submitted on it hands its leadership over, then
+submits the removal again each heartbeat, for `handOffWindow` maximum
+election timeouts, while the new leader refuses it
+`MEMBERSHIP_CHANGE_PENDING`. The `TimeoutNow` of the hand-off makes its
+target campaign at once, and the vote request deposes the old leader: a
+follower that knows no leader until the winner's first append reaches it.
+A try that expired in that gap ended the hand-off, the node no longer
+leading, and the removal, submitted at once, was refused `NOT_LEADER`: the
+node had no leader to forward it to. A try whose transfer the step
+function still ran ended the same way, no proposal being taken while a
+transfer runs. Nothing was appended and the leadership had moved as the
+call asked, yet the call failed; on a slow runner the gap outlasted the
+try, and #681's test failed `NOT_LEADER` on NetBSD
+([#701](https://github.com/kitsunium/sdk/issues/701)).
+
+- **`NOT_LEADER` is submitted again as `MEMBERSHIP_CHANGE_PENDING` is.**
+  Within the same window, each heartbeat: both refusals say nothing was
+  appended (D6), and both come from the transfer the call itself made, not
+  from the caller. Past the window the last refusal is returned. A node
+  still leading once its tries ended, no voter having taken over, gets
+  `MEMBERSHIP_INVALID` — a leader refuses its own removal — instead of the
+  `NOT_LEADER` of the transfer it still ran.
+- **What it costs.** A removal whose hand-off reaches no leader within the
+  window returns up to `handOffWindow` maximum election timeouts later.
+- The rule is the node's alone: no frame changes, no raft mutation is
+  added, and a mixed cluster needs nothing.
+
 ## Amendment — a joiner's member stamp follows the entries that admit it (2026-10-27, #695)
 
 A directory `Init` prepared carries a joining stamp: it votes for nobody,
@@ -5141,6 +5171,7 @@ added: the step function is unchanged.
 | #690, #691 | Raft hunt, 2026-10-25 | the offline operations: `WipeAndRejoin` ordered behind the stop marker `STOP-WIPE`, a crash at any step refusing the start and every offline write until the wipe runs again (#690); `Recover` refuses an old member's ID beside the survivor and asks a fence for every other old voter, whatever the members name (#691); neither `Recover` nor `RestoreSnapshot` accepts two members under one ID (amendment of 2026-10-26, review of #693) |
 | #694 | Raft hunt loop, 2026-10-26 | each hand-off try lasts the committed contract's maximum election timeout, raft's transfer deadline, not the `InitialTiming`'s (amendment of 2026-10-26, #694) |
 | #696 | Raft hunt loop, 2026-10-26 | the trailing window is kept only while the log is under half its headroom and the disk is not short, and Config refuses a log quota whose headroom over the reserve is two segments or less; no format change (amendment of 2026-10-26, #696) |
+| #701 | Raft hunt loop, 2026-10-27 | a removal of the leader submitted on it is submitted again on `NOT_LEADER` as on `MEMBERSHIP_CHANGE_PENDING`, within the hand-off's window, until the node hears of the leader its hand-off elected; no format change (amendment of 2026-10-27, #701) |
 | #695 | Raft hunt loop, 2026-10-27 | a joiner's stamp turns a member's only once the log is durable through the entries that admit it, the configuration judged at the commit bounded by the durable index, at each Ready and each storage completion; no format change, no raft mutation (amendment of 2026-10-27, #695) |
 
 ## raft-sql-poc (owner's prior Raft)

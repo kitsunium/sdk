@@ -17461,10 +17461,12 @@ sequences:
             - bind: err
               eval: n.admin(ctx, coreconsensus.EntryMembership, remove)
               to: n.admin
+            - bind: again
+              eval: errs.HasCode(err, coreconsensus.CodeMembershipChangePending) || errs.HasCode(err, coreconsensus.CodeNotLeader)
             - opt:
                 do:
                   - return: err
-                when: "!errs.HasCode(err, coreconsensus.CodeMembershipChangePending) || !n.clk.Now().Before(deadline)"
+                when: "!again || !n.clk.Now().Before(deadline)"
             - opt:
                 do:
                   - return: err
