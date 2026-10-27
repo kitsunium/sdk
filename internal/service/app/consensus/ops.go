@@ -556,16 +556,23 @@ func (n *Node) successorOf(id coreconsensus.NodeID) (coreconsensus.NodeID, bool)
 
 // removeAfterTransfer submits a removal right after leadership moved. The
 // new leader accepts no membership change before its term's no-op commits
-// (MEMBERSHIP_CHANGE_PENDING), an engine detail of the transfer the call
-// itself made, not the caller's: it is submitted again, each heartbeat, for
-// at most handOffWindow maximum election timeouts, in which the new leader's
-// watch of PreferredLeaders hands nothing back (#676).
+// (MEMBERSHIP_CHANGE_PENDING). This node, deposed by the campaign its own
+// TimeoutNow started, knows no leader to forward to until the winner's
+// first append reaches it, and while the transfer of a hand-off's last try
+// still runs raft takes no proposal (NOT_LEADER, #701). Both are engine
+// details of the transfer the call itself made, not the caller's, and both
+// are answered before anything is appended (D6): the removal is submitted
+// again, each heartbeat, for at most handOffWindow maximum election
+// timeouts, in which the new leader's watch of PreferredLeaders hands
+// nothing back (#676). A node no voter took over from ends on its own
+// refusal to remove itself, MEMBERSHIP_INVALID.
 func (n *Node) removeAfterTransfer(ctx context.Context, remove wire.AdminValue) error {
 	timing := n.Status().Timing
 	deadline := n.clk.Now().Add(handOffWindow * timing.ElectionTimeoutMax)
 	for {
 		err := n.admin(ctx, coreconsensus.EntryMembership, remove)
-		if !errs.HasCode(err, coreconsensus.CodeMembershipChangePending) || !n.clk.Now().Before(deadline) {
+		again := errs.HasCode(err, coreconsensus.CodeMembershipChangePending) || errs.HasCode(err, coreconsensus.CodeNotLeader)
+		if !again || !n.clk.Now().Before(deadline) {
 			return err
 		}
 		if !n.pause(ctx, timing.HeartbeatInterval) {
