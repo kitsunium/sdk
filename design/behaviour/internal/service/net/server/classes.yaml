@@ -17,6 +17,21 @@ constants:
         type: int
         value: "8"
     name: defaultPerAddress
+  - grouped: true
+    items:
+      - doc: |-
+          replyQueue is how many replies one batch may queue before they are sent
+          early to make room.
+        name: replyQueue
+        type: int
+        value: "128"
+      - doc: |-
+          replyArena is the room the queued replies' bytes share, copied out of the
+          handler's buffer so it may reuse it as soon as Reply returns.
+        name: replyArena
+        type: int
+        value: 256 << 10
+    name: replyQueue
   - doc: |-
       defaultHandshakeTimeout bounds the TLS negotiation when a group sets none.
 
@@ -117,6 +132,38 @@ constants:
       - name: pevEnd
       - name: pevSent
     name: pevOpen
+  - grouped: true
+    items:
+      - doc: |-
+          udpGRO is UDP_GRO, the socket option that lets the kernel hand a reader
+          several datagrams of one flow as one message, and the type of the control
+          message carrying their size (include/uapi/linux/udp.h; Linux 5.0). The
+          standard library's syscall package does not define it.
+        name: udpGRO
+        value: "104"
+      - doc: |-
+          groMessageSize is the largest message a GRO read can return: a coalesced
+          message is bounded by the 16-bit IP length it would be sent with, so a
+          slot this large never cuts one (MSG_TRUNC) for want of room.
+        name: groMessageSize
+        type: int
+        value: "65535"
+      - doc: |-
+          groSegmentBytes is the size of the UDP_GRO control message's payload: the
+          segment size, a C int.
+        name: groSegmentBytes
+        type: int
+        value: "4"
+      - doc: |-
+          groControlSpace is the control room a GRO read gives each message: the
+          UDP_GRO message's 24 bytes and room beside it for those a caller may have
+          asked of the socket itself — IP_PKTINFO (32), IPV6_PKTINFO (40), a
+          timestamp (32 to 64) —, so a foreign control message never cuts the one
+          the reader needs (MSG_CTRUNC). 64 slots of it are 16 KiB.
+        name: groControlSpace
+        type: int
+        value: "256"
+    name: udpGRO
   - doc: |-
       mmsghdrAlign is the alignment C gives struct mmsghdr, which it inherits from
       struct msghdr — the widest member decides, and msghdr holds the pointers.
@@ -135,6 +182,61 @@ constants:
           (unsafe.Sizeof(syscall.Msghdr{}) +
           	unsafe.Sizeof(uint32(0)) + mmsghdrAlign - 1) / mmsghdrAlign * mmsghdrAlign
     name: mmsghdrStride
+  - grouped: true
+    items:
+      - doc: |-
+          udpSegment is UDP_SEGMENT: as a socket option it answers whether the
+          kernel has UDP GSO (Linux 4.18), and as a control message on one send it
+          cuts the send into datagrams of its value (include/uapi/linux/udp.h). The
+          standard library's syscall package does not define it.
+        name: udpSegment
+        value: "103"
+      - doc: |-
+          udpMaxSegments is the most datagrams one GSO send may carry: the kernel's
+          UDP_MAX_SEGMENTS since 4.18, the floor every kernel the SDK runs on keeps.
+        name: udpMaxSegments
+        type: int
+        value: "64"
+      - doc: udpHeaderBytes is the UDP header every datagram carries.
+        name: udpHeaderBytes
+        type: int
+        value: "8"
+      - doc: ipv4HeaderBytes is IPv4's header, without options.
+        name: ipv4HeaderBytes
+        type: int
+        value: "20"
+      - doc: ipv6HeaderBytes is IPv6's fixed header, without extension headers.
+        name: ipv6HeaderBytes
+        type: int
+        value: "40"
+      - doc: |-
+          ipMaxLength is the 16-bit IP length a GSO send is built as before the
+          device cuts it: its header, the UDP header and every segment fit in it,
+          or the kernel refuses the send with EMSGSIZE.
+        name: ipMaxLength
+        type: int
+        value: "65535"
+      - doc: |-
+          ethernetMTU bounds the segment a reply is coalesced at: a segment past the
+          path's MTU is refused (EINVAL), where the same reply sent alone would be
+          fragmented, so a larger reply leaves alone. A path with a smaller MTU
+          refuses the send, and its replies are sent again one by one.
+        name: ethernetMTU
+        type: int
+        value: "1500"
+      - doc: "segmentSizeBytes is UDP_SEGMENT's control payload: a C uint16."
+        name: segmentSizeBytes
+        type: int
+        value: "2"
+      - doc: |-
+          gsoInvalidLimit is how many GSO sends in a row the kernel may refuse with
+          EINVAL before GSO is switched off for the socket: a refusal that no
+          smaller segment cures — SO_NO_CHECK, a device that takes no GSO — would
+          otherwise cost one failed sendmmsg a batch for the socket's life.
+        name: gsoInvalidLimit
+        type: int
+        value: "4"
+    name: udpSegment
   - doc: |-
       The ranks of the lattice iouring > epoll > portable > goroutine (ADR 0188
       §D1). A rank is compared, never shown: State spells the capability.
@@ -180,6 +282,23 @@ constants:
   - grouped: true
     items:
       - doc: |-
+          faultGSO is the Source of a fault naming a group a socket of which sends
+          without GSO (ADR 0192).
+        name: faultGSO
+        type: string
+        value: "\"gso\""
+      - doc: |-
+          handoverBudget bounds the wait for the handover's drains, inside Shutdown's
+          own budget: a socket that keeps receiving faster than one batch a read never
+          reaches EAGAIN, and the stream and loop drains after it share the same
+          context (ADR 0192 §D4).
+        name: handoverBudget
+        type: time.Duration
+        value: 250 * time.Millisecond
+    name: faultGSO
+  - grouped: true
+    items:
+      - doc: |-
           defaultMaxPacketSize is the largest datagram accepted when a group sets
           no ceiling. It comfortably exceeds a typical MTU while staying far below
           the 64 KiB theoretical maximum, so a misconfigured peer cannot make the
@@ -204,6 +323,15 @@ constants:
         type: int
         value: "0xf"
     name: soReusePort
+  - doc: |-
+      sysSendmmsg is sendmmsg(2)'s number on linux/amd64
+      (arch/x86/entry/syscalls/syscall_64.tbl), which the standard library's
+      syscall package does not define on this architecture.
+    items:
+      - name: sysSendmmsg
+        type: uintptr
+        value: "307"
+    name: sysSendmmsg
   - grouped: true
     items:
       - doc: defaultDrainTimeout bounds Shutdown when the caller sets no budget.
@@ -348,9 +476,14 @@ files:
       - packetConnsFromFiles
     name: adopt.go
   - decls:
+      - replyQueue
       - datagram
       - (*datagram).payload
+      - (*datagram).segment
+      - (*datagram).count
       - datagramSource
+      - datagramSink
+      - datagramCounters
       - newSlots
     name: batch.go
   - decls:
@@ -359,6 +492,11 @@ files:
   - decls:
       - portableReader
       - (*portableReader).readBatch
+      - (*portableReader).slotSize
+      - portableSink
+      - portableSink.begin
+      - portableSink.reply
+      - portableSink.flush
     name: batch_portable.go
   - decls:
       - conn
@@ -390,6 +528,7 @@ files:
     name: conn_waiter.go
   - decls:
       - newDatagramSource
+      - newDatagramSink
       - batchAvailable
     name: datagram_source_linux.go
   - decls: []
@@ -481,6 +620,7 @@ files:
       - (*Server).waitIdle
       - (*Server).Close
       - (*Server).closeListeners
+      - (*Server).closeStreamListeners
     name: lifecycle.go
   - decls:
       - _#3
@@ -618,17 +758,56 @@ files:
       - handshake
     name: loop_tls.go
   - decls:
+      - udpGRO
       - multiReader
       - newMultiReader
+      - (*multiReader).enableGRO
+      - (*multiReader).setGRO
+      - (*multiReader).handover
+      - (*multiReader).stopGRO
+      - (*multiReader).switchGROOff
+      - (*multiReader).slotSize
       - (*multiReader).wire
+      - (*multiReader).bind
+      - (*multiReader).prepare
       - (*multiReader).readBatch
+      - (*multiReader).drain
       - (*multiReader).fill
+      - groSegment
     name: multireader_linux.go
   - decls:
       - mmsghdrAlign
       - mmsghdrStride
       - mmsghdr
     name: multireader_mmsghdr_linux.go
+  - decls:
+      - udpSegment
+      - gsoSegments
+      - maxSegment
+      - pendingReply
+      - (*pendingReply).addr
+      - replySpan
+      - multiWriter
+      - newMultiWriter
+      - sendmmsg
+      - (*multiWriter).begin
+      - (*multiWriter).reply
+      - (*multiWriter).encode
+      - (*multiWriter).flush
+      - (*multiWriter).flushLocked
+      - (*multiWriter).build
+      - (*multiWriter).runFrom
+      - (*multiWriter).layout
+      - (*multiWriter).sendAll
+      - (*multiWriter).refused
+      - (*multiWriter).gsoRefused
+      - (*multiWriter).sendFrom
+      - (*multiWriter).left
+      - (*multiWriter).unavailable
+      - (*multiWriter).writeEach
+      - (*multiWriter).fail
+      - (*multiWriter).disableGSO
+    name: multiwriter_linux.go
   - decls:
       - rankGoroutine
       - rankKernel
@@ -671,6 +850,7 @@ files:
       - ReadBufferSize
       - MaxPacketSize
       - BatchSize
+      - BatchReplies
       - Shards
       - MaxConns
       - Adopt
@@ -689,6 +869,14 @@ files:
       - (*packet).reset
     name: packet.go
   - decls:
+      - faultGSO
+      - (*Server).newBoundPacket
+      - (*Server).handoverPackets
+      - (*Server).recordGSOOff
+      - (*Server).gsoFaults
+      - (*Server).stopGROPackets
+    name: packet_bound.go
+  - decls:
       - PacketGroup
       - (*PacketGroup).Name
       - (*PacketGroup).Handle
@@ -701,6 +889,10 @@ files:
       - packetNetworks
       - listenPacket
       - boundPacketConn
+      - (*boundPacketConn).finish
+      - handoverSource
+      - (*boundPacketConn).handover
+      - (*boundPacketConn).stopGRO
       - (*boundPacketConn).Close
       - packetSize
       - batchSize
@@ -708,6 +900,7 @@ files:
   - decls:
       - (*Server).readLoop
       - (*Server).dispatch
+      - (*Server).serveMessage
       - (*Server).servePacket
     name: packet_loop.go
   - decls:
@@ -725,10 +918,22 @@ files:
       - rawConnProvider
     name: raw_conn_provider_linux.go
   - decls:
+      - queuedReply
+      - queuedSink
+      - newQueuedSink
+      - (*queuedSink).begin
+      - (*queuedSink).reply
+      - (*queuedSink).flush
+      - (*queuedSink).flushLocked
+    name: reply_queue.go
+  - decls:
       - soReusePort
       - reusePortSupported
       - setReusePort
     name: reuseport_linux.go
+  - decls:
+      - sysSendmmsg
+    name: sendmmsg_linux_amd64.go
   - decls:
       - defaultDrainTimeout
       - lookupFunc
@@ -895,15 +1100,26 @@ functions:
     results: "*trackedConn"
   - doc: |-
       newDatagramSource returns the batched reader when the socket exposes a raw
-      descriptor, and the portable one otherwise.
+      descriptor, and the portable one otherwise. With gro, the batched reader
+      switches UDP_GRO on, which only it can read: it alone parses the segment size
+      out of each message and splits it (ADR 0192).
 
       The type assertion is the honest guard: recvmmsg needs a real file
       descriptor, and a caller can legitimately hand us a PacketConn that has none
       — a test double, or a wrapper. Falling back keeps such a socket working
       instead of failing at the first read.
     name: newDatagramSource
-    params: pc stdnet.PacketConn
+    params: pc stdnet.PacketConn, gro bool
     results: datagramSource
+  - doc: |-
+      newDatagramSink returns the sink a socket's replies leave through: at once,
+      one WriteTo each, unless batched — BatchReplies —, then per batch: the
+      sendmmsg and GSO sink when the socket is UDP and exposes a raw descriptor, the
+      queued one otherwise. onGSOOff is called once the device refuses GSO for the
+      socket.
+    name: newDatagramSink
+    params: pc stdnet.PacketConn, batched bool, counters *datagramCounters, onGSOOff func()
+    results: datagramSink
   - doc: |-
       batchAvailable reports whether the platform can read several datagrams per
       syscall. It feeds the degradation reported by State.
@@ -1248,6 +1464,38 @@ functions:
     params: pc stdnet.PacketConn, sc rawConnProvider
     results: reader *multiReader, err error
   - doc: |-
+      groSegment returns the segment size a UDP_GRO control message reports in
+      control, or zero when it carries none: the message is then one datagram.
+    name: groSegment
+    params: control []byte
+    results: int
+  - doc: |-
+      gsoSegments is how many datagrams of size bytes one GSO send of a socket of
+      family may carry: the kernel's udpMaxSegments, and the 16-bit IP length the
+      send is built as — 54 of the L3 load's datagrams on IPv4 and on IPv6.
+    name: gsoSegments
+    params: family, size int
+    results: int
+  - doc: |-
+      maxSegment is the largest datagram a socket of family coalesces: one that
+      fits an Ethernet frame with its headers.
+    name: maxSegment
+    params: family int
+    results: int
+  - doc: |-
+      newMultiWriter builds a batched sink over pc. It fails on a socket that is
+      neither IPv4 nor IPv6 UDP — a Unix datagram socket has no GSO, and its peer
+      no sockaddr this sink writes —, which the caller serves with portableSink.
+    name: newMultiWriter
+    params: pc stdnet.PacketConn, sc rawConnProvider, counters *datagramCounters, onGSOOff func()
+    results: "*multiWriter, error"
+  - doc: |-
+      sendmmsg is the sendmmsg(2) the sink drives: how many of headers left, or the
+      errno of the first that did not.
+    name: sendmmsg
+    params: fd uintptr, headers []mmsghdr
+    results: sent int, errno syscall.Errno
+  - doc: |-
       readOperator reads both variables through lookup and applies R5 (ADR 0187
       §D8): an empty value is unset, an unknown token caps the engine at portable,
       and nothing the environment says raises a group above its code's choice.
@@ -1297,6 +1545,8 @@ functions:
   - name: BatchSize
     params: n int
     results: GroupOption
+  - name: BatchReplies
+    results: GroupOption
   - name: Shards
     params: n int
     results: GroupOption
@@ -1337,6 +1587,10 @@ functions:
       call fails.
     name: kernelRelease
     results: string
+  - doc: newQueuedSink builds a queued sink over pc.
+    name: newQueuedSink
+    params: pc stdnet.PacketConn, counters *datagramCounters
+    results: "*queuedSink"
   - doc: |-
       reusePortSupported reports whether this platform can bind several listeners
       to one address.
@@ -1360,8 +1614,8 @@ functions:
     results: "*Server"
   - doc: |-
       packetHonours reports whether a datagram group applies the option of kind
-      k: its ceilings, adoption, and the three every engine honours. Engine and
-      Plaintext are judged by engineRefusal.
+      k: its ceilings, its batched replies (ADR 0192), adoption, and the three
+      every engine honours. Engine and Plaintext are judged by engineRefusal.
     name: packetHonours
     params: k corenet.OptionKind
     results: bool
@@ -1475,6 +1729,7 @@ imports:
   bits: math/bits
   buffer: github.com/kitsunium/sdk/internal/kernel/concur/buffer
   clock: github.com/kitsunium/sdk/internal/kernel/clock
+  cmp: cmp
   context: context
   corehealth: github.com/kitsunium/sdk/internal/core/app/health
   corenet: github.com/kitsunium/sdk/internal/core/net
@@ -1554,6 +1809,11 @@ types:
       datagram is one slot in a read batch: a reusable buffer plus what the last
       read put in it. Slots are allocated once per read loop and reused for the
       life of the socket, which is what keeps datagram serving allocation-free.
+
+      One slot is one message of the kernel, and with UDP GRO a message is several
+      datagrams of one sender laid end to end: seg is then their size, every one
+      but the last exactly seg bytes long, and the read loop hands each to the
+      handler as its own Packet (ADR 0192).
     fields:
       - doc: buf is the slot's reusable payload buffer.
         name: buf
@@ -1561,6 +1821,18 @@ types:
       - doc: n is how many bytes the last read placed in buf.
         name: "n"
         type: int
+      - doc: |-
+          seg is the size of each datagram of a coalesced message, as the UDP_GRO
+          control message reported it; zero when the message is one datagram.
+        name: seg
+        type: int
+      - doc: |-
+          cut marks a message the kernel cut short — its payload past the buffer
+          on a coalesced read (MSG_TRUNC) or its control data past the room left
+          for it (MSG_CTRUNC): what survives cannot be split into whole datagrams,
+          so the read loop drops it and counts it in State.
+        name: cut
+        type: bool
       - doc: addr is the sender of the last read.
         name: addr
         type: stdnet.Addr
@@ -1570,6 +1842,18 @@ types:
         name: payload
         recv: d *datagram
         results: "[]byte"
+      - doc: |-
+          segment returns the i-th datagram of the slot's message and whether there is
+          one: the whole payload once for a message of one datagram, then seg-sized
+          pieces with a shorter last one for a coalesced message.
+        name: segment
+        params: i int
+        recv: d *datagram
+        results: piece []byte, ok bool
+      - doc: count returns how many datagrams the slot's message carries.
+        name: count
+        recv: d *datagram
+        results: int
     name: datagram
   - doc: |-
       datagramSource collects one or more datagrams per call.
@@ -1588,7 +1872,51 @@ types:
       	// readBatch fills slots and returns how many were filled. It returns at
       	// least one datagram or an error.
       	readBatch(slots []datagram) (n int, err error)
+      	// slotSize is the size newSlots is given for a group whose ceiling is
+      	// ceiling: the ceiling itself, or a whole coalesced message when the
+      	// source reads UDP GRO.
+      	slotSize(ceiling int) int
       }
+  - doc: |-
+      datagramSink sends the replies a read batch's handlers make.
+
+      By default every reply is a WriteTo, one datagram a call, its error the
+      caller's (portableSink). Under BatchReplies the replies made while a batch is
+      served are queued and leave together when it ends: on Linux one sendmmsg,
+      consecutive replies to one peer of one size as one UDP GSO message
+      (multiWriter); elsewhere, and on a socket sendmmsg cannot address, one WriteTo
+      each (queuedSink) — darwin sends one datagram a call (ADR 0192).
+
+      IFACE-PLUGIN: implementations are selected by build tag and stay unexported.
+    kind: named
+    name: datagramSink
+    underlying: |-
+      interface {
+      	// begin opens a batch: replies made until flush may be queued.
+      	begin()
+      	// reply sends b to to, or queues it until flush while a batch is open.
+      	reply(b []byte, to stdnet.Addr) (n int, err error)
+      	// flush sends what the batch queued and closes it.
+      	flush()
+      }
+  - doc: |-
+      datagramCounters are what the batched datagram paths drop, reported in
+      State's Datagrams. One set per server, shared by every socket's reader and
+      sink.
+    fields:
+      - doc: |-
+          truncated counts messages dropped for MSG_TRUNC on a coalesced read or
+          MSG_CTRUNC on any.
+        name: truncated
+        type: atomic.Uint64
+      - doc: gsoOversized counts GSO messages the kernel refused with EMSGSIZE.
+        name: gsoOversized
+        type: atomic.Uint64
+      - doc: replyFailures counts queued replies that did not leave.
+        name: replyFailures
+        type: atomic.Uint64
+    kind: struct
+    name: datagramCounters
   - doc: |-
       portableReader reads one datagram per syscall using the standard library.
 
@@ -1612,7 +1940,33 @@ types:
         params: slots []datagram
         recv: r *portableReader
         results: n int, err error
+      - doc: "slotSize implements datagramSource: one datagram a read, so the ceiling."
+        name: slotSize
+        params: ceiling int
+        recv: r *portableReader
+        results: int
     name: portableReader
+  - doc: |-
+      portableSink sends every reply at once, one datagram a call: the floor
+      every platform has, and darwin's answer (ADR 0192).
+    fields:
+      - doc: pc is the socket replies leave through.
+        name: pc
+        type: stdnet.PacketConn
+    kind: struct
+    methods:
+      - doc: "begin implements datagramSink: there is no queue to open."
+        name: begin
+        recv: portableSink
+      - doc: reply implements datagramSink with one WriteTo.
+        name: reply
+        params: b []byte, to stdnet.Addr
+        recv: w portableSink
+        results: n int, err error
+      - doc: "flush implements datagramSink: nothing was queued."
+        name: flush
+        recv: portableSink
+    name: portableSink
   - doc: |-
       conn is the domain's view of one accepted connection.
 
@@ -2638,9 +2992,11 @@ types:
   - doc: |-
       multiReader reads several datagrams per syscall using recvmmsg(2).
 
-      It reuses one message array for the life of the socket: the iovecs and name
-      buffers are wired to the slot buffers once, so a read costs no allocation at
-      all — which is the entire reason for the batched path.
+      It reuses one message array for the life of the socket: the iovecs, name and
+      control buffers are wired to the slot buffers once, so a read costs no
+      allocation at all — which is the entire reason for the batched path. The
+      kernel writes back the lengths it used into the same headers, so every
+      capacity is restored before each call (prepare), never only at wiring.
     fields:
       - doc: pc is the socket, kept for the fallback path and for addresses.
         name: pc
@@ -2657,23 +3013,137 @@ types:
       - doc: names receives each datagram's sender address.
         name: names
         type: "[]syscall.RawSockaddrAny"
+      - doc: oob receives each message's control data, controlSpace bytes a slot.
+        name: oob
+        type: "[]byte"
+      - doc: |-
+          controlSpace is the room one message's control data has: groControlSpace
+          under GRO, the one case a read asks for a control message, and none
+          without it — a control message the caller asked of the socket is then
+          not read, and its MSG_CTRUNC means nothing to the reader.
+        name: controlSpace
+        type: int
       - doc: wired records the slot count the arrays were built for.
         name: wired
         type: int
+      - doc: |-
+          gro records that UDP_GRO was switched on at construction, so slots must
+          hold a whole coalesced message.
+        name: gro
+        type: bool
+      - doc: |-
+          handing is set by handover: the next reads drain what the socket holds
+          without waiting, then end the loop.
+        name: handing
+        type: atomic.Bool
+      - doc: |-
+          stopping is set by stopGRO before it switches GRO off: a read that
+          returns from then on may hold a coalesced message without its segment
+          size, so it is dropped and the loop ended — the socket is being closed.
+        name: stopping
+        type: atomic.Bool
+      - doc: |-
+          received and errno are what the last recvmmsg returned. They are fields,
+          and recv and drainOnce the functions the descriptor runs, bound once at
+          wiring, so a read moves nothing to the heap.
+        name: received
+        type: int
+      - name: errno
+        type: syscall.Errno
+      - name: recv
+        type: func(fd uintptr) bool
+      - name: drainOnce
+        type: func(fd uintptr)
     kind: struct
     methods:
+      - doc: |-
+          enableGRO switches UDP_GRO on and reports whether the kernel took it: a
+          socket that is not UDP, or a kernel before 5.0, refuses, and the reader then
+          reads one datagram a message as before. It runs before the first read, so the
+          slots are sized for what it decided.
+        name: enableGRO
+        recv: r *multiReader
+        results: bool
+      - doc: setGRO sets UDP_GRO on the socket.
+        name: setGRO
+        params: on bool
+        recv: r *multiReader
+        results: error
+      - doc: |-
+          handover prepares the socket for whoever reads it after this loop — a
+          successor that inherits it, which may not split coalesced messages: the loop
+          drains what the socket holds without waiting, GRO still on, until EAGAIN,
+          then switches GRO off and ends (ADR 0192). The order is the kernel's:
+          udp_recvmsg writes the UDP_GRO control message only while the option is on,
+          so a message coalesced before GRO went off and read after it would arrive
+          without its segment size, one datagram the length of all of them. It reports
+          whether a drain was started; a reader that never had GRO on has nothing to
+          hand over.
+        name: handover
+        recv: r *multiReader
+        results: bool
+      - doc: |-
+          stopGRO switches GRO off without a drain: Close's, which waits for nothing,
+          so a successor at least finds nothing coalesced from here on.
+        name: stopGRO
+        recv: r *multiReader
+      - doc: |-
+          switchGROOff marks the reader stopping, then switches GRO off: in that
+          order, so no read completing during the switch is split wrongly.
+        name: switchGROOff
+        recv: r *multiReader
+      - doc: |-
+          slotSize implements datagramSource: a whole coalesced message under GRO, the
+          ceiling otherwise. Under GRO a socket's read batch therefore holds BatchSize
+          slots of 64 KiB: 1 MiB at the default 16, 64 MiB at a BatchSize of 1024,
+          allocated once for the socket's life (ADR 0192 §D2).
+        name: slotSize
+        params: ceiling int
+        recv: r *multiReader
+        results: int
       - doc: |-
           wire points the message array at the caller's slots. It runs once per slot
           count, not once per read.
         name: wire
         params: slots []datagram
         recv: r *multiReader
+      - doc: |-
+          bind builds, once, the functions the descriptor runs: recvmmsg parked on the
+          netpoller, and the drain's, which never waits. They write into the reader's
+          fields, so neither moves a variable to the heap on each read.
+        name: bind
+        recv: r *multiReader
+      - doc: |-
+          prepare restores every header's capacities before a call: the kernel wrote
+          back into Namelen and Controllen the lengths the last message used, and a
+          message that carried no control data left Controllen at zero, so the next
+          coalesced message would find no room for its segment size (MSG_CTRUNC) and
+          be dropped.
+        name: prepare
+        recv: r *multiReader
       - doc: readBatch implements datagramSource using one recvmmsg call.
         name: readBatch
         params: slots []datagram
         recv: r *multiReader
         results: n int, err error
-      - doc: fill copies the per-datagram results back into the caller's slots.
+      - doc: |-
+          drain reads what the socket holds without waiting. EAGAIN means the queue is
+          empty: the socket is handed over, and the loop is told so as a closed socket
+          is, net.ErrClosed, which ends it.
+        name: drain
+        params: slots []datagram
+        recv: r *multiReader
+        results: n int, err error
+      - doc: |-
+          fill copies the per-message results back into the caller's slots: the length,
+          the sender, the segment size a coalesced message carries, and whether the
+          kernel cut the message (msg_flags).
+
+          Without GRO the reader asks for no control data and reads none: a control
+          message the caller asked of the socket — IP_PKTINFO, a timestamp — finds no
+          room and the kernel sets MSG_CTRUNC, which costs this reader nothing, so it
+          never cuts a message. Under GRO a message is cut for MSG_CTRUNC only when the
+          UDP_GRO message itself did not survive: its segment size may then be lost.
         name: fill
         params: slots []datagram, received int
         recv: r *multiReader
@@ -2706,6 +3176,255 @@ types:
         type: uint32
     kind: struct
     name: mmsghdr
+  - doc: |-
+      pendingReply is one queued reply: where its bytes sit in the arena and the
+      peer it goes to.
+    fields:
+      - doc: off and size place the reply's bytes in the arena.
+        name: "off"
+        type: int
+      - doc: off and size place the reply's bytes in the arena.
+        name: size
+        type: int
+      - doc: |-
+          name is the peer's sockaddr, sockaddr_in or sockaddr_in6, zeroed past
+          its length so two replies to one peer compare equal.
+        name: name
+        type: syscall.RawSockaddrInet6
+      - doc: namelen is the length of name the kernel reads.
+        name: namelen
+        type: uint32
+    kind: struct
+    methods:
+      - doc: |-
+          addr is the peer e was queued for, as WriteTo takes it: the fallback of a
+          socket whose sendmmsg is refused, off the batched path.
+        name: addr
+        recv: e *pendingReply
+        results: stdnet.Addr
+    name: pendingReply
+  - doc: |-
+      replySpan is one message of a send: count consecutive queued replies from
+      first, one GSO send when count is more than one.
+    fields:
+      - doc: first is the index of the span's first reply in the queue.
+        name: first
+        type: int
+      - doc: count is how many replies it carries.
+        name: count
+        type: int
+    kind: struct
+    name: replySpan
+  - doc: |-
+      multiWriter sends the replies of one read batch with sendmmsg(2), every run of
+      consecutive replies to one peer of one size — the last may be shorter — as
+      one UDP GSO message (ADR 0192).
+
+      Its queue, arena and message arrays are allocated once, at construction, so
+      a reply costs no allocation once the loop is running. A mutex guards them: a
+      handler that kept its Packet may reply from another goroutine, and such a
+      reply, outside any batch, is written at once.
+    fields:
+      - doc: pc is the socket, written directly outside a batch.
+        name: pc
+        type: stdnet.PacketConn
+      - doc: raw exposes the descriptor under the runtime's netpoller.
+        name: raw
+        type: syscall.RawConn
+      - doc: |-
+          family is the socket's, AF_INET or AF_INET6: it decides the sockaddr a
+          reply is addressed with and the headers a GSO send is sized for.
+        name: family
+        type: int
+      - doc: counters is where failed replies and refused GSO sends are counted.
+        name: counters
+        type: "*datagramCounters"
+      - doc: onGSOOff is called once GSO is switched off on this socket.
+        name: onGSOOff
+        type: func()
+      - doc: send is sendmmsg; a test swaps it to answer what a device would.
+        name: send
+        type: func(fd uintptr, headers []mmsghdr) (sent int, errno syscall.Errno)
+      - doc: |-
+          gso is on until the device refuses a GSO send for want of checksum
+          offload (EIO), and stays off for the socket's life.
+        name: gso
+        type: atomic.Bool
+      - doc: mu guards everything below.
+        name: mu
+        type: sync.Mutex
+      - doc: open is true between begin and flush, while replies are queued.
+        name: open
+        type: bool
+      - doc: arena holds the queued replies' bytes, used of it so far.
+        name: arena
+        type: "[]byte"
+      - name: used
+        type: int
+      - doc: queue is the replies queued in this batch.
+        name: queue
+        type: "[]pendingReply"
+      - doc: |-
+          headers, iovecs, oob and spans describe one send's messages, indexed in
+          lockstep.
+        name: headers
+        type: "[]mmsghdr"
+      - name: iovecs
+        type: "[]syscall.Iovec"
+      - name: oob
+        type: "[]byte"
+      - name: spans
+        type: "[]replySpan"
+      - doc: controlSpace is CMSG_SPACE of the UDP_SEGMENT size, one message's room.
+        name: controlSpace
+        type: int
+      - doc: |-
+          plainUntil is the queue index below which replies leave one by one:
+          those of a span a path with a smaller MTU refused (EINVAL).
+        name: plainUntil
+        type: int
+      - doc: |-
+          segmentCeiling, when not zero, is the largest segment a GSO send may
+          carry on this socket from now on: one below the smallest the kernel
+          refused with EINVAL, so a path with a smaller MTU costs one refused
+          send, not one a batch. It only falls, for the socket's life.
+        name: segmentCeiling
+        type: int
+      - doc: |-
+          invalidRun counts the GSO sends refused with EINVAL since the last GSO
+          send that left; at gsoInvalidLimit, GSO is switched off.
+        name: invalidRun
+        type: int
+      - doc: |-
+          noMmsg is set once sendmmsg itself is refused — ENOSYS or EPERM, under
+          a seccomp filter that allows sendto — while a WriteTo of the same reply
+          leaves: every batch then leaves one WriteTo a reply.
+        name: noMmsg
+        type: bool
+      - doc: |-
+          sent, sendErrno, from and to are one sendmmsg's arguments and results,
+          and write the function the descriptor runs, bound once at construction,
+          so a send moves nothing to the heap.
+        name: sent
+        type: int
+      - name: sendErrno
+        type: syscall.Errno
+      - name: from
+        type: int
+      - name: to
+        type: int
+      - name: write
+        type: func(fd uintptr) bool
+    kind: struct
+    methods:
+      - doc: "begin implements datagramSink: replies are queued from here."
+        name: begin
+        recv: w *multiWriter
+      - doc: |-
+          reply implements datagramSink. Inside a batch it copies b into the arena and
+          reports it sent; flush sends it, and a failure there is counted in State,
+          since the handler has returned. Outside one, or for a peer this sink cannot
+          address, it is one WriteTo.
+        name: reply
+        params: b []byte, to stdnet.Addr
+        recv: w *multiWriter
+        results: n int, err error
+      - doc: |-
+          encode writes to's sockaddr for this socket's family into entry, and reports
+          whether it could: a UDP address of the socket's family, or an IPv4 one on an
+          IPv6 socket, as a mapped address; a zoned IPv6 peer is left to WriteTo, which
+          resolves its zone.
+        name: encode
+        params: to stdnet.Addr, entry *pendingReply
+        recv: w *multiWriter
+        results: bool
+      - doc: "flush implements datagramSink: it sends what the batch queued and closes it."
+        name: flush
+        recv: w *multiWriter
+      - doc: flushLocked sends the queue and empties it. mu is held.
+        name: flushLocked
+        recv: w *multiWriter
+      - doc: |-
+          build lays the queue from start out as messages, as many as it takes, and
+          returns their count: each run of consecutive replies to one peer, of one size
+          with possibly a shorter last, at most gsoSegments of them and no larger than
+          maxSegment, is one GSO message; any other reply is a message alone.
+        name: build
+        params: start int
+        recv: w *multiWriter
+        results: int
+      - doc: runFrom returns how many replies from e one GSO message carries.
+        name: runFrom
+        params: e int
+        recv: w *multiWriter
+        results: int
+      - doc: |-
+          layout writes message m: count replies from first, total bytes long, one
+          iovec over their contiguous bytes, and UDP_SEGMENT when there are several.
+        name: layout
+        params: m, first, count, total int
+        recv: w *multiWriter
+      - doc: |-
+          sendAll sends messages [0, messages) built from the queue, resuming from the
+          count each sendmmsg returns, and returns the queue index the next build
+          starts from: the queue's end once everything left or was counted, or the
+          first reply of a span to send again without GSO.
+        name: sendAll
+        params: messages int
+        recv: w *multiWriter
+        results: int
+      - doc: |-
+          refused judges message k's refusal with errno, messages laid out, and
+          reports whether the queue is to be rebuilt from resume.
+        name: refused
+        params: k, messages int, errno syscall.Errno
+        recv: w *multiWriter
+        results: resume int, again bool
+      - doc: |-
+          gsoRefused judges a GSO send's refusal with errno, and reports whether the
+          queue is to be rebuilt from resume.
+        name: gsoRefused
+        params: span replySpan, errno syscall.Errno
+        recv: w *multiWriter
+        results: resume int, again bool
+      - doc: |-
+          sendFrom runs one sendmmsg from message k, parked on the netpoller while the
+          socket's send buffer is full: how many messages the kernel took, or the
+          errno of the first it refused, or the socket's failure.
+        name: sendFrom
+        params: k, messages int
+        recv: w *multiWriter
+        results: sent int, err error
+      - doc: |-
+          left notes that messages [k, end) left: a GSO send among them proves GSO
+          works on this socket, and ends a run of EINVAL refusals.
+        name: left
+        params: k, end int
+        recv: w *multiWriter
+      - doc: |-
+          unavailable serves messages [k, messages) after sendmmsg itself was refused,
+          one WriteTo a reply. A reply that leaves so proves the refusal was the
+          syscall's — a seccomp filter that allows sendto, not sendmmsg — and every
+          later batch then leaves the same way; one that fails too, a firewall's
+          EPERM for instance, is counted, and sendmmsg is tried again next batch.
+        name: unavailable
+        params: k, messages int
+        recv: w *multiWriter
+      - doc: |-
+          writeEach writes queued replies [first, last) one WriteTo each, counts each
+          that fails, and returns how many left.
+        name: writeEach
+        params: first, last int
+        recv: w *multiWriter
+        results: int
+      - doc: fail counts the replies of messages [k, messages) as failed.
+        name: fail
+        params: k, messages int
+        recv: w *multiWriter
+      - doc: disableGSO switches GSO off for the socket's life and reports it once.
+        name: disableGSO
+        recv: w *multiWriter
+    name: multiWriter
   - doc: |-
       capabilityEntry is one row of the registry: a token, its rank, and whether
       KITSUNIUM_NET_DISABLE may switch it off.
@@ -2881,6 +3600,12 @@ types:
       - doc: conn is the socket the datagram arrived on, used by Reply.
         name: conn
         type: stdnet.PacketConn
+      - doc: |-
+          sink sends Reply's datagram: queued with the batch's other replies while
+          the batch is served, at once otherwise (ADR 0192). Nil on a packet built
+          without a read loop, which writes to conn.
+        name: sink
+        type: datagramSink
       - doc: id is the monotonic identifier assigned at read time.
         name: id
         type: uint64
@@ -2922,6 +3647,10 @@ types:
           Packet and reply later. Once the read loop has ended and reset it, the reply
           is net.ErrClosed — what writing to the closed socket would have answered —
           rather than a nil dereference.
+
+          A reply made while its batch is served is queued and leaves with the batch's
+          other replies (datagramSink): its n and err report the queueing, and a send
+          that fails afterwards is counted in State's Datagrams.
         name: Reply
         params: b []byte
         recv: p *packet
@@ -2952,6 +3681,11 @@ types:
       - doc: adopt names inherited sockets to take over instead of binding.
         name: adopt
         type: "[]string"
+      - doc: |-
+          batchReplies queues the replies of a read batch and sends them when it
+          ends (BatchReplies, ADR 0192).
+        name: batchReplies
+        type: bool
     kind: struct
     methods:
       - name: Name
@@ -2992,13 +3726,51 @@ types:
       - doc: pc is the live socket.
         name: pc
         type: stdnet.PacketConn
+      - doc: |-
+          source reads it, sink sends its replies; both are built with it, before
+          its read loop starts.
+        name: source
+        type: datagramSource
+      - name: sink
+        type: datagramSink
+      - doc: |-
+          done is closed when its read loop has ended, which a handover waits on;
+          doneOnce guards the close.
+        name: done
+        type: chan struct{}
+      - name: doneOnce
+        type: sync.Once
     kind: struct
     methods:
+      - doc: "finish closes done, once: the read loop has ended."
+        name: finish
+        recv: b *boundPacketConn
+      - doc: |-
+          handover prepares the socket for whoever reads it next and reports whether
+          its read loop is draining: wait on done before closing it.
+        name: handover
+        recv: b *boundPacketConn
+        results: bool
+      - doc: stopGRO switches GRO off on the socket, without a drain.
+        name: stopGRO
+        recv: b *boundPacketConn
       - doc: Close releases the socket, which is what ends its read loop.
         name: Close
         recv: b *boundPacketConn
         results: error
     name: boundPacketConn
+  - doc: |-
+      handoverSource is the part of a source that hands its socket over: a drain
+      to EAGAIN with GRO on, then GRO off, which ends the read loop (ADR 0192).
+    kind: named
+    name: handoverSource
+    underlying: |-
+      interface {
+      	// handover starts it and reports whether there is a drain to wait for.
+      	handover() bool
+      	// stopGRO switches GRO off without a drain.
+      	stopGRO()
+      }
   - doc: |-
       rawConnProvider is the part of *net.UDPConn the batched reader needs: access
       to the raw descriptor under the runtime's netpoller.
@@ -3012,6 +3784,69 @@ types:
       interface {
       	SyscallConn() (syscall.RawConn, error)
       }
+  - doc: |-
+      queuedReply is one reply queuedSink holds: where its bytes sit in the arena
+      and the peer it goes to.
+    fields:
+      - doc: off and size place the reply's bytes in the arena.
+        name: "off"
+        type: int
+      - doc: off and size place the reply's bytes in the arena.
+        name: size
+        type: int
+      - doc: to is the peer.
+        name: to
+        type: stdnet.Addr
+    kind: struct
+    name: queuedReply
+  - doc: |-
+      queuedSink is BatchReplies where sendmmsg is not: the batch's replies are
+      queued and leave at its end, one WriteTo each (ADR 0192). The option's
+      contract — a reply reported sent when queued, a failure counted — is the
+      same on every platform; only the syscall count differs.
+
+      Its queue and arena are allocated once, at construction; a mutex guards
+      them, since a handler that kept its Packet may reply from another goroutine.
+    fields:
+      - doc: pc is the socket replies leave through.
+        name: pc
+        type: stdnet.PacketConn
+      - doc: counters is where failed replies are counted.
+        name: counters
+        type: "*datagramCounters"
+      - doc: mu guards everything below.
+        name: mu
+        type: sync.Mutex
+      - doc: open is true between begin and flush, while replies are queued.
+        name: open
+        type: bool
+      - doc: arena holds the queued replies' bytes, used of it so far.
+        name: arena
+        type: "[]byte"
+      - name: used
+        type: int
+      - doc: queue is the replies queued in this batch.
+        name: queue
+        type: "[]queuedReply"
+    kind: struct
+    methods:
+      - doc: "begin implements datagramSink: replies are queued from here."
+        name: begin
+        recv: w *queuedSink
+      - doc: |-
+          reply implements datagramSink: queued inside a batch, at once outside one or
+          when it is larger than the arena.
+        name: reply
+        params: b []byte, to stdnet.Addr
+        recv: w *queuedSink
+        results: n int, err error
+      - doc: "flush implements datagramSink: it sends what the batch queued and closes it."
+        name: flush
+        recv: w *queuedSink
+      - doc: flushLocked sends the queue, one WriteTo a reply, and empties it. mu is held.
+        name: flushLocked
+        recv: w *queuedSink
+    name: queuedSink
   - doc: "lookupFunc reads one environment variable: os.LookupEnv, or a test's map."
     kind: named
     name: lookupFunc
@@ -3069,6 +3904,17 @@ types:
           is reported instead of hidden.
         name: oversized
         type: atomic.Uint64
+      - doc: datagrams counts what the batched datagram paths drop (ADR 0192).
+        name: datagrams
+        type: datagramCounters
+      - doc: gsoMu guards gsoOff.
+        name: gsoMu
+        type: sync.Mutex
+      - doc: |-
+          gsoOff names, once each, the groups a socket of which the device refused
+          GSO for: a fault State lists for as long as the server lives.
+        name: gsoOff
+        type: "[]string"
       - doc: |-
           acceptBackoffs counts the waits accept loops took after a failed Accept —
           descriptor exhaustion, typically — so a server that is failing to accept
@@ -3322,6 +4168,11 @@ types:
         name: closeListeners
         recv: s *Server
       - doc: |-
+          closeStreamListeners closes and forgets every bound stream listener, which
+          ends the accept loops.
+        name: closeStreamListeners
+        recv: s *Server
+      - doc: |-
           bindLoopGroup binds or adopts a loop group's listeners, registers them as
           the server's like any other, and starts the group's engine on them.
         name: bindLoopGroup
@@ -3347,6 +4198,37 @@ types:
         name: closeLoops
         recv: s *Server
       - doc: |-
+          newBoundPacket pairs a live datagram socket with its group, its source — the
+          batched reader with UDP GRO on where the platform has it — and its sink:
+          replies at once, or per batch under BatchReplies.
+        name: newBoundPacket
+        params: group *PacketGroup, addr corenet.AddressValue, pc stdnet.PacketConn
+        recv: s *Server
+        results: "*boundPacketConn"
+      - doc: |-
+          handoverPackets hands every datagram socket over before it is closed, and
+          waits, within handoverBudget and ctx, for each read loop's drain to end:
+          what the socket queued coalesced is served here, then GRO goes off, so
+          nothing coalesced is left to a successor that may not split it (ADR 0192).
+          A drain still running when the budget ends has GRO switched off at once, and
+          the close that follows cuts it.
+        name: handoverPackets
+        params: ctx context.Context
+        recv: s *Server
+      - doc: recordGSOOff names group among those sending without GSO, once.
+        name: recordGSOOff
+        params: group string
+        recv: s *Server
+      - doc: gsoFaults is one fault per group a socket of which sends without GSO.
+        name: gsoFaults
+        recv: s *Server
+        results: "[]corenet.FaultValue"
+      - doc: |-
+          stopGROPackets switches GRO off on every datagram socket, without a drain:
+          Close's, which waits for nothing.
+        name: stopGROPackets
+        recv: s *Server
+      - doc: |-
           readLoop serves datagrams until its socket is closed.
 
           Goroutine lifecycle: one per datagram socket, started by bindPacketGroup and
@@ -3364,7 +4246,7 @@ types:
         recv: s *Server
       - doc: |-
           dispatch serves every datagram in a filled batch, dropping any past the
-          group's ceiling.
+          group's ceiling, and each coalesced message as the datagrams it carries.
 
           An oversized datagram is NOT handed on. The kernel has already discarded its
           tail, so what remains is a prefix that reads exactly like a complete message:
@@ -3372,9 +4254,14 @@ types:
           whole is a correctness bug rather than a capacity one. It is dropped and
           counted in State instead — the same answer the accept path gives a connection
           past its ceiling, because there is nobody above a read loop to return an
-          error to and the counter is therefore the report.
+          error to and the counter is therefore the report. A message the kernel cut
+          (datagram.cut) is dropped and counted the same way, in Datagrams.
         name: dispatch
         params: slots []datagram, held *packet, handler corenet.PacketHandler, ceiling int
+        recv: s *Server
+      - doc: serveMessage serves each datagram of one message, one Packet each.
+        name: serveMessage
+        params: slot *datagram, held *packet, handler corenet.PacketHandler, ceiling int
         recv: s *Server
       - doc: servePacket runs the handler for one datagram, containing any panic.
         name: servePacket
@@ -3872,13 +4759,27 @@ types:
         recv: l *connLimiter
     name: connLimiter
 vars:
-  - doc: |-
-      The portable reader is the floor every platform falls back to, so it must
-      satisfy the seam on every platform, not only where the batched path exists.
+  - grouped: true
     items:
-      - name: _
+      - doc: |-
+          The portable reader is the floor every platform falls back to, so it
+          must satisfy the seam on every platform, not only where the batched path
+          exists.
+        name: _
         type: datagramSource
         value: (*portableReader)(nil)
+      - doc: The portable sink is the floor replies fall back to on every platform.
+        name: _
+        type: datagramSink
+        value: portableSink{}
+      - doc: The queued sink is BatchReplies' floor on every platform.
+        name: _
+        type: datagramSink
+        value: (*queuedSink)(nil)
+      - doc: A bound socket forwards the handover to its source.
+        name: _
+        type: handoverSource
+        value: (*boundPacketConn)(nil)
     name: _
   - doc: |-
       The pooled connection wrapper must still satisfy the port it is handed to
@@ -3888,13 +4789,22 @@ vars:
         type: corenet.Conn
         value: (*conn)(nil)
     name: _#2
-  - doc: |-
-      The batched reader must satisfy the seam the read loop is written against; a
-      drift here would be silent until the first datagram arrived.
+  - grouped: true
     items:
-      - name: _
+      - doc: |-
+          The batched reader must satisfy the seam the read loop is written
+          against; a drift here would be silent until the first datagram arrived.
+        name: _
         type: datagramSource
         value: (*multiReader)(nil)
+      - doc: It hands its socket over too (ADR 0192 §D4).
+        name: _
+        type: handoverSource
+        value: (*multiReader)(nil)
+      - doc: The batched sink must satisfy the seam replies are written against.
+        name: _
+        type: datagramSink
+        value: (*multiWriter)(nil)
     name: _#3
   - doc: streamNetworks are the socket families the stream engine serves.
     items:

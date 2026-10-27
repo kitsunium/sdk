@@ -226,6 +226,13 @@ jobs:
         run: |
           set -euo pipefail
           echo "kernel: $(uname -r), $(nproc) CPUs, commit $EVAL_SHA" | tee "$RUNNER_TEMP/bench.txt"
+          # How the kernel accounts irq and softirq time: L3's CPU adds it to
+          # the two rusages, without overlap only under IRQ_TIME_ACCOUNTING
+          # (ADR 0192 §D6). Recorded with the samples it qualifies.
+          cfg="/boot/config-$(uname -r)"
+          { if [ -r "$cfg" ]; then cat "$cfg"; elif [ -r /proc/config.gz ]; then zcat /proc/config.gz; fi; } \
+            | grep -E '^(# )?CONFIG_(IRQ_TIME_ACCOUNTING|TICK_CPU_ACCOUNTING|VIRT_CPU_ACCOUNTING_GEN)[ =]' \
+            | sed 's/^/accounting: /' | tee -a "$RUNNER_TEMP/bench.txt" || echo "accounting: no kernel config readable" | tee -a "$RUNNER_TEMP/bench.txt"
           for round in $(seq 1 "$ROUNDS"); do
             echo "::group::round $round"
             "$RUNNER_TEMP/server.test" -test.run='^$' -test.bench='^BenchmarkLoad' \

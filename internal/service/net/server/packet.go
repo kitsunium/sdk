@@ -16,6 +16,10 @@ type packet struct {
 	from stdnet.Addr
 	// conn is the socket the datagram arrived on, used by Reply.
 	conn stdnet.PacketConn
+	// sink sends Reply's datagram: queued with the batch's other replies while
+	// the batch is served, at once otherwise (ADR 0192). Nil on a packet built
+	// without a read loop, which writes to conn.
+	sink datagramSink
 	// id is the monotonic identifier assigned at read time.
 	id uint64
 	// group names the listener group that received it.
@@ -68,11 +72,20 @@ func (p *packet) Group() string {
 // Packet and reply later. Once the read loop has ended and reset it, the reply
 // is net.ErrClosed — what writing to the closed socket would have answered —
 // rather than a nil dereference.
+//
+// A reply made while its batch is served is queued and leaves with the batch's
+// other replies (datagramSink): its n and err report the queueing, and a send
+// that fails afterwards is counted in State's Datagrams.
 func (p *packet) Reply(b []byte) (n int, err error) {
 	//: the loop reset it: the socket it arrived on is closed.
 	if p.conn == nil {
 		//: the closed-socket answer, without a socket to ask.
 		return 0, stdnet.ErrClosed
+	}
+	//: the read loop's sink batches it.
+	if p.sink != nil {
+		//: queued, or written at once outside a batch.
+		return p.sink.reply(b, p.from)
 	}
 	//: write straight back to the address the datagram came from.
 	return p.conn.WriteTo(b, p.from)
@@ -85,6 +98,7 @@ func (p *packet) reset() {
 	p.data = nil
 	p.from = nil
 	p.conn = nil
+	p.sink = nil
 	p.id = 0
 	p.group = ""
 }

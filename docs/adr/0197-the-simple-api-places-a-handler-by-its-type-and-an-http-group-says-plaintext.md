@@ -61,8 +61,8 @@ staging ends here.
 ### D4 — A datagram group refuses what it does not honour
 
 A datagram group — `UDP` or `PacketGroup` — applies `MaxPacketSize`,
-`BatchSize`, `Adopt`, `Name`, `Engine` (the goroutine engine only) and
-`Plaintext`. Every other option, `TLS` and every timeout included, fails
+`BatchSize`, `BatchReplies` (ADR 0192), `Adopt`, `Name`, `Engine` (the
+goroutine engine only) and `Plaintext`. Every other option, `TLS` and every timeout included, fails
 `Start` with `PacketOptionUnsupported` (`0.2.11.67`), naming it; it was
 dropped in silence before (R6). It is a code of its own, not
 `LoopOptionUnsupported`, because no loop is involved.

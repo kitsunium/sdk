@@ -144,6 +144,11 @@ func TestSimpleTCP(t *testing.T) {
 		loops int
 	}{
 		{"a ConnHandler", corenet.ConnHandlerFunc(func(_ context.Context, c corenet.Conn) error {
+			//: the client's byte is read first: a close with unread input is a
+			//: reset on Windows, which would discard the answer before it is read.
+			if _, err := io.ReadFull(c, make([]byte, 1)); err != nil {
+				return err
+			}
 			_, err := io.WriteString(c, "conn\n")
 			return err
 		}), "conn\n", 0},
@@ -199,6 +204,16 @@ func TestSimpleUDP(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("no datagram")
 	}
+}
+
+// TestSimpleUDP_honours pins that a datagram group keeps the options its
+// engine applies, BatchReplies (ADR 0192) included: none is refused.
+func TestSimpleUDP_honours(t *testing.T) {
+	t.Parallel()
+	srv := server.New()
+	srv.UDP("127.0.0.1:0", corenet.PacketHandlerFunc(func(context.Context, corenet.Packet) error { return nil }),
+		server.BatchReplies(), server.BatchSize(8), server.MaxPacketSize(2048), server.Plaintext())
+	startSimple(t, srv)
 }
 
 // TestSimple_refused pins every refusal of the simple API, each reported by
