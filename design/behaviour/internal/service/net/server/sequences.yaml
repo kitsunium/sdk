@@ -3302,7 +3302,7 @@ sequences:
         eval: |-
           loop.Start(loop.Config{
           		Group: group.name, Value: value, MaxConns: group.limits.MaxConns,
-          		IdleTimeout: loopIdle(group), Handler: group.loopChain, Listeners: handoff,
+          		IdleTimeout: loopIdle(group), Handler: group.loopChain, Busy: group.loopBusy, Listeners: handoff,
           		Disabled: plan.disabled, DisabledBy: plan.disabledBy,
           	})
         to: loop
@@ -3585,7 +3585,7 @@ sequences:
         kind: internal
       - id: st.OnStart
         kind: value
-      - id: startLoopEngine
+      - id: startOffloading
         kind: internal
       - id: eng.State
         kind: internal
@@ -3651,8 +3651,8 @@ sequences:
             eval: group.loopChain.(corenet.LoopStarter)
           when: ok
       - bind: eng, err
-        eval: startLoopEngine(group, lns, plan)
-        to: startLoopEngine
+        eval: startOffloading(ctx, group, lns, plan)
+        to: startOffloading
       - opt:
           do:
             - return: err
@@ -3812,6 +3812,507 @@ sequences:
     steps:
       - return: time.Duration(group.timeouts.Idle)
         to: time
+  - of: newJobRing
+    steps:
+      - bind: size
+        eval: 1 << bits.Len(uint(max(n, 1)-1))
+      - return: "&jobRing{jobs: make([]corenet.LoopJobValue, size), mask: uint64(size - 1)}"
+  - of: (*jobRing).push
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*jobRing).push
+        kind: self
+      - id: r.tail.Load
+        kind: value
+      - id: r.tail.Store
+        kind: value
+    steps:
+      - bind: t
+        eval: r.tail.Load()
+        to: r.tail.Load
+      - opt:
+          do:
+            - return: "false"
+          when: t-r.head.Load() == uint64(len(r.jobs))
+      - set: r.jobs[t&r.mask]
+        value: job
+      - eval: r.tail.Store(t + 1)
+        to: r.tail.Store
+      - return: "true"
+  - of: (*jobRing).pop
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*jobRing).pop
+        kind: self
+      - id: r.head.Load
+        kind: value
+      - id: r.head.Store
+        kind: value
+    steps:
+      - bind: h
+        eval: r.head.Load()
+        to: r.head.Load
+      - opt:
+          do:
+            - return: corenet.LoopJobValue{}, false
+          when: h == r.tail.Load()
+      - bind: job
+        eval: r.jobs[h&r.mask]
+      - eval: r.head.Store(h + 1)
+        to: r.head.Store
+      - return: job, true
+  - of: (*outboundLane).Send
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*outboundLane).Send
+        kind: self
+      - id: l.io.Store
+        kind: value
+      - id: l.refused.Add
+        kind: value
+    steps:
+      - opt:
+          do:
+            - bind: kept
+              eval: io
+            - eval: l.io.Store(&kept)
+              to: l.io.Store
+          when: l.io.Load() == nil
+      - opt:
+          do:
+            - eval: l.refused.Add(1)
+              to: l.refused.Add
+            - return: corenet.LoopOutboundFull
+          when: "!l.jobs.push(job)"
+      - select:
+          cases:
+            - comm: l.wake <- struct{}{}
+            - default: true
+      - return: nil
+  - of: (*outboundLane).run
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*outboundLane).run
+        kind: self
+      - id: done.Done
+        kind: value
+      - id: l.jobs.pop
+        kind: internal
+      - id: w.Work
+        kind: value
+      - id: l.complete
+        kind: internal
+    steps:
+      - defer: done.Done()
+        to: done.Done
+      - loop:
+          cond: "!l.stopped.Load()"
+          do:
+            - bind: job, ok
+              eval: l.jobs.pop()
+              to: l.jobs.pop
+            - opt:
+                do:
+                  - eval: <-l.wake
+                  - continue: true
+                when: "!ok"
+            - eval: w.Work(l.lane, job)
+              to: w.Work
+            - eval: l.complete(job)
+              to: l.complete
+  - of: (*outboundLane).complete
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*outboundLane).complete
+        kind: self
+      - id: time
+        kind: stdlib
+      - id: l.io.Load
+        kind: value
+      - id: (*io).Post
+        kind: value
+    steps:
+      - loop:
+          cond: "!l.done.push(job)"
+          do:
+            - opt:
+                do:
+                  - return: ""
+                when: l.stopped.Load()
+            - eval: time.Sleep(postRetry)
+              to: time
+      - opt:
+          do:
+            - return: ""
+          when: "!l.posted.CompareAndSwap(false, true)"
+      - bind: io
+        eval: l.io.Load()
+        to: l.io.Load
+      - loop:
+          do:
+            - bind: err
+              eval: (*io).Post(runCompletions, l.key)
+              to: (*io).Post
+            - opt:
+                do:
+                  - return: ""
+                when: err == nil || !errors.Is(err, corenet.LoopPostQueueFull)
+            - eval: time.Sleep(postRetry)
+              to: time
+          forever: true
+  - of: (*outboundLane).drain
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*outboundLane).drain
+        kind: self
+      - id: l.posted.Store
+        kind: value
+      - id: l.done.pop
+        kind: internal
+      - id: l.off.OnDone
+        kind: value
+    steps:
+      - eval: l.posted.Store(false)
+        to: l.posted.Store
+      - loop:
+          do:
+            - bind: job, ok
+              eval: l.done.pop()
+              to: l.done.pop
+            - opt:
+                do:
+                  - return: ""
+                when: "!ok"
+            - eval: l.off.OnDone(io, job)
+              to: l.off.OnDone
+          forever: true
+  - of: (*laneTable).now
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*laneTable).now
+        kind: self
+      - id: t.lanes.Load
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "*p"
+          init:
+            bind: p
+            eval: t.lanes.Load()
+            to: t.lanes.Load
+          when: p != nil
+      - return: nil
+  - of: registerLane
+    participants:
+      - id: caller
+        kind: actor
+      - id: registerLane
+        kind: self
+      - id: lanesWith
+        kind: internal
+      - id: outboundLanes.lanes.Store
+        kind: value
+    steps:
+      - lock:
+          mutex: outboundLanes.mu
+      - set: l.key
+        value: outboundLanes.next
+      - op: ++
+        set: outboundLanes.next
+      - bind: next
+        eval: lanesWith(len(outboundLanes.now()) + 1)
+        to: lanesWith
+      - set: next[l.key]
+        value: l
+      - eval: outboundLanes.lanes.Store(&next)
+        to: outboundLanes.lanes.Store
+  - of: releaseLane
+    participants:
+      - id: caller
+        kind: actor
+      - id: releaseLane
+        kind: self
+      - id: lanesWith
+        kind: internal
+      - id: outboundLanes.lanes.Store
+        kind: value
+    steps:
+      - lock:
+          mutex: outboundLanes.mu
+      - bind: next
+        eval: lanesWith(len(outboundLanes.now()))
+        to: lanesWith
+      - eval: delete(next, l.key)
+      - eval: outboundLanes.lanes.Store(&next)
+        to: outboundLanes.lanes.Store
+  - of: lanesWith
+    participants:
+      - id: caller
+        kind: actor
+      - id: lanesWith
+        kind: self
+      - id: maps
+        kind: stdlib
+    steps:
+      - bind: next
+        eval: make(map[uintptr]*outboundLane, n)
+      - eval: maps.Copy(next, outboundLanes.now())
+        to: maps
+      - return: next
+  - of: runCompletions
+    participants:
+      - id: caller
+        kind: actor
+      - id: runCompletions
+        kind: self
+      - id: l.drain
+        kind: internal
+    steps:
+      - bind: l
+        eval: outboundLanes.now()[key]
+      - opt:
+          do:
+            - return: ""
+          when: l == nil
+      - eval: l.drain(io)
+        to: l.drain
+  - of: startOutbound
+    participants:
+      - id: caller
+        kind: actor
+      - id: startOutbound
+        kind: self
+      - id: findOffloader
+        kind: internal
+      - id: orDefaultInt
+        kind: internal
+      - id: loopLanes
+        kind: internal
+      - id: registerLane
+        kind: internal
+      - id: o.workers.Add
+        kind: value
+      - id: l.run
+        kind: internal
+      - id: off.OnOutbound
+        kind: value
+    steps:
+      - bind: off, w
+        eval: findOffloader(chain)
+        to: findOffloader
+      - opt:
+          do:
+            - return: nil
+          when: w == nil
+      - bind: o
+        eval: "&outbound{}"
+      - bind: depth
+        eval: orDefaultInt(v.Outbound, defaultOutboundDepth)
+        to: orDefaultInt
+      - bind: "n"
+        eval: loopLanes(v)
+        to: loopLanes
+      - bind: outs
+        eval: make([]corenet.LoopOutbound, n)
+      - loop:
+          do:
+            - bind: l
+              eval: |-
+                &outboundLane{
+                			lane: i, jobs: newJobRing(depth), done: newJobRing(depth),
+                			wake: make(chan struct{}, 1), refused: &o.refused, off: off,
+                		}
+            - eval: registerLane(l)
+              to: registerLane
+            - set: o.lanes
+              value: append(o.lanes, l)
+            - set: outs[i]
+              value: l
+            - eval: o.workers.Add(1)
+              to: o.workers.Add
+            - go: l.run(w, &o.workers)
+              to: l.run
+          key: i
+          range: "n"
+      - eval: "off.OnOutbound(corenet.LoopOutboundValue{Lanes: outs, OutputCap: orDefaultInt(v.OutputCap, portableOutputCap)})"
+        to: off.OnOutbound
+      - set: o.busy
+        value: off.Pending
+      - return: o
+  - of: startOffloading
+    participants:
+      - id: caller
+        kind: actor
+      - id: startOffloading
+        kind: self
+      - id: startOutbound
+        kind: internal
+      - id: startLoopEngine
+        kind: internal
+      - id: out.signal
+        kind: internal
+      - id: out.wait
+        kind: internal
+    steps:
+      - bind: out
+        eval: startOutbound(group.loopChain, group.loop)
+        to: startOutbound
+      - opt:
+          do:
+            - return: startLoopEngine(group, lns, plan)
+              to: startLoopEngine
+          when: out == nil
+      - set: group.loopBusy
+        value: out.busy
+      - bind: eng, err
+        eval: startLoopEngine(group, lns, plan)
+        to: startLoopEngine
+      - opt:
+          do:
+            - eval: out.signal()
+              to: out.signal
+            - eval: out.wait(ctx)
+              to: out.wait
+            - return: nil, err
+          when: err != nil
+      - return: "&offloadedEngine{loopEngine: eng, out: out}, nil"
+  - of: findOffloader
+    participants:
+      - id: caller
+        kind: actor
+      - id: findOffloader
+        kind: self
+      - id: off.Worker
+        kind: value
+      - id: layered.Next
+        kind: value
+    steps:
+      - loop:
+          cond: h != nil
+          do:
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: off, w
+                      init:
+                        bind: w
+                        eval: off.Worker()
+                        to: off.Worker
+                      when: w != nil
+                init:
+                  bind: off, ok
+                  eval: h.(corenet.LoopOffloader)
+                when: ok
+            - bind: layered, ok
+              eval: h.(corenet.LoopLayered)
+            - opt:
+                do:
+                  - return: nil, nil
+                when: "!ok"
+            - set: h
+              to: layered.Next
+              value: layered.Next()
+      - return: nil, nil
+  - of: (*outbound).signal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*outbound).signal
+        kind: self
+      - id: o.stopOnce.Do
+        kind: value
+    steps:
+      - eval: |-
+          o.stopOnce.Do(func() {
+          		//: each worker, woken to see it, and its entry released.
+          		for _, l := range o.lanes {
+          			l.stopped.Store(true)
+          			releaseLane(l)
+          			select {
+          			case l.wake <- struct{}{}:
+          			default:
+          			}
+          		}
+          	})
+        to: o.stopOnce.Do
+  - of: (*outbound).wait
+    steps:
+      - bind: waited
+        eval: make(chan struct{})
+      - go: |-
+          func() {
+          		o.workers.Wait()
+          		close(waited)
+          	}()
+      - select:
+          cases:
+            - comm: <-waited
+            - comm: <-ctx.Done()
+  - of: (*offloadedEngine).Shutdown
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*offloadedEngine).Shutdown
+        kind: self
+      - id: e.loopEngine.Shutdown
+        kind: internal
+      - id: e.out.signal
+        kind: internal
+      - id: e.out.wait
+        kind: internal
+    steps:
+      - bind: err
+        eval: e.loopEngine.Shutdown(ctx)
+        to: e.loopEngine.Shutdown
+      - eval: e.out.signal()
+        to: e.out.signal
+      - eval: e.out.wait(ctx)
+        to: e.out.wait
+      - return: err
+  - of: (*offloadedEngine).Close
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*offloadedEngine).Close
+        kind: self
+      - id: e.loopEngine.Close
+        kind: internal
+      - id: e.out.signal
+        kind: internal
+    steps:
+      - bind: err
+        eval: e.loopEngine.Close()
+        to: e.loopEngine.Close
+      - eval: e.out.signal()
+        to: e.out.signal
+      - return: err
+  - of: (*offloadedEngine).State
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*offloadedEngine).State
+        kind: self
+      - id: e.loopEngine.State
+        kind: internal
+      - id: e.out.refused.Load
+        kind: value
+    steps:
+      - bind: st
+        eval: e.loopEngine.State()
+        to: e.loopEngine.State
+      - set: st.OutboundRefused
+        to: e.out.refused.Load
+        value: e.out.refused.Load()
+      - return: st
   - of: (*portableGroup).live
     participants:
       - id: caller
@@ -3868,7 +4369,7 @@ sequences:
             - set: g.lanes
               value: |-
                 append(g.lanes, &portableLoop{
-                			g: g, lane: i, h: group.loopChain,
+                			g: g, lane: i, h: group.loopChain, busy: group.loopBusy,
                 			spillCap: orDefaultInt(v.SpillCap, portableSpillCap),
                 			outCap:   orDefaultInt(v.OutputCap, portableOutputCap),
                 			idle:     loopIdle(group),
@@ -4576,7 +5077,7 @@ sequences:
         kind: actor
       - id: (*portableLoop).control
         kind: self
-      - id: pl.markDirty
+      - id: pl.closeSettled
         kind: internal
     steps:
       - opt:
@@ -4585,6 +5086,17 @@ sequences:
           when: "!pl.g.drainReq.Load()"
       - set: pl.draining
         value: "true"
+      - eval: pl.closeSettled()
+        to: pl.closeSettled
+  - of: (*portableLoop).closeSettled
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*portableLoop).closeSettled
+        kind: self
+      - id: pl.markDirty
+        kind: internal
+    steps:
       - loop:
           do:
             - opt:
@@ -4593,7 +5105,9 @@ sequences:
                     value: true, corenet.ServerClosed
                   - eval: pl.markDirty(int32(slot))
                     to: pl.markDirty
-                when: pc.open && !pc.reasonSet && len(pc.spill) == pc.spillOff
+                when: |-
+                  pc.open && !pc.reasonSet && len(pc.spill) == pc.spillOff &&
+                  			(pl.busy == nil || !pl.busy(pl.lane, corenet.LoopConnRef{Slot: uint32(slot), Gen: pc.gen}))
           key: slot
           range: pl.conns
           value: pc

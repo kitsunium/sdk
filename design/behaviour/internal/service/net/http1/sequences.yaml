@@ -432,11 +432,26 @@ sequences:
     steps:
       - bind: b, _
         eval: h.(corenet.HTTP1Batcher)
-      - return: "&LoopHandler{h: h, batcher: b, p: p}"
+      - bind: w, _
+        eval: h.(corenet.HTTP1Worker)
+      - return: "&LoopHandler{h: h, batcher: b, worker: w, p: p, holdCap: defaultHoldCap}"
   - of: (*LoopHandler).OnOpen
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).OnOpen
+        kind: self
+      - id: a.state(io.Loop()).flag(ref).reset
+        kind: internal
     steps:
-      - set: "*a.state(io.Loop()).flag(ref)"
-        value: "connFlag{gen: ref.Gen}"
+      - eval: a.state(io.Loop()).flag(ref).reset(ref.Gen)
+        to: a.state(io.Loop()).flag(ref).reset
+  - of: (*connFlag).reset
+    steps:
+      - bind: held, buf
+        eval: f.held[:0], f.buf[:0]
+      - set: "*f"
+        value: "connFlag{gen: gen, held: held, buf: buf}"
   - of: (*LoopHandler).OnData
     participants:
       - id: caller
@@ -512,6 +527,10 @@ sequences:
         kind: internal
       - id: a.h.ServeHTTP1
         kind: value
+      - id: st.flag
+        kind: internal
+      - id: a.hold
+        kind: internal
       - id: AppendResponse
         kind: internal
       - id: st.give
@@ -528,6 +547,15 @@ sequences:
         to: a.h.ServeHTTP1
       - bind: closing
         eval: st.req.Close || res.Close || io.Pressure(ref)
+      - opt:
+          do:
+            - return: "a.hold(st, &answer{io: io, ref: ref, f: f, res: res, closing: closing})"
+              to: a.hold
+          init:
+            bind: f
+            eval: st.flag(ref)
+            to: st.flag
+          when: res.Pending || len(f.held) > 0
       - opt:
           do:
             - op: ++
@@ -585,9 +613,13 @@ sequences:
         kind: internal
       - id: a.batcher.EndBatch
         kind: value
+      - id: st.completeHeld
+        kind: internal
       - id: st.complete
         kind: internal
       - id: st.flush
+        kind: internal
+      - id: st.flushReady
         kind: internal
     steps:
       - bind: loop
@@ -599,16 +631,20 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: len(st.items) == 0
+          when: len(st.items) == 0 && len(st.ready) == 0 && len(st.deferHeld) == 0 && len(st.dropped) == 0
       - opt:
           do:
             - eval: a.batcher.EndBatch(loop)
               to: a.batcher.EndBatch
           when: st.served > 0 && a.batcher != nil
+      - eval: st.completeHeld()
+        to: st.completeHeld
       - eval: st.complete()
         to: st.complete
       - eval: st.flush(io)
         to: st.flush
+      - eval: st.flushReady(io)
+        to: st.flushReady
       - set: st.items, st.out, st.served
         value: st.items[:0], st.out[:0], 0
   - of: (*LoopHandler).Unwrap
@@ -630,9 +666,20 @@ sequences:
           key: i
           range: lanes
   - of: (*LoopHandler).OnClose
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).OnClose
+        kind: self
+      - id: swallowErr
+        kind: internal
+      - id: a.closed
+        kind: internal
     steps:
-      - set: _, _, _
-        value: io, ref, err
+      - eval: swallowErr(err)
+        to: swallowErr
+      - eval: a.closed(io, ref)
+        to: a.closed
   - of: (*loopState).complete
     participants:
       - id: caller
@@ -772,6 +819,13 @@ sequences:
       - set: st.free
         value: append(st.free, res)
   - of: (*loopState).flag
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loopState).flag
+        kind: self
+      - id: f.reset
+        kind: internal
     steps:
       - bind: ring, slot
         eval: int(ref.Ring), int(ref.Slot)
@@ -792,8 +846,23 @@ sequences:
         eval: "&st.conns[ring][slot]"
       - opt:
           do:
-            - set: "*f"
-              value: "connFlag{gen: ref.Gen}"
+            - eval: f.reset(ref.Gen)
+              to: f.reset
+          when: f.gen != ref.Gen
+      - return: f
+  - of: (*loopState).peek
+    steps:
+      - bind: ring, slot
+        eval: int(ref.Ring), int(ref.Slot)
+      - opt:
+          do:
+            - return: nil
+          when: ring >= len(st.conns) || slot >= len(st.conns[ring])
+      - bind: f
+        eval: "&st.conns[ring][slot]"
+      - opt:
+          do:
+            - return: nil
           when: f.gen != ref.Gen
       - return: f
   - of: (*LoopHandler).state
@@ -850,7 +919,9 @@ sequences:
         eval: make([]*loopState, max(len(cur), i+1))
       - eval: copy(next, cur)
       - bind: st
-        eval: "&loopState{}"
+        eval: "&loopState{unavailable: corenet.HTTP1ResponseValue{Status: statusUnavailable, Header: retryAfter}, readyEpoch: 1}"
+      - set: st.headStub.Method
+        value: methodHead
       - set: st.req.Lane
         value: i
       - set: next[i]
@@ -864,6 +935,575 @@ sequences:
           do:
             - return: ""
           when: err == nil
+  - of: pendingWorker.Work
+    participants:
+      - id: caller
+        kind: actor
+      - id: pendingWorker.Work
+        kind: self
+      - id: w.a.worker.WorkHTTP1
+        kind: value
+    steps:
+      - bind: slot
+        eval: (*w.a.state(lane).slots.Load())[job.Slot]
+      - opt:
+          do:
+            - return: ""
+          when: slot.cancelled.Load()
+      - eval: w.a.worker.WorkHTTP1(lane, job.Arg, &slot.res)
+        to: w.a.worker.WorkHTTP1
+  - of: (*LoopHandler).Worker
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: a.worker == nil
+      - return: "pendingWorker{a: a}"
+  - of: (*LoopHandler).OnOutbound
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).OnOutbound
+        kind: self
+      - id: orDefault
+        kind: internal
+    steps:
+      - set: a.holdCap
+        to: orDefault
+        value: orDefault(v.OutputCap, defaultHoldCap)
+      - loop:
+          do:
+            - set: a.state(i).outbound
+              value: out
+          key: i
+          range: v.Lanes
+          value: out
+  - of: (*LoopHandler).OnDone
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).OnDone
+        kind: self
+      - id: a.state
+        kind: internal
+      - id: st.peek
+        kind: internal
+      - id: st.freeSlot
+        kind: internal
+      - id: st.markReady
+        kind: internal
+    steps:
+      - bind: st
+        eval: a.state(io.Loop())
+        to: a.state
+      - bind: slot
+        eval: (*st.slots.Load())[job.Slot]
+      - opt:
+          do:
+            - return: ""
+          when: slot.gen != job.Gen
+      - bind: f
+        eval: st.peek(slot.ref)
+        to: st.peek
+      - opt:
+          do:
+            - eval: st.freeSlot(job.Slot)
+              to: st.freeSlot
+            - return: ""
+          when: slot.cancelled.Load() || f == nil
+      - set: slot.done
+        value: "true"
+      - eval: st.markReady(slot.ref, f)
+        to: st.markReady
+  - of: (*LoopHandler).Pending
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).Pending
+        kind: self
+      - id: a.state(lane).peek
+        kind: internal
+    steps:
+      - bind: f
+        eval: a.state(lane).peek(ref)
+        to: a.state(lane).peek
+      - return: f != nil && len(f.held) > 0
+  - of: (*LoopHandler).hold
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).hold
+        kind: self
+      - id: a.holdPending
+        kind: internal
+      - id: st.holdBytes
+        kind: internal
+      - id: st.give
+        kind: internal
+      - id: st.markReady
+        kind: internal
+      - id: st.dropHeld
+        kind: internal
+      - id: swallowErr
+        kind: internal
+    steps:
+      - bind: f, res
+        eval: an.f, an.res
+      - switch:
+          cases:
+            - case: res.Pending
+              do:
+                - eval: a.holdPending(st, an)
+                  to: a.holdPending
+            - case: res.Defer
+              do:
+                - set: f.held
+                  value: "append(f.held, heldItem{res: res, stub: st.stubOf(isHead(st.req.Method)), closing: an.closing})"
+                - set: st.deferHeld
+                  value: append(st.deferHeld, an.ref)
+            - default: true
+              do:
+                - eval: st.holdBytes(an, res)
+                  to: st.holdBytes
+                - eval: st.give(res)
+                  to: st.give
+      - eval: st.markReady(an.ref, f)
+        to: st.markReady
+      - opt:
+          do:
+            - eval: st.dropHeld(f)
+              to: st.dropHeld
+            - set: f.dead
+              value: "true"
+            - eval: swallowErr(an.io.Close(an.ref))
+              to: swallowErr
+            - return: "true"
+          when: len(f.buf) > a.holdCap
+      - return: an.closing
+  - of: (*LoopHandler).holdPending
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).holdPending
+        kind: self
+      - id: st.give
+        kind: internal
+      - id: st.takeSlot
+        kind: internal
+      - id: st.freeSlot
+        kind: internal
+      - id: st.holdBytes
+        kind: internal
+    steps:
+      - bind: res
+        eval: an.res
+      - eval: st.give(res)
+        to: st.give
+      - opt:
+          do:
+            - set: an.closing
+              value: "true"
+            - set: an.f.buf
+              value: append(an.f.buf, internalError...)
+            - set: an.f.held
+              value: "append(an.f.held, heldItem{off: len(an.f.buf) - len(internalError), end: len(an.f.buf), closing: true})"
+            - return: ""
+          when: res.Defer || a.worker == nil || st.outbound == nil
+      - bind: idx, slot
+        eval: st.takeSlot()
+        to: st.takeSlot
+      - set: slot.ref
+        value: an.ref
+      - set: slot.stub.Method, slot.stub.Close
+        value: nil, an.closing
+      - opt:
+          do:
+            - set: slot.stub.Method
+              value: methodHead
+          when: isHead(st.req.Method)
+      - opt:
+          do:
+            - set: an.f.held
+              value: "append(an.f.held, heldItem{slot: slot, closing: an.closing})"
+            - return: ""
+          when: "st.outbound.Send(an.io, corenet.LoopJobValue{Ref: an.ref, Slot: idx, Gen: slot.gen, Arg: res.Job}) == nil"
+      - eval: st.freeSlot(idx)
+        to: st.freeSlot
+      - eval: st.holdBytes(an, &st.unavailable)
+        to: st.holdBytes
+  - of: (*loopState).holdBytes
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loopState).holdBytes
+        kind: self
+      - id: AppendResponse
+        kind: internal
+    steps:
+      - bind: f
+        eval: an.f
+      - bind: "off"
+        eval: len(f.buf)
+      - bind: out, err
+        eval: AppendResponse(f.buf, &st.req, res, an.closing)
+        to: AppendResponse
+      - opt:
+          do:
+            - set: out
+              value: append(f.buf, internalError...)
+            - set: an.closing
+              value: "true"
+          when: err != nil
+      - set: f.buf
+        value: out
+      - set: f.held
+        value: "append(f.held, heldItem{off: off, end: len(f.buf), closing: an.closing})"
+  - of: (*loopState).stubOf
+    steps:
+      - opt:
+          do:
+            - return: "&st.headStub"
+          when: head
+      - return: "&st.plainStub"
+  - of: (*LoopHandler).closed
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).closed
+        kind: self
+      - id: a.state
+        kind: internal
+      - id: st.peek
+        kind: internal
+      - id: st.dropHeld
+        kind: internal
+    steps:
+      - bind: st
+        eval: a.state(io.Loop())
+        to: a.state
+      - opt:
+          do:
+            - eval: st.dropHeld(f)
+              to: st.dropHeld
+          init:
+            bind: f
+            eval: st.peek(ref)
+            to: st.peek
+          when: f != nil
+  - of: isHead
+    participants:
+      - id: caller
+        kind: actor
+      - id: isHead
+        kind: self
+      - id: bytes
+        kind: stdlib
+    steps:
+      - return: bytes.Equal(method, methodHead)
+        to: bytes
+  - of: (*loopState).takeSlot
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loopState).takeSlot
+        kind: self
+      - id: st.growSlots
+        kind: internal
+      - id: slot.cancelled.Store
+        kind: value
+    steps:
+      - opt:
+          do:
+            - eval: st.growSlots()
+              to: st.growSlots
+          when: len(st.freeSlots) == 0
+      - bind: idx
+        eval: st.freeSlots[len(st.freeSlots)-1]
+      - set: st.freeSlots
+        value: st.freeSlots[:len(st.freeSlots)-1]
+      - bind: slot
+        eval: (*st.slots.Load())[idx]
+      - op: ++
+        set: slot.gen
+      - set: slot.res, slot.done
+        value: corenet.HTTP1ResponseValue{}, false
+      - eval: slot.cancelled.Store(false)
+        to: slot.cancelled.Store
+      - return: idx, slot
+  - of: (*loopState).growSlots
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loopState).growSlots
+        kind: self
+      - id: st.slots.Load
+        kind: value
+      - id: st.slots.Store
+        kind: value
+    steps:
+      - var:
+          name: cur
+          type: "[]*pendSlot"
+      - opt:
+          do:
+            - set: cur
+              value: "*p"
+          init:
+            bind: p
+            eval: st.slots.Load()
+            to: st.slots.Load
+          when: p != nil
+      - bind: next
+        eval: make([]*pendSlot, len(cur), max(2*len(cur), 8))
+      - eval: copy(next, cur)
+      - loop:
+          cond: i < cap(next)
+          do:
+            - set: next
+              value: "append(next, &pendSlot{idx: uint32(i)})"
+            - set: st.freeSlots
+              value: append(st.freeSlots, uint32(i))
+          init: i := len(cur)
+          post: i++
+      - eval: st.slots.Store(&next)
+        to: st.slots.Store
+  - of: (*loopState).freeSlot
+    steps:
+      - set: st.freeSlots
+        value: append(st.freeSlots, idx)
+  - of: (*loopState).markReady
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: f.readyAt == st.readyEpoch
+      - set: f.readyAt
+        value: st.readyEpoch
+      - set: st.ready
+        value: append(st.ready, ref)
+  - of: (*loopState).dropHeld
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loopState).dropHeld
+        kind: self
+      - id: st.freeSlot
+        kind: internal
+      - id: it.slot.cancelled.Store
+        kind: value
+    steps:
+      - loop:
+          do:
+            - switch:
+                cases:
+                  - case: it.slot != nil && it.slot.done
+                    do:
+                      - eval: st.freeSlot(it.slot.idx)
+                        to: st.freeSlot
+                  - case: it.slot != nil
+                    do:
+                      - eval: it.slot.cancelled.Store(true)
+                        to: it.slot.cancelled.Store
+                  - case: it.res != nil
+                    do:
+                      - set: st.dropped
+                        value: append(st.dropped, it.res)
+          key: _
+          range: f.held
+          value: it
+      - set: f.held, f.buf
+        value: f.held[:0], f.buf[:0]
+  - of: (*loopState).completeHeld
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loopState).completeHeld
+        kind: self
+      - id: st.peek
+        kind: internal
+      - id: st.completeConn
+        kind: internal
+      - id: st.give
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: st.completeConn(ref, f)
+                    to: st.completeConn
+                init:
+                  bind: f
+                  eval: st.peek(ref)
+                  to: st.peek
+                when: f != nil
+          key: _
+          range: st.deferHeld
+          value: ref
+      - set: st.deferHeld
+        value: st.deferHeld[:0]
+      - loop:
+          do:
+            - eval: st.give(res)
+              to: st.give
+            - set: st.dropped[i]
+              value: nil
+          key: i
+          range: st.dropped
+          value: res
+      - set: st.dropped
+        value: st.dropped[:0]
+  - of: (*loopState).completeConn
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loopState).completeConn
+        kind: self
+      - id: appendHeld
+        kind: internal
+      - id: st.give
+        kind: internal
+      - id: st.markReady
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: it
+              eval: "&f.held[i]"
+            - opt:
+                do:
+                  - bind: "off"
+                    eval: len(f.buf)
+                  - var:
+                      name: closing
+                      type: bool
+                  - set: f.buf, closing
+                    to: appendHeld
+                    value: appendHeld(f.buf, it.stub, it.res, it.closing)
+                  - set: it.closing, it.off, it.end
+                    value: closing, off, len(f.buf)
+                  - eval: st.give(it.res)
+                    to: st.give
+                  - set: it.res
+                    value: nil
+                when: it.res != nil
+          key: i
+          range: f.held
+      - eval: st.markReady(ref, f)
+        to: st.markReady
+  - of: appendHeld
+    participants:
+      - id: caller
+        kind: actor
+      - id: appendHeld
+        kind: self
+      - id: AppendResponse
+        kind: internal
+    steps:
+      - bind: out, err
+        eval: AppendResponse(dst, stub, res, closing)
+        to: AppendResponse
+      - opt:
+          do:
+            - return: append(dst, internalError...), true
+          when: res.Defer || res.Pending || err != nil
+      - return: out, closing || res.Close
+  - of: (*loopState).flushReady
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loopState).flushReady
+        kind: self
+      - id: st.peek
+        kind: internal
+      - id: st.flushHeld
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: st.flushHeld(io, ref, f)
+                    to: st.flushHeld
+                init:
+                  bind: f
+                  eval: st.peek(ref)
+                  to: st.peek
+                when: f != nil
+          key: _
+          range: st.ready
+          value: ref
+      - set: st.ready
+        value: st.ready[:0]
+      - op: ++
+        set: st.readyEpoch
+  - of: (*loopState).flushHeld
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loopState).flushHeld
+        kind: self
+      - id: st.appendItem
+        kind: internal
+      - id: f.compact
+        kind: internal
+      - id: st.write
+        kind: internal
+      - id: st.dropHeld
+        kind: internal
+    steps:
+      - bind: out, n, closing
+        eval: st.held[:0], 0, false
+      - loop:
+          cond: n < len(f.held) && !closing && f.held[n].ready()
+          do:
+            - set: out, closing
+              to: st.appendItem
+              value: st.appendItem(out, f, f.held[n])
+          post: n++
+      - set: st.held
+        value: out
+      - opt:
+          do:
+            - return: ""
+          when: n == 0
+      - bind: rest
+        eval: copy(f.held, f.held[n:])
+      - set: f.held
+        value: f.held[:rest]
+      - eval: f.compact()
+        to: f.compact
+      - eval: st.write(io, ref, out, closing)
+        to: st.write
+      - opt:
+          do:
+            - eval: st.dropHeld(f)
+              to: st.dropHeld
+          when: closing || f.dead
+  - of: heldItem.ready
+    steps:
+      - return: (it.slot == nil || it.slot.done) && it.res == nil
+  - of: (*loopState).appendItem
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loopState).appendItem
+        kind: self
+      - id: appendHeld
+        kind: internal
+      - id: st.freeSlot
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: append(out, f.buf[it.off:it.end]...), it.closing
+          when: it.slot == nil
+      - bind: next, closing
+        eval: appendHeld(out, &it.slot.stub, &it.slot.res, it.slot.stub.Close)
+        to: appendHeld
+      - eval: st.freeSlot(it.slot.idx)
+        to: st.freeSlot
+      - return: next, closing
   - of: tokenTable
     steps:
       - var:

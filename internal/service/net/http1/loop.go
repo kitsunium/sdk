@@ -37,8 +37,9 @@ const internalError string = "HTTP/1.1 500 Internal Server Error\r\nContent-Leng
 // below p's head and body bounds) closes it too, with LoopSpillFull.
 func HandleLoop(h corenet.HTTP1Handler, p Parser) *LoopHandler {
 	b, _ := h.(corenet.HTTP1Batcher)
-	//: the batcher is found once, never per batch.
-	return &LoopHandler{h: h, batcher: b, p: p}
+	w, _ := h.(corenet.HTTP1Worker)
+	//: the batcher and the worker are found once, never per batch.
+	return &LoopHandler{h: h, batcher: b, worker: w, p: p, holdCap: defaultHoldCap}
 }
 
 // LoopHandler serves the restricted HTTP/1.1 profile on a loop group: the
@@ -54,6 +55,12 @@ type LoopHandler struct {
 	h corenet.HTTP1Handler
 	// batcher is h as an HTTP1Batcher, nil when it is not one.
 	batcher corenet.HTTP1Batcher
+	// worker is h as an HTTP1Worker, nil when it is not one: what a Pending
+	// answer is offloaded to (R3).
+	worker corenet.HTTP1Worker
+	// holdCap bounds what one connection holds back behind a pending answer:
+	// the group's OutputCap, given at OnOutbound.
+	holdCap int
 	// p frames every request.
 	p Parser
 	// loops holds each loop's state at its LoopIO.Loop index. It is replaced,
@@ -85,6 +92,31 @@ type loopState struct {
 	conns [][]connFlag
 	// served counts the requests the batch handed to the handler.
 	served int
+	// outbound is the lane's outbound to its worker, nil when nothing
+	// offloads.
+	outbound corenet.LoopOutbound
+	// slots are the pending answers' slots, by index; replaced, never written
+	// in place, so the worker reads it without a lock.
+	slots atomic.Pointer[[]*pendSlot]
+	// freeSlots are the indexes of the slots no answer holds.
+	freeSlots []uint32
+	// ready are the connections whose held answers the batch's end flushes.
+	ready []corenet.LoopConnRef
+	// deferHeld are the connections holding a deferred answer behind a
+	// pending one, completed after EndBatch.
+	deferHeld []corenet.LoopConnRef
+	// dropped are the held deferred responses a closed connection gave up
+	// during the batch, returned to the pool after EndBatch.
+	dropped []*corenet.HTTP1ResponseValue
+	// held is the scratch a connection's held answers are written from.
+	held []byte
+	// unavailable is the 503 a pending answer refused by a full queue gets.
+	unavailable corenet.HTTP1ResponseValue
+	// readyEpoch numbers the batches' ready lists, from one.
+	readyEpoch uint64
+	// headStub and plainStub are the requests a held deferred answer is
+	// written with: HEAD, or no method.
+	headStub, plainStub corenet.HTTP1RequestValue
 }
 
 // item is one answer of a batch.
@@ -113,11 +145,26 @@ type connFlag struct {
 	// dead is set once a write was refused or the close was asked: nothing
 	// more is written to it.
 	dead bool
+	// readyAt is the lane's readyEpoch the connection was last queued in,
+	// so it is queued once a batch.
+	readyAt uint64
+	// held are the answers held behind a pending one, in request order (R3).
+	held []heldItem
+	// buf holds the held answers' bytes.
+	buf []byte
 }
 
 // OnOpen implements corenet.LoopHandler. It marks the connection open on its lane.
 func (a *LoopHandler) OnOpen(io corenet.LoopIO, ref corenet.LoopConnRef) {
-	*a.state(io.Loop()).flag(ref) = connFlag{gen: ref.Gen}
+	a.state(io.Loop()).flag(ref).reset(ref.Gen)
+}
+
+// reset makes f a new connection's, of generation gen, keeping the backing
+// of its held answers and their buffer, so a slot's churn reallocates
+// neither.
+func (f *connFlag) reset(gen uint32) {
+	held, buf := f.held[:0], f.buf[:0]
+	*f = connFlag{gen: gen, held: held, buf: buf}
 }
 
 // OnData implements corenet.LoopHandler. It frames every whole request at the
@@ -171,6 +218,11 @@ func (a *LoopHandler) serve(io corenet.LoopIO, ref corenet.LoopConnRef, st *loop
 	st.served++
 	a.h.ServeHTTP1(&st.req, res)
 	closing := st.req.Close || res.Close || io.Pressure(ref)
+	//: pending, or behind a pending answer: held, in order (R3).
+	if f := st.flag(ref); res.Pending || len(f.held) > 0 {
+		//: whether the connection closes after it.
+		return a.hold(st, &answer{io: io, ref: ref, f: f, res: res, closing: closing})
+	}
 	//: deferred: the response value is kept, and written at the batch's end.
 	if res.Defer {
 		st.deferred++
@@ -214,8 +266,8 @@ func (*LoopHandler) OnWritable(io corenet.LoopIO, ref corenet.LoopConnRef) {
 func (a *LoopHandler) OnBatchEnd(io corenet.LoopIO) {
 	loop := io.Loop()
 	st := a.state(loop)
-	//: a batch with no answer has nothing to end.
-	if len(st.items) == 0 {
+	//: a batch with no answer, and no held one ready, has nothing to end.
+	if len(st.items) == 0 && len(st.ready) == 0 && len(st.deferHeld) == 0 && len(st.dropped) == 0 {
 		//: nothing queued.
 		return
 	}
@@ -223,8 +275,11 @@ func (a *LoopHandler) OnBatchEnd(io corenet.LoopIO) {
 	if st.served > 0 && a.batcher != nil {
 		a.batcher.EndBatch(loop)
 	}
+	st.completeHeld()
 	st.complete()
 	st.flush(io)
+	//: the held answers come after the batch's own, which precede them.
+	st.flushReady(io)
 	st.items, st.out, st.served = st.items[:0], st.out[:0], 0
 }
 
@@ -246,12 +301,16 @@ func (a *LoopHandler) OnStart(lanes int) {
 	}
 }
 
-// OnClose implements corenet.LoopHandler. The connection's flag stays until
-// the next OnOpen of its slot replaces it; an answer of the batch still
-// queued for it is dropped when its Write is refused as stale.
-func (*LoopHandler) OnClose(io corenet.LoopIO, ref corenet.LoopConnRef, err error) {
-	//: the flag is replaced by the slot's next OnOpen; the arguments are the port's.
-	_, _, _ = io, ref, err
+// OnClose implements corenet.LoopHandler. The connection's held answers are
+// given up — a pending one's job cancelled, its slot freed when it comes back
+// — and its flag stays until the next OnOpen of its slot replaces it; an
+// answer of the batch still queued for it is dropped when its Write is
+// refused as stale.
+func (a *LoopHandler) OnClose(io corenet.LoopIO, ref corenet.LoopConnRef, err error) {
+	//: why it closed changes nothing here.
+	swallowErr(err)
+	//: the lane's own.
+	a.closed(io, ref)
 }
 
 // complete writes the batch's answers again into spare, in request order,
@@ -369,9 +428,28 @@ func (st *loopState) flag(ref corenet.LoopConnRef) *connFlag {
 	f := &st.conns[ring][slot]
 	//: a slot reused by a newer connection starts clean.
 	if f.gen != ref.Gen {
-		*f = connFlag{gen: ref.Gen}
+		f.reset(ref.Gen)
 	}
 	//: the connection's own flag.
+	return f
+}
+
+// peek returns ref's flag when it is ref's connection's, nil when the slot
+// holds another generation or was never seen: unlike flag, it resets nothing.
+func (st *loopState) peek(ref corenet.LoopConnRef) *connFlag {
+	ring, slot := int(ref.Ring), int(ref.Slot)
+	//: never seen.
+	if ring >= len(st.conns) || slot >= len(st.conns[ring]) {
+		//: none.
+		return nil
+	}
+	f := &st.conns[ring][slot]
+	//: another connection's.
+	if f.gen != ref.Gen {
+		//: none.
+		return nil
+	}
+	//: the connection's own.
 	return f
 }
 
@@ -403,7 +481,8 @@ func (a *LoopHandler) grow(i int) *loopState {
 	}
 	next := make([]*loopState, max(len(cur), i+1))
 	copy(next, cur)
-	st := &loopState{}
+	st := &loopState{unavailable: corenet.HTTP1ResponseValue{Status: statusUnavailable, Header: retryAfter}, readyEpoch: 1}
+	st.headStub.Method = methodHead
 	st.req.Lane = i
 	next[i] = st
 	a.loops.Store(&next)

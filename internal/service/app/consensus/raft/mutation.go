@@ -148,10 +148,11 @@ const (
 	// mutRecordUnannounced answers with a leader record a PreVote that does
 	// not announce protocol 2 (#638).
 	mutRecordUnannounced
-	// mutLearnerNeverAsks leaves a learner that hears no leader silent: it
-	// never asks its members for the leader's record (#639).
+	// mutLearnerNeverAsks leaves a node that may not campaign and hears no
+	// leader waiting: a learner (#639), a silent voter or one with no table
+	// (#718) never asks its members for the leader's record.
 	mutLearnerNeverAsks
-	// mutAskCampaigns asks for the leader's record by campaigning: a learner
+	// mutAskCampaigns asks for the leader's record by campaigning: the node
 	// becomes a pre-candidate and counts the grants (#639).
 	mutAskCampaigns
 	// mutRetiredKeyAdmitted adds a learner over a key retired with a

@@ -2366,8 +2366,8 @@ sequences:
           do:
             - return: ""
           when: |-
-            r.role != core.RoleLearner || r.speaks() < Protocol2 || r.mutated(mutLearnerNeverAsks) ||
-            		now.Sub(r.lastLeaderContact) < wait || (!r.askedAt.IsZero() && now.Sub(r.askedAt) < wait)
+            !r.mayAskForLeader() || now.Sub(r.lastLeaderContact) < wait ||
+            		(!r.askedAt.IsZero() && now.Sub(r.askedAt) < wait)
       - set: r.askedAt
         value: now
       - set: r.rd.LeaderUnheard
@@ -2392,6 +2392,11 @@ sequences:
           key: _
           range: r.conf().Members
           value: m
+  - of: (*Raft).mayAskForLeader
+    steps:
+      - return: |-
+          (r.role == core.RoleFollower || r.role == core.RoleLearner) && !r.promotable() &&
+          		r.speaks() >= Protocol2 && !r.mutated(mutLearnerNeverAsks)
   - of: (*Raft).takeLeaderRecord
     participants:
       - id: caller

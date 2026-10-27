@@ -164,6 +164,13 @@
 # memory would measure itself.
 //internal/service/net/loop:loop_memory_test
 
+# internal/service/net/server — R3's port to a lane's worker (ADR 0194):
+# outboundLane.Send keeps a copy of the lane's first LoopIO, so it allocates
+# nothing per call (loop_outbound_alloc_internal_test.go, //go:build !race).
+# Storing &io itself moved the parameter to the heap: one allocation per
+# Send, which the test caught before the fix.
+//internal/service/net/server:server_test
+
 # BEGIN kit gen from design/sdk.yaml: the packages whose budgets name a fixture,
 # whose gen_perf_test.go runs race off here alone. DO NOT EDIT to the line
 # below: kit gen writes it from the design.

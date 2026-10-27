@@ -159,7 +159,7 @@ func (s *Server) bindLoopGroup(ctx context.Context, group *StreamGroup) error {
 	if st, ok := group.loopChain.(corenet.LoopStarter); ok {
 		st.OnStart(loopLanes(group.loop))
 	}
-	eng, err := startLoopEngine(group, lns, plan)
+	eng, err := startOffloading(ctx, group, lns, plan)
 	//: the backend refused.
 	if err != nil {
 		//: Start unwinds the listeners.

@@ -98,11 +98,15 @@ Parser.Parse, AppendResponse and AppendRefusal frame and write without the loop,
   - [func \(\*LoopHandler\) OnBatchEnd\(io corenet.LoopIO\)](<#LoopHandler.OnBatchEnd>)
   - [func \(\*LoopHandler\) OnClose\(io corenet.LoopIO, ref corenet.LoopConnRef, err error\)](<#LoopHandler.OnClose>)
   - [func \(\*LoopHandler\) OnData\(io corenet.LoopIO, ref corenet.LoopConnRef, buf \[\]byte\) int](<#LoopHandler.OnData>)
+  - [func \(\*LoopHandler\) OnDone\(io corenet.LoopIO, job corenet.LoopJobValue\)](<#LoopHandler.OnDone>)
   - [func \(\*LoopHandler\) OnOpen\(io corenet.LoopIO, ref corenet.LoopConnRef\)](<#LoopHandler.OnOpen>)
+  - [func \(\*LoopHandler\) OnOutbound\(v corenet.LoopOutboundValue\)](<#LoopHandler.OnOutbound>)
   - [func \(\*LoopHandler\) OnStart\(lanes int\)](<#LoopHandler.OnStart>)
   - [func \(\*LoopHandler\) OnTimeout\(io corenet.LoopIO, ref corenet.LoopConnRef\)](<#LoopHandler.OnTimeout>)
   - [func \(\*LoopHandler\) OnWritable\(io corenet.LoopIO, ref corenet.LoopConnRef\)](<#LoopHandler.OnWritable>)
+  - [func \(\*LoopHandler\) Pending\(lane int, ref corenet.LoopConnRef\) bool](<#LoopHandler.Pending>)
   - [func \(\*LoopHandler\) Unwrap\(\) corenet.HTTP1Handler](<#LoopHandler.Unwrap>)
+  - [func \(\*LoopHandler\) Worker\(\) corenet.LoopWorker](<#LoopHandler.Worker>)
 - [type Middleware](<#Middleware>)
 - [type Parser](<#Parser>)
   - [func \(Parser\) Limits\(\) corenet.HTTP1LimitsValue](<#Parser.Limits>)
@@ -118,6 +122,8 @@ Parser.Parse, AppendResponse and AppendRefusal frame and write without the loop,
 - [type RouteLayer](<#RouteLayer>)
   - [func \(\*RouteLayer\) EndBatch\(lane int\)](<#RouteLayer.EndBatch>)
   - [func \(\*RouteLayer\) ServeHTTP1\(req \*corenet.HTTP1RequestValue, res \*corenet.HTTP1ResponseValue\)](<#RouteLayer.ServeHTTP1>)
+- [type Worker](<#Worker>)
+  - [func \(Worker\) WorkHTTP1\(lane int, job uint64, res \*HTTP1ResponseValue\)](<#Worker.WorkHTTP1>)
 
 ## Constants
 
@@ -847,7 +853,7 @@ OnBatchEnd implements corenet.LoopHandler. When the batch served a request, it c
 func (*LoopHandler) OnClose(io corenet.LoopIO, ref corenet.LoopConnRef, err error)
 ```
 
-OnClose implements corenet.LoopHandler. The connection's flag stays until the next OnOpen of its slot replaces it; an answer of the batch still queued for it is dropped when its Write is refused as stale.
+OnClose implements corenet.LoopHandler. The connection's held answers are given up — a pending one's job cancelled, its slot freed when it comes back — and its flag stays until the next OnOpen of its slot replaces it; an answer of the batch still queued for it is dropped when its Write is refused as stale.
 
 <a name="LoopHandler.OnData"></a>
 ### func \(LoopHandler\) [OnData](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/loop.go>)
@@ -858,6 +864,15 @@ func (*LoopHandler) OnData(io corenet.LoopIO, ref corenet.LoopConnRef, buf []byt
 
 OnData implements corenet.LoopHandler. It frames every whole request at the start of buf, serves each in turn, and returns the bytes they took: a request still incomplete waits in the loop's spill for its next bytes. A refused request, or one whose answer closes the connection, takes the rest of buf, which is never read.
 
+<a name="LoopHandler.OnDone"></a>
+### func \(LoopHandler\) [OnDone](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/loop_pending.go>)
+
+```go
+func (*LoopHandler) OnDone(io corenet.LoopIO, job corenet.LoopJobValue)
+```
+
+OnDone implements corenet.LoopOffloader, on the lane's thread: the job's answer is ready, and its connection is flushed at the batch's end, in request order. A connection that closed meanwhile has its slot freed and nothing written.
+
 <a name="LoopHandler.OnOpen"></a>
 ### func \(LoopHandler\) [OnOpen](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/loop.go>)
 
@@ -866,6 +881,15 @@ func (*LoopHandler) OnOpen(io corenet.LoopIO, ref corenet.LoopConnRef)
 ```
 
 OnOpen implements corenet.LoopHandler. It marks the connection open on its lane.
+
+<a name="LoopHandler.OnOutbound"></a>
+### func \(LoopHandler\) [OnOutbound](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/loop_pending.go>)
+
+```go
+func (*LoopHandler) OnOutbound(v corenet.LoopOutboundValue)
+```
+
+OnOutbound implements corenet.LoopOffloader: each lane keeps its outbound, and every connection's holdback is bounded by the output ceiling.
 
 <a name="LoopHandler.OnStart"></a>
 ### func \(LoopHandler\) [OnStart](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/loop.go>)
@@ -894,6 +918,15 @@ func (*LoopHandler) OnWritable(io corenet.LoopIO, ref corenet.LoopConnRef)
 
 OnWritable implements corenet.LoopHandler. Nothing waits on it: an answer the output refuses closes its connection.
 
+<a name="LoopHandler.Pending"></a>
+### func \(LoopHandler\) [Pending](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/loop_pending.go>)
+
+```go
+func (*LoopHandler) Pending(lane int, ref corenet.LoopConnRef) bool
+```
+
+Pending implements corenet.LoopOffloader: a connection holding answers behind a pending one is still being answered, so a draining loop keeps it.
+
 <a name="LoopHandler.Unwrap"></a>
 ### func \(LoopHandler\) [Unwrap](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/loop.go>)
 
@@ -902,6 +935,15 @@ func (*LoopHandler) Unwrap() corenet.HTTP1Handler
 ```
 
 Unwrap returns the HTTP1Handler the adapter serves: what tells a loop group that its handler speaks the codec, so it may take TLS on the portable backend (ADR 0187 §D5).
+
+<a name="LoopHandler.Worker"></a>
+### func \(LoopHandler\) [Worker](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/loop_pending.go>)
+
+```go
+func (*LoopHandler) Worker() corenet.LoopWorker
+```
+
+Worker implements corenet.LoopOffloader: the adapter offloads when its handler is a corenet.HTTP1Worker, and nothing otherwise.
 
 <a name="Middleware"></a>
 ## type [Middleware](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
@@ -1103,15 +1145,15 @@ Response is an alias of `github.com/kitsunium/sdk/internal/core/net.HTTP1Respons
 type Response struct {
 	// Status is the status code, 200 to 999; zero means 200. The profile
 	// sends no interim response.
-	Status int
+	Status  int
 	// Header holds the response's extra field lines, each written as
 	// "Name: value\r\n" by the codec's writer. It never holds Content-Length or
 	// Connection, which the codec writes.
-	Header []byte
+	Header  []byte
 	// Body is the response content.
-	Body   []byte
+	Body    []byte
 	// Close asks the codec to close the connection after this response.
-	Close  bool
+	Close   bool
 	// Defer, set by the handler, holds the answer back until the end of the
 	// loop's batch, for work it batches — one database transaction for every
 	// request of the batch, say. The response value then stays valid, at the
@@ -1119,7 +1161,20 @@ type Response struct {
 	// completes it there: it fills it and clears Defer. An answer still
 	// deferred when EndBatch returns is answered 500 and its connection
 	// closed. Only the loop adapter reads it; AppendResponse does not.
-	Defer  bool
+	Defer   bool
+	// Pending, set by the handler, hands the answer to the lane's worker
+	// (HTTP1Worker, R3): the loop adapter sends Job to it and writes the
+	// answer the worker fills, from the loop's thread, once it comes back.
+	// Answers after it on the same connection wait for it, in order. A queue
+	// to the worker that is full answers 503 with Retry-After at once, the
+	// connection kept; a connection that closes first drops the answer. Pending
+	// with Defer, or with no worker, is answered 500 and the connection closed.
+	// Only the loop adapter reads it.
+	Pending bool
+	// Job is the integer a pending answer's worker is given: the handler's own
+	// index of what the work needs, which it copied out of the request, since
+	// the request's bytes do not outlive the batch.
+	Job     uint64
 }
 ```
 
@@ -1182,5 +1237,33 @@ func (*RouteLayer) ServeHTTP1(req *corenet.HTTP1RequestValue, res *corenet.HTTP1
 ```
 
 ServeHTTP1 implements corenet.HTTP1Handler.
+
+<a name="Worker"></a>
+## type [Worker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)
+
+Worker is the optional capability of a Handler served on a loop group that answers off the loop's thread: a Response marked Pending is filled by WorkHTTP1 on the lane's worker goroutine, which may block, and written once it returns.
+
+```go
+type Worker = corenet.HTTP1Worker
+```
+
+Worker is an alias of `github.com/kitsunium/sdk/internal/core/net.HTTP1Worker`, declared as:
+
+```go
+type Worker interface {
+	// WorkHTTP1 fills res, the answer to the pending request of lane whose Job
+	// was job.
+	WorkHTTP1(lane int, job uint64, res *HTTP1ResponseValue)
+}
+```
+
+<a name="Worker.WorkHTTP1"></a>
+### func \(Worker\) [WorkHTTP1](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (Worker) WorkHTTP1(lane int, job uint64, res *HTTP1ResponseValue)
+```
+
+WorkHTTP1 fills res, the answer to the pending request of lane whose Job was job.
 
 Generated from [docs/api](<https://github.com/kitsunium/sdk/blob/main/docs/api>) by tools/genindex.

@@ -534,6 +534,7 @@ var checks = map[string]func(mutation) error{
 	"leader record by announcement":     checkLeaderRecordFollowsTheAnnouncement,
 	"stranded learner asks":             checkStrandedLearnerAsks,
 	"learner question binds nothing":    checkLearnerAskBindsNothing,
+	"stranded voter asks":               checkStrandedVoterAsks,
 	"retired key refused":               checkRetiredKeyRefused,
 	"nothing new below protocol 3":      checkNothingNewBelowProtocol3,
 	"raise to 3 announced":              checkRaise3Announced,
@@ -683,11 +684,13 @@ func silentVoter(mut mutation) *Raft {
 // like any other, and the silence grants none (#524). Neither its election
 // timer nor a TimeoutNow from the leader of its term may make it campaign:
 // elected with one other grant, it overwrote the acknowledged entries it
-// had truncated.
+// had truncated. Hearing no leader, it asks its members for the leader's
+// record with a PreVote it never counts (#718): granted by every member,
+// that question leaves it a follower at its term with no vote request.
 func checkSilentNodeNeverCampaigns(mut mutation) error {
-	campaigned := func(rd ReadyValue) bool {
+	campaigned := func(rd ReadyValue, kinds ...core.MessageKind) bool {
 		for _, m := range append(rd.Messages, rd.AfterSync...) {
-			if m.Kind == core.MsgPreVote || m.Kind == core.MsgVote {
+			if slices.Contains(kinds, m.Kind) {
 				return true
 			}
 		}
@@ -695,14 +698,20 @@ func checkSilentNodeNeverCampaigns(mut mutation) error {
 	}
 	r := silentVoter(mut)
 	r.Tick(t0.Add(time.Hour))
-	if rd := r.Ready(); campaigned(rd) || r.role != core.RoleFollower {
+	rd := r.Ready()
+	for _, m := range rd.Messages {
+		if m.Kind == core.MsgPreVote {
+			r.Step(r.now, core.MessageValue{Version: 1, Group: 1, Kind: core.MsgPreVoteResp, From: m.To, To: 2, Term: m.Term})
+		}
+	}
+	if granted := r.Ready(); campaigned(rd, core.MsgVote) || campaigned(granted, core.MsgVote) || r.role != core.RoleFollower || r.term != 2 {
 		return fmt.Errorf("a silent node campaigned on its election timer (role %v term %d vote %d)", r.role, r.term, r.vote)
 	}
 	r = silentVoter(mut)
 	r.Step(t0.Add(time.Second), msg(core.MsgHeartbeat, 1, 2, 2))
 	r.Ready()
 	r.Step(t0.Add(time.Second), msg(core.MsgTimeoutNow, 1, 2, 2))
-	if rd := r.Ready(); campaigned(rd) || r.role != core.RoleFollower {
+	if rd := r.Ready(); campaigned(rd, core.MsgPreVote, core.MsgVote) || r.role != core.RoleFollower {
 		return fmt.Errorf("a silent node campaigned on a TimeoutNow (role %v term %d vote %d)", r.role, r.term, r.vote)
 	}
 	return nil
