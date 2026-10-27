@@ -9068,6 +9068,8 @@ sequences:
         kind: internal
       - id: n.startApplied
         kind: internal
+      - id: stepApplied
+        kind: internal
     steps:
       - bind: metas, err
         eval: n.cfg.Snapshots.List()
@@ -9155,7 +9157,17 @@ sequences:
           do:
             - return: raft.StartState{}, err
           when: err != nil
+      - set: applied
+        to: stepApplied
+        value: stepApplied(applied, snapIdx, hs.Commit, dur)
       - return: "raft.StartState{HardState: hs, Snapshot: base, Entries: ents, Evicted: evicted, Applied: applied, Now: n.clk.Now()}, nil"
+  - of: stepApplied
+    steps:
+      - opt:
+          do:
+            - return: applied
+          when: dur.Term != 0 || applied <= commit
+      - return: max(commit, snapIdx)
   - of: termless
     steps:
       - return: m.Position.Index > 0 && m.Position.Term == 0
@@ -18558,9 +18570,15 @@ sequences:
       - var:
           name: meta
           type: coreconsensus.SnapshotMetaValue
+      - var:
+          name: commit
+          type: uint64
       - bind: ok
         eval: |-
           n.exec(func() {
+          		if commit = n.r.Status().Commit; idx > commit {
+          			return
+          		}
           		eng := n.r.EngineAt(idx)
           		conf := n.r.ConfAt(idx)
           		conf.Index = idx
@@ -18572,7 +18590,17 @@ sequences:
           		}
           	})
         to: n.exec
-      - return: meta, ok
+      - switch:
+          cases:
+            - case: "!ok"
+              do:
+                - return: meta, n.stoppedErr()
+            - case: idx > commit
+              do:
+                - return: |-
+                    meta, origin(coreconsensus.Overloaded, errs.String("why", "the applied index is past the commit the node knows"),
+                    			errs.String("index", u64s(idx)), errs.String("commit", u64s(commit)))
+      - return: meta, nil
   - of: snapshotID
     participants:
       - id: caller
@@ -18600,8 +18628,6 @@ sequences:
         kind: value
       - id: n.metaAt
         kind: internal
-      - id: n.stoppedErr
-        kind: internal
       - id: n.cfg.Machine.Snapshot
         kind: value
       - id: n.writeSnapshot
@@ -18624,14 +18650,13 @@ sequences:
         to: n.cuttingSince.Store
       - defer: n.cuttingSince.Store(0)
         to: n.cuttingSince.Store
-      - bind: meta, ok
+      - bind: meta, err
         eval: n.metaAt(idx, term)
         to: n.metaAt
       - opt:
           do:
-            - return: n.stoppedErr()
-              to: n.stoppedErr
-          when: "!ok"
+            - return: err
+          when: err != nil
       - bind: snap, err
         eval: n.cfg.Machine.Snapshot()
         to: n.cfg.Machine.Snapshot

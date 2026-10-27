@@ -1193,6 +1193,7 @@ files:
       - silenceOf
       - (*Node).bindTransport
       - (*Node).load
+      - stepApplied
       - termless
       - (*Node).durablePosition
       - (*Node).restoreLatest
@@ -2498,6 +2499,23 @@ functions:
     name: silenceOf
     params: log coreconsensus.LogStore, o *obs
     results: term, index uint64, err error
+  - doc: |-
+      stepApplied is the applied index the step function starts from: the one
+      the machine resumes at, held at the persisted commit when the machine
+      reported no term for it. NewRaft takes an applied index its log holds as
+      committed (#707), which is sound only when the log holds there the entry
+      the machine applied: the term proves it, two entries at one index and
+      term carrying the same prefix, and durableTerm refused a start whose log
+      holds another term there. A machine that reports none may stand on an
+      install it restored before its log was reset, the start then falling back
+      below that snapshot, over a log whose entries at those indexes were never
+      committed: taken as committed, their engine effects were applied and the
+      leader's appends could never truncate them. Held at the persisted commit,
+      the index is the one NewRaft started from before, and a cut at the
+      machine's waits for the commit (metaAt).
+    name: stepApplied
+    params: applied, snapIdx, commit uint64, dur coreconsensus.PositionValue
+    results: uint64
   - doc: |-
       termless reports whether m names an index above 0 at term 0, which no
       committed entry has.
@@ -7484,12 +7502,20 @@ types:
           (raft's EngineAt), never the one standing now: the engine applies its
           entries at commit, ahead of the applied index a cut is made at, and a
           node that installed the snapshot and was then truncated back would carry
-          a contract whose entry it never applied (#402). It reports false when the
-          node stopped before the loop could answer.
+          a contract whose entry it never applied (#402). An index past the step
+          function's commit is refused OVERLOADED, for the cut to be tried again
+          once the commit reaches it: EngineAt knows the engine entries committed
+          there alone, and answered for such an index the state at the commit. A
+          machine applied past that commit — one left ahead of a log truncated
+          below it by TruncateAndStaySilent, or one that reports no term
+          (stepApplied) — had the snapshot record the cluster version, timing
+          contract or alarm before an entry it covers, and the node restarted from
+          it ran them for good (#707). It answers the node's stop when the loop
+          could not answer.
         name: metaAt
         params: idx, term uint64
         recv: n *Node
-        results: coreconsensus.SnapshotMetaValue, bool
+        results: coreconsensus.SnapshotMetaValue, error
       - doc: |-
           cut captures the state machine at the applied index and writes it. Unless
           the machine pauses apply to cut, or wait is set (SaveSnapshot), the write
