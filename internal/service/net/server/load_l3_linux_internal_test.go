@@ -493,6 +493,14 @@ func l3Round(tb testing.TB, window l3Window, per int) [2]l3Count {
 // engine's CPU a datagram and its parts, datagrams a receive and loss, and
 // the ratios, B over A, of the two netgate judges. A message cut short on
 // either engine refuses the round.
+//
+// The CPU is divided by the datagrams SENT, the same count for both engines
+// (l3Round), not by those received: a datagram the receive queue dropped still
+// cost the sender its send and the kernel its softirq work up to the drop, and
+// the engine that drops more — A, whose one-datagram buffers each charge a
+// whole truesize against rmem_max — would be charged that work over fewer
+// datagrams. Over the same sent count the ratio is the two engines' CPU for the
+// same work (ADR 0192 §D6); datagrams a receive stays a count of those read.
 func l3Metrics(sides [2]l3Count) (map[string]float64, error) {
 	m := make(map[string]float64)
 	var cpu, dps [2]float64
@@ -504,15 +512,15 @@ func l3Metrics(sides [2]l3Count) (map[string]float64, error) {
 		if s.truncated != 0 {
 			return nil, fmt.Errorf("engine %c dropped %d messages cut short (MSG_TRUNC/MSG_CTRUNC)", "ab"[k], s.truncated)
 		}
-		got := float64(s.got)
-		cpu[k] = float64(s.cpu.total()) / got
+		got, sent := float64(s.got), float64(s.sent)
+		cpu[k] = float64(s.cpu.total()) / sent
 		dps[k] = got / float64(s.receives)
 		m[p+"cpu-ns/datagram"] = cpu[k]
-		m[p+"rcv-cpu-ns/datagram"] = float64(s.cpu.receiver) / got
-		m[p+"snd-cpu-ns/datagram"] = float64(s.cpu.sender) / got
-		m[p+"irq-cpu-ns/datagram"] = float64(s.cpu.irq) / got
+		m[p+"rcv-cpu-ns/datagram"] = float64(s.cpu.receiver) / sent
+		m[p+"snd-cpu-ns/datagram"] = float64(s.cpu.sender) / sent
+		m[p+"irq-cpu-ns/datagram"] = float64(s.cpu.irq) / sent
 		m[p+"datagrams/syscall"] = dps[k]
-		m[p+"lost/op"] = 1 - got/float64(s.sent)
+		m[p+"lost/op"] = 1 - got/sent
 	}
 	m["ratio:cpu-ns/datagram"] = cpu[1] / cpu[0]
 	m["ratio:datagrams/syscall"] = dps[1] / dps[0]
@@ -713,6 +721,16 @@ func TestL3Round_symmetric(t *testing.T) {
 	}
 	if r := m["ratio:cpu-ns/datagram"]; r < 0.599 || r > 0.601 {
 		t.Fatalf("B at 60 %% of A gave a ratio of %g", r)
+	}
+	// A losing a tenth of what it was sent, at the same CPU: the ratio is 1,
+	// the loss charged to neither engine.
+	lossy := sides
+	lossy[0].got = lossy[0].sent * 9 / 10
+	if m, err = l3Metrics(lossy); err != nil {
+		t.Fatal(err)
+	}
+	if r := m["ratio:cpu-ns/datagram"]; r != 1 {
+		t.Fatalf("A losing more at the same CPU gave a ratio of %g, want 1", r)
 	}
 	cut := [2]l3Count{{got: 1, receives: 1, sent: 1}, {got: 1, receives: 1, sent: 1, truncated: 1}}
 	if _, err := l3Metrics(cut); err == nil {

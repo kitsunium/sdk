@@ -49,16 +49,25 @@ leaves the first reported, not gated.
 
 Before each `recvmmsg` — the waiting read and the drain of D4 — every header's
 `msg_namelen` is `sizeof(struct sockaddr_storage)` (`RawSockaddrAny`),
-`msg_controllen` the room its slot has, `CMSG_SPACE(int)` — the one control
-message asked for, `UDP_GRO` —, and `msg_flags` zero. The returned length and
-`msg_flags` are read for each message.
+`msg_controllen` the room its slot has, and `msg_flags` zero. The returned
+length and `msg_flags` are read for each message.
+
+The room is GRO's, the one case the reader asks for a control message: 256
+bytes a slot under GRO — `UDP_GRO`'s `CMSG_SPACE(int)`, 24, and room beside it
+for a control message the caller asked of the socket itself, `IP_PKTINFO`
+(32), `IPV6_PKTINFO` (40) or a timestamp (32 to 64), whether through its own
+`PacketConn` or an adopted descriptor —, and none without GRO: no control
+buffer, as before this record.
 
 ### D2 — A message cut short is dropped and counted
 
-`MSG_CTRUNC` (the control data did not fit, so the segment size may be lost)
-and `MSG_TRUNC` on a coalesced read (several whole datagrams and a part, which
-cannot be told apart) drop the message, counted in
-`StateValue.Datagrams.TruncatedPackets`. `MSG_TRUNC` without GRO is one
+`MSG_CTRUNC` under GRO when the `UDP_GRO` message itself did not survive (the
+segment size may be lost), and `MSG_TRUNC` on a coalesced read (several whole
+datagrams and a part, which cannot be told apart) drop the message, counted in
+`StateValue.Datagrams.TruncatedPackets`. `MSG_CTRUNC` is otherwise nothing to
+the reader: without GRO it asks for no control data, and a caller's
+`IP_PKTINFO` or timestamp then finds no room on every datagram — which, read
+as a cut, would drop them all (`Test_multiReader_foreignControl`). `MSG_TRUNC` without GRO is one
 datagram past the ceiling, which the probe byte already shows: it stays
 `OversizedPackets`, as before.
 
@@ -70,7 +79,11 @@ socket that refuses keeps one datagram a message. Under GRO a slot holds a
 whole coalesced message, at least 65 535 bytes (the 16-bit IP length a send is
 bounded by), and the read loop serves each datagram of it as its own `Packet`,
 every one `seg` bytes but the last, each judged against `MaxPacketSize` on its
-own. The memory is the batch's: 16 slots by default, 1 MiB a socket.
+own. The memory is the batch's, allocated once for the socket's life:
+`BatchSize` slots of 64 KiB, 1 MiB a socket at the default 16 and 64 MiB at a
+`BatchSize` of 1024. It is not capped: a caller that raises `BatchSize` on a
+GRO socket asks for that memory, and `BatchSize`'s own bound is the one it
+already had.
 
 ### D4 — A handover drains with GRO on, then switches it off
 
@@ -116,7 +129,19 @@ cost an allocation a datagram on the path held to none.
   leave one a message. `EMSGSIZE` is a sizing bug: counted in
   `Datagrams.GSOOversized`, the span's replies counted failed, GSO left on.
   `EINVAL` — a segment past the path's MTU — sends that span one by one, GSO
-  left on.
+  left on, and is remembered for the socket's life: no segment that large is
+  sent as GSO again (`segmentCeiling`, one below the smallest refused), so a
+  path with a smaller MTU costs one refused send, not one a batch. A refusal
+  that no smaller segment cures — `SO_NO_CHECK`, a device without GSO — is
+  met four times in a row (`gsoInvalidLimit`, a GSO send that leaves ending
+  the run) and then switches GSO off as `EIO` does, reported as the same
+  `gso` fault.
+- **`sendmmsg` itself refused** — `ENOSYS`, or `EPERM` under a seccomp filter
+  that allows `sendto` —: the batch's replies leave one `WriteTo` each. When
+  one of them leaves, the refusal was the syscall's, and every later batch of
+  the socket leaves the same way, `sendmmsg` never called again; when they
+  fail too — a firewall's `EPERM` — they are counted in `ReplyFailures` and
+  `sendmmsg` is tried again next batch.
 - **Elsewhere, a Unix datagram socket, or one with no raw descriptor**: the
   same queue, one `WriteTo` each at the batch's end. darwin sends one datagram
   a call. A zoned IPv6 peer, whose zone only `WriteTo` resolves, is written at
@@ -132,7 +157,13 @@ count differs —, a stream group, goroutine or loop, refuses it at `Start` with
 On the owner's decision of 2026-10-26, the P4a gate's `cpu-ns/datagram` on L3
 is the sum of the receiver's rusage (user+system), the sender's — the bench
 process — and the irq and softirq time of every CPU in `/proc/stat` (its
-sixth and seventh fields), divided by the datagrams received. The sum is what
+sixth and seventh fields), divided by the datagrams SENT. Both engines are
+sent the same count a round, so the ratio is their CPU for the same work. The
+datagrams received would charge a lost datagram's work — its send, its
+softirq up to the drop — to the engine that drops more, A, whose
+one-datagram buffers each charge a whole truesize against `rmem_max`: a
+bias toward B. `datagrams/syscall` stays a count of datagrams read, and
+`lost/op` is reported beside. The sum is what
 GRO changes: the receiver's copy-out, the same for both engines, and the
 segmentation of each GSO send on receive, its socket buffers and queue
 operations, which run in softirq — charged mostly to whichever task the CPU
@@ -152,7 +183,8 @@ receiver has settled, the three deltas added to that engine's sum
 netgate judges the interval of the rounds' ratios. `TestL3Round_symmetric`
 holds the schedule — as many windows and datagrams for each engine, in that
 order —, the sum of the parts, a drift of the runner that two engines of one
-cost cancel to a ratio of 1, and a scripted B at 60 % of A giving 0.6.
+cost cancel to a ratio of 1, a scripted B at 60 % of A giving 0.6, and an A
+that loses a tenth of its datagrams at the same CPU still giving 1.
 
 **Its limits.**
 
@@ -176,7 +208,16 @@ cost cancel to a ratio of 1, and a scripted B at 60 % of A giving 0.6.
   than B and can only overstate GRO's saving, by at most the softirq time
   charged inside the two processes. The bench job records which the runner has
   (`accounting:` lines in `bench.txt`), read from the runner, never assumed;
-  a run on a kernel without it is still judged, and the record says so.
+  a run on a kernel without it is still judged, and the record says so. The
+  GitHub-hosted `ubuntu-latest` runner (Linux 6.17, Azure) has it off:
+  `# CONFIG_IRQ_TIME_ACCOUNTING is not set`, `CONFIG_VIRT_CPU_ACCOUNTING_GEN=y`
+  — the latter accounts by context tracking only on the CPUs that run it
+  (`nohz_full`), and the tick everywhere else. The runner's irq parts move
+  in whole ticks — B's 49.9, 74.8 and 99.8 ns a datagram, steps of 25 —, so
+  its tick decides. The double count does not decide the verdict: on the pull
+  request's run the receiver's and the sender's rusage alone, without the
+  irq part, gave B/A about 0.31 (medians 726 over 2 342 ns), against the
+  gated 0.27 and the 0.75 threshold.
 - *`USER_HZ` ticks.* `/proc/stat` counts in ticks of 10 ms, 100 a second on
   every Linux ABI. Each engine is sent `b.N` datagrams a round — the job's
   400 000 —, not half of it as on L1 and L2, so a tick is 25 ns a datagram,

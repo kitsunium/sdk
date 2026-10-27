@@ -174,6 +174,16 @@ engine, then netgate's bound of the rounds' ratios B/A.
 | `datagrams/syscall` | 58.3 | 230 | 3.76 (lower), median 3.95 | ≥ 4, reported, not gated |
 | `cal-L3` (`recvmmsg:recvmmsg`) `cpu-ns/datagram` | | | 0.968 to 1.08, median 1.04 | within 0.8 to 1.25 — pass |
 
+On the pull request's GitHub-hosted runner (Linux 6.17, Azure, 4 CPUs, its
+kernel without `CONFIG_IRQ_TIME_ACCOUNTING`, so the irq part is tick-sampled
+and counted twice where a tick lands in the receiver or the sender, ADR 0192
+§D6): `cpu-ns/datagram` 3 027 → 803 ns, upper bound 0.273 — pass; of which
+`rcv-` 1 237 → 221, `snd-` 1 105 → 505, `irq-` 686 → 75. The two rusages
+alone give about 0.31, so the double count does not decide the verdict.
+These numbers, and the Docker ones above, were divided by the datagrams
+received, before the CPU was divided by those sent (§D6); both runs lost
+under 1 % of them, within the rounds' spread.
+
 The irq part is where GRO saves most, as §D6 expected: 2 557 → 761 ns a
 datagram. `datagrams/syscall` is reported, not gated (ADR 0192 §D7): A already
 reads a GSO send's 54 datagrams a receive, so B's count is how many sends
