@@ -331,6 +331,7 @@ files:
       - item
       - connFlag
       - (*LoopHandler).OnOpen
+      - (*connFlag).reset
       - (*LoopHandler).OnData
       - (*LoopHandler).serve
       - (*LoopHandler).OnTimeout
@@ -377,6 +378,7 @@ files:
       - appendHeld
       - (*loopState).flushReady
       - (*loopState).flushHeld
+      - (*connFlag).compact
       - heldItem.ready
       - (*loopState).appendItem
     name: loop_pending.go
@@ -1145,6 +1147,11 @@ types:
           pending one, completed after EndBatch.
         name: deferHeld
         type: "[]corenet.LoopConnRef"
+      - doc: |-
+          dropped are the held deferred responses a closed connection gave up
+          during the batch, returned to the pool after EndBatch.
+        name: dropped
+        type: "[]*corenet.HTTP1ResponseValue"
       - doc: held is the scratch a connection's held answers are written from.
         name: held
         type: "[]byte"
@@ -1244,13 +1251,16 @@ types:
       - doc: |-
           dropHeld gives up every answer f holds: a pending slot whose job is back is
           freed, one still out is cancelled and freed when it comes back, a deferred
-          response is returned to the pool.
+          response is returned to the pool once the batch's EndBatch has returned —
+          the batcher holds it until then, and a request taking it first would share
+          it with the one given up.
         name: dropHeld
         params: f *connFlag
         recv: st *loopState
       - doc: |-
           completeHeld completes, after EndBatch, the deferred responses held behind
-          a pending answer: each becomes bytes in its connection's buffer.
+          a pending answer: each becomes bytes in its connection's buffer. The ones a
+          closed connection gave up go back to the pool, the batcher done with them.
         name: completeHeld
         recv: st *loopState
       - doc: completeConn writes f's deferred held responses into its buffer.
@@ -1329,6 +1339,22 @@ types:
         name: buf
         type: "[]byte"
     kind: struct
+    methods:
+      - doc: |-
+          reset makes f a new connection's, of generation gen, keeping the backing
+          of its held answers and their buffer, so a slot's churn reallocates
+          neither.
+        name: reset
+        params: gen uint32
+        recv: f *connFlag
+      - doc: |-
+          compact drops from f's buffer the bytes of the answers already written, so
+          what the ceiling counts is only what f still holds: under an open pipeline
+          a pending answer is always at the tail of held, and a buffer that only
+          started over once held was empty would grow until it closed the
+          connection. The bytes still held move to the front, their bounds with them.
+        name: compact
+        recv: f *connFlag
     name: connFlag
   - doc: |-
       pendSlot is one pending answer (R3): what the lane keeps of it while the

@@ -46,6 +46,8 @@ go_test(
         "http1_bench_test.go",
         "loop_external_test.go",
         "loop_fixtures_test.go",
+        "loop_pending_alloc_external_test.go",
+        "loop_pending_external_test.go",
         "perf_fixtures_test.go",
         "target_external_test.go",
         "write_external_test.go",

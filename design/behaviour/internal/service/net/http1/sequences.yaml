@@ -436,9 +436,22 @@ sequences:
         eval: h.(corenet.HTTP1Worker)
       - return: "&LoopHandler{h: h, batcher: b, worker: w, p: p, holdCap: defaultHoldCap}"
   - of: (*LoopHandler).OnOpen
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).OnOpen
+        kind: self
+      - id: a.state(io.Loop()).flag(ref).reset
+        kind: internal
     steps:
-      - set: "*a.state(io.Loop()).flag(ref)"
-        value: "connFlag{gen: ref.Gen}"
+      - eval: a.state(io.Loop()).flag(ref).reset(ref.Gen)
+        to: a.state(io.Loop()).flag(ref).reset
+  - of: (*connFlag).reset
+    steps:
+      - bind: held, buf
+        eval: f.held[:0], f.buf[:0]
+      - set: "*f"
+        value: "connFlag{gen: gen, held: held, buf: buf}"
   - of: (*LoopHandler).OnData
     participants:
       - id: caller
@@ -618,7 +631,7 @@ sequences:
       - opt:
           do:
             - return: ""
-          when: len(st.items) == 0 && len(st.ready) == 0 && len(st.deferHeld) == 0
+          when: len(st.items) == 0 && len(st.ready) == 0 && len(st.deferHeld) == 0 && len(st.dropped) == 0
       - opt:
           do:
             - eval: a.batcher.EndBatch(loop)
@@ -803,6 +816,13 @@ sequences:
       - set: st.free
         value: append(st.free, res)
   - of: (*loopState).flag
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loopState).flag
+        kind: self
+      - id: f.reset
+        kind: internal
     steps:
       - bind: ring, slot
         eval: int(ref.Ring), int(ref.Slot)
@@ -823,8 +843,8 @@ sequences:
         eval: "&st.conns[ring][slot]"
       - opt:
           do:
-            - set: "*f"
-              value: "connFlag{gen: ref.Gen}"
+            - eval: f.reset(ref.Gen)
+              to: f.reset
           when: f.gen != ref.Gen
       - return: f
   - of: (*loopState).peek
@@ -1264,8 +1284,6 @@ sequences:
         kind: internal
       - id: it.slot.cancelled.Store
         kind: value
-      - id: st.give
-        kind: internal
     steps:
       - loop:
           do:
@@ -1281,8 +1299,8 @@ sequences:
                         to: it.slot.cancelled.Store
                   - case: it.res != nil
                     do:
-                      - eval: st.give(it.res)
-                        to: st.give
+                      - set: st.dropped
+                        value: append(st.dropped, it.res)
           key: _
           range: f.held
           value: it
@@ -1297,6 +1315,8 @@ sequences:
       - id: st.peek
         kind: internal
       - id: st.completeConn
+        kind: internal
+      - id: st.give
         kind: internal
     steps:
       - loop:
@@ -1315,6 +1335,17 @@ sequences:
           value: ref
       - set: st.deferHeld
         value: st.deferHeld[:0]
+      - loop:
+          do:
+            - eval: st.give(res)
+              to: st.give
+            - set: st.dropped[i]
+              value: nil
+          key: i
+          range: st.dropped
+          value: res
+      - set: st.dropped
+        value: st.dropped[:0]
   - of: (*loopState).completeConn
     participants:
       - id: caller
@@ -1407,6 +1438,8 @@ sequences:
         kind: self
       - id: st.appendItem
         kind: internal
+      - id: f.compact
+        kind: internal
       - id: st.write
         kind: internal
       - id: st.dropHeld
@@ -1431,11 +1464,8 @@ sequences:
         eval: copy(f.held, f.held[n:])
       - set: f.held
         value: f.held[:rest]
-      - opt:
-          do:
-            - set: f.buf
-              value: f.buf[:0]
-          when: rest == 0
+      - eval: f.compact()
+        to: f.compact
       - eval: st.write(io, ref, out, closing)
         to: st.write
       - opt:

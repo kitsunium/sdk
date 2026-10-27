@@ -105,6 +105,9 @@ type loopState struct {
 	// deferHeld are the connections holding a deferred answer behind a
 	// pending one, completed after EndBatch.
 	deferHeld []corenet.LoopConnRef
+	// dropped are the held deferred responses a closed connection gave up
+	// during the batch, returned to the pool after EndBatch.
+	dropped []*corenet.HTTP1ResponseValue
 	// held is the scratch a connection's held answers are written from.
 	held []byte
 	// unavailable is the 503 a pending answer refused by a full queue gets.
@@ -153,7 +156,15 @@ type connFlag struct {
 
 // OnOpen implements corenet.LoopHandler. It marks the connection open on its lane.
 func (a *LoopHandler) OnOpen(io corenet.LoopIO, ref corenet.LoopConnRef) {
-	*a.state(io.Loop()).flag(ref) = connFlag{gen: ref.Gen}
+	a.state(io.Loop()).flag(ref).reset(ref.Gen)
+}
+
+// reset makes f a new connection's, of generation gen, keeping the backing
+// of its held answers and their buffer, so a slot's churn reallocates
+// neither.
+func (f *connFlag) reset(gen uint32) {
+	held, buf := f.held[:0], f.buf[:0]
+	*f = connFlag{gen: gen, held: held, buf: buf}
 }
 
 // OnData implements corenet.LoopHandler. It frames every whole request at the
@@ -256,7 +267,7 @@ func (a *LoopHandler) OnBatchEnd(io corenet.LoopIO) {
 	loop := io.Loop()
 	st := a.state(loop)
 	//: a batch with no answer, and no held one ready, has nothing to end.
-	if len(st.items) == 0 && len(st.ready) == 0 && len(st.deferHeld) == 0 {
+	if len(st.items) == 0 && len(st.ready) == 0 && len(st.deferHeld) == 0 && len(st.dropped) == 0 {
 		//: nothing queued.
 		return
 	}
@@ -409,7 +420,7 @@ func (st *loopState) flag(ref corenet.LoopConnRef) *connFlag {
 	f := &st.conns[ring][slot]
 	//: a slot reused by a newer connection starts clean.
 	if f.gen != ref.Gen {
-		*f = connFlag{gen: ref.Gen}
+		f.reset(ref.Gen)
 	}
 	//: the connection's own flag.
 	return f

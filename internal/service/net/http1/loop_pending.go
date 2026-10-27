@@ -302,7 +302,9 @@ func (st *loopState) markReady(ref corenet.LoopConnRef, f *connFlag) {
 
 // dropHeld gives up every answer f holds: a pending slot whose job is back is
 // freed, one still out is cancelled and freed when it comes back, a deferred
-// response is returned to the pool.
+// response is returned to the pool once the batch's EndBatch has returned —
+// the batcher holds it until then, and a request taking it first would share
+// it with the one given up.
 func (st *loopState) dropHeld(f *connFlag) {
 	//: each held answer.
 	for _, it := range f.held {
@@ -313,14 +315,15 @@ func (st *loopState) dropHeld(f *connFlag) {
 		case it.slot != nil:
 			it.slot.cancelled.Store(true)
 		case it.res != nil:
-			st.give(it.res)
+			st.dropped = append(st.dropped, it.res)
 		}
 	}
 	f.held, f.buf = f.held[:0], f.buf[:0]
 }
 
 // completeHeld completes, after EndBatch, the deferred responses held behind
-// a pending answer: each becomes bytes in its connection's buffer.
+// a pending answer: each becomes bytes in its connection's buffer. The ones a
+// closed connection gave up go back to the pool, the batcher done with them.
 func (st *loopState) completeHeld() {
 	//: each connection that held one.
 	for _, ref := range st.deferHeld {
@@ -330,6 +333,12 @@ func (st *loopState) completeHeld() {
 		}
 	}
 	st.deferHeld = st.deferHeld[:0]
+	//: given up during the batch: free now that EndBatch has returned.
+	for i, res := range st.dropped {
+		st.give(res)
+		st.dropped[i] = nil
+	}
+	st.dropped = st.dropped[:0]
 }
 
 // completeConn writes f's deferred held responses into its buffer.
@@ -394,14 +403,42 @@ func (st *loopState) flushHeld(io corenet.LoopIO, ref corenet.LoopConnRef, f *co
 	}
 	rest := copy(f.held, f.held[n:])
 	f.held = f.held[:rest]
-	//: nothing held any more: the buffer starts over.
-	if rest == 0 {
-		f.buf = f.buf[:0]
-	}
+	f.compact()
 	st.write(io, ref, out, closing)
 	//: closed: what it still holds goes with it.
 	if closing || f.dead {
 		st.dropHeld(f)
+	}
+}
+
+// compact drops from f's buffer the bytes of the answers already written, so
+// what the ceiling counts is only what f still holds: under an open pipeline
+// a pending answer is always at the tail of held, and a buffer that only
+// started over once held was empty would grow until it closed the
+// connection. The bytes still held move to the front, their bounds with them.
+func (f *connFlag) compact() {
+	base := len(f.buf)
+	//: the first bytes still held; the ones before it were written.
+	for _, it := range f.held {
+		//: an answer whose bytes are in the buffer.
+		if it.slot == nil && it.res == nil {
+			base = it.off
+			break
+		}
+	}
+	//: nothing written lies before them.
+	if base == 0 {
+		//: as it is.
+		return
+	}
+	f.buf = f.buf[:copy(f.buf, f.buf[base:])]
+	//: each bound follows its bytes.
+	for i := range f.held {
+		it := &f.held[i]
+		//: bytes in the buffer.
+		if it.slot == nil && it.res == nil {
+			it.off, it.end = it.off-base, it.end-base
+		}
 	}
 }
 
