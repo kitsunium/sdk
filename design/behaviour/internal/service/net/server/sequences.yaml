@@ -602,6 +602,21 @@ sequences:
           when: c.Conn == nil
       - return: c.Conn.Close()
         to: c.Conn.Close
+  - of: (*conn).closeGracefully
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*conn).closeGracefully
+        kind: self
+      - id: closeConn
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: c.Conn == nil
+      - return: closeConn(c.Conn, c.refused)
+        to: closeConn
   - of: (*conn).reset
     steps:
       - set: c.Conn
@@ -615,6 +630,8 @@ sequences:
       - set: c.timeouts
         value: corenet.TimeoutsValue{}
       - set: c.hijacked
+        value: "false"
+      - set: c.refused
         value: "false"
   - of: (*trackedConn).Close
     participants:
@@ -882,6 +899,251 @@ sequences:
           errs.Wrap(corenet.EngineUnsupported, errs.WrapParams{},
           		errs.String("group", g.name), errs.String("engine", g.engine.String()))
         to: errs
+  - of: exclusiveApplies
+    participants:
+      - id: caller
+        kind: actor
+      - id: exclusiveApplies
+        kind: self
+      - id: stdnet
+        kind: stdlib
+      - id: netip
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: "!exclusiveAddrSupported()"
+      - switch:
+          cases:
+            - case: "\"tcp\", \"tcp4\", \"tcp6\", \"udp\", \"udp4\", \"udp6\""
+            - default: true
+              do:
+                - return: "false"
+          "on": network
+      - bind: host, _, err
+        eval: stdnet.SplitHostPort(address)
+        to: stdnet
+      - opt:
+          do:
+            - return: "true"
+          when: err != nil
+      - bind: ip, perr
+        eval: netip.ParseAddr(host)
+        to: netip
+      - return: perr != nil || !ip.IsMulticast()
+  - of: (*Server).rebindAttempts
+    steps:
+      - opt:
+          do:
+            - return: "1"
+          when: s.holdsPort(addr)
+      - return: rebindAttempts
+  - of: (*Server).holdsPort
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).holdsPort
+        kind: self
+      - id: stdnet
+        kind: stdlib
+    steps:
+      - bind: _, port, err
+        eval: stdnet.SplitHostPort(addr.Addr)
+        to: stdnet
+      - opt:
+          do:
+            - return: "false"
+          when: err != nil || port == "0" || port == ""
+      - lock:
+          mutex: s.mu
+          read: true
+      - loop:
+          do:
+            - bind: _, held, herr
+              eval: stdnet.SplitHostPort(b.ln.Addr().String())
+              to: stdnet
+            - opt:
+                do:
+                  - return: "true"
+                when: herr == nil && held == port && b.ln.Addr().Network() == "tcp"
+          key: _
+          range: s.listeners
+          value: b
+      - return: "false"
+  - of: listenControl
+    participants:
+      - id: caller
+        kind: actor
+      - id: listenControl
+        kind: self
+      - id: reusePortControl
+        kind: internal
+      - id: rawConn.Control
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!sharded && !exclusiveAddrSupported()"
+      - return:
+          closure:
+            params: network, address string, rawConn syscall.RawConn
+            results: error
+            steps:
+              - opt:
+                  do:
+                    - opt:
+                        do:
+                          - return: err
+                        init:
+                          bind: err
+                          eval: reusePortControl(network, address, rawConn)
+                          to: reusePortControl
+                        when: err != nil
+                  when: sharded
+              - opt:
+                  do:
+                    - return: nil
+                  when: "!exclusiveApplies(network, address)"
+              - var:
+                  name: setErr
+                  type: error
+              - opt:
+                  do:
+                    - return: err
+                  init:
+                    bind: err
+                    eval: rawConn.Control(func(fd uintptr) { setErr = setExclusiveAddr(fd) })
+                    to: rawConn.Control
+                  when: err != nil
+              - return: setErr
+  - of: exclusiveOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: exclusiveOf
+        kind: self
+      - id: sc.SyscallConn
+        kind: value
+      - id: raw.Control
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: sc == nil || !exclusiveAddrSupported()
+      - bind: raw, err
+        eval: sc.SyscallConn()
+        to: sc.SyscallConn
+      - opt:
+          do:
+            - return: "false"
+          when: err != nil
+      - var:
+          name: set
+          type: bool
+      - opt:
+          do:
+            - return: "false"
+          init:
+            bind: cerr
+            eval: |-
+              raw.Control(func(fd uintptr) {
+              		v, gerr := exclusiveAddrOf(fd)
+              		set = gerr == nil && v
+              	})
+            to: raw.Control
+          when: cerr != nil
+      - return: set
+  - of: rebindDelay
+    participants:
+      - id: caller
+        kind: actor
+      - id: rebindDelay
+        kind: self
+      - id: "kbackoff.Value{BaseDelay: 25 * time.Millisecond, MaxDelay: time.Second, Multiplier: 2}.Delay"
+        kind: value
+    steps:
+      - return: "kbackoff.Value{BaseDelay: 25 * time.Millisecond, MaxDelay: time.Second, Multiplier: 2}.Delay(attempt)"
+        to: "kbackoff.Value{BaseDelay: 25 * time.Millisecond, MaxDelay: time.Second, Multiplier: 2}.Delay"
+  - of: bindRetrying
+    participants:
+      - id: caller
+        kind: actor
+      - id: bindRetrying
+        kind: self
+      - id: time
+        kind: stdlib
+      - id: timer.Stop
+        kind: value
+    steps:
+      - bind: start
+        eval: time.Now()
+        to: time
+      - loop:
+          do:
+            - bind: v, err
+              eval: bind()
+            - opt:
+                do:
+                  - var:
+                      name: wait
+                      type: time.Duration
+                  - opt:
+                      do:
+                        - set: wait
+                          to: time
+                          value: time.Since(start)
+                      when: attempt > 1
+                  - return: v, wait, err
+                when: err == nil || attempt >= attempts || !inUse(err)
+            - bind: timer
+              eval: time.NewTimer(rebindDelay(attempt))
+              to: time
+            - select:
+                cases:
+                  - comm: <-timer.C
+                  - comm: <-ctx.Done()
+                    do:
+                      - eval: timer.Stop()
+                        to: timer.Stop
+                      - return: v, time.Since(start), err
+          init: attempt := 1
+          post: attempt++
+  - of: listenerSocket
+    steps:
+      - bind: sc, _
+        eval: ln.(syscall.Conn)
+      - return: sc
+  - of: packetSocket
+    steps:
+      - bind: sc, _
+        eval: pc.(syscall.Conn)
+      - return: sc
+  - of: exclusiveAddrSupported
+    steps:
+      - return: "false"
+  - of: setExclusiveAddr
+    steps:
+      - return: nil
+  - of: exclusiveAddrOf
+    steps:
+      - return: false, nil
+  - of: addrInUse
+    steps:
+      - return: "false"
+  - of: closeConn
+    participants:
+      - id: caller
+        kind: actor
+      - id: closeConn
+        kind: self
+      - id: c.Close
+        kind: value
+    steps:
+      - return: c.Close()
+        to: c.Close
   - of: platformLacks
     steps:
       - return: "false"
@@ -1749,7 +2011,7 @@ sequences:
           when: err != nil
       - loop:
           do:
-            - bind: pc, err
+            - bind: pc, rep, err
               eval: listenPacket(ctx, addr)
               to: listenPacket
             - opt:
@@ -1773,6 +2035,8 @@ sequences:
                 			Address:        pc.LocalAddr().String(),
                 			Network:        addr.Network,
                 			Shards:         1,
+                			Exclusive:      rep.exclusive,
+                			BindWait:       corenet.DurationValue(rep.wait),
                 			Degraded:       degraded,
                 			DegradedReason: reason,
                 		})
@@ -1838,6 +2102,7 @@ sequences:
                       				Network:        addr.Network,
                       				Shards:         1,
                       				Adopted:        true,
+                      				Exclusive:      exclusiveOf(packetSocket(pc)),
                       				Degraded:       degraded,
                       				DegradedReason: reason,
                       			})
@@ -1999,6 +2264,8 @@ sequences:
                       				Network: addr.Network,
                       				Shards:  1,
                       				Adopted: true,
+                      				//: read from the raw socket: TLS hides its descriptor.
+                      				Exclusive: exclusiveOf(listenerSocket(raw)),
                       			})
                   - eval: s.mu.Unlock()
                     to: s.mu.Unlock
@@ -2039,8 +2306,8 @@ sequences:
         eval: "0"
       - loop:
           do:
-            - bind: ln, err
-              eval: listen(ctx, addr, group.identity, count > 1, group.tracksCloses())
+            - bind: ln, rep, err
+              eval: listen(ctx, addr, group.identity, count > 1, group.tracksCloses(), s.rebindAttempts(addr))
               to: listen
             - opt:
                 do:
@@ -2061,6 +2328,8 @@ sequences:
                       				Address:        ln.Addr().String(),
                       				Network:        addr.Network,
                       				Shards:         count,
+                      				Exclusive:      rep.exclusive,
+                      				BindWait:       corenet.DurationValue(rep.wait),
                       				Degraded:       degraded,
                       				DegradedReason: reason,
                       			})
@@ -2643,15 +2912,17 @@ sequences:
         kind: self
       - id: familyUnavailable
         kind: internal
-      - id: cfg.Listen
-        kind: value
+      - id: bindRetrying
+        kind: internal
+      - id: exclusiveOf
+        kind: internal
       - id: layered
         kind: internal
     steps:
       - opt:
           do:
             - return: |-
-                nil, errs.Wrap(corenet.UnsupportedNetwork, errs.WrapParams{},
+                nil, rep, errs.Wrap(corenet.UnsupportedNetwork, errs.WrapParams{},
                 			errs.String("network", addr.Network))
           init:
             bind: _, ok
@@ -2659,7 +2930,7 @@ sequences:
           when: "!ok"
       - opt:
           do:
-            - return: nil, unavailable
+            - return: nil, rep, unavailable
           init:
             bind: unavailable
             eval: familyUnavailable(addr)
@@ -2668,26 +2939,30 @@ sequences:
       - opt:
           do:
             - return: |-
-                nil, errs.Wrap(corenet.InvalidAddress, errs.WrapParams{},
+                nil, rep, errs.Wrap(corenet.InvalidAddress, errs.WrapParams{},
                 			errs.String("address", addr.String()))
           when: strings.TrimSpace(addr.Addr) == ""
       - bind: cfg
-        eval: stdnet.ListenConfig{}
-      - opt:
-          do:
-            - set: cfg.Control
-              value: reusePortControl
-          when: sharded
-      - bind: raw, lerr
-        eval: cfg.Listen(ctx, addr.Network, addr.Addr)
-        to: cfg.Listen
+        eval: "stdnet.ListenConfig{Control: listenControl(sharded)}"
+      - bind: raw, wait, lerr
+        eval: |-
+          bindRetrying(ctx, attempts, addrInUse, func() (stdnet.Listener, error) {
+          		//: one attempt.
+          		return cfg.Listen(ctx, addr.Network, addr.Addr)
+          	})
+        to: bindRetrying
+      - set: rep.wait
+        value: wait
       - opt:
           do:
             - return: |-
-                nil, errs.Wrap(corenet.ListenFailed, errs.WrapParams{},
+                nil, rep, errs.Wrap(corenet.ListenFailed, errs.WrapParams{},
                 			errs.String("address", addr.String()), errs.String("cause", lerr.Error()))
           when: lerr != nil
-      - return: layered(raw, id, trackCloses), nil
+      - set: rep.exclusive
+        to: exclusiveOf
+        value: exclusiveOf(listenerSocket(raw))
+      - return: layered(raw, id, trackCloses), rep, nil
         to: layered
   - of: familyUnavailable
     participants:
@@ -3314,15 +3589,15 @@ sequences:
                 when: err != nil
             - set: lns
               value: append(lns, adopted...)
-            - eval: s.registerLoopListeners(group, adopted, true)
+            - eval: s.registerLoopListeners(group, adopted, nil)
               to: s.registerLoopListeners
           key: _
           range: group.adopt
           value: name
       - loop:
           do:
-            - bind: ln, err
-              eval: listen(ctx, addr, corenet.IdentityValue{}, false, false)
+            - bind: ln, rep, err
+              eval: listen(ctx, addr, corenet.IdentityValue{}, false, false, s.rebindAttempts(addr))
               to: listen
             - opt:
                 do:
@@ -3330,7 +3605,7 @@ sequences:
                 when: err != nil
             - set: lns
               value: append(lns, ln)
-            - eval: s.registerLoopListeners(group, []stdnet.Listener{ln}, false)
+            - eval: s.registerLoopListeners(group, []stdnet.Listener{ln}, &rep)
               to: s.registerLoopListeners
           key: _
           range: group.addrs
@@ -3378,6 +3653,13 @@ sequences:
         to: s.mu.Unlock
       - return: nil
   - of: (*Server).registerLoopListeners
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).registerLoopListeners
+        kind: self
+      - id: exclusiveOf
+        kind: internal
     steps:
       - lock:
           mutex: s.mu
@@ -3387,11 +3669,23 @@ sequences:
               eval: "corenet.AddressValue{Network: ln.Addr().Network(), Addr: ln.Addr().String()}"
             - set: s.listeners
               value: "append(s.listeners, &boundListener{group: group.name, addr: addr, ln: ln})"
+            - bind: row
+              eval: |-
+                corenet.ListenerStateValue{
+                			Group: group.name, Address: ln.Addr().String(), Network: addr.Network, Shards: 1, Adopted: rep == nil,
+                		}
+            - alt:
+                - do:
+                    - set: row.Exclusive, row.BindWait
+                      value: rep.exclusive, corenet.DurationValue(rep.wait)
+                  when: rep != nil
+                - do:
+                    - set: row.Exclusive
+                      to: exclusiveOf
+                      value: exclusiveOf(listenerSocket(ln))
+                  else: true
             - set: s.states
-              value: |-
-                append(s.states, corenet.ListenerStateValue{
-                			Group: group.name, Address: ln.Addr().String(), Network: addr.Network, Shards: 1, Adopted: adopted,
-                		})
+              value: append(s.states, row)
           key: _
           range: lns
           value: ln
@@ -7004,13 +7298,15 @@ sequences:
         kind: self
       - id: familyUnavailable
         kind: internal
-      - id: cfg.ListenPacket
-        kind: value
+      - id: bindRetrying
+        kind: internal
+      - id: exclusiveOf
+        kind: internal
     steps:
       - opt:
           do:
             - return: |-
-                nil, errs.Wrap(corenet.UnsupportedNetwork, errs.WrapParams{},
+                nil, rep, errs.Wrap(corenet.UnsupportedNetwork, errs.WrapParams{},
                 			errs.String("network", addr.Network))
           init:
             bind: _, ok
@@ -7018,7 +7314,7 @@ sequences:
           when: "!ok"
       - opt:
           do:
-            - return: nil, unavailable
+            - return: nil, rep, unavailable
           init:
             bind: unavailable
             eval: familyUnavailable(addr)
@@ -7027,22 +7323,30 @@ sequences:
       - opt:
           do:
             - return: |-
-                nil, errs.Wrap(corenet.InvalidAddress, errs.WrapParams{},
+                nil, rep, errs.Wrap(corenet.InvalidAddress, errs.WrapParams{},
                 			errs.String("address", addr.String()))
           when: strings.TrimSpace(addr.Addr) == ""
-      - var:
-          name: cfg
-          type: stdnet.ListenConfig
-      - bind: bound, lerr
-        eval: cfg.ListenPacket(ctx, addr.Network, addr.Addr)
-        to: cfg.ListenPacket
+      - bind: cfg
+        eval: "stdnet.ListenConfig{Control: listenControl(false)}"
+      - bind: bound, wait, lerr
+        eval: |-
+          bindRetrying(ctx, 1, addrInUse, func() (stdnet.PacketConn, error) {
+          		//: one attempt.
+          		return cfg.ListenPacket(ctx, addr.Network, addr.Addr)
+          	})
+        to: bindRetrying
+      - set: rep.wait
+        value: wait
       - opt:
           do:
             - return: |-
-                nil, errs.Wrap(corenet.ListenFailed, errs.WrapParams{},
+                nil, rep, errs.Wrap(corenet.ListenFailed, errs.WrapParams{},
                 			errs.String("address", addr.String()), errs.String("cause", lerr.Error()))
           when: lerr != nil
-      - return: bound, nil
+      - set: rep.exclusive
+        to: exclusiveOf
+        value: exclusiveOf(packetSocket(bound))
+      - return: bound, rep, nil
   - of: (*boundPacketConn).finish
     participants:
       - id: caller
@@ -7380,7 +7684,7 @@ sequences:
         to: s.liveMu.Unlock
       - opt:
           do:
-            - eval: swallowErr(c.Close())
+            - eval: swallowErr(c.closeGracefully())
               to: swallowErr
           when: "!c.hijacked"
       - opt:
@@ -8206,6 +8510,16 @@ sequences:
           when: tracked != nil
       - eval: l.release()
         to: l.release
+  - of: markRefused
+    steps:
+      - opt:
+          do:
+            - set: pooled.refused
+              value: "true"
+          init:
+            bind: pooled, ok
+            eval: c.(*conn)
+          when: ok
   - of: (*Server).admit
     participants:
       - id: caller
@@ -8216,6 +8530,8 @@ sequences:
         kind: value
       - id: s.rejected.Add
         kind: value
+      - id: markRefused
+        kind: internal
       - id: errs
         kind: package
       - id: limiter.releaseFor
@@ -8230,6 +8546,8 @@ sequences:
           do:
             - eval: s.rejected.Add(1)
               to: s.rejected.Add
+            - eval: markRefused(c)
+              to: markRefused
             - return: |-
                 errs.Wrap(corenet.ConnLimitReached, errs.WrapParams{},
                 			errs.Int("limit", limiter.ceiling))
