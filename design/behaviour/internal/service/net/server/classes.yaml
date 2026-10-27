@@ -4645,8 +4645,9 @@ types:
         recv: g *StreamGroup
         results: corenet.EngineValue
       - doc: |-
-          pickRefusal says why pickEngine found no engine: both kinds without Engine,
-          an Engine neither kind runs on, or a type the entry does not serve.
+          pickRefusal says why pickEngine found no engine: both kinds and no Engine
+          (HandlerAmbiguous), an Engine the handler cannot run on — whatever kinds it
+          is (EngineUnsupported) — or a type the entry does not serve.
         name: pickRefusal
         params: entry string, h any, goroutine, loop bool
         recv: g *StreamGroup

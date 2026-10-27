@@ -2599,7 +2599,7 @@ State returns a snapshot of the server's lifecycle and listeners.
 func (*Server) TCP(addr string, h any, opts ...GroupOption) *StreamGroup
 ```
 
-TCP declares a group serving h on addr, a TCP address — the simple API. h is a ConnHandler, one goroutine per connection, or a LoopHandler, on the loop engine; a handler that is both needs Engine to choose. An HTTP handler is refused with HandlerUnsupported: HTTP serves it. The group is named "tcp+" + addr unless Name says otherwise; the other refusals are HTTP's.
+TCP declares a group serving h on addr, a TCP address — the simple API. h is a ConnHandler, one goroutine per connection, or a LoopHandler, on the loop engine; a handler that is both needs Engine to choose. An HTTP handler is refused with HandlerUnsupported: HTTP serves it. The group is named "tcp+" + addr unless Name says otherwise. Start also refuses a nil or typed nil handler (HandlerMissing), both interfaces without Engine (HandlerAmbiguous), an Engine the handler cannot run on (EngineUnsupported), any other type (HandlerUnsupported) and Plaintext with TLS (PlaintextWithTLS); a TCP group serves no HTTP, so it needs neither TLS nor Plaintext.
 
 <a name="Server.UDP"></a>
 ### func \(Server\) [UDP](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/server/simple.go>)
