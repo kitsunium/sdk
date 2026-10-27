@@ -6686,7 +6686,17 @@ types:
         recv: n *Node
       - doc: |-
           checkAdmission turns a joining directory into a member once its own
-          admission is in the configuration.
+          admission is in the configuration its log holds committed and durable:
+          the one in force at the commit, bounded by what the storage actor
+          reported synced (#695). Raft's commit moves when an append is accepted,
+          in memory, and the stamp written on the loop in that same turn was
+          durable before the storage actor wrote the entries that admit the node:
+          a crash during their sync restarted a member with an empty
+          configuration, which admitted no peer and never sent a JOIN again. A
+          crash before the stamp now leaves a joining directory, which replays its
+          admission from the log or joins again (#533); the committed entries
+          through that bound are never truncated, so a member stamp always has its
+          admission on disk.
         name: checkAdmission
         recv: n *Node
       - doc: leadershipChanged answers what a change of leader or term made unknown.

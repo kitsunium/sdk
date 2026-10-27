@@ -91,6 +91,7 @@ go_test(
     srcs = [
         "aboveprotocol_internal_test.go",
         "acceptbound_internal_test.go",
+        "admissiondurable_internal_test.go",
         "adoptedfrom_internal_test.go",
         "allpeersgone_internal_test.go",
         "cancel_internal_test.go",

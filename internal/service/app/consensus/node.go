@@ -1143,6 +1143,10 @@ func (n *Node) storageDone(d *storeDone) {
 	for i, f := range d.after {
 		n.cfg.Transport.Send(d.to[i], f)
 	}
+	// The write that makes a joiner's admission durable may leave raft no
+	// Ready, apply held at its bound: the stamp follows that write here
+	// rather than at the leader's next message (#695).
+	n.checkAdmission()
 }
 
 // batchProposals hands raft the proposal that woke the loop together with
@@ -1525,13 +1529,27 @@ func (n *Node) answerReady(rd *raft.ReadyValue) {
 }
 
 // checkAdmission turns a joining directory into a member once its own
-// admission is in the configuration.
+// admission is in the configuration its log holds committed and durable:
+// the one in force at the commit, bounded by what the storage actor
+// reported synced (#695). Raft's commit moves when an append is accepted,
+// in memory, and the stamp written on the loop in that same turn was
+// durable before the storage actor wrote the entries that admit the node:
+// a crash during their sync restarted a member with an empty
+// configuration, which admitted no peer and never sent a JOIN again. A
+// crash before the stamp now leaves a joining directory, which replays its
+// admission from the log or joins again (#533); the committed entries
+// through that bound are never truncated, so a member stamp always has its
+// admission on disk.
 func (n *Node) checkAdmission() {
 	if n.canVote {
 		return
 	}
 	st := n.r.Status()
-	if m, ok := st.Committed.Member(n.stamp.ID); ok && m.Incarnation == n.stamp.Incarnation {
+	conf := st.Committed
+	if st.Stable < st.Commit {
+		conf = n.r.ConfAt(st.Stable)
+	}
+	if m, ok := conf.Member(n.stamp.ID); ok && m.Incarnation == n.stamp.Incarnation {
 		s := n.stamp
 		s.State = coreconsensus.StampMember
 		if err := n.cfg.Log.WriteStamp(s); err != nil {
