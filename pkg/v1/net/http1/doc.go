@@ -17,17 +17,17 @@
 //
 // # Serving
 //
-//	type api struct{ loops []perLoop } // one per loop, indexed by Request.Loop
+//	type api struct{ lanes []perLane } // one per lane, indexed by Request.Lane
 //
 //	func (a *api) ServeHTTP1(req *http1.Request, res *http1.Response) {
-//		l := &a.loops[req.Loop]
+//		l := &a.lanes[req.Lane]
 //		// route, authenticate with l's own scratch, ...
 //		res.Defer = true // answered at the end of the batch
 //		l.pending = append(l.pending, job{res: res})
 //	}
 //
-//	func (a *api) EndBatch(loop int) {
-//		l := &a.loops[loop]
+//	func (a *api) EndBatch(lane int) {
+//		l := &a.lanes[lane]
 //		// one transaction for every job of l.pending, then for each:
 //		// job.res.Status, job.res.Body = ..., ...; job.res.Defer = false
 //	}
@@ -35,9 +35,9 @@
 //	srv.Group("api", server.Listen("tcp", ":8080"), server.Loop(server.LoopValue{Loops: 2})).
 //		HandleLoop(http1.HandleLoop(a, http1.Parser{}))
 //
-// A handler runs on its loop's thread and must not block it. Every callback
-// of one loop runs on that thread, one at a time, so state kept per loop needs
-// no lock; Request.Loop and the loop argument of EndBatch name the loop. The
+// A handler runs on its lane's thread and must not block it. Every callback
+// of one lane runs on that thread, one at a time, so state kept per lane needs
+// no lock; Request.Lane and the lane argument of EndBatch name the lane. The
 // answers of a batch leave at its end, in request order on each connection.
 //
 // # The codec alone

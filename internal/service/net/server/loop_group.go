@@ -65,11 +65,17 @@ func (g *StreamGroup) loopRefusal() error {
 		//: refused by name.
 		return errs.Wrap(corenet.LoopTLSUnsupported, errs.WrapParams{}, errs.String("group", g.name))
 	}
-	honours, _ := g.loopHandler.(corenet.LoopOptionHonourer)
+	chain, err := buildLoopChain(g.name, g.loopHandler, g.loopMiddlewares)
+	//: a layer that does not forward every callback.
+	if err != nil {
+		//: refused by name.
+		return err
+	}
+	g.loopChain = chain
 	//: every option the group was given, in the constant block's order.
 	for _, k := range g.kinds.list() {
-		//: the engine's own, or the handler's; Use never, whatever it claims.
-		if loopHonours(k) || (honours != nil && k != corenet.OptionMiddleware && honours.Honours(k)) {
+		//: the engine's own, or the chain's; Use never, whatever it claims.
+		if loopHonours(k) || (k != corenet.OptionMiddleware && chainHonours(chain, k)) {
 			continue
 		}
 		//: the first option nobody honours.
@@ -89,7 +95,7 @@ func loopHonours(k corenet.OptionKind) bool {
 	switch k {
 	//: applied by the loop itself.
 	case corenet.OptionIdleTimeout, corenet.OptionMaxConns, corenet.OptionAdopt,
-		corenet.OptionPlaintext, corenet.OptionName, corenet.OptionEngine:
+		corenet.OptionPlaintext, corenet.OptionName, corenet.OptionEngine, corenet.OptionLoopMiddleware:
 		//: honoured.
 		return true
 	//: every other kind needs the handler.
@@ -131,6 +137,11 @@ func (s *Server) bindLoopGroup(ctx context.Context, group *StreamGroup) error {
 		return err
 	}
 	plan := s.operator.plan(group.loop.Backend, nativeLoopBackends)
+	//: the lane count is the same on every backend, a fallback included, so
+	//: the chain learns it once, before any callback.
+	if st, ok := group.loopChain.(corenet.LoopStarter); ok {
+		st.OnStart(loopLanes(group.loop))
+	}
 	eng, err := startLoopEngine(group, lns, plan)
 	//: the backend refused.
 	if err != nil {

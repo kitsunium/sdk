@@ -104,11 +104,13 @@ type HTTP1RequestValue struct {
 	// Close reports whether the client asked to close the connection after
 	// this request: a Connection field holding the close token.
 	Close bool
-	// Loop is the index of the loop that framed the request — its
-	// LoopIO.Loop — set by the loop adapter before the handler runs, so a
-	// handler finds its per-loop state in a slice, with no lock. Parse leaves
-	// it as it is; outside the loop adapter it is what the caller set.
-	Loop int
+	// Lane is the index of the lane that framed the request, from 0 to the
+	// group's lane count less one — its LoopIO.Loop — set by the loop adapter
+	// before the handler runs. One lane is one thread or one goroutine, so a
+	// handler finds its per-lane state in a slice sized at LoopStarter.OnStart,
+	// with no lock. Parse leaves it as it is; outside the loop adapter it is
+	// what the caller set.
+	Lane int
 }
 
 // Field returns the value of the first field named name and true, or nil and
