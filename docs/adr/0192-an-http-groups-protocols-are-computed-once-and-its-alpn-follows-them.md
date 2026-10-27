@@ -76,11 +76,20 @@ it sets none, closes it. `ReadHeaderTimeout` remains HTTP/1.1's;
 `net/http`'s HTTP/2 server has no header phase of its own, which this record
 documents rather than works around.
 
+## Default change
+
+A TLS HTTP group whose identity names no `NextProtos` offered no ALPN, so it
+served HTTP/1.1 only; it now offers `h2` then `http/1.1` and serves HTTP/2 to
+every client that asks. This is a change of default, allowed while v0 (ADR
+0040). The earlier behaviour comes back in code with `Protocols("http/1.1")`.
+There is no operator switch for it: `KITSUNIUM_NET_ENGINE` and
+`KITSUNIUM_NET_DISABLE` only restrict engines and kernel capabilities and never
+touch TLS (ADR 0188, R5), so the `net:default-change` label's `Override:`
+block, which names those variables alone, cannot express it and the pull
+request does not carry the label.
+
 ## Consequences
 
-- A TLS group whose identity names no `NextProtos` now negotiates `h2`. This
-  changes what an existing group serves, and is allowed while v0 (ADR 0040);
-  `Protocols("http/1.1")` keeps the earlier behaviour.
 - New: `Protocols`, `OptionProtocols` (20), `ProtocolsRefused`
   (`0.2.11.62`), re-exported by `pkg/v1/net/server`.
 - Tests: ALPN with HTTP/1.1 alone, h2 alone, both in either order and the
