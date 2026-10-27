@@ -128,11 +128,13 @@ go_test(
 
 # The idle-connection memory budget (memory_linux_test.go, //go:build !race),
 # its own target so the race-off lane (tools/alloc-lane-targets.txt) runs it
-# by name; under race it compiles to nothing it runs.
+# by name; under race it compiles to nothing it runs. The drain file comes
+# with the conformance suite, whose child dispatch names its child.
 # keep
 go_test(
     name = "loop_memory_test",
     srcs = [
+        "conformance_drain_linux_test.go",
         "conformance_linux_test.go",
         "memory_linux_test.go",
     ],
