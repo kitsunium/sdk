@@ -1,4 +1,4 @@
-# ADR 0192 — a drain stops the routing first, takes the listen queue, then closes, and LoopsAuto reads GOMAXPROCS once
+# ADR 0196 — a drain stops the routing first, takes the listen queue, then closes, and LoopsAuto reads GOMAXPROCS once
 
 - **Status**: Accepted
 - **Date**: 2026-10-27
