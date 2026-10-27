@@ -103,6 +103,7 @@ func TestGroupOption_recordsItsKind(t *testing.T) {
 		"Name":              {Name(""), corenet.OptionName},
 		"Engine":            {Engine(corenet.EngineAuto), corenet.OptionEngine},
 		"BatchReplies":      {BatchReplies(), corenet.OptionBatchReplies},
+		"Protocols":         {Protocols(), corenet.OptionProtocols},
 	}
 	facade := groupOptionFuncs(t, facadeFile)
 	//: the facade's fifteen, ReadHeaderTimeout through Adopt, and the three of

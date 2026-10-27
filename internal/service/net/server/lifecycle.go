@@ -133,8 +133,8 @@ func (g *StreamGroup) startRefusal() error {
 		return errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
 			errs.String("group", g.name), errs.String("option", corenet.OptionLoopMiddleware.String()))
 	}
-	//: every option is one the group can apply.
-	return nil
+	//: the HTTP versions it serves, computed once (ADR 0195).
+	return g.protocolsRefusal()
 }
 
 // bindEverything binds both natures, streams first so a mixed server's ports
@@ -345,7 +345,7 @@ func (s *Server) adoptStreamSockets(group *StreamGroup, handler corenet.ConnHand
 			//: an inherited socket gets exactly the layers a bound one does —
 			//: counted by the ceiling, hijacked connections included, and
 			//: served over TLS when the group carries an identity.
-			ln := layered(raw, group.identity, group.tracksCloses())
+			ln := layered(raw, group.serverTLS(), group.tracksCloses())
 			addr := corenet.AddressValue{Network: ln.Addr().Network(), Addr: ln.Addr().String()}
 			bound := &boundListener{group: group.name, addr: addr, ln: ln}
 			s.mu.Lock()
@@ -384,7 +384,7 @@ func (s *Server) bindShards(ctx context.Context, group *StreamGroup, addr corene
 	opened := 0
 	//: every shard binds the same address; the kernel spreads accepts across them.
 	for range count {
-		ln, rep, err := listen(ctx, addr, group.identity, count > 1, group.tracksCloses(), s.rebindAttempts(addr))
+		ln, rep, err := listen(ctx, addr, group.serverTLS(), count > 1, group.tracksCloses(), s.rebindAttempts(addr))
 		//: a shard that will not bind aborts startup rather than serving a
 		//: quietly smaller set than the operator asked for.
 		if err != nil {
