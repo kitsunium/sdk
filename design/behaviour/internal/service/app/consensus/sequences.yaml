@@ -4346,8 +4346,8 @@ sequences:
           do:
             - return: dst, storageFailed("entries", errImpossible)
           when: hi > l.first+uint64(len(l.slots))
-      - bind: size
-        eval: "0"
+      - bind: before, size
+        eval: len(dst), 0
       - loop:
           cond: i < hi
           do:
@@ -4386,6 +4386,10 @@ sequences:
               value: append(dst, e)
           init: i := lo
           post: i++
+      - opt:
+          do:
+            - eval: l.afterEntries(dst[before:])
+          when: l.afterEntries != nil
       - return: dst, nil
   - of: (*fileLog).readEntry
     participants:
@@ -9068,6 +9072,8 @@ sequences:
         kind: internal
       - id: n.startApplied
         kind: internal
+      - id: stepApplied
+        kind: internal
     steps:
       - bind: metas, err
         eval: n.cfg.Snapshots.List()
@@ -9155,7 +9161,17 @@ sequences:
           do:
             - return: raft.StartState{}, err
           when: err != nil
+      - set: applied
+        to: stepApplied
+        value: stepApplied(applied, snapIdx, hs.Commit, dur)
       - return: "raft.StartState{HardState: hs, Snapshot: base, Entries: ents, Evicted: evicted, Applied: applied, Now: n.clk.Now()}, nil"
+  - of: stepApplied
+    steps:
+      - opt:
+          do:
+            - return: applied
+          when: dur.Term != 0 || applied <= commit
+      - return: max(commit, snapIdx)
   - of: termless
     steps:
       - return: m.Position.Index > 0 && m.Position.Term == 0
@@ -14546,7 +14562,7 @@ sequences:
         kind: internal
       - id: d.planKept
         kind: internal
-      - id: lastMembership
+      - id: inForceAt
         kind: internal
       - id: checkOldMembers
         kind: internal
@@ -14583,10 +14599,10 @@ sequences:
           - do:
               - return: p, err
             init:
-              bind: p.old, err
-              eval: lastMembership(d.d.log, d.d.snaps, p.kept)
+              bind: p.old, p.cluster, err
+              eval: inForceAt(d.d.log, d.d.snaps, p.kept)
               op: =
-              to: lastMembership
+              to: inForceAt
             when: err != nil
       - opt:
           do:
@@ -14604,14 +14620,8 @@ sequences:
             eval: checkFenced(p.old.Voters(), stamp.ID, opt, stamp.Log.Cluster, newCluster)
             to: checkFenced
           when: err != nil
-      - opt:
-          do:
-            - return: p, err
-          init:
-            bind: err
-            eval: d.planAdopted(&p)
-            to: d.planAdopted
-          when: err != nil
+      - eval: d.planAdopted(&p)
+        to: d.planAdopted
       - return: p, d.audit(opt.Operator, recoverAuditLine(newCluster, &p))
   - of: DataDir.planAdopted
     participants:
@@ -14621,8 +14631,6 @@ sequences:
         kind: self
       - id: d.d.log.Bounds
         kind: internal
-      - id: clusterVersionThrough
-        kind: internal
     steps:
       - var:
           name: cluster
@@ -14631,7 +14639,7 @@ sequences:
           cases:
             - case: p.resumed
               do:
-                - return: nil
+                - return: ""
             - case: p.install != nil
               do:
                 - set: p.adopted, cluster
@@ -14649,26 +14657,13 @@ sequences:
                       eval: d.d.log.Bounds()
                       to: d.d.log.Bounds
                     when: first > 0 && first-1 > committed
-                - set: p.adopted
-                  value: min(p.kept, committed)
-                - var:
-                    name: err
-                    type: error
-                - opt:
-                    do:
-                      - return: err
-                    init:
-                      bind: cluster, err
-                      eval: clusterVersionThrough(d.d.log, d.d.snaps, p.kept)
-                      op: =
-                      to: clusterVersionThrough
-                    when: err != nil
+                - set: p.adopted, cluster
+                  value: min(p.kept, committed), p.cluster
       - opt:
           do:
             - set: p.adopted
               value: "0"
           when: cluster < raft.Protocol2
-      - return: nil
   - of: DataDir.planKept
     participants:
       - id: caller
@@ -14749,7 +14744,7 @@ sequences:
         kind: actor
       - id: DataDir.writeRecover
         kind: self
-      - id: d.finishInterruptedInstall
+      - id: d.finishPlannedInstall
         kind: internal
       - id: d.writeRecoverIntent
         kind: internal
@@ -14769,8 +14764,8 @@ sequences:
                   - return: err
                 init:
                   bind: err
-                  eval: d.finishInterruptedInstall(p.install)
-                  to: d.finishInterruptedInstall
+                  eval: d.finishPlannedInstall(p)
+                  to: d.finishPlannedInstall
                 when: err != nil
           when: p.install != nil
       - opt:
@@ -14789,7 +14784,7 @@ sequences:
             - return: err
           init:
             bind: err
-            eval: "d.appendForced(new(coreconsensus.HardState{Term: p.hard.Term, Commit: p.kept}), members, &p.old, op)"
+            eval: "d.appendForced(new(coreconsensus.HardState{Term: p.hard.Term, Commit: p.kept}), members, &p.old, p.cluster, op)"
             to: d.appendForced
           when: err != nil
       - set: stamp.Log
@@ -14816,6 +14811,32 @@ sequences:
           when: err != nil
       - return: d.clearRecoverIntent()
         to: d.clearRecoverIntent
+  - of: DataDir.finishPlannedInstall
+    participants:
+      - id: caller
+        kind: actor
+      - id: DataDir.finishPlannedInstall
+        kind: self
+      - id: d.finishInterruptedInstall
+        kind: internal
+      - id: inForceAt
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: d.finishInterruptedInstall(p.install)
+            to: d.finishInterruptedInstall
+          when: err != nil
+      - var:
+          name: err
+          type: error
+      - set: _, p.cluster, err
+        to: inForceAt
+        value: inForceAt(d.d.log, d.d.snaps, p.kept)
+      - return: err
   - of: DataDir.endRecoveredSilence
     participants:
       - id: caller
@@ -15295,8 +15316,6 @@ sequences:
         kind: internal
       - id: d.chainAt
         kind: internal
-      - id: clusterVersionThrough
-        kind: internal
       - id: wire
         kind: package
       - id: flog.Append
@@ -15331,13 +15350,6 @@ sequences:
           when: err != nil
       - bind: term
         eval: max(hard.Term, termAt) + 1
-      - bind: cluster, err
-        eval: clusterVersionThrough(flog, d.d.snaps, commit)
-        to: clusterVersionThrough
-      - opt:
-          do:
-            - return: err
-          when: err != nil
       - bind: conf
         eval: "coreconsensus.MembershipValue{Members: byID(members), Retired: old.Retired}"
       - var:
@@ -15410,134 +15422,141 @@ sequences:
             to: snapshotAt
           when: ok
       - return: 0, 0, nil
-  - of: lastMembership
+  - of: scanLog
     participants:
       - id: caller
         kind: actor
-      - id: lastMembership
+      - id: scanLog
         kind: self
-      - id: snaps.List
-        kind: internal
-      - id: l.Bounds
-        kind: internal
       - id: l.Entries
         kind: internal
-      - id: wire
-        kind: package
+      - id: storageFailed
+        kind: internal
     steps:
       - var:
-          name: m
-          type: coreconsensus.MembershipValue
-      - bind: metas, err
-        eval: snaps.List()
-        to: snaps.List
-      - opt:
-          do:
-            - return: m, err
-          when: err != nil
-      - opt:
-          do:
-            - set: m
-              value: metas[0].Membership
-          when: len(metas) > 0
-      - bind: first, last
-        eval: l.Bounds()
-        to: l.Bounds
-      - opt:
+          name: buf
+          type: "[]coreconsensus.EntryValue"
+      - loop:
+          cond: next <= hi
           do:
             - bind: es, err
-              eval: l.Entries(first, min(last, index)+1, int(^uint(0)>>1), nil)
+              eval: l.Entries(next, min(hi+1, next+offlineBatchEntries), offlineBatchBytes, buf[:0])
               to: l.Entries
             - opt:
                 do:
-                  - return: coreconsensus.MembershipValue{}, err
+                  - return: err
                 when: err != nil
+            - opt:
+                do:
+                  - return: storageFailed("entries", errImpossible)
+                    to: storageFailed
+                when: "!contiguousFrom(es, next)"
             - loop:
                 do:
-                  - opt:
-                      do:
-                        - opt:
-                            do:
-                              - set: m
-                                value: a.Membership
-                            init:
-                              bind: a, err
-                              eval: wire.ParseAdminAt(e.Version, e.Data)
-                              to: wire
-                            when: err == nil
-                      when: e.Kind == coreconsensus.EntryMembership
-                key: _
+                  - eval: f(&es[i])
+                key: i
                 range: es
-                value: e
-          when: last >= first
-      - return: m, nil
-  - of: clusterVersionThrough
+            - eval: clear(es)
+            - set: buf
+              value: es
+          init: next := lo
+          post: next += uint64(len(buf))
+      - return: nil
+  - of: inForceAt
     participants:
       - id: caller
         kind: actor
-      - id: clusterVersionThrough
+      - id: inForceAt
         kind: self
       - id: snaps.List
         kind: internal
       - id: l.Bounds
         kind: internal
-      - id: l.Entries
+      - id: l.Term
         kind: internal
-      - id: wire
-        kind: package
+      - id: scanLog
+        kind: internal
     steps:
       - bind: metas, err
         eval: snaps.List()
         to: snaps.List
       - opt:
           do:
-            - return: 0, err
+            - return: coreconsensus.MembershipValue{}, 0, err
           when: err != nil
       - var:
-          name: ver
-          type: uint32
-      - leaf: a var of several names, or of no type
-        stmt: var gen, base uint64
+          name: h
+          type: inForce
       - opt:
           do:
-            - set: ver, gen, base
-              value: metas[0].ClusterVersion, metas[0].ClusterGeneration, metas[0].Position.Index
+            - bind: m
+              eval: "&metas[0]"
+            - set: h
+              value: "inForce{conf: m.Membership, ver: m.ClusterVersion, gen: m.ClusterGeneration, base: m.Position.Index}"
           when: len(metas) > 0
       - bind: first, last
         eval: l.Bounds()
         to: l.Bounds
-      - bind: lo
-        eval: max(first, base+1)
+      - bind: hi, lo
+        eval: min(last, index), first
       - opt:
-          do:
-            - return: ver, nil
-          when: last < lo || index < lo
-      - bind: es, err
-        eval: l.Entries(lo, min(last, index)+1, int(^uint(0)>>1), nil)
-        to: l.Entries
-      - opt:
-          do:
-            - return: 0, err
-          when: err != nil
-      - loop:
           do:
             - opt:
                 do:
-                  - continue: true
-                when: e.Kind != coreconsensus.EntryClusterVersion
-            - opt:
-                do:
-                  - set: ver, gen
-                    value: a.ClusterVersion, gen+1
+                  - set: lo
+                    value: h.base + 1
                 init:
-                  bind: a, err
-                  eval: wire.ParseAdminAt(e.Version, e.Data)
-                  to: wire
-                when: err == nil && a.Pre.Generation == gen && a.ClusterVersion > ver
-          key: _
-          range: es
-          value: e
-      - return: ver, nil
+                  bind: t, terr
+                  eval: l.Term(h.base)
+                  to: l.Term
+                when: terr == nil && t == metas[0].Position.Term
+          when: h.base >= first && h.base <= hi
+      - opt:
+          do:
+            - return: h.conf, h.ver, nil
+          when: lo > hi
+      - opt:
+          do:
+            - return: coreconsensus.MembershipValue{}, 0, err
+          init:
+            bind: err
+            eval: scanLog(l, lo, hi, h.add)
+            to: scanLog
+          when: err != nil
+      - return: h.conf, h.ver, nil
+  - of: (*inForce).add
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*inForce).add
+        kind: self
+      - id: wire
+        kind: package
+    steps:
+      - switch:
+          cases:
+            - case: e.Kind == coreconsensus.EntryMembership
+              do:
+                - opt:
+                    do:
+                      - set: h.conf
+                        value: a.Membership
+                    init:
+                      bind: a, err
+                      eval: wire.ParseAdminAt(e.Version, e.Data)
+                      to: wire
+                    when: err == nil
+            - case: e.Kind == coreconsensus.EntryClusterVersion && e.Position.Index > h.base
+              do:
+                - opt:
+                    do:
+                      - set: h.ver, h.gen
+                        value: a.ClusterVersion, h.gen+1
+                    init:
+                      bind: a, err
+                      eval: wire.ParseAdminAt(e.Version, e.Data)
+                      to: wire
+                    when: err == nil && a.Pre.Generation == h.gen && a.ClusterVersion > h.ver
   - of: RestoreSnapshot
     participants:
       - id: caller
@@ -18574,9 +18593,15 @@ sequences:
       - var:
           name: meta
           type: coreconsensus.SnapshotMetaValue
+      - var:
+          name: commit
+          type: uint64
       - bind: ok
         eval: |-
           n.exec(func() {
+          		if commit = n.r.Status().Commit; idx > commit {
+          			return
+          		}
           		eng := n.r.EngineAt(idx)
           		conf := n.r.ConfAt(idx)
           		conf.Index = idx
@@ -18588,7 +18613,17 @@ sequences:
           		}
           	})
         to: n.exec
-      - return: meta, ok
+      - switch:
+          cases:
+            - case: "!ok"
+              do:
+                - return: meta, n.stoppedErr()
+            - case: idx > commit
+              do:
+                - return: |-
+                    meta, origin(coreconsensus.Overloaded, errs.String("why", "the applied index is past the commit the node knows"),
+                    			errs.String("index", u64s(idx)), errs.String("commit", u64s(commit)))
+      - return: meta, nil
   - of: snapshotID
     participants:
       - id: caller
@@ -18616,8 +18651,6 @@ sequences:
         kind: value
       - id: n.metaAt
         kind: internal
-      - id: n.stoppedErr
-        kind: internal
       - id: n.cfg.Machine.Snapshot
         kind: value
       - id: n.writeSnapshot
@@ -18640,14 +18673,13 @@ sequences:
         to: n.cuttingSince.Store
       - defer: n.cuttingSince.Store(0)
         to: n.cuttingSince.Store
-      - bind: meta, ok
+      - bind: meta, err
         eval: n.metaAt(idx, term)
         to: n.metaAt
       - opt:
           do:
-            - return: n.stoppedErr()
-              to: n.stoppedErr
-          when: "!ok"
+            - return: err
+          when: err != nil
       - bind: snap, err
         eval: n.cfg.Machine.Snapshot()
         to: n.cfg.Machine.Snapshot

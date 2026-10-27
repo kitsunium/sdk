@@ -389,16 +389,16 @@ func TestACutCarriesTheEngineStateAtItsIndex(t *testing.T) {
 	if now.Generation != old.Generation+1 {
 		t.Fatalf("setup: the contract did not commit: generation %d", now.Generation)
 	}
-	meta, ok := l.node.metaAt(tok.Index, tok.Term)
-	if !ok {
-		t.Fatal("the node stopped")
+	meta, err := l.node.metaAt(tok.Index, tok.Term)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if meta.Timing != old {
 		t.Fatalf("a cut at %d, before the contract, carries timing %+v, want %+v", tok.Index, meta.Timing, old)
 	}
-	meta, ok = l.node.metaAt(after.Index, after.Term)
-	if !ok {
-		t.Fatal("the node stopped")
+	meta, err = l.node.metaAt(after.Index, after.Term)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if meta.Timing.Generation != old.Generation+1 || meta.Timing.HeartbeatInterval != next.HeartbeatInterval {
 		t.Fatalf("a cut at %d, past the contract, carries timing %+v", after.Index, meta.Timing)

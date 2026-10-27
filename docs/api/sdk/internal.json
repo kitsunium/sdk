@@ -27151,6 +27151,172 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1AccessLogger",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1AccessLogger",
+      "spelled": "interface{LogHTTP1(rec HTTP1AccessValue)}",
+      "canonical": "interface{LogHTTP1(rec github.com/kitsunium/sdk/internal/core/net.HTTP1AccessValue)}",
+      "doc": "HTTP1AccessLogger receives the http1 chain's access-log records. Every slice\nof rec aliases the request or the response and is valid only while\nLogHTTP1 runs: a logger that keeps a byte copies it. It runs on the lane's\nthread, once per request, and must not block it: a logger that writes to a\nfile or a socket queues the record.\n\nIFACE-PLUGIN: what a consumer writes; the link that calls it is\ninternal/service/net/http1's.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1AccessLogger.LogHTTP1",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "LogHTTP1",
+      "recv": "HTTP1AccessLogger",
+      "spelled": "func(rec HTTP1AccessValue)",
+      "canonical": "func(rec github.com/kitsunium/sdk/internal/core/net.HTTP1AccessValue)",
+      "doc": "LogHTTP1 receives one request's record.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1AccessValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1AccessValue",
+      "spelled": "struct{Lane int; Route int; Method []byte; Path []byte; Status int; BodyLen int; Authenticated bool; Deferred bool; NFields int; Fields [8]HTTP1FieldValue}",
+      "canonical": "struct{Lane int; Route int; Method []byte; Path []byte; Status int; BodyLen int; Authenticated bool; Deferred bool; NFields int; Fields [8]github.com/kitsunium/sdk/internal/core/net.HTTP1FieldValue}",
+      "fields": [
+        {
+          "name": "Lane",
+          "type": "int",
+          "doc": "Lane is the request's lane.\n"
+        },
+        {
+          "name": "Route",
+          "type": "int",
+          "doc": "Route is the route a router link matched, zero for none.\n"
+        },
+        {
+          "name": "Method",
+          "type": "[]byte",
+          "doc": "Method is the request method.\n"
+        },
+        {
+          "name": "Path",
+          "type": "[]byte",
+          "doc": "Path is the request's canonical path, without its query.\n"
+        },
+        {
+          "name": "Status",
+          "type": "int",
+          "doc": "Status is the answer's status code, 200 when the handler left it zero;\nzero for an answer still deferred.\n"
+        },
+        {
+          "name": "BodyLen",
+          "type": "int",
+          "doc": "BodyLen is the length of the answer's body.\n"
+        },
+        {
+          "name": "Authenticated",
+          "type": "bool",
+          "doc": "Authenticated reports whether an authenticating link verified the request.\n"
+        },
+        {
+          "name": "Deferred",
+          "type": "bool",
+          "doc": "Deferred reports whether the answer was deferred to the batch's end.\n"
+        },
+        {
+          "name": "NFields",
+          "type": "int",
+          "doc": "NFields is how many entries of Fields the record filled.\n"
+        },
+        {
+          "name": "Fields",
+          "type": "[8]HTTP1FieldValue",
+          "doc": "Fields holds the allowed request fields the request carried, in the order\nthe link was given their names.\n"
+        }
+      ],
+      "doc": "HTTP1AccessValue is one request's access-log record, as the http1 chain's\nlogging link hands it to an HTTP1AccessLogger: what the request asked, how\nit was routed and answered, and the request fields the link allows, by\nname. It never holds the Authorization field, the query or the body: the\nlink refuses to allow a credential field, and the record has no slot for\nthe rest. Every slice aliases the request or the response.\n",
+      "file": "core/net/http1_auth.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1AuthValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1AuthValue",
+      "spelled": "struct{}",
+      "canonical": "struct{}",
+      "doc": "HTTP1AuthValue is what an authenticating link of the http1 chain\nestablished about a request: a subject of at most HTTP1MaxSubject bytes,\nheld in an array, and 64 bits of claims the application gives meaning to.\nIt is a value, so copying a request copies it, and it never aliases the\nbytes the credentials were read from. The zero value is no subject and no\nclaim.\n",
+      "file": "core/net/http1_auth.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.(*HTTP1AuthValue).Claims",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "Claims",
+      "recv": "HTTP1AuthValue",
+      "spelled": "func() uint64",
+      "canonical": "func() uint64",
+      "doc": "Claims returns the claims.\n",
+      "file": "core/net/http1_auth.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.(*HTTP1AuthValue).Reset",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "Reset",
+      "recv": "HTTP1AuthValue",
+      "spelled": "func()",
+      "canonical": "func()",
+      "doc": "Reset clears the subject and the claims.\n",
+      "file": "core/net/http1_auth.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.(*HTTP1AuthValue).SetClaims",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "SetClaims",
+      "recv": "HTTP1AuthValue",
+      "spelled": "func(c uint64)",
+      "canonical": "func(c uint64)",
+      "doc": "SetClaims sets the claims.\n",
+      "file": "core/net/http1_auth.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.(*HTTP1AuthValue).SetSubject",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "SetSubject",
+      "recv": "HTTP1AuthValue",
+      "spelled": "func(b []byte) bool",
+      "canonical": "func(b []byte) bool",
+      "doc": "SetSubject copies b into the value and reports true, or leaves the value\nas it is and reports false when b is longer than HTTP1MaxSubject.\n",
+      "file": "core/net/http1_auth.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.(*HTTP1AuthValue).Subject",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "Subject",
+      "recv": "HTTP1AuthValue",
+      "spelled": "func() []byte",
+      "canonical": "func() []byte",
+      "doc": "Subject returns the subject, aliasing the value: valid while the value\nis, and empty when none was set.\n",
+      "file": "core/net/http1_auth.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1Batcher",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -27171,6 +27337,31 @@
       "spelled": "func(lane int)",
       "canonical": "func(lane int)",
       "doc": "EndBatch ends the batch of the lane whose index is lane: the Lane every\nrequest of the batch carried.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1BearerVerifier",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1BearerVerifier",
+      "spelled": "interface{VerifyBearer(token []byte, auth *HTTP1AuthValue) bool}",
+      "canonical": "interface{VerifyBearer(token []byte, auth *github.com/kitsunium/sdk/internal/core/net.HTTP1AuthValue) bool}",
+      "doc": "HTTP1BearerVerifier verifies a Bearer token for the http1 chain's\nauthenticating link. VerifyBearer reports whether token is valid and, when\nit is, sets the subject and the claims on auth, which belongs to the\nrequest: the link copies nothing back, and nothing the verifier keeps may\nalias token, whose bytes the connection reuses once the batch ends. It runs\non the lane's thread, once per request the link judges, and must not block\nit.\n\nIFACE-PLUGIN: what a consumer writes; the link that calls it is\ninternal/service/net/http1's.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1BearerVerifier.VerifyBearer",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "VerifyBearer",
+      "recv": "HTTP1BearerVerifier",
+      "spelled": "func(token []byte, auth *HTTP1AuthValue) bool",
+      "canonical": "func(token []byte, auth *github.com/kitsunium/sdk/internal/core/net.HTTP1AuthValue) bool",
+      "doc": "VerifyBearer reports whether token, the credentials after \"Bearer \", is\nvalid, and fills auth when it is.\n",
       "file": "core/net/gen_ports.go",
       "layer": "core",
       "family": "net"
@@ -27405,6 +27596,19 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1MaxAccessFields",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1MaxAccessFields",
+      "spelled": "int",
+      "canonical": "int",
+      "value": "8",
+      "doc": "HTTP1MaxAccessFields is how many request fields an access-log link may\nallow: it sizes HTTP1AccessValue.Fields, so a record is a value and never a\nslice that grows.\n",
+      "file": "core/net/http1.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1MaxBody",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -27452,6 +27656,19 @@
       "canonical": "int",
       "value": "65536",
       "doc": "HTTP1MaxHead is the largest head bound HTTP1LimitsValue.Head may ask for.\n",
+      "file": "core/net/http1.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HTTP1MaxSubject",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HTTP1MaxSubject",
+      "spelled": "int",
+      "canonical": "int",
+      "value": "128",
+      "doc": "HTTP1MaxSubject is the longest subject an HTTP1AuthValue holds, in bytes. It\nsizes the value's array, so a subject is copied into the request and never\naliases the bytes it was read from; a longer one is refused.\n",
       "file": "core/net/http1.go",
       "layer": "core",
       "family": "net"
@@ -27512,8 +27729,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/net",
       "name": "HTTP1RequestValue",
-      "spelled": "struct{Method []byte; Target []byte; Host []byte; Authorization []byte; Body []byte; ContentLength int64; HeadLen int; Consumed int; NFields int; Fields [64]HTTP1FieldValue; HasHost bool; HasAuthorization bool; Close bool; Lane int}",
-      "canonical": "struct{Method []byte; Target []byte; Host []byte; Authorization []byte; Body []byte; ContentLength int64; HeadLen int; Consumed int; NFields int; Fields [64]github.com/kitsunium/sdk/internal/core/net.HTTP1FieldValue; HasHost bool; HasAuthorization bool; Close bool; Lane int}",
+      "spelled": "struct{Method []byte; Target []byte; Host []byte; Authorization []byte; Body []byte; ContentLength int64; HeadLen int; Consumed int; NFields int; Fields [64]HTTP1FieldValue; HasHost bool; HasAuthorization bool; Close bool; Lane int; Path []byte; Query []byte; Route int; Auth HTTP1AuthValue; Authenticated bool}",
+      "canonical": "struct{Method []byte; Target []byte; Host []byte; Authorization []byte; Body []byte; ContentLength int64; HeadLen int; Consumed int; NFields int; Fields [64]github.com/kitsunium/sdk/internal/core/net.HTTP1FieldValue; HasHost bool; HasAuthorization bool; Close bool; Lane int; Path []byte; Query []byte; Route int; Auth github.com/kitsunium/sdk/internal/core/net.HTTP1AuthValue; Authenticated bool}",
       "fields": [
         {
           "name": "Method",
@@ -27584,9 +27801,34 @@
           "name": "Lane",
           "type": "int",
           "doc": "Lane is the index of the lane that framed the request, from 0 to the\ngroup's lane count less one — its LoopIO.Loop — set by the loop adapter\nbefore the handler runs. One lane is one thread or one goroutine, so a\nhandler finds its per-lane state in a slice sized at LoopStarter.OnStart,\nwith no lock. Parse leaves it as it is; outside the loop adapter it is\nwhat the caller set.\n"
+        },
+        {
+          "name": "Path",
+          "type": "[]byte",
+          "doc": "Path is the request's canonical path, the one target every link of a\nchain routes and judges on, computed once by the codec: the target's\npath up to its query, an absolute-form target reduced to its path once\nits authority matched Host. It is still percent-encoded, and holds no\ndot-segment, no empty segment, no backslash and no encoded slash, dot,\nbackslash or NUL: the codec refuses a target that would (400). An\nasterisk-form target, OPTIONS only, is \"*\".\n"
+        },
+        {
+          "name": "Query",
+          "type": "[]byte",
+          "doc": "Query is the target's query, after its \"?\" and without it; empty when\nthe target has none.\n"
+        },
+        {
+          "name": "Route",
+          "type": "int",
+          "doc": "Route is the identifier of the route a router link matched, zero for\nnone. Parse resets it to zero; only a link sets it.\n"
+        },
+        {
+          "name": "Auth",
+          "type": "HTTP1AuthValue",
+          "doc": "Auth is what an authenticating link established: the subject and the\nclaims, copied by value into the request, so nothing of them aliases\nbytes the connection reuses. Parse resets it; Authenticated says\nwhether a link set it.\n"
+        },
+        {
+          "name": "Authenticated",
+          "type": "bool",
+          "doc": "Authenticated reports whether an authenticating link verified the\nrequest's credentials and filled Auth. Parse resets it to false.\n"
         }
       ],
-      "doc": "HTTP1RequestValue is one request of the restricted HTTP/1.1 profile, framed\nby the codec (internal/service/net/http1).\n\nIt is not named RequestValue: that name is the outbound request the Policy\nport judges, and the two never meet. The profile's prefix is the domain's\nway of naming a protocol's value, as SSEEventValue and WSMessageValue do.\n\nEvery slice aliases the bytes the codec read: the value is valid while those\nbytes are, which on the loop engine is until OnBatchEnd returns. A handler\nthat keeps a byte past that copies it. Fields is an array, so a value framed\ninto a reused HTTP1RequestValue allocates nothing.\n",
+      "doc": "HTTP1RequestValue is one request of the restricted HTTP/1.1 profile, framed\nby the codec (internal/service/net/http1).\n\nIt is not named RequestValue: that name is the outbound request the Policy\nport judges, and the two never meet. The profile's prefix is the domain's\nway of naming a protocol's value, as SSEEventValue and WSMessageValue do.\n\nEvery slice aliases the bytes the codec read: the value is valid while those\nbytes are, which on the loop engine is until OnBatchEnd returns. A handler\nthat keeps a byte past that copies it. Fields is an array, so a value framed\ninto a reused HTTP1RequestValue allocates nothing. Auth is a value, not a\nslice: what a link established survives the bytes it was read from.\n\nA link of a chain may read every field and set Route, Auth and\nAuthenticated; writing Consumed, HeadLen or Body changes nothing, since the\nadapter frames with what Parse returned, never with what a link left.\n",
       "file": "core/net/http1.go",
       "layer": "core",
       "family": "net"
@@ -53042,7 +53284,7 @@
         {
           "name": "Applied",
           "type": "uint64",
-          "doc": "Applied is where the state machine resumes, at least the snapshot.\n"
+          "doc": "Applied is where the state machine resumes, at least the snapshot.\nAbove HardState.Commit, NewRaft takes it as committed while the log\nholds it (#707): the caller passes such an index only when the log\nholds there the entry the machine applied, or does not hold it.\n"
         },
         {
           "name": "Now",
@@ -63413,6 +63655,56 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.Bearer",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "Bearer",
+      "spelled": "func(v corenet.HTTP1BearerVerifier, exempt ...int) (corenet.Middleware[corenet.HTTP1Handler], error)",
+      "canonical": "func(v github.com/kitsunium/sdk/internal/core/net.HTTP1BearerVerifier, exempt ...int) (github.com/kitsunium/sdk/internal/core/net.Middleware[github.com/kitsunium/sdk/internal/core/net.HTTP1Handler], error)",
+      "doc": "Bearer returns the authenticating link of an http1 chain: every request\nwhose Route is not in exempt must carry \"Authorization: Bearer <token>\"\nthat v verifies, or is answered 401 with WWW-Authenticate: Bearer and goes\nno further. The link resets Auth and Authenticated first, then lets v set\nthe subject and the claims on the request's own Auth — a value, so nothing\nof them aliases the token's bytes — and sets Authenticated before the next\nhandler runs. An exempt route reaches the next handler unauthenticated.\nThe scheme matches case-insensitively, the token is what follows its\nspaces. A nil v, or an exempt ID of zero or below, is refused with\ncorenet.HTTP1Misconfigured.\n",
+      "file": "service/net/http1/chain.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.BearerLayer",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "BearerLayer",
+      "spelled": "struct{}",
+      "canonical": "struct{}",
+      "doc": "BearerLayer is the authenticating link Bearer builds: the layer it wraps\naround the next handler.\n",
+      "file": "service/net/http1/chain.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.(*BearerLayer).EndBatch",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "EndBatch",
+      "recv": "BearerLayer",
+      "spelled": "func(lane int)",
+      "canonical": "func(lane int)",
+      "doc": "EndBatch implements corenet.HTTP1Batcher: it ends the next handler's\nbatch when the next handler is a batcher, so a chain defers answers as\nits handler does.\n",
+      "file": "service/net/http1/chain.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.(*BearerLayer).ServeHTTP1",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "ServeHTTP1",
+      "recv": "BearerLayer",
+      "spelled": "func(req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue)",
+      "canonical": "func(req *github.com/kitsunium/sdk/internal/core/net.HTTP1RequestValue, res *github.com/kitsunium/sdk/internal/core/net.HTTP1ResponseValue)",
+      "doc": "ServeHTTP1 implements corenet.HTTP1Handler.\n",
+      "file": "service/net/http1/chain.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.Continue",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/net/http1",
@@ -63433,6 +63725,106 @@
       "canonical": "func(h github.com/kitsunium/sdk/internal/core/net.HTTP1Handler, p github.com/kitsunium/sdk/internal/service/net/http1.Parser) *github.com/kitsunium/sdk/internal/service/net/http1.LoopHandler",
       "doc": "HandleLoop adapts h to the loop engine: the corenet.LoopHandler a group\nserves with StreamGroup.HandleLoop. p frames every request, so its limits\nare the group's; the zero Parser is the profile's defaults.\n\nEach lane frames its requests into a request value of its own, sets its\nLane, and calls h on the lane's thread, one request at a time, in the order\nthey arrived, pipelined ones included. A refused request is answered and\nits connection closed without reaching h. An answer has AppendResponse's\nframing, with Connection: close when the request, the response or the\nloop's soft pressure (LoopIO.Pressure) asks for it, and nothing more is\nread from a connection that closes. The batch's answers are written at\nits end, after h's EndBatch when h is a corenet.HTTP1Batcher, in request\norder on each connection, deferred ones in their place.\n\nThe response value h fills starts every request with a zero status and a\nnil Header and Body: h points them at bytes it owns, valid until the\nanswer is taken — when ServeHTTP1 returns, or when EndBatch returns for a\ndeferred one. An answer AppendResponse refuses is answered 500 and its\nconnection closed, and so is a deferred answer EndBatch left deferred. An\nanswer the connection's output refuses (LoopOutputFull: OutputCap is the\nmost a connection's answers to one batch may hold) closes the connection\nrather than wait. A request the spill cannot hold whole (LoopValue.SpillCap\nbelow p's head and body bounds) closes it too, with LoopSpillFull.\n",
       "file": "service/net/http1/loop.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.Headers",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "Headers",
+      "spelled": "func(pairs ...string) (corenet.Middleware[corenet.HTTP1Handler], error)",
+      "canonical": "func(pairs ...string) (github.com/kitsunium/sdk/internal/core/net.Middleware[github.com/kitsunium/sdk/internal/core/net.HTTP1Handler], error)",
+      "doc": "Headers returns the link that gives every answer the field lines pairs\nnames, written once by AppendField: name, value, name, value. It sets the\nresponse's Header before the next handler runs, as a slice with no spare\ncapacity, so a handler that appends its own fields copies them rather than\nwrite into the link's bytes. An odd count, and every name AppendField\nrefuses, are refused with corenet.HTTP1Misconfigured.\n",
+      "file": "service/net/http1/chain.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.HeadersLayer",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "HeadersLayer",
+      "spelled": "struct{}",
+      "canonical": "struct{}",
+      "doc": "HeadersLayer is the link Headers builds: the layer it wraps around the next\nhandler.\n",
+      "file": "service/net/http1/chain.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.(*HeadersLayer).EndBatch",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "EndBatch",
+      "recv": "HeadersLayer",
+      "spelled": "func(lane int)",
+      "canonical": "func(lane int)",
+      "doc": "EndBatch implements corenet.HTTP1Batcher: it ends the next handler's\nbatch when the next handler is a batcher, so a chain defers answers as\nits handler does.\n",
+      "file": "service/net/http1/chain.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.(*HeadersLayer).ServeHTTP1",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "ServeHTTP1",
+      "recv": "HeadersLayer",
+      "spelled": "func(req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue)",
+      "canonical": "func(req *github.com/kitsunium/sdk/internal/core/net.HTTP1RequestValue, res *github.com/kitsunium/sdk/internal/core/net.HTTP1ResponseValue)",
+      "doc": "ServeHTTP1 implements corenet.HTTP1Handler.\n",
+      "file": "service/net/http1/chain.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.Log",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "Log",
+      "spelled": "func(l corenet.HTTP1AccessLogger, allow ...string) (corenet.Middleware[corenet.HTTP1Handler], error)",
+      "canonical": "func(l github.com/kitsunium/sdk/internal/core/net.HTTP1AccessLogger, allow ...string) (github.com/kitsunium/sdk/internal/core/net.Middleware[github.com/kitsunium/sdk/internal/core/net.HTTP1Handler], error)",
+      "doc": "Log returns the access-log link of an http1 chain: once the next handler\nhas answered, it hands l one corenet.HTTP1AccessValue — lane, route,\nmethod, canonical path, status, body length, whether the request was\nauthenticated and whether its answer was deferred — with the request's\nfields named in allow, at most corenet.HTTP1MaxAccessFields of them. It\nnever logs the query, the body or a credential: Authorization,\nProxy-Authorization and Cookie in allow are refused with\ncorenet.HTTP1Misconfigured, as are a nil l, an empty or repeated name and a\nname that is not a token.\n",
+      "file": "service/net/http1/chain.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.LogLayer",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "LogLayer",
+      "spelled": "struct{}",
+      "canonical": "struct{}",
+      "doc": "LogLayer is the access-log link Log builds: the layer it wraps around the\nnext handler.\n",
+      "file": "service/net/http1/chain.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.(*LogLayer).EndBatch",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "EndBatch",
+      "recv": "LogLayer",
+      "spelled": "func(lane int)",
+      "canonical": "func(lane int)",
+      "doc": "EndBatch implements corenet.HTTP1Batcher: it ends the next handler's\nbatch when the next handler is a batcher, so a chain defers answers as\nits handler does.\n",
+      "file": "service/net/http1/chain.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.(*LogLayer).ServeHTTP1",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "ServeHTTP1",
+      "recv": "LogLayer",
+      "spelled": "func(req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue)",
+      "canonical": "func(req *github.com/kitsunium/sdk/internal/core/net.HTTP1RequestValue, res *github.com/kitsunium/sdk/internal/core/net.HTTP1ResponseValue)",
+      "doc": "ServeHTTP1 implements corenet.HTTP1Handler.\n",
+      "file": "service/net/http1/chain.go",
       "layer": "service",
       "family": "net"
     },
@@ -63900,6 +64292,45 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RefusalTargetForm",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "RefusalTargetForm",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.Refusal",
+      "value": "24",
+      "doc": "RefusalTargetForm is a target in none of the forms the profile serves:\norigin-form, absolute-form with an http or https scheme, or \"*\" for OPTIONS.\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RefusalTargetHost",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "RefusalTargetHost",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.Refusal",
+      "value": "25",
+      "doc": "RefusalTargetHost is an absolute-form target whose authority carries\nuserinfo, is empty, or differs from the Host field, or comes with no Host\nfield at all.\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RefusalTargetPath",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "RefusalTargetPath",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/internal/service/net/http1.Refusal",
+      "value": "23",
+      "doc": "RefusalTargetPath is a target whose path holds a dot-segment, an empty\nsegment, a backslash, an invalid percent-escape, or an encoded slash, dot,\nbackslash or NUL: a path two links of a chain, or a link and a backend,\ncould read as two different resources.\n",
+      "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RefusalTargetTooLong",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/service/net/http1",
@@ -63948,6 +64379,90 @@
       "value": "4",
       "doc": "RefusalVersion is any version but HTTP/1.1.\n",
       "file": "service/net/http1/refusal.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RouteLayer",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "RouteLayer",
+      "spelled": "struct{}",
+      "canonical": "struct{}",
+      "doc": "RouteLayer is the router link Routes builds: the layer it wraps around the\nnext handler.\n",
+      "file": "service/net/http1/chain.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.(*RouteLayer).EndBatch",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "EndBatch",
+      "recv": "RouteLayer",
+      "spelled": "func(lane int)",
+      "canonical": "func(lane int)",
+      "doc": "EndBatch implements corenet.HTTP1Batcher: it ends the next handler's\nbatch when the next handler is a batcher, so a chain defers answers as\nits handler does.\n",
+      "file": "service/net/http1/chain.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.(*RouteLayer).ServeHTTP1",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "ServeHTTP1",
+      "recv": "RouteLayer",
+      "spelled": "func(req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue)",
+      "canonical": "func(req *github.com/kitsunium/sdk/internal/core/net.HTTP1RequestValue, res *github.com/kitsunium/sdk/internal/core/net.HTTP1ResponseValue)",
+      "doc": "ServeHTTP1 implements corenet.HTTP1Handler.\n",
+      "file": "service/net/http1/chain.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.RouteValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "RouteValue",
+      "spelled": "struct{ID int; Method string; Path string; Prefix bool}",
+      "canonical": "struct{ID int; Method string; Path string; Prefix bool}",
+      "fields": [
+        {
+          "name": "ID",
+          "type": "int",
+          "doc": "ID identifies the route, from 1; zero is \"no route\".\n"
+        },
+        {
+          "name": "Method",
+          "type": "string",
+          "doc": "Method is the method the route takes, empty for any.\n"
+        },
+        {
+          "name": "Path",
+          "type": "string",
+          "doc": "Path is the canonical path the route matches, from \"/\": the whole of\nit, or its start when Prefix is set.\n"
+        },
+        {
+          "name": "Prefix",
+          "type": "bool",
+          "doc": "Prefix makes Path match the start of a request's path, on a segment\nboundary: \"/health\" matches \"/health\" and \"/health/live\", never\n\"/healthz\"; a Path ending in \"/\" matches whatever follows it.\n"
+        }
+      ],
+      "doc": "RouteValue is one route of a router link: an identifier the application\ngives meaning to, a method, a canonical path and whether the path is a\nprefix. The identifier is what the chain names a route by — an\nauthenticating link's exemptions, an access-log record, the handler's\nswitch.\n",
+      "file": "service/net/http1/chain.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.Routes",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "Routes",
+      "spelled": "func(routes ...RouteValue) (corenet.Middleware[corenet.HTTP1Handler], error)",
+      "canonical": "func(routes ...github.com/kitsunium/sdk/internal/service/net/http1.RouteValue) (github.com/kitsunium/sdk/internal/core/net.Middleware[github.com/kitsunium/sdk/internal/core/net.HTTP1Handler], error)",
+      "doc": "Routes returns the router link of an http1 chain: it matches each request's\ncanonical Path against routes, in order, sets HTTP1RequestValue.Route to the\nfirst match's ID — zero when none matches — and calls the next handler,\nalways: a request no route matches still reaches the next links, so an\nauthenticating link judges it like any other and only the handler answers\n404. A route matches when its Method is empty or the request's, and its\nPath is the request's, or a prefix of it ending on a segment boundary when\nPrefix is set. An ID of zero or below, a repeated ID, a Path that does not\nstart with \"/\" and a Method that is not a token are refused with\ncorenet.HTTP1Misconfigured.\n",
+      "file": "service/net/http1/chain.go",
       "layer": "service",
       "family": "net"
     },

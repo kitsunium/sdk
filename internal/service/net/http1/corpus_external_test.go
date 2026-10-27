@@ -318,8 +318,8 @@ func TestParseAccepts(t *testing.T) {
 		{"GET / HTTP/1.1\r\nX-A: a:b\xc3\xa9\r\n\r\n", "x-a", "a:b\xc3\xa9"},
 		{"GET / HTTP/1.1\r\nX-A: a\tb \r\n\r\n", "x-a", "a\tb"},
 		{"GET / HTTP/1.1\r\nX-A:\r\n\r\n", "x-a", ""},
-		{"GET * HTTP/1.1\r\nHost:\r\n\r\n", "host", ""},
-		{"OPTIONS http://a.test/x?y=1 HTTP/1.1\r\nConnection: closer\r\n\r\n", "connection", "closer"},
+		{"OPTIONS * HTTP/1.1\r\nHost:\r\n\r\n", "host", ""},
+		{"OPTIONS http://a.test/x?y=1 HTTP/1.1\r\nHost: a.test\r\nConnection: closer\r\n\r\n", "connection", "closer"},
 	} {
 		if n, r = p.Parse([]byte(c.in), &req); n != len(c.in) || r != http1.RefusalNone {
 			t.Errorf("%q: %d, %s", c.in, n, r)
@@ -330,7 +330,7 @@ func TestParseAccepts(t *testing.T) {
 		}
 	}
 	//: an empty Host is present, and a request without Host is accepted (the C reference's rule).
-	if n, r = p.Parse([]byte("GET * HTTP/1.1\r\nHost:\r\n\r\n"), &req); n == 0 || r != http1.RefusalNone || !req.HasHost || len(req.Host) != 0 {
+	if n, r = p.Parse([]byte("OPTIONS * HTTP/1.1\r\nHost:\r\n\r\n"), &req); n == 0 || r != http1.RefusalNone || !req.HasHost || len(req.Host) != 0 {
 		t.Error("empty Host not reported present")
 	}
 	if n, r = p.Parse([]byte("GET / HTTP/1.1\r\n\r\n"), &req); n == 0 || r != http1.RefusalNone || req.HasHost {

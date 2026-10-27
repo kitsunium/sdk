@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -87,5 +88,47 @@ func TestSimBoundedApplyRestartsOnALongTail(t *testing.T) {
 		if got, want := len(n.applied), int(n.r.Status().Commit); got != want || want < 100 {
 			t.Fatalf("node %d applied %d of %d committed entries after the restart", id, got, want)
 		}
+	}
+}
+
+// A start whose state machine applied past the persisted commit — a
+// DurableStateMachine on a node whose commit-only Ready, written lazily, was
+// lost in a crash — takes the applied index as committed while the log holds
+// it: the contract below it is in force from the start, EngineAt answers it
+// there, and nothing is handed to apply again. Started from the persisted
+// commit, EngineAt(9) answered the contract before it, and a snapshot cut at
+// 9 recorded it (#707). An applied index past the log's end raises nothing:
+// the entries below it may have never been committed.
+func TestAStartPastThePersistedCommitTakesTheAppliedIndexAsCommitted(t *testing.T) {
+	next := testTiming()
+	next.HeartbeatInterval = 50 * time.Millisecond
+	cmds := chainEntries(0, 1, 1, 1, 1, 1, 1, 1, 1)
+	e8 := engineEntry(cmds[6].ChainSum, 8, core.EntryTimingContract, &wire.AdminValue{Pre: core.PreconditionSpec{Generation: 1}, Contract: next})
+	ents := append(append(cmds[:7:7], e8), chainEntries(e8.ChainSum, 9, 1)...)
+	start := func(applied uint64) *Raft {
+		return NewRaft(&Config{
+			ID: 2, Group: 1, Seed: 1, Timing: testTiming(), MaxInflight: 8, MaxInflightBytes: 1 << 20,
+			MaxBatchBytes: 1 << 16, MinVoters: 1, PromoteLag: 16, CanVote: true, MaxChainRefusals: 3,
+		}, &StartState{
+			HardState: core.HardState{Term: 1, Commit: 7}, Snapshot: core.SnapshotMetaValue{Membership: testConf(1, 2, 3)},
+			Entries: slices.Clone(ents), Applied: applied, Now: t0,
+		})
+	}
+	f := start(9)
+	if st := f.Status(); st.Commit != 9 || st.Timing.Generation != 2 {
+		t.Fatalf("a start applied through 9 over a persisted commit of 7 resumes at commit %d, contract generation %d; want 9 and 2", st.Commit, st.Timing.Generation)
+	}
+	if got := f.EngineAt(9); got.Timing.Generation != 2 || got.Timing.HeartbeatInterval != next.HeartbeatInterval {
+		t.Fatalf("EngineAt(9) = %+v, want the contract committed at 8", got)
+	}
+	if got := f.EngineAt(7); got.Timing.Generation != 1 {
+		t.Fatalf("EngineAt(7) = %+v, want the contract before 8", got)
+	}
+	if rd := f.Ready(); len(rd.Apply) != 0 || rd.ApplyRead.Lo != 0 || rd.Commit != 0 {
+		t.Fatalf("the first Ready hands %d entries and a read of %+v, commit %d: the machine applied them already", len(rd.Apply), rd.ApplyRead, rd.Commit)
+	}
+	g := start(12)
+	if st := g.Status(); st.Commit != 7 || st.Timing.Generation != 1 {
+		t.Fatalf("a start applied through 12 over a log ending at 9 resumes at commit %d, contract generation %d; want the persisted 7 and 1", st.Commit, st.Timing.Generation)
 	}
 }
