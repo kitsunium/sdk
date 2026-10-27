@@ -4939,6 +4939,19 @@ packages:
           - type: "*Group"
           - type: error
       - doc: |-
+          ResolveLoops resolves LoopValue.Loops n and says where the count came from,
+          as LoopStateValue.LoopsSource spells it: LoopsAuto is GOMAXPROCS read now,
+          "auto"; a positive count is its own, "explicit"; anything else is one,
+          "single" (R8). server calls it once per group, at Start, and keeps the
+          snapshot for every backend.
+        in:
+          - name: "n"
+            type: int
+        name: ResolveLoops
+        out:
+          - type: int
+          - type: string
+      - doc: |-
           CheckCapabilities refuses a LoopValue.Capabilities entry the group cannot opt
           into: an engine, a class B capability or an unknown token, with
           LoopCapabilityRefused naming it (ADR 0189). A class A-kernel entry needs no

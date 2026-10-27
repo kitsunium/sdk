@@ -190,7 +190,7 @@ func startPortable(group *StreamGroup, lns []stdnet.Listener, degraded string, p
 	src := group.loopsSource
 	//: started without bindLoopGroup's resolution: resolved here.
 	if src == "" {
-		v.Loops, src = resolveLoops(v.Loops)
+		v.Loops, src = loop.ResolveLoops(v.Loops)
 	}
 	g := &portableGroup{
 		group: group.name, soft: max(v.SoftConns, 0), maxConns: max(group.limits.MaxConns, 0),

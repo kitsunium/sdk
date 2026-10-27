@@ -137,14 +137,7 @@ func (s *Server) bindLoopGroup(ctx context.Context, group *StreamGroup) error {
 		return err
 	}
 	plan := s.operator.plan(group.loop.Backend, nativeLoopBackends)
-	//: LoopsAuto is read once, here: every backend, the chain's OnStart and
-	//: State see the same snapshot, whatever GOMAXPROCS does next.
-	group.loop.Loops, group.loopsSource = resolveLoops(group.loop.Loops)
-	//: the lane count is the same on every backend, a fallback included, so
-	//: the chain learns it once, before any callback.
-	if st, ok := group.loopChain.(corenet.LoopStarter); ok {
-		st.OnStart(loopLanes(group.loop))
-	}
+	startLanes(group)
 	eng, err := startLoopEngine(group, lns, plan)
 	//: the backend refused.
 	if err != nil {
@@ -160,6 +153,22 @@ func (s *Server) bindLoopGroup(ctx context.Context, group *StreamGroup) error {
 	s.mu.Unlock()
 	//: serving.
 	return nil
+}
+
+// startLanes reads LoopsAuto once — every backend, the chain's OnStart and
+// State see the same snapshot, whatever GOMAXPROCS does next; a group
+// resolved already keeps its snapshot and its source — and tells the chain
+// the lane count, the same on every backend, a fallback included, once,
+// before any callback.
+func startLanes(group *StreamGroup) {
+	//: not resolved yet.
+	if group.loopsSource == "" {
+		group.loop.Loops, group.loopsSource = loop.ResolveLoops(group.loop.Loops)
+	}
+	//: a chain that keeps state per lane.
+	if st, ok := group.loopChain.(corenet.LoopStarter); ok {
+		st.OnStart(loopLanes(group.loop))
+	}
 }
 
 // registerLoopListeners records a loop group's listeners, so Close and

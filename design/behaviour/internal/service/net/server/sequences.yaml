@@ -2805,19 +2805,6 @@ sequences:
   - of: loopLanes
     steps:
       - return: max(v.Loops, 1)
-  - of: resolveLoops
-    steps:
-      - switch:
-          cases:
-            - case: n == corenet.LoopsAuto
-              do:
-                - return: max(runtime.GOMAXPROCS(0), 1), loopsAuto
-            - case: n > 0
-              do:
-                - return: n, loopsExplicit
-            - default: true
-              do:
-                - return: 1, loopsSingle
   - of: buildLoopChain
     participants:
       - id: caller
@@ -3328,10 +3315,8 @@ sequences:
         kind: package
       - id: s.operator.plan
         kind: internal
-      - id: resolveLoops
+      - id: startLanes
         kind: internal
-      - id: st.OnStart
-        kind: value
       - id: startLoopEngine
         kind: internal
       - id: eng.State
@@ -3389,17 +3374,8 @@ sequences:
       - bind: plan
         eval: s.operator.plan(group.loop.Backend, nativeLoopBackends)
         to: s.operator.plan
-      - set: group.loop.Loops, group.loopsSource
-        to: resolveLoops
-        value: resolveLoops(group.loop.Loops)
-      - opt:
-          do:
-            - eval: st.OnStart(loopLanes(group.loop))
-              to: st.OnStart
-          init:
-            bind: st, ok
-            eval: group.loopChain.(corenet.LoopStarter)
-          when: ok
+      - eval: startLanes(group)
+        to: startLanes
       - bind: eng, err
         eval: startLoopEngine(group, lns, plan)
         to: startLoopEngine
@@ -3423,6 +3399,31 @@ sequences:
       - eval: s.mu.Unlock()
         to: s.mu.Unlock
       - return: nil
+  - of: startLanes
+    participants:
+      - id: caller
+        kind: actor
+      - id: startLanes
+        kind: self
+      - id: loop
+        kind: package
+      - id: st.OnStart
+        kind: value
+    steps:
+      - opt:
+          do:
+            - set: group.loop.Loops, group.loopsSource
+              to: loop
+              value: loop.ResolveLoops(group.loop.Loops)
+          when: group.loopsSource == ""
+      - opt:
+          do:
+            - eval: st.OnStart(loopLanes(group.loop))
+              to: st.OnStart
+          init:
+            bind: st, ok
+            eval: group.loopChain.(corenet.LoopStarter)
+          when: ok
   - of: (*Server).registerLoopListeners
     steps:
       - lock:
@@ -3571,8 +3572,8 @@ sequences:
         kind: actor
       - id: startPortable
         kind: self
-      - id: resolveLoops
-        kind: internal
+      - id: loop
+        kind: package
       - id: ownListeners
         kind: internal
       - id: g.accepting.Add
@@ -3589,8 +3590,8 @@ sequences:
       - opt:
           do:
             - set: v.Loops, src
-              to: resolveLoops
-              value: resolveLoops(v.Loops)
+              to: loop
+              value: loop.ResolveLoops(v.Loops)
           when: src == ""
       - bind: g
         eval: |-

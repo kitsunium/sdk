@@ -989,7 +989,7 @@ files:
       - sizing
       - resolve
       - ringCount
-      - loopCount
+      - ResolveLoops
       - orDefault
     name: sizing.go
   - decls:
@@ -1361,10 +1361,7 @@ functions:
     name: ringCount
     params: explicit, target int, table uint64
     results: int, string
-  - doc: |-
-      loopCount resolves LoopValue.Loops: LoopsAuto is GOMAXPROCS read now, a
-      positive count its own, anything else one.
-    name: loopCount
+  - name: ResolveLoops
     params: n int
     results: int, string
   - doc: orDefault returns v, or def when v is zero or less.

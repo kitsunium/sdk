@@ -2986,7 +2986,7 @@ sequences:
         kind: actor
       - id: resolve
         kind: self
-      - id: loopCount
+      - id: ResolveLoops
         kind: internal
       - id: ringCount
         kind: internal
@@ -3009,8 +3009,8 @@ sequences:
           		tableSize: int(table),
           	}
       - set: sz.loops, sz.loopsSource
-        to: loopCount
-        value: loopCount(v.Loops)
+        to: ResolveLoops
+        value: ResolveLoops(v.Loops)
       - set: sz.rings, sz.ringsSource
         to: ringCount
         value: ringCount(v.Rings, max(sz.maxConns, sz.softConns), table)
@@ -3032,7 +3032,7 @@ sequences:
             - return: 1, ringsSingle
           when: n <= 1
       - return: int(n), ringsDerived
-  - of: loopCount
+  - of: ResolveLoops
     steps:
       - switch:
           cases:

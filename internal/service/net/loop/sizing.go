@@ -83,7 +83,7 @@ func resolve(v corenet.LoopValue, maxConns int, rlimit uint64) (sizing, error) {
 		rlimit:    rlimit,
 		tableSize: int(table),
 	}
-	sz.loops, sz.loopsSource = loopCount(v.Loops)
+	sz.loops, sz.loopsSource = ResolveLoops(v.Loops)
 	sz.rings, sz.ringsSource = ringCount(v.Rings, max(sz.maxConns, sz.softConns), table)
 	//: resolved.
 	return sz, nil
@@ -112,9 +112,12 @@ func ringCount(explicit, target int, table uint64) (int, string) {
 	return int(n), ringsDerived
 }
 
-// loopCount resolves LoopValue.Loops: LoopsAuto is GOMAXPROCS read now, a
-// positive count its own, anything else one.
-func loopCount(n int) (int, string) {
+// ResolveLoops resolves LoopValue.Loops n and says where the count came from,
+// as LoopStateValue.LoopsSource spells it: LoopsAuto is GOMAXPROCS read now,
+// "auto"; a positive count is its own, "explicit"; anything else is one,
+// "single" (R8). server calls it once per group, at Start, and keeps the
+// snapshot for every backend.
+func ResolveLoops(n int) (int, string) {
 	//: by value.
 	switch {
 	//: one loop a P, read once.

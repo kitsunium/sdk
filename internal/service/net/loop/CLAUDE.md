@@ -17,7 +17,7 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
 | File | What |
 |---|---|
 | `group.go` | `Listener` (the one hand-off: a duplicated descriptor), `Config`, `Group` (`Shutdown`, `Close`, `State`, `Rejected`, `Live`) and `Start`, which resolves the sizing, starts the backend and writes the one start line |
-| `sizing.go` | `resolve`: the defaults, `loopCount` (`LoopsAuto` read as GOMAXPROCS, zero one, the source State reports — ADR 0196 §D1), the `LoopNoDescriptors` refusal of a zero `RLIMIT_NOFILE`, and the one ring formula (explicit, else ⌈max(MaxConns, SoftConns) / min(RLIMIT_NOFILE, IORING_MAX_FIXED_FILES)⌉, else 1) |
+| `sizing.go` | `resolve`: the defaults, `ResolveLoops` (`LoopsAuto` read as GOMAXPROCS, which server calls once per group, zero one, the source State reports — ADR 0196 §D1), the `LoopNoDescriptors` refusal of a zero `RLIMIT_NOFILE`, and the one ring formula (explicit, else ⌈max(MaxConns, SoftConns) / min(RLIMIT_NOFILE, IORING_MAX_FIXED_FILES)⌉, else 1) |
 | `conn.go` | `connCtl`, one slot's pointer-free control state; its states, flags and close reasons |
 | `core.go` | the backend-neutral core: `ring` (slot table, free list, LRU, dirty list, timers), `loop` (the `corenet.LoopIO` implementation; `Loop` is its index, set at build — its lane, ADR 0191: `server` calls the chain's `LoopStarter.OnStart(Loops)` before `Start`, so nothing here does), `driver` (what a backend does: flush, shutdown, unread), the spill, the double-buffered output, the close and eviction rules |
 | `slab.go` | the mmap'd slab: power-of-two size classes from 2 KiB, arenas mapped lazily, a global budget that sheds load by name |

@@ -38,29 +38,33 @@ const drainQueued int = 3 * epollAcceptBurst
 //
 // It runs on a TCP listener, whose queue io_uring's take counts with
 // TCP_INFO, and on a Unix one, which TCP_INFO does not answer and a poll
-// does.
+// does; with one loop of one ring, and with two loops of two rings, where
+// every taker must hand the listener back before the last one closes it.
 func TestConformance_drainTakesQueue(t *testing.T) {
 	for _, network := range []string{"tcp", "unix"} {
-		t.Run(network, func(t *testing.T) {
-			eachBackend(t, func(t *testing.T, b backendCase) { drainTakesQueue(t, b, network) })
-		})
+		for _, shape := range [][2]int{{1, 1}, {2, 2}} {
+			t.Run(network+"/loops="+strconv.Itoa(shape[0])+",rings="+strconv.Itoa(shape[1]), func(t *testing.T) {
+				eachBackend(t, func(t *testing.T, b backendCase) { drainTakesQueue(t, b, network, shape[0], shape[1]) })
+			})
+		}
 	}
 }
 
-// drainTakesQueue is TestConformance_drainTakesQueue on b, over network.
-func drainTakesQueue(t *testing.T, b backendCase, network string) {
+// drainTakesQueue is TestConformance_drainTakesQueue on b, over network,
+// with loops loops of rings rings.
+func drainTakesQueue(t *testing.T, b backendCase, network string, loops, rings int) {
 	gate := make(chan struct{})
-	held := make(chan struct{}, 1)
-	var holding atomic.Bool
+	held := make(chan struct{}, loops)
+	var holding atomic.Int32
 	h := &lineH{}
 	h.batchEnd = func(corenet.LoopIO) {
-		// The first batch end once asked holds the loop on the gate.
-		if holding.CompareAndSwap(true, false) {
+		// Once asked, each loop holds on the gate at its next batch end.
+		if holding.Add(-1) >= 0 {
 			held <- struct{}{}
 			<-gate
 		}
 	}
-	g, addr := serveOn(t, b, h, network)
+	g, addr := serveOn(t, b, h, network, loops, rings)
 	c0, err := stdnet.DialTimeout(network, addr, 3*time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -68,13 +72,22 @@ func drainTakesQueue(t *testing.T, b backendCase, network string) {
 	_ = c0.SetDeadline(time.Now().Add(20 * time.Second))
 	t.Cleanup(func() { _ = c0.Close() })
 	echo(t, c0, "warm\n")
-	holding.Store(true)
+	holding.Store(int32(loops))
 	_, _ = c0.Write([]byte("hold\n"))
-	select {
-	case <-held:
-	case <-time.After(5 * time.Second):
-		close(gate)
-		t.Fatal("the loop never reached its batch end")
+	// A posted no-op wakes each loop, so each reaches a batch end and holds.
+	for _, lp := range g.loops {
+		if err := lp.Post(func(corenet.LoopIO, uintptr) {}, 0); err != nil {
+			close(gate)
+			t.Fatalf("Post: %v", err)
+		}
+	}
+	for range loops {
+		select {
+		case <-held:
+		case <-time.After(5 * time.Second):
+			close(gate)
+			t.Fatal("a loop never reached its batch end")
+		}
 	}
 
 	conns := make([]stdnet.Conn, 0, drainQueued)
@@ -89,14 +102,15 @@ func drainTakesQueue(t *testing.T, b backendCase, network string) {
 		_, _ = c.Write([]byte("q\n"))
 		conns = append(conns, c)
 	}
+	// The drain is asked for while every loop is held, so each sees it as
+	// it goes on; Shutdown asks again, which changes nothing.
+	g.ctl.drain()
 	done := make(chan error, 1)
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		done <- g.Shutdown(ctx)
 	}()
-	// The drain request lands while the loop is held; then it goes on.
-	time.Sleep(20 * time.Millisecond)
 	close(gate)
 
 	var wg sync.WaitGroup
@@ -167,12 +181,13 @@ func echoThenEnd(c stdnet.Conn, want string) string {
 	return ""
 }
 
-// serveOn starts a group on b with h, listening on loopback TCP or on a Unix
-// socket in a temporary directory, and returns its address.
-func serveOn(t *testing.T, b backendCase, h corenet.LoopHandler, network string) (*Group, string) {
+// serveOn starts a group of loops loops of rings rings on b with h,
+// listening on loopback TCP or on a Unix socket in a temporary directory, and
+// returns its address.
+func serveOn(t *testing.T, b backendCase, h corenet.LoopHandler, network string, loops, rings int) (*Group, string) {
 	t.Helper()
 	if network == "tcp" {
-		return serve(t, b, h, nil)
+		return serve(t, b, h, func(c *Config) { c.Value.Loops, c.Value.Rings = loops, rings })
 	}
 	path := filepath.Join(t.TempDir(), "drain.sock")
 	fd, err := syscall.Socket(syscall.AF_UNIX, syscall.SOCK_STREAM|syscall.SOCK_NONBLOCK|syscall.SOCK_CLOEXEC, 0)
@@ -185,7 +200,7 @@ func serveOn(t *testing.T, b backendCase, h corenet.LoopHandler, network string)
 	if err := syscall.Listen(fd, 4096); err != nil {
 		t.Fatal(err)
 	}
-	g, err := Start(Config{Group: t.Name(), Value: corenet.LoopValue{Backend: b.backend}, Handler: h, Listeners: []Listener{{FD: fd}}, Log: io.Discard})
+	g, err := Start(Config{Group: t.Name(), Value: corenet.LoopValue{Backend: b.backend, Loops: loops, Rings: rings}, Handler: h, Listeners: []Listener{{FD: fd}}, Log: io.Discard})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}

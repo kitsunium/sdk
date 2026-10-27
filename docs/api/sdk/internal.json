@@ -64709,6 +64709,18 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/loop.ResolveLoops",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/net/loop",
+      "name": "ResolveLoops",
+      "spelled": "func(n int) (int, string)",
+      "canonical": "func(n int) (int, string)",
+      "doc": "ResolveLoops resolves LoopValue.Loops n and says where the count came from,\nas LoopStateValue.LoopsSource spells it: LoopsAuto is GOMAXPROCS read now,\n\"auto\"; a positive count is its own, \"explicit\"; anything else is one,\n\"single\" (R8). server calls it once per group, at Start, and keeps the\nsnapshot for every backend.\n",
+      "file": "service/net/loop/sizing.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/net/loop.Start",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/net/loop",

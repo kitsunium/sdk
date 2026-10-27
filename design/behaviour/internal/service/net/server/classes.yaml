@@ -77,24 +77,6 @@ constants:
       - name: probeHonours
       - name: probeCallbacks
     name: probeStart
-  - doc: |-
-      Where a loop group's lane count came from, as LoopStateValue.LoopsSource
-      spells it.
-    grouped: true
-    items:
-      - doc: loopsExplicit is a positive LoopValue.Loops.
-        name: loopsExplicit
-        type: string
-        value: "\"explicit\""
-      - doc: loopsAuto is LoopsAuto, GOMAXPROCS read at Start.
-        name: loopsAuto
-        type: string
-        value: "\"auto\""
-      - doc: "loopsSingle is a zero LoopValue.Loops: one lane (R8)."
-        name: loopsSingle
-        type: string
-        value: "\"single\""
-    name: loopsExplicit
   - doc: nativeLoopBackends is true where the leaf's io_uring and epoll exist.
     items:
       - name: nativeLoopBackends
@@ -661,10 +643,8 @@ files:
     name: listen_tracked.go
   - decls:
       - probeStart
-      - loopsExplicit
       - probeNames
       - loopLanes
-      - resolveLoops
       - buildLoopChain
       - wrapLoop
       - sameHandler
@@ -704,6 +684,7 @@ files:
       - (*StreamGroup).loopRefusal
       - loopHonours
       - (*Server).bindLoopGroup
+      - startLanes
       - (*Server).registerLoopListeners
       - (*Server).loopStates
       - (*Server).shutdownLoops
@@ -1326,14 +1307,6 @@ functions:
     params: v corenet.LoopValue
     results: int
   - doc: |-
-      resolveLoops resolves LoopValue.Loops and says where the count came from:
-      LoopsAuto is GOMAXPROCS read now — bindLoopGroup calls it once, at Start,
-      and keeps the snapshot —, a positive count is its own, anything else is
-      one.
-    name: resolveLoops
-    params: n int
-    results: int, string
-  - doc: |-
       buildLoopChain wraps h in mws, outermost first, once at Start, and checks
       the chain twice: every layer is a corenet.LoopLayered whose Next is the
       handler it was given, and every callback sent through the same middlewares
@@ -1414,6 +1387,14 @@ functions:
     name: loopHonours
     params: k corenet.OptionKind
     results: bool
+  - doc: |-
+      startLanes reads LoopsAuto once — every backend, the chain's OnStart and
+      State see the same snapshot, whatever GOMAXPROCS does next; a group
+      resolved already keeps its snapshot and its source — and tells the chain
+      the lane count, the same on every backend, a fallback included, once,
+      before any callback.
+    name: startLanes
+    params: group *StreamGroup
   - doc: loopIdle is the group's IdleTimeout as the loop takes it.
     name: loopIdle
     params: group *StreamGroup

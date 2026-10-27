@@ -649,7 +649,7 @@ func (rr *uRing) cancelAccept(i int) bool {
 func (rr *uRing) takeQueues() {
 	//: each listener not handed back yet.
 	for i, fd := range rr.ul.lfds {
-		//: handed back already.
+		//: not handed back yet.
 		if !rr.queueDone[i] {
 			rr.takeQueue(i, fd)
 		}

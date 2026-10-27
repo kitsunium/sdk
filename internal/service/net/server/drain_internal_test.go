@@ -45,8 +45,8 @@ func TestDrain_graceUnderArrivals(t *testing.T) {
 				t.Fatalf("Start: %v", err)
 			}
 			st := srv.State()
-			if ls := st.Loops[0]; ls.Loops != procs || ls.LoopsSource != loopsAuto {
-				t.Fatalf("LoopsAuto: loops %d (%q), want %d (%q)", ls.Loops, ls.LoopsSource, procs, loopsAuto)
+			if ls := st.Loops[0]; ls.Loops != procs || ls.LoopsSource != "auto" {
+				t.Fatalf("LoopsAuto: loops %d (%q), want %d (%q)", ls.Loops, ls.LoopsSource, procs, "auto")
 			}
 			addr := st.Listeners[0].Address
 
