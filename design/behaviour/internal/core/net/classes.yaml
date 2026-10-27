@@ -336,6 +336,10 @@ constants:
           OptionLoopMiddleware is UseLoop. The loop engine honours it; every group no
           loop handler serves refuses it with LoopOptionUnsupported.
         name: OptionLoopMiddleware
+      - doc: |-
+          OptionBatchReplies is BatchReplies. A datagram group honours it; a stream
+          group, goroutine or loop, refuses it with LoopOptionUnsupported (ADR 0192).
+        name: OptionBatchReplies
     name: OptionNone
   - doc: The loop backends. The zero value is LoopBackendAuto.
     grouped: true
@@ -805,6 +809,9 @@ files:
       - StateValue.Degraded
       - ListenerStateValue
     name: state.go
+  - decls:
+      - DatagramStateValue
+    name: state_datagram.go
   - decls:
       - OverrideValue
       - FaultValue
@@ -1941,6 +1948,9 @@ types:
           over. A count that keeps rising is a server that cannot accept.
         name: AcceptBackoffs
         type: uint64
+      - doc: Datagrams counts what the batched datagram paths drop (ADR 0192).
+        name: Datagrams
+        type: DatagramStateValue
       - doc: |-
           Loops reports every loop group (ADR 0186 §D8). It is empty while the
           server serves none.
@@ -2002,6 +2012,26 @@ types:
     name: ListenerStateValue
   - fields:
       - doc: |-
+          TruncatedPackets is the number of messages dropped because the kernel cut
+          them: a coalesced message past its buffer (MSG_TRUNC under UDP GRO), or a
+          message whose control data did not fit (MSG_CTRUNC). Neither can be split
+          into whole datagrams, so none of what survives is delivered.
+        name: TruncatedPackets
+        type: uint64
+      - doc: |-
+          GSOOversized is the number of GSO sends the kernel refused with EMSGSIZE:
+          a sizing bug, counted, which leaves GSO on.
+        name: GSOOversized
+        type: uint64
+      - doc: |-
+          ReplyFailures is the number of replies a BatchReplies group queued during
+          a batch that did not leave: Reply had already reported them sent.
+        name: ReplyFailures
+        type: uint64
+    kind: struct
+    name: DatagramStateValue
+  - fields:
+      - doc: |-
           Source is "environment" when KITSUNIUM_NET_ENGINE or KITSUNIUM_NET_DISABLE
           is set to a non-empty value, and empty otherwise.
         name: Source
@@ -2024,8 +2054,8 @@ types:
     name: OverrideValue
   - fields:
       - doc: |-
-          Source says what reported it: "listener", "loop", "ring", "stall" or
-          "environment".
+          Source says what reported it: "listener", "loop", "ring", "stall",
+          "capability", "gso" or "environment".
         name: Source
         type: string
       - doc: Group names the group concerned; empty for the environment.
@@ -2189,6 +2219,7 @@ vars:
           	OptionName:              "Name",
           	OptionEngine:            "Engine",
           	OptionLoopMiddleware:    "UseLoop",
+          	OptionBatchReplies:      "BatchReplies",
           }
     name: optionNames
   - doc: |-

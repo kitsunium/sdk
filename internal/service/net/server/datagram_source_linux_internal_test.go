@@ -97,7 +97,7 @@ func Test_newDatagramSource(t *testing.T) {
 		t.Helper()
 		pc := packetConnOf(t, c.socket)
 
-		reader := newDatagramSource(pc)
+		reader := newDatagramSource(pc, true)
 
 		if c.wantBatched {
 			//: a portable reader on linux means the batched path silently vanished.
@@ -154,7 +154,7 @@ func Test_batchAvailable(t *testing.T) {
 			t.Fatal("batchAvailable reports false on linux")
 		}
 
-		_, batched := newDatagramSource(packetConnOf(t, c.socket)).(*multiReader)
+		_, batched := newDatagramSource(packetConnOf(t, c.socket), true).(*multiReader)
 
 		if batched != c.wantAgrees {
 			t.Fatalf("batchAvailable() is true but a %v socket got batched = %v — "+

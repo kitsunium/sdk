@@ -37,6 +37,7 @@ go_library(
         "response.go",
         "sse.go",
         "state.go",
+        "state_datagram.go",
         "state_report.go",
         "timeouts.go",
         "websocket.go",

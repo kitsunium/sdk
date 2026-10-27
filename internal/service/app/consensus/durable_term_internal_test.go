@@ -60,6 +60,20 @@ type durableBench struct {
 	cid   coreconsensus.ClusterID
 	net   *MemoryNetwork
 	nodes []*durableNode
+	// run is the boot-scoped marker directory the data directories open
+	// with, inside the test's own temporary tree; empty, openDir's shared
+	// one.
+	run string
+}
+
+// openDD opens the data directory dir of one of the bench's nodes, on
+// 16 KiB segments; where there is no flock(2), the refusal is asserted and
+// the test skips.
+func (b *durableBench) openDD(dir string) DataDir {
+	if b.run != "" {
+		return silenceOpen(b.t, dir, b.run)
+	}
+	return openDir(b.t, dir, 16<<10)
 }
 
 func (b *durableBench) conf(x *durableNode) Config {
@@ -72,7 +86,7 @@ func (b *durableBench) conf(x *durableNode) Config {
 }
 
 func (b *durableBench) open(x *durableNode) error {
-	x.dd = openDir(b.t, x.dir, 16<<10)
+	x.dd = b.openDD(x.dir)
 	n, err := NewNode(b.conf(x))
 	if err != nil {
 		_ = x.dd.Close()
@@ -144,11 +158,17 @@ func (b *durableBench) saveBytes(x *durableNode) (coreconsensus.SnapshotMetaValu
 }
 
 func newDurableBench(t *testing.T, cid coreconsensus.ClusterID) *durableBench {
-	b := &durableBench{t: t, cid: cid, net: NewMemoryNetwork()}
+	return newDurableBenchIn(t, cid, "")
+}
+
+// newDurableBenchIn is newDurableBench whose data directories open with the
+// boot-scoped marker directory run (durableBench.run).
+func newDurableBenchIn(t *testing.T, cid coreconsensus.ClusterID, run string) *durableBench {
+	b := &durableBench{t: t, cid: cid, net: NewMemoryNetwork(), run: run}
 	var members []coreconsensus.MemberValue
 	for i := range 3 {
 		x := &durableNode{dir: t.TempDir(), sm: &durableKV{kv: newKV()}}
-		x.dd = openDir(t, x.dir, 16<<10)
+		x.dd = b.openDD(x.dir)
 		slot := fmt.Sprintf("z%d", i)
 		id, inc, err := Init(x.dd, cid, slot)
 		if err != nil {

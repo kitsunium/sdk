@@ -622,6 +622,7 @@ files:
       - round
       - Raft
       - NewRaft
+      - startCommit
       - (*Raft).adoptClusterVersion
       - (*Raft).refusesClusterVersion
       - (*Raft).loadEntries
@@ -802,6 +803,25 @@ functions:
   - name: NewRaft
     params: cfg *Config, st *StartState
     results: "*Raft"
+  - doc: |-
+      startCommit is the commit a start resumes from: the persisted one, at
+      least the snapshot's, and at least the applied index while the log holds
+      it, never past the log's end. A Ready that only moves the commit is
+      written lazily and rides the next sync, so a crash left the persisted
+      commit below what a DurableStateMachine had applied; NewRaft replayed the
+      engine effects through that commit alone, and a snapshot cut at the
+      applied index recorded the cluster version, timing contract and alarm of
+      the older commit, which the node restarted from it ran for good (#707).
+      Apply is handed committed, durable entries only, and the caller passes an
+      applied index above the persisted commit only when the log holds there
+      the entry the machine applied: every entry through it is committed. An
+      applied index past the log's end raises nothing: the log then does not
+      lead to the machine's state — a log truncated below it, or the restore
+      of an install whose snapshot is no longer the base — and may hold, below
+      that index, entries that were never committed.
+    name: startCommit
+    params: st *StartState, snapIndex, last uint64
+    results: uint64
   - doc: |-
       actsAtCommit reports whether an entry of kind changes the engine's own
       replicated state when it commits. A membership does only when it is the
@@ -1259,7 +1279,11 @@ types:
           entry keeps its own. Only a committed entry may be loaded so (#663).
         name: Evicted
         type: uint64
-      - doc: Applied is where the state machine resumes, at least the snapshot.
+      - doc: |-
+          Applied is where the state machine resumes, at least the snapshot.
+          Above HardState.Commit, NewRaft takes it as committed while the log
+          holds it (#707): the caller passes such an index only when the log
+          holds there the entry the machine applied, or does not hold it.
         name: Applied
         type: uint64
       - doc: "Now is the start instant: the restart vote-refusal window opens here."

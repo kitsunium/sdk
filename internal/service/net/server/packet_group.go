@@ -20,6 +20,9 @@ type PacketGroup struct {
 	limits corenet.LimitsValue
 	// adopt names inherited sockets to take over instead of binding.
 	adopt []string
+	// batchReplies queues the replies of a read batch and sends them when it
+	// ends (BatchReplies, ADR 0192).
+	batchReplies bool
 }
 
 // Name returns the group's name.

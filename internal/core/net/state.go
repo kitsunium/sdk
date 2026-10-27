@@ -28,6 +28,8 @@ type StateValue struct {
 	// 5 ms, doubling to 1 s, and the next accepted connection starts the curve
 	// over. A count that keeps rising is a server that cannot accept.
 	AcceptBackoffs uint64 `json:"accept_backoffs"`
+	// Datagrams counts what the batched datagram paths drop (ADR 0192).
+	Datagrams DatagramStateValue `json:"datagrams"`
 	// Loops reports every loop group (ADR 0186 §D8). It is empty while the
 	// server serves none.
 	Loops []LoopStateValue `json:"loops,omitempty"`

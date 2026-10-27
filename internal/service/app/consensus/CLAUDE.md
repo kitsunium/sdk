@@ -167,6 +167,20 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   `TestALeaderSlowToApplyStillRefusesForwardsPastMaxApplyLagBytes`,
   `TestAMachineThatDropsItsPayloadsLeavesNoApplyLag`,
   `TestADurableMachineResumesInsideTheTailReadBack`).
+- Read the log whole in an offline operation, or from its first entry
+  where the newest snapshot answers: `Recover` read the configuration in
+  force at the index it keeps from the log's first entry, then the cluster
+  version past the snapshot twice, each in one `Entries` call with no byte
+  bound, about three times the log in heap, and a survivor whose compaction
+  had stalled was OOM-killed at every rerun on the host where it starts
+  (#700). `inForceAt` reads both in one pass, `scanLog` handing it
+  `offlineBatchBytes` and `offlineBatchEntries` at a time into one reused
+  slice, from the snapshot's metadata and the entries after it when the log
+  holds the snapshot's index under its term, else from the log's first
+  entry as before; `planRecover` reads it once and hands the version down
+  to `appendForced`. Count what a reader holds with `fileLog.afterEntries`,
+  not a sampled heap (`TestRecoverHoldsOneBatchOfTheLogAtATime`,
+  `TestTheHistoryInForceIsReadPastTheSnapshot`).
 - Sample a heap peak in the package's own process: the tests before it
   leave hundreds of MiB live, and the collector lets a share of that grow
   in garbage on top of what is measured.
@@ -386,6 +400,15 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   `StorageDone` reports the log durable through the commit that met the
   condition, and the driver removes SILENT in the Ready after (#684,
   `TestTheEndOfASilenceIsDurableOnlyAfterTheEntriesThatEndIt`).
+- Turn a joining stamp into a member's on raft's commit alone: it moves
+  when an append is accepted, in memory, and `checkAdmission` wrote the
+  stamp on the loop in the turn that handed the storage actor the entries
+  that admit the node, before they were written. A crash during their sync
+  restarted a member with an empty configuration, which admitted no peer
+  and never sent a JOIN again, and every raise was refused while it stayed
+  listed. The admission is judged at the commit bounded by `Stable`, at
+  each Ready and each storage completion (#695,
+  `TestAJoinerBecomesAMemberOnDiskOnlyOnceTheEntriesThatAdmitItAreDurable`).
 - Refuse a JOIN on a held slot when the member holding it is the requester
   itself — id, incarnation, slot and key all equal: a joiner restarted
   before anything reached its log admits the members only from a JOIN
@@ -734,6 +757,20 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   installed it (#544, `TestADurableRestartResumesWithTheAppliedTerm`,
   `TestASnapshotPublishedAtTermZeroIsSetAside`,
   `TestAPeerInstallsTheSnapshotOfADurableLeaderRestarted`).
+- Start the step function at the persisted commit under a durable machine
+  applied past it, or cut past the step function's commit: a commit-only
+  Ready is written lazily (#558), a crash left the machine past the commit
+  raft restarted from, and a cut at the applied index recorded, from
+  `EngineAt`, the cluster version, contract and alarm of that commit, which
+  the node restarted from it ran for good (#707). `NewRaft` takes the
+  applied index the log holds as committed (`startCommit`); `stepApplied`
+  holds a machine that reports no term at the persisted commit, since only
+  the term proves the log holds the entry it applied; and `metaAt` refuses
+  a cut past the commit OVERLOADED until the commit reaches it
+  (`TestADurableRestartPastItsPersistedCommitCutsTheContractItApplied`,
+  `TestADurableRestartPastItsPersistedCommitCutsTheVersionItApplied`,
+  `TestACutPastTheCommitTheNodeKnowsWaitsForIt`,
+  `TestATermlessDurableMachinePastTheCommitLeavesTheStaleTailUncommitted`).
 - Trust a version 1 `.meta` whose id does not name its position, or take
   an acknowledgement past the leader's last index as match: version 1
   carries no checksum, and one bit of `Position.Index` erased the log,

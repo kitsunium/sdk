@@ -2984,6 +2984,8 @@ sequences:
         kind: internal
       - id: node.raiseSilenceOverSnapshot
         kind: internal
+      - id: startCommit
+        kind: internal
       - id: node.applyCommitEffects
         kind: internal
       - id: node.resetElection
@@ -3042,7 +3044,8 @@ sequences:
       - eval: node.raiseSilenceOverSnapshot()
         to: node.raiseSilenceOverSnapshot
       - set: node.log.committed
-        value: min(max(st.HardState.Commit, node.log.snapIndex), node.log.lastIndex())
+        to: startCommit
+        value: startCommit(st, node.log.snapIndex, node.log.lastIndex())
       - set: node.log.applied
         value: max(st.Applied, node.log.snapIndex)
       - set: node.log.applied
@@ -3073,6 +3076,16 @@ sequences:
       - set: node.rd.Membership
         value: node.admittedPub
       - return: node
+  - of: startCommit
+    steps:
+      - bind: c
+        eval: max(st.HardState.Commit, snapIndex)
+      - opt:
+          do:
+            - set: c
+              value: max(c, st.Applied)
+          when: st.Applied <= last
+      - return: min(c, last)
   - of: (*Raft).adoptClusterVersion
     steps:
       - opt:
