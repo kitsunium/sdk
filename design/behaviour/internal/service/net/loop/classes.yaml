@@ -156,13 +156,32 @@ constants:
         type: int64
         value: int64(drainQuiet / tickEvery)
       - doc: |-
-          queueTakeMax bounds how many connections epoll's drain takes from one
-          listener's queue: past it the arrivals outpace the drain, and what is
-          left in the queue meets the close.
+          queueTakeMax bounds how many connections the drain takes from one
+          listener's queue, a loop on epoll, a ring on io_uring: past it the
+          arrivals outpace the drain — no grace let the routing stop —, and what
+          is left in the queue meets the close.
         name: queueTakeMax
         type: int
         value: 1 << 16
+      - doc: |-
+          queueTakeBatch bounds what epoll's drain takes from one listener in one
+          batch, so the loop serves between two takes.
+        name: queueTakeBatch
+        type: int
+        value: 8 * epollAcceptBurst
     name: drainQuiet
+  - doc: What an accept's failure means for epoll's drain take (takeAfter).
+    grouped: true
+    items:
+      - doc: "takeOver ends the take: the queue is empty, or the listener failed."
+        name: takeOver
+        type: uint8
+        value: iota
+      - doc: "takeLater waits for the next batch: no descriptor until a close."
+        name: takeLater
+      - doc: "takeNext skips one connection: the peer abandoned it, or a signal."
+        name: takeNext
+    name: takeOver
   - grouped: true
     items:
       - doc: |-
@@ -661,6 +680,10 @@ constants:
         name: acceptReserve
         type: int
         value: "16"
+      - doc: pollIn is POLLIN (asm-generic/poll.h).
+        name: pollIn
+        type: int16
+        value: "0x1"
       - doc: |-
           takeOn is uRing.take for a ring that takes its share of the
           listeners' queues as the group drains.
@@ -872,11 +895,14 @@ files:
     name: doc.go
   - decls:
       - drainQuiet
+      - takeOver
       - listenerSet
       - newListenerSet
       - (*listenerSet).handBack
       - (*listenerSet).closeRest
       - (*listenerSet).close
+      - takeAfter
+      - (*ring).full
       - (*ring).drainable
     name: drain_linux.go
   - decls:
@@ -916,6 +942,7 @@ files:
       - (*epollLoop).unread
       - (*epollLoop).control
       - (*epollLoop).takeQueues
+      - (*epollLoop).queuesTaken
       - (*epollLoop).takeQueue
       - (*epollLoop).closeAll
       - (*epollLoop).teardown
@@ -1033,6 +1060,7 @@ files:
       - udOp
       - udGen
       - udSlot
+      - pollFd
       - uRing
       - uLoop
       - ringUses
@@ -1074,6 +1102,7 @@ files:
       - (*uRing).onConnOp
       - (*uRing).onAccept
       - (*uRing).acceptFailed
+      - takeWaits
       - (*uRing).refuses
       - (*uRing).orphanClose
       - (*uRing).armRecv
@@ -1104,6 +1133,8 @@ files:
       - (*uRing).cancelOld
       - (*uRing).unread
       - (*uRing).watchdog
+      - queued
+      - readable
       - listenerQueue
       - (*uLoop).control
       - (*uLoop).startDrain
@@ -1235,6 +1266,10 @@ functions:
     name: newListenerSet
     params: fds []int, takers int
     results: "*listenerSet"
+  - doc: takeAfter says what an accept4 failure means for the drain's take.
+    name: takeAfter
+    params: err error
+    results: uint8
   - doc: |-
       startEpoll starts g's loops on epoll.
 
@@ -1432,9 +1467,32 @@ functions:
     name: orErrno
     params: a, b syscall.Errno
     results: syscall.Errno
+  - doc: |-
+      takeWaits reports whether an accept's failure leaves the drain's take
+      going: its own cancel, a connection the peer abandoned, a signal, an empty
+      queue (EAGAIN, should a kernel honour the listener's O_NONBLOCK), or no
+      descriptor until a close frees one.
+    name: takeWaits
+    params: res int32
+    results: bool
   - doc: fillStale overwrites b with staleFill.
     name: fillStale
     params: b []byte
+  - doc: |-
+      queued is how many connections wait in the listening socket fd's queue:
+      TCP_INFO's count on a TCP listener; on one TCP_INFO does not answer — a
+      Unix socket — acceptDepth when a zero-timeout poll says it is readable, and
+      zero otherwise. An accept armed past what waits is cancelled once the queue
+      reads empty.
+    name: queued
+    params: fd int
+    results: int
+  - doc: |-
+      readable polls fd for input with a zero timeout: a listening socket is
+      readable while its accept queue holds a connection.
+    name: readable
+    params: fd int
+    results: bool
   - doc: |-
       listenerQueue is the listening socket's accept queue (TCP_INFO's unacked
       on a listener), zero when it cannot be read.
@@ -1916,6 +1974,10 @@ types:
       - doc: compactAll compacts every open slot's spill.
         name: compactAll
         recv: r *ring
+      - doc: full reports whether the ring's table has no slot left for a connection.
+        name: full
+        recv: r *ring
+        results: bool
       - doc: |-
           drainable reports whether the drain closes the open connection c now: no
           partial input, and either it has sent something — its request was read —
@@ -2177,6 +2239,13 @@ types:
       - name: set
         type: "*listenerSet"
       - doc: |-
+          queueDone is, per listener, that the loop took its queue as the group
+          drains and handed it back; taken how many connections it took from it.
+        name: queueDone
+        type: "[]bool"
+      - name: taken
+        type: "[]int"
+      - doc: |-
           armed reports whether the listeners are in the epoll set; rearmAt is
           the tick an EMFILE backoff ends at, backoff its current length.
         name: armed
@@ -2350,12 +2419,24 @@ types:
           the loop's set, admitting each connection, and hands each listener back to
           the group's set, whose last loop closes it: a connection the kernel
           completed before the close is served, not reset by it (plan P6).
+
+          It runs at every batch of the drain until each listener is handed back: a
+          take that waits for descriptors goes on once the drain's closes free some.
         name: takeQueues
         recv: el *epollLoop
-      - doc: takeQueue accepts from lfd until its queue is empty, queueTakeMax at most.
-        name: takeQueue
-        params: lfd int
+      - doc: queuesTaken reports whether the loop handed every listener back.
+        name: queuesTaken
         recv: el *epollLoop
+        results: bool
+      - doc: |-
+          takeQueue accepts from listener i, lfd, queueTakeBatch at most this batch,
+          and reports whether its take is over: the queue empty, the listener failed,
+          or queueTakeMax taken. Out of descriptors, or with the ring's table full,
+          it waits for the drain's closes.
+        name: takeQueue
+        params: i, lfd int
+        recv: el *epollLoop
+        results: bool
       - doc: closeAll closes every connection still open, as the loop stops.
         name: closeAll
         recv: el *epollLoop
@@ -2922,6 +3003,16 @@ types:
         type: "[probeOps]probeOp"
     kind: struct
     name: probeBuf
+  - doc: pollFd is struct pollfd (include/uapi/asm-generic/poll.h).
+    fields:
+      - name: fd
+        type: int32
+      - name: events
+        type: int16
+      - name: revents
+        type: int16
+    kind: struct
+    name: pollFd
   - doc: uRing is one ring of an io_uring loop.
     fields:
       - name: ul
@@ -2953,6 +3044,11 @@ types:
         type: "[]bool"
       - name: take
         type: uint8
+      - doc: |-
+          taken is, per listener, how many accepts the drain's take armed:
+          bounded by queueTakeMax, past which the arrivals outpace the drain.
+        name: taken
+        type: "[]int"
       - doc: |-
           starved are slots whose recv ran out of buffers, re-armed as buffers
           come back; recycle the buffers the batch handed out.
@@ -3065,10 +3161,13 @@ types:
         name: takeQueue
         params: i, fd int
         recv: rr *uRing
-      - doc: armTake arms n single-shot accepts on listener i, fd, for the drain's take.
+      - doc: |-
+          armTake arms n single-shot accepts on listener i, fd, for the drain's take,
+          and says how many the SQ had room for.
         name: armTake
         params: i, fd, n int
         recv: rr *uRing
+        results: int
       - doc: |-
           used is how many direct-descriptor entries the ring holds, draining slots
           included: an index stays the kernel's until its close completes.

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io"
 	stdnet "net"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -34,88 +35,104 @@ const drainQueued int = 3 * epollAcceptBurst
 // drain is over, and Shutdown must return within its budget. Before plan P6
 // the listener left the set unread and closed last, and a connection the
 // drain found unread was closed at once: both reset the peer.
+//
+// It runs on a TCP listener, whose queue io_uring's take counts with
+// TCP_INFO, and on a Unix one, which TCP_INFO does not answer and a poll
+// does.
 func TestConformance_drainTakesQueue(t *testing.T) {
-	eachBackend(t, func(t *testing.T, b backendCase) {
-		gate := make(chan struct{})
-		held := make(chan struct{}, 1)
-		var holding atomic.Bool
-		h := &lineH{}
-		h.batchEnd = func(corenet.LoopIO) {
-			// The first batch end once asked holds the loop on the gate.
-			if holding.CompareAndSwap(true, false) {
-				held <- struct{}{}
-				<-gate
-			}
-		}
-		g, addr := serve(t, b, h, nil)
-		c0 := dial(t, addr)
-		echo(t, c0, "warm\n")
-		holding.Store(true)
-		_, _ = c0.Write([]byte("hold\n"))
-		select {
-		case <-held:
-		case <-time.After(5 * time.Second):
-			close(gate)
-			t.Fatal("the loop never reached its batch end")
-		}
+	for _, network := range []string{"tcp", "unix"} {
+		t.Run(network, func(t *testing.T) {
+			eachBackend(t, func(t *testing.T, b backendCase) { drainTakesQueue(t, b, network) })
+		})
+	}
+}
 
-		conns := make([]stdnet.Conn, 0, drainQueued)
-		for range drainQueued {
-			c, err := stdnet.DialTimeout("tcp", addr, 3*time.Second)
-			if err != nil {
-				close(gate)
-				t.Fatalf("dial into the queue: %v", err)
-			}
-			_ = c.SetDeadline(time.Now().Add(20 * time.Second))
-			t.Cleanup(func() { _ = c.Close() })
-			_, _ = c.Write([]byte("q\n"))
-			conns = append(conns, c)
+// drainTakesQueue is TestConformance_drainTakesQueue on b, over network.
+func drainTakesQueue(t *testing.T, b backendCase, network string) {
+	gate := make(chan struct{})
+	held := make(chan struct{}, 1)
+	var holding atomic.Bool
+	h := &lineH{}
+	h.batchEnd = func(corenet.LoopIO) {
+		// The first batch end once asked holds the loop on the gate.
+		if holding.CompareAndSwap(true, false) {
+			held <- struct{}{}
+			<-gate
 		}
-		done := make(chan error, 1)
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			done <- g.Shutdown(ctx)
-		}()
-		// The drain request lands while the loop is held; then it goes on.
-		time.Sleep(20 * time.Millisecond)
+	}
+	g, addr := serveOn(t, b, h, network)
+	c0, err := stdnet.DialTimeout(network, addr, 3*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = c0.SetDeadline(time.Now().Add(20 * time.Second))
+	t.Cleanup(func() { _ = c0.Close() })
+	echo(t, c0, "warm\n")
+	holding.Store(true)
+	_, _ = c0.Write([]byte("hold\n"))
+	select {
+	case <-held:
+	case <-time.After(5 * time.Second):
 		close(gate)
+		t.Fatal("the loop never reached its batch end")
+	}
 
-		var wg sync.WaitGroup
-		failures := make(chan string, drainQueued+1)
-		for i, c := range conns {
-			wg.Go(func() {
-				if msg := echoThenEnd(c, "q\n"); msg != "" {
-					failures <- msg + " (queued #" + strconv.Itoa(i) + ")"
-				}
-			})
+	conns := make([]stdnet.Conn, 0, drainQueued)
+	for range drainQueued {
+		c, err := stdnet.DialTimeout(network, addr, 3*time.Second)
+		if err != nil {
+			close(gate)
+			t.Fatalf("dial into the queue: %v", err)
 		}
+		_ = c.SetDeadline(time.Now().Add(20 * time.Second))
+		t.Cleanup(func() { _ = c.Close() })
+		_, _ = c.Write([]byte("q\n"))
+		conns = append(conns, c)
+	}
+	done := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		done <- g.Shutdown(ctx)
+	}()
+	// The drain request lands while the loop is held; then it goes on.
+	time.Sleep(20 * time.Millisecond)
+	close(gate)
+
+	var wg sync.WaitGroup
+	failures := make(chan string, drainQueued+1)
+	for i, c := range conns {
 		wg.Go(func() {
-			if msg := echoThenEnd(c0, "hold\n"); msg != "" {
-				failures <- msg + " (the held one)"
+			if msg := echoThenEnd(c, "q\n"); msg != "" {
+				failures <- msg + " (queued #" + strconv.Itoa(i) + ")"
 			}
 		})
-		wg.Wait()
-		close(failures)
-		var all []string
-		for f := range failures {
-			all = append(all, f)
-		}
-		if len(all) > 0 {
-			t.Fatalf("%d of %d connections cut short: %v\n%s", len(all), drainQueued+1, all[:min(len(all), 8)], dumpGroup(g))
-		}
-		if err := <-done; err != nil {
-			t.Fatalf("Shutdown: %v", err)
-		}
-		if c, err := stdnet.DialTimeout("tcp", addr, time.Second); err == nil {
-			_ = c.Close()
-			t.Fatal("the listener still accepts after the drain")
-		}
-		o, cl := h.counts()
-		if o != drainQueued+1 || cl != o {
-			t.Fatalf("%d opened, %d closed, want %d each", o, cl, drainQueued+1)
+	}
+	wg.Go(func() {
+		if msg := echoThenEnd(c0, "hold\n"); msg != "" {
+			failures <- msg + " (the held one)"
 		}
 	})
+	wg.Wait()
+	close(failures)
+	var all []string
+	for f := range failures {
+		all = append(all, f)
+	}
+	if len(all) > 0 {
+		t.Fatalf("%d of %d connections cut short: %v\n%s", len(all), drainQueued+1, all[:min(len(all), 8)], dumpGroup(g))
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	if c, err := stdnet.DialTimeout(network, addr, time.Second); err == nil {
+		_ = c.Close()
+		t.Fatal("the listener still accepts after the drain")
+	}
+	o, cl := h.counts()
+	if o != drainQueued+1 || cl != o {
+		t.Fatalf("%d opened, %d closed, want %d each", o, cl, drainQueued+1)
+	}
 }
 
 // echo writes line on c and requires it back.
@@ -148,4 +165,30 @@ func echoThenEnd(c stdnet.Conn, want string) string {
 		return "bytes past the echo: " + string(rest)
 	}
 	return ""
+}
+
+// serveOn starts a group on b with h, listening on loopback TCP or on a Unix
+// socket in a temporary directory, and returns its address.
+func serveOn(t *testing.T, b backendCase, h corenet.LoopHandler, network string) (*Group, string) {
+	t.Helper()
+	if network == "tcp" {
+		return serve(t, b, h, nil)
+	}
+	path := filepath.Join(t.TempDir(), "drain.sock")
+	fd, err := syscall.Socket(syscall.AF_UNIX, syscall.SOCK_STREAM|syscall.SOCK_NONBLOCK|syscall.SOCK_CLOEXEC, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Bind(fd, &syscall.SockaddrUnix{Name: path}); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Listen(fd, 4096); err != nil {
+		t.Fatal(err)
+	}
+	g, err := Start(Config{Group: t.Name(), Value: corenet.LoopValue{Backend: b.backend}, Handler: h, Listeners: []Listener{{FD: fd}}, Log: io.Discard})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = g.Close() })
+	return g, path
 }

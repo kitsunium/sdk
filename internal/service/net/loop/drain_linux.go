@@ -16,10 +16,24 @@ const (
 	drainQuiet time.Duration = time.Second
 	// drainQuietTicks is drainQuiet in ticks.
 	drainQuietTicks int64 = int64(drainQuiet / tickEvery)
-	// queueTakeMax bounds how many connections epoll's drain takes from one
-	// listener's queue: past it the arrivals outpace the drain, and what is
-	// left in the queue meets the close.
+	// queueTakeMax bounds how many connections the drain takes from one
+	// listener's queue, a loop on epoll, a ring on io_uring: past it the
+	// arrivals outpace the drain — no grace let the routing stop —, and what
+	// is left in the queue meets the close.
 	queueTakeMax int = 1 << 16
+	// queueTakeBatch bounds what epoll's drain takes from one listener in one
+	// batch, so the loop serves between two takes.
+	queueTakeBatch int = 8 * epollAcceptBurst
+)
+
+// What an accept's failure means for epoll's drain take (takeAfter).
+const (
+	// takeOver ends the take: the queue is empty, or the listener failed.
+	takeOver uint8 = iota
+	// takeLater waits for the next batch: no descriptor until a close.
+	takeLater
+	// takeNext skips one connection: the peer abandoned it, or a signal.
+	takeNext
 )
 
 // listenerSet is a group's listeners as its loops share them through the
@@ -77,6 +91,31 @@ func (ls *listenerSet) close(i int) {
 		return
 	}
 	swallowErr(syscall.Close(ls.fds[i]))
+}
+
+// takeAfter says what an accept4 failure means for the drain's take.
+func takeAfter(err error) uint8 {
+	//: by errno.
+	switch err {
+	//: out of descriptors: the drain's closes make room.
+	case syscall.EMFILE, syscall.ENFILE:
+		//: next batch.
+		return takeLater
+	//: one connection lost, the queue still there.
+	case syscall.ECONNABORTED, syscall.EINTR:
+		//: the next one.
+		return takeNext
+	//: EAGAIN, the queue empty; anything else, the listener failed.
+	default:
+		//: over.
+		return takeOver
+	}
+}
+
+// full reports whether the ring's table has no slot left for a connection.
+func (r *ring) full() bool {
+	//: no released slot, and the table at its size.
+	return len(r.free) == 0 && len(r.conns) >= r.lp.sz.tableSize
 }
 
 // drainable reports whether the drain closes the open connection c now: no

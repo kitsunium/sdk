@@ -1237,6 +1237,23 @@ sequences:
           when: "!ls.closed[i].CompareAndSwap(false, true)"
       - eval: swallowErr(syscall.Close(ls.fds[i]))
         to: swallowErr
+  - of: takeAfter
+    steps:
+      - switch:
+          cases:
+            - case: syscall.EMFILE, syscall.ENFILE
+              do:
+                - return: takeLater
+            - case: syscall.ECONNABORTED, syscall.EINTR
+              do:
+                - return: takeNext
+            - default: true
+              do:
+                - return: takeOver
+          "on": err
+  - of: (*ring).full
+    steps:
+      - return: len(r.free) == 0 && len(r.conns) >= r.lp.sz.tableSize
   - of: (*ring).drainable
     steps:
       - return: c.state == stOpen && c.spill.empty() && (c.flags&fHeard != 0 || r.lp.tick-c.lastIO >= drainQuietTicks)
@@ -1300,7 +1317,12 @@ sequences:
               eval: newLoop(g, *cfg, i, mmapAnon)
               to: newLoop
             - bind: el
-              eval: "&epollLoop{lp: lp, lfds: runner.lfds, set: runner.set, epfd: -1, evfd: -1, events: make([]syscall.EpollEvent, g.sz.cqBatch), backoff: backoffMin, excl: excl}"
+              eval: |-
+                &epollLoop{
+                			lp: lp, lfds: runner.lfds, set: runner.set,
+                			queueDone: make([]bool, len(runner.lfds)), taken: make([]int, len(runner.lfds)),
+                			epfd: -1, evfd: -1, events: make([]syscall.EpollEvent, g.sz.cqBatch), backoff: backoffMin, excl: excl,
+                		}
             - set: runner.loops
               value: append(runner.loops, el)
             - set: g.loops
@@ -1695,7 +1717,7 @@ sequences:
             - opt:
                 do:
                   - break: true
-                when: el.stopReq.Load() || (lp.draining && el.r.live == 0)
+                when: el.stopReq.Load() || (lp.draining && el.r.live == 0 && el.queuesTaken())
           forever: true
       - eval: el.closeAll()
         to: el.closeAll
@@ -2324,20 +2346,32 @@ sequences:
         kind: actor
       - id: (*epollLoop).takeQueues
         kind: self
-      - id: el.takeQueue
-        kind: internal
       - id: el.set.handBack
         kind: internal
     steps:
       - loop:
           do:
-            - eval: el.takeQueue(fd)
-              to: el.takeQueue
-            - eval: el.set.handBack(i)
-              to: el.set.handBack
+            - opt:
+                do:
+                  - set: el.queueDone[i]
+                    value: "true"
+                  - eval: el.set.handBack(i)
+                    to: el.set.handBack
+                when: "!el.queueDone[i] && el.takeQueue(i, fd)"
           key: i
           range: el.lfds
           value: fd
+  - of: (*epollLoop).queuesTaken
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*epollLoop).queuesTaken
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: "!slices.Contains(el.queueDone, false)"
+        to: slices
   - of: (*epollLoop).takeQueue
     participants:
       - id: caller
@@ -2351,20 +2385,34 @@ sequences:
     steps:
       - loop:
           do:
+            - opt:
+                do:
+                  - return: el.taken[i] >= queueTakeMax
+                when: el.taken[i] >= queueTakeMax || el.r.full()
             - bind: nfd, _, err
               eval: syscall.Accept4(lfd, syscall.SOCK_NONBLOCK|syscall.SOCK_CLOEXEC)
               to: syscall
             - opt:
                 do:
-                  - opt:
-                      do:
-                        - return: ""
-                      when: el.acceptFailed(err)
-                  - continue: true
+                  - switch:
+                      cases:
+                        - case: takeOver
+                          do:
+                            - return: "true"
+                        - case: takeLater
+                          do:
+                            - return: "false"
+                        - case: takeNext
+                          do:
+                            - continue: true
+                      "on": takeAfter(err)
                 when: err != nil
+            - op: ++
+              set: el.taken[i]
             - eval: el.admit(nfd)
               to: el.admit
-          range: queueTakeMax
+          range: queueTakeBatch
+      - return: "false"
   - of: (*epollLoop).closeAll
     participants:
       - id: caller
@@ -4129,7 +4177,7 @@ sequences:
         eval: |-
           &uRing{
           		ul: ul, u: u, armed: make([]int, len(ul.lfds)),
-          		queueDone: make([]bool, len(ul.lfds)), queueCancel: make([]bool, len(ul.lfds)), backoff: backoffMin, sweepOn: sweep, sweepAt: -1,
+          		queueDone: make([]bool, len(ul.lfds)), queueCancel: make([]bool, len(ul.lfds)), taken: make([]int, len(ul.lfds)), backoff: backoffMin, sweepOn: sweep, sweepAt: -1,
           	}
       - set: rr.r
         to: newRing
@@ -4393,6 +4441,8 @@ sequences:
         kind: actor
       - id: (*uRing).takeQueue
         kind: self
+      - id: queued
+        kind: internal
       - id: rr.cancelAccept
         kind: internal
       - id: rr.ul.set.handBack
@@ -4405,8 +4455,9 @@ sequences:
       - opt:
           do:
             - set: q
-              value: int(listenerQueue(fd))
-          when: rr.take == takeOn
+              to: queued
+              value: queued(fd)
+          when: rr.take == takeOn && rr.taken[i] < queueTakeMax
       - opt:
           do:
             - opt:
@@ -4419,8 +4470,6 @@ sequences:
           when: rr.armed[i] > 0
       - set: rr.queueCancel[i]
         value: "false"
-      - bind: "n"
-        eval: min(q, acceptDepth, rr.acceptRoom())
       - opt:
           do:
             - set: rr.queueDone[i]
@@ -4428,9 +4477,17 @@ sequences:
             - eval: rr.ul.set.handBack(i)
               to: rr.ul.set.handBack
             - return: ""
-          when: n == 0
-      - eval: rr.armTake(i, fd, n)
+          when: q == 0
+      - bind: "n"
+        eval: min(q, acceptDepth, rr.acceptRoom(), queueTakeMax-rr.taken[i])
+      - opt:
+          do:
+            - return: ""
+          when: n == 0 || (rr.paused && rr.ul.lp.tick < rr.resumeAt)
+      - op: +=
+        set: rr.taken[i]
         to: rr.armTake
+        value: rr.armTake(i, fd, n)
   - of: (*uRing).armTake
     participants:
       - id: caller
@@ -4453,7 +4510,7 @@ sequences:
                 do:
                   - op: ++
                     set: rr.r.st.retries
-                  - return: ""
+                  - return: k
                 when: s == nil
             - eval: prepAccept(s, fd, udPack(udAccept, 0, uint32(i)), false)
               to: prepAccept
@@ -4461,7 +4518,9 @@ sequences:
               to: rr.ul.onFD
             - op: ++
               set: rr.armed[i]
+          key: k
           range: "n"
+      - return: "n"
   - of: (*uRing).used
     steps:
       - return: len(rr.r.conns) - len(rr.r.free)
@@ -4820,7 +4879,7 @@ sequences:
           do:
             - set: rr.take
               value: takeOff
-          when: rr.ul.lp.draining && res != -int32(syscall.ECANCELED) && res != -int32(syscall.ECONNABORTED)
+          when: rr.ul.lp.draining && !takeWaits(res)
       - opt:
           do:
             - set: rr.paused
@@ -4837,6 +4896,17 @@ sequences:
                     value: "true"
                 when: "!rr.ul.direct"
           when: res == -int32(syscall.ENFILE) || res == -int32(syscall.EMFILE)
+  - of: takeWaits
+    steps:
+      - switch:
+          cases:
+            - case: syscall.ECANCELED, syscall.ECONNABORTED, syscall.EINTR, syscall.EAGAIN, syscall.ENFILE, syscall.EMFILE
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+          "on": syscall.Errno(-res)
   - of: (*uRing).refuses
     steps:
       - bind: lp
@@ -5639,6 +5709,49 @@ sequences:
           key: i
           range: rr.ul.lfds
           value: fd
+  - of: queued
+    participants:
+      - id: caller
+        kind: actor
+      - id: queued
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - var:
+          name: info
+          type: syscall.TCPInfo
+      - bind: "n"
+        eval: new(uint32(unsafe.Sizeof(info)))
+      - bind: _, _, errno
+        eval: |-
+          syscall.Syscall6(syscall.SYS_GETSOCKOPT, uintptr(fd), syscall.IPPROTO_TCP, syscall.TCP_INFO,
+          		uintptr(unsafe.Pointer(&info)), uintptr(unsafe.Pointer(n)), 0)
+        to: syscall
+      - opt:
+          do:
+            - return: int(info.Unacked)
+          when: errno == 0
+      - opt:
+          do:
+            - return: acceptDepth
+          when: readable(fd)
+      - return: "0"
+  - of: readable
+    participants:
+      - id: caller
+        kind: actor
+      - id: readable
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - bind: pfd
+        eval: "pollFd{fd: int32(fd), events: pollIn}"
+      - bind: r, _, errno
+        eval: syscall.RawSyscall6(syscall.SYS_PPOLL, uintptr(unsafe.Pointer(&pfd)), 1, uintptr(unsafe.Pointer(new(syscall.Timespec{}))), 0, 0, 0)
+        to: syscall
+      - return: errno == 0 && r == 1 && pfd.revents&pollIn != 0
   - of: listenerQueue
     participants:
       - id: caller

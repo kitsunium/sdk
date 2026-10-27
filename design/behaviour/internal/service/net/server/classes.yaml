@@ -113,6 +113,13 @@ constants:
         name: portableTick
         type: time.Duration
         value: 10 * time.Millisecond
+      - doc: |-
+          portableQuiet is how long the drain leaves open a connection that has
+          sent nothing yet, as the native backends' drainQuiet: its request may be
+          on the way, and a close before it is read resets the peer.
+        name: portableQuiet
+        type: time.Duration
+        value: time.Second
       - doc: portableEvents bounds the events one batch takes.
         name: portableEvents
         type: int
@@ -150,6 +157,14 @@ constants:
       - name: pevEnd
       - name: pevSent
     name: pevOpen
+  - doc: |-
+      portableTakeMax bounds how many connections the portable drain takes from
+      one listener's queue: past it the arrivals outpace the drain.
+    items:
+      - name: portableTakeMax
+        type: int
+        value: 1 << 16
+    name: portableTakeMax
   - grouped: true
     items:
       - doc: |-
@@ -708,7 +723,11 @@ files:
       - portableNoDelay
       - orDefaultInt
       - (*portableGroup).acceptLoop
+      - (*portableGroup).admit
+      - (*portableGroup).takeQueues
+      - (*portableGroup).closeOwned
       - (*portableLoop).run
+      - (*portableLoop).finished
       - (*portableLoop).collect
       - (*portableLoop).handle
       - (*portableLoop).handleData
@@ -726,6 +745,7 @@ files:
       - (*portableLoop).finish
       - (*portableLoop).timers
       - (*portableLoop).control
+      - (*portableLoop).closeSettled
       - (*portableLoop).endBatch
       - (*portableLoop).settle
       - (*portableLoop).compactSpills
@@ -744,6 +764,15 @@ files:
       - portableEngine.State
       - fillMark
     name: loop_portable.go
+  - decls:
+      - portableTakeMax
+      - filer
+      - ownListeners
+      - dupListener
+      - takeQueue
+      - acceptRaw
+      - connOf
+    name: loop_portable_take_unix.go
   - decls:
       - udpGRO
       - multiReader
@@ -1419,6 +1448,34 @@ functions:
   - doc: fillMark fills b with recycledMark.
     name: fillMark
     params: b []byte
+  - doc: |-
+      ownListeners duplicates each listener server bound, so the portable
+      backend closes its own copy once its drain took the queue, and server's
+      close after the grace leaves the socket listening until then. A listener
+      that cannot be duplicated stays server's, closed with the others.
+    name: ownListeners
+    params: lns []stdnet.Listener
+    results: all, owned []stdnet.Listener
+  - doc: dupListener is a listener of its own over a duplicate of ln's descriptor.
+    name: dupListener
+    params: ln stdnet.Listener
+    results: stdnet.Listener, error
+  - doc: |-
+      takeQueue accepts from ln, non-blocking, until its queue is empty, and
+      hands each connection to admit: the acceptor may take some too, and both
+      admit.
+    name: takeQueue
+    params: ln stdnet.Listener, admit func(stdnet.Conn)
+  - doc: acceptRaw accepts once on rc's non-blocking descriptor.
+    name: acceptRaw
+    params: rc syscall.RawConn
+    results: int, error
+  - doc: |-
+      connOf wraps the accepted descriptor nfd in a net.Conn on the netpoller,
+      and closes nfd whatever happens: FileConn holds a duplicate.
+    name: connOf
+    params: nfd int
+    results: stdnet.Conn, error
   - doc: newMultiReader builds a batched reader over pc.
     name: newMultiReader
     params: pc stdnet.PacketConn, sc rawConnProvider
@@ -2592,6 +2649,11 @@ types:
         type: time.Time
       - name: deadline
         type: time.Time
+      - doc: |-
+          heardAt is when the peer's first byte came, zero until then: the drain
+          leaves a connection that has sent nothing open for portableQuiet.
+        name: heardAt
+        type: time.Time
       - name: pressure
         type: bool
       - name: wantWrite
@@ -2635,6 +2697,17 @@ types:
         type: "[]*portableLoop"
       - name: lns
         type: "[]stdnet.Listener"
+      - doc: |-
+          owned are the listeners the group duplicated from server's and closes
+          itself, once its drain took their queue (takeQueues); one it could not
+          duplicate is server's, closed with the others after the grace.
+        name: owned
+        type: "[]stdnet.Listener"
+      - doc: |-
+          accepting counts the acceptors still running: a lane stops only once
+          none can hand it a connection.
+        name: accepting
+        type: atomic.Int32
       - doc: turn is the lane the next accepted connection goes to, modulo the count.
         name: turn
         type: atomic.Uint64
@@ -2655,6 +2728,22 @@ types:
       - doc: acceptLoop hands each accepted connection to a lane, in turn.
         name: acceptLoop
         params: ln stdnet.Listener
+        recv: g *portableGroup
+      - doc: |-
+          admit hands c to a lane, in turn, or closes it past MaxConns, a refusal
+          the peer sees. A draining group admits too: what arrives before its
+          listener closes is served, never closed unread.
+        name: admit
+        params: c stdnet.Conn
+        recv: g *portableGroup
+      - doc: |-
+          takeQueues takes every owned listener's queue to its end, then closes the
+          listener (ADR 0196 §D3): what the kernel completed before the close is
+          served, not reset by it.
+        name: takeQueues
+        recv: g *portableGroup
+      - doc: closeOwned closes every listener the group owns.
+        name: closeOwned
         recv: g *portableGroup
       - doc: wakeAll rouses every lane's handler goroutine.
         name: wakeAll
@@ -2726,6 +2815,12 @@ types:
         name: run
         params: done chan<- struct{}
         recv: pl *portableLoop
+      - doc: |-
+          finished reports whether the lane stops: the backend stopped, or the lane
+          drained to its last connection with no acceptor left to hand it another.
+        name: finished
+        recv: pl *portableLoop
+        results: bool
       - doc: collect takes the events already queued, up to a batch.
         name: collect
         recv: pl *portableLoop
@@ -2801,6 +2896,11 @@ types:
         recv: pl *portableLoop
       - doc: control applies the drain.
         name: control
+        recv: pl *portableLoop
+      - doc: |-
+          closeSettled closes, as the drain does, every open connection with nothing
+          unconsumed that has sent something or stayed silent for portableQuiet.
+        name: closeSettled
         recv: pl *portableLoop
       - doc: |-
           endBatch flushes the dirty connections, settles the closes, releases the
@@ -2881,6 +2981,14 @@ types:
         recv: e portableEngine
         results: corenet.LoopStateValue
     name: portableEngine
+  - doc: filer is a listener whose descriptor can be duplicated.
+    kind: named
+    name: filer
+    underlying: |-
+      interface {
+      	// File returns a duplicate of the listener's descriptor.
+      	File() (*os.File, error)
+      }
   - doc: |-
       multiReader reads several datagrams per syscall using recvmmsg(2).
 

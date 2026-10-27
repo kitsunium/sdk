@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-27T12:00:00Z -->
+<!-- updated: 2026-10-27T18:00:00Z -->
 # internal/service/net/server/
 
 ## Purpose
@@ -21,7 +21,8 @@ Public façade: `pkg/v1/net/server`.
 | `operator_internal_test.go` | `TestCapabilityRegistry_matchesTheDesign` (reads `design/net.yaml`, the go_test's `data`), `TestReadOperator`, `TestOperatorPlan` (every code × engine × disable combination: never above the code nor the ceiling, never a ruled-out backend, the highest left), and a loop group started under each switch — `ProbeStage` `epoll` where io_uring is ruled out |
 | `stall_internal_test.go` | a fake loop engine walked from healthy to one drained ring to a stall: faults, readiness, liveness at the grace to the nanosecond on a manual clock, no stall during a drain, `Serve` returning `LoopGroupStalled`, `RegisterHealth`, the platform and the fallbacks |
 | `lifecycle.go` | `Start`, `Serve`, `Shutdown`, `Close`, the accept loop and its backoff (`acceptDelay`, `backOff`), the drain: readiness false, `waitGrace` (`WithDrainGrace`, ADR 0196 §D2), then the listeners |
-| `drain_internal_test.go` | plan P6 (ADR 0196): the drain under continuous arrivals on every backend, `LoopsAuto` on — clients that stop dialling 150 ms after readiness turned false under a 400 ms grace, none cut short, the grace serving what came after readiness turned false, kept connections ending cleanly —, `LoopsAuto`'s snapshot in `State`, and the grace ended by the caller's ctx; `laneEchoH`, a handler that keeps nothing per connection, since a `LoopConnRef` names a connection within its lane only |
+| `drain_internal_test.go` | plan P6 (ADR 0196): the drain on every backend, `LoopsAuto` on — clients that stop dialling 150 ms after readiness turned false under a 400 ms grace, none cut short, the grace serving what came after readiness turned false, kept connections ending cleanly; arrivals that never stop until a dial is refused, every connection dialled before the close's own 20 ms window reading its echo (skipped on Windows, where the portable backend takes no queue) —, `LoopsAuto`'s snapshot in `State`, and the grace ended by the caller's ctx; `laneEchoH`, a handler that keeps nothing per connection, since a `LoopConnRef` names a connection within its lane only |
+| `loop_portable_take_unix.go`, `loop_portable_take_other.go` | the portable drain's take (ADR 0196 §D3): `ownListeners` duplicates each listener server bound (`File`, `FileListener`), so server's close after the grace leaves it listening; `takeQueue` accepts on its own non-blocking descriptor to `EAGAIN` (`syscall.Accept` under `RawConn.Control`, `FileConn`); on Windows the listeners stay server's and nothing is taken |
 | `loop_group.go` | loop groups: `HandleLoop` (ADR 0186 §D9 step 11), `loopRefusal` — TLS, `Use` and every kind of the group's set neither the engine (`loopHonours`: IdleTimeout, MaxConns, Adopt, Plaintext, Name, Engine, UseLoop) nor the chain (`chainHonours`: a layer or the handler) honours, after `buildLoopChain`; `OnStart(lanes)` on the chain before the engine starts, `Use` whatever the handler claims — the listeners bound or adopted and registered like any group's, the engines in `Shutdown`, `Close` and `State` |
 | `option_set.go` | `optionSet` — the kinds a group was given, one bit per `corenet.OptionKind` (ADR 0187 §D2); every `GroupOption`, `Use` and `PreHandshake` add theirs, a zero value included |
 | `engine_option.go` | `reconcileName` (Name against the declared name, `GroupNameConflict`) and `engineRefusal` — `PlaintextWithTLS`, and an `Engine` the handler's type or `Loop` contradicts (`EngineUnsupported`), judged at `Start`, never folded back (ADR 0187 §D4) |
@@ -170,8 +171,12 @@ Public façade: `pkg/v1/net/server`.
   `waitGrace` keeps every listener accepting and every connection served for
   `WithDrainGrace`, or until ctx ends; `Serve` adds the grace to its drain
   budget. A loop group then takes its listen queue before its listener closes
-  (the leaf's drain); the portable backend and the goroutine engine close
-  their listener with the server's, after the grace.
+  (the leaf's drain), and so does the portable backend on Unix, on the
+  listeners it duplicated at Start (`ownListeners`, `takeQueues`), its
+  acceptors admitting until each closes and a lane stopping only once none
+  runs; a connection that has sent nothing closes once heard or after
+  `portableQuiet`. The goroutine engine, and the portable backend on Windows,
+  close their listener with the server's, after the grace.
 - **The operator's switches only restrict, and are read before any probe**
   (ADR 0188, R5). `New` reads `KITSUNIUM_NET_ENGINE` and
   `KITSUNIUM_NET_DISABLE` once, through `lookup` (`os.LookupEnv` unless a test

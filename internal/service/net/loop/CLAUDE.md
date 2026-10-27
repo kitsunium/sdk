@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-27T12:00:00Z -->
+<!-- updated: 2026-10-27T18:00:00Z -->
 # internal/service/net/loop/
 
 ## Purpose
@@ -56,16 +56,21 @@ in `server` (`loop_portable.go`). `server.Group.HandleLoop` is the one way in
   chunk and the old one waits on `deferred`. Compaction runs only after
   `OnBatchEnd`. `TestCore_spillHandedOutStaysPut` pins this.
 - **The drain takes the listen queue, then closes the listener** (ADR 0196
-  §D3). epoll: `CTL_DEL`, then `accept4` to `EAGAIN` (`takeQueues`, at most
-  `queueTakeMax`), each connection admitted — a draining loop admits. io_uring:
+  §D3). epoll: `CTL_DEL`, then at each batch `accept4` to `EAGAIN`
+  (`takeQueues`, `queueTakeBatch` a batch, `queueTakeMax` in all), each
+  connection admitted — a draining loop admits; `EMFILE`, `ENFILE` or a full
+  table wait for the drain's closes (`takeAfter`, `ring.full`). io_uring:
   the accepts in flight are cancelled, and one that completed as its cancel
   crossed it is served (`refuses` refuses only on a ring the watchdog drained
   while the group serves; a ring the watchdog drained before the group, or
   whose accept failed during the take, takes nothing — `take`); once they
-  came back, `takeQueues` arms single-shot
-  accepts as many as `TCP_INFO` says are queued, within the room above the
-  reserve, cancels one left waiting on an empty queue, and hands the listener
-  back once the queue is empty with none in flight. The listener closes when
+  came back, `takeQueues` arms single-shot accepts as many as `queued` says
+  wait — `TCP_INFO` on TCP, a zero-timeout
+  `ppoll` on a Unix socket —, within the room above the reserve (none left,
+  or a process-descriptor backoff, waits: never read as empty), `queueTakeMax`
+  in all, an accept's failure stopping the take only when `takeWaits` says the
+  listener failed, cancels one left waiting on an empty queue, and hands the
+  listener back once the queue is empty with none in flight. The listener closes when
   its last taker hands it back (`listenerSet`), before the established
   connections drain; a loop stops once its connections are gone and its
   listeners handed back. A connection that has sent nothing (`fHeard` unset)
@@ -234,7 +239,8 @@ leaked, GOGC=1 with forced GC at the high-water mark, EMFILE at RLIMIT 64 and
 the foreign-thread `Write` under `loopdebug`, a 2-entry buffer ring of 64-byte
 buffers shuffled and 0xAA-filled (thousands of ENOBUFS), every probe stage
 failed, `DEFER_TASKRUN`, 10 000 idle connections with zero watchdog fires,
-and the drain (`conformance_drain_linux_test.go`, ADR 0196): the loop held at
+and the drain (`conformance_drain_linux_test.go`, ADR 0196, on a TCP and on a
+Unix listener): the loop held at
 its batch end, 384 connections queued with their request — more than one
 epoll burst and than io_uring's accepts in flight —, then the drain, every one
 reading its echo and a clean end, the listener refusing after.

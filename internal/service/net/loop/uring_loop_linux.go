@@ -37,6 +37,8 @@ const (
 	// acceptReserve is the free direct-descriptor entries a ring keeps: under
 	// it the ring stops accepting, and it resumes at twice as many.
 	acceptReserve int = 16
+	// pollIn is POLLIN (asm-generic/poll.h).
+	pollIn int16 = 0x1
 	// takeOn is uRing.take for a ring that takes its share of the
 	// listeners' queues as the group drains.
 	takeOn uint8 = 0
@@ -95,6 +97,13 @@ func udSlot(ud uint64) uint32 {
 	return uint32(ud)
 }
 
+// pollFd is struct pollfd (include/uapi/asm-generic/poll.h).
+type pollFd struct {
+	fd      int32
+	events  int16
+	revents int16
+}
+
 // uRing is one ring of an io_uring loop.
 type uRing struct {
 	ul *uLoop
@@ -115,6 +124,9 @@ type uRing struct {
 	queueDone   []bool
 	queueCancel []bool
 	take        uint8
+	// taken is, per listener, how many accepts the drain's take armed:
+	// bounded by queueTakeMax, past which the arrivals outpace the drain.
+	taken []int
 	// starved are slots whose recv ran out of buffers, re-armed as buffers
 	// come back; recycle the buffers the batch handed out.
 	starved []int32
@@ -429,7 +441,7 @@ func (ul *uLoop) newRing(i int, sweep bool) (*uRing, error) {
 	lp := ul.lp
 	rr := &uRing{
 		ul: ul, u: u, armed: make([]int, len(ul.lfds)),
-		queueDone: make([]bool, len(ul.lfds)), queueCancel: make([]bool, len(ul.lfds)), backoff: backoffMin, sweepOn: sweep, sweepAt: -1,
+		queueDone: make([]bool, len(ul.lfds)), queueCancel: make([]bool, len(ul.lfds)), taken: make([]int, len(ul.lfds)), backoff: backoffMin, sweepOn: sweep, sweepAt: -1,
 	}
 	rr.r = newRing(lp, i, rr)
 	bufs, size := ul.bufShape()
@@ -647,9 +659,10 @@ func (rr *uRing) takeQueues() {
 // takeQueue is takeQueues' step on listener i, fd.
 func (rr *uRing) takeQueue(i, fd int) {
 	q := 0
-	//: a ring the watchdog drained, or whose accept failed, takes nothing.
-	if rr.take == takeOn {
-		q = int(listenerQueue(fd))
+	//: a ring the watchdog drained, whose accept failed, or past its budget
+	//: takes nothing.
+	if rr.take == takeOn && rr.taken[i] < queueTakeMax {
+		q = queued(fd)
 	}
 	//: accepts in flight: the drain's cancels, or this take's own.
 	if rr.armed[i] > 0 {
@@ -661,32 +674,41 @@ func (rr *uRing) takeQueue(i, fd int) {
 		return
 	}
 	rr.queueCancel[i] = false
-	n := min(q, acceptDepth, rr.acceptRoom())
-	//: empty, or no room left: handed back.
-	if n == 0 {
+	//: empty: handed back.
+	if q == 0 {
 		rr.queueDone[i] = true
 		rr.ul.set.handBack(i)
 		//: taken.
 		return
 	}
-	rr.armTake(i, fd, n)
+	n := min(q, acceptDepth, rr.acceptRoom(), queueTakeMax-rr.taken[i])
+	//: queued, but no entry free, or process descriptors out until the
+	//: backoff ends: the drain's closes make room, and the take waits.
+	if n == 0 || (rr.paused && rr.ul.lp.tick < rr.resumeAt) {
+		//: next batch.
+		return
+	}
+	rr.taken[i] += rr.armTake(i, fd, n)
 }
 
-// armTake arms n single-shot accepts on listener i, fd, for the drain's take.
-func (rr *uRing) armTake(i, fd, n int) {
+// armTake arms n single-shot accepts on listener i, fd, for the drain's take,
+// and says how many the SQ had room for.
+func (rr *uRing) armTake(i, fd, n int) int {
 	//: one SQE each.
-	for range n {
+	for k := range n {
 		s := rr.u.get()
 		//: no room in the SQ.
 		if s == nil {
 			rr.r.st.retries++
 			//: next batch.
-			return
+			return k
 		}
 		prepAccept(s, fd, udPack(udAccept, 0, uint32(i)), false)
 		rr.ul.onFD(s)
 		rr.armed[i]++
 	}
+	//: all of them.
+	return n
 }
 
 // queuesTaken reports whether every ring of the loop handed every listener
@@ -903,9 +925,10 @@ func (rr *uRing) onAccept(li int, c *cqe) {
 // acceptFailed pauses the ring when an accept failed for want of entries:
 // closes make room.
 func (rr *uRing) acceptFailed(res int32) {
-	//: during the drain's take, a failure other than its own cancel or a
-	//: connection the peer abandoned ends the ring's take.
-	if rr.ul.lp.draining && res != -int32(syscall.ECANCELED) && res != -int32(syscall.ECONNABORTED) {
+	//: during the drain's take, a failure that says the listener is broken
+	//: ends the ring's take; its own cancel, a connection the peer
+	//: abandoned, an empty queue and a lack of descriptors only wait.
+	if rr.ul.lp.draining && !takeWaits(res) {
 		rr.take = takeOff
 	}
 	//: out of entries: pause until closes make room.
@@ -919,6 +942,24 @@ func (rr *uRing) acceptFailed(res int32) {
 			rr.backoff = min(rr.backoff*2, backoffMax)
 			rr.ul.lp.hard = true
 		}
+	}
+}
+
+// takeWaits reports whether an accept's failure leaves the drain's take
+// going: its own cancel, a connection the peer abandoned, a signal, an empty
+// queue (EAGAIN, should a kernel honour the listener's O_NONBLOCK), or no
+// descriptor until a close frees one.
+func takeWaits(res int32) bool {
+	//: by errno.
+	switch syscall.Errno(-res) {
+	//: each of them waits for the next batch.
+	case syscall.ECANCELED, syscall.ECONNABORTED, syscall.EINTR, syscall.EAGAIN, syscall.ENFILE, syscall.EMFILE:
+		//: waits.
+		return true
+	//: anything else.
+	default:
+		//: the listener failed.
+		return false
 	}
 }
 
@@ -1496,6 +1537,39 @@ func (rr *uRing) watchdog() {
 		//: re-armed when the cancels complete.
 		return
 	}
+}
+
+// queued is how many connections wait in the listening socket fd's queue:
+// TCP_INFO's count on a TCP listener; on one TCP_INFO does not answer — a
+// Unix socket — acceptDepth when a zero-timeout poll says it is readable, and
+// zero otherwise. An accept armed past what waits is cancelled once the queue
+// reads empty.
+func queued(fd int) int {
+	var info syscall.TCPInfo
+	n := new(uint32(unsafe.Sizeof(info)))
+	_, _, errno := syscall.Syscall6(syscall.SYS_GETSOCKOPT, uintptr(fd), syscall.IPPROTO_TCP, syscall.TCP_INFO,
+		uintptr(unsafe.Pointer(&info)), uintptr(unsafe.Pointer(n)), 0)
+	//: a TCP listener counts its queue.
+	if errno == 0 {
+		//: queued connections.
+		return int(info.Unacked)
+	}
+	//: anything else says only whether one waits.
+	if readable(fd) {
+		//: some.
+		return acceptDepth
+	}
+	//: none.
+	return 0
+}
+
+// readable polls fd for input with a zero timeout: a listening socket is
+// readable while its accept queue holds a connection.
+func readable(fd int) bool {
+	pfd := pollFd{fd: int32(fd), events: pollIn}
+	r, _, errno := syscall.RawSyscall6(syscall.SYS_PPOLL, uintptr(unsafe.Pointer(&pfd)), 1, uintptr(unsafe.Pointer(new(syscall.Timespec{}))), 0, 0, 0)
+	//: an answer, with input.
+	return errno == 0 && r == 1 && pfd.revents&pollIn != 0
 }
 
 // listenerQueue is the listening socket's accept queue (TCP_INFO's unacked

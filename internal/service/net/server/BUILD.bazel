@@ -36,6 +36,8 @@ go_library(
         "loop_engine_other.go",
         "loop_group.go",
         "loop_portable.go",
+        "loop_portable_take_other.go",
+        "loop_portable_take_unix.go",
         "multireader_linux.go",
         "multireader_mmsghdr_linux.go",
         "multiwriter_linux.go",

@@ -23,6 +23,10 @@ const (
 	portableReadSize int = 16 << 10
 	// portableTick is the portable backend's timer resolution.
 	portableTick time.Duration = 10 * time.Millisecond
+	// portableQuiet is how long the drain leaves open a connection that has
+	// sent nothing yet, as the native backends' drainQuiet: its request may be
+	// on the way, and a close before it is read resets the peer.
+	portableQuiet time.Duration = time.Second
 	// portableEvents bounds the events one batch takes.
 	portableEvents int = 512
 	// portablePostCap is the portable backend's post queue.
@@ -76,11 +80,14 @@ type portableConn struct {
 	flight  int
 	closing bool
 	// The handler goroutine's own state.
-	open      bool
-	spill     []byte
-	spillOff  int
-	lastIO    time.Time
-	deadline  time.Time
+	open     bool
+	spill    []byte
+	spillOff int
+	lastIO   time.Time
+	deadline time.Time
+	// heardAt is when the peer's first byte came, zero until then: the drain
+	// leaves a connection that has sent nothing open for portableQuiet.
+	heardAt   time.Time
 	pressure  bool
 	wantWrite bool
 	peerDone  bool
@@ -108,6 +115,13 @@ type portableGroup struct {
 	noDelayOff bool
 	lanes      []*portableLoop
 	lns        []stdnet.Listener
+	// owned are the listeners the group duplicated from server's and closes
+	// itself, once its drain took their queue (takeQueues); one it could not
+	// duplicate is server's, closed with the others after the grace.
+	owned []stdnet.Listener
+	// accepting counts the acceptors still running: a lane stops only once
+	// none can hand it a connection.
+	accepting atomic.Int32
 	// turn is the lane the next accepted connection goes to, modulo the count.
 	turn     atomic.Uint64
 	drainReq atomic.Bool
@@ -180,7 +194,7 @@ func startPortable(group *StreamGroup, lns []stdnet.Listener, degraded string, p
 	}
 	g := &portableGroup{
 		group: group.name, soft: max(v.SoftConns, 0), maxConns: max(group.limits.MaxConns, 0),
-		degraded: degraded, lns: lns, loopsSource: src,
+		degraded: degraded, loopsSource: src,
 		caps:       append(loop.Unprobed("portable", plan.disabled, plan.disabledBy), portableNoDelay(plan)),
 		noDelayOff: slices.Contains(plan.disabled, corenet.CapabilityTCPNoDelay),
 	}
@@ -196,8 +210,10 @@ func startPortable(group *StreamGroup, lns []stdnet.Listener, degraded string, p
 			wake: make(chan struct{}, 1), done: make(chan struct{}),
 		})
 	}
-	//: one acceptor per listener; it ends when server closes the listener.
-	for _, ln := range lns {
+	g.lns, g.owned = ownListeners(lns)
+	//: one acceptor per listener; it ends when its listener closes.
+	for _, ln := range g.lns {
+		g.accepting.Add(1)
 		go g.acceptLoop(ln)
 	}
 	//: one handler goroutine per lane.
@@ -234,8 +250,9 @@ func orDefaultInt(v, def int) int {
 
 // acceptLoop hands each accepted connection to a lane, in turn.
 func (g *portableGroup) acceptLoop(ln stdnet.Listener) {
+	defer g.accepting.Add(-1)
 	failures := 0
-	//: until server closes the listener.
+	//: until its listener closes.
 	for {
 		c, err := ln.Accept()
 		//: closed, or a failure to back off from.
@@ -250,15 +267,42 @@ func (g *portableGroup) acceptLoop(ln stdnet.Listener) {
 			continue
 		}
 		failures = 0
-		//: MaxConns: accepted and closed, a refusal the peer sees.
-		if g.maxConns > 0 && g.live() >= int64(g.maxConns) || g.drainReq.Load() {
-			g.rejected.Add(1)
-			swallowErr(c.Close())
-			continue
-		}
-		pl := g.lanes[(g.turn.Add(1)-1)%uint64(len(g.lanes))]
-		pl.live.Add(1)
-		pl.events <- portableEvent{kind: pevOpen, conn: c}
+		g.admit(c)
+	}
+}
+
+// admit hands c to a lane, in turn, or closes it past MaxConns, a refusal
+// the peer sees. A draining group admits too: what arrives before its
+// listener closes is served, never closed unread.
+func (g *portableGroup) admit(c stdnet.Conn) {
+	//: MaxConns: accepted and closed.
+	if g.maxConns > 0 && g.live() >= int64(g.maxConns) {
+		g.rejected.Add(1)
+		swallowErr(c.Close())
+		//: refused.
+		return
+	}
+	pl := g.lanes[(g.turn.Add(1)-1)%uint64(len(g.lanes))]
+	pl.live.Add(1)
+	pl.events <- portableEvent{kind: pevOpen, conn: c}
+}
+
+// takeQueues takes every owned listener's queue to its end, then closes the
+// listener (ADR 0196 §D3): what the kernel completed before the close is
+// served, not reset by it.
+func (g *portableGroup) takeQueues() {
+	//: each listener the group owns.
+	for _, ln := range g.owned {
+		takeQueue(ln, g.admit)
+		swallowErr(ln.Close())
+	}
+}
+
+// closeOwned closes every listener the group owns.
+func (g *portableGroup) closeOwned() {
+	//: each one; a second close is harmless.
+	for _, ln := range g.owned {
+		swallowErr(ln.Close())
 	}
 }
 
@@ -284,12 +328,19 @@ func (pl *portableLoop) run(done chan<- struct{}) {
 		pl.h.OnBatchEnd(pl)
 		pl.endBatch()
 		//: finished.
-		if pl.g.stopReq.Load() || (pl.draining && pl.live.Load() == 0) {
+		if pl.finished() {
 			pl.closeAll()
 			//: out.
 			return
 		}
 	}
+}
+
+// finished reports whether the lane stops: the backend stopped, or the lane
+// drained to its last connection with no acceptor left to hand it another.
+func (pl *portableLoop) finished() bool {
+	//: either.
+	return pl.g.stopReq.Load() || (pl.draining && pl.live.Load() == 0 && pl.g.accepting.Load() == 0)
 }
 
 // collect takes the events already queued, up to a batch.
@@ -501,6 +552,10 @@ func (pl *portableLoop) lookup(ref corenet.LoopConnRef) (int32, *portableConn) {
 // deliver hands data to the handler behind any spill.
 func (pl *portableLoop) deliver(slot int32, pc *portableConn, data []byte) {
 	pc.lastIO = time.Now()
+	//: the first byte: the drain may close it once settled.
+	if pc.heardAt.IsZero() {
+		pc.heardAt = pc.lastIO
+	}
 	ref := corenet.LoopConnRef{Slot: uint32(slot), Gen: pc.gen}
 	buf := data
 	//: behind a spill the bytes join it; appending never touches the bytes
@@ -617,10 +672,17 @@ func (pl *portableLoop) control() {
 		return
 	}
 	pl.draining = true
+	pl.closeSettled()
+}
+
+// closeSettled closes, as the drain does, every open connection with nothing
+// unconsumed that has sent something or stayed silent for portableQuiet.
+func (pl *portableLoop) closeSettled() {
+	now := time.Now()
 	//: each open one with nothing unconsumed.
 	for slot, pc := range pl.conns {
-		//: mid-request ones finish first.
-		if pc.open && !pc.reasonSet && len(pc.spill) == pc.spillOff {
+		//: mid-request ones finish first, fresh ones once heard or quiet.
+		if pc.open && !pc.reasonSet && len(pc.spill) == pc.spillOff && (!pc.heardAt.IsZero() || now.Sub(pc.lastIO) >= portableQuiet) {
 			pc.reasonSet, pc.closeErr = true, corenet.ServerClosed
 			pl.markDirty(int32(slot))
 		}
@@ -865,6 +927,7 @@ func (e portableEngine) Shutdown(ctx context.Context) error {
 	g := e.g
 	g.drainReq.Store(true)
 	g.wakeAll()
+	g.takeQueues()
 	//: every lane drained, or out of budget.
 	for _, pl := range g.lanes {
 		select {
@@ -884,6 +947,7 @@ func (e portableEngine) Close() error {
 	g := e.g
 	g.once.Do(func() {
 		g.stopReq.Store(true)
+		g.closeOwned()
 		g.wakeAll()
 		//: every lane's goroutine returned.
 		for _, pl := range g.lanes {

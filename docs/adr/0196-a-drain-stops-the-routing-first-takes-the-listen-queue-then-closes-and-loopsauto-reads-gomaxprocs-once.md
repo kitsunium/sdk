@@ -72,16 +72,29 @@ within its own ctx, and a ctx that ends first ends the grace.
 The drain of a loop group, per backend:
 
 1. **epoll**: each loop takes the listeners out of its set (`EPOLL_CTL_DEL`),
-   accepts on each until `EAGAIN` (at most 65 536, past which the arrivals
-   outpace the drain) and serves what it accepted.
+   then, at each batch of the drain, accepts on each until `EAGAIN` — 1 024 a
+   batch, so the loop serves between two takes — and serves what it accepted.
+   Out of descriptors (`EMFILE`, `ENFILE`) or with its table full, it waits
+   for the drain's closes to free some instead of handing the queue to the
+   close.
 2. **io_uring**: each ring cancels its single-shot accepts. An accept that
    completed as its cancel crossed it is served, not closed. Once every cancel
-   came back, the ring arms as many accepts as the listener's queue holds
-   (`TCP_INFO`'s `tcpi_unacked` on a listener), within the room above its
-   reserve, until the queue reads empty with none in flight; an accept left
-   waiting because another ring took the connection is cancelled again. A
-   ring the watchdog drained before the group takes nothing, and a ring whose
-   accept failed stops taking.
+   came back, the ring arms as many accepts as the listener's queue holds —
+   `TCP_INFO`'s `tcpi_unacked` on a TCP listener; on one `TCP_INFO` does not
+   answer, a Unix socket, `acceptDepth` while a zero-timeout `ppoll` says it is
+   readable — within the room above its reserve, until the queue reads empty
+   with none in flight; an accept left waiting because another ring took the
+   connection is cancelled again. A queue with no room above the reserve, or
+   with process descriptors out until the backoff ends, waits for the drain's
+   closes; it is never read as empty. A ring the watchdog drained before the
+   group takes nothing. An accept's failure stops the ring's take only when it
+   says the listener failed: its own cancel, `ECONNABORTED`, `EINTR`, `EAGAIN`
+   (should a kernel honour the listener's `O_NONBLOCK`), `ENFILE` and
+   `EMFILE` only wait.
+   
+   Both backends take at most 65 536 connections from one listener: past it
+   the arrivals outpace the drain — no grace let the routing stop —, and what
+   is left in the queue meets the close.
 3. Each taker — a loop on epoll, a ring on io_uring — hands each listener back
    once it is done with it; the last one closes it (`listenerSet`). The
    listener therefore closes before the established connections drain, never
@@ -93,9 +106,18 @@ The drain of a loop group, per backend:
    request on the way; closing it unread would reset it.
 
 The loop does not stop until its connections are gone **and** its listeners
-handed back. The portable backend accepts through `net.Listener`, which has
-no non-blocking accept to take a queue with: its listeners close when the
-server's do, after the grace.
+handed back.
+
+The portable backend does the same on every Unix platform. At Start it
+duplicates each listener server bound (`File`, `FileListener`) so that
+server's close after the grace leaves the socket listening; its acceptors
+keep admitting while it drains; its `Shutdown` accepts on each listener's own
+non-blocking descriptor until `EAGAIN` (`syscall.Accept` under
+`RawConn.Control`, each descriptor wrapped by `FileConn`), then closes it; a
+lane stops only once no acceptor runs. Its connections follow rule 4 too
+(`portableQuiet`, a second). On Windows a listener's descriptor cannot be
+duplicated into a `net.Listener`: there the portable backend's listeners stay
+server's, close after the grace, and no queue is taken.
 
 ### D4 — A partial drain is the kernel's `tcp_migrate_req`
 
@@ -130,10 +152,14 @@ and their ratio is what P2 judges.
 - The drain's take arms io_uring accepts after the cancels came back, a batch
   at a time: a drain costs a few ticks more than before when the queue is
   long.
-- Tests: `TestConformance_drainTakesQueue` (both native backends: the loop
-  held at its batch end, 384 connections queued with their request, then the
-  drain — every one reads its echo and a clean end, the listener refuses
-  after), `TestDrain_graceUnderArrivals` (every backend: clients dial back to
+- Tests: `TestConformance_drainTakesQueue` (both native backends, on a TCP
+  and on a Unix listener: the loop held at its batch end, 384 connections
+  queued with their request, then the drain — every one reads its echo and a
+  clean end, the listener refuses after), `TestDrain_arrivalsAcrossTheDrain`
+  (every backend: arrivals that never stop until a dial is refused; every
+  connection dialled earlier than 20 ms before the first refusal reads its
+  echo — the close's own window, D4, is the only reset allowed, and it is
+  logged; on Linux the 45 runs measured showed one), `TestDrain_graceUnderArrivals` (every backend: clients dial back to
   back and stop 150 ms after readiness turns false, under a 400 ms grace —
   no dial fails, no exchange is cut short, connections dialled after readiness
   turned false are served, kept connections end cleanly), and

@@ -8,6 +8,7 @@ import (
 	"io"
 	stdnet "net"
 	"runtime"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -128,6 +129,100 @@ func TestDrain_graceUnderArrivals(t *testing.T) {
 	}
 }
 
+// drainCloseWindow is how close to the listener's close a connection may
+// have been dialled and still be reset: one the kernel completed after the
+// take's last empty read, or whose handshake it had not finished, meets the
+// close (ADR 0196 §D4). Nothing else may be.
+const drainCloseWindow = 20 * time.Millisecond
+
+// TestDrain_arrivalsAcrossTheDrain keeps arrivals going through the whole
+// drain, on every backend the platform has: clients dial back to back and
+// stop only once a dial is refused — the listener closed. Every connection
+// whose dial succeeded must read its echo, never a reset nor an end before
+// it, unless it was dialled within drainCloseWindow of the first refusal:
+// the close's own window, which no sequence of calls on one listener closes.
+// Each backend takes its listen queue before it closes the listener, so
+// what waited there is served.
+func TestDrain_arrivalsAcrossTheDrain(t *testing.T) {
+	for _, b := range loopBackends() {
+		t.Run(b.String(), func(t *testing.T) {
+			if runtime.GOOS == "windows" {
+				// ADR 0196 §D3: a Windows listener cannot be duplicated into the
+				// portable backend's own, so its drain takes no queue and a close
+				// under arrivals resets what waits; the grace test above holds.
+				t.Skip("the portable backend takes no listen queue on Windows")
+			}
+			srv := New(WithDrainGrace(50 * time.Millisecond))
+			t.Cleanup(func() { swallowErr(srv.Close()) })
+			h := &laneEchoH{}
+			srv.Group("loop", Listen("tcp", "127.0.0.1:0"), Loop(corenet.LoopValue{Backend: b, Loops: corenet.LoopsAuto})).HandleLoop(h)
+			if err := srv.Start(t.Context()); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+			addr := srv.State().Listeners[0].Address
+			type cut struct {
+				at  time.Time
+				msg string
+			}
+			var draining atomic.Bool
+			var during atomic.Int64
+			var mu sync.Mutex
+			var cuts []cut
+			var refusedAt []time.Time
+			var wg sync.WaitGroup
+			for range 4 {
+				wg.Go(func() {
+					for {
+						began := draining.Load()
+						at := time.Now()
+						dialled, msg := exchange(addr)
+						mu.Lock()
+						switch {
+						case !dialled && !began && !draining.Load():
+							cuts = append(cuts, cut{at, "refused before the drain: " + msg})
+						case !dialled:
+							refusedAt = append(refusedAt, at)
+						case msg != "":
+							cuts = append(cuts, cut{at, msg})
+						case began:
+							during.Add(1)
+						}
+						mu.Unlock()
+						if !dialled {
+							return
+						}
+						time.Sleep(time.Millisecond)
+					}
+				})
+			}
+			time.Sleep(100 * time.Millisecond)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			draining.Store(true)
+			if err := srv.Shutdown(ctx); err != nil {
+				t.Fatalf("Shutdown: %v", err)
+			}
+			wg.Wait()
+			if during.Load() == 0 || len(refusedAt) == 0 {
+				t.Fatalf("arrivals did not cross the drain: %d served during it, %d refused after", during.Load(), len(refusedAt))
+			}
+			closed := slices.MinFunc(refusedAt, func(a, b time.Time) int { return a.Compare(b) })
+			window := 0
+			for _, c := range cuts {
+				if c.at.After(closed.Add(-drainCloseWindow)) {
+					window++
+					continue
+				}
+				t.Errorf("cut short %v before the listener closed: %s", closed.Sub(c.at), c.msg)
+			}
+			t.Logf("%d served during the drain; %d reset within %v of the close", during.Load(), window, drainCloseWindow)
+			if o, cl := h.opens.Load(), h.closes.Load(); o != cl {
+				t.Fatalf("%d opened, %d closed", o, cl)
+			}
+		})
+	}
+}
+
 // TestDrain_graceBoundedByCtx pins that the grace never outlives the
 // caller's budget: a Shutdown whose ctx ends first goes on with the drain.
 func TestDrain_graceBoundedByCtx(t *testing.T) {
@@ -180,20 +275,26 @@ func (h *laneEchoH) OnClose(corenet.LoopIO, corenet.LoopConnRef, error) { h.clos
 // oneExchange dials addr, sends one line, reads its echo and closes, and
 // says what went wrong: empty when nothing did.
 func oneExchange(addr string) string {
+	_, msg := exchange(addr)
+	return msg
+}
+
+// exchange is oneExchange that also says whether the dial succeeded.
+func exchange(addr string) (bool, string) {
 	c, err := stdnet.DialTimeout("tcp", addr, 2*time.Second)
 	if err != nil {
-		return "dial: " + err.Error()
+		return false, "dial: " + err.Error()
 	}
 	defer func() { swallowErr(c.Close()) }()
 	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
 	if _, err := c.Write([]byte("a\n")); err != nil {
-		return "write: " + err.Error()
+		return true, "write: " + err.Error()
 	}
 	got := make([]byte, 2)
 	if _, err := io.ReadFull(c, got); err != nil || string(got) != "a\n" {
-		return "echo " + string(got) + ": " + errString(err)
+		return true, "echo " + string(got) + ": " + errString(err)
 	}
-	return ""
+	return true, ""
 }
 
 // lineEcho writes line on c and requires it back.

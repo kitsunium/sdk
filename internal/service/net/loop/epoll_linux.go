@@ -4,6 +4,7 @@ package loop
 
 import (
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -70,6 +71,10 @@ type epollLoop struct {
 	// the group's hold on them through the drain.
 	lfds []int
 	set  *listenerSet
+	// queueDone is, per listener, that the loop took its queue as the group
+	// drains and handed it back; taken how many connections it took from it.
+	queueDone []bool
+	taken     []int
 	// armed reports whether the listeners are in the epoll set; rearmAt is
 	// the tick an EMFILE backoff ends at, backoff its current length.
 	armed   bool
@@ -121,7 +126,11 @@ func startEpoll(g *Group, cfg *Config) error {
 	//: locked itself to its thread.
 	for i := range g.sz.loops {
 		lp := newLoop(g, *cfg, i, mmapAnon)
-		el := &epollLoop{lp: lp, lfds: runner.lfds, set: runner.set, epfd: -1, evfd: -1, events: make([]syscall.EpollEvent, g.sz.cqBatch), backoff: backoffMin, excl: excl}
+		el := &epollLoop{
+			lp: lp, lfds: runner.lfds, set: runner.set,
+			queueDone: make([]bool, len(runner.lfds)), taken: make([]int, len(runner.lfds)),
+			epfd: -1, evfd: -1, events: make([]syscall.EpollEvent, g.sz.cqBatch), backoff: backoffMin, excl: excl,
+		}
 		runner.loops = append(runner.loops, el)
 		g.loops = append(g.loops, lp)
 		runner.wg.Add(1)
@@ -339,7 +348,7 @@ func (el *epollLoop) run(wg *sync.WaitGroup, ready chan<- error) {
 		lp.endBatch(started)
 		el.off = 0
 		//: finished: stopped, or drained to the last connection.
-		if el.stopReq.Load() || (lp.draining && el.r.live == 0) {
+		if el.stopReq.Load() || (lp.draining && el.r.live == 0 && el.queuesTaken()) {
 			//: out of the loop.
 			break
 		}
@@ -738,30 +747,61 @@ func (el *epollLoop) control() {
 // the loop's set, admitting each connection, and hands each listener back to
 // the group's set, whose last loop closes it: a connection the kernel
 // completed before the close is served, not reset by it (plan P6).
+//
+// It runs at every batch of the drain until each listener is handed back: a
+// take that waits for descriptors goes on once the drain's closes free some.
 func (el *epollLoop) takeQueues() {
-	//: each listener, then handed back.
+	//: each listener not handed back yet.
 	for i, fd := range el.lfds {
-		el.takeQueue(fd)
-		el.set.handBack(i)
+		//: over: handed back.
+		if !el.queueDone[i] && el.takeQueue(i, fd) {
+			el.queueDone[i] = true
+			el.set.handBack(i)
+		}
 	}
 }
 
-// takeQueue accepts from lfd until its queue is empty, queueTakeMax at most.
-func (el *epollLoop) takeQueue(lfd int) {
-	//: bounded: past it the arrivals outpace the drain.
-	for range queueTakeMax {
-		nfd, _, err := syscall.Accept4(lfd, syscall.SOCK_NONBLOCK|syscall.SOCK_CLOEXEC)
-		//: EAGAIN ends the take, as does a failure that ends a burst.
-		if err != nil {
-			//: empty, or nothing more to take.
-			if el.acceptFailed(err) {
-				//: taken.
-				return
-			}
-			continue
+// queuesTaken reports whether the loop handed every listener back.
+func (el *epollLoop) queuesTaken() bool {
+	//: one left, or none.
+	return !slices.Contains(el.queueDone, false)
+}
+
+// takeQueue accepts from listener i, lfd, queueTakeBatch at most this batch,
+// and reports whether its take is over: the queue empty, the listener failed,
+// or queueTakeMax taken. Out of descriptors, or with the ring's table full,
+// it waits for the drain's closes.
+func (el *epollLoop) takeQueue(i, lfd int) bool {
+	//: bounded per batch, so the loop serves between two takes.
+	for range queueTakeBatch {
+		//: past the budget, or no slot until a close.
+		if el.taken[i] >= queueTakeMax || el.r.full() {
+			//: over, or next batch.
+			return el.taken[i] >= queueTakeMax
 		}
+		nfd, _, err := syscall.Accept4(lfd, syscall.SOCK_NONBLOCK|syscall.SOCK_CLOEXEC)
+		//: a failure ends the take, waits, or skips one connection.
+		if err != nil {
+			//: by what it says of the queue.
+			switch takeAfter(err) {
+			//: empty, or the listener failed.
+			case takeOver:
+				//: over.
+				return true
+			//: no descriptor until a close.
+			case takeLater:
+				//: next batch.
+				return false
+			//: the next one.
+			case takeNext:
+				continue
+			}
+		}
+		el.taken[i]++
 		el.admit(nfd)
 	}
+	//: more next batch.
+	return false
 }
 
 // closeAll closes every connection still open, as the loop stops.

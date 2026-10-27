@@ -3573,6 +3573,10 @@ sequences:
         kind: self
       - id: resolveLoops
         kind: internal
+      - id: ownListeners
+        kind: internal
+      - id: g.accepting.Add
+        kind: value
       - id: g.acceptLoop
         kind: internal
       - id: pl.run
@@ -3592,7 +3596,7 @@ sequences:
         eval: |-
           &portableGroup{
           		group: group.name, soft: max(v.SoftConns, 0), maxConns: max(group.limits.MaxConns, 0),
-          		degraded: degraded, lns: lns, loopsSource: src,
+          		degraded: degraded, loopsSource: src,
           		caps:       append(loop.Unprobed("portable", plan.disabled, plan.disabledBy), portableNoDelay(plan)),
           		noDelayOff: slices.Contains(plan.disabled, corenet.CapabilityTCPNoDelay),
           	}
@@ -3611,12 +3615,17 @@ sequences:
                 		})
           key: i
           range: loopLanes(v)
+      - set: g.lns, g.owned
+        to: ownListeners
+        value: ownListeners(lns)
       - loop:
           do:
+            - eval: g.accepting.Add(1)
+              to: g.accepting.Add
             - go: g.acceptLoop(ln)
               to: g.acceptLoop
           key: _
-          range: lns
+          range: g.lns
           value: ln
       - loop:
           do:
@@ -3649,17 +3658,17 @@ sequences:
         kind: actor
       - id: (*portableGroup).acceptLoop
         kind: self
+      - id: g.accepting.Add
+        kind: value
       - id: ln.Accept
         kind: value
       - id: time
         kind: stdlib
-      - id: g.rejected.Add
-        kind: value
-      - id: swallowErr
+      - id: g.admit
         kind: internal
-      - id: pl.live.Add
-        kind: value
     steps:
+      - defer: g.accepting.Add(-1)
+        to: g.accepting.Add
       - bind: failures
         eval: "0"
       - loop:
@@ -3681,22 +3690,73 @@ sequences:
                 when: err != nil
             - set: failures
               value: "0"
-            - opt:
-                do:
-                  - eval: g.rejected.Add(1)
-                    to: g.rejected.Add
-                  - eval: swallowErr(c.Close())
-                    to: swallowErr
-                  - continue: true
-                when: g.maxConns > 0 && g.live() >= int64(g.maxConns) || g.drainReq.Load()
-            - bind: pl
-              eval: g.lanes[(g.turn.Add(1)-1)%uint64(len(g.lanes))]
-            - eval: pl.live.Add(1)
-              to: pl.live.Add
-            - send:
-                chan: pl.events
-                value: "portableEvent{kind: pevOpen, conn: c}"
+            - eval: g.admit(c)
+              to: g.admit
           forever: true
+  - of: (*portableGroup).admit
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*portableGroup).admit
+        kind: self
+      - id: g.rejected.Add
+        kind: value
+      - id: swallowErr
+        kind: internal
+      - id: pl.live.Add
+        kind: value
+    steps:
+      - opt:
+          do:
+            - eval: g.rejected.Add(1)
+              to: g.rejected.Add
+            - eval: swallowErr(c.Close())
+              to: swallowErr
+            - return: ""
+          when: g.maxConns > 0 && g.live() >= int64(g.maxConns)
+      - bind: pl
+        eval: g.lanes[(g.turn.Add(1)-1)%uint64(len(g.lanes))]
+      - eval: pl.live.Add(1)
+        to: pl.live.Add
+      - send:
+          chan: pl.events
+          value: "portableEvent{kind: pevOpen, conn: c}"
+  - of: (*portableGroup).takeQueues
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*portableGroup).takeQueues
+        kind: self
+      - id: takeQueue
+        kind: internal
+      - id: swallowErr
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: takeQueue(ln, g.admit)
+              to: takeQueue
+            - eval: swallowErr(ln.Close())
+              to: swallowErr
+          key: _
+          range: g.owned
+          value: ln
+  - of: (*portableGroup).closeOwned
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*portableGroup).closeOwned
+        kind: self
+      - id: swallowErr
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: swallowErr(ln.Close())
+              to: swallowErr
+          key: _
+          range: g.owned
+          value: ln
   - of: (*portableLoop).run
     participants:
       - id: caller
@@ -3757,8 +3817,11 @@ sequences:
                   - eval: pl.closeAll()
                     to: pl.closeAll
                   - return: ""
-                when: pl.g.stopReq.Load() || (pl.draining && pl.live.Load() == 0)
+                when: pl.finished()
           forever: true
+  - of: (*portableLoop).finished
+    steps:
+      - return: pl.g.stopReq.Load() || (pl.draining && pl.live.Load() == 0 && pl.g.accepting.Load() == 0)
   - of: (*portableLoop).collect
     participants:
       - id: caller
@@ -4116,6 +4179,11 @@ sequences:
       - set: pc.lastIO
         to: time
         value: time.Now()
+      - opt:
+          do:
+            - set: pc.heardAt
+              value: pc.lastIO
+          when: pc.heardAt.IsZero()
       - bind: ref
         eval: "corenet.LoopConnRef{Slot: uint32(slot), Gen: pc.gen}"
       - bind: buf
@@ -4264,7 +4332,7 @@ sequences:
         kind: actor
       - id: (*portableLoop).control
         kind: self
-      - id: pl.markDirty
+      - id: pl.closeSettled
         kind: internal
     steps:
       - opt:
@@ -4273,6 +4341,22 @@ sequences:
           when: "!pl.g.drainReq.Load()"
       - set: pl.draining
         value: "true"
+      - eval: pl.closeSettled()
+        to: pl.closeSettled
+  - of: (*portableLoop).closeSettled
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*portableLoop).closeSettled
+        kind: self
+      - id: time
+        kind: stdlib
+      - id: pl.markDirty
+        kind: internal
+    steps:
+      - bind: now
+        eval: time.Now()
+        to: time
       - loop:
           do:
             - opt:
@@ -4281,7 +4365,7 @@ sequences:
                     value: true, corenet.ServerClosed
                   - eval: pl.markDirty(int32(slot))
                     to: pl.markDirty
-                when: pc.open && !pc.reasonSet && len(pc.spill) == pc.spillOff
+                when: pc.open && !pc.reasonSet && len(pc.spill) == pc.spillOff && (!pc.heardAt.IsZero() || now.Sub(pc.lastIO) >= portableQuiet)
           key: slot
           range: pl.conns
           value: pc
@@ -4621,6 +4705,8 @@ sequences:
         kind: value
       - id: g.wakeAll
         kind: internal
+      - id: g.takeQueues
+        kind: internal
       - id: swallowErr
         kind: internal
       - id: errs
@@ -4632,6 +4718,8 @@ sequences:
         to: g.drainReq.Store
       - eval: g.wakeAll()
         to: g.wakeAll
+      - eval: g.takeQueues()
+        to: g.takeQueues
       - loop:
           do:
             - select:
@@ -4661,6 +4749,7 @@ sequences:
       - eval: |-
           g.once.Do(func() {
           		g.stopReq.Store(true)
+          		g.closeOwned()
           		g.wakeAll()
           		//: every lane's goroutine returned.
           		for _, pl := range g.lanes {
@@ -4702,6 +4791,152 @@ sequences:
               value: recycledMark
           key: i
           range: b
+  - of: ownListeners
+    participants:
+      - id: caller
+        kind: actor
+      - id: ownListeners
+        kind: self
+      - id: dupListener
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - bind: dup, err
+              eval: dupListener(ln)
+              to: dupListener
+            - opt:
+                do:
+                  - set: all
+                    value: append(all, ln)
+                  - continue: true
+                when: err != nil
+            - set: all
+              value: append(all, dup)
+            - set: owned
+              value: append(owned, dup)
+          key: _
+          range: lns
+          value: ln
+      - return: all, owned
+  - of: dupListener
+    participants:
+      - id: caller
+        kind: actor
+      - id: dupListener
+        kind: self
+      - id: f.File
+        kind: internal
+      - id: stdnet
+        kind: stdlib
+    steps:
+      - bind: f, ok
+        eval: ln.(filer)
+      - opt:
+          do:
+            - return: nil, syscall.EINVAL
+          when: "!ok"
+      - bind: file, err
+        eval: f.File()
+        to: f.File
+      - opt:
+          do:
+            - return: nil, err
+          when: err != nil
+      - defer: func() { swallowErr(file.Close()) }()
+      - return: stdnet.FileListener(file)
+        to: stdnet
+  - of: takeQueue
+    participants:
+      - id: caller
+        kind: actor
+      - id: takeQueue
+        kind: self
+      - id: sc.SyscallConn
+        kind: value
+      - id: acceptRaw
+        kind: internal
+      - id: connOf
+        kind: internal
+    steps:
+      - bind: sc, ok
+        eval: ln.(syscall.Conn)
+      - opt:
+          do:
+            - return: ""
+          when: "!ok"
+      - bind: rc, err
+        eval: sc.SyscallConn()
+        to: sc.SyscallConn
+      - opt:
+          do:
+            - return: ""
+          when: err != nil
+      - loop:
+          do:
+            - bind: nfd, aerr
+              eval: acceptRaw(rc)
+              to: acceptRaw
+            - opt:
+                do:
+                  - continue: true
+                when: aerr == syscall.ECONNABORTED || aerr == syscall.EINTR
+            - opt:
+                do:
+                  - return: ""
+                when: aerr != nil
+            - bind: c, cerr
+              eval: connOf(nfd)
+              to: connOf
+            - opt:
+                do:
+                  - continue: true
+                when: cerr != nil
+            - eval: admit(c)
+          range: portableTakeMax
+  - of: acceptRaw
+    participants:
+      - id: caller
+        kind: actor
+      - id: acceptRaw
+        kind: self
+      - id: rc.Control
+        kind: value
+    steps:
+      - bind: nfd
+        eval: "-1"
+      - var:
+          name: aerr
+          type: error
+      - bind: cerr
+        eval: rc.Control(func(fd uintptr) { nfd, _, aerr = syscall.Accept(int(fd)) })
+        to: rc.Control
+      - opt:
+          do:
+            - return: "-1, cerr"
+          when: cerr != nil
+      - return: nfd, aerr
+  - of: connOf
+    participants:
+      - id: caller
+        kind: actor
+      - id: connOf
+        kind: self
+      - id: syscall
+        kind: stdlib
+      - id: os
+        kind: stdlib
+      - id: stdnet
+        kind: stdlib
+    steps:
+      - eval: syscall.CloseOnExec(nfd)
+        to: syscall
+      - bind: f
+        eval: os.NewFile(uintptr(nfd), "")
+        to: os
+      - defer: func() { swallowErr(f.Close()) }()
+      - return: stdnet.FileConn(f)
+        to: stdnet
   - of: newMultiReader
     participants:
       - id: caller
