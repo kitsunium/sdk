@@ -5195,6 +5195,62 @@ contract for good, and so did every peer that installed the snapshot
 - No frame, payload or record format changes, and no raft mutation is
   added.
 
+## Amendment — a joiner's member stamp follows the entries that admit it (2026-10-27, #695)
+
+A directory `Init` prepared carries a joining stamp: it votes for nobody,
+and the driver turns it into a member's once the node's own admission is
+in the committed configuration (`checkAdmission`). The driver read that
+configuration at the step function's commit, which moves when an append
+is accepted, in memory, and wrote the member stamp on the event loop in
+the turn that handed the storage actor the very entries that admit the
+node: the stamp, durable on return, reached the disk before them. A power
+cut during their write or their fdatasync left a member stamp over a log
+that held the hard state alone
+([#695](https://github.com/kitsunium/sdk/issues/695)). Restarted, the node
+was a member with an empty configuration: its transport admitted no peer,
+the engine sends its JOIN again only while the node is joining (#632), the
+first consumer's driver only from a joining stamp, and the leader never fed
+it again. The learner kept its slot, and while it stayed listed every
+`RaiseClusterVersion` was refused, the raise waiting to hear from every
+member (#665). The remedy was manual: `Remove`, then `WipeAndRejoin` and
+`Init` under a new ID, and from protocol 3 a new key (#648). The class of
+#684 and #690: one state file made durable before another it rests on.
+
+- **The stamp turns a member's once the admission is durable.**
+  `checkAdmission` judges the configuration in force at the commit bounded
+  by the index the storage actor last reported durable (`StorageDone`, the
+  step function's `Stable`), the bound apply already holds. The entries
+  through it are committed, so never truncated, and on disk: a member stamp
+  always has its admission in its log, or in the snapshot an install made
+  durable before the step function moved onto it. The check runs at each
+  storage completion as well as at each Ready, so a completion that leaves
+  the step function no Ready, apply held at `MaxApplyLagBytes`, does not
+  hold the stamp until the leader's next message.
+- **Each crash point is safe.**
+  - Before the batch is durable: the stamp is joining and the log holds no
+    more than before. The node joins again, and a member that lists it
+    answers without proposing anything (#533).
+  - After the batch, before the stamp: still joining, with the admission in
+    the log. The transport admits the configuration the log replays, and
+    the first commit that covers the admission, the hard state's own when
+    it was synced with the batch, writes the member stamp.
+  - The stamp is written by rename, durable on return: the old one or the
+    new one.
+  - After it: a member whose log holds its admission.
+- **What it costs.** The member stamp, and the release of the JOIN answer's
+  admission set that follows it (#552), wait for one sync of the storage
+  actor. Meanwhile the node votes for nobody, and campaigns no more than
+  the learner it is; it cannot be promoted either, since its
+  acknowledgements of those entries wait for the same sync (D5b).
+- **What it leaves.** A directory a crash already left in that state, a
+  member stamp whose snapshots and log name no configuration, is not
+  detected at start, and still needs `Remove`, then `WipeAndRejoin` and
+  `Init`. #526 refuses such a start only on a node with no table; widening
+  that refusal is a new refusal a product sees, and is left to a decision.
+
+No frame, payload, record or stamp format changes, and no raft mutation is
+added: the step function is unchanged.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -5217,6 +5273,7 @@ contract for good, and so did every peer that installed the snapshot
 | #700 | Raft hunt loop, 2026-10-26 | `Recover` reads the log a batch of 1 MiB and 4 096 entries at a time, the configuration and the cluster version once, past the newest snapshot when the log continues it; no format change (amendment of 2026-10-26, #700) |
 | #701 | Raft hunt loop, 2026-10-27 | a removal of the leader submitted on it is submitted again on `NOT_LEADER` as on `MEMBERSHIP_CHANGE_PENDING`, within the hand-off's window, until the node hears of the leader its hand-off elected; no format change (amendment of 2026-10-27, #701) |
 | #707 | Raft hunt loop, 2026-10-27 | a `DurableStateMachine`'s applied index the log holds at the machine's term is taken as committed at the start, and a cut past the step function's commit waits for it; no format change (amendment of 2026-10-27, #707) |
+| #695 | Raft hunt loop, 2026-10-27 | a joiner's stamp turns a member's only once the log is durable through the entries that admit it, the configuration judged at the commit bounded by the durable index, at each Ready and each storage completion; no format change, no raft mutation (amendment of 2026-10-27, #695) |
 
 ## raft-sql-poc (owner's prior Raft)
 

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-26T12:00:00Z -->
+<!-- updated: 2026-10-27T12:00:00Z -->
 # internal/service/net/server/
 
 ## Purpose
@@ -41,15 +41,19 @@ Public façade: `pkg/v1/net/server`.
 | `pool.go` | per-connection recycling + the live-socket registry |
 | `options.go` | `Option` / `GroupOption` — including the two HTTP-only group options, `ReadHeaderTimeout` and `MaxHeaderBytes`, `Loop`, refused by every group no loop handler serves, and `Plaintext`, `Name` and `Engine` (ADR 0187); each records its kind |
 | `packet_group.go` | `PacketGroup` — the datagram mirror of `StreamGroup` |
-| `packet.go` | the pooled `corenet.Packet` implementation |
-| `packet_listen.go` | datagram socket construction; family validation; ceilings |
-| `packet_loop.go` | the datagram read loop and dispatch |
-| `batch.go` | the `datagramSource` seam + reusable read slots |
-| `batch_portable.go` | one datagram per syscall — the floor everywhere |
-| `datagram_source_{linux,other}.go` | `newDatagramSource` — the batched reader for a socket exposing a raw descriptor (Linux only), the portable one otherwise — and `batchAvailable`, which feeds `State` |
+| `packet.go` | the pooled `corenet.Packet` implementation; `Reply` goes through the socket's `datagramSink` |
+| `packet_listen.go` | datagram socket construction; family validation; ceilings; `boundPacketConn` (its source, sink and `done`), `handoverSource` |
+| `packet_bound.go` | `newBoundPacket` (source with GRO, sink per `BatchReplies`), `handoverPackets` (Shutdown's drain wait, after the stream listeners are closed and within `handoverBudget`, 250 ms, a drain still running then has GRO switched off — ADR 0192 §D4), `stopGROPackets` (Close's), `recordGSOOff` / `gsoFaults` (the `gso` faults of `State`) |
+| `packet_loop.go` | the datagram read loop and dispatch: one `Packet` a datagram, a coalesced message split by `serveMessage`, a cut one counted (`Datagrams.TruncatedPackets`); the sink opened before the batch and flushed after it |
+| `batch.go` | the `datagramSource` and `datagramSink` seams, reusable read slots (`segment`, `count` for a coalesced message), `datagramCounters`, the reply queue's sizes |
+| `batch_portable.go` | one datagram per syscall — the floor everywhere; `portableSink`, `Reply`'s default, one `WriteTo` a reply |
+| `reply_queue.go` | `queuedSink`: `BatchReplies` without `sendmmsg` — queued, one `WriteTo` each at the batch's end (darwin, every non-Linux, a Unix datagram socket) |
+| `datagram_source_{linux,other}.go` | `newDatagramSource` — the batched reader for a socket exposing a raw descriptor (Linux only), UDP GRO on when asked, the portable one otherwise —, `newDatagramSink` — the portable sink unless `BatchReplies`, then `multiWriter` or `queuedSink` — and `batchAvailable`, which feeds `State` |
 | `raw_conn_provider_linux.go` | `rawConnProvider` — the raw-descriptor contract the batched reader needs, declared rather than asserting `*net.UDPConn` |
 | `kernel_len_linux.go` | `setKernelLen` — a kernel length field written at the width the architecture gives it (`uint64` or `uint32`) |
-| `multireader_linux.go` | `recvmmsg` batched reader |
+| `multireader_linux.go` | `recvmmsg` batched reader: `prepare` restores every capacity before each call, `fill` reads lengths and `msg_flags`, `enableGRO`/`slotSize` (65 535-byte slots under GRO), `groSegment` (the `UDP_GRO` control message), `handover`/`drain`/`stopGRO` — a read returning once `stopGRO` has begun is dropped, its segment size possibly lost (ADR 0192 §D1–§D4) |
+| `multiwriter_linux.go` | `multiWriter`, `BatchReplies` on Linux: one `sendmmsg` a batch resumed from its count, runs to one peer of one size as `UDP_SEGMENT` sends (`gsoSegments`, `maxSegment`), `EIO` switching GSO off, `EMSGSIZE` counted, `EINVAL` sent alone (ADR 0192 §D5) |
+| `sendmmsg_linux_{amd64,386,other}.go` | `sysSendmmsg`: the syscall's number, absent from `syscall` on amd64 and 386 |
 | `multireader_mmsghdr_linux.go` | the cited `struct mmsghdr` layout |
 | `sockaddr_linux.go` | kernel sockaddr decoding for the batched path |
 | `http_adapter.go` | the `net/http` adapter (ADR 0029 D3) |
@@ -67,7 +71,10 @@ Public façade: `pkg/v1/net/server`.
 | `handshake.go` | the bounded TLS handshake — `handshakeHandler`, and `defaultHandshakeTimeout` (10 s) for a group that sets none |
 | `swallow.go` | `swallowErr` — the recorded discard of a non-actionable cleanup error |
 | `load_gate_linux_test.go` | the network merge gate's L1 and L2 (plan P8, `tools/netgate`): paired (ADR 0190): `BenchmarkLoadL1/pair=goroutine:loop` (P6) and `pair=loop:loop` (the calibration), `BenchmarkLoadL2/pair=handwritten:chain` (P2: the same auth and routing through `http1.Routes` and `http1.Bearer`, `chainL2`) and `pair=handwritten:handwritten` (its calibration) — one child (`TestLoadChild`, this binary re-run, `KITSUNIUM_NETGATE_CHILD=L2:a,b`) serves both engines side by side, 1000 kept-alive connections each, a 1 KiB body, and a round sends `b.N` requests in 2×`pairedWindows` windows, A, B, B, A, …; the metric is ITS CPU (getrusage at each window's ends), reported as `a:cpu-ns/req`, `b:cpu-ns/req` and `ratio:cpu-ns/req`, one paired sample a round; `TestLoadL1L2_wired` serves each engine for three requests, `TestLoadPaired_wired` two side by side |
-| `load_l3_linux_internal_test.go` | L3, paired like L1 and L2: `BenchmarkLoadL3/pair=recvmmsg:recvmmsg` (P4a's calibration; `l3Sources` is the table its engine B joins), one receiver reading both engines' sockets, each through its own source, windows A, B, B, A, … (`l3Windows`), `a:`, `b:` and `ratio:` of each metric over the veth pair of `scripts/ci/net-veth.sh`, 1200-byte datagrams from 4 GSO flows (`UDP_SEGMENT`, 54 segments a send) at 200 000 a second, the receiver re-run on `TestLoadL3Child` in the namespace; `cpu-ns/datagram`, `datagrams/syscall` (datagrams per `readBatch`) and `lost/op`; skipped without `KITSUNIUM_NETGATE_L3_PEER`; `TestLoadL3_wired` sends one GSO burst on loopback to each socket of a pair and counts its 54 datagrams there and none on the other |
+| `load_l3_linux_internal_test.go` | L3, paired like L1 and L2 (ADR 0190): `BenchmarkLoadL3/pair=recvmmsg:recvmmsg` (P4a's calibration) and `pair=recvmmsg:gro` (P4a's gate: GRO off, engine A; GRO on, engine B; `l3Sources`), one receiver (`TestLoadL3Child`, this binary re-run in the namespace) reading both engines' sockets, each through its own source, slots of `slotSize` and a coalesced message counted by `count`, windows A, B, B, A, … (`l3Windows`, b.N datagrams an engine) over the veth pair of `scripts/ci/net-veth.sh`, 1200-byte datagrams from 4 GSO flows (`UDP_SEGMENT`, 54 segments a send) at 200 000 a second; every window metered by one function (`l3Meter`, `l3Round`): `cpu-ns/datagram` — `l3CPU`: the receiver's rusage, the sender's and /proc/stat's irq and softirq time, over the datagrams sent, its parts reported as `rcv-`, `snd-`, `irq-cpu-ns/datagram` (ADR 0192 §D6) —, `datagrams/syscall` and `lost/op`, `a:`, `b:` and `ratio:`; a window below the receiver's own CPU or a message cut short fails the round (`TestL3CPU_check`, `TestL3Round_symmetric`) |
+| `multireader_gro_linux_internal_test.go` | GRO on the reader: a burst split, a shorter last segment, the segment size after a plain datagram (capacities restored), `MSG_CTRUNC` cut, a caller's `IP_PKTINFO` with GRO off (no control room, never cut) and on (room beside `UDP_GRO`), `slotSize`, the handover drain (split, then GRO off, then `net.ErrClosed`), `stopGRO`, `groSegment`'s walk |
+| `multiwriter_linux_internal_test.go` | `gsoSegments` (54 at 1200 on both families), the flush over loopback at the cap (54 in one message, 55 in two, a shorter last, past an Ethernet frame alone), a reply outside a batch, a scripted `sendmmsg` for `EIO`/`EINVAL`/`EMSGSIZE` and a partial count, `EINVAL` remembered across batches (`segmentCeiling`, GSO off after `gsoInvalidLimit` in a row), `sendmmsg` refused (`ENOSYS`/`EPERM`: `WriteTo` each, kept off when one leaves), `encode` and `pendingReply.addr` |
+| `reply_queue_internal_test.go`, `packet_bound_internal_test.go`, `batch_replies_external_test.go` | the queued sink (copy, order, failures counted, full queue), the handover wait and its budget, the `gso` faults, the sink a group's option picks, `BatchReplies` end to end and refused by a stream group |
 | `{batch,conn,linux}_compliance.go` | compile-time interface assertions (`KTN-IFACE-ASSERT-PLACEMENT`) |
 
 ## Why-this-shape
@@ -228,6 +235,28 @@ Public façade: `pkg/v1/net/server`.
   already uses. `struct mmsghdr` lives in `multireader_mmsghdr_linux.go` with
   its header quoted; `syscall.Msghdr`, `Iovec`, `SYS_RECVMMSG` and
   `MSG_WAITFORONE` are all in the stdlib.
+- **Every capacity is restored before every call** (ADR 0192 §D1). The kernel
+  writes the lengths it used back into each header; a message without control
+  data leaves `msg_controllen` at zero, and the next coalesced message would
+  find no room for its segment size. `prepare` resets `msg_namelen`,
+  `msg_controllen` and `msg_flags` on every header before every `recvmmsg`.
+- **UDP GRO wherever the cmsg reader is** (§D3). Only the batched reader
+  parses `UDP_GRO`, so only it switches the option on; its slots hold a whole
+  coalesced message (65 535 bytes, 1 MiB a socket at the default batch), and
+  `serveMessage` hands each datagram of it to the handler as its own `Packet`.
+  `MSG_CTRUNC`, and `MSG_TRUNC` under GRO, drop and count the message.
+- **The handover drains with GRO on, then switches it off** (§D4). The plan's
+  first wording was the reverse; `udp_recvmsg` writes the segment size only
+  while `UDP_GRO` is on, so a message queued coalesced and read after the
+  switch arrives as one datagram the length of all of them —
+  `Test_multiReader_handover` pins the order.
+- **`Reply` is synchronous unless the group asks** (§D5). `BatchReplies`
+  queues a batch's replies and sends them at its end: `multiWriter` on Linux
+  (`sendmmsg`, GSO runs), `queuedSink` elsewhere; a reply is then reported
+  sent when queued and a failure counted in `Datagrams.ReplyFailures`. A stream
+  group refuses the option. The sinks are mutex-guarded: a kept `Packet` may
+  reply from another goroutine, and outside a batch that reply is written at
+  once.
 - **The syscall is driven inside `RawConn.Read`.** Returning false on `EAGAIN`
   parks the goroutine on the **netpoller**, exactly as a blocking `ReadFrom`
   would. Batching does not cost us runtime integration.
@@ -567,5 +596,6 @@ cd internal/service && GOWORK=off go test -race -cover ./net/server/...
 - ADR 0189 — the kernel capabilities switched off by name, the merged report, the `capability` fault, `CheckCapabilities` at bind — `docs/adr/0189-a-kernel-capability-is-probed-reported-and-switched-off-by-name.md`
 - ADR 0188 — the operator's switches, `State`'s faults, fallbacks, override and platform, readiness and liveness — `docs/adr/0188-the-operators-switches-only-restrict-and-state-says-what-the-server-runs-without.md`
 - ADR 0191 — `Loops` lanes on every backend, `OnStart`, `UseLoop` and the probe chain — `docs/adr/0191-a-loop-middleware-forwards-every-callback-and-the-http1-chain-judges-one-canonical-target.md`
+- ADR 0192 — UDP GRO and the restored capacities, the handover drain, `BatchReplies` and GSO replies, L3's machine CPU — `docs/adr/0192-a-datagram-socket-reads-coalesced-and-its-replies-may-leave-per-batch.md`
 - Contract layer — `internal/core/net/CLAUDE.md`
 - The two protocols that depend on both — `internal/service/net/{sse,websocket}/CLAUDE.md`

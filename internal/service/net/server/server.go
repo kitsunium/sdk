@@ -71,6 +71,13 @@ type Server struct {
 	// read loop has nobody to hand an error to, so this counter is how the drop
 	// is reported instead of hidden.
 	oversized atomic.Uint64
+	// datagrams counts what the batched datagram paths drop (ADR 0192).
+	datagrams datagramCounters
+	// gsoMu guards gsoOff.
+	gsoMu sync.Mutex
+	// gsoOff names, once each, the groups a socket of which the device refused
+	// GSO for: a fault State lists for as long as the server lives.
+	gsoOff []string
 	// acceptBackoffs counts the waits accept loops took after a failed Accept —
 	// descriptor exhaustion, typically — so a server that is failing to accept
 	// says so in State instead of spinning a core per listener.
@@ -216,6 +223,7 @@ func (s *Server) PacketGroup(name string, opts ...GroupOption) *PacketGroup {
 	group.addrs = shim.addrs
 	group.limits = shim.limits
 	group.adopt = shim.adopt
+	group.batchReplies = shim.kinds.has(corenet.OptionBatchReplies)
 	s.packetByName[name] = group
 	s.packetGroups = append(s.packetGroups, group)
 	//: returned so the caller can attach a handler in the same expression.
@@ -254,12 +262,12 @@ func (s *Server) judgePacketOptions(shim *StreamGroup) {
 }
 
 // packetHonours reports whether a datagram group applies the option of kind
-// k: its ceilings, adoption, and the three every engine honours. Engine and
-// Plaintext are judged by engineRefusal.
+// k: its ceilings, its batched replies (ADR 0192), adoption, and the three
+// every engine honours. Engine and Plaintext are judged by engineRefusal.
 func packetHonours(k corenet.OptionKind) bool {
 	//: what PacketGroup keeps of its shim.
 	switch k {
-	case corenet.OptionMaxPacketSize, corenet.OptionBatchSize, corenet.OptionAdopt,
+	case corenet.OptionMaxPacketSize, corenet.OptionBatchSize, corenet.OptionBatchReplies, corenet.OptionAdopt,
 		corenet.OptionName, corenet.OptionEngine, corenet.OptionPlaintext:
 		//: honoured.
 		return true
@@ -297,10 +305,15 @@ func (s *Server) State() corenet.StateValue {
 		RejectedConns:    s.rejected.Load(),
 		OversizedPackets: s.oversized.Load(),
 		AcceptBackoffs:   s.acceptBackoffs.Load(),
-		Loops:            s.loopStates(),
-		Override:         override,
-		Fallbacks:        fallbacks,
-		Platform:         s.platform,
+		Datagrams: corenet.DatagramStateValue{
+			TruncatedPackets: s.datagrams.truncated.Load(),
+			GSOOversized:     s.datagrams.gsoOversized.Load(),
+			ReplyFailures:    s.datagrams.replyFailures.Load(),
+		},
+		Loops:     s.loopStates(),
+		Override:  override,
+		Fallbacks: fallbacks,
+		Platform:  s.platform,
 	}
 	st.Faults = s.faults(st)
 	//: a snapshot.

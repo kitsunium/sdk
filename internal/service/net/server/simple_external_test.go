@@ -180,6 +180,16 @@ func TestSimpleUDP(t *testing.T) {
 	}
 }
 
+// TestSimpleUDP_honours pins that a datagram group keeps the options its
+// engine applies, BatchReplies (ADR 0192) included: none is refused.
+func TestSimpleUDP_honours(t *testing.T) {
+	t.Parallel()
+	srv := server.New()
+	srv.UDP("127.0.0.1:0", corenet.PacketHandlerFunc(func(context.Context, corenet.Packet) error { return nil }),
+		server.BatchReplies(), server.BatchSize(8), server.MaxPacketSize(2048), server.Plaintext())
+	startSimple(t, srv)
+}
+
 // TestSimple_refused pins every refusal of the simple API, each reported by
 // Start before anything is bound, with its code.
 func TestSimple_refused(t *testing.T) {
