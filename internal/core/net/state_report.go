@@ -23,8 +23,8 @@ type OverrideValue struct {
 // degraded listener or loop group, a drained ring, a stalled loop group, or an
 // environment token the registry does not know (ADR 0188).
 type FaultValue struct {
-	// Source says what reported it: "listener", "loop", "ring", "stall" or
-	// "environment".
+	// Source says what reported it: "listener", "loop", "ring", "stall",
+	// "capability", "gso" or "environment".
 	Source string `json:"source"`
 	// Group names the group concerned; empty for the environment.
 	Group string `json:"group,omitempty"`

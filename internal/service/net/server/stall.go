@@ -172,6 +172,7 @@ func (s *Server) faults(st corenet.StateValue) []corenet.FaultValue {
 			out = append(out, corenet.FaultValue{Source: faultListener, Group: l.Group, Reason: l.DegradedReason})
 		}
 	}
+	out = append(out, s.gsoFaults()...)
 	serving := st.Phase == corenet.PhaseServing
 	//: every loop group.
 	for _, lp := range st.Loops {

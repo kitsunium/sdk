@@ -131,6 +131,14 @@ func Test_Server_dispatch(t *testing.T) {
 		wantServed int
 		// wantOversized is how many are dropped and counted.
 		wantOversized int
+		// seg makes the first message a coalesced one of that segment size.
+		seg int
+		// cut marks the first message cut by the kernel.
+		cut bool
+		// wantTotal is how many datagrams are counted, when not one a size.
+		wantTotal int
+		// wantTruncated is how many messages are dropped as cut.
+		wantTruncated int
 	}
 	tests := []tc{
 		{name: "an empty batch", ceiling: 8, wantServed: 0},
@@ -148,25 +156,50 @@ func Test_Server_dispatch(t *testing.T) {
 		},
 		{name: "a datagram exactly at the ceiling", ceiling: 8, sizes: []int{8}, wantServed: 1},
 		{name: "an empty datagram", ceiling: 8, sizes: []int{0}, wantServed: 1},
+		{
+			//: a coalesced message is the datagrams it carries, the last shorter.
+			name:    "a coalesced message",
+			ceiling: 8, sizes: []int{20, 4}, seg: 8, wantServed: 4, wantTotal: 4,
+		},
+		{
+			//: each segment is judged against the ceiling on its own.
+			name:    "a coalesced message of segments past the ceiling",
+			ceiling: 8, sizes: []int{20}, seg: 10, wantOversized: 2, wantTotal: 2,
+		},
+		{
+			//: cut short: nothing in it is delivered, and the next message is.
+			name:    "a cut message",
+			ceiling: 8, sizes: []int{8, 4}, cut: true, wantServed: 1, wantTotal: 1, wantTruncated: 1,
+		},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		srv := New()
 		handler := &recordingHandler{}
-		slots := newSlots(max(len(c.sizes), 1), c.ceiling)
+		slots := newSlots(max(len(c.sizes), 1), max(c.ceiling, 32))
 		for i, size := range c.sizes {
 			slots[i].n = size
 			slots[i].addr = sender
 		}
+		slots[0].seg = c.seg
+		slots[0].cut = c.cut
 		held := &packet{conn: &fakePacketConn{}, group: "sip"}
 
 		srv.dispatch(slots[:len(c.sizes)], held, handler, c.ceiling)
 
 		state := srv.State()
+		wantTotal := c.wantTotal
+		//: one datagram a message, unless the case says otherwise.
+		if wantTotal == 0 {
+			wantTotal = len(c.sizes)
+		}
 		//: every datagram is counted, whether or not it was served — an operator
 		//: reading a drop rate needs both halves.
-		if state.TotalConns != uint64(len(c.sizes)) {
-			t.Fatalf("TotalConns = %d, want %d", state.TotalConns, len(c.sizes))
+		if state.TotalConns != uint64(wantTotal) {
+			t.Fatalf("TotalConns = %d, want %d", state.TotalConns, wantTotal)
+		}
+		if state.Datagrams.TruncatedPackets != uint64(c.wantTruncated) {
+			t.Fatalf("TruncatedPackets = %d, want %d", state.Datagrams.TruncatedPackets, c.wantTruncated)
 		}
 		if state.OversizedPackets != uint64(c.wantOversized) {
 			t.Fatalf("OversizedPackets = %d, want %d — a truncated prefix served as "+
@@ -222,8 +255,8 @@ func Test_Server_readLoop(t *testing.T) {
 		srv := New()
 		srv.runCtx = t.Context()
 		handler := &recordingHandler{want: len(c.payloads), served: make(chan struct{})}
-		bound := &boundPacketConn{group: "sip", pc: receiver}
 		group := &PacketGroup{name: "sip", limits: corenet.LimitsValue{MaxPacketSize: c.ceiling}}
+		bound := srv.newBoundPacket(group, corenet.AddressValue{}, receiver)
 
 		stopped := make(chan struct{})
 		srv.inFlight.Add(1)

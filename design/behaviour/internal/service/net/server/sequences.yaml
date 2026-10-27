@@ -409,6 +409,34 @@ sequences:
   - of: (*datagram).payload
     steps:
       - return: d.buf[:d.n]
+  - of: (*datagram).segment
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*datagram).segment
+        kind: self
+      - id: d.payload
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: d.payload(), i == 0
+              to: d.payload
+          when: d.seg <= 0 || d.seg >= d.n
+      - bind: "off"
+        eval: i * d.seg
+      - opt:
+          do:
+            - return: nil, false
+          when: off >= d.n
+      - return: d.buf[off:min(off+d.seg, d.n)], true
+  - of: (*datagram).count
+    steps:
+      - opt:
+          do:
+            - return: "1"
+          when: d.seg <= 0 || d.seg >= d.n
+      - return: (d.n + d.seg - 1) / d.seg
   - of: newSlots
     steps:
       - bind: slots
@@ -449,6 +477,22 @@ sequences:
       - set: slots[0].addr
         value: addr
       - return: 1, nil
+  - of: (*portableReader).slotSize
+    steps:
+      - return: ceiling
+  - of: portableSink.begin
+  - of: portableSink.reply
+    participants:
+      - id: caller
+        kind: actor
+      - id: portableSink.reply
+        kind: self
+      - id: w.pc.WriteTo
+        kind: value
+    steps:
+      - return: w.pc.WriteTo(b, to)
+        to: w.pc.WriteTo
+  - of: portableSink.flush
   - of: (*conn).Read
     participants:
       - id: caller
@@ -727,6 +771,8 @@ sequences:
         kind: self
       - id: newMultiReader
         kind: internal
+      - id: reader.enableGRO
+        kind: internal
     steps:
       - bind: raw, ok
         eval: pc.(rawConnProvider)
@@ -741,7 +787,43 @@ sequences:
           do:
             - return: "&portableReader{pc: pc}"
           when: err != nil
+      - opt:
+          do:
+            - eval: reader.enableGRO()
+              to: reader.enableGRO
+          when: gro
       - return: reader
+  - of: newDatagramSink
+    participants:
+      - id: caller
+        kind: actor
+      - id: newDatagramSink
+        kind: self
+      - id: newQueuedSink
+        kind: internal
+      - id: newMultiWriter
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "portableSink{pc: pc}"
+          when: "!batched"
+      - bind: raw, ok
+        eval: pc.(rawConnProvider)
+      - opt:
+          do:
+            - return: newQueuedSink(pc, counters)
+              to: newQueuedSink
+          when: "!ok"
+      - bind: writer, err
+        eval: newMultiWriter(pc, raw, counters, onGSOOff)
+        to: newMultiWriter
+      - opt:
+          do:
+            - return: newQueuedSink(pc, counters)
+              to: newQueuedSink
+          when: err != nil
+      - return: writer
   - of: batchAvailable
     steps:
       - return: "true"
@@ -1521,10 +1603,10 @@ sequences:
         kind: self
       - id: g.engineRefusal
         kind: internal
-      - id: g.loopRefusal
-        kind: internal
       - id: errs
         kind: package
+      - id: g.loopRefusal
+        kind: internal
     steps:
       - opt:
           do:
@@ -1542,6 +1624,13 @@ sequences:
             eval: g.engineRefusal()
             to: g.engineRefusal
           when: err != nil
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
+                			errs.String("group", g.name), errs.String("option", corenet.OptionBatchReplies.String()))
+              to: errs
+          when: g.kinds.has(corenet.OptionBatchReplies)
       - opt:
           do:
             - return: g.loopRefusal()
@@ -1634,6 +1723,8 @@ sequences:
         kind: internal
       - id: listenPacket
         kind: internal
+      - id: s.newBoundPacket
+        kind: internal
       - id: batchDegradation
         kind: internal
       - id: s.mu.Lock
@@ -1666,7 +1757,8 @@ sequences:
                   - return: err
                 when: err != nil
             - bind: bound
-              eval: "&boundPacketConn{group: group.name, addr: addr, pc: pc}"
+              eval: s.newBoundPacket(group, addr, pc)
+              to: s.newBoundPacket
             - bind: degraded, reason
               eval: batchDegradation(group.limits)
               to: batchDegradation
@@ -1704,6 +1796,8 @@ sequences:
         kind: internal
       - id: batchDegradation
         kind: internal
+      - id: s.newBoundPacket
+        kind: internal
       - id: s.mu.Lock
         kind: value
       - id: s.mu.Unlock
@@ -1730,7 +1824,8 @@ sequences:
                   - bind: addr
                     eval: "corenet.AddressValue{Network: pc.LocalAddr().Network(), Addr: pc.LocalAddr().String()}"
                   - bind: bound
-                    eval: "&boundPacketConn{group: group.name, addr: addr, pc: pc}"
+                    eval: s.newBoundPacket(group, addr, pc)
+                    to: s.newBoundPacket
                   - eval: s.mu.Lock()
                     to: s.mu.Lock
                   - set: s.packetConns
@@ -2211,6 +2306,10 @@ sequences:
         kind: value
       - id: s.stopStallWatch
         kind: internal
+      - id: s.closeStreamListeners
+        kind: internal
+      - id: s.handoverPackets
+        kind: internal
       - id: s.closeListeners
         kind: internal
       - id: s.shutdownLoops
@@ -2232,6 +2331,10 @@ sequences:
         to: s.phase.Store
       - eval: s.stopStallWatch()
         to: s.stopStallWatch
+      - eval: s.closeStreamListeners()
+        to: s.closeStreamListeners
+      - eval: s.handoverPackets(ctx)
+        to: s.handoverPackets
       - eval: s.closeListeners()
         to: s.closeListeners
       - bind: loopErr
@@ -2365,6 +2468,8 @@ sequences:
         kind: self
       - id: s.stopStallWatch
         kind: internal
+      - id: s.stopGROPackets
+        kind: internal
       - id: s.closeListeners
         kind: internal
       - id: s.closeLoops
@@ -2378,6 +2483,8 @@ sequences:
     steps:
       - eval: s.stopStallWatch()
         to: s.stopStallWatch
+      - eval: s.stopGROPackets()
+        to: s.stopGROPackets
       - eval: s.closeListeners()
         to: s.closeListeners
       - eval: s.closeLoops()
@@ -2399,6 +2506,8 @@ sequences:
         kind: actor
       - id: (*Server).closeListeners
         kind: self
+      - id: s.closeStreamListeners
+        kind: internal
       - id: s.mu.Lock
         kind: value
       - id: s.mu.Unlock
@@ -2406,12 +2515,10 @@ sequences:
       - id: swallowErr
         kind: internal
     steps:
+      - eval: s.closeStreamListeners()
+        to: s.closeStreamListeners
       - eval: s.mu.Lock()
         to: s.mu.Lock
-      - bind: listeners
-        eval: s.listeners
-      - set: s.listeners
-        value: nil
       - bind: packetConns
         eval: s.packetConns
       - set: s.packetConns
@@ -2425,6 +2532,27 @@ sequences:
           key: _
           range: packetConns
           value: bound
+  - of: (*Server).closeStreamListeners
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).closeStreamListeners
+        kind: self
+      - id: s.mu.Lock
+        kind: value
+      - id: s.mu.Unlock
+        kind: value
+      - id: swallowErr
+        kind: internal
+    steps:
+      - eval: s.mu.Lock()
+        to: s.mu.Lock
+      - bind: listeners
+        eval: s.listeners
+      - set: s.listeners
+        value: nil
+      - eval: s.mu.Unlock()
+        to: s.mu.Unlock
       - loop:
           do:
             - eval: swallowErr(bound.Close())
@@ -4535,6 +4663,96 @@ sequences:
             - return: nil, rerr
           when: rerr != nil
       - return: "&multiReader{pc: pc, raw: raw}, nil"
+  - of: (*multiReader).enableGRO
+    steps:
+      - set: r.gro
+        value: r.setGRO(true) == nil
+      - return: r.gro
+  - of: (*multiReader).setGRO
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiReader).setGRO
+        kind: self
+      - id: r.raw.Control
+        kind: value
+      - id: cmp
+        kind: stdlib
+    steps:
+      - bind: value
+        eval: "0"
+      - opt:
+          do:
+            - set: value
+              value: "1"
+          when: "on"
+      - var:
+          name: serr
+          type: error
+      - bind: cerr
+        eval: |-
+          r.raw.Control(func(fd uintptr) {
+          		serr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_UDP, udpGRO, value)
+          	})
+        to: r.raw.Control
+      - return: cmp.Or(cerr, serr)
+        to: cmp
+  - of: (*multiReader).handover
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiReader).handover
+        kind: self
+      - id: r.handing.Store
+        kind: value
+      - id: swallowErr
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: "!r.gro"
+      - eval: r.handing.Store(true)
+        to: r.handing.Store
+      - eval: swallowErr(r.pc.SetReadDeadline(time.Unix(1, 0)))
+        to: swallowErr
+      - return: "true"
+  - of: (*multiReader).stopGRO
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiReader).stopGRO
+        kind: self
+      - id: r.switchGROOff
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: r.switchGROOff()
+              to: r.switchGROOff
+          when: r.gro
+  - of: (*multiReader).switchGROOff
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiReader).switchGROOff
+        kind: self
+      - id: r.stopping.Store
+        kind: value
+      - id: swallowErr
+        kind: internal
+    steps:
+      - eval: r.stopping.Store(true)
+        to: r.stopping.Store
+      - eval: swallowErr(r.setGRO(false))
+        to: swallowErr
+  - of: (*multiReader).slotSize
+    steps:
+      - opt:
+          do:
+            - return: ceiling
+          when: "!r.gro"
+      - return: max(ceiling, groMessageSize)
   - of: (*multiReader).wire
     participants:
       - id: caller
@@ -4543,6 +4761,10 @@ sequences:
         kind: self
       - id: setKernelLen
         kind: internal
+      - id: r.bind
+        kind: internal
+      - id: r.prepare
+        kind: internal
     steps:
       - opt:
           do:
@@ -4550,12 +4772,19 @@ sequences:
           when: r.wired == len(slots)
       - bind: count
         eval: len(slots)
+      - opt:
+          do:
+            - set: r.controlSpace
+              value: groControlSpace
+          when: r.controlSpace <= 0 && r.gro
       - set: r.headers
         value: make([]mmsghdr, count)
       - set: r.iovecs
         value: make([]syscall.Iovec, count)
       - set: r.names
         value: make([]syscall.RawSockaddrAny, count)
+      - set: r.oob
+        value: make([]byte, count*r.controlSpace)
       - loop:
           do:
             - set: r.iovecs[i].Base
@@ -4564,16 +4793,87 @@ sequences:
               to: setKernelLen
             - set: r.headers[i].hdr.Name
               value: (*byte)(unsafe.Pointer(&r.names[i]))
-            - set: r.headers[i].hdr.Namelen
-              value: syscall.SizeofSockaddrAny
             - set: r.headers[i].hdr.Iov
               value: "&r.iovecs[i]"
             - eval: setKernelLen(&r.headers[i].hdr.Iovlen, 1)
               to: setKernelLen
+            - opt:
+                do:
+                  - set: r.headers[i].hdr.Control
+                    value: "&r.oob[i*r.controlSpace]"
+                when: r.controlSpace > 0
           key: i
           range: slots
+      - eval: r.bind()
+        to: r.bind
       - set: r.wired
         value: count
+      - eval: r.prepare()
+        to: r.prepare
+  - of: (*multiReader).bind
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiReader).bind
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: ""
+          when: r.recv != nil
+      - set: r.recv
+        value:
+          closure:
+            params: fd uintptr
+            results: bool
+            steps:
+              - bind: result, _, callErrno
+                eval: |-
+                  syscall.Syscall6(syscall.SYS_RECVMMSG, fd,
+                  			uintptr(unsafe.Pointer(&r.headers[0])), uintptr(len(r.headers)),
+                  			syscall.MSG_WAITFORONE, 0, 0)
+                to: syscall
+              - opt:
+                  do:
+                    - return: "false"
+                  when: callErrno == syscall.EAGAIN
+              - set: r.received, r.errno
+                value: int(result), callErrno
+              - return: "true"
+      - set: r.drainOnce
+        value:
+          closure:
+            params: fd uintptr
+            steps:
+              - bind: result, _, callErrno
+                eval: |-
+                  syscall.Syscall6(syscall.SYS_RECVMMSG, fd,
+                  			uintptr(unsafe.Pointer(&r.headers[0])), uintptr(len(r.headers)),
+                  			syscall.MSG_DONTWAIT, 0, 0)
+                to: syscall
+              - set: r.received, r.errno
+                value: int(result), callErrno
+  - of: (*multiReader).prepare
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiReader).prepare
+        kind: self
+      - id: setKernelLen
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - set: r.headers[i].hdr.Namelen
+              value: syscall.SizeofSockaddrAny
+            - eval: setKernelLen(&r.headers[i].hdr.Controllen, r.controlSpace)
+              to: setKernelLen
+            - set: r.headers[i].hdr.Flags
+              value: "0"
+          key: i
+          range: r.headers
   - of: (*multiReader).readBatch
     participants:
       - id: caller
@@ -4582,6 +4882,10 @@ sequences:
         kind: self
       - id: r.wire
         kind: internal
+      - id: r.drain
+        kind: internal
+      - id: r.prepare
+        kind: internal
       - id: r.raw.Read
         kind: value
       - id: r.fill
@@ -4589,28 +4893,25 @@ sequences:
     steps:
       - eval: r.wire(slots)
         to: r.wire
-      - var:
-          name: received
-          type: int
-      - var:
-          name: errno
-          type: syscall.Errno
+      - opt:
+          do:
+            - return: r.drain(slots)
+              to: r.drain
+          when: r.handing.Load()
+      - eval: r.prepare()
+        to: r.prepare
+      - set: r.received, r.errno
+        value: 0, 0
       - bind: ctrlErr
-        eval: |-
-          r.raw.Read(func(fd uintptr) bool {
-          		result, _, callErrno := syscall.Syscall6(syscall.SYS_RECVMMSG, fd,
-          			uintptr(unsafe.Pointer(&r.headers[0])), uintptr(len(r.headers)),
-          			syscall.MSG_WAITFORONE, 0, 0)
-          		//: not ready yet — let the netpoller wake us when it is.
-          		if callErrno == syscall.EAGAIN {
-          			//: not ready — hand control back to the netpoller.
-          			return false
-          		}
-          		received, errno = int(result), callErrno
-          		//: the syscall completed, successfully or not.
-          		return true
-          	})
+        eval: r.raw.Read(r.recv)
         to: r.raw.Read
+      - bind: received, errno
+        eval: r.received, r.errno
+      - opt:
+          do:
+            - return: r.drain(slots)
+              to: r.drain
+          when: ctrlErr != nil && r.handing.Load() && errors.Is(ctrlErr, os.ErrDeadlineExceeded)
       - opt:
           do:
             - return: 0, ctrlErr
@@ -4619,6 +4920,55 @@ sequences:
           do:
             - return: 0, errno
           when: errno != 0
+      - opt:
+          do:
+            - return: 0, stdnet.ErrClosed
+          when: r.stopping.Load()
+      - eval: r.fill(slots, received)
+        to: r.fill
+      - return: received, nil
+  - of: (*multiReader).drain
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiReader).drain
+        kind: self
+      - id: r.prepare
+        kind: internal
+      - id: r.raw.Control
+        kind: value
+      - id: swallowErr
+        kind: internal
+      - id: r.fill
+        kind: internal
+    steps:
+      - eval: r.prepare()
+        to: r.prepare
+      - set: r.received, r.errno
+        value: 0, 0
+      - bind: ctrlErr
+        eval: r.raw.Control(r.drainOnce)
+        to: r.raw.Control
+      - bind: received, errno
+        eval: r.received, r.errno
+      - opt:
+          do:
+            - return: 0, ctrlErr
+          when: ctrlErr != nil
+      - opt:
+          do:
+            - eval: swallowErr(r.setGRO(false))
+              to: swallowErr
+            - return: 0, stdnet.ErrClosed
+          when: errno == syscall.EAGAIN
+      - opt:
+          do:
+            - return: 0, errno
+          when: errno != 0
+      - opt:
+          do:
+            - return: 0, stdnet.ErrClosed
+          when: r.stopping.Load()
       - eval: r.fill(slots, received)
         to: r.fill
       - return: received, nil
@@ -4628,18 +4978,721 @@ sequences:
         kind: actor
       - id: (*multiReader).fill
         kind: self
+      - id: groSegment
+        kind: internal
       - id: sockaddrToAddr
         kind: internal
     steps:
       - loop:
           do:
-            - set: slots[i].n
+            - bind: hdr
+              eval: "&r.headers[i].hdr"
+            - bind: slot
+              eval: "&slots[i]"
+            - set: slot.n
               value: int(r.headers[i].length)
-            - set: slots[i].addr
+            - set: slot.seg
+              value: "0"
+            - opt:
+                do:
+                  - bind: used
+                    eval: min(int(hdr.Controllen), r.controlSpace)
+                  - set: slot.seg
+                    to: groSegment
+                    value: "groSegment(r.oob[i*r.controlSpace : i*r.controlSpace+used])"
+                when: r.controlSpace > 0
+            - set: slot.cut
+              value: r.gro && slot.seg == 0 && hdr.Flags&syscall.MSG_CTRUNC != 0
+            - opt:
+                do:
+                  - set: slot.addr
+                    value: nil
+                  - continue: true
+                when: slot.cut
+            - set: slot.cut
+              value: hdr.Flags&syscall.MSG_TRUNC != 0 && (r.gro || slot.seg > 0)
+            - set: slot.addr
               to: sockaddrToAddr
               value: sockaddrToAddr(&r.names[i])
           key: i
           range: received
+  - of: groSegment
+    participants:
+      - id: caller
+        kind: actor
+      - id: groSegment
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - bind: header
+        eval: syscall.CmsgLen(0)
+        to: syscall
+      - loop:
+          cond: off+header <= len(control)
+          do:
+            - bind: cmsg
+              eval: (*syscall.Cmsghdr)(unsafe.Pointer(&control[off]))
+            - bind: length
+              eval: int(cmsg.Len)
+            - opt:
+                do:
+                  - return: "0"
+                when: length < header || off+length > len(control)
+            - opt:
+                do:
+                  - return: int(*(*int32)(unsafe.Pointer(&control[off+header])))
+                when: cmsg.Level == syscall.IPPROTO_UDP && cmsg.Type == udpGRO && length >= header+groSegmentBytes
+            - op: +=
+              set: "off"
+              to: syscall
+              value: syscall.CmsgSpace(length - header)
+          init: off := 0
+      - return: "0"
+  - of: gsoSegments
+    steps:
+      - bind: header
+        eval: ipv4HeaderBytes
+      - opt:
+          do:
+            - set: header
+              value: ipv6HeaderBytes
+          when: family == syscall.AF_INET6
+      - opt:
+          do:
+            - return: "1"
+          when: size <= 0
+      - return: min(udpMaxSegments, (ipMaxLength-header-udpHeaderBytes)/size)
+  - of: maxSegment
+    steps:
+      - opt:
+          do:
+            - return: ethernetMTU - ipv6HeaderBytes - udpHeaderBytes
+          when: family == syscall.AF_INET6
+      - return: ethernetMTU - ipv4HeaderBytes - udpHeaderBytes
+  - of: (*pendingReply).addr
+    steps:
+      - opt:
+          do:
+            - bind: sa4
+              eval: (*syscall.RawSockaddrInet4)(unsafe.Pointer(&e.name))
+            - return: "&stdnet.UDPAddr{IP: stdnet.IPv4(sa4.Addr[0], sa4.Addr[1], sa4.Addr[2], sa4.Addr[3]), Port: hostPort(sa4.Port)}"
+          when: e.name.Family == syscall.AF_INET
+      - bind: ip
+        eval: make(stdnet.IP, stdnet.IPv6len)
+      - eval: copy(ip, e.name.Addr[:])
+      - return: "&stdnet.UDPAddr{IP: ip, Port: hostPort(e.name.Port)}"
+  - of: newMultiWriter
+    participants:
+      - id: caller
+        kind: actor
+      - id: newMultiWriter
+        kind: self
+      - id: sc.SyscallConn
+        kind: internal
+      - id: raw.Control
+        kind: value
+      - id: w.gso.Store
+        kind: value
+    steps:
+      - bind: raw, rerr
+        eval: sc.SyscallConn()
+        to: sc.SyscallConn
+      - opt:
+          do:
+            - return: nil, rerr
+          when: rerr != nil
+      - var:
+          name: family
+          type: int
+      - var:
+          name: gso
+          type: bool
+      - var:
+          name: serr
+          type: error
+      - bind: cerr
+        eval: |-
+          raw.Control(func(fd uintptr) {
+          		sa, err := syscall.Getsockname(int(fd))
+          		serr = err
+          		//: the family decides the sockaddr every reply is written with.
+          		switch sa.(type) {
+          		//: IPv4.
+          		case *syscall.SockaddrInet4:
+          			family = syscall.AF_INET
+          		//: IPv6, IPv4-mapped peers included.
+          		case *syscall.SockaddrInet6:
+          			family = syscall.AF_INET6
+          		}
+          		_, gerr := syscall.GetsockoptInt(int(fd), syscall.IPPROTO_UDP, udpSegment)
+          		gso = gerr == nil
+          	})
+        to: raw.Control
+      - opt:
+          do:
+            - return: nil, cmp.Or(cerr, serr)
+          when: cerr != nil || serr != nil
+      - opt:
+          do:
+            - return: nil, syscall.EAFNOSUPPORT
+          when: family == 0
+      - bind: w
+        eval: |-
+          &multiWriter{
+          		pc: pc, raw: raw, family: family, counters: counters, onGSOOff: onGSOOff, send: sendmmsg,
+          		arena: make([]byte, replyArena), queue: make([]pendingReply, 0, replyQueue),
+          		headers: make([]mmsghdr, replyQueue), iovecs: make([]syscall.Iovec, replyQueue),
+          		spans: make([]replySpan, replyQueue), controlSpace: syscall.CmsgSpace(segmentSizeBytes),
+          	}
+      - set: w.oob
+        value: make([]byte, replyQueue*w.controlSpace)
+      - eval: w.gso.Store(gso)
+        to: w.gso.Store
+      - set: w.write
+        value:
+          closure:
+            params: fd uintptr
+            results: bool
+            steps:
+              - set: w.sent, w.sendErrno
+                value: w.send(fd, w.headers[w.from:w.to])
+              - return: w.sendErrno != syscall.EAGAIN
+      - return: w, nil
+  - of: sendmmsg
+    participants:
+      - id: caller
+        kind: actor
+      - id: sendmmsg
+        kind: self
+      - id: syscall
+        kind: stdlib
+    steps:
+      - bind: result, _, callErrno
+        eval: |-
+          syscall.Syscall6(sysSendmmsg, fd,
+          		uintptr(unsafe.Pointer(&headers[0])), uintptr(len(headers)), 0, 0, 0)
+        to: syscall
+      - opt:
+          do:
+            - return: 0, callErrno
+          when: callErrno != 0
+      - return: int(result), 0
+  - of: (*multiWriter).begin
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiWriter).begin
+        kind: self
+      - id: w.mu.Lock
+        kind: value
+      - id: w.mu.Unlock
+        kind: value
+    steps:
+      - eval: w.mu.Lock()
+        to: w.mu.Lock
+      - set: w.open
+        value: "true"
+      - eval: w.mu.Unlock()
+        to: w.mu.Unlock
+  - of: (*multiWriter).reply
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiWriter).reply
+        kind: self
+      - id: w.mu.Lock
+        kind: value
+      - id: w.mu.Unlock
+        kind: value
+      - id: w.pc.WriteTo
+        kind: value
+      - id: w.flushLocked
+        kind: internal
+    steps:
+      - eval: w.mu.Lock()
+        to: w.mu.Lock
+      - var:
+          name: entry
+          type: pendingReply
+      - opt:
+          do:
+            - eval: w.mu.Unlock()
+              to: w.mu.Unlock
+            - return: w.pc.WriteTo(b, to)
+              to: w.pc.WriteTo
+          when: "!w.open || len(b) > len(w.arena) || !w.encode(to, &entry)"
+      - opt:
+          do:
+            - eval: w.flushLocked()
+              to: w.flushLocked
+          when: len(w.queue) == cap(w.queue) || w.used+len(b) > len(w.arena)
+      - set: entry.off, entry.size
+        value: w.used, len(b)
+      - eval: copy(w.arena[w.used:], b)
+      - op: +=
+        set: w.used
+        value: len(b)
+      - set: w.queue
+        value: append(w.queue, entry)
+      - eval: w.mu.Unlock()
+        to: w.mu.Unlock
+      - return: len(b), nil
+  - of: (*multiWriter).encode
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiWriter).encode
+        kind: self
+      - id: udp.IP.To16
+        kind: value
+      - id: udp.IP.To4
+        kind: value
+    steps:
+      - bind: udp, ok
+        eval: to.(*stdnet.UDPAddr)
+      - opt:
+          do:
+            - return: "false"
+          when: "!ok || udp == nil || udp.Zone != \"\""
+      - bind: port
+        eval: (*[2]byte)(unsafe.Pointer(&entry.name.Port))
+      - set: port[0], port[1]
+        value: byte(udp.Port>>portByteShift), byte(udp.Port)
+      - opt:
+          do:
+            - bind: ip
+              eval: udp.IP.To16()
+              to: udp.IP.To16
+            - opt:
+                do:
+                  - return: "false"
+                when: ip == nil
+            - set: entry.name.Family
+              value: syscall.AF_INET6
+            - eval: copy(entry.name.Addr[:], ip)
+            - set: entry.namelen
+              value: syscall.SizeofSockaddrInet6
+            - return: "true"
+          when: w.family == syscall.AF_INET6
+      - bind: ip
+        eval: udp.IP.To4()
+        to: udp.IP.To4
+      - opt:
+          do:
+            - return: "false"
+          when: ip == nil
+      - bind: sa4
+        eval: (*syscall.RawSockaddrInet4)(unsafe.Pointer(&entry.name))
+      - set: sa4.Family
+        value: syscall.AF_INET
+      - eval: copy(sa4.Addr[:], ip)
+      - set: entry.namelen
+        value: syscall.SizeofSockaddrInet4
+      - return: "true"
+  - of: (*multiWriter).flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiWriter).flush
+        kind: self
+      - id: w.mu.Lock
+        kind: value
+      - id: w.flushLocked
+        kind: internal
+      - id: w.mu.Unlock
+        kind: value
+    steps:
+      - eval: w.mu.Lock()
+        to: w.mu.Lock
+      - eval: w.flushLocked()
+        to: w.flushLocked
+      - set: w.open
+        value: "false"
+      - eval: w.mu.Unlock()
+        to: w.mu.Unlock
+  - of: (*multiWriter).flushLocked
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiWriter).flushLocked
+        kind: self
+      - id: w.writeEach
+        kind: internal
+      - id: w.sendAll
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: w.writeEach(0, len(w.queue))
+              to: w.writeEach
+          when: w.noMmsg
+      - loop:
+          cond: start < len(w.queue) && !w.noMmsg
+          do:
+            - set: start
+              to: w.sendAll
+              value: w.sendAll(w.build(start))
+          init: start := 0
+      - set: w.queue
+        value: w.queue[:0]
+      - set: w.used
+        value: "0"
+      - set: w.plainUntil
+        value: "0"
+  - of: (*multiWriter).build
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiWriter).build
+        kind: self
+      - id: w.gso.Load
+        kind: value
+      - id: maxSegment
+        kind: internal
+      - id: w.runFrom
+        kind: internal
+      - id: w.layout
+        kind: internal
+    steps:
+      - bind: gso
+        eval: w.gso.Load()
+        to: w.gso.Load
+      - bind: limitSize
+        eval: maxSegment(w.family)
+        to: maxSegment
+      - opt:
+          do:
+            - set: limitSize
+              value: min(limitSize, w.segmentCeiling)
+          when: w.segmentCeiling > 0
+      - bind: messages
+        eval: "0"
+      - loop:
+          cond: e < len(w.queue)
+          do:
+            - bind: first
+              eval: "&w.queue[e]"
+            - bind: run
+              eval: "1"
+            - opt:
+                do:
+                  - set: run
+                    to: w.runFrom
+                    value: w.runFrom(e)
+                when: gso && e >= w.plainUntil && first.size > 0 && first.size <= limitSize
+            - bind: last
+              eval: "&w.queue[e+run-1]"
+            - eval: w.layout(messages, e, run, last.off+last.size-first.off)
+              to: w.layout
+            - op: +=
+              set: e
+              value: run
+          init: e := start
+          post: messages++
+      - return: messages
+  - of: (*multiWriter).runFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiWriter).runFrom
+        kind: self
+      - id: gsoSegments
+        kind: internal
+    steps:
+      - bind: first
+        eval: "&w.queue[e]"
+      - bind: limit
+        eval: gsoSegments(w.family, first.size)
+        to: gsoSegments
+      - bind: run
+        eval: "1"
+      - loop:
+          cond: run < limit && e+run < len(w.queue)
+          do:
+            - bind: next
+              eval: "&w.queue[e+run]"
+            - opt:
+                do:
+                  - break: true
+                when: next.name != first.name || next.namelen != first.namelen || next.size > first.size || next.size == 0
+            - op: ++
+              set: run
+            - opt:
+                do:
+                  - break: true
+                when: next.size < first.size
+      - return: run
+  - of: (*multiWriter).layout
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiWriter).layout
+        kind: self
+      - id: setKernelLen
+        kind: internal
+      - id: cmsg.SetLen
+        kind: value
+    steps:
+      - bind: entry
+        eval: "&w.queue[first]"
+      - bind: hdr
+        eval: "&w.headers[m].hdr"
+      - set: hdr.Name
+        value: (*byte)(unsafe.Pointer(&entry.name))
+      - set: hdr.Namelen
+        value: entry.namelen
+      - set: w.iovecs[m].Base
+        value: "&w.arena[min(entry.off, len(w.arena)-1)]"
+      - eval: setKernelLen(&w.iovecs[m].Len, total)
+        to: setKernelLen
+      - set: hdr.Iov
+        value: "&w.iovecs[m]"
+      - eval: setKernelLen(&hdr.Iovlen, 1)
+        to: setKernelLen
+      - set: hdr.Flags
+        value: "0"
+      - set: w.spans[m]
+        value: "replySpan{first: first, count: count}"
+      - opt:
+          do:
+            - set: hdr.Control
+              value: nil
+            - eval: setKernelLen(&hdr.Controllen, 0)
+              to: setKernelLen
+            - return: ""
+          when: count == 1
+      - bind: control
+        eval: "w.oob[m*w.controlSpace : (m+1)*w.controlSpace]"
+      - bind: cmsg
+        eval: (*syscall.Cmsghdr)(unsafe.Pointer(&control[0]))
+      - set: cmsg.Level
+        value: syscall.IPPROTO_UDP
+      - set: cmsg.Type
+        value: udpSegment
+      - eval: cmsg.SetLen(syscall.CmsgLen(segmentSizeBytes))
+        to: cmsg.SetLen
+      - set: "*(*uint16)(unsafe.Pointer(&control[syscall.CmsgLen(0)]))"
+        value: uint16(entry.size)
+      - set: hdr.Control
+        value: "&control[0]"
+      - eval: setKernelLen(&hdr.Controllen, w.controlSpace)
+        to: setKernelLen
+  - of: (*multiWriter).sendAll
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiWriter).sendAll
+        kind: self
+      - id: w.sendFrom
+        kind: internal
+      - id: w.fail
+        kind: internal
+      - id: w.left
+        kind: internal
+      - id: w.refused
+        kind: internal
+    steps:
+      - loop:
+          cond: k < messages
+          do:
+            - bind: sent, err
+              eval: w.sendFrom(k, messages)
+              to: w.sendFrom
+            - bind: errno, refused
+              eval: err.(syscall.Errno)
+            - opt:
+                do:
+                  - eval: w.fail(k, messages)
+                    to: w.fail
+                  - return: len(w.queue)
+                when: err != nil && !refused
+            - opt:
+                do:
+                  - eval: w.left(k, k+sent)
+                    to: w.left
+                  - op: +=
+                    set: k
+                    value: sent
+                  - continue: true
+                when: err == nil && sent > 0
+            - opt:
+                do:
+                  - return: resume
+                init:
+                  bind: resume, again
+                  eval: w.refused(k, messages, errno)
+                  to: w.refused
+                when: again
+            - op: ++
+              set: k
+          init: k := 0
+      - return: len(w.queue)
+  - of: (*multiWriter).refused
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiWriter).refused
+        kind: self
+      - id: w.unavailable
+        kind: internal
+      - id: w.gsoRefused
+        kind: internal
+      - id: w.counters.replyFailures.Add
+        kind: value
+    steps:
+      - bind: span
+        eval: w.spans[k]
+      - switch:
+          cases:
+            - case: errno == syscall.ENOSYS || errno == syscall.EPERM
+              do:
+                - eval: w.unavailable(k, messages)
+                  to: w.unavailable
+                - return: len(w.queue), true
+            - case: span.count > 1
+              do:
+                - return: w.gsoRefused(span, errno)
+                  to: w.gsoRefused
+            - default: true
+              do:
+                - eval: w.counters.replyFailures.Add(uint64(span.count))
+                  to: w.counters.replyFailures.Add
+                - return: 0, false
+  - of: (*multiWriter).gsoRefused
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiWriter).gsoRefused
+        kind: self
+      - id: w.disableGSO
+        kind: internal
+      - id: w.counters.gsoOversized.Add
+        kind: value
+      - id: w.counters.replyFailures.Add
+        kind: value
+    steps:
+      - switch:
+          cases:
+            - case: syscall.EIO
+              do:
+                - eval: w.disableGSO()
+                  to: w.disableGSO
+                - return: span.first, true
+            - case: syscall.EINVAL
+              do:
+                - set: w.plainUntil
+                  value: span.first + span.count
+                - set: w.segmentCeiling
+                  value: w.queue[span.first].size - 1
+                - op: ++
+                  set: w.invalidRun
+                - opt:
+                    do:
+                      - eval: w.disableGSO()
+                        to: w.disableGSO
+                    when: w.invalidRun >= gsoInvalidLimit
+                - return: span.first, true
+            - case: syscall.EMSGSIZE
+              do:
+                - eval: w.counters.gsoOversized.Add(1)
+                  to: w.counters.gsoOversized.Add
+                - eval: w.counters.replyFailures.Add(uint64(span.count))
+                  to: w.counters.replyFailures.Add
+            - default: true
+              do:
+                - eval: w.counters.replyFailures.Add(uint64(span.count))
+                  to: w.counters.replyFailures.Add
+          "on": errno
+      - return: 0, false
+  - of: (*multiWriter).sendFrom
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiWriter).sendFrom
+        kind: self
+      - id: w.raw.Write
+        kind: value
+    steps:
+      - set: w.from, w.to, w.sent, w.sendErrno
+        value: k, messages, 0, 0
+      - bind: cerr
+        eval: w.raw.Write(w.write)
+        to: w.raw.Write
+      - opt:
+          do:
+            - return: 0, cerr
+          when: cerr != nil
+      - opt:
+          do:
+            - return: 0, w.sendErrno
+          when: w.sendErrno != 0
+      - return: w.sent, nil
+  - of: (*multiWriter).unavailable
+    steps:
+      - bind: first
+        eval: w.spans[k].first
+      - bind: last
+        eval: w.spans[messages-1].first + w.spans[messages-1].count
+      - opt:
+          do:
+            - set: w.noMmsg
+              value: "true"
+          when: w.writeEach(first, last) > 0
+  - of: (*multiWriter).writeEach
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiWriter).writeEach
+        kind: self
+      - id: w.pc.WriteTo
+        kind: value
+      - id: w.counters.replyFailures.Add
+        kind: value
+    steps:
+      - bind: left
+        eval: "0"
+      - loop:
+          cond: i < last
+          do:
+            - bind: entry
+              eval: "&w.queue[i]"
+            - opt:
+                do:
+                  - eval: w.counters.replyFailures.Add(1)
+                    to: w.counters.replyFailures.Add
+                  - continue: true
+                init:
+                  bind: _, err
+                  eval: w.pc.WriteTo(w.arena[entry.off:entry.off+entry.size], entry.addr())
+                  to: w.pc.WriteTo
+                when: err != nil
+            - op: ++
+              set: left
+          init: i := first
+          post: i++
+      - return: left
+  - of: (*multiWriter).fail
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiWriter).fail
+        kind: self
+      - id: w.counters.replyFailures.Add
+        kind: value
+    steps:
+      - loop:
+          cond: k < messages
+          do:
+            - eval: w.counters.replyFailures.Add(uint64(w.spans[k].count))
+              to: w.counters.replyFailures.Add
+          post: k++
+  - of: (*multiWriter).disableGSO
+    steps:
+      - opt:
+          do:
+            - eval: w.onGSOOff()
+          when: w.gso.Swap(false) && w.onGSOOff != nil
   - of: readOperator
     participants:
       - id: caller
@@ -5096,6 +6149,21 @@ sequences:
                 value: "n"
               - eval: g.kinds.add(corenet.OptionBatchSize)
                 to: g.kinds.add
+  - of: BatchReplies
+    participants:
+      - id: caller
+        kind: actor
+      - id: BatchReplies
+        kind: self
+      - id: g.kinds.add
+        kind: internal
+    steps:
+      - return:
+          closure:
+            params: g *StreamGroup
+            steps:
+              - eval: g.kinds.add(corenet.OptionBatchReplies)
+                to: g.kinds.add
   - of: Shards
     participants:
       - id: caller
@@ -5229,6 +6297,8 @@ sequences:
         kind: actor
       - id: (*packet).Reply
         kind: self
+      - id: p.sink.reply
+        kind: internal
       - id: p.conn.WriteTo
         kind: value
     steps:
@@ -5236,6 +6306,11 @@ sequences:
           do:
             - return: 0, stdnet.ErrClosed
           when: p.conn == nil
+      - opt:
+          do:
+            - return: p.sink.reply(b, p.from)
+              to: p.sink.reply
+          when: p.sink != nil
       - return: p.conn.WriteTo(b, p.from)
         to: p.conn.WriteTo
   - of: (*packet).reset
@@ -5246,10 +6321,132 @@ sequences:
         value: nil
       - set: p.conn
         value: nil
+      - set: p.sink
+        value: nil
       - set: p.id
         value: "0"
       - set: p.group
         value: "\"\""
+  - of: (*Server).newBoundPacket
+    steps:
+      - bind: name
+        eval: group.name
+      - return: |-
+          &boundPacketConn{
+          		group: name, addr: addr, pc: pc,
+          		source: newDatagramSource(pc, true),
+          		sink:   newDatagramSink(pc, group.batchReplies, &s.datagrams, func() { s.recordGSOOff(name) }),
+          		done:   make(chan struct{}),
+          	}
+  - of: (*Server).handoverPackets
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).handoverPackets
+        kind: self
+      - id: s.mu.RLock
+        kind: value
+      - id: slices
+        kind: stdlib
+      - id: s.mu.RUnlock
+        kind: value
+      - id: context
+        kind: stdlib
+      - id: bound.stopGRO
+        kind: internal
+    steps:
+      - eval: s.mu.RLock()
+        to: s.mu.RLock
+      - bind: conns
+        eval: slices.Clone(s.packetConns)
+        to: slices
+      - eval: s.mu.RUnlock()
+        to: s.mu.RUnlock
+      - bind: draining
+        eval: make([]*boundPacketConn, 0, len(conns))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: draining
+                    value: append(draining, bound)
+                when: bound.handover()
+          key: _
+          range: conns
+          value: bound
+      - bind: wait, cancel
+        eval: context.WithTimeout(ctx, handoverBudget)
+        to: context
+      - defer: cancel()
+      - loop:
+          do:
+            - select:
+                cases:
+                  - comm: <-bound.done
+                  - comm: <-wait.Done()
+                    do:
+                      - eval: bound.stopGRO()
+                        to: bound.stopGRO
+          key: _
+          range: draining
+          value: bound
+  - of: (*Server).recordGSOOff
+    steps:
+      - lock:
+          mutex: s.gsoMu
+      - opt:
+          do:
+            - set: s.gsoOff
+              value: append(s.gsoOff, group)
+          when: "!slices.Contains(s.gsoOff, group)"
+  - of: (*Server).gsoFaults
+    steps:
+      - lock:
+          mutex: s.gsoMu
+      - var:
+          name: out
+          type: "[]corenet.FaultValue"
+      - loop:
+          do:
+            - set: out
+              value: |-
+                append(out, corenet.FaultValue{
+                			Source: faultGSO, Group: group,
+                			Reason: "UDP GSO refused by the device (EIO: no checksum offload); replies leave one datagram a message",
+                		})
+          key: _
+          range: s.gsoOff
+          value: group
+      - return: out
+  - of: (*Server).stopGROPackets
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).stopGROPackets
+        kind: self
+      - id: s.mu.RLock
+        kind: value
+      - id: slices
+        kind: stdlib
+      - id: s.mu.RUnlock
+        kind: value
+      - id: bound.stopGRO
+        kind: internal
+    steps:
+      - eval: s.mu.RLock()
+        to: s.mu.RLock
+      - bind: conns
+        eval: slices.Clone(s.packetConns)
+        to: slices
+      - eval: s.mu.RUnlock()
+        to: s.mu.RUnlock
+      - loop:
+          do:
+            - eval: bound.stopGRO()
+              to: bound.stopGRO
+          key: _
+          range: conns
+          value: bound
   - of: (*PacketGroup).Name
     steps:
       - return: g.name
@@ -5332,6 +6529,51 @@ sequences:
                 			errs.String("address", addr.String()), errs.String("cause", lerr.Error()))
           when: lerr != nil
       - return: bound, nil
+  - of: (*boundPacketConn).finish
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*boundPacketConn).finish
+        kind: self
+      - id: b.doneOnce.Do
+        kind: value
+    steps:
+      - eval: b.doneOnce.Do(func() { close(b.done) })
+        to: b.doneOnce.Do
+  - of: (*boundPacketConn).handover
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*boundPacketConn).handover
+        kind: self
+      - id: h.handover
+        kind: internal
+    steps:
+      - bind: h, ok
+        eval: b.source.(handoverSource)
+      - opt:
+          do:
+            - return: "false"
+          when: "!ok"
+      - return: h.handover()
+        to: h.handover
+  - of: (*boundPacketConn).stopGRO
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*boundPacketConn).stopGRO
+        kind: self
+      - id: h.stopGRO
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - eval: h.stopGRO()
+              to: h.stopGRO
+          init:
+            bind: h, ok
+            eval: b.source.(handoverSource)
+          when: ok
   - of: (*boundPacketConn).Close
     participants:
       - id: caller
@@ -5365,32 +6607,37 @@ sequences:
         kind: self
       - id: s.inFlight.Done
         kind: value
+      - id: bound.finish
+        kind: internal
       - id: packetSize
         kind: internal
       - id: newSlots
-        kind: internal
-      - id: newDatagramSource
         kind: internal
       - id: held.reset
         kind: internal
       - id: reader.readBatch
         kind: internal
+      - id: bound.sink.begin
+        kind: internal
       - id: s.dispatch
+        kind: internal
+      - id: bound.sink.flush
         kind: internal
     steps:
       - defer: s.inFlight.Done()
         to: s.inFlight.Done
+      - defer: bound.finish()
+        to: bound.finish
       - bind: ceiling
         eval: packetSize(group.limits)
         to: packetSize
-      - bind: slots
-        eval: newSlots(batchSize(group.limits), ceiling)
-        to: newSlots
       - bind: reader
-        eval: newDatagramSource(bound.pc)
-        to: newDatagramSource
+        eval: bound.source
+      - bind: slots
+        eval: newSlots(batchSize(group.limits), reader.slotSize(ceiling))
+        to: newSlots
       - bind: held
-        eval: "&packet{conn: bound.pc, group: group.name}"
+        eval: "&packet{conn: bound.pc, sink: bound.sink, group: group.name}"
       - defer: held.reset()
         to: held.reset
       - loop:
@@ -5406,8 +6653,12 @@ sequences:
                       when: errors.Is(err, stdnet.ErrClosed)
                   - continue: true
                 when: err != nil
+            - eval: bound.sink.begin()
+              to: bound.sink.begin
             - eval: s.dispatch(slots[:count], held, handler, ceiling)
               to: s.dispatch
+            - eval: bound.sink.flush()
+              to: bound.sink.flush
           forever: true
   - of: (*Server).dispatch
     participants:
@@ -5415,12 +6666,39 @@ sequences:
         kind: actor
       - id: (*Server).dispatch
         kind: self
+      - id: s.datagrams.truncated.Add
+        kind: value
+      - id: s.serveMessage
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: s.datagrams.truncated.Add(1)
+                    to: s.datagrams.truncated.Add
+                  - continue: true
+                when: slots[i].cut
+            - eval: s.serveMessage(&slots[i], held, handler, ceiling)
+              to: s.serveMessage
+          key: i
+          range: slots
+      - set: held.data
+        value: nil
+      - set: held.from
+        value: nil
+  - of: (*Server).serveMessage
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).serveMessage
+        kind: self
+      - id: slot.segment
+        kind: internal
       - id: s.total.Add
         kind: value
       - id: s.oversized.Add
         kind: value
-      - id: slots[i].payload
-        kind: internal
       - id: s.nextID.Add
         kind: value
       - id: swallowErr
@@ -5428,6 +6706,13 @@ sequences:
     steps:
       - loop:
           do:
+            - bind: data, ok
+              eval: slot.segment(j)
+              to: slot.segment
+            - opt:
+                do:
+                  - return: ""
+                when: "!ok"
             - eval: s.total.Add(1)
               to: s.total.Add
             - opt:
@@ -5435,23 +6720,18 @@ sequences:
                   - eval: s.oversized.Add(1)
                     to: s.oversized.Add
                   - continue: true
-                when: slots[i].n > ceiling
+                when: len(data) > ceiling
             - set: held.data
-              to: slots[i].payload
-              value: slots[i].payload()
+              value: data
             - set: held.from
-              value: slots[i].addr
+              value: slot.addr
             - set: held.id
               to: s.nextID.Add
               value: s.nextID.Add(1)
             - eval: swallowErr(s.servePacket(held, handler))
               to: swallowErr
-          key: i
-          range: slots
-      - set: held.data
-        value: nil
-      - set: held.from
-        value: nil
+          init: j := 0
+          post: j++
   - of: (*Server).servePacket
     participants:
       - id: caller
@@ -5627,6 +6907,121 @@ sequences:
           key: _
           range: sockets
           value: socket
+  - of: newQueuedSink
+    steps:
+      - return: |-
+          &queuedSink{
+          		pc: pc, counters: counters,
+          		arena: make([]byte, replyArena), queue: make([]queuedReply, 0, replyQueue),
+          	}
+  - of: (*queuedSink).begin
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*queuedSink).begin
+        kind: self
+      - id: w.mu.Lock
+        kind: value
+      - id: w.mu.Unlock
+        kind: value
+    steps:
+      - eval: w.mu.Lock()
+        to: w.mu.Lock
+      - set: w.open
+        value: "true"
+      - eval: w.mu.Unlock()
+        to: w.mu.Unlock
+  - of: (*queuedSink).reply
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*queuedSink).reply
+        kind: self
+      - id: w.mu.Lock
+        kind: value
+      - id: w.mu.Unlock
+        kind: value
+      - id: w.pc.WriteTo
+        kind: value
+      - id: w.flushLocked
+        kind: internal
+    steps:
+      - eval: w.mu.Lock()
+        to: w.mu.Lock
+      - opt:
+          do:
+            - eval: w.mu.Unlock()
+              to: w.mu.Unlock
+            - return: w.pc.WriteTo(b, to)
+              to: w.pc.WriteTo
+          when: "!w.open || len(b) > len(w.arena)"
+      - opt:
+          do:
+            - eval: w.flushLocked()
+              to: w.flushLocked
+          when: len(w.queue) == cap(w.queue) || w.used+len(b) > len(w.arena)
+      - set: w.queue
+        value: "append(w.queue, queuedReply{off: w.used, size: len(b), to: to})"
+      - eval: copy(w.arena[w.used:], b)
+      - op: +=
+        set: w.used
+        value: len(b)
+      - eval: w.mu.Unlock()
+        to: w.mu.Unlock
+      - return: len(b), nil
+  - of: (*queuedSink).flush
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*queuedSink).flush
+        kind: self
+      - id: w.mu.Lock
+        kind: value
+      - id: w.flushLocked
+        kind: internal
+      - id: w.mu.Unlock
+        kind: value
+    steps:
+      - eval: w.mu.Lock()
+        to: w.mu.Lock
+      - eval: w.flushLocked()
+        to: w.flushLocked
+      - set: w.open
+        value: "false"
+      - eval: w.mu.Unlock()
+        to: w.mu.Unlock
+  - of: (*queuedSink).flushLocked
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*queuedSink).flushLocked
+        kind: self
+      - id: w.pc.WriteTo
+        kind: value
+      - id: w.counters.replyFailures.Add
+        kind: value
+    steps:
+      - loop:
+          do:
+            - bind: r
+              eval: "&w.queue[i]"
+            - opt:
+                do:
+                  - eval: w.counters.replyFailures.Add(1)
+                    to: w.counters.replyFailures.Add
+                init:
+                  bind: _, err
+                  eval: w.pc.WriteTo(w.arena[r.off:r.off+r.size], r.to)
+                  to: w.pc.WriteTo
+                when: err != nil
+            - set: r.to
+              value: nil
+          key: i
+          range: w.queue
+      - set: w.queue
+        value: w.queue[:0]
+      - set: w.used
+        value: "0"
   - of: reusePortSupported
     steps:
       - return: "true"
@@ -5753,6 +7148,8 @@ sequences:
         kind: internal
       - id: s.judgePacketOptions
         kind: internal
+      - id: shim.kinds.has
+        kind: internal
     steps:
       - bind: shim
         eval: "&StreamGroup{name: name}"
@@ -5790,6 +7187,9 @@ sequences:
         value: shim.limits
       - set: group.adopt
         value: shim.adopt
+      - set: group.batchReplies
+        to: shim.kinds.has
+        value: shim.kinds.has(corenet.OptionBatchReplies)
       - set: s.packetByName[name]
         value: group
       - set: s.packetGroups
@@ -5881,10 +7281,15 @@ sequences:
           		RejectedConns:    s.rejected.Load(),
           		OversizedPackets: s.oversized.Load(),
           		AcceptBackoffs:   s.acceptBackoffs.Load(),
-          		Loops:            s.loopStates(),
-          		Override:         override,
-          		Fallbacks:        fallbacks,
-          		Platform:         s.platform,
+          		Datagrams: corenet.DatagramStateValue{
+          			TruncatedPackets: s.datagrams.truncated.Load(),
+          			GSOOversized:     s.datagrams.gsoOversized.Load(),
+          			ReplyFailures:    s.datagrams.replyFailures.Load(),
+          		},
+          		Loops:     s.loopStates(),
+          		Override:  override,
+          		Fallbacks: fallbacks,
+          		Platform:  s.platform,
           	}
       - set: st.Faults
         to: s.faults
