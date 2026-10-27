@@ -112,6 +112,7 @@ func TestPortable_timersOnTick(t *testing.T) {
 	h := &portableLineH{}
 	pl := newOpenPortable(h, 2)
 	pl.batch()
+	//: a batch that left no scan scheduled would let timers expire unnoticed, so fail at once.
 	if pl.timersAt.IsZero() {
 		t.Fatal("the first batch did not schedule the next scan")
 	}
