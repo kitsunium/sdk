@@ -21,7 +21,8 @@ import (
 // answers, #639's question was a learner's only, and it stayed silent for
 // as long as D led, the cluster one failure from having no leader. It now
 // asks, as a learner does. Every directory, the runtime directory
-// included, is in t.TempDir().
+// included, is in t.TempDir(); where flock(2) is missing a data directory
+// is refused, and the test skips (silenceOpen).
 func TestTheSilentFounderRejoinsALeaderAdmittedWhileItWasDown(t *testing.T) {
 	net := NewMemoryNetwork()
 	net.admission = true
@@ -44,7 +45,7 @@ func TestTheSilentFounderRejoinsALeaderAdmittedWhileItWasDown(t *testing.T) {
 	var members []coreconsensus.MemberValue
 	for i := range 3 {
 		dn := &diskNode{dir: t.TempDir()}
-		dn.dd = openDirIn(t, dn.dir, run)
+		dn.dd = silenceOpen(t, dn.dir, run)
 		t.Cleanup(func() {
 			if dn.node != nil {
 				dn.crash(t, c)
@@ -67,7 +68,7 @@ func TestTheSilentFounderRejoinsALeaderAdmittedWhileItWasDown(t *testing.T) {
 		if err := dn.dd.Close(); err != nil {
 			t.Fatal(err)
 		}
-		dn.dd = openDirIn(t, dn.dir, run)
+		dn.dd = silenceOpen(t, dn.dir, run)
 		start(dn)
 	}
 	a, b, victim := founders[0], founders[1], founders[2]
@@ -114,7 +115,7 @@ func TestTheSilentFounderRejoinsALeaderAdmittedWhileItWasDown(t *testing.T) {
 	// the last of its last segment, past the founding configuration and
 	// before D's admission, which it never received.
 	damageBeforeLastRecord(t, victim)
-	victim.dd = openDirIn(t, victim.dir, run)
+	victim.dd = silenceOpen(t, victim.dir, run)
 	victim.sm = newKV()
 	if _, err := NewNode(cfg(victim)); !errors.Is(err, coreconsensus.LogQuarantined) {
 		t.Fatalf("damaged log: %v", err)
