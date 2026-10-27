@@ -51,7 +51,7 @@ func Test_listenPacket(t *testing.T) {
 		t.Helper()
 		addr := targetAddr(t, c.target, c.addr)
 
-		pc, err := listenPacket(t.Context(), corenet.AddressValue{Network: c.network, Addr: addr})
+		pc, _, err := listenPacket(t.Context(), corenet.AddressValue{Network: c.network, Addr: addr})
 
 		if c.wantCode != 0 {
 			if !errs.HasCode(err, c.wantCode) {

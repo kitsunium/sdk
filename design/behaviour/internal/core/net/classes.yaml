@@ -751,6 +751,10 @@ files:
       - LoopLayer.OnStart
     name: loop_layer.go
   - decls:
+      - LoopJobValue
+      - LoopOutboundValue
+    name: loop_outbound.go
+  - decls:
       - LoopRingStateValue
       - LoopStateValue
     name: loop_state.go
@@ -1259,6 +1263,23 @@ types:
           closed. Only the loop adapter reads it; AppendResponse does not.
         name: Defer
         type: bool
+      - doc: |-
+          Pending, set by the handler, hands the answer to the lane's worker
+          (HTTP1Worker, R3): the loop adapter sends Job to it and writes the
+          answer the worker fills, from the loop's thread, once it comes back.
+          Answers after it on the same connection wait for it, in order. A queue
+          to the worker that is full answers 503 with Retry-After at once, the
+          connection kept; a connection that closes first drops the answer. Pending
+          with Defer, or with no worker, is answered 500 and the connection closed.
+          Only the loop adapter reads it.
+        name: Pending
+        type: bool
+      - doc: |-
+          Job is the integer a pending answer's worker is given: the handler's own
+          index of what the work needs, which it copied out of the request, since
+          the request's bytes do not outlive the batch.
+        name: Job
+        type: uint64
     kind: struct
     name: HTTP1ResponseValue
   - kind: named
@@ -1571,6 +1592,30 @@ types:
         recv: l LoopLayer
     name: LoopLayer
   - fields:
+      - doc: Ref is the connection the job answers.
+        name: Ref
+        type: LoopConnRef
+      - doc: Slot is the sender's index of the job's state.
+        name: Slot
+        type: uint32
+      - doc: Gen is the generation of that slot when the job was sent.
+        name: Gen
+        type: uint32
+      - doc: Arg is the sender's own argument.
+        name: Arg
+        type: uint64
+    kind: struct
+    name: LoopJobValue
+  - fields:
+      - doc: Lanes are the lanes' outbounds, by lane.
+        name: Lanes
+        type: "[]LoopOutbound"
+      - doc: OutputCap is LoopValue.OutputCap, its default applied.
+        name: OutputCap
+        type: int
+    kind: struct
+    name: LoopOutboundValue
+  - fields:
       - doc: Loop is the loop's index in its group.
         name: Loop
         type: int
@@ -1668,6 +1713,12 @@ types:
           loops' recent batches.
         name: BatchP99
         type: DurationValue
+      - doc: |-
+          OutboundRefused counts the jobs a full queue to a worker refused
+          (LoopOutboundFull), every lane's: for the http1 adapter, the 503s it
+          answered for them. Zero when the group offloads nothing.
+        name: OutboundRefused
+        type: uint64
       - doc: RingStates reports every ring of every loop, loop by loop.
         name: RingStates
         type: "[]LoopRingStateValue"
@@ -1750,6 +1801,13 @@ types:
           for none; the class A-kernel capabilities need no opt-in.
         name: Capabilities
         type: "[]Capability"
+      - doc: |-
+          Outbound is how many jobs one lane's queue to its worker holds (R3),
+          when the group's handler offloads (LoopOffloader). A Send past it is
+          refused with LoopOutboundFull and counted in LoopStateValue. Zero
+          selects 256.
+        name: Outbound
+        type: int
     kind: struct
     name: LoopValue
   - kind: named
@@ -1950,6 +2008,20 @@ types:
           by this process.
         name: Adopted
         type: bool
+      - doc: |-
+          Exclusive reports that no other socket can bind the listener's address
+          while it lives: SO_EXCLUSIVEADDRUSE on Windows, set on a unicast TCP or
+          UDP socket this process binds and read back, never set, on an adopted
+          one. It is false on every other platform, which has no such option.
+        name: Exclusive
+        type: bool
+      - doc: |-
+          BindWait is how long the bind waited for its address to come free: on
+          Windows, a restarted server's address stays taken until the previous
+          process's connections end, and the bind is retried, bounded. Zero when
+          the first attempt bound.
+        name: BindWait
+        type: DurationValue
     kind: struct
     name: ListenerStateValue
   - fields:

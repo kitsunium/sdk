@@ -229,6 +229,40 @@ sequences:
         value: emptyConn(c.gen)
       - set: r.free
         value: append(r.free, slot)
+  - of: (*loop).closeSettled
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*loop).closeSettled
+        kind: self
+      - id: r.markDirty
+        kind: internal
+    steps:
+      - loop:
+          cond: s != noLink
+          do:
+            - bind: c
+              eval: "&r.conns[s]"
+            - bind: nxt
+              eval: c.lruNext
+            - opt:
+                do:
+                  - set: c.state, c.reason
+                    value: stClosing, rDrain
+                  - eval: r.markDirty(s)
+                    to: r.markDirty
+                when: c.state == stOpen && c.spill.empty() && !lp.waits(r, s)
+            - set: s
+              value: nxt
+          init: s := r.lruHead
+  - of: (*loop).evictable
+    steps:
+      - bind: c
+        eval: "&r.conns[slot]"
+      - return: c.state == stOpen && c.spill.empty() && c.pending() == 0 && !r.drv.unread(r, slot) && !lp.waits(r, slot)
+  - of: (*loop).waits
+    steps:
+      - return: lp.busy != nil && lp.busy(lp.index, r.ref(slot))
   - of: (*ring).ref
     steps:
       - return: "corenet.LoopConnRef{Ring: uint32(r.index), Slot: uint32(slot), Gen: r.conns[slot].gen}"
@@ -895,7 +929,7 @@ sequences:
                     to: r.finish
                   - op: ++
                     set: done
-                when: c.state == stOpen && c.spill.empty() && c.pending() == 0 && !r.drv.unread(r, s)
+                when: lp.evictable(r, s)
             - set: s
               value: nxt
       - return: done
@@ -2220,7 +2254,7 @@ sequences:
         kind: self
       - id: el.disarmListeners
         kind: internal
-      - id: r.markDirty
+      - id: lp.closeSettled
         kind: internal
     steps:
       - bind: lp, r
@@ -2236,23 +2270,8 @@ sequences:
           when: el.drainReq.Load() && !lp.draining
       - opt:
           do:
-            - loop:
-                cond: s != noLink
-                do:
-                  - bind: c
-                    eval: "&r.conns[s]"
-                  - bind: nxt
-                    eval: c.lruNext
-                  - opt:
-                      do:
-                        - set: c.state, c.reason
-                          value: stClosing, rDrain
-                        - eval: r.markDirty(s)
-                          to: r.markDirty
-                      when: c.state == stOpen && c.spill.empty()
-                  - set: s
-                    value: nxt
-                init: s := r.lruHead
+            - eval: lp.closeSettled(r)
+              to: lp.closeSettled
           when: lp.draining
   - of: (*epollLoop).closeAll
     participants:
@@ -2532,7 +2551,7 @@ sequences:
       - bind: lp
         eval: |-
           &loop{
-          		index: i, sz: g.sz, h: cfg.Handler, grp: g.grp,
+          		index: i, sz: g.sz, h: cfg.Handler, busy: cfg.Busy, grp: g.grp,
           		epoch:    time.Now(),
           		lowWater: g.sz.outputCap / lowWaterDiv,
           	}
@@ -5438,7 +5457,7 @@ sequences:
         kind: self
       - id: rr.cancelAccepts
         kind: internal
-      - id: r.markDirty
+      - id: lp.closeSettled
         kind: internal
     steps:
       - bind: lp
@@ -5463,25 +5482,8 @@ sequences:
           when: "!lp.draining"
       - loop:
           do:
-            - bind: r
-              eval: rr.r
-            - loop:
-                cond: s != noLink
-                do:
-                  - bind: c
-                    eval: "&r.conns[s]"
-                  - bind: nxt
-                    eval: c.lruNext
-                  - opt:
-                      do:
-                        - set: c.state, c.reason
-                          value: stClosing, rDrain
-                        - eval: r.markDirty(s)
-                          to: r.markDirty
-                      when: c.state == stOpen && c.spill.empty()
-                  - set: s
-                    value: nxt
-                init: s := r.lruHead
+            - eval: lp.closeSettled(rr.r)
+              to: lp.closeSettled
           key: _
           range: ul.rings
           value: rr

@@ -97,4 +97,9 @@ type LoopValue struct {
 	// unknown token is refused at Start with LoopCapabilityRefused. Nil asks
 	// for none; the class A-kernel capabilities need no opt-in.
 	Capabilities []Capability `json:"capabilities,omitempty"`
+	// Outbound is how many jobs one lane's queue to its worker holds (R3),
+	// when the group's handler offloads (LoopOffloader). A Send past it is
+	// refused with LoopOutboundFull and counted in LoopStateValue. Zero
+	// selects 256.
+	Outbound int `json:"outbound"`
 }

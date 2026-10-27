@@ -33,6 +33,15 @@ constants:
         value: 256 << 10
     name: replyQueue
   - doc: |-
+      rebindAttempts is one: an address in use elsewhere is a real conflict, and
+      a TIME_WAIT connection does not hold a listener's address (Go binds with
+      SO_REUSEADDR), so nothing is worth waiting out.
+    items:
+      - name: rebindAttempts
+        type: int
+        value: "1"
+    name: rebindAttempts
+  - doc: |-
       defaultHandshakeTimeout bounds the TLS negotiation when a group sets none.
 
       It has a default where Read, Write and Idle deliberately do not, because the
@@ -83,6 +92,27 @@ constants:
         type: bool
         value: "true"
     name: nativeLoopBackends
+  - grouped: true
+    items:
+      - doc: |-
+          defaultOutboundDepth is LoopValue.Outbound's default: how many jobs one
+          lane's queue to its worker holds.
+        name: defaultOutboundDepth
+        type: int
+        value: "256"
+      - doc: |-
+          postRetry is how long a worker waits before it posts a completion again
+          to a loop whose post queue was full.
+        name: postRetry
+        type: time.Duration
+        value: time.Millisecond
+      - doc: |-
+          cacheLine is the cache line a ring's two counters are kept apart by, so
+          the producer's stores never invalidate the line the consumer reads.
+        name: cacheLine
+        type: int
+        value: "64"
+    name: defaultOutboundDepth
   - grouped: true
     items:
       - doc: |-
@@ -492,6 +522,7 @@ files:
       - (*conn).Group
       - (*conn).Buffer
       - (*conn).Close
+      - (*conn).closeGracefully
       - (*conn).reset
     name: conn.go
   - decls:
@@ -520,6 +551,26 @@ files:
       - (*StreamGroup).reconcileName
       - (*StreamGroup).engineRefusal
     name: engine_option.go
+  - decls:
+      - bindReport
+      - exclusiveApplies
+      - (*Server).rebindAttempts
+      - (*Server).holdsPort
+      - listenControl
+      - exclusiveOf
+      - rebindDelay
+      - bindRetrying
+      - listenerSocket
+      - packetSocket
+    name: exclusive.go
+  - decls:
+      - rebindAttempts
+      - exclusiveAddrSupported
+      - setExclusiveAddr
+      - exclusiveAddrOf
+      - addrInUse
+      - closeConn
+    name: exclusive_other.go
   - decls:
       - platformLacks
     name: family_other.go
@@ -675,6 +726,35 @@ files:
       - loopIdle
     name: loop_group.go
   - decls:
+      - defaultOutboundDepth
+      - jobRing
+      - newJobRing
+      - (*jobRing).push
+      - (*jobRing).pop
+      - outboundLane
+      - (*outboundLane).Send
+      - (*outboundLane).run
+      - (*outboundLane).complete
+      - (*outboundLane).drain
+      - outboundLanes
+      - laneTable
+      - (*laneTable).now
+      - registerLane
+      - releaseLane
+      - lanesWith
+      - runCompletions
+      - outbound
+      - startOutbound
+      - startOffloading
+      - findOffloader
+      - (*outbound).signal
+      - (*outbound).wait
+      - offloadedEngine
+      - (*offloadedEngine).Shutdown
+      - (*offloadedEngine).Close
+      - (*offloadedEngine).State
+    name: loop_outbound.go
+  - decls:
       - portableReadSize
       - pevOpen
       - markRecycled
@@ -707,6 +787,7 @@ files:
       - (*portableLoop).timers
       - (*portableLoop).timer
       - (*portableLoop).control
+      - (*portableLoop).closeSettled
       - (*portableLoop).endBatch
       - (*portableLoop).settle
       - (*portableLoop).compactListed
@@ -959,6 +1040,7 @@ files:
       - (*connLimiter).tryAcquire
       - (*connLimiter).release
       - (*connLimiter).releaseFor
+      - markRefused
       - (*Server).admit
     name: stream_group_limiter.go
   - decls:
@@ -1069,6 +1151,71 @@ functions:
       syscall. It feeds the degradation reported by State.
     name: batchAvailable
     results: bool
+  - doc: |-
+      exclusiveApplies reports whether a socket of network bound to address takes
+      SO_EXCLUSIVEADDRUSE: a unicast TCP or UDP one, on a platform that has the
+      option. A multicast socket shares its port with the group's other members
+      by design, and AF_UNIX has no port to take.
+    name: exclusiveApplies
+    params: network, address string
+    results: bool
+  - doc: |-
+      listenControl is net.ListenConfig.Control for one bind: SO_REUSEPORT when
+      the address is sharded, SO_EXCLUSIVEADDRUSE when it applies, both before
+      bind; nil when neither can, so the bind is the standard library's own.
+    name: listenControl
+    params: sharded bool
+    results: func(network, address string, rawConn syscall.RawConn) error
+  - doc: |-
+      exclusiveOf reads SO_EXCLUSIVEADDRUSE back from an adopted socket: what a
+      supervisor set is reported, never set and never fatal (a socket that cannot
+      be read reports false).
+    name: exclusiveOf
+    params: sc syscall.Conn
+    results: bool
+  - doc: |-
+      rebindDelay is the wait after the attempt-th refused bind: 25 ms, doubling,
+      held at 1 s, on the SDK's one published backoff (ADR 0103).
+    name: rebindDelay
+    params: attempt int
+    results: time.Duration
+  - doc: |-
+      bindRetrying calls bind until it binds, fails otherwise than with inUse, or
+      has been called attempts times, waiting rebindDelay between two calls, and
+      returns how long it waited: the bounded rebind of an address a restarted
+      server's predecessor still holds. ctx ends the wait early with the last
+      refusal.
+    name: bindRetrying
+    params: ctx context.Context, attempts int, inUse func(error) bool, bind func() (T, error)
+    results: T, time.Duration, error
+    typeParams: T any
+  - doc: listenerSocket is ln's descriptor, nil when it has none.
+    name: listenerSocket
+    params: ln stdnet.Listener
+    results: syscall.Conn
+  - doc: packetSocket is pc's descriptor, nil when it has none.
+    name: packetSocket
+    params: pc stdnet.PacketConn
+    results: syscall.Conn
+  - doc: exclusiveAddrSupported reports that the platform has no SO_EXCLUSIVEADDRUSE.
+    name: exclusiveAddrSupported
+    results: bool
+  - doc: setExclusiveAddr does nothing where the option does not exist.
+    name: setExclusiveAddr
+    params: _ uintptr
+    results: error
+  - doc: exclusiveAddrOf reads nothing where the option does not exist.
+    name: exclusiveAddrOf
+    params: _ uintptr
+    results: bool, error
+  - doc: "addrInUse never asks for a rebind: rebindAttempts is one."
+    name: addrInUse
+    params: _ error
+    results: bool
+  - doc: closeConn closes c; hard changes nothing where no close is graceful.
+    name: closeConn
+    params: c stdnet.Conn, _ bool
+    results: error
   - doc: |-
       platformLacks reports whether this platform has no socket for a family the
       engine serves everywhere else. Off Windows the answer is left to the kernel:
@@ -1243,10 +1390,12 @@ functions:
 
       trackCloses hands out sockets that report their own Close (see trackedConn),
       for a group whose ceiling must keep counting a connection a handler took
-      over.
+      over. A unicast TCP socket holds its address exclusively where the platform
+      can (exclusiveApplies), and an address still held is bound again, at most
+      attempts binds (bindRetrying); the report says both.
     name: listen
-    params: ctx context.Context, addr corenet.AddressValue, id corenet.IdentityValue, sharded, trackCloses bool
-    results: ln stdnet.Listener, err error
+    params: ctx context.Context, addr corenet.AddressValue, id corenet.IdentityValue, sharded, trackCloses bool, attempts int
+    results: ln stdnet.Listener, rep bindReport, err error
   - doc: |-
       familyUnavailable refuses a family the engine serves but this platform has
       no socket for, before the OS is asked — or returns nil.
@@ -1361,6 +1510,48 @@ functions:
     name: loopIdle
     params: group *StreamGroup
     results: time.Duration
+  - doc: newJobRing allocates a ring of at least n jobs.
+    name: newJobRing
+    params: n int
+    results: "*jobRing"
+  - doc: registerLane gives l its key.
+    name: registerLane
+    params: l *outboundLane
+  - doc: releaseLane removes l's entry, once its loop has stopped.
+    name: releaseLane
+    params: l *outboundLane
+  - doc: lanesWith copies the table as it stands into a new map of room n. Under mu.
+    name: lanesWith
+    params: n int
+    results: map[uintptr]*outboundLane
+  - doc: "runCompletions is the op a worker posts: it drains the lane named by key."
+    name: runCompletions
+    params: io corenet.LoopIO, key uintptr
+  - doc: |-
+      startOutbound finds the chain's offloader — the first handler walking by
+      Next that is a corenet.LoopOffloader with a worker — and, when there is
+      one, starts a worker per lane and gives it the lanes' outbounds. A chain
+      with none starts nothing and returns nil.
+
+      Goroutine lifecycle: one worker per lane (outboundLane.run), owned by the
+      returned outbound, counted in its workers group; signal ends each once its
+      running job returns, and wait waits for them.
+    name: startOutbound
+    params: chain corenet.LoopHandler, v corenet.LoopValue
+    results: "*outbound"
+  - doc: |-
+      startOffloading starts the group's workers, when its chain offloads, then
+      its engine: the workers run, and the chain holds its outbounds, before any
+      callback can send a job, and a draining loop keeps every connection still
+      waiting on one (R3). The workers stop after the engine, and State counts
+      the refused jobs; an engine that does not start stops them at once.
+    name: startOffloading
+    params: ctx context.Context, group *StreamGroup, lns []stdnet.Listener, plan loopPlan
+    results: loopEngine, error
+  - doc: findOffloader walks the chain by Next for its offloader.
+    name: findOffloader
+    params: h corenet.LoopHandler
+    results: corenet.LoopOffloader, corenet.LoopWorker
   - doc: |-
       startPortable starts the portable backend on lns, with one lane per loop
       of the group's LoopValue (zero meaning one). degraded names why a Linux
@@ -1496,10 +1687,16 @@ functions:
   - name: Engine
     params: e corenet.EngineValue
     results: GroupOption
-  - doc: listenPacket binds one datagram socket.
+  - doc: |-
+      listenPacket binds one datagram socket.
+
+      A unicast UDP socket holds its address exclusively where the platform can
+      (exclusiveApplies) — a multicast one never — and is bound once: a datagram
+      socket leaves no connection behind it to wait out; the report says whether
+      it holds its address.
     name: listenPacket
     params: ctx context.Context, addr corenet.AddressValue
-    results: pc stdnet.PacketConn, err error
+    results: pc stdnet.PacketConn, rep bindReport, err error
   - doc: packetSize returns the group's datagram ceiling.
     name: packetSize
     params: limits corenet.LimitsValue
@@ -1601,6 +1798,11 @@ functions:
     params: limits corenet.LimitsValue
     results: "*connLimiter"
   - doc: |-
+      markRefused records on a pooled connection that the ceiling refused it, so
+      the engine closes it at once rather than gracefully.
+    name: markRefused
+    params: c corenet.Conn
+  - doc: |-
       swallowErr intentionally discards a non-actionable error, recording the
       discard so the error audit treats it as deliberate rather than dropped.
 
@@ -1636,6 +1838,7 @@ imports:
   kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
   loop: github.com/kitsunium/sdk/internal/service/net/loop
   maps: maps
+  netip: net/netip
   os: os
   recycler: github.com/kitsunium/sdk/internal/kernel/concur/recycler
   reflect: reflect
@@ -1904,6 +2107,13 @@ types:
           it needs no synchronisation of its own.
         name: hijacked
         type: bool
+      - doc: |-
+          refused records that the group's ceiling turned the connection away
+          before any handler ran: it is closed at once, never gracefully, so a
+          flood of refused peers that never send their FIN costs no goroutine
+          lingering on each (ADR 0193 §D4).
+        name: refused
+        type: bool
     kind: struct
     methods:
       - doc: Read implements net.Conn, bounding this read before it starts.
@@ -1943,6 +2153,14 @@ types:
           net/http to finish. Embedding net.Conn would make that a nil dereference, so
           the guard is what keeps a late close from panicking a serving goroutine.
         name: Close
+        recv: c *conn
+        results: error
+      - doc: |-
+          closeGracefully closes the socket as the engine ends a connection: on
+          Windows, shutdown(SD_SEND) and a bounded read to the peer's zero first, so
+          the address it was accepted on is free again once the peer has answered
+          (closeConn); elsewhere, Close.
+        name: closeGracefully
         recv: c *conn
         results: error
       - doc: |-
@@ -2058,6 +2276,18 @@ types:
         name: release
         recv: w *connWaiter
     name: connWaiter
+  - doc: |-
+      bindReport is what binding one address tells State: whether the socket
+      holds its address exclusively, and how long the bind waited for it.
+    fields:
+      - doc: exclusive is ListenerStateValue.Exclusive.
+        name: exclusive
+        type: bool
+      - doc: wait is ListenerStateValue.BindWait.
+        name: wait
+        type: time.Duration
+    kind: struct
+    name: bindReport
   - doc: |-
       handshakeHandler completes the TLS negotiation under its own bound before
       handing the connection to the group's handler.
@@ -2510,6 +2740,201 @@ types:
       	// State reports the group.
       	State() corenet.LoopStateValue
       }
+  - doc: |-
+      jobRing is a single-producer single-consumer ring of jobs, preallocated:
+      head is written by the consumer only, tail by the producer only, and each
+      reads the other's with an atomic load, so neither takes a lock. Each
+      counter has a cache line of its own, the read-only fields one before them,
+      so the two sides never write the same line.
+    fields:
+      - doc: jobs is the storage, a power of two long.
+        name: jobs
+        type: "[]corenet.LoopJobValue"
+      - doc: mask is len(jobs) less one.
+        name: mask
+        type: uint64
+      - doc: _ keeps head off the line jobs and mask share.
+        name: _
+        type: "[cacheLine]byte"
+      - doc: head is the next job to pop.
+        name: head
+        type: atomic.Uint64
+      - doc: _ keeps tail off head's line.
+        name: _
+        type: "[cacheLine - 8]byte"
+      - doc: tail is the next free place.
+        name: tail
+        type: atomic.Uint64
+      - doc: _ keeps whatever follows the ring off tail's line.
+        name: _
+        type: "[cacheLine - 8]byte"
+    kind: struct
+    methods:
+      - doc: push appends job and reports false when the ring is full. Producer only.
+        name: push
+        params: job corenet.LoopJobValue
+        recv: r *jobRing
+        results: bool
+      - doc: |-
+          pop removes the oldest job and reports false when the ring is empty.
+          Consumer only.
+        name: pop
+        recv: r *jobRing
+        results: corenet.LoopJobValue, bool
+    name: jobRing
+  - doc: |-
+      outboundLane is one lane's port to its worker (R3): the jobs the lane's
+      thread sends, the worker's completions on their way back, and the worker
+      goroutine itself.
+    fields:
+      - doc: lane is the lane's index.
+        name: lane
+        type: int
+      - doc: |-
+          key is the lane's index in outboundLanes, the integer its completion
+          op is posted with.
+        name: key
+        type: uintptr
+      - doc: jobs carries jobs from the lane's thread to the worker.
+        name: jobs
+        type: "*jobRing"
+      - doc: done carries completions from the worker back to the lane's thread.
+        name: done
+        type: "*jobRing"
+      - doc: |-
+          io is the lane's LoopIO, set by the first Send: what the worker posts
+          completions through.
+        name: io
+        type: atomic.Pointer[corenet.LoopIO]
+      - doc: wake rouses the worker; one token is enough.
+        name: wake
+        type: chan struct{}
+      - doc: posted is true from a posted completion op to its run.
+        name: posted
+        type: atomic.Bool
+      - doc: stopped ends the worker once it has finished its job.
+        name: stopped
+        type: atomic.Bool
+      - doc: refused counts the Sends a full queue refused.
+        name: refused
+        type: "*atomic.Uint64"
+      - doc: off is the offloader the completions return to.
+        name: "off"
+        type: corenet.LoopOffloader
+    kind: struct
+    methods:
+      - doc: |-
+          Send implements corenet.LoopOutbound: it queues job for the lane's worker
+          and wakes it, or refuses with LoopOutboundFull and counts the refusal.
+        name: Send
+        params: io corenet.LoopIO, job corenet.LoopJobValue
+        recv: l *outboundLane
+        results: error
+      - doc: |-
+          run is the worker: it pops each job, runs it, and hands it back to the
+          lane, until stopped.
+
+          Goroutine lifecycle: one per lane, started by startOutbound and owned by
+          the group's outbound; it exits once stop is set, after the job it runs, and
+          its exit is what stop waits for.
+        name: run
+        params: w corenet.LoopWorker, done *sync.WaitGroup
+        recv: l *outboundLane
+      - doc: |-
+          complete hands job back to the lane's thread: into the done ring, then one
+          post of the completion op when the ring was idle. A full ring, or a full
+          post queue, is waited out — the worker may block, the lane may not; a
+          stopped loop ends the wait.
+        name: complete
+        params: job corenet.LoopJobValue
+        recv: l *outboundLane
+      - doc: "drain runs on the lane's thread: every completion back to the offloader."
+        name: drain
+        params: io corenet.LoopIO
+        recv: l *outboundLane
+    name: outboundLane
+  - doc: laneTable is outboundLanes' type.
+    fields:
+      - doc: mu serialises registration and release.
+        name: mu
+        type: sync.Mutex
+      - doc: next is the key the next lane is given.
+        name: next
+        type: uintptr
+      - doc: lanes is replaced, never written in place, under mu.
+        name: lanes
+        type: atomic.Pointer[map[uintptr]*outboundLane]
+    kind: struct
+    methods:
+      - doc: now returns the table as it stands, nil before the first lane.
+        name: now
+        recv: t *laneTable
+        results: map[uintptr]*outboundLane
+    name: laneTable
+  - doc: outbound is one loop group's port to its workers.
+    fields:
+      - doc: lanes are the group's lanes, by index.
+        name: lanes
+        type: "[]*outboundLane"
+      - doc: refused counts every lane's refused Sends.
+        name: refused
+        type: atomic.Uint64
+      - doc: workers waits on every worker.
+        name: workers
+        type: sync.WaitGroup
+      - doc: stopOnce makes stop idempotent.
+        name: stopOnce
+        type: sync.Once
+      - doc: busy is the offloader's Pending.
+        name: busy
+        type: func(lane int, ref corenet.LoopConnRef) bool
+    kind: struct
+    methods:
+      - doc: |-
+          signal tells every worker to stop once its running job returns, and
+          releases each lane's entry in outboundLanes. Queued jobs are dropped: their
+          loop has stopped and could not write an answer.
+        name: signal
+        recv: o *outbound
+      - doc: |-
+          wait waits for every worker to exit, within ctx.
+
+          Goroutine lifecycle: one waiter, which ends when the last worker has; a
+          ctx that ends first leaves it to end with them, holding nothing else.
+        name: wait
+        params: ctx context.Context
+        recv: o *outbound
+    name: outbound
+  - doc: |-
+      offloadedEngine is a loop engine whose group offloads to workers: the
+      workers stop once the engine has, and State counts the refused Sends.
+    fields:
+      - name: ""
+        role: embedded
+        type: loopEngine
+      - doc: out is the group's outbound.
+        name: out
+        type: "*outbound"
+    kind: struct
+    methods:
+      - doc: |-
+          Shutdown drains the engine — answers still pending reach their
+          connections, the workers running — then stops the workers.
+        name: Shutdown
+        params: ctx context.Context
+        recv: e *offloadedEngine
+        results: error
+      - doc: |-
+          Close closes the engine, then stops the workers without waiting on a job
+          still running.
+        name: Close
+        recv: e *offloadedEngine
+        results: error
+      - doc: State adds the refused Sends to the engine's report.
+        name: State
+        recv: e *offloadedEngine
+        results: corenet.LoopStateValue
+    name: offloadedEngine
   - doc: portableEvent is what a connection's goroutines tell the handler goroutine.
     fields:
       - name: kind
@@ -2639,6 +3064,9 @@ types:
         type: int
       - name: h
         type: corenet.LoopHandler
+      - doc: busy is the chain's offloader's Pending, nil when nothing offloads.
+        name: busy
+        type: func(lane int, ref corenet.LoopConnRef) bool
       - name: spillCap
         type: int
       - name: outCap
@@ -2796,6 +3224,11 @@ types:
         recv: pl *portableLoop
       - doc: control applies the drain.
         name: control
+        recv: pl *portableLoop
+      - doc: |-
+          closeSettled marks for closing every open connection with nothing
+          unconsumed and no answer out with a worker (R3).
+        name: closeSettled
         recv: pl *portableLoop
       - doc: |-
           endBatch flushes the dirty connections, settles the closes, releases the
@@ -3895,6 +4328,23 @@ types:
         params: name string
         recv: s *Server
         results: conns []stdnet.PacketConn, err error
+      - doc: |-
+          rebindAttempts is how many binds addr gets: rebindAttempts on a platform
+          that holds an address after its socket closed, but one when this server
+          already holds a socket on the same port, of the same transport — another
+          of its addresses (":8080" then "127.0.0.1:8080", say) refuses the bind
+          for as long as it lives, and waiting it out would only delay the error.
+        name: rebindAttempts
+        params: addr corenet.AddressValue
+        recv: s *Server
+        results: int
+      - doc: |-
+          holdsPort reports whether one of the server's bound stream listeners has
+          addr's port, on the same transport; a port of zero is held by nobody.
+        name: holdsPort
+        params: addr corenet.AddressValue
+        recv: s *Server
+        results: bool
       - name: RegisterHealth
         params: h corehealth.Health
         recv: s *Server
@@ -4063,9 +4513,11 @@ types:
         results: error
       - doc: |-
           registerLoopListeners records a loop group's listeners, so Close and
-          Shutdown close them and State reports them, as for every group.
+          Shutdown close them and State reports them, as for every group: bound ones
+          with the bind's report, adopted ones (rep nil) with SO_EXCLUSIVEADDRUSE
+          read back.
         name: registerLoopListeners
-        params: group *StreamGroup, lns []stdnet.Listener, adopted bool
+        params: group *StreamGroup, lns []stdnet.Listener, rep *bindReport
         recv: s *Server
       - doc: loopStates reports every loop group.
         name: loopStates
@@ -4353,6 +4805,11 @@ types:
         name: loopMiddlewares
         type: "[]corenet.Middleware[corenet.LoopHandler]"
       - doc: |-
+          loopBusy is the chain's offloader's Pending, nil when nothing offloads:
+          what a draining loop asks before it closes a settled connection (R3).
+        name: loopBusy
+        type: func(lane int, ref corenet.LoopConnRef) bool
+      - doc: |-
           loopChain is loopHandler wrapped in loopMiddlewares, built and checked
           once at Start; the loop engine serves it.
         name: loopChain
@@ -4569,6 +5026,16 @@ vars:
           	probeWritable: "OnWritable", probeBatchEnd: "OnBatchEnd", probeClose: "OnClose", probeHonours: "Honours",
           }
     name: probeNames
+  - doc: |-
+      outboundLanes holds every running lane of every server's outbound, by key:
+      a PostFunc is a plain function and its argument an integer, so the
+      completion op finds its lane here. A key is never given twice, so an op
+      posted for a stopped lane cannot reach a newer one; a stopped lane's entry
+      is released, and an op that still names it finds nothing.
+    items:
+      - name: outboundLanes
+        type: laneTable
+    name: outboundLanes
   - doc: |-
       markRecycled, set by a test, fills each read buffer the batch released
       with recycledMark before it is read into again.

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-27T03:00:00Z -->
+<!-- updated: 2026-10-27T08:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -409,6 +409,14 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   listed. The admission is judged at the commit bounded by `Stable`, at
   each Ready and each storage completion (#695,
   `TestAJoinerBecomesAMemberOnDiskOnlyOnceTheEntriesThatAdmitItAreDurable`).
+- Leave a silent voter that hears no leader with no way to reach one: it
+  never campaigns, so it never sent the PreVote a leader record answers. A
+  founder down while a member was admitted and made leader, then truncated
+  by `TruncateAndStaySilent`, came back over a configuration that does not
+  list that leader, its transport refused it, and it never ended its
+  silence while that leader led. Raft's question of #639 is asked by every
+  node `promotable` excludes (#718,
+  `TestTheSilentFounderRejoinsALeaderAdmittedWhileItWasDown`).
 - Refuse a JOIN on a held slot when the member holding it is the requester
   itself — id, incarnation, slot and key all equal: a joiner restarted
   before anything reached its log admits the members only from a JOIN

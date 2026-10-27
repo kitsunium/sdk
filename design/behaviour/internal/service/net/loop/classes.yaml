@@ -781,6 +781,9 @@ files:
       - (*ring).take
       - (*ring).opened
       - (*ring).abandon
+      - (*loop).closeSettled
+      - (*loop).evictable
+      - (*loop).waits
       - (*ring).ref
       - (*ring).deliver
       - (*ring).keep
@@ -1931,6 +1934,9 @@ types:
       - doc: h is the handler.
         name: h
         type: corenet.LoopHandler
+      - doc: busy is Config.Busy, nil when nothing offloads.
+        name: busy
+        type: func(lane int, ref corenet.LoopConnRef) bool
       - doc: grp is what the group's loops share.
         name: grp
         type: "*shared"
@@ -1969,6 +1975,25 @@ types:
         type: int
     kind: struct
     methods:
+      - doc: |-
+          closeSettled starts the drain's close of every connection of r that is
+          open with no partial input and no answer out with a worker: each closes
+          once its output has left; mid-request ones finish first.
+        name: closeSettled
+        params: r *ring
+        recv: lp *loop
+      - doc: |-
+          evictable reports whether slot of r may be evicted: open, with nothing
+          unconsumed, unsent or unread, and no answer out with a worker.
+        name: evictable
+        params: r *ring, slot int32
+        recv: lp *loop
+        results: bool
+      - doc: waits reports whether slot of r waits on the handler's worker (R3).
+        name: waits
+        params: r *ring, slot int32
+        recv: lp *loop
+        results: bool
       - doc: |-
           endBatch runs once OnBatchEnd has returned: flushes, releases the chunks the
           batch held, compacts spills, and publishes the counters.
@@ -2266,6 +2291,12 @@ types:
       - doc: Handler is the group's loop handler.
         name: Handler
         type: corenet.LoopHandler
+      - doc: |-
+          Busy reports whether a connection of a lane waits on its worker (the
+          chain's LoopOffloader.Pending, R3): the drain keeps it open, eviction
+          passes it by. Nil when nothing offloads.
+        name: Busy
+        type: func(lane int, ref corenet.LoopConnRef) bool
       - doc: Listeners are the sockets to accept on.
         name: Listeners
         type: "[]Listener"

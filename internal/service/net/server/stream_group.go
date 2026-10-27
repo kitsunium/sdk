@@ -59,6 +59,9 @@ type StreamGroup struct {
 	loopHandler corenet.LoopHandler
 	// loopMiddlewares decorate the loop handler, outermost first (UseLoop).
 	loopMiddlewares []corenet.Middleware[corenet.LoopHandler]
+	// loopBusy is the chain's offloader's Pending, nil when nothing offloads:
+	// what a draining loop asks before it closes a settled connection (R3).
+	loopBusy func(lane int, ref corenet.LoopConnRef) bool
 	// loopChain is loopHandler wrapped in loopMiddlewares, built and checked
 	// once at Start; the loop engine serves it.
 	loopChain corenet.LoopHandler

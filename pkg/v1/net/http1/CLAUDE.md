@@ -20,6 +20,7 @@ the job is discussed.
 | `HandleLoop(h, p)` → `*LoopHandler` | the `server.LoopHandler` of a loop group serving `h`; `p` sets the limits, the zero `Parser` the defaults |
 | `Handler`, `HandlerFunc` | what a consumer writes: `ServeHTTP1(*Request, *Response)` |
 | `Batcher` | optional: `EndBatch(lane)` once per batch, before its answers leave — where a handler runs the work it batched and completes what it deferred |
+| `Worker` | optional: `WorkHTTP1(lane, job, res)` on the lane's worker goroutine, which may block, for a `Response` marked `Pending` (ADR 0194); later answers on the connection wait in order; a full queue answers 503 with `Retry-After` |
 | `Request`, `Response`, `Field`, `Limits` | the values; `Request.Lane` names the lane, `Request.Path` is the canonical target, `Route` and `Auth` what the links set, `Response.Defer` answers at the batch's end |
 | `Middleware`, `Chain`, `Routes` (`Route`, `RouteLayer`), `Bearer` (`BearerVerifier`, `Auth`, `BearerLayer`), `Headers` (`HeadersLayer`), `Log` (`AccessLogger`, `Access`, `LogLayer`), `MaxSubject`, `MaxAccessFields` | the chain (ADR 0191 §D4): links composed outermost first, judging `Path`; exemptions by route id, the subject copied by value, no credential logged |
 | `Parser`, `NewParser`, `Continue`, `Pending`, `Refusal`, `RefusalNone` | the codec's framing, usable without the loop |

@@ -56,6 +56,7 @@ adapter.
 | `engine.go` | `EngineValue` + `EngineAuto` (the zero: the handler's type chooses), `EngineGoroutine`, `EngineLoop` + `String` — the engine family `Engine` names (ADR 0187 §D3) |
 | `loop_state.go` | `LoopStateValue` — one loop group's backend, probe stage, fallback, sizing (`Loops`, `Rings` and where it came from), the effective `RLIMIT_NOFILE` and `GOMAXPROCS`, the batch p99 — and `LoopRingStateValue`, one ring's counters (ADR 0186 §D8); `Capabilities`, the kernel capabilities' report (ADR 0189) |
 | `loop_value.go` | `LoopValue` — a loop group's engine configuration, passed by the `Loop` group option; `LoopBackend` + its constants (`auto`, the zero, `iouring`, `epoll`, `portable`) + `String` (ADR 0186 §D5); `Capabilities`, the class A-code opt-ins (ADR 0189) |
+| `loop_outbound.go` | R3 (ADR 0194): `LoopJobValue` — the full `LoopConnRef`, the sender's slot and its generation, an integer; `LoopOutboundValue` — the lanes' outbounds and `OutputCap`, given to a `LoopOffloader` at Start |
 | `timeouts.go` | `TimeoutsValue` — per-operation deadlines, one per phase (`Read` / `Write` / `Idle` / `Handshake`) |
 | `conn.go` | `ConnHandlerFunc`, the func adapter of the `ConnHandler` port |
 | `packet.go` | `PacketHandlerFunc`, the func adapter of the `PacketHandler` port |
@@ -344,6 +345,12 @@ cd internal/core && GOWORK=off go test -race -cover ./net/...
   `OptionLoopMiddleware`, `LoopMiddlewareInvalid` (`0.2.11.61`);
   `HTTP1AuthValue`, `HTTP1AccessValue`, the two chain ports and the request's
   `Lane`, `Path`, `Query`, `Route`, `Auth`, `Authenticated` — `docs/adr/0191-a-loop-middleware-forwards-every-callback-and-the-http1-chain-judges-one-canonical-target.md`
+- ADR 0193 — `ListenerStateValue.Exclusive` and `BindWait` —
+  `docs/adr/0193-a-windows-listener-holds-its-address-exclusively-closes-gracefully-and-rebinds-bounded.md`
+- ADR 0194 — `LoopJobValue`, `LoopOutboundValue`, `LoopOutbound`, `LoopWorker`,
+  `LoopOffloader`, `HTTP1Worker`, `LoopOutboundFull` (`0.2.11.63`),
+  `LoopValue.Outbound`, `LoopStateValue.OutboundRefused`,
+  `HTTP1ResponseValue.Pending`/`Job` — `docs/adr/0194-a-loop-lane-offloads-to-its-own-worker-and-an-http1-answer-may-be-pending.md`
 - ADR 0188 — `Capability`, `EnvEngine`, `EnvDisable`, `OverrideValue`,
   `FaultValue`, `FallbacksValue`, `PlatformValue`, the four `StateValue`
   fields and `LoopGroupStalled` (`0.2.11.59`) —
