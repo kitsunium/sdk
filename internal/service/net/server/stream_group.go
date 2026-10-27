@@ -34,6 +34,11 @@ type StreamGroup struct {
 	// core/net's Timeouts and Limits, which describe every protocol a group
 	// can serve, and "a request header" is not a word in most of them.
 	http httpBounds
+	// protos is the Protocols option's list, as given.
+	protos []string
+	// httpProtos is what the group serves, computed at Start from protos and
+	// the identity (protocolsRefusal).
+	httpProtos httpProtocols
 	// limiter caps concurrent connections; nil when the group has no ceiling.
 	limiter *connLimiter
 	// adopt names inherited sockets to take over instead of binding.
@@ -199,6 +204,7 @@ func (g *StreamGroup) resolved() corenet.ConnHandler {
 	if g.httpAdapter != nil {
 		g.httpAdapter.timeouts = g.timeouts
 		g.httpAdapter.bounds = g.http
+		g.httpAdapter.protocols = &g.httpProtos.accepted
 	}
 	//: composed once at Start rather than per connection, so the middleware
 	//: chain costs nothing on the hot path.

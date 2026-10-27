@@ -101,6 +101,7 @@ alias(
 go_test(
     name = "loop_test",
     srcs = [
+        "batch_cost_internal_test.go",
         "conformance_caps_linux_test.go",
         "conformance_caps_uring_linux_test.go",
         "conformance_linux_test.go",

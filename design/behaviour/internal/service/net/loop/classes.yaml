@@ -91,6 +91,8 @@ constants:
           fSending is output the backend holds: EPOLLOUT armed, or a send in
           flight.
         name: fSending
+      - doc: fCompact puts the slot on its ring's compaction list.
+        name: fCompact
     name: fPressure
   - doc: |-
       The reasons a connection is closed, mapped to the preallocated error
@@ -788,6 +790,7 @@ files:
       - (*ring).appendSpill
       - (*ring).spillRoom
       - (*ring).deliverSpill
+      - (*ring).consumed
       - (*ring).hasSpill
       - (*ring).compactSpill
       - clampConsumed
@@ -806,7 +809,7 @@ files:
       - (*ring).lruTouch
       - (*ring).evict
       - (*loop).endBatch
-      - (*ring).compactAll
+      - (*ring).compactListed
       - (*loop).now
       - (*loop).lookup
       - (*loop).Write
@@ -1684,6 +1687,12 @@ types:
       - doc: dirtyHead starts the list of slots to flush at the end of the batch.
         name: dirtyHead
         type: int32
+      - doc: |-
+          compact lists the slots whose spill's head was consumed in the batch,
+          compacted at its end. A slice, not a link in the slot: a slot released
+          inside the batch is reset whole, and a link would cut the list there.
+        name: compact
+        type: "[]int32"
       - doc: drv is the backend.
         name: drv
         type: driver
@@ -1753,6 +1762,13 @@ types:
           deliverSpill hands n bytes read straight into slot's spill (spillRoom) to
           the handler with the rest of the spill.
         name: deliverSpill
+        params: slot int32, n int
+        recv: r *ring
+      - doc: |-
+          consumed advances slot's spill past the n bytes the handler consumed: a
+          spill consumed whole goes back once the batch is over, a head consumed is
+          listed for the compaction at the batch's end.
+        name: consumed
         params: slot int32, n int
         recv: r *ring
       - doc: hasSpill reports whether slot holds unconsumed input.
@@ -1837,8 +1853,12 @@ types:
         name: evict
         recv: r *ring
         results: int
-      - doc: compactAll compacts every open slot's spill.
-        name: compactAll
+      - doc: |-
+          compactListed compacts the spill of every slot listed in the batch, so the
+          batch's end costs the slots it touched, not the open ones. A slot released
+          and taken again since its listing is compacted harmlessly: compactSpill
+          moves nothing it does not have to.
+        name: compactListed
         recv: r *ring
       - doc: publish copies the ring's counters to its atomics.
         name: publish

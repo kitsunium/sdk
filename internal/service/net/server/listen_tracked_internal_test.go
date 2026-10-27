@@ -38,11 +38,11 @@ func Test_trackedListener_Accept(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		var id corenet.IdentityValue
+		var cfg *tls.Config
 		if c.secured {
-			id = testIdentity(t)
+			cfg = testIdentity(t).ServerConfig()
 		}
-		ln, _, err := listen(t.Context(), corenet.AddressValue{Network: "tcp", Addr: "127.0.0.1:0"}, id, false, true, 1)
+		ln, _, err := listen(t.Context(), corenet.AddressValue{Network: "tcp", Addr: "127.0.0.1:0"}, cfg, false, true, 1)
 		if err != nil {
 			t.Fatalf("listen: %v", err)
 		}

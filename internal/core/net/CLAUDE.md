@@ -51,7 +51,7 @@ adapter.
 | `duration.go` | `DurationValue` — config-friendly duration (`"30s"` or nanoseconds) |
 | `address.go` | `AddressValue` — one socket to bind |
 | `limits.go` | `LimitsValue` — one listener group's resource ceilings; a zero field means the domain default, never unbounded |
-| `loop.go` | the loop engine's contract values (ADR 0186 §D4): `LoopConnRef` — ring, slot, generation, comparable, the zero value stale; `PostFunc` — an operation posted to a loop, a plain function and an integer, no closure; `OptionKind` + its constants + `String` — the group options a loop group judges at `Start`, an iota whose kinds 16–18 (`OptionPlaintext`, `OptionName`, `OptionEngine`, ADR 0187) 19 (`OptionLoopMiddleware`, `UseLoop`, ADR 0191) and 20 (`OptionBatchReplies`, ADR 0192) follow `OptionPreHandshake` so no earlier value moves |
+| `loop.go` | the loop engine's contract values (ADR 0186 §D4): `LoopConnRef` — ring, slot, generation, comparable, the zero value stale; `PostFunc` — an operation posted to a loop, a plain function and an integer, no closure; `OptionKind` + its constants + `String` — the group options a loop group judges at `Start`, an iota whose kinds 16–18 (`OptionPlaintext`, `OptionName`, `OptionEngine`, ADR 0187) 19 (`OptionLoopMiddleware`, `UseLoop`, ADR 0191) 20 (`OptionBatchReplies`, ADR 0192) and 21 (`OptionProtocols`, `Protocols`, ADR 0195) follow `OptionPreHandshake` so no earlier value moves |
 | `loop_layer.go` | `LoopLayer` + `NewLoopLayer` — the base a loop middleware's layer embeds: it forwards the eight callbacks (the six of `LoopHandler`, `Honours` to a `LoopOptionHonourer`, `OnStart` to a `LoopStarter`) and `Next` returns the wrapped handler, the `LoopLayered` port server's Start walks (ADR 0191 §D2) |
 | `engine.go` | `EngineValue` + `EngineAuto` (the zero: the handler's type chooses), `EngineGoroutine`, `EngineLoop` + `String` — the engine family `Engine` names (ADR 0187 §D3) |
 | `loop_state.go` | `LoopStateValue` — one loop group's backend, probe stage, fallback, sizing (`Loops`, `Rings` and where it came from), the effective `RLIMIT_NOFILE` and `GOMAXPROCS`, the batch p99 — and `LoopRingStateValue`, one ring's counters (ADR 0186 §D8); `Capabilities`, the kernel capabilities' report (ADR 0189) |
@@ -274,14 +274,14 @@ SSE terminator scan — moved with the code that pays them, to
 | 0.2.11.59 | `LoopGroupStalled` | 69 |
 | 0.2.11.60 | `LoopCapabilityRefused` | 78 |
 | 0.2.11.61 | `LoopMiddlewareInvalid` | 78 |
+| 0.2.11.62 | `ProtocolsRefused` | 78 |
+| 0.2.11.63 | `LoopOutboundFull` | 75 |
 | 0.2.11.64 | `HandlerAmbiguous` | 64 |
 | 0.2.11.65 | `HandlerUnsupported` | 64 |
 | 0.2.11.66 | `PlaintextRequired` | 78 |
 | 0.2.11.67 | `PacketOptionUnsupported` | 78 |
 
-`0.2.11.62` – `0.2.11.63` are claimed by changes still open (ADR 0195's
-`ProtocolsRefused`, ADR 0194's `LoopOutboundFull`); `0.2.11.68` –
-`0.2.11.255` reserved. The `HTTP1*` refusals carry their
+`0.2.11.68` – `0.2.11.255` reserved. The `HTTP1*` refusals carry their
 answer's status in `http:` (400, 413, 414, 417, 431, 501).
 
 ## Imports allowed
@@ -357,6 +357,8 @@ cd internal/core && GOWORK=off go test -race -cover ./net/...
   `LoopOffloader`, `HTTP1Worker`, `LoopOutboundFull` (`0.2.11.63`),
   `LoopValue.Outbound`, `LoopStateValue.OutboundRefused`,
   `HTTP1ResponseValue.Pending`/`Job` — `docs/adr/0194-a-loop-lane-offloads-to-its-own-worker-and-an-http1-answer-may-be-pending.md`
+- ADR 0195 — `OptionProtocols`, `ProtocolsRefused` (`0.2.11.62`) —
+  `docs/adr/0195-an-http-groups-protocols-are-computed-once-and-its-alpn-follows-them.md`
 - ADR 0197 — `HandlerAmbiguous`, `HandlerUnsupported`, `PlaintextRequired`,
   `PacketOptionUnsupported` (`0.2.11.64` – `0.2.11.67`) —
   `docs/adr/0197-the-simple-api-places-a-handler-by-its-type-and-an-http-group-says-plaintext.md`

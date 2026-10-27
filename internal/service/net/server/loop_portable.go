@@ -86,6 +86,8 @@ type portableConn struct {
 	peerDone  bool
 	closeErr  error
 	reasonSet bool
+	// compact lists the connection on its loop's compaction list.
+	compact bool
 }
 
 // portableGroup is the portable backend (ADR 0186 §D3, §D7): the default
@@ -164,6 +166,11 @@ type portableLoop struct {
 	// batchAcks are the readers waiting on the current batch.
 	batchAcks []chan struct{}
 	dirty     []int32
+	// compact lists the slots whose spill's head was consumed in the batch.
+	compact []int32
+	// timersAt is when the next scan of the timers is due: a tick after the
+	// last, or the earliest deadline set since, whichever comes first.
+	timersAt time.Time
 }
 
 // startPortable starts the portable backend on lns, with one lane per loop
@@ -316,12 +323,7 @@ func (pl *portableLoop) run(done chan<- struct{}) {
 		case <-pl.wake:
 		case <-tick.C:
 		}
-		pl.collect()
-		pl.drainPosts()
-		pl.timers()
-		pl.control()
-		pl.h.OnBatchEnd(pl)
-		pl.endBatch()
+		pl.batch()
 		//: finished.
 		if pl.g.stopReq.Load() || (pl.draining && pl.live.Load() == 0) {
 			pl.closeAll()
@@ -329,6 +331,22 @@ func (pl *portableLoop) run(done chan<- struct{}) {
 			return
 		}
 	}
+}
+
+// batch serves the events queued behind the first one, the posts, the timers
+// when they are due and the drain, then ends the batch. A batch costs what it
+// touches: the timers' scan of every connection runs once a tick, not once a
+// batch.
+func (pl *portableLoop) batch() {
+	pl.collect()
+	pl.drainPosts()
+	//: a tick since the last scan, or a deadline due.
+	if now := time.Now(); !now.Before(pl.timersAt) {
+		pl.timers(now)
+	}
+	pl.control()
+	pl.h.OnBatchEnd(pl)
+	pl.endBatch()
 }
 
 // collect takes the events already queued, up to a batch.
@@ -563,6 +581,11 @@ func (pl *portableLoop) deliver(slot int32, pc *portableConn, data []byte) {
 	//: consumed from the spill, or a new tail kept.
 	if len(pc.spill) > pc.spillOff {
 		pc.spillOff += n
+		//: a head consumed, listed once for the batch's end.
+		if n > 0 && !pc.compact {
+			pc.compact = true
+			pl.compact = append(pl.compact, slot)
+		}
 	} else if n < len(buf) {
 		tail := buf[n:]
 		//: past the cap.
@@ -625,26 +648,39 @@ func (pl *portableLoop) finish(slot int32, pc *portableConn, err error) {
 	pl.free = append(pl.free, slot)
 }
 
-// timers fires deadlines and closes idle connections.
-func (pl *portableLoop) timers() {
-	now := time.Now()
+// timers fires deadlines and closes idle connections, and sets the next scan
+// a tick later, or at the earliest deadline still to come when it is sooner:
+// a deadline OnTimeout sets on any connection lowers it as SetDeadline does.
+func (pl *portableLoop) timers(now time.Time) {
+	pl.timersAt = now.Add(portableTick)
 	//: every open connection; the portable backend pays a scan per tick.
 	for slot, pc := range pl.conns {
+		//: open ones only.
+		if pc.open {
+			pl.timer(int32(slot), pc, now)
+		}
+	}
+}
+
+// timer closes pc when it is idle past the bound with nothing to send, fires
+// its deadline when it came, and brings the next scan forward to a deadline
+// still to come before it.
+func (pl *portableLoop) timer(slot int32, pc *portableConn, now time.Time) {
+	//: idle past the bound with nothing to send.
+	if pl.idle > 0 && now.Sub(pc.lastIO) >= pl.idle && pl.pending(pc) == 0 {
+		pc.reasonSet, pc.closeErr = true, os.ErrDeadlineExceeded
+		pl.finish(slot, pc, os.ErrDeadlineExceeded)
 		//: closed.
-		if !pc.open {
-			continue
-		}
-		//: idle past the bound with nothing to send.
-		if pl.idle > 0 && now.Sub(pc.lastIO) >= pl.idle && pl.pending(pc) == 0 {
-			pc.reasonSet, pc.closeErr = true, os.ErrDeadlineExceeded
-			pl.finish(int32(slot), pc, os.ErrDeadlineExceeded)
-			continue
-		}
-		//: the handler's deadline.
-		if !pc.deadline.IsZero() && !now.Before(pc.deadline) {
-			pc.deadline = time.Time{}
-			pl.h.OnTimeout(pl, corenet.LoopConnRef{Slot: uint32(slot), Gen: pc.gen})
-		}
+		return
+	}
+	//: the handler's deadline.
+	if !pc.deadline.IsZero() && !now.Before(pc.deadline) {
+		pc.deadline = time.Time{}
+		pl.h.OnTimeout(pl, corenet.LoopConnRef{Slot: uint32(slot), Gen: pc.gen})
+	}
+	//: a deadline still to come may come before the tick.
+	if !pc.deadline.IsZero() && pc.deadline.Before(pl.timersAt) {
+		pl.timersAt = pc.deadline
 	}
 }
 
@@ -686,7 +722,7 @@ func (pl *portableLoop) endBatch() {
 		a <- struct{}{}
 	}
 	pl.batchAcks = pl.batchAcks[:0]
-	pl.compactSpills()
+	pl.compactListed()
 	pl.batches.Add(1)
 }
 
@@ -719,17 +755,22 @@ func (pl *portableLoop) settle(slot int32) {
 	}
 }
 
-// compactSpills moves every spill's consumed head out, now that no
-// handed-out buffer survives.
-func (pl *portableLoop) compactSpills() {
-	//: every connection.
-	for _, pc := range pl.conns {
+// compactListed moves the consumed head of every spill listed in the batch
+// out, now that no handed-out buffer survives, so the batch's end costs the
+// connections it touched, not the open ones. A slot taken again since its
+// listing holds a new connection, compacted harmlessly.
+func (pl *portableLoop) compactListed() {
+	//: each listed slot, then the list is empty for the next batch.
+	for _, slot := range pl.compact {
+		pc := pl.conns[slot]
+		pc.compact = false
 		//: a consumed head moves out.
 		if pc.open && pc.spillOff > 0 {
 			pc.spill = append(pc.spill[:0], pc.spill[pc.spillOff:]...)
 			pc.spillOff = 0
 		}
 	}
+	pl.compact = pl.compact[:0]
 }
 
 // closeAll closes every connection as the backend stops.
@@ -840,6 +881,10 @@ func (pl *portableLoop) SetDeadline(ref corenet.LoopConnRef, d time.Duration) er
 		pc.deadline = time.Time{}
 	} else {
 		pc.deadline = time.Now().Add(d)
+		//: due before the next scan: the scan comes sooner.
+		if pc.deadline.Before(pl.timersAt) {
+			pl.timersAt = pc.deadline
+		}
 	}
 	//: armed.
 	return nil
