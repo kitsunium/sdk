@@ -140,18 +140,15 @@ func (r *Raft) mayRecordTo(m core.MessageValue) bool {
 // no answer and moves no term of its own, and a PreVote binds no receiver,
 // which raises no term on it and records nothing (R2-03). A follower of a
 // live leader drops it, a leader that hears a majority does too, and a
-// grant reaches a node that is no candidate, which drops it: only a
-// follower or a learner asks, never a campaign that an install left outside
-// the voters, which keeps its role until the campaign ends (confChanged)
-// and would count the grants. Asking binds nothing the silence forbids: a
-// silent node still grants no vote and acknowledges nothing. The Ready's
+// grant reaches a node that is no candidate, which drops it
+// (mayAskForLeader). Asking binds nothing the silence forbids: a silent
+// node still grants no vote and acknowledges nothing. The Ready's
 // LeaderUnheard tells the driver, which sends a joining node's JOIN again
 // (#632).
 func (r *Raft) askForLeader(now time.Time) {
 	wait := askElectionTimeouts * r.timing.ElectionTimeoutMax
-	if r.promotable() || (r.role != core.RoleFollower && r.role != core.RoleLearner) ||
-		r.speaks() < Protocol2 || r.mutated(mutLearnerNeverAsks) ||
-		now.Sub(r.lastLeaderContact) < wait || (!r.askedAt.IsZero() && now.Sub(r.askedAt) < wait) {
+	if !r.mayAskForLeader() || now.Sub(r.lastLeaderContact) < wait ||
+		(!r.askedAt.IsZero() && now.Sub(r.askedAt) < wait) {
 		return
 	}
 	r.askedAt = now
@@ -168,6 +165,16 @@ func (r *Raft) askForLeader(now time.Time) {
 			})
 		}
 	}
+}
+
+// mayAskForLeader reports whether this node asks for the leader's record
+// once it hears no leader: a follower or a learner that promotable
+// excludes, speaking protocol 2. Never a campaign, even one that an
+// install left outside the voters: it keeps its role until the campaign
+// ends (confChanged), and would count the grants to the question.
+func (r *Raft) mayAskForLeader() bool {
+	return (r.role == core.RoleFollower || r.role == core.RoleLearner) && !r.promotable() &&
+		r.speaks() >= Protocol2 && !r.mutated(mutLearnerNeverAsks)
 }
 
 // takeLeaderRecord admits the leader a member vouched for, provisionally:

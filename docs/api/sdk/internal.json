@@ -53258,7 +53258,7 @@
         {
           "name": "LeaderUnheard",
           "type": "bool",
-          "doc": "LeaderUnheard is set when this learner, which never campaigns, heard\nno leader for askElectionTimeouts maximum election timeouts and asked\nits members for the leader's record: the driver of a joining node\nsends its JOIN again (#632, #639).\n"
+          "doc": "LeaderUnheard is set when this node, which may not campaign (a\nlearner, a silent voter, one with no table), heard no leader for\naskElectionTimeouts maximum election timeouts and asked its members\nfor the leader's record: the driver of a joining node sends its JOIN\nagain (#632, #639, #718).\n"
         },
         {
           "name": "Fetch",
