@@ -252,6 +252,11 @@ func (s *Server) judgePacketOptions(shim *StreamGroup) {
 	if err := shim.engineRefusal(); err != nil {
 		s.recordDeclError(err)
 	}
+	//: a datagram group serves no HTTP: Protocols is refused at Start rather
+	//: than dropped with the rest of the shim (ADR 0195).
+	if err := shim.protocolsRefusal(); err != nil {
+		s.recordDeclError(err)
+	}
 }
 
 // recordDeclError keeps the first declaration error. The caller holds s.mu.

@@ -353,12 +353,12 @@ func Test_listen(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		addr := targetAddr(t, c.target, c.addr)
-		var id corenet.IdentityValue
+		var cfg *tls.Config
 		if c.secured {
-			id = testIdentity(t)
+			cfg = testIdentity(t).ServerConfig()
 		}
 
-		ln, _, err := listen(t.Context(), corenet.AddressValue{Network: c.network, Addr: addr}, id, false, false, 1)
+		ln, _, err := listen(t.Context(), corenet.AddressValue{Network: c.network, Addr: addr}, cfg, false, false, 1)
 
 		if c.wantCode != 0 {
 			if !errs.HasCode(err, c.wantCode) {

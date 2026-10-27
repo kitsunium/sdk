@@ -456,6 +456,13 @@ packages:
         type: errs.Code
       - const:
           - doc: |-
+              CodeProtocolsRefused identifies a Protocols option, or a TLS identity's
+              NextProtos, that an HTTP group cannot serve.
+            name: CodeProtocolsRefused
+            value: "0x00_02_0B_3E"
+        type: errs.Code
+      - const:
+          - doc: |-
               CodeLoopOutboundFull identifies a job refused because the lane's queue to its
               worker is full.
             name: CodeLoopOutboundFull
@@ -610,6 +617,14 @@ packages:
         name: OptionBatchReplies
         type: OptionKind
         value: "20"
+      - blockDoc: The group options a loop group judges at Start, by kind.
+        doc: |-
+          OptionProtocols is Protocols. Only an HTTP group served by net/http
+          honours it; a loop group refuses it with LoopOptionUnsupported, and any
+          other group with ProtocolsRefused.
+        name: OptionProtocols
+        type: OptionKind
+        value: "21"
       - blockDoc: The engine families a group may name with Engine. The zero value is EngineAuto.
         doc: |-
           EngineAuto lets the group's handler type choose its engine (ADR 0187): a loop
@@ -2470,6 +2485,20 @@ packages:
             private: "core/net: a loop middleware's layer does not forward every callback to the next handler"
             public: A loop middleware does not forward every callback
             reason: LOOP_MIDDLEWARE_INVALID
+          - code: CodeProtocolsRefused
+            doc: |-
+              ProtocolsRefused is returned by Start for an HTTP group whose Protocols
+              option is empty, holds an empty identifier, repeats or names an unknown
+              one, asks for h2
+              without TLS, or contradicts its identity's NextProtos — naming an HTTP
+              version the group does not serve, or none it does — and for a group that
+              serves no http.Handler given Protocols. The "reason" field names it
+              (ADR 0195).
+            exit: CONFIG
+            name: ProtocolsRefused
+            private: "core/net: the group's HTTP protocols cannot be served as configured"
+            public: The group's HTTP protocols are misconfigured
+            reason: PROTOCOLS_REFUSED
           - code: CodeLoopCapabilityRefused
             doc: |-
               LoopCapabilityRefused is returned by Start for a loop group whose
@@ -5461,6 +5490,30 @@ packages:
         name: Plaintext
         out:
           - type: GroupOption
+      - doc: |-
+          Protocols sets the HTTP versions an HTTP group serves, by ALPN identifier —
+          "http/1.1" and "h2" — in the order its TLS listeners prefer them, unless the
+          group's identity names NextProtos: the listeners then offer the identity's
+          entries the list holds, in the identity's order (ADR 0195). Unset, a group
+          with TLS serves both, h2 first, and a group without serves HTTP/1.1. It is
+          judged at Start: an empty list, an empty, repeated or unknown identifier,
+          "h2" without TLS (cleartext HTTP/2 is not served), an identity
+          whose NextProtos names a version the list excludes or none it includes, and
+          any group that does not serve an http.Handler are refused with
+          ProtocolsRefused; a loop group refuses it with LoopOptionUnsupported.
+
+          A request that arrived over HTTP/2 has no http.Hijacker: a handler that
+          hijacks its connection — a WebSocket upgrade written by hand, say — serves
+          HTTP/1.1 clients only, and a TLS group that relies on it for every client
+          says Protocols("http/1.1"), the behaviour it had before HTTP/2 was
+          negotiated by default.
+        in:
+          - name: protos
+            type: string
+        name: Protocols
+        out:
+          - type: GroupOption
+        variadic: true
       - doc: |-
           Name names the group in State, logs and errors (ADR 0187). On a group
           declared with an empty name it sets the name, which must then be unique like
@@ -8561,6 +8614,12 @@ packages:
             type: OptionKind
             typed: true
             value: "20"
+          - doc: OptionProtocols is Protocols. Only an HTTP group honours it.
+            name: OptionProtocols
+            reexport: corenet.OptionProtocols
+            type: OptionKind
+            typed: true
+            value: "21"
       - alias:
           - doc: |-
               EngineValue names the engine family a group runs on, passed by Engine. The
@@ -8704,6 +8763,10 @@ packages:
           - doc: LoopMiddlewareInvalid reports a loop middleware whose layer does not forward every callback.
             name: LoopMiddlewareInvalid
             reexport: corenet.LoopMiddlewareInvalid
+            type: "*errs.Error"
+          - doc: ProtocolsRefused reports an HTTP group's Protocols, or its identity's NextProtos, that it cannot serve.
+            name: ProtocolsRefused
+            reexport: corenet.ProtocolsRefused
             type: "*errs.Error"
           - doc: LoopCapabilityRefused reports a LoopValue.Capabilities entry a loop group cannot opt into.
             name: LoopCapabilityRefused
@@ -9078,6 +9141,28 @@ packages:
           name: Plaintext
           out:
             - type: GroupOption
+      - func:
+          doc: |-
+            Protocols sets the HTTP versions an HTTP group serves, by ALPN identifier —
+            "http/1.1" and "h2" — in the order its TLS listeners prefer them, unless the
+            identity names NextProtos, whose order then wins over the entries the list
+            holds. Unset, a group with TLS serves both, h2 first, and one without serves
+            HTTP/1.1. Start refuses with ProtocolsRefused an empty list, an empty,
+            repeated or unknown identifier, h2 without TLS, an identity whose NextProtos names a version the
+            list excludes or none it includes, and a group that serves no http.Handler;
+            a loop group refuses it with LoopOptionUnsupported.
+
+            A request that arrived over HTTP/2 has no http.Hijacker: a handler that
+            hijacks its connection serves HTTP/1.1 clients only, and a TLS group that
+            relies on it for every client says Protocols("http/1.1").
+          forward: svcserver.Protocols
+          in:
+            - name: protos
+              type: string
+          name: Protocols
+          out:
+            - type: GroupOption
+          variadic: true
       - func:
           doc: |-
             Name names the group in State, logs and errors. On a group declared with an

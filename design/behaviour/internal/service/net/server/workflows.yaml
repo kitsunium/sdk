@@ -197,3 +197,27 @@ workflows:
           range: lp.RingStates
           value: r
       - return: out
+  - of: checkProtocols
+    steps:
+      - opt:
+          do:
+            - return: "\"empty\""
+          when: len(protos) == 0
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: "\"empty identifier\""
+                when: p == ""
+            - opt:
+                do:
+                  - return: p
+                when: (p != protoHTTP1 && p != protoH2) || slices.Contains(protos[:i], p)
+          key: i
+          range: protos
+          value: p
+      - opt:
+          do:
+            - return: "\"h2 without TLS\""
+          when: "!tlsOn && slices.Contains(protos, protoH2)"
+      - return: "\"\""
