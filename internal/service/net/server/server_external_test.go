@@ -215,6 +215,12 @@ func selfSignedIdentity(t *testing.T) corenet.IdentityValue {
 // adoption child has none — and it also returns the certificate, so a client
 // can trust exactly that one.
 func newSelfSignedIdentity() (corenet.IdentityValue, *x509.Certificate, error) {
+	return newSelfSignedIdentityALPN(nil)
+}
+
+// newSelfSignedIdentityALPN is newSelfSignedIdentity with next as the
+// identity's NextProtos.
+func newSelfSignedIdentityALPN(next []string) (corenet.IdentityValue, *x509.Certificate, error) {
 	key, kerr := ecdsa.GenerateKey(elliptic.P256(), nil)
 	if kerr != nil {
 		return corenet.IdentityValue{}, nil, kerr
@@ -245,6 +251,7 @@ func newSelfSignedIdentity() (corenet.IdentityValue, *x509.Certificate, error) {
 		CertPEM:    pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
 		KeyPEM:     pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}),
 		MinVersion: tls.VersionTLS12,
+		NextProtos: next,
 	})
 	if ierr != nil {
 		return corenet.IdentityValue{}, nil, ierr

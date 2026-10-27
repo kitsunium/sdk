@@ -340,6 +340,11 @@ constants:
           OptionBatchReplies is BatchReplies. A datagram group honours it; a stream
           group, goroutine or loop, refuses it with LoopOptionUnsupported (ADR 0192).
         name: OptionBatchReplies
+      - doc: |-
+          OptionProtocols is Protocols. Only an HTTP group served by net/http
+          honours it; a loop group refuses it with LoopOptionUnsupported, and any
+          other group with ProtocolsRefused.
+        name: OptionProtocols
     name: OptionNone
   - doc: The loop backends. The zero value is LoopBackendAuto.
     grouped: true
@@ -2234,6 +2239,7 @@ vars:
           	OptionEngine:            "Engine",
           	OptionLoopMiddleware:    "UseLoop",
           	OptionBatchReplies:      "BatchReplies",
+          	OptionProtocols:         "Protocols",
           }
     name: optionNames
   - doc: |-

@@ -29,6 +29,8 @@ const (
 	// fSending is output the backend holds: EPOLLOUT armed, or a send in
 	// flight.
 	fSending
+	// fCompact puts the slot on its ring's compaction list.
+	fCompact
 )
 
 // The reasons a connection is closed, mapped to the preallocated error

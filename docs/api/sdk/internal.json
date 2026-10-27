@@ -26457,6 +26457,22 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeProtocolsRefused",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeProtocolsRefused",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133950",
+      "code": {
+        "value": "0.2.11.62"
+      },
+      "doc": "CodeProtocolsRefused identifies a Protocols option, or a TLS identity's\nNextProtos, that an HTTP group cannot serve.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeRequestDenied",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -29951,6 +29967,19 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.OptionProtocols",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OptionProtocols",
+      "spelled": "OptionKind",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.OptionKind",
+      "value": "21",
+      "doc": "OptionProtocols is Protocols. Only an HTTP group served by net/http\nhonours it; a loop group refuses it with LoopOptionUnsupported, and any\nother group with ProtocolsRefused.\n",
+      "file": "core/net/loop.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.OptionReadBufferSize",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -30459,6 +30488,23 @@
       "canonical": "func(io github.com/kitsunium/sdk/internal/core/net.LoopIO, arg uintptr)",
       "doc": "PostFunc is an operation posted to a loop with LoopIO.Post. It runs once, on\nthe loop's thread, with the loop's LoopIO and the integer it was posted with.\nIt is a plain function rather than a closure so the queue holds no pointer the\nposter built: a top-level function and an index into the caller's own table\npost without allocating.\n",
       "file": "core/net/loop.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.ProtocolsRefused",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "ProtocolsRefused",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.62",
+        "reason": "PROTOCOLS_REFUSED",
+        "public": "The group's HTTP protocols are misconfigured"
+      },
+      "doc": "ProtocolsRefused is returned by Start for an HTTP group whose Protocols\noption is empty, holds an empty identifier, repeats or names an unknown\none, asks for h2\nwithout TLS, or contradicts its identity's NextProtos — naming an HTTP\nversion the group does not serve, or none it does — and for a group that\nserves no http.Handler given Protocols. The \"reason\" field names it\n(ADR 0195).\n",
+      "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
     },
@@ -65513,6 +65559,18 @@
       "canonical": "func(a *github.com/kitsunium/sdk/internal/service/net/server.Admission) github.com/kitsunium/sdk/internal/service/net/server.GroupOption",
       "doc": "PreHandshake puts the group's accepted connections under a, before any\nTLS byte is read (ADR 0174 D2).\n",
       "file": "service/net/server/admission.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/server.Protocols",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/net/server",
+      "name": "Protocols",
+      "spelled": "func(protos ...string) GroupOption",
+      "canonical": "func(protos ...string) github.com/kitsunium/sdk/internal/service/net/server.GroupOption",
+      "doc": "Protocols sets the HTTP versions an HTTP group serves, by ALPN identifier —\n\"http/1.1\" and \"h2\" — in the order its TLS listeners prefer them, unless the\ngroup's identity names NextProtos: the listeners then offer the identity's\nentries the list holds, in the identity's order (ADR 0195). Unset, a group\nwith TLS serves both, h2 first, and a group without serves HTTP/1.1. It is\njudged at Start: an empty list, an empty, repeated or unknown identifier,\n\"h2\" without TLS (cleartext HTTP/2 is not served), an identity\nwhose NextProtos names a version the list excludes or none it includes, and\nany group that does not serve an http.Handler are refused with\nProtocolsRefused; a loop group refuses it with LoopOptionUnsupported.\n\nA request that arrived over HTTP/2 has no http.Hijacker: a handler that\nhijacks its connection — a WebSocket upgrade written by hand, say — serves\nHTTP/1.1 clients only, and a TLS group that relies on it for every client\nsays Protocols(\"http/1.1\"), the behaviour it had before HTTP/2 was\nnegotiated by default.\n",
+      "file": "service/net/server/stream_group_protocols.go",
       "layer": "service",
       "family": "net"
     },
