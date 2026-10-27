@@ -37,6 +37,11 @@ const (
 	ethernetMTU int = 1500
 	// segmentSizeBytes is UDP_SEGMENT's control payload: a C uint16.
 	segmentSizeBytes int = 2
+	// gsoInvalidLimit is how many GSO sends in a row the kernel may refuse with
+	// EINVAL before GSO is switched off for the socket: a refusal that no
+	// smaller segment cures — SO_NO_CHECK, a device that takes no GSO — would
+	// otherwise cost one failed sendmmsg a batch for the socket's life.
+	gsoInvalidLimit int = 4
 )
 
 // gsoSegments is how many datagrams of size bytes one GSO send of a socket of
@@ -79,6 +84,22 @@ type pendingReply struct {
 	name syscall.RawSockaddrInet6
 	// namelen is the length of name the kernel reads.
 	namelen uint32
+}
+
+// addr is the peer e was queued for, as WriteTo takes it: the fallback of a
+// socket whose sendmmsg is refused, off the batched path.
+func (e *pendingReply) addr() stdnet.Addr {
+	//: the IPv4 sockaddr encode wrote.
+	if e.name.Family == syscall.AF_INET {
+		sa4 := (*syscall.RawSockaddrInet4)(unsafe.Pointer(&e.name))
+		//: its address and port.
+		return &stdnet.UDPAddr{IP: stdnet.IPv4(sa4.Addr[0], sa4.Addr[1], sa4.Addr[2], sa4.Addr[3]), Port: hostPort(sa4.Port)}
+	}
+	//: an IPv6 one, unzoned: encode leaves zoned peers to WriteTo.
+	ip := make(stdnet.IP, stdnet.IPv6len)
+	copy(ip, e.name.Addr[:])
+	//: its address and port.
+	return &stdnet.UDPAddr{IP: ip, Port: hostPort(e.name.Port)}
 }
 
 // replySpan is one message of a send: count consecutive queued replies from
@@ -135,6 +156,25 @@ type multiWriter struct {
 	// plainUntil is the queue index below which replies leave one by one:
 	// those of a span a path with a smaller MTU refused (EINVAL).
 	plainUntil int
+	// segmentCeiling, when not zero, is the largest segment a GSO send may
+	// carry on this socket from now on: one below the smallest the kernel
+	// refused with EINVAL, so a path with a smaller MTU costs one refused
+	// send, not one a batch. It only falls, for the socket's life.
+	segmentCeiling int
+	// invalidRun counts the GSO sends refused with EINVAL since the last GSO
+	// send that left; at gsoInvalidLimit, GSO is switched off.
+	invalidRun int
+	// noMmsg is set once sendmmsg itself is refused — ENOSYS or EPERM, under
+	// a seccomp filter that allows sendto — while a WriteTo of the same reply
+	// leaves: every batch then leaves one WriteTo a reply.
+	noMmsg bool
+	// sent, sendErrno, from and to are one sendmmsg's arguments and results,
+	// and write the function the descriptor runs, bound once at construction,
+	// so a send moves nothing to the heap.
+	sent      int
+	sendErrno syscall.Errno
+	from, to  int
+	write     func(fd uintptr) bool
 }
 
 // newMultiWriter builds a batched sink over pc. It fails on a socket that is
@@ -183,6 +223,12 @@ func newMultiWriter(pc stdnet.PacketConn, sc rawConnProvider, counters *datagram
 	}
 	w.oob = make([]byte, replyQueue*w.controlSpace)
 	w.gso.Store(gso)
+	//: a full send buffer waits for room, as WriteTo would.
+	w.write = func(fd uintptr) bool {
+		w.sent, w.sendErrno = w.send(fd, w.headers[w.from:w.to])
+		//: anything but a full buffer ends the wait.
+		return w.sendErrno != syscall.EAGAIN
+	}
 	//: ready for the read loop's first batch.
 	return w, nil
 }
@@ -286,8 +332,12 @@ func (w *multiWriter) flush() {
 
 // flushLocked sends the queue and empties it. mu is held.
 func (w *multiWriter) flushLocked() {
+	//: sendmmsg refused for good: one WriteTo a reply.
+	if w.noMmsg {
+		w.writeEach(0, len(w.queue))
+	}
 	//: built and sent again from wherever a send asks to resume.
-	for start := 0; start < len(w.queue); {
+	for start := 0; start < len(w.queue) && !w.noMmsg; {
 		start = w.sendAll(w.build(start))
 	}
 	w.queue = w.queue[:0]
@@ -302,6 +352,10 @@ func (w *multiWriter) flushLocked() {
 func (w *multiWriter) build(start int) int {
 	gso := w.gso.Load()
 	limitSize := maxSegment(w.family)
+	//: a path refused larger segments: none past them from now on.
+	if w.segmentCeiling > 0 {
+		limitSize = min(limitSize, w.segmentCeiling)
+	}
 	messages := 0
 	//: one message per run.
 	for e := start; e < len(w.queue); messages++ {
@@ -388,8 +442,15 @@ func (w *multiWriter) sendAll(messages int) int {
 		}
 		//: the kernel took sent messages: resume after them.
 		if err == nil && sent > 0 {
+			w.left(k, k+sent)
 			k += sent
 			continue
+		}
+		//: sendmmsg itself refused: the rest leaves one WriteTo a reply.
+		if errno == syscall.ENOSYS || errno == syscall.EPERM {
+			w.unavailable(k, messages)
+			//: every reply left or was counted.
+			return len(w.queue)
 		}
 		//: message k was refused: rebuilt from a span, or counted and passed.
 		if resume, again := w.refused(w.spans[k], errno); again {
@@ -414,9 +475,17 @@ func (w *multiWriter) refused(span replySpan, errno syscall.Errno) (resume int, 
 		w.disableGSO()
 		//: rebuilt from this span.
 		return span.first, true
-	//: the segment is past this path's MTU: this span leaves one by one.
+	//: the segment is past this path's MTU: this span leaves one by one, no
+	//: segment this large is sent again, and a refusal no smaller segment
+	//: cures switches GSO off.
 	case gso && errno == syscall.EINVAL:
 		w.plainUntil = span.first + span.count
+		w.segmentCeiling = w.queue[span.first].size - 1
+		w.invalidRun++
+		//: as persistent as the device's EIO.
+		if w.invalidRun >= gsoInvalidLimit {
+			w.disableGSO()
+		}
 		//: rebuilt from this span.
 		return span.first, true
 	//: a GSO message past the IP length is a sizing bug, counted; GSO stays
@@ -436,24 +505,67 @@ func (w *multiWriter) refused(span replySpan, errno syscall.Errno) (resume int, 
 // socket's send buffer is full: how many messages the kernel took, or the
 // errno of the first it refused, or the socket's failure.
 func (w *multiWriter) sendFrom(k, messages int) (sent int, err error) {
-	var errno syscall.Errno
-	cerr := w.raw.Write(func(fd uintptr) bool {
-		sent, errno = w.send(fd, w.headers[k:messages])
-		//: a full send buffer waits for room, as WriteTo would.
-		return errno != syscall.EAGAIN
-	})
+	w.from, w.to, w.sent, w.sendErrno = k, messages, 0, 0
+	cerr := w.raw.Write(w.write)
 	//: the socket's failure first.
 	if cerr != nil {
 		//: closed, typically.
 		return 0, cerr
 	}
 	//: a refusal, as its errno.
-	if errno != 0 {
+	if w.sendErrno != 0 {
 		//: message k's.
-		return 0, errno
+		return 0, w.sendErrno
 	}
 	//: what the kernel took.
-	return sent, nil
+	return w.sent, nil
+}
+
+// left notes that messages [k, end) left: a GSO send among them proves GSO
+// works on this socket, and ends a run of EINVAL refusals.
+func (w *multiWriter) left(k, end int) {
+	//: any GSO message among them.
+	for ; k < end; k++ {
+		//: one GSO send left.
+		if w.spans[k].count > 1 {
+			w.invalidRun = 0
+			//: the run is over.
+			return
+		}
+	}
+}
+
+// unavailable serves messages [k, messages) after sendmmsg itself was refused,
+// one WriteTo a reply. A reply that leaves so proves the refusal was the
+// syscall's — a seccomp filter that allows sendto, not sendmmsg — and every
+// later batch then leaves the same way; one that fails too, a firewall's
+// EPERM for instance, is counted, and sendmmsg is tried again next batch.
+func (w *multiWriter) unavailable(k, messages int) {
+	//: from the first reply of message k to the last of the last message.
+	first := w.spans[k].first
+	last := w.spans[messages-1].first + w.spans[messages-1].count
+	//: one reply left: the syscall, not the path, refused.
+	if w.writeEach(first, last) > 0 {
+		w.noMmsg = true
+	}
+}
+
+// writeEach writes queued replies [first, last) one WriteTo each, counts each
+// that fails, and returns how many left.
+func (w *multiWriter) writeEach(first, last int) int {
+	left := 0
+	//: each reply to its own peer.
+	for i := first; i < last; i++ {
+		entry := &w.queue[i]
+		//: the write's own answer, counted when it fails.
+		if _, err := w.pc.WriteTo(w.arena[entry.off:entry.off+entry.size], entry.addr()); err != nil {
+			w.counters.replyFailures.Add(1)
+			continue
+		}
+		left++
+	}
+	//: how many left.
+	return left
 }
 
 // fail counts the replies of messages [k, messages) as failed.

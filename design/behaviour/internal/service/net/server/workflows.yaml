@@ -39,6 +39,18 @@ workflows:
           key: _
           range: pl.conns
           value: pc
+  - of: (*multiWriter).left
+    steps:
+      - loop:
+          cond: k < end
+          do:
+            - opt:
+                do:
+                  - set: w.invalidRun
+                    value: "0"
+                  - return: ""
+                when: w.spans[k].count > 1
+          post: k++
   - of: (*operatorEnv).applied
     steps:
       - loop:

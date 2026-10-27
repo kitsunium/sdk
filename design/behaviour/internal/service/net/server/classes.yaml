@@ -154,6 +154,15 @@ constants:
         name: groSegmentBytes
         type: int
         value: "4"
+      - doc: |-
+          groControlSpace is the control room a GRO read gives each message: the
+          UDP_GRO message's 24 bytes and room beside it for those a caller may have
+          asked of the socket itself — IP_PKTINFO (32), IPV6_PKTINFO (40), a
+          timestamp (32 to 64) —, so a foreign control message never cuts the one
+          the reader needs (MSG_CTRUNC). 64 slots of it are 16 KiB.
+        name: groControlSpace
+        type: int
+        value: "256"
     name: udpGRO
   - doc: |-
       mmsghdrAlign is the alignment C gives struct mmsghdr, which it inherits from
@@ -219,6 +228,14 @@ constants:
         name: segmentSizeBytes
         type: int
         value: "2"
+      - doc: |-
+          gsoInvalidLimit is how many GSO sends in a row the kernel may refuse with
+          EINVAL before GSO is switched off for the socket: a refusal that no
+          smaller segment cures — SO_NO_CHECK, a device that takes no GSO — would
+          otherwise cost one failed sendmmsg a batch for the socket's life.
+        name: gsoInvalidLimit
+        type: int
+        value: "4"
     name: udpSegment
   - doc: |-
       The ranks of the lattice iouring > epoll > portable > goroutine (ADR 0188
@@ -717,6 +734,7 @@ files:
       - (*multiReader).switchGROOff
       - (*multiReader).slotSize
       - (*multiReader).wire
+      - (*multiReader).bind
       - (*multiReader).prepare
       - (*multiReader).readBatch
       - (*multiReader).drain
@@ -733,6 +751,7 @@ files:
       - gsoSegments
       - maxSegment
       - pendingReply
+      - (*pendingReply).addr
       - replySpan
       - multiWriter
       - newMultiWriter
@@ -748,6 +767,9 @@ files:
       - (*multiWriter).sendAll
       - (*multiWriter).refused
       - (*multiWriter).sendFrom
+      - (*multiWriter).left
+      - (*multiWriter).unavailable
+      - (*multiWriter).writeEach
       - (*multiWriter).fail
       - (*multiWriter).disableGSO
     name: multiwriter_linux.go
@@ -2850,8 +2872,10 @@ types:
         name: oob
         type: "[]byte"
       - doc: |-
-          controlSpace is the room one message's control data has: CMSG_SPACE of
-          the UDP_GRO segment size, the one control message a read asks for.
+          controlSpace is the room one message's control data has: groControlSpace
+          under GRO, the one case a read asks for a control message, and none
+          without it — a control message the caller asked of the socket is then
+          not read, and its MSG_CTRUNC means nothing to the reader.
         name: controlSpace
         type: int
       - doc: wired records the slot count the arrays were built for.
@@ -2873,6 +2897,18 @@ types:
           size, so it is dropped and the loop ended — the socket is being closed.
         name: stopping
         type: atomic.Bool
+      - doc: |-
+          received and errno are what the last recvmmsg returned. They are fields,
+          and recv and drainOnce the functions the descriptor runs, bound once at
+          wiring, so a read moves nothing to the heap.
+        name: received
+        type: int
+      - name: errno
+        type: syscall.Errno
+      - name: recv
+        type: func(fd uintptr) bool
+      - name: drainOnce
+        type: func(fd uintptr)
     kind: struct
     methods:
       - doc: |-
@@ -2913,7 +2949,9 @@ types:
         recv: r *multiReader
       - doc: |-
           slotSize implements datagramSource: a whole coalesced message under GRO, the
-          ceiling otherwise.
+          ceiling otherwise. Under GRO a socket's read batch therefore holds BatchSize
+          slots of 64 KiB: 1 MiB at the default 16, 64 MiB at a BatchSize of 1024,
+          allocated once for the socket's life (ADR 0192 §D2).
         name: slotSize
         params: ceiling int
         recv: r *multiReader
@@ -2923,6 +2961,12 @@ types:
           count, not once per read.
         name: wire
         params: slots []datagram
+        recv: r *multiReader
+      - doc: |-
+          bind builds, once, the functions the descriptor runs: recvmmsg parked on the
+          netpoller, and the drain's, which never waits. They write into the reader's
+          fields, so neither moves a variable to the heap on each read.
+        name: bind
         recv: r *multiReader
       - doc: |-
           prepare restores every header's capacities before a call: the kernel wrote
@@ -2949,6 +2993,12 @@ types:
           fill copies the per-message results back into the caller's slots: the length,
           the sender, the segment size a coalesced message carries, and whether the
           kernel cut the message (msg_flags).
+
+          Without GRO the reader asks for no control data and reads none: a control
+          message the caller asked of the socket — IP_PKTINFO, a timestamp — finds no
+          room and the kernel sets MSG_CTRUNC, which costs this reader nothing, so it
+          never cuts a message. Under GRO a message is cut for MSG_CTRUNC only when the
+          UDP_GRO message itself did not survive: its segment size may then be lost.
         name: fill
         params: slots []datagram, received int
         recv: r *multiReader
@@ -3000,6 +3050,13 @@ types:
         name: namelen
         type: uint32
     kind: struct
+    methods:
+      - doc: |-
+          addr is the peer e was queued for, as WriteTo takes it: the fallback of a
+          socket whose sendmmsg is refused, off the batched path.
+        name: addr
+        recv: e *pendingReply
+        results: stdnet.Addr
     name: pendingReply
   - doc: |-
       replySpan is one message of a send: count consecutive queued replies from
@@ -3081,6 +3138,38 @@ types:
           those of a span a path with a smaller MTU refused (EINVAL).
         name: plainUntil
         type: int
+      - doc: |-
+          segmentCeiling, when not zero, is the largest segment a GSO send may
+          carry on this socket from now on: one below the smallest the kernel
+          refused with EINVAL, so a path with a smaller MTU costs one refused
+          send, not one a batch. It only falls, for the socket's life.
+        name: segmentCeiling
+        type: int
+      - doc: |-
+          invalidRun counts the GSO sends refused with EINVAL since the last GSO
+          send that left; at gsoInvalidLimit, GSO is switched off.
+        name: invalidRun
+        type: int
+      - doc: |-
+          noMmsg is set once sendmmsg itself is refused — ENOSYS or EPERM, under
+          a seccomp filter that allows sendto — while a WriteTo of the same reply
+          leaves: every batch then leaves one WriteTo a reply.
+        name: noMmsg
+        type: bool
+      - doc: |-
+          sent, sendErrno, from and to are one sendmmsg's arguments and results,
+          and write the function the descriptor runs, bound once at construction,
+          so a send moves nothing to the heap.
+        name: sent
+        type: int
+      - name: sendErrno
+        type: syscall.Errno
+      - name: from
+        type: int
+      - name: to
+        type: int
+      - name: write
+        type: func(fd uintptr) bool
     kind: struct
     methods:
       - doc: "begin implements datagramSink: replies are queued from here."
@@ -3154,6 +3243,28 @@ types:
         params: k, messages int
         recv: w *multiWriter
         results: sent int, err error
+      - doc: |-
+          left notes that messages [k, end) left: a GSO send among them proves GSO
+          works on this socket, and ends a run of EINVAL refusals.
+        name: left
+        params: k, end int
+        recv: w *multiWriter
+      - doc: |-
+          unavailable serves messages [k, messages) after sendmmsg itself was refused,
+          one WriteTo a reply. A reply that leaves so proves the refusal was the
+          syscall's — a seccomp filter that allows sendto, not sendmmsg — and every
+          later batch then leaves the same way; one that fails too, a firewall's
+          EPERM for instance, is counted, and sendmmsg is tried again next batch.
+        name: unavailable
+        params: k, messages int
+        recv: w *multiWriter
+      - doc: |-
+          writeEach writes queued replies [first, last) one WriteTo each, counts each
+          that fails, and returns how many left.
+        name: writeEach
+        params: first, last int
+        recv: w *multiWriter
+        results: int
       - doc: fail counts the replies of messages [k, messages) as failed.
         name: fail
         params: k, messages int

@@ -174,11 +174,20 @@ type scripted struct {
 	perCall int
 	// took records how many replies each sent message carried.
 	took []int
+	// all, when set, refuses every call with it, GSO or not: sendmmsg itself
+	// refused.
+	all syscall.Errno
+	// calls and refusals count the calls and the GSO messages refused.
+	calls, refusals int
 }
 
 // send returns the multiWriter.send that w's flush drives.
 func (s *scripted) send(w *multiWriter) func(uintptr, []mmsghdr) (int, syscall.Errno) {
 	return func(_ uintptr, headers []mmsghdr) (int, syscall.Errno) {
+		s.calls++
+		if s.all != 0 {
+			return 0, s.all
+		}
 		// headers is w.headers from the first message not taken yet.
 		first := len(w.headers) - cap(headers)
 		sent := 0
@@ -188,6 +197,7 @@ func (s *scripted) send(w *multiWriter) func(uintptr, []mmsghdr) (int, syscall.E
 			}
 			if s.errno != 0 && kernelLen(headers[i].hdr.Controllen) != 0 {
 				if sent == 0 {
+					s.refusals++
 					return 0, s.errno
 				}
 				break
@@ -305,5 +315,144 @@ func Test_multiWriter_encode(t *testing.T) {
 				t.Fatalf("port %d, want 4000 in network order", e.name.Port)
 			}
 		})
+	}
+}
+
+// Test_multiWriter_invalidRemembered pins EINVAL's memory across batches: a
+// segment size the path refused is never sent as GSO again, so a second batch
+// of it costs no refused send; and a refusal that every smaller segment meets
+// too — SO_NO_CHECK, a device without GSO — switches GSO off for the socket
+// after gsoInvalidLimit refusals in a row, reported once.
+func Test_multiWriter_invalidRemembered(t *testing.T) {
+	t.Parallel()
+	w, counters, _, to := writerPair(t)
+	off := 0
+	w.onGSOOff = func() { off++ }
+	s := &scripted{errno: syscall.EINVAL}
+	w.send = s.send(w)
+	batch := func(size int) {
+		w.begin()
+		for range 4 {
+			_, _ = w.reply(make([]byte, size), to)
+		}
+		w.flush()
+	}
+
+	batch(1000)
+	batch(1000)
+
+	if s.refusals != 1 || w.segmentCeiling != 999 || !w.gso.Load() {
+		t.Fatalf("refused %d GSO sends, ceiling %d, gso %v, want 1, 999 and on", s.refusals, w.segmentCeiling, w.gso.Load())
+	}
+	for _, size := range []int{900, 800, 700} {
+		batch(size)
+	}
+	if s.refusals != gsoInvalidLimit || w.gso.Load() || off != 1 {
+		t.Fatalf("refused %d, gso %v, reported off %d times, want %d, off, once", s.refusals, w.gso.Load(), off, gsoInvalidLimit)
+	}
+	batch(600)
+	if s.refusals != gsoInvalidLimit || counters.replyFailures.Load() != 0 {
+		t.Fatalf("refused %d after GSO went off, %d failures", s.refusals, counters.replyFailures.Load())
+	}
+}
+
+// Test_multiWriter_invalidRunEnds pins that a GSO send that leaves ends the
+// run of EINVAL refusals: a path that refused one size and takes a smaller one
+// keeps GSO on.
+func Test_multiWriter_invalidRunEnds(t *testing.T) {
+	t.Parallel()
+	w, _, _, to := writerPair(t)
+	s := &scripted{errno: syscall.EINVAL}
+	w.send = s.send(w)
+	w.begin()
+	for range 4 {
+		_, _ = w.reply(make([]byte, 1000), to)
+	}
+	w.flush()
+	s.errno = 0
+	w.begin()
+	for range 4 {
+		_, _ = w.reply(make([]byte, 900), to)
+	}
+	w.flush()
+	if w.invalidRun != 0 || !w.gso.Load() {
+		t.Fatalf("invalidRun %d, gso %v, want 0 and on after a GSO send left", w.invalidRun, w.gso.Load())
+	}
+}
+
+// failingConn is a PacketConn whose every WriteTo fails.
+type failingConn struct {
+	stdnet.PacketConn
+}
+
+// WriteTo refuses, as a firewall's EPERM does.
+func (failingConn) WriteTo([]byte, stdnet.Addr) (int, error) { return 0, syscall.EPERM }
+
+// Test_multiWriter_sendmmsgUnavailable pins sendmmsg refused itself — ENOSYS,
+// or EPERM under a seccomp filter that allows sendto: the batch leaves one
+// WriteTo a reply, every reply at the peer, none counted failed, and later
+// batches never call sendmmsg again; when WriteTo fails too, the refusal was
+// the path's, the replies are counted failed, and sendmmsg is kept.
+func Test_multiWriter_sendmmsgUnavailable(t *testing.T) {
+	t.Parallel()
+	for _, errno := range []syscall.Errno{syscall.ENOSYS, syscall.EPERM} {
+		t.Run(errno.Error(), func(t *testing.T) {
+			t.Parallel()
+			w, counters, peer, to := writerPair(t)
+			s := &scripted{all: errno}
+			w.send = s.send(w)
+			for range 2 {
+				w.begin()
+				for range 3 {
+					_, _ = w.reply(make([]byte, 500), to)
+				}
+				_, _ = w.reply(make([]byte, 100), &stdnet.UDPAddr{IP: to.IP, Port: to.Port})
+				w.flush()
+			}
+			if got := receive(t, peer); len(got) != 8 {
+				t.Fatalf("the peer received %v, want 8 datagrams", got)
+			}
+			if s.calls != 1 || !w.noMmsg || counters.replyFailures.Load() != 0 {
+				t.Fatalf("sendmmsg called %d times, noMmsg %v, %d failures, want once, set, none", s.calls, w.noMmsg, counters.replyFailures.Load())
+			}
+		})
+	}
+	t.Run("WriteTo refused too", func(t *testing.T) {
+		t.Parallel()
+		w, counters, _, to := writerPair(t)
+		w.pc = failingConn{w.pc}
+		s := &scripted{all: syscall.EPERM}
+		w.send = s.send(w)
+		w.begin()
+		for range 3 {
+			_, _ = w.reply(make([]byte, 500), to)
+		}
+		w.flush()
+		if w.noMmsg || counters.replyFailures.Load() != 3 {
+			t.Fatalf("noMmsg %v, %d failures, want sendmmsg kept and 3 failures", w.noMmsg, counters.replyFailures.Load())
+		}
+	})
+}
+
+// Test_pendingReply_addr pins the fallback's peer: the sockaddr encode wrote,
+// read back, on both families.
+func Test_pendingReply_addr(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		family int
+		to     *stdnet.UDPAddr
+	}{
+		{syscall.AF_INET, &stdnet.UDPAddr{IP: stdnet.IPv4(192, 0, 2, 7).To4(), Port: 4433}},
+		{syscall.AF_INET6, &stdnet.UDPAddr{IP: stdnet.ParseIP("2001:db8::7"), Port: 4433}},
+	} {
+		w := &multiWriter{family: c.family}
+		var e pendingReply
+		if !w.encode(c.to, &e) {
+			t.Fatalf("encode(%v) refused", c.to)
+		}
+		got := e.addr().(*stdnet.UDPAddr)
+		if !got.IP.Equal(c.to.IP) || got.Port != c.to.Port {
+			t.Fatalf("addr() = %v, want %v", got, c.to)
+		}
 	}
 }
