@@ -169,3 +169,29 @@ func TestHandleLoop_droppedDeferNotShared(t *testing.T) {
 		})
 	}
 }
+
+// TestHandleLoop_staleDoneFreesNothing pins OnDone on a job of an older
+// generation than its slot's: the slot is another answer's, so it is not
+// freed, and the next pending answer is given a slot of its own.
+func TestHandleLoop_staleDoneFreesNothing(t *testing.T) {
+	h := &pendH{}
+	a, out := startPend(h, 1<<16)
+	io := newFakeIO(0)
+	ref := corenet.LoopConnRef{Ring: 0, Slot: 1, Gen: 1}
+	a.OnOpen(io, ref)
+	a.OnData(io, ref, []byte(get("/pend")))
+	stale := out.jobs[0]
+	stale.Gen--
+	a.OnDone(io, stale)
+	a.OnData(io, ref, []byte(get("/pend")))
+	if len(out.jobs) != 2 || out.jobs[0].Slot == out.jobs[1].Slot {
+		t.Fatalf("two pending answers share a slot: %+v", out.jobs)
+	}
+	a.OnBatchEnd(io)
+	finish(a, io, out)
+	a.OnBatchEnd(io)
+	want := []string{"200 OK work:1", "200 OK work:2"}
+	if got := answers(t, io.out[ref], "GET"); !slices.Equal(got, want) {
+		t.Fatalf("answers:\n got %q\nwant %q", got, want)
+	}
+}

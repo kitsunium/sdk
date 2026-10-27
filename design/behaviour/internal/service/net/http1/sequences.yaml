@@ -995,6 +995,10 @@ sequences:
         to: a.state
       - bind: slot
         eval: (*st.slots.Load())[job.Slot]
+      - opt:
+          do:
+            - return: ""
+          when: slot.gen != job.Gen
       - bind: f
         eval: st.peek(slot.ref)
         to: st.peek
@@ -1003,7 +1007,7 @@ sequences:
             - eval: st.freeSlot(job.Slot)
               to: st.freeSlot
             - return: ""
-          when: slot.gen != job.Gen || slot.cancelled.Load() || f == nil
+          when: slot.cancelled.Load() || f == nil
       - set: slot.done
         value: "true"
       - eval: st.markReady(slot.ref, f)

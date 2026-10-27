@@ -108,9 +108,15 @@ func (a *LoopHandler) OnOutbound(v corenet.LoopOutboundValue) {
 func (a *LoopHandler) OnDone(io corenet.LoopIO, job corenet.LoopJobValue) {
 	st := a.state(io.Loop())
 	slot := (*st.slots.Load())[job.Slot]
+	//: a job of an older generation: the slot is another answer's now, and
+	//: freeing it again would hand it to two. The invariant excludes it.
+	if slot.gen != job.Gen {
+		//: left to its holder.
+		return
+	}
 	f := st.peek(slot.ref)
 	//: the connection is gone, or the answer was given up on.
-	if slot.gen != job.Gen || slot.cancelled.Load() || f == nil {
+	if slot.cancelled.Load() || f == nil {
 		st.freeSlot(job.Slot)
 		//: dropped.
 		return
