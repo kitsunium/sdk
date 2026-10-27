@@ -336,6 +336,11 @@ constants:
           OptionLoopMiddleware is UseLoop. The loop engine honours it; every group no
           loop handler serves refuses it with LoopOptionUnsupported.
         name: OptionLoopMiddleware
+      - doc: |-
+          OptionProtocols is Protocols. Only an HTTP group served by net/http
+          honours it; a loop group refuses it with LoopOptionUnsupported, and any
+          other group with ProtocolsRefused.
+        name: OptionProtocols
     name: OptionNone
   - doc: The loop backends. The zero value is LoopBackendAuto.
     grouped: true
@@ -2131,6 +2136,7 @@ vars:
           	OptionName:              "Name",
           	OptionEngine:            "Engine",
           	OptionLoopMiddleware:    "UseLoop",
+          	OptionProtocols:         "Protocols",
           }
     name: optionNames
   - doc: |-

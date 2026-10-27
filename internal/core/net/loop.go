@@ -81,6 +81,10 @@ const (
 	// OptionLoopMiddleware is UseLoop. The loop engine honours it; every group no
 	// loop handler serves refuses it with LoopOptionUnsupported.
 	OptionLoopMiddleware
+	// OptionProtocols is Protocols. Only an HTTP group served by net/http
+	// honours it; a loop group refuses it with LoopOptionUnsupported, and any
+	// other group with ProtocolsRefused.
+	OptionProtocols
 )
 
 // optionNames holds each kind's constructor name, indexed by kind. Its length
@@ -107,6 +111,7 @@ var optionNames = [...]string{
 	OptionName:              "Name",
 	OptionEngine:            "Engine",
 	OptionLoopMiddleware:    "UseLoop",
+	OptionProtocols:         "Protocols",
 }
 
 // String renders the option's name, as its constructor spells it.

@@ -97,6 +97,7 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
 - [func New\(opts ...Option\) \*Server](<#New>)
 - [func NewLoopLayer\(next LoopHandler\) LoopLayer](<#NewLoopLayer>)
 - [func Plaintext\(\) GroupOption](<#Plaintext>)
+- [func Protocols\(protos ...string\) GroupOption](<#Protocols>)
 - [func ReadBufferSize\(n int\) GroupOption](<#ReadBufferSize>)
 - [func ReadHeaderTimeout\(d time.Duration\) GroupOption](<#ReadHeaderTimeout>)
 - [func ReadTimeout\(d time.Duration\) GroupOption](<#ReadTimeout>)
@@ -484,6 +485,15 @@ OptionPreHandshake is PreHandshake.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionPreHandshake`.
 
+<a name="OptionProtocols"></a>
+```go
+const OptionProtocols OptionKind = 20
+```
+
+OptionProtocols is Protocols. Only an HTTP group honours it.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionProtocols`.
+
 <a name="OptionReadBufferSize"></a>
 ```go
 const OptionReadBufferSize OptionKind = 9
@@ -838,6 +848,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/net.PlaintextWithTLS`.
 
 Code `0.2.11.57` · reason `PLAINTEXT_WITH_TLS` · public "The group cannot be both plaintext and TLS"
 
+<a name="ProtocolsRefused"></a>
+```go
+var ProtocolsRefused *errs.Error
+```
+
+ProtocolsRefused reports an HTTP group's Protocols, or its identity's NextProtos, that it cannot serve.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.ProtocolsRefused`.
+
+Code `0.2.11.62` · reason `PROTOCOLS_REFUSED` · public "The group's HTTP protocols are misconfigured"
+
 <a name="UnsupportedNetwork"></a>
 ```go
 var UnsupportedNetwork *errs.Error
@@ -1023,6 +1044,15 @@ func Plaintext() GroupOption
 ```
 
 Plaintext declares that the group serves no TLS. Every engine honours it. A group given both Plaintext and TLS, in either order, fails Start with PlaintextWithTLS. It is not yet required of a plaintext group: the simple API will require it of every HTTP group without TLS.
+
+<a name="Protocols"></a>
+## func [Protocols](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+```go
+func Protocols(protos ...string) GroupOption
+```
+
+Protocols sets the HTTP versions an HTTP group serves, by ALPN identifier — "http/1.1" and "h2" — in the order its TLS listeners prefer them. Unset, a group with TLS serves both, h2 first, and one without serves HTTP/1.1. Start refuses with ProtocolsRefused an empty list, a repeated or unknown identifier, h2 without TLS, an identity whose NextProtos names a version the list excludes or none it includes, and a group that serves no http.Handler; a loop group refuses it with LoopOptionUnsupported.
 
 <a name="ReadBufferSize"></a>
 ## func [ReadBufferSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)

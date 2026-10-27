@@ -113,7 +113,7 @@ func reusePortControl(network, address string, rawConn syscall.RawConn) error {
 // trackCloses hands out sockets that report their own Close (see trackedConn),
 // for a group whose ceiling must keep counting a connection a handler took
 // over.
-func listen(ctx context.Context, addr corenet.AddressValue, id corenet.IdentityValue, sharded, trackCloses bool) (ln stdnet.Listener, err error) {
+func listen(ctx context.Context, addr corenet.AddressValue, cfgTLS *tls.Config, sharded, trackCloses bool) (ln stdnet.Listener, err error) {
 	//: reject an unserved family before touching the OS.
 	if _, ok := streamNetworks[addr.Network]; !ok {
 		//: refuse an unserved family before touching the OS.
@@ -144,7 +144,7 @@ func listen(ctx context.Context, addr corenet.AddressValue, id corenet.IdentityV
 			errs.String("address", addr.String()), errs.String("cause", lerr.Error()))
 	}
 	//: the same layers an adopted socket gets, from the same function.
-	return layered(raw, id, trackCloses), nil
+	return layered(raw, cfgTLS, trackCloses), nil
 }
 
 // familyUnavailable refuses a family the engine serves but this platform has
@@ -173,20 +173,20 @@ func familyUnavailable(addr corenet.AddressValue) error {
 // The adopted path used to add the tracker and never TLS, so a group with an
 // identity served an inherited socket in plaintext and reported no error —
 // the supervisor passes a raw socket, and TLS is this process's layer to add.
-func layered(raw stdnet.Listener, id corenet.IdentityValue, trackCloses bool) stdnet.Listener {
+func layered(raw stdnet.Listener, cfgTLS *tls.Config, trackCloses bool) stdnet.Listener {
 	//: the tracker goes UNDER TLS, so net/http still receives the concrete
 	//: *tls.Conn it type-asserts on to populate Request.TLS.
 	if trackCloses {
 		raw = &trackedListener{Listener: raw}
 	}
 	//: without an identity the listener stays plaintext.
-	if id.IsZero() {
+	if cfgTLS == nil {
 		//: no identity, so the listener stays plaintext.
 		return raw
 	}
-	//: ServerConfig also carries the mutual-TLS setting, so one call covers
-	//: both TLS and mTLS and they cannot drift apart.
-	return tls.NewListener(raw, id.ServerConfig())
+	//: the identity's ServerConfig (StreamGroup.serverTLS) also carries the
+	//: mutual-TLS setting, so TLS and mTLS cannot drift apart.
+	return tls.NewListener(raw, cfgTLS)
 }
 
 // boundListener pairs a live listener with the group that owns it.

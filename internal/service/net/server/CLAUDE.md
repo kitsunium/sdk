@@ -34,7 +34,7 @@ Public façade: `pkg/v1/net/server`.
 | `loop_group_internal_test.go` | loop groups on every backend the platform has: split lines, a 4 MiB response byte-exact, close, spill, drain, and every refusal — a zero-valued option included; `TestLoopGroup_middlewareRefused`, `Use` refused on every backend whatever the handler claims |
 | `loop_option_external_test.go` | `TestLoop` — the `Loop` option refused before or after the handler, on both natures, and what wins over it |
 | `stream_group.go` | `StreamGroup` — `Handle`, `HandleFunc`, `HandleHTTP`, `Use`, `UseLoop` (kind `OptionLoopMiddleware`, every call); `claimHandler`, the one-handler rule every declaration takes |
-| `listen.go` | listener construction; TLS/mTLS wrapping; family validation |
+| `listen.go` | listener construction; TLS/mTLS wrapping (the group's `serverTLS`); family validation |
 | `conn.go` | the pooled `corenet.Conn` implementation, and the `hijacked` hand-over flag |
 | `pool.go` | per-connection recycling + the live-socket registry |
 | `options.go` | `Option` / `GroupOption` — including the two HTTP-only group options, `ReadHeaderTimeout` and `MaxHeaderBytes`, `Loop`, refused by every group no loop handler serves, and `Plaintext`, `Name` and `Engine` (ADR 0187); each records its kind |
@@ -51,6 +51,8 @@ Public façade: `pkg/v1/net/server`.
 | `multireader_mmsghdr_linux.go` | the cited `struct mmsghdr` layout |
 | `sockaddr_linux.go` | kernel sockaddr decoding for the batched path |
 | `http_adapter.go` | the `net/http` adapter (ADR 0029 D3) |
+| `stream_group_protocols.go` | `Protocols` (kind `OptionProtocols`) and `httpProtocols` (ADR 0192): `protocolsRefusal` computes, once at `Start`, the versions an HTTP group serves and the ALPN list its TLS listeners offer (`offered`: the identity's `NextProtos` the group serves, in the identity's order), refusing with `ProtocolsRefused`; `serverTLS` — a listener's `*tls.Config`; `http2Config` — HTTP/2's bounds, set: 100 streams, 16 KiB frames, 4 KiB HPACK tables, 256 KiB a stream's window and 1 MiB the connection's |
+| `protocols_{external,internal}_test.go` | ALPN h1 / h2 / both and the identity's order, each refusal, the adapter's `Protocols`/`HTTP2` and no identity in its `TLSConfig`, an unfinished HEADERS block closed by the idle or read bound, an unread stream held to its window while another stream on the connection sends 768 KiB |
 | `http_bounds.go` | `httpBounds` — the header phase's own deadline and the header size cap, kept out of `core/net`'s protocol-neutral `Timeouts`/`Limits`; each unset value keeps the adapter's earlier behaviour (the read timeout for the header phase, net/http's 1 MiB cap); `idleOrRead`, the wait between requests |
 | `http_read_deadline.go` | `perReadBody` / `deadlineBody` — the read bound applied per read of a request body, cleared at its end (#454) |
 | `conn_waiter.go` | `connWaiter` — the completion channel and the hijack flag one `ServeConn` blocks on |

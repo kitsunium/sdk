@@ -305,6 +305,47 @@ constants:
         type: string
         value: "\"missing\""
     name: classKernel
+  - grouped: true
+    items:
+      - doc: protoHTTP1 is HTTP/1.1's ALPN identifier (RFC 7301).
+        name: protoHTTP1
+        type: string
+        value: "\"http/1.1\""
+      - doc: protoH2 is HTTP/2's ALPN identifier over TLS (RFC 9113 §3.2).
+        name: protoH2
+        type: string
+        value: "\"h2\""
+      - doc: |-
+          h2MaxConcurrentStreams is how many streams one HTTP/2 connection may have
+          open at once: net/http's own floor, set rather than left implicit.
+        name: h2MaxConcurrentStreams
+        type: int
+        value: "100"
+      - doc: |-
+          h2MaxReadFrameSize is the largest frame read, the protocol's minimum
+          (RFC 9113 §4.2): a peer cannot make one frame cost more.
+        name: h2MaxReadFrameSize
+        type: int
+        value: 16 << 10
+      - doc: |-
+          h2HeaderTableSize bounds both HPACK tables, the protocol's default
+          (RFC 7541 §4.2).
+        name: h2HeaderTableSize
+        type: int
+        value: 4 << 10
+      - doc: |-
+          h2ReceivePerStream is the flow-control window a stream's body may hold
+          unread: what a handler that never reads its body costs at most.
+        name: h2ReceivePerStream
+        type: int
+        value: 256 << 10
+      - doc: |-
+          h2ReceivePerConn is the window of a whole connection, four streams'
+          worth, so one unread stream never stops the others.
+        name: h2ReceivePerConn
+        type: int
+        value: 4 * h2ReceivePerStream
+    name: protoHTTP1
 files:
   - decls:
       - defaultPerAddress
@@ -755,6 +796,17 @@ files:
       - (*Server).admit
     name: stream_group_limiter.go
   - decls:
+      - protoHTTP1
+      - httpProtocols
+      - Protocols
+      - (*StreamGroup).protocolsRefusal
+      - checkProtocols
+      - offered
+      - (*StreamGroup).protocolsErr
+      - (*StreamGroup).serverTLS
+      - http2Config
+    name: stream_group_protocols.go
+  - decls:
       - swallowErr
     name: swallow.go
   - decls:
@@ -1027,7 +1079,7 @@ functions:
       for a group whose ceiling must keep counting a connection a handler took
       over.
     name: listen
-    params: ctx context.Context, addr corenet.AddressValue, id corenet.IdentityValue, sharded, trackCloses bool
+    params: ctx context.Context, addr corenet.AddressValue, cfgTLS *tls.Config, sharded, trackCloses bool
     results: ln stdnet.Listener, err error
   - doc: |-
       familyUnavailable refuses a family the engine serves but this platform has
@@ -1050,7 +1102,7 @@ functions:
       identity served an inherited socket in plaintext and reported no error —
       the supervisor passes a raw socket, and TLS is this process's layer to add.
     name: layered
-    params: raw stdnet.Listener, id corenet.IdentityValue, trackCloses bool
+    params: raw stdnet.Listener, cfgTLS *tls.Config, trackCloses bool
     results: stdnet.Listener
   - doc: |-
       loopLanes is how many lanes a loop group runs on every backend: Loops,
@@ -1344,6 +1396,28 @@ functions:
     name: newConnLimiter
     params: limits corenet.LimitsValue
     results: "*connLimiter"
+  - name: Protocols
+    params: protos ...string
+    results: GroupOption
+  - doc: checkProtocols returns why protos cannot be served, or "" when it can.
+    name: checkProtocols
+    params: protos []string, tlsOn bool
+    results: string
+  - doc: |-
+      offered is the ALPN list a TLS group offers: protos when the identity
+      names none, else the identity's NextProtos that protos holds, in the
+      identity's order. An identity naming an HTTP version protos excludes, or
+      nothing protos holds, returns the reason.
+    name: offered
+    params: next, protos []string
+    results: "[]string, string"
+  - doc: |-
+      http2Config is the HTTP/2 bounds every HTTP group serves with: set, never
+      left to net/http's defaults, so a release of the standard library cannot
+      move them.
+    name: http2Config
+    params: write corenet.DurationValue
+    results: "*http.HTTP2Config"
   - doc: |-
       swallowErr intentionally discards a non-actionable error, recording the
       discard so the error audit treats it as deliberate rather than dropped.
@@ -1757,6 +1831,11 @@ types:
           the header size cap — set at Start with the timeouts above.
         name: bounds
         type: httpBounds
+      - doc: |-
+          protocols is http.Server.Protocols, computed once at Start with the ALPN
+          list the group's listeners offer (ADR 0192); nil until then.
+        name: protocols
+        type: "*http.Protocols"
       - doc: start guarantees the serving goroutine is launched at most once.
         name: start
         type: sync.Once
@@ -3393,6 +3472,14 @@ types:
           can serve, and "a request header" is not a word in most of them.
         name: http
         type: httpBounds
+      - doc: protos is the Protocols option's list, as given.
+        name: protos
+        type: "[]string"
+      - doc: |-
+          httpProtos is what the group serves, computed at Start from protos and
+          the identity (protocolsRefusal).
+        name: httpProtos
+        type: httpProtocols
       - doc: limiter caps concurrent connections; nil when the group has no ceiling.
         name: limiter
         type: "*connLimiter"
@@ -3543,6 +3630,25 @@ types:
         name: resolved
         recv: g *StreamGroup
         results: corenet.ConnHandler
+      - doc: |-
+          protocolsRefusal computes the group's httpProtocols, once, and returns the
+          refusal of a combination it cannot serve. A group that serves no
+          http.Handler computes nothing; given Protocols it is refused.
+        name: protocolsRefusal
+        recv: g *StreamGroup
+        results: error
+      - doc: protocolsErr wraps ProtocolsRefused with the group and the reason.
+        name: protocolsErr
+        params: reason string
+        recv: g *StreamGroup
+        results: error
+      - doc: |-
+          serverTLS returns the TLS configuration of one of the group's listeners,
+          nil without an identity: the identity's, offering the group's ALPN list
+          when it serves HTTP. A fresh value each call, so no listener shares one.
+        name: serverTLS
+        recv: g *StreamGroup
+        results: "*tls.Config"
     name: StreamGroup
   - doc: |-
       connLimiter caps how many connections a group holds at once.
@@ -3584,6 +3690,20 @@ types:
         params: c corenet.Conn
         recv: l *connLimiter
     name: connLimiter
+  - doc: |-
+      httpProtocols is what an HTTP group serves, computed once at Start from its
+      Protocols option, its TLS identity and nothing else (ADR 0192): the ALPN
+      list its listeners offer and the set net/http accepts. Both derive from the
+      same list, so they cannot disagree.
+    fields:
+      - doc: alpn is the ALPN list the group's TLS listeners offer, nil without TLS.
+        name: alpn
+        type: "[]string"
+      - doc: accepted is http.Server.Protocols.
+        name: accepted
+        type: http.Protocols
+    kind: struct
+    name: httpProtocols
 vars:
   - doc: |-
       The portable reader is the floor every platform falls back to, so it must

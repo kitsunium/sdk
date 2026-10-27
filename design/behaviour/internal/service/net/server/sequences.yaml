@@ -1160,6 +1160,11 @@ sequences:
           		ReadHeaderTimeout: a.bounds.headerTimeout(read),
           		//: zero is net/http's own default (1 MiB); a caller's cap replaces it.
           		MaxHeaderBytes: a.bounds.headerBytes(),
+          		//: the versions the group serves, from the same list as its ALPN, and
+          		//: HTTP/2's bounds set rather than left to the standard library's.
+          		//: TLSConfig stays unset: the listener's is the one that negotiates.
+          		Protocols: a.protocols,
+          		HTTP2:     http2Config(a.timeouts.Write),
           		//: every request on this listener derives from a context carrying the
           		//: drain signal, which is the only way a handler holding a connection
           		//: open indefinitely can learn that the server is shutting down. A
@@ -1525,6 +1530,8 @@ sequences:
         kind: internal
       - id: errs
         kind: package
+      - id: g.protocolsRefusal
+        kind: internal
     steps:
       - opt:
           do:
@@ -1561,7 +1568,8 @@ sequences:
                 			errs.String("group", g.name), errs.String("option", corenet.OptionLoopMiddleware.String()))
               to: errs
           when: g.kinds.has(corenet.OptionLoopMiddleware)
-      - return: nil
+      - return: g.protocolsRefusal()
+        to: g.protocolsRefusal
   - of: (*Server).bindEverything
     participants:
       - id: caller
@@ -1886,7 +1894,7 @@ sequences:
             - loop:
                 do:
                   - bind: ln
-                    eval: layered(raw, group.identity, group.tracksCloses())
+                    eval: layered(raw, group.serverTLS(), group.tracksCloses())
                     to: layered
                   - bind: addr
                     eval: "corenet.AddressValue{Network: ln.Addr().Network(), Addr: ln.Addr().String()}"
@@ -1945,7 +1953,7 @@ sequences:
       - loop:
           do:
             - bind: ln, err
-              eval: listen(ctx, addr, group.identity, count > 1, group.tracksCloses())
+              eval: listen(ctx, addr, group.serverTLS(), count > 1, group.tracksCloses())
               to: listen
             - opt:
                 do:
@@ -2559,7 +2567,7 @@ sequences:
                 nil, errs.Wrap(corenet.ListenFailed, errs.WrapParams{},
                 			errs.String("address", addr.String()), errs.String("cause", lerr.Error()))
           when: lerr != nil
-      - return: layered(raw, id, trackCloses), nil
+      - return: layered(raw, cfgTLS, trackCloses), nil
         to: layered
   - of: familyUnavailable
     participants:
@@ -2595,8 +2603,8 @@ sequences:
       - opt:
           do:
             - return: raw
-          when: id.IsZero()
-      - return: tls.NewListener(raw, id.ServerConfig())
+          when: cfgTLS == nil
+      - return: tls.NewListener(raw, cfgTLS)
         to: tls
   - of: (*boundListener).closedSignal
     participants:
@@ -3194,7 +3202,7 @@ sequences:
       - loop:
           do:
             - bind: ln, err
-              eval: listen(ctx, addr, corenet.IdentityValue{}, false, false)
+              eval: listen(ctx, addr, nil, false, false)
               to: listen
             - opt:
                 do:
@@ -6229,6 +6237,8 @@ sequences:
               value: g.timeouts
             - set: g.httpAdapter.bounds
               value: g.http
+            - set: g.httpAdapter.protocols
+              value: "&g.httpProtos.accepted"
           when: g.httpAdapter != nil
       - bind: chained
         eval: corenet.Chain(g.handler, g.middlewares...)
@@ -6320,6 +6330,193 @@ sequences:
         to: limiter.releaseFor
       - return: handler.ServeConn(ctx, c)
         to: handler.ServeConn
+  - of: Protocols
+    participants:
+      - id: caller
+        kind: actor
+      - id: Protocols
+        kind: self
+      - id: slices
+        kind: stdlib
+      - id: g.kinds.add
+        kind: internal
+    steps:
+      - bind: kept
+        eval: slices.Clone(protos)
+        to: slices
+      - return:
+          closure:
+            params: g *StreamGroup
+            steps:
+              - set: g.protos
+                value: kept
+              - eval: g.kinds.add(corenet.OptionProtocols)
+                to: g.kinds.add
+  - of: (*StreamGroup).protocolsRefusal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StreamGroup).protocolsRefusal
+        kind: self
+      - id: g.kinds.has
+        kind: internal
+      - id: g.protocolsErr
+        kind: internal
+      - id: g.identity.IsZero
+        kind: value
+      - id: checkProtocols
+        kind: internal
+      - id: p.accepted.SetHTTP1
+        kind: value
+      - id: p.accepted.SetHTTP2
+        kind: value
+      - id: offered
+        kind: internal
+    steps:
+      - bind: set
+        eval: g.kinds.has(corenet.OptionProtocols)
+        to: g.kinds.has
+      - opt:
+          do:
+            - opt:
+                do:
+                  - return: g.protocolsErr("handler")
+                    to: g.protocolsErr
+                when: set
+            - return: nil
+          when: g.httpAdapter == nil
+      - bind: tlsOn
+        eval: "!g.identity.IsZero()"
+        to: g.identity.IsZero
+      - bind: protos
+        eval: g.protos
+      - opt:
+          do:
+            - set: protos
+              value: "[]string{protoHTTP1}"
+            - opt:
+                do:
+                  - set: protos
+                    value: "[]string{protoH2, protoHTTP1}"
+                when: tlsOn
+          when: "!set"
+      - opt:
+          do:
+            - return: g.protocolsErr(reason)
+              to: g.protocolsErr
+          init:
+            bind: reason
+            eval: checkProtocols(protos, tlsOn)
+            to: checkProtocols
+          when: reason != ""
+      - var:
+          name: p
+          type: httpProtocols
+      - eval: p.accepted.SetHTTP1(slices.Contains(protos, protoHTTP1))
+        to: p.accepted.SetHTTP1
+      - eval: p.accepted.SetHTTP2(slices.Contains(protos, protoH2))
+        to: p.accepted.SetHTTP2
+      - opt:
+          do:
+            - bind: alpn, reason
+              eval: offered(g.identity.ServerConfig().NextProtos, protos)
+              to: offered
+            - opt:
+                do:
+                  - return: g.protocolsErr(reason)
+                    to: g.protocolsErr
+                when: reason != ""
+            - set: p.alpn
+              value: alpn
+          when: tlsOn
+      - set: g.httpProtos
+        value: p
+      - return: nil
+  - of: offered
+    participants:
+      - id: caller
+        kind: actor
+      - id: offered
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: slices.Clone(protos), ""
+              to: slices
+          when: len(next) == 0
+      - bind: alpn
+        eval: make([]string, 0, len(next))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil, "NextProtos " + n
+                when: (n == protoHTTP1 || n == protoH2) && !slices.Contains(protos, n)
+            - opt:
+                do:
+                  - set: alpn
+                    value: append(alpn, n)
+                when: slices.Contains(protos, n)
+          key: _
+          range: next
+          value: "n"
+      - opt:
+          do:
+            - return: nil, "NextProtos"
+          when: len(alpn) == 0
+      - return: alpn, ""
+  - of: (*StreamGroup).protocolsErr
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StreamGroup).protocolsErr
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corenet.ProtocolsRefused, errs.WrapParams{},
+          		errs.String("group", g.name), errs.String("reason", reason))
+        to: errs
+  - of: (*StreamGroup).serverTLS
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StreamGroup).serverTLS
+        kind: self
+      - id: g.identity.ServerConfig
+        kind: value
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: g.identity.IsZero()
+      - bind: cfg
+        eval: g.identity.ServerConfig()
+        to: g.identity.ServerConfig
+      - opt:
+          do:
+            - set: cfg.NextProtos
+              to: slices
+              value: slices.Clone(g.httpProtos.alpn)
+          when: g.httpAdapter != nil
+      - return: cfg
+  - of: http2Config
+    steps:
+      - return: |-
+          &http.HTTP2Config{
+          		MaxConcurrentStreams:          h2MaxConcurrentStreams,
+          		MaxReadFrameSize:              h2MaxReadFrameSize,
+          		MaxDecoderHeaderTableSize:     h2HeaderTableSize,
+          		MaxEncoderHeaderTableSize:     h2HeaderTableSize,
+          		MaxReceiveBufferPerStream:     h2ReceivePerStream,
+          		MaxReceiveBufferPerConnection: h2ReceivePerConn,
+          		WriteByteTimeout:              write.Duration(),
+          	}
   - of: swallowErr
     steps:
       - opt:

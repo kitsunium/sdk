@@ -2443,6 +2443,20 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.OptionProtocols",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "OptionProtocols",
+      "spelled": "OptionKind",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/net/server.OptionKind",
+      "value": "20",
+      "init": "go:github.com/kitsunium/sdk/internal/core/net.OptionProtocols",
+      "doc": "OptionProtocols is Protocols. Only an HTTP group honours it.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.OptionReadBufferSize",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
@@ -2739,6 +2753,36 @@
       "canonical": "github.com/kitsunium/sdk/internal/core/net.PostFunc",
       "owner": "go:github.com/kitsunium/sdk/internal/core/net.PostFunc",
       "doc": "PostFunc is an operation posted to a loop with LoopIO.Post. It runs once, on\nthe loop's thread.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.Protocols",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "Protocols",
+      "spelled": "func(protos ...string) GroupOption",
+      "canonical": "func(protos ...string) github.com/kitsunium/sdk/pkg/v1/net/server.GroupOption",
+      "doc": "Protocols sets the HTTP versions an HTTP group serves, by ALPN identifier —\n\"http/1.1\" and \"h2\" — in the order its TLS listeners prefer them. Unset, a\ngroup with TLS serves both, h2 first, and one without serves HTTP/1.1. Start\nrefuses with ProtocolsRefused an empty list, a repeated or unknown\nidentifier, h2 without TLS, an identity whose NextProtos names a version the\nlist excludes or none it includes, and a group that serves no http.Handler;\na loop group refuses it with LoopOptionUnsupported.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.ProtocolsRefused",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "ProtocolsRefused",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/net.ProtocolsRefused",
+      "code": {
+        "value": "0.2.11.62",
+        "reason": "PROTOCOLS_REFUSED",
+        "public": "The group's HTTP protocols are misconfigured"
+      },
+      "doc": "ProtocolsRefused reports an HTTP group's Protocols, or its identity's NextProtos, that it cannot serve.\n",
       "file": "server/gen_facade.go",
       "layer": "public",
       "family": "net"

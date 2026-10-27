@@ -122,7 +122,7 @@ func (s *Server) bindLoopGroup(ctx context.Context, group *StreamGroup) error {
 	}
 	//: then every address, one listener each: the loop shards inside.
 	for _, addr := range group.addrs {
-		ln, err := listen(ctx, addr, corenet.IdentityValue{}, false, false)
+		ln, err := listen(ctx, addr, nil, false, false)
 		//: the address could not be bound.
 		if err != nil {
 			//: Start unwinds what is bound.

@@ -282,6 +282,7 @@ func TestLoopGroup_refusals(t *testing.T) {
 		{name: "ReadTimeout nobody honours", opts: []GroupOption{ReadTimeout(time.Second)}, want: corenet.CodeLoopOptionUnsupported, wantOpt: "ReadTimeout"},
 		{name: "ReadHeaderTimeout nobody honours", opts: []GroupOption{ReadHeaderTimeout(time.Second)}, want: corenet.CodeLoopOptionUnsupported, wantOpt: "ReadHeaderTimeout"},
 		{name: "Shards", opts: []GroupOption{Shards(2)}, want: corenet.CodeLoopOptionUnsupported, wantOpt: "Shards"},
+		{name: "Protocols", opts: []GroupOption{Protocols(protoHTTP1)}, want: corenet.CodeLoopOptionUnsupported, wantOpt: "Protocols"},
 		{name: "ReadHeaderTimeout the handler honours", opts: []GroupOption{ReadHeaderTimeout(time.Second)}, h: &honouringH{loopLineH{honours: []corenet.OptionKind{corenet.OptionReadHeaderTimeout}}}},
 		{name: "Use even when the handler claims it", h: &honouringH{loopLineH{honours: []corenet.OptionKind{corenet.OptionMiddleware}}}, also: func(g *StreamGroup) { g.Use(func(next corenet.ConnHandler) corenet.ConnHandler { return next }) }, want: corenet.CodeLoopOptionUnsupported, wantOpt: "Use"},
 		{name: "IdleTimeout and MaxConns are the engine's", opts: []GroupOption{IdleTimeout(time.Minute), MaxConns(10)}},

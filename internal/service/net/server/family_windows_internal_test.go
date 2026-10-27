@@ -66,7 +66,7 @@ func Test_familyUnavailable_refusesBeforeTheOSIsAsked(t *testing.T) {
 		}},
 		{name: "a unix seqpacket socket on the stream engine", network: "unixpacket", bind: func(t *testing.T, addr corenet.AddressValue) (bool, error) {
 			t.Helper()
-			ln, err := listen(t.Context(), addr, corenet.IdentityValue{}, false, false)
+			ln, err := listen(t.Context(), addr, nil, false, false)
 			//: a listener that should not exist is still released.
 			if ln != nil {
 				swallowErr(ln.Close())

@@ -39,8 +39,9 @@ func Test_OptionKind_String(t *testing.T) {
 		{"name", corenet.OptionName, "Name"},
 		{"engine", corenet.OptionEngine, "Engine"},
 		{"loop middleware", corenet.OptionLoopMiddleware, "UseLoop"},
+		{"protocols", corenet.OptionProtocols, "Protocols"},
 		//: past the block, the value is reported, never indexed out of range.
-		{"one past the last kind", corenet.OptionLoopMiddleware + 1, "unknown"},
+		{"one past the last kind", corenet.OptionProtocols + 1, "unknown"},
 		{"the largest value", corenet.OptionKind(255), "unknown"},
 	}
 	runCase := func(t *testing.T, c tc) {
