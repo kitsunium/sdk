@@ -1,4 +1,4 @@
-// Package server_test — the simple API (ADR 0187 §D6, ADR 0195): HTTP, TCP
+// Package server_test — the simple API (ADR 0187 §D6, ADR 0197): HTTP, TCP
 // and UDP choose the engine by the handler's type, name the group after its
 // address, require Plaintext of an HTTP group without TLS, and refuse every
 // handler they cannot place with a typed error.

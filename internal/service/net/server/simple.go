@@ -20,7 +20,7 @@ const (
 )
 
 // HTTP declares a group serving h over HTTP on addr, a TCP address — the
-// simple API (ADR 0187 §D6, ADR 0195). h is an http.Handler, served by
+// simple API (ADR 0187 §D6, ADR 0197). h is an http.Handler, served by
 // net/http on the goroutine engine, or an HTTP1Handler, served by the http1
 // profile's codec on the loop engine; a handler that is both needs Engine to
 // choose. The group is named "tcp+" + addr unless Name says otherwise, and

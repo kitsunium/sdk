@@ -28029,7 +28029,7 @@
         "reason": "HANDLER_AMBIGUOUS",
         "public": "The handler could run on two engines; choose one with Engine"
       },
-      "doc": "HandlerAmbiguous is returned by Start for a simple-API group whose handler\nimplements both interfaces of its entry — http.Handler and HTTP1Handler for\nHTTP, ConnHandler and LoopHandler for TCP — with no Engine to choose\n(ADR 0195). The \"entry\" and \"type\" fields name them.\n",
+      "doc": "HandlerAmbiguous is returned by Start for a simple-API group whose handler\nimplements both interfaces of its entry — http.Handler and HTTP1Handler for\nHTTP, ConnHandler and LoopHandler for TCP — with no Engine to choose\n(ADR 0197). The \"entry\" and \"type\" fields name them.\n",
       "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
@@ -28080,7 +28080,7 @@
         "reason": "HANDLER_UNSUPPORTED",
         "public": "The handler cannot be served by this entry point"
       },
-      "doc": "HandlerUnsupported is returned by Start for a simple-API group whose handler\nno engine of its entry serves: a PacketHandler given to HTTP, a LoopHandler\ngiven to UDP, an HTTP handler given to TCP (its \"serve\" field names HTTP),\nany other type (ADR 0195). The \"entry\" and \"type\" fields name them.\n",
+      "doc": "HandlerUnsupported is returned by Start for a simple-API group whose handler\nno engine of its entry serves: a PacketHandler given to HTTP, a LoopHandler\ngiven to UDP, an HTTP handler given to TCP (its \"serve\" field names HTTP),\nany other type (ADR 0197). The \"entry\" and \"type\" fields name them.\n",
       "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
@@ -29908,7 +29908,7 @@
         "reason": "PACKET_OPTION_UNSUPPORTED",
         "public": "The datagram group cannot honour one of its options"
       },
-      "doc": "PacketOptionUnsupported is returned by Start for a datagram group given an\noption the datagram engine does not apply — anything but MaxPacketSize,\nBatchSize, Adopt, Name, Engine and Plaintext — refused rather than dropped\n(ADR 0187 §D4, ADR 0195). The \"option\" field names it.\n",
+      "doc": "PacketOptionUnsupported is returned by Start for a datagram group given an\noption the datagram engine does not apply — anything but MaxPacketSize,\nBatchSize, Adopt, Name, Engine and Plaintext — refused rather than dropped\n(ADR 0187 §D4, ADR 0197). The \"option\" field names it.\n",
       "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
@@ -30032,7 +30032,7 @@
         "reason": "PLAINTEXT_REQUIRED",
         "public": "The HTTP group needs TLS or Plaintext"
       },
-      "doc": "PlaintextRequired is returned by Start for a group that serves HTTP —\nnet/http's or the http1 codec — given neither TLS nor Plaintext: a group\nwithout TLS says so (ADR 0187 §D7, ADR 0195). The \"group\" field names it.\n",
+      "doc": "PlaintextRequired is returned by Start for a group that serves HTTP —\nnet/http's or the http1 codec — given neither TLS nor Plaintext: a group\nwithout TLS says so (ADR 0187 §D7, ADR 0197). The \"group\" field names it.\n",
       "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
@@ -65115,7 +65115,7 @@
       "name": "Plaintext",
       "spelled": "func() GroupOption",
       "canonical": "func() github.com/kitsunium/sdk/internal/service/net/server.GroupOption",
-      "doc": "Plaintext declares that the group serves no TLS (ADR 0187). Every engine\nhonours it. A group given both Plaintext and TLS, in either order, fails\nStart with PlaintextWithTLS. An HTTP group without TLS must give it, or\nfails Start with PlaintextRequired (ADR 0195).\n",
+      "doc": "Plaintext declares that the group serves no TLS (ADR 0187). Every engine\nhonours it. A group given both Plaintext and TLS, in either order, fails\nStart with PlaintextWithTLS. An HTTP group without TLS must give it, or\nfails Start with PlaintextRequired (ADR 0197).\n",
       "file": "service/net/server/options.go",
       "layer": "service",
       "family": "net"
@@ -65214,7 +65214,7 @@
       "recv": "Server",
       "spelled": "func(addr string, h any, opts ...GroupOption) *StreamGroup",
       "canonical": "func(addr string, h any, opts ...github.com/kitsunium/sdk/internal/service/net/server.GroupOption) *github.com/kitsunium/sdk/internal/service/net/server.StreamGroup",
-      "doc": "HTTP declares a group serving h over HTTP on addr, a TCP address — the\nsimple API (ADR 0187 §D6, ADR 0195). h is an http.Handler, served by\nnet/http on the goroutine engine, or an HTTP1Handler, served by the http1\nprofile's codec on the loop engine; a handler that is both needs Engine to\nchoose. The group is named \"tcp+\" + addr unless Name says otherwise, and\nopts apply as they do to Group. Without TLS, Plaintext is required (ADR\n0187 §D7). Every refusal is reported by Start: a nil or typed nil handler\n(HandlerMissing), both interfaces without Engine (HandlerAmbiguous), an\nEngine the handler cannot run on (EngineUnsupported), a type no engine of\nHTTP serves (HandlerUnsupported), Plaintext with TLS (PlaintextWithTLS),\nneither (PlaintextRequired).\n",
+      "doc": "HTTP declares a group serving h over HTTP on addr, a TCP address — the\nsimple API (ADR 0187 §D6, ADR 0197). h is an http.Handler, served by\nnet/http on the goroutine engine, or an HTTP1Handler, served by the http1\nprofile's codec on the loop engine; a handler that is both needs Engine to\nchoose. The group is named \"tcp+\" + addr unless Name says otherwise, and\nopts apply as they do to Group. Without TLS, Plaintext is required (ADR\n0187 §D7). Every refusal is reported by Start: a nil or typed nil handler\n(HandlerMissing), both interfaces without Engine (HandlerAmbiguous), an\nEngine the handler cannot run on (EngineUnsupported), a type no engine of\nHTTP serves (HandlerUnsupported), Plaintext with TLS (PlaintextWithTLS),\nneither (PlaintextRequired).\n",
       "file": "service/net/server/simple.go",
       "layer": "service",
       "family": "net"

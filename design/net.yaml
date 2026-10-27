@@ -2329,7 +2329,7 @@ packages:
               HandlerAmbiguous is returned by Start for a simple-API group whose handler
               implements both interfaces of its entry — http.Handler and HTTP1Handler for
               HTTP, ConnHandler and LoopHandler for TCP — with no Engine to choose
-              (ADR 0195). The "entry" and "type" fields name them.
+              (ADR 0197). The "entry" and "type" fields name them.
             exit: USAGE
             name: HandlerAmbiguous
             private: "core/net: the handler implements both interfaces of its entry and no Engine chooses"
@@ -2340,7 +2340,7 @@ packages:
               HandlerUnsupported is returned by Start for a simple-API group whose handler
               no engine of its entry serves: a PacketHandler given to HTTP, a LoopHandler
               given to UDP, an HTTP handler given to TCP (its "serve" field names HTTP),
-              any other type (ADR 0195). The "entry" and "type" fields name them.
+              any other type (ADR 0197). The "entry" and "type" fields name them.
             exit: USAGE
             name: HandlerUnsupported
             private: "core/net: no engine of the entry serves the handler's type"
@@ -2350,7 +2350,7 @@ packages:
             doc: |-
               PlaintextRequired is returned by Start for a group that serves HTTP —
               net/http's or the http1 codec — given neither TLS nor Plaintext: a group
-              without TLS says so (ADR 0187 §D7, ADR 0195). The "group" field names it.
+              without TLS says so (ADR 0187 §D7, ADR 0197). The "group" field names it.
             exit: CONFIG
             name: PlaintextRequired
             private: "core/net: an HTTP group without TLS must say Plaintext"
@@ -2361,7 +2361,7 @@ packages:
               PacketOptionUnsupported is returned by Start for a datagram group given an
               option the datagram engine does not apply — anything but MaxPacketSize,
               BatchSize, Adopt, Name, Engine and Plaintext — refused rather than dropped
-              (ADR 0187 §D4, ADR 0195). The "option" field names it.
+              (ADR 0187 §D4, ADR 0197). The "option" field names it.
             exit: CONFIG
             name: PacketOptionUnsupported
             private: "core/net: the datagram group was given an option it cannot honour"
@@ -5193,7 +5193,7 @@ packages:
           Plaintext declares that the group serves no TLS (ADR 0187). Every engine
           honours it. A group given both Plaintext and TLS, in either order, fails
           Start with PlaintextWithTLS. An HTTP group without TLS must give it, or
-          fails Start with PlaintextRequired (ADR 0195).
+          fails Start with PlaintextRequired (ADR 0197).
         name: Plaintext
         out:
           - type: GroupOption
@@ -5613,7 +5613,7 @@ packages:
             variadic: true
           - doc: |-
               HTTP declares a group serving h over HTTP on addr, a TCP address — the
-              simple API (ADR 0187 §D6, ADR 0195). h is an http.Handler, served by
+              simple API (ADR 0187 §D6, ADR 0197). h is an http.Handler, served by
               net/http on the goroutine engine, or an HTTP1Handler, served by the http1
               profile's codec on the loop engine; a handler that is both needs Engine to
               choose. The group is named "tcp+" + addr unless Name says otherwise, and
