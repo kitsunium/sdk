@@ -322,3 +322,62 @@ func Test_multiReader_stopGRO(t *testing.T) {
 	}
 	(&multiReader{}).stopGRO()
 }
+
+// Test_multiReader_foreignControl pins a socket on which the caller asked for
+// a control message of its own, IP_PKTINFO here: without GRO the reader asks
+// for no control data, so the kernel's MSG_CTRUNC for the one it could not
+// write cuts nothing and every datagram is served; with GRO the room beside
+// UDP_GRO's holds it, and a coalesced send is still split, never cut.
+func Test_multiReader_foreignControl(t *testing.T) {
+	t.Parallel()
+	pktinfo := func(t *testing.T, pc stdnet.PacketConn) {
+		t.Helper()
+		raw, err := pc.(*stdnet.UDPConn).SyscallConn()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var serr error
+		if cerr := raw.Control(func(fd uintptr) {
+			serr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IP, syscall.IP_PKTINFO, 1)
+		}); cerr != nil || serr != nil {
+			t.Fatalf("IP_PKTINFO: %v %v", cerr, serr)
+		}
+	}
+	t.Run("GRO off", func(t *testing.T) {
+		t.Parallel()
+		receiver, sender := udpPair(t)
+		pktinfo(t, receiver)
+		reader, err := newMultiReader(receiver, receiver)
+		if err != nil {
+			t.Fatal(err)
+		}
+		slots := newSlots(4, reader.slotSize(1200))
+		for range 3 {
+			if _, err := sender.Write(make([]byte, 300)); err != nil {
+				t.Fatal(err)
+			}
+			n := readOne(t, reader, slots)
+			if n != 1 || slots[0].cut || slots[0].n != 300 || slots[0].addr == nil {
+				t.Fatalf("read %d, cut=%v n=%d addr=%v, want one whole datagram", n, slots[0].cut, slots[0].n, slots[0].addr)
+			}
+		}
+		if reader.controlSpace != 0 || reader.headers[0].hdr.Control != nil {
+			t.Fatalf("a reader without GRO asked for %d bytes of control data", reader.controlSpace)
+		}
+	})
+	t.Run("GRO on", func(t *testing.T) {
+		t.Parallel()
+		reader, sender := groReader(t, 1200)
+		pktinfo(t, reader.pc)
+		slots := newSlots(2, reader.slotSize(1200))
+		for range 3 {
+			if _, err := sender.Write(make([]byte, 10*1200)); err != nil {
+				t.Fatal(err)
+			}
+			n := readOne(t, reader, slots)
+			if n != 1 || slots[0].cut || slots[0].seg != 1200 || slots[0].count() != 10 {
+				t.Fatalf("read %d, cut=%v seg=%d count=%d, want one message of 10", n, slots[0].cut, slots[0].seg, slots[0].count())
+			}
+		}
+	})
+}

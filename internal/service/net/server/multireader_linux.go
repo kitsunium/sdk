@@ -26,6 +26,12 @@ const (
 	// groSegmentBytes is the size of the UDP_GRO control message's payload: the
 	// segment size, a C int.
 	groSegmentBytes int = 4
+	// groControlSpace is the control room a GRO read gives each message: the
+	// UDP_GRO message's 24 bytes and room beside it for those a caller may have
+	// asked of the socket itself — IP_PKTINFO (32), IPV6_PKTINFO (40), a
+	// timestamp (32 to 64) —, so a foreign control message never cuts the one
+	// the reader needs (MSG_CTRUNC). 64 slots of it are 16 KiB.
+	groControlSpace int = 256
 )
 
 // multiReader reads several datagrams per syscall using recvmmsg(2).
@@ -48,8 +54,10 @@ type multiReader struct {
 	names []syscall.RawSockaddrAny
 	// oob receives each message's control data, controlSpace bytes a slot.
 	oob []byte
-	// controlSpace is the room one message's control data has: CMSG_SPACE of
-	// the UDP_GRO segment size, the one control message a read asks for.
+	// controlSpace is the room one message's control data has: groControlSpace
+	// under GRO, the one case a read asks for a control message, and none
+	// without it — a control message the caller asked of the socket is then
+	// not read, and its MSG_CTRUNC means nothing to the reader.
 	controlSpace int
 	// wired records the slot count the arrays were built for.
 	wired int
@@ -63,6 +71,13 @@ type multiReader struct {
 	// returns from then on may hold a coalesced message without its segment
 	// size, so it is dropped and the loop ended — the socket is being closed.
 	stopping atomic.Bool
+	// received and errno are what the last recvmmsg returned. They are fields,
+	// and recv and drainOnce the functions the descriptor runs, bound once at
+	// wiring, so a read moves nothing to the heap.
+	received  int
+	errno     syscall.Errno
+	recv      func(fd uintptr) bool
+	drainOnce func(fd uintptr)
 }
 
 // newMultiReader builds a batched reader over pc.
@@ -73,8 +88,9 @@ func newMultiReader(pc stdnet.PacketConn, sc rawConnProvider) (reader *multiRead
 		//: without the descriptor there is nothing to batch on.
 		return nil, rerr
 	}
-	//: the arrays are sized lazily, on the first read, when the slot count is known.
-	return &multiReader{pc: pc, raw: raw, controlSpace: syscall.CmsgSpace(groSegmentBytes)}, nil
+	//: the arrays are sized lazily, on the first read, when the slot count is
+	//: known, and the control room once GRO is decided.
+	return &multiReader{pc: pc, raw: raw}, nil
 }
 
 // enableGRO switches UDP_GRO on and reports whether the kernel took it: a
@@ -142,7 +158,9 @@ func (r *multiReader) switchGROOff() {
 }
 
 // slotSize implements datagramSource: a whole coalesced message under GRO, the
-// ceiling otherwise.
+// ceiling otherwise. Under GRO a socket's read batch therefore holds BatchSize
+// slots of 64 KiB: 1 MiB at the default 16, 64 MiB at a BatchSize of 1024,
+// allocated once for the socket's life (ADR 0192 §D2).
 func (r *multiReader) slotSize(ceiling int) int {
 	//: one datagram a message: the probe byte past the ceiling is enough.
 	if !r.gro {
@@ -162,10 +180,9 @@ func (r *multiReader) wire(slots []datagram) {
 		return
 	}
 	count := len(slots)
-	//: a reader built without its constructor still gets the room the UDP_GRO
-	//: control message needs.
-	if r.controlSpace <= 0 {
-		r.controlSpace = syscall.CmsgSpace(groSegmentBytes)
+	//: GRO's room, unless a test set its own; none without GRO.
+	if r.controlSpace <= 0 && r.gro {
+		r.controlSpace = groControlSpace
 	}
 	//: all four are indexed in lockstep with slots, never appended to.
 	r.headers = make([]mmsghdr, count)
@@ -179,10 +196,47 @@ func (r *multiReader) wire(slots []datagram) {
 		r.headers[i].hdr.Name = (*byte)(unsafe.Pointer(&r.names[i]))
 		r.headers[i].hdr.Iov = &r.iovecs[i]
 		setKernelLen(&r.headers[i].hdr.Iovlen, 1)
-		r.headers[i].hdr.Control = &r.oob[i*r.controlSpace]
+		//: no control room: the kernel writes no control data.
+		if r.controlSpace > 0 {
+			r.headers[i].hdr.Control = &r.oob[i*r.controlSpace]
+		}
 	}
+	r.bind()
 	r.wired = count
 	r.prepare()
+}
+
+// bind builds, once, the functions the descriptor runs: recvmmsg parked on the
+// netpoller, and the drain's, which never waits. They write into the reader's
+// fields, so neither moves a variable to the heap on each read.
+func (r *multiReader) bind() {
+	//: already bound for this reader.
+	if r.recv != nil {
+		//: bound.
+		return
+	}
+	//: driving the syscall inside RawConn.Read is what keeps the goroutine
+	//: parked on the netpoller: returning false on EAGAIN hands control back to
+	//: the runtime exactly as a blocking ReadFrom would.
+	r.recv = func(fd uintptr) bool {
+		result, _, callErrno := syscall.Syscall6(syscall.SYS_RECVMMSG, fd,
+			uintptr(unsafe.Pointer(&r.headers[0])), uintptr(len(r.headers)),
+			syscall.MSG_WAITFORONE, 0, 0)
+		//: not ready yet — let the netpoller wake us when it is.
+		if callErrno == syscall.EAGAIN {
+			//: not ready — hand control back to the netpoller.
+			return false
+		}
+		r.received, r.errno = int(result), callErrno
+		//: the syscall completed, successfully or not.
+		return true
+	}
+	r.drainOnce = func(fd uintptr) {
+		result, _, callErrno := syscall.Syscall6(syscall.SYS_RECVMMSG, fd,
+			uintptr(unsafe.Pointer(&r.headers[0])), uintptr(len(r.headers)),
+			syscall.MSG_DONTWAIT, 0, 0)
+		r.received, r.errno = int(result), callErrno
+	}
 }
 
 // prepare restores every header's capacities before a call: the kernel wrote
@@ -208,24 +262,9 @@ func (r *multiReader) readBatch(slots []datagram) (n int, err error) {
 		return r.drain(slots)
 	}
 	r.prepare()
-	var received int
-	var errno syscall.Errno
-	//: driving the syscall inside RawConn.Read is what keeps the goroutine
-	//: parked on the netpoller: returning false on EAGAIN hands control back to
-	//: the runtime exactly as a blocking ReadFrom would.
-	ctrlErr := r.raw.Read(func(fd uintptr) bool {
-		result, _, callErrno := syscall.Syscall6(syscall.SYS_RECVMMSG, fd,
-			uintptr(unsafe.Pointer(&r.headers[0])), uintptr(len(r.headers)),
-			syscall.MSG_WAITFORONE, 0, 0)
-		//: not ready yet — let the netpoller wake us when it is.
-		if callErrno == syscall.EAGAIN {
-			//: not ready — hand control back to the netpoller.
-			return false
-		}
-		received, errno = int(result), callErrno
-		//: the syscall completed, successfully or not.
-		return true
-	})
+	r.received, r.errno = 0, 0
+	ctrlErr := r.raw.Read(r.recv)
+	received, errno := r.received, r.errno
 	//: handover's deadline woke the parked read: drain instead.
 	if ctrlErr != nil && r.handing.Load() && errors.Is(ctrlErr, os.ErrDeadlineExceeded) {
 		//: the drain's own read.
@@ -257,14 +296,9 @@ func (r *multiReader) readBatch(slots []datagram) (n int, err error) {
 // is, net.ErrClosed, which ends it.
 func (r *multiReader) drain(slots []datagram) (n int, err error) {
 	r.prepare()
-	var received int
-	var errno syscall.Errno
-	ctrlErr := r.raw.Control(func(fd uintptr) {
-		result, _, callErrno := syscall.Syscall6(syscall.SYS_RECVMMSG, fd,
-			uintptr(unsafe.Pointer(&r.headers[0])), uintptr(len(r.headers)),
-			syscall.MSG_DONTWAIT, 0, 0)
-		received, errno = int(result), callErrno
-	})
+	r.received, r.errno = 0, 0
+	ctrlErr := r.raw.Control(r.drainOnce)
+	received, errno := r.received, r.errno
 	//: closed under the drain: the budget ran out first.
 	if ctrlErr != nil {
 		//: the loop ends on it.
@@ -296,6 +330,12 @@ func (r *multiReader) drain(slots []datagram) (n int, err error) {
 // fill copies the per-message results back into the caller's slots: the length,
 // the sender, the segment size a coalesced message carries, and whether the
 // kernel cut the message (msg_flags).
+//
+// Without GRO the reader asks for no control data and reads none: a control
+// message the caller asked of the socket — IP_PKTINFO, a timestamp — finds no
+// room and the kernel sets MSG_CTRUNC, which costs this reader nothing, so it
+// never cuts a message. Under GRO a message is cut for MSG_CTRUNC only when the
+// UDP_GRO message itself did not survive: its segment size may then be lost.
 func (r *multiReader) fill(slots []datagram, received int) {
 	//: only the slots the kernel actually filled carry meaningful data.
 	for i := range received {
@@ -303,15 +343,19 @@ func (r *multiReader) fill(slots []datagram, received int) {
 		slot := &slots[i]
 		slot.n = int(r.headers[i].length)
 		slot.seg = 0
-		slot.cut = hdr.Flags&syscall.MSG_CTRUNC != 0
-		//: control data cut short may have lost the segment size, so the
-		//: message cannot be split: nothing more to read from it.
+		//: GRO's control message, read as the kernel laid it out.
+		if r.controlSpace > 0 {
+			used := min(int(hdr.Controllen), r.controlSpace)
+			slot.seg = groSegment(r.oob[i*r.controlSpace : i*r.controlSpace+used])
+		}
+		//: control data cut short before the segment size: the message
+		//: cannot be split, nothing more to read from it.
+		slot.cut = r.gro && slot.seg == 0 && hdr.Flags&syscall.MSG_CTRUNC != 0
+		//: cut short: no sender to hand on.
 		if slot.cut {
 			slot.addr = nil
 			continue
 		}
-		used := min(int(hdr.Controllen), r.controlSpace)
-		slot.seg = groSegment(r.oob[i*r.controlSpace : i*r.controlSpace+used])
 		//: a message past its buffer is cut. Without GRO it is one datagram past
 		//: the ceiling, which the probe byte already shows; with it, it may be
 		//: several whole datagrams and a part, which cannot be told apart.
