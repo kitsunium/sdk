@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unsafe"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/service/net/http1"
@@ -350,4 +351,43 @@ func TestLoopOutbound_drain(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Test_jobRingLines pins the ring's layout: head and tail each on a cache
+// line of their own, apart from the read-only fields, so the producer's
+// stores never invalidate the line the consumer reads.
+func Test_jobRingLines(t *testing.T) {
+	t.Parallel()
+	var r jobRing
+	mask, head, tail := unsafe.Offsetof(r.mask), unsafe.Offsetof(r.head), unsafe.Offsetof(r.tail)
+	if head-mask < uintptr(cacheLine) || tail-head < uintptr(cacheLine) {
+		t.Fatalf("mask at %d, head at %d, tail at %d: want each %d bytes apart", mask, head, tail, cacheLine)
+	}
+	if unsafe.Sizeof(r)-tail < uintptr(cacheLine) {
+		t.Fatalf("tail at %d of %d bytes: want a line of its own", tail, unsafe.Sizeof(r))
+	}
+}
+
+// TestLoopOutbound_releasesLanes pins outboundLanes: a lane is found by its
+// key while it runs, and its entry is released once its workers are told to
+// stop, so a long-lived process that starts servers does not keep them.
+func TestLoopOutbound_releasesLanes(t *testing.T) {
+	t.Parallel()
+	out := startOutbound(http1.HandleLoop(&pendingApp{}, http1.Parser{}), corenet.LoopValue{Loops: 2})
+	if out == nil {
+		t.Fatal("startOutbound: no outbound for a worker")
+	}
+	for _, l := range out.lanes {
+		if outboundLanes.now()[l.key] != l {
+			t.Fatalf("lane %d not found by its key %d", l.lane, l.key)
+		}
+	}
+	out.signal()
+	out.wait(t.Context())
+	for _, l := range out.lanes {
+		if outboundLanes.now()[l.key] != nil {
+			t.Fatalf("lane %d still held at key %d after stop", l.lane, l.key)
+		}
+	}
+	runCompletions(probeIO{}, out.lanes[0].key)
 }

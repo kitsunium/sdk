@@ -73,8 +73,9 @@ HTTP/1.1 answers in request order. From a connection's first pending answer
 until it is written, every later answer of that connection — answered on the
 loop, deferred to the batch's end, or pending — is held, in order, in a
 buffer of the connection's own, and written at a batch's end once every
-answer before it is ready. What a connection holds is bounded by
-`LoopValue.OutputCap`: past it the connection is closed. The alternative,
+answer before it is ready. What a connection still holds — the answers
+already written leave the count — is bounded by `LoopValue.OutputCap`: past
+it the connection is closed. The alternative,
 stop reading the connection until its answer is back, needed a new
 "resume reading" primitive on every backend.
 
@@ -99,7 +100,9 @@ The queue's depth is `LoopValue.Outbound`, beside the loop's other bounds; no
   and, for `HTTP1Worker` as `Worker`, `pkg/v1/net/http1`.
 - The worker's completion reaches the lane through a process-wide table of
   lanes indexed by the integer it posts with, since a `PostFunc` holds no
-  closure; the table only grows, by one entry per lane per started group.
+  closure; a key is never given twice, so an op posted for a stopped lane
+  cannot reach a newer one, and a lane's entry is released once its workers
+  are told to stop.
 - A handler that never sets `Pending` pays one flag lookup per request; the
   answers' path allocates nothing new.
 - Tests, on every loop backend present, under `-race`: a pending answer and

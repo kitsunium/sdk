@@ -3561,7 +3561,9 @@ sequences:
     steps:
       - opt:
           do:
-            - eval: l.io.Store(&io)
+            - bind: kept
+              eval: io
+            - eval: l.io.Store(&kept)
               to: l.io.Store
           when: l.io.Load() == nil
       - opt:
@@ -3675,50 +3677,98 @@ sequences:
             - eval: l.off.OnDone(io, job)
               to: l.off.OnDone
           forever: true
+  - of: (*laneTable).now
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*laneTable).now
+        kind: self
+      - id: t.lanes.Load
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "*p"
+          init:
+            bind: p
+            eval: t.lanes.Load()
+            to: t.lanes.Load
+          when: p != nil
+      - return: nil
   - of: registerLane
     participants:
       - id: caller
         kind: actor
       - id: registerLane
         kind: self
-      - id: outboundLanes.lanes.Load
-        kind: value
+      - id: lanesWith
+        kind: internal
       - id: outboundLanes.lanes.Store
         kind: value
     steps:
       - lock:
           mutex: outboundLanes.mu
-      - var:
-          name: cur
-          type: "[]*outboundLane"
-      - opt:
-          do:
-            - set: cur
-              value: "*p"
-          init:
-            bind: p
-            eval: outboundLanes.lanes.Load()
-            to: outboundLanes.lanes.Load
-          when: p != nil
-      - bind: next
-        eval: append(slices.Clip(cur), l)
       - set: l.key
-        value: uintptr(len(cur))
+        value: outboundLanes.next
+      - op: ++
+        set: outboundLanes.next
+      - bind: next
+        eval: lanesWith(len(outboundLanes.now()) + 1)
+        to: lanesWith
+      - set: next[l.key]
+        value: l
       - eval: outboundLanes.lanes.Store(&next)
         to: outboundLanes.lanes.Store
+  - of: releaseLane
+    participants:
+      - id: caller
+        kind: actor
+      - id: releaseLane
+        kind: self
+      - id: lanesWith
+        kind: internal
+      - id: outboundLanes.lanes.Store
+        kind: value
+    steps:
+      - lock:
+          mutex: outboundLanes.mu
+      - bind: next
+        eval: lanesWith(len(outboundLanes.now()))
+        to: lanesWith
+      - eval: delete(next, l.key)
+      - eval: outboundLanes.lanes.Store(&next)
+        to: outboundLanes.lanes.Store
+  - of: lanesWith
+    participants:
+      - id: caller
+        kind: actor
+      - id: lanesWith
+        kind: self
+      - id: maps
+        kind: stdlib
+    steps:
+      - bind: next
+        eval: make(map[uintptr]*outboundLane, n)
+      - eval: maps.Copy(next, outboundLanes.now())
+        to: maps
+      - return: next
   - of: runCompletions
     participants:
       - id: caller
         kind: actor
       - id: runCompletions
         kind: self
-      - id: lanes[key].drain
+      - id: l.drain
         kind: internal
     steps:
-      - bind: lanes
-        eval: "*outboundLanes.lanes.Load()"
-      - eval: lanes[key].drain(io)
-        to: lanes[key].drain
+      - bind: l
+        eval: outboundLanes.now()[key]
+      - opt:
+          do:
+            - return: ""
+          when: l == nil
+      - eval: l.drain(io)
+        to: l.drain
   - of: startOutbound
     participants:
       - id: caller
@@ -3868,9 +3918,10 @@ sequences:
     steps:
       - eval: |-
           o.stopOnce.Do(func() {
-          		//: each worker, woken to see it.
+          		//: each worker, woken to see it, and its entry released.
           		for _, l := range o.lanes {
           			l.stopped.Store(true)
+          			releaseLane(l)
           			select {
           			case l.wake <- struct{}{}:
           			default:

@@ -97,6 +97,12 @@ constants:
         name: postRetry
         type: time.Duration
         value: time.Millisecond
+      - doc: |-
+          cacheLine is the cache line a ring's two counters are kept apart by, so
+          the producer's stores never invalidate the line the consumer reads.
+        name: cacheLine
+        type: int
+        value: "64"
     name: defaultOutboundDepth
   - grouped: true
     items:
@@ -701,7 +707,11 @@ files:
       - (*outboundLane).complete
       - (*outboundLane).drain
       - outboundLanes
+      - laneTable
+      - (*laneTable).now
       - registerLane
+      - releaseLane
+      - lanesWith
       - runCompletions
       - outbound
       - startOutbound
@@ -1407,6 +1417,13 @@ functions:
   - doc: registerLane gives l its key.
     name: registerLane
     params: l *outboundLane
+  - doc: releaseLane removes l's entry, once its loop has stopped.
+    name: releaseLane
+    params: l *outboundLane
+  - doc: lanesWith copies the table as it stands into a new map of room n. Under mu.
+    name: lanesWith
+    params: n int
+    results: map[uintptr]*outboundLane
   - doc: "runCompletions is the op a worker posts: it drains the lane named by key."
     name: runCompletions
     params: io corenet.LoopIO, key uintptr
@@ -2587,7 +2604,9 @@ types:
   - doc: |-
       jobRing is a single-producer single-consumer ring of jobs, preallocated:
       head is written by the consumer only, tail by the producer only, and each
-      reads the other's with an atomic load, so neither takes a lock.
+      reads the other's with an atomic load, so neither takes a lock. Each
+      counter has a cache line of its own, the read-only fields one before them,
+      so the two sides never write the same line.
     fields:
       - doc: jobs is the storage, a power of two long.
         name: jobs
@@ -2595,12 +2614,21 @@ types:
       - doc: mask is len(jobs) less one.
         name: mask
         type: uint64
+      - doc: _ keeps head off the line jobs and mask share.
+        name: _
+        type: "[cacheLine]byte"
       - doc: head is the next job to pop.
         name: head
         type: atomic.Uint64
+      - doc: _ keeps tail off head's line.
+        name: _
+        type: "[cacheLine - 8]byte"
       - doc: tail is the next free place.
         name: tail
         type: atomic.Uint64
+      - doc: _ keeps whatever follows the ring off tail's line.
+        name: _
+        type: "[cacheLine - 8]byte"
     kind: struct
     methods:
       - doc: push appends job and reports false when the ring is full. Producer only.
@@ -2686,6 +2714,24 @@ types:
         params: io corenet.LoopIO
         recv: l *outboundLane
     name: outboundLane
+  - doc: laneTable is outboundLanes' type.
+    fields:
+      - doc: mu serialises registration and release.
+        name: mu
+        type: sync.Mutex
+      - doc: next is the key the next lane is given.
+        name: next
+        type: uintptr
+      - doc: lanes is replaced, never written in place, under mu.
+        name: lanes
+        type: atomic.Pointer[map[uintptr]*outboundLane]
+    kind: struct
+    methods:
+      - doc: now returns the table as it stands, nil before the first lane.
+        name: now
+        recv: t *laneTable
+        results: map[uintptr]*outboundLane
+    name: laneTable
   - doc: outbound is one loop group's port to its workers.
     fields:
       - doc: lanes are the group's lanes, by index.
@@ -2706,8 +2752,9 @@ types:
     kind: struct
     methods:
       - doc: |-
-          signal tells every worker to stop once its running job returns. Queued
-          jobs are dropped: their loop has stopped and could not write an answer.
+          signal tells every worker to stop once its running job returns, and
+          releases each lane's entry in outboundLanes. Queued jobs are dropped: their
+          loop has stopped and could not write an answer.
         name: signal
         recv: o *outbound
       - doc: |-
@@ -4791,19 +4838,14 @@ vars:
           }
     name: probeNames
   - doc: |-
-      outboundLanes holds every lane of every server's outbound, by key: a
-      PostFunc is a plain function and its argument an integer, so the
-      completion op finds its lane here. It only grows; a stopped lane's entry
-      stays, and its posts are refused by its stopped loop.
+      outboundLanes holds every running lane of every server's outbound, by key:
+      a PostFunc is a plain function and its argument an integer, so the
+      completion op finds its lane here. A key is never given twice, so an op
+      posted for a stopped lane cannot reach a newer one; a stopped lane's entry
+      is released, and an op that still names it finds nothing.
     items:
       - name: outboundLanes
-        type: |-
-          struct {
-          	// mu serialises registration.
-          	mu sync.Mutex
-          	// lanes is replaced, never written in place, under mu.
-          	lanes atomic.Pointer[[]*outboundLane]
-          }
+        type: laneTable
     name: outboundLanes
   - doc: |-
       markRecycled, set by a test, fills each read buffer the batch released

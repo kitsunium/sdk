@@ -3,9 +3,9 @@ package server
 import (
 	"context"
 	"errors"
+	"maps"
 	"math/bits"
 	stdnet "net"
-	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -20,20 +20,31 @@ const (
 	// postRetry is how long a worker waits before it posts a completion again
 	// to a loop whose post queue was full.
 	postRetry time.Duration = time.Millisecond
+	// cacheLine is the cache line a ring's two counters are kept apart by, so
+	// the producer's stores never invalidate the line the consumer reads.
+	cacheLine int = 64
 )
 
 // jobRing is a single-producer single-consumer ring of jobs, preallocated:
 // head is written by the consumer only, tail by the producer only, and each
-// reads the other's with an atomic load, so neither takes a lock.
+// reads the other's with an atomic load, so neither takes a lock. Each
+// counter has a cache line of its own, the read-only fields one before them,
+// so the two sides never write the same line.
 type jobRing struct {
 	// jobs is the storage, a power of two long.
 	jobs []corenet.LoopJobValue
 	// mask is len(jobs) less one.
 	mask uint64
+	// _ keeps head off the line jobs and mask share.
+	_ [cacheLine]byte
 	// head is the next job to pop.
 	head atomic.Uint64
+	// _ keeps tail off head's line.
+	_ [cacheLine - 8]byte
 	// tail is the next free place.
 	tail atomic.Uint64
+	// _ keeps whatever follows the ring off tail's line.
+	_ [cacheLine - 8]byte
 }
 
 // newJobRing allocates a ring of at least n jobs.
@@ -103,9 +114,11 @@ type outboundLane struct {
 // Send implements corenet.LoopOutbound: it queues job for the lane's worker
 // and wakes it, or refuses with LoopOutboundFull and counts the refusal.
 func (l *outboundLane) Send(io corenet.LoopIO, job corenet.LoopJobValue) error {
-	//: the lane's LoopIO, kept once for the worker's completions.
+	//: the lane's LoopIO, kept once for the worker's completions: a copy, so
+	//: only the first Send moves a value to the heap, never io itself.
 	if l.io.Load() == nil {
-		l.io.Store(&io)
+		kept := io
+		l.io.Store(&kept)
 	}
 	//: a full queue refuses, never blocks the lane.
 	if !l.jobs.push(job) {
@@ -190,36 +203,73 @@ func (l *outboundLane) drain(io corenet.LoopIO) {
 	}
 }
 
-// outboundLanes holds every lane of every server's outbound, by key: a
-// PostFunc is a plain function and its argument an integer, so the
-// completion op finds its lane here. It only grows; a stopped lane's entry
-// stays, and its posts are refused by its stopped loop.
-var outboundLanes struct {
-	// mu serialises registration.
+// outboundLanes holds every running lane of every server's outbound, by key:
+// a PostFunc is a plain function and its argument an integer, so the
+// completion op finds its lane here. A key is never given twice, so an op
+// posted for a stopped lane cannot reach a newer one; a stopped lane's entry
+// is released, and an op that still names it finds nothing.
+var outboundLanes laneTable
+
+// laneTable is outboundLanes' type.
+type laneTable struct {
+	// mu serialises registration and release.
 	mu sync.Mutex
+	// next is the key the next lane is given.
+	next uintptr
 	// lanes is replaced, never written in place, under mu.
-	lanes atomic.Pointer[[]*outboundLane]
+	lanes atomic.Pointer[map[uintptr]*outboundLane]
+}
+
+// now returns the table as it stands, nil before the first lane.
+func (t *laneTable) now() map[uintptr]*outboundLane {
+	//: published.
+	if p := t.lanes.Load(); p != nil {
+		//: the current table.
+		return *p
+	}
+	//: none yet.
+	return nil
 }
 
 // registerLane gives l its key.
 func registerLane(l *outboundLane) {
 	outboundLanes.mu.Lock()
 	defer outboundLanes.mu.Unlock()
-	var cur []*outboundLane
-	//: the table as it stands.
-	if p := outboundLanes.lanes.Load(); p != nil {
-		cur = *p
-	}
-	next := append(slices.Clip(cur), l)
-	l.key = uintptr(len(cur))
+	l.key = outboundLanes.next
+	outboundLanes.next++
+	next := lanesWith(len(outboundLanes.now()) + 1)
+	next[l.key] = l
 	outboundLanes.lanes.Store(&next)
+}
+
+// releaseLane removes l's entry, once its loop has stopped.
+func releaseLane(l *outboundLane) {
+	outboundLanes.mu.Lock()
+	defer outboundLanes.mu.Unlock()
+	next := lanesWith(len(outboundLanes.now()))
+	delete(next, l.key)
+	outboundLanes.lanes.Store(&next)
+}
+
+// lanesWith copies the table as it stands into a new map of room n. Under mu.
+func lanesWith(n int) map[uintptr]*outboundLane {
+	//: replaced, never written in place: a loop may be reading the old one.
+	next := make(map[uintptr]*outboundLane, n)
+	maps.Copy(next, outboundLanes.now())
+	//: the copy.
+	return next
 }
 
 // runCompletions is the op a worker posts: it drains the lane named by key.
 func runCompletions(io corenet.LoopIO, key uintptr) {
-	lanes := *outboundLanes.lanes.Load()
+	l := outboundLanes.now()[key]
+	//: released: its loop stopped, its completions go nowhere.
+	if l == nil {
+		//: nothing to drain.
+		return
+	}
 	//: on the lane's thread.
-	lanes[key].drain(io)
+	l.drain(io)
 }
 
 // outbound is one loop group's port to its workers.
@@ -322,13 +372,15 @@ func findOffloader(h corenet.LoopHandler) (corenet.LoopOffloader, corenet.LoopWo
 	return nil, nil
 }
 
-// signal tells every worker to stop once its running job returns. Queued
-// jobs are dropped: their loop has stopped and could not write an answer.
+// signal tells every worker to stop once its running job returns, and
+// releases each lane's entry in outboundLanes. Queued jobs are dropped: their
+// loop has stopped and could not write an answer.
 func (o *outbound) signal() {
 	o.stopOnce.Do(func() {
-		//: each worker, woken to see it.
+		//: each worker, woken to see it, and its entry released.
 		for _, l := range o.lanes {
 			l.stopped.Store(true)
+			releaseLane(l)
 			select {
 			case l.wake <- struct{}{}:
 			default:
