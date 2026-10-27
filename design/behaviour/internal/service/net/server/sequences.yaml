@@ -4448,17 +4448,7 @@ sequences:
         kind: value
       - id: pl.handle
         kind: internal
-      - id: pl.collect
-        kind: internal
-      - id: pl.drainPosts
-        kind: internal
-      - id: pl.timers
-        kind: internal
-      - id: pl.control
-        kind: internal
-      - id: pl.h.OnBatchEnd
-        kind: value
-      - id: pl.endBatch
+      - id: pl.batch
         kind: internal
       - id: pl.closeAll
         kind: internal
@@ -4479,18 +4469,8 @@ sequences:
                         to: pl.handle
                   - comm: <-pl.wake
                   - comm: <-tick.C
-            - eval: pl.collect()
-              to: pl.collect
-            - eval: pl.drainPosts()
-              to: pl.drainPosts
-            - eval: pl.timers()
-              to: pl.timers
-            - eval: pl.control()
-              to: pl.control
-            - eval: pl.h.OnBatchEnd(pl)
-              to: pl.h.OnBatchEnd
-            - eval: pl.endBatch()
-              to: pl.endBatch
+            - eval: pl.batch()
+              to: pl.batch
             - opt:
                 do:
                   - eval: pl.closeAll()
@@ -4498,6 +4478,46 @@ sequences:
                   - return: ""
                 when: pl.g.stopReq.Load() || (pl.draining && pl.live.Load() == 0)
           forever: true
+  - of: (*portableLoop).batch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*portableLoop).batch
+        kind: self
+      - id: pl.collect
+        kind: internal
+      - id: pl.drainPosts
+        kind: internal
+      - id: time
+        kind: stdlib
+      - id: pl.timers
+        kind: internal
+      - id: pl.control
+        kind: internal
+      - id: pl.h.OnBatchEnd
+        kind: value
+      - id: pl.endBatch
+        kind: internal
+    steps:
+      - eval: pl.collect()
+        to: pl.collect
+      - eval: pl.drainPosts()
+        to: pl.drainPosts
+      - opt:
+          do:
+            - eval: pl.timers(now)
+              to: pl.timers
+          init:
+            bind: now
+            eval: time.Now()
+            to: time
+          when: "!now.Before(pl.timersAt)"
+      - eval: pl.control()
+        to: pl.control
+      - eval: pl.h.OnBatchEnd(pl)
+        to: pl.h.OnBatchEnd
+      - eval: pl.endBatch()
+        to: pl.endBatch
   - of: (*portableLoop).collect
     participants:
       - id: caller
@@ -4884,6 +4904,13 @@ sequences:
               - op: +=
                 set: pc.spillOff
                 value: "n"
+              - opt:
+                  do:
+                    - set: pc.compact
+                      value: "true"
+                    - set: pl.compact
+                      value: append(pl.compact, slot)
+                  when: n > 0 && !pc.compact
             when: len(pc.spill) > pc.spillOff
           - do:
               - bind: tail
@@ -4963,40 +4990,55 @@ sequences:
         kind: actor
       - id: (*portableLoop).timers
         kind: self
-      - id: time
-        kind: stdlib
+      - id: now.Add
+        kind: value
+      - id: pl.timer
+        kind: internal
+    steps:
+      - set: pl.timersAt
+        to: now.Add
+        value: now.Add(portableTick)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: pl.timer(int32(slot), pc, now)
+                    to: pl.timer
+                when: pc.open
+          key: slot
+          range: pl.conns
+          value: pc
+  - of: (*portableLoop).timer
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*portableLoop).timer
+        kind: self
       - id: pl.finish
         kind: internal
       - id: pl.h.OnTimeout
         kind: value
     steps:
-      - bind: now
-        eval: time.Now()
-        to: time
-      - loop:
+      - opt:
           do:
-            - opt:
-                do:
-                  - continue: true
-                when: "!pc.open"
-            - opt:
-                do:
-                  - set: pc.reasonSet, pc.closeErr
-                    value: true, os.ErrDeadlineExceeded
-                  - eval: pl.finish(int32(slot), pc, os.ErrDeadlineExceeded)
-                    to: pl.finish
-                  - continue: true
-                when: pl.idle > 0 && now.Sub(pc.lastIO) >= pl.idle && pl.pending(pc) == 0
-            - opt:
-                do:
-                  - set: pc.deadline
-                    value: time.Time{}
-                  - eval: "pl.h.OnTimeout(pl, corenet.LoopConnRef{Slot: uint32(slot), Gen: pc.gen})"
-                    to: pl.h.OnTimeout
-                when: "!pc.deadline.IsZero() && !now.Before(pc.deadline)"
-          key: slot
-          range: pl.conns
-          value: pc
+            - set: pc.reasonSet, pc.closeErr
+              value: true, os.ErrDeadlineExceeded
+            - eval: pl.finish(slot, pc, os.ErrDeadlineExceeded)
+              to: pl.finish
+            - return: ""
+          when: pl.idle > 0 && now.Sub(pc.lastIO) >= pl.idle && pl.pending(pc) == 0
+      - opt:
+          do:
+            - set: pc.deadline
+              value: time.Time{}
+            - eval: "pl.h.OnTimeout(pl, corenet.LoopConnRef{Slot: uint32(slot), Gen: pc.gen})"
+              to: pl.h.OnTimeout
+          when: "!pc.deadline.IsZero() && !now.Before(pc.deadline)"
+      - opt:
+          do:
+            - set: pl.timersAt
+              value: pc.deadline
+          when: "!pc.deadline.IsZero() && pc.deadline.Before(pl.timersAt)"
   - of: (*portableLoop).control
     participants:
       - id: caller
@@ -5045,7 +5087,7 @@ sequences:
         kind: self
       - id: pl.settle
         kind: internal
-      - id: pl.compactSpills
+      - id: pl.compactListed
         kind: internal
       - id: pl.batches.Add
         kind: value
@@ -5069,8 +5111,8 @@ sequences:
           value: a
       - set: pl.batchAcks
         value: pl.batchAcks[:0]
-      - eval: pl.compactSpills()
-        to: pl.compactSpills
+      - eval: pl.compactListed()
+        to: pl.compactListed
       - eval: pl.batches.Add(1)
         to: pl.batches.Add
   - of: (*portableLoop).settle
@@ -5293,6 +5335,11 @@ sequences:
               - set: pc.deadline
                 to: time.Now().Add
                 value: time.Now().Add(d)
+              - opt:
+                  do:
+                    - set: pl.timersAt
+                      value: pc.deadline
+                  when: pc.deadline.Before(pl.timersAt)
             else: true
       - return: nil
   - of: (*portableLoop).Pressure
