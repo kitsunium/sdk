@@ -78,6 +78,9 @@ const (
 	// OptionEngine is Engine. Every engine honours it, or refuses the group with
 	// EngineUnsupported.
 	OptionEngine
+	// OptionLoopMiddleware is UseLoop. The loop engine honours it; every group no
+	// loop handler serves refuses it with LoopOptionUnsupported.
+	OptionLoopMiddleware
 	// OptionBatchReplies is BatchReplies. A datagram group honours it; a stream
 	// group, goroutine or loop, refuses it with LoopOptionUnsupported (ADR 0192).
 	OptionBatchReplies
@@ -106,6 +109,7 @@ var optionNames = [...]string{
 	OptionPlaintext:         "Plaintext",
 	OptionName:              "Name",
 	OptionEngine:            "Engine",
+	OptionLoopMiddleware:    "UseLoop",
 	OptionBatchReplies:      "BatchReplies",
 }
 

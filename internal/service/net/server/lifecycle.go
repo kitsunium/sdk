@@ -127,6 +127,12 @@ func (g *StreamGroup) startRefusal() error {
 		return errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
 			errs.String("group", g.name), errs.String("option", "Loop"))
 	}
+	//: nor a loop middleware, which has no loop handler to wrap.
+	if g.kinds.has(corenet.OptionLoopMiddleware) {
+		//: refused rather than dropped (R6).
+		return errs.Wrap(corenet.LoopOptionUnsupported, errs.WrapParams{},
+			errs.String("group", g.name), errs.String("option", corenet.OptionLoopMiddleware.String()))
+	}
 	//: every option is one the group can apply.
 	return nil
 }

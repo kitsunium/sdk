@@ -26185,6 +26185,22 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeLoopMiddlewareInvalid",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeLoopMiddlewareInvalid",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133949",
+      "code": {
+        "value": "0.2.11.61"
+      },
+      "doc": "CodeLoopMiddlewareInvalid identifies a loop middleware whose layer does not\nforward every callback to the handler it wraps.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeLoopNoDescriptors",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -27171,8 +27187,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/net",
       "name": "HTTP1Batcher",
-      "spelled": "interface{EndBatch(loop int)}",
-      "canonical": "interface{EndBatch(loop int)}",
+      "spelled": "interface{EndBatch(lane int)}",
+      "canonical": "interface{EndBatch(lane int)}",
       "doc": "HTTP1Batcher is the optional capability of an HTTP1Handler served on a loop\ngroup: the end of each batch of the loop's requests.\n\nThe loop adapter calls EndBatch once per loop iteration that served at least\none request, on the loop's thread, after every request of the batch went\nthrough ServeHTTP1 and before any answer of the batch is written. A handler\nruns the work it batched there — one transaction for every request, say —\nand completes each response it deferred (HTTP1ResponseValue.Defer). Every\nbyte the batch's requests aliased is still valid while EndBatch runs, and\nnone is once it returns. Like every callback of the loop, it must not block\nthe loop's thread longer than the batch's own work.\n\nIFACE-PLUGIN: what a consumer writes beside HTTP1Handler; the adapter that\ncalls it is internal/service/net/http1's.\n",
       "file": "core/net/gen_ports.go",
       "layer": "core",
@@ -27184,9 +27200,9 @@
       "package": "github.com/kitsunium/sdk/internal/core/net",
       "name": "EndBatch",
       "recv": "HTTP1Batcher",
-      "spelled": "func(loop int)",
-      "canonical": "func(loop int)",
-      "doc": "EndBatch ends the batch of the loop whose index is loop: the Loop every\nrequest of the batch carried.\n",
+      "spelled": "func(lane int)",
+      "canonical": "func(lane int)",
+      "doc": "EndBatch ends the batch of the lane whose index is lane: the Lane every\nrequest of the batch carried.\n",
       "file": "core/net/gen_ports.go",
       "layer": "core",
       "family": "net"
@@ -27528,8 +27544,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/net",
       "name": "HTTP1RequestValue",
-      "spelled": "struct{Method []byte; Target []byte; Host []byte; Authorization []byte; Body []byte; ContentLength int64; HeadLen int; Consumed int; NFields int; Fields [64]HTTP1FieldValue; HasHost bool; HasAuthorization bool; Close bool; Loop int}",
-      "canonical": "struct{Method []byte; Target []byte; Host []byte; Authorization []byte; Body []byte; ContentLength int64; HeadLen int; Consumed int; NFields int; Fields [64]github.com/kitsunium/sdk/internal/core/net.HTTP1FieldValue; HasHost bool; HasAuthorization bool; Close bool; Loop int}",
+      "spelled": "struct{Method []byte; Target []byte; Host []byte; Authorization []byte; Body []byte; ContentLength int64; HeadLen int; Consumed int; NFields int; Fields [64]HTTP1FieldValue; HasHost bool; HasAuthorization bool; Close bool; Lane int}",
+      "canonical": "struct{Method []byte; Target []byte; Host []byte; Authorization []byte; Body []byte; ContentLength int64; HeadLen int; Consumed int; NFields int; Fields [64]github.com/kitsunium/sdk/internal/core/net.HTTP1FieldValue; HasHost bool; HasAuthorization bool; Close bool; Lane int}",
       "fields": [
         {
           "name": "Method",
@@ -27597,9 +27613,9 @@
           "doc": "Close reports whether the client asked to close the connection after\nthis request: a Connection field holding the close token.\n"
         },
         {
-          "name": "Loop",
+          "name": "Lane",
           "type": "int",
-          "doc": "Loop is the index of the loop that framed the request — its\nLoopIO.Loop — set by the loop adapter before the handler runs, so a\nhandler finds its per-loop state in a slice, with no lock. Parse leaves\nit as it is; outside the loop adapter it is what the caller set.\n"
+          "doc": "Lane is the index of the lane that framed the request, from 0 to the\ngroup's lane count less one — its LoopIO.Loop — set by the loop adapter\nbefore the handler runs. One lane is one thread or one goroutine, so a\nhandler finds its per-lane state in a slice sized at LoopStarter.OnStart,\nwith no lock. Parse leaves it as it is; outside the loop adapter it is\nwhat the caller set.\n"
         }
       ],
       "doc": "HTTP1RequestValue is one request of the restricted HTTP/1.1 profile, framed\nby the codec (internal/service/net/http1).\n\nIt is not named RequestValue: that name is the outbound request the Policy\nport judges, and the two never meet. The profile's prefix is the domain's\nway of naming a protocol's value, as SSEEventValue and WSMessageValue do.\n\nEvery slice aliases the bytes the codec read: the value is valid while those\nbytes are, which on the loop engine is until OnBatchEnd returns. A handler\nthat keeps a byte past that copies it. Fields is an array, so a value framed\ninto a reused HTTP1RequestValue allocates nothing.\n",
@@ -28391,7 +28407,7 @@
       "recv": "LoopIO",
       "spelled": "func() int",
       "canonical": "func() int",
-      "doc": "Loop returns the index of the loop this LoopIO belongs to, from 0 to the\ngroup's loop count less one, fixed for the loop's life. A handler keeps\nits per-loop state — a scratch, a batch, a buffer — in a slice indexed by\nit, so a callback finds its own with no lock and no map. The portable\nbackend runs one loop, index 0. Any goroutine may call it.\n",
+      "doc": "Loop returns the index of the loop this LoopIO belongs to, from 0 to the\ngroup's lane count less one, fixed for the loop's life: its lane. A\nhandler keeps its per-lane state — a scratch, a batch, a buffer — in a\nslice indexed by it and sized at LoopStarter.OnStart, so a callback finds\nits own with no lock and no map. The portable backend runs LoopValue.Loops\nlanes too, one handler goroutine each. Any goroutine may call it.\n",
       "file": "core/net/gen_ports.go",
       "layer": "core",
       "family": "net"
@@ -28445,6 +28461,177 @@
       "canonical": "func(ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef, p []byte) error",
       "doc": "Write copies p into ref's output and returns. Writes on one reference leave\nin the order they were made, and p may be reused once Write returns. It is\nrefused with LoopOutputFull, copying nothing, when p would pass the\nconnection's output ceiling or the loop's global output budget, and with\nLoopStaleRef when ref's connection has closed.\n",
       "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopLayer",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "LoopLayer",
+      "spelled": "struct{}",
+      "canonical": "struct{}",
+      "doc": "LoopLayer is the base of a loop middleware's layer: it forwards the eight\ncallbacks — OnOpen, OnData, OnTimeout, OnWritable, OnBatchEnd, OnClose,\nHonours and OnStart — to the handler it wraps, and Next returns it. A layer\nembeds it, built by NewLoopLayer, and overrides the callbacks it acts on;\nan override forwards the callback in turn, through the embedded LoopLayer,\nunless the layer answers it itself — a refused connection's bytes, say.\nHonours answers for the wrapped handler, which a LoopOptionHonourer\nanswers and any other handler does not; OnStart reaches a LoopStarter and\nstops at any other handler.\n",
+      "file": "core/net/loop_layer.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopLayer.Honours",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "Honours",
+      "recv": "LoopLayer",
+      "spelled": "func(k OptionKind) bool",
+      "canonical": "func(k github.com/kitsunium/sdk/internal/core/net.OptionKind) bool",
+      "doc": "Honours reports whether the wrapped handler honours the option of kind k:\nits own Honours when it is a LoopOptionHonourer, false otherwise.\n",
+      "file": "core/net/loop_layer.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopLayer.Next",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "Next",
+      "recv": "LoopLayer",
+      "spelled": "func() LoopHandler",
+      "canonical": "func() github.com/kitsunium/sdk/internal/core/net.LoopHandler",
+      "doc": "Next returns the handler the layer wraps.\n\nIFACE-PLUGIN: the wrapped handler is whatever the next layer, or the\nconsumer, wrote.\n",
+      "file": "core/net/loop_layer.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopLayer.OnBatchEnd",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OnBatchEnd",
+      "recv": "LoopLayer",
+      "spelled": "func(io LoopIO)",
+      "canonical": "func(io github.com/kitsunium/sdk/internal/core/net.LoopIO)",
+      "doc": "OnBatchEnd forwards to the wrapped handler.\n",
+      "file": "core/net/loop_layer.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopLayer.OnClose",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OnClose",
+      "recv": "LoopLayer",
+      "spelled": "func(io LoopIO, ref LoopConnRef, err error)",
+      "canonical": "func(io github.com/kitsunium/sdk/internal/core/net.LoopIO, ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef, err error)",
+      "doc": "OnClose forwards to the wrapped handler.\n",
+      "file": "core/net/loop_layer.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopLayer.OnData",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OnData",
+      "recv": "LoopLayer",
+      "spelled": "func(io LoopIO, ref LoopConnRef, buf []byte) int",
+      "canonical": "func(io github.com/kitsunium/sdk/internal/core/net.LoopIO, ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef, buf []byte) int",
+      "doc": "OnData forwards to the wrapped handler and returns what it consumed.\n",
+      "file": "core/net/loop_layer.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopLayer.OnOpen",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OnOpen",
+      "recv": "LoopLayer",
+      "spelled": "func(io LoopIO, ref LoopConnRef)",
+      "canonical": "func(io github.com/kitsunium/sdk/internal/core/net.LoopIO, ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef)",
+      "doc": "OnOpen forwards to the wrapped handler.\n",
+      "file": "core/net/loop_layer.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopLayer.OnStart",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OnStart",
+      "recv": "LoopLayer",
+      "spelled": "func(lanes int)",
+      "canonical": "func(lanes int)",
+      "doc": "OnStart forwards to the wrapped handler when it is a LoopStarter.\n",
+      "file": "core/net/loop_layer.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopLayer.OnTimeout",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OnTimeout",
+      "recv": "LoopLayer",
+      "spelled": "func(io LoopIO, ref LoopConnRef)",
+      "canonical": "func(io github.com/kitsunium/sdk/internal/core/net.LoopIO, ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef)",
+      "doc": "OnTimeout forwards to the wrapped handler.\n",
+      "file": "core/net/loop_layer.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopLayer.OnWritable",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OnWritable",
+      "recv": "LoopLayer",
+      "spelled": "func(io LoopIO, ref LoopConnRef)",
+      "canonical": "func(io github.com/kitsunium/sdk/internal/core/net.LoopIO, ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef)",
+      "doc": "OnWritable forwards to the wrapped handler.\n",
+      "file": "core/net/loop_layer.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopLayered",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "LoopLayered",
+      "spelled": "interface{Next() LoopHandler}",
+      "canonical": "interface{Next() github.com/kitsunium/sdk/internal/core/net.LoopHandler}",
+      "doc": "LoopLayered is what every layer a loop middleware returns implements: Next\nis the handler the layer wraps. A layer embeds LoopLayer, which forwards the\neight callbacks — the six of LoopHandler, Honours and OnStart — to Next, and\noverrides the ones it acts on, forwarding them in turn. At Start the server\nwalks the chain by Next and sends each callback through a probe chain; a\nlayer that does not implement LoopLayered, or does not forward a callback,\nfails Start with LoopMiddlewareInvalid. The chain honours an option when one\nof its layers or the handler does.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopLayered.Next",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "Next",
+      "recv": "LoopLayered",
+      "spelled": "func() LoopHandler",
+      "canonical": "func() github.com/kitsunium/sdk/internal/core/net.LoopHandler",
+      "doc": "Next returns the handler the layer wraps.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopMiddlewareInvalid",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "LoopMiddlewareInvalid",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.61",
+        "reason": "LOOP_MIDDLEWARE_INVALID",
+        "public": "A loop middleware does not forward every callback"
+      },
+      "doc": "LoopMiddlewareInvalid is returned by Start when a loop middleware's layer\ndoes not forward every callback to the handler it wraps: it does not\nimplement LoopLayered, its Next is not the handler it was given, or one of\nthe eight callbacks sent through a probe chain did not reach the handler.\nThe \"group\" and \"callback\" fields name it.\n",
+      "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
     },
@@ -28668,6 +28855,31 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopStarter",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "LoopStarter",
+      "spelled": "interface{OnStart(lanes int)}",
+      "canonical": "interface{OnStart(lanes int)}",
+      "doc": "LoopStarter is the optional capability of a LoopHandler that keeps state per\nlane: OnStart tells it how many lanes the group runs, once, before any other\ncallback, so it sizes a slice indexed by LoopIO.Loop and no callback grows\none. A lane is one loop thread on a native backend, one handler goroutine on\nthe portable backend; its count is LoopValue.Loops, zero meaning one, on\nevery backend, a fallback from a native backend to the portable one\nincluded.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopStarter.OnStart",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OnStart",
+      "recv": "LoopStarter",
+      "spelled": "func(lanes int)",
+      "canonical": "func(lanes int)",
+      "doc": "OnStart is called once, before any other callback, with the number of\nlanes: every LoopIO.Loop the group's callbacks see is from 0 to lanes\nless one.\n",
+      "file": "core/net/gen_ports.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.LoopStateValue",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -28886,6 +29098,18 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.NewLoopLayer",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "NewLoopLayer",
+      "spelled": "func(next LoopHandler) LoopLayer",
+      "canonical": "func(next github.com/kitsunium/sdk/internal/core/net.LoopHandler) github.com/kitsunium/sdk/internal/core/net.LoopLayer",
+      "doc": "NewLoopLayer returns the base of a loop middleware's layer over next: the\nLoopLayer a layer embeds, forwarding every callback to next.\n",
+      "file": "core/net/loop_layer.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.NotStarted",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -28922,7 +29146,7 @@
       "name": "OptionBatchReplies",
       "spelled": "OptionKind",
       "canonical": "github.com/kitsunium/sdk/internal/core/net.OptionKind",
-      "value": "19",
+      "value": "20",
       "doc": "OptionBatchReplies is BatchReplies. A datagram group honours it; a stream\ngroup, goroutine or loop, refuses it with LoopOptionUnsupported (ADR 0192).\n",
       "file": "core/net/loop.go",
       "layer": "core",
@@ -29001,6 +29225,19 @@
       "spelled": "func() string",
       "canonical": "func() string",
       "doc": "String renders the option's name, as its constructor spells it.\n",
+      "file": "core/net/loop.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.OptionLoopMiddleware",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OptionLoopMiddleware",
+      "spelled": "OptionKind",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.OptionKind",
+      "value": "19",
+      "doc": "OptionLoopMiddleware is UseLoop. The loop engine honours it; every group no\nloop handler serves refuses it with LoopOptionUnsupported.\n",
       "file": "core/net/loop.go",
       "layer": "core",
       "family": "net"
@@ -63245,7 +63482,7 @@
       "name": "HandleLoop",
       "spelled": "func(h corenet.HTTP1Handler, p Parser) *LoopHandler",
       "canonical": "func(h github.com/kitsunium/sdk/internal/core/net.HTTP1Handler, p github.com/kitsunium/sdk/internal/service/net/http1.Parser) *github.com/kitsunium/sdk/internal/service/net/http1.LoopHandler",
-      "doc": "HandleLoop adapts h to the loop engine: the corenet.LoopHandler a group\nserves with StreamGroup.HandleLoop. p frames every request, so its limits\nare the group's; the zero Parser is the profile's defaults.\n\nEach loop frames its requests into a request value of its own, sets its\nLoop, and calls h on the loop's thread, one request at a time, in the order\nthey arrived, pipelined ones included. A refused request is answered and\nits connection closed without reaching h. An answer has AppendResponse's\nframing, with Connection: close when the request, the response or the\nloop's soft pressure (LoopIO.Pressure) asks for it, and nothing more is\nread from a connection that closes. The batch's answers are written at\nits end, after h's EndBatch when h is a corenet.HTTP1Batcher, in request\norder on each connection, deferred ones in their place.\n\nThe response value h fills starts every request with a zero status and a\nnil Header and Body: h points them at bytes it owns, valid until the\nanswer is taken — when ServeHTTP1 returns, or when EndBatch returns for a\ndeferred one. An answer AppendResponse refuses is answered 500 and its\nconnection closed, and so is a deferred answer EndBatch left deferred. An\nanswer the connection's output refuses (LoopOutputFull: OutputCap is the\nmost a connection's answers to one batch may hold) closes the connection\nrather than wait. A request the spill cannot hold whole (LoopValue.SpillCap\nbelow p's head and body bounds) closes it too, with LoopSpillFull.\n",
+      "doc": "HandleLoop adapts h to the loop engine: the corenet.LoopHandler a group\nserves with StreamGroup.HandleLoop. p frames every request, so its limits\nare the group's; the zero Parser is the profile's defaults.\n\nEach lane frames its requests into a request value of its own, sets its\nLane, and calls h on the lane's thread, one request at a time, in the order\nthey arrived, pipelined ones included. A refused request is answered and\nits connection closed without reaching h. An answer has AppendResponse's\nframing, with Connection: close when the request, the response or the\nloop's soft pressure (LoopIO.Pressure) asks for it, and nothing more is\nread from a connection that closes. The batch's answers are written at\nits end, after h's EndBatch when h is a corenet.HTTP1Batcher, in request\norder on each connection, deferred ones in their place.\n\nThe response value h fills starts every request with a zero status and a\nnil Header and Body: h points them at bytes it owns, valid until the\nanswer is taken — when ServeHTTP1 returns, or when EndBatch returns for a\ndeferred one. An answer AppendResponse refuses is answered 500 and its\nconnection closed, and so is a deferred answer EndBatch left deferred. An\nanswer the connection's output refuses (LoopOutputFull: OutputCap is the\nmost a connection's answers to one batch may hold) closes the connection\nrather than wait. A request the spill cannot hold whole (LoopValue.SpillCap\nbelow p's head and body bounds) closes it too, with LoopSpillFull.\n",
       "file": "service/net/http1/loop.go",
       "layer": "service",
       "family": "net"
@@ -63257,7 +63494,7 @@
       "name": "LoopHandler",
       "spelled": "struct{}",
       "canonical": "struct{}",
-      "doc": "LoopHandler serves the restricted HTTP/1.1 profile on a loop group: the\ncorenet.LoopHandler HandleLoop returns. Its state is per loop — a request\nvalue, the batch's answers, a flag per connection — and a loop touches only\nits own, found by LoopIO.Loop, so the data path takes no lock and, once a\nloop's buffers have grown to its batches, allocates nothing. It honours no\ngroup option itself: a loop group given ReadHeaderTimeout or MaxHeaderBytes\nrefuses it at Start, the head bound being p's.\n",
+      "doc": "LoopHandler serves the restricted HTTP/1.1 profile on a loop group: the\ncorenet.LoopHandler HandleLoop returns. Its state is per lane — a request\nvalue, the batch's answers, a flag per connection — and a lane touches only\nits own, found by LoopIO.Loop and built at OnStart, so the data path takes\nno lock and, once a lane's buffers have grown to its batches, allocates\nnothing. It honours no group option itself: a loop group given\nReadHeaderTimeout or MaxHeaderBytes refuses it at Start, the head bound\nbeing p's.\n",
       "file": "service/net/http1/loop.go",
       "layer": "service",
       "family": "net"
@@ -63309,7 +63546,20 @@
       "recv": "LoopHandler",
       "spelled": "func(io corenet.LoopIO, ref corenet.LoopConnRef)",
       "canonical": "func(io github.com/kitsunium/sdk/internal/core/net.LoopIO, ref github.com/kitsunium/sdk/internal/core/net.LoopConnRef)",
-      "doc": "OnOpen implements corenet.LoopHandler. It marks the connection open on its loop.\n",
+      "doc": "OnOpen implements corenet.LoopHandler. It marks the connection open on its lane.\n",
+      "file": "service/net/http1/loop.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/http1.(*LoopHandler).OnStart",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/http1",
+      "name": "OnStart",
+      "recv": "LoopHandler",
+      "spelled": "func(lanes int)",
+      "canonical": "func(lanes int)",
+      "doc": "OnStart implements corenet.LoopStarter: it builds every lane's state\nbefore the first callback, so no lane builds its own under a lock.\n",
       "file": "service/net/http1/loop.go",
       "layer": "service",
       "family": "net"
@@ -64548,6 +64798,19 @@
       "spelled": "func(middlewares ...corenet.Middleware[corenet.ConnHandler]) *StreamGroup",
       "canonical": "func(middlewares ...github.com/kitsunium/sdk/internal/core/net.Middleware[github.com/kitsunium/sdk/internal/core/net.ConnHandler]) *github.com/kitsunium/sdk/internal/service/net/server.StreamGroup",
       "doc": "Use appends middlewares, outermost first.\n",
+      "file": "service/net/server/stream_group.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/server.(*StreamGroup).UseLoop",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/server",
+      "name": "UseLoop",
+      "recv": "StreamGroup",
+      "spelled": "func(middlewares ...corenet.Middleware[corenet.LoopHandler]) *StreamGroup",
+      "canonical": "func(middlewares ...github.com/kitsunium/sdk/internal/core/net.Middleware[github.com/kitsunium/sdk/internal/core/net.LoopHandler]) *github.com/kitsunium/sdk/internal/service/net/server.StreamGroup",
+      "doc": "UseLoop appends loop middlewares, outermost first, and records the\nOptionLoopMiddleware kind on every call, even with none. A loop group\nwraps its handler in them at Start, after checking that each layer is a\ncorenet.LoopLayered whose Next is what it was given and that every one of\nthe eight callbacks, sent through a probe chain, reaches the probe: a layer\nthat fails either check fails Start with LoopMiddlewareInvalid. The chain\nhonours an option when one of its layers or the handler does. A group no\nloop handler serves refuses UseLoop with LoopOptionUnsupported.\n",
       "file": "service/net/server/stream_group.go",
       "layer": "service",
       "family": "net"

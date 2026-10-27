@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-05T00:00:00Z -->
+<!-- updated: 2026-10-26T12:00:00Z -->
 # pkg/v1/net/
 
 ## Purpose
@@ -31,7 +31,7 @@ arrived is the security family's (`pkg/v1/security`).
 
 | Package | What it publishes | Aliases onto | README |
 |---|---|---|---|
-| `server/` | `New` → a `Server` of stream `Group`s and `PacketGroup`s, `Chain` / `ChainPacket`, the drain announced through `DrainSignal` rather than imposed (ADR 0029, ADR 0043) | `internal/core/net`, `internal/service/net/server` | `server/README.md` |
+| `server/` | `New` → a `Server` of stream `Group`s and `PacketGroup`s, `Chain` / `ChainPacket`, the drain announced through `DrainSignal` rather than imposed (ADR 0029, ADR 0043); loop middlewares through `Group.UseLoop`, their base `LoopLayer` / `NewLoopLayer` and `LoopStarter` (ADR 0191) | `internal/core/net`, `internal/service/net/server` | `server/README.md` |
 | `client/` | `New(cfg, tlsid.Identity, Policy, CallHook)` → a `Client` whose `Policy` is enforced in the transport; a refusal is `RequestDenied` (ADR 0029) | `internal/core/net`, `internal/service/net/client` | `client/README.md` |
 | `tlsid/` | `New` for material in memory, `Load` for material on disk → an `Identity` shared by `server` and `client`; `MaterialInvalid`, `HandshakeFailed` (ADR 0029) | `internal/core/net`, `internal/service/net/tlsid` | `tlsid/README.md` |
 | `sse/` | `New(w, r, opts…)` → a `Stream` with keep-alive, `Retry` and a write timeout; `DrainSignal` (ADR 0029, ADR 0043) | `internal/core/net`, `internal/service/net/sse` | `sse/README.md` |

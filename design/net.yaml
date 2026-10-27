@@ -447,6 +447,13 @@ packages:
             name: CodeLoopCapabilityRefused
             value: "0x00_02_0B_3C"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeLoopMiddlewareInvalid identifies a loop middleware whose layer does not
+              forward every callback to the handler it wraps.
+            name: CodeLoopMiddlewareInvalid
+            value: "0x00_02_0B_3D"
+        type: errs.Code
     constants:
       - blockDoc: The loop backends. The zero value is LoopBackendAuto.
         doc: |-
@@ -584,11 +591,18 @@ packages:
         value: "18"
       - blockDoc: The group options a loop group judges at Start, by kind.
         doc: |-
+          OptionLoopMiddleware is UseLoop. The loop engine honours it; every group no
+          loop handler serves refuses it with LoopOptionUnsupported.
+        name: OptionLoopMiddleware
+        type: OptionKind
+        value: "19"
+      - blockDoc: The group options a loop group judges at Start, by kind.
+        doc: |-
           OptionBatchReplies is BatchReplies. A datagram group honours it; a stream
           group, goroutine or loop, refuses it with LoopOptionUnsupported (ADR 0192).
         name: OptionBatchReplies
         type: OptionKind
-        value: "19"
+        value: "20"
       - blockDoc: The engine families a group may name with Engine. The zero value is EngineAuto.
         doc: |-
           EngineAuto lets the group's handler type choose its engine (ADR 0187): a loop
@@ -1251,6 +1265,15 @@ packages:
           - name: err
             type: error
       - doc: |-
+          NewLoopLayer returns the base of a loop middleware's layer over next: the
+          LoopLayer a layer embeds, forwarding every callback to next.
+        in:
+          - name: next
+            type: LoopHandler
+        name: NewLoopLayer
+        out:
+          - type: LoopLayer
+      - doc: |-
           Chain applies middlewares to a handler, outermost first.
 
           Chain(h, a, b, c) yields a(b(c(h))): the first middleware listed is the first
@@ -1495,10 +1518,11 @@ packages:
               - type: error
           - doc: |-
               Loop returns the index of the loop this LoopIO belongs to, from 0 to the
-              group's loop count less one, fixed for the loop's life. A handler keeps
-              its per-loop state — a scratch, a batch, a buffer — in a slice indexed by
-              it, so a callback finds its own with no lock and no map. The portable
-              backend runs one loop, index 0. Any goroutine may call it.
+              group's lane count less one, fixed for the loop's life: its lane. A
+              handler keeps its per-lane state — a scratch, a batch, a buffer — in a
+              slice indexed by it and sized at LoopStarter.OnStart, so a callback finds
+              its own with no lock and no map. The portable backend runs LoopValue.Loops
+              lanes too, one handler goroutine each. Any goroutine may call it.
             name: Loop
             out:
               - type: int
@@ -1519,6 +1543,39 @@ packages:
             out:
               - type: bool
         name: LoopOptionHonourer
+      - doc: |-
+          LoopStarter is the optional capability of a LoopHandler that keeps state per
+          lane: OnStart tells it how many lanes the group runs, once, before any other
+          callback, so it sizes a slice indexed by LoopIO.Loop and no callback grows
+          one. A lane is one loop thread on a native backend, one handler goroutine on
+          the portable backend; its count is LoopValue.Loops, zero meaning one, on
+          every backend, a fallback from a native backend to the portable one
+          included.
+        methods:
+          - doc: |-
+              OnStart is called once, before any other callback, with the number of
+              lanes: every LoopIO.Loop the group's callbacks see is from 0 to lanes
+              less one.
+            in:
+              - name: lanes
+                type: int
+            name: OnStart
+        name: LoopStarter
+      - doc: |-
+          LoopLayered is what every layer a loop middleware returns implements: Next
+          is the handler the layer wraps. A layer embeds LoopLayer, which forwards the
+          eight callbacks — the six of LoopHandler, Honours and OnStart — to Next, and
+          overrides the ones it acts on, forwarding them in turn. At Start the server
+          walks the chain by Next and sends each callback through a probe chain; a
+          layer that does not implement LoopLayered, or does not forward a callback,
+          fails Start with LoopMiddlewareInvalid. The chain honours an option when one
+          of its layers or the handler does.
+        methods:
+          - doc: Next returns the handler the layer wraps.
+            name: Next
+            out:
+              - type: LoopHandler
+        name: LoopLayered
       - doc: |-
           HTTP1Handler answers one request of the restricted HTTP/1.1 profile.
 
@@ -1558,10 +1615,10 @@ packages:
           calls it is internal/service/net/http1's.
         methods:
           - doc: |-
-              EndBatch ends the batch of the loop whose index is loop: the Loop every
+              EndBatch ends the batch of the lane whose index is lane: the Lane every
               request of the batch carried.
             in:
-              - name: loop
+              - name: lane
                 type: int
             name: EndBatch
         name: HTTP1Batcher
@@ -2219,6 +2276,18 @@ packages:
             private: "core/net: every ring of the loop group was drained by its watchdog; set KITSUNIUM_NET_DISABLE before restarting"
             public: A loop group stopped accepting connections
             reason: LOOP_GROUP_STALLED
+          - code: CodeLoopMiddlewareInvalid
+            doc: |-
+              LoopMiddlewareInvalid is returned by Start when a loop middleware's layer
+              does not forward every callback to the handler it wraps: it does not
+              implement LoopLayered, its Next is not the handler it was given, or one of
+              the eight callbacks sent through a probe chain did not reach the handler.
+              The "group" and "callback" fields name it.
+            exit: CONFIG
+            name: LoopMiddlewareInvalid
+            private: "core/net: a loop middleware's layer does not forward every callback to the next handler"
+            public: A loop middleware does not forward every callback
+            reason: LOOP_MIDDLEWARE_INVALID
           - code: CodeLoopCapabilityRefused
             doc: |-
               LoopCapabilityRefused is returned by Start for a loop group whose
@@ -2580,12 +2649,105 @@ packages:
               name: Close
               type: bool
             - doc: |-
-                Loop is the index of the loop that framed the request — its
-                LoopIO.Loop — set by the loop adapter before the handler runs, so a
-                handler finds its per-loop state in a slice, with no lock. Parse leaves
-                it as it is; outside the loop adapter it is what the caller set.
-              name: Loop
+                Lane is the index of the lane that framed the request, from 0 to the
+                group's lane count less one — its LoopIO.Loop — set by the loop adapter
+                before the handler runs. One lane is one thread or one goroutine, so a
+                handler finds its per-lane state in a slice sized at LoopStarter.OnStart,
+                with no lock. Parse leaves it as it is; outside the loop adapter it is
+                what the caller set.
+              name: Lane
               type: int
+      - doc: |-
+          LoopLayer is the base of a loop middleware's layer: it forwards the eight
+          callbacks — OnOpen, OnData, OnTimeout, OnWritable, OnBatchEnd, OnClose,
+          Honours and OnStart — to the handler it wraps, and Next returns it. A layer
+          embeds it, built by NewLoopLayer, and overrides the callbacks it acts on;
+          an override forwards the callback in turn, through the embedded LoopLayer,
+          unless the layer answers it itself — a refused connection's bytes, say.
+          Honours answers for the wrapped handler, which a LoopOptionHonourer
+          answers and any other handler does not; OnStart reaches a LoopStarter and
+          stops at any other handler.
+        methods:
+          - doc: |-
+              Next returns the handler the layer wraps.
+
+              IFACE-PLUGIN: the wrapped handler is whatever the next layer, or the
+              consumer, wrote.
+            name: Next
+            out:
+              - type: LoopHandler
+            recv: value
+          - doc: OnOpen forwards to the wrapped handler.
+            in:
+              - name: io
+                type: LoopIO
+              - name: ref
+                type: LoopConnRef
+            name: OnOpen
+            recv: value
+          - doc: OnData forwards to the wrapped handler and returns what it consumed.
+            in:
+              - name: io
+                type: LoopIO
+              - name: ref
+                type: LoopConnRef
+              - name: buf
+                type: "[]byte"
+            name: OnData
+            out:
+              - type: int
+            recv: value
+          - doc: OnTimeout forwards to the wrapped handler.
+            in:
+              - name: io
+                type: LoopIO
+              - name: ref
+                type: LoopConnRef
+            name: OnTimeout
+            recv: value
+          - doc: OnWritable forwards to the wrapped handler.
+            in:
+              - name: io
+                type: LoopIO
+              - name: ref
+                type: LoopConnRef
+            name: OnWritable
+            recv: value
+          - doc: OnBatchEnd forwards to the wrapped handler.
+            in:
+              - name: io
+                type: LoopIO
+            name: OnBatchEnd
+            recv: value
+          - doc: OnClose forwards to the wrapped handler.
+            in:
+              - name: io
+                type: LoopIO
+              - name: ref
+                type: LoopConnRef
+              - name: err
+                type: error
+            name: OnClose
+            recv: value
+          - doc: |-
+              Honours reports whether the wrapped handler honours the option of kind k:
+              its own Honours when it is a LoopOptionHonourer, false otherwise.
+            in:
+              - name: k
+                type: OptionKind
+            name: Honours
+            out:
+              - type: bool
+            recv: value
+          - doc: OnStart forwards to the wrapped handler when it is a LoopStarter.
+            in:
+              - name: lanes
+                type: int
+            name: OnStart
+            recv: value
+        name: LoopLayer
+        struct:
+          unexported: true
       - doc: |-
           HTTP1ResponseValue is the answer an HTTP1Handler gives to one request.
 
@@ -4138,8 +4300,8 @@ packages:
           serves with StreamGroup.HandleLoop. p frames every request, so its limits
           are the group's; the zero Parser is the profile's defaults.
 
-          Each loop frames its requests into a request value of its own, sets its
-          Loop, and calls h on the loop's thread, one request at a time, in the order
+          Each lane frames its requests into a request value of its own, sets its
+          Lane, and calls h on the lane's thread, one request at a time, in the order
           they arrived, pipelined ones included. A refused request is answered and
           its connection closed without reaching h. An answer has AppendResponse's
           framing, with Connection: close when the request, the response or the
@@ -4171,14 +4333,15 @@ packages:
     types:
       - doc: |-
           LoopHandler serves the restricted HTTP/1.1 profile on a loop group: the
-          corenet.LoopHandler HandleLoop returns. Its state is per loop — a request
-          value, the batch's answers, a flag per connection — and a loop touches only
-          its own, found by LoopIO.Loop, so the data path takes no lock and, once a
-          loop's buffers have grown to its batches, allocates nothing. It honours no
-          group option itself: a loop group given ReadHeaderTimeout or MaxHeaderBytes
-          refuses it at Start, the head bound being p's.
+          corenet.LoopHandler HandleLoop returns. Its state is per lane — a request
+          value, the batch's answers, a flag per connection — and a lane touches only
+          its own, found by LoopIO.Loop and built at OnStart, so the data path takes
+          no lock and, once a lane's buffers have grown to its batches, allocates
+          nothing. It honours no group option itself: a loop group given
+          ReadHeaderTimeout or MaxHeaderBytes refuses it at Start, the head bound
+          being p's.
         methods:
-          - doc: OnOpen implements corenet.LoopHandler. It marks the connection open on its loop.
+          - doc: OnOpen implements corenet.LoopHandler. It marks the connection open on its lane.
             in:
               - name: io
                 type: corenet.LoopIO
@@ -4244,6 +4407,14 @@ packages:
               - name: err
                 type: error
             name: OnClose
+            recv: pointer
+          - doc: |-
+              OnStart implements corenet.LoopStarter: it builds every lane's state
+              before the first callback, so no lane builds its own under a lock.
+            in:
+              - name: lanes
+                type: int
+            name: OnStart
             recv: pointer
         name: LoopHandler
         struct:
@@ -5145,6 +5316,23 @@ packages:
               - name: middlewares
                 type: corenet.Middleware[corenet.ConnHandler]
             name: Use
+            out:
+              - type: "*StreamGroup"
+            recv: pointer
+            variadic: true
+          - doc: |-
+              UseLoop appends loop middlewares, outermost first, and records the
+              OptionLoopMiddleware kind on every call, even with none. A loop group
+              wraps its handler in them at Start, after checking that each layer is a
+              corenet.LoopLayered whose Next is what it was given and that every one of
+              the eight callbacks, sent through a probe chain, reaches the probe: a layer
+              that fails either check fails Start with LoopMiddlewareInvalid. The chain
+              honours an option when one of its layers or the handler does. A group no
+              loop handler serves refuses UseLoop with LoopOptionUnsupported.
+            in:
+              - name: middlewares
+                type: corenet.Middleware[corenet.LoopHandler]
+            name: UseLoop
             out:
               - type: "*StreamGroup"
             recv: pointer
@@ -6610,17 +6798,17 @@ packages:
 
       # Serving
 
-      	type api struct{ loops []perLoop } // one per loop, indexed by Request.Loop
+      	type api struct{ lanes []perLane } // one per lane, indexed by Request.Lane
 
       	func (a *api) ServeHTTP1(req *http1.Request, res *http1.Response) {
-      		l := &a.loops[req.Loop]
+      		l := &a.lanes[req.Lane]
       		// route, authenticate with l's own scratch, ...
       		res.Defer = true // answered at the end of the batch
       		l.pending = append(l.pending, job{res: res})
       	}
 
-      	func (a *api) EndBatch(loop int) {
-      		l := &a.loops[loop]
+      	func (a *api) EndBatch(lane int) {
+      		l := &a.lanes[lane]
       		// one transaction for every job of l.pending, then for each:
       		// job.res.Status, job.res.Body = ..., ...; job.res.Defer = false
       	}
@@ -6628,9 +6816,9 @@ packages:
       	srv.Group("api", server.Listen("tcp", ":8080"), server.Loop(server.LoopValue{Loops: 2})).
       		HandleLoop(http1.HandleLoop(a, http1.Parser{}))
 
-      A handler runs on its loop's thread and must not block it. Every callback
-      of one loop runs on that thread, one at a time, so state kept per loop needs
-      no lock; Request.Loop and the loop argument of EndBatch name the loop. The
+      A handler runs on its lane's thread and must not block it. Every callback
+      of one lane runs on that thread, one at a time, so state kept per lane needs
+      no lock; Request.Lane and the lane argument of EndBatch name the lane. The
       answers of a batch leave at its end, in request order on each connection.
 
       # The codec alone
@@ -6659,7 +6847,7 @@ packages:
       - alias:
           - doc: |-
               Request is one request, framed by the codec. Every slice aliases the bytes
-              it was framed from; Loop names the loop that framed it.
+              it was framed from; Lane names the lane that framed it.
             name: Request
             target: corenet.HTTP1RequestValue
       - alias:
@@ -7279,6 +7467,28 @@ packages:
             target: corenet.LoopOptionHonourer
       - alias:
           - doc: |-
+              LoopStarter is the optional capability of a LoopHandler that keeps state
+              per lane: OnStart gives it the lane count, once, before any other callback.
+            name: LoopStarter
+            target: corenet.LoopStarter
+      - alias:
+          - doc: |-
+              LoopLayered is what every layer of a loop middleware implements: Next is
+              the handler it wraps.
+            name: LoopLayered
+            target: corenet.LoopLayered
+      - alias:
+          - doc: |-
+              LoopLayer is the base a loop middleware's layer embeds: it forwards the
+              eight callbacks to the handler it wraps.
+            name: LoopLayer
+            target: corenet.LoopLayer
+      - alias:
+          - doc: LoopMiddleware decorates a loop handler with a layer, for UseLoop.
+            name: LoopMiddleware
+            target: corenet.Middleware[corenet.LoopHandler]
+      - alias:
+          - doc: |-
               LoopConnRef names one connection of a loop by ring, slot and generation. The
               zero value names no connection.
             name: LoopConnRef
@@ -7430,13 +7640,19 @@ packages:
             type: OptionKind
             typed: true
             value: "18"
+          - doc: OptionLoopMiddleware is UseLoop. A group no loop handler serves refuses it.
+            name: OptionLoopMiddleware
+            reexport: corenet.OptionLoopMiddleware
+            type: OptionKind
+            typed: true
+            value: "19"
       - const:
           - doc: OptionBatchReplies is BatchReplies. A datagram group honours it; a stream group refuses it.
             name: OptionBatchReplies
             reexport: corenet.OptionBatchReplies
             type: OptionKind
             typed: true
-            value: "19"
+            value: "20"
       - alias:
           - doc: |-
               EngineValue names the engine family a group runs on, passed by Engine. The
@@ -7576,6 +7792,10 @@ packages:
           - doc: LoopGroupStalled reports a loop group every ring of which its watchdog drained.
             name: LoopGroupStalled
             reexport: corenet.LoopGroupStalled
+            type: "*errs.Error"
+          - doc: LoopMiddlewareInvalid reports a loop middleware whose layer does not forward every callback.
+            name: LoopMiddlewareInvalid
+            reexport: corenet.LoopMiddlewareInvalid
             type: "*errs.Error"
           - doc: LoopCapabilityRefused reports a LoopValue.Capabilities entry a loop group cannot opt into.
             name: LoopCapabilityRefused
@@ -7846,6 +8066,17 @@ packages:
           name: BatchReplies
           out:
             - type: GroupOption
+      - func:
+          doc: |-
+            NewLoopLayer returns the LoopLayer a loop middleware's layer embeds over
+            next, forwarding every callback to it.
+          forward: corenet.NewLoopLayer
+          in:
+            - name: next
+              type: LoopHandler
+          name: NewLoopLayer
+          out:
+            - type: LoopLayer
       - func:
           doc: ChainPacket applies middlewares to a datagram handler, outermost first.
           forward: corenet.Chain

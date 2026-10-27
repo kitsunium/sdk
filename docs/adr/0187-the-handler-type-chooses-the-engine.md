@@ -20,7 +20,9 @@
   switches made concrete) and §Consequences (`StateValue` gains four fields);
   [ADR 0190](0190-a-merge-gate-judges-the-ratio-of-two-engines-measured-side-by-side.md)
   §D10 (a ratio gate measured with both engines side by side);
-  [ADR 0192](0192-a-datagram-socket-reads-coalesced-and-its-replies-may-leave-per-batch.md) (`OptionBatchReplies`, kind 19,
+  [ADR 0191](0191-a-loop-middleware-forwards-every-callback-and-the-http1-chain-judges-one-canonical-target.md) §Deferred (the loop
+  middlewares, their own record);
+  [ADR 0192](0192-a-datagram-socket-reads-coalesced-and-its-replies-may-leave-per-batch.md) (`OptionBatchReplies`, kind 20,
   honoured by a datagram group, refused by a stream group)
 - **Related**: [ADR 0029](0029-sdk-net-domain.md) (the domain, one goroutine
   per connection), [ADR 0031](0031-policy-zero-values-are-never-inert.md)

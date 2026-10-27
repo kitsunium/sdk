@@ -12,7 +12,7 @@
 - **Amends**: [ADR 0029](0029-sdk-net-domain.md) (the datagram engine: one
   `Packet` a datagram, now also out of a coalesced message), and
   [ADR 0187](0187-the-handler-type-chooses-the-engine.md) (a new `OptionKind`,
-  19, judged by its rules)
+  20, after ADR 0191's `OptionLoopMiddleware` at 19, judged by its rules)
 - **Related**: [ADR 0186](0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md)
   §D8 (`State`), [ADR 0188](0188-the-operators-switches-only-restrict-and-state-says-what-the-server-runs-without.md)
   (`Faults`), [ADR 0163](0163-the-sdk-is-designed-by-its-diagram-and-kit-writes-only-data-and-test-pins.md)
@@ -93,7 +93,7 @@ left to the successor. `Close` switches GRO off and waits for nothing.
 ### D5 — Replies are synchronous by default; `BatchReplies` batches them
 
 By default `Packet.Reply` is one `WriteTo` and returns its error, as always.
-`BatchReplies()`, a `GroupOption` of kind `OptionBatchReplies` (19), changes a
+`BatchReplies()`, a `GroupOption` of kind `OptionBatchReplies` (20), changes a
 datagram group's replies: one made while its batch is served copies its
 datagram into a preallocated queue (128 replies, 256 KiB) and reports it sent,
 `len(b)` and nil; the batch's replies leave when it ends, before the next

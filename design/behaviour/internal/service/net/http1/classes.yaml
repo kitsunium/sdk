@@ -230,6 +230,7 @@ files:
       - (*LoopHandler).OnTimeout
       - (*LoopHandler).OnWritable
       - (*LoopHandler).OnBatchEnd
+      - (*LoopHandler).OnStart
       - (*LoopHandler).OnClose
       - (*loopState).complete
       - (*loopState).flush
@@ -609,6 +610,9 @@ types:
         recv: "*LoopHandler"
       - name: OnBatchEnd
         params: io corenet.LoopIO
+        recv: a *LoopHandler
+      - name: OnStart
+        params: lanes int
         recv: a *LoopHandler
       - name: OnClose
         params: io corenet.LoopIO, ref corenet.LoopConnRef, err error

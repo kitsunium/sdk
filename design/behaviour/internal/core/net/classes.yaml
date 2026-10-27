@@ -315,6 +315,10 @@ constants:
           EngineUnsupported.
         name: OptionEngine
       - doc: |-
+          OptionLoopMiddleware is UseLoop. The loop engine honours it; every group no
+          loop handler serves refuses it with LoopOptionUnsupported.
+        name: OptionLoopMiddleware
+      - doc: |-
           OptionBatchReplies is BatchReplies. A datagram group honours it; a stream
           group, goroutine or loop, refuses it with LoopOptionUnsupported (ADR 0192).
         name: OptionBatchReplies
@@ -705,6 +709,19 @@ files:
       - OptionKind.String
     name: loop.go
   - decls:
+      - LoopLayer
+      - NewLoopLayer
+      - LoopLayer.Next
+      - LoopLayer.OnOpen
+      - LoopLayer.OnData
+      - LoopLayer.OnTimeout
+      - LoopLayer.OnWritable
+      - LoopLayer.OnBatchEnd
+      - LoopLayer.OnClose
+      - LoopLayer.Honours
+      - LoopLayer.OnStart
+    name: loop_layer.go
+  - decls:
       - LoopRingStateValue
       - LoopStateValue
     name: loop_state.go
@@ -818,6 +835,9 @@ functions:
   - name: NewIdentityValue
     params: p IdentityParams
     results: id IdentityValue, err error
+  - name: NewLoopLayer
+    params: next LoopHandler
+    results: LoopLayer
   - doc: |-
       parseKeyPair turns a PEM certificate chain and key into a tls.Certificate.
       Both halves empty is legitimate — a client that only verifies the server holds
@@ -1135,11 +1155,13 @@ types:
         name: Close
         type: bool
       - doc: |-
-          Loop is the index of the loop that framed the request — its
-          LoopIO.Loop — set by the loop adapter before the handler runs, so a
-          handler finds its per-loop state in a slice, with no lock. Parse leaves
-          it as it is; outside the loop adapter it is what the caller set.
-        name: Loop
+          Lane is the index of the lane that framed the request, from 0 to the
+          group's lane count less one — its LoopIO.Loop — set by the loop adapter
+          before the handler runs. One lane is one thread or one goroutine, so a
+          handler finds its per-lane state in a slice sized at LoopStarter.OnStart,
+          with no lock. Parse leaves it as it is; outside the loop adapter it is
+          what the caller set.
+        name: Lane
         type: int
     kind: struct
     methods:
@@ -1386,6 +1408,42 @@ types:
         results: string
     name: OptionKind
     underlying: uint8
+  - fields:
+      - doc: next is the handler the layer wraps.
+        name: next
+        type: LoopHandler
+    kind: struct
+    methods:
+      - name: Next
+        recv: l LoopLayer
+        results: LoopHandler
+      - name: OnOpen
+        params: io LoopIO, ref LoopConnRef
+        recv: l LoopLayer
+      - name: OnData
+        params: io LoopIO, ref LoopConnRef, buf []byte
+        recv: l LoopLayer
+        results: int
+      - name: OnTimeout
+        params: io LoopIO, ref LoopConnRef
+        recv: l LoopLayer
+      - name: OnWritable
+        params: io LoopIO, ref LoopConnRef
+        recv: l LoopLayer
+      - name: OnBatchEnd
+        params: io LoopIO
+        recv: l LoopLayer
+      - name: OnClose
+        params: io LoopIO, ref LoopConnRef, err error
+        recv: l LoopLayer
+      - name: Honours
+        params: k OptionKind
+        recv: l LoopLayer
+        results: bool
+      - name: OnStart
+        params: lanes int
+        recv: l LoopLayer
+    name: LoopLayer
   - fields:
       - doc: Loop is the loop's index in its group.
         name: Loop
@@ -1922,6 +1980,9 @@ vars:
   - doc: |-
       The func adapters must satisfy the ports they exist to adapt; an adapter that
       drifts from its interface is useless and the drift is silent until call time.
+      LoopLayer forwards every callback a layer may be asked for: it must stay a
+      LoopHandler, and each optional capability, or a layer embedding it would
+      stop forwarding one without a compile error.
     grouped: true
     items:
       - name: _
@@ -1933,6 +1994,18 @@ vars:
       - name: _
         type: HTTP1Handler
         value: HTTP1HandlerFunc(nil)
+      - name: _
+        type: LoopHandler
+        value: LoopLayer{}
+      - name: _
+        type: LoopLayered
+        value: LoopLayer{}
+      - name: _
+        type: LoopOptionHonourer
+        value: LoopLayer{}
+      - name: _
+        type: LoopStarter
+        value: LoopLayer{}
     name: _
   - doc: |-
       optionNames holds each kind's constructor name, indexed by kind. Its length
@@ -1961,6 +2034,7 @@ vars:
           	OptionPlaintext:         "Plaintext",
           	OptionName:              "Name",
           	OptionEngine:            "Engine",
+          	OptionLoopMiddleware:    "UseLoop",
           	OptionBatchReplies:      "BatchReplies",
           }
     name: optionNames
