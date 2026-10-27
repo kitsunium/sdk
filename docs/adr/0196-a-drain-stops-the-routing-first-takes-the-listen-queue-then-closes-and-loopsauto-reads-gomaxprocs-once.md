@@ -142,6 +142,17 @@ queued and half-open connections to another listener of the group when
 sysctls out of scope); the documentation names this one for whoever runs
 several processes on one port.
 
+Two more refusals reach a peer during the drain, on every backend, and both
+are the ones it meets at any time: `MaxConns` reached — a connection the take
+accepts past it is closed, as one accepted while serving is — and a take
+that gives up, out of descriptors with no connection left to close, or past
+its budget. On the portable backend, `FileListener` calls `Fd()` on the
+duplicate `File` returned, which makes the shared open file description
+blocking for the microseconds before `FileListener`'s own duplicate sets
+`O_NONBLOCK` again: no acceptor of this process runs on it then, but a
+socket adopted from a supervisor that another process also accepts on could
+see one blocking accept in that window.
+
 ### D5 — P6's gate is active
 
 The `P6` row of `tools/netgate` — `cpu-ns/req` of the loop engine over the

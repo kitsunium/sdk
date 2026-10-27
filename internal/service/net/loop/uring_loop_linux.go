@@ -975,9 +975,9 @@ func takeWaits(res int32) bool {
 
 // refuses reports whether a connection accepted on index is closed at once:
 // the watchdog drained the ring while the group serves, MaxConns is reached,
-// or the index is past the table. The group's drain refuses none: an accept
-// that completed as its cancel crossed it, or one the drain's take armed, is
-// served.
+// or the index is past the table. The group's drain adds no refusal of its
+// own: an accept that completed as its cancel crossed it, or one the drain's
+// take armed, is served unless MaxConns is reached, as at any time.
 func (rr *uRing) refuses(index uint32) bool {
 	lp := rr.ul.lp
 	//: any of the three.
