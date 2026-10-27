@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-27T08:00:00Z -->
+<!-- updated: 2026-10-27T14:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -205,7 +205,12 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   the engine state of the entries committed past the snapshot is rolled
   back and carried by the next cut — a node with a table evicts the
   payloads it committed, so they cannot be replayed (#416,
-  `TestAnInstallBelowTheCommitLeavesTheEngineStateAlone`).
+  `TestAnInstallBelowTheCommitLeavesTheEngineStateAlone`). A node with no
+  table installs below its commit and replays them: it evicts no payload
+  past its base until then, even under a `DurableStateMachine` the start
+  resumed past it, whose install of the leader's older snapshot ran the
+  cluster version from before a raise it had applied (#720,
+  `TestANoTableDurableFollowerKeepsTheRaiseThroughAnOlderInstall`).
 - Sync once per queued Ready: every request the storage actor takes is
   staged, then synced ONCE, then completed in order, so no `AfterSync`
   leaves before the sync that covers it; a group of commit-only Readys is

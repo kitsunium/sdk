@@ -127,6 +127,7 @@ go_test(
         "metabitflip_internal_test.go",
         "metav2_internal_test.go",
         "newerlog_internal_test.go",
+        "notableinstall_internal_test.go",
         "observe_internal_test.go",
         "observed_internal_test.go",
         "offline_internal_test.go",

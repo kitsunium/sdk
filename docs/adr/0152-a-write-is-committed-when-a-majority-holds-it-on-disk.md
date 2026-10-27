@@ -5300,6 +5300,46 @@ leader it was never sent the install it waits for.
   that asks, and `checkStrandedVoterAsks` catches both on a silent voter
   and on one with no table.
 
+## Amendment — a node with no table keeps every payload past its base until its install (2026-10-27, #720)
+
+A node with no table (D7) holds the entries past its log's base, applies
+nothing, and replays at its install the engine effects of the entries it
+holds committed past the snapshot from their payloads (#416): the
+timing contract, the cluster version and its generation, the `NO_SPACE`
+alarm. Ready bounded what it may evict on such a node by the step
+function's applied index, which the start sets to what a
+`DurableStateMachine` reports, and #707 takes that index as committed past
+the persisted commit. The first Ready then dropped the payloads of every
+entry through it, engine entries included, `RecentEntriesBytes` exceeded.
+The leader offers its newest snapshot, which may be older than the
+machine: the restore is skipped for a machine already past it, the step
+function takes the snapshot's engine state, then finds no payload to
+replay past it, and skips each entry silently. The node ran the cluster
+version, or the alarm, from before an entry it had applied, its next cut
+recorded it, a restart from that cut kept it, and every peer that
+installed it inherited it; the next raise never matched its
+`Pre.Generation` there
+([#720](https://github.com/kitsunium/sdk/issues/720)). Without #707, a
+machine at or below the persisted commit met the same loss once later
+appends overflowed the window before the install.
+
+- **A node with no table evicts nothing past its base** (`evictable`).
+  Its install is at the base or past it (`CheckOffer` refuses one below),
+  so every payload it may replay stays in memory until then, whatever the
+  applied index; once installed, the node has a table and evicts as any
+  other. A machine that is not durable already started at the base, so
+  nothing changes for it.
+- **What it costs.** A node with no table holds the payloads past its
+  base that the start loaded, within `RecentEntriesBytes` for the
+  committed commands (`readTail`), and those appended until its install,
+  which it already held since its applied index does not move without a
+  table. The step function's applied index, and what apply is handed after
+  the install, are unchanged.
+- No frame, payload or record format changes, and no raft mutation is
+  added: `checkNoTableKeepsCommittedPayloads` now also starts the node
+  with a durable machine at its persisted commit, and past it as #707
+  raises it, and `mutNoTableEvictsCommitted` still fails it.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -5324,6 +5364,7 @@ leader it was never sent the install it waits for.
 | #707 | Raft hunt loop, 2026-10-27 | a `DurableStateMachine`'s applied index the log holds at the machine's term is taken as committed at the start, and a cut past the step function's commit waits for it; no format change (amendment of 2026-10-27, #707) |
 | #695 | Raft hunt loop, 2026-10-27 | a joiner's stamp turns a member's only once the log is durable through the entries that admit it, the configuration judged at the commit bounded by the durable index, at each Ready and each storage completion; no format change, no raft mutation (amendment of 2026-10-27, #695) |
 | #718 | Raft hunt loop, 2026-10-27 | a silent voter and a voter with no table, which never campaign, ask their members for the leader's record once they hear no leader, as a learner does (#639); no format change, no protocol raise (amendment of 2026-10-27, #718) |
+| #720 | Raft hunt loop, 2026-10-27 | a node with no table evicts no payload past its base until its install, whatever its applied index, so the install of a snapshot below a `DurableStateMachine`'s still replays the engine entries past it; no format change, no raft mutation (amendment of 2026-10-27, #720) |
 
 ## raft-sql-poc (owner's prior Raft)
 

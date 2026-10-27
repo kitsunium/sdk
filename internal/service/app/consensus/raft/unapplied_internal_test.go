@@ -127,8 +127,29 @@ func checkNothingHandedBehindARead(mut mutation) error {
 // payloads of the entries it holds committed, whose engine effects its
 // install replays from them over the snapshot's state (#416); dropped past
 // RecentEntriesBytes, the alarm committed past the snapshot was forgotten
-// (mutNoTableEvictsCommitted).
+// (mutNoTableEvictsCommitted). So does one whose DurableStateMachine
+// applied past its base: the step function starts at the machine's applied
+// index, which #707 takes as committed past the persisted commit, and the
+// payloads through it were dropped at the first Ready, though an install
+// below it still replays their effects (#720).
 func checkNoTableKeepsCommittedPayloads(mut mutation) error {
+	for _, c := range []struct{ commit, applied uint64 }{{5, 0}, {5, 5}, {3, 5}} {
+		if err := noTableInstallKeepsTheAlarm(mut, c.commit, c.applied); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// noTableInstallKeepsTheAlarm starts node 2 with no table over a base at 2
+// and the entries 3 to 5, the NO_SPACE alarm raised at 4, every Ready
+// evicting what it may (RecentEntriesBytes 1): commit is the persisted
+// commit, applied the index a DurableStateMachine reports, 0 for a machine
+// that is not durable. It then installs the leader's snapshot at 3, below
+// that index, as Node.install does for a durable machine already past it:
+// the restore is skipped, and the step function moves onto the snapshot
+// and replays the engine effects of 4 and 5.
+func noTableInstallKeepsTheAlarm(mut mutation, commit, applied uint64) error {
 	cfg := &Config{
 		ID: 2, Group: 1, Seed: 1, Timing: testTiming(), MaxInflight: 8, MaxInflightBytes: 1 << 20,
 		MaxBatchBytes: 1 << 16, MinVoters: 1, PromoteLag: 16, CanVote: true, MaxChainRefusals: 3, NoTable: true,
@@ -138,15 +159,23 @@ func checkNoTableKeepsCommittedPayloads(mut mutation) error {
 	e4 := engineEntry(all[2].ChainSum, 4, core.EntryNoSpaceRaise, &wire.AdminValue{})
 	ents := append(append(all, e4), chainEntries(e4.ChainSum, 5, 1)...)
 	base := core.SnapshotMetaValue{Position: core.PositionValue{Term: 1, Index: 2}, ChainTip: all[1].ChainSum, Membership: testConf(1, 2, 3)}
-	f := NewRaft(cfg, &StartState{HardState: core.HardState{Term: 1, Commit: 5}, Snapshot: base, Entries: ents[2:], Now: t0})
+	f := NewRaft(cfg, &StartState{HardState: core.HardState{Term: 1, Commit: commit}, Snapshot: base, Entries: ents[2:], Applied: applied, Now: t0})
+	if st := f.Status(); st.Commit != 5 || st.NoSpace != 4 {
+		return fmt.Errorf("setup: persisted commit %d, machine at %d: the start committed %d, noSpace %d", commit, applied, st.Commit, st.NoSpace)
+	}
 	f.Ready()
 	f.lead, f.term = 1, 1
-	f.InstallSnapshot(core.SnapshotMetaValue{Position: core.PositionValue{Term: 1, Index: 3}, ChainTip: all[2].ChainSum, Membership: testConf(1, 2, 3), Timing: testTiming()})
+	meta := core.SnapshotMetaValue{Position: core.PositionValue{Term: 1, Index: 3}, ChainTip: all[2].ChainSum, Membership: testConf(1, 2, 3), Timing: testTiming()}
+	if code := f.CheckOffer(1, core.InstallOfferValue{Term: 1, Meta: meta}, f.NoTable()); code != 0 {
+		return fmt.Errorf("setup: persisted commit %d, machine at %d: the offer at 3 was refused %v", commit, applied, code)
+	}
+	f.InstallSnapshot(meta)
 	if f.NoTable() || f.log.snapIndex != 3 {
 		return fmt.Errorf("setup: the install was not taken: noTable %v base %d", f.NoTable(), f.log.snapIndex)
 	}
 	if st := f.Status(); st.NoSpace != 4 {
-		return fmt.Errorf("the alarm committed at 4, past the snapshot at 3, was forgotten by a node with no table that dropped its payload: noSpace %d", st.NoSpace)
+		return fmt.Errorf("persisted commit %d, machine at %d: the alarm committed at 4, past the snapshot at 3, was forgotten by a node with no table that dropped its payload: noSpace %d",
+			commit, applied, st.NoSpace)
 	}
 	return nil
 }
