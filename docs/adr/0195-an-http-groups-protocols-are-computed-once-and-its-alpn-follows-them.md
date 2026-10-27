@@ -37,9 +37,10 @@ stream that is never read holds, or how many streams a peer opens.
 
 `Protocols(protos ...string)` names the versions an HTTP group serves by ALPN
 identifier, `http/1.1` and `h2`, in the order its TLS listeners prefer them;
-it records `OptionProtocols` (21; 20 is ADR 0192's `OptionBatchReplies`). Unset, a group with TLS serves `h2` then
-`http/1.1`, and one without serves `http/1.1`: cleartext HTTP/2 (h2c) is not
-served. At `Start` the group computes, once, from that list and its identity:
+it records `OptionProtocols` (21; 20 is ADR 0192's `OptionBatchReplies`).
+Unset, a group with TLS serves `h2` then `http/1.1`, and one without serves
+`http/1.1`: cleartext HTTP/2 (h2c) is not served. At `Start` the group
+computes, once, from that list and its identity:
 
 - **the ALPN list** its TLS listeners offer: the list itself when the
   identity names no `NextProtos`, else the identity's entries the list holds,
@@ -55,13 +56,13 @@ empty one of its own on `Serve`, which carries no certificate).
 ### D2 — What Start refuses
 
 `ProtocolsRefused` (`0.2.11.62`, field `reason`): an empty list; an empty, a
-repeated or an unknown identifier; `h2` without TLS; an identity whose `NextProtos` names an
-HTTP version the list excludes — it would be negotiated, then dropped — or
-nothing the list holds, which fails every handshake; and `Protocols` on a
-group that serves no `http.Handler`. A loop group refuses the option with
-`LoopOptionUnsupported`, like every kind it does not honour: the `http1`
-profile is HTTP/1.1 only. None of these narrows the configuration in silence
-(R6).
+repeated or an unknown identifier; `h2` without TLS; an identity whose
+`NextProtos` names an HTTP version the list excludes — it would be negotiated,
+then dropped — or nothing the list holds, which fails every handshake; and
+`Protocols` on a group that serves no `http.Handler`, a datagram group
+included. A loop group refuses the option with `LoopOptionUnsupported`, like
+every kind it does not honour: the `http1` profile is HTTP/1.1 only. None of
+these narrows the configuration in silence (R6).
 
 ### D3 — HTTP/2's bounds are set, and why these
 
@@ -98,30 +99,32 @@ defaults, so a release of the standard library cannot move them:
   one block (`MaxHeaderBytes`), not by time; a group that bounds none of these
   timeouts bounds none of this, as on HTTP/1.1.
 
-## Default change
-
-A TLS HTTP group whose identity names no `NextProtos` offered no ALPN, so it
-served HTTP/1.1 only; it now offers `h2` then `http/1.1` and serves HTTP/2 to
-every client that asks. A request that arrives over HTTP/2 has no
-`http.Hijacker`: a handler that hijacks its connection — a WebSocket upgrade
-written by hand — now works for HTTP/1.1 clients only on such a group. This is a change of default, allowed while v0 (ADR
-0040). The earlier behaviour comes back in code with `Protocols("http/1.1")`.
-There is no operator switch for it: `KITSUNIUM_NET_ENGINE` and
-`KITSUNIUM_NET_DISABLE` only restrict engines and kernel capabilities and never
-touch TLS (ADR 0188, R5), so the `net:default-change` label's `Override:`
-block, which names those variables alone, cannot express it and the pull
-request does not carry the label.
-
 ## Consequences
 
-- New: `Protocols`, `OptionProtocols` (21; 20 is ADR 0192's `OptionBatchReplies`), `ProtocolsRefused`
-  (`0.2.11.62`), re-exported by `pkg/v1/net/server`.
+- New: `Protocols`, `OptionProtocols` (21; 20 is ADR 0192's
+  `OptionBatchReplies`), `ProtocolsRefused` (`0.2.11.62`), re-exported by
+  `pkg/v1/net/server`.
 - Tests: ALPN with HTTP/1.1 alone, h2 alone, both in either order and the
   identity's order; every refusal; the adapter's `Protocols` and `HTTP2`;
   an unfinished header block closed by the idle or the read bound, and one
   left behind an open stream closed by the PING bound; an unread stream held
   to its window while another stream on the connection sends a body larger
-  than it.
+  than it; a datagram group refusing `Protocols`.
+
+## Breaking changes
+
+A default change. A TLS HTTP group whose identity names no `NextProtos`
+offered no ALPN, so it served HTTP/1.1 only; it now offers `h2` then
+`http/1.1` and serves HTTP/2 to every client that asks. A request that arrives
+over HTTP/2 has no `http.Hijacker`: a handler that hijacks its connection — a
+WebSocket upgrade written by hand — now works for HTTP/1.1 clients only on
+such a group. This is a change of default, allowed while v0 (ADR 0040). The
+earlier behaviour comes back in code with `Protocols("http/1.1")`. There is no
+operator switch for it: `KITSUNIUM_NET_ENGINE` and `KITSUNIUM_NET_DISABLE`
+only restrict engines and kernel capabilities and never touch TLS (ADR 0188,
+R5), so the `net:default-change` label's `Override:` block, which names those
+variables alone, cannot express it and the pull request does not carry the
+label.
 
 ## Alternatives considered
 
@@ -132,3 +135,16 @@ request does not carry the label.
   Rejected (R6): an operator who listed `h2` would get HTTP/1.1 and no error.
 - **Serve h2c on a plaintext group.** Out of scope: nothing asks for it, and
   a cleartext upgrade is one more parser in front of every request.
+
+## Deferred
+
+- **h2c on a plaintext group**, until a group asks for it (see above).
+- **HTTP/2's bounds as options** (D3), until a group needs one of them moved.
+
+## References
+
+- RFC 7301 — TLS Application-Layer Protocol Negotiation.
+- RFC 9113 — HTTP/2: §3.2 (`h2` over TLS), §4.2 (frame size), §6.5.2
+  (concurrent streams).
+- RFC 7541 §4.2 — HPACK dynamic table size.
+- `net/http`: `Server.Protocols`, `Server.HTTP2` (`HTTP2Config`).
