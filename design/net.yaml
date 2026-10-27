@@ -2348,7 +2348,8 @@ packages:
               HandlerUnsupported is returned by Start for a simple-API group whose handler
               no engine of its entry serves: a PacketHandler given to HTTP, a LoopHandler
               given to UDP, an HTTP handler given to TCP (its "serve" field names HTTP),
-              any other type (ADR 0197). The "entry" and "type" fields name them.
+              any other type (ADR 0197). The "entry" and "type" fields name them, on
+              every one of these refusals.
             exit: USAGE
             name: HandlerUnsupported
             private: "core/net: no engine of the entry serves the handler's type"
@@ -5705,8 +5706,12 @@ packages:
               h is a ConnHandler, one goroutine per connection, or a LoopHandler, on the
               loop engine; a handler that is both needs Engine to choose. An HTTP
               handler is refused with HandlerUnsupported: HTTP serves it. The group is
-              named "tcp+" + addr unless Name says otherwise; the other refusals are
-              HTTP's.
+              named "tcp+" + addr unless Name says otherwise. Start also refuses a nil or
+              typed nil handler (HandlerMissing), both interfaces without Engine
+              (HandlerAmbiguous), an Engine the handler cannot run on
+              (EngineUnsupported), any other type (HandlerUnsupported) and Plaintext with
+              TLS (PlaintextWithTLS); a TCP group serves no HTTP, so it needs neither TLS
+              nor Plaintext.
             in:
               - name: addr
                 type: string
@@ -7347,7 +7352,7 @@ packages:
       	routes, _ := http1.Routes(http1.Route{ID: routeItem, Method: "GET", Path: "/items/", Prefix: true},
       		http1.Route{ID: routeHealth, Path: "/health"})
       	bearer, _ := http1.Bearer(verifier, routeHealth) // /health needs no token
-      	srv.Group("api", server.Listen("tcp", ":8080"), server.Loop(server.LoopValue{Loops: 2})).
+      	srv.Group("api", server.Listen("tcp", ":8080"), server.Loop(server.LoopValue{Loops: 2}), server.Plaintext()).
       		HandleLoop(http1.HandleLoop(http1.Chain(a, routes, bearer), http1.Parser{}))
 
       A handler runs on its lane's thread and must not block it. Every callback

@@ -44,8 +44,12 @@ func (s *Server) HTTP(addr string, h any, opts ...GroupOption) *StreamGroup {
 // h is a ConnHandler, one goroutine per connection, or a LoopHandler, on the
 // loop engine; a handler that is both needs Engine to choose. An HTTP
 // handler is refused with HandlerUnsupported: HTTP serves it. The group is
-// named "tcp+" + addr unless Name says otherwise; the other refusals are
-// HTTP's.
+// named "tcp+" + addr unless Name says otherwise. Start also refuses a nil or
+// typed nil handler (HandlerMissing), both interfaces without Engine
+// (HandlerAmbiguous), an Engine the handler cannot run on
+// (EngineUnsupported), any other type (HandlerUnsupported) and Plaintext with
+// TLS (PlaintextWithTLS); a TCP group serves no HTTP, so it needs neither TLS
+// nor Plaintext.
 func (s *Server) TCP(addr string, h any, opts ...GroupOption) *StreamGroup {
 	g := s.simpleGroup("tcp", addr, opts)
 	//: a refusal is the group's, reported by Start.
@@ -161,7 +165,8 @@ func (g *StreamGroup) mountTCPEntry(h any) error {
 	if isHTTPHandler(h) {
 		//: refused, the entry named.
 		return errs.Wrap(corenet.HandlerUnsupported, errs.WrapParams{},
-			errs.String("group", g.name), errs.String("entry", entryTCP), errs.String("serve", entryHTTP))
+			errs.String("group", g.name), errs.String("entry", entryTCP), errs.String("type", typeName(h)),
+			errs.String("serve", entryHTTP))
 	}
 	conn, isConn := h.(corenet.ConnHandler)
 	lh, isLoop := h.(corenet.LoopHandler)
@@ -209,17 +214,19 @@ func fits(e, want corenet.EngineValue, other bool) bool {
 	return e == want || (e == corenet.EngineAuto && !other)
 }
 
-// pickRefusal says why pickEngine found no engine: both kinds without Engine,
-// an Engine neither kind runs on, or a type the entry does not serve.
+// pickRefusal says why pickEngine found no engine: both kinds and no Engine
+// (HandlerAmbiguous), an Engine the handler cannot run on — whatever kinds it
+// is (EngineUnsupported) — or a type the entry does not serve.
 func (g *StreamGroup) pickRefusal(entry string, h any, goroutine, loop bool) error {
-	//: by what the handler is.
+	//: by what the handler is, an Engine given judged first.
 	switch {
-	case goroutine && loop:
+	case goroutine && loop && !g.kinds.has(corenet.OptionEngine):
 		//: Engine chooses.
 		return errs.Wrap(corenet.HandlerAmbiguous, errs.WrapParams{},
 			errs.String("group", g.name), errs.String("entry", entry), errs.String("type", typeName(h)))
 	case goroutine || loop:
-		//: the handler cannot run on the Engine given.
+		//: the handler cannot run on the Engine given, a value outside the
+		//: block included.
 		return errs.Wrap(corenet.EngineUnsupported, errs.WrapParams{},
 			errs.String("group", g.name), errs.String("engine", g.engine.String()))
 	default:

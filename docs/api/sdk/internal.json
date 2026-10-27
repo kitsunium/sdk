@@ -28112,7 +28112,7 @@
         "reason": "HANDLER_UNSUPPORTED",
         "public": "The handler cannot be served by this entry point"
       },
-      "doc": "HandlerUnsupported is returned by Start for a simple-API group whose handler\nno engine of its entry serves: a PacketHandler given to HTTP, a LoopHandler\ngiven to UDP, an HTTP handler given to TCP (its \"serve\" field names HTTP),\nany other type (ADR 0197). The \"entry\" and \"type\" fields name them.\n",
+      "doc": "HandlerUnsupported is returned by Start for a simple-API group whose handler\nno engine of its entry serves: a PacketHandler given to HTTP, a LoopHandler\ngiven to UDP, an HTTP handler given to TCP (its \"serve\" field names HTTP),\nany other type (ADR 0197). The \"entry\" and \"type\" fields name them, on\nevery one of these refusals.\n",
       "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
@@ -65368,7 +65368,7 @@
       "recv": "Server",
       "spelled": "func(addr string, h any, opts ...GroupOption) *StreamGroup",
       "canonical": "func(addr string, h any, opts ...github.com/kitsunium/sdk/internal/service/net/server.GroupOption) *github.com/kitsunium/sdk/internal/service/net/server.StreamGroup",
-      "doc": "TCP declares a group serving h on addr, a TCP address — the simple API.\nh is a ConnHandler, one goroutine per connection, or a LoopHandler, on the\nloop engine; a handler that is both needs Engine to choose. An HTTP\nhandler is refused with HandlerUnsupported: HTTP serves it. The group is\nnamed \"tcp+\" + addr unless Name says otherwise; the other refusals are\nHTTP's.\n",
+      "doc": "TCP declares a group serving h on addr, a TCP address — the simple API.\nh is a ConnHandler, one goroutine per connection, or a LoopHandler, on the\nloop engine; a handler that is both needs Engine to choose. An HTTP\nhandler is refused with HandlerUnsupported: HTTP serves it. The group is\nnamed \"tcp+\" + addr unless Name says otherwise. Start also refuses a nil or\ntyped nil handler (HandlerMissing), both interfaces without Engine\n(HandlerAmbiguous), an Engine the handler cannot run on\n(EngineUnsupported), any other type (HandlerUnsupported) and Plaintext with\nTLS (PlaintextWithTLS); a TCP group serves no HTTP, so it needs neither TLS\nnor Plaintext.\n",
       "file": "service/net/server/simple.go",
       "layer": "service",
       "family": "net"

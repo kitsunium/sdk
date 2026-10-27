@@ -7562,7 +7562,8 @@ sequences:
           do:
             - return: |-
                 errs.Wrap(corenet.HandlerUnsupported, errs.WrapParams{},
-                			errs.String("group", g.name), errs.String("entry", entryTCP), errs.String("serve", entryHTTP))
+                			errs.String("group", g.name), errs.String("entry", entryTCP), errs.String("type", typeName(h)),
+                			errs.String("serve", entryHTTP))
               to: errs
           when: isHTTPHandler(h)
       - bind: conn, isConn
@@ -7619,7 +7620,7 @@ sequences:
     steps:
       - switch:
           cases:
-            - case: goroutine && loop
+            - case: goroutine && loop && !g.kinds.has(corenet.OptionEngine)
               do:
                 - return: |-
                     errs.Wrap(corenet.HandlerAmbiguous, errs.WrapParams{},

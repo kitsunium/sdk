@@ -41,7 +41,7 @@ adapter.
 
 | File | Surface |
 |---|---|
-| `gen_codes.go` | the 61 `Code` constants, `0.2.11.1` – `0.2.11.61`; the matching `*errs.Error` sentinels — written by kit gen from `design/net.yaml` (ADR 0164) |
+| `gen_codes.go` | the 65 `Code` constants, `0.2.11.1` – `0.2.11.61` and `0.2.11.64` – `0.2.11.67`; the matching `*errs.Error` sentinels — written by kit gen from `design/net.yaml` (ADR 0164) |
 | `wrap.go` | `wrapAs(sentinel, cause, fields...)` — origin-wins sentinel wrapping |
 | `identity.go` | `IdentityValue` — the opaque, redacting TLS identity + `NewIdentityValue` |
 | `identity_params.go` | `IdentityParams` — in-memory TLS material |
@@ -273,8 +273,14 @@ SSE terminator scan — moved with the code that pays them, to
 | 0.2.11.59 | `LoopGroupStalled` | 69 |
 | 0.2.11.60 | `LoopCapabilityRefused` | 78 |
 | 0.2.11.61 | `LoopMiddlewareInvalid` | 78 |
+| 0.2.11.64 | `HandlerAmbiguous` | 64 |
+| 0.2.11.65 | `HandlerUnsupported` | 64 |
+| 0.2.11.66 | `PlaintextRequired` | 78 |
+| 0.2.11.67 | `PacketOptionUnsupported` | 78 |
 
-`0.2.11.62` – `0.2.11.255` reserved. The `HTTP1*` refusals carry their
+`0.2.11.62` – `0.2.11.63` are claimed by changes still open (ADR 0195's
+`ProtocolsRefused`, ADR 0194's `LoopOutboundFull`); `0.2.11.68` –
+`0.2.11.255` reserved. The `HTTP1*` refusals carry their
 answer's status in `http:` (400, 413, 414, 417, 431, 501).
 
 ## Imports allowed
