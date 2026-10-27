@@ -1,9 +1,13 @@
 // Package main — the gate table: the merge gates of the network plan (P8, R7:
 // a gate is placed at the merge, never at the release), written as data. One
-// row per step, each comparing engine B against engine A on one load,
-// measured in the same job on the same runner. A criterion is one metric and
-// one threshold, judged on the bound of the confidence interval that can fail
-// it (stats.go, eval.go).
+// row per step, each comparing engine B against engine A on one load, both
+// served by one child in each round, side by side, in windows A, B, B, A, …:
+// a round is one sample of the ratio B/A. A criterion is one metric and one
+// threshold, judged on the bound of the ratios' confidence interval that can
+// fail it (stats.go, eval.go). The calibration rows hold one engine against
+// itself: the ratio two series of the same engine give on the runner, which
+// must stay within the tightest threshold the load is judged at, or no row
+// of that load can be trusted to pass or fail on its engines alone.
 package main
 
 const (
@@ -65,6 +69,12 @@ const (
 	// publishedCPUCeiling is P5's: no more CPU a request than the published
 	// http1.
 	publishedCPUCeiling float64 = 1.0
+	// calibrationHTTP is how far from 1 two series of one engine may lie on L1
+	// and L2: P2's 5 %, the tightest ratio either load is judged at that a
+	// faster B can meet (P5's 1.0 is a non-regression, met only below 1).
+	calibrationHTTP float64 = 1.05
+	// calibrationUDP is the same on L3: P4a's 25 %.
+	calibrationUDP float64 = 1.25
 )
 
 var (
@@ -90,18 +100,44 @@ var (
 	p6Criteria = []criterionEntity{{Metric: metricCPUPerReq, Op: opAtMost, Threshold: loopsCPUCeiling, Ratio: true}}
 	// p5Criteria: CPU a request against the published http1.
 	p5Criteria = []criterionEntity{{Metric: metricCPUPerReq, Op: opAtMost, Threshold: publishedCPUCeiling, Ratio: true}}
+	// calHTTPCriteria: one engine against itself, within calibrationHTTP of 1
+	// either way.
+	calHTTPCriteria = []criterionEntity{
+		{Metric: metricCPUPerReq, Op: opAtMost, Threshold: calibrationHTTP, Ratio: true},
+		{Metric: metricCPUPerReq, Op: opAtLeast, Threshold: 1 / calibrationHTTP, Ratio: true},
+	}
+	// calUDPCriteria: the same on L3's two metrics, within calibrationUDP.
+	calUDPCriteria = []criterionEntity{
+		{Metric: metricCPUPerDatagram, Op: opAtMost, Threshold: calibrationUDP, Ratio: true},
+		{Metric: metricCPUPerDatagram, Op: opAtLeast, Threshold: 1 / calibrationUDP, Ratio: true},
+		{Metric: metricDatagramsPerSyscall, Op: opAtMost, Threshold: calibrationUDP, Ratio: true},
+		{Metric: metricDatagramsPerSyscall, Op: opAtLeast, Threshold: 1 / calibrationUDP, Ratio: true},
+	}
 
 	// gates is the plan's table (P8 §Gates). P0, P1 and P3 have functional
 	// gates only (the lanes), so they have no row here. A row is active once
 	// its step's engine B is built — P4a's, GRO in datagramSource (ADR 0192) —
-	// and every other is inactive: reported, never failing.
+	// and every other step's row is inactive: reported, never failing.
+	// The calibration rows are active: a runner on which one engine does not
+	// match itself fails the run rather than lets a step pass or fail on it.
 	gates = []gateEntity{
-		{Step: "P2", Load: loadL2, A: "handwritten", B: "chain", Criteria: p2Criteria,
-			AllocBudget: p2AllocBudget, Pending: "the http1 middleware chain (P2) is engine B"},
-		{Step: "P4a", Load: loadL3, A: "recvmmsg", B: "gro", Criteria: p4aCriteria, Active: true},
-		{Step: "P6", Load: loadL1, A: "goroutine", B: "loop", Criteria: p6Criteria,
-			Pending: "LoopsAuto and the drain (P6) set engine B's loop count"},
-		{Step: "P5", Load: loadL1, A: "published", B: "loop", Criteria: p5Criteria,
-			Pending: "the published http1's L1 samples (engine A) are not stored yet; P5 widens the profile"},
+		{
+			Step: "P2", Load: loadL2, A: "handwritten", B: "chain", Criteria: p2Criteria,
+			AllocBudget: p2AllocBudget, Pending: "the http1 middleware chain (P2) is engine B",
+		},
+		{
+			Step: "P4a", Load: loadL3, A: "recvmmsg", B: "gro", Criteria: p4aCriteria, Active: true,
+		},
+		{
+			Step: "P6", Load: loadL1, A: "goroutine", B: "loop", Criteria: p6Criteria,
+			Pending: "LoopsAuto and the drain (P6) set engine B's loop count",
+		},
+		{
+			Step: "P5", Load: loadL1, A: "published", B: "loop", Criteria: p5Criteria,
+			Pending: "the published http1's L1 samples (engine A) are not stored yet; P5 widens the profile",
+		},
+		{Step: "cal-L1", Load: loadL1, A: "loop", B: "loop", Criteria: calHTTPCriteria, Active: true},
+		{Step: "cal-L2", Load: loadL2, A: "handwritten", B: "handwritten", Criteria: calHTTPCriteria, Active: true},
+		{Step: "cal-L3", Load: loadL3, A: "recvmmsg", B: "recvmmsg", Criteria: calUDPCriteria, Active: true},
 	}
 )

@@ -9,11 +9,18 @@
 // costs (l3CPU): the receiver's rusage, the sender's — this process's —, and
 // the irq and softirq time /proc/stat accounts apart from any task, which is
 // where GRO saves: a GSO send is segmented on receive without it, in softirq.
-// The datagrams each receive returned and the receiver's own CPU are reported
-// beside, not gated (ADR 0192 §D6). Engine A is the recvmmsg reader
-// with UDP GRO off, one datagram a message; engine B is the same reader with
-// GRO on, each message a GSO send's datagrams, split as the read loop splits
-// them (P4a, ADR 0192).
+// The datagrams each receive returned and each part of the CPU are reported
+// beside, not gated (ADR 0192 §D6, §D7). Engine A is the recvmmsg reader with
+// UDP GRO off, one datagram a message; engine B is the same reader with GRO
+// on, each message a GSO send's datagrams, split as the read loop splits them
+// (P4a, ADR 0192).
+//
+// The measure is paired, as L1's and L2's (load_gate_linux_test.go, ADR 0190):
+// one receiver reads both engines' sockets, each through its own source, and a
+// round sends to them in windows A, B, B, A, … at the one fixed rate. Every
+// window is metered the same way whichever engine it feeds (l3Round), so a
+// round's ratio, B over A, is one paired sample, whose interval tools/netgate
+// judges.
 
 package server
 
@@ -47,18 +54,18 @@ const (
 	l3Rate = 200_000
 	// l3Slots is the receiver's batch.
 	l3Slots = 64
-	// l3Window is how many datagrams one sample sends, whatever -benchtime
-	// says. /proc/stat counts in USER_HZ ticks — 100 a second on every Linux
-	// ABI, 10 ms each —, so at 100 000 datagrams a tick was 100 ns a
-	// datagram, 2.5 % of engine A, and the interval widened by the
-	// quantisation alone; at 400 000 it is 25 ns (ADR 0192 §D6). Two seconds
-	// a sample at l3Rate.
-	l3Window = 400_000
 	// l3ReadBuffer is the receive buffer the receiver asks for, so a burst of
 	// every flow's segments is queued rather than dropped; the kernel caps it
 	// at net.core.rmem_max, and the bench reports what was lost.
 	l3ReadBuffer = 8 << 20
 )
+
+// l3Windows is how many windows of each engine one paired round sends, as
+// L1's and L2's pairedWindows: A, B, then B, A, repeated. Each engine is sent
+// b.N datagrams a round, not half of it as on L1 and L2: /proc/stat counts in
+// USER_HZ ticks, 10 ms each, and the job's 400 000 an engine keep a tick at
+// 25 ns a datagram (ADR 0192 §D6).
+const l3Windows = 8
 
 // The environment of an L3 run: the receiver's address in the namespace, the
 // sender's on the near end of the pair, and the command prefix that runs the
@@ -81,27 +88,78 @@ const (
 )
 
 // TestLoadL3Child is the receiving half of BenchmarkLoadL3, and runs only in
-// the child it starts: it binds, prints its address, reads through
-// datagramSource counting datagrams and receives, and answers each line on
-// stdin with its CPU, datagrams and receives, until stdin closes. Under GRO a
-// message counts the datagrams it carries, as dispatch serves them.
+// the child it starts: it binds one socket an engine, prints their addresses,
+// reads each through its engine's source counting datagrams, receives and
+// messages cut short, and answers each line on stdin with its CPU and those
+// counts, until stdin closes. Under GRO a message counts the datagrams it
+// carries, as dispatch serves them.
 func TestLoadL3Child(t *testing.T) {
-	engine, ok := strings.CutPrefix(os.Getenv(l3ChildEnv), "L3:")
-	if !ok || (engine != l3EngineA && engine != l3EngineB) {
+	engines, ok := strings.CutPrefix(os.Getenv(l3ChildEnv), "L3:")
+	if !ok {
 		t.Skip("the receiving half of BenchmarkLoadL3: run by it, in a child")
 	}
-	pc, err := stdnet.ListenPacket("udp", os.Getenv(l3BindEnv))
+	var readers []*l3Reader
+	line := "addr"
+	for _, engine := range strings.Split(engines, ",") {
+		r, err := listenL3(engine, os.Getenv(l3BindEnv))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = r.pc.Close() }()
+		readers = append(readers, r)
+		line += " " + r.pc.LocalAddr().String()
+	}
+	fmt.Println(line)
+	l3Answer(os.Stdin, os.Stdout, func() []uint64 {
+		var vs []uint64
+		for _, r := range readers {
+			vs = append(vs, r.datagrams.Load(), r.receives.Load(), r.truncated.Load())
+		}
+		return vs
+	})
+}
+
+// l3Sources builds each L3 engine's reader over its socket, by label, with
+// whether that reader must coalesce: the one table an engine joins.
+var l3Sources = map[string]struct {
+	build func(stdnet.PacketConn) datagramSource
+	gro   bool
+}{
+	l3EngineA: {build: func(pc stdnet.PacketConn) datagramSource { return newDatagramSource(pc, false) }},
+	l3EngineB: {build: func(pc stdnet.PacketConn) datagramSource { return newDatagramSource(pc, true) }, gro: true},
+}
+
+// l3Reader is one engine's socket in the receiver, and what it counted.
+type l3Reader struct {
+	pc                             stdnet.PacketConn
+	datagrams, receives, truncated atomic.Uint64
+}
+
+// listenL3 binds a socket for engine and reads it through the engine's
+// source, its slots as large as the source asks for, counting datagrams —
+// every one a coalesced message carries —, receives and messages cut short,
+// until the socket closes.
+//
+// Goroutine lifecycle: it launches the reader, which returns once the socket
+// is closed.
+func listenL3(engine, bind string) (*l3Reader, error) {
+	source, ok := l3Sources[engine]
+	if !ok {
+		return nil, fmt.Errorf("no L3 engine %q", engine)
+	}
+	pc, err := stdnet.ListenPacket("udp", bind)
 	if err != nil {
-		t.Fatal(err)
+		return nil, err
 	}
 	if udp, ok := pc.(*stdnet.UDPConn); ok {
 		_ = udp.SetReadBuffer(l3ReadBuffer)
 	}
-	src := newDatagramSource(pc, engine == l3EngineB)
-	if r, isBatched := src.(*multiReader); !isBatched || r.gro != (engine == l3EngineB) {
-		t.Fatalf("engine %s read through %T, GRO %v", engine, src, isBatched && r.gro)
+	src := source.build(pc)
+	if mr, batched := src.(*multiReader); !batched || mr.gro != source.gro {
+		_ = pc.Close()
+		return nil, fmt.Errorf("engine %s read through %T, GRO %v", engine, src, batched && mr.gro)
 	}
-	var datagrams, receives, truncated atomic.Uint64
+	r := &l3Reader{pc: pc}
 	go func() {
 		slots := newSlots(l3Slots, src.slotSize(l3DatagramSize))
 		for {
@@ -109,21 +167,17 @@ func TestLoadL3Child(t *testing.T) {
 			if rerr != nil {
 				return
 			}
-			receives.Add(1)
+			r.receives.Add(1)
 			for i := range n {
 				if slots[i].cut {
-					truncated.Add(1)
+					r.truncated.Add(1)
 					continue
 				}
-				datagrams.Add(uint64(slots[i].count()))
+				r.datagrams.Add(uint64(slots[i].count()))
 			}
 		}
 	}()
-	fmt.Printf("addr %s\n", pc.LocalAddr())
-	l3Answer(os.Stdin, os.Stdout, func() []uint64 {
-		return []uint64{datagrams.Load(), receives.Load(), truncated.Load()}
-	})
-	_ = pc.Close()
+	return r, nil
 }
 
 // l3Answer answers each line read from in with the process's CPU (user+system,
@@ -148,17 +202,17 @@ func l3Answer(in io.Reader, out io.Writer, extra func() []uint64) {
 
 // l3Child is a running receiver.
 type l3Child struct {
-	cmd  *exec.Cmd
-	in   io.WriteCloser
-	out  *bufio.Reader
-	addr string
+	cmd   *exec.Cmd
+	in    io.WriteCloser
+	out   *bufio.Reader
+	addrs []string
 }
 
-// startL3Child runs the receiver reading with engine, bound to bind, under
-// prefix when given.
-func startL3Child(tb testing.TB, engine, prefix, bind string) *l3Child {
+// startL3Child runs the receiver bound to bind, one socket for each of
+// engines, under prefix when given.
+func startL3Child(tb testing.TB, prefix, bind string, engines ...string) *l3Child {
 	tb.Helper()
-	env := []string{l3ChildEnv + "=L3:" + engine, l3BindEnv + "=" + bind}
+	env := []string{l3ChildEnv + "=L3:" + strings.Join(engines, ","), l3BindEnv + "=" + bind}
 	var cmd *exec.Cmd
 	if p := strings.Fields(prefix); len(p) > 0 {
 		// sudo and ip netns exec reset the environment: it goes through env.
@@ -194,26 +248,33 @@ func startL3Child(tb testing.TB, engine, prefix, bind string) *l3Child {
 		}
 	})
 	line, err := c.out.ReadString('\n')
-	addr, ok := strings.CutPrefix(strings.TrimSpace(line), "addr ")
-	if err != nil || !ok {
-		tb.Fatalf("L3 receiver printed %q, %v, want its address", line, err)
+	addrs, ok := strings.CutPrefix(strings.TrimSpace(line), "addr ")
+	c.addrs = strings.Fields(addrs)
+	if err != nil || !ok || len(c.addrs) != len(engines) {
+		tb.Fatalf("L3 receiver printed %q, %v, want one address an engine", line, err)
 	}
-	c.addr = addr
 	return c
 }
 
-// sample reads the receiver's CPU, datagrams, receives and truncated messages.
-func (c *l3Child) sample(tb testing.TB) [4]uint64 {
+// l3Sample is the receiver's CPU, then each socket's datagrams, receives and
+// messages cut short, in the order of the engines it was started with.
+type l3Sample struct {
+	cpu                            uint64
+	datagrams, receives, truncated []uint64
+}
+
+// sample reads the receiver's CPU and each socket's counts.
+func (c *l3Child) sample(tb testing.TB) l3Sample {
 	tb.Helper()
 	if _, err := c.in.Write([]byte("s\n")); err != nil {
 		tb.Fatal(err)
 	}
 	line, err := c.out.ReadString('\n')
 	f := strings.Fields(line)
-	if err != nil || len(f) != 4 {
+	if err != nil || len(f) != 1+3*len(c.addrs) {
 		tb.Fatalf("L3 receiver sample %q, %v", line, err)
 	}
-	var vs [4]uint64
+	vs := make([]uint64, len(f))
 	for i := range vs {
 		v, perr := strconv.ParseUint(f[i], 10, 64)
 		if perr != nil {
@@ -221,33 +282,46 @@ func (c *l3Child) sample(tb testing.TB) [4]uint64 {
 		}
 		vs[i] = v
 	}
-	return vs
+	s := l3Sample{cpu: vs[0]}
+	for i := range c.addrs {
+		s.datagrams = append(s.datagrams, vs[1+3*i])
+		s.receives = append(s.receives, vs[2+3*i])
+		s.truncated = append(s.truncated, vs[3+3*i])
+	}
+	return s
 }
 
 // clockTicks is USER_HZ, the unit of /proc/stat's times: 100 on every Linux
 // ABI, whatever the kernel's own HZ (proc(5)).
 const clockTicks = 100
 
-// l3CPU is the CPU one window of L3 cost, in ns, by part.
+// l3CPU is the CPU L3 cost, in ns, by part: one window's, or the sum of an
+// engine's windows.
 type l3CPU struct {
 	// receiver and sender are the two processes' user+system rusage.
 	receiver, sender uint64
 	// irq is the irq and softirq time of every CPU in /proc/stat. With
 	// CONFIG_IRQ_TIME_ACCOUNTING the kernel charges it to no task, so it adds
-	// to the two rusages without overlap; without it, part of it is in them
-	// already (BENCH.md records the runner's).
+	// to the two rusages without overlap; without it, it is sampled at the
+	// tick and part of it is in them already (the bench job records which).
 	irq uint64
 }
 
-// total is the window's CPU, the gated metric.
+// total is the CPU, the gated metric.
 func (c l3CPU) total() uint64 { return c.receiver + c.sender + c.irq }
+
+// plus is c and d, part by part.
+func (c l3CPU) plus(d l3CPU) l3CPU {
+	return l3CPU{receiver: c.receiver + d.receiver, sender: c.sender + d.sender, irq: c.irq + d.irq}
+}
 
 // errInconsistentCPU reports a gated CPU below what the receiver alone
 // spent, which no sound measure of the whole can give: the first measure,
 // /proc/stat's busy time, did on one runner in two (ADR 0192 §D6).
 var errInconsistentCPU = errors.New("the gated CPU is below the receiver's own")
 
-// check refuses a window whose gated CPU is below the receiver's own.
+// check refuses a window whose gated CPU is below the receiver's own: a part
+// that went backwards wraps, and the sum falls below it.
 func (c l3CPU) check() error {
 	if c.total() < c.receiver {
 		return fmt.Errorf("%w: %d < %d ns", errInconsistentCPU, c.total(), c.receiver)
@@ -355,15 +429,15 @@ func sendL3(flows []*stdnet.UDPConn, datagrams int) (int, error) {
 	return perFlow * len(flows) * l3Segments, <-errc
 }
 
-// settle waits until the receiver's datagram count stops moving, or reaches
+// settle waits until socket i's datagram count stops moving, or reaches
 // want, within two seconds.
-func settle(tb testing.TB, c *l3Child, want uint64) [4]uint64 {
+func settle(tb testing.TB, c *l3Child, i int, want uint64) l3Sample {
 	tb.Helper()
 	last := c.sample(tb)
 	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
 		time.Sleep(20 * time.Millisecond)
 		s := c.sample(tb)
-		if s[1] >= want || s[1] == last[1] {
+		if s.datagrams[i] >= want || s.datagrams[i] == last.datagrams[i] {
 			return s
 		}
 		last = s
@@ -371,103 +445,183 @@ func settle(tb testing.TB, c *l3Child, want uint64) [4]uint64 {
 	return last
 }
 
-// BenchmarkLoadL3 is L3 on each engine of the P4a gate: the recvmmsg reader
-// with GRO off (A) and on (B). It runs over the veth pair scripts/ci/net-veth.sh
-// sets up, or is skipped.
-func BenchmarkLoadL3(b *testing.B) {
-	for _, engine := range []string{l3EngineA, l3EngineB} {
-		b.Run("engine="+engine, func(b *testing.B) { benchL3(b, engine) })
+// l3Count is what one window, or the sum of an engine's windows, counted.
+type l3Count struct {
+	cpu                                 l3CPU
+	got, sent, receives, truncated, win uint64
+}
+
+// plus is c and d, field by field.
+func (c l3Count) plus(d l3Count) l3Count {
+	return l3Count{
+		cpu: c.cpu.plus(d.cpu), got: c.got + d.got, sent: c.sent + d.sent,
+		receives: c.receives + d.receives, truncated: c.truncated + d.truncated, win: c.win + d.win,
 	}
 }
 
-// benchL3 is one engine's run of L3.
-func benchL3(b *testing.B, engine string) {
+// l3Window sends n datagrams to engine i's socket and meters them: the one
+// function a window of either engine goes through, so A and B are measured
+// identically.
+type l3Window func(tb testing.TB, i, n int) l3Count
+
+// l3Round runs one paired round, 2×l3Windows windows of per datagrams in the
+// order A, B, B, A, A, B, …, through window, and sums each engine's. It
+// refuses a window whose CPU is inconsistent (l3CPU.check).
+func l3Round(tb testing.TB, window l3Window, per int) [2]l3Count {
+	tb.Helper()
+	var sides [2]l3Count
+	//: A, B, B, A, …: every window of B has one of A beside it.
+	for w := range l3Windows {
+		order := [2]int{0, 1}
+		if w%2 == 1 {
+			order = [2]int{1, 0}
+		}
+		for _, i := range order {
+			c := window(tb, i, per)
+			if err := c.cpu.check(); err != nil {
+				tb.Fatalf("engine %c, window %d: %v", "ab"[i], w, err)
+			}
+			sides[i] = sides[i].plus(c)
+		}
+	}
+	return sides
+}
+
+// l3Metrics is a round's metrics as BenchmarkLoadL3 reports them: each
+// engine's CPU a datagram and its parts, datagrams a receive and loss, and
+// the ratios, B over A, of the two netgate judges. A message cut short on
+// either engine refuses the round.
+func l3Metrics(sides [2]l3Count) (map[string]float64, error) {
+	m := make(map[string]float64)
+	var cpu, dps [2]float64
+	for k, s := range sides {
+		p := string("ab"[k]) + ":"
+		if s.got == 0 || s.receives == 0 {
+			return nil, fmt.Errorf("engine %c read no datagram", "ab"[k])
+		}
+		if s.truncated != 0 {
+			return nil, fmt.Errorf("engine %c dropped %d messages cut short (MSG_TRUNC/MSG_CTRUNC)", "ab"[k], s.truncated)
+		}
+		got := float64(s.got)
+		cpu[k] = float64(s.cpu.total()) / got
+		dps[k] = got / float64(s.receives)
+		m[p+"cpu-ns/datagram"] = cpu[k]
+		m[p+"rcv-cpu-ns/datagram"] = float64(s.cpu.receiver) / got
+		m[p+"snd-cpu-ns/datagram"] = float64(s.cpu.sender) / got
+		m[p+"irq-cpu-ns/datagram"] = float64(s.cpu.irq) / got
+		m[p+"datagrams/syscall"] = dps[k]
+		m[p+"lost/op"] = 1 - got/float64(s.sent)
+	}
+	m["ratio:cpu-ns/datagram"] = cpu[1] / cpu[0]
+	m["ratio:datagrams/syscall"] = dps[1] / dps[0]
+	return m, nil
+}
+
+// BenchmarkLoadL3 is L3 paired: the recvmmsg reader against itself, the
+// calibration of the P4a gate, and against itself with GRO, P4a's gate. It
+// runs over the veth pair scripts/ci/net-veth.sh sets up, or is skipped.
+func BenchmarkLoadL3(b *testing.B) {
+	for _, p := range [][2]string{{l3EngineA, l3EngineA}, {l3EngineA, l3EngineB}} {
+		b.Run("pair="+p[0]+":"+p[1], func(b *testing.B) { benchPairedL3(b, p[0], p[1]) })
+	}
+}
+
+// benchPairedL3 runs one paired round of L3: both engines' sockets in one
+// receiver, b.N datagrams an engine in l3Windows windows each, A, B, B, A, …,
+// every window metered by l3Meter.
+func benchPairedL3(b *testing.B, engineA, engineB string) {
 	peer := os.Getenv(l3PeerEnv)
 	if peer == "" {
 		b.Skip("L3 runs over the veth pair of scripts/ci/net-veth.sh: " + l3PeerEnv + " is unset")
 	}
-	child := startL3Child(b, engine, os.Getenv(l3ExecEnv), stdnet.JoinHostPort(peer, "0"))
-	flows := make([]*stdnet.UDPConn, l3Flows)
+	child := startL3Child(b, os.Getenv(l3ExecEnv), stdnet.JoinHostPort(peer, "0"), engineA, engineB)
+	var flows [2][]*stdnet.UDPConn
 	for i := range flows {
-		c, err := dialGSO(os.Getenv(l3LocalEnv), child.addr)
-		if err != nil {
-			b.Fatal(err)
+		for range l3Flows {
+			c, err := dialGSO(os.Getenv(l3LocalEnv), child.addrs[i])
+			if err != nil {
+				b.Fatal(err)
+			}
+			flows[i] = append(flows[i], c)
+			b.Cleanup(func() { _ = c.Close() })
 		}
-		flows[i] = c
-		b.Cleanup(func() { _ = c.Close() })
 	}
-	before := child.sample(b)
-	senderBefore, irqBefore := processCPU(b), irqTime(b)
+	per := max(b.N/l3Windows, l3Flows*l3Segments)
 	b.ResetTimer()
-	// The window is the bench's, not b.N: the metrics are a datagram's, and the
-	// instrument's resolution sets the window (l3Window).
-	sent, err := sendL3(flows, l3Window)
+	sides := l3Round(b, l3Meter(child, flows), per)
+	b.StopTimer()
+	m, err := l3Metrics(sides)
 	if err != nil {
 		b.Fatal(err)
 	}
-	after := settle(b, child, before[1]+uint64(sent))
-	cpu := l3CPU{
-		receiver: after[0] - before[0],
-		sender:   processCPU(b) - senderBefore,
-		irq:      irqTime(b) - irqBefore,
+	for unit, v := range m {
+		b.ReportMetric(v, unit)
 	}
-	b.StopTimer()
-	got := after[1] - before[1]
-	if got == 0 {
-		b.Fatal("the receiver read no datagram")
-	}
-	if cut := after[3] - before[3]; cut != 0 {
-		b.Fatalf("engine %s dropped %d messages cut short (MSG_TRUNC/MSG_CTRUNC)", engine, cut)
-	}
-	if err := cpu.check(); err != nil {
-		b.Fatal(err)
-	}
-	b.ReportMetric(float64(cpu.total())/float64(got), "cpu-ns/datagram")
-	b.ReportMetric(float64(cpu.receiver)/float64(got), "rcv-cpu-ns/datagram")
-	b.ReportMetric(float64(cpu.sender)/float64(got), "snd-cpu-ns/datagram")
-	b.ReportMetric(float64(cpu.irq)/float64(got), "irq-cpu-ns/datagram")
-	b.ReportMetric(float64(got)/float64(after[2]-before[2]), "datagrams/syscall")
-	b.ReportMetric(1-float64(got)/float64(sent), "lost/op")
 }
 
-// TestLoadL3_wired runs L3's sender and receiver on loopback, on each engine:
-// one GSO send of one flow must reach the receiver as l3Segments datagrams,
-// counted with the receives that read them, none cut short — on GRO, one
-// message the read loop splits, read with its segment size on every call.
+// l3Meter is the window of a running receiver: it reads the receiver's
+// sample, this process's rusage and the irq time, sends to engine i's flows,
+// waits for the receiver to settle, and reads the three again.
+func l3Meter(child *l3Child, flows [2][]*stdnet.UDPConn) l3Window {
+	return func(tb testing.TB, i, n int) l3Count {
+		tb.Helper()
+		before := child.sample(tb)
+		snd, irq := processCPU(tb), irqTime(tb)
+		sent, err := sendL3(flows[i], n)
+		if err != nil {
+			tb.Fatal(err)
+		}
+		after := settle(tb, child, i, before.datagrams[i]+uint64(sent))
+		cpu := l3CPU{receiver: after.cpu - before.cpu, sender: processCPU(tb) - snd, irq: irqTime(tb) - irq}
+		return l3Count{
+			cpu: cpu, got: after.datagrams[i] - before.datagrams[i], sent: uint64(sent),
+			receives: after.receives[i] - before.receives[i], truncated: after.truncated[i] - before.truncated[i], win: 1,
+		}
+	}
+}
+
+// TestLoadL3_wired runs L3's sender and receiver on loopback, both engines in
+// one receiver: one GSO send of one flow must reach its socket, and only it,
+// as l3Segments datagrams, counted with the receives that read them, none cut
+// short — on GRO, one message the read loop splits, read with its segment
+// size on every call.
 func TestLoadL3_wired(t *testing.T) {
 	if l3Segments*l3DatagramSize > 65507 {
 		t.Fatalf("a GSO send of %d bytes exceeds UDP's", l3Segments*l3DatagramSize)
 	}
-	for _, engine := range []string{l3EngineA, l3EngineB} {
-		t.Run(engine, func(t *testing.T) {
-			child := startL3Child(t, engine, "", "127.0.0.1:0")
-			flow, err := dialGSO("", child.addr)
-			if err != nil {
-				t.Fatal(err)
+	engines := []string{l3EngineA, l3EngineB}
+	child := startL3Child(t, "", "127.0.0.1:0", engines...)
+	for i, addr := range child.addrs {
+		flow, err := dialGSO("", addr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Three sends, three reads at least: the segment size must reach
+		// every call, not the first only.
+		for range 3 {
+			before := child.sample(t)
+			if sent, err := sendL3([]*stdnet.UDPConn{flow}, l3Segments); err != nil || sent != l3Segments {
+				t.Fatalf("sent %d, %v, want one send of %d", sent, err, l3Segments)
 			}
-			defer func() { _ = flow.Close() }()
-			// Three sends, three reads at least: the segment size must reach
-			// every call, not the first only.
-			for range 3 {
-				before := child.sample(t)
-				if sent, err := sendL3([]*stdnet.UDPConn{flow}, l3Segments); err != nil || sent != l3Segments {
-					t.Fatalf("sent %d, %v, want one send of %d", sent, err, l3Segments)
-				}
-				after := settle(t, child, before[1]+l3Segments)
-				if got := after[1] - before[1]; got != l3Segments {
-					t.Fatalf("the receiver read %d datagrams of one GSO send, want %d", got, l3Segments)
-				}
-				if after[2] == before[2] {
-					t.Fatal("datagrams read and no receive counted")
-				}
-				if cut := after[3] - before[3]; cut != 0 {
-					t.Fatalf("%d messages cut short", cut)
-				}
-				if engine == l3EngineB && after[2]-before[2] != 1 {
-					t.Fatalf("GRO read one GSO send in %d receives, want 1", after[2]-before[2])
-				}
+			after := settle(t, child, i, before.datagrams[i]+l3Segments)
+			if got := after.datagrams[i] - before.datagrams[i]; got != l3Segments {
+				t.Fatalf("%s read %d datagrams of one GSO send, want %d", engines[i], got, l3Segments)
 			}
-		})
+			if other := 1 - i; after.datagrams[other] != before.datagrams[other] {
+				t.Fatalf("%s read datagrams sent to %s", engines[other], engines[i])
+			}
+			receives := after.receives[i] - before.receives[i]
+			if receives == 0 {
+				t.Fatal("datagrams read and no receive counted")
+			}
+			if cut := after.truncated[i] - before.truncated[i]; cut != 0 {
+				t.Fatalf("%s: %d messages cut short", engines[i], cut)
+			}
+			if engines[i] == l3EngineB && receives != 1 {
+				t.Fatalf("GRO read one GSO send in %d receives, want 1", receives)
+			}
+		}
+		_ = flow.Close()
 	}
 }
 
@@ -489,5 +643,77 @@ func TestL3CPU_check(t *testing.T) {
 				t.Fatalf("check = %v, want failing %v", err, c.fail)
 			}
 		})
+	}
+}
+
+// TestL3Round_symmetric pins the paired measure on a scripted window: A and B
+// get as many windows and datagrams, in the order A, B, B, A, …; the CPU a
+// datagram is the sum of its three parts, each non-negative; two engines of
+// one cost give a ratio of 1 whatever the runner adds to every window; B at
+// 60 % of A on every part gives 0.6; and a message cut short refuses the
+// round.
+func TestL3Round_symmetric(t *testing.T) {
+	const per = 1000
+	var order []int
+	// The runner's drift: every window costs more than the one before,
+	// whichever engine it feeds.
+	scripted := func(cost func(i int) l3CPU) l3Window {
+		return func(_ testing.TB, i, n int) l3Count {
+			order = append(order, i)
+			drift := uint64(len(order))
+			c := cost(i)
+			c.receiver += drift
+			c.irq += drift
+			return l3Count{cpu: c, got: uint64(n), sent: uint64(n), receives: uint64(n / l3Segments), win: 1}
+		}
+	}
+	same := func(int) l3CPU { return l3CPU{receiver: 300 * per, sender: 200 * per, irq: 100 * per} }
+	sides := l3Round(t, scripted(same), per)
+	want := []int{0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0}
+	if fmt.Sprint(order) != fmt.Sprint(want) {
+		t.Fatalf("windows ran %v, want %v", order, want)
+	}
+	for k, s := range sides {
+		if s.win != l3Windows || s.got != l3Windows*per || s.sent != s.got {
+			t.Fatalf("engine %c: %d windows, %d datagrams, want %d of %d", "ab"[k], s.win, s.got, l3Windows, per)
+		}
+	}
+	m, err := l3Metrics(sides)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The drift summed over A's windows (1, 4, 5, 8, …) and B's (2, 3, 6, 7, …)
+	// is the same: the order cancels it.
+	if r, d := m["ratio:cpu-ns/datagram"], m["ratio:datagrams/syscall"]; r != 1 || d != 1 {
+		t.Fatalf("two engines of one cost gave ratios %g and %g, want 1", r, d)
+	}
+	for unit, v := range m {
+		if v < 0 {
+			t.Fatalf("%s = %g, want non-negative", unit, v)
+		}
+	}
+	for _, p := range []string{"a:", "b:"} {
+		sum := m[p+"rcv-cpu-ns/datagram"] + m[p+"snd-cpu-ns/datagram"] + m[p+"irq-cpu-ns/datagram"]
+		if d := sum - m[p+"cpu-ns/datagram"]; d > 1e-9 || d < -1e-9 {
+			t.Fatalf("%s parts sum to %g, the CPU is %g", p, sum, m[p+"cpu-ns/datagram"])
+		}
+	}
+	order = nil
+	cheaper := func(i int) l3CPU {
+		c := same(i)
+		if i == 1 {
+			c = l3CPU{receiver: c.receiver * 6 / 10, sender: c.sender * 6 / 10, irq: c.irq * 6 / 10}
+		}
+		return c
+	}
+	if m, err = l3Metrics(l3Round(t, scripted(cheaper), per)); err != nil {
+		t.Fatal(err)
+	}
+	if r := m["ratio:cpu-ns/datagram"]; r < 0.599 || r > 0.601 {
+		t.Fatalf("B at 60 %% of A gave a ratio of %g", r)
+	}
+	cut := [2]l3Count{{got: 1, receives: 1, sent: 1}, {got: 1, receives: 1, sent: 1, truncated: 1}}
+	if _, err := l3Metrics(cut); err == nil {
+		t.Fatal("a round with a message cut short gave metrics")
 	}
 }

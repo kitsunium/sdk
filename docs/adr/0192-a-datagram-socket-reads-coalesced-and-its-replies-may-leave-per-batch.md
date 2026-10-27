@@ -130,21 +130,60 @@ count differs —, a stream group, goroutine or loop, refuses it at `Start` with
 ### D6 — L3's CPU is the receiver's, the sender's and the irq time
 
 On the owner's decision of 2026-10-26, the P4a gate's `cpu-ns/datagram` on L3
-is the sum, over the window, of the receiver's rusage (user+system), the
-sender's — the bench process — and the irq and softirq time of every CPU in
-`/proc/stat`, divided by the datagrams received. The sum is what GRO changes:
-the receiver's copy-out, the same for both engines, and the segmentation of
-each GSO send on receive, its socket buffers and queue operations, which run
-in softirq. Under `CONFIG_IRQ_TIME_ACCOUNTING` the kernel charges that time to
-no task, so the three parts add without overlap; without it, part of the
-softirq time is in the rusages already, and the bench job records which the
-runner has (`accounting:` in `bench.txt`, BENCH.md). Each part is reported
-beside the sum, ungated: `rcv-`, `snd-` and `irq-cpu-ns/datagram`.
+is the sum of the receiver's rusage (user+system), the sender's — the bench
+process — and the irq and softirq time of every CPU in `/proc/stat` (its
+sixth and seventh fields), divided by the datagrams received. The sum is what
+GRO changes: the receiver's copy-out, the same for both engines, and the
+segmentation of each GSO send on receive, its socket buffers and queue
+operations, which run in softirq — charged mostly to whichever task the CPU
+was running, the sender's often, so the receiver's rusage alone missed it.
+Each part is reported beside the sum, ungated: `rcv-`, `snd-` and
+`irq-cpu-ns/datagram`.
 
-A window is 400 000 datagrams, fixed in the bench (`l3Window`) whatever
-`-benchtime` says: `/proc/stat` counts in `USER_HZ` ticks, 100 a second on
-every Linux ABI, so at the job's 100 000 datagrams a tick was 100 ns a
-datagram; at 400 000 it is 25 ns.
+**Measured symmetrically, in the paired windows of
+[ADR 0190](0190-a-merge-gate-judges-the-ratio-of-two-engines-measured-side-by-side.md).**
+One receiver reads both engines' sockets, `BenchmarkLoadL3/pair=recvmmsg:gro`
+(the gate) and `pair=recvmmsg:recvmmsg` (its calibration, `cal-L3`), and a
+round sends to them in 16 windows A, B, B, A, …. Every window, whichever
+engine it feeds, goes through one function (`l3Meter`): the receiver's
+rusage, the sender's and `/proc/stat` read before the send and again once the
+receiver has settled, the three deltas added to that engine's sum
+(`l3Round`). A round reports `a:`, `b:` and `ratio:` of each metric, and
+netgate judges the interval of the rounds' ratios. `TestL3Round_symmetric`
+holds the schedule — as many windows and datagrams for each engine, in that
+order —, the sum of the parts, a drift of the runner that two engines of one
+cost cancel to a ratio of 1, and a scripted B at 60 % of A giving 0.6.
+
+**Its limits.**
+
+- *The rusages are processes', not engines'.* The receiver's rusage is the
+  whole child, both sockets' readers; the idle one is parked in the poller
+  and costs nothing measurable, and the same idle reader sits beside either
+  engine's windows. The sender's is the whole bench process, its pacing and
+  its sampling of the child included — the same work in every window.
+- *`/proc/stat` is the machine's, not the pair's.* It is not namespaced: it
+  counts both ends of the veth pair, and any other irq work the runner does
+  during a window. The interleaving lands such noise on both engines alike;
+  it widens the interval, it cannot bias the ratio.
+- *Overlap and resolution depend on the kernel's accounting.* Under
+  `CONFIG_IRQ_TIME_ACCOUNTING` the kernel measures irq and softirq time at
+  every entry and exit and charges it to no task, so the three parts add
+  without overlap. Without it, `/proc/stat`'s irq fields are tick-sampled —
+  a whole tick charged to softirq when the tick lands in one — and the
+  softirq time the tick missed stays in the rusage of the task it
+  interrupted: the sum still counts that work once, but the split between
+  the parts is coarse. The bench job records which the runner has
+  (`accounting:` lines in `bench.txt`), read from the runner, never assumed;
+  a run on a kernel without it is still judged, and the record says so.
+- *`USER_HZ` ticks.* `/proc/stat` counts in ticks of 10 ms, 100 a second on
+  every Linux ABI. Each engine is sent `b.N` datagrams a round — the job's
+  400 000 —, not half of it as on L1 and L2, so a tick is 25 ns a datagram,
+  under 1 % of engine A. A's windows fall in five runs a round (A, then
+  A, A three times, then A) and B's in four, consecutive windows of one
+  engine meeting at a sample, so the quantisation of a round is a few ticks
+  at most, on both engines alike. The first window size, 100 000 datagrams,
+  made a tick 100 ns a datagram, which alone pushed the bound past the
+  threshold.
 
 The first measure, decided on 2026-10-25, was every CPU's busy time in
 `/proc/stat`. It is abandoned: on a GitHub-hosted runner its user and system
@@ -152,9 +191,10 @@ fields, sampled at the tick, gave engine B 25 to 100 ns a datagram on one run
 in two — below the receiver's own rusage of about 345 ns, which no measure of
 the whole can be — while the other runs gave 625 to 850 ns. The bench now
 refuses a window whose gated CPU is below the receiver's own
-(`errInconsistentCPU`, `TestL3CPU_check`). The sender is the same GSO sender
-on both engines, so it adds the same work to both sides of the ratio. The L3
-child never replies, so the gate does not depend on D5's mode.
+(`errInconsistentCPU`, `TestL3CPU_check`), and a round in which a message was
+cut short on either engine. The sender is the same GSO sender on both
+engines, so it adds the same work to both sides of the ratio. The L3 child
+never replies, so the gate does not depend on D5's mode.
 
 ### D7 — Datagrams a receive is reported, not gated
 

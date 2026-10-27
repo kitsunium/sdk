@@ -140,13 +140,17 @@ the code — L1: a plaintext GET, 1 KiB answered, 1000 kept-alive connections;
 L2: L1 with a Bearer token and routing; L3: 1200-byte UDP datagrams, a GSO
 sender of 54 segments, 4 flows at 200 000 datagrams a second, over a veth pair
 — and the metric of L1 and L2 is the server's CPU, measured in its own process,
-so the client's cost never dilutes a ratio. L3's is the machine's: every CPU's
-busy time in `/proc/stat` over the window, because what GRO saves — each GSO
-send segmented again on receive — runs in softirq charged mostly to the
-sender's context, and the receiver's rusage, dominated by the copy-out both
-engines pay, missed it (ADR 0192 §D6); the receiver's rusage is reported beside
-as `rcv-cpu-ns/datagram`. P4a's gate is required; every other waits for the
-step that builds its engine B (`netgate -list`).
+so the client's cost never dilutes a ratio. Each pair of engines is measured
+side by side, one child serving both in windows A, B, B, A, … (ADR 0190), and
+a round is one sample of the ratio B/A. L3's CPU is the receiver's rusage
+plus the sender's plus the irq and softirq time of `/proc/stat`, every window
+of either engine metered by the same function (ADR 0192 §D6): what GRO saves —
+each GSO send segmented again on receive — runs in softirq, charged mostly to
+whatever task the CPU was running, and the receiver's rusage alone, dominated
+by the copy-out both engines pay, missed it. Each part is reported beside as
+`rcv-`, `snd-` and `irq-cpu-ns/datagram`. P4a's gate and the calibration rows
+are required; every other waits for the step that builds its engine B
+(`netgate -list`).
 
 One measurement, under Docker on a Mac (Linux 7.0 arm64, 8 CPUs, epoll since
 Docker's profile refuses io_uring), one round at `-benchtime=100000x`, given
@@ -159,28 +163,28 @@ only as the order of magnitude the gate starts from:
 | `LoadL2/engine=handwritten` | 6 403 |
 | `LoadL3/engine=recvmmsg` (loopback, 55.7 datagrams a receive, receiver's rusage) | 621 |
 
-P4a's two engines on the veth pair, the same Docker, the bench pinned to 4
-CPUs, ten interleaved rounds (ADR 0192 §D6): medians, then netgate's bound of
-B/A.
+P4a's pair on the veth pair, the same Docker (Linux 7.0.14), the container
+held to 4 CPUs, ten paired rounds at `-benchtime=400000x`: medians of each
+engine, then netgate's bound of the rounds' ratios B/A.
 
-| Metric | `engine=recvmmsg` (A) | `engine=gro` (B) | bound | gate |
+| Metric | `recvmmsg` (A) | `gro` (B) | bound | gate |
 |---|---|---|---|---|
-| `datagrams/syscall` | 58.2 | 308 | 4.73 (lower) | ≥ 4, reported, not gated |
-| `cpu-ns/datagram`, the machine's | 3 542 | 1 825 | 0.576 (upper) | ≤ 0.75 — pass |
+| `cpu-ns/datagram` | 5 400 | 3 021 | 0.623 (upper), median 0.552 | ≤ 0.75 — pass |
+| of which `rcv-` / `snd-` / `irq-` | 896 / 1 925 / 2 557 | 512 / 1 723 / 761 | | reported |
+| `datagrams/syscall` | 58.3 | 230 | 3.76 (lower), median 3.95 | ≥ 4, reported, not gated |
+| `cal-L3` (`recvmmsg:recvmmsg`) `cpu-ns/datagram` | | | 0.968 to 1.08, median 1.04 | within 0.8 to 1.25 — pass |
 
-On the GitHub-hosted runner of the pull request (Linux 6.17, 4 CPUs):
-`cpu-ns/datagram` 2 188 → 725 ns, upper bound 0.368 — pass; `datagrams/syscall`
-54.0 → 193, lower bound 3.54. The second is reported, not gated (ADR 0192
-§D7): A already reads a GSO send's 54 datagrams a receive, so B's count is how
-many sends queue before its reader wakes, the runner's scheduling.
+The irq part is where GRO saves most, as §D6 expected: 2 557 → 761 ns a
+datagram. `datagrams/syscall` is reported, not gated (ADR 0192 §D7): A already
+reads a GSO send's 54 datagrams a receive, so B's count is how many sends
+queue before its reader wakes, the runner's scheduling.
 
-A sample is `l3Window`, 400 000 datagrams, whatever `-benchtime` says:
-`/proc/stat` counts in `USER_HZ` ticks, 100 a second on every Linux ABI, and at
-the job's 100 000 datagrams a tick was 100 ns a datagram — 2.5 % of A —, which
-alone pushed the bound to 0.757 with a median of 0.65; at 400 000 a tick is
-25 ns. Ten rounds of L3 take about 1 min 30 s, inside the bench job's 30
-minutes. The receiver's own rusage, first gated, gave B/A near 0.81 with an
-upper bound of 1.05 (`rcv-cpu-ns/datagram`, reported, not gated).
+Each engine is sent `b.N` datagrams a round, 400 000 at the job's
+`-benchtime`, not half of it as on L1 and L2: `/proc/stat` counts in `USER_HZ`
+ticks, 100 a second on every Linux ABI, and at 100 000 datagrams a tick was
+100 ns a datagram — 2.5 % of A —, which alone pushed the bound past the
+threshold; at 400 000 it is 25 ns. A round of both L3 pairs takes about 9 s,
+ten rounds 1 min 30 s, inside the bench job's 30 minutes.
 
 ## What is NOT measured here
 
