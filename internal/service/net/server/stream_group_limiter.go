@@ -79,6 +79,15 @@ func (l *connLimiter) releaseFor(c corenet.Conn) {
 	l.release()
 }
 
+// markRefused records on a pooled connection that the ceiling refused it, so
+// the engine closes it at once rather than gracefully.
+func markRefused(c corenet.Conn) {
+	//: only the engine's own wrapper carries the flag.
+	if pooled, ok := c.(*conn); ok {
+		pooled.refused = true
+	}
+}
+
 // admit runs the handler under the group's ceiling, translating a rejection
 // into the domain's own sentinel.
 //
@@ -96,6 +105,7 @@ func (s *Server) admit(ctx context.Context, limiter *connLimiter, c corenet.Conn
 	//: the ceiling rejected this connection.
 	if !limiter.tryAcquire() {
 		s.rejected.Add(1)
+		markRefused(c)
 		//: report in the domain's own terms, naming the ceiling it hit.
 		return errs.Wrap(corenet.ConnLimitReached, errs.WrapParams{},
 			errs.Int("limit", limiter.ceiling))

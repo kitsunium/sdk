@@ -132,21 +132,21 @@ func (s *Server) bindLoopGroup(ctx context.Context, group *StreamGroup) error {
 			//: the error names the socket.
 			return err
 		}
-		adopted = group.loopLayers(adopted)
-		lns = append(lns, adopted...)
-		s.registerLoopListeners(group, adopted, true)
+		//: registered raw, so State reads the socket's own options; served
+		//: through TLS when the codec takes it.
+		s.registerLoopListeners(group, adopted, nil)
+		lns = append(lns, group.loopLayers(adopted)...)
 	}
 	//: then every address, one listener each: the loop shards inside.
 	for _, addr := range group.addrs {
-		ln, err := listen(ctx, addr, corenet.IdentityValue{}, false, false)
+		ln, rep, err := listen(ctx, addr, corenet.IdentityValue{}, false, false, s.rebindAttempts(addr))
 		//: the address could not be bound.
 		if err != nil {
 			//: Start unwinds what is bound.
 			return err
 		}
-		ln = group.loopLayers([]stdnet.Listener{ln})[0]
-		lns = append(lns, ln)
-		s.registerLoopListeners(group, []stdnet.Listener{ln}, false)
+		s.registerLoopListeners(group, []stdnet.Listener{ln}, &rep)
+		lns = append(lns, group.loopLayers([]stdnet.Listener{ln})...)
 	}
 	//: an opt-in no backend may honour is refused before any engine starts.
 	if err := loop.CheckCapabilities(group.name, group.loop); err != nil {
@@ -177,17 +177,26 @@ func (s *Server) bindLoopGroup(ctx context.Context, group *StreamGroup) error {
 }
 
 // registerLoopListeners records a loop group's listeners, so Close and
-// Shutdown close them and State reports them, as for every group.
-func (s *Server) registerLoopListeners(group *StreamGroup, lns []stdnet.Listener, adopted bool) {
+// Shutdown close them and State reports them, as for every group: bound ones
+// with the bind's report, adopted ones (rep nil) with SO_EXCLUSIVEADDRUSE
+// read back.
+func (s *Server) registerLoopListeners(group *StreamGroup, lns []stdnet.Listener, rep *bindReport) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	//: one row and one bound listener each.
 	for _, ln := range lns {
 		addr := corenet.AddressValue{Network: ln.Addr().Network(), Addr: ln.Addr().String()}
 		s.listeners = append(s.listeners, &boundListener{group: group.name, addr: addr, ln: ln})
-		s.states = append(s.states, corenet.ListenerStateValue{
-			Group: group.name, Address: ln.Addr().String(), Network: addr.Network, Shards: 1, Adopted: adopted,
-		})
+		row := corenet.ListenerStateValue{
+			Group: group.name, Address: ln.Addr().String(), Network: addr.Network, Shards: 1, Adopted: rep == nil,
+		}
+		//: bound here: what the bind did; adopted: what the supervisor set.
+		if rep != nil {
+			row.Exclusive, row.BindWait = rep.exclusive, corenet.DurationValue(rep.wait)
+		} else {
+			row.Exclusive = exclusiveOf(listenerSocket(ln))
+		}
+		s.states = append(s.states, row)
 	}
 }
 
