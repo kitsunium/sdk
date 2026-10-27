@@ -54,8 +54,8 @@ empty one of its own on `Serve`, which carries no certificate).
 
 ### D2 — What Start refuses
 
-`ProtocolsRefused` (`0.2.11.62`, field `reason`): an empty list; a repeated or
-unknown identifier; `h2` without TLS; an identity whose `NextProtos` names an
+`ProtocolsRefused` (`0.2.11.62`, field `reason`): an empty list; an empty, a
+repeated or an unknown identifier; `h2` without TLS; an identity whose `NextProtos` names an
 HTTP version the list excludes — it would be negotiated, then dropped — or
 nothing the list holds, which fails every handshake; and `Protocols` on a
 group that serves no `http.Handler`. A loop group refuses the option with

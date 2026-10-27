@@ -26227,7 +26227,7 @@
       "code": {
         "value": "0.2.11.36"
       },
-      "doc": "CodeLoopOptionUnsupported identifies an option a group cannot honour on its\nengine: Loop on a group not served by a loop handler, or, on a loop group,\nUse or an option neither the engine nor the handler honours (ADR 0186 §D1).\n",
+      "doc": "CodeLoopOptionUnsupported identifies an option a group cannot honour on its\nengine: Loop on a group not served by a loop handler, BatchReplies on a\nstream group (ADR 0192), or, on a loop group, Use or an option neither the\nengine nor the handler honours (ADR 0186 §D1).\n",
       "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
@@ -26846,6 +26846,38 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.DatagramStateValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "DatagramStateValue",
+      "spelled": "struct{TruncatedPackets uint64 \"json:\\\"truncated_packets\\\"\"; GSOOversized uint64 \"json:\\\"gso_oversized\\\"\"; ReplyFailures uint64 \"json:\\\"reply_failures\\\"\"}",
+      "canonical": "struct{TruncatedPackets uint64 \"json:\\\"truncated_packets\\\"\"; GSOOversized uint64 \"json:\\\"gso_oversized\\\"\"; ReplyFailures uint64 \"json:\\\"reply_failures\\\"\"}",
+      "fields": [
+        {
+          "name": "TruncatedPackets",
+          "type": "uint64",
+          "tag": "json:\"truncated_packets\"",
+          "doc": "TruncatedPackets is the number of messages dropped because the kernel cut\nthem: a coalesced message past its buffer (MSG_TRUNC under UDP GRO), or a\nmessage whose control data did not fit (MSG_CTRUNC). Neither can be split\ninto whole datagrams, so none of what survives is delivered.\n"
+        },
+        {
+          "name": "GSOOversized",
+          "type": "uint64",
+          "tag": "json:\"gso_oversized\"",
+          "doc": "GSOOversized is the number of GSO sends the kernel refused with EMSGSIZE:\na sizing bug, counted, which leaves GSO on.\n"
+        },
+        {
+          "name": "ReplyFailures",
+          "type": "uint64",
+          "tag": "json:\"reply_failures\"",
+          "doc": "ReplyFailures is the number of replies a BatchReplies group queued during\na batch that did not leave: Reply had already reported them sent.\n"
+        }
+      ],
+      "doc": "DatagramStateValue counts what the batched datagram paths drop (ADR 0192):\nthe messages a read cut short, and the replies a batch queued that did not\nleave. Each is a drop nobody above a read loop could be told of, so the\ncounter is the report.\n",
+      "file": "core/net/state_datagram.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.DrainSignal",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -27095,7 +27127,7 @@
           "name": "Source",
           "type": "string",
           "tag": "json:\"source\"",
-          "doc": "Source says what reported it: \"listener\", \"loop\", \"ring\", \"stall\" or\n\"environment\".\n"
+          "doc": "Source says what reported it: \"listener\", \"loop\", \"ring\", \"stall\",\n\"capability\", \"gso\" or \"environment\".\n"
         },
         {
           "name": "Group",
@@ -29366,6 +29398,19 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.OptionBatchReplies",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "OptionBatchReplies",
+      "spelled": "OptionKind",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.OptionKind",
+      "value": "20",
+      "doc": "OptionBatchReplies is BatchReplies. A datagram group honours it; a stream\ngroup, goroutine or loop, refuses it with LoopOptionUnsupported (ADR 0192).\n",
+      "file": "core/net/loop.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.OptionBatchSize",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -30062,7 +30107,7 @@
         "reason": "PROTOCOLS_REFUSED",
         "public": "The group's HTTP protocols are misconfigured"
       },
-      "doc": "ProtocolsRefused is returned by Start for an HTTP group whose Protocols\noption is empty, repeats or names an unknown identifier, asks for h2\nwithout TLS, or contradicts its identity's NextProtos — naming an HTTP\nversion the group does not serve, or none it does — and for a group that\nserves no http.Handler given Protocols. The \"reason\" field names it\n(ADR 0195).\n",
+      "doc": "ProtocolsRefused is returned by Start for an HTTP group whose Protocols\noption is empty, holds an empty identifier, repeats or names an unknown\none, asks for h2\nwithout TLS, or contradicts its identity's NextProtos — naming an HTTP\nversion the group does not serve, or none it does — and for a group that\nserves no http.Handler given Protocols. The \"reason\" field names it\n(ADR 0195).\n",
       "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
@@ -30380,8 +30425,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/net",
       "name": "StateValue",
-      "spelled": "struct{Phase Phase \"json:\\\"phase\\\"\"; Listeners []ListenerStateValue \"json:\\\"listeners\\\"\"; ActiveConns int64 \"json:\\\"active_conns\\\"\"; TotalConns uint64 \"json:\\\"total_conns\\\"\"; RejectedConns uint64 \"json:\\\"rejected_conns\\\"\"; OversizedPackets uint64 \"json:\\\"oversized_packets\\\"\"; AcceptBackoffs uint64 \"json:\\\"accept_backoffs\\\"\"; Loops []LoopStateValue \"json:\\\"loops,omitempty\\\"\"; Override OverrideValue \"json:\\\"override\\\"\"; Faults []FaultValue \"json:\\\"faults,omitempty\\\"\"; Fallbacks FallbacksValue \"json:\\\"fallbacks\\\"\"; Platform PlatformValue \"json:\\\"platform\\\"\"}",
-      "canonical": "struct{Phase github.com/kitsunium/sdk/internal/core/net.Phase \"json:\\\"phase\\\"\"; Listeners []github.com/kitsunium/sdk/internal/core/net.ListenerStateValue \"json:\\\"listeners\\\"\"; ActiveConns int64 \"json:\\\"active_conns\\\"\"; TotalConns uint64 \"json:\\\"total_conns\\\"\"; RejectedConns uint64 \"json:\\\"rejected_conns\\\"\"; OversizedPackets uint64 \"json:\\\"oversized_packets\\\"\"; AcceptBackoffs uint64 \"json:\\\"accept_backoffs\\\"\"; Loops []github.com/kitsunium/sdk/internal/core/net.LoopStateValue \"json:\\\"loops,omitempty\\\"\"; Override github.com/kitsunium/sdk/internal/core/net.OverrideValue \"json:\\\"override\\\"\"; Faults []github.com/kitsunium/sdk/internal/core/net.FaultValue \"json:\\\"faults,omitempty\\\"\"; Fallbacks github.com/kitsunium/sdk/internal/core/net.FallbacksValue \"json:\\\"fallbacks\\\"\"; Platform github.com/kitsunium/sdk/internal/core/net.PlatformValue \"json:\\\"platform\\\"\"}",
+      "spelled": "struct{Phase Phase \"json:\\\"phase\\\"\"; Listeners []ListenerStateValue \"json:\\\"listeners\\\"\"; ActiveConns int64 \"json:\\\"active_conns\\\"\"; TotalConns uint64 \"json:\\\"total_conns\\\"\"; RejectedConns uint64 \"json:\\\"rejected_conns\\\"\"; OversizedPackets uint64 \"json:\\\"oversized_packets\\\"\"; AcceptBackoffs uint64 \"json:\\\"accept_backoffs\\\"\"; Datagrams DatagramStateValue \"json:\\\"datagrams\\\"\"; Loops []LoopStateValue \"json:\\\"loops,omitempty\\\"\"; Override OverrideValue \"json:\\\"override\\\"\"; Faults []FaultValue \"json:\\\"faults,omitempty\\\"\"; Fallbacks FallbacksValue \"json:\\\"fallbacks\\\"\"; Platform PlatformValue \"json:\\\"platform\\\"\"}",
+      "canonical": "struct{Phase github.com/kitsunium/sdk/internal/core/net.Phase \"json:\\\"phase\\\"\"; Listeners []github.com/kitsunium/sdk/internal/core/net.ListenerStateValue \"json:\\\"listeners\\\"\"; ActiveConns int64 \"json:\\\"active_conns\\\"\"; TotalConns uint64 \"json:\\\"total_conns\\\"\"; RejectedConns uint64 \"json:\\\"rejected_conns\\\"\"; OversizedPackets uint64 \"json:\\\"oversized_packets\\\"\"; AcceptBackoffs uint64 \"json:\\\"accept_backoffs\\\"\"; Datagrams github.com/kitsunium/sdk/internal/core/net.DatagramStateValue \"json:\\\"datagrams\\\"\"; Loops []github.com/kitsunium/sdk/internal/core/net.LoopStateValue \"json:\\\"loops,omitempty\\\"\"; Override github.com/kitsunium/sdk/internal/core/net.OverrideValue \"json:\\\"override\\\"\"; Faults []github.com/kitsunium/sdk/internal/core/net.FaultValue \"json:\\\"faults,omitempty\\\"\"; Fallbacks github.com/kitsunium/sdk/internal/core/net.FallbacksValue \"json:\\\"fallbacks\\\"\"; Platform github.com/kitsunium/sdk/internal/core/net.PlatformValue \"json:\\\"platform\\\"\"}",
       "fields": [
         {
           "name": "Phase",
@@ -30424,6 +30469,12 @@
           "type": "uint64",
           "tag": "json:\"accept_backoffs\"",
           "doc": "AcceptBackoffs is the number of times an accept loop waited after Accept\nfailed with anything but its listener closing — the process out of file\ndescriptors, typically, with connections still queued. Retrying at once\nwould spin a core per listener while the condition lasts; each wait is\n5 ms, doubling to 1 s, and the next accepted connection starts the curve\nover. A count that keeps rising is a server that cannot accept.\n"
+        },
+        {
+          "name": "Datagrams",
+          "type": "DatagramStateValue",
+          "tag": "json:\"datagrams\"",
+          "doc": "Datagrams counts what the batched datagram paths drop (ADR 0192).\n"
         },
         {
           "name": "Loops",
@@ -53330,7 +53381,7 @@
         {
           "name": "Applied",
           "type": "uint64",
-          "doc": "Applied is where the state machine resumes, at least the snapshot.\n"
+          "doc": "Applied is where the state machine resumes, at least the snapshot.\nAbove HardState.Commit, NewRaft takes it as committed while the log\nholds it (#707): the caller passes such an index only when the log\nholds there the entry the machine applied, or does not hold it.\n"
         },
         {
           "name": "Now",
@@ -64791,6 +64842,18 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/server.BatchReplies",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/net/server",
+      "name": "BatchReplies",
+      "spelled": "func() GroupOption",
+      "canonical": "func() github.com/kitsunium/sdk/internal/service/net/server.GroupOption",
+      "doc": "BatchReplies makes a datagram group's replies leave per read batch rather than\none at a time (ADR 0192). Packet.Reply made while the batch is served then\nqueues a copy of its datagram and reports it sent, len(b) and nil; the batch's\nreplies leave together when it ends, and one that fails then is counted in\nState's Datagrams.ReplyFailures, since its handler has returned. On Linux a UDP\nsocket sends them with one sendmmsg, a run of consecutive replies to one peer\nof one size as one UDP GSO send, split at 64 segments or the IP length, and\none datagram a message once the device refused GSO (EIO); a zoned IPv6 peer\nis written at once, and a Unix datagram socket, a socket with no raw\ndescriptor and every other platform send the queue one WriteTo a reply.\nA queue that is full — 128 replies or 256 KiB — sends what it holds early,\nbefore the batch ends; a reply larger than that room, or to a peer the sink\ncannot address, is written at once and returns the write's own error, never\ncounted. Under the option Reply is valid only during the handler's call, as\nData is:\nthe Packet is the read loop's, and one kept and replied to while a later\nbatch is served is queued with that batch. A reply made while no batch is\nserved is written at once. Without the option, Reply writes at once and\nreturns the write's own error. A stream group refuses it with\nLoopOptionUnsupported.\n",
+      "file": "service/net/server/options.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/net/server.BatchSize",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/net/server",
@@ -65053,7 +65116,7 @@
       "name": "Protocols",
       "spelled": "func(protos ...string) GroupOption",
       "canonical": "func(protos ...string) github.com/kitsunium/sdk/internal/service/net/server.GroupOption",
-      "doc": "Protocols sets the HTTP versions an HTTP group serves, by ALPN identifier —\n\"http/1.1\" and \"h2\" — in the order its TLS listeners prefer them (ADR\n0195). Unset, a group with TLS serves both, h2 first, and a group without\nserves HTTP/1.1. It is judged at Start: an empty list, a repeated or unknown\nidentifier, \"h2\" without TLS (cleartext HTTP/2 is not served), an identity\nwhose NextProtos names a version the list excludes or none it includes, and\nany group that does not serve an http.Handler are refused with\nProtocolsRefused; a loop group refuses it with LoopOptionUnsupported.\n\nA request that arrived over HTTP/2 has no http.Hijacker: a handler that\nhijacks its connection — a WebSocket upgrade written by hand, say — serves\nHTTP/1.1 clients only, and a TLS group that relies on it for every client\nsays Protocols(\"http/1.1\"), the behaviour it had before HTTP/2 was\nnegotiated by default.\n",
+      "doc": "Protocols sets the HTTP versions an HTTP group serves, by ALPN identifier —\n\"http/1.1\" and \"h2\" — in the order its TLS listeners prefer them, unless the\ngroup's identity names NextProtos: the listeners then offer the identity's\nentries the list holds, in the identity's order (ADR 0195). Unset, a group\nwith TLS serves both, h2 first, and a group without serves HTTP/1.1. It is\njudged at Start: an empty list, an empty, repeated or unknown identifier,\n\"h2\" without TLS (cleartext HTTP/2 is not served), an identity\nwhose NextProtos names a version the list excludes or none it includes, and\nany group that does not serve an http.Handler are refused with\nProtocolsRefused; a loop group refuses it with LoopOptionUnsupported.\n\nA request that arrived over HTTP/2 has no http.Hijacker: a handler that\nhijacks its connection — a WebSocket upgrade written by hand, say — serves\nHTTP/1.1 clients only, and a TLS group that relies on it for every client\nsays Protocols(\"http/1.1\"), the behaviour it had before HTTP/2 was\nnegotiated by default.\n",
       "file": "service/net/server/stream_group_protocols.go",
       "layer": "service",
       "family": "net"

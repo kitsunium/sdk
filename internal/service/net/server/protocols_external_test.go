@@ -174,6 +174,8 @@ func TestProtocols_refused(t *testing.T) {
 	}
 	tests := []tc{
 		{"an empty list", "empty", httpGroup(server.TLS(plain), server.Protocols())},
+		{"an empty identifier", "empty identifier", httpGroup(server.TLS(plain), server.Protocols(""))},
+		{"an empty identifier beside a valid one", "empty identifier", httpGroup(server.TLS(plain), server.Protocols("h2", ""))},
 		{"an unknown identifier", "h3", httpGroup(server.TLS(plain), server.Protocols("h2", "h3"))},
 		{"a repeated identifier", "h2", httpGroup(server.TLS(plain), server.Protocols("h2", "h2"))},
 		{"h2 without TLS", "h2 without TLS", httpGroup(server.Protocols("h2"))},
@@ -262,7 +264,7 @@ func (h *h2Conn) closedWithin(d time.Duration) bool {
 	for {
 		if _, err := io.ReadFull(h.c, hdr[:]); err != nil {
 			var ne stdnet.Error
-			return !(errors.As(err, &ne) && ne.Timeout())
+			return !errors.As(err, &ne) || !ne.Timeout()
 		}
 		n := int(hdr[0])<<16 | int(hdr[1])<<8 | int(hdr[2])
 		if _, err := io.CopyN(io.Discard, h.c, int64(n)); err != nil {

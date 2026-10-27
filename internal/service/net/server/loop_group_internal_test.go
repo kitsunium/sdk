@@ -451,3 +451,24 @@ func TestLoopGroup_middlewareRefused(t *testing.T) {
 		}
 	}
 }
+
+// TestLoopGroup_batchRepliesRefused pins that BatchReplies stays out of every
+// loop group (ADR 0192 §D5): a stream group has no datagram replies to batch,
+// so the option is refused whatever the handler claims to honour.
+func TestLoopGroup_batchRepliesRefused(t *testing.T) {
+	t.Parallel()
+	for _, b := range loopBackends() {
+		t.Run(b.String(), func(t *testing.T) {
+			t.Parallel()
+			srv := New()
+			t.Cleanup(func() { swallowErr(srv.Close()) })
+			srv.Group("loop", BatchReplies(), Listen("tcp", "127.0.0.1:0"), Loop(corenet.LoopValue{Backend: b})).HandleLoop(&allHonoursH{})
+			err := srv.Start(t.Context())
+			if !errs.HasCode(err, corenet.CodeLoopOptionUnsupported) || !slices.ContainsFunc(errs.FieldsOf(err), func(f errs.FieldValue) bool {
+				return f.Key() == "option" && f.StringValue() == "BatchReplies"
+			}) {
+				t.Fatalf("Start = %v, want LoopOptionUnsupported naming BatchReplies", err)
+			}
+		})
+	}
+}

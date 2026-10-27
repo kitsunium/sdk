@@ -81,9 +81,9 @@ const (
 	// OptionLoopMiddleware is UseLoop. The loop engine honours it; every group no
 	// loop handler serves refuses it with LoopOptionUnsupported.
 	OptionLoopMiddleware
-	// Kind 20 is OptionBatchReplies (ADR 0192), which its own change declares;
-	// the place is kept so no later kind moves when it lands.
-	_
+	// OptionBatchReplies is BatchReplies. A datagram group honours it; a stream
+	// group, goroutine or loop, refuses it with LoopOptionUnsupported (ADR 0192).
+	OptionBatchReplies
 	// OptionProtocols is Protocols. Only an HTTP group served by net/http
 	// honours it; a loop group refuses it with LoopOptionUnsupported, and any
 	// other group with ProtocolsRefused.
@@ -114,6 +114,7 @@ var optionNames = [...]string{
 	OptionName:              "Name",
 	OptionEngine:            "Engine",
 	OptionLoopMiddleware:    "UseLoop",
+	OptionBatchReplies:      "BatchReplies",
 	OptionProtocols:         "Protocols",
 }
 

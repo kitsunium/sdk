@@ -102,6 +102,7 @@ func TestGroupOption_recordsItsKind(t *testing.T) {
 		"Plaintext":         {Plaintext(), corenet.OptionPlaintext},
 		"Name":              {Name(""), corenet.OptionName},
 		"Engine":            {Engine(corenet.EngineAuto), corenet.OptionEngine},
+		"BatchReplies":      {BatchReplies(), corenet.OptionBatchReplies},
 		"Protocols":         {Protocols(), corenet.OptionProtocols},
 	}
 	facade := groupOptionFuncs(t, facadeFile)

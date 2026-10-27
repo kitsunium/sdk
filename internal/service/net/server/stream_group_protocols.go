@@ -44,10 +44,12 @@ type httpProtocols struct {
 }
 
 // Protocols sets the HTTP versions an HTTP group serves, by ALPN identifier —
-// "http/1.1" and "h2" — in the order its TLS listeners prefer them (ADR
-// 0195). Unset, a group with TLS serves both, h2 first, and a group without
-// serves HTTP/1.1. It is judged at Start: an empty list, a repeated or unknown
-// identifier, "h2" without TLS (cleartext HTTP/2 is not served), an identity
+// "http/1.1" and "h2" — in the order its TLS listeners prefer them, unless the
+// group's identity names NextProtos: the listeners then offer the identity's
+// entries the list holds, in the identity's order (ADR 0195). Unset, a group
+// with TLS serves both, h2 first, and a group without serves HTTP/1.1. It is
+// judged at Start: an empty list, an empty, repeated or unknown identifier,
+// "h2" without TLS (cleartext HTTP/2 is not served), an identity
 // whose NextProtos names a version the list excludes or none it includes, and
 // any group that does not serve an http.Handler are refused with
 // ProtocolsRefused; a loop group refuses it with LoopOptionUnsupported.
@@ -124,6 +126,11 @@ func checkProtocols(protos []string, tlsOn bool) string {
 	}
 	//: each identifier once, and one of the two.
 	for i, p := range protos {
+		//: an empty identifier names no version, and "" would read as servable.
+		if p == "" {
+			//: refused.
+			return "empty identifier"
+		}
 		//: a version the group serves, named once.
 		if (p != protoHTTP1 && p != protoH2) || slices.Contains(protos[:i], p) {
 			//: refused, the identifier named.

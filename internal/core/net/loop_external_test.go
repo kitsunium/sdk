@@ -39,6 +39,8 @@ func Test_OptionKind_String(t *testing.T) {
 		{"name", corenet.OptionName, "Name"},
 		{"engine", corenet.OptionEngine, "Engine"},
 		{"loop middleware", corenet.OptionLoopMiddleware, "UseLoop"},
+		{"batch replies", corenet.OptionBatchReplies, "BatchReplies"},
+
 		{"protocols", corenet.OptionProtocols, "Protocols"},
 		//: past the block, the value is reported, never indexed out of range.
 		{"one past the last kind", corenet.OptionProtocols + 1, "unknown"},
