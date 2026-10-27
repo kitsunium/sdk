@@ -1133,7 +1133,9 @@ type Route struct {
 	// Path is the canonical path the route matches, from "/": the whole of
 	// it, or its start when Prefix is set.
 	Path   string
-	// Prefix makes Path match the start of a request's path.
+	// Prefix makes Path match the start of a request's path, on a segment
+	// boundary: "/health" matches "/health" and "/health/live", never
+	// "/healthz"; a Path ending in "/" matches whatever follows it.
 	Prefix bool
 }
 ```
