@@ -118,6 +118,11 @@ func TestSimpleTCP(t *testing.T) {
 		loops int
 	}{
 		{"a ConnHandler", corenet.ConnHandlerFunc(func(_ context.Context, c corenet.Conn) error {
+			//: the client's byte is read first: a close with unread input is a
+			//: reset on Windows, which would discard the answer before it is read.
+			if _, err := io.ReadFull(c, make([]byte, 1)); err != nil {
+				return err
+			}
 			_, err := io.WriteString(c, "conn\n")
 			return err
 		}), "conn\n", 0},
