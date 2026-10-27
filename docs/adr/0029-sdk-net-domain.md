@@ -5,6 +5,7 @@
 - **Deciders**: @kodflow
 - **Amended by**: [ADR 0155](0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md) — the facades move under `pkg/v1/net`
 - **Amended by**: [ADR 0186](0186-a-plaintext-group-may-run-on-an-event-loop-and-its-http-is-a-profile-that-refuses.md) — D1, D2, D3 and D4: an opt-in, plaintext-only loop engine entered by `StreamGroup.HandleLoop`, and a restricted HTTP/1.1 profile for it
+- **Amended by**: [ADR 0192](0192-a-datagram-socket-reads-coalesced-and-its-replies-may-leave-per-batch.md) — the datagram engine reads with UDP GRO, one `Packet` a datagram of a coalesced message, and a group's replies may leave per batch (`BatchReplies`)
 - **Related**: ADR 0016 (proc — the one-sibling/many-facades precedent), ADR 0018
   (portability — the build-bar/runtime-bar contract and the `x/sys` ban),
   ADR 0026 (resilience — bulkhead/timeout policies reused here), ADR 0027

@@ -596,7 +596,28 @@ func (n *Node) load() (raft.StartState, error) {
 	if err != nil {
 		return raft.StartState{}, err
 	}
+	applied = stepApplied(applied, snapIdx, hs.Commit, dur)
 	return raft.StartState{HardState: hs, Snapshot: base, Entries: ents, Evicted: evicted, Applied: applied, Now: n.clk.Now()}, nil
+}
+
+// stepApplied is the applied index the step function starts from: the one
+// the machine resumes at, held at the persisted commit when the machine
+// reported no term for it. NewRaft takes an applied index its log holds as
+// committed (#707), which is sound only when the log holds there the entry
+// the machine applied: the term proves it, two entries at one index and
+// term carrying the same prefix, and durableTerm refused a start whose log
+// holds another term there. A machine that reports none may stand on an
+// install it restored before its log was reset, the start then falling back
+// below that snapshot, over a log whose entries at those indexes were never
+// committed: taken as committed, their engine effects were applied and the
+// leader's appends could never truncate them. Held at the persisted commit,
+// the index is the one NewRaft started from before, and a cut at the
+// machine's waits for the commit (metaAt).
+func stepApplied(applied, snapIdx, commit uint64, dur coreconsensus.PositionValue) uint64 {
+	if dur.Term != 0 || applied <= commit {
+		return applied
+	}
+	return max(commit, snapIdx)
 }
 
 // termless reports whether m names an index above 0 at term 0, which no
@@ -1143,6 +1164,10 @@ func (n *Node) storageDone(d *storeDone) {
 	for i, f := range d.after {
 		n.cfg.Transport.Send(d.to[i], f)
 	}
+	// The write that makes a joiner's admission durable may leave raft no
+	// Ready, apply held at its bound: the stamp follows that write here
+	// rather than at the leader's next message (#695).
+	n.checkAdmission()
 }
 
 // batchProposals hands raft the proposal that woke the loop together with
@@ -1525,13 +1550,27 @@ func (n *Node) answerReady(rd *raft.ReadyValue) {
 }
 
 // checkAdmission turns a joining directory into a member once its own
-// admission is in the configuration.
+// admission is in the configuration its log holds committed and durable:
+// the one in force at the commit, bounded by what the storage actor
+// reported synced (#695). Raft's commit moves when an append is accepted,
+// in memory, and the stamp written on the loop in that same turn was
+// durable before the storage actor wrote the entries that admit the node:
+// a crash during their sync restarted a member with an empty
+// configuration, which admitted no peer and never sent a JOIN again. A
+// crash before the stamp now leaves a joining directory, which replays its
+// admission from the log or joins again (#533); the committed entries
+// through that bound are never truncated, so a member stamp always has its
+// admission on disk.
 func (n *Node) checkAdmission() {
 	if n.canVote {
 		return
 	}
 	st := n.r.Status()
-	if m, ok := st.Committed.Member(n.stamp.ID); ok && m.Incarnation == n.stamp.Incarnation {
+	conf := st.Committed
+	if st.Stable < st.Commit {
+		conf = n.r.ConfAt(st.Stable)
+	}
+	if m, ok := conf.Member(n.stamp.ID); ok && m.Incarnation == n.stamp.Incarnation {
 		s := n.stamp
 		s.State = coreconsensus.StampMember
 		if err := n.cfg.Log.WriteStamp(s); err != nil {

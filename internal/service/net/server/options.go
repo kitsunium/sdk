@@ -180,6 +180,33 @@ func BatchSize(n int) GroupOption {
 	}
 }
 
+// BatchReplies makes a datagram group's replies leave per read batch rather than
+// one at a time (ADR 0192). Packet.Reply made while the batch is served then
+// queues a copy of its datagram and reports it sent, len(b) and nil; the batch's
+// replies leave together when it ends, and one that fails then is counted in
+// State's Datagrams.ReplyFailures, since its handler has returned. On Linux a UDP
+// socket sends them with one sendmmsg, a run of consecutive replies to one peer
+// of one size as one UDP GSO send, split at 64 segments or the IP length, and
+// one datagram a message once the device refused GSO (EIO); a zoned IPv6 peer
+// is written at once, and a Unix datagram socket, a socket with no raw
+// descriptor and every other platform send the queue one WriteTo a reply.
+// A queue that is full — 128 replies or 256 KiB — sends what it holds early,
+// before the batch ends; a reply larger than that room, or to a peer the sink
+// cannot address, is written at once and returns the write's own error, never
+// counted. Under the option Reply is valid only during the handler's call, as
+// Data is:
+// the Packet is the read loop's, and one kept and replied to while a later
+// batch is served is queued with that batch. A reply made while no batch is
+// served is written at once. Without the option, Reply writes at once and
+// returns the write's own error. A stream group refuses it with
+// LoopOptionUnsupported.
+func BatchReplies() GroupOption {
+	//: the option is applied by the constructor, in declaration order.
+	return func(g *StreamGroup) {
+		g.kinds.add(corenet.OptionBatchReplies)
+	}
+}
+
 // Shards sets how many listeners to open on each of the group's addresses.
 //
 // Several listeners on one address is what SO_REUSEPORT buys: the kernel

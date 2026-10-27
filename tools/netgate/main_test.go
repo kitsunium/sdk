@@ -155,8 +155,12 @@ func TestEvaluate_thresholds(t *testing.T) {
 		{"P6 without its pair is missing", pairLines("L1", "loop", "loop", "cpu-ns/req", tightRatios), "P6", verdictMissing},
 		{"P4a at 5x and -40 % passes", pairLines("L3", "recvmmsg", "gro", "datagrams/syscall", scaled(tightRatios, 5)) +
 			pairLines("L3", "recvmmsg", "gro", "cpu-ns/datagram", scaled(tightRatios, 0.6)), "P4a", verdictPass},
-		{"P4a at 4x on the median fails on the lower bound", pairLines("L3", "recvmmsg", "gro", "datagrams/syscall", scaled(tightRatios, 4)) +
-			pairLines("L3", "recvmmsg", "gro", "cpu-ns/datagram", scaled(tightRatios, 0.6)), "P4a", verdictFail},
+		// datagrams/syscall is reported, not gated: below its floor, P4a still
+		// passes on its CPU.
+		{"P4a below 4x a receive still passes on its CPU", pairLines("L3", "recvmmsg", "gro", "datagrams/syscall", scaled(tightRatios, 3.5)) +
+			pairLines("L3", "recvmmsg", "gro", "cpu-ns/datagram", scaled(tightRatios, 0.6)), "P4a", verdictPass},
+		{"P4a at -25 % CPU on the median fails on the bound", pairLines("L3", "recvmmsg", "gro", "datagrams/syscall", scaled(tightRatios, 5)) +
+			pairLines("L3", "recvmmsg", "gro", "cpu-ns/datagram", scaled(tightRatios, 0.75)), "P4a", verdictFail},
 		{"P2 within 5 % passes", pairLines("L2", "handwritten", "chain", "cpu-ns/req", scaled(tightRatios, 1.03)), "P2", verdictPass},
 		{"P2 at 5 % on the median fails on the bound", pairLines("L2", "handwritten", "chain", "cpu-ns/req", scaled(tightRatios, 1.05)), "P2", verdictFail},
 		// Ratios spread by 25 %: the median 1.0 meets 1.05, the bound 1.1 does not.
@@ -202,19 +206,19 @@ func TestEvaluate_pairedCancelsTheRunner(t *testing.T) {
 	}
 }
 
-// TestEvaluate_shippedTable pins the table as it ships: P2, P6 and the
+// TestEvaluate_shippedTable pins the table as it ships: P2, P4a, P6 and the
 // calibration rows are active, so a run without them, with P2's chain 5 %
 // dearer, with P6's loop engine at only −25 %, or with one engine unlike
 // itself, fails; every other step's row is inactive, and samples that would
 // fail it fail nothing while it still reports what it measured.
 func TestEvaluate_shippedTable(t *testing.T) {
 	failing := pairLines("L1", "published", "loop", "cpu-ns/req", scaled(tightRatios, 2))
-	rep := evaluate(gates, mustParse(t, calibrated+failing), "abc")
+	rep := evaluate(gates, mustParse(t, calibrated+p4aPassing()+failing), "abc")
 	if !rep.Passed {
 		t.Fatalf("calibrated run failed: %+v", rep)
 	}
 	for _, g := range rep.Gates {
-		active := strings.HasPrefix(g.Step, "cal-") || g.Step == "P2" || g.Step == "P6"
+		active := strings.HasPrefix(g.Step, "cal-") || g.Step == "P2" || g.Step == "P4a" || g.Step == "P6"
 		if active != g.Active || (!active && (g.Verdict != verdictInactive || g.Pending == "")) || (active && g.Verdict != verdictPass) {
 			t.Errorf("%s: active=%t verdict=%s pending=%q", g.Step, g.Active, g.Verdict, g.Pending)
 		}
@@ -239,6 +243,14 @@ func TestEvaluate_shippedTable(t *testing.T) {
 	}
 }
 
+// p4aPassing is L3's rounds as a run that passes P4a's gate reports them:
+// five times the datagrams a receive, 40 % less CPU a datagram.
+func p4aPassing() string {
+	//: both metrics, one pair.
+	return pairLines("L3", "recvmmsg", "gro", "datagrams/syscall", scaled(tightRatios, 5)) +
+		pairLines("L3", "recvmmsg", "gro", "cpu-ns/datagram", scaled(tightRatios, 0.6))
+}
+
 // mustParse parses in or fails the test.
 func mustParse(t *testing.T, in string) samplesEntity {
 	t.Helper()
@@ -255,7 +267,7 @@ func mustParse(t *testing.T, in string) samplesEntity {
 func TestGates_table(t *testing.T) {
 	want := map[string]string{
 		"P2":     "L2 handwritten chain cpu-ns/req<=1.05r",
-		"P4a":    "L3 recvmmsg gro datagrams/syscall>=4r cpu-ns/datagram<=0.75r",
+		"P4a":    "L3 recvmmsg gro datagrams/syscall>=4r(reported) cpu-ns/datagram<=0.75r",
 		"P6":     "L1 goroutine loop cpu-ns/req<=0.7r",
 		"P5":     "L1 published loop cpu-ns/req<=1r",
 		"cal-L1": "L1 loop loop cpu-ns/req<=1.05r cpu-ns/req>=0.9523809523809523r",
@@ -271,6 +283,9 @@ func TestGates_table(t *testing.T) {
 			got += fmt.Sprintf(" %s%s%g", c.Metric, c.Op, c.Threshold)
 			if c.Ratio {
 				got += "r"
+			}
+			if c.Reported {
+				got += "(reported)"
 			}
 			if !slices.Contains([]string{opAtMost, opAtLeast}, c.Op) {
 				t.Errorf("%s: op %q", g.Step, c.Op)
@@ -308,7 +323,7 @@ func TestJudge_refusesBadRatioAndOp(t *testing.T) {
 func TestRun(t *testing.T) {
 	dir := t.TempDir()
 	in := filepath.Join(dir, "bench.txt")
-	if err := os.WriteFile(in, []byte(calibrated), 0o600); err != nil {
+	if err := os.WriteFile(in, []byte(calibrated+p4aPassing()), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var out, errb bytes.Buffer

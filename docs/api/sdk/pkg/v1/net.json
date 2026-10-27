@@ -1113,6 +1113,18 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.BatchReplies",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "BatchReplies",
+      "spelled": "func() GroupOption",
+      "canonical": "func() github.com/kitsunium/sdk/pkg/v1/net/server.GroupOption",
+      "doc": "BatchReplies makes a datagram group's replies leave per read batch: Reply\nthen reports a queued reply sent, and a queued send that fails — when the batch\nends, or earlier when the queue fills — is counted in\n[State].Datagrams.ReplyFailures; a reply too large to queue is written at once\nand returns its own error. On Linux a UDP socket batches\nthem with sendmmsg and, where it can, UDP GSO; elsewhere each leaves with a\nWriteTo. Under it Reply is valid only during the handler's call, as Data is.\nWithout it, Reply writes at once and returns the write's own error. A stream\ngroup refuses it.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.BatchSize",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
@@ -1313,6 +1325,19 @@
         "public": "The server is at its connection limit"
       },
       "doc": "ConnLimitReached reports a connection turned away by the group ceiling.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.DatagramState",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "DatagramState",
+      "spelled": "corenet.DatagramStateValue",
+      "canonical": "github.com/kitsunium/sdk/internal/core/net.DatagramStateValue",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/net.DatagramStateValue",
+      "doc": "DatagramState counts what the batched datagram paths drop: messages cut\nshort, GSO sends refused for their size, queued replies that did not leave.\n",
       "file": "server/gen_facade.go",
       "layer": "public",
       "family": "net"
@@ -2257,6 +2282,20 @@
       "value": "14",
       "init": "go:github.com/kitsunium/sdk/internal/core/net.OptionAdopt",
       "doc": "OptionAdopt is Adopt. The loop engine honours it.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.OptionBatchReplies",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "OptionBatchReplies",
+      "spelled": "OptionKind",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/net/server.OptionKind",
+      "value": "20",
+      "init": "go:github.com/kitsunium/sdk/internal/core/net.OptionBatchReplies",
+      "doc": "OptionBatchReplies is BatchReplies. A datagram group honours it; a stream group refuses it.\n",
       "file": "server/gen_facade.go",
       "layer": "public",
       "family": "net"

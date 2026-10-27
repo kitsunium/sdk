@@ -118,3 +118,50 @@ func Test_newSlots(t *testing.T) {
 		})
 	}
 }
+
+// Test_datagram_segment pins the split of one message into its datagrams: the
+// whole payload once without a segment size, seg-sized pieces with a shorter
+// last one under GRO, nothing past the end.
+func Test_datagram_segment(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		// name describes the case.
+		name string
+		// n and seg are the slot's length and segment size.
+		n, seg int
+		// want are the datagram lengths, in order.
+		want []int
+	}
+	tests := []tc{
+		{name: "one datagram", n: 100, want: []int{100}},
+		{name: "an empty datagram", n: 0, want: []int{0}},
+		{name: "whole segments", n: 30, seg: 10, want: []int{10, 10, 10}},
+		{name: "a shorter last", n: 25, seg: 10, want: []int{10, 10, 5}},
+		{name: "a segment size past the message", n: 8, seg: 10, want: []int{8}},
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			slot := datagram{buf: make([]byte, 128), n: c.n, seg: c.seg}
+			var got []int
+			for i := 0; ; i++ {
+				b, ok := slot.segment(i)
+				if !ok {
+					break
+				}
+				if len(b) > 0 && &b[0] != &slot.buf[i*max(c.seg, 1)] {
+					t.Fatalf("datagram %d does not alias its place in the slot", i)
+				}
+				got = append(got, len(b))
+			}
+			if len(got) != len(c.want) || slot.count() != len(c.want) {
+				t.Fatalf("segments %v, count %d, want %v", got, slot.count(), c.want)
+			}
+			for i := range got {
+				if got[i] != c.want[i] {
+					t.Fatalf("segments %v, want %v", got, c.want)
+				}
+			}
+		})
+	}
+}

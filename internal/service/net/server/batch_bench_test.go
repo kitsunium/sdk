@@ -66,7 +66,7 @@ func drain(b *testing.B, source datagramSource, slots []datagram) {
 // through recvmmsg — in principle a single syscall.
 func BenchmarkDatagramRead_Batched(b *testing.B) {
 	udp, client := datagramPair(b)
-	source := newDatagramSource(udp)
+	source := newDatagramSource(udp, false)
 	if _, ok := source.(*multiReader); !ok {
 		b.Fatalf("expected the batched reader, got %T", source)
 	}
