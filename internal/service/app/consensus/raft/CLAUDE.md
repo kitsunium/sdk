@@ -226,3 +226,12 @@ under coverage before touching `shard_count`.
   (#639, `askForLeader`, `mutLearnerNeverAsks`, `checkStrandedLearnerAsks`).
   The question is a PreVote it never counts, keeping its role and its term
   (`mutAskCampaigns`, `checkLearnerAskBindsNothing`).
+- Start the commit at the persisted one alone under a state machine
+  applied past it: a commit-only Ready is written lazily, a
+  `DurableStateMachine` crashed past the persisted commit, and `EngineAt`
+  at its applied index answered the engine state of that commit, which a
+  cut recorded and the node restarted from it ran for good (#707).
+  `NewRaft` takes `StartState.Applied` as committed while the log holds it,
+  never past the log's end (`startCommit`), and the driver passes such an
+  index only when the log holds there the entry the machine applied
+  (`TestAStartPastThePersistedCommitTakesTheAppliedIndexAsCommitted`).

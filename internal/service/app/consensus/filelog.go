@@ -287,6 +287,10 @@ type fileLog struct {
 	// fill replaces zeroFrom when a test sets it, to fail as a full disk
 	// does; nil otherwise.
 	fill func(f *os.File, off, size int64) error
+	// afterEntries is handed each batch Entries returns, under mu, before
+	// it returns it: a test counts what a reader of the log holds at once
+	// (#700). Only a test sets it, before the reads it counts.
+	afterEntries func(es []coreconsensus.EntryValue)
 	// occupied is the bytes the segments occupy, kept beside segs wherever
 	// a segment is added or dropped, so the event loop reads it without mu:
 	// a rotation holds mu across an fsync (D5b).
@@ -1488,7 +1492,7 @@ func (l *fileLog) Entries(lo, hi uint64, maxBytes int, dst []coreconsensus.Entry
 	if hi > l.first+uint64(len(l.slots)) {
 		return dst, storageFailed("entries", errImpossible)
 	}
-	size := 0
+	before, size := len(dst), 0
 	for i := lo; i < hi; i++ {
 		s := l.slots[i-l.first]
 		var e coreconsensus.EntryValue
@@ -1505,6 +1509,9 @@ func (l *fileLog) Entries(lo, hi uint64, maxBytes int, dst []coreconsensus.Entry
 			break
 		}
 		dst = append(dst, e)
+	}
+	if l.afterEntries != nil {
+		l.afterEntries(dst[before:])
 	}
 	return dst, nil
 }

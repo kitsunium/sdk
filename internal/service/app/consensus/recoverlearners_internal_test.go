@@ -215,7 +215,7 @@ func TestRecoverAndRestoreRefuseTwoMembersUnderOneID(t *testing.T) {
 			err := Recover(keep.dd, next, tc.members, f.options(f.nodes[1], f.nodes[2]))
 			if err == nil {
 				_, last := keep.dd.d.log.Bounds()
-				conf := must(lastMembership(keep.dd.d.log, keep.dd.d.snaps, last))(t)
+				conf, _ := must2(inForceAt(keep.dd.d.log, keep.dd.d.snaps, last))(t)
 				t.Fatalf("Recover naming %s accepted: the forced configuration lists %s, voters %v", tc.name, memberLines(conf.Members), conf.Voters())
 			}
 			f.refused(t, keep, err, "naming "+tc.name)

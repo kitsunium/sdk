@@ -139,9 +139,18 @@ GitHub-hosted runner, and the samples and the report are the run's
 the code — L1: a plaintext GET, 1 KiB answered, 1000 kept-alive connections;
 L2: L1 with a Bearer token and routing; L3: 1200-byte UDP datagrams, a GSO
 sender of 54 segments, 4 flows at 200 000 datagrams a second, over a veth pair
-— and the metric is the server's CPU, measured in its own process, so the
-client's cost never dilutes a ratio. No gate is required yet: each waits for
-the step that builds its engine B (`netgate -list`).
+— and the metric of L1 and L2 is the server's CPU, measured in its own process,
+so the client's cost never dilutes a ratio. Each pair of engines is measured
+side by side, one child serving both in windows A, B, B, A, … (ADR 0190), and
+a round is one sample of the ratio B/A. L3's CPU is the receiver's rusage
+plus the sender's plus the irq and softirq time of `/proc/stat`, every window
+of either engine metered by the same function (ADR 0192 §D6): what GRO saves —
+each GSO send segmented again on receive — runs in softirq, charged mostly to
+whatever task the CPU was running, and the receiver's rusage alone, dominated
+by the copy-out both engines pay, missed it. Each part is reported beside as
+`rcv-`, `snd-` and `irq-cpu-ns/datagram`. P4a's gate and the calibration rows
+are required; every other waits for the step that builds its engine B
+(`netgate -list`).
 
 One measurement, under Docker on a Mac (Linux 7.0 arm64, 8 CPUs, epoll since
 Docker's profile refuses io_uring), one round at `-benchtime=100000x`, given
@@ -152,7 +161,40 @@ only as the order of magnitude the gate starts from:
 | `LoadL1/engine=goroutine` | 16 419 |
 | `LoadL1/engine=loop` | 4 282 |
 | `LoadL2/engine=handwritten` | 6 403 |
-| `LoadL3/engine=recvmmsg` (loopback, 55.7 datagrams a receive) | 621 |
+| `LoadL3/engine=recvmmsg` (loopback, 55.7 datagrams a receive, receiver's rusage) | 621 |
+
+P4a's pair on the veth pair, the same Docker (Linux 7.0.14), the container
+held to 4 CPUs, ten paired rounds at `-benchtime=400000x`: medians of each
+engine, then netgate's bound of the rounds' ratios B/A.
+
+| Metric | `recvmmsg` (A) | `gro` (B) | bound | gate |
+|---|---|---|---|---|
+| `cpu-ns/datagram` | 5 400 | 3 021 | 0.623 (upper), median 0.552 | ≤ 0.75 — pass |
+| of which `rcv-` / `snd-` / `irq-` | 896 / 1 925 / 2 557 | 512 / 1 723 / 761 | | reported |
+| `datagrams/syscall` | 58.3 | 230 | 3.76 (lower), median 3.95 | ≥ 4, reported, not gated |
+| `cal-L3` (`recvmmsg:recvmmsg`) `cpu-ns/datagram` | | | 0.968 to 1.08, median 1.04 | within 0.8 to 1.25 — pass |
+
+On the pull request's GitHub-hosted runner (Linux 6.17, Azure, 4 CPUs, its
+kernel without `CONFIG_IRQ_TIME_ACCOUNTING`, so the irq part is tick-sampled
+and counted twice where a tick lands in the receiver or the sender, ADR 0192
+§D6): `cpu-ns/datagram` 3 027 → 803 ns, upper bound 0.273 — pass; of which
+`rcv-` 1 237 → 221, `snd-` 1 105 → 505, `irq-` 686 → 75. The two rusages
+alone give about 0.31, so the double count does not decide the verdict.
+These numbers, and the Docker ones above, were divided by the datagrams
+received, before the CPU was divided by those sent (§D6); both runs lost
+under 1 % of them, within the rounds' spread.
+
+The irq part is where GRO saves most, as §D6 expected: 2 557 → 761 ns a
+datagram. `datagrams/syscall` is reported, not gated (ADR 0192 §D7): A already
+reads a GSO send's 54 datagrams a receive, so B's count is how many sends
+queue before its reader wakes, the runner's scheduling.
+
+Each engine is sent `b.N` datagrams a round, 400 000 at the job's
+`-benchtime`, not half of it as on L1 and L2: `/proc/stat` counts in `USER_HZ`
+ticks, 100 a second on every Linux ABI, and at 100 000 datagrams a tick was
+100 ns a datagram — 2.5 % of A —, which alone pushed the bound past the
+threshold; at 400 000 it is 25 ns. A round of both L3 pairs takes about 9 s,
+ten rounds 1 min 30 s, inside the bench job's 30 minutes.
 
 ## What is NOT measured here
 
