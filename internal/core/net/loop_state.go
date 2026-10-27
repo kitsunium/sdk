@@ -69,6 +69,10 @@ type LoopStateValue struct {
 	// BatchP99 is the 99th percentile of one loop iteration's duration, over the
 	// loops' recent batches.
 	BatchP99 DurationValue `json:"batch_p99"`
+	// OutboundRefused counts the jobs a full queue to a worker refused
+	// (LoopOutboundFull), every lane's: for the http1 adapter, the 503s it
+	// answered for them. Zero when the group offloads nothing.
+	OutboundRefused uint64 `json:"outbound_refused"`
 	// RingStates reports every ring of every loop, loop by loop.
 	RingStates []LoopRingStateValue `json:"ring_states"`
 	// Capabilities reports every optional kernel capability the group's backend

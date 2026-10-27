@@ -169,6 +169,7 @@ go_test(
         "unapplied_internal_test.go",
         "unappliedstart_internal_test.go",
         "undecodable_internal_test.go",
+        "unlistedleader_internal_test.go",
         "verdictclose_internal_test.go",
         "waitapplied_internal_test.go",
         "waiter_internal_test.go",
