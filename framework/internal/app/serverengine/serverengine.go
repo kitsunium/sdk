@@ -35,7 +35,7 @@ func newHTTPServer(cfg plug.HTTPConfig) plug.HTTPServer {
 		server.Listen("tcp", cfg.Addr), server.Shards(cfg.Shards),
 		server.ReadHeaderTimeout(cfg.ReadHeader), server.ReadTimeout(cfg.Read),
 		server.WriteTimeout(cfg.Write), server.IdleTimeout(cfg.Idle),
-		server.MaxHeaderBytes(cfg.MaxHeaderBytes),
+		server.MaxHeaderBytes(cfg.MaxHeaderBytes), server.Plaintext(),
 	).HandleHTTP(cfg.Handler)
 	return httpServer{srv: srv}
 }

@@ -26057,6 +26057,22 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeHandlerAmbiguous",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeHandlerAmbiguous",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133952",
+      "code": {
+        "value": "0.2.11.64"
+      },
+      "doc": "CodeHandlerAmbiguous identifies a handler the simple API cannot assign to one engine: it implements both interfaces of its entry and no Engine chooses.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeHandlerMissing",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -26084,6 +26100,22 @@
         "value": "0.2.11.8"
       },
       "doc": "CodeHandlerPanic identifies a panic recovered inside a handler; the connection\nis closed but the process survives.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodeHandlerUnsupported",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodeHandlerUnsupported",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133953",
+      "code": {
+        "value": "0.2.11.65"
+      },
+      "doc": "CodeHandlerUnsupported identifies a handler no engine of the simple API's entry serves.\n",
       "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
@@ -26345,6 +26377,22 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodePacketOptionUnsupported",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodePacketOptionUnsupported",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133955",
+      "code": {
+        "value": "0.2.11.67"
+      },
+      "doc": "CodePacketOptionUnsupported identifies an option a datagram group cannot honour.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.CodePacketTooLarge",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -26356,6 +26404,22 @@
         "value": "0.2.11.14"
       },
       "doc": "CodePacketTooLarge identifies a datagram longer than the group's accepted size.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.CodePlaintextRequired",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "CodePlaintextRequired",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "133954",
+      "code": {
+        "value": "0.2.11.66"
+      },
+      "doc": "CodePlaintextRequired identifies an HTTP group given neither TLS nor Plaintext.\n",
       "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
@@ -27954,6 +28018,23 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HandlerAmbiguous",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HandlerAmbiguous",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.64",
+        "reason": "HANDLER_AMBIGUOUS",
+        "public": "The handler could run on two engines; choose one with Engine"
+      },
+      "doc": "HandlerAmbiguous is returned by Start for a simple-API group whose handler\nimplements both interfaces of its entry — http.Handler and HTTP1Handler for\nHTTP, ConnHandler and LoopHandler for TCP — with no Engine to choose\n(ADR 0195). The \"entry\" and \"type\" fields name them.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.HandlerMissing",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -27983,6 +28064,23 @@
         "public": "The connection handler failed unexpectedly"
       },
       "doc": "HandlerPanic wraps a panic recovered inside a handler.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.HandlerUnsupported",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "HandlerUnsupported",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.65",
+        "reason": "HANDLER_UNSUPPORTED",
+        "public": "The handler cannot be served by this entry point"
+      },
+      "doc": "HandlerUnsupported is returned by Start for a simple-API group whose handler\nno engine of its entry serves: a PacketHandler given to HTTP, a LoopHandler\ngiven to UDP, an HTTP handler given to TCP (its \"serve\" field names HTTP),\nany other type (ADR 0195). The \"entry\" and \"type\" fields name them.\n",
       "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
@@ -29799,6 +29897,23 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.PacketOptionUnsupported",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "PacketOptionUnsupported",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.67",
+        "reason": "PACKET_OPTION_UNSUPPORTED",
+        "public": "The datagram group cannot honour one of its options"
+      },
+      "doc": "PacketOptionUnsupported is returned by Start for a datagram group given an\noption the datagram engine does not apply — anything but MaxPacketSize,\nBatchSize, Adopt, Name, Engine and Plaintext — refused rather than dropped\n(ADR 0187 §D4, ADR 0195). The \"option\" field names it.\n",
+      "file": "core/net/gen_codes.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/net.PacketTooLarge",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/internal/core/net",
@@ -29902,6 +30017,23 @@
       "value": "4",
       "doc": "PhaseStopped has released every listener.\n",
       "file": "core/net/phase.go",
+      "layer": "core",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/net.PlaintextRequired",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/net",
+      "name": "PlaintextRequired",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.2.11.66",
+        "reason": "PLAINTEXT_REQUIRED",
+        "public": "The HTTP group needs TLS or Plaintext"
+      },
+      "doc": "PlaintextRequired is returned by Start for a group that serves HTTP —\nnet/http's or the http1 codec — given neither TLS nor Plaintext: a group\nwithout TLS says so (ADR 0187 §D7, ADR 0195). The \"group\" field names it.\n",
+      "file": "core/net/gen_codes.go",
       "layer": "core",
       "family": "net"
     },
@@ -64983,7 +65115,7 @@
       "name": "Plaintext",
       "spelled": "func() GroupOption",
       "canonical": "func() github.com/kitsunium/sdk/internal/service/net/server.GroupOption",
-      "doc": "Plaintext declares that the group serves no TLS (ADR 0187). Every engine\nhonours it. A group given both Plaintext and TLS, in either order, fails\nStart with PlaintextWithTLS. It is not yet required of a plaintext group:\nthe simple API will require it of every HTTP group without TLS.\n",
+      "doc": "Plaintext declares that the group serves no TLS (ADR 0187). Every engine\nhonours it. A group given both Plaintext and TLS, in either order, fails\nStart with PlaintextWithTLS. An HTTP group without TLS must give it, or\nfails Start with PlaintextRequired (ADR 0195).\n",
       "file": "service/net/server/options.go",
       "layer": "service",
       "family": "net"
@@ -65075,6 +65207,19 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/server.(*Server).HTTP",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/server",
+      "name": "HTTP",
+      "recv": "Server",
+      "spelled": "func(addr string, h any, opts ...GroupOption) *StreamGroup",
+      "canonical": "func(addr string, h any, opts ...github.com/kitsunium/sdk/internal/service/net/server.GroupOption) *github.com/kitsunium/sdk/internal/service/net/server.StreamGroup",
+      "doc": "HTTP declares a group serving h over HTTP on addr, a TCP address — the\nsimple API (ADR 0187 §D6, ADR 0195). h is an http.Handler, served by\nnet/http on the goroutine engine, or an HTTP1Handler, served by the http1\nprofile's codec on the loop engine; a handler that is both needs Engine to\nchoose. The group is named \"tcp+\" + addr unless Name says otherwise, and\nopts apply as they do to Group. Without TLS, Plaintext is required (ADR\n0187 §D7). Every refusal is reported by Start: a nil or typed nil handler\n(HandlerMissing), both interfaces without Engine (HandlerAmbiguous), an\nEngine the handler cannot run on (EngineUnsupported), a type no engine of\nHTTP serves (HandlerUnsupported), Plaintext with TLS (PlaintextWithTLS),\nneither (PlaintextRequired).\n",
+      "file": "service/net/server/simple.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/net/server.(*Server).PacketGroup",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/service/net/server",
@@ -65149,6 +65294,32 @@
       "canonical": "func() github.com/kitsunium/sdk/internal/core/net.StateValue",
       "doc": "State returns a snapshot of the server's lifecycle and listeners.\n",
       "file": "service/net/server/server.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/server.(*Server).TCP",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/server",
+      "name": "TCP",
+      "recv": "Server",
+      "spelled": "func(addr string, h any, opts ...GroupOption) *StreamGroup",
+      "canonical": "func(addr string, h any, opts ...github.com/kitsunium/sdk/internal/service/net/server.GroupOption) *github.com/kitsunium/sdk/internal/service/net/server.StreamGroup",
+      "doc": "TCP declares a group serving h on addr, a TCP address — the simple API.\nh is a ConnHandler, one goroutine per connection, or a LoopHandler, on the\nloop engine; a handler that is both needs Engine to choose. An HTTP\nhandler is refused with HandlerUnsupported: HTTP serves it. The group is\nnamed \"tcp+\" + addr unless Name says otherwise; the other refusals are\nHTTP's.\n",
+      "file": "service/net/server/simple.go",
+      "layer": "service",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/net/server.(*Server).UDP",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/net/server",
+      "name": "UDP",
+      "recv": "Server",
+      "spelled": "func(addr string, h any, opts ...GroupOption) *PacketGroup",
+      "canonical": "func(addr string, h any, opts ...github.com/kitsunium/sdk/internal/service/net/server.GroupOption) *github.com/kitsunium/sdk/internal/service/net/server.PacketGroup",
+      "doc": "UDP declares a datagram group serving h on addr, a UDP address — the\nsimple API. h is a PacketHandler; anything else, a LoopHandler included, is\nrefused with HandlerUnsupported, and a nil or typed nil handler with\nHandlerMissing. The group is named \"udp+\" + addr unless Name says\notherwise; every option the datagram engine does not honour is refused, as\non any datagram group.\n",
+      "file": "service/net/server/simple.go",
       "layer": "service",
       "family": "net"
     },
@@ -69756,7 +69927,7 @@
       "name": "ServerMiddleware",
       "spelled": "func(tracer coretrace.Tracer) corenet.Middleware[http.Handler]",
       "canonical": "func(tracer github.com/kitsunium/sdk/internal/core/observe/trace.Tracer) github.com/kitsunium/sdk/internal/core/net.Middleware[net/http.Handler]",
-      "doc": "ServerMiddleware returns a middleware that traces every inbound request.\n\nIt is a corenet.Middleware[http.Handler] — the SDK's OWN middleware type,\ninstantiated at http.Handler — so it composes with corenet.Chain and drops\nstraight onto a group:\n\n\tsrv.Group(\"api\", server.Listen(\"tcp\", \":8443\")).\n\t    HandleHTTP(corenet.Chain(mux, trace.ServerMiddleware(tracer)))\n\nIt decorates an http.Handler rather than the group's ConnHandler because a\ntraceparent is an HTTP HEADER: the connection middleware sees bytes, and there\nis no header at that level to extract. That is a statement about where the\npropagation format lives, not a gap in the net domain.\n\n# What it does, in order\n\n 1. EXTRACTS the span context from the request headers. A malformed or absent\n    traceparent silently starts a new trace — which is what W3C Trace Context\n    §4.3 requires, and never a rejected request: the header is written by a\n    stranger, so failing on it is a denial of service with extra steps.\n 2. Starts a SERVER span, named by the request METHOD alone.\n 3. Records the status and marks 5xx as an error.\n\n# Why the span is named \"GET\" and not \"GET /users/42\"\n\nA span name is a low-cardinality label a backend GROUPS on. A path carries\nidentifiers, so \"GET /users/42\" and \"GET /users/43\" are two operations to a\nbackend and one to a human — and a service with a million users has a million\nspan names, which is how a tracing bill becomes a story. The conventions ask\nfor \"{method} {route}\", where the ROUTE is the template; this SDK does not\nroute, so it has no template to use and does not invent one from the path. A\ncaller who has a router records it themselves, on the span this middleware\nalready put in the context.\n\nThe PATH is recorded as an attribute instead, where high cardinality is\naffordable, and it is the ESCAPED form for the reason corenet.RequestValue\ngives: url.URL.Path is already percent-decoded, so a \"%2e%2e\" that an upstream\nreinterprets as \"..\" would be recorded as something it is not.\n",
+      "doc": "ServerMiddleware returns a middleware that traces every inbound request.\n\nIt is a corenet.Middleware[http.Handler] — the SDK's OWN middleware type,\ninstantiated at http.Handler — so it composes with corenet.Chain and drops\nstraight onto a group:\n\n\tsrv.Group(\"api\", server.Listen(\"tcp\", \":8443\"), server.TLS(id)).\n\t    HandleHTTP(corenet.Chain(mux, trace.ServerMiddleware(tracer)))\n\nIt decorates an http.Handler rather than the group's ConnHandler because a\ntraceparent is an HTTP HEADER: the connection middleware sees bytes, and there\nis no header at that level to extract. That is a statement about where the\npropagation format lives, not a gap in the net domain.\n\n# What it does, in order\n\n 1. EXTRACTS the span context from the request headers. A malformed or absent\n    traceparent silently starts a new trace — which is what W3C Trace Context\n    §4.3 requires, and never a rejected request: the header is written by a\n    stranger, so failing on it is a denial of service with extra steps.\n 2. Starts a SERVER span, named by the request METHOD alone.\n 3. Records the status and marks 5xx as an error.\n\n# Why the span is named \"GET\" and not \"GET /users/42\"\n\nA span name is a low-cardinality label a backend GROUPS on. A path carries\nidentifiers, so \"GET /users/42\" and \"GET /users/43\" are two operations to a\nbackend and one to a human — and a service with a million users has a million\nspan names, which is how a tracing bill becomes a story. The conventions ask\nfor \"{method} {route}\", where the ROUTE is the template; this SDK does not\nroute, so it has no template to use and does not invent one from the path. A\ncaller who has a router records it themselves, on the span this middleware\nalready put in the context.\n\nThe PATH is recorded as an attribute instead, where high cardinality is\naffordable, and it is the ESCAPED form for the reason corenet.RequestValue\ngives: url.URL.Path is already percent-decoded, so a \"%2e%2e\" that an upstream\nreinterprets as \"..\" would be recorded as something it is not.\n",
       "file": "service/observe/trace/http_server.go",
       "layer": "service",
       "family": "observe"

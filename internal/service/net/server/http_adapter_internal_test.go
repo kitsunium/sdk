@@ -45,7 +45,7 @@ var _ corenet.ConnHandler = (*httpAdapter)(nil)
 func startHTTPGroup(t *testing.T) (srv *Server, adapter *httpAdapter, addr string) {
 	t.Helper()
 	srv = New()
-	group := srv.Group("api", Listen("tcp", "127.0.0.1:0"))
+	group := srv.Group("api", Listen("tcp", "127.0.0.1:0"), Plaintext())
 	group.HandleHTTP(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		//: a dropped write would make the request look served when it was not.
 		if _, err := io.WriteString(w, "ok"); err != nil {

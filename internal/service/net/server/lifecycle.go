@@ -108,6 +108,11 @@ func (g *StreamGroup) startRefusal() error {
 		//: refused by name.
 		return err
 	}
+	//: an HTTP group says TLS or Plaintext (ADR 0187 §D7).
+	if err := g.plaintextRefusal(); err != nil {
+		//: refused by name.
+		return err
+	}
 	//: a loop group judges every option it was given against the engine and
 	//: its handler.
 	if g.loopHandler != nil {

@@ -32,7 +32,7 @@ const hijackDeadline time.Duration = 5 * time.Second
 func startHijackServer(t *testing.T, h http.Handler) (srv *server.Server, addr string) {
 	t.Helper()
 	srv = server.New()
-	srv.Group("api", server.Listen("tcp", "127.0.0.1:0")).HandleHTTP(h)
+	srv.Group("api", server.Listen("tcp", "127.0.0.1:0"), server.Plaintext()).HandleHTTP(h)
 	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestAHijackedConnectionStillCountsAgainstTheCeiling(t *testing.T) {
 		closeOrFail(t, socket)
 	})
 	srv := server.New()
-	srv.Group("api", server.Listen("tcp", "127.0.0.1:0"), server.MaxConns(1)).HandleHTTP(mux)
+	srv.Group("api", server.Listen("tcp", "127.0.0.1:0"), server.MaxConns(1), server.Plaintext()).HandleHTTP(mux)
 	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}

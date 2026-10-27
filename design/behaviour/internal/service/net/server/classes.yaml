@@ -226,6 +226,23 @@ constants:
   - grouped: true
     items:
       - doc: |-
+          entryHTTP, entryTCP and entryUDP name the simple API's entries in an
+          error's "entry" field.
+        name: entryHTTP
+        type: string
+        value: "\"HTTP\""
+      - doc: entryTCP is Server.TCP.
+        name: entryTCP
+        type: string
+        value: "\"TCP\""
+      - doc: entryUDP is Server.UDP.
+        name: entryUDP
+        type: string
+        value: "\"UDP\""
+    name: entryHTTP
+  - grouped: true
+    items:
+      - doc: |-
           portByteShift converts the network-byte-order port the kernel reports
           into host order. sockaddr_in stores it big-endian regardless of platform.
         name: portByteShift
@@ -705,10 +722,34 @@ files:
       - (*Server).Group
       - (*Server).PacketGroup
       - (*Server).judgePacketOptions
+      - packetHonours
       - (*Server).recordDeclError
       - (*Server).State
       - (*Server).recordFallback
     name: server.go
+  - decls:
+      - entryHTTP
+      - (*Server).HTTP
+      - (*Server).TCP
+      - (*Server).UDP
+      - (*PacketGroup).mountUDPEntry
+      - (*Server).simpleGroup
+      - defaultName
+      - (*Server).recordGroupErr
+      - (*StreamGroup).recordErr
+      - (*StreamGroup).mountHTTPEntry
+      - (*StreamGroup).mountTCPEntry
+      - (*StreamGroup).pickEngine
+      - fits
+      - (*StreamGroup).pickRefusal
+      - (*StreamGroup).missing
+      - unsupported
+      - isHTTPHandler
+      - isNil
+      - typeName
+      - (*StreamGroup).servesHTTP
+      - (*StreamGroup).plaintextRefusal
+    name: simple.go
   - decls:
       - portByteShift
       - sockaddrToAddr
@@ -1289,6 +1330,43 @@ functions:
     params: lookup lookupFunc, opts ...Option
     results: "*Server"
   - doc: |-
+      packetHonours reports whether a datagram group applies the option of kind
+      k: its ceilings, adoption, and the three every engine honours. Engine and
+      Plaintext are judged by engineRefusal.
+    name: packetHonours
+    params: k corenet.OptionKind
+    results: bool
+  - doc: |-
+      defaultName names a group declared with no name, unless a later Name
+      option names it: it is a declaration's own, recording no kind.
+    name: defaultName
+    params: name string
+    results: GroupOption
+  - doc: |-
+      fits reports whether engine want may serve a handler under Engine e: e
+      names it, or e is auto and the handler runs on no other.
+    name: fits
+    params: e, want corenet.EngineValue, other bool
+    results: bool
+  - doc: unsupported is HandlerUnsupported for a type entry serves on no engine.
+    name: unsupported
+    params: group, entry string, h any
+    results: error
+  - doc: isHTTPHandler reports whether h is a handler HTTP serves.
+    name: isHTTPHandler
+    params: h any
+    results: bool
+  - doc: |-
+      isNil reports whether h is nil, or a typed nil a method call would
+      dereference.
+    name: isNil
+    params: h any
+    results: bool
+  - doc: typeName is h's dynamic type, for an error field.
+    name: typeName
+    params: h any
+    results: string
+  - doc: |-
       sockaddrToAddr converts a kernel sockaddr into a net.Addr.
 
       recvmmsg reports the sender as a raw sockaddr, so the batched path has to do
@@ -1375,6 +1453,7 @@ imports:
   errors: errors
   errs: github.com/kitsunium/sdk/internal/kernel/errs
   http: net/http
+  http1: github.com/kitsunium/sdk/internal/service/net/http1
   io: io
   kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
   loop: github.com/kitsunium/sdk/internal/service/net/loop
@@ -2829,6 +2908,13 @@ types:
         name: resolved
         recv: g *PacketGroup
         results: corenet.PacketHandler
+      - doc: |-
+          mountUDPEntry serves h as UDP's entry: a PacketHandler, the one type a
+          datagram engine serves.
+        name: mountUDPEntry
+        params: h any
+        recv: g *PacketGroup
+        results: error
     name: PacketGroup
   - doc: boundPacketConn pairs a live datagram socket with the group that owns it.
     fields:
@@ -3289,6 +3375,29 @@ types:
         name: recordFallback
         params: group, reason string
         recv: s *Server
+      - name: HTTP
+        params: addr string, h any, opts ...GroupOption
+        recv: s *Server
+        results: "*StreamGroup"
+      - name: TCP
+        params: addr string, h any, opts ...GroupOption
+        recv: s *Server
+        results: "*StreamGroup"
+      - name: UDP
+        params: addr string, h any, opts ...GroupOption
+        recv: s *Server
+        results: "*PacketGroup"
+      - doc: |-
+          simpleGroup declares the stream group of a simple-API entry: listening on
+          network addr, named network+"+"+addr unless Name names it.
+        name: simpleGroup
+        params: network, addr string, opts []GroupOption
+        recv: s *Server
+        results: "*StreamGroup"
+      - doc: recordGroupErr records err as the server's declaration error.
+        name: recordGroupErr
+        params: err error
+        recv: s *Server
       - doc: |-
           startStallWatch ticks the watcher on the engine's clock while the server
           has loop groups. Shutdown and Close stop it.
@@ -3412,6 +3521,11 @@ types:
         name: declErr
         type: error
       - doc: |-
+          defaultName is the simple API's default name, which a Name option
+          replaces; empty for a group declared by Group.
+        name: defaultName
+        type: string
+      - doc: |-
           declared records that a handler was declared, even a nil one, so a
           second declaration is caught whatever the first one passed.
         name: declared
@@ -3492,6 +3606,57 @@ types:
           It reads the set of kinds the group was given, never a guess from non-zero
           fields (ADR 0187).
         name: loopRefusal
+        recv: g *StreamGroup
+        results: error
+      - doc: recordErr records err as the group's declaration error, the first kept.
+        name: recordErr
+        params: err error
+        recv: g *StreamGroup
+      - doc: |-
+          mountHTTPEntry serves h as HTTP's entry: net/http for an http.Handler, the
+          http1 codec on the loop for an HTTP1Handler, Engine choosing for a
+          handler that is both.
+        name: mountHTTPEntry
+        params: h any
+        recv: g *StreamGroup
+        results: error
+      - doc: |-
+          mountTCPEntry serves h as TCP's entry: a goroutine per connection for a
+          ConnHandler, the loop for a LoopHandler.
+        name: mountTCPEntry
+        params: h any
+        recv: g *StreamGroup
+        results: error
+      - doc: |-
+          pickEngine chooses the engine a handler that is a goroutine one, a loop
+          one or both runs on: the one it is, or Engine's for both; EngineAuto when
+          none fits.
+        name: pickEngine
+        params: goroutine, loop bool
+        recv: g *StreamGroup
+        results: corenet.EngineValue
+      - doc: |-
+          pickRefusal says why pickEngine found no engine: both kinds without Engine,
+          an Engine neither kind runs on, or a type the entry does not serve.
+        name: pickRefusal
+        params: entry string, h any, goroutine, loop bool
+        recv: g *StreamGroup
+        results: error
+      - doc: missing is HandlerMissing for a nil handler given to entry.
+        name: missing
+        params: entry string
+        recv: g *StreamGroup
+        results: error
+      - doc: |-
+          servesHTTP reports whether the group speaks HTTP: net/http's adapter, or
+          the http1 codec as its loop handler.
+        name: servesHTTP
+        recv: g *StreamGroup
+        results: bool
+      - doc: |-
+          plaintextRefusal is ADR 0187 §D7: an HTTP group given no TLS must say
+          Plaintext.
+        name: plaintextRefusal
         recv: g *StreamGroup
         results: error
       - name: Name

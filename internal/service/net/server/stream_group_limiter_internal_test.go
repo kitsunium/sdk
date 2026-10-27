@@ -308,9 +308,9 @@ func Test_Server_admit_HijackedConnectionKeepsItsSlot(t *testing.T) {
 			}
 		})
 		srv := newTestServer(t)
-		opts := []GroupOption{Listen("tcp", "127.0.0.1:0"), MaxConns(1)}
+		opts := []GroupOption{Listen("tcp", "127.0.0.1:0"), MaxConns(1), Plaintext()}
 		if c.secured {
-			opts = append(opts, TLS(testIdentity(t)))
+			opts = []GroupOption{Listen("tcp", "127.0.0.1:0"), MaxConns(1), TLS(testIdentity(t))}
 		}
 		group := srv.Group("api", opts...).HandleHTTP(holdingMux(t, release, closed))
 		if err := srv.Start(t.Context()); err != nil {

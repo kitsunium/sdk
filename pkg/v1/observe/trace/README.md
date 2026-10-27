@@ -49,7 +49,7 @@ That is not an optimisation. Deciding per span produces a trace with holes in it
 [ServerMiddleware](#ServerMiddleware) and [ClientMiddleware](#ClientMiddleware) are the SDK's own middleware type instantiated at http.Handler and http.RoundTripper, so they compose with the network domain's Chain:
 
 ```
-srv.Group("api", server.Listen("tcp", ":8443")).
+srv.Group("api", server.Listen("tcp", ":8443"), server.TLS(id)).
 	HandleHTTP(net.Chain(mux, trace.ServerMiddleware(tracer)))
 
 c.HTTP().Transport = net.Chain(c.HTTP().Transport, trace.ClientMiddleware(tracer))

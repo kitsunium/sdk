@@ -132,7 +132,7 @@ func httpGet(b *testing.B, client *http.Client, url string) {
 // benchmark is what shows whether that claim holds.
 func BenchmarkHTTP_Adapter(b *testing.B) {
 	srv := server.New()
-	srv.Group("http", server.Listen("tcp", "127.0.0.1:0")).HandleHTTP(benchHandler)
+	srv.Group("http", server.Listen("tcp", "127.0.0.1:0"), server.Plaintext()).HandleHTTP(benchHandler)
 	if err := srv.Start(b.Context()); err != nil {
 		b.Fatalf("start: %v", err)
 	}

@@ -34,6 +34,8 @@ Public façade: `pkg/v1/net/server`.
 | `loop_group_internal_test.go` | loop groups on every backend the platform has: split lines, a 4 MiB response byte-exact, close, spill, drain, and every refusal — a zero-valued option included; `TestLoopGroup_middlewareRefused`, `Use` refused on every backend whatever the handler claims |
 | `loop_option_external_test.go` | `TestLoop` — the `Loop` option refused before or after the handler, on both natures, and what wins over it |
 | `stream_group.go` | `StreamGroup` — `Handle`, `HandleFunc`, `HandleHTTP`, `Use`, `UseLoop` (kind `OptionLoopMiddleware`, every call); `claimHandler`, the one-handler rule every declaration takes |
+| `simple.go` | the simple API (ADR 0195): `Server.HTTP`/`TCP`/`UDP` — `simpleGroup` (listen + `defaultName` `network+"+"+addr`, which `Name` replaces), `mountHTTPEntry`/`mountTCPEntry` (`pickEngine` by the handler's interfaces and `Engine`, `pickRefusal`: `HandlerAmbiguous`, `EngineUnsupported`, `HandlerUnsupported`), `isNil` (typed nil), `servesHTTP` + `plaintextRefusal` (`PlaintextRequired` for every HTTP group without TLS); `packetHonours` (in `server.go`) refuses a datagram group's other options with `PacketOptionUnsupported` |
+| `simple_external_test.go` | each entry's engine choice and default name, `Name` replacing it, a datagram served, and every refusal: nil, typed nil, both interfaces, wrong `Engine`, wrong type, HTTP on TCP, no `Plaintext`, `Plaintext` with TLS, datagram options |
 | `listen.go` | listener construction; TLS/mTLS wrapping; family validation |
 | `conn.go` | the pooled `corenet.Conn` implementation, and the `hijacked` hand-over flag |
 | `pool.go` | per-connection recycling + the live-socket registry |
@@ -122,9 +124,10 @@ Public façade: `pkg/v1/net/server`.
   shim is judged the same way at declaration (`judgePacketOptions`).
   `Group` and `PacketGroup` apply their options before the duplicate check,
   so `Name` may name a group declared with `""`; an empty `Name`, or one that
-  differs from a declared name, records `GroupNameConflict`. `Plaintext` is
-  not yet required of a plaintext HTTP group: that lands with the simple API
-  (ADR 0187 §D7). `MaxConns(0)` keeps "no ceiling": zero means the default for
+  differs from a declared name, records `GroupNameConflict`. Every HTTP group
+  without TLS must give `Plaintext` (`PlaintextRequired`, ADR 0195), and a
+  datagram group refuses every option it does not honour
+  (`PacketOptionUnsupported`). `MaxConns(0)` keeps "no ceiling": zero means the default for
   options added from ADR 0187 on only.
 - **A loop group is a group like the others, served by another engine** (ADR
   0186 §D1, §D3). It binds and adopts through the same `listen` and

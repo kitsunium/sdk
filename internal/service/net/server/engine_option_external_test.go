@@ -44,7 +44,7 @@ func TestEngine(t *testing.T) {
 		{
 			name: "EngineAuto on HandleHTTP is served",
 			declare: func(srv *server.Server) {
-				srv.Group("g", listen, server.Engine(corenet.EngineAuto)).HandleHTTP(http.NotFoundHandler())
+				srv.Group("g", listen, server.Engine(corenet.EngineAuto), server.Plaintext()).HandleHTTP(http.NotFoundHandler())
 			},
 		},
 		{
@@ -64,7 +64,7 @@ func TestEngine(t *testing.T) {
 		{
 			name: "EngineLoop on HandleHTTP",
 			declare: func(srv *server.Server) {
-				srv.Group("g", listen, server.Engine(corenet.EngineLoop)).HandleHTTP(http.NotFoundHandler())
+				srv.Group("g", listen, server.Engine(corenet.EngineLoop), server.Plaintext()).HandleHTTP(http.NotFoundHandler())
 			},
 			want:       corenet.CodeEngineUnsupported,
 			wantEngine: "loop",

@@ -1580,6 +1580,24 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.HandlerAmbiguous",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "HandlerAmbiguous",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/net.HandlerAmbiguous",
+      "code": {
+        "value": "0.2.11.64",
+        "reason": "HANDLER_AMBIGUOUS",
+        "public": "The handler could run on two engines; choose one with Engine"
+      },
+      "doc": "HandlerAmbiguous reports a simple-API handler that could run on two engines and no Engine chooses.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.HandlerFunc",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
@@ -1606,6 +1624,24 @@
         "public": "The listener group has no handler"
       },
       "doc": "HandlerMissing reports a group declared without a handler.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.HandlerUnsupported",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "HandlerUnsupported",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/net.HandlerUnsupported",
+      "code": {
+        "value": "0.2.11.65",
+        "reason": "HANDLER_UNSUPPORTED",
+        "public": "The handler cannot be served by this entry point"
+      },
+      "doc": "HandlerUnsupported reports a handler no engine of its simple-API entry serves.\n",
       "file": "server/gen_facade.go",
       "layer": "public",
       "family": "net"
@@ -2605,6 +2641,24 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.PacketOptionUnsupported",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "PacketOptionUnsupported",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/net.PacketOptionUnsupported",
+      "code": {
+        "value": "0.2.11.67",
+        "reason": "PACKET_OPTION_UNSUPPORTED",
+        "public": "The datagram group cannot honour one of its options"
+      },
+      "doc": "PacketOptionUnsupported reports an option a datagram group cannot honour.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.Phase",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
@@ -2694,7 +2748,25 @@
       "name": "Plaintext",
       "spelled": "func() GroupOption",
       "canonical": "func() github.com/kitsunium/sdk/pkg/v1/net/server.GroupOption",
-      "doc": "Plaintext declares that the group serves no TLS. Every engine honours it. A\ngroup given both Plaintext and TLS, in either order, fails Start with\nPlaintextWithTLS. It is not yet required of a plaintext group: the simple\nAPI will require it of every HTTP group without TLS.\n",
+      "doc": "Plaintext declares that the group serves no TLS. Every engine honours it. A\ngroup given both Plaintext and TLS, in either order, fails Start with\nPlaintextWithTLS. An HTTP group without TLS must give it, or fails Start\nwith PlaintextRequired.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.PlaintextRequired",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "PlaintextRequired",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/net.PlaintextRequired",
+      "code": {
+        "value": "0.2.11.66",
+        "reason": "PLAINTEXT_REQUIRED",
+        "public": "The HTTP group needs TLS or Plaintext"
+      },
+      "doc": "PlaintextRequired reports an HTTP group given neither TLS nor Plaintext.\n",
       "file": "server/gen_facade.go",
       "layer": "public",
       "family": "net"

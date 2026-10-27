@@ -219,8 +219,8 @@ func Adopt(names ...string) GroupOption {
 
 // Plaintext declares that the group serves no TLS (ADR 0187). Every engine
 // honours it. A group given both Plaintext and TLS, in either order, fails
-// Start with PlaintextWithTLS. It is not yet required of a plaintext group:
-// the simple API will require it of every HTTP group without TLS.
+// Start with PlaintextWithTLS. An HTTP group without TLS must give it, or
+// fails Start with PlaintextRequired (ADR 0195).
 func Plaintext() GroupOption {
 	//: the option is applied by the constructor, in declaration order; the
 	//: contradiction with TLS is judged at Start.

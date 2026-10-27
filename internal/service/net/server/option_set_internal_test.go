@@ -22,8 +22,9 @@ import (
 var facadeFile = filepath.Join("..", "..", "..", "..", "pkg", "v1", "net", "server", "gen_facade.go")
 
 // groupOptionExempt are the constructors that record no kind: Listen adds an
-// address, which no engine judges, and Loop is judged on its own by loopSet.
-var groupOptionExempt = []string{"Listen", "Loop"}
+// address, which no engine judges, Loop is judged on its own by loopSet, and
+// defaultName is the simple API's own default name.
+var groupOptionExempt = []string{"Listen", "Loop", "defaultName"}
 
 // groupOptionFuncs returns the name of every top-level function of the files
 // that returns exactly one GroupOption.
