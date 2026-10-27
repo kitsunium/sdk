@@ -26,7 +26,7 @@ func startBoundedServer(t *testing.T, opts ...server.GroupOption) string {
 	t.Helper()
 	srv := server.New()
 	opts = append([]server.GroupOption{server.Listen("tcp", "127.0.0.1:0")}, opts...)
-	srv.Group("api", opts...).HandleHTTP(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv.Group("api", append(opts, server.Plaintext())...).HandleHTTP(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	if err := srv.Start(t.Context()); err != nil {
@@ -126,7 +126,7 @@ func startBodyServer(t *testing.T, read, pause time.Duration) (addr string, seen
 	t.Helper()
 	outcomes := make(chan bodyOutcome, 1)
 	srv := server.New()
-	srv.Group("api", server.Listen("tcp", "127.0.0.1:0"), server.ReadTimeout(read)).
+	srv.Group("api", server.Listen("tcp", "127.0.0.1:0"), server.ReadTimeout(read), server.Plaintext()).
 		HandleHTTP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			first := make([]byte, 1)
 			n, err := io.ReadFull(r.Body, first)

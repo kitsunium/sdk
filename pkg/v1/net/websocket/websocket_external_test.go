@@ -40,7 +40,7 @@ const peerDeadline time.Duration = 5 * time.Second
 func TestTheShortestUsefulWebSocketServer(t *testing.T) {
 	t.Parallel()
 	srv := server.New()
-	srv.Group("api", server.Listen("tcp", "127.0.0.1:0")).
+	srv.Group("api", server.Listen("tcp", "127.0.0.1:0"), server.Plaintext()).
 		HandleHTTP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			conn, err := websocket.Upgrade(w, r)
 			//: Upgrade has already written the HTTP refusal.
@@ -85,7 +85,7 @@ func TestDrainClosesTheConnectionInsteadOfBurningTheBudget(t *testing.T) {
 	live := make(chan struct{})
 	ended := make(chan error, 1)
 	srv := server.New(server.WithDrainTimeout(5 * time.Second))
-	srv.Group("api", server.Listen("tcp", "127.0.0.1:0")).
+	srv.Group("api", server.Listen("tcp", "127.0.0.1:0"), server.Plaintext()).
 		HandleHTTP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			conn, err := websocket.Upgrade(w, r)
 			if err != nil {
@@ -143,7 +143,7 @@ func TestEveryOptionForwarderReachesTheEngine(t *testing.T) {
 	t.Parallel()
 	negotiated := make(chan string, 1)
 	srv := server.New()
-	srv.Group("api", server.Listen("tcp", "127.0.0.1:0")).
+	srv.Group("api", server.Listen("tcp", "127.0.0.1:0"), server.Plaintext()).
 		HandleHTTP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			conn, err := websocket.Upgrade(w, r,
 				websocket.Subprotocols("chat.v2", "chat.v1"),

@@ -108,6 +108,11 @@ func (g *StreamGroup) startRefusal() error {
 		//: refused by name.
 		return err
 	}
+	//: an HTTP group says TLS or Plaintext (ADR 0187 §D7).
+	if err := g.plaintextRefusal(); err != nil {
+		//: refused by name.
+		return err
+	}
 	//: a stream group, goroutine or loop, has no datagram replies to batch,
 	//: whatever a loop handler claims to honour.
 	if g.kinds.has(corenet.OptionBatchReplies) {

@@ -59,7 +59,7 @@ const (
 // instantiated at http.Handler — so it composes with corenet.Chain and drops
 // straight onto a group:
 //
-//	srv.Group("api", server.Listen("tcp", ":8443")).
+//	srv.Group("api", server.Listen("tcp", ":8443"), server.TLS(id)).
 //	    HandleHTTP(corenet.Chain(mux, trace.ServerMiddleware(tracer)))
 //
 // It decorates an http.Handler rather than the group's ConnHandler because a

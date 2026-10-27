@@ -649,6 +649,22 @@ codes:
     const: CodeLoopOutboundFull
     hex: "0x00_02_0B_3F"
     package: internal/core/net
+  - code: "0.2.11.64"
+    const: CodeHandlerAmbiguous
+    hex: "0x00_02_0B_40"
+    package: internal/core/net
+  - code: "0.2.11.65"
+    const: CodeHandlerUnsupported
+    hex: "0x00_02_0B_41"
+    package: internal/core/net
+  - code: "0.2.11.66"
+    const: CodePlaintextRequired
+    hex: "0x00_02_0B_42"
+    package: internal/core/net
+  - code: "0.2.11.67"
+    const: CodePacketOptionUnsupported
+    hex: "0x00_02_0B_43"
+    package: internal/core/net
   - code: "0.2.12.1"
     const: CodeInvalidEntry
     hex: "0x00_02_0C_01"

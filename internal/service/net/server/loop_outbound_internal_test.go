@@ -114,7 +114,7 @@ func startPending(t *testing.T, b corenet.LoopBackend, app corenet.HTTP1Handler,
 	v.Backend, v.Loops = b, 2
 	srv := New()
 	t.Cleanup(func() { swallowErr(srv.Close()) })
-	srv.Group("loop", Listen("tcp", "127.0.0.1:0"), Loop(v)).HandleLoop(http1.HandleLoop(app, http1.Parser{}))
+	srv.Group("loop", Listen("tcp", "127.0.0.1:0"), Loop(v), Plaintext()).HandleLoop(http1.HandleLoop(app, http1.Parser{}))
 	if err := srv.Start(t.Context()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}

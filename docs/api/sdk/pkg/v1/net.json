@@ -31,7 +31,7 @@
       "dir": "http1",
       "layer": "public",
       "family": "net",
-      "doc": "Package http1 is the restricted HTTP/1.1 profile the SDK serves on its loop\nengine (ADR 0186 §D6): a codec that frames requests out of bytes and appends\nresponses to bytes, and HandleLoop, the adapter that serves a Handler on a\nloop group of package server.\n\nIt is a profile, not an HTTP server, and what it refuses defines it. A\nrequest is answered with its status and Connection: close, and its\nconnection closed, before any handler sees it, when it carries any\nTransfer-Encoding (chunked, and so trailers, included), Expect, a bare CR or\nLF, a NUL or another control byte in a value, obs-fold, whitespace before a\ncolon, a name outside tchar, a Content-Length that is not one run of at most\nten digits or that repeats, a second Authorization or Host, CONNECT, a\ntarget two readers could resolve apart — a dot-segment, an empty segment, a\nbackslash, an encoded slash, dot, backslash or NUL, an absolute-form not for\nits Host — or a head, target or body past its Limits. HTTP/2, Upgrade and\nTLS are out of the profile: a program that needs them mounts net/http with Group.HandleHTTP.\nFraming depends on neither the method nor the route: a request takes its\nhead plus its Content-Length.\n\n# Serving\n\n\ttype api struct{ lanes []perLane } // one per lane, indexed by Request.Lane\n\n\tfunc (a *api) ServeHTTP1(req *http1.Request, res *http1.Response) {\n\t\tl := &a.lanes[req.Lane]\n\t\tswitch req.Route { // set by the router link\n\t\tcase routeItem:\n\t\t\tres.Defer = true // answered at the end of the batch\n\t\t\tl.pending = append(l.pending, job{res: res, user: req.Auth})\n\t\tdefault:\n\t\t\tres.Status = 404\n\t\t}\n\t}\n\n\tfunc (a *api) EndBatch(lane int) {\n\t\tl := &a.lanes[lane]\n\t\t// one transaction for every job of l.pending, then for each:\n\t\t// job.res.Status, job.res.Body = ..., ...; job.res.Defer = false\n\t}\n\n\troutes, _ := http1.Routes(http1.Route{ID: routeItem, Method: \"GET\", Path: \"/items/\", Prefix: true},\n\t\thttp1.Route{ID: routeHealth, Path: \"/health\"})\n\tbearer, _ := http1.Bearer(verifier, routeHealth) // /health needs no token\n\tsrv.Group(\"api\", server.Listen(\"tcp\", \":8080\"), server.Loop(server.LoopValue{Loops: 2})).\n\t\tHandleLoop(http1.HandleLoop(http1.Chain(a, routes, bearer), http1.Parser{}))\n\nA handler runs on its lane's thread and must not block it. Every callback\nof one lane runs on that thread, one at a time, so state kept per lane needs\nno lock; Request.Lane and the lane argument of EndBatch name the lane. The\nanswers of a batch leave at its end, in request order on each connection.\n\n# The chain\n\nA link is a Middleware, composed with Chain, the first listed outermost.\nThe codec has already computed the request's canonical Path — no\ndot-segment, no empty segment, no encoded slash, dot, backslash or NUL, an\nabsolute-form target reduced to its path once its authority matched Host —\nso every link routes and judges the same bytes. Routes sets\nRequest.Route, Bearer verifies the token for every route its exemptions do\nnot name and copies the subject and the claims into Request.Auth by value,\nHeaders gives every answer its fields, and Log hands an AccessLogger a\nrecord of the fields it allows, never a credential. No link writes the\nbytes a request takes: the adapter frames with what Parse returned.\n\n# The codec alone\n\nParser.Parse, AppendResponse and AppendRefusal frame and write without the\nloop, on any []byte: nothing allocates once the caller's buffers have room.\n"
+      "doc": "Package http1 is the restricted HTTP/1.1 profile the SDK serves on its loop\nengine (ADR 0186 §D6): a codec that frames requests out of bytes and appends\nresponses to bytes, and HandleLoop, the adapter that serves a Handler on a\nloop group of package server.\n\nIt is a profile, not an HTTP server, and what it refuses defines it. A\nrequest is answered with its status and Connection: close, and its\nconnection closed, before any handler sees it, when it carries any\nTransfer-Encoding (chunked, and so trailers, included), Expect, a bare CR or\nLF, a NUL or another control byte in a value, obs-fold, whitespace before a\ncolon, a name outside tchar, a Content-Length that is not one run of at most\nten digits or that repeats, a second Authorization or Host, CONNECT, a\ntarget two readers could resolve apart — a dot-segment, an empty segment, a\nbackslash, an encoded slash, dot, backslash or NUL, an absolute-form not for\nits Host — or a head, target or body past its Limits. HTTP/2, Upgrade and\nTLS are out of the profile: a program that needs them mounts net/http with Group.HandleHTTP.\nFraming depends on neither the method nor the route: a request takes its\nhead plus its Content-Length.\n\n# Serving\n\n\ttype api struct{ lanes []perLane } // one per lane, indexed by Request.Lane\n\n\tfunc (a *api) ServeHTTP1(req *http1.Request, res *http1.Response) {\n\t\tl := &a.lanes[req.Lane]\n\t\tswitch req.Route { // set by the router link\n\t\tcase routeItem:\n\t\t\tres.Defer = true // answered at the end of the batch\n\t\t\tl.pending = append(l.pending, job{res: res, user: req.Auth})\n\t\tdefault:\n\t\t\tres.Status = 404\n\t\t}\n\t}\n\n\tfunc (a *api) EndBatch(lane int) {\n\t\tl := &a.lanes[lane]\n\t\t// one transaction for every job of l.pending, then for each:\n\t\t// job.res.Status, job.res.Body = ..., ...; job.res.Defer = false\n\t}\n\n\troutes, _ := http1.Routes(http1.Route{ID: routeItem, Method: \"GET\", Path: \"/items/\", Prefix: true},\n\t\thttp1.Route{ID: routeHealth, Path: \"/health\"})\n\tbearer, _ := http1.Bearer(verifier, routeHealth) // /health needs no token\n\tsrv.Group(\"api\", server.Listen(\"tcp\", \":8080\"), server.Loop(server.LoopValue{Loops: 2}), server.Plaintext()).\n\t\tHandleLoop(http1.HandleLoop(http1.Chain(a, routes, bearer), http1.Parser{}))\n\nA handler runs on its lane's thread and must not block it. Every callback\nof one lane runs on that thread, one at a time, so state kept per lane needs\nno lock; Request.Lane and the lane argument of EndBatch name the lane. The\nanswers of a batch leave at its end, in request order on each connection.\n\n# The chain\n\nA link is a Middleware, composed with Chain, the first listed outermost.\nThe codec has already computed the request's canonical Path — no\ndot-segment, no empty segment, no encoded slash, dot, backslash or NUL, an\nabsolute-form target reduced to its path once its authority matched Host —\nso every link routes and judges the same bytes. Routes sets\nRequest.Route, Bearer verifies the token for every route its exemptions do\nnot name and copies the subject and the claims into Request.Auth by value,\nHeaders gives every answer its fields, and Log hands an AccessLogger a\nrecord of the fields it allows, never a credential. No link writes the\nbytes a request takes: the adapter frames with what Parse returned.\n\n# The codec alone\n\nParser.Parse, AppendResponse and AppendRefusal frame and write without the\nloop, on any []byte: nothing allocates once the caller's buffers have room.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/pkg/v1/net/server",
@@ -1618,6 +1618,24 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.HandlerAmbiguous",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "HandlerAmbiguous",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/net.HandlerAmbiguous",
+      "code": {
+        "value": "0.2.11.64",
+        "reason": "HANDLER_AMBIGUOUS",
+        "public": "The handler could run on two engines; choose one with Engine"
+      },
+      "doc": "HandlerAmbiguous reports a simple-API handler that could run on two engines and no Engine chooses.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.HandlerFunc",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
@@ -1644,6 +1662,24 @@
         "public": "The listener group has no handler"
       },
       "doc": "HandlerMissing reports a group declared without a handler.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.HandlerUnsupported",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "HandlerUnsupported",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/net.HandlerUnsupported",
+      "code": {
+        "value": "0.2.11.65",
+        "reason": "HANDLER_UNSUPPORTED",
+        "public": "The handler cannot be served by this entry point"
+      },
+      "doc": "HandlerUnsupported reports a handler no engine of its simple-API entry serves.\n",
       "file": "server/gen_facade.go",
       "layer": "public",
       "family": "net"
@@ -2754,6 +2790,24 @@
       "family": "net"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.PacketOptionUnsupported",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "PacketOptionUnsupported",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/net.PacketOptionUnsupported",
+      "code": {
+        "value": "0.2.11.67",
+        "reason": "PACKET_OPTION_UNSUPPORTED",
+        "public": "The datagram group cannot honour one of its options"
+      },
+      "doc": "PacketOptionUnsupported reports an option a datagram group cannot honour.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.Phase",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
@@ -2843,7 +2897,25 @@
       "name": "Plaintext",
       "spelled": "func() GroupOption",
       "canonical": "func() github.com/kitsunium/sdk/pkg/v1/net/server.GroupOption",
-      "doc": "Plaintext declares that the group serves no TLS. Every engine honours it. A\ngroup given both Plaintext and TLS, in either order, fails Start with\nPlaintextWithTLS. It is not yet required of a plaintext group: the simple\nAPI will require it of every HTTP group without TLS.\n",
+      "doc": "Plaintext declares that the group serves no TLS. Every engine honours it. A\ngroup given both Plaintext and TLS, in either order, fails Start with\nPlaintextWithTLS. An HTTP group without TLS must give it, or fails Start\nwith PlaintextRequired.\n",
+      "file": "server/gen_facade.go",
+      "layer": "public",
+      "family": "net"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/net/server.PlaintextRequired",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/net/server",
+      "name": "PlaintextRequired",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/net.PlaintextRequired",
+      "code": {
+        "value": "0.2.11.66",
+        "reason": "PLAINTEXT_REQUIRED",
+        "public": "The HTTP group needs TLS or Plaintext"
+      },
+      "doc": "PlaintextRequired reports an HTTP group given neither TLS nor Plaintext.\n",
       "file": "server/gen_facade.go",
       "layer": "public",
       "family": "net"

@@ -74,7 +74,7 @@ func TestLoadChild(t *testing.T) {
 	load, engines, _ := strings.Cut(spec, ":")
 	srv := server.New()
 	for i, engine := range strings.Split(engines, ",") {
-		g := srv.Group("netgate-"+strconv.Itoa(i), server.Listen("tcp", "127.0.0.1:0"), loadGroupOption(engine))
+		g := srv.Group("netgate-"+strconv.Itoa(i), server.Listen("tcp", "127.0.0.1:0"), loadGroupOption(engine), server.Plaintext())
 		serveLoad(t, g, load, engine)
 	}
 	if err := srv.Start(t.Context()); err != nil {

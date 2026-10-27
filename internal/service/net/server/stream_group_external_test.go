@@ -233,7 +233,7 @@ func TestStreamGroup_HandleHTTP(t *testing.T) {
 		t.Helper()
 		srv := server.New()
 		t.Cleanup(func() { closeOrFail(t, srv) })
-		group := srv.Group("api", server.Listen("tcp", "127.0.0.1:0"))
+		group := srv.Group("api", server.Listen("tcp", "127.0.0.1:0"), server.Plaintext())
 
 		chained := group.HandleHTTP(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(c.status)

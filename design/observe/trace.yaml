@@ -2048,7 +2048,7 @@ packages:
           instantiated at http.Handler — so it composes with corenet.Chain and drops
           straight onto a group:
 
-          	srv.Group("api", server.Listen("tcp", ":8443")).
+          	srv.Group("api", server.Listen("tcp", ":8443"), server.TLS(id)).
           	    HandleHTTP(corenet.Chain(mux, trace.ServerMiddleware(tracer)))
 
           It decorates an http.Handler rather than the group's ConnHandler because a
@@ -2882,7 +2882,7 @@ packages:
       instantiated at http.Handler and http.RoundTripper, so they compose with the
       network domain's Chain:
 
-      	srv.Group("api", server.Listen("tcp", ":8443")).
+      	srv.Group("api", server.Listen("tcp", ":8443"), server.TLS(id)).
       		HandleHTTP(net.Chain(mux, trace.ServerMiddleware(tracer)))
 
       	c.HTTP().Transport = net.Chain(c.HTTP().Transport, trace.ClientMiddleware(tracer))

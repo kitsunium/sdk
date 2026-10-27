@@ -179,6 +179,7 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 | `adr/0193-a-windows-listener-holds-its-address-exclusively-closes-gracefully-and-rebinds-bounded.md` | A Windows listener holds its address exclusively, closes gracefully and rebinds, bounded: `SO_EXCLUSIVEADDRUSE` on unicast TCP/UDP, read back on an adopted socket, `shutdown(SD_SEND)` and a read to zero, eight bounded rebinds; `ListenerStateValue.Exclusive`, `BindWait` |
 | `adr/0194-a-loop-lane-offloads-to-its-own-worker-and-an-http1-answer-may-be-pending.md` | A loop lane offloads to its own worker, and an http1 answer may be pending: R3's `LoopOutbound`/`LoopWorker`/`LoopOffloader`, `LoopOutboundFull`, `HTTP1Worker` and `Pending`; order kept behind a pending answer, a full queue's 503 |
 | `adr/0195-an-http-groups-protocols-are-computed-once-and-its-alpn-follows-them.md` | An HTTP group's protocols are computed once, and its ALPN follows them: `Protocols`, the listener's ALPN and `http.Server.Protocols` from one list, `ProtocolsRefused`, HTTP/2's bounds set | Accepted |
+| `adr/0197-the-simple-api-places-a-handler-by-its-type-and-an-http-group-says-plaintext.md` | The simple API places a handler by its type, and an HTTP group says Plaintext: `Server.HTTP`/`TCP`/`UDP`, default name `network+addr`, `HandlerAmbiguous`, `HandlerUnsupported`, `PlaintextRequired`, `PacketOptionUnsupported` | Accepted |
 
 This table is one of THREE indexes of the same ADRs — the others are
 `docs/adr/CLAUDE.md`'s Contents table and the root `CLAUDE.md` Reference list —

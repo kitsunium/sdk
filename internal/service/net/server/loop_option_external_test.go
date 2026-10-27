@@ -39,7 +39,7 @@ func TestLoop(t *testing.T) {
 		{
 			name: "after HandleHTTP",
 			declare: func(srv *server.Server) {
-				srv.Group("g", server.Listen("tcp", "127.0.0.1:0")).HandleHTTP(http.NotFoundHandler())
+				srv.Group("g", server.Listen("tcp", "127.0.0.1:0"), server.Plaintext()).HandleHTTP(http.NotFoundHandler())
 				srv.Group("h", server.Listen("tcp", "127.0.0.1:0"), server.Loop(corenet.LoopValue{})).HandleFunc(echoHandler)
 			},
 			want: corenet.CodeLoopOptionUnsupported,

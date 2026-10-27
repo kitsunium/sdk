@@ -254,6 +254,32 @@ func (s *Server) judgePacketOptions(shim *StreamGroup) {
 	if err := shim.protocolsRefusal(); err != nil {
 		s.recordDeclError(err)
 	}
+	//: every other kind the datagram engine does not apply (ADR 0187 §D4).
+	for _, k := range shim.kinds.list() {
+		//: the first one is refused, never dropped (R6).
+		if !packetHonours(k) {
+			s.recordDeclError(errs.Wrap(corenet.PacketOptionUnsupported, errs.WrapParams{},
+				errs.String("group", shim.name), errs.String("option", k.String())))
+			//: one is enough.
+			return
+		}
+	}
+}
+
+// packetHonours reports whether a datagram group applies the option of kind
+// k: its ceilings, its batched replies (ADR 0192), adoption, and the three
+// every engine honours. Engine and Plaintext are judged by engineRefusal.
+func packetHonours(k corenet.OptionKind) bool {
+	//: what PacketGroup keeps of its shim.
+	switch k {
+	case corenet.OptionMaxPacketSize, corenet.OptionBatchSize, corenet.OptionBatchReplies, corenet.OptionAdopt,
+		corenet.OptionName, corenet.OptionEngine, corenet.OptionPlaintext:
+		//: honoured.
+		return true
+	default:
+		//: dropped with the shim: refused.
+		return false
+	}
 }
 
 // recordDeclError keeps the first declaration error. The caller holds s.mu.

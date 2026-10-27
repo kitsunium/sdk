@@ -862,7 +862,7 @@ sequences:
             - set: g.name
               value: g.optName
             - return: ""
-          when: g.optName != "" && (g.name == "" || g.name == g.optName)
+          when: g.optName != "" && (g.name == "" || g.name == g.defaultName || g.name == g.optName)
       - opt:
           do:
             - set: g.declErr
@@ -1870,6 +1870,8 @@ sequences:
         kind: self
       - id: g.engineRefusal
         kind: internal
+      - id: g.plaintextRefusal
+        kind: internal
       - id: errs
         kind: package
       - id: g.loopRefusal
@@ -1892,6 +1894,14 @@ sequences:
             bind: err
             eval: g.engineRefusal()
             to: g.engineRefusal
+          when: err != nil
+      - opt:
+          do:
+            - return: err
+          init:
+            bind: err
+            eval: g.plaintextRefusal()
+            to: g.plaintextRefusal
           when: err != nil
       - opt:
           do:
@@ -8111,6 +8121,30 @@ sequences:
             eval: shim.protocolsRefusal()
             to: shim.protocolsRefusal
           when: err != nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - eval: |-
+                      s.recordDeclError(errs.Wrap(corenet.PacketOptionUnsupported, errs.WrapParams{},
+                      				errs.String("group", shim.name), errs.String("option", k.String())))
+                    to: s.recordDeclError
+                  - return: ""
+                when: "!packetHonours(k)"
+          key: _
+          range: shim.kinds.list()
+          value: k
+  - of: packetHonours
+    steps:
+      - switch:
+          cases:
+            - case: corenet.OptionMaxPacketSize, corenet.OptionBatchSize, corenet.OptionBatchReplies, corenet.OptionAdopt, corenet.OptionName, corenet.OptionEngine, corenet.OptionPlaintext
+              do:
+                - return: "true"
+            - default: true
+              do:
+                - return: "false"
+          "on": k
   - of: (*Server).recordDeclError
     steps:
       - opt:
@@ -8199,6 +8233,385 @@ sequences:
       - set: s.fallbacks.LastAt
         to: s.clk.Now
         value: s.clk.Now()
+  - of: (*Server).HTTP
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).HTTP
+        kind: self
+      - id: s.simpleGroup
+        kind: internal
+      - id: g.mountHTTPEntry
+        kind: internal
+      - id: g.recordErr
+        kind: internal
+    steps:
+      - bind: g
+        eval: s.simpleGroup("tcp", addr, opts)
+        to: s.simpleGroup
+      - opt:
+          do:
+            - eval: g.recordErr(err)
+              to: g.recordErr
+          init:
+            bind: err
+            eval: g.mountHTTPEntry(h)
+            to: g.mountHTTPEntry
+          when: err != nil
+      - return: g
+  - of: (*Server).TCP
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).TCP
+        kind: self
+      - id: s.simpleGroup
+        kind: internal
+      - id: g.mountTCPEntry
+        kind: internal
+      - id: g.recordErr
+        kind: internal
+    steps:
+      - bind: g
+        eval: s.simpleGroup("tcp", addr, opts)
+        to: s.simpleGroup
+      - opt:
+          do:
+            - eval: g.recordErr(err)
+              to: g.recordErr
+          init:
+            bind: err
+            eval: g.mountTCPEntry(h)
+            to: g.mountTCPEntry
+          when: err != nil
+      - return: g
+  - of: (*Server).UDP
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).UDP
+        kind: self
+      - id: s.PacketGroup
+        kind: internal
+      - id: g.mountUDPEntry
+        kind: internal
+      - id: s.recordGroupErr
+        kind: internal
+    steps:
+      - bind: g
+        eval: s.PacketGroup("", append([]GroupOption{Listen("udp", addr), defaultName("udp+" + addr)}, opts...)...)
+        to: s.PacketGroup
+      - opt:
+          do:
+            - eval: s.recordGroupErr(err)
+              to: s.recordGroupErr
+          init:
+            bind: err
+            eval: g.mountUDPEntry(h)
+            to: g.mountUDPEntry
+          when: err != nil
+      - return: g
+  - of: (*PacketGroup).mountUDPEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*PacketGroup).mountUDPEntry
+        kind: self
+      - id: errs
+        kind: package
+      - id: unsupported
+        kind: internal
+      - id: g.Handle
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(corenet.HandlerMissing, errs.WrapParams{},
+                			errs.String("group", g.name), errs.String("entry", entryUDP))
+              to: errs
+          when: isNil(h)
+      - bind: ph, ok
+        eval: h.(corenet.PacketHandler)
+      - opt:
+          do:
+            - return: unsupported(g.name, entryUDP, h)
+              to: unsupported
+          when: "!ok"
+      - eval: g.Handle(ph)
+        to: g.Handle
+      - return: nil
+  - of: (*Server).simpleGroup
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).simpleGroup
+        kind: self
+      - id: s.Group
+        kind: internal
+    steps:
+      - return: s.Group("", append([]GroupOption{Listen(network, addr), defaultName(network + "+" + addr)}, opts...)...)
+        to: s.Group
+  - of: defaultName
+    steps:
+      - return:
+          closure:
+            params: g *StreamGroup
+            steps:
+              - set: g.name, g.defaultName
+                value: name, name
+  - of: (*Server).recordGroupErr
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).recordGroupErr
+        kind: self
+      - id: s.recordDeclError
+        kind: internal
+    steps:
+      - lock:
+          mutex: s.mu
+      - eval: s.recordDeclError(err)
+        to: s.recordDeclError
+  - of: (*StreamGroup).recordErr
+    steps:
+      - opt:
+          do:
+            - set: g.declErr
+              value: err
+          when: g.declErr == nil
+  - of: (*StreamGroup).mountHTTPEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StreamGroup).mountHTTPEntry
+        kind: self
+      - id: g.missing
+        kind: internal
+      - id: g.HandleHTTP
+        kind: internal
+      - id: g.HandleLoop
+        kind: internal
+      - id: g.pickRefusal
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: g.missing(entryHTTP)
+              to: g.missing
+          when: isNil(h)
+      - bind: std, isStd
+        eval: h.(http.Handler)
+      - bind: h1, isH1
+        eval: h.(corenet.HTTP1Handler)
+      - switch:
+          cases:
+            - case: corenet.EngineGoroutine
+              do:
+                - eval: g.HandleHTTP(std)
+                  to: g.HandleHTTP
+            - case: corenet.EngineLoop
+              do:
+                - eval: g.HandleLoop(http1.HandleLoop(h1, http1.Parser{}))
+                  to: g.HandleLoop
+            - default: true
+              do:
+                - return: g.pickRefusal(entryHTTP, h, isStd, isH1)
+                  to: g.pickRefusal
+          "on": g.pickEngine(isStd, isH1)
+      - return: nil
+  - of: (*StreamGroup).mountTCPEntry
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StreamGroup).mountTCPEntry
+        kind: self
+      - id: g.missing
+        kind: internal
+      - id: errs
+        kind: package
+      - id: g.Handle
+        kind: internal
+      - id: g.HandleLoop
+        kind: internal
+      - id: g.pickRefusal
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: g.missing(entryTCP)
+              to: g.missing
+          when: isNil(h)
+      - opt:
+          do:
+            - return: |-
+                errs.Wrap(corenet.HandlerUnsupported, errs.WrapParams{},
+                			errs.String("group", g.name), errs.String("entry", entryTCP), errs.String("type", typeName(h)),
+                			errs.String("serve", entryHTTP))
+              to: errs
+          when: isHTTPHandler(h)
+      - bind: conn, isConn
+        eval: h.(corenet.ConnHandler)
+      - bind: lh, isLoop
+        eval: h.(corenet.LoopHandler)
+      - switch:
+          cases:
+            - case: corenet.EngineGoroutine
+              do:
+                - eval: g.Handle(conn)
+                  to: g.Handle
+            - case: corenet.EngineLoop
+              do:
+                - eval: g.HandleLoop(lh)
+                  to: g.HandleLoop
+            - default: true
+              do:
+                - return: g.pickRefusal(entryTCP, h, isConn, isLoop)
+                  to: g.pickRefusal
+          "on": g.pickEngine(isConn, isLoop)
+      - return: nil
+  - of: (*StreamGroup).pickEngine
+    steps:
+      - bind: e
+        eval: corenet.EngineAuto
+      - opt:
+          do:
+            - set: e
+              value: g.engine
+          when: g.kinds.has(corenet.OptionEngine)
+      - opt:
+          do:
+            - return: corenet.EngineGoroutine
+          when: goroutine && fits(e, corenet.EngineGoroutine, loop)
+      - opt:
+          do:
+            - return: corenet.EngineLoop
+          when: loop && fits(e, corenet.EngineLoop, goroutine)
+      - return: corenet.EngineAuto
+  - of: fits
+    steps:
+      - return: e == want || (e == corenet.EngineAuto && !other)
+  - of: (*StreamGroup).pickRefusal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StreamGroup).pickRefusal
+        kind: self
+      - id: errs
+        kind: package
+      - id: unsupported
+        kind: internal
+    steps:
+      - switch:
+          cases:
+            - case: goroutine && loop && !g.kinds.has(corenet.OptionEngine)
+              do:
+                - return: |-
+                    errs.Wrap(corenet.HandlerAmbiguous, errs.WrapParams{},
+                    			errs.String("group", g.name), errs.String("entry", entry), errs.String("type", typeName(h)))
+                  to: errs
+            - case: goroutine || loop
+              do:
+                - return: |-
+                    errs.Wrap(corenet.EngineUnsupported, errs.WrapParams{},
+                    			errs.String("group", g.name), errs.String("engine", g.engine.String()))
+                  to: errs
+            - default: true
+              do:
+                - return: unsupported(g.name, entry, h)
+                  to: unsupported
+  - of: (*StreamGroup).missing
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StreamGroup).missing
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corenet.HandlerMissing, errs.WrapParams{},
+          		errs.String("group", g.name), errs.String("entry", entry))
+        to: errs
+  - of: unsupported
+    participants:
+      - id: caller
+        kind: actor
+      - id: unsupported
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: |-
+          errs.Wrap(corenet.HandlerUnsupported, errs.WrapParams{},
+          		errs.String("group", group), errs.String("entry", entry), errs.String("type", typeName(h)))
+        to: errs
+  - of: isHTTPHandler
+    steps:
+      - bind: _, std
+        eval: h.(http.Handler)
+      - bind: _, h1
+        eval: h.(corenet.HTTP1Handler)
+      - return: std || h1
+  - of: isNil
+    participants:
+      - id: caller
+        kind: actor
+      - id: isNil
+        kind: self
+      - id: reflect
+        kind: stdlib
+      - id: v.IsNil
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: "true"
+          when: h == nil
+      - bind: v
+        eval: reflect.ValueOf(h)
+        to: reflect
+      - switch:
+          cases:
+            - case: reflect.Pointer, reflect.Map, reflect.Func, reflect.Interface, reflect.Slice, reflect.Chan
+              do:
+                - return: v.IsNil()
+                  to: v.IsNil
+            - default: true
+              do:
+                - return: "false"
+          "on": v.Kind()
+  - of: typeName
+    participants:
+      - id: caller
+        kind: actor
+      - id: typeName
+        kind: self
+      - id: reflect.TypeOf(h).String
+        kind: value
+    steps:
+      - return: reflect.TypeOf(h).String()
+        to: reflect.TypeOf(h).String
+  - of: (*StreamGroup).servesHTTP
+    steps:
+      - bind: _, h1
+        eval: g.loopHandler.(*http1.LoopHandler)
+      - return: g.httpAdapter != nil || h1
+  - of: (*StreamGroup).plaintextRefusal
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*StreamGroup).plaintextRefusal
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - opt:
+          do:
+            - return: nil
+          when: "!g.servesHTTP() || g.kinds.has(corenet.OptionTLS) || g.kinds.has(corenet.OptionPlaintext)"
+      - return: errs.Wrap(corenet.PlaintextRequired, errs.WrapParams{}, errs.String("group", g.name))
+        to: errs
   - of: sockaddrToAddr
     participants:
       - id: caller
