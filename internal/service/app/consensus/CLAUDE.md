@@ -400,6 +400,15 @@ of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
   `StorageDone` reports the log durable through the commit that met the
   condition, and the driver removes SILENT in the Ready after (#684,
   `TestTheEndOfASilenceIsDurableOnlyAfterTheEntriesThatEndIt`).
+- Turn a joining stamp into a member's on raft's commit alone: it moves
+  when an append is accepted, in memory, and `checkAdmission` wrote the
+  stamp on the loop in the turn that handed the storage actor the entries
+  that admit the node, before they were written. A crash during their sync
+  restarted a member with an empty configuration, which admitted no peer
+  and never sent a JOIN again, and every raise was refused while it stayed
+  listed. The admission is judged at the commit bounded by `Stable`, at
+  each Ready and each storage completion (#695,
+  `TestAJoinerBecomesAMemberOnDiskOnlyOnceTheEntriesThatAdmitItAreDurable`).
 - Refuse a JOIN on a held slot when the member holding it is the requester
   itself — id, incarnation, slot and key all equal: a joiner restarted
   before anything reached its log admits the members only from a JOIN
