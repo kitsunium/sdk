@@ -78,6 +78,9 @@ const (
 	// OptionEngine is Engine. Every engine honours it, or refuses the group with
 	// EngineUnsupported.
 	OptionEngine
+	// OptionLoopMiddleware is UseLoop. The loop engine honours it; every group no
+	// loop handler serves refuses it with LoopOptionUnsupported.
+	OptionLoopMiddleware
 )
 
 // optionNames holds each kind's constructor name, indexed by kind. Its length
@@ -103,6 +106,7 @@ var optionNames = [...]string{
 	OptionPlaintext:         "Plaintext",
 	OptionName:              "Name",
 	OptionEngine:            "Engine",
+	OptionLoopMiddleware:    "UseLoop",
 }
 
 // String renders the option's name, as its constructor spells it.

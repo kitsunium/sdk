@@ -90,7 +90,7 @@ sequences:
       - id: st.give
         kind: internal
     steps:
-      - set: st.req.Loop
+      - set: st.req.Lane
         value: loop
       - bind: res
         eval: st.take()
@@ -184,6 +184,21 @@ sequences:
         to: st.flush
       - set: st.items, st.out, st.served
         value: st.items[:0], st.out[:0], 0
+  - of: (*LoopHandler).OnStart
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LoopHandler).OnStart
+        kind: self
+      - id: a.state
+        kind: internal
+    steps:
+      - loop:
+          do:
+            - eval: a.state(i)
+              to: a.state
+          key: i
+          range: lanes
   - of: (*LoopHandler).OnClose
     steps:
       - set: _, _, _
@@ -406,7 +421,7 @@ sequences:
       - eval: copy(next, cur)
       - bind: st
         eval: "&loopState{}"
-      - set: st.req.Loop
+      - set: st.req.Lane
         value: i
       - set: next[i]
         value: st

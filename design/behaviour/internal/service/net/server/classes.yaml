@@ -45,6 +45,23 @@ constants:
         type: time.Duration
         value: 10 * time.Millisecond
     name: drainPollInterval
+  - doc: |-
+      The eight callbacks a loop middleware's layer forwards, in the order the
+      probe sends them.
+    grouped: true
+    items:
+      - name: probeStart
+        type: int
+        value: iota
+      - name: probeOpen
+      - name: probeData
+      - name: probeTimeout
+      - name: probeWritable
+      - name: probeBatchEnd
+      - name: probeClose
+      - name: probeHonours
+      - name: probeCallbacks
+    name: probeStart
   - doc: nativeLoopBackends is true where the leaf's io_uring and epoll exist.
     items:
       - name: nativeLoopBackends
@@ -83,6 +100,12 @@ constants:
         name: portableOutputCap
         type: int
         value: 1 << 20
+      - doc: |-
+          recycledMark is the byte a released buffer is filled with under
+          markRecycled.
+        name: recycledMark
+        type: byte
+        value: "0xAA"
     name: portableReadSize
   - doc: The kinds of a portable event.
     grouped: true
@@ -463,6 +486,33 @@ files:
       - (*trackedListener).Accept
     name: listen_tracked.go
   - decls:
+      - probeStart
+      - probeNames
+      - loopLanes
+      - buildLoopChain
+      - wrapLoop
+      - sameHandler
+      - chainHonours
+      - invalidLayer
+      - sendProbe
+      - loopProbe
+      - (*loopProbe).OnStart
+      - (*loopProbe).OnOpen
+      - (*loopProbe).OnData
+      - (*loopProbe).OnTimeout
+      - (*loopProbe).OnWritable
+      - (*loopProbe).OnBatchEnd
+      - (*loopProbe).OnClose
+      - (*loopProbe).Honours
+      - probeIO
+      - probeIO.Write
+      - probeIO.Close
+      - probeIO.SetDeadline
+      - probeIO.Pressure
+      - probeIO.Post
+      - probeIO.Loop
+    name: loop_chain.go
+  - decls:
       - nativeLoopBackends
       - startLoopEngine
       - nativeEngine
@@ -487,13 +537,16 @@ files:
   - decls:
       - portableReadSize
       - pevOpen
+      - markRecycled
       - portableEvent
       - portableConn
+      - portableGroup
+      - (*portableGroup).live
       - portableLoop
       - startPortable
       - portableNoDelay
       - orDefaultInt
-      - (*portableLoop).acceptLoop
+      - (*portableGroup).acceptLoop
       - (*portableLoop).run
       - (*portableLoop).collect
       - (*portableLoop).handle
@@ -524,9 +577,11 @@ files:
       - (*portableLoop).Loop
       - (*portableLoop).Post
       - portableEngine
+      - (*portableGroup).wakeAll
       - portableEngine.Shutdown
       - portableEngine.Close
       - portableEngine.State
+      - fillMark
     name: loop_portable.go
   - decls:
       - multiReader
@@ -688,6 +743,7 @@ files:
       - (*StreamGroup).mountHTTP
       - (*StreamGroup).tracksCloses
       - (*StreamGroup).Use
+      - (*StreamGroup).UseLoop
       - (*StreamGroup).resolved
     name: stream_group.go
   - decls:
@@ -997,6 +1053,51 @@ functions:
     params: raw stdnet.Listener, id corenet.IdentityValue, trackCloses bool
     results: stdnet.Listener
   - doc: |-
+      loopLanes is how many lanes a loop group runs on every backend: Loops,
+      zero meaning one (R8).
+    name: loopLanes
+    params: v corenet.LoopValue
+    results: int
+  - doc: |-
+      buildLoopChain wraps h in mws, outermost first, once at Start, and checks
+      the chain twice: every layer is a corenet.LoopLayered whose Next is the
+      handler it was given, and every callback sent through the same middlewares
+      built over a probe reaches the probe. Either failure is
+      LoopMiddlewareInvalid, naming the group and the callback — "Next" for the
+      first check. With no middleware the chain is h.
+    name: buildLoopChain
+    params: group string, h corenet.LoopHandler, mws []corenet.Middleware[corenet.LoopHandler]
+    results: corenet.LoopHandler, error
+  - doc: |-
+      wrapLoop applies mws to h, outermost first, and reports whether every
+      layer is a corenet.LoopLayered whose Next is what it wrapped.
+    name: wrapLoop
+    params: h corenet.LoopHandler, mws []corenet.Middleware[corenet.LoopHandler]
+    results: corenet.LoopHandler, bool
+  - doc: |-
+      sameHandler reports whether a and b are the same handler. Two values of a
+      type that cannot be compared are taken as the same, rather than compared
+      into a panic.
+    name: sameHandler
+    params: a, b corenet.LoopHandler
+    results: bool
+  - doc: |-
+      chainHonours reports whether a layer of chain, or its handler, honours the
+      option of kind k: the chain merges what each of them honours.
+    name: chainHonours
+    params: chain corenet.LoopHandler, k corenet.OptionKind
+    results: bool
+  - doc: invalidLayer is LoopMiddlewareInvalid naming the group and the callback.
+    name: invalidLayer
+    params: group, callback string
+    results: error
+  - doc: |-
+      sendProbe sends each of the eight callbacks through probed once, with a
+      LoopIO that refuses everything and the zero reference, which no
+      connection holds.
+    name: sendProbe
+    params: probed corenet.LoopHandler
+  - doc: |-
       startLoopEngine starts a loop group on Linux on the backend plan names —
       min(code, environment), ADR 0188 —: the leaf's native backends, handed
       duplicated descriptors of the listeners server bound (ADR 0186 §D3), or the
@@ -1043,13 +1144,14 @@ functions:
     params: group *StreamGroup
     results: time.Duration
   - doc: |-
-      startPortable starts the portable backend on lns. degraded names why a
-      Linux auto group fell back to it, empty otherwise.
+      startPortable starts the portable backend on lns, with one lane per loop
+      of the group's LoopValue (zero meaning one). degraded names why a Linux
+      auto group fell back to it, empty otherwise.
 
       Goroutine lifecycle: it launches one acceptor per listener, which returns
-      once server closes that listener or the backend stops, and the handler
-      goroutine, which returns once the backend stopped or drained to its last
-      connection, closing done as it does.
+      once server closes that listener or the backend stops, and one handler
+      goroutine per lane, which returns once the backend stopped or its lane
+      drained to its last connection, closing the lane's done as it does.
     name: startPortable
     params: group *StreamGroup, lns []stdnet.Listener, degraded string, plan loopPlan
     results: portableEngine
@@ -1068,6 +1170,9 @@ functions:
     name: clampUsed
     params: v, n int
     results: int
+  - doc: fillMark fills b with recycledMark.
+    name: fillMark
+    params: b []byte
   - doc: newMultiReader builds a batched reader over pc.
     name: newMultiReader
     params: pc stdnet.PacketConn, sc rawConnProvider
@@ -1276,6 +1381,7 @@ imports:
   maps: maps
   os: os
   recycler: github.com/kitsunium/sdk/internal/kernel/concur/recycler
+  reflect: reflect
   runtime: runtime
   sdlisten: github.com/kitsunium/sdk/internal/service/proc/systemd/listen
   slices: slices
@@ -1939,6 +2045,85 @@ types:
         results: conn stdnet.Conn, err error
     name: trackedListener
   - doc: |-
+      loopProbe is the handler a probe chain wraps: it records each callback that
+      reaches it.
+    fields:
+      - doc: seen holds, by callback, whether it arrived.
+        name: seen
+        type: "[probeCallbacks]bool"
+    kind: struct
+    methods:
+      - doc: OnStart implements corenet.LoopStarter.
+        name: OnStart
+        params: _ int
+        recv: p *loopProbe
+      - doc: OnOpen implements corenet.LoopHandler.
+        name: OnOpen
+        params: _ corenet.LoopIO, _ corenet.LoopConnRef
+        recv: p *loopProbe
+      - doc: OnData implements corenet.LoopHandler.
+        name: OnData
+        params: _ corenet.LoopIO, _ corenet.LoopConnRef, buf []byte
+        recv: p *loopProbe
+        results: int
+      - doc: OnTimeout implements corenet.LoopHandler.
+        name: OnTimeout
+        params: _ corenet.LoopIO, _ corenet.LoopConnRef
+        recv: p *loopProbe
+      - doc: OnWritable implements corenet.LoopHandler.
+        name: OnWritable
+        params: _ corenet.LoopIO, _ corenet.LoopConnRef
+        recv: p *loopProbe
+      - doc: OnBatchEnd implements corenet.LoopHandler.
+        name: OnBatchEnd
+        params: _ corenet.LoopIO
+        recv: p *loopProbe
+      - doc: OnClose implements corenet.LoopHandler.
+        name: OnClose
+        params: _ corenet.LoopIO, _ corenet.LoopConnRef, _ error
+        recv: p *loopProbe
+      - doc: "Honours implements corenet.LoopOptionHonourer: the probe honours nothing."
+        name: Honours
+        params: _ corenet.OptionKind
+        recv: p *loopProbe
+        results: bool
+    name: loopProbe
+  - doc: |-
+      probeIO is the LoopIO of the probe: every connection is stale, the queue is
+      closed, and it is lane 0.
+    kind: struct
+    methods:
+      - doc: Write implements corenet.LoopIO.
+        name: Write
+        params: _ corenet.LoopConnRef, _ []byte
+        recv: probeIO
+        results: error
+      - doc: Close implements corenet.LoopIO.
+        name: Close
+        params: _ corenet.LoopConnRef
+        recv: probeIO
+        results: error
+      - doc: SetDeadline implements corenet.LoopIO.
+        name: SetDeadline
+        params: _ corenet.LoopConnRef, _ time.Duration
+        recv: probeIO
+        results: error
+      - doc: Pressure implements corenet.LoopIO.
+        name: Pressure
+        params: _ corenet.LoopConnRef
+        recv: probeIO
+        results: bool
+      - doc: Post implements corenet.LoopIO.
+        name: Post
+        params: _ corenet.PostFunc, _ uintptr
+        recv: probeIO
+        results: error
+      - doc: Loop implements corenet.LoopIO.
+        name: Loop
+        recv: probeIO
+        results: int
+    name: probeIO
+  - doc: |-
       nativeEngine is the leaf's group with server's socket probe merged into
       its capability report (ADR 0189).
     fields:
@@ -2033,26 +2218,19 @@ types:
     kind: struct
     name: portableConn
   - doc: |-
-      portableLoop is the portable backend (ADR 0186 §D3, §D7): the default
+      portableGroup is the portable backend (ADR 0186 §D3, §D7): the default
       engine's accept path and a goroutine pair per connection on the netpoller,
-      every handler callback serialised onto one handler goroutine, so the
-      LoopHandler contract holds unchanged: one goroutine calls it, buf valid
-      until OnBatchEnd.
+      spread over LoopValue.Loops lanes, every callback of one lane serialised
+      onto that lane's handler goroutine, so the LoopHandler contract holds
+      unchanged: one goroutine calls a lane, buf valid until its OnBatchEnd.
+      The acceptors hand connections to the lanes in turn.
     fields:
       - name: group
         type: string
-      - name: h
-        type: corenet.LoopHandler
-      - name: spillCap
-        type: int
-      - name: outCap
-        type: int
       - name: soft
         type: int
       - name: maxConns
         type: int
-      - name: idle
-        type: time.Duration
       - name: degraded
         type: string
       - doc: |-
@@ -2063,6 +2241,51 @@ types:
         type: "[]corenet.CapabilityValue"
       - name: noDelayOff
         type: bool
+      - name: lanes
+        type: "[]*portableLoop"
+      - name: lns
+        type: "[]stdnet.Listener"
+      - doc: turn is the lane the next accepted connection goes to, modulo the count.
+        name: turn
+        type: atomic.Uint64
+      - name: drainReq
+        type: atomic.Bool
+      - name: stopReq
+        type: atomic.Bool
+      - name: rejected
+        type: atomic.Uint64
+      - name: once
+        type: sync.Once
+    kind: struct
+    methods:
+      - doc: live is how many connections the group's lanes serve together.
+        name: live
+        recv: g *portableGroup
+        results: int64
+      - doc: acceptLoop hands each accepted connection to a lane, in turn.
+        name: acceptLoop
+        params: ln stdnet.Listener
+        recv: g *portableGroup
+      - doc: wakeAll rouses every lane's handler goroutine.
+        name: wakeAll
+        recv: g *portableGroup
+    name: portableGroup
+  - doc: |-
+      portableLoop is one lane of the portable backend: its handler goroutine,
+      its connections, its post queue and its LoopIO.
+    fields:
+      - name: g
+        type: "*portableGroup"
+      - name: lane
+        type: int
+      - name: h
+        type: corenet.LoopHandler
+      - name: spillCap
+        type: int
+      - name: outCap
+        type: int
+      - name: idle
+        type: time.Duration
       - name: events
         type: chan portableEvent
       - doc: post is the queue of posted operations; wake rouses the handler.
@@ -2088,26 +2311,16 @@ types:
         type: "[]int32"
       - name: live
         type: atomic.Int64
-      - name: drainReq
-        type: atomic.Bool
-      - name: stopReq
-        type: atomic.Bool
       - name: draining
         type: bool
       - name: done
         type: chan struct{}
-      - name: lns
-        type: "[]stdnet.Listener"
       - name: accepted
         type: atomic.Uint64
       - name: closed
         type: atomic.Uint64
       - name: batches
         type: atomic.Uint64
-      - name: rejected
-        type: atomic.Uint64
-      - name: once
-        type: sync.Once
       - name: readers
         type: sync.WaitGroup
       - doc: batchAcks are the readers waiting on the current batch.
@@ -2117,10 +2330,6 @@ types:
         type: "[]int32"
     kind: struct
     methods:
-      - doc: acceptLoop hands each accepted connection to the handler goroutine.
-        name: acceptLoop
-        params: ln stdnet.Listener
-        recv: pl *portableLoop
       - doc: |-
           run is the handler goroutine: one batch per iteration. It is the one
           goroutine that closes done, as it returns.
@@ -2249,7 +2458,7 @@ types:
         params: ref corenet.LoopConnRef
         recv: pl *portableLoop
         results: bool
-      - doc: "Loop implements corenet.LoopIO: the portable backend is one loop, index 0."
+      - doc: "Loop implements corenet.LoopIO: the lane's index."
         name: Loop
         recv: pl *portableLoop
         results: int
@@ -2261,11 +2470,11 @@ types:
     name: portableLoop
   - doc: |-
       portableEngine is the portable backend as server drives it: the lifecycle
-      half, apart from the LoopIO its handler is called with, whose Close names a
-      connection.
+      half, apart from the LoopIO each lane's handler is called with, whose
+      Close names a connection.
     fields:
-      - name: pl
-        type: "*portableLoop"
+      - name: g
+        type: "*portableGroup"
     kind: struct
     methods:
       - doc: Shutdown implements loopEngine.
@@ -3220,6 +3429,14 @@ types:
           with one is served by the loop engine (ADR 0186 §D1).
         name: loopHandler
         type: corenet.LoopHandler
+      - doc: loopMiddlewares decorate the loop handler, outermost first (UseLoop).
+        name: loopMiddlewares
+        type: "[]corenet.Middleware[corenet.LoopHandler]"
+      - doc: |-
+          loopChain is loopHandler wrapped in loopMiddlewares, built and checked
+          once at Start; the loop engine serves it.
+        name: loopChain
+        type: corenet.LoopHandler
       - doc: |-
           kinds is the set of option kinds the group was given, a zero value
           included, so a refusal reads what was posed rather than guessing from a
@@ -3318,6 +3535,10 @@ types:
         params: middlewares ...corenet.Middleware[corenet.ConnHandler]
         recv: g *StreamGroup
         results: "*StreamGroup"
+      - name: UseLoop
+        params: middlewares ...corenet.Middleware[corenet.LoopHandler]
+        recv: g *StreamGroup
+        results: "*StreamGroup"
       - doc: resolved returns the handler with the group's middlewares applied.
         name: resolved
         recv: g *StreamGroup
@@ -3396,6 +3617,22 @@ vars:
           	"tcp": {}, "tcp4": {}, "tcp6": {}, "unix": {}, "unixpacket": {},
           }
     name: streamNetworks
+  - doc: probeNames names each callback in LoopMiddlewareInvalid's "callback" field.
+    items:
+      - name: probeNames
+        value: |-
+          [probeCallbacks]string{
+          	probeStart: "OnStart", probeOpen: "OnOpen", probeData: "OnData", probeTimeout: "OnTimeout",
+          	probeWritable: "OnWritable", probeBatchEnd: "OnBatchEnd", probeClose: "OnClose", probeHonours: "Honours",
+          }
+    name: probeNames
+  - doc: |-
+      markRecycled, set by a test, fills each read buffer the batch released
+      with recycledMark before it is read into again.
+    items:
+      - name: markRecycled
+        type: atomic.Bool
+    name: markRecycled
   - doc: |-
       capabilityRegistry is design/net.yaml's registry, top first.
       TestCapabilityRegistry_matchesTheDesign holds it to the design's two blocks.

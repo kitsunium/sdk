@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-26T18:36:00Z -->
+<!-- updated: 2026-10-27T03:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -68,6 +68,18 @@ rest is spread thinner (24 shards): the sums per shard of a `-race
 machine, are 32.9 s at 24, and 34 s for the slowest on average over
 4,000 draws of up to 40 tests inserted anywhere (36 to 37 s at 19 or
 20, 31 s at 28).
+
+The BSD, illumos and Solaris guests of `e2e-cross.yml` run one test binary
+per package under a 5-minute `-test.timeout`, the alarm a hang panics on
+(`scripts/ci/run-test-binaries.sh`). Whole, this suite took 272 to 301 s
+on NetBSD 10.1 and 268 s on OpenBSD 7.9, and timed out on NetBSD in 19
+runs of 55 (#701): `scripts/ci/test-binaries.sh` cuts it in two runs,
+`-test.run=^TestA` and `-test.skip=^TestA`, each under that cap, which
+stays 5 minutes. Measured with `-test.v` on NetBSD, `^TestA` held 163 s
+of the 298 and the rest 135; `TestTheStartHoldsNoMoreOfTheTailThanItsBudget`
+took 18 s there (2 s on a Linux workstation) and
+`TestHealthWarnsBeforeTheSnapshotLimit` 13 s, settling its cuts after each
+of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
 
 ## Do NOT
 
@@ -696,6 +708,18 @@ machine, are 32.9 s at 24, and 34 s for the slowest on average over
   contract's `ElectionTimeoutMax` (#694,
   `TestRemovingTheLeaderOnItselfHandsOverPastAVoterThatDeclinesUnderALongerContract`,
   `TestRemovingTheLeaderOnItselfHandsOverPastADeadVoterUnderALongerContract`).
+- Answer a `Remove` of the leader submitted on it with the `NOT_LEADER` of
+  its own hand-off: the `TimeoutNow` makes the target campaign at once, its
+  vote request deposes the node, which knows no leader until the winner's
+  first append reaches it, and a try that expired in that gap ended the
+  hand-off and submitted the removal with no leader to forward it to; a
+  try whose transfer raft still ran was refused the same way, raft taking
+  no proposal while one runs. Both say nothing was appended (D6), and both
+  are the transfer the call made: `removeAfterTransfer` submits again on
+  `NOT_LEADER` as on `MEMBERSHIP_CHANGE_PENDING`, each heartbeat within
+  `handOffWindow` maximum election timeouts, and a node no voter took over
+  from ends on `MEMBERSHIP_INVALID`, a leader refusing its own removal
+  (#701, `TestRemovingTheLeaderOnItselfWaitsForTheLeaderItsHandOffElected`).
 - Leave a peer's series at their last value once it is no longer published,
   or keep a departed member's certificate in `peerExpiry`: a series is never
   deleted, and "peer unreachable" and "certificate expiring" alerted for a

@@ -4,11 +4,15 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
 
 // holdApply blocks tn's machine in Apply until the returned release runs.
@@ -365,6 +369,85 @@ func TestRemovingTheLeaderOnItselfHandsOverPastADeadVoterUnderALongerContract(t 
 	removeSelfOnce(t, x, fmt.Sprintf("while %d, the first pick, is dead", d.id))
 	waitFor(t, "the old leader removed", func() bool {
 		_, member := byConf[2].node.Membership().Member(x.id)
+		return !member
+	})
+}
+
+// leaderSilence loses, on every node's memory transport, the appends and
+// heartbeats sent to one node: no leader reaches it, while the votes it is
+// asked for and its own frames still go through.
+type leaderSilence struct {
+	// to is the node no leader reaches; 0 lets every frame through.
+	to atomic.Uint64
+}
+
+// silencedTransport is one node's memory transport under a leaderSilence.
+type silencedTransport struct {
+	*MemoryTransport
+	silence *leaderSilence
+}
+
+// Send drops an append or a heartbeat to the node the silence names, and
+// sends the rest.
+func (t *silencedTransport) Send(to coreconsensus.NodeID, frame []byte) {
+	if uint64(to) == t.silence.to.Load() {
+		var m coreconsensus.MessageValue
+		if err := wire.ParseMessage(append([]byte(nil), frame...), &m); err == nil &&
+			(m.Kind == coreconsensus.MsgApp || m.Kind == coreconsensus.MsgHeartbeat) {
+			return
+		}
+	}
+	t.MemoryTransport.Send(to, frame)
+}
+
+// handOffEnd runs ended, once, when a node logs that a try of its
+// leadership hand-off did not complete.
+type handOffEnd struct {
+	once  sync.Once
+	ended func()
+}
+
+func (l *handOffEnd) Log(_ context.Context, _ level.Level, msg string, _ ...corelogger.AttrValue) {
+	if msg == "consensus: leadership hand-off did not complete" {
+		l.once.Do(l.ended)
+	}
+}
+func (l *handOffEnd) With(...corelogger.AttrValue) corelogger.Logger { return l }
+func (l *handOffEnd) WithGroup(string) corelogger.Logger             { return l }
+func (l *handOffEnd) Enabled(context.Context, level.Level) bool      { return true }
+
+// TestRemovingTheLeaderOnItselfWaitsForTheLeaderItsHandOffElected is #701:
+// Remove(x) submitted on the leader x hands the leadership over first
+// (#529), and the TimeoutNow x sends makes the target campaign at once. Its
+// vote request deposes x, a follower that knows no leader until the
+// winner's first append reaches it. A try of the hand-off that expired in
+// that gap ended the hand-off, x no longer leading, and the removal,
+// submitted at once, was refused NOT_LEADER: x had no leader to forward it
+// to. Nothing was appended, and the leadership had moved as the call asked;
+// on a slow runner the gap outlasted the try, and #681's test failed
+// NOT_LEADER on NetBSD. Here no leader reaches x until a few heartbeats
+// after its try expired, and the removal goes through.
+func TestRemovingTheLeaderOnItselfWaitsForTheLeaderItsHandOffElected(t *testing.T) {
+	silence := new(leaderSilence)
+	beat := testTimingFast().HeartbeatInterval
+	end := &handOffEnd{ended: func() { time.AfterFunc(3*beat, func() { silence.to.Store(0) }) }}
+	c := newClusterWith(t, &cluster{
+		t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{0x70, 0x01, 1}, size: 3,
+		configure: func(_ *testNode, cfg *Config) {
+			cfg.Transport = &silencedTransport{MemoryTransport: cfg.Transport.(*MemoryTransport), silence: silence}
+			cfg.Logger = end
+		},
+	})
+	x := c.settledLeader(5 * time.Second)
+	propose(t, x.node, "a=1")
+	waitFor(t, "every voter acknowledges the leader's last entry", func() bool { return firstHandOff(x.node) != 0 })
+	// From here no leader reaches x: the voter its hand-off goes to wins
+	// the term x's TimeoutNow starts, and x does not hear of it.
+	silence.to.Store(uint64(x.id))
+	removeSelfOnce(t, x, "before it heard of the leader its hand-off elected")
+	other := c.otherThan(x)
+	waitFor(t, "the old leader removed", func() bool {
+		_, member := other.node.Membership().Member(x.id)
 		return !member
 	})
 }

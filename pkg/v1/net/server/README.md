@@ -95,6 +95,7 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
 - [func MaxPacketSize\(n int\) GroupOption](<#MaxPacketSize>)
 - [func Name\(name string\) GroupOption](<#Name>)
 - [func New\(opts ...Option\) \*Server](<#New>)
+- [func NewLoopLayer\(next LoopHandler\) LoopLayer](<#NewLoopLayer>)
 - [func Plaintext\(\) GroupOption](<#Plaintext>)
 - [func ReadBufferSize\(n int\) GroupOption](<#ReadBufferSize>)
 - [func ReadHeaderTimeout\(d time.Duration\) GroupOption](<#ReadHeaderTimeout>)
@@ -120,6 +121,7 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
   - [func \(\*Group\) HandleLoop\(h corenet.LoopHandler\) \*StreamGroup](<#Group.HandleLoop>)
   - [func \(\*Group\) Name\(\) string](<#Group.Name>)
   - [func \(\*Group\) Use\(middlewares ...corenet.Middleware\[corenet.ConnHandler\]\) \*StreamGroup](<#Group.Use>)
+  - [func \(\*Group\) UseLoop\(middlewares ...corenet.Middleware\[corenet.LoopHandler\]\) \*StreamGroup](<#Group.UseLoop>)
 - [type GroupOption](<#GroupOption>)
 - [type Handler](<#Handler>)
   - [func \(Handler\) ServeConn\(ctx context.Context, c Conn\) error](<#Handler.ServeConn>)
@@ -143,9 +145,24 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
   - [func \(LoopIO\) Pressure\(ref LoopConnRef\) bool](<#LoopIO.Pressure>)
   - [func \(LoopIO\) SetDeadline\(ref LoopConnRef, d time.Duration\) error](<#LoopIO.SetDeadline>)
   - [func \(LoopIO\) Write\(ref LoopConnRef, p \[\]byte\) error](<#LoopIO.Write>)
+- [type LoopLayer](<#LoopLayer>)
+  - [func \(LoopLayer\) Honours\(k OptionKind\) bool](<#LoopLayer.Honours>)
+  - [func \(LoopLayer\) Next\(\) LoopHandler](<#LoopLayer.Next>)
+  - [func \(LoopLayer\) OnBatchEnd\(io LoopIO\)](<#LoopLayer.OnBatchEnd>)
+  - [func \(LoopLayer\) OnClose\(io LoopIO, ref LoopConnRef, err error\)](<#LoopLayer.OnClose>)
+  - [func \(LoopLayer\) OnData\(io LoopIO, ref LoopConnRef, buf \[\]byte\) int](<#LoopLayer.OnData>)
+  - [func \(LoopLayer\) OnOpen\(io LoopIO, ref LoopConnRef\)](<#LoopLayer.OnOpen>)
+  - [func \(LoopLayer\) OnStart\(lanes int\)](<#LoopLayer.OnStart>)
+  - [func \(LoopLayer\) OnTimeout\(io LoopIO, ref LoopConnRef\)](<#LoopLayer.OnTimeout>)
+  - [func \(LoopLayer\) OnWritable\(io LoopIO, ref LoopConnRef\)](<#LoopLayer.OnWritable>)
+- [type LoopLayered](<#LoopLayered>)
+  - [func \(LoopLayered\) Next\(\) LoopHandler](<#LoopLayered.Next>)
+- [type LoopMiddleware](<#LoopMiddleware>)
 - [type LoopOptionHonourer](<#LoopOptionHonourer>)
   - [func \(LoopOptionHonourer\) Honours\(k OptionKind\) bool](<#LoopOptionHonourer.Honours>)
 - [type LoopRingState](<#LoopRingState>)
+- [type LoopStarter](<#LoopStarter>)
+  - [func \(LoopStarter\) OnStart\(lanes int\)](<#LoopStarter.OnStart>)
 - [type LoopState](<#LoopState>)
 - [type LoopValue](<#LoopValue>)
 - [type Middleware](<#Middleware>)
@@ -385,6 +402,15 @@ const OptionIdleTimeout OptionKind = 5
 OptionIdleTimeout is IdleTimeout. The loop engine honours it.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionIdleTimeout`.
+
+<a name="OptionLoopMiddleware"></a>
+```go
+const OptionLoopMiddleware OptionKind = 19
+```
+
+OptionLoopMiddleware is UseLoop. A group no loop handler serves refuses it.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.OptionLoopMiddleware`.
 
 <a name="OptionMaxConns"></a>
 ```go
@@ -702,6 +728,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopGroupStalled`.
 
 Code `0.2.11.59` · reason `LOOP_GROUP_STALLED` · public "A loop group stopped accepting connections"
 
+<a name="LoopMiddlewareInvalid"></a>
+```go
+var LoopMiddlewareInvalid *errs.Error
+```
+
+LoopMiddlewareInvalid reports a loop middleware whose layer does not forward every callback.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopMiddlewareInvalid`.
+
+Code `0.2.11.61` · reason `LOOP_MIDDLEWARE_INVALID` · public "A loop middleware does not forward every callback"
+
 <a name="LoopNoDescriptors"></a>
 ```go
 var LoopNoDescriptors *errs.Error
@@ -968,6 +1005,15 @@ func New(opts ...Option) *Server
 ```
 
 New builds a server.
+
+<a name="NewLoopLayer"></a>
+## func [NewLoopLayer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+```go
+func NewLoopLayer(next LoopHandler) LoopLayer
+```
+
+NewLoopLayer returns the LoopLayer a loop middleware's layer embeds over next, forwarding every callback to it.
 
 <a name="Plaintext"></a>
 ## func [Plaintext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
@@ -1293,6 +1339,15 @@ func (*Group) Use(middlewares ...corenet.Middleware[corenet.ConnHandler]) *Strea
 
 Use appends middlewares, outermost first.
 
+<a name="Group.UseLoop"></a>
+### func \(Group\) [UseLoop](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/server/stream_group.go>)
+
+```go
+func (*Group) UseLoop(middlewares ...corenet.Middleware[corenet.LoopHandler]) *StreamGroup
+```
+
+UseLoop appends loop middlewares, outermost first, and records the OptionLoopMiddleware kind on every call, even with none. A loop group wraps its handler in them at Start, after checking that each layer is a corenet.LoopLayered whose Next is what it was given and that every one of the eight callbacks, sent through a probe chain, reaches the probe: a layer that fails either check fails Start with LoopMiddlewareInvalid. The chain honours an option when one of its layers or the handler does. A group no loop handler serves refuses UseLoop with LoopOptionUnsupported.
+
 <a name="GroupOption"></a>
 ## type [GroupOption](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
@@ -1554,10 +1609,11 @@ type LoopIO interface {
 	// LoopStaleRef and does nothing.
 	Close(ref LoopConnRef) error
 	// Loop returns the index of the loop this LoopIO belongs to, from 0 to the
-	// group's loop count less one, fixed for the loop's life. A handler keeps
-	// its per-loop state — a scratch, a batch, a buffer — in a slice indexed by
-	// it, so a callback finds its own with no lock and no map. The portable
-	// backend runs one loop, index 0. Any goroutine may call it.
+	// group's lane count less one, fixed for the loop's life: its lane. A
+	// handler keeps its per-lane state — a scratch, a batch, a buffer — in a
+	// slice indexed by it and sized at LoopStarter.OnStart, so a callback finds
+	// its own with no lock and no map. The portable backend runs LoopValue.Loops
+	// lanes too, one handler goroutine each. Any goroutine may call it.
 	Loop() int
 	// Post queues op to run once on the loop's thread with arg, and wakes the
 	// loop. It is the one operation any goroutine may call. The queue is
@@ -1602,7 +1658,7 @@ Close closes ref's connection once the output already written has left, and call
 func (LoopIO) Loop() int
 ```
 
-Loop returns the index of the loop this LoopIO belongs to, from 0 to the group's loop count less one, fixed for the loop's life. A handler keeps its per-loop state — a scratch, a batch, a buffer — in a slice indexed by it, so a callback finds its own with no lock and no map. The portable backend runs one loop, index 0. Any goroutine may call it.
+Loop returns the index of the loop this LoopIO belongs to, from 0 to the group's lane count less one, fixed for the loop's life: its lane. A handler keeps its per-lane state — a scratch, a batch, a buffer — in a slice indexed by it and sized at LoopStarter.OnStart, so a callback finds its own with no lock and no map. The portable backend runs LoopValue.Loops lanes too, one handler goroutine each. Any goroutine may call it.
 
 <a name="LoopIO.Post"></a>
 ### func \(LoopIO\) [Post](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
@@ -1639,6 +1695,146 @@ func (LoopIO) Write(ref LoopConnRef, p []byte) error
 ```
 
 Write copies p into ref's output and returns. Writes on one reference leave in the order they were made, and p may be reused once Write returns. It is refused with LoopOutputFull, copying nothing, when p would pass the connection's output ceiling or the loop's global output budget, and with LoopStaleRef when ref's connection has closed.
+
+<a name="LoopLayer"></a>
+## type [LoopLayer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+LoopLayer is the base a loop middleware's layer embeds: it forwards the eight callbacks to the handler it wraps.
+
+```go
+type LoopLayer = corenet.LoopLayer
+```
+
+LoopLayer is an alias of `github.com/kitsunium/sdk/internal/core/net.LoopLayer`, declared as:
+
+```go
+type LoopLayer struct{}
+```
+
+<a name="LoopLayer.Honours"></a>
+### func \(LoopLayer\) [Honours](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/loop_layer.go>)
+
+```go
+func (LoopLayer) Honours(k OptionKind) bool
+```
+
+Honours reports whether the wrapped handler honours the option of kind k: its own Honours when it is a LoopOptionHonourer, false otherwise.
+
+<a name="LoopLayer.Next"></a>
+### func \(LoopLayer\) [Next](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/loop_layer.go>)
+
+```go
+func (LoopLayer) Next() LoopHandler
+```
+
+Next returns the handler the layer wraps.
+
+IFACE-PLUGIN: the wrapped handler is whatever the next layer, or the consumer, wrote.
+
+<a name="LoopLayer.OnBatchEnd"></a>
+### func \(LoopLayer\) [OnBatchEnd](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/loop_layer.go>)
+
+```go
+func (LoopLayer) OnBatchEnd(io LoopIO)
+```
+
+OnBatchEnd forwards to the wrapped handler.
+
+<a name="LoopLayer.OnClose"></a>
+### func \(LoopLayer\) [OnClose](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/loop_layer.go>)
+
+```go
+func (LoopLayer) OnClose(io LoopIO, ref LoopConnRef, err error)
+```
+
+OnClose forwards to the wrapped handler.
+
+<a name="LoopLayer.OnData"></a>
+### func \(LoopLayer\) [OnData](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/loop_layer.go>)
+
+```go
+func (LoopLayer) OnData(io LoopIO, ref LoopConnRef, buf []byte) int
+```
+
+OnData forwards to the wrapped handler and returns what it consumed.
+
+<a name="LoopLayer.OnOpen"></a>
+### func \(LoopLayer\) [OnOpen](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/loop_layer.go>)
+
+```go
+func (LoopLayer) OnOpen(io LoopIO, ref LoopConnRef)
+```
+
+OnOpen forwards to the wrapped handler.
+
+<a name="LoopLayer.OnStart"></a>
+### func \(LoopLayer\) [OnStart](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/loop_layer.go>)
+
+```go
+func (LoopLayer) OnStart(lanes int)
+```
+
+OnStart forwards to the wrapped handler when it is a LoopStarter.
+
+<a name="LoopLayer.OnTimeout"></a>
+### func \(LoopLayer\) [OnTimeout](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/loop_layer.go>)
+
+```go
+func (LoopLayer) OnTimeout(io LoopIO, ref LoopConnRef)
+```
+
+OnTimeout forwards to the wrapped handler.
+
+<a name="LoopLayer.OnWritable"></a>
+### func \(LoopLayer\) [OnWritable](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/loop_layer.go>)
+
+```go
+func (LoopLayer) OnWritable(io LoopIO, ref LoopConnRef)
+```
+
+OnWritable forwards to the wrapped handler.
+
+<a name="LoopLayered"></a>
+## type [LoopLayered](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+LoopLayered is what every layer of a loop middleware implements: Next is the handler it wraps.
+
+```go
+type LoopLayered = corenet.LoopLayered
+```
+
+LoopLayered is an alias of `github.com/kitsunium/sdk/internal/core/net.LoopLayered`, declared as:
+
+```go
+type LoopLayered interface {
+	// Next returns the handler the layer wraps.
+	Next() LoopHandler
+}
+```
+
+<a name="LoopLayered.Next"></a>
+### func \(LoopLayered\) [Next](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (LoopLayered) Next() LoopHandler
+```
+
+Next returns the handler the layer wraps.
+
+<a name="LoopMiddleware"></a>
+## type [LoopMiddleware](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+LoopMiddleware decorates a loop handler with a layer, for UseLoop.
+
+```go
+type LoopMiddleware = corenet.Middleware[corenet.LoopHandler]
+```
+
+LoopMiddleware is an alias of `github.com/kitsunium/sdk/internal/core/net.Middleware`, declared as:
+
+```go
+type LoopMiddleware[H any] func(next H) H
+```
 
 <a name="LoopOptionHonourer"></a>
 ## type [LoopOptionHonourer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
@@ -1713,6 +1909,35 @@ type LoopRingState struct {
 	Draining      bool   `json:"draining"`
 }
 ```
+
+<a name="LoopStarter"></a>
+## type [LoopStarter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+LoopStarter is the optional capability of a LoopHandler that keeps state per lane: OnStart gives it the lane count, once, before any other callback.
+
+```go
+type LoopStarter = corenet.LoopStarter
+```
+
+LoopStarter is an alias of `github.com/kitsunium/sdk/internal/core/net.LoopStarter`, declared as:
+
+```go
+type LoopStarter interface {
+	// OnStart is called once, before any other callback, with the number of
+	// lanes: every LoopIO.Loop the group's callbacks see is from 0 to lanes
+	// less one.
+	OnStart(lanes int)
+}
+```
+
+<a name="LoopStarter.OnStart"></a>
+### func \(LoopStarter\) [OnStart](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (LoopStarter) OnStart(lanes int)
+```
+
+OnStart is called once, before any other callback, with the number of lanes: every LoopIO.Loop the group's callbacks see is from 0 to lanes less one.
 
 <a name="LoopState"></a>
 ## type [LoopState](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
