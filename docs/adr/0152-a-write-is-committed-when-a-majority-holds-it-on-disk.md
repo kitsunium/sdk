@@ -1172,6 +1172,9 @@ followers and sent it nothing. From protocol 2:
   above, which the learner takes under the same bounds as a voter. No frame
   or format is added: the PreVote is protocol 1's, and the record is still
   sent only to a PreVote carrying `FlagProtocol2`.
+  A silent voter and a voter with no table, which never campaign either,
+  ask the same question (amendment of 2026-10-27,
+  [#718](https://github.com/kitsunium/sdk/issues/718)).
 
 **A removal never leaves a voter with no known member to vouch for the
 leader (amendment of 2026-10-23, #603).** The record above needs a member of
@@ -5251,6 +5254,52 @@ member (#665). The remedy was manual: `Remove`, then `WipeAndRejoin` and
 No frame, payload, record or stamp format changes, and no raft mutation is
 added: the step function is unchanged.
 
+## Amendment — a voter that may not campaign asks for the leader's record, as a learner does (2026-10-27, #718)
+
+A voter left silent by `TruncateAndStaySilent` never campaigns (#524), so
+it never sent the PreVote D4's leader record answers (#542), and the
+question of #639 was a learner's only. A founder down while a member was
+admitted, promoted and handed the leadership, whose log was then found
+damaged and truncated before that admission, came back silent over a
+configuration that does not list the leader: its transport refused the
+leader's key, and the members it knows, followers of that leader, sent it
+nothing. It was never rewritten, so it never ended its silence and never
+voted again for as long as that leader led, for good in a stable cluster
+or under `PreferredLeaders`: R4-03's condition, a leader that rewrites the
+log, was never met, where R5-13 states a cost that lasts only while
+another node is down. Meanwhile the cluster tolerated one
+failure less, a raise to protocol 3 was refused `VERSION_UNSUPPORTED`
+while the silent voter was listed and unheard, and one more failure left
+no leader until the failed node returned
+([#718](https://github.com/kitsunium/sdk/issues/718)). A voter with no
+table (D7), which never campaigns either, had the same gap: behind such a
+leader it was never sent the install it waits for.
+
+- **Every node that may not campaign asks.** The question of #639 is asked
+  by a follower or a learner that raft's `promotable` excludes: a learner,
+  a silent voter, a voter with no table. Nothing else of it changes: after
+  two maximum election timeouts without hearing a leader, then every two
+  while it hears none, a PreVote to every other member of its
+  configuration, which a follower of a live leader answers with the
+  record under D4's rules, and which the node takes under the same bounds.
+- **The question binds nothing the silence forbids.** The node does not
+  become a pre-candidate, counts no answer and keeps its term. A silent
+  voter still grants no vote, requests none and acknowledges nothing, and
+  its silence ends only under R3-09, #636 and #684, on the appends of the
+  leader the record admits. A campaign that an install left outside the
+  voters keeps its role until it ends, and asks nothing.
+- **Compatibility.** No frame, payload or record format changes, and no
+  protocol raise: the question is protocol 1's PreVote, the record is
+  still sent only to one carrying `FlagProtocol2`, and a node that speaks
+  protocol 1 asks nothing. A member of an older release answers the
+  question as any PreVote, with no record: the silent voter stays silent,
+  as before, and asks again every two maximum election timeouts.
+- **What it costs.** Such a node sends one PreVote per member every two
+  maximum election timeouts while it hears no leader. No raft mutation is
+  added: `mutLearnerNeverAsks` and `mutAskCampaigns` now cover every node
+  that asks, and `checkStrandedVoterAsks` catches both on a silent voter
+  and on one with no table.
+
 ## Revision history
 
 | Version | Round | What changed |
@@ -5274,6 +5323,7 @@ added: the step function is unchanged.
 | #701 | Raft hunt loop, 2026-10-27 | a removal of the leader submitted on it is submitted again on `NOT_LEADER` as on `MEMBERSHIP_CHANGE_PENDING`, within the hand-off's window, until the node hears of the leader its hand-off elected; no format change (amendment of 2026-10-27, #701) |
 | #707 | Raft hunt loop, 2026-10-27 | a `DurableStateMachine`'s applied index the log holds at the machine's term is taken as committed at the start, and a cut past the step function's commit waits for it; no format change (amendment of 2026-10-27, #707) |
 | #695 | Raft hunt loop, 2026-10-27 | a joiner's stamp turns a member's only once the log is durable through the entries that admit it, the configuration judged at the commit bounded by the durable index, at each Ready and each storage completion; no format change, no raft mutation (amendment of 2026-10-27, #695) |
+| #718 | Raft hunt loop, 2026-10-27 | a silent voter and a voter with no table, which never campaign, ask their members for the leader's record once they hear no leader, as a learner does (#639); no format change, no protocol raise (amendment of 2026-10-27, #718) |
 
 ## raft-sql-poc (owner's prior Raft)
 
