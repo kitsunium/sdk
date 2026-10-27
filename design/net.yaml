@@ -254,9 +254,9 @@ packages:
         type: errs.Code
       - const:
           - doc: |-
-              CodeLoopTLSUnsupported identifies a loop group given a TLS identity: the
-              loop engine speaks plaintext only, and the SDK owns no TLS stack it could
-              drive without a blocking net.Conn (ADR 0186 §D2).
+              CodeLoopTLSUnsupported identifies a loop group given TLS it cannot take: a
+              raw loop handler, the loop engine speaking plaintext only (ADR 0186 §D2), or
+              a contradiction of the http1 codec's TLS path (ADR 0196).
             name: CodeLoopTLSUnsupported
             value: "0x00_02_0B_23"
         type: errs.Code
@@ -2084,9 +2084,11 @@ packages:
             reason: STATIC_MISCONFIGURED
           - code: CodeLoopTLSUnsupported
             doc: |-
-              LoopTLSUnsupported is returned by Start for a loop group given TLS. The loop
-              engine is plaintext only (ADR 0186 §D2); a group that needs TLS is served by
-              Handle or HandleHTTP on the default engine.
+              LoopTLSUnsupported is returned by Start for a loop group given TLS that
+              cannot take it: a raw loop handler — the loop engine is plaintext only (ADR
+              0186 §D2) — or, for the http1 codec, which takes TLS on the portable backend
+              (ADR 0196), a zero identity, an explicit native backend or a loop
+              middleware; the "option" field names it.
             exit: CONFIG
             name: LoopTLSUnsupported
             private: "core/net: a loop group was given a TLS identity; the loop engine is plaintext only"
@@ -4716,6 +4718,14 @@ packages:
                 type: int
             name: OnStart
             recv: pointer
+          - doc: |-
+              Unwrap returns the HTTP1Handler the adapter serves: what tells a loop group
+              that its handler speaks the codec, so it may take TLS on the portable
+              backend (ADR 0187 §D5).
+            name: Unwrap
+            out:
+              - type: corenet.HTTP1Handler
+            recv: pointer
         name: LoopHandler
         struct:
           unexported: true
@@ -5618,7 +5628,8 @@ packages:
               profile's codec on the loop engine; a handler that is both needs Engine to
               choose. The group is named "tcp+" + addr unless Name says otherwise, and
               opts apply as they do to Group. Without TLS, Plaintext is required (ADR
-              0187 §D7). Every refusal is reported by Start: a nil or typed nil handler
+              0187 §D7); with TLS, an HTTP1Handler runs on the portable backend, crypto/tls
+              negotiating HTTP/1.1 first (ADR 0196). Every refusal is reported by Start: a nil or typed nil handler
               (HandlerMissing), both interfaces without Engine (HandlerAmbiguous), an
               Engine the handler cannot run on (EngineUnsupported), a type no engine of
               HTTP serves (HandlerUnsupported), Plaintext with TLS (PlaintextWithTLS),
@@ -5746,14 +5757,17 @@ packages:
               HandleLoop serves the group on the loop engine (ADR 0186): h is called on
               the loop's own thread for every connection of the group, with the bytes
               each one receives, instead of a goroutine per connection. It is opt-in, and
-              plaintext only.
+              plaintext, but for the http1 codec (http1.HandleLoop), which takes TLS:
+              crypto/tls negotiates each connection on its own goroutine, bounded by
+              HandshakeTimeout, offering HTTP/1.1 alone, and the cleartext reaches the
+              codec on the portable backend's lanes (ADR 0196).
 
               The group keeps the server's lifecycle — the bind, the adoption of
               inherited sockets, MaxConns, the drain, State — and Loop(v) sizes and
               places the engine: io_uring after a probe of the running kernel, then epoll,
               on Linux, and the portable backend, the default engine's accept path
               serialised onto one handler goroutine, everywhere else. Start refuses a loop
-              group given TLS with LoopTLSUnsupported, one given Use or an option neither
+              group given TLS it cannot take with LoopTLSUnsupported, one given Use or an option neither
               the engine (IdleTimeout, MaxConns, Adopt, Plaintext, Name, Engine) nor h,
               through LoopOptionHonourer, honours with LoopOptionUnsupported — an option
               given counts, its zero value included —, and an explicit backend the

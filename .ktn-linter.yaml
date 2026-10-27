@@ -2286,6 +2286,13 @@ rules:
       # exists for. Scoped to the one file; retire with #693.
       - "**/internal/service/data/sql/withheld.go"
       - "internal/service/data/sql/withheld.go"
+      # TEMPORARY — the same kodflow/ktn-linter#693, on http1.LoopHandler.Unwrap,
+      # the name the owner's D-N6 gives the method (ADR 0187 §D5, ADR 0196):
+      # it is the protocol a loop group asks of its handler to learn it speaks
+      # the codec, not a getter of field h. Scoped to the one file; retire
+      # with #693.
+      - "**/internal/service/net/http1/loop.go"
+      - "internal/service/net/http1/loop.go"
 
   # ── Audit 2026-05-28 — all five scoped overrides RETIRED (ktn-linter v1.34.5) ─
   # Every exclusion that used to live here was removed and the linter re-run on

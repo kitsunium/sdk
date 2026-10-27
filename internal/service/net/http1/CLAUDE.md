@@ -31,7 +31,7 @@ link reads `Path`, the canonical target `Parse` computed, never `Target`.
 | `chain.go` | the chain's links: `Routes` (`RouteValue`, `RouteLayer`), `Bearer` (`BearerLayer`), `Headers` (`HeadersLayer`), `Log` (`LogLayer`); each layer forwards `EndBatch` |
 | `refusal.go` | `Refusal` and its 26 values; `Status`, `Err` (the core sentinel), `String` |
 | `write.go` | `AppendStatusLine`, `AppendField`, `AppendResponse`, `AppendRefusal`; the precomputed status lines |
-| `loop.go` | `HandleLoop`, `LoopHandler`: the loop adapter — per-lane state built at `OnStart` (`loopState`: the request value, the batch's answers in `out`, the pooled response values, a flag per connection by ring and slot), deferred answers completed in request order (`complete`), one `Write` per connection run (`flush`) |
+| `loop.go` | `HandleLoop`, `LoopHandler` (`Unwrap` returns the `HTTP1Handler`, so a group may take TLS on the portable backend, ADR 0196): the loop adapter — per-lane state built at `OnStart` (`loopState`: the request value, the batch's answers in `out`, the pooled response values, a flag per connection by ring and slot), deferred answers completed in request order (`complete`), one `Write` per connection run (`flush`) |
 | `loop_fixtures_test.go` | the adapter's batch fixture (`perfLoop`, `perfH`) and the request bytes, untagged so the benchmarks reach them under race too |
 | `loop_external_test.go` | the adapter on a fake `LoopIO`: order of immediate and deferred answers, every way a connection closes, HEAD, slot reuse, several loops |
 | `target_external_test.go` | the canonical target: what each form reduces to, every refusal, and `Parse` resetting what a link set |

@@ -228,6 +228,14 @@ func (a *LoopHandler) OnBatchEnd(io corenet.LoopIO) {
 	st.items, st.out, st.served = st.items[:0], st.out[:0], 0
 }
 
+// Unwrap returns the HTTP1Handler the adapter serves: what tells a loop group
+// that its handler speaks the codec, so it may take TLS on the portable
+// backend (ADR 0187 §D5).
+func (a *LoopHandler) Unwrap() corenet.HTTP1Handler {
+	//: the handler given to HandleLoop.
+	return a.h
+}
+
 // OnStart implements corenet.LoopStarter: it builds every lane's state
 // before the first callback, so no lane builds its own under a lock.
 func (a *LoopHandler) OnStart(lanes int) {

@@ -106,6 +106,9 @@ type portableGroup struct {
 	noDelayOff bool
 	lanes      []*portableLoop
 	lns        []stdnet.Listener
+	// handshake bounds a TLS connection's negotiation, which runs before the
+	// lane sees it; zero for a plaintext group (ADR 0196).
+	handshake time.Duration
 	// turn is the lane the next accepted connection goes to, modulo the count.
 	turn     atomic.Uint64
 	drainReq atomic.Bool
@@ -176,6 +179,10 @@ func startPortable(group *StreamGroup, lns []stdnet.Listener, degraded string, p
 		degraded: degraded, lns: lns,
 		caps:       append(loop.Unprobed("portable", plan.disabled, plan.disabledBy), portableNoDelay(plan)),
 		noDelayOff: slices.Contains(plan.disabled, corenet.CapabilityTCPNoDelay),
+	}
+	//: a TLS codec group negotiates each connection first.
+	if group.tlsCodec() {
+		g.handshake = group.handshakeBound()
 	}
 	//: the lanes, built before any acceptor can hand one a connection.
 	for i := range loopLanes(v) {
@@ -249,9 +256,46 @@ func (g *portableGroup) acceptLoop(ln stdnet.Listener) {
 			swallowErr(c.Close())
 			continue
 		}
-		pl := g.lanes[(g.turn.Add(1)-1)%uint64(len(g.lanes))]
-		pl.live.Add(1)
-		pl.events <- portableEvent{kind: pevOpen, conn: c}
+		g.dispatch(c)
+	}
+}
+
+// dispatch hands c to the next lane, in turn; a TLS connection is negotiated
+// first, off the acceptor, so the lane sees it only once it is cleartext.
+//
+// Goroutine lifecycle: for a TLS group, one negotiate goroutine per
+// connection, which returns once the handshake ends and the connection is
+// handed to its lane or closed.
+func (g *portableGroup) dispatch(c stdnet.Conn) {
+	pl := g.lanes[(g.turn.Add(1)-1)%uint64(len(g.lanes))]
+	pl.live.Add(1)
+	//: TLS: negotiated off the acceptor, before the lane sees it.
+	if g.handshake > 0 {
+		go pl.negotiate(c, g.handshake)
+		//: handed over.
+		return
+	}
+	pl.events <- portableEvent{kind: pevOpen, conn: c}
+}
+
+// negotiate completes c's TLS handshake within d, then hands c to the lane;
+// a failed or stalled one closes it, and the lane never sees it.
+//
+// Goroutine lifecycle: one per accepted TLS connection, started by
+// acceptLoop; it returns once the handshake ends and the connection is handed
+// over, or the lane has stopped, which closes the connection instead.
+func (pl *portableLoop) negotiate(c stdnet.Conn, d time.Duration) {
+	//: given up: the lane never counted it.
+	if !handshake(c, d) {
+		pl.live.Add(-1)
+		//: closed.
+		return
+	}
+	select {
+	case pl.events <- portableEvent{kind: pevOpen, conn: c}:
+	case <-pl.done:
+		pl.live.Add(-1)
+		swallowErr(c.Close())
 	}
 }
 

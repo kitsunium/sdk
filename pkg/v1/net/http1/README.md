@@ -102,6 +102,7 @@ Parser.Parse, AppendResponse and AppendRefusal frame and write without the loop,
   - [func \(\*LoopHandler\) OnStart\(lanes int\)](<#LoopHandler.OnStart>)
   - [func \(\*LoopHandler\) OnTimeout\(io corenet.LoopIO, ref corenet.LoopConnRef\)](<#LoopHandler.OnTimeout>)
   - [func \(\*LoopHandler\) OnWritable\(io corenet.LoopIO, ref corenet.LoopConnRef\)](<#LoopHandler.OnWritable>)
+  - [func \(\*LoopHandler\) Unwrap\(\) corenet.HTTP1Handler](<#LoopHandler.Unwrap>)
 - [type Middleware](<#Middleware>)
 - [type Parser](<#Parser>)
   - [func \(Parser\) Limits\(\) corenet.HTTP1LimitsValue](<#Parser.Limits>)
@@ -892,6 +893,15 @@ func (*LoopHandler) OnWritable(io corenet.LoopIO, ref corenet.LoopConnRef)
 ```
 
 OnWritable implements corenet.LoopHandler. Nothing waits on it: an answer the output refuses closes its connection.
+
+<a name="LoopHandler.Unwrap"></a>
+### func \(LoopHandler\) [Unwrap](<https://github.com/kitsunium/sdk/blob/main/internal/service/net/http1/loop.go>)
+
+```go
+func (*LoopHandler) Unwrap() corenet.HTTP1Handler
+```
+
+Unwrap returns the HTTP1Handler the adapter serves: what tells a loop group that its handler speaks the codec, so it may take TLS on the portable backend (ADR 0187 §D5).
 
 <a name="Middleware"></a>
 ## type [Middleware](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/http1/gen_facade.go>)

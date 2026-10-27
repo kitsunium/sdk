@@ -321,6 +321,7 @@ files:
       - (*LoopHandler).OnTimeout
       - (*LoopHandler).OnWritable
       - (*LoopHandler).OnBatchEnd
+      - (*LoopHandler).Unwrap
       - (*LoopHandler).OnStart
       - (*LoopHandler).OnClose
       - (*loopState).complete
@@ -972,6 +973,9 @@ types:
       - name: OnBatchEnd
         params: io corenet.LoopIO
         recv: a *LoopHandler
+      - name: Unwrap
+        recv: a *LoopHandler
+        results: corenet.HTTP1Handler
       - name: OnStart
         params: lanes int
         recv: a *LoopHandler
