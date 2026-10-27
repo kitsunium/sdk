@@ -17,17 +17,25 @@ turns the engine's soft pressure into `Connection: close`, and writes the
 batch's answers at `OnBatchEnd`, after the handler's `HTTP1Batcher.EndBatch`.
 Published by `pkg/v1/net/http1` (ADR 0186 §D9 step 12).
 
+The chain (ADR 0191): `Routes`, `Bearer`, `Headers` and `Log` each return a
+`corenet.Middleware[corenet.HTTP1Handler]`, composed by `corenet.Chain`; every
+link reads `Path`, the canonical target `Parse` computed, never `Target`.
+
 ## Contents
 
 | File | Surface |
 |---|---|
 | `doc.go` | the package comment — what the profile refuses, the framing rule, a usage sketch |
-| `parse.go` | `Parser` (`NewParser`, `Limits`, `Parse`), `Continue`, `Pending`; the request line, field and Content-Length rules |
-| `refusal.go` | `Refusal` and its 23 values; `Status`, `Err` (the core sentinel), `String` |
+| `parse.go` | `Parser` (`NewParser`, `Limits`, `Parse`), `Continue`, `Pending`; the request line, field and Content-Length rules; `reset` clears what a link sets too (`Route`, `Auth`, `Authenticated`) |
+| `target.go` | `canonical`: `Path` and `Query` once the head is whole — origin-form, absolute-form reduced once its authority equals Host, `*` for OPTIONS — and the three target refusals (ADR 0191 §D3) |
+| `chain.go` | the chain's links: `Routes` (`RouteValue`, `RouteLayer`), `Bearer` (`BearerLayer`), `Headers` (`HeadersLayer`), `Log` (`LogLayer`); each layer forwards `EndBatch` |
+| `refusal.go` | `Refusal` and its 26 values; `Status`, `Err` (the core sentinel), `String` |
 | `write.go` | `AppendStatusLine`, `AppendField`, `AppendResponse`, `AppendRefusal`; the precomputed status lines |
 | `loop.go` | `HandleLoop`, `LoopHandler`: the loop adapter — per-lane state built at `OnStart` (`loopState`: the request value, the batch's answers in `out`, the pooled response values, a flag per connection by ring and slot), deferred answers completed in request order (`complete`), one `Write` per connection run (`flush`) |
 | `loop_fixtures_test.go` | the adapter's batch fixture (`perfLoop`, `perfH`) and the request bytes, untagged so the benchmarks reach them under race too |
 | `loop_external_test.go` | the adapter on a fake `LoopIO`: order of immediate and deferred answers, every way a connection closes, HEAD, slot reuse, several loops |
+| `target_external_test.go` | the canonical target: what each form reduces to, every refusal, and `Parse` resetting what a link set |
+| `chain_external_test.go` | each link — routes matched, 401s, the subject copied (the token's bytes overwritten after), fields never written into, records without a credential or the query, every misconfiguration — and a chain behind the adapter: deferred answers through every layer, a link writing `Consumed` changing nothing, the lane |
 | `corpus_external_test.go` | every vector of the C reference (`bench/cref/src/parse_test.c`), the profile's own refusals, the smuggling vectors, limits, prefixes, framing, early answers, pipelining |
 | `fuzz_external_test.go` | `FuzzParseProperties`, `TestMutations` (the C reference's mutation loop), `FuzzDifferential` against `net/http.ReadRequest` |
 | `write_external_test.go` | the writer, read back by `net/http.ReadResponse` |
@@ -106,6 +114,29 @@ negative one or one past its maximum is `HTTP1Misconfigured` at `NewParser`.
   (ADR 0191 §D1); a lane past the count, or an adapter driven without
   `OnStart`, still builds its own under a mutex the first time it calls. The
   data path reads it without a lock. A lane touches only its own entry.
+- **One canonical target, computed once by the codec** (ADR 0191 §D3). A
+  router and an authenticating link that read two targets is how a route
+  escapes its check: `/health/../api`, `//api`, `%2e%2e`, `%2f`, an
+  absolute-form whose authority is not the Host. `Parse` refuses every one
+  with 400 and hands each link the same `Path`, still encoded: no escape left
+  in it can spell a separator, so nothing has to be decoded, and nothing
+  allocates. `canonical` runs once the head is whole, since absolute-form is
+  judged against Host; the refusal still depends only on head bytes, so the
+  codec stays monotone.
+- **A link never frames.** The adapter advances by the `n` `Parse` returned,
+  before the handler runs; `Consumed`, `HeadLen` and `Body` written by a link
+  change nothing (`TestChain_onTheLoop`).
+- **The links allocate nothing, by shape.** `Routes` compares bytes with the
+  table built once; `Bearer` lets the verifier write the request's own
+  `HTTP1AuthValue`, so no value of its own escapes to the heap; `Headers`
+  hands out its bytes with no spare capacity, so an append copies rather
+  than writes into them; `Log` passes its record by value. A 401 behind
+  `Headers` copies its field after the link's: the one error path that
+  allocates, named in the budget.
+- **Every layer forwards `EndBatch`.** `HandleLoop` finds the batcher on the
+  handler it is given, the chain's outermost layer; a layer that did not
+  forward would leave every deferred answer deferred, answered 500. A link a
+  program writes itself must do the same.
 - **Answers leave at the batch's end, in request order.** An immediate answer
   is written into the loop's `out` when `ServeHTTP1` returns, so the handler's
   bytes need live no longer; a deferred one (`Defer`) keeps its pooled
@@ -137,8 +168,9 @@ takes about 1.4 µs and 11 allocations; `AppendResponse` about 16 ns. On the C
 reference's own stream the codec is about 2.1× `http_parse.c` (249 against
 118 ns a request) — a diagnostic, never a gate. Budgets
 (`design/sdk.yaml`) are allocation counts only — `Parse`, `AppendResponse`,
-`AppendStatusLine`, `AppendField`, `AppendRefusal`, `(*LoopHandler).OnData` and
-`(*LoopHandler).OnBatchEnd` at 0 — never nanoseconds (ADR 0165). A batch of
+`AppendStatusLine`, `AppendField`, `AppendRefusal`, `(*LoopHandler).OnData`,
+`(*LoopHandler).OnBatchEnd` and the four links' `ServeHTTP1` at 0 — never
+nanoseconds (ADR 0165). A batch of
 sixteen pipelined GETs through the adapter costs about 107 ns a request,
 deferred ones about 110.
 
@@ -173,5 +205,6 @@ cd internal && GOWORK=off go test -run '^$' -fuzz FuzzParseProperties -fuzztime 
 ## Reference
 
 - ADR 0186 §D6 (the profile), §D9 (publication order); ADR 0160 §4; ADR 0029 D3.
+- ADR 0191 §D3 (the canonical target), §D4 (the chain).
 - RFC 9110 §5.6.2 (tchar), §10.1.1 (Expect), §15; RFC 9112 §2.2, §3, §5, §6, §11.
 - `bench/cref/src/http_parse.{c,h}`, `parse_test.c` — the C reference, same scope.

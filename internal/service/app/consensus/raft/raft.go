@@ -192,6 +192,9 @@ type StartState struct {
 	// entry keeps its own. Only a committed entry may be loaded so (#663).
 	Evicted uint64
 	// Applied is where the state machine resumes, at least the snapshot.
+	// Above HardState.Commit, NewRaft takes it as committed while the log
+	// holds it (#707): the caller passes such an index only when the log
+	// holds there the entry the machine applied, or does not hold it.
 	Applied uint64
 	// Now is the start instant: the restart vote-refusal window opens here.
 	Now time.Time
@@ -462,7 +465,7 @@ func NewRaft(cfg *Config, st *StartState) *Raft {
 	node.loadEntries(st)
 	node.log.stable = node.log.lastIndex()
 	node.raiseSilenceOverSnapshot()
-	node.log.committed = min(max(st.HardState.Commit, node.log.snapIndex), node.log.lastIndex())
+	node.log.committed = startCommit(st, node.log.snapIndex, node.log.lastIndex())
 	node.log.applied = max(st.Applied, node.log.snapIndex)
 	node.log.applied = min(node.log.applied, node.log.committed)
 	node.applyCommitEffects(node.log.snapIndex+1, node.log.committed)
@@ -481,6 +484,29 @@ func NewRaft(cfg *Config, st *StartState) *Raft {
 	node.admittedPub = node.admitted()
 	node.rd.Membership = node.admittedPub
 	return node
+}
+
+// startCommit is the commit a start resumes from: the persisted one, at
+// least the snapshot's, and at least the applied index while the log holds
+// it, never past the log's end. A Ready that only moves the commit is
+// written lazily and rides the next sync, so a crash left the persisted
+// commit below what a DurableStateMachine had applied; NewRaft replayed the
+// engine effects through that commit alone, and a snapshot cut at the
+// applied index recorded the cluster version, timing contract and alarm of
+// the older commit, which the node restarted from it ran for good (#707).
+// Apply is handed committed, durable entries only, and the caller passes an
+// applied index above the persisted commit only when the log holds there
+// the entry the machine applied: every entry through it is committed. An
+// applied index past the log's end raises nothing: the log then does not
+// lead to the machine's state — a log truncated below it, or the restore
+// of an install whose snapshot is no longer the base — and may hold, below
+// that index, entries that were never committed.
+func startCommit(st *StartState, snapIndex, last uint64) uint64 {
+	c := max(st.HardState.Commit, snapIndex)
+	if st.Applied <= last {
+		c = max(c, st.Applied)
+	}
+	return min(c, last)
 }
 
 // adoptClusterVersion takes the start's snapshot's cluster version, unless

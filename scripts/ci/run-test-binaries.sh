@@ -11,6 +11,11 @@
 # directly has no timeout of its own, and a hang must panic with every stack
 # and let the next suite run.
 #
+# A suite test-binaries.sh cut into parts is one manifest line per part: the
+# binary and its directory, then the part as k/n, its -test.run and its
+# -test.skip ("-" for none), passed before the flags given here. Each part is
+# a run of its own, with its own timeout and attempts, named DIR[k/n].
+#
 # A suite that fails is tried again, up to TEST_ATTEMPTS times in all (default
 # 3), and ONLY to tell a defect from a flake: a suite failing every attempt
 # fails, and a suite that failed and then passed FAILS TOO, named as flaky —
@@ -25,6 +30,8 @@
 # that never passed, "is flaky" for one that passed only on a retry.
 
 set -u
+# A part's regular expressions reach its binary as written: never as globs.
+set -f
 
 if [ "$#" -lt 1 ]; then
   echo "usage: run-test-binaries.sh BINDIR [TEST FLAG...]" >&2
@@ -52,41 +59,49 @@ failed=""
 flaky=""
 ran=0
 start=$(now)
-while read -r bin dir; do
+while read -r bin dir part run skip; do
   [ -n "$bin" ] || continue
   ran=$((ran + 1))
+  name=$dir
+  sel=""
+  if [ -n "$part" ]; then
+    name="${dir}[$part]"
+    [ "$run" = - ] || sel="-test.run=$run"
+    [ "$skip" = - ] || sel="$sel -test.skip=$skip"
+  fi
   t0=$(now)
   i=1
   ok=0
   hung=0
   while [ "$i" -le "$attempts" ]; do
-    if (cd "$root/$dir" && "$bindir/$bin" -test.timeout="$timeout" "$@") </dev/null >"$log" 2>&1; then
+    # shellcheck disable=SC2086 # $sel is the part's flags, split on purpose
+    if (cd "$root/$dir" && "$bindir/$bin" -test.timeout="$timeout" $sel "$@") </dev/null >"$log" 2>&1; then
       cat "$log"
       ok=1
       break
     fi
     cat "$log"
     if grep -q '^panic: test timed out after' "$log"; then
-      echo "  ($dir timed out on $kernel: not tried again)"
+      echo "  ($name timed out on $kernel: not tried again)"
       hung=1
       break
     fi
-    echo "  (attempt $i of $dir failed on $kernel)"
+    echo "  (attempt $i of $name failed on $kernel)"
     i=$((i + 1))
   done
   t1=$(now)
   if [ "$ok" -eq 1 ] && [ "$i" -eq 1 ]; then
-    echo "ok   $dir ($((t1 - t0))s)"
+    echo "ok   $name ($((t1 - t0))s)"
   elif [ "$ok" -eq 1 ]; then
-    echo "FLAKY $dir ($((t1 - t0))s, failed $((i - 1)) of $i attempts)"
-    flaky="$flaky $dir:$i"
+    echo "FLAKY $name ($((t1 - t0))s, failed $((i - 1)) of $i attempts)"
+    flaky="$flaky $name:$i"
   else
     if [ "$hung" -eq 1 ]; then
-      echo "FAIL $dir ($((t1 - t0))s, timed out after $timeout)"
+      echo "FAIL $name ($((t1 - t0))s, timed out after $timeout)"
     else
-      echo "FAIL $dir ($((t1 - t0))s, $attempts attempts)"
+      echo "FAIL $name ($((t1 - t0))s, $attempts attempts)"
     fi
-    failed="$failed $dir"
+    failed="$failed $name"
   fi
 done <"$bindir/manifest"
 

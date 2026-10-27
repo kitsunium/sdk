@@ -122,6 +122,7 @@ go_test(
         "listen_tracked_internal_test.go",
         "load_gate_linux_test.go",
         "load_l3_linux_internal_test.go",
+        "loop_chain_conformance_internal_test.go",
         "loop_chain_internal_test.go",
         "loop_group_internal_test.go",
         "loop_option_external_test.go",
@@ -172,13 +173,6 @@ go_test(
         "//internal/kernel/clock",
         "//internal/kernel/concur/worker",
         "//internal/kernel/errs",
-    ] + select({
-        "@rules_go//go/platform:android": [
-            "//internal/service/net/http1",
-        ],
-        "@rules_go//go/platform:linux": [
-            "//internal/service/net/http1",
-        ],
-        "//conditions:default": [],
-    }),
+        "//internal/service/net/http1",
+    ],
 )

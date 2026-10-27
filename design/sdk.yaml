@@ -592,6 +592,24 @@ budgets:
   - fn: go:github.com/kitsunium/sdk/internal/service/net/http1.(*LoopHandler).OnBatchEnd
     allocs: 0
     fixture: LoopHandlerOnBatchEnd
+  # The chain (plan P2): a router, a Bearer check copying the subject into
+  # the request by value, the response's fields and an access-log record
+  # handed by value. The chain's 0 allocations are P2's gate (tools/netgate),
+  # counted here on its own stack, a 401 included; the one exclusion is an
+  # error path, a 401 behind a Headers link, whose field is copied after the
+  # link's own.
+  - fn: go:github.com/kitsunium/sdk/internal/service/net/http1.(*RouteLayer).ServeHTTP1
+    allocs: 0
+    fixture: RouteLayerServeHTTP1
+  - fn: go:github.com/kitsunium/sdk/internal/service/net/http1.(*BearerLayer).ServeHTTP1
+    allocs: 0
+    fixture: BearerLayerServeHTTP1
+  - fn: go:github.com/kitsunium/sdk/internal/service/net/http1.(*HeadersLayer).ServeHTTP1
+    allocs: 0
+    fixture: HeadersLayerServeHTTP1
+  - fn: go:github.com/kitsunium/sdk/internal/service/net/http1.(*LogLayer).ServeHTTP1
+    allocs: 0
+    fixture: LogLayerServeHTTP1
   # jsonenc: every appender writes into the caller's slice and allocates
   # nothing once it has the room. The string appenders read their string
   # through a view, not a copy, so none of them lets it escape; the object

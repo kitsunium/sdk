@@ -764,6 +764,56 @@ SH
   [ "$status" -eq 1 ]
 }
 
+# A suite cut into parts (#701) is one run per part: the part's -test.run or
+# -test.skip reaches the binary as written, never globbed, before the flags
+# given, and each part is tried and named on its own, with its own timeout.
+@test "binaries: each part of a cut suite is a run of its own, with its selection, named" {
+  binaries_fixture
+  printf 'a.test a/pkg 1/2 ^Test[A]x -\na.test a/pkg 2/2 - ^Test[A]x\nb.test b/pkg\n' >bins/manifest
+  # The file the unquoted flag would glob to, were globbing on.
+  touch "$WORK/a/pkg/-test.run=^TestAx"
+  printf '0\n1\n1\n1\n' >"$WORK/a.codes"
+
+  run sh "$CI_DIR/run-test-binaries.sh" bins -test.v
+
+  [ "$status" -eq 1 ]
+  [ "$(sed -n 1p "$WORK/a.args")" = "-test.timeout=5m -test.run=^Test[A]x -test.v" ]
+  [ "$(sed -n 2p "$WORK/a.args")" = "-test.timeout=5m -test.skip=^Test[A]x -test.v" ]
+  [ "$(wc -l <"$WORK/a.ran" | tr -d ' ')" = "4" ]
+  [[ "$output" == *"ok   a/pkg[1/2]"* ]]
+  [[ "$output" == *"::error::a/pkg[2/2] fails on"* ]]
+  [[ "$output" != *"::error::a/pkg[1/2]"* ]]
+  [[ "$output" == *"3 suites on"* ]]
+  [ "$(cat "$WORK/b.args")" = "-test.timeout=5m -test.v" ]
+}
+
+# test-binaries.sh cuts the suites its parts table names, and only those: a
+# run per regular expression, and a last run skipping every one, so each
+# test runs once whatever its name. The go command is a stub: the packages it
+# lists, the binaries it writes.
+@test "binaries: test-binaries.sh writes a manifest line per part of a cut suite, one for a whole suite" {
+  cd "$WORK"
+  mkdir -p repo/scripts/ci repo/internal/service/app/consensus repo/internal/p stub
+  cp "$CI_DIR/test-binaries.sh" repo/scripts/ci/
+  cat >stub/go <<SH
+#!/bin/sh
+case "\$1" in
+  list) printf '%s\n' "$WORK/repo/internal/service/app/consensus" "$WORK/repo/internal/p" ;;
+  env) echo stubos ;;
+  test) while [ "\$#" -gt 0 ]; do [ "\$1" = -o ] && : >"\$2"; shift; done ;;
+esac
+SH
+  chmod +x stub/go
+
+  run env PATH="$WORK/stub:$PATH" bash repo/scripts/ci/test-binaries.sh "$WORK/bins" internal
+
+  [ "$status" -eq 0 ]
+  [ "$(cat "$WORK/bins/manifest")" = "internal__service__app__consensus.test internal/service/app/consensus 1/2 ^TestA -
+internal__service__app__consensus.test internal/service/app/consensus 2/2 - ^TestA
+internal__p.test internal/p" ]
+  [[ "$output" == *"2 test binaries, 3 runs, for stubos"* ]]
+}
+
 # The guests run EVERY package, compiled from the census by test-binaries.sh,
 # not a list of "platform-sensitive" packages that left 300 of 333 unexecuted;
 # and no job of the runtime lane shrinks a suite with -short (rule 12).

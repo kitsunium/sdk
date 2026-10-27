@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-26T01:40:00Z -->
+<!-- updated: 2026-10-27T03:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -68,6 +68,18 @@ rest is spread thinner (24 shards): the sums per shard of a `-race
 machine, are 32.9 s at 24, and 34 s for the slowest on average over
 4,000 draws of up to 40 tests inserted anywhere (36 to 37 s at 19 or
 20, 31 s at 28).
+
+The BSD, illumos and Solaris guests of `e2e-cross.yml` run one test binary
+per package under a 5-minute `-test.timeout`, the alarm a hang panics on
+(`scripts/ci/run-test-binaries.sh`). Whole, this suite took 272 to 301 s
+on NetBSD 10.1 and 268 s on OpenBSD 7.9, and timed out on NetBSD in 19
+runs of 55 (#701): `scripts/ci/test-binaries.sh` cuts it in two runs,
+`-test.run=^TestA` and `-test.skip=^TestA`, each under that cap, which
+stays 5 minutes. Measured with `-test.v` on NetBSD, `^TestA` held 163 s
+of the 298 and the rest 135; `TestTheStartHoldsNoMoreOfTheTailThanItsBudget`
+took 18 s there (2 s on a Linux workstation) and
+`TestHealthWarnsBeforeTheSnapshotLimit` 13 s, settling its cuts after each
+of some 150 writes of 40 bytes: it writes 200 bytes now, some 30 writes.
 
 ## Do NOT
 
@@ -155,6 +167,20 @@ machine, are 32.9 s at 24, and 34 s for the slowest on average over
   `TestALeaderSlowToApplyStillRefusesForwardsPastMaxApplyLagBytes`,
   `TestAMachineThatDropsItsPayloadsLeavesNoApplyLag`,
   `TestADurableMachineResumesInsideTheTailReadBack`).
+- Read the log whole in an offline operation, or from its first entry
+  where the newest snapshot answers: `Recover` read the configuration in
+  force at the index it keeps from the log's first entry, then the cluster
+  version past the snapshot twice, each in one `Entries` call with no byte
+  bound, about three times the log in heap, and a survivor whose compaction
+  had stalled was OOM-killed at every rerun on the host where it starts
+  (#700). `inForceAt` reads both in one pass, `scanLog` handing it
+  `offlineBatchBytes` and `offlineBatchEntries` at a time into one reused
+  slice, from the snapshot's metadata and the entries after it when the log
+  holds the snapshot's index under its term, else from the log's first
+  entry as before; `planRecover` reads it once and hands the version down
+  to `appendForced`. Count what a reader holds with `fileLog.afterEntries`,
+  not a sampled heap (`TestRecoverHoldsOneBatchOfTheLogAtATime`,
+  `TestTheHistoryInForceIsReadPastTheSnapshot`).
 - Sample a heap peak in the package's own process: the tests before it
   leave hundreds of MiB live, and the collector lets a share of that grow
   in garbage on top of what is measured.
@@ -682,6 +708,18 @@ machine, are 32.9 s at 24, and 34 s for the slowest on average over
   contract's `ElectionTimeoutMax` (#694,
   `TestRemovingTheLeaderOnItselfHandsOverPastAVoterThatDeclinesUnderALongerContract`,
   `TestRemovingTheLeaderOnItselfHandsOverPastADeadVoterUnderALongerContract`).
+- Answer a `Remove` of the leader submitted on it with the `NOT_LEADER` of
+  its own hand-off: the `TimeoutNow` makes the target campaign at once, its
+  vote request deposes the node, which knows no leader until the winner's
+  first append reaches it, and a try that expired in that gap ended the
+  hand-off and submitted the removal with no leader to forward it to; a
+  try whose transfer raft still ran was refused the same way, raft taking
+  no proposal while one runs. Both say nothing was appended (D6), and both
+  are the transfer the call made: `removeAfterTransfer` submits again on
+  `NOT_LEADER` as on `MEMBERSHIP_CHANGE_PENDING`, each heartbeat within
+  `handOffWindow` maximum election timeouts, and a node no voter took over
+  from ends on `MEMBERSHIP_INVALID`, a leader refusing its own removal
+  (#701, `TestRemovingTheLeaderOnItselfWaitsForTheLeaderItsHandOffElected`).
 - Leave a peer's series at their last value once it is no longer published,
   or keep a departed member's certificate in `peerExpiry`: a series is never
   deleted, and "peer unreachable" and "certificate expiring" alerted for a
@@ -710,6 +748,20 @@ machine, are 32.9 s at 24, and 34 s for the slowest on average over
   installed it (#544, `TestADurableRestartResumesWithTheAppliedTerm`,
   `TestASnapshotPublishedAtTermZeroIsSetAside`,
   `TestAPeerInstallsTheSnapshotOfADurableLeaderRestarted`).
+- Start the step function at the persisted commit under a durable machine
+  applied past it, or cut past the step function's commit: a commit-only
+  Ready is written lazily (#558), a crash left the machine past the commit
+  raft restarted from, and a cut at the applied index recorded, from
+  `EngineAt`, the cluster version, contract and alarm of that commit, which
+  the node restarted from it ran for good (#707). `NewRaft` takes the
+  applied index the log holds as committed (`startCommit`); `stepApplied`
+  holds a machine that reports no term at the persisted commit, since only
+  the term proves the log holds the entry it applied; and `metaAt` refuses
+  a cut past the commit OVERLOADED until the commit reaches it
+  (`TestADurableRestartPastItsPersistedCommitCutsTheContractItApplied`,
+  `TestADurableRestartPastItsPersistedCommitCutsTheVersionItApplied`,
+  `TestACutPastTheCommitTheNodeKnowsWaitsForIt`,
+  `TestATermlessDurableMachinePastTheCommitLeavesTheStaleTailUncommitted`).
 - Trust a version 1 `.meta` whose id does not name its position, or take
   an acknowledgement past the leader's last index as match: version 1
   carries no checksum, and one bit of `Position.Index` erased the log,

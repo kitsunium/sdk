@@ -119,8 +119,9 @@ A link is a `corenet.Middleware[corenet.HTTP1Handler]`, composed by `Chain`.
 `EndBatch` so a chain defers answers as its handler does:
 
 - **`Routes(routes ...RouteValue)`** sets `Route` to the first route whose
-  method (empty: any) and `Path` (exact, or prefix) match, zero for none, and
-  always calls the next handler: an unrouted request still meets the
+  method (empty: any) and `Path` (exact, or a prefix ending on a segment
+  boundary: `/health` takes `/health/live`, never `/healthz`) match, zero for
+  none, and always calls the next handler: an unrouted request still meets the
   authenticating link, and only the handler answers 404.
 - **`Bearer(v HTTP1BearerVerifier, exempt ...int)`** resets `Auth` and
   `Authenticated`, then requires `Authorization: Bearer <token>` on every
