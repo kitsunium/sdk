@@ -25,6 +25,38 @@ workflows:
           range: before
           value: b
       - return: "false"
+  - of: (*connFlag).compact
+    steps:
+      - bind: base
+        eval: len(f.buf)
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: base
+                    value: it.off
+                  - break: true
+                when: it.slot == nil && it.res == nil
+          key: _
+          range: f.held
+          value: it
+      - opt:
+          do:
+            - return: ""
+          when: base == 0
+      - set: f.buf
+        value: f.buf[:copy(f.buf, f.buf[base:])]
+      - loop:
+          do:
+            - bind: it
+              eval: "&f.held[i]"
+            - opt:
+                do:
+                  - set: it.off, it.end
+                    value: it.off-base, it.end-base
+                when: it.slot == nil && it.res == nil
+          key: i
+          range: f.held
   - of: contentLength
     steps:
       - opt:

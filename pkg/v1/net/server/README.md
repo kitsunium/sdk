@@ -147,6 +147,7 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
   - [func \(LoopIO\) Pressure\(ref LoopConnRef\) bool](<#LoopIO.Pressure>)
   - [func \(LoopIO\) SetDeadline\(ref LoopConnRef, d time.Duration\) error](<#LoopIO.SetDeadline>)
   - [func \(LoopIO\) Write\(ref LoopConnRef, p \[\]byte\) error](<#LoopIO.Write>)
+- [type LoopJobValue](<#LoopJobValue>)
 - [type LoopLayer](<#LoopLayer>)
   - [func \(LoopLayer\) Honours\(k OptionKind\) bool](<#LoopLayer.Honours>)
   - [func \(LoopLayer\) Next\(\) LoopHandler](<#LoopLayer.Next>)
@@ -160,13 +161,23 @@ The same is true of anything else a handler hijacks: once the socket is taken ov
 - [type LoopLayered](<#LoopLayered>)
   - [func \(LoopLayered\) Next\(\) LoopHandler](<#LoopLayered.Next>)
 - [type LoopMiddleware](<#LoopMiddleware>)
+- [type LoopOffloader](<#LoopOffloader>)
+  - [func \(LoopOffloader\) OnDone\(io LoopIO, job LoopJobValue\)](<#LoopOffloader.OnDone>)
+  - [func \(LoopOffloader\) OnOutbound\(v LoopOutboundValue\)](<#LoopOffloader.OnOutbound>)
+  - [func \(LoopOffloader\) Pending\(lane int, ref LoopConnRef\) bool](<#LoopOffloader.Pending>)
+  - [func \(LoopOffloader\) Worker\(\) LoopWorker](<#LoopOffloader.Worker>)
 - [type LoopOptionHonourer](<#LoopOptionHonourer>)
   - [func \(LoopOptionHonourer\) Honours\(k OptionKind\) bool](<#LoopOptionHonourer.Honours>)
+- [type LoopOutbound](<#LoopOutbound>)
+  - [func \(LoopOutbound\) Send\(io LoopIO, job LoopJobValue\) error](<#LoopOutbound.Send>)
+- [type LoopOutboundValue](<#LoopOutboundValue>)
 - [type LoopRingState](<#LoopRingState>)
 - [type LoopStarter](<#LoopStarter>)
   - [func \(LoopStarter\) OnStart\(lanes int\)](<#LoopStarter.OnStart>)
 - [type LoopState](<#LoopState>)
 - [type LoopValue](<#LoopValue>)
+- [type LoopWorker](<#LoopWorker>)
+  - [func \(LoopWorker\) Work\(lane int, job LoopJobValue\)](<#LoopWorker.Work>)
 - [type Middleware](<#Middleware>)
 - [type Option](<#Option>)
 - [type OptionKind](<#OptionKind>)
@@ -771,6 +782,17 @@ LoopOptionUnsupported reports a group option a loop group cannot honour.
 Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopOptionUnsupported`.
 
 Code `0.2.11.36` · reason `LOOP_OPTION_UNSUPPORTED` · public "The group option is not supported by its engine"
+
+<a name="LoopOutboundFull"></a>
+```go
+var LoopOutboundFull *errs.Error
+```
+
+LoopOutboundFull reports a job refused by a lane's full queue to its worker.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/net.LoopOutboundFull`.
+
+Code `0.2.11.63` · reason `LOOP_OUTBOUND_FULL` · public "The server cannot take more offloaded work now"
 
 <a name="LoopOutputFull"></a>
 ```go
@@ -1753,6 +1775,30 @@ func (LoopIO) Write(ref LoopConnRef, p []byte) error
 
 Write copies p into ref's output and returns. Writes on one reference leave in the order they were made, and p may be reused once Write returns. It is refused with LoopOutputFull, copying nothing, when p would pass the connection's output ceiling or the loop's global output budget, and with LoopStaleRef when ref's connection has closed.
 
+<a name="LoopJobValue"></a>
+## type [LoopJobValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+LoopJobValue is one job a lane sends its worker.
+
+```go
+type LoopJobValue = corenet.LoopJobValue
+```
+
+LoopJobValue is an alias of `github.com/kitsunium/sdk/internal/core/net.LoopJobValue`, declared as:
+
+```go
+type LoopJobValue struct {
+	// Ref is the connection the job answers.
+	Ref  LoopConnRef
+	// Slot is the sender's index of the job's state.
+	Slot uint32
+	// Gen is the generation of that slot when the job was sent.
+	Gen  uint32
+	// Arg is the sender's own argument.
+	Arg  uint64
+}
+```
+
 <a name="LoopLayer"></a>
 ## type [LoopLayer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
@@ -1893,6 +1939,69 @@ LoopMiddleware is an alias of `github.com/kitsunium/sdk/internal/core/net.Middle
 type LoopMiddleware[H any] func(next H) H
 ```
 
+<a name="LoopOffloader"></a>
+## type [LoopOffloader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+LoopOffloader is the optional capability of a LoopHandler that offloads blocking work to one worker goroutine per lane (R3).
+
+```go
+type LoopOffloader = corenet.LoopOffloader
+```
+
+LoopOffloader is an alias of `github.com/kitsunium/sdk/internal/core/net.LoopOffloader`, declared as:
+
+```go
+type LoopOffloader interface {
+	// OnDone is called on the lane's thread with each job its worker ran.
+	OnDone(io LoopIO, job LoopJobValue)
+	// OnOutbound gives the offloader its lanes' outbounds, once.
+	OnOutbound(v LoopOutboundValue)
+	// Pending reports, on the lane's thread, whether ref, a connection of lane,
+	// waits for an answer its worker has not given back: a draining loop keeps
+	// it open until it has, and eviction passes it by.
+	Pending(lane int, ref LoopConnRef) bool
+	// Worker returns the worker the group's lanes offload to; nil offloads
+	// nothing.
+	Worker() LoopWorker
+}
+```
+
+<a name="LoopOffloader.OnDone"></a>
+### func \(LoopOffloader\) [OnDone](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (LoopOffloader) OnDone(io LoopIO, job LoopJobValue)
+```
+
+OnDone is called on the lane's thread with each job its worker ran.
+
+<a name="LoopOffloader.OnOutbound"></a>
+### func \(LoopOffloader\) [OnOutbound](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (LoopOffloader) OnOutbound(v LoopOutboundValue)
+```
+
+OnOutbound gives the offloader its lanes' outbounds, once.
+
+<a name="LoopOffloader.Pending"></a>
+### func \(LoopOffloader\) [Pending](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (LoopOffloader) Pending(lane int, ref LoopConnRef) bool
+```
+
+Pending reports, on the lane's thread, whether ref, a connection of lane, waits for an answer its worker has not given back: a draining loop keeps it open until it has, and eviction passes it by.
+
+<a name="LoopOffloader.Worker"></a>
+### func \(LoopOffloader\) [Worker](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (LoopOffloader) Worker() LoopWorker
+```
+
+Worker returns the worker the group's lanes offload to; nil offloads nothing.
+
 <a name="LoopOptionHonourer"></a>
 ## type [LoopOptionHonourer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
 
@@ -1919,6 +2028,53 @@ func (LoopOptionHonourer) Honours(k OptionKind) bool
 ```
 
 Honours reports whether the handler applies the option of kind k itself.
+
+<a name="LoopOutbound"></a>
+## type [LoopOutbound](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+LoopOutbound is one lane's preallocated queue to its worker; Send never blocks.
+
+```go
+type LoopOutbound = corenet.LoopOutbound
+```
+
+LoopOutbound is an alias of `github.com/kitsunium/sdk/internal/core/net.LoopOutbound`, declared as:
+
+```go
+type LoopOutbound interface {
+	// Send queues job for the lane's worker, or refuses with LoopOutboundFull.
+	Send(io LoopIO, job LoopJobValue) error
+}
+```
+
+<a name="LoopOutbound.Send"></a>
+### func \(LoopOutbound\) [Send](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (LoopOutbound) Send(io LoopIO, job LoopJobValue) error
+```
+
+Send queues job for the lane's worker, or refuses with LoopOutboundFull.
+
+<a name="LoopOutboundValue"></a>
+## type [LoopOutboundValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+LoopOutboundValue is what an offloader is given at Start: the lanes' outbounds and the output ceiling of one connection.
+
+```go
+type LoopOutboundValue = corenet.LoopOutboundValue
+```
+
+LoopOutboundValue is an alias of `github.com/kitsunium/sdk/internal/core/net.LoopOutboundValue`, declared as:
+
+```go
+type LoopOutboundValue struct {
+	// Lanes are the lanes' outbounds, by lane.
+	Lanes     []LoopOutbound
+	// OutputCap is LoopValue.OutputCap, its default applied.
+	OutputCap int
+}
+```
 
 <a name="LoopRingState"></a>
 ## type [LoopRingState](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
@@ -2010,40 +2166,44 @@ LoopState is an alias of `github.com/kitsunium/sdk/internal/core/net.LoopStateVa
 ```go
 type LoopState struct {
 	// Group is the loop group's name.
-	Group          string               `json:"group"`
+	Group           string               `json:"group"`
 	// Backend is the backend in use.
-	Backend        LoopBackend          `json:"backend"`
+	Backend         LoopBackend          `json:"backend"`
 	// ProbeStage names the last stage of the kernel probe the backend passed,
 	// or the stage that failed when the group fell back.
-	ProbeStage     string               `json:"probe_stage"`
+	ProbeStage      string               `json:"probe_stage"`
 	// Degraded reports that the group runs on a backend other than the best one
 	// it asked for: auto fell back from io_uring, say.
-	Degraded       bool                 `json:"degraded"`
+	Degraded        bool                 `json:"degraded"`
 	// DegradedReason names the fallback and its cause when Degraded is set.
-	DegradedReason string               `json:"degraded_reason,omitempty"`
+	DegradedReason  string               `json:"degraded_reason,omitempty"`
 	// Loops is the number of loops running.
-	Loops          int                  `json:"loops"`
+	Loops           int                  `json:"loops"`
 	// Rings is the number of rings per loop.
-	Rings          int                  `json:"rings"`
+	Rings           int                  `json:"rings"`
 	// RingsSource says where Rings came from: "explicit", "derived" from the
 	// connection bounds and the descriptor limit, or "single" when no bound was
 	// set or the backend runs one ring.
-	RingsSource    string               `json:"rings_source"`
+	RingsSource     string               `json:"rings_source"`
 	// RLimitNoFile is the effective RLIMIT_NOFILE soft limit read at Start. The
 	// SDK never raises it; the Go runtime already lifts the soft limit to the
 	// hard one.
-	RLimitNoFile   uint64               `json:"rlimit_nofile"`
+	RLimitNoFile    uint64               `json:"rlimit_nofile"`
 	// GOMAXPROCS is runtime.GOMAXPROCS(0) read at Start. The SDK never sets it.
-	GOMAXPROCS     int                  `json:"gomaxprocs"`
+	GOMAXPROCS      int                  `json:"gomaxprocs"`
 	// BatchP99 is the 99th percentile of one loop iteration's duration, over the
 	// loops' recent batches.
-	BatchP99       DurationValue        `json:"batch_p99"`
+	BatchP99        DurationValue        `json:"batch_p99"`
+	// OutboundRefused counts the jobs a full queue to a worker refused
+	// (LoopOutboundFull), every lane's: for the http1 adapter, the 503s it
+	// answered for them. Zero when the group offloads nothing.
+	OutboundRefused uint64               `json:"outbound_refused"`
 	// RingStates reports every ring of every loop, loop by loop.
-	RingStates     []LoopRingStateValue `json:"ring_states"`
+	RingStates      []LoopRingStateValue `json:"ring_states"`
 	// Capabilities reports every optional kernel capability the group's backend
 	// probed or was told not to, the server's socket probes merged in
 	// (ADR 0189).
-	Capabilities   []CapabilityValue    `json:"capabilities,omitempty"`
+	Capabilities    []CapabilityValue    `json:"capabilities,omitempty"`
 }
 ```
 
@@ -2105,8 +2265,40 @@ type LoopValue struct {
 	// unknown token is refused at Start with LoopCapabilityRefused. Nil asks
 	// for none; the class A-kernel capabilities need no opt-in.
 	Capabilities []Capability  `json:"capabilities,omitempty"`
+	// Outbound is how many jobs one lane's queue to its worker holds (R3),
+	// when the group's handler offloads (LoopOffloader). A Send past it is
+	// refused with LoopOutboundFull and counted in LoopStateValue. Zero
+	// selects 256.
+	Outbound     int           `json:"outbound"`
 }
 ```
+
+<a name="LoopWorker"></a>
+## type [LoopWorker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)
+
+LoopWorker runs a lane's offloaded jobs, off the loop's thread; it may block.
+
+```go
+type LoopWorker = corenet.LoopWorker
+```
+
+LoopWorker is an alias of `github.com/kitsunium/sdk/internal/core/net.LoopWorker`, declared as:
+
+```go
+type LoopWorker interface {
+	// Work runs job, sent by the lane whose index is lane.
+	Work(lane int, job LoopJobValue)
+}
+```
+
+<a name="LoopWorker.Work"></a>
+### func \(LoopWorker\) [Work](<https://github.com/kitsunium/sdk/blob/main/internal/core/net/gen_ports.go>)
+
+```go
+func (LoopWorker) Work(lane int, job LoopJobValue)
+```
+
+Work runs job, sent by the lane whose index is lane.
 
 <a name="Middleware"></a>
 ## type [Middleware](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/server/gen_facade.go>)

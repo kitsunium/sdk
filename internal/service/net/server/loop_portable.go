@@ -128,9 +128,11 @@ func (g *portableGroup) live() int64 {
 // portableLoop is one lane of the portable backend: its handler goroutine,
 // its connections, its post queue and its LoopIO.
 type portableLoop struct {
-	g        *portableGroup
-	lane     int
-	h        corenet.LoopHandler
+	g    *portableGroup
+	lane int
+	h    corenet.LoopHandler
+	// busy is the chain's offloader's Pending, nil when nothing offloads.
+	busy     func(lane int, ref corenet.LoopConnRef) bool
 	spillCap int
 	outCap   int
 	idle     time.Duration
@@ -180,7 +182,7 @@ func startPortable(group *StreamGroup, lns []stdnet.Listener, degraded string, p
 	//: the lanes, built before any acceptor can hand one a connection.
 	for i := range loopLanes(v) {
 		g.lanes = append(g.lanes, &portableLoop{
-			g: g, lane: i, h: group.loopChain,
+			g: g, lane: i, h: group.loopChain, busy: group.loopBusy,
 			spillCap: orDefaultInt(v.SpillCap, portableSpillCap),
 			outCap:   orDefaultInt(v.OutputCap, portableOutputCap),
 			idle:     loopIdle(group),
@@ -610,10 +612,17 @@ func (pl *portableLoop) control() {
 		return
 	}
 	pl.draining = true
+	pl.closeSettled()
+}
+
+// closeSettled marks for closing every open connection with nothing
+// unconsumed and no answer out with a worker (R3).
+func (pl *portableLoop) closeSettled() {
 	//: each open one with nothing unconsumed.
 	for slot, pc := range pl.conns {
-		//: mid-request ones finish first.
-		if pc.open && !pc.reasonSet && len(pc.spill) == pc.spillOff {
+		//: mid-request ones, and ones waiting on a worker, finish first.
+		if pc.open && !pc.reasonSet && len(pc.spill) == pc.spillOff &&
+			(pl.busy == nil || !pl.busy(pl.lane, corenet.LoopConnRef{Slot: uint32(slot), Gen: pc.gen})) {
 			pc.reasonSet, pc.closeErr = true, corenet.ServerClosed
 			pl.markDirty(int32(slot))
 		}
