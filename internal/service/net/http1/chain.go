@@ -35,7 +35,9 @@ type RouteValue struct {
 	// Path is the canonical path the route matches, from "/": the whole of
 	// it, or its start when Prefix is set.
 	Path string
-	// Prefix makes Path match the start of a request's path.
+	// Prefix makes Path match the start of a request's path, on a segment
+	// boundary: "/health" matches "/health" and "/health/live", never
+	// "/healthz"; a Path ending in "/" matches whatever follows it.
 	Prefix bool
 }
 
@@ -87,9 +89,10 @@ func misconfigured(linkName, what string) error {
 // always: a request no route matches still reaches the next links, so an
 // authenticating link judges it like any other and only the handler answers
 // 404. A route matches when its Method is empty or the request's, and its
-// Path is the request's, or a prefix of it when Prefix is set. An ID of zero
-// or below, a repeated ID, a Path that does not start with "/" and a Method
-// that is not a token are refused with corenet.HTTP1Misconfigured.
+// Path is the request's, or a prefix of it ending on a segment boundary when
+// Prefix is set. An ID of zero or below, a repeated ID, a Path that does not
+// start with "/" and a Method that is not a token are refused with
+// corenet.HTTP1Misconfigured.
 func Routes(routes ...RouteValue) (corenet.Middleware[corenet.HTTP1Handler], error) {
 	table := make([]route, 0, len(routes))
 	//: each route checked once, here, never per request.
@@ -154,12 +157,21 @@ func (l *RouteLayer) ServeHTTP1(req *corenet.HTTP1RequestValue, res *corenet.HTT
 		r := &l.routes[i]
 		//: the method, then the path or its start.
 		if (len(r.method) == 0 || bytes.Equal(r.method, req.Method)) &&
-			(bytes.Equal(r.path, req.Path) || (r.prefix && bytes.HasPrefix(req.Path, r.path))) {
+			(bytes.Equal(r.path, req.Path) || (r.prefix && prefixOf(r.path, req.Path))) {
 			req.Route = r.id
 			break
 		}
 	}
 	l.next.ServeHTTP1(req, res)
+}
+
+// prefixOf reports whether prefix starts path on a segment boundary: path is
+// prefix, prefix ends in '/', or path's next byte is '/' — so a prefix route
+// never takes a sibling whose name merely starts like it.
+func prefixOf(prefix, path []byte) bool {
+	//: the bytes first, then the boundary after them.
+	return bytes.HasPrefix(path, prefix) &&
+		(len(path) == len(prefix) || prefix[len(prefix)-1] == '/' || path[len(prefix)] == '/')
 }
 
 // EndBatch implements corenet.HTTP1Batcher: it ends the next handler's
@@ -357,10 +369,11 @@ func Log(l corenet.HTTP1AccessLogger, allow ...string) (corenet.Middleware[coren
 		}
 		names = append(names, []byte(name))
 	}
+	kept := slices.Clone(allow)
 	//: one layer per handler it wraps.
 	return func(next corenet.HTTP1Handler) corenet.HTTP1Handler {
 		//: the names are shared, read only.
-		return &LogLayer{link: newLink(next), l: l, allow: allow, names: names}
+		return &LogLayer{link: newLink(next), l: l, allow: kept, names: names}
 	}, nil
 }
 

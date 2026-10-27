@@ -286,6 +286,7 @@ files:
       - checkRoute
       - RouteLayer
       - (*RouteLayer).ServeHTTP1
+      - prefixOf
       - (*RouteLayer).EndBatch
       - Bearer
       - BearerLayer
@@ -436,6 +437,13 @@ functions:
     name: checkRoute
     params: r RouteValue, before []RouteValue
     results: error
+  - doc: |-
+      prefixOf reports whether prefix starts path on a segment boundary: path is
+      prefix, prefix ends in '/', or path's next byte is '/' — so a prefix route
+      never takes a sibling whose name merely starts like it.
+    name: prefixOf
+    params: prefix, path []byte
+    results: bool
   - name: Bearer
     params: v corenet.HTTP1BearerVerifier, exempt ...int
     results: corenet.Middleware[corenet.HTTP1Handler], error
@@ -683,7 +691,8 @@ functions:
       backslash or NUL (RefusalTargetPath); a form the profile does not serve
       (RefusalTargetForm); an absolute-form authority that is not the Host's
       (RefusalTargetHost). Nothing is decoded and nothing allocates: both slices
-      alias the target, or a constant.
+      alias the target, never a package value, so a link that writes into
+      req.Path writes into this request's bytes only.
     name: canonical
     params: req *corenet.HTTP1RequestValue
     results: Refusal
@@ -801,7 +810,10 @@ types:
           it, or its start when Prefix is set.
         name: Path
         type: string
-      - doc: Prefix makes Path match the start of a request's path.
+      - doc: |-
+          Prefix makes Path match the start of a request's path, on a segment
+          boundary: "/health" matches "/health" and "/health/live", never
+          "/healthz"; a Path ending in "/" matches whatever follows it.
         name: Prefix
         type: bool
     kind: struct
@@ -1294,12 +1306,6 @@ vars:
           any other.
         name: hexDigits
         value: hexTable()
-      - doc: pathRoot is the canonical path of an absolute-form target with none.
-        name: pathRoot
-        value: slices.Clip([]byte("/"))
-      - doc: pathAsterisk is the canonical path of the asterisk-form target.
-        name: pathAsterisk
-        value: slices.Clip([]byte("*"))
       - doc: methodOptions is the one method an asterisk-form target may carry.
         name: methodOptions
         value: "[]byte(\"OPTIONS\")"

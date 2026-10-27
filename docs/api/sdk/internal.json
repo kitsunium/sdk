@@ -64446,7 +64446,7 @@
         {
           "name": "Prefix",
           "type": "bool",
-          "doc": "Prefix makes Path match the start of a request's path.\n"
+          "doc": "Prefix makes Path match the start of a request's path, on a segment\nboundary: \"/health\" matches \"/health\" and \"/health/live\", never\n\"/healthz\"; a Path ending in \"/\" matches whatever follows it.\n"
         }
       ],
       "doc": "RouteValue is one route of a router link: an identifier the application\ngives meaning to, a method, a canonical path and whether the path is a\nprefix. The identifier is what the chain names a route by — an\nauthenticating link's exemptions, an access-log record, the handler's\nswitch.\n",
@@ -64461,7 +64461,7 @@
       "name": "Routes",
       "spelled": "func(routes ...RouteValue) (corenet.Middleware[corenet.HTTP1Handler], error)",
       "canonical": "func(routes ...github.com/kitsunium/sdk/internal/service/net/http1.RouteValue) (github.com/kitsunium/sdk/internal/core/net.Middleware[github.com/kitsunium/sdk/internal/core/net.HTTP1Handler], error)",
-      "doc": "Routes returns the router link of an http1 chain: it matches each request's\ncanonical Path against routes, in order, sets HTTP1RequestValue.Route to the\nfirst match's ID — zero when none matches — and calls the next handler,\nalways: a request no route matches still reaches the next links, so an\nauthenticating link judges it like any other and only the handler answers\n404. A route matches when its Method is empty or the request's, and its\nPath is the request's, or a prefix of it when Prefix is set. An ID of zero\nor below, a repeated ID, a Path that does not start with \"/\" and a Method\nthat is not a token are refused with corenet.HTTP1Misconfigured.\n",
+      "doc": "Routes returns the router link of an http1 chain: it matches each request's\ncanonical Path against routes, in order, sets HTTP1RequestValue.Route to the\nfirst match's ID — zero when none matches — and calls the next handler,\nalways: a request no route matches still reaches the next links, so an\nauthenticating link judges it like any other and only the handler answers\n404. A route matches when its Method is empty or the request's, and its\nPath is the request's, or a prefix of it ending on a segment boundary when\nPrefix is set. An ID of zero or below, a repeated ID, a Path that does not\nstart with \"/\" and a Method that is not a token are refused with\ncorenet.HTTP1Misconfigured.\n",
       "file": "service/net/http1/chain.go",
       "layer": "service",
       "family": "net"

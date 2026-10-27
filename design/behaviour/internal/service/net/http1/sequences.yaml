@@ -119,11 +119,16 @@ sequences:
                   - break: true
                 when: |-
                   (len(r.method) == 0 || bytes.Equal(r.method, req.Method)) &&
-                  			(bytes.Equal(r.path, req.Path) || (r.prefix && bytes.HasPrefix(req.Path, r.path)))
+                  			(bytes.Equal(r.path, req.Path) || (r.prefix && prefixOf(r.path, req.Path)))
           key: i
           range: l.routes
       - eval: l.next.ServeHTTP1(req, res)
         to: l.next.ServeHTTP1
+  - of: prefixOf
+    steps:
+      - return: |-
+          bytes.HasPrefix(path, prefix) &&
+          		(len(path) == len(prefix) || prefix[len(prefix)-1] == '/' || path[len(prefix)] == '/')
   - of: (*RouteLayer).EndBatch
     participants:
       - id: caller
@@ -327,6 +332,44 @@ sequences:
     steps:
       - eval: l.endBatch(lane)
         to: l.endBatch
+  - of: Log
+    participants:
+      - id: caller
+        kind: actor
+      - id: Log
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, misconfigured("Log", "logger")
+          when: l == nil
+      - opt:
+          do:
+            - return: nil, misconfigured("Log", "allow")
+          when: len(allow) > corenet.HTTP1MaxAccessFields
+      - bind: names
+        eval: make([][]byte, 0, len(allow))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil, misconfigured("Log", name)
+                when: "!token(name) || credential(name) || repeated(name, allow[:i])"
+            - set: names
+              value: append(names, []byte(name))
+          key: i
+          range: allow
+          value: name
+      - bind: kept
+        eval: slices.Clone(allow)
+        to: slices
+      - return: |-
+          func(next corenet.HTTP1Handler) corenet.HTTP1Handler {
+          		//: the names are shared, read only.
+          		return &LogLayer{link: newLink(next), l: l, allow: kept, names: names}
+          	}, nil
   - of: (*LogLayer).ServeHTTP1
     participants:
       - id: caller
@@ -1601,7 +1644,7 @@ sequences:
                       - return: RefusalTargetForm
                     when: "!bytes.Equal(req.Method, methodOptions)"
                 - set: req.Path
-                  value: pathAsterisk
+                  value: t[:1:1]
                 - return: RefusalNone
             - default: true
               do:
@@ -1649,8 +1692,10 @@ sequences:
             - return: splitPath(tail, req)
               to: splitPath
           when: len(tail) > 0 && tail[0] == '/'
+      - bind: slash
+        eval: len(t) - len(rest) - 1
       - set: req.Path
-        value: pathRoot
+        value: "t[slash : slash+1 : slash+1]"
       - opt:
           do:
             - set: req.Query

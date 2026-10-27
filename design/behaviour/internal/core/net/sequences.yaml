@@ -146,6 +146,7 @@ sequences:
           when: len(b) > HTTP1MaxSubject
       - set: a.n
         value: uint8(copy(a.subject[:], b))
+      - eval: clear(a.subject[a.n:])
       - return: "true"
   - of: (*HTTP1AuthValue).Subject
     steps:

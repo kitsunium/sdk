@@ -71,7 +71,8 @@ func misconfiguredAs(err error, option string) bool {
 
 // TestRoutes pins the router link: the first route whose method and path
 // match sets Route, a prefix matches a longer path, zero is "none", and the
-// next handler runs either way.
+// next handler runs either way. A prefix matches on a segment boundary only:
+// "/static" takes "/static/a.css", never "/staticky".
 func TestRoutes(t *testing.T) {
 	t.Parallel()
 	h := &recordH{}
@@ -79,6 +80,7 @@ func TestRoutes(t *testing.T) {
 		http1.RouteValue{ID: 1, Method: "GET", Path: "/items/", Prefix: true},
 		http1.RouteValue{ID: 2, Path: "/health"},
 		http1.RouteValue{ID: 3, Method: "POST", Path: "/items/new"},
+		http1.RouteValue{ID: 4, Path: "/static", Prefix: true},
 	))
 	chain := corenet.Chain[corenet.HTTP1Handler](h, routes)
 	for _, c := range []struct {
@@ -94,6 +96,10 @@ func TestRoutes(t *testing.T) {
 		{"POST /items/new HTTP/1.1\r\nHost: h\r\n\r\n", 3},
 		{get("/nowhere"), 0},
 		{"GET http://h/health?q HTTP/1.1\r\nHost: h\r\n\r\n", 2},
+		{get("/static"), 4},
+		{get("/static/a.css"), 4},
+		{get("/staticky"), 0},
+		{get("/static-admin/secrets"), 0},
 	} {
 		var res corenet.HTTP1ResponseValue
 		chain.ServeHTTP1(parse(t, c.in), &res)
@@ -122,13 +128,15 @@ func TestRoutes(t *testing.T) {
 // token the verifier refuses is answered 401 with WWW-Authenticate and goes
 // no further; an accepted one reaches the handler with the subject copied by
 // value, so overwriting the token's bytes changes nothing; an exempt route
-// goes on unauthenticated, whatever it carries.
+// goes on unauthenticated, whatever it carries, and an exempt prefix route
+// exempts its own segments only, never a sibling path that starts like it.
 func TestBearer(t *testing.T) {
 	t.Parallel()
 	h := &recordH{}
 	v := tokenVerifier{"tok-a": "alice", "tok-b": "bob"}
-	routes := mustLink(http1.Routes(http1.RouteValue{ID: 1, Path: "/api", Prefix: true}, http1.RouteValue{ID: 2, Path: "/health"}))
-	bearer := mustLink(http1.Bearer(v, 2))
+	routes := mustLink(http1.Routes(http1.RouteValue{ID: 1, Path: "/api", Prefix: true}, http1.RouteValue{ID: 2, Path: "/health"},
+		http1.RouteValue{ID: 3, Path: "/public", Prefix: true}))
+	bearer := mustLink(http1.Bearer(v, 2, 3))
 	chain := corenet.Chain[corenet.HTTP1Handler](h, routes, bearer)
 	auth := func(target, value string) string {
 		return "GET " + target + " HTTP/1.1\r\nHost: h\r\nAuthorization: " + value + "\r\n\r\n"
@@ -148,6 +156,10 @@ func TestBearer(t *testing.T) {
 		{get("/nowhere"), "", 401},
 		{get("/health"), "", 0},
 		{auth("/health", "Bearer tok-a"), "", 0},
+		{get("/public"), "", 0},
+		{get("/public/a"), "", 0},
+		{get("/publicity/secrets"), "", 401},
+		{get("/public-admin"), "", 401},
 	} {
 		served := len(h.subjects)
 		var res corenet.HTTP1ResponseValue
@@ -265,7 +277,10 @@ func (a *accessRecorder) LogHTTP1(rec corenet.HTTP1AccessValue) {
 func TestLog(t *testing.T) {
 	t.Parallel()
 	rec := &accessRecorder{}
-	logLink := mustLink(http1.Log(rec, "User-Agent", "x-request-id"))
+	allow := []string{"User-Agent", "x-request-id"}
+	logLink := mustLink(http1.Log(rec, allow...))
+	//: the link keeps its own names: the caller's slice, rewritten, logs no credential.
+	allow[0] = "Authorization"
 	deferH := corenet.HTTP1HandlerFunc(func(req *corenet.HTTP1RequestValue, res *corenet.HTTP1ResponseValue) {
 		res.Defer = bytes.Equal(req.Path, []byte("/later"))
 		res.Body = []byte("abc")

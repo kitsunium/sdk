@@ -4492,9 +4492,10 @@ packages:
           always: a request no route matches still reaches the next links, so an
           authenticating link judges it like any other and only the handler answers
           404. A route matches when its Method is empty or the request's, and its
-          Path is the request's, or a prefix of it when Prefix is set. An ID of zero
-          or below, a repeated ID, a Path that does not start with "/" and a Method
-          that is not a token are refused with corenet.HTTP1Misconfigured.
+          Path is the request's, or a prefix of it ending on a segment boundary when
+          Prefix is set. An ID of zero or below, a repeated ID, a Path that does not
+          start with "/" and a Method that is not a token are refused with
+          corenet.HTTP1Misconfigured.
         in:
           - name: routes
             type: RouteValue
@@ -4767,7 +4768,10 @@ packages:
                 it, or its start when Prefix is set.
               name: Path
               type: string
-            - doc: Prefix makes Path match the start of a request's path.
+            - doc: |-
+                Prefix makes Path match the start of a request's path, on a segment
+                boundary: "/health" matches "/health" and "/health/live", never
+                "/healthz"; a Path ending in "/" matches whatever follows it.
               name: Prefix
               type: bool
       - doc: |-

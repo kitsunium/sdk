@@ -2,7 +2,6 @@ package http1
 
 import (
 	"bytes"
-	"slices"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 )
@@ -28,10 +27,6 @@ var (
 	// hexDigits are the values of the hexadecimal digits, by byte; noDigit for
 	// any other.
 	hexDigits = hexTable()
-	// pathRoot is the canonical path of an absolute-form target with none.
-	pathRoot = slices.Clip([]byte("/"))
-	// pathAsterisk is the canonical path of the asterisk-form target.
-	pathAsterisk = slices.Clip([]byte("*"))
 	// methodOptions is the one method an asterisk-form target may carry.
 	methodOptions = []byte("OPTIONS")
 	// querySep starts a target's query.
@@ -64,7 +59,8 @@ func hexTable() [byteValues]byte {
 // backslash or NUL (RefusalTargetPath); a form the profile does not serve
 // (RefusalTargetForm); an absolute-form authority that is not the Host's
 // (RefusalTargetHost). Nothing is decoded and nothing allocates: both slices
-// alias the target, or a constant.
+// alias the target, never a package value, so a link that writes into
+// req.Path writes into this request's bytes only.
 func canonical(req *corenet.HTTP1RequestValue) Refusal {
 	t := req.Target
 	//: by the target's first byte, which the four forms differ by.
@@ -80,7 +76,7 @@ func canonical(req *corenet.HTTP1RequestValue) Refusal {
 			//: refused.
 			return RefusalTargetForm
 		}
-		req.Path = pathAsterisk
+		req.Path = t[:1:1]
 		//: the server as a whole.
 		return RefusalNone
 	//: absolute-form, or nothing the profile serves.
@@ -116,7 +112,9 @@ func absoluteForm(t []byte, req *corenet.HTTP1RequestValue) Refusal {
 		//: path and query.
 		return splitPath(tail, req)
 	}
-	req.Path = pathRoot
+	//: the root is the scheme's last '/', the byte before the authority.
+	slash := len(t) - len(rest) - 1
+	req.Path = t[slash : slash+1 : slash+1]
 	//: an empty path is the root; the query, if any, after its "?".
 	if len(tail) > 0 {
 		req.Query = tail[1:]

@@ -24,7 +24,8 @@ func (a *HTTP1AuthValue) SetSubject(b []byte) bool {
 		return false
 	}
 	a.n = uint8(copy(a.subject[:], b))
-	//: copied.
+	clear(a.subject[a.n:])
+	//: copied, nothing of an earlier subject left past it.
 	return true
 }
 

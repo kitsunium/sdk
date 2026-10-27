@@ -105,3 +105,29 @@ func TestParse_resetsWhatALinkSets(t *testing.T) {
 		t.Fatalf("left %d %v %q %d", req.Route, req.Authenticated, req.Auth.Subject(), req.Auth.Claims())
 	}
 }
+
+// TestCanonicalTarget_pathIsTheRequests pins that the root of an
+// absolute-form target and the asterisk alias the request's own bytes: a link
+// that writes into one request's Path leaves the next request's as it was,
+// whatever connection or lane it arrives on.
+func TestCanonicalTarget_pathIsTheRequests(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct{ line, path string }{
+		{"OPTIONS * HTTP/1.1", "*"},
+		{"GET http://h HTTP/1.1", "/"},
+		{"GET https://h?q HTTP/1.1", "/"},
+	} {
+		in := c.line + "\r\nHost: h\r\n\r\n"
+		var first, next corenet.HTTP1RequestValue
+		if n, r := (http1.Parser{}).Parse([]byte(in), &first); n != len(in) || r != http1.RefusalNone {
+			t.Fatalf("%q: %d, %s", c.line, n, r)
+		}
+		first.Path[0] = 'X'
+		if n, r := (http1.Parser{}).Parse([]byte(in), &next); n != len(in) || r != http1.RefusalNone {
+			t.Fatalf("%q: %d, %s", c.line, n, r)
+		}
+		if string(next.Path) != c.path || cap(next.Path) != 1 {
+			t.Errorf("%q: after a write into an earlier Path, Path %q (cap %d), want %q", c.line, next.Path, cap(next.Path), c.path)
+		}
+	}
+}

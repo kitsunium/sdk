@@ -80,7 +80,9 @@ func TestLoopLayer(t *testing.T) {
 }
 
 // TestHTTP1AuthValue pins the subject held by value: a copy, refused past
-// HTTP1MaxSubject without a change, cleared by Reset with the claims.
+// HTTP1MaxSubject without a change, a shorter one leaving nothing of the
+// longer before it (two values with one subject compare equal), cleared by
+// Reset with the claims.
 func TestHTTP1AuthValue(t *testing.T) {
 	t.Parallel()
 	var a corenet.HTTP1AuthValue
@@ -100,6 +102,12 @@ func TestHTTP1AuthValue(t *testing.T) {
 	b.SetSubject([]byte("bob"))
 	if string(a.Subject()) != "alice" {
 		t.Fatal("a copy shares the subject")
+	}
+	var fresh corenet.HTTP1AuthValue
+	fresh.SetSubject([]byte("bob"))
+	fresh.SetClaims(9)
+	if b != fresh {
+		t.Fatalf("a shorter subject left the longer one's bytes: %+v", b)
 	}
 	long := make([]byte, corenet.HTTP1MaxSubject+1)
 	if a.SetSubject(long) || string(a.Subject()) != "alice" {
