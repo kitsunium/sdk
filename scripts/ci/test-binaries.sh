@@ -85,9 +85,29 @@ for f in "$out"/.fail.*; do
 done
 [ "$failed" -eq 0 ] || exit 1
 
+# parts <dir> — the -test.run regular expressions a suite is cut by, one run
+# of its binary each, plus a last run of every test none of them matches
+# (-test.skip): a test of any name, one added later included, runs in exactly
+# one run. Nothing for a suite run whole, which is every suite but those
+# below. Each run has its own -test.timeout in run-test-binaries.sh, which
+# stays the alarm it is: a suite is cut, never given a longer cap.
+#
+# internal/service/app/consensus: some 300 cluster and disk scenarios that
+# wait rather than compute (its CLAUDE.md, §Lanes; 24 shards under Bazel).
+# Whole, it took 272 to 301 s on NetBSD 10.1 and timed out there at the cap
+# in 19 runs of 55 (#701); it took 268 s on OpenBSD 7.9. Measured with
+# -test.v on NetBSD, ^TestA held 163 s of 298, the rest 135.
+parts() {
+  case "$1" in
+    internal/service/app/consensus) echo '^TestA' ;;
+  esac
+}
+
 # The manifest, in the census order. A package whose test files all carry a
 # constraint this GOOS does not meet is not listed by go list above, so every
-# directory here has a binary; a missing one is a defect of this script.
+# directory here has a binary; a missing one is a defect of this script. A
+# line is the binary and its directory, then, for a suite cut by parts, the
+# run as k/n, its -test.run and its -test.skip, "-" standing for none.
 : >"$out/manifest"
 while IFS= read -r dir; do
   bin="$(name "$dir")"
@@ -95,8 +115,19 @@ while IFS= read -r dir; do
     echo "::error::go test -c wrote no binary for $dir" >&2
     exit 1
   fi
-  printf '%s %s\n' "$bin" "$dir" >>"$out/manifest"
+  read -r -a res <<<"$(parts "$dir")"
+  if [ "${#res[@]}" -eq 0 ]; then
+    printf '%s %s\n' "$bin" "$dir" >>"$out/manifest"
+    continue
+  fi
+  n=$((${#res[@]} + 1))
+  before=""
+  for k in "${!res[@]}"; do
+    printf '%s %s %s %s %s\n' "$bin" "$dir" "$((k + 1))/$n" "${res[$k]}" "${before:--}" >>"$out/manifest"
+    before="${before:+$before|}${res[$k]}"
+  done
+  printf '%s %s %s %s %s\n' "$bin" "$dir" "$n/$n" - "$before" >>"$out/manifest"
 done <"$pkgs"
 rm -f "$pkgs"
 
-echo "test-binaries.sh: $(wc -l <"$out/manifest" | tr -d ' ') test binaries for $(go env GOOS)/$(go env GOARCH), $(du -sh "$out" | cut -f1)"
+echo "test-binaries.sh: $(cut -d' ' -f1 "$out/manifest" | sort -u | wc -l | tr -d ' ') test binaries, $(wc -l <"$out/manifest" | tr -d ' ') runs, for $(go env GOOS)/$(go env GOARCH), $(du -sh "$out" | cut -f1)"

@@ -105,7 +105,11 @@ func TestAVersionedJoinIsReadOneWay(t *testing.T) {
 
 // Health reports the newest snapshot's size and the limit a cut is held
 // to, and warns from four fifths of it, before the cuts are refused
-// SNAPSHOT_TOO_LARGE (R2-30, #556).
+// SNAPSHOT_TOO_LARGE (R2-30, #556). Each write adds some 200 bytes to the
+// state, so the snapshot nears the limit in some 30 writes, each followed
+// by its cuts settling: with 40 bytes it took some 150, 13 s on NetBSD
+// (#701). A cut every 5 writes moves the snapshot by about 1 KiB, well
+// under the fifth of the limit left between the warning and the refusal.
 func TestHealthWarnsBeforeTheSnapshotLimit(t *testing.T) {
 	const limit = 8192
 	c := newClusterWith(t, &cluster{
@@ -115,7 +119,7 @@ func TestHealthWarnsBeforeTheSnapshotLimit(t *testing.T) {
 		},
 	})
 	l := c.settledLeader(5 * time.Second)
-	value := string(bytes.Repeat([]byte("v"), 40))
+	value := string(bytes.Repeat([]byte("v"), 200))
 	sawBelow := false
 	for i := 0; ; i++ {
 		proposeOnLeader(t, c, "k"+string(rune('a'+i%26))+string(rune('a'+i/26))+"="+value)
@@ -143,7 +147,7 @@ func TestHealthWarnsBeforeTheSnapshotLimit(t *testing.T) {
 			}
 			return
 		}
-		if i > 400 {
+		if i > 100 {
 			t.Fatalf("the snapshot never neared the limit: %d of %d", h.SnapshotBytes, limit)
 		}
 	}
