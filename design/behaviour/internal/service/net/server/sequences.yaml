@@ -8031,6 +8031,8 @@ sequences:
         kind: internal
       - id: shim.engineRefusal
         kind: internal
+      - id: shim.protocolsRefusal
+        kind: internal
     steps:
       - opt:
           do:
@@ -8052,6 +8054,15 @@ sequences:
             bind: err
             eval: shim.engineRefusal()
             to: shim.engineRefusal
+          when: err != nil
+      - opt:
+          do:
+            - eval: s.recordDeclError(err)
+              to: s.recordDeclError
+          init:
+            bind: err
+            eval: shim.protocolsRefusal()
+            to: shim.protocolsRefusal
           when: err != nil
   - of: (*Server).recordDeclError
     steps:

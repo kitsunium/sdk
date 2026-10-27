@@ -209,6 +209,30 @@ func TestProtocols_refused(t *testing.T) {
 	closeOrFail(t, srv)
 }
 
+// TestProtocols_packetGroup checks a datagram group refuses Protocols at
+// Start rather than dropping it with the rest of its options, and starts
+// without it.
+func TestProtocols_packetGroup(t *testing.T) {
+	t.Parallel()
+	srv := server.New()
+	srv.PacketGroup("p", server.Listen("udp", "127.0.0.1:0"), server.Protocols("http/1.1")).HandleFunc(noopPacket)
+	err := srv.Start(t.Context())
+	t.Cleanup(func() { _ = srv.Close() })
+	if !errs.HasCode(err, corenet.CodeProtocolsRefused) || !fieldIs(err, "reason", "handler") {
+		t.Fatalf("Start = %v, want ProtocolsRefused reason=handler", err)
+	}
+	if n := len(srv.State().Listeners); n != 0 {
+		t.Fatalf("a refused Start bound %d listeners", n)
+	}
+	//: without the option the same group starts.
+	plain := server.New()
+	plain.PacketGroup("p", server.Listen("udp", "127.0.0.1:0")).HandleFunc(noopPacket)
+	if err := plain.Start(t.Context()); err != nil {
+		t.Fatalf("a datagram group without Protocols: %v", err)
+	}
+	closeOrFail(t, plain)
+}
+
 // fieldIs reports whether err carries the string field key=want.
 func fieldIs(err error, key, want string) bool {
 	for _, f := range errs.FieldsOf(err) {
