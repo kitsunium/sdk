@@ -37,13 +37,15 @@ Public façade: `pkg/v1/net/server`.
 | `loop_group_internal_test.go` | loop groups on every backend the platform has: split lines, a 4 MiB response byte-exact, close, spill, drain, and every refusal — a zero-valued option included; `TestLoopGroup_middlewareRefused`, `Use` refused on every backend whatever the handler claims |
 | `loop_option_external_test.go` | `TestLoop` — the `Loop` option refused before or after the handler, on both natures, and what wins over it |
 | `stream_group.go` | `StreamGroup` — `Handle`, `HandleFunc`, `HandleHTTP`, `Use`, `UseLoop` (kind `OptionLoopMiddleware`, every call); `claimHandler`, the one-handler rule every declaration takes |
-| `listen.go` | listener construction; TLS/mTLS wrapping; family validation |
-| `conn.go` | the pooled `corenet.Conn` implementation, and the `hijacked` hand-over flag |
+| `listen.go` | listener construction; TLS/mTLS wrapping; family validation; the `bindReport` (exclusive, bind wait) |
+| `exclusive.go`, `exclusive_{windows,other}.go` | ADR 0193: `listenControl` — `SO_REUSEPORT` when sharded, `SO_EXCLUSIVEADDRUSE` on Windows for unicast TCP/UDP (`exclusiveApplies`, multicast and AF_UNIX excluded) before bind; `exclusiveOf` reads it back from an adopted socket, never fatal; `bindRetrying` — Windows rebinds a `WSAEADDRINUSE` TCP address eight times at most, 25 ms doubling to 1 s, the wait in `BindWait` (UDP, other platforms and a port the server already holds — `Server.rebindAttempts`/`holdsPort` — one attempt); `closeConn` — Windows' graceful close, `CloseWrite` then a read to zero bounded by 500 ms and 64 KiB |
+| `exclusive_internal_test.go`, `exclusive_windows_internal_test.go` | the retry and the applicability rule everywhere; on Windows both sockets exclusive, a second bind refused, a plain socket read as not exclusive, a restart on the same address after three echoed connections |
+| `conn.go` | the pooled `corenet.Conn` implementation, the `hijacked` hand-over flag, `refused` (the ceiling turned it away: closed at once), and `closeGracefully`, the engine's own close (ADR 0193) |
 | `pool.go` | per-connection recycling + the live-socket registry |
 | `options.go` | `Option` / `GroupOption` — including the two HTTP-only group options, `ReadHeaderTimeout` and `MaxHeaderBytes`, `Loop`, refused by every group no loop handler serves, and `Plaintext`, `Name` and `Engine` (ADR 0187); each records its kind; `WithDrainGrace` (ADR 0196) |
 | `packet_group.go` | `PacketGroup` — the datagram mirror of `StreamGroup` |
 | `packet.go` | the pooled `corenet.Packet` implementation; `Reply` goes through the socket's `datagramSink` |
-| `packet_listen.go` | datagram socket construction; family validation; ceilings; `boundPacketConn` (its source, sink and `done`), `handoverSource` |
+| `packet_listen.go` | datagram socket construction (exclusive like a listener, bound once, ADR 0193); family validation; ceilings; `boundPacketConn` (its source, sink and `done`), `handoverSource` |
 | `packet_bound.go` | `newBoundPacket` (source with GRO, sink per `BatchReplies`), `handoverPackets` (Shutdown's drain wait, after the stream listeners are closed and within `handoverBudget`, 250 ms, a drain still running then has GRO switched off — ADR 0192 §D4), `stopGROPackets` (Close's), `recordGSOOff` / `gsoFaults` (the `gso` faults of `State`) |
 | `packet_loop.go` | the datagram read loop and dispatch: one `Packet` a datagram, a coalesced message split by `serveMessage`, a cut one counted (`Datagrams.TruncatedPackets`); the sink opened before the batch and flushed after it |
 | `batch.go` | the `datagramSource` and `datagramSink` seams, reusable read slots (`segment`, `count` for a coalesced message), `datagramCounters`, the reply queue's sizes |

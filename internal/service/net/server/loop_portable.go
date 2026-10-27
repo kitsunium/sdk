@@ -106,8 +106,10 @@ type portableGroup struct {
 	soft     int
 	maxConns int
 	degraded string
-	// loopsSource is where the lane count came from, for State.
+	// loopsSource is where the lane count came from, for State; procs is
+	// GOMAXPROCS read at Start.
 	loopsSource string
+	procs       int
 	// caps is the group's capability report: every row unprobed, or
 	// disabled; noDelayOff is tcp-nodelay switched off, so each accepted
 	// connection has the netpoller's TCP_NODELAY cleared (ADR 0189).
@@ -194,7 +196,7 @@ func startPortable(group *StreamGroup, lns []stdnet.Listener, degraded string, p
 	}
 	g := &portableGroup{
 		group: group.name, soft: max(v.SoftConns, 0), maxConns: max(group.limits.MaxConns, 0),
-		degraded: degraded, loopsSource: src,
+		degraded: degraded, loopsSource: src, procs: runtime.GOMAXPROCS(0),
 		caps:       append(loop.Unprobed("portable", plan.disabled, plan.disabledBy), portableNoDelay(plan)),
 		noDelayOff: slices.Contains(plan.disabled, corenet.CapabilityTCPNoDelay),
 	}
@@ -1051,7 +1053,7 @@ func (e portableEngine) State() corenet.LoopStateValue {
 	return corenet.LoopStateValue{
 		Group: g.group, Backend: corenet.LoopBackendPortable, ProbeStage: "portable",
 		Degraded: g.degraded != "", DegradedReason: g.degraded,
-		Loops: len(g.lanes), LoopsSource: g.loopsSource, Rings: 1, RingsSource: "single", GOMAXPROCS: runtime.GOMAXPROCS(0),
+		Loops: len(g.lanes), LoopsSource: g.loopsSource, Rings: 1, RingsSource: "single", GOMAXPROCS: g.procs,
 		Capabilities: slices.Clone(g.caps),
 		RingStates:   rings,
 	}

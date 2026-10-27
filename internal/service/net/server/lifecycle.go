@@ -189,7 +189,7 @@ func (s *Server) bindPacketGroup(ctx context.Context, group *PacketGroup) error 
 	}
 	//: one socket and one read goroutine per address.
 	for _, addr := range group.addrs {
-		pc, err := listenPacket(ctx, addr)
+		pc, rep, err := listenPacket(ctx, addr)
 		//: surface the address that could not be bound.
 		if err != nil {
 			//: abort startup; Start unwinds whatever is already bound.
@@ -204,6 +204,8 @@ func (s *Server) bindPacketGroup(ctx context.Context, group *PacketGroup) error 
 			Address:        pc.LocalAddr().String(),
 			Network:        addr.Network,
 			Shards:         1,
+			Exclusive:      rep.exclusive,
+			BindWait:       corenet.DurationValue(rep.wait),
 			Degraded:       degraded,
 			DegradedReason: reason,
 		})
@@ -241,6 +243,7 @@ func (s *Server) adoptPacketSockets(group *PacketGroup, handler corenet.PacketHa
 				Network:        addr.Network,
 				Shards:         1,
 				Adopted:        true,
+				Exclusive:      exclusiveOf(packetSocket(pc)),
 				Degraded:       degraded,
 				DegradedReason: reason,
 			})
@@ -353,6 +356,8 @@ func (s *Server) adoptStreamSockets(group *StreamGroup, handler corenet.ConnHand
 				Network: addr.Network,
 				Shards:  1,
 				Adopted: true,
+				//: read from the raw socket: TLS hides its descriptor.
+				Exclusive: exclusiveOf(listenerSocket(raw)),
 			})
 			s.mu.Unlock()
 			s.inFlight.Add(1)
@@ -379,7 +384,7 @@ func (s *Server) bindShards(ctx context.Context, group *StreamGroup, addr corene
 	opened := 0
 	//: every shard binds the same address; the kernel spreads accepts across them.
 	for range count {
-		ln, err := listen(ctx, addr, group.identity, count > 1, group.tracksCloses())
+		ln, rep, err := listen(ctx, addr, group.identity, count > 1, group.tracksCloses(), s.rebindAttempts(addr))
 		//: a shard that will not bind aborts startup rather than serving a
 		//: quietly smaller set than the operator asked for.
 		if err != nil {
@@ -397,6 +402,8 @@ func (s *Server) bindShards(ctx context.Context, group *StreamGroup, addr corene
 				Address:        ln.Addr().String(),
 				Network:        addr.Network,
 				Shards:         count,
+				Exclusive:      rep.exclusive,
+				BindWait:       corenet.DurationValue(rep.wait),
 				Degraded:       degraded,
 				DegradedReason: reason,
 			})
@@ -548,7 +555,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	//: the drain budget is independent of the cancelled ctx, or shutdown would
 	//: have no time left to run at the very moment it is needed; the grace
 	//: comes on top of it, so a grace never eats the drain.
-	drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.drainGrace+s.drainTimeout)
+	drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), max(s.drainGrace, 0)+s.drainTimeout)
 	defer cancel()
 	err := s.Shutdown(drainCtx)
 	//: the caller's end: whether the drain completed.

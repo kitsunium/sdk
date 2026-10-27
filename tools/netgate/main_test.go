@@ -236,6 +236,10 @@ func TestEvaluate_shippedTable(t *testing.T) {
 		pairLines("L2", "handwritten", "handwritten", "cpu-ns/req", scaled(tightRatios, 1.08)) +
 		pairLines("L3", "recvmmsg", "recvmmsg", "cpu-ns/datagram", tightRatios) +
 		pairLines("L3", "recvmmsg", "recvmmsg", "datagrams/syscall", tightRatios)
+	//: P6's own verdict: every other active gate passes, P6 fails at −25 %.
+	if r := evaluate(gates, mustParse(t, slower+p4aPassing()), "abc"); r.Passed || gateNamed(t, r, "P6").Verdict != verdictFail {
+		t.Fatalf("P6 at -25 %%: passed=%t P6=%s", r.Passed, gateNamed(t, r, "P6").Verdict)
+	}
 	for _, in := range []string{"", failing, drifted, dearer, slower} {
 		if evaluate(gates, mustParse(t, in), "abc").Passed {
 			t.Fatalf("a run without its calibration, or with one engine 8 %% off itself, passed: %q", in)
