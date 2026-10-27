@@ -5490,8 +5490,6 @@ sequences:
         kind: internal
       - id: w.left
         kind: internal
-      - id: w.unavailable
-        kind: internal
       - id: w.refused
         kind: internal
     steps:
@@ -5520,16 +5518,10 @@ sequences:
                 when: err == nil && sent > 0
             - opt:
                 do:
-                  - eval: w.unavailable(k, messages)
-                    to: w.unavailable
-                  - return: len(w.queue)
-                when: errno == syscall.ENOSYS || errno == syscall.EPERM
-            - opt:
-                do:
                   - return: resume
                 init:
                   bind: resume, again
-                  eval: w.refused(w.spans[k], errno)
+                  eval: w.refused(k, messages, errno)
                   to: w.refused
                 when: again
             - op: ++
@@ -5542,6 +5534,37 @@ sequences:
         kind: actor
       - id: (*multiWriter).refused
         kind: self
+      - id: w.unavailable
+        kind: internal
+      - id: w.gsoRefused
+        kind: internal
+      - id: w.counters.replyFailures.Add
+        kind: value
+    steps:
+      - bind: span
+        eval: w.spans[k]
+      - switch:
+          cases:
+            - case: errno == syscall.ENOSYS || errno == syscall.EPERM
+              do:
+                - eval: w.unavailable(k, messages)
+                  to: w.unavailable
+                - return: len(w.queue), true
+            - case: span.count > 1
+              do:
+                - return: w.gsoRefused(span, errno)
+                  to: w.gsoRefused
+            - default: true
+              do:
+                - eval: w.counters.replyFailures.Add(uint64(span.count))
+                  to: w.counters.replyFailures.Add
+                - return: 0, false
+  - of: (*multiWriter).gsoRefused
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*multiWriter).gsoRefused
+        kind: self
       - id: w.disableGSO
         kind: internal
       - id: w.counters.gsoOversized.Add
@@ -5549,16 +5572,14 @@ sequences:
       - id: w.counters.replyFailures.Add
         kind: value
     steps:
-      - bind: gso
-        eval: span.count > 1
       - switch:
           cases:
-            - case: gso && errno == syscall.EIO
+            - case: syscall.EIO
               do:
                 - eval: w.disableGSO()
                   to: w.disableGSO
                 - return: span.first, true
-            - case: gso && errno == syscall.EINVAL
+            - case: syscall.EINVAL
               do:
                 - set: w.plainUntil
                   value: span.first + span.count
@@ -5572,7 +5593,7 @@ sequences:
                         to: w.disableGSO
                     when: w.invalidRun >= gsoInvalidLimit
                 - return: span.first, true
-            - case: gso && errno == syscall.EMSGSIZE
+            - case: syscall.EMSGSIZE
               do:
                 - eval: w.counters.gsoOversized.Add(1)
                   to: w.counters.gsoOversized.Add
@@ -5582,6 +5603,7 @@ sequences:
               do:
                 - eval: w.counters.replyFailures.Add(uint64(span.count))
                   to: w.counters.replyFailures.Add
+          "on": errno
       - return: 0, false
   - of: (*multiWriter).sendFrom
     participants:

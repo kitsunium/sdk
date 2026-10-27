@@ -766,6 +766,7 @@ files:
       - (*multiWriter).layout
       - (*multiWriter).sendAll
       - (*multiWriter).refused
+      - (*multiWriter).gsoRefused
       - (*multiWriter).sendFrom
       - (*multiWriter).left
       - (*multiWriter).unavailable
@@ -3229,9 +3230,16 @@ types:
         recv: w *multiWriter
         results: int
       - doc: |-
-          refused judges message span's refusal with errno, and reports whether the
-          queue is to be rebuilt from resume.
+          refused judges message k's refusal with errno, messages laid out, and
+          reports whether the queue is to be rebuilt from resume.
         name: refused
+        params: k, messages int, errno syscall.Errno
+        recv: w *multiWriter
+        results: resume int, again bool
+      - doc: |-
+          gsoRefused judges a GSO send's refusal with errno, and reports whether the
+          queue is to be rebuilt from resume.
+        name: gsoRefused
         params: span replySpan, errno syscall.Errno
         recv: w *multiWriter
         results: resume int, again bool

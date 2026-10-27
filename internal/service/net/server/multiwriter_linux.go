@@ -446,14 +446,8 @@ func (w *multiWriter) sendAll(messages int) int {
 			k += sent
 			continue
 		}
-		//: sendmmsg itself refused: the rest leaves one WriteTo a reply.
-		if errno == syscall.ENOSYS || errno == syscall.EPERM {
-			w.unavailable(k, messages)
-			//: every reply left or was counted.
-			return len(w.queue)
-		}
 		//: message k was refused: rebuilt from a span, or counted and passed.
-		if resume, again := w.refused(w.spans[k], errno); again {
+		if resume, again := w.refused(k, messages, errno); again {
 			//: rebuilt from this span.
 			return resume
 		}
@@ -463,22 +457,44 @@ func (w *multiWriter) sendAll(messages int) int {
 	return len(w.queue)
 }
 
-// refused judges message span's refusal with errno, and reports whether the
-// queue is to be rebuilt from resume.
-func (w *multiWriter) refused(span replySpan, errno syscall.Errno) (resume int, again bool) {
-	gso := span.count > 1
-	//: what the refusal means.
+// refused judges message k's refusal with errno, messages laid out, and
+// reports whether the queue is to be rebuilt from resume.
+func (w *multiWriter) refused(k, messages int, errno syscall.Errno) (resume int, again bool) {
+	span := w.spans[k]
+	//: who refused.
 	switch {
+	//: sendmmsg itself refused: the rest leaves one WriteTo a reply.
+	case errno == syscall.ENOSYS || errno == syscall.EPERM:
+		w.unavailable(k, messages)
+		//: every reply left or was counted: nothing to rebuild.
+		return len(w.queue), true
+	//: a GSO send, whose refusals each mean something of their own.
+	case span.count > 1:
+		//: judged by what GSO's errnos mean.
+		return w.gsoRefused(span, errno)
+	//: any other refusal drops this message's reply, counted.
+	default:
+		w.counters.replyFailures.Add(uint64(span.count))
+		//: passed.
+		return 0, false
+	}
+}
+
+// gsoRefused judges a GSO send's refusal with errno, and reports whether the
+// queue is to be rebuilt from resume.
+func (w *multiWriter) gsoRefused(span replySpan, errno syscall.Errno) (resume int, again bool) {
+	//: what the refusal means.
+	switch errno {
 	//: the device has no checksum offload, which GSO requires: off for the
 	//: socket, and the rest leaves one datagram a message.
-	case gso && errno == syscall.EIO:
+	case syscall.EIO:
 		w.disableGSO()
 		//: rebuilt from this span.
 		return span.first, true
 	//: the segment is past this path's MTU: this span leaves one by one, no
 	//: segment this large is sent again, and a refusal no smaller segment
 	//: cures switches GSO off.
-	case gso && errno == syscall.EINVAL:
+	case syscall.EINVAL:
 		w.plainUntil = span.first + span.count
 		w.segmentCeiling = w.queue[span.first].size - 1
 		w.invalidRun++
@@ -490,7 +506,7 @@ func (w *multiWriter) refused(span replySpan, errno syscall.Errno) (resume int, 
 		return span.first, true
 	//: a GSO message past the IP length is a sizing bug, counted; GSO stays
 	//: on.
-	case gso && errno == syscall.EMSGSIZE:
+	case syscall.EMSGSIZE:
 		w.counters.gsoOversized.Add(1)
 		w.counters.replyFailures.Add(uint64(span.count))
 	//: any other refusal drops this message's replies, counted.
