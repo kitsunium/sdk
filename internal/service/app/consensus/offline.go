@@ -63,6 +63,18 @@ const (
 	whyRepeatedID = "two members under one id"
 )
 
+// offlineBatchBytes and offlineBatchEntries bound one read of the log by an
+// offline operation: the payload bytes and the entries of a batch, which the
+// next read reuses. Recover read the survivor's whole retained log in one
+// call, its payloads included, three times over (#700). A batch holds 1 MiB
+// of payloads, the default MaxBatchBytes, and 4096 entries, about 224 KiB
+// of EntryValue however small their payloads; an entry larger than the
+// bytes is read alone.
+const (
+	offlineBatchBytes   int    = 1 << 20
+	offlineBatchEntries uint64 = 4096
+)
+
 // The offline functions work on the shipped layout, and only on it (D17,
 // R2-33), on a stopped node: each refuses a DataDir a live Node holds.
 
@@ -619,6 +631,11 @@ type recoverPlan struct {
 	// new identity's AdoptedFrom; 0 records none (#509).
 	adopted uint64
 	old     coreconsensus.MembershipValue
+	// cluster is the cluster version the history leaves at kept, which the
+	// forced entry's payload version follows (#648): read with old, in the
+	// same pass over the log, and handed down rather than read again (#700).
+	// An interrupted install's is read once the install is finished.
+	cluster uint32
 	resumed bool
 	// install is the snapshot of an install a crash interrupted, which
 	// Recover finishes before its marker and keeps (#506); nil when none.
@@ -646,7 +663,7 @@ func (d DataDir) planRecover(stamp *coreconsensus.StampValue, newCluster corecon
 		// The snapshot holds every entry kept; the log below it is
 		// replaced, and its configuration entries are older.
 		p.old = p.install.Membership
-	} else if p.old, err = lastMembership(d.d.log, d.d.snaps, p.kept); err != nil {
+	} else if p.old, p.cluster, err = inForceAt(d.d.log, d.d.snaps, p.kept); err != nil {
 		// The old configuration decides which voters must be attested
 		// fenced: one that could not be read fails Recover closed, never
 		// open. It is the configuration of the last entry kept: an adopted
@@ -659,9 +676,7 @@ func (d DataDir) planRecover(stamp *coreconsensus.StampValue, newCluster corecon
 	if err := checkFenced(p.old.Voters(), stamp.ID, opt, stamp.Log.Cluster, newCluster); err != nil {
 		return p, err
 	}
-	if err := d.planAdopted(&p); err != nil {
-		return p, err
-	}
+	d.planAdopted(&p)
 	return p, d.audit(opt.Operator, recoverAuditLine(newCluster, &p))
 }
 
@@ -671,12 +686,13 @@ func (d DataDir) planRecover(stamp *coreconsensus.StampValue, newCluster corecon
 // interrupted install published. A resumed Recover's marker does not
 // record it, and records none. It is recorded only when the history kept
 // is at protocol version 2: the stamp that carries it is one a node of
-// protocol 1 refuses to open (#509, D18).
-func (d DataDir) planAdopted(p *recoverPlan) error {
+// protocol 1 refuses to open (#509, D18). The cluster version is the one
+// planRecover read with the old configuration.
+func (d DataDir) planAdopted(p *recoverPlan) {
 	var cluster uint32
 	switch {
 	case p.resumed:
-		return nil
+		return
 	case p.install != nil:
 		p.adopted, cluster = p.kept, p.install.ClusterVersion
 	default:
@@ -684,16 +700,11 @@ func (d DataDir) planAdopted(p *recoverPlan) error {
 		if first, _ := d.d.log.Bounds(); first > 0 && first-1 > committed {
 			committed = first - 1
 		}
-		p.adopted = min(p.kept, committed)
-		var err error
-		if cluster, err = clusterVersionThrough(d.d.log, d.d.snaps, p.kept); err != nil {
-			return err
-		}
+		p.adopted, cluster = min(p.kept, committed), p.cluster
 	}
 	if cluster < raft.Protocol2 {
 		p.adopted = 0
 	}
-	return nil
 }
 
 // planKept decides the last index the new history keeps: the one a resumed
@@ -749,7 +760,7 @@ func (d DataDir) writeRecover(stamp *coreconsensus.StampValue, newCluster coreco
 	if p.install != nil {
 		// Before the marker: a crash after it reruns as a first Recover,
 		// over a log whose base is the snapshot, and keeps the same index.
-		if err := d.finishInterruptedInstall(p.install); err != nil {
+		if err := d.finishPlannedInstall(p); err != nil {
 			return err
 		}
 	}
@@ -758,7 +769,7 @@ func (d DataDir) writeRecover(stamp *coreconsensus.StampValue, newCluster coreco
 			return err
 		}
 	}
-	if err := d.appendForced(new(coreconsensus.HardState{Term: p.hard.Term, Commit: p.kept}), members, &p.old, op); err != nil {
+	if err := d.appendForced(new(coreconsensus.HardState{Term: p.hard.Term, Commit: p.kept}), members, &p.old, p.cluster, op); err != nil {
 		return err
 	}
 	stamp.Log = coreconsensus.LogIdentityValue{
@@ -772,6 +783,18 @@ func (d DataDir) writeRecover(stamp *coreconsensus.StampValue, newCluster coreco
 		return err
 	}
 	return d.clearRecoverIntent()
+}
+
+// finishPlannedInstall finishes the install a crash interrupted, which the
+// plan keeps, then reads the cluster version the forced entry follows: the
+// log now starts past the snapshot, so nothing of it is read (#700).
+func (d DataDir) finishPlannedInstall(p *recoverPlan) error {
+	if err := d.finishInterruptedInstall(p.install); err != nil {
+		return err
+	}
+	var err error
+	_, p.cluster, err = inForceAt(d.d.log, d.d.snaps, p.kept)
+	return err
 }
 
 // endRecoveredSilence removes, durably and before STOP-RECOVER goes, the
@@ -1068,8 +1091,10 @@ func extends(e *coreconsensus.EntryValue, end, term uint64, chain uint32) bool {
 // history, chained to the entry it follows and one term past any the log
 // knew. It keeps the old configuration's retired IDs and, in a history at
 // protocol version 3, its retired keys, in an entry of payload version 3:
-// below, the entry is of version 0, as it always was (#648).
-func (d DataDir) appendForced(hard *coreconsensus.HardState, members []coreconsensus.MemberValue, old *coreconsensus.MembershipValue, operator coreconsensus.Operator) error {
+// below, the entry is of version 0, as it always was (#648). cluster is the
+// cluster version the history leaves at hard.Commit, which Recover read
+// with old (#700).
+func (d DataDir) appendForced(hard *coreconsensus.HardState, members []coreconsensus.MemberValue, old *coreconsensus.MembershipValue, cluster uint32, operator coreconsensus.Operator) error {
 	flog := d.d.log
 	commit := hard.Commit
 	first, last := flog.Bounds()
@@ -1083,10 +1108,6 @@ func (d DataDir) appendForced(hard *coreconsensus.HardState, members []coreconse
 		return err
 	}
 	term := max(hard.Term, termAt) + 1
-	cluster, err := clusterVersionThrough(flog, d.d.snaps, commit)
-	if err != nil {
-		return err
-	}
 	conf := coreconsensus.MembershipValue{Members: byID(members), Retired: old.Retired}
 	var version uint32
 	if cluster >= raft.Protocol3 {
@@ -1136,68 +1157,98 @@ func snapshotAt(metas []coreconsensus.SnapshotMetaValue, index uint64) (corecons
 	return coreconsensus.SnapshotMetaValue{}, false
 }
 
-// lastMembership is the configuration committed at index, from the log or
-// the latest snapshot. A store that cannot answer fails it: a configuration
-// read from half the sources is an older one, and Recover would ask for the
-// fence of the wrong voters.
-func lastMembership(l *fileLog, snaps *fileSnapshots, index uint64) (coreconsensus.MembershipValue, error) {
-	var m coreconsensus.MembershipValue
-	metas, err := snaps.List()
-	if err != nil {
-		return m, err
-	}
-	if len(metas) > 0 {
-		m = metas[0].Membership
-	}
-	first, last := l.Bounds()
-	if last >= first {
-		es, err := l.Entries(first, min(last, index)+1, int(^uint(0)>>1), nil)
+// scanLog hands f every entry of l from lo through hi, in order, read a
+// batch at a time into one slice the next batch reuses: what it holds does
+// not grow with the log (#700). An entry the log cannot give back fails it,
+// as it failed the whole read.
+func scanLog(l *fileLog, lo, hi uint64, f func(e *coreconsensus.EntryValue)) error {
+	var buf []coreconsensus.EntryValue
+	for next := lo; next <= hi; next += uint64(len(buf)) {
+		es, err := l.Entries(next, min(hi+1, next+offlineBatchEntries), offlineBatchBytes, buf[:0])
 		if err != nil {
-			return coreconsensus.MembershipValue{}, err
+			return err
 		}
-		for _, e := range es {
-			if e.Kind == coreconsensus.EntryMembership {
-				if a, err := wire.ParseAdminAt(e.Version, e.Data); err == nil {
-					m = a.Membership
-				}
-			}
+		if !contiguousFrom(es, next) {
+			return storageFailed("entries", errImpossible)
 		}
+		for i := range es {
+			f(&es[i])
+		}
+		// The batch's payloads go before the next is read, not as the next
+		// read overwrites its slots one by one.
+		clear(es)
+		buf = es
 	}
-	return m, nil
+	return nil
 }
 
-// clusterVersionThrough is the cluster version the committed entries
-// through index leave, from the latest snapshot and the raises in the log
-// after it, applied as the engine applies them at commit. A store that
-// cannot answer fails it.
-func clusterVersionThrough(l *fileLog, snaps *fileSnapshots, index uint64) (uint32, error) {
+// inForceAt is what the committed history leaves in force at index: the
+// configuration, and the cluster version its raises leave, applied as the
+// engine applies them at commit. Both start from the newest snapshot's
+// metadata and follow the entries the log holds through index, a batch at
+// a time (scanLog); a raise counts past the snapshot only. When the
+// snapshot ends at or below index and the log holds its index under its
+// term, the entries up to it are the history the snapshot was cut from,
+// whose configuration its metadata states (raft's ConfAt, D7): they are not
+// read, and a start runs the same configuration from the same base.
+// Otherwise the log is read from its first entry, as it always was: for an
+// index below the snapshot, and for a snapshot the log does not continue,
+// an install a crash interrupted whose snapshot no longer verifies. The
+// configuration used to be read from the log's first entry whatever the
+// snapshot, and both in one read of the whole range: Recover held the
+// survivor's whole retained log, payloads included, once for the
+// configuration and twice for the cluster version (#700). A store that
+// cannot answer fails it: a configuration read from half the sources is an
+// older one, and Recover would ask for the fence of the wrong voters.
+func inForceAt(l *fileLog, snaps *fileSnapshots, index uint64) (coreconsensus.MembershipValue, uint32, error) {
 	metas, err := snaps.List()
 	if err != nil {
-		return 0, err
+		return coreconsensus.MembershipValue{}, 0, err
 	}
-	var ver uint32
-	var gen, base uint64
+	var h inForce
 	if len(metas) > 0 {
-		ver, gen, base = metas[0].ClusterVersion, metas[0].ClusterGeneration, metas[0].Position.Index
+		m := &metas[0]
+		h = inForce{conf: m.Membership, ver: m.ClusterVersion, gen: m.ClusterGeneration, base: m.Position.Index}
 	}
 	first, last := l.Bounds()
-	lo := max(first, base+1)
-	if last < lo || index < lo {
-		return ver, nil
-	}
-	es, err := l.Entries(lo, min(last, index)+1, int(^uint(0)>>1), nil)
-	if err != nil {
-		return 0, err
-	}
-	for _, e := range es {
-		if e.Kind != coreconsensus.EntryClusterVersion {
-			continue
-		}
-		if a, err := wire.ParseAdminAt(e.Version, e.Data); err == nil && a.Pre.Generation == gen && a.ClusterVersion > ver {
-			ver, gen = a.ClusterVersion, gen+1
+	hi, lo := min(last, index), first
+	if h.base >= first && h.base <= hi {
+		if t, terr := l.Term(h.base); terr == nil && t == metas[0].Position.Term {
+			lo = h.base + 1
 		}
 	}
-	return ver, nil
+	if lo > hi {
+		return h.conf, h.ver, nil
+	}
+	if err := scanLog(l, lo, hi, h.add); err != nil {
+		return coreconsensus.MembershipValue{}, 0, err
+	}
+	return h.conf, h.ver, nil
+}
+
+// inForce is what inForceAt reads in force: the configuration, the cluster
+// version and its generation, from the snapshot at base on.
+type inForce struct {
+	conf      coreconsensus.MembershipValue
+	ver       uint32
+	gen, base uint64
+}
+
+// add applies e to what is in force: a configuration entry replaces the
+// configuration, and a raise past the snapshot, of the current generation,
+// to a higher version raises the cluster version. A payload that does not
+// parse changes nothing.
+func (h *inForce) add(e *coreconsensus.EntryValue) {
+	switch {
+	case e.Kind == coreconsensus.EntryMembership:
+		if a, err := wire.ParseAdminAt(e.Version, e.Data); err == nil {
+			h.conf = a.Membership
+		}
+	case e.Kind == coreconsensus.EntryClusterVersion && e.Position.Index > h.base:
+		if a, err := wire.ParseAdminAt(e.Version, e.Data); err == nil && a.Pre.Generation == h.gen && a.ClusterVersion > h.ver {
+			h.ver, h.gen = a.ClusterVersion, h.gen+1
+		}
+	}
 }
 
 // RestoreOptions are RestoreSnapshot's preconditions (R3-15). Expected and

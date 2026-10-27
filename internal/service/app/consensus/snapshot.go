@@ -210,11 +210,23 @@ func (n *Node) cutFailed(err error) {
 // (raft's EngineAt), never the one standing now: the engine applies its
 // entries at commit, ahead of the applied index a cut is made at, and a
 // node that installed the snapshot and was then truncated back would carry
-// a contract whose entry it never applied (#402). It reports false when the
-// node stopped before the loop could answer.
-func (n *Node) metaAt(idx, term uint64) (coreconsensus.SnapshotMetaValue, bool) {
+// a contract whose entry it never applied (#402). An index past the step
+// function's commit is refused OVERLOADED, for the cut to be tried again
+// once the commit reaches it: EngineAt knows the engine entries committed
+// there alone, and answered for such an index the state at the commit. A
+// machine applied past that commit — one left ahead of a log truncated
+// below it by TruncateAndStaySilent, or one that reports no term
+// (stepApplied) — had the snapshot record the cluster version, timing
+// contract or alarm before an entry it covers, and the node restarted from
+// it ran them for good (#707). It answers the node's stop when the loop
+// could not answer.
+func (n *Node) metaAt(idx, term uint64) (coreconsensus.SnapshotMetaValue, error) {
 	var meta coreconsensus.SnapshotMetaValue
+	var commit uint64
 	ok := n.exec(func() {
+		if commit = n.r.Status().Commit; idx > commit {
+			return
+		}
 		eng := n.r.EngineAt(idx)
 		conf := n.r.ConfAt(idx)
 		conf.Index = idx
@@ -225,7 +237,14 @@ func (n *Node) metaAt(idx, term uint64) (coreconsensus.SnapshotMetaValue, bool) 
 			Timing: eng.Timing, ClusterVersion: eng.Cluster, ClusterGeneration: eng.ClusterG, NoSpace: eng.NoSpace,
 		}
 	})
-	return meta, ok
+	switch {
+	case !ok:
+		return meta, n.stoppedErr()
+	case idx > commit:
+		return meta, origin(coreconsensus.Overloaded, errs.String("why", "the applied index is past the commit the node knows"),
+			errs.String("index", u64s(idx)), errs.String("commit", u64s(commit)))
+	}
+	return meta, nil
 }
 
 // snapshotID is the identifier of the snapshot cut at idx in term.
@@ -253,9 +272,9 @@ func (n *Node) cut(idx, term uint64, wait bool) error {
 	// goroutine: watchProgress does not take that for a stuck apply (#593).
 	n.cuttingSince.Store(n.clk.Now().UnixNano())
 	defer n.cuttingSince.Store(0)
-	meta, ok := n.metaAt(idx, term)
-	if !ok {
-		return n.stoppedErr()
+	meta, err := n.metaAt(idx, term)
+	if err != nil {
+		return err
 	}
 	snap, err := n.cfg.Machine.Snapshot()
 	if err != nil {

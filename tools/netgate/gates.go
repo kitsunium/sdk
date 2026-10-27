@@ -115,15 +115,16 @@ var (
 	}
 
 	// gates is the plan's table (P8 §Gates). P0, P1 and P3 have functional
-	// gates only (the lanes), so they have no row here. A row is active once
-	// its step's engine B is built — P4a's, GRO in datagramSource (ADR 0192) —
-	// and every other step's row is inactive: reported, never failing.
+	// gates only (the lanes), so they have no row here. P2 is active: its
+	// chain (internal/service/net/http1's links) is engine B; so is P4a: GRO in
+	// datagramSource (ADR 0192). Every other step's row waits on its step,
+	// inactive: reported, never failing.
 	// The calibration rows are active: a runner on which one engine does not
 	// match itself fails the run rather than lets a step pass or fail on it.
 	gates = []gateEntity{
 		{
 			Step: "P2", Load: loadL2, A: "handwritten", B: "chain", Criteria: p2Criteria,
-			AllocBudget: p2AllocBudget, Pending: "the http1 middleware chain (P2) is engine B",
+			AllocBudget: p2AllocBudget, Active: true,
 		},
 		{
 			Step: "P4a", Load: loadL3, A: "recvmmsg", B: "gro", Criteria: p4aCriteria, Active: true,

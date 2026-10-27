@@ -28,8 +28,8 @@ name.
 
 **The ports are generated from the design** (ADR 0163): `Conn`, `ConnHandler`,
 `Packet`, `PacketHandler`, `Policy`, `LoopIO`, `LoopHandler`,
-`LoopOptionHonourer`, `LoopStarter`, `LoopLayered`, `HTTP1Handler` and
-`HTTP1Batcher` are declared, with their doc comments,
+`LoopOptionHonourer`, `LoopStarter`, `LoopLayered`, `HTTP1Handler`,
+`HTTP1Batcher`, `HTTP1BearerVerifier` and `HTTP1AccessLogger` are declared, with their doc comments,
 under `ports:` in `design/net.yaml`, and `kit gen` writes them into
 `gen_ports.go`. A port or its doc comment changes in the design, then `kit
 gen`, then `make api` — never in `gen_ports.go`, whose header digests `make
@@ -64,6 +64,8 @@ adapter.
 | `middleware.go` | `Middleware[H]` + `Chain` — one generic decorator shape for stream and datagram handlers, the first listed outermost |
 | `phase.go` | `Phase` — `PhaseNew` / `PhaseStarting` / `PhaseServing` / `PhaseDraining` / `PhaseStopped` + `String` |
 | `state.go` | `StateValue` (+ `Degraded`, true for any `Faults` entry and, for a value built by hand, any row's `Degraded` — ADR 0188 §D4) and `ListenerStateValue` — the server's reported state; `StateValue.Loops` is empty while no loop group exists |
+| `state_report.go` | `OverrideValue` (what the operator's variables did: source, raw, applied ceiling, disabled), `FaultValue` (one thing the server runs without: source, group, reason), `FallbacksValue` (count and last occurrence), `PlatformValue` (GOOS, GOARCH, kernel release, toolchain) — the four fields ADR 0188 adds to `StateValue` |
+| `http1_auth.go` | `HTTP1AuthValue` — a subject of at most `HTTP1MaxSubject` bytes held in an array, and 64 bits of claims (`SetSubject`, which refuses rather than cuts, `Subject`, `SetClaims`, `Claims`, `Reset`): by value, so a subject never aliases the token it was read from — and `HTTP1AccessValue`, one access-log record with a fixed array of allowed fields and no slot for the query, the body or a credential (ADR 0191 §D4); the ports `HTTP1BearerVerifier` and `HTTP1AccessLogger` are in `gen_ports.go` |
 | `capability.go` | `Capability` and the registry of the operator's tokens, top first — `CapabilityIOURing`, `CapabilityEpoll` (switchable), `CapabilityPortable`, `CapabilityGoroutine` (floors) — and `EnvEngine`, `EnvDisable`, the variables' names (ADR 0188 §D1); the kernel capabilities in three blocks — class A-kernel (`uring-multishot-recv`, `uring-pbuf`, `uring-direct`, `epoll-exclusive`, `tcp-nodelay`), class A-code (`uring-defer-taskrun`, `uring-no-sqarray`, `uring-ring-fds`, `uring-sq-rewind`) and class B, declared and not built — and `CapabilityValue`, one row of a loop group's report (ADR 0189); the parser in `net/server` and `scripts/ci/check-net-default-change.sh` read the same design blocks |
 | `state_datagram.go` | `DatagramStateValue` — what the batched datagram paths drop: messages the kernel cut (`TruncatedPackets`), GSO sends refused with `EMSGSIZE` (`GSOOversized`), queued replies that did not leave (`ReplyFailures`); `StateValue.Datagrams` (ADR 0192) |
 | `state_report.go` | `OverrideValue` (what the operator's variables did: source, raw, applied ceiling, disabled), `FaultValue` (one thing the server runs without: source — `gso` among them, ADR 0192 —, group, reason), `FallbacksValue` (count and last occurrence), `PlatformValue` (GOOS, GOARCH, kernel release, toolchain) — the four fields ADR 0188 adds to `StateValue` |
@@ -77,7 +79,7 @@ adapter.
 | `websocket_opcode.go` | `WSOpCode` — the six assigned opcodes, `IsControl` / `Defined` / `String` |
 | `websocket_close.go` | `WSCloseCode` — the §7.4.1 registry, `Sendable` / `Echoable`; the close payload's wire form is `service/net/websocket`'s |
 | `websocket_message.go` | `WSMessageValue` — the reassembled message and its `OpCode`; its §8.1 UTF-8 rule is checked by the engine |
-| `http1.go` | the restricted HTTP/1.1 profile's vocabulary (ADR 0186 §D6): `HTTP1RequestValue` (+ `Field`, A–Z folding only; `Lane`, the lane that framed it — ADR 0191), `HTTP1FieldValue`, `HTTP1ResponseValue` (`Defer`, answered at the batch's end), `HTTP1LimitsValue` and its bounds (`HTTP1DefaultHead`, `HTTP1MaxHead`, `HTTP1DefaultTarget`, `HTTP1DefaultBody`, `HTTP1MaxBody`, `HTTP1MaxFields`, `HTTP1MaxContentLengthDigits`), `HTTP1HandlerFunc`, the func adapter of the `HTTP1Handler` port (in `gen_ports.go`, beside `HTTP1Batcher`, its optional batch end); the codec is `service/net/http1`'s |
+| `http1.go` | the restricted HTTP/1.1 profile's vocabulary (ADR 0186 §D6): `HTTP1RequestValue` (+ `Field`, A–Z folding only; `Lane`, the lane that framed it; `Path` and `Query`, the canonical target the codec computes; `Route`, `Auth` and `Authenticated`, what the chain's links set, reset by `Parse` — ADR 0191), `HTTP1MaxSubject`, `HTTP1MaxAccessFields`, `HTTP1FieldValue`, `HTTP1ResponseValue` (`Defer`, answered at the batch's end), `HTTP1LimitsValue` and its bounds (`HTTP1DefaultHead`, `HTTP1MaxHead`, `HTTP1DefaultTarget`, `HTTP1DefaultBody`, `HTTP1MaxBody`, `HTTP1MaxFields`, `HTTP1MaxContentLengthDigits`), `HTTP1HandlerFunc`, the func adapter of the `HTTP1Handler` port (in `gen_ports.go`, beside `HTTP1Batcher`, its optional batch end); the codec is `service/net/http1`'s |
 
 ## Why-this-shape
 
@@ -87,6 +89,12 @@ adapter.
   on. `Honours` and `OnStart` stop at a handler without the capability rather
   than assert it. Whether a layer kept a callback is server's to check, by a
   probe chain at Start; nothing here can tell.
+- **`HTTP1AuthValue` is an array, not a slice** (ADR 0191 §D4). The token a
+  verifier reads aliases the connection's buffer, reused once the batch ends;
+  a subject kept as a slice of it would name another request's bytes in a
+  deferred answer. 128 bytes and a length byte, copied with the request, and
+  a subject longer than that is refused, never cut — a cut subject is another
+  subject.
 
 - **`IdentityValue` is opaque and redacting.** It copies `crypto.Key` /
   `writer.CredentialValue` exactly: value receivers, unexported secret fields,
@@ -333,8 +341,9 @@ cd internal/core && GOWORK=off go test -race -cover ./net/...
   `LoopValue.Capabilities`, `LoopCapabilityRefused` —
   `docs/adr/0189-a-kernel-capability-is-probed-reported-and-switched-off-by-name.md`
 - ADR 0191 — `LoopStarter`, `LoopLayered`, `LoopLayer`, `NewLoopLayer`,
-  `OptionLoopMiddleware`, `LoopMiddlewareInvalid` (`0.2.11.61`) and the
-  request's `Lane` — `docs/adr/0191-a-loop-middleware-forwards-every-callback-and-the-http1-chain-judges-one-canonical-target.md`
+  `OptionLoopMiddleware`, `LoopMiddlewareInvalid` (`0.2.11.61`);
+  `HTTP1AuthValue`, `HTTP1AccessValue`, the two chain ports and the request's
+  `Lane`, `Path`, `Query`, `Route`, `Auth`, `Authenticated` — `docs/adr/0191-a-loop-middleware-forwards-every-callback-and-the-http1-chain-judges-one-canonical-target.md`
 - ADR 0188 — `Capability`, `EnvEngine`, `EnvDisable`, `OverrideValue`,
   `FaultValue`, `FallbacksValue`, `PlatformValue`, the four `StateValue`
   fields and `LoopGroupStalled` (`0.2.11.59`) —

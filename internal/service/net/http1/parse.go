@@ -209,6 +209,11 @@ func (p Parser) Parse(buf []byte, req *corenet.HTTP1RequestValue) (int, Refusal)
 		//: refused, or more bytes needed — unless the bound is already spent.
 		return 0, ranOut(r, len(buf), head)
 	}
+	//: the head is whole, Host known: the one canonical target, or a refusal.
+	if r := canonical(req); r != RefusalNone {
+		//: refused like any other rule, before any handler.
+		return 0, r
+	}
 	//: the head is whole: its length and the request's are known.
 	req.HeadLen = end
 	req.Consumed = end + int(req.ContentLength)
@@ -258,8 +263,10 @@ func Pending(req *corenet.HTTP1RequestValue, buffered int) int {
 func reset(req *corenet.HTTP1RequestValue) {
 	//: every scalar and slice header of the value; the array is left.
 	req.Method, req.Target, req.Host, req.Authorization, req.Body = nil, nil, nil, nil, nil
-	req.ContentLength, req.HeadLen, req.Consumed, req.NFields = 0, 0, 0, 0
-	req.HasHost, req.HasAuthorization, req.Close = false, false, false
+	req.Path, req.Query = nil, nil
+	req.ContentLength, req.HeadLen, req.Consumed, req.NFields, req.Route = 0, 0, 0, 0, 0
+	req.HasHost, req.HasAuthorization, req.Close, req.Authenticated = false, false, false, false
+	req.Auth.Reset()
 }
 
 // requestLine reads "method SP target SP HTTP/1.1 CRLF" from the start of

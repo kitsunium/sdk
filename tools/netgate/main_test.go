@@ -67,7 +67,8 @@ func pairLines(load, a, b, unit string, ratios []float64) string {
 
 // calibrated is every calibration row's rounds within 1 % of 1: a runner a
 // step's row may be judged on.
-var calibrated = pairLines("L1", "loop", "loop", "cpu-ns/req", tightRatios) +
+var calibrated = pairLines("L2", "handwritten", "chain", "cpu-ns/req", tightRatios) +
+	pairLines("L1", "loop", "loop", "cpu-ns/req", tightRatios) +
 	pairLines("L2", "handwritten", "handwritten", "cpu-ns/req", tightRatios) +
 	pairLines("L3", "recvmmsg", "recvmmsg", "cpu-ns/datagram", tightRatios) +
 	pairLines("L3", "recvmmsg", "recvmmsg", "datagrams/syscall", tightRatios)
@@ -204,11 +205,11 @@ func TestEvaluate_pairedCancelsTheRunner(t *testing.T) {
 	}
 }
 
-// TestEvaluate_shippedTable pins the table as it ships: P4a's row is active —
-// its engine B is built — and every other step's is inactive, so samples that
-// would fail it fail nothing, while it still reports what it measured; the
-// calibration rows are active, so a run without them, or with one engine
-// unlike itself, fails, as does a run without P4a's samples.
+// TestEvaluate_shippedTable pins the table as it ships: P2, P4a and the
+// calibration rows are active, so a run without them, with P2's chain 5 %
+// dearer, or with one engine unlike itself, fails; every other step's row is
+// inactive, and samples that would fail it fail nothing while it still
+// reports what it measured.
 func TestEvaluate_shippedTable(t *testing.T) {
 	failing := pairLines("L1", "goroutine", "loop", "cpu-ns/req", scaled(tightRatios, 2))
 	rep := evaluate(gates, mustParse(t, calibrated+p4aPassing()+failing), "abc")
@@ -216,19 +217,22 @@ func TestEvaluate_shippedTable(t *testing.T) {
 		t.Fatalf("calibrated run failed: %+v", rep)
 	}
 	for _, g := range rep.Gates {
-		cal := strings.HasPrefix(g.Step, "cal-") || g.Step == "P4a"
-		if cal != g.Active || (!cal && (g.Verdict != verdictInactive || g.Pending == "")) || (cal && g.Verdict != verdictPass) {
+		active := strings.HasPrefix(g.Step, "cal-") || g.Step == "P2" || g.Step == "P4a"
+		if active != g.Active || (!active && (g.Verdict != verdictInactive || g.Pending == "")) || (active && g.Verdict != verdictPass) {
 			t.Errorf("%s: active=%t verdict=%s pending=%q", g.Step, g.Active, g.Verdict, g.Pending)
 		}
 	}
 	if g := gateNamed(t, rep, "P6"); g.Measured[0].Verdict != verdictFail {
 		t.Fatalf("an inactive gate still reports what it measured: %+v", g.Measured)
 	}
-	drifted := pairLines("L1", "loop", "loop", "cpu-ns/req", tightRatios) +
+	dearer := strings.Replace(calibrated, pairLines("L2", "handwritten", "chain", "cpu-ns/req", tightRatios),
+		pairLines("L2", "handwritten", "chain", "cpu-ns/req", scaled(tightRatios, 1.05)), 1)
+	drifted := pairLines("L2", "handwritten", "chain", "cpu-ns/req", tightRatios) +
+		pairLines("L1", "loop", "loop", "cpu-ns/req", tightRatios) +
 		pairLines("L2", "handwritten", "handwritten", "cpu-ns/req", scaled(tightRatios, 1.08)) +
 		pairLines("L3", "recvmmsg", "recvmmsg", "cpu-ns/datagram", tightRatios) +
 		pairLines("L3", "recvmmsg", "recvmmsg", "datagrams/syscall", tightRatios)
-	for _, in := range []string{"", failing, drifted} {
+	for _, in := range []string{"", failing, drifted, dearer} {
 		if evaluate(gates, mustParse(t, in), "abc").Passed {
 			t.Fatalf("a run without its calibration, or with one engine 8 %% off itself, passed: %q", in)
 		}

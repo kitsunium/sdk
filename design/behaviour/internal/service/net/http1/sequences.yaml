@@ -1,6 +1,433 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 sequences:
+  - of: newLink
+    steps:
+      - bind: b, _
+        eval: next.(corenet.HTTP1Batcher)
+      - return: "link{next: next, batcher: b}"
+  - of: (*link).endBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*link).endBatch
+        kind: self
+      - id: l.batcher.EndBatch
+        kind: value
+    steps:
+      - opt:
+          do:
+            - eval: l.batcher.EndBatch(lane)
+              to: l.batcher.EndBatch
+          when: l.batcher != nil
+  - of: misconfigured
+    participants:
+      - id: caller
+        kind: actor
+      - id: misconfigured
+        kind: self
+      - id: errs
+        kind: package
+    steps:
+      - return: errs.Wrap(corenet.HTTP1Misconfigured, errs.WrapParams{}, errs.String("link", linkName), errs.String("option", what))
+        to: errs
+  - of: Routes
+    participants:
+      - id: caller
+        kind: actor
+      - id: Routes
+        kind: self
+      - id: checkRoute
+        kind: internal
+    steps:
+      - bind: table
+        eval: make([]route, 0, len(routes))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil, err
+                init:
+                  bind: err
+                  eval: checkRoute(r, routes[:i])
+                  to: checkRoute
+                when: err != nil
+            - set: table
+              value: "append(table, route{id: r.ID, method: []byte(r.Method), path: []byte(r.Path), prefix: r.Prefix})"
+          key: i
+          range: routes
+          value: r
+      - return: |-
+          func(next corenet.HTTP1Handler) corenet.HTTP1Handler {
+          		//: the table is shared, read only.
+          		return &RouteLayer{link: newLink(next), routes: table}
+          	}, nil
+  - of: checkRoute
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkRoute
+        kind: self
+      - id: misconfigured
+        kind: internal
+    steps:
+      - opt:
+          do:
+            - return: misconfigured("Routes", "id")
+              to: misconfigured
+          when: r.ID <= 0
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: misconfigured("Routes", "id")
+                    to: misconfigured
+                when: b.ID == r.ID
+          key: _
+          range: before
+          value: b
+      - opt:
+          do:
+            - return: misconfigured("Routes", "method")
+              to: misconfigured
+          when: r.Method != "" && !token(r.Method)
+      - opt:
+          do:
+            - return: misconfigured("Routes", "path")
+              to: misconfigured
+          when: r.Path == "" || r.Path[0] != '/' || checkPath([]byte(r.Path)) != RefusalNone
+      - return: nil
+  - of: (*RouteLayer).ServeHTTP1
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*RouteLayer).ServeHTTP1
+        kind: self
+      - id: l.next.ServeHTTP1
+        kind: value
+    steps:
+      - set: req.Route
+        value: "0"
+      - loop:
+          do:
+            - bind: r
+              eval: "&l.routes[i]"
+            - opt:
+                do:
+                  - set: req.Route
+                    value: r.id
+                  - break: true
+                when: |-
+                  (len(r.method) == 0 || bytes.Equal(r.method, req.Method)) &&
+                  			(bytes.Equal(r.path, req.Path) || (r.prefix && prefixOf(r.path, req.Path)))
+          key: i
+          range: l.routes
+      - eval: l.next.ServeHTTP1(req, res)
+        to: l.next.ServeHTTP1
+  - of: prefixOf
+    steps:
+      - return: |-
+          bytes.HasPrefix(path, prefix) &&
+          		(len(path) == len(prefix) || prefix[len(prefix)-1] == '/' || path[len(prefix)] == '/')
+  - of: (*RouteLayer).EndBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*RouteLayer).EndBatch
+        kind: self
+      - id: l.endBatch
+        kind: internal
+    steps:
+      - eval: l.endBatch(lane)
+        to: l.endBatch
+  - of: Bearer
+    participants:
+      - id: caller
+        kind: actor
+      - id: Bearer
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, misconfigured("Bearer", "verifier")
+          when: v == nil
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil, misconfigured("Bearer", "exempt")
+                when: id <= 0
+          key: _
+          range: exempt
+          value: id
+      - bind: ids
+        eval: slices.Clone(exempt)
+        to: slices
+      - return: |-
+          func(next corenet.HTTP1Handler) corenet.HTTP1Handler {
+          		//: the exemptions are shared, read only.
+          		return &BearerLayer{link: newLink(next), v: v, exempt: ids}
+          	}, nil
+  - of: (*BearerLayer).ServeHTTP1
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*BearerLayer).ServeHTTP1
+        kind: self
+      - id: req.Auth.Reset
+        kind: value
+      - id: l.next.ServeHTTP1
+        kind: value
+      - id: bearerToken
+        kind: internal
+      - id: addHeader
+        kind: internal
+    steps:
+      - eval: req.Auth.Reset()
+        to: req.Auth.Reset
+      - set: req.Authenticated
+        value: "false"
+      - opt:
+          do:
+            - eval: l.next.ServeHTTP1(req, res)
+              to: l.next.ServeHTTP1
+            - return: ""
+          when: l.exempted(req.Route)
+      - bind: tok, ok
+        eval: bearerToken(req)
+        to: bearerToken
+      - opt:
+          do:
+            - eval: req.Auth.Reset()
+              to: req.Auth.Reset
+            - set: res.Status
+              value: statusUnauthorized
+            - eval: addHeader(res, wwwAuthenticate)
+              to: addHeader
+            - return: ""
+          when: "!ok || !l.v.VerifyBearer(tok, &req.Auth)"
+      - set: req.Authenticated
+        value: "true"
+      - eval: l.next.ServeHTTP1(req, res)
+        to: l.next.ServeHTTP1
+  - of: (*BearerLayer).EndBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*BearerLayer).EndBatch
+        kind: self
+      - id: l.endBatch
+        kind: internal
+    steps:
+      - eval: l.endBatch(lane)
+        to: l.endBatch
+  - of: (*BearerLayer).exempted
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*BearerLayer).exempted
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - return: slices.Contains(l.exempt, route)
+        to: slices
+  - of: bearerToken
+    participants:
+      - id: caller
+        kind: actor
+      - id: bearerToken
+        kind: self
+      - id: bytes
+        kind: stdlib
+    steps:
+      - bind: v
+        eval: req.Authorization
+      - opt:
+          do:
+            - return: nil, false
+          when: |-
+            !req.HasAuthorization || len(v) <= len(bearerScheme) || v[len(bearerScheme)] != ' ' ||
+            		!foldIs(v[:len(bearerScheme)], bearerScheme)
+      - bind: tok
+        eval: bytes.TrimLeft(v[len(bearerScheme):], " ")
+        to: bytes
+      - return: tok, len(tok) > 0
+  - of: addHeader
+    steps:
+      - opt:
+          do:
+            - set: res.Header
+              value: b
+            - return: ""
+          when: len(res.Header) == 0
+      - set: res.Header
+        value: append(slices.Clip(res.Header), b...)
+  - of: Headers
+    participants:
+      - id: caller
+        kind: actor
+      - id: Headers
+        kind: self
+      - id: AppendField
+        kind: internal
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, misconfigured("Headers", "pairs")
+          when: len(pairs)%2 != 0
+      - var:
+          name: b
+          type: "[]byte"
+      - loop:
+          cond: i < len(pairs)
+          do:
+            - var:
+                name: err
+                type: error
+            - set: b, err
+              to: AppendField
+              value: AppendField(b, pairs[i], pairs[i+1])
+            - opt:
+                do:
+                  - return: nil, misconfigured("Headers", pairs[i])
+                when: err != nil
+          init: i := 0
+          post: i += 2
+      - set: b
+        to: slices
+        value: slices.Clip(b)
+      - return: |-
+          func(next corenet.HTTP1Handler) corenet.HTTP1Handler {
+          		//: the bytes are shared, read only.
+          		return &HeadersLayer{link: newLink(next), fields: b}
+          	}, nil
+  - of: (*HeadersLayer).ServeHTTP1
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*HeadersLayer).ServeHTTP1
+        kind: self
+      - id: addHeader
+        kind: internal
+      - id: l.next.ServeHTTP1
+        kind: value
+    steps:
+      - eval: addHeader(res, l.fields)
+        to: addHeader
+      - eval: l.next.ServeHTTP1(req, res)
+        to: l.next.ServeHTTP1
+  - of: (*HeadersLayer).EndBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*HeadersLayer).EndBatch
+        kind: self
+      - id: l.endBatch
+        kind: internal
+    steps:
+      - eval: l.endBatch(lane)
+        to: l.endBatch
+  - of: Log
+    participants:
+      - id: caller
+        kind: actor
+      - id: Log
+        kind: self
+      - id: slices
+        kind: stdlib
+    steps:
+      - opt:
+          do:
+            - return: nil, misconfigured("Log", "logger")
+          when: l == nil
+      - opt:
+          do:
+            - return: nil, misconfigured("Log", "allow")
+          when: len(allow) > corenet.HTTP1MaxAccessFields
+      - bind: names
+        eval: make([][]byte, 0, len(allow))
+      - loop:
+          do:
+            - opt:
+                do:
+                  - return: nil, misconfigured("Log", name)
+                when: "!token(name) || credential(name) || repeated(name, allow[:i])"
+            - set: names
+              value: append(names, []byte(name))
+          key: i
+          range: allow
+          value: name
+      - bind: kept
+        eval: slices.Clone(allow)
+        to: slices
+      - return: |-
+          func(next corenet.HTTP1Handler) corenet.HTTP1Handler {
+          		//: the names are shared, read only.
+          		return &LogLayer{link: newLink(next), l: l, allow: kept, names: names}
+          	}, nil
+  - of: (*LogLayer).ServeHTTP1
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LogLayer).ServeHTTP1
+        kind: self
+      - id: l.next.ServeHTTP1
+        kind: value
+      - id: orDefault
+        kind: internal
+      - id: req.Field
+        kind: value
+      - id: l.l.LogHTTP1
+        kind: value
+    steps:
+      - eval: l.next.ServeHTTP1(req, res)
+        to: l.next.ServeHTTP1
+      - bind: rec
+        eval: |-
+          corenet.HTTP1AccessValue{
+          		Lane: req.Lane, Route: req.Route, Method: req.Method, Path: req.Path,
+          		BodyLen: len(res.Body), Authenticated: req.Authenticated, Deferred: res.Defer,
+          	}
+      - opt:
+          do:
+            - set: rec.Status
+              to: orDefault
+              value: orDefault(res.Status, statusOK)
+          when: "!res.Defer"
+      - loop:
+          do:
+            - opt:
+                do:
+                  - set: rec.Fields[rec.NFields]
+                    value: "corenet.HTTP1FieldValue{Name: l.names[i], Value: v}"
+                  - op: ++
+                    set: rec.NFields
+                init:
+                  bind: v, ok
+                  eval: req.Field(name)
+                  to: req.Field
+                when: ok
+          key: i
+          range: l.allow
+          value: name
+      - eval: l.l.LogHTTP1(rec)
+        to: l.l.LogHTTP1
+  - of: (*LogLayer).EndBatch
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*LogLayer).EndBatch
+        kind: self
+      - id: l.endBatch
+        kind: internal
+    steps:
+      - eval: l.endBatch(lane)
+        to: l.endBatch
   - of: HandleLoop
     steps:
       - bind: b, _
@@ -520,6 +947,8 @@ sequences:
         kind: internal
       - id: fields
         kind: internal
+      - id: canonical
+        kind: internal
       - id: Continue
         kind: internal
     steps:
@@ -543,6 +972,14 @@ sequences:
           do:
             - return: 0, ranOut(r, len(buf), head)
           when: r != RefusalNone || end == 0
+      - opt:
+          do:
+            - return: 0, r
+          init:
+            bind: r
+            eval: canonical(req)
+            to: canonical
+          when: r != RefusalNone
       - set: req.HeadLen
         value: end
       - set: req.Consumed
@@ -569,13 +1006,24 @@ sequences:
     steps:
       - return: max(0, req.Consumed-buffered)
   - of: reset
+    participants:
+      - id: caller
+        kind: actor
+      - id: reset
+        kind: self
+      - id: req.Auth.Reset
+        kind: value
     steps:
       - set: req.Method, req.Target, req.Host, req.Authorization, req.Body
         value: nil, nil, nil, nil, nil
-      - set: req.ContentLength, req.HeadLen, req.Consumed, req.NFields
-        value: 0, 0, 0, 0
-      - set: req.HasHost, req.HasAuthorization, req.Close
-        value: false, false, false
+      - set: req.Path, req.Query
+        value: nil, nil
+      - set: req.ContentLength, req.HeadLen, req.Consumed, req.NFields, req.Route
+        value: 0, 0, 0, 0, 0
+      - set: req.HasHost, req.HasAuthorization, req.Close, req.Authenticated
+        value: false, false, false, false
+      - eval: req.Auth.Reset()
+        to: req.Auth.Reset
   - of: requestLine
     participants:
       - id: caller
@@ -1146,6 +1594,228 @@ sequences:
             - return: nil
           when: int(r) >= refusalCount
       - return: refusalErrs[r]
+  - of: hexTable
+    steps:
+      - var:
+          name: t
+          type: "[byteValues]byte"
+      - loop:
+          do:
+            - set: t[i]
+              value: noDigit
+          key: i
+          range: t
+      - loop:
+          do:
+            - set: t['0'+i]
+              value: byte(i)
+          key: i
+          range: decimalDigits
+      - loop:
+          do:
+            - set: t['a'+i], t['A'+i]
+              value: byte(decimalDigits+i), byte(decimalDigits+i)
+          key: i
+          range: hexLetters
+      - return: t
+  - of: canonical
+    participants:
+      - id: caller
+        kind: actor
+      - id: canonical
+        kind: self
+      - id: splitPath
+        kind: internal
+      - id: absoluteForm
+        kind: internal
+    steps:
+      - bind: t
+        eval: req.Target
+      - switch:
+          cases:
+            - case: t[0] == '/'
+              do:
+                - return: splitPath(t, req)
+                  to: splitPath
+            - case: len(t) == 1 && t[0] == '*'
+              do:
+                - opt:
+                    do:
+                      - return: RefusalTargetForm
+                    when: "!bytes.Equal(req.Method, methodOptions)"
+                - set: req.Path
+                  value: t[:1:1]
+                - return: RefusalNone
+            - default: true
+              do:
+                - return: absoluteForm(t, req)
+                  to: absoluteForm
+  - of: absoluteForm
+    participants:
+      - id: caller
+        kind: actor
+      - id: absoluteForm
+        kind: self
+      - id: cutScheme
+        kind: internal
+      - id: bytes
+        kind: stdlib
+      - id: splitPath
+        kind: internal
+    steps:
+      - bind: rest, ok
+        eval: cutScheme(t)
+        to: cutScheme
+      - opt:
+          do:
+            - return: RefusalTargetForm
+          when: "!ok"
+      - bind: end
+        eval: len(rest)
+      - opt:
+          do:
+            - set: end
+              value: i
+          init:
+            bind: i
+            eval: bytes.IndexAny(rest, "/?")
+            to: bytes
+          when: i >= 0
+      - opt:
+          do:
+            - return: RefusalTargetHost
+          when: "!authorityIsHost(rest[:end], req)"
+      - bind: tail
+        eval: rest[end:]
+      - opt:
+          do:
+            - return: splitPath(tail, req)
+              to: splitPath
+          when: len(tail) > 0 && tail[0] == '/'
+      - bind: slash
+        eval: len(t) - len(rest) - 1
+      - set: req.Path
+        value: "t[slash : slash+1 : slash+1]"
+      - opt:
+          do:
+            - set: req.Query
+              value: tail[1:]
+          when: len(tail) > 0
+      - return: RefusalNone
+  - of: authorityIsHost
+    steps:
+      - return: len(authority) > 0 && bytes.IndexByte(authority, '@') < 0 && req.HasHost && foldEqualBytes(authority, req.Host)
+  - of: splitPath
+    participants:
+      - id: caller
+        kind: actor
+      - id: splitPath
+        kind: self
+      - id: bytes
+        kind: stdlib
+      - id: checkPath
+        kind: internal
+    steps:
+      - bind: path, query, found
+        eval: bytes.Cut(p, querySep)
+        to: bytes
+      - opt:
+          do:
+            - set: req.Query
+              value: query
+          when: found
+      - opt:
+          do:
+            - return: r
+          init:
+            bind: r
+            eval: checkPath(path)
+            to: checkPath
+          when: r != RefusalNone
+      - set: req.Path
+        value: path
+      - return: RefusalNone
+  - of: checkPath
+    participants:
+      - id: caller
+        kind: actor
+      - id: checkPath
+        kind: self
+      - id: pathByte
+        kind: internal
+    steps:
+      - bind: start
+        eval: "1"
+      - loop:
+          cond: i <= len(p)
+          do:
+            - opt:
+                do:
+                  - opt:
+                      do:
+                        - return: RefusalTargetPath
+                      when: (i == start && i < len(p)) || dotSegment(p[start:i])
+                  - op: ++
+                    set: i
+                  - set: start
+                    value: i
+                  - continue: true
+                when: i == len(p) || p[i] == '/'
+            - bind: "n"
+              eval: pathByte(p, i)
+              to: pathByte
+            - opt:
+                do:
+                  - return: RefusalTargetPath
+                when: n == 0
+            - op: +=
+              set: i
+              value: "n"
+          init: i := 1
+      - return: RefusalNone
+  - of: pathByte
+    steps:
+      - switch:
+          cases:
+            - case: "'\\\\'"
+              do:
+                - return: "0"
+            - case: "'%'"
+              do:
+                - opt:
+                    do:
+                      - return: "0"
+                    when: "!escapeAllowed(p, i)"
+                - return: escapeLen
+            - default: true
+              do:
+                - return: "1"
+          "on": p[i]
+  - of: dotSegment
+    steps:
+      - return: (len(seg) == 1 && seg[0] == '.') || (len(seg) == 2 && seg[0] == '.' && seg[1] == '.')
+  - of: escapeAllowed
+    steps:
+      - opt:
+          do:
+            - return: "false"
+          when: i+2 >= len(p)
+      - bind: hi, lo
+        eval: hexDigits[p[i+1]], hexDigits[p[i+2]]
+      - opt:
+          do:
+            - return: "false"
+          when: hi == noDigit || lo == noDigit
+      - bind: c
+        eval: hi<<4 | lo
+      - return: c != '/' && c != '.' && c != '\\' && c != 0
+  - of: lowerASCII
+    steps:
+      - opt:
+          do:
+            - return: c + 'a' - 'A'
+          when: c >= 'A' && c <= 'Z'
+      - return: c
   - of: refusalAnswerTable
     steps:
       - var:

@@ -792,6 +792,20 @@ packages:
         type: int
         value: "64"
       - doc: |-
+          HTTP1MaxSubject is the longest subject an HTTP1AuthValue holds, in bytes. It
+          sizes the value's array, so a subject is copied into the request and never
+          aliases the bytes it was read from; a longer one is refused.
+        name: HTTP1MaxSubject
+        type: int
+        value: "128"
+      - doc: |-
+          HTTP1MaxAccessFields is how many request fields an access-log link may
+          allow: it sizes HTTP1AccessValue.Fields, so a record is a value and never a
+          slice that grows.
+        name: HTTP1MaxAccessFields
+        type: int
+        value: "8"
+      - doc: |-
           HTTP1DefaultHead is the head bound a zero HTTP1LimitsValue.Head selects: the
           request line, every field line and the blank line that ends them, in bytes.
         name: HTTP1DefaultHead
@@ -1622,6 +1636,46 @@ packages:
                 type: int
             name: EndBatch
         name: HTTP1Batcher
+      - doc: |-
+          HTTP1BearerVerifier verifies a Bearer token for the http1 chain's
+          authenticating link. VerifyBearer reports whether token is valid and, when
+          it is, sets the subject and the claims on auth, which belongs to the
+          request: the link copies nothing back, and nothing the verifier keeps may
+          alias token, whose bytes the connection reuses once the batch ends. It runs
+          on the lane's thread, once per request the link judges, and must not block
+          it.
+
+          IFACE-PLUGIN: what a consumer writes; the link that calls it is
+          internal/service/net/http1's.
+        methods:
+          - doc: |-
+              VerifyBearer reports whether token, the credentials after "Bearer ", is
+              valid, and fills auth when it is.
+            in:
+              - name: token
+                type: "[]byte"
+              - name: auth
+                type: "*HTTP1AuthValue"
+            name: VerifyBearer
+            out:
+              - type: bool
+        name: HTTP1BearerVerifier
+      - doc: |-
+          HTTP1AccessLogger receives the http1 chain's access-log records. Every slice
+          of rec aliases the request or the response and is valid only while
+          LogHTTP1 runs: a logger that keeps a byte copies it. It runs on the lane's
+          thread, once per request, and must not block it: a logger that writes to a
+          file or a socket queues the record.
+
+          IFACE-PLUGIN: what a consumer writes; the link that calls it is
+          internal/service/net/http1's.
+        methods:
+          - doc: LogHTTP1 receives one request's record.
+            in:
+              - name: rec
+                type: HTTP1AccessValue
+            name: LogHTTP1
+        name: HTTP1AccessLogger
       - doc: |-
           Packet is one received datagram.
 
@@ -2576,7 +2630,12 @@ packages:
           Every slice aliases the bytes the codec read: the value is valid while those
           bytes are, which on the loop engine is until OnBatchEnd returns. A handler
           that keeps a byte past that copies it. Fields is an array, so a value framed
-          into a reused HTTP1RequestValue allocates nothing.
+          into a reused HTTP1RequestValue allocates nothing. Auth is a value, not a
+          slice: what a link established survives the bytes it was read from.
+
+          A link of a chain may read every field and set Route, Auth and
+          Authenticated; writing Consumed, HeadLen or Body changes nothing, since the
+          adapter frames with what Parse returned, never with what a link left.
         methods:
           - doc: |-
               Field returns the value of the first field named name and true, or nil and
@@ -2657,6 +2716,124 @@ packages:
                 what the caller set.
               name: Lane
               type: int
+            - doc: |-
+                Path is the request's canonical path, the one target every link of a
+                chain routes and judges on, computed once by the codec: the target's
+                path up to its query, an absolute-form target reduced to its path once
+                its authority matched Host. It is still percent-encoded, and holds no
+                dot-segment, no empty segment, no backslash and no encoded slash, dot,
+                backslash or NUL: the codec refuses a target that would (400). An
+                asterisk-form target, OPTIONS only, is "*".
+              name: Path
+              type: "[]byte"
+            - doc: |-
+                Query is the target's query, after its "?" and without it; empty when
+                the target has none.
+              name: Query
+              type: "[]byte"
+            - doc: |-
+                Route is the identifier of the route a router link matched, zero for
+                none. Parse resets it to zero; only a link sets it.
+              name: Route
+              type: int
+            - doc: |-
+                Auth is what an authenticating link established: the subject and the
+                claims, copied by value into the request, so nothing of them aliases
+                bytes the connection reuses. Parse resets it; Authenticated says
+                whether a link set it.
+              name: Auth
+              type: HTTP1AuthValue
+            - doc: |-
+                Authenticated reports whether an authenticating link verified the
+                request's credentials and filled Auth. Parse resets it to false.
+              name: Authenticated
+              type: bool
+      - doc: |-
+          HTTP1AuthValue is what an authenticating link of the http1 chain
+          established about a request: a subject of at most HTTP1MaxSubject bytes,
+          held in an array, and 64 bits of claims the application gives meaning to.
+          It is a value, so copying a request copies it, and it never aliases the
+          bytes the credentials were read from. The zero value is no subject and no
+          claim.
+        methods:
+          - doc: |-
+              SetSubject copies b into the value and reports true, or leaves the value
+              as it is and reports false when b is longer than HTTP1MaxSubject.
+            in:
+              - name: b
+                type: "[]byte"
+            name: SetSubject
+            out:
+              - type: bool
+            recv: pointer
+          - doc: |-
+              Subject returns the subject, aliasing the value: valid while the value
+              is, and empty when none was set.
+            name: Subject
+            out:
+              - type: "[]byte"
+            recv: pointer
+          - doc: SetClaims sets the claims.
+            in:
+              - name: c
+                type: uint64
+            name: SetClaims
+            recv: pointer
+          - doc: Claims returns the claims.
+            name: Claims
+            out:
+              - type: uint64
+            recv: pointer
+          - doc: Reset clears the subject and the claims.
+            name: Reset
+            recv: pointer
+        name: HTTP1AuthValue
+        struct:
+          unexported: true
+      - doc: |-
+          HTTP1AccessValue is one request's access-log record, as the http1 chain's
+          logging link hands it to an HTTP1AccessLogger: what the request asked, how
+          it was routed and answered, and the request fields the link allows, by
+          name. It never holds the Authorization field, the query or the body: the
+          link refuses to allow a credential field, and the record has no slot for
+          the rest. Every slice aliases the request or the response.
+        name: HTTP1AccessValue
+        struct:
+          fields:
+            - doc: Lane is the request's lane.
+              name: Lane
+              type: int
+            - doc: Route is the route a router link matched, zero for none.
+              name: Route
+              type: int
+            - doc: Method is the request method.
+              name: Method
+              type: "[]byte"
+            - doc: Path is the request's canonical path, without its query.
+              name: Path
+              type: "[]byte"
+            - doc: |-
+                Status is the answer's status code, 200 when the handler left it zero;
+                zero for an answer still deferred.
+              name: Status
+              type: int
+            - doc: BodyLen is the length of the answer's body.
+              name: BodyLen
+              type: int
+            - doc: Authenticated reports whether an authenticating link verified the request.
+              name: Authenticated
+              type: bool
+            - doc: Deferred reports whether the answer was deferred to the batch's end.
+              name: Deferred
+              type: bool
+            - doc: NFields is how many entries of Fields the record filled.
+              name: NFields
+              type: int
+            - doc: |-
+                Fields holds the allowed request fields the request carried, in the order
+                the link was given their names.
+              name: Fields
+              type: "[HTTP1MaxAccessFields]HTTP1FieldValue"
       - doc: |-
           LoopLayer is the base of a loop middleware's layer: it forwards the eight
           callbacks — OnOpen, OnData, OnTimeout, OnWritable, OnBatchEnd, OnClose,
@@ -4148,6 +4325,27 @@ packages:
         name: RefusalMethodUnsupported
         type: Refusal
         value: "22"
+      - doc: |-
+          RefusalTargetPath is a target whose path holds a dot-segment, an empty
+          segment, a backslash, an invalid percent-escape, or an encoded slash, dot,
+          backslash or NUL: a path two links of a chain, or a link and a backend,
+          could read as two different resources.
+        name: RefusalTargetPath
+        type: Refusal
+        value: "23"
+      - doc: |-
+          RefusalTargetForm is a target in none of the forms the profile serves:
+          origin-form, absolute-form with an http or https scheme, or "*" for OPTIONS.
+        name: RefusalTargetForm
+        type: Refusal
+        value: "24"
+      - doc: |-
+          RefusalTargetHost is an absolute-form target whose authority carries
+          userinfo, is empty, or differs from the Host field, or comes with no Host
+          field at all.
+        name: RefusalTargetHost
+        type: Refusal
+        value: "25"
     doc: |-
       Package http1 is the restricted HTTP/1.1 profile (ADR 0186 §D6): a codec
       that frames requests out of bytes and appends responses to bytes, doing no
@@ -4327,6 +4525,81 @@ packages:
         name: HandleLoop
         out:
           - type: "*LoopHandler"
+      - doc: |-
+          Routes returns the router link of an http1 chain: it matches each request's
+          canonical Path against routes, in order, sets HTTP1RequestValue.Route to the
+          first match's ID — zero when none matches — and calls the next handler,
+          always: a request no route matches still reaches the next links, so an
+          authenticating link judges it like any other and only the handler answers
+          404. A route matches when its Method is empty or the request's, and its
+          Path is the request's, or a prefix of it ending on a segment boundary when
+          Prefix is set. An ID of zero or below, a repeated ID, a Path that does not
+          start with "/" and a Method that is not a token are refused with
+          corenet.HTTP1Misconfigured.
+        in:
+          - name: routes
+            type: RouteValue
+        name: Routes
+        out:
+          - type: corenet.Middleware[corenet.HTTP1Handler]
+          - type: error
+        variadic: true
+      - doc: |-
+          Bearer returns the authenticating link of an http1 chain: every request
+          whose Route is not in exempt must carry "Authorization: Bearer <token>"
+          that v verifies, or is answered 401 with WWW-Authenticate: Bearer and goes
+          no further. The link resets Auth and Authenticated first, then lets v set
+          the subject and the claims on the request's own Auth — a value, so nothing
+          of them aliases the token's bytes — and sets Authenticated before the next
+          handler runs. An exempt route reaches the next handler unauthenticated.
+          The scheme matches case-insensitively, the token is what follows its
+          spaces. A nil v, or an exempt ID of zero or below, is refused with
+          corenet.HTTP1Misconfigured.
+        in:
+          - name: v
+            type: corenet.HTTP1BearerVerifier
+          - name: exempt
+            type: int
+        name: Bearer
+        out:
+          - type: corenet.Middleware[corenet.HTTP1Handler]
+          - type: error
+        variadic: true
+      - doc: |-
+          Headers returns the link that gives every answer the field lines pairs
+          names, written once by AppendField: name, value, name, value. It sets the
+          response's Header before the next handler runs, as a slice with no spare
+          capacity, so a handler that appends its own fields copies them rather than
+          write into the link's bytes. An odd count, and every name AppendField
+          refuses, are refused with corenet.HTTP1Misconfigured.
+        in:
+          - name: pairs
+            type: string
+        name: Headers
+        out:
+          - type: corenet.Middleware[corenet.HTTP1Handler]
+          - type: error
+        variadic: true
+      - doc: |-
+          Log returns the access-log link of an http1 chain: once the next handler
+          has answered, it hands l one corenet.HTTP1AccessValue — lane, route,
+          method, canonical path, status, body length, whether the request was
+          authenticated and whether its answer was deferred — with the request's
+          fields named in allow, at most corenet.HTTP1MaxAccessFields of them. It
+          never logs the query, the body or a credential: Authorization,
+          Proxy-Authorization and Cookie in allow are refused with
+          corenet.HTTP1Misconfigured, as are a nil l, an empty or repeated name and a
+          name that is not a token.
+        in:
+          - name: l
+            type: corenet.HTTP1AccessLogger
+          - name: allow
+            type: string
+        name: Log
+        out:
+          - type: corenet.Middleware[corenet.HTTP1Handler]
+          - type: error
+        variadic: true
     imports:
       corenet: github.com/kitsunium/sdk/internal/core/net
     path: github.com/kitsunium/sdk/internal/service/net/http1
@@ -4419,6 +4692,128 @@ packages:
         name: LoopHandler
         struct:
           unexported: true
+      - doc: |-
+          RouteLayer is the router link Routes builds: the layer it wraps around the
+          next handler.
+        methods:
+          - doc: ServeHTTP1 implements corenet.HTTP1Handler.
+            in:
+              - name: req
+                type: "*corenet.HTTP1RequestValue"
+              - name: res
+                type: "*corenet.HTTP1ResponseValue"
+            name: ServeHTTP1
+            recv: pointer
+          - doc: |-
+              EndBatch implements corenet.HTTP1Batcher: it ends the next handler's
+              batch when the next handler is a batcher, so a chain defers answers as
+              its handler does.
+            in:
+              - name: lane
+                type: int
+            name: EndBatch
+            recv: pointer
+        name: RouteLayer
+        struct:
+          unexported: true
+      - doc: |-
+          BearerLayer is the authenticating link Bearer builds: the layer it wraps
+          around the next handler.
+        methods:
+          - doc: ServeHTTP1 implements corenet.HTTP1Handler.
+            in:
+              - name: req
+                type: "*corenet.HTTP1RequestValue"
+              - name: res
+                type: "*corenet.HTTP1ResponseValue"
+            name: ServeHTTP1
+            recv: pointer
+          - doc: |-
+              EndBatch implements corenet.HTTP1Batcher: it ends the next handler's
+              batch when the next handler is a batcher, so a chain defers answers as
+              its handler does.
+            in:
+              - name: lane
+                type: int
+            name: EndBatch
+            recv: pointer
+        name: BearerLayer
+        struct:
+          unexported: true
+      - doc: |-
+          HeadersLayer is the link Headers builds: the layer it wraps around the next
+          handler.
+        methods:
+          - doc: ServeHTTP1 implements corenet.HTTP1Handler.
+            in:
+              - name: req
+                type: "*corenet.HTTP1RequestValue"
+              - name: res
+                type: "*corenet.HTTP1ResponseValue"
+            name: ServeHTTP1
+            recv: pointer
+          - doc: |-
+              EndBatch implements corenet.HTTP1Batcher: it ends the next handler's
+              batch when the next handler is a batcher, so a chain defers answers as
+              its handler does.
+            in:
+              - name: lane
+                type: int
+            name: EndBatch
+            recv: pointer
+        name: HeadersLayer
+        struct:
+          unexported: true
+      - doc: |-
+          LogLayer is the access-log link Log builds: the layer it wraps around the
+          next handler.
+        methods:
+          - doc: ServeHTTP1 implements corenet.HTTP1Handler.
+            in:
+              - name: req
+                type: "*corenet.HTTP1RequestValue"
+              - name: res
+                type: "*corenet.HTTP1ResponseValue"
+            name: ServeHTTP1
+            recv: pointer
+          - doc: |-
+              EndBatch implements corenet.HTTP1Batcher: it ends the next handler's
+              batch when the next handler is a batcher, so a chain defers answers as
+              its handler does.
+            in:
+              - name: lane
+                type: int
+            name: EndBatch
+            recv: pointer
+        name: LogLayer
+        struct:
+          unexported: true
+      - doc: |-
+          RouteValue is one route of a router link: an identifier the application
+          gives meaning to, a method, a canonical path and whether the path is a
+          prefix. The identifier is what the chain names a route by — an
+          authenticating link's exemptions, an access-log record, the handler's
+          switch.
+        name: RouteValue
+        struct:
+          fields:
+            - doc: ID identifies the route, from 1; zero is "no route".
+              name: ID
+              type: int
+            - doc: Method is the method the route takes, empty for any.
+              name: Method
+              type: string
+            - doc: |-
+                Path is the canonical path the route matches, from "/": the whole of
+                it, or its start when Prefix is set.
+              name: Path
+              type: string
+            - doc: |-
+                Prefix makes Path match the start of a request's path, on a segment
+                boundary: "/health" matches "/health" and "/health/live", never
+                "/healthz"; a Path ending in "/" matches whatever follows it.
+              name: Prefix
+              type: bool
       - doc: |-
           Parser frames requests of the restricted HTTP/1.1 profile under its limits.
           It holds three integers and no state between calls, so one Parser serves
@@ -6790,9 +7185,11 @@ packages:
       Transfer-Encoding (chunked, and so trailers, included), Expect, a bare CR or
       LF, a NUL or another control byte in a value, obs-fold, whitespace before a
       colon, a name outside tchar, a Content-Length that is not one run of at most
-      ten digits or that repeats, a second Authorization or Host, CONNECT, or a
-      head, target or body past its Limits. HTTP/2, Upgrade and TLS are out of the
-      profile: a program that needs them mounts net/http with Group.HandleHTTP.
+      ten digits or that repeats, a second Authorization or Host, CONNECT, a
+      target two readers could resolve apart — a dot-segment, an empty segment, a
+      backslash, an encoded slash, dot, backslash or NUL, an absolute-form not for
+      its Host — or a head, target or body past its Limits. HTTP/2, Upgrade and
+      TLS are out of the profile: a program that needs them mounts net/http with Group.HandleHTTP.
       Framing depends on neither the method nor the route: a request takes its
       head plus its Content-Length.
 
@@ -6802,9 +7199,13 @@ packages:
 
       	func (a *api) ServeHTTP1(req *http1.Request, res *http1.Response) {
       		l := &a.lanes[req.Lane]
-      		// route, authenticate with l's own scratch, ...
-      		res.Defer = true // answered at the end of the batch
-      		l.pending = append(l.pending, job{res: res})
+      		switch req.Route { // set by the router link
+      		case routeItem:
+      			res.Defer = true // answered at the end of the batch
+      			l.pending = append(l.pending, job{res: res, user: req.Auth})
+      		default:
+      			res.Status = 404
+      		}
       	}
 
       	func (a *api) EndBatch(lane int) {
@@ -6813,13 +7214,29 @@ packages:
       		// job.res.Status, job.res.Body = ..., ...; job.res.Defer = false
       	}
 
+      	routes, _ := http1.Routes(http1.Route{ID: routeItem, Method: "GET", Path: "/items/", Prefix: true},
+      		http1.Route{ID: routeHealth, Path: "/health"})
+      	bearer, _ := http1.Bearer(verifier, routeHealth) // /health needs no token
       	srv.Group("api", server.Listen("tcp", ":8080"), server.Loop(server.LoopValue{Loops: 2})).
-      		HandleLoop(http1.HandleLoop(a, http1.Parser{}))
+      		HandleLoop(http1.HandleLoop(http1.Chain(a, routes, bearer), http1.Parser{}))
 
       A handler runs on its lane's thread and must not block it. Every callback
       of one lane runs on that thread, one at a time, so state kept per lane needs
       no lock; Request.Lane and the lane argument of EndBatch name the lane. The
       answers of a batch leave at its end, in request order on each connection.
+
+      # The chain
+
+      A link is a Middleware, composed with Chain, the first listed outermost.
+      The codec has already computed the request's canonical Path — no
+      dot-segment, no empty segment, no encoded slash, dot, backslash or NUL, an
+      absolute-form target reduced to its path once its authority matched Host —
+      so every link routes and judges the same bytes. Routes sets
+      Request.Route, Bearer verifies the token for every route its exemptions do
+      not name and copies the subject and the claims into Request.Auth by value,
+      Headers gives every answer its fields, and Log hands an AccessLogger a
+      record of the fields it allows, never a credential. No link writes the
+      bytes a request takes: the adapter frames with what Parse returned.
 
       # The codec alone
 
@@ -6847,7 +7264,9 @@ packages:
       - alias:
           - doc: |-
               Request is one request, framed by the codec. Every slice aliases the bytes
-              it was framed from; Lane names the lane that framed it.
+              Request is one request, framed by the codec. Every slice aliases the bytes
+              it was framed from; Lane names the lane that framed it, Path is its
+              canonical path, Route and Auth what the chain's links set.
             name: Request
             target: corenet.HTTP1RequestValue
       - alias:
@@ -6884,6 +7303,56 @@ packages:
               HandleLoop returns.
             name: LoopHandler
             target: svchttp1.LoopHandler
+      - alias:
+          - doc: |-
+              Middleware is a link of a chain: it decorates a Handler with another,
+              composed by Chain.
+            name: Middleware
+            target: corenet.Middleware[corenet.HTTP1Handler]
+      - alias:
+          - doc: |-
+              Auth is what an authenticating link established: a subject and claims,
+              held by value in the Request.
+            name: Auth
+            target: corenet.HTTP1AuthValue
+      - alias:
+          - doc: |-
+              BearerVerifier verifies a Bearer token for Bearer's link and fills the
+              request's Auth.
+            name: BearerVerifier
+            target: corenet.HTTP1BearerVerifier
+      - alias:
+          - doc: |-
+              Access is one request's access-log record, as Log's link hands it to an
+              AccessLogger.
+            name: Access
+            target: corenet.HTTP1AccessValue
+      - alias:
+          - doc: AccessLogger receives Log's records, on the lane's thread.
+            name: AccessLogger
+            target: corenet.HTTP1AccessLogger
+      - alias:
+          - doc: |-
+              Route is one route of Routes' link: an identifier, a method, a canonical
+              path and whether it is a prefix.
+            name: Route
+            target: svchttp1.RouteValue
+      - alias:
+          - doc: RouteLayer is the link Routes builds.
+            name: RouteLayer
+            target: svchttp1.RouteLayer
+      - alias:
+          - doc: BearerLayer is the link Bearer builds.
+            name: BearerLayer
+            target: svchttp1.BearerLayer
+      - alias:
+          - doc: HeadersLayer is the link Headers builds.
+            name: HeadersLayer
+            target: svchttp1.HeadersLayer
+      - alias:
+          - doc: LogLayer is the link Log builds.
+            name: LogLayer
+            target: svchttp1.LogLayer
       - const:
           - doc: "RefusalNone is no refusal: the request was framed, or needs more bytes."
             name: RefusalNone
@@ -6900,6 +7369,20 @@ packages:
             type: int
             typed: true
             value: "64"
+      - const:
+          - doc: MaxSubject is the longest subject an Auth holds, in bytes.
+            name: MaxSubject
+            reexport: corenet.HTTP1MaxSubject
+            type: int
+            typed: true
+            value: "128"
+      - const:
+          - doc: MaxAccessFields is how many request fields Log may allow.
+            name: MaxAccessFields
+            reexport: corenet.HTTP1MaxAccessFields
+            type: int
+            typed: true
+            value: "8"
       - const:
           - doc: DefaultHead is the head bound a zero Limits.Head selects, in bytes.
             name: DefaultHead
@@ -7105,6 +7588,80 @@ packages:
           name: AppendRefusal
           out:
             - type: "[]byte"
+      - func:
+          doc: |-
+            Chain applies links to a handler, outermost first: Chain(h, a, b) yields
+            a(b(h)), the first link listed the first to see a request.
+          forward: corenet.Chain
+          in:
+            - name: h
+              type: Handler
+            - name: links
+              type: Middleware
+          name: Chain
+          out:
+            - type: Handler
+          variadic: true
+      - func:
+          doc: |-
+            Routes returns the router link: Request.Route is the first route whose
+            Method and Path match, zero for none, and the next handler runs either
+            way. A bad ID, a repeated one, a Path not from "/" or a Method that is not
+            a token is refused with Misconfigured.
+          forward: svchttp1.Routes
+          in:
+            - name: routes
+              type: Route
+          name: Routes
+          out:
+            - type: Middleware
+            - type: error
+          variadic: true
+      - func:
+          doc: |-
+            Bearer returns the authenticating link: a request whose Route is not in
+            exempt is answered 401 unless v verifies its Bearer token; v sets the
+            subject and the claims on the request's Auth, a value.
+          forward: svchttp1.Bearer
+          in:
+            - name: v
+              type: BearerVerifier
+            - name: exempt
+              type: int
+          name: Bearer
+          out:
+            - type: Middleware
+            - type: error
+          variadic: true
+      - func:
+          doc: |-
+            Headers returns the link that gives every answer the field lines pairs
+            names, name then value; a name AppendField refuses is Misconfigured.
+          forward: svchttp1.Headers
+          in:
+            - name: pairs
+              type: string
+          name: Headers
+          out:
+            - type: Middleware
+            - type: error
+          variadic: true
+      - func:
+          doc: |-
+            Log returns the access-log link: one Access record per request, with the
+            request fields allow names. Authorization, Proxy-Authorization and Cookie
+            are refused with Misconfigured: a credential is never logged.
+          forward: svchttp1.Log
+          in:
+            - name: l
+              type: AccessLogger
+            - name: allow
+              type: string
+          name: Log
+          out:
+            - type: Middleware
+            - type: error
+          variadic: true
     imports:
       corenet: github.com/kitsunium/sdk/internal/core/net
       errs: github.com/kitsunium/sdk/internal/kernel/errs
