@@ -27,8 +27,9 @@ var packetNetworks = map[string]struct{}{
 // listenPacket binds one datagram socket.
 //
 // A unicast UDP socket holds its address exclusively where the platform can
-// (exclusiveApplies) — a multicast one never — and an address still held is
-// bound again, bounded (bindRetrying); the report says both.
+// (exclusiveApplies) — a multicast one never — and is bound once: a datagram
+// socket leaves no connection behind it to wait out; the report says whether
+// it holds its address.
 func listenPacket(ctx context.Context, addr corenet.AddressValue) (pc stdnet.PacketConn, rep bindReport, err error) {
 	//: reject an unserved family before touching the OS.
 	if _, ok := packetNetworks[addr.Network]; !ok {
@@ -49,7 +50,7 @@ func listenPacket(ctx context.Context, addr corenet.AddressValue) (pc stdnet.Pac
 	}
 	//: SO_EXCLUSIVEADDRUSE where it applies, before bind.
 	cfg := stdnet.ListenConfig{Control: listenControl(false)}
-	bound, wait, lerr := bindRetrying(ctx, rebindAttempts, addrInUse, func() (stdnet.PacketConn, error) {
+	bound, wait, lerr := bindRetrying(ctx, 1, addrInUse, func() (stdnet.PacketConn, error) {
 		//: one attempt.
 		return cfg.ListenPacket(ctx, addr.Network, addr.Addr)
 	})
@@ -60,7 +61,7 @@ func listenPacket(ctx context.Context, addr corenet.AddressValue) (pc stdnet.Pac
 		return nil, rep, errs.Wrap(corenet.ListenFailed, errs.WrapParams{},
 			errs.String("address", addr.String()), errs.String("cause", lerr.Error()))
 	}
-	rep.exclusive = exclusiveApplies(bound.LocalAddr().Network(), bound.LocalAddr().String())
+	rep.exclusive = exclusiveOf(packetSocket(bound))
 	//: the socket is bound and ready to read.
 	return bound, rep, nil
 }

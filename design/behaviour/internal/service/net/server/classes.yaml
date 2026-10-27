@@ -394,6 +394,8 @@ files:
   - decls:
       - bindReport
       - exclusiveApplies
+      - (*Server).rebindAttempts
+      - (*Server).holdsPort
       - listenControl
       - exclusiveOf
       - rebindDelay
@@ -780,6 +782,7 @@ files:
       - (*connLimiter).tryAcquire
       - (*connLimiter).release
       - (*connLimiter).releaseFor
+      - markRefused
       - (*Server).admit
     name: stream_group_limiter.go
   - decls:
@@ -940,9 +943,9 @@ functions:
     name: addrInUse
     params: _ error
     results: bool
-  - doc: closeConn closes c.
+  - doc: closeConn closes c; hard changes nothing where no close is graceful.
     name: closeConn
-    params: c stdnet.Conn
+    params: c stdnet.Conn, _ bool
     results: error
   - doc: |-
       platformLacks reports whether this platform has no socket for a family the
@@ -1119,10 +1122,10 @@ functions:
       trackCloses hands out sockets that report their own Close (see trackedConn),
       for a group whose ceiling must keep counting a connection a handler took
       over. A unicast TCP socket holds its address exclusively where the platform
-      can (exclusiveApplies), and an address still held is bound again, bounded
-      (bindRetrying); the report says both.
+      can (exclusiveApplies), and an address still held is bound again, at most
+      attempts binds (bindRetrying); the report says both.
     name: listen
-    params: ctx context.Context, addr corenet.AddressValue, id corenet.IdentityValue, sharded, trackCloses bool
+    params: ctx context.Context, addr corenet.AddressValue, id corenet.IdentityValue, sharded, trackCloses bool, attempts int
     results: ln stdnet.Listener, rep bindReport, err error
   - doc: |-
       familyUnavailable refuses a family the engine serves but this platform has
@@ -1343,8 +1346,9 @@ functions:
       listenPacket binds one datagram socket.
 
       A unicast UDP socket holds its address exclusively where the platform can
-      (exclusiveApplies) — a multicast one never — and an address still held is
-      bound again, bounded (bindRetrying); the report says both.
+      (exclusiveApplies) — a multicast one never — and is bound once: a datagram
+      socket leaves no connection behind it to wait out; the report says whether
+      it holds its address.
     name: listenPacket
     params: ctx context.Context, addr corenet.AddressValue
     results: pc stdnet.PacketConn, rep bindReport, err error
@@ -1445,6 +1449,11 @@ functions:
     params: limits corenet.LimitsValue
     results: "*connLimiter"
   - doc: |-
+      markRefused records on a pooled connection that the ceiling refused it, so
+      the engine closes it at once rather than gracefully.
+    name: markRefused
+    params: c corenet.Conn
+  - doc: |-
       swallowErr intentionally discards a non-actionable error, recording the
       discard so the error audit treats it as deliberate rather than dropped.
 
@@ -1479,6 +1488,7 @@ imports:
   kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
   loop: github.com/kitsunium/sdk/internal/service/net/loop
   maps: maps
+  netip: net/netip
   os: os
   recycler: github.com/kitsunium/sdk/internal/kernel/concur/recycler
   reflect: reflect
@@ -1647,6 +1657,13 @@ types:
           still using. Written and read on the connection's own serve goroutine, so
           it needs no synchronisation of its own.
         name: hijacked
+        type: bool
+      - doc: |-
+          refused records that the group's ceiling turned the connection away
+          before any handler ran: it is closed at once, never gracefully, so a
+          flood of refused peers that never send their FIN costs no goroutine
+          lingering on each (ADR 0193 §D4).
+        name: refused
         type: bool
     kind: struct
     methods:
@@ -3136,6 +3153,23 @@ types:
         params: name string
         recv: s *Server
         results: conns []stdnet.PacketConn, err error
+      - doc: |-
+          rebindAttempts is how many binds addr gets: rebindAttempts on a platform
+          that holds an address after its socket closed, but one when this server
+          already holds a socket on the same port, of the same transport — another
+          of its addresses (":8080" then "127.0.0.1:8080", say) refuses the bind
+          for as long as it lives, and waiting it out would only delay the error.
+        name: rebindAttempts
+        params: addr corenet.AddressValue
+        recv: s *Server
+        results: int
+      - doc: |-
+          holdsPort reports whether one of the server's bound stream listeners has
+          addr's port, on the same transport; a port of zero is held by nobody.
+        name: holdsPort
+        params: addr corenet.AddressValue
+        recv: s *Server
+        results: bool
       - name: RegisterHealth
         params: h corehealth.Health
         recv: s *Server

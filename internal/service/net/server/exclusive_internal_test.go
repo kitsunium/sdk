@@ -3,9 +3,12 @@ package server
 import (
 	"context"
 	"errors"
+	stdnet "net"
 	"runtime"
 	"testing"
 	"time"
+
+	corenet "github.com/kitsunium/sdk/internal/core/net"
 )
 
 // errTaken is the refusal the fake binds of Test_bindRetrying wait out.
@@ -74,10 +77,69 @@ func Test_exclusiveApplies(t *testing.T) {
 		{"udp4", "0.0.0.0:53", windows},
 		{"udp4", "239.1.2.3:5000", false},
 		{"udp6", "[ff02::1]:5000", false},
+		{"udp6", "[ff02::1%eth0]:5000", false},
 		{"unix", `C:\tmp\s.sock`, false},
 	} {
 		if got := exclusiveApplies(c.network, c.address); got != c.want {
 			t.Errorf("%s %s: %t, want %t", c.network, c.address, got, c.want)
 		}
+	}
+}
+
+// halfCloseConn records whether CloseWrite, the graceful close's first step,
+// was asked.
+type halfCloseConn struct {
+	stdnet.Conn
+	halfClosed, closed bool
+}
+
+func (c *halfCloseConn) CloseWrite() error { c.halfClosed = true; return nil }
+func (c *halfCloseConn) Close() error      { c.closed = true; return nil }
+
+// Test_refusedClosesAtOnce pins that a connection the ceiling refuses is
+// closed at once, never gracefully: admit marks it, and closeGracefully then
+// skips the write half's shutdown and the read to zero.
+func Test_refusedClosesAtOnce(t *testing.T) {
+	t.Parallel()
+	srv := New()
+	limiter := newConnLimiter(corenet.LimitsValue{MaxConns: 1})
+	if !limiter.tryAcquire() {
+		t.Fatal("the first slot was refused")
+	}
+	raw := &halfCloseConn{}
+	c := &conn{Conn: raw}
+	if err := srv.admit(t.Context(), limiter, c, corenet.ConnHandlerFunc(func(context.Context, corenet.Conn) error {
+		t.Fatal("a refused connection reached its handler")
+		return nil
+	})); err == nil || !c.refused {
+		t.Fatalf("admit = %v, refused %t", err, c.refused)
+	}
+	if err := c.closeGracefully(); err != nil || !raw.closed || raw.halfClosed {
+		t.Fatalf("closed %t half-closed %t, %v", raw.closed, raw.halfClosed, err)
+	}
+	c.reset()
+	if c.refused {
+		t.Fatal("reset kept the refusal for the next connection")
+	}
+}
+
+// Test_rebindAttempts pins that a port the server already holds is bound
+// once: another of its own addresses refuses it for as long as it lives,
+// and waiting would only delay the error; any other port gets the
+// platform's attempts.
+func Test_rebindAttempts(t *testing.T) {
+	t.Parallel()
+	srv := New()
+	srv.Group("a", Listen("tcp", "127.0.0.1:0")).HandleFunc(func(context.Context, corenet.Conn) error { return nil })
+	if err := srv.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+	_, port, _ := stdnet.SplitHostPort(srv.State().Listeners[0].Address)
+	if n := srv.rebindAttempts(corenet.AddressValue{Network: "tcp", Addr: "0.0.0.0:" + port}); n != 1 {
+		t.Fatalf("our own port: %d attempts", n)
+	}
+	if n := srv.rebindAttempts(corenet.AddressValue{Network: "tcp", Addr: "127.0.0.1:0"}); n != rebindAttempts {
+		t.Fatalf("a port of the kernel's choice: %d attempts", n)
 	}
 }

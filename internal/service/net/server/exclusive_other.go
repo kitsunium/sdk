@@ -33,8 +33,8 @@ func addrInUse(_ error) bool {
 	return false
 }
 
-// closeConn closes c.
-func closeConn(c stdnet.Conn) error {
+// closeConn closes c; hard changes nothing where no close is graceful.
+func closeConn(c stdnet.Conn, _ bool) error {
 	//: the platform's close.
 	return c.Close()
 }

@@ -57,16 +57,17 @@ func addrInUse(err error) bool {
 	return errors.Is(err, wsaeAddrInUse)
 }
 
-// closeConn closes c gracefully: shutdown(SD_SEND), then a read until the
+// closeConn closes c gracefully — at once when hard, for a connection
+// nothing was said on: shutdown(SD_SEND), then a read until the
 // peer's zero, bounded by closeLinger and closeDrainMax, then the close. A
 // socket closed this way is no longer active once its peer has answered, so
 // the address it was accepted on can be bound again at once — the port reuse
 // a closesocket with unread data or unacknowledged output would hold up
 // (Microsoft's "Using SO_REUSEADDR and SO_EXCLUSIVEADDRUSE").
-func closeConn(c stdnet.Conn) error {
+func closeConn(c stdnet.Conn, hard bool) error {
 	half, ok := c.(interface{ CloseWrite() error })
-	//: a socket without a write half to shut, or one already closed.
-	if !ok || half.CloseWrite() != nil {
+	//: refused, a socket without a write half to shut, or one already closed.
+	if hard || !ok || half.CloseWrite() != nil {
 		//: closed as it is.
 		return c.Close()
 	}

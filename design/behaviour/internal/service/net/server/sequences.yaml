@@ -571,7 +571,7 @@ sequences:
           do:
             - return: nil
           when: c.Conn == nil
-      - return: closeConn(c.Conn)
+      - return: closeConn(c.Conn, c.refused)
         to: closeConn
   - of: (*conn).reset
     steps:
@@ -586,6 +586,8 @@ sequences:
       - set: c.timeouts
         value: corenet.TimeoutsValue{}
       - set: c.hijacked
+        value: "false"
+      - set: c.refused
         value: "false"
   - of: (*trackedConn).Close
     participants:
@@ -823,6 +825,8 @@ sequences:
         kind: self
       - id: stdnet
         kind: stdlib
+      - id: netip
+        kind: stdlib
     steps:
       - opt:
           do:
@@ -838,10 +842,53 @@ sequences:
       - bind: host, _, err
         eval: stdnet.SplitHostPort(address)
         to: stdnet
-      - bind: ip
-        eval: stdnet.ParseIP(host)
+      - opt:
+          do:
+            - return: "true"
+          when: err != nil
+      - bind: ip, perr
+        eval: netip.ParseAddr(host)
+        to: netip
+      - return: perr != nil || !ip.IsMulticast()
+  - of: (*Server).rebindAttempts
+    steps:
+      - opt:
+          do:
+            - return: "1"
+          when: s.holdsPort(addr)
+      - return: rebindAttempts
+  - of: (*Server).holdsPort
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*Server).holdsPort
+        kind: self
+      - id: stdnet
+        kind: stdlib
+    steps:
+      - bind: _, port, err
+        eval: stdnet.SplitHostPort(addr.Addr)
         to: stdnet
-      - return: err != nil || ip == nil || !ip.IsMulticast()
+      - opt:
+          do:
+            - return: "false"
+          when: err != nil || port == "0" || port == ""
+      - lock:
+          mutex: s.mu
+          read: true
+      - loop:
+          do:
+            - bind: _, held, herr
+              eval: stdnet.SplitHostPort(b.ln.Addr().String())
+              to: stdnet
+            - opt:
+                do:
+                  - return: "true"
+                when: herr == nil && held == port && b.ln.Addr().Network() == "tcp"
+          key: _
+          range: s.listeners
+          value: b
+      - return: "false"
   - of: listenControl
     participants:
       - id: caller
@@ -2165,7 +2212,7 @@ sequences:
       - loop:
           do:
             - bind: ln, rep, err
-              eval: listen(ctx, addr, group.identity, count > 1, group.tracksCloses())
+              eval: listen(ctx, addr, group.identity, count > 1, group.tracksCloses(), s.rebindAttempts(addr))
               to: listen
             - opt:
                 do:
@@ -2739,7 +2786,7 @@ sequences:
         kind: internal
       - id: bindRetrying
         kind: internal
-      - id: exclusiveApplies
+      - id: exclusiveOf
         kind: internal
       - id: layered
         kind: internal
@@ -2771,7 +2818,7 @@ sequences:
         eval: "stdnet.ListenConfig{Control: listenControl(sharded)}"
       - bind: raw, wait, lerr
         eval: |-
-          bindRetrying(ctx, rebindAttempts, addrInUse, func() (stdnet.Listener, error) {
+          bindRetrying(ctx, attempts, addrInUse, func() (stdnet.Listener, error) {
           		//: one attempt.
           		return cfg.Listen(ctx, addr.Network, addr.Addr)
           	})
@@ -2785,8 +2832,8 @@ sequences:
                 			errs.String("address", addr.String()), errs.String("cause", lerr.Error()))
           when: lerr != nil
       - set: rep.exclusive
-        to: exclusiveApplies
-        value: exclusiveApplies(raw.Addr().Network(), raw.Addr().String())
+        to: exclusiveOf
+        value: exclusiveOf(listenerSocket(raw))
       - return: layered(raw, id, trackCloses), rep, nil
         to: layered
   - of: familyUnavailable
@@ -3422,7 +3469,7 @@ sequences:
       - loop:
           do:
             - bind: ln, rep, err
-              eval: listen(ctx, addr, corenet.IdentityValue{}, false, false)
+              eval: listen(ctx, addr, corenet.IdentityValue{}, false, false, s.rebindAttempts(addr))
               to: listen
             - opt:
                 do:
@@ -5542,7 +5589,7 @@ sequences:
         kind: internal
       - id: bindRetrying
         kind: internal
-      - id: exclusiveApplies
+      - id: exclusiveOf
         kind: internal
     steps:
       - opt:
@@ -5572,7 +5619,7 @@ sequences:
         eval: "stdnet.ListenConfig{Control: listenControl(false)}"
       - bind: bound, wait, lerr
         eval: |-
-          bindRetrying(ctx, rebindAttempts, addrInUse, func() (stdnet.PacketConn, error) {
+          bindRetrying(ctx, 1, addrInUse, func() (stdnet.PacketConn, error) {
           		//: one attempt.
           		return cfg.ListenPacket(ctx, addr.Network, addr.Addr)
           	})
@@ -5586,8 +5633,8 @@ sequences:
                 			errs.String("address", addr.String()), errs.String("cause", lerr.Error()))
           when: lerr != nil
       - set: rep.exclusive
-        to: exclusiveApplies
-        value: exclusiveApplies(bound.LocalAddr().Network(), bound.LocalAddr().String())
+        to: exclusiveOf
+        value: exclusiveOf(packetSocket(bound))
       - return: bound, rep, nil
   - of: (*boundPacketConn).Close
     participants:
@@ -6544,6 +6591,16 @@ sequences:
           when: tracked != nil
       - eval: l.release()
         to: l.release
+  - of: markRefused
+    steps:
+      - opt:
+          do:
+            - set: pooled.refused
+              value: "true"
+          init:
+            bind: pooled, ok
+            eval: c.(*conn)
+          when: ok
   - of: (*Server).admit
     participants:
       - id: caller
@@ -6554,6 +6611,8 @@ sequences:
         kind: value
       - id: s.rejected.Add
         kind: value
+      - id: markRefused
+        kind: internal
       - id: errs
         kind: package
       - id: limiter.releaseFor
@@ -6568,6 +6627,8 @@ sequences:
           do:
             - eval: s.rejected.Add(1)
               to: s.rejected.Add
+            - eval: markRefused(c)
+              to: markRefused
             - return: |-
                 errs.Wrap(corenet.ConnLimitReached, errs.WrapParams{},
                 			errs.Int("limit", limiter.ceiling))

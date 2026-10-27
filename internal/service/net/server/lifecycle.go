@@ -377,7 +377,7 @@ func (s *Server) bindShards(ctx context.Context, group *StreamGroup, addr corene
 	opened := 0
 	//: every shard binds the same address; the kernel spreads accepts across them.
 	for range count {
-		ln, rep, err := listen(ctx, addr, group.identity, count > 1, group.tracksCloses())
+		ln, rep, err := listen(ctx, addr, group.identity, count > 1, group.tracksCloses(), s.rebindAttempts(addr))
 		//: a shard that will not bind aborts startup rather than serving a
 		//: quietly smaller set than the operator asked for.
 		if err != nil {

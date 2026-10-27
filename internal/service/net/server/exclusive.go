@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	stdnet "net"
+	"net/netip"
 	"syscall"
 	"time"
 
+	corenet "github.com/kitsunium/sdk/internal/core/net"
 	kbackoff "github.com/kitsunium/sdk/internal/kernel/backoff"
 )
 
@@ -36,9 +38,54 @@ func exclusiveApplies(network, address string) bool {
 		return false
 	}
 	host, _, err := stdnet.SplitHostPort(address)
-	ip := stdnet.ParseIP(host)
-	//: a multicast group's members share the port.
-	return err != nil || ip == nil || !ip.IsMulticast()
+	//: no host to judge: a unicast bind as far as we can tell.
+	if err != nil {
+		//: exclusive.
+		return true
+	}
+	ip, perr := netip.ParseAddr(host)
+	//: a multicast group's members share the port; a zone ("%eth0") is part
+	//: of what netip parses.
+	return perr != nil || !ip.IsMulticast()
+}
+
+// rebindAttempts is how many binds addr gets: rebindAttempts on a platform
+// that holds an address after its socket closed, but one when this server
+// already holds a socket on the same port, of the same transport — another
+// of its addresses (":8080" then "127.0.0.1:8080", say) refuses the bind
+// for as long as it lives, and waiting it out would only delay the error.
+func (s *Server) rebindAttempts(addr corenet.AddressValue) int {
+	//: a conflict with ourselves is not waited out.
+	if s.holdsPort(addr) {
+		//: one.
+		return 1
+	}
+	//: the platform's bound.
+	return rebindAttempts
+}
+
+// holdsPort reports whether one of the server's bound stream listeners has
+// addr's port, on the same transport; a port of zero is held by nobody.
+func (s *Server) holdsPort(addr corenet.AddressValue) bool {
+	_, port, err := stdnet.SplitHostPort(addr.Addr)
+	//: no port, or the kernel's choice.
+	if err != nil || port == "0" || port == "" {
+		//: nobody's.
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	//: each listener bound so far.
+	for _, b := range s.listeners {
+		_, held, herr := stdnet.SplitHostPort(b.ln.Addr().String())
+		//: the same port, on a stream transport.
+		if herr == nil && held == port && b.ln.Addr().Network() == "tcp" {
+			//: ours.
+			return true
+		}
+	}
+	//: free of us.
+	return false
 }
 
 // listenControl is net.ListenConfig.Control for one bind: SO_REUSEPORT when

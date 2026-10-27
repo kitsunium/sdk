@@ -113,9 +113,9 @@ func reusePortControl(network, address string, rawConn syscall.RawConn) error {
 // trackCloses hands out sockets that report their own Close (see trackedConn),
 // for a group whose ceiling must keep counting a connection a handler took
 // over. A unicast TCP socket holds its address exclusively where the platform
-// can (exclusiveApplies), and an address still held is bound again, bounded
-// (bindRetrying); the report says both.
-func listen(ctx context.Context, addr corenet.AddressValue, id corenet.IdentityValue, sharded, trackCloses bool) (ln stdnet.Listener, rep bindReport, err error) {
+// can (exclusiveApplies), and an address still held is bound again, at most
+// attempts binds (bindRetrying); the report says both.
+func listen(ctx context.Context, addr corenet.AddressValue, id corenet.IdentityValue, sharded, trackCloses bool, attempts int) (ln stdnet.Listener, rep bindReport, err error) {
 	//: reject an unserved family before touching the OS.
 	if _, ok := streamNetworks[addr.Network]; !ok {
 		//: refuse an unserved family before touching the OS.
@@ -135,7 +135,7 @@ func listen(ctx context.Context, addr corenet.AddressValue, id corenet.IdentityV
 	}
 	//: SO_REUSEPORT when sharded, SO_EXCLUSIVEADDRUSE where it applies.
 	cfg := stdnet.ListenConfig{Control: listenControl(sharded)}
-	raw, wait, lerr := bindRetrying(ctx, rebindAttempts, addrInUse, func() (stdnet.Listener, error) {
+	raw, wait, lerr := bindRetrying(ctx, attempts, addrInUse, func() (stdnet.Listener, error) {
 		//: one attempt.
 		return cfg.Listen(ctx, addr.Network, addr.Addr)
 	})
@@ -146,7 +146,7 @@ func listen(ctx context.Context, addr corenet.AddressValue, id corenet.IdentityV
 		return nil, rep, errs.Wrap(corenet.ListenFailed, errs.WrapParams{},
 			errs.String("address", addr.String()), errs.String("cause", lerr.Error()))
 	}
-	rep.exclusive = exclusiveApplies(raw.Addr().Network(), raw.Addr().String())
+	rep.exclusive = exclusiveOf(listenerSocket(raw))
 	//: the same layers an adopted socket gets, from the same function.
 	return layered(raw, id, trackCloses), rep, nil
 }

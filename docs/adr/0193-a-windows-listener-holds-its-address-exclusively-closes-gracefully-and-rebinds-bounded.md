@@ -38,17 +38,34 @@ Windows), closed every connection with `Close`, and failed a bind at once.
   already bound; the option is read back and reported, and its absence is
   never fatal.
 - **D3 — Reported.** `ListenerStateValue.Exclusive` says whether the socket
-  holds its address exclusively; `ListenerStateValue.BindWait` how long the
-  bind waited for it.
+  holds its address exclusively, read back from the socket, bound or adopted,
+  never inferred; `ListenerStateValue.BindWait` how long the bind waited for
+  it.
 - **D4 — A graceful close.** On Windows, when a connection ends — its handler
   returned, it was not hijacked — the engine shuts its write half
   (`shutdown(SD_SEND)`, `CloseWrite`), reads until the peer's zero, bounded by
   500 ms and 64 KiB, then closes. The budget's own severing (`closeLive`)
-  stays a plain close: it exists to be immediate.
-- **D5 — A bounded rebind.** On Windows a bind refused with `WSAEADDRINUSE` is
-  tried again, eight attempts at most, 25 ms doubling to 1 s between them
-  (≈ 2.6 s in all), and the wait lands in `BindWait`. Elsewhere one attempt:
-  an address in use there is a real conflict.
+  stays a plain close: it exists to be immediate; so does a connection the
+  group's ceiling (`MaxConns`) refuses before any handler ran — a flood of
+  refused peers that never send their FIN would otherwise hold a goroutine
+  and a descriptor for 500 ms each.
+- **D5 — A bounded rebind, for TCP.** On Windows a TCP bind refused with
+  `WSAEADDRINUSE` is tried again, eight attempts at most, 25 ms doubling to
+  1 s between them (≈ 2.6 s in all), and the wait lands in `BindWait`. A UDP
+  socket is bound once: it leaves no connection behind it to wait out.
+  Elsewhere one attempt: an address in use there is a real conflict. A port
+  the same server already holds on another address is bound once too: the
+  conflict is with itself and lasts as long as it does.
+- **D6 — One port, two addresses of one server.** An exclusive socket on the
+  wildcard holds the port on every address, and one on a specific address
+  refuses a later wildcard bind of the same port (Microsoft's tables:
+  `WSAEADDRINUSE` or `WSAEACCES`). On Windows a server that binds `:8080` and
+  `127.0.0.1:8080`, in either order, or a dual-stack wildcard after an IPv4
+  loopback on the same port, now fails `Start` with `ListenFailed` naming the
+  address, at once. Before this record the second bind succeeded and the two
+  sockets shared the port, which connection went where being undefined: the
+  configuration was already wrong, and is now refused. Binding the wildcard
+  alone, or distinct ports, serves the same clients.
 
 ## Consequences
 
@@ -58,10 +75,15 @@ Windows), closed every connection with `Close`, and failed a bind at once.
 - An engine-closed connection on Windows can take up to 500 ms of its own
   goroutine to finish; a peer that never answers costs that, never more.
 - New `ListenerStateValue` fields `Exclusive` and `BindWait`.
-- Tests: the retry and the applicability rule on every platform; on the
-  windows lane, both sockets exclusive, a second bind refused, a socket bound
-  without the option reading false, and a restart on the same address after
-  three echoed connections, every answer delivered whole.
+- **Breaking on Windows (v0, ADR 0040):** the same port on two addresses of
+  one server is refused (D6).
+- Tests: the retry, the applicability rule (a zoned IPv6 multicast address
+  included), the ceiling's refusal closed at once and a port the server holds
+  bound once, on every platform; on the windows lane, both sockets exclusive,
+  a second bind refused, a socket bound without the option reading false, one
+  server binding the same port on two addresses refused within a second, and
+  a restart on the same address after three echoed connections, every answer
+  delivered whole.
 
 ## Alternatives considered
 

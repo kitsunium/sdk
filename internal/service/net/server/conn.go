@@ -41,6 +41,11 @@ type conn struct {
 	// still using. Written and read on the connection's own serve goroutine, so
 	// it needs no synchronisation of its own.
 	hijacked bool
+	// refused records that the group's ceiling turned the connection away
+	// before any handler ran: it is closed at once, never gracefully, so a
+	// flood of refused peers that never send their FIN costs no goroutine
+	// lingering on each (ADR 0193 §D4).
+	refused bool
 }
 
 // Read implements net.Conn, bounding this read before it starts.
@@ -154,8 +159,8 @@ func (c *conn) closeGracefully() error {
 		//: nothing to close.
 		return nil
 	}
-	//: the platform's close.
-	return closeConn(c.Conn)
+	//: the platform's close; at once for a connection the ceiling refused.
+	return closeConn(c.Conn, c.refused)
 }
 
 // reset clears the connection so the pool can hand it out again. It is the
@@ -170,4 +175,5 @@ func (c *conn) reset() {
 	//: a pooled wrapper that kept this flag would make the NEXT connection
 	//: unclosable, which is a descriptor leak per reuse.
 	c.hijacked = false
+	c.refused = false
 }

@@ -101,3 +101,29 @@ func TestRebind_windows(t *testing.T) {
 		t.Fatalf("rebound %+v", l)
 	}
 }
+
+// TestSamePortTwoAddresses_windows pins the conflict with ourselves: one
+// server binding a port on 127.0.0.1, then on the wildcard, is refused at
+// once — the first socket holds the port exclusively — and never waits out
+// the rebind's bound.
+func TestSamePortTwoAddresses_windows(t *testing.T) {
+	t.Parallel()
+	probe, err := stdnet.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, port, _ := stdnet.SplitHostPort(probe.Addr().String())
+	_ = probe.Close()
+	srv := New()
+	srv.Group("loopback", Listen("tcp", "127.0.0.1:"+port)).Handle(echoOnce{})
+	srv.Group("wildcard", Listen("tcp", "0.0.0.0:"+port)).Handle(echoOnce{})
+	start := time.Now()
+	err = srv.Start(t.Context())
+	t.Cleanup(func() { _ = srv.Close() })
+	if err == nil {
+		t.Fatal("the same port on two addresses of one server was bound twice")
+	}
+	if took := time.Since(start); took > time.Second {
+		t.Fatalf("refused after %v: the conflict with ourselves was waited out", took)
+	}
+}
