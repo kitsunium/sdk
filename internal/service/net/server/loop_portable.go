@@ -146,9 +146,11 @@ func (g *portableGroup) live() int64 {
 // portableLoop is one lane of the portable backend: its handler goroutine,
 // its connections, its post queue and its LoopIO.
 type portableLoop struct {
-	g        *portableGroup
-	lane     int
-	h        corenet.LoopHandler
+	g    *portableGroup
+	lane int
+	h    corenet.LoopHandler
+	// busy is the chain's offloader's Pending, nil when nothing offloads.
+	busy     func(lane int, ref corenet.LoopConnRef) bool
 	spillCap int
 	outCap   int
 	idle     time.Duration
@@ -203,7 +205,7 @@ func startPortable(group *StreamGroup, lns []stdnet.Listener, degraded string, p
 	//: the lanes, built before any acceptor can hand one a connection.
 	for i := range loopLanes(v) {
 		g.lanes = append(g.lanes, &portableLoop{
-			g: g, lane: i, h: group.loopChain,
+			g: g, lane: i, h: group.loopChain, busy: group.loopBusy,
 			spillCap: orDefaultInt(v.SpillCap, portableSpillCap),
 			outCap:   orDefaultInt(v.OutputCap, portableOutputCap),
 			idle:     loopIdle(group),
@@ -750,18 +752,29 @@ func (pl *portableLoop) control() {
 	pl.closeSettled()
 }
 
-// closeSettled closes, as the drain does, every open connection with nothing
-// unconsumed that has sent something or stayed silent for portableQuiet.
+// closeSettled marks for closing, as the drain does, every open connection
+// the drain may close now (drainable).
 func (pl *portableLoop) closeSettled() {
 	now := time.Now()
-	//: each open one with nothing unconsumed.
+	//: each open one the drain may close.
 	for slot, pc := range pl.conns {
-		//: mid-request ones finish first, fresh ones once heard or quiet.
-		if pc.open && !pc.reasonSet && len(pc.spill) == pc.spillOff && (!pc.heardAt.IsZero() || now.Sub(pc.lastIO) >= portableQuiet) {
+		//: mid-request ones, ones waiting on a worker, fresh ones not yet
+		//: heard nor quiet: they finish first.
+		if pl.drainable(int32(slot), pc, now) {
 			pc.reasonSet, pc.closeErr = true, corenet.ServerClosed
 			pl.markDirty(int32(slot))
 		}
 	}
+}
+
+// drainable reports whether the drain closes pc, at slot, now: open with
+// nothing unconsumed, no answer out with a worker (R3), and either it has
+// sent something or it stayed silent for portableQuiet.
+func (pl *portableLoop) drainable(slot int32, pc *portableConn, now time.Time) bool {
+	//: settled, heard or quiet, and waiting on nobody.
+	return pc.open && !pc.reasonSet && len(pc.spill) == pc.spillOff &&
+		(!pc.heardAt.IsZero() || now.Sub(pc.lastIO) >= portableQuiet) &&
+		(pl.busy == nil || !pl.busy(pl.lane, corenet.LoopConnRef{Slot: uint32(slot), Gen: pc.gen}))
 }
 
 // endBatch flushes the dirty connections, settles the closes, releases the

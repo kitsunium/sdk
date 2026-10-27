@@ -127,3 +127,21 @@ func (r *ring) drainable(c *connCtl) bool {
 	//: mid-request connections finish first; fresh ones get their request in.
 	return c.state == stOpen && c.spill.empty() && (c.flags&fHeard != 0 || r.lp.tick-c.lastIO >= drainQuietTicks)
 }
+
+// closeSettled starts the drain's close of every connection of r the drain
+// may close (drainable) that has no answer out with a worker (R3): each
+// closes once its output has left; mid-request ones, and ones waiting on a
+// worker, finish first.
+func (lp *loop) closeSettled(r *ring) {
+	//: every open connection is looked at.
+	for s := r.lruHead; s != noLink; {
+		c := &r.conns[s]
+		nxt := c.lruNext
+		//: settled, heard or quiet, and waiting on nobody.
+		if r.drainable(c) && !lp.waits(r, s) {
+			c.state, c.reason = stClosing, rDrain
+			r.markDirty(s)
+		}
+		s = nxt
+	}
+}

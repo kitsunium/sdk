@@ -138,7 +138,7 @@ func (s *Server) bindLoopGroup(ctx context.Context, group *StreamGroup) error {
 	}
 	plan := s.operator.plan(group.loop.Backend, nativeLoopBackends)
 	startLanes(group)
-	eng, err := startLoopEngine(group, lns, plan)
+	eng, err := startOffloading(ctx, group, lns, plan)
 	//: the backend refused.
 	if err != nil {
 		//: Start unwinds the listeners.

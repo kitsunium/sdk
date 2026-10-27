@@ -1615,17 +1615,7 @@ func (ul *uLoop) control() {
 	//: every ring, every open connection.
 	for _, rr := range ul.rings {
 		rr.takeQueues()
-		r := rr.r
-		for s := r.lruHead; s != noLink; {
-			c := &r.conns[s]
-			nxt := c.lruNext
-			//: mid-request ones finish first, fresh ones once heard.
-			if r.drainable(c) {
-				c.state, c.reason = stClosing, rDrain
-				r.markDirty(s)
-			}
-			s = nxt
-		}
+		lp.closeSettled(rr.r)
 	}
 }
 

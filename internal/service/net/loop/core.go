@@ -105,6 +105,8 @@ type loop struct {
 	evictIdle int64
 	// h is the handler.
 	h corenet.LoopHandler
+	// busy is Config.Busy, nil when nothing offloads.
+	busy func(lane int, ref corenet.LoopConnRef) bool
 	// grp is what the group's loops share.
 	grp *shared
 	// rings are the loop's rings.
@@ -193,6 +195,20 @@ func (r *ring) abandon(slot int32) {
 	c := &r.conns[slot]
 	*c = emptyConn(c.gen)
 	r.free = append(r.free, slot)
+}
+
+// evictable reports whether slot of r may be evicted: open, with nothing
+// unconsumed, unsent or unread, and no answer out with a worker.
+func (lp *loop) evictable(r *ring, slot int32) bool {
+	c := &r.conns[slot]
+	//: mid-request, with output, or waiting on a worker: it keeps its place.
+	return c.state == stOpen && c.spill.empty() && c.pending() == 0 && !r.drv.unread(r, slot) && !lp.waits(r, slot)
+}
+
+// waits reports whether slot of r waits on the handler's worker (R3).
+func (lp *loop) waits(r *ring, slot int32) bool {
+	//: nothing offloads: nothing waits.
+	return lp.busy != nil && lp.busy(lp.index, r.ref(slot))
 }
 
 // ref is slot's current reference.
@@ -633,7 +649,7 @@ func (r *ring) evict() int {
 			break
 		}
 		//: a connection mid-request, or with output, keeps its place.
-		if c.state == stOpen && c.spill.empty() && c.pending() == 0 && !r.drv.unread(r, s) {
+		if lp.evictable(r, s) {
 			r.st.evicted++
 			r.finish(s, rEvict, 0)
 			done++

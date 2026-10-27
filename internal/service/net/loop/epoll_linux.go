@@ -729,17 +729,7 @@ func (el *epollLoop) control() {
 	//: connection with no partial input closes once its output left.
 	if lp.draining {
 		el.takeQueues()
-		//: every open connection is looked at.
-		for s := r.lruHead; s != noLink; {
-			c := &r.conns[s]
-			nxt := c.lruNext
-			//: mid-request connections finish first, fresh ones once heard.
-			if r.drainable(c) {
-				c.state, c.reason = stClosing, rDrain
-				r.markDirty(s)
-			}
-			s = nxt
-		}
+		lp.closeSettled(r)
 	}
 }
 

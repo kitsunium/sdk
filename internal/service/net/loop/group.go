@@ -49,6 +49,10 @@ type Config struct {
 	IdleTimeout time.Duration
 	// Handler is the group's loop handler.
 	Handler corenet.LoopHandler
+	// Busy reports whether a connection of a lane waits on its worker (the
+	// chain's LoopOffloader.Pending, R3): the drain keeps it open, eviction
+	// passes it by. Nil when nothing offloads.
+	Busy func(lane int, ref corenet.LoopConnRef) bool
 	// Listeners are the sockets to accept on.
 	Listeners []Listener
 	// Log receives the one start line; nil is standard error.
@@ -266,7 +270,7 @@ func (g *Group) Live() int64 {
 // newLoop builds loop i of g, its rings empty, its slab mapped by mapper.
 func newLoop(g *Group, cfg Config, i int, mapper func(int) ([]byte, error)) *loop {
 	lp := &loop{
-		index: i, sz: g.sz, h: cfg.Handler, grp: g.grp,
+		index: i, sz: g.sz, h: cfg.Handler, busy: cfg.Busy, grp: g.grp,
 		epoch:    time.Now(),
 		lowWater: g.sz.outputCap / lowWaterDiv,
 	}
