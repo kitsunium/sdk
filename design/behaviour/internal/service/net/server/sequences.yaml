@@ -5614,6 +5614,10 @@ sequences:
         kind: self
       - id: g.tlsErr
         kind: internal
+      - id: offered
+        kind: internal
+      - id: g.protocolsErr
+        kind: internal
     steps:
       - switch:
           cases:
@@ -5631,6 +5635,16 @@ sequences:
                   to: g.tlsErr
             - default: true
               do:
+                - bind: alpn, reason
+                  eval: offered(g.identity.ServerConfig().NextProtos, alpnHTTP1)
+                  to: offered
+                - opt:
+                    do:
+                      - return: g.protocolsErr(reason)
+                        to: g.protocolsErr
+                    when: reason != ""
+                - set: g.httpProtos.alpn
+                  value: alpn
                 - return: nil
   - of: (*StreamGroup).tlsErr
     participants:
@@ -5692,7 +5706,7 @@ sequences:
         eval: g.identity.ServerConfig()
         to: g.identity.ServerConfig
       - set: cfg.NextProtos
-        value: alpnHTTP1
+        value: g.httpProtos.alpn
       - return: cfg
   - of: (*StreamGroup).handshakeBound
     participants:

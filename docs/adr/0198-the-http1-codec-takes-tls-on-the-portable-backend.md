@@ -32,7 +32,10 @@ the platform:
 
 - its listeners are wrapped in TLS with the identity's configuration,
   offering **`http/1.1` alone** by ALPN — a client that asks for `h2` only
-  fails the handshake;
+  fails the handshake; an identity whose `NextProtos` names `h2`, or nothing
+  the codec serves, is refused at `Start` with `ProtocolsRefused`, as ADR
+  0195 refuses an HTTP group's, and one naming `http/1.1` among others is
+  kept to it rather than overwritten;
 - each accepted connection is negotiated on a goroutine of its own, bounded
   by `HandshakeTimeout` (the domain's 10 s default when unset), **before** its
   lane sees it: a failed or stalled handshake is closed and never reaches

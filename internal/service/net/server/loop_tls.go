@@ -46,7 +46,9 @@ func (g *StreamGroup) loopTLSRefusal() error {
 // tlsCodecRefusal judges a TLS codec group (R6): an identity that names
 // nothing, an explicit native backend — TLS runs on the portable backend
 // alone — and a loop middleware are refused with LoopTLSUnsupported, the
-// option named; nothing is served without TLS or elsewhere instead.
+// option named; nothing is served without TLS or elsewhere instead. An
+// identity whose NextProtos names h2, or nothing the codec serves, is
+// refused with ProtocolsRefused, as an HTTP group's would be (ADR 0195).
 func (g *StreamGroup) tlsCodecRefusal() error {
 	//: by the first contradiction.
 	switch {
@@ -60,6 +62,15 @@ func (g *StreamGroup) tlsCodecRefusal() error {
 		//: a loop-only option with TLS.
 		return g.tlsErr(corenet.OptionLoopMiddleware.String())
 	default:
+		//: the identity's ALPN against the one version the codec serves.
+		alpn, reason := offered(g.identity.ServerConfig().NextProtos, alpnHTTP1)
+		//: a version the codec does not serve, or none it does.
+		if reason != "" {
+			//: refused, the reason named.
+			return g.protocolsErr(reason)
+		}
+		//: computed once, offered by every listener.
+		g.httpProtos.alpn = alpn
 		//: servable.
 		return nil
 	}
@@ -109,10 +120,11 @@ func tlsCodecHonours(k corenet.OptionKind) bool {
 }
 
 // codecTLS is the configuration of a TLS codec group's listeners: the
-// identity's, offering HTTP/1.1 alone, a fresh value each call.
+// identity's, offering HTTP/1.1 alone — the identity's NextProtos kept to it
+// at Start by tlsCodecRefusal — a fresh value each call.
 func (g *StreamGroup) codecTLS() *tls.Config {
 	cfg := g.identity.ServerConfig()
-	cfg.NextProtos = alpnHTTP1
+	cfg.NextProtos = g.httpProtos.alpn
 	//: the listener's own.
 	return cfg
 }

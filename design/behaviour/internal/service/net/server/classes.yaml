@@ -5035,7 +5035,8 @@ types:
         type: "[]string"
       - doc: |-
           httpProtos is what the group serves, computed at Start from protos and
-          the identity (protocolsRefusal).
+          the identity (protocolsRefusal; a TLS codec group's ALPN alone,
+          tlsCodecRefusal).
         name: httpProtos
         type: httpProtocols
       - doc: limiter caps concurrent connections; nil when the group has no ceiling.
@@ -5174,7 +5175,9 @@ types:
           tlsCodecRefusal judges a TLS codec group (R6): an identity that names
           nothing, an explicit native backend — TLS runs on the portable backend
           alone — and a loop middleware are refused with LoopTLSUnsupported, the
-          option named; nothing is served without TLS or elsewhere instead.
+          option named; nothing is served without TLS or elsewhere instead. An
+          identity whose NextProtos names h2, or nothing the codec serves, is
+          refused with ProtocolsRefused, as an HTTP group's would be (ADR 0195).
         name: tlsCodecRefusal
         recv: g *StreamGroup
         results: error
@@ -5198,7 +5201,8 @@ types:
         results: corenet.LoopBackend
       - doc: |-
           codecTLS is the configuration of a TLS codec group's listeners: the
-          identity's, offering HTTP/1.1 alone, a fresh value each call.
+          identity's, offering HTTP/1.1 alone — the identity's NextProtos kept to it
+          at Start by tlsCodecRefusal — a fresh value each call.
         name: codecTLS
         recv: g *StreamGroup
         results: "*tls.Config"
